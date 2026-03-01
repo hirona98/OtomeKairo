@@ -8,6 +8,7 @@
 - テーブル名と保存境界は `docs/34_SQLite論理スキーマ.md` を見る
 - エンドポイントの意味、HTTP method、`SSE` の接続方法は `docs/35_WebAPI仕様.md` を見る
 - `memory_jobs` の責務と payload の意味は `docs/33_記憶ジョブ仕様.md` を見る
+- 設定キーごとの型制約は `docs/39_設定キー運用仕様.md` を見る
 - JSON のキー、型、必須項目で迷ったら、このドキュメントを正本として扱う
 
 <!-- Block: Scope -->
@@ -48,19 +49,20 @@
 ### `payload_ref_json`
 
 - `payload_ref_json` は、少なくとも `payload_kind`、`payload_id`、`payload_version` を持つ
-- `payload_ref_json` は、`input_journal.payload_ref_json` と `memory_jobs.payload_ref_json` で共通の形を使う
+- `payload_ref_json` は、`input_journal.payload_ref_json` と `memory_jobs.payload_ref_json` で共通の形を使うが、`payload_kind` の語彙は用途ごとに分ける
 
 ```json
 {
-  "payload_kind": "memory_job_payload",
-  "payload_id": "mjp_...",
+  "payload_kind": "input_payload",
+  "payload_id": "payload_...",
   "payload_version": 1
 }
 ```
 
 - `payload_kind` は、参照先の分類を示す `string` である
-- `payload_id` は、参照先レコードの主キーと一致する `string` である
+- `payload_id` は、参照先レコードの主キーまたは `payload_kind` ごとの opaque な識別子である
 - `payload_version` は、参照先 JSON の版を示す `integer` である
+- `input_journal.payload_ref_json.payload_kind` は、初期段階では `input_payload`、`media_file`、`external_result` を区別する
 - `memory_jobs.payload_ref_json.payload_kind` は、初期段階では `memory_job_payload` に固定する
 
 <!-- Block: Error Body -->
@@ -102,6 +104,7 @@
 - `input_kind` は `chat_message` に固定する
 - `text` は、空文字列や空白のみを許可しない
 - `client_message_id` は任意で、同一クライアントからの再送判定に使う
+- `client_message_id` がある場合、Web サーバは `pending_inputs.client_message_id` にも同じ値を書き込む
 
 <!-- Block: Pending Cancel -->
 #### `cancel`
@@ -122,6 +125,7 @@
 
 - `settings_overrides.requested_value_json` は、要求値そのものではなく、型付きの正規化オブジェクトで保持する
 - `POST /api/settings/overrides` の `requested_value` は、Web サーバでこの形へ正規化してから保存する
+- `value_type` は、対象 `key` の登録定義と一致しなければならない
 
 ```json
 {
@@ -320,6 +324,54 @@
 - `targets` の各要素は、少なくとも `entity_type`、`entity_id`、`current_searchable` を持つ
 - `entity_type` は、少なくとも `event`、`memory_state`、`event_affect` を区別する
 
+<!-- Block: Embedding Sync -->
+#### `job_kind = embedding_sync`
+
+```json
+{
+  "job_kind": "embedding_sync",
+  "cycle_id": "cycle_...",
+  "source_event_ids": ["evt_001"],
+  "created_at": 1760000000000,
+  "idempotency_key": "embedding_sync:cycle_...:evt_001",
+  "embedding_model": "text-embedding-3-small",
+  "requested_scopes": ["recent", "global"],
+  "targets": [
+    {
+      "entity_type": "memory_state",
+      "entity_id": "ms_...",
+      "source_updated_at": 1760000000000,
+      "current_searchable": true
+    }
+  ]
+}
+```
+
+- 追加の必須項目は `embedding_model`、`requested_scopes`、`targets` である
+- `requested_scopes` は空配列を許可しない
+- `requested_scopes` の各要素は、少なくとも `recent`、`global` を区別する
+- `targets` は空配列を許可しない
+- `targets` の各要素は、少なくとも `entity_type`、`entity_id`、`source_updated_at`、`current_searchable` を持つ
+
+<!-- Block: Tidy Memory -->
+#### `job_kind = tidy_memory`
+
+```json
+{
+  "job_kind": "tidy_memory",
+  "cycle_id": "cycle_...",
+  "source_event_ids": ["evt_001"],
+  "created_at": 1760000000000,
+  "idempotency_key": "tidy_memory:cycle_...:completed_jobs_gc",
+  "maintenance_scope": "completed_jobs_gc",
+  "retention_cutoff_at": 1760000000000
+}
+```
+
+- 追加の必須項目は `maintenance_scope`、`retention_cutoff_at` である
+- `maintenance_scope` は、少なくとも `completed_jobs_gc`、`stale_preview_gc`、`stale_vector_gc` を区別する
+- `target_refs` は任意で、指定する場合は各要素が少なくとも `entity_type`、`entity_id` を持つ
+
 <!-- Block: Web Api Group -->
 ## Web API の JSON
 
@@ -335,9 +387,10 @@
 ```
 
 - 必須項目は `key`、`requested_value`、`apply_scope` である
-- `key` は、ドット区切りの設定キー `string` に固定する
-- `requested_value` は、`string`、`number`、`boolean`、`object`、`array` のいずれかを許可する
-- `apply_scope` は、初期段階では `runtime`、`next_boot` を区別する
+- `key` は、`docs/39_設定キー運用仕様.md` に登録されたドット区切り設定キーに固定する
+- `requested_value` は、対象 `key` に登録された型だけを許可する
+- 初期公開キーでは `string`、`integer`、`number`、`boolean` だけを受け付ける
+- `apply_scope` は、対象 `key` に登録された許可値だけを受け付ける
 
 <!-- Block: Settings Override Response -->
 ### `POST /api/settings/overrides` の成功応答 JSON
@@ -367,6 +420,7 @@
 - 必須項目は `text` である
 - `text` は、空文字列や空白のみを許可しない
 - `client_message_id` は任意で、クライアント側の再送判定に使う
+- `client_message_id` がある場合、同じ `channel` での再利用は許可しない
 
 <!-- Block: Chat Input Response -->
 ### `POST /api/chat/input` の成功応答 JSON

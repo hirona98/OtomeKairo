@@ -9,6 +9,9 @@
 - ランタイムとの受け渡し仕様は `docs/31_ランタイム処理仕様.md` を見る
 - SQLite の保存先は `docs/34_SQLite論理スキーマ.md` を見る
 - 入出力 JSON 本文と `SSE data` の形は `docs/36_JSONデータ仕様.md` を見る
+- 起動前の seed 前提は `docs/37_起動初期化仕様.md` を見る
+- 入力重複、`cancel`、`SSE` 保持運用は `docs/38_入力ストリーム運用仕様.md` を見る
+- 設定キー、型制約、`apply_scope` は `docs/39_設定キー運用仕様.md` を見る
 - API の path、HTTP method、各エンドポイントの役割、`SSE` の接続方式で迷ったら、このドキュメントを正本として扱う
 
 <!-- Block: Scope -->
@@ -194,7 +197,9 @@
 ```
 
 - 必須項目は `key`、`requested_value`、`apply_scope` とする
-- `apply_scope` は、初期段階では `runtime`、`next_boot` を区別してよい
+- `key` は `docs/39_設定キー運用仕様.md` に登録された値だけを受け付ける
+- `apply_scope` は、キーごとに許可された値だけを受け付ける
+- `requested_value` の型と範囲は、キーごとの定義に従って検証する
 
 <!-- Block: Settings Post Response -->
 ### 成功応答
@@ -209,6 +214,7 @@
 
 - 成功時は `202 Accepted` を返す
 - DB には `settings_overrides.status="queued"` で挿入する
+- 未登録キー、`apply_scope` 不一致、型違反、範囲違反は `400 Bad Request` で拒否する
 
 <!-- Block: Chat Input -->
 ## `POST /api/chat/input`
@@ -239,8 +245,10 @@
 - `pending_inputs` に 1 件追加する
 - `source` は `web_input` に固定する
 - `channel` は `browser_chat` に固定する
+- `client_message_id` がある場合は、`pending_inputs.client_message_id` にも同じ値を入れる
 - `payload_json` には、少なくとも `input_kind="chat_message"`、`text`、必要なら `client_message_id` を入れる
 - 追加時の `status` は `queued` に固定する
+- 同じ `(channel, client_message_id)` が既にある場合は、追加せず `409 Conflict` を返す
 
 <!-- Block: Chat Input Response -->
 ### 成功応答
@@ -276,6 +284,7 @@
 ```
 
 - `target_message_id` は任意とし、省略時は「現在のブラウザチャット応答全体」を対象にしてよい
+- 実際の停止対象の解決は `docs/38_入力ストリーム運用仕様.md` に従う
 
 <!-- Block: Chat Cancel Write -->
 ### DB への写像
@@ -319,7 +328,7 @@
 
 - `ui_outbound_events` から `channel` 一致かつ `ui_event_id > last_event_id` の行だけを読み出す
 - Web サーバは、配信済み状態を DB へ書き戻さない
-- 接続維持のため、イベントがない間は heartbeat コメントを流してよい
+- 接続維持のため、イベントがない間は 15 秒以内の間隔で heartbeat コメントを流してよい
 
 <!-- Block: SSE Format -->
 ### `SSE` の固定形式
@@ -370,7 +379,8 @@ data: {"message_id":"msg_...","text":"お","chunk_index":0}
 
 - ブラウザ切断はサーバ側の異常とみなさない
 - 再接続時は、ブラウザが保持する `Last-Event-ID` で続きから読む
-- `ui_outbound_events` の保持期間外まで古い `Last-Event-ID` が指定された場合は、利用可能な最古のイベントから再開してよい
+- `ui_outbound_events` の保持期間外まで古い `Last-Event-ID` が指定された場合は、利用可能な最古のイベントから再開する
+- 必要なら、再開前に一時的な `stream_reset` の `notice` を返してよい
 - ストリーム完了を意味する専用の HTTP close は定義せず、接続継続中に `message` や `status` で区切りを表現する
 
 <!-- Block: Status Codes -->
@@ -387,7 +397,7 @@ data: {"message_id":"msg_...","text":"お","chunk_index":0}
 ## このドキュメントで確定したこと
 
 - ブラウザチャットの入力は `POST /api/chat/input`、継続出力は `GET /api/chat/stream` の `SSE` で分離する
-- Web サーバは応答本文を生成せず、`pending_inputs` と `ui_outbound_events` の橋渡しだけを行う
+- Web サーバは応答本文を生成せず、`pending_inputs` と `ui_outbound_events` の橋渡し、および保持期限切れストリーム行の削除だけを行う
 - `SSE` の再開位置は `ui_outbound_events.ui_event_id` と `Last-Event-ID` で管理する
 - `POST /api/chat/cancel` も即時中断ではなく、通常の入力要求としてランタイムへ渡す
 - 初期のブラウザチャット用チャネルは `browser_chat` に固定する

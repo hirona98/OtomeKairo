@@ -7,6 +7,8 @@
 - 目的は、`docs/30_システム設計.md`、`docs/31_ランタイム処理仕様.md`、`docs/32_記憶設計.md`、`docs/33_記憶ジョブ仕様.md` で決めた論理領域を、実装可能な保存単位へ落とすことにある
 - Web API からどのテーブルをどう使うかは `docs/35_WebAPI仕様.md` を見る
 - JSON 列の中身は `docs/36_JSONデータ仕様.md` を見る
+- 初回 seed と排他起動の前提は `docs/37_起動初期化仕様.md` を見る
+- 入力重複とストリーム保持運用は `docs/38_入力ストリーム運用仕様.md` を見る
 - 実際の初期 SQL 文は `sql/core_schema.sql` に置く
 - ここで固定するのは、テーブル名、主キー、必須列、主要制約、主要索引である
 - ここで固定しないのは、実際の `CREATE TABLE` 文、migration 手順、SQLite pragma の全文である
@@ -37,7 +39,7 @@
 ### テーブルの分類
 
 - append-only の正本ログは、`ui_outbound_events`、`input_journal`、`events`、`action_history`、`retrieval_runs`、`revisions`、`commit_records` とする
-- 更新で育つテーブルは、`self_state`、`attention_state`、`body_state`、`world_state`、`drive_state`、`task_state`、`working_memory_items`、`recent_event_window_items`、`skill_registry`、`pending_inputs`、`settings_overrides`、`memory_states`、`preference_memory`、`event_affects`、`event_links`、`event_threads`、`state_links`、`event_entities`、`state_entities`、`event_preview_cache`、`memory_jobs`、`memory_job_payloads`、`vec_items` とする
+- 更新で育つテーブルは、`db_meta`、`runtime_leases`、`self_state`、`attention_state`、`body_state`、`world_state`、`drive_state`、`task_state`、`working_memory_items`、`recent_event_window_items`、`skill_registry`、`pending_inputs`、`settings_overrides`、`memory_states`、`preference_memory`、`event_affects`、`event_links`、`event_threads`、`state_links`、`event_entities`、`state_entities`、`event_preview_cache`、`memory_jobs`、`memory_job_payloads`、`vec_items` とする
 - append-only テーブルは、論理削除でなく追記を基本とし、通常更新を前提にしない
 - 例外として `event_preview_cache`、`memory_jobs`、`pending_inputs`、`settings_overrides` は更新を前提とする
 
@@ -49,6 +51,27 @@
 - `cycle_id` は横断相関キーとして多くのテーブルに置くが、初期段階では専用の `cycles` テーブルは作らない
 - `commit_records` が、短周期の正本確定を辿る主な起点になる
 - `ui_outbound_events` は制御面ストリームログであり、コア状態の保存単位とは分離する
+
+<!-- Block: Boot Meta Group -->
+## 起動メタテーブル
+
+<!-- Block: Db Meta -->
+### `db_meta`
+
+- 役割: スキーマ版と初期化完了情報を保持する
+- 主キー: `meta_key TEXT PRIMARY KEY`
+- 必須列: `meta_value_json`, `updated_at`
+- `meta_key` は、初期段階では `schema_version`、`schema_name`、`initialized_at`、`initializer_version` を必須とする
+- 主要索引: 主キーのみでよい
+
+<!-- Block: Runtime Leases -->
+### `runtime_leases`
+
+- 役割: `人格ランタイム` の排他起動 lease を保持する
+- 主キー: `lease_name TEXT PRIMARY KEY`
+- 必須列: `owner_token`, `acquired_at`, `heartbeat_at`, `expires_at`
+- `lease_name` は、初期段階では `primary_runtime` を使う
+- 主要索引: `(expires_at ASC)`
 
 <!-- Block: Runtime State Group -->
 ## ランタイム状態テーブル
@@ -127,9 +150,11 @@
 - 役割: Web サーバや外部入力から入った未処理入力を保持する
 - 主キー: `input_id TEXT PRIMARY KEY`
 - 必須列: `source`, `channel`, `payload_json`, `created_at`, `priority`, `status`
-- 任意列: `claimed_at`, `resolved_at`, `discard_reason`
+- 任意列: `client_message_id`, `claimed_at`, `resolved_at`, `discard_reason`
 - `status` は、少なくとも `queued`、`claimed`、`consumed`、`discarded` を区別する
 - `channel` は、少なくとも `browser_chat` を区別する
+- `client_message_id` は、`browser_chat` の重複受付防止に使う
+- 主要制約: `UNIQUE(channel, client_message_id) WHERE client_message_id IS NOT NULL`
 - 主要索引: `(status, priority DESC, created_at ASC)`
 
 <!-- Block: Settings Overrides -->
@@ -151,6 +176,7 @@
 - 任意列: `source_cycle_id`
 - `event_type` は、少なくとも `token`、`message`、`status`、`notice`、`error` を区別する
 - `ui_event_id` は、`SSE` の `Last-Event-ID` にそのまま使える単調増加値とする
+- 古い行の削除は append-only 運用の例外として、`docs/38_入力ストリーム運用仕様.md` の保持条件に従って stream janitor だけが行ってよい
 - 主要索引: `(channel, ui_event_id ASC)`
 
 <!-- Block: Event Group -->
@@ -362,6 +388,13 @@
 
 <!-- Block: Transaction Boundaries -->
 ## 保存単位の固定
+
+<!-- Block: Boot Boundary -->
+### 起動初期化の保存境界
+
+- 同じ起動 transaction に含めるのは、`db_meta`、`self_state`、`attention_state`、`body_state`、`world_state`、`drive_state` とする
+- `runtime_leases` の取得と更新は、seed 用 transaction と分けてよい
+- スキーマ版不一致や seed 失敗時は、起動を中断し、短周期や長周期を開始しない
 
 <!-- Block: Short Cycle Boundary -->
 ### 短周期の保存境界

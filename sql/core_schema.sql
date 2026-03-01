@@ -3,6 +3,24 @@ PRAGMA foreign_keys = ON;
 
 BEGIN IMMEDIATE;
 
+-- Block: Boot metadata tables
+CREATE TABLE db_meta (
+    meta_key TEXT PRIMARY KEY,
+    meta_value_json TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE runtime_leases (
+    lease_name TEXT PRIMARY KEY,
+    owner_token TEXT NOT NULL,
+    acquired_at INTEGER NOT NULL,
+    heartbeat_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+);
+
+CREATE INDEX idx_runtime_leases_expires
+    ON runtime_leases (expires_at ASC);
+
 -- Block: Runtime singleton state tables
 CREATE TABLE self_state (
     row_id INTEGER PRIMARY KEY CHECK (row_id = 1),
@@ -121,6 +139,7 @@ CREATE TABLE pending_inputs (
     input_id TEXT PRIMARY KEY,
     source TEXT NOT NULL,
     channel TEXT NOT NULL CHECK (channel = 'browser_chat'),
+    client_message_id TEXT,
     payload_json TEXT NOT NULL,
     created_at INTEGER NOT NULL,
     priority INTEGER NOT NULL,
@@ -134,6 +153,10 @@ CREATE TABLE pending_inputs (
 
 CREATE INDEX idx_pending_inputs_status_priority_created
     ON pending_inputs (status, priority DESC, created_at ASC);
+
+CREATE UNIQUE INDEX idx_pending_inputs_channel_client_message
+    ON pending_inputs (channel, client_message_id)
+    WHERE client_message_id IS NOT NULL;
 
 CREATE TABLE settings_overrides (
     override_id TEXT PRIMARY KEY,
