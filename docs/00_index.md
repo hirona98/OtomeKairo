@@ -30,11 +30,12 @@
 - 構成設計を考えるとき: `docs/10_target_architecture.md`
 - 外部接続や採用技術を考えるとき: `docs/20_external_interfaces.md`
 - 詳細設計を詰めるとき: `docs/30_design_breakdown.md`
+- 実装直前の処理契約を詰めるとき: `docs/31_runtime_detail.md`
 - 記憶設計を詰めるとき: `docs/note/memory_research_notes.md`
 - 自律行動設計を詰めるとき: `docs/note/autonomous_embodiment_research_notes.md`
 - 研究メモの採用候補を整理するとき: `docs/note/research_takeaways.md`
-- 実装を始めるとき: `docs/10_target_architecture.md` と `docs/30_design_breakdown.md`
-- ドキュメントを直すとき: この `docs/00_index.md` と `docs/10_target_architecture.md` と `docs/20_external_interfaces.md` と `docs/30_design_breakdown.md` と `docs/note/memory_research_notes.md` と `docs/note/autonomous_embodiment_research_notes.md` と `docs/note/research_takeaways.md`
+- 実装を始めるとき: `docs/10_target_architecture.md` と `docs/30_design_breakdown.md` と `docs/31_runtime_detail.md`
+- ドキュメントを直すとき: この `docs/00_index.md` と `docs/10_target_architecture.md` と `docs/20_external_interfaces.md` と `docs/30_design_breakdown.md` と `docs/31_runtime_detail.md` と `docs/note/memory_research_notes.md` と `docs/note/autonomous_embodiment_research_notes.md` と `docs/note/research_takeaways.md`
 
 <!-- Block: Notes -->
 ## 参考メモ
@@ -52,5 +53,6 @@
 - 目標構成/責務分割/永続化方針が変わったら `docs/10_target_architecture.md` を更新する
 - 外部インタフェース/採用技術/接続先が変わったら `docs/20_external_interfaces.md` を更新する
 - 実装単位/処理順序/状態境界が変わったら `docs/30_design_breakdown.md` を更新する
+- 実行単位/入出力契約/保存順序の細部が変わったら `docs/31_runtime_detail.md` を更新する
 - 参考メモや一時資料を追加するときは `docs/note/` に置く
 - 記憶設計の比較検討が進んだら `docs/note/memory_research_notes.md` を更新する

@@ -7,6 +7,7 @@
 - 目的は、「何をどの責務で作るか」を曖昧にしないことにある
 - 構成の全体像は `docs/10_target_architecture.md` を見る
 - 外部接続と技術選定は `docs/20_external_interfaces.md` を見る
+- 実装直前の入出力契約、状態遷移、保存順序は `docs/31_runtime_detail.md` を見る
 - 実装前に責務、処理順序、状態境界で迷ったら、このドキュメントを正本として扱う
 
 <!-- Block: System Split -->

@@ -10,4 +10,5 @@
 - 目標構成: `docs/10_target_architecture.md`
 - 決定済み外部接続: `docs/20_external_interfaces.md`
 - 詳細設計: `docs/30_design_breakdown.md`
+- 実装直前設計: `docs/31_runtime_detail.md`
 - 参考メモ: `docs/note/memory_research_notes.md`
