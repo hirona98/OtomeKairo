@@ -9,3 +9,4 @@
 - 作業開始: `docs/00_index.md`
 - 目標構成: `docs/10_target_architecture.md`
 - 決定済み外部接続: `docs/20_external_interfaces.md`
+- 詳細設計: `docs/30_design_breakdown.md`

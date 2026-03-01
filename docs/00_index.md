@@ -22,14 +22,16 @@
 - `docs/00_index.md`: 現在の導線と参照先
 - `docs/10_target_architecture.md`: 常時稼働する人格コアの構成と責務境界
 - `docs/20_external_interfaces.md`: 決定済みの外部インタフェースと技術選定
+- `docs/30_design_breakdown.md`: 実装単位まで分解した詳細設計
 
 <!-- Block: Next Reads -->
 ## 作業タイプ別: 次に開く
 
 - 構成設計を考えるとき: `docs/10_target_architecture.md`
 - 外部接続や採用技術を考えるとき: `docs/20_external_interfaces.md`
-- 実装を始めるとき: `docs/10_target_architecture.md`
-- ドキュメントを直すとき: この `docs/00_index.md` と `docs/10_target_architecture.md` と `docs/20_external_interfaces.md`
+- 詳細設計を詰めるとき: `docs/30_design_breakdown.md`
+- 実装を始めるとき: `docs/10_target_architecture.md` と `docs/30_design_breakdown.md`
+- ドキュメントを直すとき: この `docs/00_index.md` と `docs/10_target_architecture.md` と `docs/20_external_interfaces.md` と `docs/30_design_breakdown.md`
 
 <!-- Block: Maintenance -->
 ## 更新ルール（重要）
@@ -37,3 +39,4 @@
 - リポ構成/入口/主要導線が変わったら、この `docs/00_index.md` を更新する
 - 目標構成/責務分割/永続化方針が変わったら `docs/10_target_architecture.md` を更新する
 - 外部インタフェース/採用技術/接続先が変わったら `docs/20_external_interfaces.md` を更新する
+- 実装単位/処理順序/状態境界が変わったら `docs/30_design_breakdown.md` を更新する
