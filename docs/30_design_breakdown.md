@@ -29,6 +29,22 @@
 - 状態の正本は常に永続化基盤にあり、メモリ上の状態は実行中の作業コピーとして扱う
 - 背後で勝手に状態を書き換える隠れた常駐処理は作らない
 
+<!-- Block: Fixed Responsibility Conditions -->
+## 具体設計として固定する責務条件
+
+- `attention manager` は、記憶の補助ではなく、`memory` と同格の必須責務として毎短周期で評価する
+- `action dispatcher` の実行後は、成否に関係なく必ず `reobserve` を行い、その結果を保存前に取り込む
+- `reflection writer` は感想文を残すのではなく、少なくとも `reflection_note`、`retry_hint`、`avoid_pattern` の 3 種を構造化して残す
+- `context assembler` は、`working_memory` を最優先で詰め、その残り予算で関連するエピソード、意味、感情、関係、反省を種別ごとの上限付きで組み立てる
+- `cognition planner` は、高位の意図、優先順位、次の 1 手の行動候補、必要なら後続の `step_hints` までを作る責務に限定し、低位のデバイス制御手順は作らない
+- `action validator` は、安全、身体能力、空間制約、`affordances`、現在タスク、命令階層を同時に検査し、`execute`、`hold`、`reject` のいずれかへ確定する
+- `state committer` は、短周期の保存を完了するまで、次の短周期や長周期へ進ませない
+- `memory consolidator` は、イベントの抽出、意味記憶の昇格、重要度更新、埋め込み同期を 1 つの長周期処理として完了させる
+- `skill promoter` は、単発の成功では昇格させず、複数サイクルで再現した成功パターンだけを `skill_registry` に登録する
+- `attention manager` と `action validator` は、同じ命令階層評価結果を共有し、下位入力が上位制約を飛び越えないようにする
+- `gateway` は、センサー、行動器、ネットワークの唯一の統合点とし、人格コアから個別実装を直接呼ばない
+- 外部接続の失敗は、単なる `failed` で終わらせず、原因種別付きのイベントとして保存し、次回判断と学習の材料にする
+
 <!-- Block: Runtime Ownership -->
 ## 人格ランタイムの責務分解
 
@@ -112,7 +128,7 @@ flowchart TD
 6. `cognition_input` をもとに、反応不要、即時行動、保留継続のいずれかを決める
 7. 原則として LLM を使って、`cognition_input` から意図と `action proposal` を組み立てる
 8. `action validator` が、候補を安全で実行可能な `action_command` へ変換する
-9. 実行可能な行動だけを実行し、必要なら実行中の観測変化を再取り込みする
+9. 実行可能な行動だけを実行し、実行後の観測変化を必ず再取り込みする
 10. 実行結果と観測結果をイベントとして記録する
 11. 自己状態、身体状態、世界状態、`working_memory`、短期記憶を更新して保存する
 12. 次の待機状態へ戻る
@@ -138,6 +154,15 @@ flowchart TD
 - その次に、緊急度の高い観測イベントを優先する
 - 進行中のタスクは、緊急イベントがない限り継続して処理する
 - 自発行動は、外部入力と保留タスクが落ち着いているときにだけ実行する
+
+<!-- Block: Self Initiated Actions -->
+## 自発行動の制約
+
+- 自発行動は、`task_progress`、`unexplored_check`、`self_maintenance`、`skill_rehearsal` のいずれかに分類できるものだけを許す
+- 自発行動は、開始時点で `goal_hint` と停止条件を持ち、無目的な徘徊や無期限の探索を許さない
+- `unexplored_check` は、未観測領域、未確認対象、長時間更新のない重要対象の確認に限定する
+- `self_maintenance` は、身体状態、観測品質、外部待ち状態の健全性回復に限定する
+- `skill_rehearsal` は、緊急入力や高優先タスクがないときだけ許す
 
 <!-- Block: Instruction Priority -->
 ## 命令階層
@@ -175,14 +200,23 @@ flowchart TD
 ## 行動候補と実行命令の分離
 
 - LLM や内部判断が作るのは `action proposal` であり、まだ実行命令ではない
-- `action validator` は、現在の身体状態、世界状態、能力制約、安全制約を見て、候補を `action_command` に変換する
+- `action validator` は、現在の身体状態、世界状態、能力制約、空間制約、アフォーダンス、安全制約を見て、候補を `action_command` に変換する
 - 実行不能な候補は、その場で棄却または保留に回す
 - `action proposal` と `action_command` を同一視しない
+
+<!-- Block: Stepwise Planning -->
+## 長い計画の分解
+
+- 1 回の短周期で確定する主命令は 1 つだけとし、複数手順をまとめて確定しない
+- `cognition planner` は、後続の `step_hints` を返してよいが、未実行ステップをそのまま確定命令として扱わない
+- 後続ステップが必要な場合は、`task_state` に残課題として保持し、次周期で再評価する
+- 外界が変化した場合、前周期の後続手順は自動継続せず、必ず再判断する
 
 <!-- Block: LLM Boundaries -->
 ## 認知処理の境界
 
 - 認知判断の主担当は LLM であり、意図形成、候補生成、要約、言語化、反省補助の大半を担う
+- LLM が扱うのは、正規化済みのマルチモーダル観測要約と構造化した判断材料であり、生センサー入力や低位制御信号ではない
 - LLM に渡すのは、`context assembler` が選別した `cognition_input` であり、人格の性格、現在感情、長期目標、関係性、関連記憶、現在の身体状態、世界状態、進行中タスク、命令階層の要約を含む
 - `cognition_input` は、その時点で必要な断面だけを渡し、DB の全量ダンプや生ログ全量をそのまま渡さない
 - LLM は、外部 API の直接実行者にはしない
@@ -229,7 +263,7 @@ flowchart TD
 - `self_state`: 性格傾向、感情、関係性、長期目標を持つ
 - `attention_state`: 現在の注意対象、無視対象、再観測優先順位を持つ
 - `body_state`: 姿勢、移動状態、出力可否、観測可能な感覚器の状態を持つ
-- `world_state`: 現在地、周辺対象、進行中タスク、外界の最近の状況、`affordances`、`constraints` を持つ
+- `world_state`: 現在地、周辺対象、進行中タスク、外界の最近の状況、`affordances`、`constraints`、`attention_targets` を持つ
 - `drive_state`: 空腹や疲労のような生理ではなく、行動を促す内部欲求の強度を持つ
 - `task_state`: 継続中の作業、待機中の保留、再開条件を持つ
 - `skill_registry`: 再利用可能な行動列、発火条件、成功条件を持つ

@@ -37,7 +37,7 @@
 - `短周期ループ` は、外部刺激への反応と即時行動を担当する
 - `長周期ループ` は、反省、記憶整理、スキル昇格、埋め込み同期を担当する
 - 各ループには、`cycle_id`、`cycle_kind`、`trigger_reason`、`started_at` を必ず付与する
-- `trigger_reason` は、少なくとも `external_input`、`sensor_change`、`task_resume`、`time_elapsed`、`post_action_followup` を区別する
+- `trigger_reason` は、少なくとも `external_input`、`sensor_change`、`task_resume`、`idle_tick`、`self_initiated`、`post_action_followup` を区別する
 
 <!-- Block: Short Cycle Triggers -->
 ## 短周期ループの起動条件
@@ -47,6 +47,14 @@
 - `task_state` に再開条件を満たした保留タスクがあるときは、短周期ループを起動する
 - 一定時間のアイドリング経過で、再観測や自発行動の判定時刻に達したときは、短周期ループを起動する
 - 直前行動に `requires_reobserve` が立っているときは、その追跡のために短周期ループを起動する
+
+<!-- Block: Self Initiated Triggers -->
+## 自発行動の起動条件
+
+- `self_initiated` は、緊急度の高い外部入力、保留中の高優先タスク、外部待ちの戻りがないときだけ候補にする
+- 自発行動の目的種別は、`task_progress`、`unexplored_check`、`self_maintenance`、`skill_rehearsal` の 4 つに固定する
+- `self_initiated` を選ぶ場合でも、開始前に `goal_hint` と停止条件が作れない候補は採用しない
+- 無目的な探索、無期限の巡回、根拠のないスキル試行は採用しない
 
 <!-- Block: Long Cycle Triggers -->
 ## 長周期ループの起動条件
@@ -89,10 +97,10 @@
 ## `cognition_input` の契約
 
 - `cognition_input` は、その時点の人格として判断させるために `LLM` へ渡す入力断面である
-- `cognition_input` は、`cycle_meta`、`persona_snapshot`、`body_snapshot`、`world_snapshot`、`drive_snapshot`、`task_snapshot`、`attention_snapshot`、`memory_bundle`、`policy_snapshot`、`skill_candidates`、`current_observation` を持つ
+- `cognition_input` は、`cycle_meta`、`persona_snapshot`、`body_snapshot`、`world_snapshot`、`drive_snapshot`、`task_snapshot`、`attention_snapshot`、`memory_bundle`、`policy_snapshot`、`skill_candidates`、`current_observation`、`context_budget` を持つ
 - `persona_snapshot` には、性格傾向、現在感情、長期目標、関係性、人格としての不変条件を含める
 - `body_snapshot` には、移動可否、出力可否、利用可能センサー、直近負荷、現在の姿勢を含める
-- `world_snapshot` には、現在地、周辺対象、`affordances`、`constraints`、現在の状況要約を含める
+- `world_snapshot` には、現在地、周辺対象、`affordances`、`constraints`、`attention_targets`、現在の状況要約を含める
 - `drive_snapshot` には、内部欲求の強度と、その短周期での優先度影響を含める
 - `task_snapshot` には、進行中タスク、保留条件、再開条件、中断可否を含める
 - `attention_snapshot` には、主注意対象、抑制対象、再確認候補を含める
@@ -100,7 +108,9 @@
 - `policy_snapshot` には、`system policy`、`runtime policy`、今回の `external input` の評価結果を含める
 - `skill_candidates` には、今回の状況に適合しうるスキルだけを含める
 - `current_observation` には、今回の主注意対象として選ばれた観測と、その周辺観測を含める
+- `context_budget` には、今回の `LLM` 呼び出しで使える全体量上限と、`persona`、`situation`、`memory`、`output contract` への割当上限を含める
 - `context assembler` は DB の全量を渡さず、この短周期で必要な断面だけを選別して `cognition_input` にする
+- `context assembler` は、`context_budget` を超えた断面をそのまま詰め込まず、優先度の低い項目から落として構成する
 
 <!-- Block: Prompt Layering -->
 ## LLM へ渡す層の分け方
@@ -117,10 +127,11 @@
 ## `cognition_result` の契約
 
 - `cognition_result` は、`LLM` が返す構造化された認知結果である
-- `cognition_result` は、`intention_summary`、`decision_reason`、`action_proposals`、`speech_draft`、`memory_focus`、`reflection_seed` を持つ
+- `cognition_result` は、`intention_summary`、`decision_reason`、`action_proposals`、`step_hints`、`speech_draft`、`memory_focus`、`reflection_seed` を持つ
 - `intention_summary` は、この短周期で人格が何をしようとしているかを 1 つに定める
 - `decision_reason` は、行動の根拠となる要約であり、後から検証できる形で残す
 - `action_proposals` は、優先順に並んだ候補列であり、まだ実行命令ではない
+- `step_hints` は、複数手順が必要な場合の後続候補列であり、未確定の補助計画として扱う
 - `speech_draft` は、`speak` 系候補があるときだけ持つ
 - `memory_focus` は、この判断で特に参照した記憶の要約を持つ
 - `reflection_seed` は、後続の `reflection writer` が使う要点を持つ
@@ -139,10 +150,20 @@
 ## `action_proposal` の契約
 
 - `action_proposal` は、`LLM` が提案する未確定の行動候補である
-- 各候補は、`proposal_id`、`action_type`、`target_hint`、`parameter_hint`、`goal_hint`、`priority`、`reason` を持つ
+- 各候補は、`proposal_id`、`action_type`、`target_hint`、`parameter_hint`、`goal_hint`、`step_hints`、`completion_hint`、`priority`、`reason` を持つ
 - `action_type` は、少なくとも `speak`、`move`、`look`、`browse`、`social`、`notify`、`wait` を区別する
 - 候補は複数返してよいが、優先度の高い順に並んでいなければならない
 - 候補の段階では、実行パラメータはまだ確定値ではなく、検証前のヒントとして扱う
+- `step_hints` は、必要な場合だけ持つ手続き的な補助手順であり、実行命令ではない
+- `completion_hint` は、何をもってその候補が完了したとみなすかの観測条件を持つ
+
+<!-- Block: Planning Constraints -->
+## 長い計画の拘束条件
+
+- 1 回の短周期で `action_command` に落とすのは、常に次の 1 手だけである
+- `step_hints` が複数あっても、未実行の後続手順をまとめて確定命令にしない
+- 後続手順は `task_state` に保持してよいが、次周期の観測と優先度評価を通したうえで再判断する
+- 前周期で妥当だった後続手順でも、外界変化や失敗があれば自動継続せず破棄または再編する
 
 <!-- Block: Action Command Contract -->
 ## `action_command` の契約
@@ -153,14 +174,14 @@
 - `proposal_ref` は、どの `action_proposal` から確定したかを追跡するために必須である
 - `preconditions` を満たさない候補は確定しない
 - `stop_conditions` は、行動をいつ止めるかを明示し、無制限な継続を許さない
-- `requires_reobserve` は、行動後に追加観測が必要かを明示する
+- `requires_reobserve` は、行動直後の標準再観測に加えて、追加の追跡観測が必要かを明示する
 - どの `action_command` も、必ず 1 つの明確な `actuator_port` に属する
 
 <!-- Block: Action Validation Rules -->
 ## `action validator` の確定ルール
 
 - `action validator` は、候補を優先順に検査し、最初に実行可能な候補だけを `action_command` にする
-- 検査対象は、`system policy`、`runtime policy`、身体制約、世界制約、現在タスク、命令階層である
+- 検査対象は、`system policy`、`runtime policy`、身体制約、世界制約、空間制約、`affordances`、現在タスク、命令階層である
 - 安全に反する候補は、その時点で棄却する
 - 身体能力を超える候補は、その時点で棄却する
 - 現在のタスク連続性を壊す候補は、緊急性がなければ保留に回す
@@ -171,11 +192,14 @@
 ## `action dispatcher` と実行結果の契約
 
 - `action dispatcher` は、`action_command` を対応する `actuator_port` に渡して実行する
-- 実行結果は、`result_id`、`command_id`、`started_at`、`finished_at`、`status`、`observed_effects`、`raw_result_ref` を持つ
+- 実行結果は、`result_id`、`command_id`、`started_at`、`finished_at`、`status`、`failure_mode`、`observed_effects`、`raw_result_ref`、`adapter_trace_ref` を持つ
 - `status` は、少なくとも `succeeded`、`failed`、`stopped` を区別する
-- 実行中に新しい観測変化があった場合は、`observed_effects` として再観測結果を束ねる
+- `failure_mode` は、失敗時の原因種別であり、少なくとも `precondition_failed`、`device_rejected`、`network_timeout`、`sensor_mismatch`、`unexpected_side_effect` を区別する
+- 実行後の再観測結果は、必ず `observed_effects` として束ねる
+- `requires_reobserve` が立っている場合は、行動直後の標準再観測に加えて追跡観測を行う
 - 実行器は、宣言されていない副作用を持ってはならない
 - 実行失敗も成功と同じく、後続の保存と反省の入力にする
+- `adapter_trace_ref` は、外部アダプタ側の詳細記録への参照であり、統合由来の失敗解析に使う
 
 <!-- Block: Commit Contract -->
 ## `state committer` の保存契約
@@ -239,7 +263,7 @@
 - `self_state` は、性格傾向、現在感情、長期目標、関係性、人格としての不変条件を持つ
 - `attention_state` は、主注意対象、抑制対象、再確認待ち、直近の注意遷移理由を持つ
 - `body_state` は、姿勢、移動状態、感覚器利用可否、出力ロック、現在負荷を持つ
-- `world_state` は、現在地、周辺対象、状況要約、`affordances`、`constraints`、外部待ち状態を持つ
+- `world_state` は、現在地、周辺対象、状況要約、`affordances`、`constraints`、`attention_targets`、外部待ち状態を持つ
 - `drive_state` は、内部欲求の強度と優先度への影響を持つ
 - `task_state` は、進行中タスク、保留タスク、再開条件、中断可否、期限を持つ
 - `memory_state` は、`working_memory`、エピソード、意味、感情、対人、反省を持つ

@@ -5,13 +5,29 @@
 
 - OtomeKairo は、ひとつの人格個体として持続する **身体性を持つ AI 人格コア** として設計する
 - 中心にあるのはチャット応答ではなく、常時稼働し続ける「観測・判断・行動」の循環である
-- 中心ループは、`observe -> attend -> decide -> act -> reflect` を基本形とする
+- 中心ループは、`observe -> attend -> decide -> act -> reflect -> consolidate` を基本形とする
 - 会話は多数ある入出力チャネルの 1 つにすぎず、中心機能ではない
 - 設定変更は、人格コア本体とは責務を分離した Web サーバから行う
 - 実装単位までの分解は `docs/30_design_breakdown.md` で管理する
 - 実装直前の処理契約は `docs/31_runtime_detail.md` で管理する
 - 記憶サブシステムの詳細は `docs/32_memory_detail.md` で管理する
 - 後方互換やフォールバックは持たせず、常に現在の正しい構成へ寄せる
+
+<!-- Block: Fixed Principles -->
+## 固定した全体原則
+
+- 認知コアは、`perception`、`attention`、`action selection`、`memory`、`learning`、`reasoning` を同格の中核機能として持ち、どれか 1 つへ偏らない
+- 1 回の認知循環は、`observe -> attend -> decide -> act -> reobserve -> reflect -> consolidate` までを 1 単位として閉じる
+- 行動の直後には、成功、失敗、想定外を問わず必ず再観測を行い、その結果を次の判断材料へ戻す
+- 反省はその場限りのログにせず、次回判断で再利用する `reflection_note`、`retry_hint`、`avoid_pattern` として保存する
+- 長い計画は一括で最後まで確定せず、常に「次の 1 手」に分解して、観測結果ごとに更新する
+- LLM に渡す判断材料は、`working_memory`、関連長期記憶、現在状態、命令階層を `context budget` の範囲で組み立て、DB 全量を渡さない
+- 観測は入力元ごとの差異を人格コアへ持ち込まず、すべて `observation_frame` 相当の統一表現に正規化する
+- 行動は自由文ではなく、実行前に必ず `action_command` へ構造化し、検証を通ったものだけを実行する
+- LLM は意図、要約、行動候補、反省補助を担い、デバイス制御、DB 更新、外部 API 実行の最終確定は決定論的処理で担う
+- 再利用価値のある行動列は、複数回の成功根拠と反省結果が揃ったものだけを `skill` として昇格する
+- 自発行動は、`task_progress`、`unexplored_check`、`self_maintenance`、`skill_rehearsal` のいずれかの明示目的を持つ
+- 下位入力やツール出力は、上位の `system policy` と `runtime policy` を直接上書きできない
 
 <!-- Block: Runtime Shape -->
 ## 成立させるべき稼働像
@@ -33,7 +49,7 @@
 6. 行動候補を、安全で実行可能な行動命令へ変換する
 7. 発話、移動、視線変更、検索、通知などの行動を実行する
 8. 実行結果を再観測し、反省、自己状態、記憶、世界状態に反映して保存する
-9. 再びアイドリング状態へ戻る
+9. 必要な記憶整理を長周期で反映し、再びアイドリング状態へ戻る
 
 <!-- Block: Layout -->
 ## あるべきディレクトリ構成
@@ -151,7 +167,7 @@
 ## 責務境界
 
 - `boot/`: 起動入口だけを持つ。人格コア起動と Web サーバ起動の開始点だけを担当する
-- `runtime/`: アイドリングを含む常時稼働ループを担当する。`observe -> attend -> decide -> act -> reflect` の呼び出し順だけを持つ
+- `runtime/`: アイドリングを含む常時稼働ループを担当する。`observe -> attend -> decide -> act -> reobserve` の短周期と、`reflect -> consolidate` の長周期の呼び出し順だけを持つ
 - `web/`: 設定変更、テキスト入力、状態確認の HTTP ルーティングだけを担当する
 - `usecase/`: 観測処理、行動選択、行動実行、保存といったユースケース単位の調停を担当する
 - `domain/`: 自己、身体、世界、欲求、意図、行動、記憶を表す中核概念を置く。外部 API や DB を持ち込まない
@@ -199,7 +215,7 @@
 - `self_model`: 性格傾向、現在の感情、長期目標、関係性の認識を持つ
 - `attention_state`: 現在の注意対象、抑制対象、優先順位を持つ
 - `body_state`: 姿勢、移動状態、利用可能な感覚器、疲労や負荷のような身体状態を持つ
-- `world_state`: 現在地、周辺状況、進行中タスク、外部対象の状態認識、`affordances`、`constraints` を持つ
+- `world_state`: 現在地、周辺状況、進行中タスク、外部対象の状態認識、`affordances`、`constraints`、`attention_targets` を持つ
 - `memory`: `working`、エピソード、意味、感情、対人、反省を含む階層記憶を持つ
 - `skill`: 再利用可能な行動列と発火条件を持つ
 - これらを分離して持ちつつ、判断時には一体として参照する

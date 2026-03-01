@@ -29,6 +29,19 @@
 - `working_memory` は長期記憶ではなく、その時点の作業断面として扱う
 - 性格、感情、関係性、反省は、記憶の外側に逃がさず、想起の対象として一体で扱う
 
+<!-- Block: Fixed Memory Rules -->
+## 具体設計として固定する記憶原則
+
+- `events` は出来事の不変記録、`memory_states` は育つ知識として分離し、両者を同一更新として扱わない
+- すべての長期記憶更新は、必ず `evidence_event_ids` を持ち、根拠イベントなしで昇格しない
+- 反省は自由文ではなく、少なくとも `reflection_note`、`retry_hint`、`avoid_pattern`、必要なら `judgment_patch` を持つ再利用用の記憶として保存する
+- 想起では `working_memory` を最優先で確保し、その残りでエピソード、意味、感情、関係、反省を種別ごとの件数上限付きで `memory_bundle` に積む
+- `memory_bundle` は、種別ごとの上限と全体の `context budget` を超えてはならず、超過分は優先度順に落とす
+- `action` と `action_result` は分離して記録するが、同一 `cycle_id` と相互参照で必ず結び付け、失敗も成功と同じ粒度で残す
+- 忘却は削除でなく、`importance`、`memory_strength`、`last_accessed_at`、`searchable` の変化で表現し、想起時に再強化する
+- `long_mood_state` は増殖させず単一の持続状態として更新し、瞬間感情は `event_affect` で別管理する
+- `skill` 昇格に使う根拠は、複数イベントにまたがる成功列と、それに対応する反省メモの組でなければならない
+
 <!-- Block: Memory Topology -->
 ## 記憶の全体構造
 
@@ -296,6 +309,7 @@
 - `relationship_hits` は、関係性や `preference_memory` の関連項目を持つ
 - `reflection_hits` は、類似失敗、再試行ヒント、回避パターンを持つ
 - `selection_trace` は、何をどう選んだかの要点だけを持ち、`retrieval_runs` に観測用として残す
+- 各 hit 群は件数上限を持ち、`memory_bundle` 全体は LLM の文脈窓予算を超えないように制御する
 
 <!-- Block: LLM Selection -->
 ## LLM による最終選別
