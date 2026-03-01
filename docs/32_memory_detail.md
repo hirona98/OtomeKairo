@@ -17,8 +17,11 @@
 - 固定するのは、人格コアの記憶であり、設定ファイルや一時ログの一般論ではない
 - 一時的な比較検討や参考情報は `docs/note/` に残し、このドキュメントには採用した内容だけを書く
 
+<!-- Block: Memory Model Group -->
+## 記憶モデル
+
 <!-- Block: Design Principles -->
-## 記憶設計の原則
+### 記憶設計の原則
 
 - 記憶は、`追記される出来事` と `更新で育つ状態` を分ける
 - 事実として観測された出来事は、矛盾があっても出来事ログから消さない
@@ -30,7 +33,7 @@
 - 性格、感情、関係性、反省は、記憶の外側に逃がさず、想起の対象として一体で扱う
 
 <!-- Block: Fixed Memory Rules -->
-## 具体設計として固定する記憶原則
+### 具体設計として固定する記憶原則
 
 - `events` は出来事の不変記録、`memory_states` は育つ知識として分離し、両者を同一更新として扱わない
 - すべての長期記憶更新は、必ず `evidence_event_ids` を持ち、根拠イベントなしで昇格しない
@@ -43,7 +46,7 @@
 - `skill` 昇格に使う根拠は、複数イベントにまたがる成功列と、それに対応する反省メモの組でなければならない
 
 <!-- Block: Memory Topology -->
-## 記憶の全体構造
+### 記憶の全体構造
 
 - 記憶は、`event ledger`、`memory state layer`、`affect layer`、`context graph`、`entity indexes`、`retrieval indexes`、`revision log`、`retrieval log` の 8 層で構成する
 - `event ledger` は、観測と行動の出来事を追記する不変の層である
@@ -56,7 +59,7 @@
 - `retrieval log` は、どう思い出したかを観測するための実行ログである
 
 <!-- Block: Entity Indexes -->
-## エンティティ索引の設計
+### エンティティ索引の設計
 
 - `entity_expand` を成立させるため、イベント本文や状態本文に付いたエンティティは正規化索引として別に持つ
 - `event_entities` は、`memory event` に紐づくエンティティ索引である
@@ -68,7 +71,7 @@
 - エンティティ索引は、本文の代わりではなく、多段想起の入り口として使う
 
 <!-- Block: Logical Domains -->
-## 論理記憶ドメイン
+### 論理記憶ドメイン
 
 - `working_memory`
   - 短周期ループの間だけ使う作業文脈である
@@ -100,7 +103,7 @@
   - 反復成功の根拠となるイベント列と反省メモを参照できるようにする
 
 <!-- Block: Event Ledger -->
-## `event ledger` の設計
+### `event ledger` の設計
 
 - `event ledger` は、短周期の保存完了ごとに 1 件以上の `memory event` を追記する
 - 基本単位は会話の 1 ターンではなく、`1 回の意味のある観測・行動まとまり` とする
@@ -111,7 +114,7 @@
 - 明示的な制御面入力でも、人格が自発判断の材料として取り込んだなら `memory event` として残す
 
 <!-- Block: Event Record Contract -->
-## `memory event` の契約
+### `memory event` の契約
 
 - 各 `memory event` は、少なくとも `event_id`、`cycle_id`、`created_at`、`source`、`kind`、`searchable` を持つ
 - 各 `memory event` は、必要に応じて `observation_summary`、`action_summary`、`result_summary`、`payload_ref` を持つ
@@ -123,7 +126,7 @@
 - 内部起点のイベントは、`idle_tick`、`post_action_followup`、`self_initiated` の語彙をそのまま使い、短周期起点との対応を崩さない
 
 <!-- Block: Event Annotations -->
-## 出来事注釈
+### 出来事注釈
 
 - `memory event` には、出来事そのものとは別に `event_annotations` を付与できる
 - `event_annotations` は、少なくとも `about_time`、`entities`、`thread hints`、`modality summary` を持つ
@@ -134,7 +137,7 @@
 - 出来事注釈は、イベントの追記後に追加・補正してよいが、元の出来事本文を書き換えたものとしては扱わない
 
 <!-- Block: Memory State Layer -->
-## `memory state layer` の設計
+### `memory state layer` の設計
 
 - `memory state layer` は、イベントから抽出された「育つ読み物」を持つ
 - 物理保存は 1 つの `memory_states` 系テーブルにまとめてもよいが、論理的には記憶種別を分けて扱う
@@ -144,7 +147,7 @@
 - 同じ種類の情報でも、時期が違うなら上書きせず並存させる
 
 <!-- Block: Memory Kinds -->
-## `memory_kind` の固定集合
+### `memory_kind` の固定集合
 
 - `fact`
   - 比較的安定した事実、属性、設定を持つ
@@ -175,7 +178,7 @@
   - 通常の `fact` に埋め込まず、専用ルールで扱う
 
 <!-- Block: Preference Memory -->
-## `preference` の専用設計
+### `preference` の専用設計
 
 - `preference` は、好みや苦手の誤断定を減らすための専用記録である
 - 会話アプリ由来の `user_preferences` という考え方は、そのままでは使わず、人格コアでは `preference_memory` として扱う
@@ -189,7 +192,7 @@
 - 矛盾する `confirmed` が出た場合は、新しい確定を正として反対極性を `revoked` にする
 
 <!-- Block: Affect Layer -->
-## 感情記憶の設計
+### 感情記憶の設計
 
 - 感情は、`瞬間感情` と `持続感情` の 2 層で扱う
 - 瞬間感情はイベントに紐づく `event_affect` として持つ
@@ -198,7 +201,7 @@
 - 感情記述は人格本人の主観で統一する
 
 <!-- Block: Event Affect Contract -->
-## `event_affect` の契約
+### `event_affect` の契約
 
 - `event_affect` は、`event_id` に紐づく瞬間感情である
 - 各記録は、`event_affect_id`、`event_id`、`moment_affect_text`、`moment_affect_labels`、`vad`、`confidence`、`created_at` を持つ
@@ -208,7 +211,7 @@
 - `event_affect` は長期感情の更新材料にも使う
 
 <!-- Block: Long Mood Model -->
-## `long_mood_state` の更新モデル
+### `long_mood_state` の更新モデル
 
 - `long_mood_state` は、背景として持続する感情状態である
 - `long_mood_state` は、`baseline` と `shock` の 2 層で解釈する
@@ -218,7 +221,7 @@
 - `long_mood_state` 自体は増殖させず、1 件を更新して育てる
 
 <!-- Block: Context Graph -->
-## 文脈グラフの設計
+### 文脈グラフの設計
 
 - 記憶は本文検索だけでは足りないため、出来事どうし、状態どうしの関係を別に持つ
 - `event_links` は、イベント間の向き付き関係である
@@ -227,7 +230,7 @@
 - これらは派生情報だが、再現性と検索安定性のために保存して育てる
 
 <!-- Block: Context Graph Labels -->
-## 文脈グラフの関係ラベル
+### 文脈グラフの関係ラベル
 
 - `event_links.label` の初期固定値は、`reply_to`、`same_topic`、`caused_by`、`continuation` とする
 - `state_links.label` の初期固定値は、`relates_to`、`derived_from`、`supports`、`contradicts` とする
@@ -235,8 +238,11 @@
 - `same_topic`、`caused_by`、`continuation` の補正や追加は、長周期の更新で行う
 - 対称関係として扱うラベルは、必要なら逆向きリンクも保存する
 
+<!-- Block: Retrieval Group -->
+## 想起設計
+
 <!-- Block: Retrieval Overview -->
-## 記憶検索（思い出す）の全体像
+### 記憶検索（思い出す）の全体像
 
 - 記憶検索は、`RetrievalPlan -> candidate gathering -> LLM selection -> memory_bundle` の 4 段で行う
 - いきなり DB 結果を `memory_bundle` にしない
@@ -245,7 +251,7 @@
 - 想起は短周期の `context assembler` の中で行う
 
 <!-- Block: Retrieval Plan -->
-## `RetrievalPlan` の契約
+### `RetrievalPlan` の契約
 
 - `RetrievalPlan` は、今回どう思い出すかを固定する短い構造化計画である
 - `RetrievalPlan` は、少なくとも `mode`、`queries`、`time_hint`、`diversify`、`limits` を持つ
@@ -256,7 +262,7 @@
 - `limits` は、候補数上限と選別数上限を持つ
 
 <!-- Block: Retrieval Modes -->
-## `RetrievalPlan.mode` の固定値
+### `RetrievalPlan.mode` の固定値
 
 - `associative_recent`
   - 最近性を強く効かせる連想想起である
@@ -275,7 +281,7 @@
   - `reflection_note` と関連エピソードを優先する
 
 <!-- Block: Candidate Gathering -->
-## 候補収集の経路
+### 候補収集の経路
 
 - 候補収集は、可能なものを並行に走らせてよいが、最終的な統合は 1 つの順序で行う
 - 初期の候補収集経路は、`recent_events`、`recent_states`、`vector_recent`、`vector_global`、`trigram_events`、`reply_chain`、`context_threads`、`context_links`、`about_time`、`event_affects`、`state_link_expand`、`entity_expand` とする
@@ -288,7 +294,7 @@
 - `state_link_expand` と `entity_expand` は、多段想起のための補助経路である
 
 <!-- Block: Candidate Rules -->
-## 候補収集のルール
+### 候補収集のルール
 
 - 収集経路ごとの遅延で全体を止めないよう、各経路には独立した時間予算を持たせる
 - 時間予算を超えた経路は、そのサイクルでは不採用とし、他の経路の結果で続行する
@@ -299,7 +305,7 @@
 - `event_affect` と探索枠は、入れすぎると主経路を圧迫するため、明示的に上限を持つ
 
 <!-- Block: Memory Bundle -->
-## `memory_bundle` の契約
+### `memory_bundle` の契約
 
 - `memory_bundle` は、今回の認知判断に渡す最終的な想起結果である
 - `memory_bundle` は、`working_memory_items`、`episodic_hits`、`semantic_hits`、`affective_hits`、`relationship_hits`、`reflection_hits`、`selection_trace` を持つ
@@ -313,7 +319,7 @@
 - 各 hit 群は件数上限を持ち、`memory_bundle` 全体は LLM の文脈窓予算を超えないように制御する
 
 <!-- Block: LLM Selection -->
-## LLM による最終選別
+### LLM による最終選別
 
 - 候補を最終的に `memory_bundle` へ落とす段は `LLM` が担う
 - `LLM` は、どの候補を今回の人格判断に使うべきかを選別し、必要なら短い要約へ整形する
@@ -322,8 +328,11 @@
 - 候補が多いほどよいわけではないため、選別に渡す入力サイズにも上限を持つ
 - 選別結果が空でも、空の `memory_bundle` を明示的に返し、暗黙に他の記憶を補わない
 
+<!-- Block: Update Group -->
+## 更新設計
+
 <!-- Block: Memory Update Overview -->
-## 記憶更新（育てる）の全体像
+### 記憶更新（育てる）の全体像
 
 - 記憶更新は、短周期の保存完了後に長周期ループで行う
 - 記憶更新は、`MemoryWritePlan generation -> plan validation -> apply -> revisions -> embedding sync` の順で行う
@@ -332,7 +341,7 @@
 - 出来事ログの追記と、長期記憶の更新は別処理として扱う
 
 <!-- Block: Memory Write Plan -->
-## `MemoryWritePlan` の契約
+### `MemoryWritePlan` の契約
 
 - `MemoryWritePlan` は、直近イベントから何をどう育てるかを定める構造化計画である
 - `MemoryWritePlan` は、少なくとも `event_annotations`、`state_updates`、`preference_updates`、`event_affect`、`context_updates`、`revision_reasons` を持つ
@@ -344,7 +353,7 @@
 - `revision_reasons` は、監査用に残す短い変更理由を持つ
 
 <!-- Block: Update Operations -->
-## 記憶更新の操作種別
+### 記憶更新の操作種別
 
 - `upsert`
   - 新規作成または既存更新を行う
@@ -363,7 +372,7 @@
   - 検索優先度や将来の足切りに使う
 
 <!-- Block: Update Rules -->
-## 記憶更新の原則
+### 記憶更新の原則
 
 - イベント由来の更新では、`evidence_event_ids` を空にしない
 - 矛盾がある場合は、まず並存か期間分割を選び、即座の上書きを避ける
@@ -374,7 +383,7 @@
 - 根拠が弱い情報は `candidate` や低 `confidence` として残し、断定状態へ飛ばさない
 
 <!-- Block: Dedup And Coexistence -->
-## 重複、矛盾、並存の扱い
+### 重複、矛盾、並存の扱い
 
 - `events` は追記ログなので、重複しても削除しない
 - `memory_states` は、完全一致の重複だけを整理対象にする
@@ -385,7 +394,7 @@
 - `long_mood_state` だけは単一アクティブを維持し、並存させない
 
 <!-- Block: Forgetting -->
-## 忘却と再強化
+### 忘却と再強化
 
 - 忘却は、削除ではなく `importance`、`memory_strength`、`last_accessed_at` の変化で表現する
 - `importance` は、その記憶が将来判断に効く重みである
@@ -396,7 +405,7 @@
 - 低重要度記憶は削除せず、`searchable=0` として主要想起から外す判断を許す
 
 <!-- Block: Tidy Memory -->
-## 定期整理
+### 定期整理
 
 - 記憶検索は広めに候補を集めるため、長期運用では `memory_states` が増えやすい
 - そのため、同期の判断経路ではなく、長周期の整理タスクで定期的に過去化を行う
@@ -406,7 +415,7 @@
 - 定期整理の結果も `revisions` に残し、「整理由来」であることが分かる理由を持たせる
 
 <!-- Block: Temporal Model -->
-## 時間モデル
+### 時間モデル
 
 - 記憶には、`recorded time` と `about time` と `valid time` の 3 系統が必要である
 - `recorded time` は、DB に記録された時刻であり、`created_at` を使う
@@ -416,8 +425,11 @@
 - `life_stage` は、年をまたいだ時期分散の補助として使う
 - `about_time` は推定であるため、必ず `about_time_confidence` を持つ
 
+<!-- Block: Persistence Audit Group -->
+## 保存と監査
+
 <!-- Block: Physical Mapping -->
-## 物理保存の基本マッピング
+### 物理保存の基本マッピング
 
 - 記憶の物理保存は、`data/core.sqlite3` の中で次のテーブル群に写像する
 - 初期に固定する主テーブルは、`events`、`memory_states`、`preference_memory`、`event_affects`、`event_links`、`event_threads`、`state_links`、`event_entities`、`state_entities`、`revisions`、`retrieval_runs`、`vec_items`、`events_fts` とする
@@ -431,7 +443,7 @@
 - `data/events.jsonl` は観測と追跡用の外部ログ、`events` テーブルは人格記憶のエピソード正本として扱う
 
 <!-- Block: Index Strategy -->
-## 索引戦略
+### 索引戦略
 
 - ベクトル索引は、少なくとも `events`、`memory_states`、`event_affects` を対象にする
 - 文字 n-gram 索引は、まず `events` を対象にする
@@ -443,7 +455,7 @@
 - 何でも主要経路へ入れず、`RetrievalPlan` と経路クォータで混入量を制御する
 
 <!-- Block: Revision Log -->
-## `revisions` の設計
+### `revisions` の設計
 
 - `revisions` は、更新された記憶の監査履歴である
 - `revisions` は、`revision_id`、`entity_type`、`entity_id`、`before_json`、`after_json`、`reason`、`evidence_event_ids`、`created_at` を持つ
@@ -453,7 +465,7 @@
 - `revisions` は通常の想起の主要経路にしない
 
 <!-- Block: Retrieval Runs -->
-## `retrieval_runs` の設計
+### `retrieval_runs` の設計
 
 - `retrieval_runs` は、どのように思い出したかを観測するためのログである
 - `retrieval_runs` は、`run_id`、`cycle_id`、`created_at`、`plan_json`、`candidates_json`、`selected_json`、`resolved_event_ids_json` を持つ
@@ -464,8 +476,11 @@
 - `selected_json` には、最終的な `memory_bundle` の要点と選別理由を保存する
 - `retrieval_runs` は、説明とデバッグのために使い、主要想起の材料にはしない
 
+<!-- Block: Runtime Integration Group -->
+## ランタイム接続
+
 <!-- Block: Runtime Integration -->
-## ランタイムとの接続点
+### ランタイムとの接続点
 
 - 短周期では、`context assembler` が `RetrievalPlan` を作り、候補収集と選別を行って `memory_bundle` を作る
 - 短周期の保存では、`events`、`working_memory`、必要なら `retrieval_runs` の更新までを行う
@@ -475,8 +490,11 @@
 - `skill promoter` は、記憶側に保存されたイベント列、反省、成功パターンを材料にする
 - 記憶更新が完了するまでは、その長周期は未完了である
 
+<!-- Block: Closing Group -->
+## 補足と確定事項
+
 <!-- Block: Non Goals -->
-## この段階でやらないこと
+### この段階でやらないこと
 
 - 生の画像や音声を記憶の正本として長期保存すること
 - LLM に記憶更新を直接書き込ませること
@@ -485,7 +503,7 @@
 - 監査ログを主要想起の中心にすること
 
 <!-- Block: Fixed Decisions -->
-## このドキュメントで確定したこと
+### このドキュメントで確定したこと
 
 - 記憶は、`追記される出来事` と `更新で育つ状態` を分ける
 - 想起は、`RetrievalPlan -> 候補収集 -> LLM 選別 -> memory_bundle` で行う

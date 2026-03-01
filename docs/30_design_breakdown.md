@@ -11,8 +11,11 @@
 - 記憶サブシステムの詳細は `docs/32_memory_detail.md` を見る
 - 実装前に責務、処理順序、状態境界で迷ったら、このドキュメントを正本として扱う
 
+<!-- Block: System Overview Group -->
+## システム全体像
+
 <!-- Block: System Split -->
-## システムの分割単位
+### システムの分割単位
 
 - システムは、`人格ランタイム`、`設定 Web サーバ`、`永続化基盤`、`外部インタフェース群` の 4 つに分ける
 - `人格ランタイム` は、観測・判断・行動・保存を行う本体である
@@ -21,7 +24,7 @@
 - `外部インタフェース群` は、カメラ、マイク、TTS、SNS API、LINE API、ブラウザアクセスなどの外界接続を担う
 
 <!-- Block: Process Model -->
-## プロセス構成
+### プロセス構成
 
 - 1 台のホスト上で、`人格ランタイム` と `設定 Web サーバ` を分離して常駐させる
 - `人格ランタイム` だけが、自己状態、世界状態、記憶の更新権限を持つ
@@ -29,8 +32,11 @@
 - 状態の正本は常に永続化基盤にあり、メモリ上の状態は実行中の作業コピーとして扱う
 - 背後で勝手に状態を書き換える隠れた常駐処理は作らない
 
+<!-- Block: Crosscutting Rules Group -->
+## 横断ルール
+
 <!-- Block: Fixed Responsibility Conditions -->
-## 具体設計として固定する責務条件
+### 具体設計として固定する責務条件
 
 - `attention manager` は、記憶の補助ではなく、`memory` と同格の必須責務として毎短周期で評価する
 - `action dispatcher` の実行後は、成否に関係なく必ず `reobserve` を行い、その結果を保存前に取り込む
@@ -47,8 +53,11 @@
 - `gateway` は、センサー、行動器、ネットワークの唯一の統合点とし、人格コアから個別実装を直接呼ばない
 - 外部接続の失敗は、単なる `failed` で終わらせず、原因種別付きのイベントとして保存し、次回判断と学習の材料にする
 
+<!-- Block: Runtime Design Group -->
+## 人格ランタイムの処理設計
+
 <!-- Block: Runtime Ownership -->
-## 人格ランタイムの責務分解
+### 人格ランタイムの責務分解
 
 - `idle scheduler`: 次の観測周期、長周期処理、保留タスクの発火判定を行う
 - `input collector`: 各入力元から新しい刺激を回収する
@@ -64,7 +73,7 @@
 - `skill promoter`: 反復成功した行動列を再利用可能スキルへ昇格する
 
 <!-- Block: Runtime Cycles -->
-## ランタイムの周期設計
+### ランタイムの周期設計
 
 - ランタイムは `短周期ループ` と `長周期ループ` の 2 種類で回す
 - `短周期ループ` は、`observe -> attend -> decide -> act -> commit` を担当する主循環である
@@ -73,7 +82,7 @@
 - どの周期でも、状態更新は必ず保存完了まで 1 つの処理単位として閉じる
 
 <!-- Block: Runtime Mermaid -->
-## ランタイムの動作図
+### ランタイムの動作図
 
 - 下の Mermaid 図は、`人格ランタイム`、`設定 Web サーバ`、`永続化基盤`、`外部インタフェース群` の動きを本文どおりに図示したものである
 - 上段はシステム全体の受け渡し、下段はランタイム内部の短周期と長周期の循環を示す
@@ -120,7 +129,7 @@ flowchart TD
 ```
 
 <!-- Block: Short Cycle -->
-## 短周期ループの処理順
+### 短周期ループの処理順
 
 1. 設定変更要求とテキスト入力要求を取り込む
 2. カメラ、マイク、その他入力元から新規観測を回収する
@@ -136,7 +145,7 @@ flowchart TD
 12. 次の待機状態へ戻る
 
 <!-- Block: Long Cycle -->
-## 長周期ループの処理順
+### 長周期ループの処理順
 
 1. 直近イベントから意味のある出来事を抽出する
 2. 実行結果と失敗要因から `reflection_notes`、`retry_hint`、`avoid_pattern` を作る
@@ -149,7 +158,7 @@ flowchart TD
 9. 反映後の状態を保存し、次の短周期へ戻す
 
 <!-- Block: Priority Model -->
-## 優先度モデル
+### 優先度モデル
 
 - 最優先は安全制約であり、安全に反する行動は選ばない
 - 次に優先するのは、明示的な外部入力である
@@ -158,7 +167,7 @@ flowchart TD
 - 自発行動は、外部入力と保留タスクが落ち着いているときにだけ実行する
 
 <!-- Block: Self Initiated Actions -->
-## 自発行動の制約
+### 自発行動の制約
 
 - 自発行動は、`task_progress`、`unexplored_check`、`self_maintenance`、`skill_rehearsal` のいずれかに分類できるものだけを許す
 - 自発行動は、開始時点で `goal_hint` と停止条件を持ち、無目的な徘徊や無期限の探索を許さない
@@ -167,7 +176,7 @@ flowchart TD
 - `skill_rehearsal` は、緊急入力や高優先タスクがないときだけ許す
 
 <!-- Block: Instruction Priority -->
-## 命令階層
+### 命令階層
 
 - `system policy` が最上位であり、人格個体の不変条件と安全条件を持つ
 - `runtime policy` は、その時点の実行条件と内部制約を持つ
@@ -177,7 +186,7 @@ flowchart TD
 - 命令階層の判定は、`attention manager` と `action validator` の前に必ず通す
 
 <!-- Block: Input Breakdown -->
-## 観測入力の分解
+### 観測入力の分解
 
 - `Wi-Fi Web カメラ`: 画像取得と視点制御を分けて扱う。画像は観測、視点変更は行動である
 - `マイク入力`: 音声断片または発話区間として観測する
@@ -187,7 +196,7 @@ flowchart TD
 - どの入力元でも、人格コアに渡す前に `observation_frame` に統一する
 
 <!-- Block: Action Breakdown -->
-## 行動の分解
+### 行動の分解
 
 - `speak`: 発話内容を作り、TTS で音声出力する
 - `move`: 身体位置または移動状態を変える
@@ -199,7 +208,7 @@ flowchart TD
 - すべての行動は `action_command` として正規化してから実行する
 
 <!-- Block: Action Validation -->
-## 行動候補と実行命令の分離
+### 行動候補と実行命令の分離
 
 - LLM や内部判断が作るのは `action proposal` であり、まだ実行命令ではない
 - `action validator` は、現在の身体状態、世界状態、能力制約、空間制約、アフォーダンス、安全制約を見て、候補を `action_command` に変換する
@@ -207,7 +216,7 @@ flowchart TD
 - `action proposal` と `action_command` を同一視しない
 
 <!-- Block: Stepwise Planning -->
-## 長い計画の分解
+### 長い計画の分解
 
 - 1 回の短周期で確定する主命令は 1 つだけとし、複数手順をまとめて確定しない
 - `cognition planner` は、後続の `step_hints` を返してよいが、未実行ステップをそのまま確定命令として扱わない
@@ -215,7 +224,7 @@ flowchart TD
 - 外界が変化した場合、前周期の後続手順は自動継続せず、必ず再判断する
 
 <!-- Block: LLM Boundaries -->
-## 認知処理の境界
+### 認知処理の境界
 
 - 認知判断の主担当は LLM であり、意図形成、候補生成、要約、言語化、反省補助の大半を担う
 - LLM が扱うのは、正規化済みのマルチモーダル観測要約と構造化した判断材料であり、生センサー入力や低位制御信号ではない
@@ -229,7 +238,7 @@ flowchart TD
 - LLM が返す行動関連の出力は `action proposal` までとし、`action_command` は必ず別段で確定する
 
 <!-- Block: Cognition Input -->
-## LLM に渡す認知入力
+### LLM に渡す認知入力
 
 - `cognition_input` は、LLM にその時点の人格として判断させるための入力断面である
 - 必須要素は、`self_state` の性格傾向、現在感情、長期目標、関係性の認識である
@@ -239,8 +248,11 @@ flowchart TD
 - `skill_registry` は、今回の状況に適合するスキルだけを候補として含める
 - 性格や記憶を欠いた入力で行動判断させることは、この設計では不完全な認知として扱う
 
+<!-- Block: Control State Group -->
+## 制御面と状態設計
+
 <!-- Block: Control Plane -->
-## 設定 Web サーバの責務分解
+### 設定 Web サーバの責務分解
 
 - `settings api`: 設定の取得、変更、反映要求を受け付ける
 - `text input api`: 手動テキスト入力を受け付ける
@@ -250,7 +262,7 @@ flowchart TD
 - Web サーバは、`system policy` と `runtime policy` を直接上書きしない
 
 <!-- Block: Handoff Model -->
-## Web サーバからランタイムへの受け渡し
+### Web サーバからランタイムへの受け渡し
 
 - Web サーバは、要求を `pending_inputs` と `settings_overrides` の論理領域へ保存する
 - ランタイムは、短周期ループの先頭でその要求を取り込む
@@ -260,7 +272,7 @@ flowchart TD
 - 外部入力は、命令階層上で `external input` として扱い、上位ポリシーを直接上書きしない
 
 <!-- Block: State Breakdown -->
-## 状態モデルの分解
+### 状態モデルの分解
 
 - `self_state`: 性格傾向、感情、関係性、長期目標を持つ
 - `attention_state`: 現在の注意対象、無視対象、再観測優先順位を持つ
@@ -272,7 +284,7 @@ flowchart TD
 - `memory_state`: `working_memory`、エピソード記憶、意味記憶、感情記憶、対人記憶、反省メモを持つ
 
 <!-- Block: Storage Breakdown -->
-## 永続化の論理分解
+### 永続化の論理分解
 
 - `self_state`: 現在の人格状態の正本を 1 件保持する
 - `attention_state`: 現在の注意状態の正本を 1 件保持する
@@ -295,7 +307,7 @@ flowchart TD
 - `events.jsonl`: 観測と行動の追跡ログを追記専用で保持する
 
 <!-- Block: Memory Policy -->
-## 記憶の更新方針
+### 記憶の更新方針
 
 - 短周期では、`working_memory` を組み立て、直近の出来事をエピソード候補として残す
 - 長周期では、繰り返し参照される内容だけを意味記憶へ昇格させる
@@ -306,8 +318,11 @@ flowchart TD
 - 記憶本文とベクトル索引は別管理でも、論理的には同じ記憶項目として扱う
 - 忘却は削除ではなく、重要度低下、参照頻度低下、記憶強度減衰として扱う
 
+<!-- Block: Implementation Group -->
+## 実装導線
+
 <!-- Block: Package Mapping -->
-## パッケージと設計単位の対応
+### パッケージと設計単位の対応
 
 - `runtime/`: 周期制御とループ管理
 - `web/`: HTTP 制御面
@@ -319,7 +334,7 @@ flowchart TD
 - `schema/`: 受け渡しの構造定義
 
 <!-- Block: Initial Slices -->
-## 実装の最初の切り分け
+### 実装の最初の切り分け
 
 - 第1段階は、`設定 Web サーバ`、`短周期ループ`、`状態保存` の 3 点を成立させる
 - 第2段階は、`attention`、`instruction priority`、`LiteLLM` による認知処理を接続する
@@ -330,7 +345,7 @@ flowchart TD
 - 各段階で、人格ランタイムの責務境界は崩さない
 
 <!-- Block: Definition of Done -->
-## 詳細設計として確定したこと
+### 詳細設計として確定したこと
 
 - 状態更新者は `人格ランタイム` だけである
 - Web サーバは制御面であり、人格判断は行わない

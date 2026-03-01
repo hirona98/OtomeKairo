@@ -18,8 +18,11 @@
 - 固定するのは、ランタイム内部の契約であり、LLM プロバイダ固有の prompt 文面や SDK 呼び出しではない
 - 記憶の物理保存の輪郭は `docs/32_memory_detail.md` で固定し、最終的な SQL の細部は次に別ドキュメントで固定する前提とする
 
+<!-- Block: Runtime Model Group -->
+## 実行モデルと前提状態
+
 <!-- Block: Runtime Invariants -->
-## ランタイムの不変条件
+### ランタイムの不変条件
 
 - 同時に状態を書き換える実体は、常に 1 つの `人格ランタイム` だけである
 - 1 回の短周期ループは、1 つの作業コピーに対して閉じた更新として完了する
@@ -30,7 +33,7 @@
 - 暗黙の補完やフォールバックは行わず、失敗は明示的な失敗として扱う
 
 <!-- Block: Runtime Execution Model -->
-## 実行モデル
+### 実行モデル
 
 - ランタイムは、常に 1 本の主スレッド相当の処理単位で `短周期ループ` と `長周期ループ` を交互に管理する
 - 同じ時刻に、2 つの短周期ループが並列で同じ状態を更新することはない
@@ -41,7 +44,7 @@
 - `trigger_reason` はサイクル起動理由の分類であり、詳細な外部入力源は `observation_batch.source` に持つ
 
 <!-- Block: Short Cycle Triggers -->
-## 短周期ループの起動条件
+### 短周期ループの起動条件
 
 - `pending_inputs` に未処理入力があるときは、短周期ループを起動する
 - センサー取得で新しい観測が得られたときは、短周期ループを起動する
@@ -50,7 +53,7 @@
 - 直前行動に `requires_reobserve` が立っているときは、その追跡のために短周期ループを起動する
 
 <!-- Block: Self Initiated Triggers -->
-## 自発行動の起動条件
+### 自発行動の起動条件
 
 - `self_initiated` は、緊急度の高い外部入力、保留中の高優先タスク、外部待ちの戻りがないときだけ候補にする
 - 自発行動の目的種別は、`task_progress`、`unexplored_check`、`self_maintenance`、`skill_rehearsal` の 4 つに固定する
@@ -58,7 +61,7 @@
 - 無目的な探索、無期限の巡回、根拠のないスキル試行は採用しない
 
 <!-- Block: Long Cycle Triggers -->
-## 長周期ループの起動条件
+### 長周期ループの起動条件
 
 - 直近の短周期で新しいイベントが確定したときは、長周期ループの候補にする
 - `reflection` 対象の失敗イベントが発生したときは、次の安全な境界で長周期ループを起動する
@@ -67,15 +70,42 @@
 - 長周期ループは、短周期ループの保存完了前には起動しない
 
 <!-- Block: Runtime Working Set -->
-## 1 サイクルで扱う作業単位
+### 1 サイクルで扱う作業単位
 
 - 1 回の短周期ループでは、`observation_batch`、`attention_set`、`cognition_input`、`cognition_result`、`action_command`、`commit_record` を作る
 - 1 回の長周期ループでは、`reflection_bundle`、`memory_updates`、`skill_updates`、`embedding_updates` を作る
 - これらの作業単位は、永続状態そのものではなく、そのサイクル内だけで使う中間成果物である
 - 永続状態へ反映されるのは、`state committer` が確定した差分だけである
 
+<!-- Block: State Slices -->
+### 状態断面の詳細
+
+- `self_state` は、性格傾向、現在感情、長期目標、関係性、人格としての不変条件を持つ
+- `attention_state` は、主注意対象、抑制対象、再確認待ち、直近の注意遷移理由を持つ
+- `body_state` は、姿勢、移動状態、感覚器利用可否、出力ロック、現在負荷を持つ
+- `world_state` は、現在地、周辺対象、状況要約、`affordances`、`constraints`、`attention_targets`、外部待ち状態を持つ
+- `drive_state` は、内部欲求の強度と優先度への影響を持つ
+- `task_state` は、進行中タスク、保留タスク、再開条件、中断可否、期限を持つ
+- `memory_state` は、`working_memory`、エピソード、意味、感情、対人、反省を持つ
+- `skill_registry` は、再利用可能な行動列と、その発火条件、成功条件を持つ
+
+<!-- Block: Task State Machine -->
+### `task_state` の状態遷移
+
+- `task_state` の主状態は、`idle`、`active`、`waiting_external`、`paused`、`completed`、`abandoned` の 6 つである
+- `idle` は、現在の主タスクがない状態である
+- `active` は、短周期で継続して処理すべき主タスクがある状態である
+- `waiting_external` は、外部結果待ちで次の観測を待っている状態である
+- `paused` は、緊急度の高い別件で一時中断している状態である
+- `completed` は、目標を満たして終了した状態である
+- `abandoned` は、安全制約、失敗、優先度低下で打ち切った状態である
+- 遷移は、常に短周期または長周期の保存時にだけ確定する
+
+<!-- Block: Short Cycle Group -->
+## 短周期の処理契約
+
 <!-- Block: Observation Batch -->
-## `observation_batch` の契約
+### `observation_batch` の契約
 
 - `observation_batch` は、その短周期で処理対象になる観測イベントの集合である
 - 各項目は、`observation_id`、`source`、`kind`、`captured_at`、`priority_hint`、`normalized_summary`、`payload_ref` を持つ
@@ -86,7 +116,7 @@
 - 内部起点の観測は、`trigger_reason` と同じ語彙で `idle_tick`、`post_action_followup`、`self_initiated` を使う
 
 <!-- Block: Attention Set -->
-## `attention_set` の契約
+### `attention_set` の契約
 
 - `attention_set` は、その短周期で何を主対象にし、何を抑制するかを確定した結果である
 - `attention_set` は、`primary_focus`、`secondary_focuses`、`suppressed_items`、`revisit_queue` を持つ
@@ -96,7 +126,7 @@
 - 抑制した観測も捨てず、`revisit_queue` に残して次周期の候補にする
 
 <!-- Block: Cognition Input Contract -->
-## `cognition_input` の契約
+### `cognition_input` の契約
 
 - `cognition_input` は、その時点の人格として判断させるために `LLM` へ渡す入力断面である
 - `cognition_input` は、`cycle_meta`、`persona_snapshot`、`body_snapshot`、`world_snapshot`、`drive_snapshot`、`task_snapshot`、`attention_snapshot`、`memory_bundle`、`policy_snapshot`、`skill_candidates`、`current_observation`、`context_budget` を持つ
@@ -115,7 +145,7 @@
 - `context assembler` は、`context_budget` を超えた断面をそのまま詰め込まず、優先度の低い項目から落として構成する
 
 <!-- Block: Prompt Layering -->
-## LLM へ渡す層の分け方
+### LLM へ渡す層の分け方
 
 - `LLM` へ渡す内容は、`system layer`、`persona layer`、`situation layer`、`memory layer`、`output contract layer` の 5 層に分けて組み立てる
 - `system layer` は、安全制約と人格個体の不変条件を持つ
@@ -126,7 +156,7 @@
 - どの層も省略可能な任意要素として扱わず、必須断面として常に構成する
 
 <!-- Block: Cognition Result Contract -->
-## `cognition_result` の契約
+### `cognition_result` の契約
 
 - `cognition_result` は、`LLM` が返す構造化された認知結果である
 - `cognition_result` は、`intention_summary`、`decision_reason`、`action_proposals`、`step_hints`、`speech_draft`、`memory_focus`、`reflection_seed` を持つ
@@ -140,7 +170,7 @@
 - 構造化形式に合わない `cognition_result` は、その短周期では失敗として扱い、実行段へ進めない
 
 <!-- Block: Decision Gate -->
-## 短周期の判断ゲート
+### 短周期の判断ゲート
 
 - `attention_set` と `cognition_input` を作った時点で、その短周期は `ignore`、`react`、`defer` の 3 つに分ける
 - `ignore` は、保存だけ行って即時行動をしない状態である
@@ -149,7 +179,7 @@
 - `ignore` と `defer` も、判断結果として明示的に確定し、暗黙に捨てない
 
 <!-- Block: Action Proposal Contract -->
-## `action_proposal` の契約
+### `action_proposal` の契約
 
 - `action_proposal` は、`LLM` が提案する未確定の行動候補である
 - 各候補は、`proposal_id`、`action_type`、`target_hint`、`parameter_hint`、`goal_hint`、`step_hints`、`completion_hint`、`priority`、`reason` を持つ
@@ -160,7 +190,7 @@
 - `completion_hint` は、何をもってその候補が完了したとみなすかの観測条件を持つ
 
 <!-- Block: Planning Constraints -->
-## 長い計画の拘束条件
+### 長い計画の拘束条件
 
 - 1 回の短周期で `action_command` に落とすのは、常に次の 1 手だけである
 - `step_hints` が複数あっても、未実行の後続手順をまとめて確定命令にしない
@@ -168,7 +198,7 @@
 - 前周期で妥当だった後続手順でも、外界変化や失敗があれば自動継続せず破棄または再編する
 
 <!-- Block: Action Command Contract -->
-## `action_command` の契約
+### `action_command` の契約
 
 - `action_command` は、`action validator` が確定する唯一の実行命令である
 - 1 回の短周期で確定する主命令は、原則として 1 つだけである
@@ -180,7 +210,7 @@
 - どの `action_command` も、必ず 1 つの明確な `actuator_port` に属する
 
 <!-- Block: Action Validation Rules -->
-## `action validator` の確定ルール
+### `action validator` の確定ルール
 
 - `action validator` は、候補を優先順に検査し、最初に実行可能な候補だけを `action_command` にする
 - 検査対象は、`system policy`、`runtime policy`、身体制約、世界制約、空間制約、`affordances`、現在タスク、命令階層である
@@ -191,7 +221,7 @@
 - 実行可能な候補が 1 つもない場合は、候補を棄却または保留として確定し、代替命令を捏造しない
 
 <!-- Block: Action Execution Contract -->
-## `action dispatcher` と実行結果の契約
+### `action dispatcher` と実行結果の契約
 
 - `action dispatcher` は、`action_command` を対応する `actuator_port` に渡して実行する
 - 実行結果は、`result_id`、`command_id`、`started_at`、`finished_at`、`status`、`failure_mode`、`observed_effects`、`raw_result_ref`、`adapter_trace_ref` を持つ
@@ -204,7 +234,7 @@
 - `adapter_trace_ref` は、外部アダプタ側の詳細記録への参照であり、統合由来の失敗解析に使う
 
 <!-- Block: Commit Contract -->
-## `state committer` の保存契約
+### `state committer` の保存契約
 
 - `state committer` は、その短周期で確定した差分だけを永続状態へ反映する
 - 1 回の短周期の保存単位は、`self_state`、`attention_state`、`body_state`、`world_state`、`drive_state`、`task_state`、`working_memory`、`action_history`、`pending_inputs`、`settings_overrides`、必要なら `retrieval_runs` の処理結果である
@@ -216,7 +246,7 @@
 - 短周期の正本完了条件は、SQLite 側の状態差分と `commit_record` の確定であり、`events.jsonl` 同期状態は `log_sync_status` で別追跡する
 
 <!-- Block: Commit Order -->
-## 短周期の保存順序
+### 短周期の保存順序
 
 - まず、入力の取り込み結果として `pending_inputs` と `settings_overrides` の状態を更新する
 - 次に、`self_state`、`attention_state`、`body_state`、`world_state`、`drive_state`、`task_state`、`working_memory` の差分を反映する
@@ -226,8 +256,11 @@
 - 最後に、`events.jsonl` 同期結果に応じて `log_sync_status` を `synced` または `needs_replay` に更新する
 - この順序は固定し、同一サイクル内で入れ替えない
 
+<!-- Block: Long Cycle Group -->
+## 長周期の処理契約
+
 <!-- Block: Reflect Contract -->
-## `reflection writer` の契約
+### `reflection writer` の契約
 
 - `reflection writer` は、直近の `commit_record` と `cognition_result` と実行結果を材料に `reflection_bundle` を作る
 - `reflection_bundle` は、`what_happened`、`what_failed`、`what_worked`、`retry_hint`、`avoid_pattern` を持つ
@@ -235,7 +268,7 @@
 - 直近の短周期で `ignore` や `defer` を選んだ場合も、その判断妥当性を記録対象にできる
 
 <!-- Block: Consolidation Contract -->
-## `memory consolidator` の契約
+### `memory consolidator` の契約
 
 - `memory consolidator` は、`reflection_bundle` と直近イベントから長期記憶へ残す内容を選別する
 - 選別結果は、`episodic_updates`、`semantic_updates`、`affective_updates`、`relationship_updates` に分ける
@@ -244,7 +277,7 @@
 - 短期的な出来事のうち、再参照価値が低いものはエピソード候補のまま減衰させる
 
 <!-- Block: Learning Contract -->
-## `skill promoter` と学習の契約
+### `skill promoter` と学習の契約
 
 - `skill promoter` は、反復成功した行動列だけを `skill_registry` の候補にする
 - `skill` には、`skill_id`、`trigger_pattern`、`preconditions`、`action_pattern`、`success_signature` を持たせる
@@ -252,8 +285,11 @@
 - `embedding_updates` は、記憶本文の更新と同じ長周期で同期する
 - 記憶の忘却は削除ではなく、重要度、参照頻度、記憶強度の減衰として扱う
 
+<!-- Block: Boundary Conditions Group -->
+## 境界条件
+
 <!-- Block: Web Handoff Contract -->
-## Web サーバとの受け渡し契約
+### Web サーバとの受け渡し契約
 
 - `settings api` と `text input api` は、人格状態を直接変更せず、`pending_inputs` と `settings_overrides` に要求を書き込む
 - `pending_inputs` の各項目は、`input_id`、`source`、`channel`、`payload`、`created_at`、`priority`、`status` を持つ
@@ -265,32 +301,8 @@
 - ランタイムは、設定変更を評価した同じ短周期の保存で、`claimed` を必ず `applied` または `rejected` に確定する
 - Web サーバは、`self_state`、`world_state`、`memory_state` の正本を直接更新しない
 
-<!-- Block: State Slices -->
-## 状態断面の詳細
-
-- `self_state` は、性格傾向、現在感情、長期目標、関係性、人格としての不変条件を持つ
-- `attention_state` は、主注意対象、抑制対象、再確認待ち、直近の注意遷移理由を持つ
-- `body_state` は、姿勢、移動状態、感覚器利用可否、出力ロック、現在負荷を持つ
-- `world_state` は、現在地、周辺対象、状況要約、`affordances`、`constraints`、`attention_targets`、外部待ち状態を持つ
-- `drive_state` は、内部欲求の強度と優先度への影響を持つ
-- `task_state` は、進行中タスク、保留タスク、再開条件、中断可否、期限を持つ
-- `memory_state` は、`working_memory`、エピソード、意味、感情、対人、反省を持つ
-- `skill_registry` は、再利用可能な行動列と、その発火条件、成功条件を持つ
-
-<!-- Block: Task State Machine -->
-## `task_state` の状態遷移
-
-- `task_state` の主状態は、`idle`、`active`、`waiting_external`、`paused`、`completed`、`abandoned` の 6 つである
-- `idle` は、現在の主タスクがない状態である
-- `active` は、短周期で継続して処理すべき主タスクがある状態である
-- `waiting_external` は、外部結果待ちで次の観測を待っている状態である
-- `paused` は、緊急度の高い別件で一時中断している状態である
-- `completed` は、目標を満たして終了した状態である
-- `abandoned` は、安全制約、失敗、優先度低下で打ち切った状態である
-- 遷移は、常に短周期または長周期の保存時にだけ確定する
-
 <!-- Block: Error Policy -->
-## エラー時の扱い
+### エラー時の扱い
 
 - `LLM` の構造化出力が壊れている場合は、その短周期を失敗として記録し、実行段へ進めない
 - `action validator` が候補をすべて棄却した場合は、その事実を明示的に保存し、暗黙の代替行動は行わない
@@ -300,7 +312,7 @@
 - エラーを握りつぶす処理は作らない
 
 <!-- Block: Concurrency Policy -->
-## 並行性の制約
+### 並行性の制約
 
 - 同じ人格個体に対して、同時に複数の `人格ランタイム` を起動しない
 - `設定 Web サーバ` は、入力要求と設定要求だけを並行に受け付けてよい
