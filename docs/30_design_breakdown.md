@@ -34,7 +34,7 @@
 - `input collector`: 各入力元から新しい刺激を回収する
 - `observation normalizer`: 入力差異を `perception` に正規化する
 - `attention manager`: 何を見るか、何を抑制するか、何を先に処理するかを決める
-- `context assembler`: 現在の自己状態、身体状態、世界状態、関連記憶を読み出して判断材料を作る
+- `context assembler`: 現在の自己状態、身体状態、世界状態、関連記憶を読み出し、LLM に渡す `cognition_input` を組み立てる
 - `cognition planner`: 原則として LLM を使い、意図と行動候補を作る
 - `action validator`: 行動候補を、実行可能で安全な `action_command` へ落とす
 - `action dispatcher`: 実行すべき行動を選び、外部インタフェースへ命令する
@@ -106,9 +106,9 @@ flowchart TD
 2. カメラ、マイク、その他入力元から新規観測を回収する
 3. 観測を `perception` に正規化する
 4. `attention manager` が、注意対象、抑制対象、優先順位を決める
-5. 命令階層と優先度に従って、現在状態、`working_memory`、関連記憶を読み出す
-6. 反応不要、即時行動、保留継続のいずれかを決める
-7. 原則として LLM を使って意図と `action proposal` を組み立てる
+5. 命令階層と優先度に従って、現在状態、`working_memory`、関連記憶を読み出し、`cognition_input` を組み立てる
+6. `cognition_input` をもとに、反応不要、即時行動、保留継続のいずれかを決める
+7. 原則として LLM を使って、`cognition_input` から意図と `action proposal` を組み立てる
 8. `action validator` が、候補を安全で実行可能な `action_command` へ変換する
 9. 実行可能な行動だけを実行し、必要なら実行中の観測変化を再取り込みする
 10. 実行結果と観測結果をイベントとして記録する
@@ -181,12 +181,25 @@ flowchart TD
 ## 認知処理の境界
 
 - 認知判断の主担当は LLM であり、意図形成、候補生成、要約、言語化、反省補助の大半を担う
+- LLM に渡すのは、`context assembler` が選別した `cognition_input` であり、人格の性格、現在感情、長期目標、関係性、関連記憶、現在の身体状態、世界状態、進行中タスク、命令階層の要約を含む
+- `cognition_input` は、その時点で必要な断面だけを渡し、DB の全量ダンプや生ログ全量をそのまま渡さない
 - LLM は、外部 API の直接実行者にはしない
 - LLM は、DB の直接更新者にはしない
 - 行動の安全検証、実行可否判定、状態保存の確定は、LLM ではなく決定論的な処理で行う
 - LLM の入出力は、必ず構造化した `cognition_result` に落とす
 - プロバイダ差異は `LiteLLM` に閉じ込め、人格コアはモデル名と役割だけを見る
 - LLM が返す行動関連の出力は `action proposal` までとし、`action_command` は必ず別段で確定する
+
+<!-- Block: Cognition Input -->
+## LLM に渡す認知入力
+
+- `cognition_input` は、LLM にその時点の人格として判断させるための入力断面である
+- 必須要素は、`self_state` の性格傾向、現在感情、長期目標、関係性の認識である
+- 必須要素は、`body_state`、`world_state`、`drive_state`、`task_state` の現在断面である
+- 必須要素は、`working_memory` と、その時点で関連するエピソード記憶、意味記憶、感情記憶、対人記憶、反省メモである
+- 必須要素は、現在の観測イベント、注意対象、抑制対象、命令階層の評価結果である
+- `skill_registry` は、今回の状況に適合するスキルだけを候補として含める
+- 性格や記憶を欠いた入力で行動判断させることは、この設計では不完全な認知として扱う
 
 <!-- Block: Control Plane -->
 ## 設定 Web サーバの責務分解
