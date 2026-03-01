@@ -32,8 +32,9 @@
 - 詳細設計を詰めるとき: `docs/30_design_breakdown.md`
 - 記憶設計を詰めるとき: `docs/note/memory_research_notes.md`
 - 自律行動設計を詰めるとき: `docs/note/autonomous_embodiment_research_notes.md`
+- 研究メモの採用候補を整理するとき: `docs/note/research_takeaways.md`
 - 実装を始めるとき: `docs/10_target_architecture.md` と `docs/30_design_breakdown.md`
-- ドキュメントを直すとき: この `docs/00_index.md` と `docs/10_target_architecture.md` と `docs/20_external_interfaces.md` と `docs/30_design_breakdown.md` と `docs/note/memory_research_notes.md` と `docs/note/autonomous_embodiment_research_notes.md`
+- ドキュメントを直すとき: この `docs/00_index.md` と `docs/10_target_architecture.md` と `docs/20_external_interfaces.md` と `docs/30_design_breakdown.md` と `docs/note/memory_research_notes.md` と `docs/note/autonomous_embodiment_research_notes.md` と `docs/note/research_takeaways.md`
 
 <!-- Block: Notes -->
 ## 参考メモ
@@ -41,6 +42,7 @@
 - 一時的な情報、比較検討、参考資料、最終設計書に不要な補足は `docs/note/` に置く
 - 記憶設計の研究メモ: `docs/note/memory_research_notes.md`
 - 自律行動システムの研究メモ: `docs/note/autonomous_embodiment_research_notes.md`
+- 研究メモの採用候補まとめ: `docs/note/research_takeaways.md`
 - 参考フロー図: `docs/note/CocoroGhost_システムフロー図.md`
 
 <!-- Block: Maintenance -->
