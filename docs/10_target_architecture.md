@@ -10,6 +10,7 @@
 - 設定変更は、人格コア本体とは責務を分離した Web サーバから行う
 - 実装単位までの分解は `docs/30_design_breakdown.md` で管理する
 - 実装直前の処理契約は `docs/31_runtime_detail.md` で管理する
+- 記憶サブシステムの詳細は `docs/32_memory_detail.md` で管理する
 - 後方互換やフォールバックは持たせず、常に現在の正しい構成へ寄せる
 
 <!-- Block: Runtime Shape -->
@@ -46,6 +47,8 @@
 │   ├── 10_target_architecture.md
 │   ├── 20_external_interfaces.md
 │   ├── 30_design_breakdown.md
+│   ├── 31_runtime_detail.md
+│   ├── 32_memory_detail.md
 │   └── note/
 │       ├── CocoroGhost_システムフロー図.md
 │       ├── autonomous_embodiment_research_notes.md
