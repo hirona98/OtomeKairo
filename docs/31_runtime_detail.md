@@ -8,6 +8,7 @@
 - 責務分割の全体像は `docs/10_target_architecture.md` を見る
 - 実装単位の責務分解は `docs/30_design_breakdown.md` を見る
 - 記憶サブシステムの詳細は `docs/32_memory_detail.md` を見る
+- `memory_jobs` の payload 契約は `docs/33_memory_job_contracts.md` を見る
 - 関数の入出力や状態遷移で迷ったら、このドキュメントを正本として扱う
 
 <!-- Block: Scope -->
@@ -17,6 +18,7 @@
 - 固定するのは、論理的な状態断面と更新順序であり、物理的な SQL テーブル名やカラム名そのものではない
 - 固定するのは、ランタイム内部の契約であり、LLM プロバイダ固有の prompt 文面や SDK 呼び出しではない
 - 記憶の物理保存の輪郭は `docs/32_memory_detail.md` で固定し、最終的な SQL の細部は次に別ドキュメントで固定する前提とする
+- `memory_jobs.payload_ref` と `job_kind` ごとの payload 詳細は `docs/33_memory_job_contracts.md` を正本とする
 
 <!-- Block: Runtime Model Group -->
 ## 実行モデルと前提状態
@@ -30,6 +32,8 @@
 - `LLM` は認知判断の主担当だが、I/O 実行者にも DB 更新者にもならない
 - `action proposal` と `action_command` は常に分離し、同一視しない
 - 性格、感情、記憶を欠いた判断は、不完全な認知として扱う
+- 受理した観測は、判断前に `input_journal` へ不変追記し、短周期の途中失敗でも失われない
+- 長周期で扱う記憶育成は、`memory_jobs` に永続化された仕事だけを処理対象にする
 - 暗黙の補完やフォールバックは行わず、失敗は明示的な失敗として扱う
 
 <!-- Block: Runtime Execution Model -->
@@ -72,8 +76,8 @@
 <!-- Block: Runtime Working Set -->
 ### 1 サイクルで扱う作業単位
 
-- 1 回の短周期ループでは、`observation_batch`、`attention_set`、`cognition_input`、`cognition_result`、`action_command`、`commit_record` を作る
-- 1 回の長周期ループでは、`reflection_bundle`、`memory_updates`、`skill_updates`、`embedding_updates` を作る
+- 1 回の短周期ループでは、`observation_batch`、`input_journal_batch`、`attention_set`、`cognition_input`、`cognition_result`、`action_command`、`commit_record` を作る
+- 1 回の長周期ループでは、`claimed_memory_jobs`、`reflection_bundle`、`memory_updates`、`skill_updates`、`embedding_updates` を作る
 - これらの作業単位は、永続状態そのものではなく、そのサイクル内だけで使う中間成果物である
 - 永続状態へ反映されるのは、`state committer` が確定した差分だけである
 
@@ -86,7 +90,7 @@
 - `world_state` は、現在地、周辺対象、状況要約、`affordances`、`constraints`、`attention_targets`、外部待ち状態を持つ
 - `drive_state` は、内部欲求の強度と優先度への影響を持つ
 - `task_state` は、進行中タスク、保留タスク、再開条件、中断可否、期限を持つ
-- `memory_state` は、`working_memory`、エピソード、意味、感情、対人、反省を持つ
+- `memory_state` は、`working_memory`、`recent_event_window`、エピソード、意味、感情、対人、反省を持つ
 - `skill_registry` は、再利用可能な行動列と、その発火条件、成功条件を持つ
 
 <!-- Block: Task State Machine -->
@@ -108,12 +112,25 @@
 ### `observation_batch` の契約
 
 - `observation_batch` は、その短周期で処理対象になる観測イベントの集合である
+- `observation_batch` は、受理済みの観測を `input_journal` へ記録した後に、正規化して組み立てる
 - 各項目は、`observation_id`、`source`、`kind`、`captured_at`、`priority_hint`、`normalized_summary`、`payload_ref` を持つ
+- `observation_id` は、その観測を `input_journal` と結び付ける一意キーであり、再処理時の重複追記を防ぐ
 - `source` は、少なくとも `web_input`、`camera`、`microphone`、`network_result`、`sns_result`、`line_result`、`idle_tick`、`post_action_followup`、`self_initiated` を区別する
 - `kind` は、少なくとも `instruction`、`scene_change`、`audio_segment`、`search_result`、`social_reaction`、`internal_trigger` を区別する
 - 生データ本体は `payload_ref` の先に閉じ込め、人格コア側では正規化後の要約を主に扱う
 - 同一短周期で扱う観測は、時系列順に並べたうえで `priority_hint` を保持する
 - 内部起点の観測は、`trigger_reason` と同じ語彙で `idle_tick`、`post_action_followup`、`self_initiated` を使う
+
+<!-- Block: Input Journal Contract -->
+### `input_journal` の契約
+
+- `input_journal` は、受理した観測や外部入力を、判断前に残すための不変ログである
+- `input_journal` の追記は `input collector` が担当し、`attention_set` の評価前に完了させる
+- 各記録は、少なくとも `journal_id`、`observation_id`、`cycle_id`、`source`、`kind`、`captured_at`、`receipt_summary`、`payload_ref`、`created_at` を持つ
+- `receipt_summary` は、正規化済みの意味要約ではなく、受理時点で分かる短い受領要約である
+- `input_journal` は append-only とし、同じ `observation_id` を二重追記しない
+- `input_journal` はスケジューリング用キューではなく、「何を受理したか」の正本であり、後段の `events` が置き換えない
+- 後続で `events` を確定するときは、どの `input_journal` を材料にしたかを追跡可能にする
 
 <!-- Block: Attention Set -->
 ### `attention_set` の契約
@@ -137,6 +154,7 @@
 - `task_snapshot` には、進行中タスク、保留条件、再開条件、中断可否を含める
 - `attention_snapshot` には、主注意対象、抑制対象、再確認候補を含める
 - `memory_bundle` には、`working_memory`、関連エピソード、関連意味記憶、関連感情記憶、関連対人記憶、関連反省メモを含める
+- `memory_bundle` には、選別済みの `working_memory` とは別に、直近の生イベント列である `recent_event_window` を含める
 - `policy_snapshot` には、`system policy`、`runtime policy`、今回の `external input` の評価結果を含める
 - `skill_candidates` には、今回の状況に適合しうるスキルだけを含める
 - `current_observation` には、今回の主注意対象として選ばれた観測と、その周辺観測を含める
@@ -237,9 +255,10 @@
 ### `state committer` の保存契約
 
 - `state committer` は、その短周期で確定した差分だけを永続状態へ反映する
-- 1 回の短周期の保存単位は、`self_state`、`attention_state`、`body_state`、`world_state`、`drive_state`、`task_state`、`working_memory`、`action_history`、`pending_inputs`、`settings_overrides`、必要なら `retrieval_runs` の処理結果である
+- 1 回の短周期の保存単位は、`self_state`、`attention_state`、`body_state`、`world_state`、`drive_state`、`task_state`、`working_memory`、`recent_event_window`、`action_history`、`pending_inputs`、`settings_overrides`、新規に enqueue する `memory_jobs`、必要なら `retrieval_runs` の処理結果である
 - `state committer` は、まず SQLite 側の正本更新と `commit_record` を確定し、その後に `events.jsonl` を派生同期する
 - `commit_record` には、少なくとも `commit_id`、`cycle_id`、`committed_at`、`log_sync_status` を持たせる
+- `input_journal` は、短周期の状態保存とは別に事前追記されるが、その短周期で確定した `events` は必ず `input_journal` の参照を持てるようにする
 - `events.jsonl` は正本ではないため、内容は必ず SQLite で確定した `commit_record` から再構成する
 - `events.jsonl` の追記は、`commit_id` を使って idempotent に行い、同じ `commit_record` を二重記録しない
 - `events.jsonl` の追記に失敗した場合は、`log_sync_status` を `needs_replay` に更新し、同じ状態差分を再適用せずに派生ログ同期だけを再実行する
@@ -248,9 +267,11 @@
 <!-- Block: Commit Order -->
 ### 短周期の保存順序
 
-- まず、入力の取り込み結果として `pending_inputs` と `settings_overrides` の状態を更新する
-- 次に、`self_state`、`attention_state`、`body_state`、`world_state`、`drive_state`、`task_state`、`working_memory` の差分を反映する
+- まず、観測原本の受理時点で `input_journal` を `observation_id` 単位に追記し、取りこぼしを防ぐ
+- 次に、入力の取り込み結果として `pending_inputs` と `settings_overrides` の状態を更新する
+- 次に、`self_state`、`attention_state`、`body_state`、`world_state`、`drive_state`、`task_state`、`working_memory`、`recent_event_window` の差分を反映する
 - 次に、`action_history`、`retrieval_runs`、エピソード候補を保存する
+- 次に、その短周期で確定した `events` を根拠に、必要な `memory_jobs` を enqueue する
 - 次に、今回の `commit_record` を `log_sync_status="pending"` で確定して SQLite の更新を完了する
 - 次に、確定済み `commit_record` から `events.jsonl` を `commit_id` 単位で追記する
 - 最後に、`events.jsonl` 同期結果に応じて `log_sync_status` を `synced` または `needs_replay` に更新する
@@ -258,6 +279,19 @@
 
 <!-- Block: Long Cycle Group -->
 ## 長周期の処理契約
+
+<!-- Block: Memory Job Scheduler -->
+### `memory job scheduler` の契約
+
+- `memory job scheduler` は、`memory_jobs` から `queued` のジョブを claim し、その長周期で扱う仕事を確定する
+- `memory_jobs` の主状態は、`queued`、`claimed`、`completed`、`dead_letter` の 4 つである
+- 各ジョブは、少なくとも `job_id`、`job_kind`、`payload_ref`、`created_at`、`status`、`tries` を持つ
+- `payload_ref` の解決規則と `job_kind` ごとの payload 本体は `docs/33_memory_job_contracts.md` に従う
+- 1 回の長周期では、claim したジョブだけを処理し、未claim のジョブを暗黙に巻き込まない
+- `memory_jobs` は、少なくとも `write_memory`、`refresh_preview`、`embedding_sync`、`tidy_memory`、`quarantine_memory` を区別する
+- 短周期で新しい `events` が確定したときは、同じ短周期の保存単位で最低でも `write_memory` を enqueue する
+- `refresh_preview` は、対象イベント本文または要約が変わったときだけ enqueue する
+- 失敗したジョブは `tries` を増やして再実行対象に残し、上限到達時だけ `dead_letter` にする
 
 <!-- Block: Reflect Contract -->
 ### `reflection writer` の契約
@@ -270,11 +304,14 @@
 <!-- Block: Consolidation Contract -->
 ### `memory consolidator` の契約
 
-- `memory consolidator` は、`reflection_bundle` と直近イベントから長期記憶へ残す内容を選別する
-- 選別結果は、`episodic_updates`、`semantic_updates`、`affective_updates`、`relationship_updates` に分ける
+- `memory consolidator` は、`claimed_memory_jobs` と `reflection_bundle` と直近イベントから、対象ジョブに応じた更新内容を選別する
+- `job_kind="write_memory"` の選別結果は、`episodic_updates`、`semantic_updates`、`affective_updates`、`relationship_updates`、`quarantine_updates` に分ける
+- `job_kind="refresh_preview"` の場合は、`event_preview_cache` の更新だけを行い、他の更新群を同時に確定しない
 - 一度の出来事でも、事実、感情、関係性は別レイヤとして分けて保持する
 - `working_memory` にしか価値がない内容は、長期記憶へ昇格させない
+- `recent_event_window` は、次の短周期に必要な近接文脈だけを残し、長期記憶へそのまま昇格させない
 - 短期的な出来事のうち、再参照価値が低いものはエピソード候補のまま減衰させる
+- `quarantine_updates` は、誤想起として確定した項目を削除せず、`searchable` の切替で主要想起から外す
 
 <!-- Block: Learning Contract -->
 ### `skill promoter` と学習の契約
@@ -283,6 +320,7 @@
 - `skill` には、`skill_id`、`trigger_pattern`、`preconditions`、`action_pattern`、`success_signature` を持たせる
 - 単発成功だけでは `skill` に昇格させない
 - `embedding_updates` は、記憶本文の更新と同じ長周期で同期する
+- `refresh_preview` や `quarantine_memory` が完了したときも、対応する `memory_jobs` の状態を同じ長周期で `completed` に確定する
 - 記憶の忘却は削除ではなく、重要度、参照頻度、記憶強度の減衰として扱う
 
 <!-- Block: Boundary Conditions Group -->
@@ -327,6 +365,8 @@
 - `cognition_input` は、人格、状態、記憶、命令階層を必須断面として持つ
 - `LLM` は `cognition_result` を返すが、`action_command` は返さない
 - `action validator` は、候補を 1 つの実行命令へ確定するか、棄却または保留を明示する
+- 受理した観測は、短周期の判断前に `input_journal` へ残す
 - 1 回の短周期は、SQLite 側の正本更新を 1 つの保存単位として閉じる
+- 長周期の記憶育成は、`memory_jobs` の永続状態を持って進める
 - `events.jsonl` は観測ログであり、`commit_record` から再構成できる派生ログとして扱う
 - エラーや不整合は明示的に失敗として扱い、暗黙の補完はしない

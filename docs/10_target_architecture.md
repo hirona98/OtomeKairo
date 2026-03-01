@@ -11,6 +11,7 @@
 - 実装単位までの分解は `docs/30_design_breakdown.md` で管理する
 - 実装直前の処理契約は `docs/31_runtime_detail.md` で管理する
 - 記憶サブシステムの詳細は `docs/32_memory_detail.md` で管理する
+- `memory_jobs` の payload 契約は `docs/33_memory_job_contracts.md` で管理する
 - 後方互換やフォールバックは持たせず、常に現在の正しい構成へ寄せる
 
 <!-- Block: Fixed Principles -->
@@ -21,10 +22,14 @@
 - 行動の直後には、成功、失敗、想定外を問わず必ず再観測を行い、その結果を次の判断材料へ戻す
 - 反省はその場限りのログにせず、次回判断で再利用する `reflection_note`、`retry_hint`、`avoid_pattern` として保存する
 - 長い計画は一括で最後まで確定せず、常に「次の 1 手」に分解して、観測結果ごとに更新する
+- 受理した観測や外部入力は、判断前に `input_journal` へ不変ログとして残し、短周期の途中失敗でも取りこぼさない
 - LLM に渡す判断材料は、`working_memory`、関連長期記憶、現在状態、命令階層を `context budget` の範囲で組み立て、DB 全量を渡さない
+- 短期の判断材料は、選別済みの `working_memory` と、直近の生イベント列である `recent_event_window` を分けて保持する
 - 観測は入力元ごとの差異を人格コアへ持ち込まず、すべて `observation_frame` 相当の統一表現に正規化する
 - 行動は自由文ではなく、実行前に必ず `action_command` へ構造化し、検証を通ったものだけを実行する
 - LLM は意図、要約、行動候補、反省補助を担い、デバイス制御、DB 更新、外部 API 実行の最終確定は決定論的処理で担う
+- 長周期の記憶育成は、その場の一時処理にせず、`memory_jobs` として永続化したうえで順に処理する
+- 想起で使う圧縮プレビューは `event_preview_cache` のような派生保存として持ち、元の出来事本文の代替にはしない
 - 再利用価値のある行動列は、複数回の成功根拠と反省結果が揃ったものだけを `skill` として昇格する
 - 自発行動は、`task_progress`、`unexplored_check`、`self_maintenance`、`skill_rehearsal` のいずれかの明示目的を持つ
 - 下位入力やツール出力は、上位の `system policy` と `runtime policy` を直接上書きできない
@@ -42,9 +47,9 @@
 ## 中心ループ
 
 1. アイドリング中に、センサー、ネットワーク、時刻、内部欲求の変化を監視する
-2. 新しい刺激や継続課題があれば、観測イベントとして正規化する
+2. 新しい刺激や継続課題があれば、観測イベントとして正規化し、受理した内容を `input_journal` に不変追記する
 3. 観測イベントをもとに、何を見るか、何を抑制するか、何を優先するかを決める
-4. 現在の自己状態、身体状態、世界状態、記憶から、人格判断に必要な認知入力を組み立てる
+4. 現在の自己状態、身体状態、世界状態、`working_memory`、`recent_event_window`、関連記憶から、人格判断に必要な認知入力を組み立てる
 5. 認知入力をもとに、認知処理は原則として LLM を使い、意図と行動候補を組み立てる
 6. 行動候補を、安全で実行可能な行動命令へ変換する
 7. 発話、移動、視線変更、検索、通知などの行動を実行する
@@ -65,6 +70,7 @@
 │   ├── 30_design_breakdown.md
 │   ├── 31_runtime_detail.md
 │   ├── 32_memory_detail.md
+│   ├── 33_memory_job_contracts.md
 │   └── note/
 │       ├── CocoroGhost_システムフロー図.md
 │       ├── autonomous_embodiment_research_notes.md
@@ -108,6 +114,7 @@
         │   ├── validate_action.py
         │   ├── execute_action.py
         │   ├── write_reflection.py
+        │   ├── run_memory_jobs.py
         │   ├── persist_state.py
         │   └── consolidate_memory.py
         ├── domain/
@@ -121,6 +128,7 @@
         │   ├── action.py
         │   ├── skill.py
         │   ├── reflection.py
+        │   ├── memory_job.py
         │   ├── memory.py
         │   └── event.py
         ├── gateway/
@@ -132,6 +140,7 @@
         │   ├── social_port.py
         │   ├── notification_port.py
         │   ├── memory_store.py
+        │   ├── job_store.py
         │   ├── state_store.py
         │   ├── world_store.py
         │   └── event_store.py
@@ -160,21 +169,22 @@
             ├── settings.py
             ├── observation_frame.py
             ├── action_command.py
-            └── cognition_result.py
+            ├── cognition_result.py
+            └── memory_write_plan.py
 ```
 
 <!-- Block: Boundaries -->
 ## 責務境界
 
 - `boot/`: 起動入口だけを持つ。人格コア起動と Web サーバ起動の開始点だけを担当する
-- `runtime/`: アイドリングを含む常時稼働ループを担当する。`observe -> attend -> decide -> act -> reobserve` の短周期と、`reflect -> consolidate` の長周期の呼び出し順だけを持つ
+- `runtime/`: アイドリングを含む常時稼働ループを担当する。`observe -> attend -> decide -> act -> reobserve` の短周期と、`reflect -> schedule -> consolidate` の長周期の呼び出し順だけを持つ
 - `web/`: 設定変更、テキスト入力、状態確認の HTTP ルーティングだけを担当する
-- `usecase/`: 観測処理、行動選択、行動実行、保存といったユースケース単位の調停を担当する
+- `usecase/`: 観測処理、行動選択、行動実行、保存、`memory_jobs` の実行調停を担当する
 - `domain/`: 自己、身体、世界、欲求、意図、行動、記憶を表す中核概念を置く。外部 API や DB を持ち込まない
-- `gateway/`: 感覚、行動、ネットワーク、通知、埋め込み検索、記憶保存など、外部依存との境界を抽象化する
+- `gateway/`: 感覚、行動、ネットワーク、通知、埋め込み検索、記憶保存、ジョブ永続化など、外部依存との境界を抽象化する
 - `infra/`: センサー、アクチュエータ、LiteLLM、sqlite-vec、FastAPI などの具体実装を置く
 - `policy/`: 優先度判定、命令階層、安全制約、行動制約を明示的なルールとして分離する
-- `schema/`: 外部入出力や認知結果の構造を明示的に定義する
+- `schema/`: 外部入出力、認知結果、記憶更新計画の構造を明示的に定義する
 - `config/`: 人格定義、身体構成、欲求設定、LLM ルーティング、行動ポリシーをコードから分離して管理する
 - `data/`: この人格個体の永続状態を置く。自己状態、世界状態、記憶、イベントをここに集約する
 
@@ -216,7 +226,7 @@
 - `attention_state`: 現在の注意対象、抑制対象、優先順位を持つ
 - `body_state`: 姿勢、移動状態、利用可能な感覚器、疲労や負荷のような身体状態を持つ
 - `world_state`: 現在地、周辺状況、進行中タスク、外部対象の状態認識、`affordances`、`constraints`、`attention_targets` を持つ
-- `memory`: `working`、エピソード、意味、感情、対人、反省を含む階層記憶を持つ
+- `memory`: `working`、`recent_event_window`、エピソード、意味、感情、対人、反省を含む階層記憶を持つ
 - `skill`: 再利用可能な行動列と発火条件を持つ
 - これらを分離して持ちつつ、判断時には一体として参照する
 
@@ -226,6 +236,10 @@
 - 正式な保存先は `SQLite` を前提にし、自己状態、世界状態、記憶を一元管理する
 - 記憶検索用の埋め込み索引は `sqlite-vec` を用いて同じ SQLite 系の保存基盤に統合する
 - `JSONL` のイベントログは観測用に使い、正本にはしない
+- `input_journal` は、受理した観測の不変ログとして `events` とは別に保持する
+- `events` は、`input_journal` をもとにまとまった意味単位へ再構成したエピソード正本として保持する
+- `event_preview_cache` は、想起時の LLM 選別に使う派生プレビューとして保持する
+- `memory_jobs` は、長周期で処理する記憶更新、プレビュー更新、整理タスクの永続キューとして保持する
 - 設定は `config/`、実行時状態は `data/` と明確に分離する
 - メモリ上の一時状態を真実源にせず、各ループ完了時に保存を確定する
 - センサー入力の生データを正本にせず、必要な観測結果だけを保存する

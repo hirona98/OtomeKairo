@@ -7,6 +7,7 @@
 - 目的は、記憶の「思い出す」と「育てる」を分けたうえで、処理単位、更新原則、保存形を曖昧にしないことにある
 - 構成全体は `docs/10_target_architecture.md` を見る
 - ランタイム全体の処理契約は `docs/31_runtime_detail.md` を見る
+- `memory_jobs` の payload 契約は `docs/33_memory_job_contracts.md` を見る
 - 記憶の設計判断で迷ったら、このドキュメントを正本として扱う
 
 <!-- Block: Scope -->
@@ -24,39 +25,48 @@
 ### 記憶設計の原則
 
 - 記憶は、`追記される出来事` と `更新で育つ状態` を分ける
+- 受理した観測は、正規化前の受理ログとして `input_journal` へ残し、出来事記憶と混同しない
 - 事実として観測された出来事は、矛盾があっても出来事ログから消さない
 - 長期記憶は、出来事から抽出して育てるが、必ず根拠イベントを持つ
 - 記憶の想起は、DB の単純検索だけで終わらせず、`RetrievalPlan -> 候補収集 -> LLM 選別 -> memory_bundle` の 4 段で行う
 - 記憶の更新は、短周期の保存完了後に行い、同期の即時反応と分離する
 - 忘却は削除ではなく、重要度、参照頻度、記憶強度の減衰で表現する
 - `working_memory` は長期記憶ではなく、その時点の作業断面として扱う
+- 短期文脈は、選別済みの `working_memory` と、直近の生イベント列である `recent_event_window` を分けて扱う
+- 長周期の記憶育成は、短周期保存で enqueue された `memory_jobs` に永続化した仕事だけを順に処理する
 - 性格、感情、関係性、反省は、記憶の外側に逃がさず、想起の対象として一体で扱う
 
 <!-- Block: Fixed Memory Rules -->
 ### 具体設計として固定する記憶原則
 
 - `events` は出来事の不変記録、`memory_states` は育つ知識として分離し、両者を同一更新として扱わない
+- `input_journal` は受理した観測の不変記録であり、`events` が確定しても置き換えない
 - すべての長期記憶更新は、必ず `evidence_event_ids` を持ち、根拠イベントなしで昇格しない
 - 反省は自由文ではなく、少なくとも `reflection_note`、`retry_hint`、`avoid_pattern`、必要なら `judgment_patch` を持つ再利用用の記憶として保存する
-- 想起では `working_memory` を最優先で確保し、その残りでエピソード、意味、感情、関係、反省を種別ごとの件数上限付きで `memory_bundle` に積む
+- 想起では `working_memory` を最優先で確保しつつ、`recent_event_window` を別枠で保持し、その残りでエピソード、意味、感情、関係、反省を種別ごとの件数上限付きで `memory_bundle` に積む
 - `memory_bundle` は、種別ごとの上限と全体の `context budget` を超えてはならず、超過分は優先度順に落とす
 - `action` と `action_result` は分離して記録するが、同一 `cycle_id` と相互参照で必ず結び付け、失敗も成功と同じ粒度で残す
 - 忘却は削除でなく、`importance`、`memory_strength`、`last_accessed_at`、`searchable` の変化で表現し、想起時に再強化する
 - `long_mood_state` は増殖させず単一の持続状態として更新し、瞬間感情は `event_affect` で別管理する
+- 想起用の圧縮プレビューは `event_preview_cache` に派生保存し、元の出来事本文の代替にしない
+- 誤想起は、元の記録を削除せず、`searchable` の切替で主要想起から隔離する
 - `skill` 昇格に使う根拠は、複数イベントにまたがる成功列と、それに対応する反省メモの組でなければならない
 
 <!-- Block: Memory Topology -->
 ### 記憶の全体構造
 
-- 記憶は、`event ledger`、`memory state layer`、`affect layer`、`context graph`、`entity indexes`、`retrieval indexes`、`revision log`、`retrieval log` の 8 層で構成する
-- `event ledger` は、観測と行動の出来事を追記する不変の層である
+- 記憶は、`input journal`、`event ledger`、`memory state layer`、`affect layer`、`context graph`、`entity indexes`、`retrieval indexes`、`preview cache`、`revision log`、`retrieval log`、`maintenance queue` の 11 層で構成する
+- `input journal` は、受理した観測や外部入力を、判断前に残す不変の層である
+- `event ledger` は、観測と行動を意味単位へまとめた出来事を追記する不変の層である
 - `memory state layer` は、事実、関係、タスク、要約、持続感情、反省などを更新で育てる層である
 - `affect layer` は、イベントごとの瞬間感情を持つ層である
 - `context graph` は、出来事どうし、状態どうしのつながりを育てる層である
 - `entity indexes` は、出来事と状態に付いたエンティティを正規化して、多段想起の種にする層である
 - `retrieval indexes` は、ベクトル検索や文字検索のための索引であり、記憶本文ではない
+- `preview cache` は、想起時の LLM 選別に使う圧縮プレビューを持つ派生層である
 - `revision log` は、更新された記憶の監査履歴である
 - `retrieval log` は、どう思い出したかを観測するための実行ログである
+- `maintenance queue` は、長周期で処理する記憶更新、プレビュー更新、整理ジョブを保持する層である
 
 <!-- Block: Entity Indexes -->
 ### エンティティ索引の設計
@@ -77,6 +87,11 @@
   - 短周期ループの間だけ使う作業文脈である
   - 長期保存の正本ではなく、次の判断に必要な断面だけを持つ
   - 必要なら直近スナップショットとして保存するが、長期記憶と同一視しない
+
+- `recent_event_window`
+  - 直近の受理済みイベント列を、そのまま近接文脈として持つ
+  - `working_memory` のように要点へ圧縮せず、短期の流れを保つために使う
+  - 長期記憶へそのまま昇格させず、必要なら `events` と `memory_states` へ再構成して残す
 
 - `episodic_memory`
   - 観測、行動、結果を時系列で残す出来事記憶である
@@ -102,12 +117,23 @@
   - `skill_registry` 自体は記憶本体ではないが、スキル昇格の根拠は記憶側で保持する
   - 反復成功の根拠となるイベント列と反省メモを参照できるようにする
 
+<!-- Block: Input Journal -->
+### `input_journal` の設計
+
+- `input_journal` は、受理した観測や外部入力を、判断前に落とす不変ログである
+- 基本単位は、`observation_id` ごとに 1 件である
+- `input_journal` は append-only とし、同じ `observation_id` を二重追記しない
+- `input_journal` は、元の入力痕跡を残すための層であり、後段の `events` が意味単位へ再構成しても削除しない
+- `input_journal` に保存するのは、生の巨大バイナリではなく、受理時点の短い要約と参照先である
+- `input_journal` は、監査用だけでなく、短周期失敗後の再処理起点としても使える形で保持する
+
 <!-- Block: Event Ledger -->
 ### `event ledger` の設計
 
 - `event ledger` は、短周期の保存完了ごとに 1 件以上の `memory event` を追記する
 - 基本単位は会話の 1 ターンではなく、`1 回の意味のある観測・行動まとまり` とする
 - 1 件の `memory event` は、観測、判断、実行、結果のうち、そのサイクルで確定した事実を持つ
+- `memory event` は、必要に応じて複数の `input_journal` を束ねて 1 件にしてよい
 - `memory event` は削除しない
 - 同じ事象に対して後から違う解釈が生じても、元の `memory event` はそのまま残す
 - 生の画像や音声を正本記憶として保持せず、必要な説明テキスト、要約、参照先だけを残す
@@ -117,7 +143,7 @@
 ### `memory event` の契約
 
 - 各 `memory event` は、少なくとも `event_id`、`cycle_id`、`created_at`、`source`、`kind`、`searchable` を持つ
-- 各 `memory event` は、必要に応じて `observation_summary`、`action_summary`、`result_summary`、`payload_ref` を持つ
+- 各 `memory event` は、必要に応じて `observation_summary`、`action_summary`、`result_summary`、`payload_ref`、`input_journal_refs` を持つ
 - `source` は、少なくとも `web_input`、`camera`、`microphone`、`network_result`、`sns_result`、`line_result`、`idle_tick`、`post_action_followup`、`self_initiated` を区別する
 - `kind` は、少なくとも `observation`、`action`、`action_result`、`internal_decision`、`external_response` を区別する
 - `searchable` は、想起対象に含めるかを示す明示フラグである
@@ -217,7 +243,11 @@
 - `long_mood_state` は、`baseline` と `shock` の 2 層で解釈する
 - `baseline` は、緩やかに更新する基調であり、毎サイクルで反転しない
 - `shock` は、直近の強い出来事の余韻であり、時間とともに減衰する
+- `baseline` の更新は、直前の `baseline` を現在の `event_affect.vad` へ少しだけ近づける `lerp` として扱い、更新率は小さく固定する
+- `shock` の初期値は、`event_affect.vad - baseline` の差分を基準に作り、強い差分ほど大きくする
+- `shock` の減衰は、経過時間に応じた指数減衰とし、半減期ベースで滑らかに下げる
 - 最終的な現在感情は、`baseline` と `shock` を合成して `self_state.current_emotion` に反映する
+- 合成後の VAD は各軸 `-1.0..+1.0` に clamp し、1 サイクルで急反転しないよう上限変化量を持つ
 - `long_mood_state` 自体は増殖させず、1 件を更新して育てる
 
 <!-- Block: Context Graph -->
@@ -303,12 +333,14 @@
 - 近い意味の重複は候補段階では許容し、最終選別で落とす
 - 候補数は上限を持ち、増えやすい経路が独占しないように経路別クォータを適用する
 - `event_affect` と探索枠は、入れすぎると主経路を圧迫するため、明示的に上限を持つ
+- `recent_event_window` は候補経路の 1 つではなく、常に別枠で少量固定し、他の hit 枠を圧迫しない
 
 <!-- Block: Memory Bundle -->
 ### `memory_bundle` の契約
 
 - `memory_bundle` は、今回の認知判断に渡す最終的な想起結果である
-- `memory_bundle` は、`working_memory_items`、`episodic_hits`、`semantic_hits`、`affective_hits`、`relationship_hits`、`reflection_hits`、`selection_trace` を持つ
+- `memory_bundle` は、`recent_event_window`、`working_memory_items`、`episodic_hits`、`semantic_hits`、`affective_hits`、`relationship_hits`、`reflection_hits`、`selection_trace` を持つ
+- `recent_event_window` は、直近の `input_journal` / `events` から取った近接文脈の列である
 - `working_memory_items` は、直近の合意、進行中の流れ、即時判断に必要な短期情報だけを持つ
 - `episodic_hits` は、出来事ログから選ばれた過去事例を持つ
 - `semantic_hits` は、育った知識、要約、タスク状態、持続感情の関連項目を持つ
@@ -324,7 +356,7 @@
 - 候補を最終的に `memory_bundle` へ落とす段は `LLM` が担う
 - `LLM` は、どの候補を今回の人格判断に使うべきかを選別し、必要なら短い要約へ整形する
 - ここでの `LLM` は、検索計画を作る役ではなく、候補の関連性と優先度を判断する役である
-- `LLM` に渡す候補本文は、全文ではなく、プレビューとメタ情報を中心に圧縮する
+- `LLM` に渡す候補本文は、全文ではなく、`event_preview_cache` を含むプレビューとメタ情報を中心に圧縮する
 - 候補が多いほどよいわけではないため、選別に渡す入力サイズにも上限を持つ
 - 選別結果が空でも、空の `memory_bundle` を明示的に返し、暗黙に他の記憶を補わない
 
@@ -334,8 +366,8 @@
 <!-- Block: Memory Update Overview -->
 ### 記憶更新（育てる）の全体像
 
-- 記憶更新は、短周期の保存完了後に長周期ループで行う
-- 記憶更新は、`MemoryWritePlan generation -> plan validation -> apply -> revisions -> embedding sync` の順で行う
+- 記憶更新は、短周期の保存完了後に、`memory_jobs` を起点にした長周期ループで行う
+- 記憶更新は、`enqueue -> claim -> dispatch(job_kind) -> apply -> revisions -> followup enqueue -> embedding sync` の順で行う
 - 生成と適用を分け、生成した計画をそのまま盲目的に適用しない
 - すべての更新は、根拠イベントと理由を持たなければならない
 - 出来事ログの追記と、長期記憶の更新は別処理として扱う
@@ -382,6 +414,15 @@
 - `reflection_note` は、失敗時だけでなく `ignore` や `defer` の妥当性にも使ってよい
 - 根拠が弱い情報は `candidate` や低 `confidence` として残し、断定状態へ飛ばさない
 
+<!-- Block: Misretrieval Quarantine -->
+### 誤想起の隔離
+
+- 誤想起が確定したときは、対象の `events`、`memory_states`、`event_affects` を削除しない
+- 誤想起の隔離は、主に `searchable=0` と、必要ならベクトル索引からの除外で表現する
+- 隔離した事実そのものは監査や再検証に使えるよう残す
+- 誤想起の隔離判断も、`revisions` または専用のジョブ履歴で追跡可能にする
+- 隔離は長周期の `quarantine_memory` ジョブで適用し、同期の想起経路を遅くしない
+
 <!-- Block: Dedup And Coexistence -->
 ### 重複、矛盾、並存の扱い
 
@@ -408,7 +449,7 @@
 ### 定期整理
 
 - 記憶検索は広めに候補を集めるため、長期運用では `memory_states` が増えやすい
-- そのため、同期の判断経路ではなく、長周期の整理タスクで定期的に過去化を行う
+- そのため、同期の判断経路ではなく、長周期の `tidy_memory` ジョブで定期的に過去化を行う
 - 定期整理は、削除ではなく `close` を基本にする
 - 最初に入れる安全な整理は、完全一致重複の過去化である
 - 意味的に近い記憶の統合は、品質難度が高いため、この段階では自動化しない
@@ -432,8 +473,8 @@
 ### 物理保存の基本マッピング
 
 - 記憶の物理保存は、`data/core.sqlite3` の中で次のテーブル群に写像する
-- 初期に固定する主テーブルは、`events`、`memory_states`、`preference_memory`、`event_affects`、`event_links`、`event_threads`、`state_links`、`event_entities`、`state_entities`、`revisions`、`retrieval_runs`、`vec_items`、`events_fts` とする
-- `working_memory` は、長期記憶テーブルではなく、ランタイム状態のスナップショットとして別管理してよい
+- 初期に固定する主テーブルは、`input_journal`、`events`、`memory_states`、`preference_memory`、`event_affects`、`event_links`、`event_threads`、`state_links`、`event_entities`、`state_entities`、`revisions`、`retrieval_runs`、`event_preview_cache`、`memory_jobs`、`vec_items`、`events_fts` とする
+- `working_memory` と `recent_event_window` は、長期記憶テーブルではなく、ランタイム状態のスナップショットとして別管理してよい
 - `long_mood_state` は、`memory_states` の `memory_kind="long_mood_state"` として保持する
 - `reflection_note` は、`memory_states` の `memory_kind="reflection_note"` として保持する
 - `preference_memory` は、誤断定回避のため、`memory_states` から分けて専用テーブルとしてよい
@@ -476,19 +517,42 @@
 - `selected_json` には、最終的な `memory_bundle` の要点と選別理由を保存する
 - `retrieval_runs` は、説明とデバッグのために使い、主要想起の材料にはしない
 
+<!-- Block: Preview Cache -->
+### `event_preview_cache` の設計
+
+- `event_preview_cache` は、想起時の LLM 選別に使う派生プレビューを保持する
+- `event_preview_cache` は、`preview_id`、`event_id`、`preview_text`、`source_event_updated_at`、`created_at`、`updated_at` を持つ
+- `preview_text` は、出来事本文の圧縮版であり、元の `events` 本文の代替として扱わない
+- `source_event_updated_at` は、元イベントとの差分検出に使い、本文が変わったらプレビューを作り直す
+- `event_preview_cache` の更新主体は `refresh_preview` ジョブだけとし、`write_memory` は直接更新しない
+- `refresh_preview` ジョブは、このテーブルだけを更新できる
+
+<!-- Block: Maintenance Queue -->
+### `memory_jobs` の設計
+
+- `memory_jobs` は、長周期で処理する記憶更新用の永続ジョブキューである
+- `memory_jobs` は、`job_id`、`job_kind`、`payload_ref`、`status`、`tries`、`created_at`、`updated_at` を持つ
+- `status` は、少なくとも `queued`、`claimed`、`completed`、`dead_letter` を区別する
+- `job_kind` は、少なくとも `write_memory`、`refresh_preview`、`embedding_sync`、`tidy_memory`、`quarantine_memory` を区別する
+- `payload_ref` の解決規則と `job_kind` ごとの payload 本体は `docs/33_memory_job_contracts.md` を正本とする
+- 新しい `events` が確定したときは、最低でも `write_memory` を短周期保存単位で enqueue する
+- `refresh_preview` は、対象イベント本文または要約が変わったときだけ enqueue する
+- `memory_jobs` は、ランタイムが再起動しても未完了仕事を失わないために持つ
+
 <!-- Block: Runtime Integration Group -->
 ## ランタイム接続
 
 <!-- Block: Runtime Integration -->
 ### ランタイムとの接続点
 
-- 短周期では、`context assembler` が `RetrievalPlan` を作り、候補収集と選別を行って `memory_bundle` を作る
-- 短周期の保存では、`events`、`working_memory`、必要なら `retrieval_runs` の更新までを行う
+- 短周期では、`input collector` が `input_journal` を追記し、その後に `context assembler` が `RetrievalPlan` を作り、候補収集と選別を行って `memory_bundle` を作る
+- 短周期の保存では、`events`、`working_memory`、`recent_event_window`、新規に enqueue する `memory_jobs`、必要なら `retrieval_runs` の更新までを行う
 - `retrieval_runs` は、想起時点で `cycle_id` で保存し、同じ短周期の `events` 確定後に `resolved_event_ids_json` を補助参照として埋めてよい
-- 長周期では、`reflection writer` が `reflection_bundle` を作り、それをもとに `MemoryWritePlan` を作る
-- 長周期の適用で、`memory_states`、`preference_memory`、`event_affects`、`event_links`、`event_threads`、`state_links`、`revisions`、`vec_items` を更新する
+- 短周期の保存中に、長周期で扱う `memory_jobs` を enqueue する
+- 長周期では、`memory job scheduler` が `memory_jobs` を claim し、`reflection writer` が `reflection_bundle` を作り、それをもとに `MemoryWritePlan` を作る
+- 長周期の適用で、`write_memory` は `memory_states`、`preference_memory`、`event_affects`、`event_links`、`event_threads`、`state_links`、`revisions`、`vec_items` を更新し、`refresh_preview` だけが `event_preview_cache` を更新する
 - `skill promoter` は、記憶側に保存されたイベント列、反省、成功パターンを材料にする
-- 記憶更新が完了するまでは、その長周期は未完了である
+- 記憶更新と `memory_jobs` の完了確定が終わるまでは、その長周期は未完了である
 
 <!-- Block: Closing Group -->
 ## 補足と確定事項
@@ -506,10 +570,12 @@
 ### このドキュメントで確定したこと
 
 - 記憶は、`追記される出来事` と `更新で育つ状態` を分ける
+- `input_journal` を、`events` より前段の不変ログとして持つ
 - 想起は、`RetrievalPlan -> 候補収集 -> LLM 選別 -> memory_bundle` で行う
-- 更新は、`MemoryWritePlan -> 検証 -> 適用 -> revisions -> embedding sync` で行う
+- 更新は、`memory_jobs` を起点に `dispatch(job_kind) -> 適用 -> revisions -> followup enqueue -> embedding sync` で行う
 - `event_affect` と `long_mood_state` の 2 層で感情を扱う
 - 好悪のような誤断定しやすい情報は、`preference_memory` として専用管理する
 - 忘却は削除ではなく、重みと検索優先度の減衰で扱う
 - 完全一致重複の整理は許すが、意味的統合はこの段階では自動化しない
-- `revisions` と `retrieval_runs` を持ち、記憶更新と想起の両方を観測可能にする
+- 誤想起は削除せず、`searchable` の切替で隔離する
+- `revisions`、`retrieval_runs`、`memory_jobs` を持ち、記憶更新と想起の両方を観測可能にする

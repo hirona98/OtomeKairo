@@ -32,18 +32,19 @@
 - 詳細設計を詰めるとき: `docs/30_design_breakdown.md`
 - 実装直前の処理契約を詰めるとき: `docs/31_runtime_detail.md`
 - 記憶設計を詰めるとき: `docs/32_memory_detail.md`
+- `memory_jobs` の payload 契約を詰めるとき: `docs/33_memory_job_contracts.md`
 - 自律行動設計を詰めるとき: `docs/10_target_architecture.md` と `docs/30_design_breakdown.md` と `docs/31_runtime_detail.md`
-- 採用済みの設計原則を確認するとき: `docs/10_target_architecture.md` と `docs/30_design_breakdown.md` と `docs/31_runtime_detail.md` と `docs/32_memory_detail.md`
+- 採用済みの設計原則を確認するとき: `docs/10_target_architecture.md` と `docs/30_design_breakdown.md` と `docs/31_runtime_detail.md` と `docs/32_memory_detail.md` と `docs/33_memory_job_contracts.md`
 - 記憶設計の背景判断を確認するとき: `docs/note/記憶設計に関する先行研究のメモ.md`
 - 自律行動設計の背景判断を確認するとき: `docs/note/自律行動システムの先行研究メモ.md`
-- 実装を始めるとき: `docs/10_target_architecture.md` と `docs/30_design_breakdown.md` と `docs/31_runtime_detail.md` と `docs/32_memory_detail.md`
-- ドキュメントを直すとき: この `docs/00_index.md` と `docs/10_target_architecture.md` と `docs/20_external_interfaces.md` と `docs/30_design_breakdown.md` と `docs/31_runtime_detail.md` と `docs/32_memory_detail.md`
+- 実装を始めるとき: `docs/10_target_architecture.md` と `docs/30_design_breakdown.md` と `docs/31_runtime_detail.md` と `docs/32_memory_detail.md` と `docs/33_memory_job_contracts.md`
+- ドキュメントを直すとき: この `docs/00_index.md` と `docs/10_target_architecture.md` と `docs/20_external_interfaces.md` と `docs/30_design_breakdown.md` と `docs/31_runtime_detail.md` と `docs/32_memory_detail.md` と `docs/33_memory_job_contracts.md`
 
 <!-- Block: Notes -->
 ## 参考メモ
 
 - 一時的な情報、比較検討、参考資料、最終設計書に不要な補足は `docs/note/` に置く
-- 研究メモは比較検討用であり、正本は `docs/10`、`docs/30`、`docs/31`、`docs/32` だけで読める状態を維持する
+- 研究メモは比較検討用であり、正本は `docs/10`、`docs/30`、`docs/31`、`docs/32`、`docs/33` だけで読める状態を維持する
 - 記憶設計の研究メモ: `docs/note/記憶設計に関する先行研究のメモ.md`
 - 自律行動システムの研究メモ: `docs/note/自律行動システムの先行研究メモ.md`
 - 類似システムの参考フロー図: `docs/note/CocoroGhost_システムフロー図.md`
@@ -57,4 +58,5 @@
 - 実装単位/処理順序/状態境界が変わったら `docs/30_design_breakdown.md` を更新する
 - 実行単位/入出力契約/保存順序の細部が変わったら `docs/31_runtime_detail.md` を更新する
 - 記憶の想起/更新/保存設計が変わったら `docs/32_memory_detail.md` を更新する
+- `memory_jobs` の payload 契約や job ごとの責務が変わったら `docs/33_memory_job_contracts.md` を更新する
 - 参考メモや一時資料を追加するときは `docs/note/` に置く

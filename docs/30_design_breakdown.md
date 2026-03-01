@@ -9,6 +9,7 @@
 - 外部接続と技術選定は `docs/20_external_interfaces.md` を見る
 - 実装直前の入出力契約、状態遷移、保存順序は `docs/31_runtime_detail.md` を見る
 - 記憶サブシステムの詳細は `docs/32_memory_detail.md` を見る
+- `memory_jobs` の payload 契約は `docs/33_memory_job_contracts.md` を見る
 - 実装前に責務、処理順序、状態境界で迷ったら、このドキュメントを正本として扱う
 
 <!-- Block: System Overview Group -->
@@ -39,15 +40,18 @@
 ### 具体設計として固定する責務条件
 
 - `attention manager` は、記憶の補助ではなく、`memory` と同格の必須責務として毎短周期で評価する
+- `input collector` は、受理した観測を `observation_id` 単位で `input_journal` に不変追記してから後段へ渡し、判断前に入力痕跡を失わない
 - `action dispatcher` の実行後は、成否に関係なく必ず `reobserve` を行い、その結果を保存前に取り込む
 - `reflection writer` は感想文を残すのではなく、少なくとも `reflection_note`、`retry_hint`、`avoid_pattern` の 3 種を構造化して残す
-- `context assembler` は、`working_memory` を最優先で詰め、その残り予算で関連するエピソード、意味、感情、関係、反省を種別ごとの上限付きで組み立てる
+- `context assembler` は、`working_memory` を最優先で詰めつつ、`recent_event_window` を別断面として保持し、その残り予算で関連するエピソード、意味、感情、関係、反省を種別ごとの上限付きで組み立てる
 - `cognition planner` は、高位の意図、優先順位、次の 1 手の行動候補、必要なら後続の `step_hints` までを作る責務に限定し、低位のデバイス制御手順は作らない
 - `action validator` は、安全、身体能力、空間制約、`affordances`、現在タスク、命令階層を同時に検査し、`execute`、`hold`、`reject` のいずれかへ確定する
 - `state committer` は、短周期の正本更新を完了するまで、次の短周期や長周期へ進ませない
 - `state committer` は、`drive_state`、`settings_overrides`、`pending_inputs` を短周期の同一保存単位で確定する
 - `events.jsonl` は `commit_record` から再構成できる派生ログとし、正本更新と同じ差分を二重適用しない
-- `memory consolidator` は、イベントの抽出、意味記憶の昇格、重要度更新、埋め込み同期を 1 つの長周期処理として完了させる
+- `memory job scheduler` は、`memory_jobs` を永続ジョブとして claim し、`generate / apply / preview / tidy` の各処理をメモリ内だけで終わらせない
+- `memory consolidator` は、イベントの抽出、意味記憶の昇格、重要度更新、プレビュー更新、埋め込み同期を 1 つの長周期処理として完了させる
+- `memory consolidator` は、誤想起が確定した項目を削除せず、`searchable` の切替で主要想起から隔離する
 - `skill promoter` は、単発の成功では昇格させず、複数サイクルで再現した成功パターンだけを `skill_registry` に登録する
 - `attention manager` と `action validator` は、同じ命令階層評価結果を共有し、下位入力が上位制約を飛び越えないようにする
 - `gateway` は、センサー、行動器、ネットワークの唯一の統合点とし、人格コアから個別実装を直接呼ばない
@@ -69,6 +73,7 @@
 - `action dispatcher`: 実行すべき行動を選び、外部インタフェースへ命令する
 - `state committer`: 行動結果を自己状態、世界状態、記憶へ反映して保存する
 - `reflection writer`: 実行結果から反省と再試行ヒントを作る
+- `memory job scheduler`: 長周期で扱う `memory_jobs` を claim し、処理順を固定する
 - `memory consolidator`: 短期の出来事を整理し、長期記憶へ統合する
 - `skill promoter`: 反復成功した行動列を再利用可能スキルへ昇格する
 
@@ -77,7 +82,7 @@
 
 - ランタイムは `短周期ループ` と `長周期ループ` の 2 種類で回す
 - `短周期ループ` は、`observe -> attend -> decide -> act -> commit` を担当する主循環である
-- `長周期ループ` は、`reflect -> consolidate -> learn` を担当する補助循環である
+- `長周期ループ` は、`reflect -> schedule -> consolidate -> learn` を担当する補助循環である
 - 両方のループを同じ人格ランタイムが管理し、状態の更新者を 1 つに保つ
 - どの周期でも、状態更新は必ず保存完了まで 1 つの処理単位として閉じる
 
@@ -92,14 +97,16 @@ flowchart TD
     web["設定 Web サーバ"] --> pending["pending_inputs / settings_overrides"]
     sensors["外部インタフェース群\ncamera / mic / text / network / sns"] --> collect["input collector"]
     pending --> collect
-    collect --> normalize["observation normalizer"]
+    collect --> journal["input_journal"]
+    journal --> normalize["observation normalizer"]
     normalize --> short["短周期ループ"]
     short --> dispatch["action dispatcher"]
     dispatch --> actuators["外部インタフェース群\nTTS / move / look / browse / social / notify"]
     dispatch --> events["events.jsonl"]
     short --> commit["state committer"]
     commit --> sqlite["SQLite + sqlite-vec"]
-    commit --> long["長周期ループ"]
+    commit --> jobs["memory_jobs"]
+    jobs --> long["長周期ループ"]
     long --> sqlite
     long --> short
 ```
@@ -107,9 +114,10 @@ flowchart TD
 ```mermaid
 flowchart TD
     idle["idle scheduler"] --> observe["observe\ninput collector"]
-    observe --> normalize["normalize\nobservation normalizer"]
+    observe --> journal["journal\ninput_journal"]
+    journal --> normalize["normalize\nobservation normalizer"]
     normalize --> attend["attend\nattention manager"]
-    attend --> context["context assemble\nstate + working_memory + related memory"]
+    attend --> context["context assemble\nstate + working_memory + recent_event_window + related memory"]
     context --> decide{"反応するか"}
     decide -- "静観" --> wait["wait"]
     wait --> commit["commit\nstate committer"]
@@ -123,7 +131,8 @@ flowchart TD
     act --> reobserve["実行結果の再観測"]
     reobserve --> commit
     commit --> reflect["reflect\nreflection writer"]
-    reflect --> consolidate["consolidate\nmemory consolidator"]
+    reflect --> schedule["schedule\nmemory job scheduler"]
+    schedule --> consolidate["consolidate\nmemory consolidator"]
     consolidate --> learn["learn\nskill promoter + embedding sync"]
     learn --> idle
 ```
@@ -133,29 +142,31 @@ flowchart TD
 
 1. 設定変更要求とテキスト入力要求を取り込む
 2. カメラ、マイク、その他入力元から新規観測を回収する
-3. 観測を `perception` に正規化する
-4. `attention manager` が、注意対象、抑制対象、優先順位を決める
-5. 命令階層と優先度に従って、現在状態、`working_memory`、関連記憶を読み出し、`cognition_input` を組み立てる
-6. `cognition_input` をもとに、反応不要、即時行動、保留継続のいずれかを決める
-7. 原則として LLM を使って、`cognition_input` から意図と `action proposal` を組み立てる
-8. `action validator` が、候補を安全で実行可能な `action_command` へ変換する
-9. 実行可能な行動だけを実行し、実行後の観測変化を必ず再取り込みする
-10. 実行結果と観測結果をイベントとして記録する
-11. 自己状態、身体状態、世界状態、`working_memory`、短期記憶を更新して保存する
-12. 次の待機状態へ戻る
+3. 受理した観測を `input_journal` に `observation_id` 単位で受理ログとして不変追記する
+4. 観測を `perception` に正規化する
+5. `attention manager` が、注意対象、抑制対象、優先順位を決める
+6. 命令階層と優先度に従って、現在状態、`working_memory`、`recent_event_window`、関連記憶を読み出し、`cognition_input` を組み立てる
+7. `cognition_input` をもとに、反応不要、即時行動、保留継続のいずれかを決める
+8. 原則として LLM を使って、`cognition_input` から意図と `action proposal` を組み立てる
+9. `action validator` が、候補を安全で実行可能な `action_command` へ変換する
+10. 実行可能な行動だけを実行し、実行後の観測変化を必ず再取り込みする
+11. 実行結果と観測結果をイベントとして記録する
+12. 自己状態、身体状態、世界状態、`working_memory`、`recent_event_window`、短期記憶を更新して保存する
+13. 長周期用の `memory_jobs` を短周期の保存単位として投入し、次の待機状態へ戻る
 
 <!-- Block: Long Cycle -->
 ### 長周期ループの処理順
 
-1. 直近イベントから意味のある出来事を抽出する
+1. `memory_jobs` から、その長周期で処理すべきジョブを claim する
 2. 実行結果と失敗要因から `reflection_notes`、`retry_hint`、`avoid_pattern` を作る
-3. エピソード記憶として残す内容を選別する
-4. 長期的に再利用する知識や関係性を意味記憶へ昇格させる
-5. 反復成功した行動列を `skill_registry` へ昇格させる
-6. 記憶強度、重要度、最終参照時刻を更新し、忘却と再強化を反映する
-7. 埋め込みベクトルを更新し、`sqlite-vec` の検索索引を同期する
-8. 完了済みタスクや期限切れ保留状態を整理する
-9. 反映後の状態を保存し、次の短周期へ戻す
+3. 直近イベントから `MemoryWritePlan` を作り、適用前に検証する
+4. エピソード記憶として残す内容を選別し、長期的に再利用する知識や関係性を意味記憶へ昇格させる
+5. `refresh_preview` ジョブだけが `event_preview_cache` を更新し、誤想起隔離に使う `searchable` を必要に応じて切り替える
+6. 反復成功した行動列を `skill_registry` へ昇格させる
+7. 記憶強度、重要度、最終参照時刻を更新し、忘却と再強化を反映する
+8. 埋め込みベクトルを更新し、`sqlite-vec` の検索索引を同期する
+9. 完了済みタスク、重複記憶、期限切れ保留状態を整理する
+10. ジョブ状態と反映後の状態を保存し、次の短周期へ戻す
 
 <!-- Block: Priority Model -->
 ### 優先度モデル
@@ -243,7 +254,7 @@ flowchart TD
 - `cognition_input` は、LLM にその時点の人格として判断させるための入力断面である
 - 必須要素は、`self_state` の性格傾向、現在感情、長期目標、関係性の認識である
 - 必須要素は、`body_state`、`world_state`、`drive_state`、`task_state` の現在断面である
-- 必須要素は、`working_memory` と、その時点で関連するエピソード記憶、意味記憶、感情記憶、対人記憶、反省メモである
+- 必須要素は、`working_memory`、`recent_event_window`、その時点で関連するエピソード記憶、意味記憶、感情記憶、対人記憶、反省メモである
 - 必須要素は、現在の観測イベント、注意対象、抑制対象、命令階層の評価結果である
 - `skill_registry` は、今回の状況に適合するスキルだけを候補として含める
 - 性格や記憶を欠いた入力で行動判断させることは、この設計では不完全な認知として扱う
@@ -281,7 +292,7 @@ flowchart TD
 - `drive_state`: 空腹や疲労のような生理ではなく、行動を促す内部欲求の強度を持つ
 - `task_state`: 継続中の作業、待機中の保留、再開条件を持つ
 - `skill_registry`: 再利用可能な行動列、発火条件、成功条件を持つ
-- `memory_state`: `working_memory`、エピソード記憶、意味記憶、感情記憶、対人記憶、反省メモを持つ
+- `memory_state`: `working_memory`、`recent_event_window`、エピソード記憶、意味記憶、感情記憶、対人記憶、反省メモを持つ
 
 <!-- Block: Storage Breakdown -->
 ### 永続化の論理分解
@@ -292,14 +303,18 @@ flowchart TD
 - `world_state`: 現在の世界認識の正本を 1 件保持する
 - `drive_state`: 現在の内部欲求状態の正本を 1 件保持する
 - `pending_inputs`: Web サーバや外部から入った未処理入力を保持する
+- `input_journal`: 受理した観測と外部入力の不変ログを保持する
 - `task_state`: 継続タスク、保留タスク、再開条件の正本を保持する
 - `working_memory`: 短周期でのみ使う作業文脈を保持する
+- `recent_event_window`: 直近の生イベント列を短期判断用に保持する
 - `episodic_memory`: 出来事単位の記憶を時系列で保持する
 - `semantic_memory`: 安定した知識を保持する
 - `affective_memory`: 出来事に紐づく感情痕跡を保持する
 - `relationship_memory`: 相手や対象への認識を保持する
 - `skill_registry`: 再利用可能なスキルを保持する
 - `reflection_notes`: 失敗要因、再試行ヒント、回避パターンを保持する
+- `event_preview_cache`: 想起時の LLM 選別に使う派生プレビューを保持する
+- `memory_jobs`: 長周期で処理する記憶更新、プレビュー更新、整理ジョブを保持する
 - `memory_embeddings`: `sqlite-vec` で検索する埋め込み索引を保持する
 - `action_history`: 実行した行動と結果を保持する
 - `settings_overrides`: Web から変更された設定の差分を保持する
@@ -310,11 +325,14 @@ flowchart TD
 ### 記憶の更新方針
 
 - 短周期では、`working_memory` を組み立て、直近の出来事をエピソード候補として残す
+- 短周期では、`input_journal` に残った受理済み観測から `recent_event_window` を構成し、`working_memory` と混ぜない
 - 長周期では、繰り返し参照される内容だけを意味記憶へ昇格させる
 - 感情痕跡は `affective_memory` として保持し、持続感情は `self_state` 側で持つ
 - 反省は `reflection_notes` として独立に保持する
 - 再利用価値が高い行動列は `skill_registry` に昇格させる
 - 記憶の更新と埋め込み更新は、同じ処理単位で完了させる
+- 想起用の圧縮本文は `event_preview_cache` に派生保存し、元の出来事本文の代替にはしない
+- 誤想起は、元の記録を削除せず、`searchable` の切替で主要想起から隔離する
 - 記憶本文とベクトル索引は別管理でも、論理的には同じ記憶項目として扱う
 - 忘却は削除ではなく、重要度低下、参照頻度低下、記憶強度減衰として扱う
 
@@ -338,8 +356,9 @@ flowchart TD
 
 - 第1段階は、`設定 Web サーバ`、`短周期ループ`、`状態保存` の 3 点を成立させる
 - 第2段階は、`attention`、`instruction priority`、`LiteLLM` による認知処理を接続する
-- 第3段階は、`sqlite-vec` による記憶検索と `reflection` を接続する
+- 第3段階は、`sqlite-vec` による記憶検索、`input_journal`、`reflection` を接続する
 - 第4段階は、`skill_registry` と `working_memory` を接続する
+- 第4.5段階は、`memory_jobs` と `event_preview_cache` による長周期育成を接続する
 - 第5段階は、`Wi-Fi Web カメラ`、`マイク`、`TTS` を接続する
 - 第6段階は、`SNS API`、`LINE API`、`移動制御` を接続する
 - 各段階で、人格ランタイムの責務境界は崩さない
@@ -354,4 +373,5 @@ flowchart TD
 - `action proposal` と `action_command` は分離する
 - 命令階層は `system policy > runtime policy > external input > tool output` である
 - `SQLite + sqlite-vec + JSONL` が永続化の基本構成である
+- 記憶保持は `input_journal -> events -> memory_states` の段階で扱う
 - 実装はこの分解単位に沿って進める

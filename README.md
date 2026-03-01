@@ -12,4 +12,5 @@
 - 詳細設計: `docs/30_design_breakdown.md`
 - 実装直前設計: `docs/31_runtime_detail.md`
 - 記憶詳細設計: `docs/32_memory_detail.md`
+- `memory_jobs` 契約詳細: `docs/33_memory_job_contracts.md`
 - 参考メモ: `docs/note/memory_research_notes.md`

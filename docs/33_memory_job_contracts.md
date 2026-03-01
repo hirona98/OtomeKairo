@@ -1,0 +1,165 @@
+# `memory_jobs` 契約詳細
+
+<!-- Block: Purpose -->
+## このドキュメントの役割
+
+- このドキュメントは、`docs/31_runtime_detail.md` と `docs/32_memory_detail.md` にある `memory_jobs` を、実装直前の payload 契約まで固定する
+- 目的は、`payload_ref` の意味、参照先、ジョブ種別ごとの payload 断面を曖昧にしないことにある
+- ランタイム全体の処理契約は `docs/31_runtime_detail.md` を見る
+- 記憶サブシステム全体は `docs/32_memory_detail.md` を見る
+- `memory_jobs` のテーブルや schema を作るときは、このドキュメントを正本として扱う
+
+<!-- Block: Scope -->
+## このドキュメントで固定する範囲
+
+- 固定するのは、`memory_jobs.payload_ref` の解決規則と、`job_kind` ごとの payload 契約である
+- 固定するのは、ジョブ投入時と claim 後の処理境界であり、SQL の型名や migration 手順そのものではない
+- 固定するのは、初期に使う `write_memory`、`refresh_preview`、`quarantine_memory` の 3 種である
+- `embedding_sync` と `tidy_memory` は、この段階では投入条件だけを持ち、詳細 payload は次段で固定する
+
+<!-- Block: Core Rules -->
+## 共通原則
+
+<!-- Block: Job Design Principles -->
+### `memory_jobs` の共通原則
+
+- `memory_jobs` は、短周期で確定した事実から、長周期で安全に再開可能な仕事だけを切り出す
+- 1 ジョブは 1 つの責務だけを持ち、`job_kind` をまたいで複数責務を混ぜない
+- `payload_ref` は、巨大本文そのものを埋め込むためではなく、正本のどこを材料にするかを指す参照である
+- claim 後に必要な材料が不足していても、暗黙の補完や別経路の推測で埋めない
+- 同じ仕事を二重投入しないために、各 payload は idempotency 判定に使えるキーを持つ
+- `write_memory` が長期記憶を更新し、`refresh_preview` が派生プレビューを更新し、`quarantine_memory` が想起隔離だけを更新する
+
+<!-- Block: PayloadRef -->
+### `payload_ref` の共通契約
+
+- `payload_ref` は、少なくとも `payload_kind`、`payload_id`、`payload_version` を持つ
+- `payload_kind` は、少なくとも `memory_job_payload` を区別する
+- `payload_id` は、そのジョブ専用の payload 本体を指す一意キーである
+- `payload_version` は、payload スキーマの版であり、初期値は `1` に固定する
+- `payload_ref` 自体には、業務データ本体を詰め込まない
+- `payload_ref` が指す payload 本体は、`core.sqlite3` のジョブ payload 領域に保持し、`memory_jobs` 行本体とは分けてよい
+- claim 側は、`payload_ref` を解決できない場合、そのジョブを失敗として扱い、推測再構成しない
+
+<!-- Block: Common Payload -->
+### 共通 payload ヘッダ
+
+- すべての job payload は、少なくとも `job_kind`、`cycle_id`、`source_event_ids`、`created_at`、`idempotency_key` を持つ
+- `job_kind` は、`memory_jobs.job_kind` と一致しなければならない
+- `cycle_id` は、そのジョブがどの短周期の確定結果から生まれたかを示す
+- `source_event_ids` は、ジョブの根拠となる `events.event_id` の配列である
+- `source_event_ids` は空にしない
+- `created_at` は、payload 本体を確定した時刻である
+- `idempotency_key` は、同一仕事の二重投入防止に使う安定キーである
+- `idempotency_key` は、少なくとも `job_kind + cycle_id + source_event_ids + purpose suffix` で安定化する
+
+<!-- Block: WriteMemory -->
+## `write_memory` の契約
+
+<!-- Block: WriteMemory Purpose -->
+### 役割
+
+- `write_memory` は、確定済み `events` を材料に、長期記憶更新の本体を行う
+- `write_memory` は、`MemoryWritePlan` の生成、検証、適用、必要な followup job の投入までを担当する
+- `write_memory` は、`event_preview_cache` を直接更新しない
+
+<!-- Block: WriteMemory Payload -->
+### payload
+
+- `write_memory` payload は、少なくとも `job_kind`、`cycle_id`、`source_event_ids`、`primary_event_id`、`reflection_seed_ref`、`event_snapshot_refs`、`idempotency_key` を持つ
+- `primary_event_id` は、そのジョブで中心材料として扱う `event_id` である
+- `primary_event_id` は、`source_event_ids` に含まれていなければならない
+- `reflection_seed_ref` は、その短周期で確定した `reflection_seed` または `reflection_bundle` への参照である
+- `event_snapshot_refs` は、更新時に参照する `events` のスナップショット参照である
+- `event_snapshot_refs` は、少なくとも `event_id` と `event_updated_at` を持つ
+- `event_snapshot_refs` は、対象イベントが後から変わった場合の stale 判定に使う
+
+<!-- Block: WriteMemory Output -->
+### 完了条件
+
+- `write_memory` は、`MemoryWritePlan` を生成して妥当性検証を通し、`memory_states` 系の更新を完了したときに `completed` になる
+- `write_memory` が対象イベント本文または要約の更新を検知した場合は、必要に応じて `refresh_preview` を followup enqueue する
+- `write_memory` が誤想起隔離を必要と判断した場合は、必要に応じて `quarantine_memory` を followup enqueue する
+- `write_memory` は、followup job の enqueue を含めて 1 つの完了条件とする
+
+<!-- Block: RefreshPreview -->
+## `refresh_preview` の契約
+
+<!-- Block: RefreshPreview Purpose -->
+### 役割
+
+- `refresh_preview` は、`event_preview_cache` の更新だけを担当する
+- `refresh_preview` は、長期記憶本文、感情、関係性、隔離状態を直接更新しない
+- `refresh_preview` は、`write_memory` の補助ではあるが、独立ジョブとして再試行可能でなければならない
+
+<!-- Block: RefreshPreview Payload -->
+### payload
+
+- `refresh_preview` payload は、少なくとも `job_kind`、`cycle_id`、`source_event_ids`、`target_event_id`、`target_event_updated_at`、`preview_reason`、`idempotency_key` を持つ
+- `target_event_id` は、プレビューを再構成する対象イベントである
+- `target_event_updated_at` は、対象イベント本文の版を表す
+- `preview_reason` は、少なくとも `event_created`、`event_updated`、`preview_missing` を区別する
+- `target_event_updated_at` が `event_preview_cache.source_event_updated_at` と一致する場合、そのジョブは no-op 完了してよい
+
+<!-- Block: RefreshPreview Completion -->
+### 完了条件
+
+- `refresh_preview` は、対象イベントから新しい `preview_text` を生成し、`event_preview_cache` を upsert したときに `completed` になる
+- 対象イベントが既に削除されている、という状態はこの設計では起こさない前提である
+- 対象イベントが存在しない場合は、実装不整合として失敗扱いにする
+
+<!-- Block: Quarantine -->
+## `quarantine_memory` の契約
+
+<!-- Block: Quarantine Purpose -->
+### 役割
+
+- `quarantine_memory` は、誤想起として確定した項目を、削除せず主要想起から外すためのジョブである
+- `quarantine_memory` は、`searchable` の切替と、必要なら索引からの除外だけを担当する
+- `quarantine_memory` は、出来事本文や長期記憶本文の書き換えを担当しない
+
+<!-- Block: Quarantine Payload -->
+### payload
+
+- `quarantine_memory` payload は、少なくとも `job_kind`、`cycle_id`、`source_event_ids`、`targets`、`reason_code`、`reason_note`、`idempotency_key` を持つ
+- `targets` は、隔離対象の列であり、各要素は `entity_type`、`entity_id`、`current_searchable` を持つ
+- `entity_type` は、少なくとも `event`、`memory_state`、`event_affect` を区別する
+- `reason_code` は、少なくとも `misretrieval_confirmed`、`stale_linkage`、`manual_quarantine` を区別する
+- `reason_note` は、監査用の短い補足であり、自由文でもよい
+- `targets` は空にしない
+
+<!-- Block: Quarantine Completion -->
+### 完了条件
+
+- `quarantine_memory` は、すべての `targets` に対して `searchable=0` または等価の索引除外を適用し、監査痕跡を残したときに `completed` になる
+- すでに隔離済みの対象は、再適用せず no-op 完了してよい
+- 隔離失敗時は部分成功で終わらせず、そのジョブ全体を失敗として扱う
+
+<!-- Block: Enqueue Rules -->
+## 投入規則
+
+<!-- Block: Enqueue Timing -->
+### 短周期からの投入
+
+- `write_memory` は、短周期で新しい `events` が確定したとき、同じ短周期の保存単位で投入する
+- `refresh_preview` は、短周期では原則投入しない
+- `refresh_preview` は、`write_memory` 完了後に必要と判定されたときだけ followup enqueue する
+- `quarantine_memory` は、短周期では原則投入しない
+- `quarantine_memory` は、`write_memory` または別の記憶判断で隔離必要と判定されたときだけ followup enqueue する
+
+<!-- Block: Enqueue Idempotency -->
+### 二重投入防止
+
+- 同じ `idempotency_key` の `queued` または `claimed` ジョブがある場合、新規投入しない
+- `completed` 済みの同一 `idempotency_key` がある場合、同一 payload なら再投入しない
+- 内容が変わった再投入は、`payload_version` または `idempotency_key` を変える
+
+<!-- Block: Fixed Decisions -->
+## このドキュメントで確定したこと
+
+- `payload_ref` は、payload 本体への参照であり、業務データ本体を直接持たない
+- `write_memory` は、長期記憶更新の本体であり、followup job の投入までを担当する
+- `refresh_preview` は、`event_preview_cache` の唯一の更新主体である
+- `quarantine_memory` は、削除ではなく隔離だけを担当する
+- `refresh_preview` と `quarantine_memory` は、原則として `write_memory` の followup job として投入する
+- `memory_jobs` の実装は、この payload 契約に従って行う
