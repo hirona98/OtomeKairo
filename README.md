@@ -10,9 +10,9 @@
 - 目標構成: `docs/10_目標アーキテクチャ.md`
 - 決定済み外部接続: `docs/20_外部インタフェース.md`
 - システム設計: `docs/30_システム設計.md`
-- ランタイム処理契約: `docs/31_ランタイム処理契約.md`
+- ランタイム処理仕様: `docs/31_ランタイム処理仕様.md`
 - 記憶設計: `docs/32_記憶設計.md`
-- `memory_jobs` 契約: `docs/33_記憶ジョブ契約.md`
+- `memory_jobs` 仕様: `docs/33_記憶ジョブ仕様.md`
 - SQLite 論理スキーマ: `docs/34_SQLite論理スキーマ.md`
-- WebAPI契約: `docs/35_WebAPI契約.md`
-- 参考メモ: `docs/note/memory_research_notes.md`
+- WebAPI仕様: `docs/35_WebAPI仕様.md`
+- 参考メモ: `docs/note/記憶設計に関する先行研究のメモ.md`
