@@ -30,8 +30,16 @@
 - 構成設計を考えるとき: `docs/10_target_architecture.md`
 - 外部接続や採用技術を考えるとき: `docs/20_external_interfaces.md`
 - 詳細設計を詰めるとき: `docs/30_design_breakdown.md`
+- 記憶設計を詰めるとき: `docs/note/memory_research_notes.md`
 - 実装を始めるとき: `docs/10_target_architecture.md` と `docs/30_design_breakdown.md`
-- ドキュメントを直すとき: この `docs/00_index.md` と `docs/10_target_architecture.md` と `docs/20_external_interfaces.md` と `docs/30_design_breakdown.md`
+- ドキュメントを直すとき: この `docs/00_index.md` と `docs/10_target_architecture.md` と `docs/20_external_interfaces.md` と `docs/30_design_breakdown.md` と `docs/note/memory_research_notes.md`
+
+<!-- Block: Notes -->
+## 参考メモ
+
+- 一時的な情報、比較検討、参考資料、最終設計書に不要な補足は `docs/note/` に置く
+- 記憶設計の研究メモ: `docs/note/memory_research_notes.md`
+- 参考フロー図: `docs/note/CocoroGhost_システムフロー図.md`
 
 <!-- Block: Maintenance -->
 ## 更新ルール（重要）
@@ -40,3 +48,5 @@
 - 目標構成/責務分割/永続化方針が変わったら `docs/10_target_architecture.md` を更新する
 - 外部インタフェース/採用技術/接続先が変わったら `docs/20_external_interfaces.md` を更新する
 - 実装単位/処理順序/状態境界が変わったら `docs/30_design_breakdown.md` を更新する
+- 参考メモや一時資料を追加するときは `docs/note/` に置く
+- 記憶設計の比較検討が進んだら `docs/note/memory_research_notes.md` を更新する

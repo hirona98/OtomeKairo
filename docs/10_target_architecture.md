@@ -41,7 +41,11 @@
 ├── docs/
 │   ├── 00_index.md
 │   ├── 10_target_architecture.md
-│   └── 20_external_interfaces.md
+│   ├── 20_external_interfaces.md
+│   ├── 30_design_breakdown.md
+│   └── note/
+│       ├── CocoroGhost_システムフロー図.md
+│       └── memory_research_notes.md
 ├── config/
 │   ├── persona/
 │   ├── body/
