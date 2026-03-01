@@ -34,18 +34,19 @@
 - 記憶設計を詰めるとき: `docs/32_記憶設計.md`
 - `memory_jobs` の payload 契約を詰めるとき: `docs/33_記憶ジョブ契約.md`
 - SQLite の保存設計を詰めるとき: `docs/34_SQLite論理スキーマ.md`
+- Web API 契約を詰めるとき: `docs/35_WebAPI契約.md`
 - 自律行動設計を詰めるとき: `docs/10_目標アーキテクチャ.md` と `docs/30_システム設計.md` と `docs/31_ランタイム処理契約.md`
-- 採用済みの設計原則を確認するとき: `docs/10_目標アーキテクチャ.md` と `docs/30_システム設計.md` と `docs/31_ランタイム処理契約.md` と `docs/32_記憶設計.md` と `docs/33_記憶ジョブ契約.md` と `docs/34_SQLite論理スキーマ.md`
+- 採用済みの設計原則を確認するとき: `docs/10_目標アーキテクチャ.md` と `docs/30_システム設計.md` と `docs/31_ランタイム処理契約.md` と `docs/32_記憶設計.md` と `docs/33_記憶ジョブ契約.md` と `docs/34_SQLite論理スキーマ.md` と `docs/35_WebAPI契約.md`
 - 記憶設計の背景判断を確認するとき: `docs/note/記憶設計に関する先行研究のメモ.md`
 - 自律行動設計の背景判断を確認するとき: `docs/note/自律行動システムの先行研究メモ.md`
-- 実装を始めるとき: `docs/10_目標アーキテクチャ.md` と `docs/30_システム設計.md` と `docs/31_ランタイム処理契約.md` と `docs/32_記憶設計.md` と `docs/33_記憶ジョブ契約.md` と `docs/34_SQLite論理スキーマ.md`
-- ドキュメントを直すとき: この `docs/00_index.md` と `docs/10_目標アーキテクチャ.md` と `docs/20_外部インタフェース.md` と `docs/30_システム設計.md` と `docs/31_ランタイム処理契約.md` と `docs/32_記憶設計.md` と `docs/33_記憶ジョブ契約.md` と `docs/34_SQLite論理スキーマ.md`
+- 実装を始めるとき: `docs/10_目標アーキテクチャ.md` と `docs/30_システム設計.md` と `docs/31_ランタイム処理契約.md` と `docs/32_記憶設計.md` と `docs/33_記憶ジョブ契約.md` と `docs/34_SQLite論理スキーマ.md` と `docs/35_WebAPI契約.md`
+- ドキュメントを直すとき: この `docs/00_index.md` と `docs/10_目標アーキテクチャ.md` と `docs/20_外部インタフェース.md` と `docs/30_システム設計.md` と `docs/31_ランタイム処理契約.md` と `docs/32_記憶設計.md` と `docs/33_記憶ジョブ契約.md` と `docs/34_SQLite論理スキーマ.md` と `docs/35_WebAPI契約.md`
 
 <!-- Block: Notes -->
 ## 参考メモ
 
 - 一時的な情報、比較検討、参考資料、最終設計書に不要な補足は `docs/note/` に置く
-- 研究メモは比較検討用であり、正本は `docs/10`、`docs/30`、`docs/31`、`docs/32`、`docs/33`、`docs/34` だけで読める状態を維持する
+- 研究メモは比較検討用であり、正本は `docs/10`、`docs/30`、`docs/31`、`docs/32`、`docs/33`、`docs/34`、`docs/35` だけで読める状態を維持する
 - 記憶設計の研究メモ: `docs/note/記憶設計に関する先行研究のメモ.md`
 - 自律行動システムの研究メモ: `docs/note/自律行動システムの先行研究メモ.md`
 - 類似システムの参考フロー図: `docs/note/ココロゴースト_システムフロー図.md`
@@ -61,4 +62,5 @@
 - 記憶の想起/更新/保存設計が変わったら `docs/32_記憶設計.md` を更新する
 - `memory_jobs` の payload 契約や job ごとの責務が変わったら `docs/33_記憶ジョブ契約.md` を更新する
 - SQLite のテーブル名/主キー/主要制約が変わったら `docs/34_SQLite論理スキーマ.md` を更新する
+- Web API の path/JSON/SSE 契約が変わったら `docs/35_WebAPI契約.md` を更新する
 - 参考メモや一時資料を追加するときは `docs/note/` に置く

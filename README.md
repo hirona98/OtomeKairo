@@ -14,4 +14,5 @@
 - 記憶設計: `docs/32_記憶設計.md`
 - `memory_jobs` 契約: `docs/33_記憶ジョブ契約.md`
 - SQLite 論理スキーマ: `docs/34_SQLite論理スキーマ.md`
+- WebAPI契約: `docs/35_WebAPI契約.md`
 - 参考メモ: `docs/note/memory_research_notes.md`
