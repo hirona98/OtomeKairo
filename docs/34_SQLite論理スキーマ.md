@@ -7,6 +7,7 @@
 - 目的は、`docs/30_システム設計.md`、`docs/31_ランタイム処理仕様.md`、`docs/32_記憶設計.md`、`docs/33_記憶ジョブ仕様.md` で決めた論理領域を、実装可能な保存単位へ落とすことにある
 - Web API からどのテーブルをどう使うかは `docs/35_WebAPI仕様.md` を見る
 - JSON 列の中身は `docs/36_JSONデータ仕様.md` を見る
+- 実際の初期 SQL 文は `sql/core_schema.sql` に置く
 - ここで固定するのは、テーブル名、主キー、必須列、主要制約、主要索引である
 - ここで固定しないのは、実際の `CREATE TABLE` 文、migration 手順、SQLite pragma の全文である
 - SQLite の物理実装で迷ったら、このドキュメントを正本として扱う
@@ -386,4 +387,4 @@
 - `commit_records` が、短周期確定と `events.jsonl` 再生成の主な起点になる
 - `memory_jobs` と `memory_job_payloads` を分け、`payload_ref` は JSON 参照として保持する
 - `events` テーブルのエピソード正本と、`events.jsonl` の外部追跡ログは別物として扱う
-- このドキュメントを基準に、次は実際の SQL 文または ORM モデルを作る
+- このドキュメントを基準に、`sql/core_schema.sql` を更新するか、次は ORM モデルを作る

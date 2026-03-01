@@ -16,4 +16,5 @@
 - SQLite 論理スキーマ: `docs/34_SQLite論理スキーマ.md`
 - WebAPI仕様: `docs/35_WebAPI仕様.md`
 - JSONデータ仕様: `docs/36_JSONデータ仕様.md`
+- 初期 SQL 実装: `sql/core_schema.sql`
 - 参考メモ: `docs/note/記憶設計に関する先行研究のメモ.md`

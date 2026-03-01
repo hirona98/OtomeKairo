@@ -36,6 +36,7 @@
 - SQLite の保存設計を詰めるとき: `docs/34_SQLite論理スキーマ.md`
 - Web API 仕様を詰めるとき: `docs/35_WebAPI仕様.md`
 - JSON データ仕様を詰めるとき: `docs/36_JSONデータ仕様.md`
+- 実際の初期 SQL を見るとき: `sql/core_schema.sql`
 - 自律行動設計を詰めるとき: `docs/10_目標アーキテクチャ.md` と `docs/30_システム設計.md` と `docs/31_ランタイム処理仕様.md`
 - 採用済みの設計原則を確認するとき: `docs/10_目標アーキテクチャ.md` と `docs/30_システム設計.md` と `docs/31_ランタイム処理仕様.md` と `docs/32_記憶設計.md` と `docs/33_記憶ジョブ仕様.md` と `docs/34_SQLite論理スキーマ.md` と `docs/35_WebAPI仕様.md` と `docs/36_JSONデータ仕様.md`
 - 記憶設計の背景判断を確認するとき: `docs/note/記憶設計に関する先行研究のメモ.md`
@@ -65,4 +66,5 @@
 - SQLite のテーブル名/主キー/主要制約が変わったら `docs/34_SQLite論理スキーマ.md` を更新する
 - Web API の path/JSON/SSE 仕様が変わったら `docs/35_WebAPI仕様.md` を更新する
 - JSON のキー/型/必須項目が変わったら `docs/36_JSONデータ仕様.md` を更新する
+- 初期 SQL 実装を変更したら `sql/core_schema.sql` と `docs/34_SQLite論理スキーマ.md` を両方更新する
 - 参考メモや一時資料を追加するときは `docs/note/` に置く
