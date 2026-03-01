@@ -30,7 +30,8 @@
 - 必須項目は常に出現させる
 - 任意項目は、値がないときに `null` を入れず、省略する
 - 未定義キーは受け付けない
-- 時刻は、原則として UTC unix milliseconds の `integer` に固定する
+- 永続化 JSON と Web API の時刻は、原則として UTC unix milliseconds の `integer` に固定する
+- LLM に渡す内部の派生入力はこの限りでなく、`context assembler` が人間可読な日時表現と相対時間表現を別フィールドとして組み立てる
 - ID は、`ui_event_id` と `last_commit_id` を除き、不透明な `string` に固定する
 - 配列は順序を持つものとして扱い、書き込み側で順序を安定化させる
 
