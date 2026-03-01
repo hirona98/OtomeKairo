@@ -38,7 +38,9 @@
 - `context assembler` は、`working_memory` を最優先で詰め、その残り予算で関連するエピソード、意味、感情、関係、反省を種別ごとの上限付きで組み立てる
 - `cognition planner` は、高位の意図、優先順位、次の 1 手の行動候補、必要なら後続の `step_hints` までを作る責務に限定し、低位のデバイス制御手順は作らない
 - `action validator` は、安全、身体能力、空間制約、`affordances`、現在タスク、命令階層を同時に検査し、`execute`、`hold`、`reject` のいずれかへ確定する
-- `state committer` は、短周期の保存を完了するまで、次の短周期や長周期へ進ませない
+- `state committer` は、短周期の正本更新を完了するまで、次の短周期や長周期へ進ませない
+- `state committer` は、`drive_state`、`settings_overrides`、`pending_inputs` を短周期の同一保存単位で確定する
+- `events.jsonl` は `commit_record` から再構成できる派生ログとし、正本更新と同じ差分を二重適用しない
 - `memory consolidator` は、イベントの抽出、意味記憶の昇格、重要度更新、埋め込み同期を 1 つの長周期処理として完了させる
 - `skill promoter` は、単発の成功では昇格させず、複数サイクルで再現した成功パターンだけを `skill_registry` に登録する
 - `attention manager` と `action validator` は、同じ命令階層評価結果を共有し、下位入力が上位制約を飛び越えないようにする
@@ -276,8 +278,9 @@ flowchart TD
 - `attention_state`: 現在の注意状態の正本を 1 件保持する
 - `body_state`: 現在の身体状態の正本を 1 件保持する
 - `world_state`: 現在の世界認識の正本を 1 件保持する
+- `drive_state`: 現在の内部欲求状態の正本を 1 件保持する
 - `pending_inputs`: Web サーバや外部から入った未処理入力を保持する
-- `task_queue`: 継続タスクと再開条件を保持する
+- `task_state`: 継続タスク、保留タスク、再開条件の正本を保持する
 - `working_memory`: 短周期でのみ使う作業文脈を保持する
 - `episodic_memory`: 出来事単位の記憶を時系列で保持する
 - `semantic_memory`: 安定した知識を保持する
@@ -288,6 +291,7 @@ flowchart TD
 - `memory_embeddings`: `sqlite-vec` で検索する埋め込み索引を保持する
 - `action_history`: 実行した行動と結果を保持する
 - `settings_overrides`: Web から変更された設定の差分を保持する
+- `commit_records`: 各短周期の確定差分と `events.jsonl` 同期状態を保持し、派生ログ再構成の正本にする
 - `events.jsonl`: 観測と行動の追跡ログを追記専用で保持する
 
 <!-- Block: Memory Policy -->

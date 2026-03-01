@@ -38,6 +38,7 @@
 - `長周期ループ` は、反省、記憶整理、スキル昇格、埋め込み同期を担当する
 - 各ループには、`cycle_id`、`cycle_kind`、`trigger_reason`、`started_at` を必ず付与する
 - `trigger_reason` は、少なくとも `external_input`、`sensor_change`、`task_resume`、`idle_tick`、`self_initiated`、`post_action_followup` を区別する
+- `trigger_reason` はサイクル起動理由の分類であり、詳細な外部入力源は `observation_batch.source` に持つ
 
 <!-- Block: Short Cycle Triggers -->
 ## 短周期ループの起動条件
@@ -78,10 +79,11 @@
 
 - `observation_batch` は、その短周期で処理対象になる観測イベントの集合である
 - 各項目は、`observation_id`、`source`、`kind`、`captured_at`、`priority_hint`、`normalized_summary`、`payload_ref` を持つ
-- `source` は、少なくとも `web_input`、`camera`、`microphone`、`network_result`、`sns_result`、`line_result`、`internal_timer` を区別する
+- `source` は、少なくとも `web_input`、`camera`、`microphone`、`network_result`、`sns_result`、`line_result`、`idle_tick`、`post_action_followup`、`self_initiated` を区別する
 - `kind` は、少なくとも `instruction`、`scene_change`、`audio_segment`、`search_result`、`social_reaction`、`internal_trigger` を区別する
 - 生データ本体は `payload_ref` の先に閉じ込め、人格コア側では正規化後の要約を主に扱う
 - 同一短周期で扱う観測は、時系列順に並べたうえで `priority_hint` を保持する
+- 内部起点の観測は、`trigger_reason` と同じ語彙で `idle_tick`、`post_action_followup`、`self_initiated` を使う
 
 <!-- Block: Attention Set -->
 ## `attention_set` の契約
@@ -205,20 +207,23 @@
 ## `state committer` の保存契約
 
 - `state committer` は、その短周期で確定した差分だけを永続状態へ反映する
-- 1 回の短周期の保存単位は、`self_state`、`attention_state`、`body_state`、`world_state`、`task_state`、`working_memory`、`action_history`、`pending_inputs` の処理結果である
-- `state committer` は、まず SQLite 側の正本更新を確定し、その直後に `events.jsonl` を追記する
+- 1 回の短周期の保存単位は、`self_state`、`attention_state`、`body_state`、`world_state`、`drive_state`、`task_state`、`working_memory`、`action_history`、`pending_inputs`、`settings_overrides`、必要なら `retrieval_runs` の処理結果である
+- `state committer` は、まず SQLite 側の正本更新と `commit_record` を確定し、その後に `events.jsonl` を派生同期する
+- `commit_record` には、少なくとも `commit_id`、`cycle_id`、`committed_at`、`log_sync_status` を持たせる
 - `events.jsonl` は正本ではないため、内容は必ず SQLite で確定した `commit_record` から再構成する
-- `events.jsonl` の追記失敗は黙殺せず、明示的なエラーとして扱う
-- 保存が完了するまでは、その短周期は未完了であり、次の長周期へ進めない
+- `events.jsonl` の追記は、`commit_id` を使って idempotent に行い、同じ `commit_record` を二重記録しない
+- `events.jsonl` の追記に失敗した場合は、`log_sync_status` を `needs_replay` に更新し、同じ状態差分を再適用せずに派生ログ同期だけを再実行する
+- 短周期の正本完了条件は、SQLite 側の状態差分と `commit_record` の確定であり、`events.jsonl` 同期状態は `log_sync_status` で別追跡する
 
 <!-- Block: Commit Order -->
 ## 短周期の保存順序
 
-- まず、入力の取り込み結果として `pending_inputs` の状態を更新する
-- 次に、`self_state`、`attention_state`、`body_state`、`world_state`、`task_state`、`working_memory` の差分を反映する
-- 次に、`action_history` とエピソード候補を保存する
-- 次に、今回の `commit_record` を確定して SQLite の更新を完了する
-- 最後に、確定済み `commit_record` から `events.jsonl` を追記する
+- まず、入力の取り込み結果として `pending_inputs` と `settings_overrides` の状態を更新する
+- 次に、`self_state`、`attention_state`、`body_state`、`world_state`、`drive_state`、`task_state`、`working_memory` の差分を反映する
+- 次に、`action_history`、`retrieval_runs`、エピソード候補を保存する
+- 次に、今回の `commit_record` を `log_sync_status="pending"` で確定して SQLite の更新を完了する
+- 次に、確定済み `commit_record` から `events.jsonl` を `commit_id` 単位で追記する
+- 最後に、`events.jsonl` 同期結果に応じて `log_sync_status` を `synced` または `needs_replay` に更新する
 - この順序は固定し、同一サイクル内で入れ替えない
 
 <!-- Block: Reflect Contract -->
@@ -253,8 +258,11 @@
 - `settings api` と `text input api` は、人格状態を直接変更せず、`pending_inputs` と `settings_overrides` に要求を書き込む
 - `pending_inputs` の各項目は、`input_id`、`source`、`channel`、`payload`、`created_at`、`priority`、`status` を持つ
 - `settings_overrides` の各項目は、`override_id`、`key`、`requested_value`、`apply_scope`、`created_at`、`status` を持つ
-- `status` は、少なくとも `queued`、`claimed`、`applied`、`rejected` を区別する
+- `pending_inputs.status` は、少なくとも `queued`、`claimed`、`consumed`、`discarded` を区別する
+- `settings_overrides.status` は、少なくとも `queued`、`claimed`、`applied`、`rejected` を区別する
 - ランタイムは、短周期の先頭で `queued` を `claimed` にし、そのサイクルの責任範囲として取り込む
+- ランタイムは、入力を処理した同じ短周期の保存で、`pending_inputs` の `claimed` を必ず `consumed` または `discarded` に確定する
+- ランタイムは、設定変更を評価した同じ短周期の保存で、`claimed` を必ず `applied` または `rejected` に確定する
 - Web サーバは、`self_state`、`world_state`、`memory_state` の正本を直接更新しない
 
 <!-- Block: State Slices -->
@@ -287,7 +295,8 @@
 - `LLM` の構造化出力が壊れている場合は、その短周期を失敗として記録し、実行段へ進めない
 - `action validator` が候補をすべて棄却した場合は、その事実を明示的に保存し、暗黙の代替行動は行わない
 - 外部 I/O の失敗は、`action_history` とイベントに残し、次の `reflection` 対象にする
-- 保存失敗は明示的なランタイムエラーとして扱い、黙って先へ進めない
+- SQLite 側の正本保存失敗は明示的なランタイムエラーとして扱い、黙って先へ進めない
+- `events.jsonl` の同期失敗は、`log_sync_status="needs_replay"` として明示し、状態差分の再適用ではなく派生ログ同期の再実行対象にする
 - エラーを握りつぶす処理は作らない
 
 <!-- Block: Concurrency Policy -->
@@ -306,6 +315,6 @@
 - `cognition_input` は、人格、状態、記憶、命令階層を必須断面として持つ
 - `LLM` は `cognition_result` を返すが、`action_command` は返さない
 - `action validator` は、候補を 1 つの実行命令へ確定するか、棄却または保留を明示する
-- 1 回の短周期は、1 つの保存単位として閉じる
-- `events.jsonl` は観測ログであり、正本は常に SQLite 側である
+- 1 回の短周期は、SQLite 側の正本更新を 1 つの保存単位として閉じる
+- `events.jsonl` は観測ログであり、`commit_record` から再構成できる派生ログとして扱う
 - エラーや不整合は明示的に失敗として扱い、暗黙の補完はしない

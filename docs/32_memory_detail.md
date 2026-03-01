@@ -23,7 +23,7 @@
 - 記憶は、`追記される出来事` と `更新で育つ状態` を分ける
 - 事実として観測された出来事は、矛盾があっても出来事ログから消さない
 - 長期記憶は、出来事から抽出して育てるが、必ず根拠イベントを持つ
-- 記憶の想起は、DB の単純検索だけで終わらせず、`RetrievalPlan -> 候補収集 -> LLM 選別` の 3 段で行う
+- 記憶の想起は、DB の単純検索だけで終わらせず、`RetrievalPlan -> 候補収集 -> LLM 選別 -> memory_bundle` の 4 段で行う
 - 記憶の更新は、短周期の保存完了後に行い、同期の即時反応と分離する
 - 忘却は削除ではなく、重要度、参照頻度、記憶強度の減衰で表現する
 - `working_memory` は長期記憶ではなく、その時点の作業断面として扱う
@@ -115,11 +115,12 @@
 
 - 各 `memory event` は、少なくとも `event_id`、`cycle_id`、`created_at`、`source`、`kind`、`searchable` を持つ
 - 各 `memory event` は、必要に応じて `observation_summary`、`action_summary`、`result_summary`、`payload_ref` を持つ
-- `source` は、少なくとも `web_input`、`camera`、`microphone`、`network_result`、`sns_result`、`line_result`、`internal_trigger`、`self_initiated` を区別する
+- `source` は、少なくとも `web_input`、`camera`、`microphone`、`network_result`、`sns_result`、`line_result`、`idle_tick`、`post_action_followup`、`self_initiated` を区別する
 - `kind` は、少なくとも `observation`、`action`、`action_result`、`internal_decision`、`external_response` を区別する
 - `searchable` は、想起対象に含めるかを示す明示フラグである
 - `event_id` の時系列は保存順序と一致させ、時系列検索の基準にする
 - `updated_at` は、注釈追加や派生更新があったときだけ更新し、出来事そのものの発生時刻は `created_at` に固定する
+- 内部起点のイベントは、`idle_tick`、`post_action_followup`、`self_initiated` の語彙をそのまま使い、短周期起点との対応を崩さない
 
 <!-- Block: Event Annotations -->
 ## 出来事注釈
@@ -455,7 +456,9 @@
 ## `retrieval_runs` の設計
 
 - `retrieval_runs` は、どのように思い出したかを観測するためのログである
-- `retrieval_runs` は、`run_id`、`event_id`、`created_at`、`plan_json`、`candidates_json`、`selected_json` を持つ
+- `retrieval_runs` は、`run_id`、`cycle_id`、`created_at`、`plan_json`、`candidates_json`、`selected_json`、`resolved_event_ids_json` を持つ
+- `cycle_id` は、想起が走った短周期への主参照であり、`retrieval_runs` の正本の結び先とする
+- `resolved_event_ids_json` は、その短周期で後から確定した `events` への補助参照であり、保存時に後から埋めてよい
 - `plan_json` には `RetrievalPlan` を保存する
 - `candidates_json` には、候補本文ではなく、件数、経路別内訳、圧縮後の統計だけを保存する
 - `selected_json` には、最終的な `memory_bundle` の要点と選別理由を保存する
@@ -465,7 +468,8 @@
 ## ランタイムとの接続点
 
 - 短周期では、`context assembler` が `RetrievalPlan` を作り、候補収集と選別を行って `memory_bundle` を作る
-- 短周期の保存では、`events` と `working_memory` の更新までを行う
+- 短周期の保存では、`events`、`working_memory`、必要なら `retrieval_runs` の更新までを行う
+- `retrieval_runs` は、想起時点で `cycle_id` で保存し、同じ短周期の `events` 確定後に `resolved_event_ids_json` を補助参照として埋めてよい
 - 長周期では、`reflection writer` が `reflection_bundle` を作り、それをもとに `MemoryWritePlan` を作る
 - 長周期の適用で、`memory_states`、`preference_memory`、`event_affects`、`event_links`、`event_threads`、`state_links`、`revisions`、`vec_items` を更新する
 - `skill promoter` は、記憶側に保存されたイベント列、反省、成功パターンを材料にする
