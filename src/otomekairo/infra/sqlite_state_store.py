@@ -13,6 +13,7 @@ from typing import Any
 from otomekairo.schema.runtime_types import (
     ActionHistoryRecord,
     CognitionStateSnapshot,
+    MemoryJobRecord,
     PendingInputRecord,
     SettingsOverrideRecord,
 )
@@ -779,6 +780,134 @@ class SqliteStateStore:
                 """,
                 (owner_token,),
             )
+
+    # Block: Memory job claim
+    def claim_next_memory_job(self) -> MemoryJobRecord | None:
+        now_ms = _now_ms()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """
+                SELECT
+                    memory_jobs.job_id,
+                    memory_jobs.job_kind,
+                    memory_jobs.created_at,
+                    memory_job_payloads.payload_json
+                FROM memory_jobs
+                JOIN memory_job_payloads
+                  ON json_extract(memory_jobs.payload_ref_json, '$.payload_id') = memory_job_payloads.payload_id
+                WHERE memory_jobs.status = 'queued'
+                ORDER BY memory_jobs.created_at ASC
+                LIMIT 1
+                """
+            ).fetchone()
+            if row is None:
+                return None
+            connection.execute(
+                """
+                UPDATE memory_jobs
+                SET status = 'claimed',
+                    tries = tries + 1,
+                    claimed_at = ?,
+                    updated_at = ?
+                WHERE job_id = ?
+                  AND status = 'queued'
+                """,
+                (now_ms, now_ms, row["job_id"]),
+            )
+        return MemoryJobRecord(
+            job_id=row["job_id"],
+            job_kind=row["job_kind"],
+            created_at=int(row["created_at"]),
+            payload=json.loads(row["payload_json"]),
+        )
+
+    # Block: Memory job apply
+    def complete_write_memory_job(self, *, memory_job: MemoryJobRecord) -> str:
+        if memory_job.job_kind != "write_memory":
+            raise StoreValidationError("memory_job.job_kind must be write_memory")
+        source_event_ids = memory_job.payload["source_event_ids"]
+        if not isinstance(source_event_ids, list) or not source_event_ids:
+            raise StoreValidationError("write_memory source_event_ids must not be empty")
+        now_ms = _now_ms()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            job_row = connection.execute(
+                """
+                SELECT status
+                FROM memory_jobs
+                WHERE job_id = ?
+                """,
+                (memory_job.job_id,),
+            ).fetchone()
+            if job_row is None:
+                raise RuntimeError("memory job is missing")
+            if job_row["status"] != "claimed":
+                raise StoreConflictError("memory job must be claimed before completion")
+            event_rows = _fetch_events_for_ids(
+                connection=connection,
+                event_ids=source_event_ids,
+            )
+            memory_state_id = _opaque_id("mem")
+            summary_text = _build_write_memory_summary_text(
+                primary_event_id=str(memory_job.payload["primary_event_id"]),
+                event_rows=event_rows,
+            )
+            connection.execute(
+                """
+                INSERT INTO memory_states (
+                    memory_state_id,
+                    memory_kind,
+                    body_text,
+                    payload_json,
+                    confidence,
+                    importance,
+                    memory_strength,
+                    searchable,
+                    last_confirmed_at,
+                    evidence_event_ids_json,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?, 'summary', ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
+                """,
+                (
+                    memory_state_id,
+                    summary_text,
+                    _json_text(
+                        {
+                            "source_job_id": memory_job.job_id,
+                            "job_kind": memory_job.job_kind,
+                            "source_cycle_id": memory_job.payload["cycle_id"],
+                            "primary_event_id": memory_job.payload["primary_event_id"],
+                            "source_event_ids": source_event_ids,
+                            "summary_kind": "minimal_write_memory",
+                        }
+                    ),
+                    0.50,
+                    0.50,
+                    0.50,
+                    now_ms,
+                    _json_text(source_event_ids),
+                    now_ms,
+                    now_ms,
+                ),
+            )
+            updated_row_count = connection.execute(
+                """
+                UPDATE memory_jobs
+                SET status = 'completed',
+                    completed_at = ?,
+                    updated_at = ?,
+                    last_error = NULL
+                WHERE job_id = ?
+                  AND status = 'claimed'
+                """,
+                (now_ms, now_ms, memory_job.job_id),
+            ).rowcount
+            if updated_row_count != 1:
+                raise StoreConflictError("memory job must be claimed before completion")
+        return memory_state_id
 
     # Block: Pending input claim
     def claim_next_pending_input(self) -> PendingInputRecord | None:
@@ -1654,6 +1783,63 @@ def _action_result_summary(action_result: ActionHistoryRecord) -> str:
 # Block: Memory job helpers
 def _write_memory_job_idempotency_key(*, cycle_id: str, event_ids: list[str]) -> str:
     return "write_memory:" + cycle_id + ":" + ":".join(event_ids)
+
+
+def _fetch_events_for_ids(
+    *,
+    connection: sqlite3.Connection,
+    event_ids: list[str],
+) -> list[sqlite3.Row]:
+    placeholders = ",".join("?" for _ in event_ids)
+    rows = connection.execute(
+        f"""
+        SELECT
+            event_id,
+            kind,
+            observation_summary,
+            action_summary,
+            result_summary,
+            created_at
+        FROM events
+        WHERE event_id IN ({placeholders})
+        """,
+        tuple(event_ids),
+    ).fetchall()
+    rows_by_id = {str(row["event_id"]): row for row in rows}
+    ordered_rows: list[sqlite3.Row] = []
+    for event_id in event_ids:
+        row = rows_by_id.get(event_id)
+        if row is None:
+            raise RuntimeError("source event for write_memory is missing")
+        ordered_rows.append(row)
+    return ordered_rows
+
+
+def _build_write_memory_summary_text(
+    *,
+    primary_event_id: str,
+    event_rows: list[sqlite3.Row],
+) -> str:
+    summary_parts: list[str] = []
+    for row in event_rows:
+        event_id = str(row["event_id"])
+        body = _event_summary_text(row)
+        if event_id == primary_event_id:
+            summary_parts.append(f"中心:{body}")
+            continue
+        summary_parts.append(body)
+    combined_text = " / ".join(part for part in summary_parts if part)
+    if combined_text:
+        return combined_text[:1000]
+    return "短周期で確定した出来事を要約した記憶"
+
+
+def _event_summary_text(row: sqlite3.Row) -> str:
+    for key in ("result_summary", "observation_summary", "action_summary"):
+        value = row[key]
+        if isinstance(value, str) and value:
+            return value
+    return str(row["kind"])
 
 
 # Block: Runtime settings helpers

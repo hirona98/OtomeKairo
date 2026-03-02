@@ -60,6 +60,9 @@ class RuntimeLoop:
             return True
         pending_input = self._store.claim_next_pending_input()
         if pending_input is None:
+            processed_memory = self._process_memory_job_once()
+            if processed_memory:
+                return True
             return False
         cycle_id = _opaque_id("cycle")
         self._store.append_input_journal_for_pending_input(
@@ -226,6 +229,16 @@ class RuntimeLoop:
             final_status=final_status,
             reject_reason=reject_reason,
         )
+        return True
+
+    # Block: Memory job iteration
+    def _process_memory_job_once(self) -> bool:
+        memory_job = self._store.claim_next_memory_job()
+        if memory_job is None:
+            return False
+        if memory_job.job_kind != "write_memory":
+            raise RuntimeError(f"unsupported memory job kind: {memory_job.job_kind}")
+        self._store.complete_write_memory_job(memory_job=memory_job)
         return True
 
     # Block: Infinite loop

@@ -26,6 +26,15 @@ class SettingsOverrideRecord:
     created_at: int
 
 
+# Block: Memory job record
+@dataclass(frozen=True, slots=True)
+class MemoryJobRecord:
+    job_id: str
+    job_kind: str
+    created_at: int
+    payload: dict[str, Any]
+
+
 # Block: Action history record
 @dataclass(frozen=True, slots=True)
 class ActionHistoryRecord:
