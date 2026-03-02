@@ -15,7 +15,7 @@
 ## このドキュメントで固定する範囲
 
 - 固定するのは、初期実装で使う JSON オブジェクトのキー、型、必須項目、固定語彙である
-- 固定するのは、`pending_inputs.payload_json`、`settings_overrides.requested_value_json`、`ui_outbound_events.payload_json`、`memory_jobs.payload_ref_json`、`memory_job_payloads.payload_json`、主要な Web API 本文である
+- 固定するのは、`pending_inputs.payload_json`、`settings_overrides.requested_value_json`、`ui_outbound_events.payload_json`、`action_history.command_json`、`action_history.observed_effects_json`、`memory_jobs.payload_ref_json`、`memory_job_payloads.payload_json`、主要な Web API 本文である
 - 固定するのは、`self_state.personality_json`、`self_state.current_emotion_json`、`self_state.long_term_goals_json`、`self_state.relationship_overview_json`、`self_state.invariants_json`、短周期の内部で使う `selection_profile`、`persona_consistency_score`、`attention_score_breakdown`、`self_initiated_score_breakdown`、`action_candidate_score`、長周期の内部で使う `personality_change_proposal`、`persona_updates` の形である
 - 固定しないのは、Python のクラス名、Pydantic モデル名、OpenAPI の自動生成細部である
 - 固定しないのは、将来追加する未使用フィールドや後段の拡張イベント種別である
@@ -722,6 +722,55 @@
 
 - 必須項目は `error_code`、`message` である
 - `retriable` は任意で、再試行可能なときだけ付ける
+
+<!-- Block: Action History Group -->
+## 行動履歴の JSON
+
+<!-- Block: Action Command -->
+### `action_history.command_json`
+
+- `action_history.command_json` は、その行動で実行しようとした命令の最小記録である
+- 初期実装では、ブラウザ向けの UI 応答命令をこの形で保持する
+
+```json
+{
+  "target_channel": "browser_chat",
+  "event_types": ["status", "message", "status"],
+  "message_id": "msg_...",
+  "role": "system_notice",
+  "related_input_id": "inp_..."
+}
+```
+
+- 必須項目は `target_channel`、`event_types` である
+- `target_channel` は、初期段階では `browser_chat` に固定する
+- `event_types` は、実際に出そうとした `ui_outbound_events.event_type` の順序付き配列である
+- `message_id` は、`event_type = message` を含む命令だけに付ける
+- `role` は、`message_id` を伴うメッセージ応答だけに付ける
+- `related_input_id` は、入力に対する応答行動だけに付ける
+- `target_message_id` は、`cancel` のように既存メッセージを対象化する行動だけに付ける
+- `input_kind` は、未対応入力のエラー応答のように、原因となる入力種別を残したいときだけ付ける
+
+<!-- Block: Action Effects -->
+### `action_history.observed_effects_json`
+
+- `action_history.observed_effects_json` は、その行動の直後に観測した最小結果である
+- 初期実装では、実際に UI へ流したイベント種別と主要 ID だけを保持する
+
+```json
+{
+  "emitted_event_types": ["status", "message", "status"],
+  "message_id": "msg_...",
+  "status_code_after": "idle"
+}
+```
+
+- 必須項目は `emitted_event_types` である
+- `emitted_event_types` は、実際に `ui_outbound_events` へ追記した `event_type` の順序付き配列である
+- `message_id` は、メッセージ応答を生成した場合だけに付ける
+- `notice_code` は、`notice` を生成した場合だけに付ける
+- `error_code` は、`error` を生成した場合だけに付ける
+- `status_code_after` は、最後に `status` を出した場合だけに付ける
 
 <!-- Block: Memory Job Group -->
 ## 記憶ジョブの JSON

@@ -8,7 +8,12 @@ from pathlib import Path
 from typing import Any
 
 from otomekairo import __version__
-from otomekairo.infra.sqlite_state_store import PendingInputRecord, SettingsOverrideRecord, SqliteStateStore
+from otomekairo.infra.sqlite_state_store import (
+    ActionHistoryRecord,
+    PendingInputRecord,
+    SettingsOverrideRecord,
+    SqliteStateStore,
+)
 from otomekairo.schema.settings import SettingsValidationError, build_default_settings, decode_requested_value, get_setting_definition
 
 
@@ -53,7 +58,7 @@ class RuntimeLoop:
             cycle_id=cycle_id,
         )
         resolved_at = _now_ms()
-        ui_events, resolution_status, discard_reason = _build_ui_events(
+        ui_events, action_results, resolution_status, discard_reason = _build_cycle_resolution(
             pending_input=pending_input,
             cycle_id=cycle_id,
             resolved_at=resolved_at,
@@ -64,12 +69,14 @@ class RuntimeLoop:
             "processed_input_id": pending_input.input_id,
             "processed_input_kind": pending_input.payload["input_kind"],
             "emitted_event_types": [ui_event["event_type"] for ui_event in ui_events],
+            "executed_action_types": [action_result.action_type for action_result in action_results],
             "resolution_status": resolution_status,
         }
         self._store.finalize_pending_input_cycle(
             pending_input=pending_input,
             cycle_id=cycle_id,
             resolution_status=resolution_status,
+            action_results=action_results,
             discard_reason=discard_reason,
             ui_events=ui_events,
             commit_payload=commit_payload,
@@ -150,30 +157,24 @@ def _evaluate_settings_override(settings_override: SettingsOverrideRecord) -> tu
     return ("applied", None)
 
 
-# Block: Event building
-def _build_ui_events(
+# Block: Cycle resolution
+def _build_cycle_resolution(
     *,
     pending_input: PendingInputRecord,
     cycle_id: str,
     resolved_at: int,
-) -> tuple[list[dict[str, Any]], str, str | None]:
+) -> tuple[list[dict[str, Any]], list[ActionHistoryRecord], str, str | None]:
     input_kind = pending_input.payload["input_kind"]
     if input_kind == "chat_message":
-        return (_chat_message_events(pending_input, cycle_id, resolved_at), "consumed", None)
+        ui_events, action_results = _chat_message_events(pending_input, cycle_id, resolved_at)
+        return (ui_events, action_results, "consumed", None)
     if input_kind == "cancel":
-        return (_cancel_events(pending_input, cycle_id), "consumed", None)
+        ui_events, action_results = _cancel_events(pending_input, cycle_id, resolved_at)
+        return (ui_events, action_results, "consumed", None)
+    ui_events, action_results = _unsupported_input_events(pending_input, resolved_at)
     return (
-        [
-            {
-                "channel": pending_input.channel,
-                "event_type": "error",
-                "payload": {
-                    "error_code": "unsupported_input_kind",
-                    "message": "未対応の入力種別です",
-                    "retriable": False,
-                },
-            }
-        ],
+        ui_events,
+        action_results,
         "discarded",
         "unsupported_input_kind",
     )
@@ -183,9 +184,9 @@ def _chat_message_events(
     pending_input: PendingInputRecord,
     cycle_id: str,
     resolved_at: int,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], list[ActionHistoryRecord]]:
     message_id = _opaque_id("msg")
-    return [
+    ui_events = [
         {
             "channel": pending_input.channel,
             "event_type": "status",
@@ -217,10 +218,40 @@ def _chat_message_events(
             },
         },
     ]
+    action_results = [
+        ActionHistoryRecord(
+            result_id=_opaque_id("actres"),
+            command_id=_opaque_id("cmd"),
+            action_type="emit_chat_response",
+            command={
+                "target_channel": pending_input.channel,
+                "event_types": ["status", "message", "status"],
+                "message_id": message_id,
+                "role": "system_notice",
+                "related_input_id": pending_input.input_id,
+            },
+            started_at=resolved_at,
+            finished_at=resolved_at + 1,
+            status="succeeded",
+            failure_mode=None,
+            observed_effects={
+                "emitted_event_types": ["status", "message", "status"],
+                "message_id": message_id,
+                "status_code_after": "idle",
+            },
+            raw_result_ref=None,
+            adapter_trace_ref=None,
+        )
+    ]
+    return (ui_events, action_results)
 
 
-def _cancel_events(pending_input: PendingInputRecord, cycle_id: str) -> list[dict[str, Any]]:
-    return [
+def _cancel_events(
+    pending_input: PendingInputRecord,
+    cycle_id: str,
+    resolved_at: int,
+) -> tuple[list[dict[str, Any]], list[ActionHistoryRecord]]:
+    ui_events = [
         {
             "channel": pending_input.channel,
             "event_type": "notice",
@@ -239,6 +270,71 @@ def _cancel_events(pending_input: PendingInputRecord, cycle_id: str) -> list[dic
             },
         },
     ]
+    action_results = [
+        ActionHistoryRecord(
+            result_id=_opaque_id("actres"),
+            command_id=_opaque_id("cmd"),
+            action_type="emit_cancel_notice",
+            command={
+                "target_channel": pending_input.channel,
+                "target_message_id": pending_input.payload.get("target_message_id"),
+                "event_types": ["notice", "status"],
+            },
+            started_at=resolved_at,
+            finished_at=resolved_at + 1,
+            status="succeeded",
+            failure_mode=None,
+            observed_effects={
+                "emitted_event_types": ["notice", "status"],
+                "notice_code": "cancel_requested",
+                "status_code_after": "idle",
+            },
+            raw_result_ref=None,
+            adapter_trace_ref=None,
+        )
+    ]
+    return (ui_events, action_results)
+
+
+def _unsupported_input_events(
+    pending_input: PendingInputRecord,
+    resolved_at: int,
+) -> tuple[list[dict[str, Any]], list[ActionHistoryRecord]]:
+    input_kind = str(pending_input.payload["input_kind"])
+    ui_events = [
+        {
+            "channel": pending_input.channel,
+            "event_type": "error",
+            "payload": {
+                "error_code": "unsupported_input_kind",
+                "message": "未対応の入力種別です",
+                "retriable": False,
+            },
+        }
+    ]
+    action_results = [
+        ActionHistoryRecord(
+            result_id=_opaque_id("actres"),
+            command_id=_opaque_id("cmd"),
+            action_type="emit_input_error",
+            command={
+                "target_channel": pending_input.channel,
+                "input_kind": input_kind,
+                "event_types": ["error"],
+            },
+            started_at=resolved_at,
+            finished_at=resolved_at + 1,
+            status="succeeded",
+            failure_mode=None,
+            observed_effects={
+                "emitted_event_types": ["error"],
+                "error_code": "unsupported_input_kind",
+            },
+            raw_result_ref=None,
+            adapter_trace_ref=None,
+        )
+    ]
+    return (ui_events, action_results)
 
 # Block: Runtime helpers
 def _default_db_path() -> Path:

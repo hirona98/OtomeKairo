@@ -246,6 +246,7 @@ flowchart TD
 - 必須列: `cycle_id`, `command_id`, `action_type`, `command_json`, `started_at`, `finished_at`, `status`
 - 任意列: `failure_mode`, `observed_effects_json`, `raw_result_ref_json`, `adapter_trace_ref_json`
 - `status` は、少なくとも `succeeded`、`failed`、`stopped` を区別する
+- `command_json` と `observed_effects_json` の JSON 形は、`docs/36_JSONデータ仕様.md` を正本とする
 - 主要索引: `(cycle_id)`, `(status, finished_at DESC)`
 
 <!-- Block: Events -->

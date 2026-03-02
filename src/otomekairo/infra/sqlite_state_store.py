@@ -54,6 +54,22 @@ class SettingsOverrideRecord:
     created_at: int
 
 
+# Block: Action history record
+@dataclass(frozen=True, slots=True)
+class ActionHistoryRecord:
+    result_id: str
+    command_id: str
+    action_type: str
+    command: dict[str, Any]
+    started_at: int
+    finished_at: int
+    status: str
+    failure_mode: str | None
+    observed_effects: dict[str, Any] | None
+    raw_result_ref: dict[str, Any] | None
+    adapter_trace_ref: dict[str, Any] | None
+
+
 # Block: Store implementation
 class SqliteStateStore:
     def __init__(self, db_path: Path, initializer_version: str) -> None:
@@ -631,6 +647,7 @@ class SqliteStateStore:
         pending_input: PendingInputRecord,
         cycle_id: str,
         resolution_status: str,
+        action_results: list[ActionHistoryRecord],
         ui_events: list[dict[str, Any]],
         commit_payload: dict[str, Any],
         discard_reason: str | None = None,
@@ -663,6 +680,7 @@ class SqliteStateStore:
                 connection=connection,
                 pending_input=pending_input,
                 cycle_id=cycle_id,
+                action_results=action_results,
                 ui_events=ui_events,
                 resolved_at=resolved_at,
             )
@@ -798,9 +816,11 @@ class SqliteStateStore:
         connection: sqlite3.Connection,
         pending_input: PendingInputRecord,
         cycle_id: str,
+        action_results: list[ActionHistoryRecord],
         ui_events: list[dict[str, Any]],
         resolved_at: int,
     ) -> list[str]:
+        input_journal_refs_json = _json_text([f"obs_{pending_input.input_id}"])
         event_ids = [
             self._insert_event(
                 connection=connection,
@@ -817,24 +837,119 @@ class SqliteStateStore:
                         "payload_version": 1,
                     }
                 ),
-                input_journal_refs_json=_json_text([f"obs_{pending_input.input_id}"]),
+                input_journal_refs_json=input_journal_refs_json,
             )
         ]
+        event_ids.extend(
+            self._insert_action_history(
+                connection=connection,
+                cycle_id=cycle_id,
+                action_results=action_results,
+                input_journal_refs_json=input_journal_refs_json,
+            )
+        )
         response_summary = _runtime_response_summary(ui_events)
         if response_summary is None:
             return event_ids
+        response_created_at = resolved_at
+        if action_results:
+            response_created_at = max(action_result.finished_at for action_result in action_results) + 1
         event_ids.append(
             self._insert_event(
                 connection=connection,
                 cycle_id=cycle_id,
-                created_at=resolved_at,
+                created_at=response_created_at,
                 source="runtime",
                 kind="external_response",
                 searchable=True,
                 result_summary=response_summary,
-                input_journal_refs_json=_json_text([f"obs_{pending_input.input_id}"]),
+                input_journal_refs_json=input_journal_refs_json,
             )
         )
+        return event_ids
+
+    # Block: Action history write
+    def _insert_action_history(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        cycle_id: str,
+        action_results: list[ActionHistoryRecord],
+        input_journal_refs_json: str,
+    ) -> list[str]:
+        event_ids: list[str] = []
+        for action_result in action_results:
+            if action_result.status not in {"succeeded", "failed", "stopped"}:
+                raise StoreValidationError("action status is invalid")
+            connection.execute(
+                """
+                INSERT INTO action_history (
+                    result_id,
+                    cycle_id,
+                    command_id,
+                    action_type,
+                    command_json,
+                    started_at,
+                    finished_at,
+                    status,
+                    failure_mode,
+                    observed_effects_json,
+                    raw_result_ref_json,
+                    adapter_trace_ref_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    action_result.result_id,
+                    cycle_id,
+                    action_result.command_id,
+                    action_result.action_type,
+                    _json_text(action_result.command),
+                    action_result.started_at,
+                    action_result.finished_at,
+                    action_result.status,
+                    action_result.failure_mode,
+                    (
+                        _json_text(action_result.observed_effects)
+                        if action_result.observed_effects is not None
+                        else None
+                    ),
+                    (
+                        _json_text(action_result.raw_result_ref)
+                        if action_result.raw_result_ref is not None
+                        else None
+                    ),
+                    (
+                        _json_text(action_result.adapter_trace_ref)
+                        if action_result.adapter_trace_ref is not None
+                        else None
+                    ),
+                ),
+            )
+            event_ids.append(
+                self._insert_event(
+                    connection=connection,
+                    cycle_id=cycle_id,
+                    created_at=action_result.started_at,
+                    source="runtime",
+                    kind="action",
+                    searchable=True,
+                    action_summary=_action_command_summary(action_result),
+                    input_journal_refs_json=input_journal_refs_json,
+                )
+            )
+            event_ids.append(
+                self._insert_event(
+                    connection=connection,
+                    cycle_id=cycle_id,
+                    created_at=action_result.finished_at,
+                    source="runtime",
+                    kind="action_result",
+                    searchable=True,
+                    result_summary=_action_result_summary(action_result),
+                    input_journal_refs_json=input_journal_refs_json,
+                )
+            )
         return event_ids
 
     # Block: Event insert
@@ -1252,6 +1367,20 @@ def _runtime_response_summary(ui_events: list[dict[str, Any]]) -> str | None:
         if event_type == "error":
             return str(payload["message"])
     return None
+
+
+# Block: Action summary helpers
+def _action_command_summary(action_result: ActionHistoryRecord) -> str:
+    target_channel = action_result.command.get("target_channel")
+    if isinstance(target_channel, str) and target_channel:
+        return f"{action_result.action_type} -> {target_channel}"
+    return action_result.action_type
+
+
+def _action_result_summary(action_result: ActionHistoryRecord) -> str:
+    if action_result.failure_mode:
+        return f"{action_result.action_type} {action_result.status}: {action_result.failure_mode}"
+    return f"{action_result.action_type} {action_result.status}"
 
 
 # Block: Runtime settings helpers

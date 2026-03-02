@@ -32,5 +32,5 @@
 - `src/otomekairo/boot/run_runtime.py`: 人格ランタイムの常時ループを起動する
 - `src/otomekairo/web/app.py`: FastAPI アプリを構成し、API ルータと例外処理を束ねる
 - `src/otomekairo/infra/sqlite_state_store.py`: `core_schema.sql` を読み込む DB 初期化と、状態参照・入力受付・設定反映の最小実装を持つ
-- `src/otomekairo/runtime/main_loop.py`: `settings_overrides` と `pending_inputs` を消費し、`input_journal`、`events`、`ui_outbound_events`、`commit_records` まで閉じ、`runtime.idle_tick_ms` を待機間隔に使う最小ランタイムを持つ
+- `src/otomekairo/runtime/main_loop.py`: `settings_overrides` と `pending_inputs` を消費し、`input_journal`、`action_history`、`events`、`ui_outbound_events`、`commit_records` まで閉じ、`runtime.idle_tick_ms` を待機間隔に使う最小ランタイムを持つ
 - `src/otomekairo/schema/settings.py`: 設定キーの検証と有効設定の初期値を定義する
