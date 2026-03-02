@@ -257,6 +257,7 @@ flowchart TD
 - 任意列: `updated_at`, `observation_summary`, `action_summary`, `result_summary`, `payload_ref_json`, `input_journal_refs_json`
 - `kind` は、少なくとも `observation`、`action`、`action_result`、`internal_decision`、`external_response` を区別する
 - `searchable` は、`0 / 1` で持つ
+- `input_journal_refs_json` の JSON 形は、`docs/36_JSONデータ仕様.md` を正本とする
 - 主要索引: `(cycle_id)`, `(created_at DESC)`, `(searchable, created_at DESC)`, `(source, created_at DESC)`
 
 <!-- Block: Commit Records -->

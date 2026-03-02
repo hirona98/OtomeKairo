@@ -565,6 +565,22 @@
 - 各値は、UTC unix milliseconds の `integer` に固定する
 - `next_boot` の materialize は、この時刻が既存値より新しいキーだけを更新する
 
+<!-- Block: Event Group -->
+## イベントテーブルの JSON
+
+<!-- Block: Event Input Journal Refs -->
+### `events.input_journal_refs_json`
+
+```json
+[
+  "obs_inp_..."
+]
+```
+
+- `events.input_journal_refs_json` は、その `events` 行の根拠になった `input_journal.observation_id` の順序付き配列である
+- 各要素は、不透明な `string` に固定する
+- 空配列は許可するが、外部入力や観測に由来する `events` では根拠がある限り省略しない
+
 <!-- Block: Control Plane Group -->
 ## 制御面テーブルの JSON
 

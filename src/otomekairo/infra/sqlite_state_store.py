@@ -259,6 +259,16 @@ class SqliteStateStore:
                     value=applied_value,
                     applied_at=resolved_at,
                 )
+            event_ids = self._insert_settings_override_events(
+                connection=connection,
+                override_id=override_id,
+                cycle_id=cycle_id,
+                key=key,
+                apply_scope=apply_scope,
+                final_status=final_status,
+                reject_reason=reject_reason,
+                resolved_at=resolved_at,
+            )
             updated_row_count = connection.execute(
                 """
                 UPDATE settings_overrides
@@ -293,6 +303,7 @@ class SqliteStateStore:
                             "settings_key": key,
                             "apply_scope": apply_scope,
                             "resolution_status": final_status,
+                            "event_ids": event_ids,
                         }
                     ),
                 ),
@@ -617,7 +628,7 @@ class SqliteStateStore:
     def finalize_pending_input_cycle(
         self,
         *,
-        input_id: str,
+        pending_input: PendingInputRecord,
         cycle_id: str,
         resolution_status: str,
         ui_events: list[dict[str, Any]],
@@ -648,6 +659,13 @@ class SqliteStateStore:
                         cycle_id,
                     ),
                 )
+            event_ids = self._insert_pending_input_events(
+                connection=connection,
+                pending_input=pending_input,
+                cycle_id=cycle_id,
+                ui_events=ui_events,
+                resolved_at=resolved_at,
+            )
             updated_row_count = connection.execute(
                 """
                 UPDATE pending_inputs
@@ -657,7 +675,7 @@ class SqliteStateStore:
                 WHERE input_id = ?
                   AND status = 'claimed'
                 """,
-                (resolution_status, resolved_at, discard_reason, input_id),
+                (resolution_status, resolved_at, discard_reason, pending_input.input_id),
             ).rowcount
             if updated_row_count != 1:
                 raise StoreConflictError("pending input must be claimed before finalization")
@@ -671,7 +689,11 @@ class SqliteStateStore:
                 )
                 VALUES (?, ?, 'pending', ?)
                 """,
-                (cycle_id, resolved_at, _json_text(commit_payload)),
+                (
+                    cycle_id,
+                    resolved_at,
+                    _json_text({**commit_payload, "event_ids": event_ids}),
+                ),
             )
             commit_id = connection.execute(
                 """
@@ -732,6 +754,138 @@ class SqliteStateStore:
                     now_ms,
                 ),
             )
+
+    # Block: Settings event write
+    def _insert_settings_override_events(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        override_id: str,
+        cycle_id: str,
+        key: str,
+        apply_scope: str,
+        final_status: str,
+        reject_reason: str | None,
+        resolved_at: int,
+    ) -> list[str]:
+        summary = f"settings {key} {final_status} ({apply_scope})"
+        if reject_reason:
+            summary = f"{summary}: {reject_reason}"
+        return [
+            self._insert_event(
+                connection=connection,
+                cycle_id=cycle_id,
+                created_at=resolved_at,
+                source="runtime",
+                kind="internal_decision",
+                searchable=True,
+                result_summary=summary,
+                payload_ref_json=_json_text(
+                    {
+                        "payload_kind": "input_payload",
+                        "payload_id": override_id,
+                        "payload_version": 1,
+                    }
+                ),
+                input_journal_refs_json=_json_text([f"obs_{override_id}"]),
+            )
+        ]
+
+    # Block: Pending input event write
+    def _insert_pending_input_events(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        pending_input: PendingInputRecord,
+        cycle_id: str,
+        ui_events: list[dict[str, Any]],
+        resolved_at: int,
+    ) -> list[str]:
+        event_ids = [
+            self._insert_event(
+                connection=connection,
+                cycle_id=cycle_id,
+                created_at=pending_input.created_at,
+                source=pending_input.source,
+                kind="observation",
+                searchable=True,
+                observation_summary=_pending_input_receipt_summary(pending_input),
+                payload_ref_json=_json_text(
+                    {
+                        "payload_kind": "input_payload",
+                        "payload_id": pending_input.input_id,
+                        "payload_version": 1,
+                    }
+                ),
+                input_journal_refs_json=_json_text([f"obs_{pending_input.input_id}"]),
+            )
+        ]
+        response_summary = _runtime_response_summary(ui_events)
+        if response_summary is None:
+            return event_ids
+        event_ids.append(
+            self._insert_event(
+                connection=connection,
+                cycle_id=cycle_id,
+                created_at=resolved_at,
+                source="runtime",
+                kind="external_response",
+                searchable=True,
+                result_summary=response_summary,
+                input_journal_refs_json=_json_text([f"obs_{pending_input.input_id}"]),
+            )
+        )
+        return event_ids
+
+    # Block: Event insert
+    def _insert_event(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        cycle_id: str,
+        created_at: int,
+        source: str,
+        kind: str,
+        searchable: bool,
+        observation_summary: str | None = None,
+        action_summary: str | None = None,
+        result_summary: str | None = None,
+        payload_ref_json: str | None = None,
+        input_journal_refs_json: str | None = None,
+    ) -> str:
+        event_id = _opaque_id("evt")
+        connection.execute(
+            """
+            INSERT INTO events (
+                event_id,
+                cycle_id,
+                created_at,
+                source,
+                kind,
+                searchable,
+                observation_summary,
+                action_summary,
+                result_summary,
+                payload_ref_json,
+                input_journal_refs_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                event_id,
+                cycle_id,
+                created_at,
+                source,
+                kind,
+                1 if searchable else 0,
+                observation_summary,
+                action_summary,
+                result_summary,
+                payload_ref_json,
+                input_journal_refs_json,
+            ),
+        )
+        return event_id
 
     # Block: SQLite connection
     def _connect(self) -> sqlite3.Connection:
@@ -1085,6 +1239,19 @@ def _pending_input_receipt_summary(pending_input: PendingInputRecord) -> str:
     if input_kind == "cancel":
         return "cancel request"
     return f"input:{input_kind}"
+
+
+def _runtime_response_summary(ui_events: list[dict[str, Any]]) -> str | None:
+    for ui_event in ui_events:
+        payload = ui_event["payload"]
+        event_type = ui_event["event_type"]
+        if event_type == "message":
+            return str(payload["text"])
+        if event_type == "notice":
+            return str(payload["text"])
+        if event_type == "error":
+            return str(payload["message"])
+    return None
 
 
 # Block: Runtime settings helpers

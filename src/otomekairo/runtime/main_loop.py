@@ -67,7 +67,7 @@ class RuntimeLoop:
             "resolution_status": resolution_status,
         }
         self._store.finalize_pending_input_cycle(
-            input_id=pending_input.input_id,
+            pending_input=pending_input,
             cycle_id=cycle_id,
             resolution_status=resolution_status,
             discard_reason=discard_reason,
