@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Iterator
 from typing import Any
 
-from otomekairo.gateway.cognition_client import CognitionRequest, CognitionResponse
+from otomekairo.gateway.cognition_client import CognitionRequest
 
 
 # Block: LiteLLM cognition client
@@ -12,19 +13,17 @@ class LiteLLMCognitionClient:
     def __init__(self) -> None:
         self._litellm = _import_litellm_module()
 
-    # Block: Completion call
-    def complete(self, request: CognitionRequest) -> CognitionResponse:
+    # Block: Streaming completion call
+    def stream_text(self, request: CognitionRequest) -> Iterable[str]:
         context_budget = request.cognition_input["context_budget"]
         response = self._litellm.completion(
             model=str(context_budget["default_model"]),
             messages=_build_messages(request),
             temperature=float(context_budget["temperature"]),
             max_tokens=int(context_budget["max_output_tokens"]),
+            stream=True,
         )
-        return CognitionResponse(
-            response_text=_extract_response_text(response),
-            response_role="assistant",
-        )
+        return _stream_response_text(response)
 
 
 # Block: LiteLLM import
@@ -68,23 +67,32 @@ def _build_messages(request: CognitionRequest) -> list[dict[str, str]]:
     ]
 
 
-# Block: Response extraction
-def _extract_response_text(response: Any) -> str:
-    if not hasattr(response, "choices") or not response.choices:
-        raise RuntimeError("LiteLLM response does not contain choices")
-    message = response.choices[0].message
-    content = getattr(message, "content", None)
+# Block: Streaming response extraction
+def _stream_response_text(response: Any) -> Iterator[str]:
+    yielded_any = False
+    for chunk in response:
+        chunk_text = _extract_chunk_text(chunk)
+        if not chunk_text:
+            continue
+        yielded_any = True
+        yield chunk_text
+    if not yielded_any:
+        raise RuntimeError("LiteLLM stream content is missing")
+
+
+def _extract_chunk_text(chunk: Any) -> str:
+    if not hasattr(chunk, "choices") or not chunk.choices:
+        return ""
+    delta = getattr(chunk.choices[0], "delta", None)
+    if delta is None:
+        return ""
+    content = getattr(delta, "content", None)
     if isinstance(content, str):
-        stripped_content = content.strip()
-        if stripped_content:
-            return stripped_content
-        raise RuntimeError("LiteLLM response content is blank")
+        return content
     if isinstance(content, list):
         text_parts = [part.get("text", "") for part in content if isinstance(part, dict)]
-        combined_text = "".join(text_parts).strip()
-        if combined_text:
-            return combined_text
-    raise RuntimeError("LiteLLM response content is missing")
+        return "".join(text_parts)
+    return ""
 
 
 # Block: Formatting helpers

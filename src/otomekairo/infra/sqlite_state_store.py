@@ -643,6 +643,38 @@ class SqliteStateStore:
             for row in rows
         ]
 
+    # Block: Stream event append
+    def append_ui_outbound_event(
+        self,
+        *,
+        channel: str,
+        event_type: str,
+        payload: dict[str, Any],
+        source_cycle_id: str,
+    ) -> int:
+        created_at = _now_ms()
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO ui_outbound_events (
+                    channel,
+                    event_type,
+                    payload_json,
+                    created_at,
+                    source_cycle_id
+                )
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    channel,
+                    event_type,
+                    _json_text(payload),
+                    created_at,
+                    source_cycle_id,
+                ),
+            )
+        return int(cursor.lastrowid)
+
     # Block: Runtime lease
     def acquire_runtime_lease(self, *, owner_token: str, lease_ttl_ms: int) -> None:
         if lease_ttl_ms <= 0:
@@ -682,6 +714,52 @@ class SqliteStateStore:
                 """,
                 (owner_token, now_ms, now_ms, expires_at),
             )
+
+    # Block: Matching cancel claim
+    def claim_matching_cancel_input(
+        self,
+        *,
+        channel: str,
+        target_message_id: str,
+    ) -> PendingInputRecord | None:
+        now_ms = _now_ms()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """
+                SELECT input_id, source, channel, payload_json, created_at
+                FROM pending_inputs
+                WHERE status = 'queued'
+                  AND channel = ?
+                  AND json_extract(payload_json, '$.input_kind') = 'cancel'
+                  AND (
+                        json_extract(payload_json, '$.target_message_id') IS NULL
+                        OR json_extract(payload_json, '$.target_message_id') = ?
+                  )
+                ORDER BY priority DESC, created_at ASC
+                LIMIT 1
+                """,
+                (channel, target_message_id),
+            ).fetchone()
+            if row is None:
+                return None
+            connection.execute(
+                """
+                UPDATE pending_inputs
+                SET status = 'claimed',
+                    claimed_at = ?
+                WHERE input_id = ?
+                  AND status = 'queued'
+                """,
+                (now_ms, row["input_id"]),
+            )
+        return PendingInputRecord(
+            input_id=row["input_id"],
+            source=row["source"],
+            channel=row["channel"],
+            created_at=int(row["created_at"]),
+            payload=json.loads(row["payload_json"]),
+        )
 
     # Block: Runtime lease release
     def release_runtime_lease(self, *, owner_token: str) -> None:
@@ -762,26 +840,6 @@ class SqliteStateStore:
             raise StoreValidationError("resolution_status is invalid")
         resolved_at = _now_ms()
         with self._connect() as connection:
-            for ui_event in ui_events:
-                connection.execute(
-                    """
-                    INSERT INTO ui_outbound_events (
-                        channel,
-                        event_type,
-                        payload_json,
-                        created_at,
-                        source_cycle_id
-                    )
-                    VALUES (?, ?, ?, ?, ?)
-                    """,
-                    (
-                        ui_event["channel"],
-                        ui_event["event_type"],
-                        _json_text(ui_event["payload"]),
-                        resolved_at,
-                        cycle_id,
-                    ),
-                )
             event_ids = self._insert_pending_input_events(
                 connection=connection,
                 pending_input=pending_input,

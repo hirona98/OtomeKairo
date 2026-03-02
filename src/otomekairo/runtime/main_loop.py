@@ -18,7 +18,8 @@ from otomekairo.usecase.run_cognition import run_cognition_for_chat_message
 
 # Block: Runtime constants
 DEFAULT_LEASE_HEARTBEAT_MS = 5_000
-DEFAULT_LEASE_TTL_MS = 15_000
+MINIMUM_LEASE_TTL_MS = 15_000
+DEFAULT_LEASE_TTL_MS = 60_000
 
 
 # Block: Runtime loop
@@ -38,7 +39,7 @@ class RuntimeLoop:
             raise RuntimeError("lease_heartbeat_ms must be positive")
         if lease_heartbeat_ms > DEFAULT_LEASE_HEARTBEAT_MS:
             raise RuntimeError("lease_heartbeat_ms must be 5000 or less")
-        if lease_ttl_ms < DEFAULT_LEASE_TTL_MS:
+        if lease_ttl_ms < MINIMUM_LEASE_TTL_MS:
             raise RuntimeError("lease_ttl_ms must be 15000 or more")
         self._store = store
         self._owner_token = owner_token
@@ -50,10 +51,7 @@ class RuntimeLoop:
 
     # Block: Single iteration
     def run_once(self) -> bool:
-        self._store.acquire_runtime_lease(
-            owner_token=self._owner_token,
-            lease_ttl_ms=self._lease_ttl_ms,
-        )
+        self._refresh_runtime_lease()
         if not self._boot_reconciled:
             self._store.materialize_next_boot_settings()
             self._boot_reconciled = True
@@ -117,6 +115,11 @@ class RuntimeLoop:
                 resolved_at=resolved_at,
                 cognition_input=cognition_input,
                 cognition_client=self._cognition_client,
+                emit_ui_event=lambda ui_event: self._append_ui_event(cycle_id=cycle_id, ui_event=ui_event),
+                consume_cancel=lambda message_id: self._consume_matching_cancel(
+                    channel=pending_input.channel,
+                    message_id=message_id,
+                ),
             )
             return (
                 cognition_execution.ui_events,
@@ -127,12 +130,81 @@ class RuntimeLoop:
         if input_kind == "cancel":
             return ([], [], "discarded", "cancel_target_not_found")
         ui_events, action_results = _unsupported_input_events(pending_input, resolved_at)
+        self._append_ui_events(cycle_id=cycle_id, ui_events=ui_events)
         return (
             ui_events,
             action_results,
             "discarded",
             "unsupported_input_kind",
         )
+
+    # Block: UI event append
+    def _append_ui_event(self, *, cycle_id: str, ui_event: dict[str, Any]) -> None:
+        self._refresh_runtime_lease()
+        self._store.append_ui_outbound_event(
+            channel=ui_event["channel"],
+            event_type=ui_event["event_type"],
+            payload=ui_event["payload"],
+            source_cycle_id=cycle_id,
+        )
+
+    def _append_ui_events(self, *, cycle_id: str, ui_events: list[dict[str, Any]]) -> None:
+        for ui_event in ui_events:
+            self._append_ui_event(cycle_id=cycle_id, ui_event=ui_event)
+
+    # Block: Active cancel handling
+    def _consume_matching_cancel(self, *, channel: str, message_id: str) -> bool:
+        self._refresh_runtime_lease()
+        pending_input = self._store.claim_matching_cancel_input(
+            channel=channel,
+            target_message_id=message_id,
+        )
+        if pending_input is None:
+            return False
+        cycle_id = _opaque_id("cycle")
+        resolved_at = _now_ms()
+        self._store.append_input_journal_for_pending_input(
+            pending_input=pending_input,
+            cycle_id=cycle_id,
+        )
+        action_result = ActionHistoryRecord(
+            result_id=_opaque_id("actres"),
+            command_id=_opaque_id("cmd"),
+            action_type="stop_active_message",
+            command={
+                "target_channel": channel,
+                "target_message_id": message_id,
+                "event_types": [],
+            },
+            started_at=resolved_at,
+            finished_at=resolved_at,
+            status="succeeded",
+            failure_mode=None,
+            observed_effects={
+                "target_message_id": message_id,
+                "stop_reason": "cancel_requested",
+            },
+            raw_result_ref=None,
+            adapter_trace_ref=None,
+        )
+        self._store.finalize_pending_input_cycle(
+            pending_input=pending_input,
+            cycle_id=cycle_id,
+            resolution_status="consumed",
+            action_results=[action_result],
+            discard_reason=None,
+            ui_events=[],
+            commit_payload={
+                "cycle_kind": "short",
+                "trigger_reason": "external_input",
+                "processed_input_id": pending_input.input_id,
+                "processed_input_kind": "cancel",
+                "emitted_event_types": [],
+                "executed_action_types": ["stop_active_message"],
+                "resolution_status": "consumed",
+            },
+        )
+        return True
 
     # Block: Settings iteration
     def _process_settings_override_once(self) -> bool:
@@ -184,10 +256,14 @@ class RuntimeLoop:
             time.sleep(sleep_ms / 1000.0)
             remaining_ms -= sleep_ms
             if remaining_ms > 0:
-                self._store.acquire_runtime_lease(
-                    owner_token=self._owner_token,
-                    lease_ttl_ms=self._lease_ttl_ms,
-                )
+                self._refresh_runtime_lease()
+
+    # Block: Lease refresh
+    def _refresh_runtime_lease(self) -> None:
+        self._store.acquire_runtime_lease(
+            owner_token=self._owner_token,
+            lease_ttl_ms=self._lease_ttl_ms,
+        )
 
 
 # Block: Runtime construction

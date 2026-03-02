@@ -14,7 +14,7 @@ from otomekairo.web.dependencies import ApiError, AppServices
 
 # Block: Stream constants
 HEARTBEAT_INTERVAL_SECONDS = 15.0
-POLL_INTERVAL_SECONDS = 1.0
+POLL_INTERVAL_SECONDS = 0.1
 
 
 # Block: Router factory
