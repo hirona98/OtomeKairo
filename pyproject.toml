@@ -16,6 +16,7 @@ dependencies = [
 
 [project.scripts]
 otomekairo-web = "otomekairo.boot.run_web:main"
+otomekairo-runtime = "otomekairo.boot.run_runtime:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/otomekairo"]

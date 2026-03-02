@@ -1,0 +1,207 @@
+"""Minimal runtime loop for consuming pending inputs."""
+
+from __future__ import annotations
+
+import os
+import time
+import uuid
+from pathlib import Path
+from typing import Any
+
+from otomekairo import __version__
+from otomekairo.infra.sqlite_state_store import PendingInputRecord, SqliteStateStore
+
+
+# Block: Runtime constants
+DEFAULT_LEASE_TTL_MS = 5_000
+DEFAULT_POLL_INTERVAL_MS = 500
+
+
+# Block: Runtime loop
+class RuntimeLoop:
+    def __init__(
+        self,
+        *,
+        store: SqliteStateStore,
+        owner_token: str,
+        lease_ttl_ms: int = DEFAULT_LEASE_TTL_MS,
+    ) -> None:
+        self._store = store
+        self._owner_token = owner_token
+        self._lease_ttl_ms = lease_ttl_ms
+
+    # Block: Single iteration
+    def run_once(self) -> bool:
+        self._store.acquire_runtime_lease(
+            owner_token=self._owner_token,
+            lease_ttl_ms=self._lease_ttl_ms,
+        )
+        pending_input = self._store.claim_next_pending_input()
+        if pending_input is None:
+            return False
+        cycle_id = _opaque_id("cycle")
+        resolved_at = _now_ms()
+        ui_events, resolution_status, discard_reason = _build_ui_events(
+            pending_input=pending_input,
+            cycle_id=cycle_id,
+            resolved_at=resolved_at,
+        )
+        commit_payload = {
+            "cycle_kind": "short",
+            "trigger_reason": "external_input",
+            "processed_input_id": pending_input.input_id,
+            "processed_input_kind": pending_input.payload["input_kind"],
+            "emitted_event_types": [ui_event["event_type"] for ui_event in ui_events],
+            "resolution_status": resolution_status,
+        }
+        self._store.finalize_pending_input_cycle(
+            input_id=pending_input.input_id,
+            cycle_id=cycle_id,
+            resolution_status=resolution_status,
+            discard_reason=discard_reason,
+            ui_events=ui_events,
+            commit_payload=commit_payload,
+        )
+        return True
+
+    # Block: Infinite loop
+    def run_forever(self, *, poll_interval_ms: int = DEFAULT_POLL_INTERVAL_MS) -> None:
+        if poll_interval_ms <= 0:
+            raise ValueError("poll_interval_ms must be positive")
+        try:
+            while True:
+                processed = self.run_once()
+                if not processed:
+                    time.sleep(poll_interval_ms / 1000.0)
+        finally:
+            self._store.release_runtime_lease(owner_token=self._owner_token)
+
+
+# Block: Runtime construction
+def build_runtime_loop(*, db_path: Path | None = None) -> RuntimeLoop:
+    resolved_db_path = db_path or _default_db_path()
+    store = SqliteStateStore(
+        db_path=resolved_db_path,
+        initializer_version=__version__,
+    )
+    store.initialize()
+    return RuntimeLoop(
+        store=store,
+        owner_token=_runtime_owner_token(),
+        lease_ttl_ms=_lease_ttl_ms(),
+    )
+
+
+# Block: Event building
+def _build_ui_events(
+    *,
+    pending_input: PendingInputRecord,
+    cycle_id: str,
+    resolved_at: int,
+) -> tuple[list[dict[str, Any]], str, str | None]:
+    input_kind = pending_input.payload["input_kind"]
+    if input_kind == "chat_message":
+        return (_chat_message_events(pending_input, cycle_id, resolved_at), "consumed", None)
+    if input_kind == "cancel":
+        return (_cancel_events(pending_input, cycle_id), "consumed", None)
+    return (
+        [
+            {
+                "channel": pending_input.channel,
+                "event_type": "error",
+                "payload": {
+                    "error_code": "unsupported_input_kind",
+                    "message": "未対応の入力種別です",
+                    "retriable": False,
+                },
+            }
+        ],
+        "discarded",
+        "unsupported_input_kind",
+    )
+
+
+def _chat_message_events(
+    pending_input: PendingInputRecord,
+    cycle_id: str,
+    resolved_at: int,
+) -> list[dict[str, Any]]:
+    message_id = _opaque_id("msg")
+    return [
+        {
+            "channel": pending_input.channel,
+            "event_type": "status",
+            "payload": {
+                "status_code": "thinking",
+                "label": "入力を処理しています",
+                "cycle_id": cycle_id,
+            },
+        },
+        {
+            "channel": pending_input.channel,
+            "event_type": "message",
+            "payload": {
+                "message_id": message_id,
+                "role": "system_notice",
+                "text": "入力を受け付けました。認知処理はこれから実装します。",
+                "created_at": resolved_at,
+                "source_cycle_id": cycle_id,
+                "related_input_id": pending_input.input_id,
+            },
+        },
+        {
+            "channel": pending_input.channel,
+            "event_type": "status",
+            "payload": {
+                "status_code": "idle",
+                "label": "待機中",
+                "cycle_id": cycle_id,
+            },
+        },
+    ]
+
+
+def _cancel_events(pending_input: PendingInputRecord, cycle_id: str) -> list[dict[str, Any]]:
+    return [
+        {
+            "channel": pending_input.channel,
+            "event_type": "notice",
+            "payload": {
+                "notice_code": "cancel_requested",
+                "text": "停止要求を受け付けました",
+            },
+        },
+        {
+            "channel": pending_input.channel,
+            "event_type": "status",
+            "payload": {
+                "status_code": "idle",
+                "label": "待機中",
+                "cycle_id": cycle_id,
+            },
+        },
+    ]
+
+
+# Block: Runtime helpers
+def _default_db_path() -> Path:
+    db_path = os.environ.get("OTOMEKAIRO_DB_PATH")
+    if db_path:
+        return Path(db_path)
+    return Path(__file__).resolve().parents[3] / "data" / "core.sqlite3"
+
+
+def _runtime_owner_token() -> str:
+    return f"runtime_{uuid.uuid4().hex}"
+
+
+def _lease_ttl_ms() -> int:
+    return int(os.environ.get("OTOMEKAIRO_RUNTIME_LEASE_MS", str(DEFAULT_LEASE_TTL_MS)))
+
+
+def _opaque_id(prefix: str) -> str:
+    return f"{prefix}_{uuid.uuid4().hex}"
+
+
+def _now_ms() -> int:
+    return int(time.time() * 1000)

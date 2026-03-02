@@ -32,6 +32,14 @@ class BootstrapResult:
     initialized_at: int
 
 
+# Block: Pending input record
+@dataclass(frozen=True, slots=True)
+class PendingInputRecord:
+    input_id: str
+    channel: str
+    payload: dict[str, Any]
+
+
 # Block: Store implementation
 class SqliteStateStore:
     def __init__(self, db_path: Path, initializer_version: str) -> None:
@@ -288,6 +296,162 @@ class SqliteStateStore:
             }
             for row in rows
         ]
+
+    # Block: Runtime lease
+    def acquire_runtime_lease(self, *, owner_token: str, lease_ttl_ms: int) -> None:
+        if lease_ttl_ms <= 0:
+            raise StoreValidationError("lease_ttl_ms must be positive")
+        now_ms = _now_ms()
+        expires_at = now_ms + lease_ttl_ms
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """
+                SELECT owner_token, expires_at
+                FROM runtime_leases
+                WHERE lease_name = 'primary_runtime'
+                """
+            ).fetchone()
+            if row is not None and row["owner_token"] != owner_token and row["expires_at"] >= now_ms:
+                raise StoreConflictError("primary runtime lease is already held")
+            connection.execute(
+                """
+                INSERT INTO runtime_leases (
+                    lease_name,
+                    owner_token,
+                    acquired_at,
+                    heartbeat_at,
+                    expires_at
+                )
+                VALUES ('primary_runtime', ?, ?, ?, ?)
+                ON CONFLICT(lease_name) DO UPDATE SET
+                    owner_token = excluded.owner_token,
+                    acquired_at = CASE
+                        WHEN runtime_leases.owner_token = excluded.owner_token
+                            THEN runtime_leases.acquired_at
+                        ELSE excluded.acquired_at
+                    END,
+                    heartbeat_at = excluded.heartbeat_at,
+                    expires_at = excluded.expires_at
+                """,
+                (owner_token, now_ms, now_ms, expires_at),
+            )
+
+    # Block: Runtime lease release
+    def release_runtime_lease(self, *, owner_token: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                DELETE FROM runtime_leases
+                WHERE lease_name = 'primary_runtime'
+                  AND owner_token = ?
+                """,
+                (owner_token,),
+            )
+
+    # Block: Pending input claim
+    def claim_next_pending_input(self) -> PendingInputRecord | None:
+        now_ms = _now_ms()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """
+                SELECT input_id, channel, payload_json
+                FROM pending_inputs
+                WHERE status = 'queued'
+                ORDER BY priority DESC, created_at ASC
+                LIMIT 1
+                """
+            ).fetchone()
+            if row is None:
+                return None
+            connection.execute(
+                """
+                UPDATE pending_inputs
+                SET status = 'claimed',
+                    claimed_at = ?
+                WHERE input_id = ?
+                  AND status = 'queued'
+                """,
+                (now_ms, row["input_id"]),
+            )
+        return PendingInputRecord(
+            input_id=row["input_id"],
+            channel=row["channel"],
+            payload=json.loads(row["payload_json"]),
+        )
+
+    # Block: Cycle finalize
+    def finalize_pending_input_cycle(
+        self,
+        *,
+        input_id: str,
+        cycle_id: str,
+        resolution_status: str,
+        ui_events: list[dict[str, Any]],
+        commit_payload: dict[str, Any],
+        discard_reason: str | None = None,
+    ) -> int:
+        if resolution_status not in {"consumed", "discarded"}:
+            raise StoreValidationError("resolution_status is invalid")
+        resolved_at = _now_ms()
+        with self._connect() as connection:
+            for ui_event in ui_events:
+                connection.execute(
+                    """
+                    INSERT INTO ui_outbound_events (
+                        channel,
+                        event_type,
+                        payload_json,
+                        created_at,
+                        source_cycle_id
+                    )
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        ui_event["channel"],
+                        ui_event["event_type"],
+                        _json_text(ui_event["payload"]),
+                        resolved_at,
+                        cycle_id,
+                    ),
+                )
+            updated_row_count = connection.execute(
+                """
+                UPDATE pending_inputs
+                SET status = ?,
+                    resolved_at = ?,
+                    discard_reason = ?
+                WHERE input_id = ?
+                  AND status = 'claimed'
+                """,
+                (resolution_status, resolved_at, discard_reason, input_id),
+            ).rowcount
+            if updated_row_count != 1:
+                raise StoreConflictError("pending input must be claimed before finalization")
+            connection.execute(
+                """
+                INSERT INTO commit_records (
+                    cycle_id,
+                    committed_at,
+                    log_sync_status,
+                    commit_payload_json
+                )
+                VALUES (?, ?, 'pending', ?)
+                """,
+                (cycle_id, resolved_at, _json_text(commit_payload)),
+            )
+            commit_id = connection.execute(
+                """
+                SELECT commit_id
+                FROM commit_records
+                WHERE cycle_id = ?
+                """,
+                (cycle_id,),
+            ).fetchone()
+        if commit_id is None:
+            raise RuntimeError("commit_records insert did not persist")
+        return int(commit_id["commit_id"])
 
     # Block: SQLite connection
     def _connect(self) -> sqlite3.Connection:
