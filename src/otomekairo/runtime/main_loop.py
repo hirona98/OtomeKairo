@@ -17,7 +17,8 @@ from otomekairo.usecase.run_cognition import run_cognition_for_chat_message
 
 
 # Block: Runtime constants
-DEFAULT_LEASE_TTL_MS = 5_000
+DEFAULT_LEASE_HEARTBEAT_MS = 5_000
+DEFAULT_LEASE_TTL_MS = 15_000
 
 
 # Block: Runtime loop
@@ -29,12 +30,21 @@ class RuntimeLoop:
         owner_token: str,
         default_settings: dict[str, Any],
         cognition_client: CognitionClient,
+        lease_heartbeat_ms: int = DEFAULT_LEASE_HEARTBEAT_MS,
         lease_ttl_ms: int = DEFAULT_LEASE_TTL_MS,
     ) -> None:
+        # Block: Lease parameter validation
+        if lease_heartbeat_ms <= 0:
+            raise RuntimeError("lease_heartbeat_ms must be positive")
+        if lease_heartbeat_ms > DEFAULT_LEASE_HEARTBEAT_MS:
+            raise RuntimeError("lease_heartbeat_ms must be 5000 or less")
+        if lease_ttl_ms < DEFAULT_LEASE_TTL_MS:
+            raise RuntimeError("lease_ttl_ms must be 15000 or more")
         self._store = store
         self._owner_token = owner_token
         self._default_settings = default_settings
         self._cognition_client = cognition_client
+        self._lease_heartbeat_ms = lease_heartbeat_ms
         self._lease_ttl_ms = lease_ttl_ms
         self._boot_reconciled = False
 
@@ -115,8 +125,7 @@ class RuntimeLoop:
                 None,
             )
         if input_kind == "cancel":
-            ui_events, action_results = _cancel_events(pending_input, cycle_id, resolved_at)
-            return (ui_events, action_results, "consumed", None)
+            return ([], [], "discarded", "cancel_target_not_found")
         ui_events, action_results = _unsupported_input_events(pending_input, resolved_at)
         return (
             ui_events,
@@ -153,19 +162,32 @@ class RuntimeLoop:
             while True:
                 processed = self.run_once()
                 if not processed:
-                    time.sleep(self._idle_tick_seconds())
+                    self._sleep_until_next_idle_tick()
         finally:
             self._store.release_runtime_lease(owner_token=self._owner_token)
 
     # Block: Idle timing
-    def _idle_tick_seconds(self) -> float:
+    def _idle_tick_ms(self) -> int:
         effective_settings = self._store.read_effective_settings(self._default_settings)
         idle_tick_ms = effective_settings["runtime.idle_tick_ms"]
         if isinstance(idle_tick_ms, bool) or not isinstance(idle_tick_ms, int):
             raise RuntimeError("runtime.idle_tick_ms must be integer")
         if idle_tick_ms <= 0:
             raise RuntimeError("runtime.idle_tick_ms must be positive")
-        return idle_tick_ms / 1000.0
+        return idle_tick_ms
+
+    # Block: Idle wait with heartbeat
+    def _sleep_until_next_idle_tick(self) -> None:
+        remaining_ms = self._idle_tick_ms()
+        while remaining_ms > 0:
+            sleep_ms = min(remaining_ms, self._lease_heartbeat_ms)
+            time.sleep(sleep_ms / 1000.0)
+            remaining_ms -= sleep_ms
+            if remaining_ms > 0:
+                self._store.acquire_runtime_lease(
+                    owner_token=self._owner_token,
+                    lease_ttl_ms=self._lease_ttl_ms,
+                )
 
 
 # Block: Runtime construction
@@ -181,6 +203,7 @@ def build_runtime_loop(*, db_path: Path | None = None) -> RuntimeLoop:
         owner_token=_runtime_owner_token(),
         default_settings=build_default_settings(),
         cognition_client=_build_default_cognition_client(),
+        lease_heartbeat_ms=_lease_heartbeat_ms(),
         lease_ttl_ms=_lease_ttl_ms(),
     )
 
@@ -200,56 +223,7 @@ def _evaluate_settings_override(settings_override: SettingsOverrideRecord) -> tu
     return ("applied", None)
 
 
-def _cancel_events(
-    pending_input: PendingInputRecord,
-    cycle_id: str,
-    resolved_at: int,
-) -> tuple[list[dict[str, Any]], list[ActionHistoryRecord]]:
-    ui_events = [
-        {
-            "channel": pending_input.channel,
-            "event_type": "notice",
-            "payload": {
-                "notice_code": "cancel_requested",
-                "text": "停止要求を受け付けました",
-            },
-        },
-        {
-            "channel": pending_input.channel,
-            "event_type": "status",
-            "payload": {
-                "status_code": "idle",
-                "label": "待機中",
-                "cycle_id": cycle_id,
-            },
-        },
-    ]
-    action_results = [
-        ActionHistoryRecord(
-            result_id=_opaque_id("actres"),
-            command_id=_opaque_id("cmd"),
-            action_type="emit_cancel_notice",
-            command={
-                "target_channel": pending_input.channel,
-                "target_message_id": pending_input.payload.get("target_message_id"),
-                "event_types": ["notice", "status"],
-            },
-            started_at=resolved_at,
-            finished_at=resolved_at + 1,
-            status="succeeded",
-            failure_mode=None,
-            observed_effects={
-                "emitted_event_types": ["notice", "status"],
-                "notice_code": "cancel_requested",
-                "status_code_after": "idle",
-            },
-            raw_result_ref=None,
-            adapter_trace_ref=None,
-        )
-    ]
-    return (ui_events, action_results)
-
-
+# Block: Unsupported input handling
 def _unsupported_input_events(
     pending_input: PendingInputRecord,
     resolved_at: int,
@@ -297,6 +271,11 @@ def _default_db_path() -> Path:
 
 def _runtime_owner_token() -> str:
     return f"runtime_{uuid.uuid4().hex}"
+
+
+# Block: Lease timing helpers
+def _lease_heartbeat_ms() -> int:
+    return DEFAULT_LEASE_HEARTBEAT_MS
 
 
 def _lease_ttl_ms() -> int:

@@ -26,7 +26,11 @@ SCHEMA_VERSION = 3
 
 # Block: API errors
 class StoreConflictError(RuntimeError):
-    pass
+    def __init__(self, message: str, *, error_code: str = "conflict") -> None:
+        # Block: Structured conflict payload
+        super().__init__(message)
+        self.message = message
+        self.error_code = error_code
 
 
 class StoreValidationError(ValueError):
@@ -559,7 +563,10 @@ class SqliteStateStore:
                     ),
                 )
         except sqlite3.IntegrityError as error:
-            raise StoreConflictError("duplicate client_message_id") from error
+            raise StoreConflictError(
+                "既に受け付けた入力です",
+                error_code="duplicate_client_message_id",
+            ) from error
         return {
             "accepted": True,
             "input_id": input_id,

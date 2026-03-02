@@ -63,8 +63,8 @@ def create_app() -> FastAPI:
         return JSONResponse(
             status_code=409,
             content={
-                "error_code": "conflict",
-                "message": str(error),
+                "error_code": error.error_code,
+                "message": error.message,
                 "request_id": request.state.request_id,
             },
         )
