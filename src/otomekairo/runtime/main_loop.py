@@ -5,12 +5,17 @@ from __future__ import annotations
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from otomekairo import __version__
 from otomekairo.gateway.cognition_client import CognitionClient
 from otomekairo.infra.sqlite_state_store import SqliteStateStore
-from otomekairo.schema.runtime_types import ActionHistoryRecord, PendingInputRecord, SettingsOverrideRecord
+from otomekairo.schema.runtime_types import (
+    ActionHistoryRecord,
+    MemoryJobRecord,
+    PendingInputRecord,
+    SettingsOverrideRecord,
+)
 from otomekairo.schema.settings import SettingsValidationError, build_default_settings, decode_requested_value, get_setting_definition
 from otomekairo.usecase.build_cognition_input import build_cognition_input
 from otomekairo.usecase.run_cognition import run_cognition_for_chat_message
@@ -236,27 +241,37 @@ class RuntimeLoop:
         memory_job = self._store.claim_next_memory_job()
         if memory_job is None:
             return False
-        # Block: write_memory apply
-        if memory_job.job_kind == "write_memory":
-            self._store.complete_write_memory_job(memory_job=memory_job)
-            return True
-        # Block: refresh_preview apply
-        if memory_job.job_kind == "refresh_preview":
-            effective_settings = self._store.read_effective_settings(self._default_settings)
-            embedding_model = effective_settings["llm.embedding_model"]
-            if not isinstance(embedding_model, str) or not embedding_model:
-                raise RuntimeError("llm.embedding_model must be non-empty string")
-            self._store.complete_refresh_preview_job(
-                memory_job=memory_job,
-                embedding_model=embedding_model,
-            )
-            return True
-        # Block: embedding_sync apply
-        if memory_job.job_kind == "embedding_sync":
-            self._store.complete_embedding_sync_job(memory_job=memory_job)
-            return True
-        # Block: unsupported memory job
-        raise RuntimeError(f"unsupported memory job kind: {memory_job.job_kind}")
+        self._memory_job_handler(memory_job.job_kind)(memory_job)
+        return True
+
+    # Block: Memory job dispatch
+    def _memory_job_handler(self, job_kind: str) -> Callable[[MemoryJobRecord], None]:
+        handlers = {
+            "write_memory": self._run_write_memory_job,
+            "refresh_preview": self._run_refresh_preview_job,
+            "embedding_sync": self._run_embedding_sync_job,
+        }
+        handler = handlers.get(job_kind)
+        if handler is None:
+            raise RuntimeError(f"unsupported memory job kind: {job_kind}")
+        return handler
+
+    # Block: Memory job handlers
+    def _run_write_memory_job(self, memory_job: MemoryJobRecord) -> None:
+        self._store.complete_write_memory_job(memory_job=memory_job)
+
+    def _run_refresh_preview_job(self, memory_job: MemoryJobRecord) -> None:
+        effective_settings = self._store.read_effective_settings(self._default_settings)
+        embedding_model = effective_settings["llm.embedding_model"]
+        if not isinstance(embedding_model, str) or not embedding_model:
+            raise RuntimeError("llm.embedding_model must be non-empty string")
+        self._store.complete_refresh_preview_job(
+            memory_job=memory_job,
+            embedding_model=embedding_model,
+        )
+
+    def _run_embedding_sync_job(self, memory_job: MemoryJobRecord) -> None:
+        self._store.complete_embedding_sync_job(memory_job=memory_job)
 
     # Block: Infinite loop
     def run_forever(self) -> None:

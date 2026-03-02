@@ -833,18 +833,10 @@ class SqliteStateStore:
         now_ms = _now_ms()
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            job_row = connection.execute(
-                """
-                SELECT status
-                FROM memory_jobs
-                WHERE job_id = ?
-                """,
-                (memory_job.job_id,),
-            ).fetchone()
-            if job_row is None:
-                raise RuntimeError("memory job is missing")
-            if job_row["status"] != "claimed":
-                raise StoreConflictError("memory job must be claimed before completion")
+            self._ensure_claimed_memory_job(
+                connection=connection,
+                job_id=memory_job.job_id,
+            )
             event_rows = _fetch_events_for_ids(
                 connection=connection,
                 event_ids=source_event_ids,
@@ -931,20 +923,11 @@ class SqliteStateStore:
                 event_rows=event_rows,
                 created_at=now_ms,
             )
-            updated_row_count = connection.execute(
-                """
-                UPDATE memory_jobs
-                SET status = 'completed',
-                    completed_at = ?,
-                    updated_at = ?,
-                    last_error = NULL
-                WHERE job_id = ?
-                  AND status = 'claimed'
-                """,
-                (now_ms, now_ms, memory_job.job_id),
-            ).rowcount
-            if updated_row_count != 1:
-                raise StoreConflictError("memory job must be claimed before completion")
+            self._mark_memory_job_completed(
+                connection=connection,
+                job_id=memory_job.job_id,
+                completed_at=now_ms,
+            )
         return memory_state_id
 
     def complete_refresh_preview_job(
@@ -962,71 +945,22 @@ class SqliteStateStore:
         now_ms = _now_ms()
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            job_row = connection.execute(
-                """
-                SELECT status
-                FROM memory_jobs
-                WHERE job_id = ?
-                """,
-                (memory_job.job_id,),
-            ).fetchone()
-            if job_row is None:
-                raise RuntimeError("memory job is missing")
-            if job_row["status"] != "claimed":
-                raise StoreConflictError("memory job must be claimed before completion")
+            self._ensure_claimed_memory_job(
+                connection=connection,
+                job_id=memory_job.job_id,
+            )
             event_row = _fetch_events_for_ids(
                 connection=connection,
                 event_ids=[target_event_id],
             )[0]
             preview_text = _build_event_preview_text(event_row)
-            preview_row = connection.execute(
-                """
-                SELECT preview_id
-                FROM event_preview_cache
-                WHERE event_id = ?
-                """,
-                (target_event_id,),
-            ).fetchone()
-            preview_id = _opaque_id("prv")
-            if preview_row is None:
-                connection.execute(
-                    """
-                    INSERT INTO event_preview_cache (
-                        preview_id,
-                        event_id,
-                        preview_text,
-                        source_event_updated_at,
-                        created_at,
-                        updated_at
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        preview_id,
-                        target_event_id,
-                        preview_text,
-                        target_event_updated_at,
-                        now_ms,
-                        now_ms,
-                    ),
-                )
-            else:
-                preview_id = str(preview_row["preview_id"])
-                connection.execute(
-                    """
-                    UPDATE event_preview_cache
-                    SET preview_text = ?,
-                        source_event_updated_at = ?,
-                        updated_at = ?
-                    WHERE event_id = ?
-                    """,
-                    (
-                        preview_text,
-                        target_event_updated_at,
-                        now_ms,
-                        target_event_id,
-                    ),
-                )
+            preview_id = self._upsert_event_preview_cache(
+                connection=connection,
+                event_id=target_event_id,
+                preview_text=preview_text,
+                source_event_updated_at=target_event_updated_at,
+                updated_at=now_ms,
+            )
             self._enqueue_embedding_sync_jobs(
                 connection=connection,
                 cycle_id=str(memory_job.payload["cycle_id"]),
@@ -1042,20 +976,11 @@ class SqliteStateStore:
                 embedding_model=embedding_model,
                 created_at=now_ms,
             )
-            updated_row_count = connection.execute(
-                """
-                UPDATE memory_jobs
-                SET status = 'completed',
-                    completed_at = ?,
-                    updated_at = ?,
-                    last_error = NULL
-                WHERE job_id = ?
-                  AND status = 'claimed'
-                """,
-                (now_ms, now_ms, memory_job.job_id),
-            ).rowcount
-            if updated_row_count != 1:
-                raise StoreConflictError("memory job must be claimed before completion")
+            self._mark_memory_job_completed(
+                connection=connection,
+                job_id=memory_job.job_id,
+                completed_at=now_ms,
+            )
         return preview_id
 
     # Block: Embedding sync apply
@@ -1076,18 +1001,10 @@ class SqliteStateStore:
         updated_scope_count = 0
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            job_row = connection.execute(
-                """
-                SELECT status
-                FROM memory_jobs
-                WHERE job_id = ?
-                """,
-                (memory_job.job_id,),
-            ).fetchone()
-            if job_row is None:
-                raise RuntimeError("memory job is missing")
-            if job_row["status"] != "claimed":
-                raise StoreConflictError("memory job must be claimed before completion")
+            self._ensure_claimed_memory_job(
+                connection=connection,
+                job_id=memory_job.job_id,
+            )
             for target in targets:
                 entity_type = str(target["entity_type"])
                 entity_id = str(target["entity_id"])
@@ -1154,21 +1071,113 @@ class SqliteStateStore:
                             ),
                         )
                     updated_scope_count += 1
-            updated_row_count = connection.execute(
-                """
-                UPDATE memory_jobs
-                SET status = 'completed',
-                    completed_at = ?,
-                    updated_at = ?,
-                    last_error = NULL
-                WHERE job_id = ?
-                  AND status = 'claimed'
-                """,
-                (now_ms, now_ms, memory_job.job_id),
-            ).rowcount
-            if updated_row_count != 1:
-                raise StoreConflictError("memory job must be claimed before completion")
+            self._mark_memory_job_completed(
+                connection=connection,
+                job_id=memory_job.job_id,
+                completed_at=now_ms,
+            )
         return updated_scope_count
+
+    # Block: Memory job state helpers
+    def _ensure_claimed_memory_job(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        job_id: str,
+    ) -> None:
+        job_row = connection.execute(
+            """
+            SELECT status
+            FROM memory_jobs
+            WHERE job_id = ?
+            """,
+            (job_id,),
+        ).fetchone()
+        if job_row is None:
+            raise RuntimeError("memory job is missing")
+        if job_row["status"] != "claimed":
+            raise StoreConflictError("memory job must be claimed before completion")
+
+    def _mark_memory_job_completed(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        job_id: str,
+        completed_at: int,
+    ) -> None:
+        updated_row_count = connection.execute(
+            """
+            UPDATE memory_jobs
+            SET status = 'completed',
+                completed_at = ?,
+                updated_at = ?,
+                last_error = NULL
+            WHERE job_id = ?
+              AND status = 'claimed'
+            """,
+            (completed_at, completed_at, job_id),
+        ).rowcount
+        if updated_row_count != 1:
+            raise StoreConflictError("memory job must be claimed before completion")
+
+    def _upsert_event_preview_cache(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        event_id: str,
+        preview_text: str,
+        source_event_updated_at: int,
+        updated_at: int,
+    ) -> str:
+        preview_row = connection.execute(
+            """
+            SELECT preview_id
+            FROM event_preview_cache
+            WHERE event_id = ?
+            """,
+            (event_id,),
+        ).fetchone()
+        preview_id = _opaque_id("prv")
+        if preview_row is None:
+            connection.execute(
+                """
+                INSERT INTO event_preview_cache (
+                    preview_id,
+                    event_id,
+                    preview_text,
+                    source_event_updated_at,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    preview_id,
+                    event_id,
+                    preview_text,
+                    source_event_updated_at,
+                    updated_at,
+                    updated_at,
+                ),
+            )
+            return preview_id
+        preview_id = str(preview_row["preview_id"])
+        connection.execute(
+            """
+            UPDATE event_preview_cache
+            SET preview_text = ?,
+                source_event_updated_at = ?,
+                updated_at = ?
+            WHERE event_id = ?
+            """,
+            (
+                preview_text,
+                source_event_updated_at,
+                updated_at,
+                event_id,
+            ),
+        )
+        return preview_id
 
     # Block: Pending input claim
     def claim_next_pending_input(self) -> PendingInputRecord | None:
