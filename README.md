@@ -35,7 +35,7 @@
 - `src/otomekairo/usecase/build_cognition_input.py`: `self_state` などの現在状態から最小の `cognition_input` を組み立てる
 - `src/otomekairo/usecase/run_cognition.py`: 認知クライアントのストリーム出力を `token` / `message` / `status` の UI 応答と `action_history` へ変換する
 - `src/otomekairo/infra/litellm_cognition_client.py`: `LiteLLM` を使って人格断面つきの認知呼び出しを行う
-- `src/otomekairo/infra/sqlite_state_store.py`: `core_schema.sql` を読み込む DB 初期化と、状態参照・入力受付・設定反映、短周期確定時の `write_memory` enqueue、`revisions` 記録、`refresh_preview` と、決定論的な `vec_items` BLOB を作る最小 `embedding_sync` の enqueue / 適用を持つ
+- `src/otomekairo/infra/sqlite_state_store.py`: `core_schema.sql` を読み込む DB 初期化と、状態参照・入力受付・設定反映、短周期確定時の `write_memory` enqueue、`revisions` 記録、`memory_state` と `event` の両方を対象にした `refresh_preview` / `embedding_sync` の enqueue / 適用を持つ
 - `src/otomekairo/runtime/main_loop.py`: `settings_overrides` と `pending_inputs` を消費し、待機中も応答中も lease heartbeat を維持しながら、`token` の即時追記、進行中 `cancel` の消費、`write_memory` / `refresh_preview` / `embedding_sync` の最小長周期処理までを行う
 - `src/otomekairo/schema/runtime_types.py`: ランタイムの共通データ形を `infra` から切り離して持つ
 - `src/otomekairo/schema/settings.py`: 設定キーの検証と有効設定の初期値を定義する

@@ -540,11 +540,14 @@
 ```json
 {
   "llm.default_model": "openrouter/default-model",
+  "llm.embedding_model": "openrouter/default-embedding",
+  "llm.temperature": 0.7,
+  "llm.max_output_tokens": 2048,
   "runtime.idle_tick_ms": 1000
 }
 ```
 
-- `runtime_settings.values_json` は、現在有効な設定値のうち、既定値から上書きされたキーだけを持つ部分オブジェクトである
+- `runtime_settings.values_json` は、現在有効な設定値を全設定キーぶん持つ完全オブジェクトである
 - キーは、`docs/39_設定キー運用仕様.md` に登録されたドット区切り設定キーだけを許可する
 - 値の型は、各キーの登録 `value_type` と一致しなければならない
 - `apply_scope="runtime"` の `applied` は、このオブジェクトを同じ短周期で更新する
@@ -556,12 +559,15 @@
 ```json
 {
   "llm.default_model": 1760000000000,
+  "llm.embedding_model": 1760000000000,
+  "llm.temperature": 1760000000000,
+  "llm.max_output_tokens": 1760000000000,
   "runtime.idle_tick_ms": 1760000000000
 }
 ```
 
-- `runtime_settings.value_updated_at_json` は、各設定キーの最終反映時刻を `key -> unix_ms` で持つ部分オブジェクトである
-- キー集合は、`runtime_settings.values_json` と同じか、その上位集合に限る
+- `runtime_settings.value_updated_at_json` は、各設定キーの最終反映時刻を `key -> unix_ms` で持つ完全オブジェクトである
+- キー集合は、`runtime_settings.values_json` と同一に固定する
 - 各値は、UTC unix milliseconds の `integer` に固定する
 - `next_boot` の materialize は、この時刻が既存値より新しいキーだけを更新する
 

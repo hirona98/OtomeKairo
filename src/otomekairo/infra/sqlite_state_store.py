@@ -18,7 +18,7 @@ from otomekairo.schema.runtime_types import (
     PendingInputRecord,
     SettingsOverrideRecord,
 )
-from otomekairo.schema.settings import decode_requested_value
+from otomekairo.schema.settings import build_default_settings, decode_requested_value
 
 
 # Block: Schema constants
@@ -923,6 +923,24 @@ class SqliteStateStore:
                 event_rows=event_rows,
                 created_at=now_ms,
             )
+            self._enqueue_embedding_sync_jobs(
+                connection=connection,
+                cycle_id=str(memory_job.payload["cycle_id"]),
+                source_event_ids=source_event_ids,
+                targets=[
+                    {
+                        "entity_type": "memory_state",
+                        "entity_id": memory_state_id,
+                        "source_updated_at": now_ms,
+                        "current_searchable": True,
+                    }
+                ],
+                embedding_model=self._require_runtime_setting_string(
+                    connection=connection,
+                    key="llm.embedding_model",
+                ),
+                created_at=now_ms,
+            )
             self._mark_memory_job_completed(
                 connection=connection,
                 job_id=memory_job.job_id,
@@ -1178,6 +1196,69 @@ class SqliteStateStore:
             ),
         )
         return preview_id
+
+    def _require_runtime_setting_string(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        key: str,
+    ) -> str:
+        runtime_settings_row = connection.execute(
+            """
+            SELECT values_json
+            FROM runtime_settings
+            WHERE row_id = 1
+            """
+        ).fetchone()
+        if runtime_settings_row is None:
+            raise RuntimeError("runtime_settings row is missing")
+        runtime_values = json.loads(runtime_settings_row["values_json"])
+        value = runtime_values.get(key)
+        if not isinstance(value, str) or not value:
+            raise RuntimeError(f"{key} must be non-empty string")
+        return value
+
+    def _ensure_runtime_settings_defaults(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        now_ms: int,
+    ) -> None:
+        default_values = build_default_settings()
+        runtime_settings_row = connection.execute(
+            """
+            SELECT values_json, value_updated_at_json
+            FROM runtime_settings
+            WHERE row_id = 1
+            """
+        ).fetchone()
+        if runtime_settings_row is None:
+            raise RuntimeError("runtime_settings row is missing")
+        current_values = json.loads(runtime_settings_row["values_json"])
+        current_updated_at = json.loads(runtime_settings_row["value_updated_at_json"])
+        merged_values = dict(default_values)
+        merged_values.update(current_values)
+        merged_updated_at = _runtime_settings_seed_timestamps(now_ms)
+        merged_updated_at.update(current_updated_at)
+        if (
+            merged_values == current_values
+            and merged_updated_at == current_updated_at
+        ):
+            return
+        connection.execute(
+            """
+            UPDATE runtime_settings
+            SET values_json = ?,
+                value_updated_at_json = ?,
+                updated_at = ?
+            WHERE row_id = 1
+            """,
+            (
+                _json_text(merged_values),
+                _json_text(merged_updated_at),
+                now_ms,
+            ),
+        )
 
     # Block: Pending input claim
     def claim_next_pending_input(self) -> PendingInputRecord | None:
@@ -1921,10 +2002,14 @@ class SqliteStateStore:
             ON CONFLICT(row_id) DO NOTHING
             """,
             (
-                _json_text({}),
-                _json_text({}),
+                _json_text(build_default_settings()),
+                _json_text(_runtime_settings_seed_timestamps(now_ms)),
                 now_ms,
             ),
+        )
+        self._ensure_runtime_settings_defaults(
+            connection=connection,
+            now_ms=now_ms,
         )
         # Block: attention_state seed
         connection.execute(
@@ -2314,6 +2399,10 @@ def _merge_runtime_settings(default_settings: dict[str, Any], runtime_values: di
         if key in merged_settings:
             merged_settings[key] = value
     return merged_settings
+
+
+def _runtime_settings_seed_timestamps(now_ms: int) -> dict[str, int]:
+    return {key: now_ms for key in build_default_settings()}
 
 
 def _upsert_runtime_setting_value(

@@ -121,8 +121,9 @@ flowchart TD
   - 役割: 現在有効な設定値の反映結果を 1 件で保持する
   - 主キー: `row_id INTEGER PRIMARY KEY CHECK(row_id = 1)`
   - 必須列: `values_json`, `value_updated_at_json`, `updated_at`
-  - `values_json` は、`docs/39_設定キー運用仕様.md` に登録されたキーだけを持つ部分オブジェクトとする
+  - `values_json` は、`docs/39_設定キー運用仕様.md` に登録された全キーを持つ完全オブジェクトとする
   - `value_updated_at_json` は、各キーの最終反映時刻を `key -> unix_ms` で持つ
+  - `value_updated_at_json` は、`values_json` と同じキー集合を持つ
   - `values_json` と `value_updated_at_json` の JSON 形は、`docs/36_JSONデータ仕様.md` を正本とする
   - `runtime` scope の設定反映は、この行を同じ短周期で更新する
   - `next_boot` scope の設定反映は、この行を即時更新せず、次回ランタイム起動時の materialize で更新する
