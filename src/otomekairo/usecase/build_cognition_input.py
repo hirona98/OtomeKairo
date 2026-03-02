@@ -77,6 +77,8 @@ def build_cognition_input(
         "context_budget": {
             "max_tokens": int(state_snapshot.effective_settings["runtime.context_budget_tokens"]),
             "default_model": str(state_snapshot.effective_settings["llm.default_model"]),
+            "temperature": float(state_snapshot.effective_settings["llm.temperature"]),
+            "max_output_tokens": int(state_snapshot.effective_settings["llm.max_output_tokens"]),
         },
     }
 

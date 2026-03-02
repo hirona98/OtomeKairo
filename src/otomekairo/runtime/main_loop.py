@@ -9,7 +9,6 @@ from typing import Any
 
 from otomekairo import __version__
 from otomekairo.gateway.cognition_client import CognitionClient
-from otomekairo.infra.deterministic_cognition_client import DeterministicCognitionClient
 from otomekairo.infra.sqlite_state_store import SqliteStateStore
 from otomekairo.schema.runtime_types import ActionHistoryRecord, PendingInputRecord, SettingsOverrideRecord
 from otomekairo.schema.settings import SettingsValidationError, build_default_settings, decode_requested_value, get_setting_definition
@@ -181,7 +180,7 @@ def build_runtime_loop(*, db_path: Path | None = None) -> RuntimeLoop:
         store=store,
         owner_token=_runtime_owner_token(),
         default_settings=build_default_settings(),
-        cognition_client=DeterministicCognitionClient(),
+        cognition_client=_build_default_cognition_client(),
         lease_ttl_ms=_lease_ttl_ms(),
     )
 
@@ -302,6 +301,13 @@ def _runtime_owner_token() -> str:
 
 def _lease_ttl_ms() -> int:
     return DEFAULT_LEASE_TTL_MS
+
+
+# Block: Cognition client factory
+def _build_default_cognition_client() -> CognitionClient:
+    from otomekairo.infra.litellm_cognition_client import LiteLLMCognitionClient
+
+    return LiteLLMCognitionClient()
 
 
 def _opaque_id(prefix: str) -> str:
