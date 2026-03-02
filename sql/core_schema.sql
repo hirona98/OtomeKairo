@@ -29,6 +29,7 @@ CREATE TABLE self_state (
     long_term_goals_json TEXT NOT NULL,
     relationship_overview_json TEXT NOT NULL,
     invariants_json TEXT NOT NULL,
+    personality_updated_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
 );
 

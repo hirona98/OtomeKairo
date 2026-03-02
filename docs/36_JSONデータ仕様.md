@@ -16,7 +16,7 @@
 
 - 固定するのは、初期実装で使う JSON オブジェクトのキー、型、必須項目、固定語彙である
 - 固定するのは、`pending_inputs.payload_json`、`settings_overrides.requested_value_json`、`ui_outbound_events.payload_json`、`memory_jobs.payload_ref_json`、`memory_job_payloads.payload_json`、主要な Web API 本文である
-- 固定するのは、`self_state.personality_json`、短周期の内部で使う `selection_profile`、`persona_consistency_score`、`attention_score_breakdown`、`self_initiated_score_breakdown`、`action_candidate_score`、長周期の内部で使う `personality_change_proposal`、`persona_updates` の形である
+- 固定するのは、`self_state.personality_json`、`self_state.current_emotion_json`、`self_state.long_term_goals_json`、`self_state.relationship_overview_json`、`self_state.invariants_json`、短周期の内部で使う `selection_profile`、`persona_consistency_score`、`attention_score_breakdown`、`self_initiated_score_breakdown`、`action_candidate_score`、長周期の内部で使う `personality_change_proposal`、`persona_updates` の形である
 - 固定しないのは、Python のクラス名、Pydantic モデル名、OpenAPI の自動生成細部である
 - 固定しないのは、将来追加する未使用フィールドや後段の拡張イベント種別である
 
@@ -147,6 +147,136 @@
 - `habit_biases.preferred_observation_kinds` は、観測種別の順序付き配列である
 - `habit_biases.avoided_action_styles` は、避ける行動様式の順序付き配列である
 
+<!-- Block: Current Emotion Json -->
+### `self_state.current_emotion_json`
+
+```json
+{
+  "primary_label": "calm",
+  "valence": 0.10,
+  "arousal": 0.22,
+  "dominance": 0.08,
+  "stability": 0.74,
+  "active_biases": {
+    "caution_bias": 0.12,
+    "approach_bias": 0.06,
+    "avoidance_bias": 0.04,
+    "speech_intensity_bias": 0.00
+  }
+}
+```
+
+- 必須項目は `primary_label`、`valence`、`arousal`、`dominance`、`stability`、`active_biases` である
+- `primary_label` は、少なくとも `calm`、`curious`、`guarded`、`warm`、`tense`、`frustrated` を区別する
+- `valence`、`arousal`、`dominance` は、`-1.0..+1.0` の `number` に固定する
+- `stability` は、`0.0..1.0` の `number` に固定する
+- `active_biases` は、`selection_profile.emotion_bias` と同じ固定キーを持ち、各値は `-1.0..+1.0` の `number` に固定する
+- `active_biases` は、短周期での `selection_profile.emotion_bias` を作る直接入力として使う
+
+<!-- Block: Long Term Goal Entry -->
+### `long_term_goal_entry`
+
+```json
+{
+  "goal_id": "goal_001",
+  "summary": "身近な関係対象との信頼を維持する",
+  "priority_weight": 0.82,
+  "status": "active",
+  "target_horizon": "long"
+}
+```
+
+- 必須項目は `goal_id`、`summary`、`priority_weight`、`status`、`target_horizon` である
+- `priority_weight` は、`0.0..1.0` の `number` に固定する
+- `status` は、少なくとも `active`、`paused`、`completed` を区別する
+- `target_horizon` は、少なくとも `short`、`mid`、`long` を区別する
+
+<!-- Block: Long Term Goals Json -->
+### `self_state.long_term_goals_json`
+
+```json
+{
+  "goals": []
+}
+```
+
+- 必須項目は `goals` である
+- `goals` は、`long_term_goal_entry` の配列に固定する
+- `goals` は、`priority_weight` の高い順に並べる
+
+<!-- Block: Relationship Overview Entry -->
+### `relationship_overview_entry`
+
+```json
+{
+  "target_ref": "entity:alice",
+  "relation_kind": "care",
+  "attention_weight": 0.78,
+  "care_commitment": 0.86,
+  "trust_level": 0.74,
+  "recent_tension": 0.08,
+  "recent_positive_contact": 0.67,
+  "waiting_response": false,
+  "last_interaction_at": 1760000000000
+}
+```
+
+- 必須項目は `target_ref`、`relation_kind`、`attention_weight`、`care_commitment`、`trust_level`、`recent_tension`、`recent_positive_contact`、`waiting_response` である
+- `relation_kind` は、少なくとも `care`、`peer`、`unknown`、`strained` を区別する
+- `attention_weight`、`care_commitment`、`trust_level`、`recent_tension`、`recent_positive_contact` は、`0.0..1.0` の `number` に固定する
+- `waiting_response` は、未応答の対人待ちがあるかを示す `boolean` である
+- `last_interaction_at` は任意で、ある場合は UTC unix milliseconds の `integer` に固定する
+
+<!-- Block: Relationship Overview Json -->
+### `self_state.relationship_overview_json`
+
+```json
+{
+  "relationships": []
+}
+```
+
+- 必須項目は `relationships` である
+- `relationships` は、`relationship_overview_entry` の配列に固定する
+- `relationships` は、`attention_weight` の高い順に並べる
+- `selection_profile.relationship_priorities` は、`relationships` の上位 `3` 件までを候補にして作る
+- `reason_tag` は、`waiting_response=true` を最優先に `pending_relation`、次に `care_commitment >= 0.70` を `care_target`、次に `recent_tension >= 0.60` を `recent_tension`、それ以外で `recent_positive_contact >= 0.60` を `recent_positive_contact` とする
+- `priority_weight` は、元の `attention_weight` をそのまま引き継ぐ
+
+<!-- Block: Invariant Protected Target Entry -->
+### `invariant_protected_target_entry`
+
+```json
+{
+  "target_ref": "entity:alice",
+  "protection_rule": "no_harm",
+  "severity": 1.0
+}
+```
+
+- 必須項目は `target_ref`、`protection_rule`、`severity` である
+- `protection_rule` は、少なくとも `no_harm`、`no_coercion`、`do_not_ignore_distress` を区別する
+- `severity` は、`0.0..1.0` の `number` に固定し、`1.0` が最も強い拘束である
+
+<!-- Block: Invariants Json -->
+### `self_state.invariants_json`
+
+```json
+{
+  "forbidden_action_types": [],
+  "forbidden_action_styles": [],
+  "required_confirmation_for": [],
+  "protected_targets": []
+}
+```
+
+- 必須項目は `forbidden_action_types`、`forbidden_action_styles`、`required_confirmation_for`、`protected_targets` である
+- `forbidden_action_types` は、人格として決して自発選択しない `action_type` の配列である
+- `forbidden_action_styles` は、少なくとも `hostile_tone`、`coercive_contact`、`careless_override` を区別する
+- `required_confirmation_for` は、少なくとも `unknown_target_approach`、`high_impact_external_action`、`sensitive_relation_action` を区別する
+- `protected_targets` は、`invariant_protected_target_entry` の配列である
+- `invariants_json` は、`hard gate` の人格側拘束にだけ使い、長周期の自動更新対象にしない
+
 <!-- Block: Persona Selection Group -->
 ## 人格選択の内部 JSON
 
@@ -165,6 +295,7 @@
 - `target_ref` は、その短周期で重みづけしたい対象の短い参照 `string` である
 - `priority_weight` は、`0.0..1.0` の `number` に固定する
 - `reason_tag` は、少なくとも `care_target`、`pending_relation`、`recent_tension`、`recent_positive_contact` を区別する
+- `reason_tag` は、`self_state.relationship_overview_json` からの抽出規則に従って決める
 
 <!-- Block: Selection Profile -->
 ### `selection_profile`
@@ -239,8 +370,10 @@
 - `persona_consistency_score` は、候補や主注意対象が「その人格らしいか」を比較するための内部スコアである
 - 必須項目は `trait_alignment`、`style_alignment`、`relationship_alignment`、`preference_alignment`、`aversion_penalty`、`emotion_alignment`、`drive_alignment`、`overall_score` である
 - 各値は、`0.0..1.0` の `number` に固定する
+- `0.0` は強い不一致、`0.5` は中立または判断材料不足、`1.0` は強い一致に固定する
+- どの軸も負値を取らず、値が大きいほど一致度が高い単調指標として扱う
 - `aversion_penalty` は、値が高いほど避けたい度合いが高いことを示す
-- `overall_score` は、各軸の重みづけ後に比較へ使う合成値である
+- `overall_score` は、正の一致軸の重み付き平均から `aversion_penalty` を減算し、`0.0..1.0` に clamp した合成値である
 - `persona_consistency_score` は永続化前提の正本ではなく、`selection_profile` と候補の組み合わせごとに再計算する
 
 <!-- Block: Attention Score Breakdown -->
@@ -267,6 +400,7 @@
 - `hard_gate_passed` は、`boolean` に固定する
 - 各 `*_score` と `total_score` は、`0.0..1.0` の `number` に固定する
 - `personality_fit_score` は、必要なら候補ごとの `persona_consistency_score` を元に計算してよい
+- 各 `*_score` は、比較前に同じ `0.0..1.0` 尺度へ正規化済みでなければならない
 - `attention_score_breakdown` は永続化前提の正本ではなく、その短周期の候補比較ごとに再計算する
 
 <!-- Block: Self Initiated Score Breakdown -->
@@ -291,6 +425,7 @@
 - `initiative_kind` は、`task_progress`、`unexplored_check`、`self_maintenance`、`skill_rehearsal` のいずれかの `string` である
 - `hard_gate_passed` は、`boolean` に固定する
 - 各 `*_fit` と `total_score` は、`0.0..1.0` の `number` に固定する
+- 各 `*_fit` は、比較前に同じ `0.0..1.0` 尺度へ正規化済みでなければならない
 - `self_initiated_score_breakdown` は永続化前提の正本ではなく、その短周期の比較ごとに再計算する
 
 <!-- Block: Action Candidate Score -->
@@ -318,6 +453,7 @@
 - 各 `*_score` と `total_score` は、`0.0..1.0` の `number` に固定する
 - `personality_fit_score` は、必要なら `persona_consistency_score` の `trait_alignment`、`style_alignment`、`overall_score` を使って計算してよい
 - `priority_hint_score` は、`proposal.priority` をそのまま信じるためではなく、同程度候補の補助比較にだけ使う
+- 各 `*_score` は、比較前に同じ `0.0..1.0` 尺度へ正規化済みでなければならない
 - `action_candidate_score` は永続化前提の正本ではなく、その短周期の候補比較ごとに再計算する
 
 <!-- Block: Persona Update Group -->
@@ -357,6 +493,8 @@
 - `trait_name` は、`self_state.personality_json.trait_values` に存在するキーだけを許可する
 - `delta` は、`-1.0..+1.0` の `number` だが、適用前の提案値である
 - `source_cycle_ids` は空配列を許可しない
+- `base_personality_updated_at` は、提案生成時に読んだ `self_state.personality_updated_at` の値である
+- `source_cycle_ids` は、証拠に使った `events` を生んだ短周期の `cycle_id` だけを数える
 - `preference_promotions` と `aversion_promotions` は、`personality_preference_entry` の配列である
 - `habit_updates` は、`preferred_action_types`、`preferred_observation_kinds`、`avoided_action_styles` のうち変更対象だけを持つ部分オブジェクトでよい
 
@@ -390,6 +528,8 @@
 - `preference_promotions` と `aversion_promotions` は、`personality_preference_entry` の配列である
 - `habit_updates` は、`self_state.personality_json.habit_biases` に上書きする部分オブジェクトである
 - `evidence_summary` は、監査と `revisions` の理由づけに使う短い要約である
+- `base_personality_updated_at` は、適用開始時の `self_state.personality_updated_at` と一致しなければならない
+- 適用時に `base_personality_updated_at` が現在の `self_state.personality_updated_at` と一致しない場合、その `persona_updates` は stale として棄却し、後続の `write_memory` で再生成する
 
 <!-- Block: Control Plane Group -->
 ## 制御面テーブルの JSON

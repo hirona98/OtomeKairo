@@ -104,10 +104,17 @@ flowchart TD
 - `self_state`
   - 役割: 現在の人格断面を 1 件で保持する
   - 主キー: `row_id INTEGER PRIMARY KEY CHECK(row_id = 1)`
-  - 必須列: `personality_json`, `current_emotion_json`, `long_term_goals_json`, `relationship_overview_json`, `invariants_json`, `updated_at`
+  - 必須列: `personality_json`, `current_emotion_json`, `long_term_goals_json`, `relationship_overview_json`, `invariants_json`, `personality_updated_at`, `updated_at`
   - `personality_json` は、経験で変化する trait、好みの行動様式、学習済みの好悪と回避傾向を持てる形にする
   - `personality_json` の JSON キーと必須形は、`docs/36_JSONデータ仕様.md` を正本とする
+  - `current_emotion_json` の JSON キーと必須形は、`docs/36_JSONデータ仕様.md` を正本とする
+  - `long_term_goals_json` の JSON キーと必須形は、`docs/36_JSONデータ仕様.md` を正本とする
+  - `relationship_overview_json` の JSON キーと必須形は、`docs/36_JSONデータ仕様.md` を正本とする
   - `invariants_json` は、自動学習で変更しない人格の不変条件を持つ
+  - `invariants_json` の JSON キーと必須形は、`docs/36_JSONデータ仕様.md` を正本とする
+  - `personality_updated_at` は、`personality_json` の版管理専用時刻であり、`base_personality_updated_at` の比較対象にする
+  - `updated_at` は、`self_state` 行全体の更新時刻であり、感情や関係性の更新でも進んでよい
+  - `personality_json` を更新する transaction では、`personality_updated_at` と `updated_at` を同時更新する
 
 - `attention_state`
   - 役割: 現在の注意断面を 1 件で保持する
