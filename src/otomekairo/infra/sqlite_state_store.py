@@ -388,6 +388,12 @@ class SqliteStateStore:
                 reject_reason=reject_reason,
                 resolved_at=resolved_at,
             )
+            enqueued_memory_job_ids = self._enqueue_write_memory_jobs(
+                connection=connection,
+                cycle_id=cycle_id,
+                event_ids=event_ids,
+                created_at=resolved_at,
+            )
             updated_row_count = connection.execute(
                 """
                 UPDATE settings_overrides
@@ -423,6 +429,7 @@ class SqliteStateStore:
                             "apply_scope": apply_scope,
                             "resolution_status": final_status,
                             "event_ids": event_ids,
+                            "enqueued_memory_job_ids": enqueued_memory_job_ids,
                         }
                     ),
                 ),
@@ -848,6 +855,12 @@ class SqliteStateStore:
                 ui_events=ui_events,
                 resolved_at=resolved_at,
             )
+            enqueued_memory_job_ids = self._enqueue_write_memory_jobs(
+                connection=connection,
+                cycle_id=cycle_id,
+                event_ids=event_ids,
+                created_at=resolved_at,
+            )
             updated_row_count = connection.execute(
                 """
                 UPDATE pending_inputs
@@ -874,7 +887,13 @@ class SqliteStateStore:
                 (
                     cycle_id,
                     resolved_at,
-                    _json_text({**commit_payload, "event_ids": event_ids}),
+                    _json_text(
+                        {
+                            **commit_payload,
+                            "event_ids": event_ids,
+                            "enqueued_memory_job_ids": enqueued_memory_job_ids,
+                        }
+                    ),
                 ),
             )
             commit_id = connection.execute(
@@ -888,6 +907,91 @@ class SqliteStateStore:
         if commit_id is None:
             raise RuntimeError("commit_records insert did not persist")
         return int(commit_id["commit_id"])
+
+    # Block: Memory job enqueue
+    def _enqueue_write_memory_jobs(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        cycle_id: str,
+        event_ids: list[str],
+        created_at: int,
+    ) -> list[str]:
+        if not event_ids:
+            return []
+        primary_event_id = event_ids[0]
+        payload_id = _opaque_id("mjp")
+        job_id = _opaque_id("mjob")
+        idempotency_key = _write_memory_job_idempotency_key(
+            cycle_id=cycle_id,
+            event_ids=event_ids,
+        )
+        payload_json = {
+            "job_kind": "write_memory",
+            "cycle_id": cycle_id,
+            "source_event_ids": event_ids,
+            "created_at": created_at,
+            "idempotency_key": idempotency_key,
+            "primary_event_id": primary_event_id,
+            "reflection_seed_ref": {
+                "ref_kind": "event",
+                "ref_id": primary_event_id,
+            },
+            "event_snapshot_refs": [
+                {
+                    "event_id": event_id,
+                    "event_updated_at": created_at,
+                }
+                for event_id in event_ids
+            ],
+        }
+        connection.execute(
+            """
+            INSERT INTO memory_job_payloads (
+                payload_id,
+                payload_kind,
+                payload_version,
+                job_kind,
+                payload_json,
+                created_at,
+                idempotency_key
+            )
+            VALUES (?, 'memory_job_payload', 1, 'write_memory', ?, ?, ?)
+            """,
+            (
+                payload_id,
+                _json_text(payload_json),
+                created_at,
+                idempotency_key,
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO memory_jobs (
+                job_id,
+                job_kind,
+                payload_ref_json,
+                status,
+                tries,
+                created_at,
+                updated_at
+            )
+            VALUES (?, 'write_memory', ?, 'queued', 0, ?, ?)
+            """,
+            (
+                job_id,
+                _json_text(
+                    {
+                        "payload_kind": "memory_job_payload",
+                        "payload_id": payload_id,
+                        "payload_version": 1,
+                    }
+                ),
+                created_at,
+                created_at,
+            ),
+        )
+        return [job_id]
 
     # Block: Input journal write
     def _append_input_journal(
@@ -1545,6 +1649,11 @@ def _action_result_summary(action_result: ActionHistoryRecord) -> str:
     if action_result.failure_mode:
         return f"{action_result.action_type} {action_result.status}: {action_result.failure_mode}"
     return f"{action_result.action_type} {action_result.status}"
+
+
+# Block: Memory job helpers
+def _write_memory_job_idempotency_key(*, cycle_id: str, event_ids: list[str]) -> str:
+    return "write_memory:" + cycle_id + ":" + ":".join(event_ids)
 
 
 # Block: Runtime settings helpers
