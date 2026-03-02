@@ -106,6 +106,7 @@ flowchart TD
   - 主キー: `row_id INTEGER PRIMARY KEY CHECK(row_id = 1)`
   - 必須列: `personality_json`, `current_emotion_json`, `long_term_goals_json`, `relationship_overview_json`, `invariants_json`, `updated_at`
   - `personality_json` は、経験で変化する trait、好みの行動様式、学習済みの好悪と回避傾向を持てる形にする
+  - `personality_json` の JSON キーと必須形は、`docs/36_JSONデータ仕様.md` を正本とする
   - `invariants_json` は、自動学習で変更しない人格の不変条件を持つ
 
 - `attention_state`

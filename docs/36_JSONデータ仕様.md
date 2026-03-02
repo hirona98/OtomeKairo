@@ -16,6 +16,7 @@
 
 - 固定するのは、初期実装で使う JSON オブジェクトのキー、型、必須項目、固定語彙である
 - 固定するのは、`pending_inputs.payload_json`、`settings_overrides.requested_value_json`、`ui_outbound_events.payload_json`、`memory_jobs.payload_ref_json`、`memory_job_payloads.payload_json`、主要な Web API 本文である
+- 固定するのは、`self_state.personality_json` と、長周期の内部で使う `personality_change_proposal`、`persona_updates` の形である
 - 固定しないのは、Python のクラス名、Pydantic モデル名、OpenAPI の自動生成細部である
 - 固定しないのは、将来追加する未使用フィールドや後段の拡張イベント種別である
 
@@ -67,6 +68,24 @@
 - `input_journal.payload_ref_json.payload_kind` は、初期段階では `input_payload`、`media_file`、`external_result` を区別する
 - `memory_jobs.payload_ref_json.payload_kind` は、初期段階では `memory_job_payload` に固定する
 
+<!-- Block: Personality Entry -->
+### `personality_preference_entry`
+
+```json
+{
+  "domain": "action_type",
+  "target_key": "look",
+  "weight": 0.45,
+  "evidence_count": 4
+}
+```
+
+- 必須項目は `domain`、`target_key`、`weight`、`evidence_count` である
+- `domain` は、少なくとも `action_type`、`observation_kind`、`interaction_style`、`topic` を区別する
+- `target_key` は、対象を表す短い `string` である
+- `weight` は、`0.0..1.0` の `number` に固定する
+- `evidence_count` は、昇格根拠件数を示す `integer` であり、`1` 未満を許可しない
+
 <!-- Block: Error Body -->
 ### エラー応答 JSON
 
@@ -81,6 +100,123 @@
 - `error_code` は、機械判定用の固定語彙 `string` である
 - `message` は、表示可能な短い説明文である
 - `request_id` は、HTTP リクエスト単位で Web サーバが生成する追跡 ID である
+
+<!-- Block: Self State Group -->
+## 人格状態の JSON
+
+<!-- Block: Personality Json -->
+### `self_state.personality_json`
+
+```json
+{
+  "trait_values": {
+    "sociability": 0.0,
+    "caution": 0.0,
+    "curiosity": 0.0,
+    "persistence": 0.0,
+    "warmth": 0.0,
+    "assertiveness": 0.0,
+    "novelty_preference": 0.0
+  },
+  "preferred_interaction_style": {
+    "speech_tone": "neutral",
+    "distance_style": "balanced",
+    "confirmation_style": "balanced",
+    "response_pace": "balanced"
+  },
+  "learned_preferences": [],
+  "learned_aversions": [],
+  "habit_biases": {
+    "preferred_action_types": [],
+    "preferred_observation_kinds": [],
+    "avoided_action_styles": []
+  }
+}
+```
+
+- 必須項目は `trait_values`、`preferred_interaction_style`、`learned_preferences`、`learned_aversions`、`habit_biases` である
+- `trait_values` は、`sociability`、`caution`、`curiosity`、`persistence`、`warmth`、`assertiveness`、`novelty_preference` を必須キーとして持つ
+- `trait_values` の各値は、`-1.0..+1.0` の `number` に固定する
+- `preferred_interaction_style` は、`speech_tone`、`distance_style`、`confirmation_style`、`response_pace` を必須キーとして持つ
+- `speech_tone` は、少なくとも `soft`、`neutral`、`direct` を区別する
+- `distance_style` は、少なくとも `reserved`、`balanced`、`close` を区別する
+- `confirmation_style` は、少なくとも `minimal`、`balanced`、`careful` を区別する
+- `response_pace` は、少なくとも `slow`、`balanced`、`quick` を区別する
+- `learned_preferences` と `learned_aversions` は、`personality_preference_entry` の配列に固定する
+- `habit_biases.preferred_action_types` は、行動種別の順序付き配列である
+- `habit_biases.preferred_observation_kinds` は、観測種別の順序付き配列である
+- `habit_biases.avoided_action_styles` は、避ける行動様式の順序付き配列である
+
+<!-- Block: Persona Update Group -->
+## 人格変化の内部 JSON
+
+<!-- Block: Personality Change Proposal -->
+### `personality_change_proposal`
+
+```json
+{
+  "base_personality_updated_at": 1760000000000,
+  "trait_deltas": [
+    {
+      "trait_name": "curiosity",
+      "delta": 0.08,
+      "reason": "未観測対象の確認を反復して選んだ",
+      "evidence_count": 4,
+      "source_cycle_ids": ["cycle_001", "cycle_002"]
+    }
+  ],
+  "style_updates": {
+    "response_pace": "quick"
+  },
+  "preference_promotions": [],
+  "aversion_promotions": [],
+  "habit_updates": {
+    "preferred_action_types": ["look", "browse"]
+  },
+  "evidence_summary": "探索寄りの行動選択が複数周期で安定した"
+}
+```
+
+- `personality_change_proposal` は、長周期の `write_memory` 内部で作る未適用の提案オブジェクトである
+- 必須項目は `base_personality_updated_at`、`trait_deltas`、`preference_promotions`、`aversion_promotions`、`habit_updates`、`evidence_summary` である
+- `style_updates` は任意で、変化がある場合だけ持つ
+- `trait_deltas` の各要素は、`trait_name`、`delta`、`reason`、`evidence_count`、`source_cycle_ids` を必須とする
+- `trait_name` は、`self_state.personality_json.trait_values` に存在するキーだけを許可する
+- `delta` は、`-1.0..+1.0` の `number` だが、適用前の提案値である
+- `source_cycle_ids` は空配列を許可しない
+- `preference_promotions` と `aversion_promotions` は、`personality_preference_entry` の配列である
+- `habit_updates` は、`preferred_action_types`、`preferred_observation_kinds`、`avoided_action_styles` のうち変更対象だけを持つ部分オブジェクトでよい
+
+<!-- Block: Persona Updates -->
+### `persona_updates`
+
+```json
+{
+  "base_personality_updated_at": 1760000000000,
+  "updated_trait_values": {
+    "curiosity": 0.08
+  },
+  "style_updates": {
+    "response_pace": "quick"
+  },
+  "preference_promotions": [],
+  "aversion_promotions": [],
+  "habit_updates": {
+    "preferred_action_types": ["look", "browse"]
+  },
+  "evidence_summary": "探索寄りの行動選択が複数周期で安定した"
+}
+```
+
+- `persona_updates` は、`bounded apply` 後に `self_state.personality_json` へ反映可能な差分オブジェクトである
+- 必須項目は `base_personality_updated_at`、`updated_trait_values`、`preference_promotions`、`aversion_promotions`、`habit_updates`、`evidence_summary` である
+- `style_updates` は任意で、変化がある場合だけ持つ
+- `updated_trait_values` は、`trait_name -> absolute_value` の部分オブジェクトである
+- `updated_trait_values` に含めてよいキーは、`self_state.personality_json.trait_values` の固定キーだけである
+- `updated_trait_values` の各値は、`-1.0..+1.0` の `number` に clamp 済みでなければならない
+- `preference_promotions` と `aversion_promotions` は、`personality_preference_entry` の配列である
+- `habit_updates` は、`self_state.personality_json.habit_biases` に上書きする部分オブジェクトである
+- `evidence_summary` は、監査と `revisions` の理由づけに使う短い要約である
 
 <!-- Block: Control Plane Group -->
 ## 制御面テーブルの JSON
@@ -280,6 +416,8 @@
 - `reflection_seed_ref` は、少なくとも `ref_kind`、`ref_id` を持つ
 - `event_snapshot_refs` の各要素は、少なくとも `event_id`、`event_updated_at` を持つ
 - `event_snapshot_refs` は空配列を許可しない
+- `write_memory` は、この payload 自体に `persona_updates` を含めない
+- `persona_updates` は、`write_memory` 実行中に生成される内部差分としてだけ扱う
 
 <!-- Block: Refresh Preview -->
 #### `job_kind = refresh_preview`
@@ -364,7 +502,7 @@
 {
   "job_kind": "tidy_memory",
   "cycle_id": "cycle_...",
-  "source_event_ids": ["evt_001"],
+  "source_event_ids": [],
   "created_at": 1760000000000,
   "idempotency_key": "tidy_memory:cycle_...:completed_jobs_gc",
   "maintenance_scope": "completed_jobs_gc",
