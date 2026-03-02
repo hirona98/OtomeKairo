@@ -138,8 +138,8 @@ class SqliteStateStore:
             },
         }
 
-    # Block: Settings snapshot
-    def read_settings(self, default_settings: dict[str, Any]) -> dict[str, Any]:
+    # Block: Effective settings read
+    def read_effective_settings(self, default_settings: dict[str, Any]) -> dict[str, Any]:
         with self._connect() as connection:
             runtime_settings_row = connection.execute(
                 """
@@ -148,6 +148,14 @@ class SqliteStateStore:
                 WHERE row_id = 1
                 """
             ).fetchone()
+        if runtime_settings_row is None:
+            raise RuntimeError("runtime_settings row is missing")
+        runtime_values = json.loads(runtime_settings_row["values_json"])
+        return _merge_runtime_settings(default_settings, runtime_values)
+
+    # Block: Settings snapshot
+    def read_settings(self, default_settings: dict[str, Any]) -> dict[str, Any]:
+        with self._connect() as connection:
             rows = connection.execute(
                 """
                 SELECT override_id, key, status, created_at
@@ -156,9 +164,6 @@ class SqliteStateStore:
                 ORDER BY created_at ASC
                 """
             ).fetchall()
-        if runtime_settings_row is None:
-            raise RuntimeError("runtime_settings row is missing")
-        runtime_values = json.loads(runtime_settings_row["values_json"])
         pending_overrides = [
             {
                 "override_id": row["override_id"],
@@ -169,7 +174,7 @@ class SqliteStateStore:
             for row in rows
         ]
         return {
-            "effective_settings": _merge_runtime_settings(default_settings, runtime_values),
+            "effective_settings": self.read_effective_settings(default_settings),
             "pending_overrides": pending_overrides,
         }
 

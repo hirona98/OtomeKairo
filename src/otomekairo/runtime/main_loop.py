@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import time
 import uuid
 from pathlib import Path
@@ -10,12 +9,11 @@ from typing import Any
 
 from otomekairo import __version__
 from otomekairo.infra.sqlite_state_store import PendingInputRecord, SettingsOverrideRecord, SqliteStateStore
-from otomekairo.schema.settings import SettingsValidationError, decode_requested_value, get_setting_definition
+from otomekairo.schema.settings import SettingsValidationError, build_default_settings, decode_requested_value, get_setting_definition
 
 
 # Block: Runtime constants
 DEFAULT_LEASE_TTL_MS = 5_000
-DEFAULT_POLL_INTERVAL_MS = 500
 
 
 # Block: Runtime loop
@@ -25,10 +23,12 @@ class RuntimeLoop:
         *,
         store: SqliteStateStore,
         owner_token: str,
+        default_settings: dict[str, Any],
         lease_ttl_ms: int = DEFAULT_LEASE_TTL_MS,
     ) -> None:
         self._store = store
         self._owner_token = owner_token
+        self._default_settings = default_settings
         self._lease_ttl_ms = lease_ttl_ms
         self._boot_reconciled = False
 
@@ -91,16 +91,24 @@ class RuntimeLoop:
         return True
 
     # Block: Infinite loop
-    def run_forever(self, *, poll_interval_ms: int = DEFAULT_POLL_INTERVAL_MS) -> None:
-        if poll_interval_ms <= 0:
-            raise ValueError("poll_interval_ms must be positive")
+    def run_forever(self) -> None:
         try:
             while True:
                 processed = self.run_once()
                 if not processed:
-                    time.sleep(poll_interval_ms / 1000.0)
+                    time.sleep(self._idle_tick_seconds())
         finally:
             self._store.release_runtime_lease(owner_token=self._owner_token)
+
+    # Block: Idle timing
+    def _idle_tick_seconds(self) -> float:
+        effective_settings = self._store.read_effective_settings(self._default_settings)
+        idle_tick_ms = effective_settings["runtime.idle_tick_ms"]
+        if isinstance(idle_tick_ms, bool) or not isinstance(idle_tick_ms, int):
+            raise RuntimeError("runtime.idle_tick_ms must be integer")
+        if idle_tick_ms <= 0:
+            raise RuntimeError("runtime.idle_tick_ms must be positive")
+        return idle_tick_ms / 1000.0
 
 
 # Block: Runtime construction
@@ -114,6 +122,7 @@ def build_runtime_loop(*, db_path: Path | None = None) -> RuntimeLoop:
     return RuntimeLoop(
         store=store,
         owner_token=_runtime_owner_token(),
+        default_settings=build_default_settings(),
         lease_ttl_ms=_lease_ttl_ms(),
     )
 
@@ -223,12 +232,8 @@ def _cancel_events(pending_input: PendingInputRecord, cycle_id: str) -> list[dic
         },
     ]
 
-
 # Block: Runtime helpers
 def _default_db_path() -> Path:
-    db_path = os.environ.get("OTOMEKAIRO_DB_PATH")
-    if db_path:
-        return Path(db_path)
     return Path(__file__).resolve().parents[3] / "data" / "core.sqlite3"
 
 
@@ -237,7 +242,7 @@ def _runtime_owner_token() -> str:
 
 
 def _lease_ttl_ms() -> int:
-    return int(os.environ.get("OTOMEKAIRO_RUNTIME_LEASE_MS", str(DEFAULT_LEASE_TTL_MS)))
+    return DEFAULT_LEASE_TTL_MS
 
 
 def _opaque_id(prefix: str) -> str:
