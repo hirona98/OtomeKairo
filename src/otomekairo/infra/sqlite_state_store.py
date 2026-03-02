@@ -893,6 +893,43 @@ class SqliteStateStore:
                     now_ms,
                 ),
             )
+            connection.execute(
+                """
+                INSERT INTO revisions (
+                    revision_id,
+                    entity_type,
+                    entity_id,
+                    before_json,
+                    after_json,
+                    reason,
+                    evidence_event_ids_json,
+                    created_at
+                )
+                VALUES (?, 'memory_states', ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    _opaque_id("rev"),
+                    memory_state_id,
+                    _json_text({}),
+                    _json_text(
+                        {
+                            "memory_kind": "summary",
+                            "body_text": summary_text,
+                            "source_job_id": memory_job.job_id,
+                            "source_event_ids": source_event_ids,
+                        }
+                    ),
+                    "write_memory created summary",
+                    _json_text(source_event_ids),
+                    now_ms,
+                ),
+            )
+            self._enqueue_refresh_preview_jobs(
+                connection=connection,
+                cycle_id=str(memory_job.payload["cycle_id"]),
+                event_rows=event_rows,
+                created_at=now_ms,
+            )
             updated_row_count = connection.execute(
                 """
                 UPDATE memory_jobs
@@ -908,6 +945,95 @@ class SqliteStateStore:
             if updated_row_count != 1:
                 raise StoreConflictError("memory job must be claimed before completion")
         return memory_state_id
+
+    def complete_refresh_preview_job(self, *, memory_job: MemoryJobRecord) -> str:
+        if memory_job.job_kind != "refresh_preview":
+            raise StoreValidationError("memory_job.job_kind must be refresh_preview")
+        target_event_id = str(memory_job.payload["target_event_id"])
+        target_event_updated_at = int(memory_job.payload["target_event_updated_at"])
+        now_ms = _now_ms()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            job_row = connection.execute(
+                """
+                SELECT status
+                FROM memory_jobs
+                WHERE job_id = ?
+                """,
+                (memory_job.job_id,),
+            ).fetchone()
+            if job_row is None:
+                raise RuntimeError("memory job is missing")
+            if job_row["status"] != "claimed":
+                raise StoreConflictError("memory job must be claimed before completion")
+            event_row = _fetch_events_for_ids(
+                connection=connection,
+                event_ids=[target_event_id],
+            )[0]
+            preview_text = _build_event_preview_text(event_row)
+            preview_row = connection.execute(
+                """
+                SELECT preview_id
+                FROM event_preview_cache
+                WHERE event_id = ?
+                """,
+                (target_event_id,),
+            ).fetchone()
+            preview_id = _opaque_id("prv")
+            if preview_row is None:
+                connection.execute(
+                    """
+                    INSERT INTO event_preview_cache (
+                        preview_id,
+                        event_id,
+                        preview_text,
+                        source_event_updated_at,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        preview_id,
+                        target_event_id,
+                        preview_text,
+                        target_event_updated_at,
+                        now_ms,
+                        now_ms,
+                    ),
+                )
+            else:
+                preview_id = str(preview_row["preview_id"])
+                connection.execute(
+                    """
+                    UPDATE event_preview_cache
+                    SET preview_text = ?,
+                        source_event_updated_at = ?,
+                        updated_at = ?
+                    WHERE event_id = ?
+                    """,
+                    (
+                        preview_text,
+                        target_event_updated_at,
+                        now_ms,
+                        target_event_id,
+                    ),
+                )
+            updated_row_count = connection.execute(
+                """
+                UPDATE memory_jobs
+                SET status = 'completed',
+                    completed_at = ?,
+                    updated_at = ?,
+                    last_error = NULL
+                WHERE job_id = ?
+                  AND status = 'claimed'
+                """,
+                (now_ms, now_ms, memory_job.job_id),
+            ).rowcount
+            if updated_row_count != 1:
+                raise StoreConflictError("memory job must be claimed before completion")
+        return preview_id
 
     # Block: Pending input claim
     def claim_next_pending_input(self) -> PendingInputRecord | None:
@@ -1049,12 +1175,7 @@ class SqliteStateStore:
         if not event_ids:
             return []
         primary_event_id = event_ids[0]
-        payload_id = _opaque_id("mjp")
-        job_id = _opaque_id("mjob")
-        idempotency_key = _write_memory_job_idempotency_key(
-            cycle_id=cycle_id,
-            event_ids=event_ids,
-        )
+        idempotency_key = _write_memory_job_idempotency_key(cycle_id=cycle_id, event_ids=event_ids)
         payload_json = {
             "job_kind": "write_memory",
             "cycle_id": cycle_id,
@@ -1074,6 +1195,64 @@ class SqliteStateStore:
                 for event_id in event_ids
             ],
         }
+        return [
+            self._insert_memory_job(
+                connection=connection,
+                job_kind="write_memory",
+                payload_json=payload_json,
+                idempotency_key=idempotency_key,
+                created_at=created_at,
+            )
+        ]
+
+    def _enqueue_refresh_preview_jobs(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        cycle_id: str,
+        event_rows: list[sqlite3.Row],
+        created_at: int,
+    ) -> list[str]:
+        job_ids: list[str] = []
+        for event_row in event_rows:
+            event_id = str(event_row["event_id"])
+            source_event_updated_at = int(event_row["created_at"])
+            payload_json = {
+                "job_kind": "refresh_preview",
+                "cycle_id": cycle_id,
+                "source_event_ids": [event_id],
+                "created_at": created_at,
+                "idempotency_key": _refresh_preview_job_idempotency_key(
+                    cycle_id=cycle_id,
+                    event_id=event_id,
+                    event_updated_at=source_event_updated_at,
+                ),
+                "target_event_id": event_id,
+                "target_event_updated_at": source_event_updated_at,
+                "preview_reason": "event_created",
+            }
+            job_ids.append(
+                self._insert_memory_job(
+                    connection=connection,
+                    job_kind="refresh_preview",
+                    payload_json=payload_json,
+                    idempotency_key=str(payload_json["idempotency_key"]),
+                    created_at=created_at,
+                )
+            )
+        return job_ids
+
+    def _insert_memory_job(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        job_kind: str,
+        payload_json: dict[str, Any],
+        idempotency_key: str,
+        created_at: int,
+    ) -> str:
+        payload_id = _opaque_id("mjp")
+        job_id = _opaque_id("mjob")
         connection.execute(
             """
             INSERT INTO memory_job_payloads (
@@ -1085,10 +1264,11 @@ class SqliteStateStore:
                 created_at,
                 idempotency_key
             )
-            VALUES (?, 'memory_job_payload', 1, 'write_memory', ?, ?, ?)
+            VALUES (?, 'memory_job_payload', 1, ?, ?, ?, ?)
             """,
             (
                 payload_id,
+                job_kind,
                 _json_text(payload_json),
                 created_at,
                 idempotency_key,
@@ -1105,10 +1285,11 @@ class SqliteStateStore:
                 created_at,
                 updated_at
             )
-            VALUES (?, 'write_memory', ?, 'queued', 0, ?, ?)
+            VALUES (?, ?, ?, 'queued', 0, ?, ?)
             """,
             (
                 job_id,
+                job_kind,
                 _json_text(
                     {
                         "payload_kind": "memory_job_payload",
@@ -1120,7 +1301,7 @@ class SqliteStateStore:
                 created_at,
             ),
         )
-        return [job_id]
+        return job_id
 
     # Block: Input journal write
     def _append_input_journal(
@@ -1785,6 +1966,15 @@ def _write_memory_job_idempotency_key(*, cycle_id: str, event_ids: list[str]) ->
     return "write_memory:" + cycle_id + ":" + ":".join(event_ids)
 
 
+def _refresh_preview_job_idempotency_key(
+    *,
+    cycle_id: str,
+    event_id: str,
+    event_updated_at: int,
+) -> str:
+    return f"refresh_preview:{cycle_id}:{event_id}:{event_updated_at}"
+
+
 def _fetch_events_for_ids(
     *,
     connection: sqlite3.Connection,
@@ -1832,6 +2022,13 @@ def _build_write_memory_summary_text(
     if combined_text:
         return combined_text[:1000]
     return "短周期で確定した出来事を要約した記憶"
+
+
+def _build_event_preview_text(row: sqlite3.Row) -> str:
+    preview_text = _event_summary_text(row).strip()
+    if preview_text:
+        return preview_text[:240]
+    return "イベントのプレビューを生成できませんでした"
 
 
 def _event_summary_text(row: sqlite3.Row) -> str:

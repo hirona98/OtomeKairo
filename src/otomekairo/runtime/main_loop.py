@@ -236,10 +236,16 @@ class RuntimeLoop:
         memory_job = self._store.claim_next_memory_job()
         if memory_job is None:
             return False
-        if memory_job.job_kind != "write_memory":
-            raise RuntimeError(f"unsupported memory job kind: {memory_job.job_kind}")
-        self._store.complete_write_memory_job(memory_job=memory_job)
-        return True
+        # Block: write_memory apply
+        if memory_job.job_kind == "write_memory":
+            self._store.complete_write_memory_job(memory_job=memory_job)
+            return True
+        # Block: refresh_preview apply
+        if memory_job.job_kind == "refresh_preview":
+            self._store.complete_refresh_preview_job(memory_job=memory_job)
+            return True
+        # Block: unsupported memory job
+        raise RuntimeError(f"unsupported memory job kind: {memory_job.job_kind}")
 
     # Block: Infinite loop
     def run_forever(self) -> None:
