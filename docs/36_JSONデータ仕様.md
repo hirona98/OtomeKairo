@@ -26,6 +26,7 @@
 ### JSON の基本形
 
 - JSON のキーは、すべて `snake_case` に統一する
+- ただし、`GET /api/settings` の `effective_settings` だけは、`docs/39_設定キー運用仕様.md` と同じドット区切り設定キーをそのままキー名に使ってよい
 - ここで定義する JSON のルートは、すべてオブジェクトに固定する
 - 必須項目は常に出現させる
 - 任意項目は、値がないときに `null` を入れず、省略する
@@ -230,7 +231,8 @@
 
 - `memory_job_payloads.payload_json` は、すべて共通ヘッダを持つ
 - `payload_json.job_kind` は、対応する `memory_job_payloads.job_kind` と一致しなければならない
-- `source_event_ids` は、順序を持つ非空配列とする
+- `source_event_ids` は、順序を持つ配列とする
+- `source_event_ids` は、イベント起点の job では非空、`tidy_memory` のような保守起点 job では空配列を許可する
 
 <!-- Block: Job Common Header -->
 #### 共通ヘッダ
@@ -246,7 +248,8 @@
 ```
 
 - 必須項目は `job_kind`、`cycle_id`、`source_event_ids`、`created_at`、`idempotency_key` である
-- `source_event_ids` は空配列を許可しない
+- `source_event_ids` は、イベント起点の job では空配列を許可しない
+- `source_event_ids` は、`tidy_memory` のような保守起点 job では空配列 `[]` を許可する
 
 <!-- Block: Write Memory -->
 #### `job_kind = write_memory`
@@ -473,9 +476,7 @@
 {
   "server_time": 1760000000000,
   "runtime": {
-    "is_running": true,
-    "last_cycle_id": "cycle_...",
-    "last_commit_id": 42
+    "is_running": false
   },
   "self_state": {
     "current_emotion": {
@@ -496,7 +497,9 @@
 ```
 
 - 必須項目は `server_time`、`runtime`、`self_state`、`attention_state`、`task_state` である
-- `runtime` は、少なくとも `is_running`、`last_cycle_id`、`last_commit_id` を持つ
+- `runtime` は、少なくとも `is_running` を持つ
+- `runtime.last_cycle_id` は、短周期が 1 回以上完了している場合だけ持つ
+- `runtime.last_commit_id` は、`commit_records` が 1 件以上ある場合だけ持つ
 - `self_state.current_emotion` は、少なくとも `v`、`a`、`d`、`labels` を持つ
 - `attention_state.primary_focus` は、表示用の短い `string` とする
 - `task_state.active_task_count`、`task_state.waiting_task_count` は `integer` に固定する

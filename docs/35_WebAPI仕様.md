@@ -38,6 +38,7 @@
 ### JSON の基本方針
 
 - JSON のキーは `snake_case` に統一する
+- ただし、`GET /api/settings` の `effective_settings` だけは、`docs/39_設定キー運用仕様.md` と同じドット区切り設定キーをそのままキー名に使ってよい
 - 時刻は、原則として UTC unix milliseconds を `integer` で返す
 - ID は、文字列または単調増加整数をそのまま返し、UI 側で意味づけしない
 - 任意項目を省略するときは `null` ではなく未出現を許す
@@ -117,9 +118,7 @@
 {
   "server_time": 1760000000000,
   "runtime": {
-    "is_running": true,
-    "last_cycle_id": "cycle_...",
-    "last_commit_id": 42
+    "is_running": false
   },
   "self_state": {
     "current_emotion": {
@@ -140,7 +139,9 @@
 ```
 
 - `runtime.is_running` は Web サーバ観点の観測値であり、心拍監視や最終更新時刻から決める
-- `last_commit_id` は `commit_records.commit_id` の最新値を返す
+- `runtime.last_cycle_id` は、短周期が 1 回以上完了している場合だけ返す
+- `last_commit_id` は、`commit_records.commit_id` の最新値がある場合だけ返す
+- 初回起動直後で短周期未実行のときは、`runtime.is_running=false` とし、`last_cycle_id` と `last_commit_id` は省略する
 - 全状態を丸ごと返さず、UI 表示に必要な要点だけを返す
 
 <!-- Block: Settings Get -->
@@ -158,9 +159,8 @@
 ```json
 {
   "effective_settings": {
-    "llm_router": {
-      "default_model": "..."
-    }
+    "llm.default_model": "...",
+    "llm.temperature": 0.7
   },
   "pending_overrides": [
     {
@@ -173,7 +173,7 @@
 }
 ```
 
-- `effective_settings` は、UI で編集対象にする設定だけを返す
+- `effective_settings` は、UI で編集対象にする設定だけを、`docs/39_設定キー運用仕様.md` と同じドット区切りキーで返す
 - 秘密情報は返さない
 
 <!-- Block: Settings Post -->
@@ -337,6 +337,7 @@
 - `event:` には `event_type` を入れる
 - `data:` には `payload_json` を 1 行 JSON として入れる
 - 1 イベントは、`id`、`event`、`data`、空行の順に流す
+- ただし、保持範囲外からの再開で合成する一時的な `stream_reset` `notice` だけは、`id:` を付けずに流してよい
 
 ```text
 id: 120
