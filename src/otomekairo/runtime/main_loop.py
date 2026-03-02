@@ -242,7 +242,18 @@ class RuntimeLoop:
             return True
         # Block: refresh_preview apply
         if memory_job.job_kind == "refresh_preview":
-            self._store.complete_refresh_preview_job(memory_job=memory_job)
+            effective_settings = self._store.read_effective_settings(self._default_settings)
+            embedding_model = effective_settings["llm.embedding_model"]
+            if not isinstance(embedding_model, str) or not embedding_model:
+                raise RuntimeError("llm.embedding_model must be non-empty string")
+            self._store.complete_refresh_preview_job(
+                memory_job=memory_job,
+                embedding_model=embedding_model,
+            )
+            return True
+        # Block: embedding_sync apply
+        if memory_job.job_kind == "embedding_sync":
+            self._store.complete_embedding_sync_job(memory_job=memory_job)
             return True
         # Block: unsupported memory job
         raise RuntimeError(f"unsupported memory job kind: {memory_job.job_kind}")

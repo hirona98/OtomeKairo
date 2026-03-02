@@ -458,7 +458,7 @@ flowchart TD
 
 - 同じ長周期 transaction に含めるのは、`memory_jobs`、`memory_states`、`preference_memory`、`event_affects`、`event_links`、`event_threads`、`state_links`、`event_entities`、`state_entities`、`event_preview_cache`、`revisions`、`vec_items`、必要なら `self_state` と `skill_registry` とする
 - `write_memory` は、必要なら同じ長周期 transaction 内で followup の `memory_jobs` と `memory_job_payloads` を追加してよい
-- `refresh_preview` は、`event_preview_cache` 以外を更新してはならない
+- `refresh_preview` は、`event_preview_cache` と必要な followup の `memory_jobs` / `memory_job_payloads` 以外を更新してはならない
 - `quarantine_memory` は、`searchable` 系の更新と監査痕跡だけを確定する
 - `self_state` を同じ長周期で更新する場合は、`personality_json` の可変部分だけを更新し、`invariants_json` は変更しない
 

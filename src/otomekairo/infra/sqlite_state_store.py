@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import time
@@ -946,9 +947,16 @@ class SqliteStateStore:
                 raise StoreConflictError("memory job must be claimed before completion")
         return memory_state_id
 
-    def complete_refresh_preview_job(self, *, memory_job: MemoryJobRecord) -> str:
+    def complete_refresh_preview_job(
+        self,
+        *,
+        memory_job: MemoryJobRecord,
+        embedding_model: str,
+    ) -> str:
         if memory_job.job_kind != "refresh_preview":
             raise StoreValidationError("memory_job.job_kind must be refresh_preview")
+        if not isinstance(embedding_model, str) or not embedding_model:
+            raise StoreValidationError("embedding_model must be non-empty string")
         target_event_id = str(memory_job.payload["target_event_id"])
         target_event_updated_at = int(memory_job.payload["target_event_updated_at"])
         now_ms = _now_ms()
@@ -1019,6 +1027,21 @@ class SqliteStateStore:
                         target_event_id,
                     ),
                 )
+            self._enqueue_embedding_sync_jobs(
+                connection=connection,
+                cycle_id=str(memory_job.payload["cycle_id"]),
+                source_event_ids=[target_event_id],
+                targets=[
+                    {
+                        "entity_type": "event",
+                        "entity_id": target_event_id,
+                        "source_updated_at": target_event_updated_at,
+                        "current_searchable": bool(event_row["searchable"]),
+                    }
+                ],
+                embedding_model=embedding_model,
+                created_at=now_ms,
+            )
             updated_row_count = connection.execute(
                 """
                 UPDATE memory_jobs
@@ -1034,6 +1057,118 @@ class SqliteStateStore:
             if updated_row_count != 1:
                 raise StoreConflictError("memory job must be claimed before completion")
         return preview_id
+
+    # Block: Embedding sync apply
+    def complete_embedding_sync_job(self, *, memory_job: MemoryJobRecord) -> int:
+        if memory_job.job_kind != "embedding_sync":
+            raise StoreValidationError("memory_job.job_kind must be embedding_sync")
+        embedding_model = memory_job.payload["embedding_model"]
+        requested_scopes = memory_job.payload["requested_scopes"]
+        targets = memory_job.payload["targets"]
+        if not isinstance(embedding_model, str) or not embedding_model:
+            raise StoreValidationError("embedding_sync embedding_model must be non-empty string")
+        if not isinstance(requested_scopes, list) or not requested_scopes:
+            raise StoreValidationError("embedding_sync requested_scopes must not be empty")
+        if not isinstance(targets, list) or not targets:
+            raise StoreValidationError("embedding_sync targets must not be empty")
+        normalized_scopes = _normalize_embedding_scopes(requested_scopes)
+        now_ms = _now_ms()
+        updated_scope_count = 0
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            job_row = connection.execute(
+                """
+                SELECT status
+                FROM memory_jobs
+                WHERE job_id = ?
+                """,
+                (memory_job.job_id,),
+            ).fetchone()
+            if job_row is None:
+                raise RuntimeError("memory job is missing")
+            if job_row["status"] != "claimed":
+                raise StoreConflictError("memory job must be claimed before completion")
+            for target in targets:
+                entity_type = str(target["entity_type"])
+                entity_id = str(target["entity_id"])
+                source_updated_at = int(target["source_updated_at"])
+                current_searchable = bool(target["current_searchable"])
+                # Block: Scope application
+                for embedding_scope in normalized_scopes:
+                    if current_searchable:
+                        embedding_blob = _build_embedding_blob(
+                            source_text=_resolve_embedding_source_text(
+                                connection=connection,
+                                entity_type=entity_type,
+                                entity_id=entity_id,
+                            ),
+                            embedding_model=embedding_model,
+                            embedding_scope=embedding_scope,
+                        )
+                        connection.execute(
+                            """
+                            INSERT INTO vec_items (
+                                vec_item_id,
+                                entity_type,
+                                entity_id,
+                                embedding_model,
+                                embedding_scope,
+                                searchable,
+                                source_updated_at,
+                                embedding
+                            )
+                            VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+                            ON CONFLICT(entity_type, entity_id, embedding_model, embedding_scope)
+                            DO UPDATE SET
+                                searchable = 1,
+                                source_updated_at = excluded.source_updated_at,
+                                embedding = excluded.embedding
+                            """,
+                            (
+                                _opaque_id("vec"),
+                                entity_type,
+                                entity_id,
+                                embedding_model,
+                                embedding_scope,
+                                source_updated_at,
+                                embedding_blob,
+                            ),
+                        )
+                    else:
+                        connection.execute(
+                            """
+                            UPDATE vec_items
+                            SET searchable = 0,
+                                source_updated_at = ?
+                            WHERE entity_type = ?
+                              AND entity_id = ?
+                              AND embedding_model = ?
+                              AND embedding_scope = ?
+                            """,
+                            (
+                                source_updated_at,
+                                entity_type,
+                                entity_id,
+                                embedding_model,
+                                embedding_scope,
+                            ),
+                        )
+                    updated_scope_count += 1
+            updated_row_count = connection.execute(
+                """
+                UPDATE memory_jobs
+                SET status = 'completed',
+                    completed_at = ?,
+                    updated_at = ?,
+                    last_error = NULL
+                WHERE job_id = ?
+                  AND status = 'claimed'
+                """,
+                (now_ms, now_ms, memory_job.job_id),
+            ).rowcount
+            if updated_row_count != 1:
+                raise StoreConflictError("memory job must be claimed before completion")
+        return updated_scope_count
 
     # Block: Pending input claim
     def claim_next_pending_input(self) -> PendingInputRecord | None:
@@ -1241,6 +1376,44 @@ class SqliteStateStore:
                 )
             )
         return job_ids
+
+    # Block: Embedding sync enqueue
+    def _enqueue_embedding_sync_jobs(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        cycle_id: str,
+        source_event_ids: list[str],
+        targets: list[dict[str, Any]],
+        embedding_model: str,
+        created_at: int,
+    ) -> list[str]:
+        if not targets:
+            return []
+        idempotency_key = _embedding_sync_job_idempotency_key(
+            cycle_id=cycle_id,
+            embedding_model=embedding_model,
+            targets=targets,
+        )
+        payload_json = {
+            "job_kind": "embedding_sync",
+            "cycle_id": cycle_id,
+            "source_event_ids": source_event_ids,
+            "created_at": created_at,
+            "idempotency_key": idempotency_key,
+            "embedding_model": embedding_model,
+            "requested_scopes": ["recent", "global"],
+            "targets": targets,
+        }
+        return [
+            self._insert_memory_job(
+                connection=connection,
+                job_kind="embedding_sync",
+                payload_json=payload_json,
+                idempotency_key=idempotency_key,
+                created_at=created_at,
+            )
+        ]
 
     def _insert_memory_job(
         self,
@@ -1975,6 +2148,22 @@ def _refresh_preview_job_idempotency_key(
     return f"refresh_preview:{cycle_id}:{event_id}:{event_updated_at}"
 
 
+def _embedding_sync_job_idempotency_key(
+    *,
+    cycle_id: str,
+    embedding_model: str,
+    targets: list[dict[str, Any]],
+) -> str:
+    target_tokens = [
+        (
+            f"{target['entity_type']}:{target['entity_id']}:"
+            f"{int(target['source_updated_at'])}:{int(bool(target['current_searchable']))}"
+        )
+        for target in targets
+    ]
+    return "embedding_sync:" + cycle_id + ":" + embedding_model + ":" + ":".join(target_tokens)
+
+
 def _fetch_events_for_ids(
     *,
     connection: sqlite3.Connection,
@@ -1986,6 +2175,7 @@ def _fetch_events_for_ids(
         SELECT
             event_id,
             kind,
+            searchable,
             observation_summary,
             action_summary,
             result_summary,
@@ -2029,6 +2219,75 @@ def _build_event_preview_text(row: sqlite3.Row) -> str:
     if preview_text:
         return preview_text[:240]
     return "イベントのプレビューを生成できませんでした"
+
+
+def _normalize_embedding_scopes(requested_scopes: list[Any]) -> list[str]:
+    normalized_scopes: list[str] = []
+    for raw_scope in requested_scopes:
+        if not isinstance(raw_scope, str):
+            raise StoreValidationError("embedding_sync scope must be string")
+        if raw_scope not in {"recent", "global"}:
+            raise StoreValidationError("embedding_sync scope is invalid")
+        if raw_scope not in normalized_scopes:
+            normalized_scopes.append(raw_scope)
+    if not normalized_scopes:
+        raise StoreValidationError("embedding_sync scopes must not be empty")
+    return normalized_scopes
+
+
+def _resolve_embedding_source_text(
+    *,
+    connection: sqlite3.Connection,
+    entity_type: str,
+    entity_id: str,
+) -> str:
+    if entity_type == "event":
+        row = connection.execute(
+            """
+            SELECT preview_text
+            FROM event_preview_cache
+            WHERE event_id = ?
+            """,
+            (entity_id,),
+        ).fetchone()
+        if row is None:
+            raise RuntimeError("event preview is missing for embedding_sync")
+        return str(row["preview_text"])
+    if entity_type == "memory_state":
+        row = connection.execute(
+            """
+            SELECT body_text
+            FROM memory_states
+            WHERE memory_state_id = ?
+            """,
+            (entity_id,),
+        ).fetchone()
+        if row is None:
+            raise RuntimeError("memory_state is missing for embedding_sync")
+        return str(row["body_text"])
+    if entity_type == "event_affect":
+        row = connection.execute(
+            """
+            SELECT moment_affect_text
+            FROM event_affects
+            WHERE event_affect_id = ?
+            """,
+            (entity_id,),
+        ).fetchone()
+        if row is None:
+            raise RuntimeError("event_affect is missing for embedding_sync")
+        return str(row["moment_affect_text"])
+    raise StoreValidationError("embedding_sync target entity_type is invalid")
+
+
+def _build_embedding_blob(
+    *,
+    source_text: str,
+    embedding_model: str,
+    embedding_scope: str,
+) -> bytes:
+    payload = f"{embedding_model}\n{embedding_scope}\n{source_text}".encode("utf-8")
+    return hashlib.sha256(payload).digest()
 
 
 def _event_summary_text(row: sqlite3.Row) -> str:
