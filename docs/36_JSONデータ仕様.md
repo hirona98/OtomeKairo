@@ -16,7 +16,7 @@
 
 - 固定するのは、初期実装で使う JSON オブジェクトのキー、型、必須項目、固定語彙である
 - 固定するのは、`pending_inputs.payload_json`、`settings_overrides.requested_value_json`、`ui_outbound_events.payload_json`、`memory_jobs.payload_ref_json`、`memory_job_payloads.payload_json`、主要な Web API 本文である
-- 固定するのは、`self_state.personality_json`、短周期の内部で使う `selection_profile`、長周期の内部で使う `personality_change_proposal`、`persona_updates` の形である
+- 固定するのは、`self_state.personality_json`、短周期の内部で使う `selection_profile`、`persona_consistency_score`、`attention_score_breakdown`、`self_initiated_score_breakdown`、`action_candidate_score`、長周期の内部で使う `personality_change_proposal`、`persona_updates` の形である
 - 固定しないのは、Python のクラス名、Pydantic モデル名、OpenAPI の自動生成細部である
 - 固定しないのは、将来追加する未使用フィールドや後段の拡張イベント種別である
 
@@ -219,6 +219,106 @@
 - `emotion_bias` は、現在感情から作る短期補正値であり、各値は `-1.0..+1.0` の `number` に固定する
 - `drive_bias` は、内部欲求から作る短期補正値であり、各値は `-1.0..+1.0` の `number` に固定する
 - `selection_profile` は永続化前提の正本ではなく、`self_state`、`current_emotion`、`relationship_overview`、`preference_memory`、`drive_state` から再構成する
+
+<!-- Block: Persona Consistency Score -->
+### `persona_consistency_score`
+
+```json
+{
+  "trait_alignment": 0.62,
+  "style_alignment": 0.74,
+  "relationship_alignment": 0.55,
+  "preference_alignment": 0.48,
+  "aversion_penalty": 0.10,
+  "emotion_alignment": 0.41,
+  "drive_alignment": 0.37,
+  "overall_score": 0.58
+}
+```
+
+- `persona_consistency_score` は、候補や主注意対象が「その人格らしいか」を比較するための内部スコアである
+- 必須項目は `trait_alignment`、`style_alignment`、`relationship_alignment`、`preference_alignment`、`aversion_penalty`、`emotion_alignment`、`drive_alignment`、`overall_score` である
+- 各値は、`0.0..1.0` の `number` に固定する
+- `aversion_penalty` は、値が高いほど避けたい度合いが高いことを示す
+- `overall_score` は、各軸の重みづけ後に比較へ使う合成値である
+- `persona_consistency_score` は永続化前提の正本ではなく、`selection_profile` と候補の組み合わせごとに再計算する
+
+<!-- Block: Attention Score Breakdown -->
+### `attention_score_breakdown`
+
+```json
+{
+  "focus_ref": "observation:camera:001",
+  "hard_gate_passed": true,
+  "urgency_score": 0.66,
+  "task_continuity_score": 0.54,
+  "relationship_salience_score": 0.72,
+  "personality_fit_score": 0.48,
+  "experience_bias_score": 0.35,
+  "explicitness_score": 0.10,
+  "novelty_score": 0.08,
+  "total_score": 0.51
+}
+```
+
+- `attention_score_breakdown` は、`attention_set` の候補比較で使う内部スコアである
+- 必須項目は `focus_ref`、`hard_gate_passed`、`urgency_score`、`task_continuity_score`、`relationship_salience_score`、`personality_fit_score`、`experience_bias_score`、`explicitness_score`、`novelty_score`、`total_score` である
+- `focus_ref` は、その候補の観測や対象を指す短い参照 `string` である
+- `hard_gate_passed` は、`boolean` に固定する
+- 各 `*_score` と `total_score` は、`0.0..1.0` の `number` に固定する
+- `personality_fit_score` は、必要なら候補ごとの `persona_consistency_score` を元に計算してよい
+- `attention_score_breakdown` は永続化前提の正本ではなく、その短周期の候補比較ごとに再計算する
+
+<!-- Block: Self Initiated Score Breakdown -->
+### `self_initiated_score_breakdown`
+
+```json
+{
+  "initiative_kind": "task_progress",
+  "hard_gate_passed": true,
+  "task_progress_fit": 0.72,
+  "relationship_care_fit": 0.46,
+  "self_maintenance_need": 0.22,
+  "curiosity_fit": 0.38,
+  "habit_match": 0.20,
+  "novelty_fit": 0.12,
+  "total_score": 0.49
+}
+```
+
+- `self_initiated_score_breakdown` は、自発行動候補の比較で使う内部スコアである
+- 必須項目は `initiative_kind`、`hard_gate_passed`、`task_progress_fit`、`relationship_care_fit`、`self_maintenance_need`、`curiosity_fit`、`habit_match`、`novelty_fit`、`total_score` である
+- `initiative_kind` は、`task_progress`、`unexplored_check`、`self_maintenance`、`skill_rehearsal` のいずれかの `string` である
+- `hard_gate_passed` は、`boolean` に固定する
+- 各 `*_fit` と `total_score` は、`0.0..1.0` の `number` に固定する
+- `self_initiated_score_breakdown` は永続化前提の正本ではなく、その短周期の比較ごとに再計算する
+
+<!-- Block: Action Candidate Score -->
+### `action_candidate_score`
+
+```json
+{
+  "proposal_id": "proposal_001",
+  "hard_gate_passed": true,
+  "task_fit_score": 0.62,
+  "personality_fit_score": 0.58,
+  "relationship_fit_score": 0.44,
+  "experience_fit_score": 0.39,
+  "drive_relief_score": 0.33,
+  "expected_stability_score": 0.50,
+  "priority_hint_score": 0.20,
+  "total_score": 0.49
+}
+```
+
+- `action_candidate_score` は、`action validator` が実行可能候補を比較するための内部スコアである
+- 必須項目は `proposal_id`、`hard_gate_passed`、`task_fit_score`、`personality_fit_score`、`relationship_fit_score`、`experience_fit_score`、`drive_relief_score`、`expected_stability_score`、`priority_hint_score`、`total_score` である
+- `proposal_id` は、比較対象の `action_proposal.proposal_id` と同じ `string` である
+- `hard_gate_passed` は、`boolean` に固定する
+- 各 `*_score` と `total_score` は、`0.0..1.0` の `number` に固定する
+- `personality_fit_score` は、必要なら `persona_consistency_score` の `trait_alignment`、`style_alignment`、`overall_score` を使って計算してよい
+- `priority_hint_score` は、`proposal.priority` をそのまま信じるためではなく、同程度候補の補助比較にだけ使う
+- `action_candidate_score` は永続化前提の正本ではなく、その短周期の候補比較ごとに再計算する
 
 <!-- Block: Persona Update Group -->
 ## 人格変化の内部 JSON
