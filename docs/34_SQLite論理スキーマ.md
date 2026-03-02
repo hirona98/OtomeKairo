@@ -9,6 +9,7 @@
 - JSON 列の中身は `docs/36_JSONデータ仕様.md` を見る
 - 初回 seed と排他起動の前提は `docs/37_起動初期化仕様.md` を見る
 - 入力重複とストリーム保持運用は `docs/38_入力ストリーム運用仕様.md` を見る
+- `self_state.personality` の更新原則は `docs/40_人格変化仕様.md` を見る
 - 実際の初期 SQL 文は `sql/core_schema.sql` に置く
 - ここで固定するのは、テーブル名、主キー、必須列、主要制約、主要索引である
 - ここで固定しないのは、実際の `CREATE TABLE` 文、migration 手順、SQLite pragma の全文である
@@ -104,6 +105,8 @@ flowchart TD
   - 役割: 現在の人格断面を 1 件で保持する
   - 主キー: `row_id INTEGER PRIMARY KEY CHECK(row_id = 1)`
   - 必須列: `personality_json`, `current_emotion_json`, `long_term_goals_json`, `relationship_overview_json`, `invariants_json`, `updated_at`
+  - `personality_json` は、経験で変化する trait、好みの行動様式、学習済みの好悪と回避傾向を持てる形にする
+  - `invariants_json` は、自動学習で変更しない人格の不変条件を持つ
 
 - `attention_state`
   - 役割: 現在の注意断面を 1 件で保持する
@@ -160,6 +163,7 @@ flowchart TD
 - 主キー: `skill_id TEXT PRIMARY KEY`
 - 必須列: `trigger_pattern_json`, `preconditions_json`, `action_pattern_json`, `success_signature_json`, `enabled`, `created_at`, `updated_at`
 - 任意列: `summary_text`, `last_used_at`
+- `preconditions_json` と `action_pattern_json` は、人格に合う発火条件と避けるべき行動様式を含めてよい
 - 主要索引: `(enabled, updated_at DESC)`
 
 <!-- Block: Control Plane Group -->
@@ -346,6 +350,7 @@ flowchart TD
 - 役割: 記憶更新の監査履歴を保持する
 - 主キー: `revision_id TEXT PRIMARY KEY`
 - 必須列: `entity_type`, `entity_id`, `before_json`, `after_json`, `reason`, `evidence_event_ids_json`, `created_at`
+- `entity_type` は、少なくとも `memory_states`、`preference_memory`、`event_links`、`event_threads`、`state_links`、`event_affects`、`self_state.personality` を取りうる
 - 主要索引: `(entity_type, entity_id, created_at DESC)`, `(created_at DESC)`
 
 <!-- Block: Retrieval Runs -->
@@ -428,10 +433,11 @@ flowchart TD
 <!-- Block: Long Cycle Boundary -->
 ### 長周期の保存境界
 
-- 同じ長周期 transaction に含めるのは、`memory_jobs`、`memory_states`、`preference_memory`、`event_affects`、`event_links`、`event_threads`、`state_links`、`event_entities`、`state_entities`、`event_preview_cache`、`revisions`、`vec_items`、必要なら `skill_registry` とする
+- 同じ長周期 transaction に含めるのは、`memory_jobs`、`memory_states`、`preference_memory`、`event_affects`、`event_links`、`event_threads`、`state_links`、`event_entities`、`state_entities`、`event_preview_cache`、`revisions`、`vec_items`、必要なら `self_state` と `skill_registry` とする
 - `write_memory` は、必要なら同じ長周期 transaction 内で followup の `memory_jobs` と `memory_job_payloads` を追加してよい
 - `refresh_preview` は、`event_preview_cache` 以外を更新してはならない
 - `quarantine_memory` は、`searchable` 系の更新と監査痕跡だけを確定する
+- `self_state` を同じ長周期で更新する場合は、`personality_json` の可変部分だけを更新し、`invariants_json` は変更しない
 
 <!-- Block: Fixed Decisions -->
 ## このドキュメントで確定したこと
