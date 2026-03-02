@@ -872,8 +872,7 @@
   "targets": [
     {
       "entity_type": "memory_state",
-      "entity_id": "ms_...",
-      "current_searchable": true
+      "entity_id": "ms_..."
     }
   ]
 }
@@ -882,8 +881,8 @@
 - 追加の必須項目は `reason_code`、`reason_note`、`targets` である
 - `reason_code` は、少なくとも `misretrieval_confirmed`、`stale_linkage`、`manual_quarantine` を区別する
 - `targets` は空配列を許可しない
-- `targets` の各要素は、少なくとも `entity_type`、`entity_id`、`current_searchable` を持つ
-- `entity_type` は、少なくとも `event`、`memory_state`、`event_affect` を区別する
+- `targets` の各要素は、少なくとも `entity_type`、`entity_id` を持つ
+- `entity_type` は、初期実装では `event`、`memory_state` を区別する
 
 <!-- Block: Embedding Sync -->
 #### `job_kind = embedding_sync`

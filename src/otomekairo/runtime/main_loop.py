@@ -250,6 +250,7 @@ class RuntimeLoop:
             "write_memory": self._run_write_memory_job,
             "refresh_preview": self._run_refresh_preview_job,
             "embedding_sync": self._run_embedding_sync_job,
+            "quarantine_memory": self._run_quarantine_memory_job,
         }
         handler = handlers.get(job_kind)
         if handler is None:
@@ -272,6 +273,16 @@ class RuntimeLoop:
 
     def _run_embedding_sync_job(self, memory_job: MemoryJobRecord) -> None:
         self._store.complete_embedding_sync_job(memory_job=memory_job)
+
+    def _run_quarantine_memory_job(self, memory_job: MemoryJobRecord) -> None:
+        effective_settings = self._store.read_effective_settings(self._default_settings)
+        embedding_model = effective_settings["llm.embedding_model"]
+        if not isinstance(embedding_model, str) or not embedding_model:
+            raise RuntimeError("llm.embedding_model must be non-empty string")
+        self._store.complete_quarantine_memory_job(
+            memory_job=memory_job,
+            embedding_model=embedding_model,
+        )
 
     # Block: Infinite loop
     def run_forever(self) -> None:

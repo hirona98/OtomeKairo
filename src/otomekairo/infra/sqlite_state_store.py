@@ -614,6 +614,42 @@ class SqliteStateStore:
             )
         return {"accepted": True, "status": "queued"}
 
+    # Block: Quarantine enqueue
+    def enqueue_quarantine_memory(
+        self,
+        *,
+        source_event_ids: list[str],
+        targets: list[dict[str, Any]],
+        reason_code: str,
+        reason_note: str,
+    ) -> dict[str, Any]:
+        if not source_event_ids:
+            raise StoreValidationError("source_event_ids must not be empty")
+        if not isinstance(reason_code, str) or not reason_code:
+            raise StoreValidationError("reason_code must be non-empty string")
+        if not isinstance(reason_note, str) or not reason_note:
+            raise StoreValidationError("reason_note must be non-empty string")
+        normalized_targets = _normalize_quarantine_targets(targets)
+        cycle_id = _opaque_id("cycle")
+        created_at = _now_ms()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            job_ids = self._enqueue_quarantine_memory_jobs(
+                connection=connection,
+                cycle_id=cycle_id,
+                source_event_ids=source_event_ids,
+                targets=normalized_targets,
+                reason_code=reason_code,
+                reason_note=reason_note,
+                created_at=created_at,
+            )
+        return {
+            "accepted": True,
+            "cycle_id": cycle_id,
+            "job_ids": job_ids,
+            "status": "queued",
+        }
+
     # Block: Stream window read
     def read_stream_window(self, *, channel: str) -> tuple[int | None, int | None]:
         with self._connect() as connection:
@@ -1096,6 +1132,79 @@ class SqliteStateStore:
             )
         return updated_scope_count
 
+    # Block: Quarantine apply
+    def complete_quarantine_memory_job(
+        self,
+        *,
+        memory_job: MemoryJobRecord,
+        embedding_model: str,
+    ) -> int:
+        if memory_job.job_kind != "quarantine_memory":
+            raise StoreValidationError("memory_job.job_kind must be quarantine_memory")
+        if not isinstance(embedding_model, str) or not embedding_model:
+            raise StoreValidationError("embedding_model must be non-empty string")
+        source_event_ids = memory_job.payload["source_event_ids"]
+        targets = _normalize_quarantine_targets(memory_job.payload["targets"])
+        reason_code = memory_job.payload["reason_code"]
+        reason_note = memory_job.payload["reason_note"]
+        if not isinstance(source_event_ids, list) or not source_event_ids:
+            raise StoreValidationError("quarantine_memory source_event_ids must not be empty")
+        if not isinstance(reason_code, str) or not reason_code:
+            raise StoreValidationError("quarantine_memory reason_code must be non-empty string")
+        if not isinstance(reason_note, str) or not reason_note:
+            raise StoreValidationError("quarantine_memory reason_note must be non-empty string")
+        now_ms = _now_ms()
+        affected_count = 0
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            self._ensure_claimed_memory_job(
+                connection=connection,
+                job_id=memory_job.job_id,
+            )
+            embedding_targets: list[dict[str, Any]] = []
+            for raw_target in targets:
+                entity_type = raw_target["entity_type"]
+                entity_id = raw_target["entity_id"]
+                source_updated_at, changed = self._quarantine_searchable_target(
+                    connection=connection,
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    updated_at=now_ms,
+                )
+                if changed:
+                    self._insert_quarantine_revision(
+                        connection=connection,
+                        entity_type=entity_type,
+                        entity_id=entity_id,
+                        source_event_ids=source_event_ids,
+                        reason_code=reason_code,
+                        reason_note=reason_note,
+                        created_at=now_ms,
+                    )
+                    affected_count += 1
+                embedding_targets.append(
+                    {
+                        "entity_type": entity_type,
+                        "entity_id": entity_id,
+                        "source_updated_at": source_updated_at,
+                        "current_searchable": False,
+                    }
+                )
+            self._enqueue_embedding_sync_jobs(
+                connection=connection,
+                cycle_id=str(memory_job.payload["cycle_id"]),
+                source_event_ids=source_event_ids,
+                targets=embedding_targets,
+                embedding_model=embedding_model,
+                created_at=now_ms,
+            )
+            self._mark_memory_job_completed(
+                connection=connection,
+                job_id=memory_job.job_id,
+                completed_at=now_ms,
+            )
+        return affected_count
+
     # Block: Memory job state helpers
     def _ensure_claimed_memory_job(
         self,
@@ -1137,6 +1246,107 @@ class SqliteStateStore:
         ).rowcount
         if updated_row_count != 1:
             raise StoreConflictError("memory job must be claimed before completion")
+
+    # Block: Quarantine target update
+    def _quarantine_searchable_target(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        entity_type: str,
+        entity_id: str,
+        updated_at: int,
+    ) -> tuple[int, bool]:
+        if entity_type == "event":
+            row = connection.execute(
+                """
+                SELECT searchable, COALESCE(updated_at, created_at) AS source_updated_at
+                FROM events
+                WHERE event_id = ?
+                """,
+                (entity_id,),
+            ).fetchone()
+            if row is None:
+                raise RuntimeError("event is missing for quarantine_memory")
+            if int(row["searchable"]) == 0:
+                return (int(row["source_updated_at"]), False)
+            connection.execute(
+                """
+                UPDATE events
+                SET searchable = 0,
+                    updated_at = ?
+                WHERE event_id = ?
+                """,
+                (updated_at, entity_id),
+            )
+            return (updated_at, True)
+        if entity_type == "memory_state":
+            row = connection.execute(
+                """
+                SELECT searchable, updated_at
+                FROM memory_states
+                WHERE memory_state_id = ?
+                """,
+                (entity_id,),
+            ).fetchone()
+            if row is None:
+                raise RuntimeError("memory_state is missing for quarantine_memory")
+            if int(row["searchable"]) == 0:
+                return (int(row["updated_at"]), False)
+            connection.execute(
+                """
+                UPDATE memory_states
+                SET searchable = 0,
+                    updated_at = ?
+                WHERE memory_state_id = ?
+                """,
+                (updated_at, entity_id),
+            )
+            return (updated_at, True)
+        raise StoreValidationError("quarantine_memory target entity_type is invalid")
+
+    # Block: Quarantine revision insert
+    def _insert_quarantine_revision(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        entity_type: str,
+        entity_id: str,
+        source_event_ids: list[str],
+        reason_code: str,
+        reason_note: str,
+        created_at: int,
+    ) -> None:
+        revision_entity_type = {
+            "event": "events",
+            "memory_state": "memory_states",
+        }.get(entity_type)
+        if revision_entity_type is None:
+            raise StoreValidationError("quarantine_memory revision entity_type is invalid")
+        connection.execute(
+            """
+            INSERT INTO revisions (
+                revision_id,
+                entity_type,
+                entity_id,
+                before_json,
+                after_json,
+                reason,
+                evidence_event_ids_json,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                _opaque_id("rev"),
+                revision_entity_type,
+                entity_id,
+                _json_text({"searchable": True}),
+                _json_text({"searchable": False}),
+                f"quarantine_memory {reason_code}: {reason_note}",
+                _json_text(source_event_ids),
+                created_at,
+            ),
+        )
 
     def _upsert_event_preview_cache(
         self,
@@ -1499,6 +1709,50 @@ class SqliteStateStore:
             self._insert_memory_job(
                 connection=connection,
                 job_kind="embedding_sync",
+                payload_json=payload_json,
+                idempotency_key=idempotency_key,
+                created_at=created_at,
+            )
+        ]
+
+    # Block: Quarantine enqueue
+    def _enqueue_quarantine_memory_jobs(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        cycle_id: str,
+        source_event_ids: list[str],
+        targets: list[dict[str, Any]],
+        reason_code: str,
+        reason_note: str,
+        created_at: int,
+    ) -> list[str]:
+        if not source_event_ids:
+            raise StoreValidationError("quarantine_memory source_event_ids must not be empty")
+        if not isinstance(reason_code, str) or not reason_code:
+            raise StoreValidationError("quarantine_memory reason_code must be non-empty string")
+        if not isinstance(reason_note, str) or not reason_note:
+            raise StoreValidationError("quarantine_memory reason_note must be non-empty string")
+        normalized_targets = _normalize_quarantine_targets(targets)
+        idempotency_key = _quarantine_memory_job_idempotency_key(
+            cycle_id=cycle_id,
+            reason_code=reason_code,
+            targets=normalized_targets,
+        )
+        payload_json = {
+            "job_kind": "quarantine_memory",
+            "cycle_id": cycle_id,
+            "source_event_ids": source_event_ids,
+            "created_at": created_at,
+            "idempotency_key": idempotency_key,
+            "reason_code": reason_code,
+            "reason_note": reason_note,
+            "targets": normalized_targets,
+        }
+        return [
+            self._insert_memory_job(
+                connection=connection,
+                job_kind="quarantine_memory",
                 payload_json=payload_json,
                 idempotency_key=idempotency_key,
                 created_at=created_at,
@@ -2233,6 +2487,32 @@ def _write_memory_job_idempotency_key(*, cycle_id: str, event_ids: list[str]) ->
     return "write_memory:" + cycle_id + ":" + ":".join(event_ids)
 
 
+def _normalize_quarantine_targets(raw_targets: Any) -> list[dict[str, str]]:
+    if not isinstance(raw_targets, list) or not raw_targets:
+        raise StoreValidationError("quarantine_memory targets must not be empty")
+    normalized_targets: list[dict[str, str]] = []
+    for raw_target in raw_targets:
+        if not isinstance(raw_target, dict):
+            raise StoreValidationError("quarantine_memory target must be object")
+        entity_type = raw_target.get("entity_type")
+        entity_id = raw_target.get("entity_id")
+        if not isinstance(entity_type, str) or not entity_type:
+            raise StoreValidationError("quarantine_memory target.entity_type must be non-empty string")
+        if entity_type == "event_affect":
+            raise StoreValidationError("event_affect quarantine is not implemented yet")
+        if entity_type not in {"event", "memory_state"}:
+            raise StoreValidationError("quarantine_memory target.entity_type is invalid")
+        if not isinstance(entity_id, str) or not entity_id:
+            raise StoreValidationError("quarantine_memory target.entity_id must be non-empty string")
+        normalized_targets.append(
+            {
+                "entity_type": entity_type,
+                "entity_id": entity_id,
+            }
+        )
+    return normalized_targets
+
+
 def _refresh_preview_job_idempotency_key(
     *,
     cycle_id: str,
@@ -2256,6 +2536,19 @@ def _embedding_sync_job_idempotency_key(
         for target in targets
     ]
     return "embedding_sync:" + cycle_id + ":" + embedding_model + ":" + ":".join(target_tokens)
+
+
+def _quarantine_memory_job_idempotency_key(
+    *,
+    cycle_id: str,
+    reason_code: str,
+    targets: list[dict[str, Any]],
+) -> str:
+    target_tokens = [
+        f"{target['entity_type']}:{target['entity_id']}"
+        for target in targets
+    ]
+    return "quarantine_memory:" + cycle_id + ":" + reason_code + ":" + ":".join(target_tokens)
 
 
 def _fetch_events_for_ids(
