@@ -31,6 +31,11 @@
 - `src/otomekairo/boot/run_web.py`: `uvicorn` で Web サーバを起動する
 - `src/otomekairo/boot/run_runtime.py`: 人格ランタイムの常時ループを起動する
 - `src/otomekairo/web/app.py`: FastAPI アプリを構成し、API ルータと例外処理を束ねる
+- `src/otomekairo/gateway/cognition_client.py`: 認知処理の外部境界を表す抽象を定義する
+- `src/otomekairo/usecase/build_cognition_input.py`: `self_state` などの現在状態から最小の `cognition_input` を組み立てる
+- `src/otomekairo/usecase/run_cognition.py`: 認知クライアント呼び出しを UI 応答と `action_history` へ変換する
+- `src/otomekairo/infra/deterministic_cognition_client.py`: `LiteLLM` 導入前の最小認知クライアントを持つ
 - `src/otomekairo/infra/sqlite_state_store.py`: `core_schema.sql` を読み込む DB 初期化と、状態参照・入力受付・設定反映の最小実装を持つ
-- `src/otomekairo/runtime/main_loop.py`: `settings_overrides` と `pending_inputs` を消費し、`input_journal`、`action_history`、`events`、`ui_outbound_events`、`commit_records` まで閉じ、`runtime.idle_tick_ms` を待機間隔に使う最小ランタイムを持つ
+- `src/otomekairo/runtime/main_loop.py`: `settings_overrides` と `pending_inputs` を消費し、認知入力の組み立てと最小認知クライアント呼び出しを経て、`input_journal`、`action_history`、`events`、`ui_outbound_events`、`commit_records` まで閉じる
+- `src/otomekairo/schema/runtime_types.py`: ランタイムの共通データ形を `infra` から切り離して持つ
 - `src/otomekairo/schema/settings.py`: 設定キーの検証と有効設定の初期値を定義する

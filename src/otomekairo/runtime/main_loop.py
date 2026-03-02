@@ -8,13 +8,13 @@ from pathlib import Path
 from typing import Any
 
 from otomekairo import __version__
-from otomekairo.infra.sqlite_state_store import (
-    ActionHistoryRecord,
-    PendingInputRecord,
-    SettingsOverrideRecord,
-    SqliteStateStore,
-)
+from otomekairo.gateway.cognition_client import CognitionClient
+from otomekairo.infra.deterministic_cognition_client import DeterministicCognitionClient
+from otomekairo.infra.sqlite_state_store import SqliteStateStore
+from otomekairo.schema.runtime_types import ActionHistoryRecord, PendingInputRecord, SettingsOverrideRecord
 from otomekairo.schema.settings import SettingsValidationError, build_default_settings, decode_requested_value, get_setting_definition
+from otomekairo.usecase.build_cognition_input import build_cognition_input
+from otomekairo.usecase.run_cognition import run_cognition_for_chat_message
 
 
 # Block: Runtime constants
@@ -29,11 +29,13 @@ class RuntimeLoop:
         store: SqliteStateStore,
         owner_token: str,
         default_settings: dict[str, Any],
+        cognition_client: CognitionClient,
         lease_ttl_ms: int = DEFAULT_LEASE_TTL_MS,
     ) -> None:
         self._store = store
         self._owner_token = owner_token
         self._default_settings = default_settings
+        self._cognition_client = cognition_client
         self._lease_ttl_ms = lease_ttl_ms
         self._boot_reconciled = False
 
@@ -58,7 +60,7 @@ class RuntimeLoop:
             cycle_id=cycle_id,
         )
         resolved_at = _now_ms()
-        ui_events, action_results, resolution_status, discard_reason = _build_cycle_resolution(
+        ui_events, action_results, resolution_status, discard_reason = self._resolve_pending_input(
             pending_input=pending_input,
             cycle_id=cycle_id,
             resolved_at=resolved_at,
@@ -82,6 +84,47 @@ class RuntimeLoop:
             commit_payload=commit_payload,
         )
         return True
+
+    # Block: Pending input resolution
+    def _resolve_pending_input(
+        self,
+        *,
+        pending_input: PendingInputRecord,
+        cycle_id: str,
+        resolved_at: int,
+    ) -> tuple[list[dict[str, Any]], list[ActionHistoryRecord], str, str | None]:
+        input_kind = pending_input.payload["input_kind"]
+        if input_kind == "chat_message":
+            state_snapshot = self._store.read_cognition_state(self._default_settings)
+            cognition_input = build_cognition_input(
+                pending_input=pending_input,
+                cycle_id=cycle_id,
+                resolved_at=resolved_at,
+                state_snapshot=state_snapshot,
+            )
+            cognition_execution = run_cognition_for_chat_message(
+                pending_input=pending_input,
+                cycle_id=cycle_id,
+                resolved_at=resolved_at,
+                cognition_input=cognition_input,
+                cognition_client=self._cognition_client,
+            )
+            return (
+                cognition_execution.ui_events,
+                cognition_execution.action_results,
+                "consumed",
+                None,
+            )
+        if input_kind == "cancel":
+            ui_events, action_results = _cancel_events(pending_input, cycle_id, resolved_at)
+            return (ui_events, action_results, "consumed", None)
+        ui_events, action_results = _unsupported_input_events(pending_input, resolved_at)
+        return (
+            ui_events,
+            action_results,
+            "discarded",
+            "unsupported_input_kind",
+        )
 
     # Block: Settings iteration
     def _process_settings_override_once(self) -> bool:
@@ -138,6 +181,7 @@ def build_runtime_loop(*, db_path: Path | None = None) -> RuntimeLoop:
         store=store,
         owner_token=_runtime_owner_token(),
         default_settings=build_default_settings(),
+        cognition_client=DeterministicCognitionClient(),
         lease_ttl_ms=_lease_ttl_ms(),
     )
 
@@ -155,95 +199,6 @@ def _evaluate_settings_override(settings_override: SettingsOverrideRecord) -> tu
     except SettingsValidationError:
         return ("rejected", "invalid_settings_value")
     return ("applied", None)
-
-
-# Block: Cycle resolution
-def _build_cycle_resolution(
-    *,
-    pending_input: PendingInputRecord,
-    cycle_id: str,
-    resolved_at: int,
-) -> tuple[list[dict[str, Any]], list[ActionHistoryRecord], str, str | None]:
-    input_kind = pending_input.payload["input_kind"]
-    if input_kind == "chat_message":
-        ui_events, action_results = _chat_message_events(pending_input, cycle_id, resolved_at)
-        return (ui_events, action_results, "consumed", None)
-    if input_kind == "cancel":
-        ui_events, action_results = _cancel_events(pending_input, cycle_id, resolved_at)
-        return (ui_events, action_results, "consumed", None)
-    ui_events, action_results = _unsupported_input_events(pending_input, resolved_at)
-    return (
-        ui_events,
-        action_results,
-        "discarded",
-        "unsupported_input_kind",
-    )
-
-
-def _chat_message_events(
-    pending_input: PendingInputRecord,
-    cycle_id: str,
-    resolved_at: int,
-) -> tuple[list[dict[str, Any]], list[ActionHistoryRecord]]:
-    message_id = _opaque_id("msg")
-    ui_events = [
-        {
-            "channel": pending_input.channel,
-            "event_type": "status",
-            "payload": {
-                "status_code": "thinking",
-                "label": "入力を処理しています",
-                "cycle_id": cycle_id,
-            },
-        },
-        {
-            "channel": pending_input.channel,
-            "event_type": "message",
-            "payload": {
-                "message_id": message_id,
-                "role": "system_notice",
-                "text": "入力を受け付けました。認知処理はこれから実装します。",
-                "created_at": resolved_at,
-                "source_cycle_id": cycle_id,
-                "related_input_id": pending_input.input_id,
-            },
-        },
-        {
-            "channel": pending_input.channel,
-            "event_type": "status",
-            "payload": {
-                "status_code": "idle",
-                "label": "待機中",
-                "cycle_id": cycle_id,
-            },
-        },
-    ]
-    action_results = [
-        ActionHistoryRecord(
-            result_id=_opaque_id("actres"),
-            command_id=_opaque_id("cmd"),
-            action_type="emit_chat_response",
-            command={
-                "target_channel": pending_input.channel,
-                "event_types": ["status", "message", "status"],
-                "message_id": message_id,
-                "role": "system_notice",
-                "related_input_id": pending_input.input_id,
-            },
-            started_at=resolved_at,
-            finished_at=resolved_at + 1,
-            status="succeeded",
-            failure_mode=None,
-            observed_effects={
-                "emitted_event_types": ["status", "message", "status"],
-                "message_id": message_id,
-                "status_code_after": "idle",
-            },
-            raw_result_ref=None,
-            adapter_trace_ref=None,
-        )
-    ]
-    return (ui_events, action_results)
 
 
 def _cancel_events(

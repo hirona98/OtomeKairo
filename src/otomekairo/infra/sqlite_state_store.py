@@ -10,6 +10,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from otomekairo.schema.runtime_types import (
+    ActionHistoryRecord,
+    CognitionStateSnapshot,
+    PendingInputRecord,
+    SettingsOverrideRecord,
+)
 from otomekairo.schema.settings import decode_requested_value
 
 
@@ -32,42 +38,6 @@ class StoreValidationError(ValueError):
 class BootstrapResult:
     db_path: Path
     initialized_at: int
-
-
-# Block: Pending input record
-@dataclass(frozen=True, slots=True)
-class PendingInputRecord:
-    input_id: str
-    source: str
-    channel: str
-    created_at: int
-    payload: dict[str, Any]
-
-
-# Block: Settings override record
-@dataclass(frozen=True, slots=True)
-class SettingsOverrideRecord:
-    override_id: str
-    key: str
-    requested_value_json: dict[str, Any]
-    apply_scope: str
-    created_at: int
-
-
-# Block: Action history record
-@dataclass(frozen=True, slots=True)
-class ActionHistoryRecord:
-    result_id: str
-    command_id: str
-    action_type: str
-    command: dict[str, Any]
-    started_at: int
-    finished_at: int
-    status: str
-    failure_mode: str | None
-    observed_effects: dict[str, Any] | None
-    raw_result_ref: dict[str, Any] | None
-    adapter_trace_ref: dict[str, Any] | None
 
 
 # Block: Store implementation
@@ -196,6 +166,135 @@ class SqliteStateStore:
             "effective_settings": self.read_effective_settings(default_settings),
             "pending_overrides": pending_overrides,
         }
+
+    # Block: Cognition snapshot
+    def read_cognition_state(self, default_settings: dict[str, Any]) -> CognitionStateSnapshot:
+        with self._connect() as connection:
+            self_row = connection.execute(
+                """
+                SELECT
+                    personality_json,
+                    current_emotion_json,
+                    long_term_goals_json,
+                    relationship_overview_json,
+                    invariants_json,
+                    personality_updated_at,
+                    updated_at
+                FROM self_state
+                WHERE row_id = 1
+                """
+            ).fetchone()
+            attention_row = connection.execute(
+                """
+                SELECT
+                    primary_focus_json,
+                    secondary_focuses_json,
+                    suppressed_items_json,
+                    revisit_queue_json,
+                    updated_at
+                FROM attention_state
+                WHERE row_id = 1
+                """
+            ).fetchone()
+            body_row = connection.execute(
+                """
+                SELECT
+                    posture_json,
+                    mobility_json,
+                    sensor_availability_json,
+                    output_locks_json,
+                    load_json,
+                    updated_at
+                FROM body_state
+                WHERE row_id = 1
+                """
+            ).fetchone()
+            world_row = connection.execute(
+                """
+                SELECT
+                    location_json,
+                    situation_summary,
+                    surroundings_json,
+                    affordances_json,
+                    constraints_json,
+                    attention_targets_json,
+                    external_waits_json,
+                    updated_at
+                FROM world_state
+                WHERE row_id = 1
+                """
+            ).fetchone()
+            drive_row = connection.execute(
+                """
+                SELECT
+                    drive_levels_json,
+                    priority_effects_json,
+                    updated_at
+                FROM drive_state
+                WHERE row_id = 1
+                """
+            ).fetchone()
+            runtime_settings_row = connection.execute(
+                """
+                SELECT values_json
+                FROM runtime_settings
+                WHERE row_id = 1
+                """
+            ).fetchone()
+        if (
+            self_row is None
+            or attention_row is None
+            or body_row is None
+            or world_row is None
+            or drive_row is None
+            or runtime_settings_row is None
+        ):
+            raise RuntimeError("singleton state rows are missing")
+        return CognitionStateSnapshot(
+            self_state={
+                "personality": json.loads(self_row["personality_json"]),
+                "current_emotion": json.loads(self_row["current_emotion_json"]),
+                "long_term_goals": json.loads(self_row["long_term_goals_json"]),
+                "relationship_overview": json.loads(self_row["relationship_overview_json"]),
+                "invariants": json.loads(self_row["invariants_json"]),
+                "personality_updated_at": int(self_row["personality_updated_at"]),
+                "updated_at": int(self_row["updated_at"]),
+            },
+            attention_state={
+                "primary_focus": json.loads(attention_row["primary_focus_json"]),
+                "secondary_focuses": json.loads(attention_row["secondary_focuses_json"]),
+                "suppressed_items": json.loads(attention_row["suppressed_items_json"]),
+                "revisit_queue": json.loads(attention_row["revisit_queue_json"]),
+                "updated_at": int(attention_row["updated_at"]),
+            },
+            body_state={
+                "posture": json.loads(body_row["posture_json"]),
+                "mobility": json.loads(body_row["mobility_json"]),
+                "sensor_availability": json.loads(body_row["sensor_availability_json"]),
+                "output_locks": json.loads(body_row["output_locks_json"]),
+                "load": json.loads(body_row["load_json"]),
+                "updated_at": int(body_row["updated_at"]),
+            },
+            world_state={
+                "location": json.loads(world_row["location_json"]),
+                "situation_summary": str(world_row["situation_summary"]),
+                "surroundings": json.loads(world_row["surroundings_json"]),
+                "affordances": json.loads(world_row["affordances_json"]),
+                "constraints": json.loads(world_row["constraints_json"]),
+                "attention_targets": json.loads(world_row["attention_targets_json"]),
+                "external_waits": json.loads(world_row["external_waits_json"]),
+                "updated_at": int(world_row["updated_at"]),
+            },
+            drive_state={
+                "drive_levels": json.loads(drive_row["drive_levels_json"]),
+                "priority_effects": json.loads(drive_row["priority_effects_json"]),
+                "updated_at": int(drive_row["updated_at"]),
+            },
+            effective_settings=_merge_runtime_settings(
+                default_settings,
+                json.loads(runtime_settings_row["values_json"]),
+            ),
+        )
 
     # Block: Settings claim
     def claim_next_settings_override(self) -> SettingsOverrideRecord | None:
