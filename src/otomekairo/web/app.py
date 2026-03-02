@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 
 from otomekairo import __version__
 from otomekairo.infra.sqlite_state_store import StoreConflictError, StoreValidationError, SqliteStateStore
-from otomekairo.schema.settings import SettingsValidationError, build_effective_settings
+from otomekairo.schema.settings import SettingsValidationError, build_default_settings
 from otomekairo.web.dependencies import ApiError, AppServices
 from otomekairo.web.chat_input_api import build_chat_input_router
 from otomekairo.web.chat_stream_api import build_chat_stream_router
@@ -22,7 +22,7 @@ from otomekairo.web.status_api import build_status_router
 def create_app() -> FastAPI:
     store = SqliteStateStore(_default_db_path(), __version__)
     store.initialize()
-    services = AppServices(store=store, effective_settings=build_effective_settings())
+    services = AppServices(store=store, default_settings=build_default_settings())
 
     app = FastAPI(title="OtomeKairo Settings Server", version=__version__)
     app.state.services = services

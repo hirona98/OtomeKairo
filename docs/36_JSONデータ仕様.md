@@ -531,6 +531,40 @@
 - `base_personality_updated_at` は、適用開始時の `self_state.personality_updated_at` と一致しなければならない
 - 適用時に `base_personality_updated_at` が現在の `self_state.personality_updated_at` と一致しない場合、その `persona_updates` は stale として棄却し、後続の `write_memory` で再生成する
 
+<!-- Block: Runtime Settings Group -->
+## ランタイム設定テーブルの JSON
+
+<!-- Block: Runtime Settings Values -->
+### `runtime_settings.values_json`
+
+```json
+{
+  "llm.default_model": "openrouter/default-model",
+  "runtime.idle_tick_ms": 1000
+}
+```
+
+- `runtime_settings.values_json` は、現在有効な設定値のうち、既定値から上書きされたキーだけを持つ部分オブジェクトである
+- キーは、`docs/39_設定キー運用仕様.md` に登録されたドット区切り設定キーだけを許可する
+- 値の型は、各キーの登録 `value_type` と一致しなければならない
+- `apply_scope="runtime"` の `applied` は、このオブジェクトを同じ短周期で更新する
+- `apply_scope="next_boot"` の `applied` は、このオブジェクトを即時更新せず、次回ランタイム起動時の materialize で更新する
+
+<!-- Block: Runtime Settings Updated At -->
+### `runtime_settings.value_updated_at_json`
+
+```json
+{
+  "llm.default_model": 1760000000000,
+  "runtime.idle_tick_ms": 1760000000000
+}
+```
+
+- `runtime_settings.value_updated_at_json` は、各設定キーの最終反映時刻を `key -> unix_ms` で持つ部分オブジェクトである
+- キー集合は、`runtime_settings.values_json` と同じか、その上位集合に限る
+- 各値は、UTC unix milliseconds の `integer` に固定する
+- `next_boot` の materialize は、この時刻が既存値より新しいキーだけを更新する
+
 <!-- Block: Control Plane Group -->
 ## 制御面テーブルの JSON
 

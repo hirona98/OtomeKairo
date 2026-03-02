@@ -20,4 +20,4 @@ class ApiError(Exception):
 @dataclass(frozen=True, slots=True)
 class AppServices:
     store: SqliteStateStore
-    effective_settings: dict[str, object]
+    default_settings: dict[str, object]

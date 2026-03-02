@@ -58,7 +58,7 @@ def get_setting_definition(key: str) -> SettingDefinition:
 
 
 # Block: Defaults export
-def build_effective_settings() -> dict[str, Any]:
+def build_default_settings() -> dict[str, Any]:
     return {definition.key: definition.default_value for definition in SETTING_DEFINITIONS}
 
 
@@ -74,6 +74,22 @@ def normalize_requested_value(key: str, requested_value: Any, apply_scope: str) 
     _validate_range(definition, requested_value)
     _validate_length(definition, requested_value)
     return {"value_type": definition.value_type, "value": requested_value}
+
+
+# Block: Normalized value decode
+def decode_requested_value(key: str, requested_value_json: dict[str, Any]) -> Any:
+    if not isinstance(requested_value_json, dict):
+        raise SettingsValidationError("invalid_settings_value", f"{key} payload must be object")
+    if "value_type" not in requested_value_json or "value" not in requested_value_json:
+        raise SettingsValidationError("invalid_settings_value", f"{key} payload is incomplete")
+    definition = get_setting_definition(key)
+    if requested_value_json["value_type"] != definition.value_type:
+        raise SettingsValidationError("invalid_settings_value", f"{key} payload type does not match definition")
+    requested_value = requested_value_json["value"]
+    _validate_type(definition, requested_value)
+    _validate_range(definition, requested_value)
+    _validate_length(definition, requested_value)
+    return requested_value
 
 
 # Block: Type validation

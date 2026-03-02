@@ -23,7 +23,7 @@ def build_settings_router(services: AppServices) -> APIRouter:
     # Block: Settings read endpoint
     @router.get("/api/settings")
     async def get_settings() -> dict[str, object]:
-        return services.store.read_settings(services.effective_settings)
+        return services.store.read_settings(services.default_settings)
 
     # Block: Settings write endpoint
     @router.post("/api/settings/overrides", status_code=status.HTTP_202_ACCEPTED)

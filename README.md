@@ -31,6 +31,6 @@
 - `src/otomekairo/boot/run_web.py`: `uvicorn` で Web サーバを起動する
 - `src/otomekairo/boot/run_runtime.py`: 人格ランタイムの常時ループを起動する
 - `src/otomekairo/web/app.py`: FastAPI アプリを構成し、API ルータと例外処理を束ねる
-- `src/otomekairo/infra/sqlite_state_store.py`: `core_schema.sql` を読み込む DB 初期化と、状態参照・入力受付の最小実装を持つ
-- `src/otomekairo/runtime/main_loop.py`: `pending_inputs` を消費し、`ui_outbound_events` と `commit_records` まで閉じる最小ランタイムを持つ
+- `src/otomekairo/infra/sqlite_state_store.py`: `core_schema.sql` を読み込む DB 初期化と、状態参照・入力受付・設定反映の最小実装を持つ
+- `src/otomekairo/runtime/main_loop.py`: `settings_overrides` と `pending_inputs` を消費し、`ui_outbound_events` と `commit_records` まで閉じる最小ランタイムを持つ
 - `src/otomekairo/schema/settings.py`: 設定キーの検証と有効設定の初期値を定義する

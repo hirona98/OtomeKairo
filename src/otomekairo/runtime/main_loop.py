@@ -9,7 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from otomekairo import __version__
-from otomekairo.infra.sqlite_state_store import PendingInputRecord, SqliteStateStore
+from otomekairo.infra.sqlite_state_store import PendingInputRecord, SettingsOverrideRecord, SqliteStateStore
+from otomekairo.schema.settings import SettingsValidationError, decode_requested_value, get_setting_definition
 
 
 # Block: Runtime constants
@@ -29,6 +30,7 @@ class RuntimeLoop:
         self._store = store
         self._owner_token = owner_token
         self._lease_ttl_ms = lease_ttl_ms
+        self._boot_reconciled = False
 
     # Block: Single iteration
     def run_once(self) -> bool:
@@ -36,6 +38,12 @@ class RuntimeLoop:
             owner_token=self._owner_token,
             lease_ttl_ms=self._lease_ttl_ms,
         )
+        if not self._boot_reconciled:
+            self._store.materialize_next_boot_settings()
+            self._boot_reconciled = True
+        processed_settings = self._process_settings_override_once()
+        if processed_settings:
+            return True
         pending_input = self._store.claim_next_pending_input()
         if pending_input is None:
             return False
@@ -61,6 +69,24 @@ class RuntimeLoop:
             discard_reason=discard_reason,
             ui_events=ui_events,
             commit_payload=commit_payload,
+        )
+        return True
+
+    # Block: Settings iteration
+    def _process_settings_override_once(self) -> bool:
+        settings_override = self._store.claim_next_settings_override()
+        if settings_override is None:
+            return False
+        cycle_id = _opaque_id("cycle")
+        final_status, reject_reason = _evaluate_settings_override(settings_override)
+        self._store.finalize_settings_override(
+            override_id=settings_override.override_id,
+            key=settings_override.key,
+            requested_value_json=settings_override.requested_value_json,
+            apply_scope=settings_override.apply_scope,
+            cycle_id=cycle_id,
+            final_status=final_status,
+            reject_reason=reject_reason,
         )
         return True
 
@@ -90,6 +116,21 @@ def build_runtime_loop(*, db_path: Path | None = None) -> RuntimeLoop:
         owner_token=_runtime_owner_token(),
         lease_ttl_ms=_lease_ttl_ms(),
     )
+
+
+# Block: Settings evaluation
+def _evaluate_settings_override(settings_override: SettingsOverrideRecord) -> tuple[str, str | None]:
+    try:
+        definition = get_setting_definition(settings_override.key)
+    except SettingsValidationError:
+        return ("rejected", "unknown_settings_key")
+    if settings_override.apply_scope not in definition.apply_scopes:
+        return ("rejected", "invalid_settings_scope")
+    try:
+        decode_requested_value(settings_override.key, settings_override.requested_value_json)
+    except SettingsValidationError:
+        return ("rejected", "invalid_settings_value")
+    return ("applied", None)
 
 
 # Block: Event building

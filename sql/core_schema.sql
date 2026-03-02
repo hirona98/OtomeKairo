@@ -33,6 +33,13 @@ CREATE TABLE self_state (
     updated_at INTEGER NOT NULL
 );
 
+CREATE TABLE runtime_settings (
+    row_id INTEGER PRIMARY KEY CHECK (row_id = 1),
+    values_json TEXT NOT NULL,
+    value_updated_at_json TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
 CREATE TABLE attention_state (
     row_id INTEGER PRIMARY KEY CHECK (row_id = 1),
     primary_focus_json TEXT NOT NULL,

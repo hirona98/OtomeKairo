@@ -10,10 +10,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from otomekairo.schema.settings import decode_requested_value
+
 
 # Block: Schema constants
 SCHEMA_NAME = "core_schema"
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 # Block: API errors
@@ -40,6 +42,15 @@ class PendingInputRecord:
     payload: dict[str, Any]
 
 
+# Block: Settings override record
+@dataclass(frozen=True, slots=True)
+class SettingsOverrideRecord:
+    override_id: str
+    key: str
+    requested_value_json: dict[str, Any]
+    apply_scope: str
+
+
 # Block: Store implementation
 class SqliteStateStore:
     def __init__(self, db_path: Path, initializer_version: str) -> None:
@@ -53,6 +64,8 @@ class SqliteStateStore:
         with self._connect() as connection:
             if not self._schema_exists(connection):
                 connection.executescript(self._schema_sql())
+            else:
+                self._migrate_schema(connection, now_ms)
             self._ensure_db_meta(connection, now_ms)
             self._seed_singletons(connection, now_ms)
         return BootstrapResult(db_path=self._db_path, initialized_at=now_ms)
@@ -126,8 +139,15 @@ class SqliteStateStore:
         }
 
     # Block: Settings snapshot
-    def read_settings(self, effective_settings: dict[str, Any]) -> dict[str, Any]:
+    def read_settings(self, default_settings: dict[str, Any]) -> dict[str, Any]:
         with self._connect() as connection:
+            runtime_settings_row = connection.execute(
+                """
+                SELECT values_json
+                FROM runtime_settings
+                WHERE row_id = 1
+                """
+            ).fetchone()
             rows = connection.execute(
                 """
                 SELECT override_id, key, status, created_at
@@ -136,6 +156,9 @@ class SqliteStateStore:
                 ORDER BY created_at ASC
                 """
             ).fetchall()
+        if runtime_settings_row is None:
+            raise RuntimeError("runtime_settings row is missing")
+        runtime_values = json.loads(runtime_settings_row["values_json"])
         pending_overrides = [
             {
                 "override_id": row["override_id"],
@@ -146,9 +169,170 @@ class SqliteStateStore:
             for row in rows
         ]
         return {
-            "effective_settings": effective_settings,
+            "effective_settings": _merge_runtime_settings(default_settings, runtime_values),
             "pending_overrides": pending_overrides,
         }
+
+    # Block: Settings claim
+    def claim_next_settings_override(self) -> SettingsOverrideRecord | None:
+        now_ms = _now_ms()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """
+                SELECT override_id, key, requested_value_json, apply_scope
+                FROM settings_overrides
+                WHERE status = 'queued'
+                ORDER BY created_at ASC
+                LIMIT 1
+                """
+            ).fetchone()
+            if row is None:
+                return None
+            connection.execute(
+                """
+                UPDATE settings_overrides
+                SET status = 'claimed',
+                    claimed_at = ?
+                WHERE override_id = ?
+                  AND status = 'queued'
+                """,
+                (now_ms, row["override_id"]),
+            )
+        return SettingsOverrideRecord(
+            override_id=row["override_id"],
+            key=row["key"],
+            requested_value_json=json.loads(row["requested_value_json"]),
+            apply_scope=row["apply_scope"],
+        )
+
+    # Block: Settings finalize
+    def finalize_settings_override(
+        self,
+        *,
+        override_id: str,
+        key: str,
+        requested_value_json: dict[str, Any],
+        apply_scope: str,
+        cycle_id: str,
+        final_status: str,
+        reject_reason: str | None = None,
+    ) -> int:
+        if final_status not in {"applied", "rejected"}:
+            raise StoreValidationError("final_status is invalid")
+        resolved_at = _now_ms()
+        with self._connect() as connection:
+            if final_status == "applied" and apply_scope == "runtime":
+                applied_value = decode_requested_value(key, requested_value_json)
+                _upsert_runtime_setting_value(
+                    connection=connection,
+                    key=key,
+                    value=applied_value,
+                    applied_at=resolved_at,
+                )
+            updated_row_count = connection.execute(
+                """
+                UPDATE settings_overrides
+                SET status = ?,
+                    resolved_at = ?,
+                    reject_reason = ?
+                WHERE override_id = ?
+                  AND status = 'claimed'
+                """,
+                (final_status, resolved_at, reject_reason, override_id),
+            ).rowcount
+            if updated_row_count != 1:
+                raise StoreConflictError("settings override must be claimed before finalization")
+            connection.execute(
+                """
+                INSERT INTO commit_records (
+                    cycle_id,
+                    committed_at,
+                    log_sync_status,
+                    commit_payload_json
+                )
+                VALUES (?, ?, 'pending', ?)
+                """,
+                (
+                    cycle_id,
+                    resolved_at,
+                    _json_text(
+                        {
+                            "cycle_kind": "short",
+                            "trigger_reason": "external_input",
+                            "processed_override_id": override_id,
+                            "settings_key": key,
+                            "apply_scope": apply_scope,
+                            "resolution_status": final_status,
+                        }
+                    ),
+                ),
+            )
+            commit_row = connection.execute(
+                """
+                SELECT commit_id
+                FROM commit_records
+                WHERE cycle_id = ?
+                """,
+                (cycle_id,),
+            ).fetchone()
+        if commit_row is None:
+            raise RuntimeError("commit_records insert did not persist")
+        return int(commit_row["commit_id"])
+
+    # Block: Next boot materialization
+    def materialize_next_boot_settings(self) -> None:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT key, requested_value_json, resolved_at
+                FROM settings_overrides
+                WHERE status = 'applied'
+                  AND apply_scope = 'next_boot'
+                  AND resolved_at IS NOT NULL
+                ORDER BY resolved_at ASC
+                """
+            ).fetchall()
+            if not rows:
+                return
+            runtime_row = connection.execute(
+                """
+                SELECT values_json, value_updated_at_json
+                FROM runtime_settings
+                WHERE row_id = 1
+                """
+            ).fetchone()
+            if runtime_row is None:
+                raise RuntimeError("runtime_settings row is missing")
+            values = json.loads(runtime_row["values_json"])
+            value_updated_at = json.loads(runtime_row["value_updated_at_json"])
+            changed = False
+            for row in rows:
+                key = row["key"]
+                current_key_updated_at = int(value_updated_at.get(key, 0))
+                resolved_at = int(row["resolved_at"])
+                if resolved_at <= current_key_updated_at:
+                    continue
+                requested_value_json = json.loads(row["requested_value_json"])
+                values[key] = decode_requested_value(key, requested_value_json)
+                value_updated_at[key] = resolved_at
+                changed = True
+            if not changed:
+                return
+            connection.execute(
+                """
+                UPDATE runtime_settings
+                SET values_json = ?,
+                    value_updated_at_json = ?,
+                    updated_at = ?
+                WHERE row_id = 1
+                """,
+                (
+                    _json_text(values),
+                    _json_text(value_updated_at),
+                    _now_ms(),
+                ),
+            )
 
     # Block: Settings write
     def enqueue_settings_override(
@@ -477,6 +661,63 @@ class SqliteStateStore:
         schema_path = _repo_root() / "sql" / "core_schema.sql"
         return schema_path.read_text(encoding="utf-8")
 
+    # Block: Schema migration
+    def _migrate_schema(self, connection: sqlite3.Connection, now_ms: int) -> None:
+        current_version = self._read_schema_version(connection)
+        if current_version is None:
+            return
+        if current_version == SCHEMA_VERSION:
+            return
+        if current_version > SCHEMA_VERSION:
+            raise RuntimeError("schema_version is newer than this initializer")
+        if current_version != 2:
+            raise RuntimeError("unsupported schema_version for migration")
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS runtime_settings (
+                row_id INTEGER PRIMARY KEY CHECK (row_id = 1),
+                values_json TEXT NOT NULL,
+                value_updated_at_json TEXT NOT NULL,
+                updated_at INTEGER NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO runtime_settings (
+                row_id,
+                values_json,
+                value_updated_at_json,
+                updated_at
+            )
+            VALUES (1, ?, ?, ?)
+            ON CONFLICT(row_id) DO NOTHING
+            """,
+            (_json_text({}), _json_text({}), now_ms),
+        )
+        connection.execute(
+            """
+            UPDATE db_meta
+            SET meta_value_json = ?,
+                updated_at = ?
+            WHERE meta_key = 'schema_version'
+            """,
+            (_json_text(SCHEMA_VERSION), now_ms),
+        )
+
+    # Block: Schema version read
+    def _read_schema_version(self, connection: sqlite3.Connection) -> int | None:
+        row = connection.execute(
+            """
+            SELECT meta_value_json
+            FROM db_meta
+            WHERE meta_key = 'schema_version'
+            """
+        ).fetchone()
+        if row is None:
+            return None
+        return int(json.loads(row["meta_value_json"]))
+
     # Block: Metadata verification
     def _ensure_db_meta(self, connection: sqlite3.Connection, now_ms: int) -> None:
         expected_meta = {
@@ -539,6 +780,24 @@ class SqliteStateStore:
                 _json_text(_self_state_relationship_overview_seed()),
                 _json_text(_self_state_invariants_seed()),
                 now_ms,
+                now_ms,
+            ),
+        )
+        # Block: runtime_settings seed
+        connection.execute(
+            """
+            INSERT INTO runtime_settings (
+                row_id,
+                values_json,
+                value_updated_at_json,
+                updated_at
+            )
+            VALUES (1, ?, ?, ?)
+            ON CONFLICT(row_id) DO NOTHING
+            """,
+            (
+                _json_text({}),
+                _json_text({}),
                 now_ms,
             ),
         )
@@ -718,6 +977,51 @@ def _public_primary_focus(primary_focus_json: dict[str, Any]) -> str:
     if not isinstance(focus_kind, str) or not focus_kind:
         raise RuntimeError("attention_state.primary_focus_json.kind is required")
     return focus_kind
+
+
+# Block: Runtime settings helpers
+def _merge_runtime_settings(default_settings: dict[str, Any], runtime_values: dict[str, Any]) -> dict[str, Any]:
+    merged_settings = dict(default_settings)
+    for key, value in runtime_values.items():
+        if key in merged_settings:
+            merged_settings[key] = value
+    return merged_settings
+
+
+def _upsert_runtime_setting_value(
+    *,
+    connection: sqlite3.Connection,
+    key: str,
+    value: Any,
+    applied_at: int,
+) -> None:
+    runtime_row = connection.execute(
+        """
+        SELECT values_json, value_updated_at_json
+        FROM runtime_settings
+        WHERE row_id = 1
+        """
+    ).fetchone()
+    if runtime_row is None:
+        raise RuntimeError("runtime_settings row is missing")
+    values = json.loads(runtime_row["values_json"])
+    value_updated_at = json.loads(runtime_row["value_updated_at_json"])
+    values[key] = value
+    value_updated_at[key] = applied_at
+    connection.execute(
+        """
+        UPDATE runtime_settings
+        SET values_json = ?,
+            value_updated_at_json = ?,
+            updated_at = ?
+        WHERE row_id = 1
+        """,
+        (
+            _json_text(values),
+            _json_text(value_updated_at),
+            applied_at,
+        ),
+    )
 
 
 # Block: Generic helpers
