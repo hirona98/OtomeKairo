@@ -16,7 +16,7 @@
 
 - 固定するのは、初期実装で使う JSON オブジェクトのキー、型、必須項目、固定語彙である
 - 固定するのは、`pending_inputs.payload_json`、`settings_overrides.requested_value_json`、`ui_outbound_events.payload_json`、`memory_jobs.payload_ref_json`、`memory_job_payloads.payload_json`、主要な Web API 本文である
-- 固定するのは、`self_state.personality_json` と、長周期の内部で使う `personality_change_proposal`、`persona_updates` の形である
+- 固定するのは、`self_state.personality_json`、短周期の内部で使う `selection_profile`、長周期の内部で使う `personality_change_proposal`、`persona_updates` の形である
 - 固定しないのは、Python のクラス名、Pydantic モデル名、OpenAPI の自動生成細部である
 - 固定しないのは、将来追加する未使用フィールドや後段の拡張イベント種別である
 
@@ -146,6 +146,79 @@
 - `habit_biases.preferred_action_types` は、行動種別の順序付き配列である
 - `habit_biases.preferred_observation_kinds` は、観測種別の順序付き配列である
 - `habit_biases.avoided_action_styles` は、避ける行動様式の順序付き配列である
+
+<!-- Block: Persona Selection Group -->
+## 人格選択の内部 JSON
+
+<!-- Block: Relationship Priority Entry -->
+### `relationship_priority_entry`
+
+```json
+{
+  "target_ref": "entity:alice",
+  "priority_weight": 0.72,
+  "reason_tag": "care_target"
+}
+```
+
+- 必須項目は `target_ref`、`priority_weight`、`reason_tag` である
+- `target_ref` は、その短周期で重みづけしたい対象の短い参照 `string` である
+- `priority_weight` は、`0.0..1.0` の `number` に固定する
+- `reason_tag` は、少なくとも `care_target`、`pending_relation`、`recent_tension`、`recent_positive_contact` を区別する
+
+<!-- Block: Selection Profile -->
+### `selection_profile`
+
+```json
+{
+  "trait_values": {
+    "sociability": 0.0,
+    "caution": 0.0,
+    "curiosity": 0.0,
+    "persistence": 0.0,
+    "warmth": 0.0,
+    "assertiveness": 0.0,
+    "novelty_preference": 0.0
+  },
+  "interaction_style": {
+    "speech_tone": "neutral",
+    "distance_style": "balanced",
+    "confirmation_style": "balanced",
+    "response_pace": "balanced"
+  },
+  "relationship_priorities": [],
+  "learned_preferences": [],
+  "learned_aversions": [],
+  "habit_biases": {
+    "preferred_action_types": [],
+    "preferred_observation_kinds": [],
+    "avoided_action_styles": []
+  },
+  "emotion_bias": {
+    "caution_bias": 0.0,
+    "approach_bias": 0.0,
+    "avoidance_bias": 0.0,
+    "speech_intensity_bias": 0.0
+  },
+  "drive_bias": {
+    "task_progress_bias": 0.0,
+    "exploration_bias": 0.0,
+    "maintenance_bias": 0.0,
+    "social_bias": 0.0
+  }
+}
+```
+
+- `selection_profile` は、短周期の内部でだけ使う人格選択用の一時オブジェクトである
+- 必須項目は `trait_values`、`interaction_style`、`relationship_priorities`、`learned_preferences`、`learned_aversions`、`habit_biases`、`emotion_bias`、`drive_bias` である
+- `trait_values` は、`self_state.personality_json.trait_values` と同じ固定キーを持つ
+- `interaction_style` は、`self_state.personality_json.preferred_interaction_style` と同じ固定キーを持つ
+- `relationship_priorities` は、`relationship_priority_entry` の配列である
+- `learned_preferences` と `learned_aversions` は、`personality_preference_entry` の配列である
+- `habit_biases` は、`self_state.personality_json.habit_biases` と同じ固定キーを持つ
+- `emotion_bias` は、現在感情から作る短期補正値であり、各値は `-1.0..+1.0` の `number` に固定する
+- `drive_bias` は、内部欲求から作る短期補正値であり、各値は `-1.0..+1.0` の `number` に固定する
+- `selection_profile` は永続化前提の正本ではなく、`self_state`、`current_emotion`、`relationship_overview`、`preference_memory`、`drive_state` から再構成する
 
 <!-- Block: Persona Update Group -->
 ## 人格変化の内部 JSON
