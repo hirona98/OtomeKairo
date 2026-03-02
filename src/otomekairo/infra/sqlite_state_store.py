@@ -38,7 +38,9 @@ class BootstrapResult:
 @dataclass(frozen=True, slots=True)
 class PendingInputRecord:
     input_id: str
+    source: str
     channel: str
+    created_at: int
     payload: dict[str, Any]
 
 
@@ -49,6 +51,7 @@ class SettingsOverrideRecord:
     key: str
     requested_value_json: dict[str, Any]
     apply_scope: str
+    created_at: int
 
 
 # Block: Store implementation
@@ -185,7 +188,7 @@ class SqliteStateStore:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
                 """
-                SELECT override_id, key, requested_value_json, apply_scope
+                SELECT override_id, key, requested_value_json, apply_scope, created_at
                 FROM settings_overrides
                 WHERE status = 'queued'
                 ORDER BY created_at ASC
@@ -209,6 +212,27 @@ class SqliteStateStore:
             key=row["key"],
             requested_value_json=json.loads(row["requested_value_json"]),
             apply_scope=row["apply_scope"],
+            created_at=int(row["created_at"]),
+        )
+
+    # Block: Settings input journal append
+    def append_input_journal_for_settings_override(
+        self,
+        *,
+        settings_override: SettingsOverrideRecord,
+        cycle_id: str,
+    ) -> None:
+        self._append_input_journal(
+            observation_id=f"obs_{settings_override.override_id}",
+            cycle_id=cycle_id,
+            source="web_settings",
+            kind="settings_override",
+            captured_at=settings_override.created_at,
+            receipt_summary=(
+                f"settings override {settings_override.key} "
+                f"({settings_override.apply_scope})"
+            ),
+            payload_id=settings_override.override_id,
         )
 
     # Block: Settings finalize
@@ -545,7 +569,7 @@ class SqliteStateStore:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
                 """
-                SELECT input_id, channel, payload_json
+                SELECT input_id, source, channel, payload_json, created_at
                 FROM pending_inputs
                 WHERE status = 'queued'
                 ORDER BY priority DESC, created_at ASC
@@ -566,8 +590,27 @@ class SqliteStateStore:
             )
         return PendingInputRecord(
             input_id=row["input_id"],
+            source=row["source"],
             channel=row["channel"],
+            created_at=int(row["created_at"]),
             payload=json.loads(row["payload_json"]),
+        )
+
+    # Block: Pending input journal append
+    def append_input_journal_for_pending_input(
+        self,
+        *,
+        pending_input: PendingInputRecord,
+        cycle_id: str,
+    ) -> None:
+        self._append_input_journal(
+            observation_id=f"obs_{pending_input.input_id}",
+            cycle_id=cycle_id,
+            source=pending_input.source,
+            kind=str(pending_input.payload["input_kind"]),
+            captured_at=pending_input.created_at,
+            receipt_summary=_pending_input_receipt_summary(pending_input),
+            payload_id=pending_input.input_id,
         )
 
     # Block: Cycle finalize
@@ -641,6 +684,54 @@ class SqliteStateStore:
         if commit_id is None:
             raise RuntimeError("commit_records insert did not persist")
         return int(commit_id["commit_id"])
+
+    # Block: Input journal write
+    def _append_input_journal(
+        self,
+        *,
+        observation_id: str,
+        cycle_id: str,
+        source: str,
+        kind: str,
+        captured_at: int,
+        receipt_summary: str,
+        payload_id: str,
+    ) -> None:
+        now_ms = _now_ms()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO input_journal (
+                    journal_id,
+                    observation_id,
+                    cycle_id,
+                    source,
+                    kind,
+                    captured_at,
+                    receipt_summary,
+                    payload_ref_json,
+                    created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    _opaque_id("jrnl"),
+                    observation_id,
+                    cycle_id,
+                    source,
+                    kind,
+                    captured_at,
+                    receipt_summary,
+                    _json_text(
+                        {
+                            "payload_kind": "input_payload",
+                            "payload_id": payload_id,
+                            "payload_version": 1,
+                        }
+                    ),
+                    now_ms,
+                ),
+            )
 
     # Block: SQLite connection
     def _connect(self) -> sqlite3.Connection:
@@ -982,6 +1073,18 @@ def _public_primary_focus(primary_focus_json: dict[str, Any]) -> str:
     if not isinstance(focus_kind, str) or not focus_kind:
         raise RuntimeError("attention_state.primary_focus_json.kind is required")
     return focus_kind
+
+
+# Block: Journal helpers
+def _pending_input_receipt_summary(pending_input: PendingInputRecord) -> str:
+    input_kind = str(pending_input.payload["input_kind"])
+    if input_kind == "chat_message":
+        text = str(pending_input.payload["text"])
+        trimmed_text = text[:60]
+        return f"chat_message:{trimmed_text}"
+    if input_kind == "cancel":
+        return "cancel request"
+    return f"input:{input_kind}"
 
 
 # Block: Runtime settings helpers

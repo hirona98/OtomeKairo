@@ -48,6 +48,10 @@ class RuntimeLoop:
         if pending_input is None:
             return False
         cycle_id = _opaque_id("cycle")
+        self._store.append_input_journal_for_pending_input(
+            pending_input=pending_input,
+            cycle_id=cycle_id,
+        )
         resolved_at = _now_ms()
         ui_events, resolution_status, discard_reason = _build_ui_events(
             pending_input=pending_input,
@@ -78,6 +82,10 @@ class RuntimeLoop:
         if settings_override is None:
             return False
         cycle_id = _opaque_id("cycle")
+        self._store.append_input_journal_for_settings_override(
+            settings_override=settings_override,
+            cycle_id=cycle_id,
+        )
         final_status, reject_reason = _evaluate_settings_override(settings_override)
         self._store.finalize_settings_override(
             override_id=settings_override.override_id,
