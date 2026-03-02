@@ -43,6 +43,27 @@
 - append-only テーブルは、論理削除でなく追記を基本とし、通常更新を前提にしない
 - 例外として `event_preview_cache`、`memory_jobs`、`pending_inputs`、`settings_overrides` は更新を前提とする
 
+- 下の Mermaid 図は、テーブル群を役割ごとにまとめた見取り図である
+
+```mermaid
+flowchart TD
+    meta["起動メタ\n db_meta / runtime_leases"]
+    runtime["ランタイム状態\n self_state ... skill_registry"]
+    control["制御面\n pending_inputs / settings_overrides / ui_outbound_events"]
+    eventlog["観測・行動\n input_journal / action_history / events / commit_records"]
+    memory["記憶本体\n memory_states ... retrieval_runs"]
+    jobs["記憶ジョブ\n memory_jobs / memory_job_payloads"]
+    index["索引\n vec_items / events_fts"]
+
+    meta --> runtime
+    runtime --> eventlog
+    control --> eventlog
+    eventlog --> memory
+    eventlog --> jobs
+    jobs --> memory
+    memory --> index
+```
+
 <!-- Block: Reference Policy -->
 ### 参照と整合性の固定
 

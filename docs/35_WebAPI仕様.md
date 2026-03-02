@@ -80,6 +80,17 @@
 - `POST /api/chat/cancel`
 - `GET /api/chat/stream`
 
+- 下の Mermaid 図は、ブラウザ、`設定 Web サーバ`、`人格ランタイム`、`SQLite` の受け渡しを要約したものである
+
+```mermaid
+flowchart LR
+    browser["ブラウザ"] -->|"GET /api/health\nGET /api/status\nGET /api/settings"| web["設定 Web サーバ"]
+    browser -->|"POST /api/chat/input\nPOST /api/chat/cancel\nPOST /api/settings/overrides"| web
+    web <-->|read / write| db["SQLite"]
+    runtime["人格ランタイム"] -->|"append ui_outbound_events"| db
+    web -->|"SSE: GET /api/chat/stream"| browser
+```
+
 <!-- Block: Health -->
 ## `GET /api/health`
 
