@@ -23,3 +23,12 @@
 - 人格選択仕様: `docs/41_人格選択仕様.md`
 - 初期 SQL 実装: `sql/core_schema.sql`
 - 参考メモ: `docs/note/記憶設計に関する先行研究のメモ.md`
+
+<!-- Block: Current Implementation -->
+## 現在の実装状況
+
+- `pyproject.toml`: Python パッケージ定義と `otomekairo-web` の起動入口を持つ
+- `src/otomekairo/boot/run_web.py`: `uvicorn` で Web サーバを起動する
+- `src/otomekairo/web/app.py`: FastAPI アプリを構成し、API ルータと例外処理を束ねる
+- `src/otomekairo/infra/sqlite_state_store.py`: `core_schema.sql` を読み込む DB 初期化と、状態参照・入力受付の最小実装を持つ
+- `src/otomekairo/schema/settings.py`: 設定キーの検証と有効設定の初期値を定義する

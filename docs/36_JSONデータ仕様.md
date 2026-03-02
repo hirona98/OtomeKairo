@@ -554,6 +554,7 @@
 - 必須項目は `input_kind`、`text` である
 - `input_kind` は `chat_message` に固定する
 - `text` は、空文字列や空白のみを許可しない
+- `text` は、`4000` 文字を超えてはならない
 - `client_message_id` は任意で、同一クライアントからの再送判定に使う
 - `client_message_id` がある場合、Web サーバは `pending_inputs.client_message_id` にも同じ値を書き込む
 

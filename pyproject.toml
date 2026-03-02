@@ -1,0 +1,21 @@
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "otomekairo"
+version = "0.1.0"
+description = "身体性を持つ AI 人格コアの初期実装"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0,<1.0.0",
+    "uvicorn>=0.30.0,<1.0.0",
+]
+
+[project.scripts]
+otomekairo-web = "otomekairo.boot.run_web:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/otomekairo"]
