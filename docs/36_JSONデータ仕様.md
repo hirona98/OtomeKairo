@@ -15,7 +15,7 @@
 ## このドキュメントで固定する範囲
 
 - 固定するのは、初期実装で使う JSON オブジェクトのキー、型、必須項目、固定語彙である
-- 固定するのは、`pending_inputs.payload_json`、`settings_overrides.requested_value_json`、`ui_outbound_events.payload_json`、`action_history.command_json`、`action_history.observed_effects_json`、`memory_jobs.payload_ref_json`、`memory_job_payloads.payload_json`、主要な Web API 本文である
+- 固定するのは、`pending_inputs.payload_json`、`settings_overrides.requested_value_json`、`settings_editor_state.direct_values_json`、`settings_presets.payload_json`、`settings_change_sets.payload_json`、`ui_outbound_events.payload_json`、`action_history.command_json`、`action_history.observed_effects_json`、`memory_jobs.payload_ref_json`、`memory_job_payloads.payload_json`、主要な Web API 本文である
 - 固定するのは、`self_state.personality_json`、`self_state.current_emotion_json`、`self_state.long_term_goals_json`、`self_state.relationship_overview_json`、`self_state.invariants_json`、短周期の内部で使う `selection_profile`、`persona_consistency_score`、`attention_score_breakdown`、`self_initiated_score_breakdown`、`action_candidate_score`、`cognition_result`、長周期の内部で使う `personality_change_proposal`、`persona_updates` の形である
 - 固定しないのは、Python のクラス名、Pydantic モデル名、OpenAPI の自動生成細部である
 - 固定しないのは、将来追加する未使用フィールドや後段の拡張イベント種別である
@@ -27,7 +27,7 @@
 ### JSON の基本形
 
 - JSON のキーは、すべて `snake_case` に統一する
-- ただし、`GET /api/settings` の `effective_settings` だけは、`docs/39_設定キー運用仕様.md` と同じドット区切り設定キーをそのままキー名に使ってよい
+- ただし、設定値のマップだけは、`docs/39_設定キー運用仕様.md` と同じドット区切り設定キーをそのままキー名に使ってよい
 - ここで定義する JSON のルートは、すべてオブジェクトに固定する
 - 必須項目は常に出現させる
 - 任意項目は、値がないときに `null` を入れず、省略する
@@ -627,10 +627,14 @@
 ```json
 {
   "llm.default_model": "openrouter/default-model",
+  "llm.api_key": "sk-example",
   "llm.embedding_model": "openrouter/default-embedding",
+  "llm.embedding_api_key": "emb-example",
   "llm.temperature": 0.7,
   "llm.max_output_tokens": 2048,
-  "runtime.idle_tick_ms": 1000
+  "runtime.idle_tick_ms": 1000,
+  "integrations.line.channel_access_token": "line-token",
+  "integrations.line.to_user_id": "Uxxxx"
 }
 ```
 
@@ -657,6 +661,155 @@
 - キー集合は、`runtime_settings.values_json` と同一に固定する
 - 各値は、UTC unix milliseconds の `integer` に固定する
 - `next_boot` の materialize は、この時刻が既存値より新しいキーだけを更新する
+
+<!-- Block: Settings Editor Group -->
+## 設定UIテーブルの JSON
+
+<!-- Block: Settings Editor Direct Values -->
+### `settings_editor_state.direct_values_json`
+
+```json
+{
+  "runtime.idle_tick_ms": 1000,
+  "runtime.long_cycle_min_interval_ms": 10000,
+  "sensors.microphone.enabled": true,
+  "sensors.camera.enabled": true,
+  "output.tts.enabled": true,
+  "integrations.sns.enabled": false,
+  "integrations.line.enabled": false
+}
+```
+
+- `settings_editor_state.direct_values_json` は、設定UIで即時反映したい運用値だけを持つ完全オブジェクトである
+- キーは、`docs/42_設定UI仕様.md` で direct 値とされた設定キーだけを許可する
+- キー名は、`docs/39_設定キー運用仕様.md` と同じドット区切り設定キーをそのまま使う
+- 値の型は、各キーの登録 `value_type` と一致しなければならない
+- `settings_editor_state` の `revision` が更新される保存では、このオブジェクト全体を canonical な形で保持する
+
+<!-- Block: Settings Preset Payload -->
+### `settings_presets.payload_json`
+
+- `settings_presets.payload_json` は、`preset_kind` ごとに固定形を持つ
+- すべての `preset_kind` で、未定義キーは受け付けない
+
+#### `preset_kind = behavior`
+
+```json
+{
+  "response_pace": "normal",
+  "proactivity_level": "medium",
+  "browse_preference": "balanced",
+  "notify_preference": "balanced",
+  "speech_style": "neutral",
+  "verbosity_bias": "balanced"
+}
+```
+
+- 各項目は、`docs/42_設定UI仕様.md` に定義した固定列挙だけを取る
+
+#### `preset_kind = llm`
+
+```json
+{
+  "llm.provider": "openrouter",
+  "llm.default_model": "openrouter/default-model",
+  "llm.temperature": 0.7,
+  "llm.max_output_tokens": 2048,
+  "llm.api_key": "sk-example",
+  "llm.base_url": "https://openrouter.ai/api/v1"
+}
+```
+
+- 必須項目は `llm.provider`、`llm.default_model`、`llm.temperature`、`llm.max_output_tokens`、`llm.api_key` である
+- `llm.base_url` は任意で、省略時は provider 既定値を使ってよい
+
+#### `preset_kind = memory`
+
+```json
+{
+  "llm.embedding_provider": "openrouter",
+  "llm.embedding_model": "openrouter/default-embedding",
+  "llm.embedding_api_key": "emb-example",
+  "llm.embedding_base_url": "https://openrouter.ai/api/v1",
+  "runtime.context_budget_tokens": 8192,
+  "retrieval_profile": {
+    "semantic_top_k": 8,
+    "recent_window_limit": 5,
+    "fact_bias": 0.7,
+    "summary_bias": 0.6,
+    "event_bias": 0.4
+  }
+}
+```
+
+- 必須項目は `llm.embedding_provider`、`llm.embedding_model`、`llm.embedding_api_key`、`runtime.context_budget_tokens`、`retrieval_profile` である
+- `retrieval_profile` の各 bias は `0.0..1.0` の `number` に固定する
+- `semantic_top_k` は `1..64` の `integer`、`recent_window_limit` は `1..20` の `integer` に固定する
+
+#### `preset_kind = output`
+
+```json
+{
+  "output.tts.voice": "default",
+  "output_mode": "ui_and_tts",
+  "notify_route": "discord",
+  "line.channel_access_token": "line-token",
+  "line.to_user_id": "Uxxxx",
+  "discord.bot_token": "discord-token",
+  "discord.channel_id": "1234567890"
+}
+```
+
+- 必須項目は `output.tts.voice`、`output_mode`、`notify_route` である
+- `output_mode` は、`ui_only` または `ui_and_tts` の `string` に固定する
+- `notify_route` は、`ui_only`、`line`、`discord` のいずれかに固定する
+- `notify_route="line"` のときは `line.channel_access_token` と `line.to_user_id` を必須にする
+- `notify_route="discord"` のときは `discord.bot_token` と `discord.channel_id` を必須にする
+
+<!-- Block: Settings Change Set Payload -->
+### `settings_change_sets.payload_json`
+
+```json
+{
+  "editor_revision": 12,
+  "active_behavior_preset_id": "preset_beh_001",
+  "active_llm_preset_id": "preset_llm_001",
+  "active_memory_preset_id": "preset_mem_001",
+  "active_output_preset_id": "preset_out_001",
+  "direct_values": {
+    "runtime.idle_tick_ms": 1000
+  },
+  "preset_versions": {
+    "behavior": 1760000000000,
+    "llm": 1760000000000,
+    "memory": 1760000000000,
+    "output": 1760000000000
+  }
+}
+```
+
+- `settings_change_sets.payload_json` は、設定UI保存の canonical 結果をランタイムへ渡すオブジェクトである
+- 必須項目は `editor_revision`、`active_behavior_preset_id`、`active_llm_preset_id`、`active_memory_preset_id`、`active_output_preset_id`、`direct_values`、`preset_versions` である
+- `direct_values` は、`settings_editor_state.direct_values_json` と同じ形に固定する
+- `preset_versions` は、各アクティブプリセットの `updated_at` を `preset_kind -> unix_ms` で持つ
+
+<!-- Block: Settings Preset Entry -->
+### `settings_preset_entry`
+
+```json
+{
+  "preset_id": "preset_llm_001",
+  "preset_name": "default",
+  "archived": false,
+  "sort_order": 10,
+  "updated_at": 1760000000000,
+  "payload": {}
+}
+```
+
+- `settings_preset_entry` は、設定UI API が返すプリセット一覧の共通要素である
+- 必須項目は `preset_id`、`preset_name`、`archived`、`sort_order`、`updated_at`、`payload` である
+- `payload` は、その `preset_kind` に対応する `settings_presets.payload_json` の固定形に一致しなければならない
 
 <!-- Block: Event Group -->
 ## イベントテーブルの JSON
@@ -752,6 +905,53 @@
 - `value_type` は、少なくとも `string`、`integer`、`number`、`boolean`、`object`、`array` を区別する
 - `value` は、`value_type` と整合する JSON 値をそのまま持つ
 - 初期段階での主要ユースケースは `string` だが、型変換の推測は行わない
+
+<!-- Block: Settings Editor Response -->
+### `GET /api/settings/editor` の本文
+
+```json
+{
+  "editor_state": {
+    "revision": 12,
+    "active_behavior_preset_id": "preset_beh_001",
+    "active_llm_preset_id": "preset_llm_001",
+    "active_memory_preset_id": "preset_mem_001",
+    "active_output_preset_id": "preset_out_001",
+    "direct_values": {
+      "runtime.idle_tick_ms": 1000
+    }
+  },
+  "preset_catalogs": {
+    "behavior": [],
+    "llm": [],
+    "memory": [],
+    "output": []
+  },
+  "constraints": {
+    "editable_direct_keys": [
+      "runtime.idle_tick_ms"
+    ]
+  },
+  "runtime_projection": {
+    "llm.default_model": "openrouter/default-model"
+  }
+}
+```
+
+- `editor_state`、`preset_catalogs`、`constraints`、`runtime_projection` を必須にする
+- `editor_state.direct_values` は、`settings_editor_state.direct_values_json` と同じ形に固定する
+- `preset_catalogs` は、`preset_kind -> settings_preset_entry[]` の object に固定する
+- `preset_catalogs.*.payload` には、API キーやトークンの生値をそのまま含めてよい
+- `runtime_projection` は、現在アクティブな構成から導出された現在有効値の要約であり、ドット区切り設定キーをキー名に使ってよい
+
+<!-- Block: Settings Editor Put -->
+### `PUT /api/settings/editor` の本文
+
+- リクエスト本文と成功応答本文は、`GET /api/settings/editor` と同じ canonical 形に固定する
+- 保存時は、サーバ側で次の整合を必須にする
+  - `editor_state.active_*_preset_id` は、それぞれ対応する `preset_catalogs` 内に存在しなければならない
+  - `preset_catalogs` の各要素は、対応する `settings_presets.payload_json` の固定形に一致しなければならない
+  - `editor_state.revision` は、保存前の `settings_editor_state.revision` と一致しなければならない
 
 <!-- Block: UI Outbound -->
 ### `ui_outbound_events.payload_json`

@@ -72,13 +72,15 @@
 ## エンドポイント一覧
 
 <!-- Block: Endpoint Summary -->
-### 初期実装で提供する API
+### この仕様で扱う API
 
 - `GET /`
 - `GET /api/health`
 - `GET /api/status`
 - `GET /api/settings`
+- `GET /api/settings/editor`
 - `POST /api/settings/overrides`
+- `PUT /api/settings/editor`
 - `POST /api/chat/input`
 - `POST /api/chat/cancel`
 - `GET /api/chat/stream`
@@ -212,7 +214,8 @@ flowchart LR
 - `effective_settings` は、UI で編集対象にする設定だけを、`docs/39_設定キー運用仕様.md` と同じドット区切りキーで返す
 - `effective_settings` は、`config/default_settings.json` の既定値に対して、`runtime_settings.values_json` を上書きした現在有効値を返す
 - `apply_scope="next_boot"` で `applied` 済みの設定は、次回ランタイム起動で materialize されるまで `effective_settings` に即時反映しない
-- `GET /api/settings` は UI の要約表示用なので、秘密情報を含めてもよいが、初期実装では必要な項目だけ返せばよい
+- `GET /api/settings` は UI の要約表示用なので、必要なら API キーやトークンを含めてよい
+- 設定UIの主編集経路は、将来的に `GET /api/settings/editor` と `PUT /api/settings/editor` に置き換える
 
 <!-- Block: Settings Post -->
 ## `POST /api/settings/overrides`
@@ -253,6 +256,37 @@ flowchart LR
 - 成功時は `202 Accepted` を返す
 - DB には `settings_overrides.status="queued"` で挿入する
 - 未登録キー、`apply_scope` 不一致、型違反、範囲違反は `400 Bad Request` で拒否する
+
+<!-- Block: Settings Editor Get -->
+## `GET /api/settings/editor`
+
+<!-- Block: Settings Editor Get Purpose -->
+### 役割
+
+- 設定UIの描画に必要な canonical な全体状態を返す
+- `settings_editor_state`、`settings_presets`、現在の `runtime_projection` をまとめて返す
+
+<!-- Block: Settings Editor Get Notes -->
+### 成功応答の考え方
+
+- 本文の JSON 形は `docs/36_JSONデータ仕様.md` を正本とする
+- 設定UIは、このレスポンスだけで現在のフォームを描画できる状態でなければならない
+- 初期設計では、`preset_catalogs.*.payload` に API キーやトークンの生値をそのまま含めてよい
+
+<!-- Block: Settings Editor Put -->
+## `PUT /api/settings/editor`
+
+<!-- Block: Settings Editor Put Purpose -->
+### 役割
+
+- 設定UIの draft 全体を 1 回で保存する
+- `settings_editor_state` と `settings_presets` を同じ transaction で更新し、必要なら `settings_change_sets` を enqueue する
+
+<!-- Block: Settings Editor Put Notes -->
+### 成功応答の考え方
+
+- リクエスト本文と成功応答本文は、`GET /api/settings/editor` と同じ canonical 形に固定する
+- 本文の JSON 形は `docs/36_JSONデータ仕様.md` を正本とする
 
 <!-- Block: Chat Input -->
 ## `POST /api/chat/input`
