@@ -6,7 +6,6 @@ import json
 import logging
 import os
 from datetime import datetime
-from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
 
@@ -143,10 +142,9 @@ def configure_process_logging(*, process_name: str) -> None:
     )
 
     # Block: File handler setup
-    file_handler = RotatingFileHandler(
-        log_dir / f"otomekairo-{process_name}.log",
-        maxBytes=1_000_000,
-        backupCount=2,
+    file_handler = logging.FileHandler(
+        log_dir / "otomekairo.log",
+        mode="a",
         encoding="utf-8",
     )
     file_handler.setLevel(logging.DEBUG)
