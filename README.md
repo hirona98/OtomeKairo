@@ -32,7 +32,7 @@
 - `run_otomekairo.sh`: Web サーバと人格ランタイムを引数なしで同時起動する最短の実行スクリプト
 - `src/otomekairo/boot/run_web.py`: `uvicorn` で Web サーバを起動し、既定では `0.0.0.0:8000` に bind する
 - `src/otomekairo/boot/run_runtime.py`: 人格ランタイムの常時ループを起動する
-- `src/otomekairo/boot/run_all.py`: Web サーバと人格ランタイムを同じ親プロセスで起動し、終了シグナル時に両方を停止する
+- `src/otomekairo/boot/run_all.py`: Web サーバと人格ランタイムを同じ親プロセスで起動し、既存のランタイム lease が生きていればそれを再利用し、終了シグナル時に自分が起動した子プロセスだけを停止する
 - `src/otomekairo/web/app.py`: FastAPI アプリを構成し、API ルータ、最小ブラウザ UI (`GET /`)、例外処理を束ねる
 - `src/otomekairo/web/static/`: `tmp/CocoroGhost/static/` にかなり近い見た目の最小チャット UI を持ち、同一オリジンで `POST /api/chat/input` と `GET /api/chat/stream` を使い、`message` 到着時は `output.tts.enabled=true` ならブラウザの `SpeechSynthesis` で音声化し、`Mic` は標準 `SpeechRecognition` で音声入力し、設定パネルでは主要な一部設定を `POST /api/settings/overrides` へ保存できる
 - `src/otomekairo/gateway/cognition_client.py`: 認知処理の外部境界を表す抽象を定義する
@@ -62,6 +62,7 @@
 - `LINE` 通知を使うときは、起動前に `OTOMEKAIRO_LINE_CHANNEL_ACCESS_TOKEN` と `OTOMEKAIRO_LINE_TO_USER_ID` を環境変数で渡す
 - `LINE` を使わないときは、設定パネルで `integrations.line.enabled=false` のまま使う
 - `otomekairo` の console script を使う場合も、`./run_otomekairo.sh` と同じく Web とランタイムを同時に起動する
+- 既に別プロセスで人格ランタイムが稼働中なら、`./run_otomekairo.sh` はそのランタイムを再利用し、Web だけを追加起動する
 - 手動で分けて起動したいときは、`otomekairo-web` と `otomekairo-runtime` を別ターミナルで順に起動してよい
 - 既定の bind 先は `0.0.0.0:8000` だが、ブラウザからは `http://127.0.0.1:8000/` を開いてよい
 - `Mic` はブラウザ標準の `SpeechRecognition` がある環境だけで使える

@@ -9,6 +9,9 @@ import sys
 import time
 from pathlib import Path
 
+from otomekairo import __version__
+from otomekairo.infra.sqlite_state_store import SqliteStateStore
+
 
 # Block: Process labels
 WEB_PROCESS = "web"
@@ -18,6 +21,7 @@ RUNTIME_PROCESS = "runtime"
 # Block: Combined entrypoint
 def main() -> None:
     repo_root = _repo_root()
+    runtime_already_running = _runtime_already_running(repo_root)
     child_env = _child_environment(repo_root)
     web_url = _web_url(child_env)
     processes = {
@@ -26,16 +30,20 @@ def main() -> None:
             child_env=child_env,
             module_name="otomekairo.boot.run_web",
         ),
-        RUNTIME_PROCESS: _start_child_process(
+    }
+    if not runtime_already_running:
+        processes[RUNTIME_PROCESS] = _start_child_process(
             repo_root=repo_root,
             child_env=child_env,
             module_name="otomekairo.boot.run_runtime",
-        ),
-    }
+        )
     _install_signal_handlers(processes)
     print("OtomeKairo started")
     print(f"  Web:     {web_url}")
-    print("  Runtime: running")
+    if runtime_already_running:
+        print("  Runtime: already running (reuse existing lease)")
+    else:
+        print("  Runtime: running")
     try:
         _wait_for_exit(processes)
     except RuntimeError as error:
@@ -75,6 +83,23 @@ def _child_environment(repo_root: Path) -> dict[str, str]:
 def _web_url(child_env: dict[str, str]) -> str:
     port = child_env.get("OTOMEKAIRO_PORT", "8000")
     return f"http://127.0.0.1:{port}/"
+
+
+# Block: Runtime lease check
+def _runtime_already_running(repo_root: Path) -> bool:
+    store = SqliteStateStore(
+        db_path=_default_db_path(repo_root),
+        initializer_version=__version__,
+    )
+    store.initialize()
+    status = store.read_status()
+    runtime = status.get("runtime")
+    if not isinstance(runtime, dict):
+        raise RuntimeError("runtime status must be object")
+    is_running = runtime.get("is_running")
+    if not isinstance(is_running, bool):
+        raise RuntimeError("runtime.is_running must be boolean")
+    return is_running
 
 
 # Block: Signal registration
@@ -122,6 +147,11 @@ def _stop_child_processes(processes: dict[str, subprocess.Popen[str]]) -> None:
 # Block: Repository root
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
+
+
+# Block: Database path
+def _default_db_path(repo_root: Path) -> Path:
+    return repo_root / "data" / "core.sqlite3"
 
 
 if __name__ == "__main__":
