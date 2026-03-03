@@ -14,6 +14,12 @@
   const settingsReloadButton = document.getElementById("btn-settings-reload");
   const settingsSaveButton = document.getElementById("btn-settings-save");
   const settingsCloseButton = document.getElementById("btn-settings-close");
+  const llmDefaultModelInput = document.getElementById("setting-llm-default-model");
+  const llmTemperatureInput = document.getElementById("setting-llm-temperature");
+  const runtimeIdleTickInput = document.getElementById("setting-runtime-idle-tick-ms");
+  const outputTtsEnabledInput = document.getElementById("setting-output-tts-enabled");
+  const outputTtsVoiceInput = document.getElementById("setting-output-tts-voice");
+  const integrationsLineEnabledInput = document.getElementById("setting-integrations-line-enabled");
   const settingsJson = document.getElementById("settings-json");
   const statusJson = document.getElementById("status-json");
   const connectionText = document.getElementById("connection-text");
@@ -21,6 +27,7 @@
 
   // Block: Runtime state
   let stream = null;
+  let micRecognition = null;
   const draftMessages = new Map();
   let statusTimerId = 0;
   let latestSettings = null;
@@ -44,13 +51,13 @@
     });
     settingsCloseButton.addEventListener("click", closeSettingsPanel);
     settingsReloadButton.addEventListener("click", () => {
-      void refreshSnapshots();
+      void reloadSettingsPanel();
     });
     settingsSaveButton.addEventListener("click", () => {
-      appendNotice("settings_dummy", "設定保存 UI はまだダミーです");
+      void handleSettingsSave();
     });
     micButton.addEventListener("click", () => {
-      appendNotice("mic_dummy", "音声入力 UI はまだダミーです");
+      void handleMicClick();
     });
     cameraButton.addEventListener("click", () => {
       appendNotice("camera_dummy", "カメラ UI はまだダミーです");
@@ -122,31 +129,12 @@
     if (!text) {
       return;
     }
-    sendButton.disabled = true;
     try {
-      const response = await fetch("/api/chat/input", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ text }),
-      });
-      const payload = await readJson(response);
-      if (!response.ok) {
-        throw new Error(payload.message || "送信に失敗しました");
-      }
-      appendMessage({
-        role: "user",
-        text,
-        messageId: String(payload.input_id || ""),
-        isDraft: false,
-      });
+      await submitChatText(text);
       chatInput.value = "";
       chatInput.focus();
     } catch (error) {
       appendError(`送信に失敗しました: ${error.message}`);
-    } finally {
-      sendButton.disabled = false;
     }
   }
 
@@ -164,7 +152,7 @@
       });
       const payload = await readJson(response);
       if (!response.ok) {
-        throw new Error(payload.message || "停止に失敗しました");
+        throw new Error(readErrorMessage(payload));
       }
       appendNotice("cancel_requested", "停止要求を送りました");
     } catch (error) {
@@ -178,11 +166,131 @@
   async function openSettingsPanel() {
     settingsPanel.classList.remove("hidden");
     await refreshSnapshots();
+    try {
+      syncEditableSettingsFromSnapshot();
+    } catch (error) {
+      appendError(`設定表示に失敗しました: ${error.message}`);
+    }
   }
 
   // Block: Settings close
   function closeSettingsPanel() {
     settingsPanel.classList.add("hidden");
+  }
+
+  // Block: Settings reload
+  async function reloadSettingsPanel() {
+    await refreshSnapshots();
+    try {
+      syncEditableSettingsFromSnapshot();
+    } catch (error) {
+      appendError(`設定再読込に失敗しました: ${error.message}`);
+    }
+  }
+
+  // Block: Settings save
+  async function handleSettingsSave() {
+    let requestedSettings;
+    let effectiveSettings;
+    try {
+      effectiveSettings = requireEffectiveSettings();
+      requestedSettings = collectEditableSettings();
+    } catch (error) {
+      appendError(`設定保存に失敗しました: ${error.message}`);
+      return;
+    }
+    const changedEntries = Object.entries(requestedSettings).filter(([key, value]) => !Object.is(effectiveSettings[key], value));
+    if (changedEntries.length === 0) {
+      appendNotice("settings_no_changes", "変更はありません");
+      return;
+    }
+    settingsSaveButton.disabled = true;
+    try {
+      for (const [key, requestedValue] of changedEntries) {
+        const response = await fetch("/api/settings/overrides", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            key,
+            requested_value: requestedValue,
+            apply_scope: "runtime",
+          }),
+        });
+        const payload = await readJson(response);
+        if (!response.ok) {
+          throw new Error(readErrorMessage(payload));
+        }
+      }
+      appendNotice("settings_saved", `${changedEntries.length} 件の設定変更を受け付けました`);
+      await refreshSnapshots();
+    } catch (error) {
+      appendError(`設定保存に失敗しました: ${error.message}`);
+    } finally {
+      settingsSaveButton.disabled = false;
+    }
+  }
+
+  // Block: Mic click
+  async function handleMicClick() {
+    if (micRecognition !== null) {
+      micRecognition.stop();
+      return;
+    }
+    let effectiveSettings;
+    try {
+      effectiveSettings = requireEffectiveSettings();
+      if (readBooleanSetting(effectiveSettings, "sensors.microphone.enabled") !== true) {
+        throw new Error("マイク入力は無効です");
+      }
+    } catch (error) {
+      appendError(`音声入力を開始できません: ${error.message}`);
+      return;
+    }
+    if (typeof window.SpeechRecognition !== "function") {
+      appendError("このブラウザでは音声入力が使えません");
+      return;
+    }
+    const recognition = new window.SpeechRecognition();
+    micRecognition = recognition;
+    recognition.lang = "ja-JP";
+    recognition.interimResults = false;
+    recognition.continuous = false;
+    recognition.maxAlternatives = 1;
+    setMicListeningState(true);
+    recognition.addEventListener("result", (event) => {
+      void handleMicResult(event);
+    });
+    recognition.addEventListener("error", (event) => {
+      const errorCode = event && typeof event.error === "string" ? event.error : "unknown";
+      appendError(`音声入力に失敗しました: ${errorCode}`);
+    });
+    recognition.addEventListener("end", () => {
+      micRecognition = null;
+      setMicListeningState(false);
+    });
+    recognition.start();
+  }
+
+  // Block: Mic result
+  async function handleMicResult(event) {
+    if (!event.results || !event.results[0] || !event.results[0][0]) {
+      appendError("音声入力の結果が不正です");
+      return;
+    }
+    const transcript = String(event.results[0][0].transcript).trim();
+    if (!transcript) {
+      appendError("音声入力が空です");
+      return;
+    }
+    try {
+      await submitChatText(transcript);
+      chatInput.value = "";
+      chatInput.focus();
+    } catch (error) {
+      appendError(`音声入力の送信に失敗しました: ${error.message}`);
+    }
   }
 
   // Block: Snapshot refresh
@@ -195,10 +303,10 @@
       const statusPayload = await readJson(statusResponse);
       const settingsPayload = await readJson(settingsResponse);
       if (!statusResponse.ok) {
-        throw new Error(statusPayload.message || "状態取得に失敗しました");
+        throw new Error(readErrorMessage(statusPayload));
       }
       if (!settingsResponse.ok) {
-        throw new Error(settingsPayload.message || "設定取得に失敗しました");
+        throw new Error(readErrorMessage(settingsPayload));
       }
       latestSettings = settingsPayload;
       statusJson.textContent = formatJson(statusPayload);
@@ -212,6 +320,17 @@
         statusJson.textContent = runtimeText.textContent;
       }
     }
+  }
+
+  // Block: Settings form sync
+  function syncEditableSettingsFromSnapshot() {
+    const effectiveSettings = requireEffectiveSettings();
+    llmDefaultModelInput.value = readStringSetting(effectiveSettings, "llm.default_model");
+    llmTemperatureInput.value = String(readNumberSetting(effectiveSettings, "llm.temperature"));
+    runtimeIdleTickInput.value = String(readIntegerSetting(effectiveSettings, "runtime.idle_tick_ms"));
+    outputTtsEnabledInput.checked = readBooleanSetting(effectiveSettings, "output.tts.enabled");
+    outputTtsVoiceInput.value = readStringSetting(effectiveSettings, "output.tts.voice");
+    integrationsLineEnabledInput.checked = readBooleanSetting(effectiveSettings, "integrations.line.enabled");
   }
 
   // Block: Status event handler
@@ -361,6 +480,44 @@
     return JSON.parse(text);
   }
 
+  // Block: API error message
+  function readErrorMessage(payload) {
+    if (payload && typeof payload === "object" && typeof payload.message === "string" && payload.message.trim()) {
+      return payload.message;
+    }
+    throw new Error("エラー応答が不正です");
+  }
+
+  // Block: Chat send helper
+  async function submitChatText(text) {
+    const messageText = String(text).trim();
+    if (!messageText) {
+      throw new Error("空のメッセージは送信できません");
+    }
+    sendButton.disabled = true;
+    try {
+      const response = await fetch("/api/chat/input", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ text: messageText }),
+      });
+      const payload = await readJson(response);
+      if (!response.ok) {
+        throw new Error(readErrorMessage(payload));
+      }
+      appendMessage({
+        role: "user",
+        text: messageText,
+        messageId: payload && "input_id" in payload ? String(payload.input_id) : "",
+        isDraft: false,
+      });
+    } finally {
+      sendButton.disabled = false;
+    }
+  }
+
   // Block: Meta label
   function buildMetaLabel(role, isDraft = false) {
     if (role === "user") {
@@ -382,12 +539,98 @@
     chatScroll.scrollTop = chatScroll.scrollHeight;
   }
 
+  // Block: Effective settings access
+  function requireEffectiveSettings() {
+    if (!latestSettings || typeof latestSettings !== "object") {
+      throw new Error("設定スナップショットが未取得です");
+    }
+    const effectiveSettings = latestSettings.effective_settings;
+    if (!effectiveSettings || typeof effectiveSettings !== "object") {
+      throw new Error("有効設定が不正です");
+    }
+    return effectiveSettings;
+  }
+
+  // Block: String setting read
+  function readStringSetting(effectiveSettings, key) {
+    if (!(key in effectiveSettings) || typeof effectiveSettings[key] !== "string") {
+      throw new Error(`${key} が文字列ではありません`);
+    }
+    const value = effectiveSettings[key].trim();
+    if (!value) {
+      throw new Error(`${key} が空です`);
+    }
+    return value;
+  }
+
+  // Block: Number setting read
+  function readNumberSetting(effectiveSettings, key) {
+    if (!(key in effectiveSettings) || typeof effectiveSettings[key] !== "number" || !Number.isFinite(effectiveSettings[key])) {
+      throw new Error(`${key} が数値ではありません`);
+    }
+    return effectiveSettings[key];
+  }
+
+  // Block: Integer setting read
+  function readIntegerSetting(effectiveSettings, key) {
+    const value = readNumberSetting(effectiveSettings, key);
+    if (!Number.isInteger(value)) {
+      throw new Error(`${key} が整数ではありません`);
+    }
+    return value;
+  }
+
+  // Block: Boolean setting read
+  function readBooleanSetting(effectiveSettings, key) {
+    if (!(key in effectiveSettings) || typeof effectiveSettings[key] !== "boolean") {
+      throw new Error(`${key} が真偽値ではありません`);
+    }
+    return effectiveSettings[key];
+  }
+
+  // Block: Settings collect
+  function collectEditableSettings() {
+    const llmDefaultModel = llmDefaultModelInput.value.trim();
+    if (!llmDefaultModel) {
+      throw new Error("LLM モデルは必須です");
+    }
+    const llmTemperature = Number(llmTemperatureInput.value);
+    if (!Number.isFinite(llmTemperature) || llmTemperature < 0 || llmTemperature > 2) {
+      throw new Error("Temperature は 0.0 以上 2.0 以下で入力してください");
+    }
+    const runtimeIdleTick = Number(runtimeIdleTickInput.value);
+    if (!Number.isInteger(runtimeIdleTick) || runtimeIdleTick < 250 || runtimeIdleTick > 60000) {
+      throw new Error("Idle Tick は 250 以上 60000 以下の整数で入力してください");
+    }
+    const outputTtsVoice = outputTtsVoiceInput.value.trim();
+    if (!outputTtsVoice) {
+      throw new Error("TTS Voice は必須です");
+    }
+    return {
+      "llm.default_model": llmDefaultModel,
+      "llm.temperature": llmTemperature,
+      "runtime.idle_tick_ms": runtimeIdleTick,
+      "output.tts.enabled": outputTtsEnabledInput.checked,
+      "output.tts.voice": outputTtsVoice,
+      "integrations.line.enabled": integrationsLineEnabledInput.checked,
+    };
+  }
+
+  // Block: Mic state
+  function setMicListeningState(isListening) {
+    micButton.textContent = isListening ? "停止" : "Mic";
+  }
+
   // Block: Browser speech
   function speakMessageText(text) {
-    const effectiveSettings = latestSettings && typeof latestSettings === "object"
-      ? latestSettings.effective_settings
-      : null;
-    if (!effectiveSettings || effectiveSettings["output.tts.enabled"] !== true) {
+    let effectiveSettings;
+    try {
+      effectiveSettings = requireEffectiveSettings();
+      if (readBooleanSetting(effectiveSettings, "output.tts.enabled") !== true) {
+        return;
+      }
+    } catch (error) {
+      appendError(`TTS を開始できません: ${error.message}`);
       return;
     }
     if (!("speechSynthesis" in window) || typeof window.SpeechSynthesisUtterance !== "function") {
@@ -398,9 +641,11 @@
     if (!messageText) {
       return;
     }
-    const requestedVoice = String(effectiveSettings["output.tts.voice"] || "").trim();
-    if (!requestedVoice) {
-      appendError("TTS voice 設定が不正です");
+    let requestedVoice;
+    try {
+      requestedVoice = readStringSetting(effectiveSettings, "output.tts.voice");
+    } catch (error) {
+      appendError(`TTS を開始できません: ${error.message}`);
       return;
     }
     const utterance = new window.SpeechSynthesisUtterance(messageText);

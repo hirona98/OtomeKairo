@@ -32,7 +32,7 @@
 - `src/otomekairo/boot/run_web.py`: `uvicorn` で Web サーバを起動する
 - `src/otomekairo/boot/run_runtime.py`: 人格ランタイムの常時ループを起動する
 - `src/otomekairo/web/app.py`: FastAPI アプリを構成し、API ルータ、最小ブラウザ UI (`GET /`)、例外処理を束ねる
-- `src/otomekairo/web/static/`: `tmp/CocoroGhost/static/` の見た目を簡略流用した最小チャット UI を持ち、同一オリジンで `POST /api/chat/input` と `GET /api/chat/stream` を使い、`message` 到着時は `output.tts.enabled=true` ならブラウザの `SpeechSynthesis` で音声化する
+- `src/otomekairo/web/static/`: `tmp/CocoroGhost/static/` の見た目を簡略流用した最小チャット UI を持ち、同一オリジンで `POST /api/chat/input` と `GET /api/chat/stream` を使い、`message` 到着時は `output.tts.enabled=true` ならブラウザの `SpeechSynthesis` で音声化し、`Mic` は標準 `SpeechRecognition` で音声入力し、設定パネルでは主要な一部設定を `POST /api/settings/overrides` へ保存できる
 - `src/otomekairo/gateway/cognition_client.py`: 認知処理の外部境界を表す抽象を定義する
 - `src/otomekairo/usecase/build_cognition_input.py`: `self_state` などの現在状態から最小の `cognition_input` を組み立て、`task_state` の進行中 / 外部待ちタスク、直近の `summary` / `fact` 記憶、直近イベント列を `current_observation` と照合して絞り込み、`memory_bundle` として渡す
 - `src/otomekairo/usecase/run_cognition.py`: 認知クライアントが返す `cognition_result` を受け取り、`action_command` を使って `speak` は `token` / `message`、`notify` は `notice`、`browse` は `waiting_external` の検索タスクとして実行し、`action_history` へ変換する
