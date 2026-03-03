@@ -62,7 +62,7 @@ def run_cognition_for_browser_chat_input(
         "status",
         {
             "status_code": "thinking",
-            "label": "入力を処理しています",
+            "label": _initial_status_label(pending_input),
             "cycle_id": cycle_id,
         },
     )
@@ -173,6 +173,16 @@ def _validated_speech_draft(cognition_result: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(speech_text, str) or not speech_text.strip():
         raise RuntimeError("cognition_result.speech_draft.text must be a non-empty string")
     return speech_draft
+
+
+# Block: Initial status label
+def _initial_status_label(pending_input: PendingInputRecord) -> str:
+    input_kind = str(pending_input.payload["input_kind"])
+    if input_kind == "chat_message":
+        return "入力を処理しています"
+    if input_kind == "network_result":
+        return "検索結果をもとに応答を準備しています"
+    raise RuntimeError("unsupported input_kind for cognition status")
 
 
 # Block: Reflection seed merge

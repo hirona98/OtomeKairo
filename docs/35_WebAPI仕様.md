@@ -110,6 +110,7 @@ flowchart LR
 - `Mic` はブラウザの標準 `SpeechRecognition` を使って音声入力し、認識結果を `POST /api/chat/input` へ流す
 - `設定保存` は、初期実装では主要な一部設定だけを `POST /api/settings/overrides` へ流す
 - `Cam` は初期実装ではダミーでもよい
+- `browse` の初期実装では、UI は少なくとも `browse_queued` と `browse_completed` の `notice` を見分けられるようにしてよい
 - UI 側で永続ストレージを前提にしない
 - UI は `browser_chat` チャネル専用として扱う
 

@@ -428,11 +428,15 @@
     row.className = "message-row notice";
     row.dataset.noticeCode = String(code);
 
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.textContent = buildNoticeMetaLabel(String(code));
+
     const bubble = document.createElement("div");
     bubble.className = "bubble";
     bubble.textContent = text;
 
-    row.appendChild(bubble);
+    row.append(meta, bubble);
     chatScroll.appendChild(row);
     scrollToBottom();
   }
@@ -446,7 +450,11 @@
     bubble.className = "bubble";
     bubble.textContent = text;
 
-    row.appendChild(bubble);
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.textContent = "エラー";
+
+    row.append(meta, bubble);
     chatScroll.appendChild(row);
     scrollToBottom();
   }
@@ -527,6 +535,23 @@
       return "OtomeKairo（生成中）";
     }
     return "OtomeKairo";
+  }
+
+  // Block: Notice meta label
+  function buildNoticeMetaLabel(code) {
+    if (code === "browse_queued") {
+      return "検索タスク";
+    }
+    if (code === "browse_completed") {
+      return "検索結果";
+    }
+    if (code === "settings_saved" || code === "settings_no_changes") {
+      return "設定";
+    }
+    if (code === "cancel_requested") {
+      return "停止";
+    }
+    return "通知";
   }
 
   // Block: JSON format

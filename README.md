@@ -48,3 +48,17 @@
 - `src/otomekairo/schema/runtime_types.py`: ランタイムの共通データ形を `infra` から切り離して持つ
 - `src/otomekairo/schema/settings.py`: 設定キーの検証と `config/default_settings.json` からの既定値読み込みを持つ
 - `config/default_settings.json`: `runtime_settings` seed と Web の `effective_settings` に使う設定既定値の正本を持つ
+
+<!-- Block: Startup Guide -->
+## 起動と確認
+
+1. ターミナル 1 で Web サーバを起動する  
+   `PYTHONPATH=src python3 -m otomekairo.boot.run_web`
+2. ターミナル 2 で人格ランタイムを起動する  
+   `PYTHONPATH=src python3 -m otomekairo.boot.run_runtime`
+3. ブラウザで `http://127.0.0.1:8000/` を開く
+4. テキスト入力、`Mic`、設定パネル、`browse` を含む応答経路を確認する
+
+- `LINE` 通知を使うときは、起動前に `OTOMEKAIRO_LINE_CHANNEL_ACCESS_TOKEN` と `OTOMEKAIRO_LINE_TO_USER_ID` を環境変数で渡す
+- `LINE` を使わないときは、設定パネルで `integrations.line.enabled=false` のまま使う
+- `otomekairo-web` / `otomekairo-runtime` の console script を使う場合も、起動順は同じでよい

@@ -38,7 +38,17 @@ def run_browse_task(
     query = _browse_query(task)
     target_channel = _browse_target_channel(task)
     started_at = _now_ms()
-    ui_events: list[dict[str, Any]] = []
+    ui_events: list[dict[str, Any]] = [
+        {
+            "channel": target_channel,
+            "event_type": "status",
+            "payload": {
+                "status_code": "browsing",
+                "label": "外部検索を実行しています",
+                "cycle_id": cycle_id,
+            },
+        }
+    ]
 
     # Block: External search
     search_response = search_client.search(
@@ -49,6 +59,28 @@ def run_browse_task(
         )
     )
     finished_at = _now_ms()
+    preview_text = _browse_notice_preview_text(search_response.summary_text)
+    ui_events.extend(
+        [
+            {
+                "channel": target_channel,
+                "event_type": "notice",
+                "payload": {
+                    "notice_code": "browse_completed",
+                    "text": f"検索結果を取得しました: {preview_text}",
+                },
+            },
+            {
+                "channel": target_channel,
+                "event_type": "status",
+                "payload": {
+                    "status_code": "processing_external_result",
+                    "label": "検索結果をもとに応答を準備しています",
+                    "cycle_id": cycle_id,
+                },
+            },
+        ]
+    )
 
     # Block: Action history
     action_result = ActionHistoryRecord(
@@ -117,6 +149,16 @@ def _browse_target_channel(task: TaskStateRecord) -> str:
     if not isinstance(target_channel, str) or not target_channel:
         raise RuntimeError("browse task completion_hint.target_channel must be non-empty string")
     return target_channel
+
+
+# Block: Browse preview helper
+def _browse_notice_preview_text(summary_text: str) -> str:
+    compact_text = " ".join(summary_text.split())
+    if not compact_text:
+        raise RuntimeError("browse summary_text must be non-empty string")
+    if len(compact_text) <= 96:
+        return compact_text
+    return compact_text[:96] + "..."
 
 
 # Block: Id helper
