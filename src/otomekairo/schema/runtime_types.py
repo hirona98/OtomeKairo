@@ -84,6 +84,16 @@ class TaskStateRecord:
     updated_at: int
 
 
+# Block: Pending input mutation record
+@dataclass(frozen=True, slots=True)
+class PendingInputMutationRecord:
+    source: str
+    channel: str
+    payload: dict[str, Any]
+    priority: int
+    created_at: int
+
+
 # Block: Cognition state snapshot
 @dataclass(frozen=True, slots=True)
 class CognitionStateSnapshot:

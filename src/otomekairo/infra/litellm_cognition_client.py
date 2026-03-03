@@ -66,8 +66,9 @@ def _build_messages(request: CognitionRequest) -> list[dict[str, str]]:
     user_prompt = "\n".join(
         [
             f"入力種別: {request.input_kind}",
-            f"受け取ったテキスト: {current_observation['text']}",
+            f"受け取った内容: {current_observation['observation_text']}",
             f"受信時刻: {current_observation['captured_at_local_text']} ({current_observation['relative_time_text']})",
+            _network_result_prompt_line(current_observation),
             f"関係性の優先対象: {_format_relationship_priorities(selection_profile['relationship_priorities'])}",
             f"長期目標: {_format_goals(persona_snapshot['long_term_goals'])}",
             f"cycle_id: {request.cycle_id}",
@@ -217,3 +218,14 @@ def _format_goals(long_term_goals: dict[str, Any]) -> str:
     if not goals:
         return "未設定"
     return ",".join(str(goal.get("title", "goal")) for goal in goals[:3] if isinstance(goal, dict))
+
+
+# Block: Network result formatting
+def _network_result_prompt_line(current_observation: dict[str, Any]) -> str:
+    if current_observation["input_kind"] != "network_result":
+        return "外部結果: なし"
+    return (
+        "外部結果: "
+        f"query={current_observation['query']} "
+        f"source_task_id={current_observation['source_task_id']}"
+    )

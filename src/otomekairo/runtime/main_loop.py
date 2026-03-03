@@ -15,6 +15,7 @@ from otomekairo.schema.runtime_types import (
     ActionHistoryRecord,
     MemoryJobRecord,
     PendingInputRecord,
+    PendingInputMutationRecord,
     SettingsOverrideRecord,
     TaskStateRecord,
     TaskStateMutationRecord,
@@ -22,7 +23,7 @@ from otomekairo.schema.runtime_types import (
 from otomekairo.schema.settings import SettingsValidationError, build_default_settings, decode_requested_value, get_setting_definition
 from otomekairo.usecase.build_cognition_input import build_cognition_input
 from otomekairo.usecase.run_browse_task import run_browse_task
-from otomekairo.usecase.run_cognition import run_cognition_for_chat_message
+from otomekairo.usecase.run_cognition import run_cognition_for_browser_chat_input
 
 
 # Block: Runtime constants
@@ -108,7 +109,7 @@ class RuntimeLoop:
             )
             commit_payload = {
                 "cycle_kind": "short",
-                "trigger_reason": "external_input",
+                "trigger_reason": _pending_input_trigger_reason(pending_input),
                 "processed_input_id": pending_input.input_id,
                 "processed_input_kind": pending_input.payload["input_kind"],
                 "emitted_event_types": [ui_event["event_type"] for ui_event in ui_events],
@@ -137,7 +138,7 @@ class RuntimeLoop:
                 ui_events=ui_events,
                 commit_payload={
                     "cycle_kind": "short",
-                    "trigger_reason": "external_input",
+                    "trigger_reason": _pending_input_trigger_reason(pending_input),
                     "processed_input_id": pending_input.input_id,
                     "processed_input_kind": pending_input.payload["input_kind"],
                     "emitted_event_types": [ui_event["event_type"] for ui_event in ui_events],
@@ -156,13 +157,13 @@ class RuntimeLoop:
                 task=task,
                 cycle_id=cycle_id,
                 search_client=self._search_client,
-                emit_ui_event=lambda ui_event: self._append_ui_event(cycle_id=cycle_id, ui_event=ui_event),
             )
             self._store.finalize_task_cycle(
                 task=task,
                 cycle_id=cycle_id,
                 final_status=execution.final_status,
                 action_results=execution.action_results,
+                pending_input_mutations=execution.pending_input_mutations,
                 ui_events=execution.ui_events,
                 commit_payload={
                     "cycle_kind": "short",
@@ -191,6 +192,7 @@ class RuntimeLoop:
                 cycle_id=cycle_id,
                 final_status="abandoned",
                 action_results=[failed_action],
+                pending_input_mutations=[],
                 ui_events=ui_events,
                 commit_payload={
                     "cycle_kind": "short",
@@ -220,7 +222,7 @@ class RuntimeLoop:
         str | None,
     ]:
         input_kind = pending_input.payload["input_kind"]
-        if input_kind == "chat_message":
+        if input_kind in {"chat_message", "network_result"}:
             state_snapshot = self._store.read_cognition_state(self._default_settings)
             cognition_input = build_cognition_input(
                 pending_input=pending_input,
@@ -228,7 +230,7 @@ class RuntimeLoop:
                 resolved_at=resolved_at,
                 state_snapshot=state_snapshot,
             )
-            cognition_execution = run_cognition_for_chat_message(
+            cognition_execution = run_cognition_for_browser_chat_input(
                 pending_input=pending_input,
                 cycle_id=cycle_id,
                 resolved_at=resolved_at,
@@ -517,6 +519,14 @@ def _error_message_text(error: Exception) -> str:
     if not error_message:
         return type(error).__name__
     return error_message[:240]
+
+
+# Block: Pending input trigger reason
+def _pending_input_trigger_reason(pending_input: PendingInputRecord) -> str:
+    input_kind = str(pending_input.payload["input_kind"])
+    if input_kind == "network_result":
+        return "external_result"
+    return "external_input"
 
 
 # Block: Unsupported input handling

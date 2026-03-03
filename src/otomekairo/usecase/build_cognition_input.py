@@ -16,15 +16,24 @@ def build_cognition_input(
     resolved_at: int,
     state_snapshot: CognitionStateSnapshot,
 ) -> dict[str, Any]:
-    if pending_input.payload["input_kind"] != "chat_message":
-        raise ValueError("cognition_input is only supported for chat_message")
+    input_kind = str(pending_input.payload["input_kind"])
+    if input_kind not in {"chat_message", "network_result"}:
+        raise ValueError("cognition_input is only supported for browser_chat text and network_result")
     selection_profile = _build_selection_profile(state_snapshot)
+    current_observation = _build_current_observation(
+        pending_input=pending_input,
+        resolved_at=resolved_at,
+    )
     return {
         "cycle_meta": {
             "cycle_id": cycle_id,
-            "trigger_reason": "external_input",
+            "trigger_reason": (
+                "external_result"
+                if input_kind == "network_result"
+                else "external_input"
+            ),
             "input_id": pending_input.input_id,
-            "input_kind": pending_input.payload["input_kind"],
+            "input_kind": input_kind,
         },
         "time_context": _build_time_context(resolved_at),
         "persona_snapshot": {
@@ -64,16 +73,7 @@ def build_cognition_input(
             },
         },
         "skill_candidates": [],
-        "current_observation": {
-            "source": pending_input.source,
-            "channel": pending_input.channel,
-            "input_kind": pending_input.payload["input_kind"],
-            "text": str(pending_input.payload["text"]),
-            "captured_at": pending_input.created_at,
-            "captured_at_utc_text": _utc_text(pending_input.created_at),
-            "captured_at_local_text": _local_text(pending_input.created_at),
-            "relative_time_text": _relative_time_text(resolved_at, pending_input.created_at),
-        },
+        "current_observation": current_observation,
         "context_budget": {
             "max_tokens": int(state_snapshot.effective_settings["runtime.context_budget_tokens"]),
             "default_model": str(state_snapshot.effective_settings["llm.default_model"]),
@@ -81,6 +81,51 @@ def build_cognition_input(
             "max_output_tokens": int(state_snapshot.effective_settings["llm.max_output_tokens"]),
         },
     }
+
+
+# Block: Current observation builder
+def _build_current_observation(
+    *,
+    pending_input: PendingInputRecord,
+    resolved_at: int,
+) -> dict[str, Any]:
+    input_kind = str(pending_input.payload["input_kind"])
+    base_observation = {
+        "source": pending_input.source,
+        "channel": pending_input.channel,
+        "input_kind": input_kind,
+        "captured_at": pending_input.created_at,
+        "captured_at_utc_text": _utc_text(pending_input.created_at),
+        "captured_at_local_text": _local_text(pending_input.created_at),
+        "relative_time_text": _relative_time_text(resolved_at, pending_input.created_at),
+    }
+    if input_kind == "chat_message":
+        text = pending_input.payload.get("text")
+        if not isinstance(text, str) or not text:
+            raise ValueError("chat_message.text must be non-empty string")
+        return {
+            **base_observation,
+            "observation_text": text,
+            "text": text,
+        }
+    if input_kind == "network_result":
+        summary_text = pending_input.payload.get("summary_text")
+        query = pending_input.payload.get("query")
+        source_task_id = pending_input.payload.get("source_task_id")
+        if not isinstance(summary_text, str) or not summary_text:
+            raise ValueError("network_result.summary_text must be non-empty string")
+        if not isinstance(query, str) or not query:
+            raise ValueError("network_result.query must be non-empty string")
+        if not isinstance(source_task_id, str) or not source_task_id:
+            raise ValueError("network_result.source_task_id must be non-empty string")
+        return {
+            **base_observation,
+            "observation_text": summary_text,
+            "query": query,
+            "summary_text": summary_text,
+            "source_task_id": source_task_id,
+        }
+    raise ValueError("unsupported current_observation input_kind")
 
 
 # Block: Selection profile

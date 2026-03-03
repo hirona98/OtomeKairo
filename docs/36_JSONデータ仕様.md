@@ -642,7 +642,8 @@
 ### `pending_inputs.payload_json`
 
 - `pending_inputs.payload_json` は、少なくとも `input_kind` を持つ
-- 初期段階の `browser_chat` では、`chat_message` と `cancel` の 2 種だけを受け付ける
+- Web API が受け付ける初期段階の `browser_chat` 入力は、`chat_message` と `cancel` の 2 種だけである
+- ランタイム内部では、外部検索結果を戻すために `network_result` を enqueue してよい
 
 <!-- Block: Pending Chat Message -->
 #### `chat_message`
@@ -675,6 +676,24 @@
 - 必須項目は `input_kind` である
 - `input_kind` は `cancel` に固定する
 - `target_message_id` は任意で、省略時は現在の `browser_chat` 応答全体を対象にしてよい
+
+<!-- Block: Pending Network Result -->
+#### `network_result`
+
+```json
+{
+  "input_kind": "network_result",
+  "query": "OpenAI",
+  "summary_text": "検索結果の要約",
+  "source_task_id": "task_..."
+}
+```
+
+- 必須項目は `input_kind`、`query`、`summary_text`、`source_task_id` である
+- `input_kind` は `network_result` に固定する
+- `query` は、外部検索に使った非空の文字列を持つ
+- `summary_text` は、外部検索アダプタが返した非空の要約文字列を持つ
+- `source_task_id` は、この結果を作った `browse` タスクを追跡するための ID を持つ
 
 <!-- Block: Settings Requested Value -->
 ### `settings_overrides.requested_value_json`
@@ -814,6 +833,7 @@
 - `target`、`parameters`、`preconditions`、`stop_conditions`、`timeout_ms`、`requires_reobserve`、`expected_effects` は、`execute` のとき `action_command` をそのまま残したい場合に付けてよい
 - `parameters.task_id`、`parameters.query`、`parameters.target_channel` は、`enqueue_browse_task` を実行する命令だけに付ける
 - `parameters.query` は、`execute_browse_task` と `abandon_browse_task` を実行する命令だけに付けてよい
+- `related_task_id` は、`execute_browse_task` と `abandon_browse_task` のように task 再開を処理する命令だけに付けてよい
 - `hold` と `reject` では、`message_id` と `role` を付けず、`event_types` は `status` だけでもよい
 - `target_message_id` は、`cancel` のように既存メッセージを対象化する行動だけに付ける
 - `input_kind` は、未対応入力のエラー応答のように、原因となる入力種別を残したいときだけ付ける
@@ -866,6 +886,7 @@
 - `enqueue_browse_task` を実行した場合は、`queued_task_id`、`queued_task_kind`、`queued_task_status` を付けてよい
 - `complete_browse_task` を実行した場合は、`related_task_id`、`task_status_after`、`summary_text` を付けてよい
 - `abandon_browse_task` を実行した場合は、`related_task_id`、`task_status_after`、`error_message` を付けてよい
+- `complete_browse_task` を実行した場合は、`followup_input_kind=\"network_result\"` を付けてよい
 
 <!-- Block: Memory Job Group -->
 ## 記憶ジョブの JSON

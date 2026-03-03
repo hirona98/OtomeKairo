@@ -23,8 +23,8 @@ class CognitionExecution:
     task_mutations: list[TaskStateMutationRecord]
 
 
-# Block: Chat cognition execution
-def run_cognition_for_chat_message(
+# Block: Browser chat cognition execution
+def run_cognition_for_browser_chat_input(
     *,
     pending_input: PendingInputRecord,
     cycle_id: str,

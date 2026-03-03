@@ -16,6 +16,7 @@ from otomekairo.schema.runtime_types import (
     CognitionStateSnapshot,
     MemoryJobRecord,
     PendingInputRecord,
+    PendingInputMutationRecord,
     SettingsOverrideRecord,
     TaskStateRecord,
     TaskStateMutationRecord,
@@ -1769,6 +1770,7 @@ class SqliteStateStore:
         cycle_id: str,
         final_status: str,
         action_results: list[ActionHistoryRecord],
+        pending_input_mutations: list[PendingInputMutationRecord],
         ui_events: list[dict[str, Any]],
         commit_payload: dict[str, Any],
     ) -> int:
@@ -1788,6 +1790,10 @@ class SqliteStateStore:
             ).rowcount
             if updated_row_count != 1:
                 raise StoreConflictError("task must be active before finalization")
+            followup_input_ids = self._insert_pending_input_mutations(
+                connection=connection,
+                pending_input_mutations=pending_input_mutations,
+            )
             event_ids = self._insert_task_cycle_events(
                 connection=connection,
                 cycle_id=cycle_id,
@@ -1817,6 +1823,7 @@ class SqliteStateStore:
                     _json_text(
                         {
                             **commit_payload,
+                            "followup_input_ids": followup_input_ids,
                             "event_ids": event_ids,
                             "enqueued_memory_job_ids": enqueued_memory_job_ids,
                         }
@@ -1834,6 +1841,47 @@ class SqliteStateStore:
         if commit_id is None:
             raise RuntimeError("commit_records insert did not persist")
         return int(commit_id["commit_id"])
+
+    # Block: Pending input mutation write
+    def _insert_pending_input_mutations(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        pending_input_mutations: list[PendingInputMutationRecord],
+    ) -> list[str]:
+        inserted_input_ids: list[str] = []
+        for pending_input_mutation in pending_input_mutations:
+            if pending_input_mutation.priority < 0:
+                raise StoreValidationError("pending input mutation.priority must be non-negative")
+            input_kind = pending_input_mutation.payload.get("input_kind")
+            if not isinstance(input_kind, str) or not input_kind:
+                raise StoreValidationError("pending input mutation.payload.input_kind must be non-empty string")
+            input_id = _opaque_id("inp")
+            connection.execute(
+                """
+                INSERT INTO pending_inputs (
+                    input_id,
+                    source,
+                    channel,
+                    client_message_id,
+                    payload_json,
+                    created_at,
+                    priority,
+                    status
+                )
+                VALUES (?, ?, ?, NULL, ?, ?, ?, 'queued')
+                """,
+                (
+                    input_id,
+                    pending_input_mutation.source,
+                    pending_input_mutation.channel,
+                    _json_text(pending_input_mutation.payload),
+                    pending_input_mutation.created_at,
+                    pending_input_mutation.priority,
+                ),
+            )
+            inserted_input_ids.append(input_id)
+        return inserted_input_ids
 
     # Block: Task state mutation apply
     def _apply_task_state_mutations(
@@ -2820,6 +2868,10 @@ def _pending_input_receipt_summary(pending_input: PendingInputRecord) -> str:
         text = str(pending_input.payload["text"])
         trimmed_text = text[:60]
         return f"chat_message:{trimmed_text}"
+    if input_kind == "network_result":
+        query = str(pending_input.payload["query"])
+        summary_text = str(pending_input.payload["summary_text"])
+        return f"network_result:{query}:{summary_text[:40]}"
     if input_kind == "cancel":
         return "cancel request"
     return f"input:{input_kind}"

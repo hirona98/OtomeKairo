@@ -5,10 +5,14 @@ from __future__ import annotations
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 from otomekairo.gateway.search_client import SearchClient, SearchRequest
-from otomekairo.schema.runtime_types import ActionHistoryRecord, TaskStateRecord
+from otomekairo.schema.runtime_types import (
+    ActionHistoryRecord,
+    PendingInputMutationRecord,
+    TaskStateRecord,
+)
 
 
 # Block: Browse task execution
@@ -16,6 +20,7 @@ from otomekairo.schema.runtime_types import ActionHistoryRecord, TaskStateRecord
 class BrowseTaskExecution:
     ui_events: list[dict[str, Any]]
     action_results: list[ActionHistoryRecord]
+    pending_input_mutations: list[PendingInputMutationRecord]
     final_status: str
 
 
@@ -25,7 +30,6 @@ def run_browse_task(
     task: TaskStateRecord,
     cycle_id: str,
     search_client: SearchClient,
-    emit_ui_event: Callable[[dict[str, Any]], None],
 ) -> BrowseTaskExecution:
     if task.task_kind != "browse":
         raise RuntimeError("task.task_kind must be browse")
@@ -36,26 +40,6 @@ def run_browse_task(
     started_at = _now_ms()
     ui_events: list[dict[str, Any]] = []
 
-    # Block: Immediate event emitter
-    def emit_event(event_type: str, payload: dict[str, Any]) -> None:
-        ui_event = {
-            "channel": target_channel,
-            "event_type": event_type,
-            "payload": payload,
-        }
-        ui_events.append(ui_event)
-        emit_ui_event(ui_event)
-
-    # Block: External wait status
-    emit_event(
-        "status",
-        {
-            "status_code": "waiting_external",
-            "label": "外部検索を実行しています",
-            "cycle_id": cycle_id,
-        },
-    )
-
     # Block: External search
     search_response = search_client.search(
         SearchRequest(
@@ -65,26 +49,6 @@ def run_browse_task(
         )
     )
     finished_at = _now_ms()
-
-    # Block: Result notice
-    emit_event(
-        "notice",
-        {
-            "notice_code": "browse_completed",
-            "text": search_response.summary_text,
-            "task_id": task.task_id,
-        },
-    )
-
-    # Block: Idle status
-    emit_event(
-        "status",
-        {
-            "status_code": "idle",
-            "label": "待機中",
-            "cycle_id": cycle_id,
-        },
-    )
 
     # Block: Action history
     action_result = ActionHistoryRecord(
@@ -97,7 +61,7 @@ def run_browse_task(
                 "queue": "task_state",
                 "channel": target_channel,
             },
-            "event_types": [ui_event["event_type"] for ui_event in ui_events],
+            "event_types": [],
             "decision": "execute",
             "decision_reason": "task_resume_execute",
             "related_task_id": task.task_id,
@@ -111,18 +75,31 @@ def run_browse_task(
         status="succeeded",
         failure_mode=None,
         observed_effects={
-            "emitted_event_types": [ui_event["event_type"] for ui_event in ui_events],
-            "status_code_after": "idle",
+            "emitted_event_types": [],
             "related_task_id": task.task_id,
             "task_status_after": "completed",
             "summary_text": search_response.summary_text,
+            "followup_input_kind": "network_result",
         },
         raw_result_ref=search_response.raw_result_ref,
         adapter_trace_ref=search_response.adapter_trace_ref,
     )
+    pending_input_mutation = PendingInputMutationRecord(
+        source="network_result",
+        channel=target_channel,
+        payload={
+            "input_kind": "network_result",
+            "query": query,
+            "summary_text": search_response.summary_text,
+            "source_task_id": task.task_id,
+        },
+        priority=90,
+        created_at=finished_at,
+    )
     return BrowseTaskExecution(
         ui_events=ui_events,
         action_results=[action_result],
+        pending_input_mutations=[pending_input_mutation],
         final_status="completed",
     )
 
