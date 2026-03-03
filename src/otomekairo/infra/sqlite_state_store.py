@@ -17,6 +17,7 @@ from otomekairo.schema.runtime_types import (
     MemoryJobRecord,
     PendingInputRecord,
     SettingsOverrideRecord,
+    TaskStateRecord,
     TaskStateMutationRecord,
 )
 from otomekairo.schema.settings import build_default_settings, decode_requested_value
@@ -1606,6 +1607,61 @@ class SqliteStateStore:
             payload=json.loads(row["payload_json"]),
         )
 
+    # Block: Waiting browse task claim
+    def claim_next_waiting_browse_task(self) -> TaskStateRecord | None:
+        now_ms = _now_ms()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """
+                SELECT task_id,
+                       task_kind,
+                       task_status,
+                       goal_hint,
+                       completion_hint_json,
+                       resume_condition_json,
+                       interruptible,
+                       priority,
+                       title,
+                       step_hints_json,
+                       created_at,
+                       updated_at
+                FROM task_state
+                WHERE task_kind = 'browse'
+                  AND task_status = 'waiting_external'
+                ORDER BY priority DESC, created_at ASC
+                LIMIT 1
+                """
+            ).fetchone()
+            if row is None:
+                return None
+            updated_row_count = connection.execute(
+                """
+                UPDATE task_state
+                SET task_status = 'active',
+                    updated_at = ?
+                WHERE task_id = ?
+                  AND task_status = 'waiting_external'
+                """,
+                (now_ms, row["task_id"]),
+            ).rowcount
+            if updated_row_count != 1:
+                return None
+        return TaskStateRecord(
+            task_id=str(row["task_id"]),
+            task_kind=str(row["task_kind"]),
+            task_status="active",
+            goal_hint=str(row["goal_hint"]),
+            completion_hint=json.loads(row["completion_hint_json"]),
+            resume_condition=json.loads(row["resume_condition_json"]),
+            interruptible=bool(row["interruptible"]),
+            priority=int(row["priority"]),
+            title=(str(row["title"]) if row["title"] is not None else None),
+            step_hints=json.loads(row["step_hints_json"]),
+            created_at=int(row["created_at"]),
+            updated_at=now_ms,
+        )
+
     # Block: Pending input journal append
     def append_input_journal_for_pending_input(
         self,
@@ -1705,6 +1761,80 @@ class SqliteStateStore:
             raise RuntimeError("commit_records insert did not persist")
         return int(commit_id["commit_id"])
 
+    # Block: Task cycle finalize
+    def finalize_task_cycle(
+        self,
+        *,
+        task: TaskStateRecord,
+        cycle_id: str,
+        final_status: str,
+        action_results: list[ActionHistoryRecord],
+        ui_events: list[dict[str, Any]],
+        commit_payload: dict[str, Any],
+    ) -> int:
+        if final_status not in {"completed", "abandoned"}:
+            raise StoreValidationError("task final_status is invalid")
+        resolved_at = _now_ms()
+        with self._connect() as connection:
+            updated_row_count = connection.execute(
+                """
+                UPDATE task_state
+                SET task_status = ?,
+                    updated_at = ?
+                WHERE task_id = ?
+                  AND task_status = 'active'
+                """,
+                (final_status, resolved_at, task.task_id),
+            ).rowcount
+            if updated_row_count != 1:
+                raise StoreConflictError("task must be active before finalization")
+            event_ids = self._insert_task_cycle_events(
+                connection=connection,
+                cycle_id=cycle_id,
+                action_results=action_results,
+                ui_events=ui_events,
+                resolved_at=resolved_at,
+            )
+            enqueued_memory_job_ids = self._enqueue_write_memory_jobs(
+                connection=connection,
+                cycle_id=cycle_id,
+                event_ids=event_ids,
+                created_at=resolved_at,
+            )
+            connection.execute(
+                """
+                INSERT INTO commit_records (
+                    cycle_id,
+                    committed_at,
+                    log_sync_status,
+                    commit_payload_json
+                )
+                VALUES (?, ?, 'pending', ?)
+                """,
+                (
+                    cycle_id,
+                    resolved_at,
+                    _json_text(
+                        {
+                            **commit_payload,
+                            "event_ids": event_ids,
+                            "enqueued_memory_job_ids": enqueued_memory_job_ids,
+                        }
+                    ),
+                ),
+            )
+            commit_id = connection.execute(
+                """
+                SELECT commit_id
+                FROM commit_records
+                WHERE cycle_id = ?
+                """,
+                (cycle_id,),
+            ).fetchone()
+        if commit_id is None:
+            raise RuntimeError("commit_records insert did not persist")
+        return int(commit_id["commit_id"])
+
     # Block: Task state mutation apply
     def _apply_task_state_mutations(
         self,
@@ -1750,6 +1880,41 @@ class SqliteStateStore:
                     _json_text(task_mutation.step_hints),
                 ),
             )
+
+    # Block: Task event write
+    def _insert_task_cycle_events(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        cycle_id: str,
+        action_results: list[ActionHistoryRecord],
+        ui_events: list[dict[str, Any]],
+        resolved_at: int,
+    ) -> list[str]:
+        event_ids = self._insert_action_history(
+            connection=connection,
+            cycle_id=cycle_id,
+            action_results=action_results,
+            input_journal_refs_json=None,
+        )
+        response_summary = _runtime_response_summary(ui_events)
+        if response_summary is None:
+            return event_ids
+        response_created_at = resolved_at
+        if action_results:
+            response_created_at = max(action_result.finished_at for action_result in action_results) + 1
+        event_ids.append(
+            self._insert_event(
+                connection=connection,
+                cycle_id=cycle_id,
+                created_at=response_created_at,
+                source="runtime",
+                kind="external_response",
+                searchable=True,
+                result_summary=response_summary,
+            )
+        )
+        return event_ids
 
     # Block: Memory job enqueue
     def _enqueue_write_memory_jobs(
@@ -2160,7 +2325,7 @@ class SqliteStateStore:
         connection: sqlite3.Connection,
         cycle_id: str,
         action_results: list[ActionHistoryRecord],
-        input_journal_refs_json: str,
+        input_journal_refs_json: str | None,
     ) -> list[str]:
         event_ids: list[str] = []
         for action_result in action_results:

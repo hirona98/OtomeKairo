@@ -9,16 +9,19 @@ from typing import Any, Callable
 
 from otomekairo import __version__
 from otomekairo.gateway.cognition_client import CognitionClient
+from otomekairo.gateway.search_client import SearchClient
 from otomekairo.infra.sqlite_state_store import SqliteStateStore
 from otomekairo.schema.runtime_types import (
     ActionHistoryRecord,
     MemoryJobRecord,
     PendingInputRecord,
     SettingsOverrideRecord,
+    TaskStateRecord,
     TaskStateMutationRecord,
 )
 from otomekairo.schema.settings import SettingsValidationError, build_default_settings, decode_requested_value, get_setting_definition
 from otomekairo.usecase.build_cognition_input import build_cognition_input
+from otomekairo.usecase.run_browse_task import run_browse_task
 from otomekairo.usecase.run_cognition import run_cognition_for_chat_message
 
 
@@ -41,6 +44,7 @@ class RuntimeLoop:
         owner_token: str,
         default_settings: dict[str, Any],
         cognition_client: CognitionClient,
+        search_client: SearchClient,
         lease_heartbeat_ms: int = DEFAULT_LEASE_HEARTBEAT_MS,
         lease_ttl_ms: int = DEFAULT_LEASE_TTL_MS,
     ) -> None:
@@ -55,6 +59,7 @@ class RuntimeLoop:
         self._owner_token = owner_token
         self._default_settings = default_settings
         self._cognition_client = cognition_client
+        self._search_client = search_client
         self._lease_heartbeat_ms = lease_heartbeat_ms
         self._lease_ttl_ms = lease_ttl_ms
         self._boot_reconciled = False
@@ -69,13 +74,17 @@ class RuntimeLoop:
         if processed_settings:
             return True
         pending_input = self._store.claim_next_pending_input()
-        if pending_input is None:
-            processed_memory = self._process_memory_job_once()
-            if processed_memory:
-                return True
-            return False
-        self._process_claimed_pending_input(pending_input)
-        return True
+        if pending_input is not None:
+            self._process_claimed_pending_input(pending_input)
+            return True
+        waiting_task = self._store.claim_next_waiting_browse_task()
+        if waiting_task is not None:
+            self._process_claimed_waiting_task(waiting_task)
+            return True
+        processed_memory = self._process_memory_job_once()
+        if processed_memory:
+            return True
+        return False
 
     # Block: Claimed pending input processing
     def _process_claimed_pending_input(self, pending_input: PendingInputRecord) -> None:
@@ -134,6 +143,63 @@ class RuntimeLoop:
                     "emitted_event_types": [ui_event["event_type"] for ui_event in ui_events],
                     "executed_action_types": [],
                     "resolution_status": "discarded",
+                    "error_kind": type(error).__name__,
+                    "error_message": _error_message_text(error),
+                },
+            )
+
+    # Block: Claimed waiting task processing
+    def _process_claimed_waiting_task(self, task: TaskStateRecord) -> None:
+        cycle_id = _opaque_id("cycle")
+        try:
+            execution = run_browse_task(
+                task=task,
+                cycle_id=cycle_id,
+                search_client=self._search_client,
+                emit_ui_event=lambda ui_event: self._append_ui_event(cycle_id=cycle_id, ui_event=ui_event),
+            )
+            self._store.finalize_task_cycle(
+                task=task,
+                cycle_id=cycle_id,
+                final_status=execution.final_status,
+                action_results=execution.action_results,
+                ui_events=execution.ui_events,
+                commit_payload={
+                    "cycle_kind": "short",
+                    "trigger_reason": "task_resume",
+                    "processed_task_id": task.task_id,
+                    "processed_task_kind": task.task_kind,
+                    "emitted_event_types": [
+                        ui_event["event_type"] for ui_event in execution.ui_events
+                    ],
+                    "executed_action_types": [
+                        action_result.action_type for action_result in execution.action_results
+                    ],
+                    "final_task_status": execution.final_status,
+                },
+            )
+        except Exception as error:
+            ui_events = _failed_task_events(task=task, cycle_id=cycle_id)
+            self._append_ui_events(cycle_id=cycle_id, ui_events=ui_events)
+            failed_action = _failed_task_action_result(
+                task=task,
+                cycle_id=cycle_id,
+                error=error,
+            )
+            self._store.finalize_task_cycle(
+                task=task,
+                cycle_id=cycle_id,
+                final_status="abandoned",
+                action_results=[failed_action],
+                ui_events=ui_events,
+                commit_payload={
+                    "cycle_kind": "short",
+                    "trigger_reason": "task_resume",
+                    "processed_task_id": task.task_id,
+                    "processed_task_kind": task.task_kind,
+                    "emitted_event_types": [ui_event["event_type"] for ui_event in ui_events],
+                    "executed_action_types": [failed_action.action_type],
+                    "final_task_status": "abandoned",
                     "error_kind": type(error).__name__,
                     "error_message": _error_message_text(error),
                 },
@@ -424,6 +490,7 @@ def build_runtime_loop(*, db_path: Path | None = None) -> RuntimeLoop:
         owner_token=_runtime_owner_token(),
         default_settings=build_default_settings(),
         cognition_client=_build_default_cognition_client(),
+        search_client=_build_default_search_client(),
         lease_heartbeat_ms=_lease_heartbeat_ms(),
         lease_ttl_ms=_lease_ttl_ms(),
     )
@@ -533,9 +600,84 @@ def _build_default_cognition_client() -> CognitionClient:
     return LiteLLMCognitionClient()
 
 
+def _build_default_search_client() -> SearchClient:
+    from otomekairo.infra.duckduckgo_search_client import DuckDuckGoSearchClient
+
+    return DuckDuckGoSearchClient()
+
+
 def _opaque_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex}"
 
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
+
+
+# Block: Failed task helpers
+def _failed_task_events(*, task: TaskStateRecord, cycle_id: str) -> list[dict[str, Any]]:
+    target_channel = task.completion_hint.get("target_channel")
+    if not isinstance(target_channel, str) or not target_channel:
+        raise RuntimeError("browse task completion_hint.target_channel must be non-empty string")
+    return [
+        {
+            "channel": target_channel,
+            "event_type": "error",
+            "payload": {
+                "error_code": "browse_task_failed",
+                "message": "外部検索タスクに失敗しました",
+                "retriable": False,
+                "cycle_id": cycle_id,
+                "task_id": task.task_id,
+            },
+        }
+    ]
+
+
+def _failed_task_action_result(
+    *,
+    task: TaskStateRecord,
+    cycle_id: str,
+    error: Exception,
+) -> ActionHistoryRecord:
+    target_channel = task.completion_hint.get("target_channel")
+    if not isinstance(target_channel, str) or not target_channel:
+        raise RuntimeError("browse task completion_hint.target_channel must be non-empty string")
+    started_at = _now_ms()
+    finished_at = started_at + 1
+    return ActionHistoryRecord(
+        result_id=_opaque_id("actres"),
+        command_id=_opaque_id("cmd"),
+        action_type="abandon_browse_task",
+        command={
+            "target_channel": target_channel,
+            "target": {
+                "queue": "task_state",
+                "channel": target_channel,
+            },
+            "event_types": ["error"],
+            "decision": "execute",
+            "decision_reason": "task_resume_failed",
+            "related_task_id": task.task_id,
+            "command_type": "abandon_browse_task",
+            "parameters": {
+                "query": task.goal_hint,
+            },
+        },
+        started_at=started_at,
+        finished_at=finished_at,
+        status="failed",
+        failure_mode=type(error).__name__,
+        observed_effects={
+            "emitted_event_types": ["error"],
+            "related_task_id": task.task_id,
+            "task_status_after": "abandoned",
+            "error_message": _error_message_text(error),
+        },
+        raw_result_ref=None,
+        adapter_trace_ref={
+            "cycle_id": cycle_id,
+            "error_kind": type(error).__name__,
+            "error_message": _error_message_text(error),
+        },
+    )

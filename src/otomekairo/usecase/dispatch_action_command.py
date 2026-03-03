@@ -276,10 +276,12 @@ def _dispatch_browse_task_command(
                 completion_hint={
                     "mode": "external_search_result",
                     "query": query,
+                    "target_channel": str(action_command["parameters"]["target_channel"]),
                 },
                 resume_condition={
                     "kind": "external_result_arrived",
                     "query": query,
+                    "target_channel": str(action_command["parameters"]["target_channel"]),
                 },
                 interruptible=True,
                 priority=80,

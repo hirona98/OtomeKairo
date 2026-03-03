@@ -67,6 +67,23 @@ class TaskStateMutationRecord:
     created_at: int
 
 
+# Block: Task state record
+@dataclass(frozen=True, slots=True)
+class TaskStateRecord:
+    task_id: str
+    task_kind: str
+    task_status: str
+    goal_hint: str
+    completion_hint: dict[str, Any]
+    resume_condition: dict[str, Any]
+    interruptible: bool
+    priority: int
+    title: str | None
+    step_hints: list[dict[str, Any]]
+    created_at: int
+    updated_at: int
+
+
 # Block: Cognition state snapshot
 @dataclass(frozen=True, slots=True)
 class CognitionStateSnapshot:
