@@ -31,11 +31,9 @@ class SettingDefinition:
 
 # Block: Registry source
 SETTING_DEFINITIONS: tuple[SettingDefinition, ...] = (
-    SettingDefinition("llm.provider", "string", ("runtime", "next_boot"), min_length=1, max_length=64),
-    SettingDefinition("llm.default_model", "string", ("runtime", "next_boot"), min_length=1, max_length=256),
+    SettingDefinition("llm.model", "string", ("runtime", "next_boot"), min_length=1, max_length=256),
     SettingDefinition("llm.api_key", "string", ("runtime", "next_boot"), min_length=0, max_length=4096),
     SettingDefinition("llm.base_url", "string", ("runtime", "next_boot"), min_length=0, max_length=512),
-    SettingDefinition("llm.embedding_provider", "string", ("runtime", "next_boot"), min_length=1, max_length=64),
     SettingDefinition("llm.embedding_model", "string", ("runtime", "next_boot"), min_length=1, max_length=256),
     SettingDefinition("llm.embedding_api_key", "string", ("runtime", "next_boot"), min_length=0, max_length=4096),
     SettingDefinition("llm.embedding_base_url", "string", ("runtime", "next_boot"), min_length=0, max_length=512),
@@ -157,8 +155,7 @@ def build_default_settings_presets(default_settings: dict[str, Any]) -> tuple[di
             "preset_kind": "llm",
             "preset_name": "標準",
             "payload": {
-                "llm.provider": str(default_settings["llm.provider"]),
-                "llm.default_model": str(default_settings["llm.default_model"]),
+                "llm.model": str(default_settings["llm.model"]),
                 "llm.temperature": float(default_settings["llm.temperature"]),
                 "llm.max_output_tokens": int(default_settings["llm.max_output_tokens"]),
                 "llm.api_key": str(default_settings["llm.api_key"]),
@@ -170,8 +167,7 @@ def build_default_settings_presets(default_settings: dict[str, Any]) -> tuple[di
             "preset_kind": "llm",
             "preset_name": "低温度",
             "payload": {
-                "llm.provider": str(default_settings["llm.provider"]),
-                "llm.default_model": str(default_settings["llm.default_model"]),
+                "llm.model": str(default_settings["llm.model"]),
                 "llm.temperature": 0.3,
                 "llm.max_output_tokens": 1536,
                 "llm.api_key": str(default_settings["llm.api_key"]),
@@ -183,7 +179,6 @@ def build_default_settings_presets(default_settings: dict[str, Any]) -> tuple[di
             "preset_kind": "memory",
             "preset_name": "標準",
             "payload": {
-                "llm.embedding_provider": str(default_settings["llm.embedding_provider"]),
                 "llm.embedding_model": str(default_settings["llm.embedding_model"]),
                 "llm.embedding_api_key": str(default_settings["llm.embedding_api_key"]),
                 "llm.embedding_base_url": str(default_settings["llm.embedding_base_url"]),
@@ -202,7 +197,6 @@ def build_default_settings_presets(default_settings: dict[str, Any]) -> tuple[di
             "preset_kind": "memory",
             "preset_name": "深め",
             "payload": {
-                "llm.embedding_provider": str(default_settings["llm.embedding_provider"]),
                 "llm.embedding_model": str(default_settings["llm.embedding_model"]),
                 "llm.embedding_api_key": str(default_settings["llm.embedding_api_key"]),
                 "llm.embedding_base_url": str(default_settings["llm.embedding_base_url"]),
@@ -482,8 +476,7 @@ def _normalize_preset_payload(*, preset_kind: str, payload: Any) -> dict[str, An
         return _normalize_keyed_preset_payload(
             payload=payload,
             required_keys=(
-                "llm.provider",
-                "llm.default_model",
+                "llm.model",
                 "llm.temperature",
                 "llm.max_output_tokens",
                 "llm.api_key",
@@ -521,7 +514,6 @@ def _normalize_behavior_preset_payload(payload: dict[str, Any]) -> dict[str, Any
 # Block: Memory preset normalization
 def _normalize_memory_preset_payload(payload: dict[str, Any]) -> dict[str, Any]:
     required_keys = {
-        "llm.embedding_provider",
         "llm.embedding_model",
         "llm.embedding_api_key",
         "llm.embedding_base_url",
@@ -537,7 +529,6 @@ def _normalize_memory_preset_payload(payload: dict[str, Any]) -> dict[str, Any]:
             if key != "retrieval_profile"
         },
         required_keys=(
-            "llm.embedding_provider",
             "llm.embedding_model",
             "llm.embedding_api_key",
             "llm.embedding_base_url",

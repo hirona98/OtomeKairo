@@ -20,11 +20,20 @@ class LiteLLMCognitionClient:
     # Block: Structured completion call
     def generate_result(self, request: CognitionRequest) -> CognitionResponse:
         context_budget = request.cognition_input["context_budget"]
+        completion_arguments = {
+            "model": str(context_budget["model"]),
+            "messages": _build_messages(request),
+            "temperature": float(context_budget["temperature"]),
+            "max_tokens": int(context_budget["max_output_tokens"]),
+        }
+        api_key = str(context_budget["api_key"])
+        if api_key:
+            completion_arguments["api_key"] = api_key
+        api_base = str(context_budget["base_url"])
+        if api_base:
+            completion_arguments["api_base"] = api_base
         response = self._litellm.completion(
-            model=str(context_budget["default_model"]),
-            messages=_build_messages(request),
-            temperature=float(context_budget["temperature"]),
-            max_tokens=int(context_budget["max_output_tokens"]),
+            **completion_arguments,
         )
         return CognitionResponse(cognition_result=_parse_cognition_result(response))
 

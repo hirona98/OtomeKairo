@@ -626,7 +626,7 @@
 
 ```json
 {
-  "llm.default_model": "openrouter/default-model",
+  "llm.model": "openrouter/default-model",
   "llm.api_key": "sk-example",
   "llm.embedding_model": "openrouter/default-embedding",
   "llm.embedding_api_key": "emb-example",
@@ -649,7 +649,7 @@
 
 ```json
 {
-  "llm.default_model": 1760000000000,
+  "llm.model": 1760000000000,
   "llm.embedding_model": 1760000000000,
   "llm.temperature": 1760000000000,
   "llm.max_output_tokens": 1760000000000,
@@ -711,26 +711,25 @@
 
 ```json
 {
-  "llm.provider": "openrouter",
-  "llm.default_model": "openrouter/default-model",
+  "llm.model": "openrouter/default-model",
   "llm.temperature": 0.7,
   "llm.max_output_tokens": 2048,
   "llm.api_key": "sk-example",
-  "llm.base_url": "https://openrouter.ai/api/v1"
+  "llm.base_url": ""
 }
 ```
 
-- 必須項目は `llm.provider`、`llm.default_model`、`llm.temperature`、`llm.max_output_tokens`、`llm.api_key` である
-- `llm.base_url` は任意で、省略時は provider 既定値を使ってよい
+- 必須項目は `llm.model`、`llm.temperature`、`llm.max_output_tokens`、`llm.api_key` である
+- `llm.model` は `provider/model` 形式の単一文字列に固定する
+- `llm.base_url` は任意で、空文字は未指定を表す
 
 #### `preset_kind = memory`
 
 ```json
 {
-  "llm.embedding_provider": "openrouter",
   "llm.embedding_model": "openrouter/default-embedding",
   "llm.embedding_api_key": "emb-example",
-  "llm.embedding_base_url": "https://openrouter.ai/api/v1",
+  "llm.embedding_base_url": "",
   "runtime.context_budget_tokens": 8192,
   "retrieval_profile": {
     "semantic_top_k": 8,
@@ -742,7 +741,9 @@
 }
 ```
 
-- 必須項目は `llm.embedding_provider`、`llm.embedding_model`、`llm.embedding_api_key`、`runtime.context_budget_tokens`、`retrieval_profile` である
+- 必須項目は `llm.embedding_model`、`llm.embedding_api_key`、`runtime.context_budget_tokens`、`retrieval_profile` である
+- `llm.embedding_model` は `provider/model` 形式の単一文字列に固定する
+- `llm.embedding_base_url` は任意で、空文字は未指定を表す
 - `retrieval_profile` の各 bias は `0.0..1.0` の `number` に固定する
 - `semantic_top_k` は `1..64` の `integer`、`recent_window_limit` は `1..20` の `integer` に固定する
 
@@ -933,7 +934,7 @@
     ]
   },
   "runtime_projection": {
-    "llm.default_model": "openrouter/default-model"
+    "llm.model": "openrouter/default-model"
   }
 }
 ```
@@ -1291,7 +1292,7 @@
 
 ```json
 {
-  "key": "llm.default_model",
+  "key": "llm.model",
   "requested_value": "openrouter/.../model",
   "apply_scope": "runtime"
 }

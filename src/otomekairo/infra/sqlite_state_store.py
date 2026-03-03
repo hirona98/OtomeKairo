@@ -36,8 +36,11 @@ from otomekairo.schema.settings import (
 
 # Block: Schema constants
 SCHEMA_NAME = "core_schema"
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 EMBEDDING_VECTOR_DIMENSION = 32
+LEGACY_SETTING_KEY_ALIASES = {
+    "llm.model": "llm.default_model",
+}
 
 
 # Block: API errors
@@ -2268,10 +2271,18 @@ class SqliteStateStore:
             raise RuntimeError("runtime_settings row is missing")
         current_values = json.loads(runtime_settings_row["values_json"])
         current_updated_at = json.loads(runtime_settings_row["value_updated_at_json"])
-        merged_values = dict(default_values)
-        merged_values.update(current_values)
-        merged_updated_at = _runtime_settings_seed_timestamps(now_ms)
-        merged_updated_at.update(current_updated_at)
+        merged_values = _merge_runtime_settings(
+            default_values,
+            _normalize_runtime_settings_values(
+                default_settings=default_values,
+                runtime_values=current_values,
+            ),
+        )
+        merged_updated_at = _normalize_runtime_settings_updated_at(
+            default_settings=default_values,
+            current_updated_at=current_updated_at,
+            now_ms=now_ms,
+        )
         if (
             merged_values == current_values
             and merged_updated_at == current_updated_at
@@ -3371,7 +3382,7 @@ class SqliteStateStore:
             return
         if current_version > SCHEMA_VERSION:
             raise RuntimeError("schema_version is newer than this initializer")
-        if current_version not in {2, 3, 4}:
+        if current_version not in {2, 3, 4, 5}:
             raise RuntimeError("unsupported schema_version for migration")
         while current_version < SCHEMA_VERSION:
             if current_version == 2:
@@ -3385,6 +3396,10 @@ class SqliteStateStore:
             if current_version == 4:
                 self._migrate_schema_4_to_5(connection=connection, now_ms=now_ms)
                 current_version = 5
+                continue
+            if current_version == 5:
+                self._migrate_schema_5_to_6(connection=connection, now_ms=now_ms)
+                current_version = 6
                 continue
             raise RuntimeError("unsupported schema_version for migration")
 
@@ -3513,6 +3528,121 @@ class SqliteStateStore:
             WHERE meta_key = 'schema_version'
             """,
             (_json_text(5), now_ms),
+        )
+
+    # Block: Schema migration 5->6
+    def _migrate_schema_5_to_6(self, *, connection: sqlite3.Connection, now_ms: int) -> None:
+        runtime_row = connection.execute(
+            """
+            SELECT values_json, value_updated_at_json
+            FROM runtime_settings
+            WHERE row_id = 1
+            """
+        ).fetchone()
+        if runtime_row is None:
+            raise RuntimeError("runtime_settings row is missing")
+        default_settings = build_default_settings()
+        normalized_values = _normalize_runtime_settings_values(
+            default_settings=default_settings,
+            runtime_values=json.loads(runtime_row["values_json"]),
+        )
+        normalized_updated_at = _normalize_runtime_settings_updated_at(
+            default_settings=default_settings,
+            current_updated_at=json.loads(runtime_row["value_updated_at_json"]),
+            now_ms=now_ms,
+        )
+        connection.execute(
+            """
+            UPDATE runtime_settings
+            SET values_json = ?,
+                value_updated_at_json = ?,
+                updated_at = ?
+            WHERE row_id = 1
+            """,
+            (
+                _json_text(normalized_values),
+                _json_text(normalized_updated_at),
+                now_ms,
+            ),
+        )
+        editor_row = connection.execute(
+            """
+            SELECT direct_values_json, revision
+            FROM settings_editor_state
+            WHERE row_id = 1
+            """
+        ).fetchone()
+        editor_seed = build_default_settings_editor_state(default_settings)
+        editor_direct_values = dict(editor_seed["direct_values_json"])
+        editor_revision = int(editor_seed["revision"])
+        if editor_row is not None:
+            raw_direct_values = json.loads(editor_row["direct_values_json"])
+            if isinstance(raw_direct_values, dict):
+                for key in build_settings_editor_direct_keys():
+                    if key in raw_direct_values:
+                        editor_direct_values[key] = raw_direct_values[key]
+            editor_revision = int(editor_row["revision"]) + 1
+            connection.execute(
+                """
+                UPDATE settings_editor_state
+                SET active_behavior_preset_id = ?,
+                    active_llm_preset_id = ?,
+                    active_memory_preset_id = ?,
+                    active_output_preset_id = ?,
+                    direct_values_json = ?,
+                    revision = ?,
+                    updated_at = ?,
+                    last_applied_change_set_id = NULL
+                WHERE row_id = 1
+                """,
+                (
+                    editor_seed["active_behavior_preset_id"],
+                    editor_seed["active_llm_preset_id"],
+                    editor_seed["active_memory_preset_id"],
+                    editor_seed["active_output_preset_id"],
+                    _json_text(editor_direct_values),
+                    editor_revision,
+                    now_ms,
+                ),
+            )
+        connection.execute("DELETE FROM settings_presets")
+        connection.execute("DELETE FROM settings_change_sets")
+        preset_seeds = build_default_settings_presets(
+            _merge_runtime_settings(default_settings, normalized_values),
+        )
+        for index, preset_seed in enumerate(preset_seeds):
+            connection.execute(
+                """
+                INSERT INTO settings_presets (
+                    preset_id,
+                    preset_kind,
+                    preset_name,
+                    payload_json,
+                    archived,
+                    sort_order,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, 0, ?, ?, ?)
+                """,
+                (
+                    preset_seed["preset_id"],
+                    preset_seed["preset_kind"],
+                    preset_seed["preset_name"],
+                    _json_text(preset_seed["payload"]),
+                    (index + 1) * 10,
+                    now_ms,
+                    now_ms,
+                ),
+            )
+        connection.execute(
+            """
+            UPDATE db_meta
+            SET meta_value_json = ?,
+                updated_at = ?
+            WHERE meta_key = 'schema_version'
+            """,
+            (_json_text(6), now_ms),
         )
 
     # Block: sqlite-vec schema ensure
@@ -4894,6 +5024,43 @@ def _merge_runtime_settings(default_settings: dict[str, Any], runtime_values: di
         if key in merged_settings:
             merged_settings[key] = value
     return merged_settings
+
+
+# Block: Runtime settings value normalization
+def _normalize_runtime_settings_values(
+    *,
+    default_settings: dict[str, Any],
+    runtime_values: dict[str, Any],
+) -> dict[str, Any]:
+    normalized: dict[str, Any] = {}
+    for key in default_settings:
+        if key in runtime_values:
+            normalized[key] = runtime_values[key]
+            continue
+        legacy_key = LEGACY_SETTING_KEY_ALIASES.get(key)
+        if legacy_key is not None and legacy_key in runtime_values:
+            normalized[key] = runtime_values[legacy_key]
+    return normalized
+
+
+# Block: Runtime settings timestamp normalization
+def _normalize_runtime_settings_updated_at(
+    *,
+    default_settings: dict[str, Any],
+    current_updated_at: dict[str, Any],
+    now_ms: int,
+) -> dict[str, int]:
+    normalized = _runtime_settings_seed_timestamps(now_ms)
+    for key in default_settings:
+        if key in current_updated_at:
+            timestamp = current_updated_at[key]
+        else:
+            legacy_key = LEGACY_SETTING_KEY_ALIASES.get(key)
+            timestamp = current_updated_at.get(legacy_key) if legacy_key is not None else None
+        if isinstance(timestamp, bool) or not isinstance(timestamp, int):
+            continue
+        normalized[key] = timestamp
+    return normalized
 
 
 def _runtime_settings_seed_timestamps(now_ms: int) -> dict[str, int]:

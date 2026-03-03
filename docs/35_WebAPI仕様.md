@@ -197,13 +197,13 @@ flowchart LR
 ```json
 {
   "effective_settings": {
-    "llm.default_model": "...",
+    "llm.model": "...",
     "llm.temperature": 0.7
   },
   "pending_overrides": [
     {
       "override_id": "ovr_...",
-      "key": "llm.default_model",
+      "key": "llm.model",
       "status": "queued",
       "created_at": 1760000000000
     }
@@ -231,7 +231,7 @@ flowchart LR
 
 ```json
 {
-  "key": "llm.default_model",
+  "key": "llm.model",
   "requested_value": "openrouter/.../model",
   "apply_scope": "runtime"
 }
