@@ -775,6 +775,7 @@
 
 - 必須項目は `error_code`、`message` である
 - `retriable` は任意で、再試行可能なときだけ付ける
+- 短周期の内部失敗を UI へ通知するときは、`error_code="processing_failed"` を使う
 
 <!-- Block: Action History Group -->
 ## 行動履歴の JSON

@@ -1869,6 +1869,12 @@ class SqliteStateStore:
         idempotency_key: str,
         created_at: int,
     ) -> str:
+        existing_job_id = self._find_memory_job_id_by_idempotency_key(
+            connection=connection,
+            idempotency_key=idempotency_key,
+        )
+        if existing_job_id is not None:
+            return existing_job_id
         payload_id = _opaque_id("mjp")
         job_id = _opaque_id("mjob")
         connection.execute(
@@ -1920,6 +1926,37 @@ class SqliteStateStore:
             ),
         )
         return job_id
+
+    # Block: Memory job idempotency lookup
+    def _find_memory_job_id_by_idempotency_key(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        idempotency_key: str,
+    ) -> str | None:
+        payload_row = connection.execute(
+            """
+            SELECT payload_id
+            FROM memory_job_payloads
+            WHERE idempotency_key = ?
+            """,
+            (idempotency_key,),
+        ).fetchone()
+        if payload_row is None:
+            return None
+        job_row = connection.execute(
+            """
+            SELECT job_id
+            FROM memory_jobs
+            WHERE json_extract(payload_ref_json, '$.payload_id') = ?
+            ORDER BY created_at ASC, rowid ASC
+            LIMIT 1
+            """,
+            (payload_row["payload_id"],),
+        ).fetchone()
+        if job_row is None:
+            raise RuntimeError("memory_job_payload exists without memory_job")
+        return str(job_row["job_id"])
 
     # Block: Input journal write
     def _append_input_journal(

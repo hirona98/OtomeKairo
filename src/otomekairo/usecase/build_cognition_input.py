@@ -98,26 +98,45 @@ def _build_selection_profile(state_snapshot: CognitionStateSnapshot) -> dict[str
         "habit_biases": dict(personality["habit_biases"]),
         "emotion_bias": dict(current_emotion["active_biases"]),
         "drive_bias": {
-            "task_progress_bias": _normalized_signed_number(priority_effects.get("task_progress_bias", 0.0)),
-            "exploration_bias": _normalized_signed_number(priority_effects.get("exploration_bias", 0.0)),
-            "maintenance_bias": _normalized_signed_number(priority_effects.get("maintenance_bias", 0.0)),
-            "social_bias": _normalized_signed_number(priority_effects.get("social_bias", 0.0)),
+            "task_progress_bias": _normalized_signed_number(
+                priority_effects["task_progress_bias"],
+                field_name="drive_state.priority_effects.task_progress_bias",
+            ),
+            "exploration_bias": _normalized_signed_number(
+                priority_effects["exploration_bias"],
+                field_name="drive_state.priority_effects.exploration_bias",
+            ),
+            "maintenance_bias": _normalized_signed_number(
+                priority_effects["maintenance_bias"],
+                field_name="drive_state.priority_effects.maintenance_bias",
+            ),
+            "social_bias": _normalized_signed_number(
+                priority_effects["social_bias"],
+                field_name="drive_state.priority_effects.social_bias",
+            ),
         },
     }
 
 
 # Block: Relationship priorities
 def _build_relationship_priorities(relationship_overview: dict[str, Any]) -> list[dict[str, Any]]:
-    relationships = relationship_overview.get("relationships", [])
+    relationships = relationship_overview["relationships"]
+    if not isinstance(relationships, list):
+        raise ValueError("self_state.relationship_overview.relationships must be list")
     priorities: list[dict[str, Any]] = []
     for relationship in relationships[:3]:
-        target_ref = relationship.get("target_ref")
+        if not isinstance(relationship, dict):
+            raise ValueError("self_state.relationship_overview.relationships item must be object")
+        target_ref = relationship["target_ref"]
         if not isinstance(target_ref, str) or not target_ref:
-            continue
+            raise ValueError("relationship.target_ref must be non-empty string")
         priorities.append(
             {
                 "target_ref": target_ref,
-                "priority_weight": _normalized_number(relationship.get("attention_weight", 0.0)),
+                "priority_weight": _normalized_number(
+                    relationship["attention_weight"],
+                    field_name="relationship.attention_weight",
+                ),
                 "reason_tag": _relationship_reason_tag(relationship),
             }
         )
@@ -126,13 +145,25 @@ def _build_relationship_priorities(relationship_overview: dict[str, Any]) -> lis
 
 # Block: Relationship reason
 def _relationship_reason_tag(relationship: dict[str, Any]) -> str:
-    if relationship.get("waiting_response") is True:
+    waiting_response = relationship["waiting_response"]
+    if not isinstance(waiting_response, bool):
+        raise ValueError("relationship.waiting_response must be boolean")
+    if waiting_response is True:
         return "pending_relation"
-    if _normalized_number(relationship.get("care_commitment", 0.0)) >= 0.70:
+    if _normalized_number(
+        relationship["care_commitment"],
+        field_name="relationship.care_commitment",
+    ) >= 0.70:
         return "care_target"
-    if _normalized_number(relationship.get("recent_tension", 0.0)) >= 0.60:
+    if _normalized_number(
+        relationship["recent_tension"],
+        field_name="relationship.recent_tension",
+    ) >= 0.60:
         return "recent_tension"
-    if _normalized_number(relationship.get("recent_positive_contact", 0.0)) >= 0.60:
+    if _normalized_number(
+        relationship["recent_positive_contact"],
+        field_name="relationship.recent_positive_contact",
+    ) >= 0.60:
         return "recent_positive_contact"
     return "care_target"
 
@@ -175,11 +206,11 @@ def _relative_time_text(now_ms: int, past_ms: int) -> str:
 
 
 # Block: Numeric helper
-def _normalized_number(value: Any) -> float:
+def _normalized_number(value: Any, *, field_name: str) -> float:
     if isinstance(value, bool):
-        return 0.0
+        raise ValueError(f"{field_name} must be numeric")
     if not isinstance(value, (int, float)):
-        return 0.0
+        raise ValueError(f"{field_name} must be numeric")
     numeric_value = float(value)
     if numeric_value < 0.0:
         return 0.0
@@ -188,11 +219,11 @@ def _normalized_number(value: Any) -> float:
     return numeric_value
 
 
-def _normalized_signed_number(value: Any) -> float:
+def _normalized_signed_number(value: Any, *, field_name: str) -> float:
     if isinstance(value, bool):
-        return 0.0
+        raise ValueError(f"{field_name} must be numeric")
     if not isinstance(value, (int, float)):
-        return 0.0
+        raise ValueError(f"{field_name} must be numeric")
     numeric_value = float(value)
     if numeric_value < -1.0:
         return -1.0

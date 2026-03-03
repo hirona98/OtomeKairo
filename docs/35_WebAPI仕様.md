@@ -49,6 +49,7 @@
 - `2xx` 以外の応答本文は、少なくとも `error_code`、`message`、`request_id` を持つ JSON とする
 - `request_id` は、その HTTP リクエスト単位で Web サーバが生成する追跡 ID である
 - エラー時も HTML を返さず、必ず JSON を返す
+- `404 Not Found`、`405 Method Not Allowed`、リクエスト検証失敗も、この error envelope に統一する
 
 ```json
 {

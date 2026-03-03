@@ -7,7 +7,9 @@ import uuid
 from pathlib import Path
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from otomekairo import __version__
 from otomekairo.infra.sqlite_state_store import StoreConflictError, StoreValidationError, SqliteStateStore
@@ -45,61 +47,85 @@ def create_app() -> FastAPI:
     # Block: API error handler
     @app.exception_handler(ApiError)
     async def handle_api_error(request: Request, error: ApiError) -> JSONResponse:
-        return JSONResponse(
+        return _error_response(
+            request=request,
             status_code=error.status_code,
-            content={
-                "error_code": error.error_code,
-                "message": error.message,
-                "request_id": request.state.request_id,
-            },
+            error_code=error.error_code,
+            message=error.message,
         )
 
     # Block: Store validation handler
     @app.exception_handler(StoreValidationError)
     async def handle_store_validation_error(request: Request, error: StoreValidationError) -> JSONResponse:
-        return JSONResponse(
+        return _error_response(
+            request=request,
             status_code=400,
-            content={
-                "error_code": "invalid_request",
-                "message": str(error),
-                "request_id": request.state.request_id,
-            },
+            error_code="invalid_request",
+            message=str(error),
         )
 
     # Block: Store conflict handler
     @app.exception_handler(StoreConflictError)
     async def handle_store_conflict_error(request: Request, error: StoreConflictError) -> JSONResponse:
-        return JSONResponse(
+        return _error_response(
+            request=request,
             status_code=409,
-            content={
-                "error_code": error.error_code,
-                "message": error.message,
-                "request_id": request.state.request_id,
-            },
+            error_code=error.error_code,
+            message=error.message,
         )
 
     # Block: Settings validation handler
     @app.exception_handler(SettingsValidationError)
     async def handle_settings_validation_error(request: Request, error: SettingsValidationError) -> JSONResponse:
-        return JSONResponse(
+        return _error_response(
+            request=request,
             status_code=400,
-            content={
-                "error_code": error.error_code,
-                "message": error.message,
-                "request_id": request.state.request_id,
-            },
+            error_code=error.error_code,
+            message=error.message,
+        )
+
+    # Block: Request validation handler
+    @app.exception_handler(RequestValidationError)
+    async def handle_request_validation_error(request: Request, _: RequestValidationError) -> JSONResponse:
+        return _error_response(
+            request=request,
+            status_code=400,
+            error_code="invalid_request",
+            message="request validation failed",
+        )
+
+    # Block: HTTP exception handler
+    @app.exception_handler(StarletteHTTPException)
+    async def handle_http_exception(request: Request, error: StarletteHTTPException) -> JSONResponse:
+        if error.status_code == 404:
+            return _error_response(
+                request=request,
+                status_code=404,
+                error_code="not_found",
+                message="resource not found",
+            )
+        if error.status_code == 405:
+            return _error_response(
+                request=request,
+                status_code=405,
+                error_code="method_not_allowed",
+                message="method not allowed",
+            )
+        return _error_response(
+            request=request,
+            status_code=error.status_code,
+            error_code="http_error",
+            message="request failed",
         )
 
     # Block: Generic error handler
     @app.exception_handler(Exception)
     async def handle_unexpected_error(request: Request, error: Exception) -> JSONResponse:
-        return JSONResponse(
+        return _error_response(
+            request=request,
             status_code=500,
-            content={
-                "error_code": "internal_server_error",
-                "message": str(error),
-                "request_id": request.state.request_id,
-            },
+            error_code="internal_server_error",
+            message=str(error),
         )
 
     # Block: Router registration
@@ -128,6 +154,24 @@ def _run_stream_janitor_if_due(*, app: FastAPI, services: AppServices) -> None:
         retain_minimum_count=STREAM_RETAIN_MINIMUM_COUNT,
     )
     app.state.last_stream_janitor_at = now_ms
+
+
+# Block: Error response helper
+def _error_response(
+    *,
+    request: Request,
+    status_code: int,
+    error_code: str,
+    message: str,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "error_code": error_code,
+            "message": message,
+            "request_id": request.state.request_id,
+        },
+    )
 
 
 # Block: Time helper

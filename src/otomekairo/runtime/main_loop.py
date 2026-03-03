@@ -109,19 +109,20 @@ class RuntimeLoop:
                 commit_payload=commit_payload,
             )
         except Exception as error:
+            ui_events = _failed_pending_input_events(pending_input)
             self._store.finalize_pending_input_cycle(
                 pending_input=pending_input,
                 cycle_id=cycle_id,
                 resolution_status="discarded",
                 action_results=[],
                 discard_reason=PENDING_INPUT_FAILURE_REASON,
-                ui_events=[],
+                ui_events=ui_events,
                 commit_payload={
                     "cycle_kind": "short",
                     "trigger_reason": "external_input",
                     "processed_input_id": pending_input.input_id,
                     "processed_input_kind": pending_input.payload["input_kind"],
-                    "emitted_event_types": [],
+                    "emitted_event_types": [ui_event["event_type"] for ui_event in ui_events],
                     "executed_action_types": [],
                     "resolution_status": "discarded",
                     "error_kind": type(error).__name__,
@@ -472,6 +473,21 @@ def _unsupported_input_events(
         )
     ]
     return (ui_events, action_results)
+
+
+# Block: Failed input handling
+def _failed_pending_input_events(pending_input: PendingInputRecord) -> list[dict[str, Any]]:
+    return [
+        {
+            "channel": pending_input.channel,
+            "event_type": "error",
+            "payload": {
+                "error_code": PENDING_INPUT_FAILURE_REASON,
+                "message": "入力処理に失敗しました",
+                "retriable": False,
+            },
+        }
+    ]
 
 # Block: Runtime helpers
 def _default_db_path() -> Path:
