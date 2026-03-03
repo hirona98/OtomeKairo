@@ -41,7 +41,7 @@
 - `src/otomekairo/usecase/run_cognition.py`: 認知クライアントが返す `cognition_result` を受け取り、`action_command` を使って `speak` は `token` / `message`、`notify` は `notice`、`browse` は `waiting_external` の検索タスクとして実行し、`action_history` へ変換する
 - `src/otomekairo/usecase/run_browse_task.py`: `task_state(waiting_external)` の `browse` タスクを外部検索へ通し、検索結果を内部入力 `network_result` として次周期へ戻し、`action_history` へ変換する
 - `src/otomekairo/usecase/validate_action.py`: `cognition_result.action_proposals` から `speak` / `browse` / `notify` / `wait` を比較し、`selection_profile` の trait / style / relationship / emotion / drive、`memory_bundle`、`task_snapshot` を使って `execute / hold / reject` と構造化した `action_command` を確定する
-- `src/otomekairo/infra/litellm_cognition_client.py`: `LiteLLM` を使って人格断面つきの認知呼び出しを行い、`cognition_result.action_proposals` の最小形も厳密に検証しつつ、`LiteLLM` 自身のデバッグログも標準出力へ出す
+- `src/otomekairo/infra/litellm_cognition_client.py`: `LiteLLM` を使って人格断面つきの認知呼び出しを行い、`response_format={"type":"json_object"}` と厳密な shape 指示で `cognition_result` を構造化させ、`action_proposals` の最小形も厳密に検証しつつ、`LiteLLM` 自身のデバッグログも標準出力へ出す
 - `src/otomekairo/gateway/search_client.py`: 外部検索の境界を表す抽象を定義する
 - `src/otomekairo/gateway/notification_client.py`: 外部通知の境界を表す抽象を定義する
 - `src/otomekairo/infra/duckduckgo_search_client.py`: DuckDuckGo Instant Answer API を使う最小の外部検索アダプタを持つ

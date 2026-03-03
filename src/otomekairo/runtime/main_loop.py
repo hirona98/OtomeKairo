@@ -145,7 +145,10 @@ class RuntimeLoop:
                 commit_payload=commit_payload,
             )
         except Exception as error:
-            ui_events = _failed_pending_input_events(pending_input)
+            ui_events = _failed_pending_input_events(
+                pending_input=pending_input,
+                error=error,
+            )
             self._store.finalize_pending_input_cycle(
                 pending_input=pending_input,
                 cycle_id=cycle_id,
@@ -659,14 +662,17 @@ def _unsupported_input_events(
 
 
 # Block: Failed input handling
-def _failed_pending_input_events(pending_input: PendingInputRecord) -> list[dict[str, Any]]:
+def _failed_pending_input_events(
+    pending_input: PendingInputRecord,
+    error: Exception,
+) -> list[dict[str, Any]]:
     return [
         {
             "channel": pending_input.channel,
             "event_type": "error",
             "payload": {
                 "error_code": PENDING_INPUT_FAILURE_REASON,
-                "message": "入力処理に失敗しました",
+                "message": f"入力処理に失敗しました: {_error_message_text(error)}",
                 "retriable": False,
             },
         }
