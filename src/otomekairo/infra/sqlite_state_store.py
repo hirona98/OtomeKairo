@@ -665,6 +665,53 @@ class SqliteStateStore:
             return (None, None)
         return (row["min_id"], row["max_id"])
 
+    # Block: Stream retention prune
+    def prune_ui_outbound_events(
+        self,
+        *,
+        channel: str,
+        retention_window_ms: int,
+        retain_minimum_count: int,
+    ) -> int:
+        if not isinstance(channel, str) or not channel:
+            raise StoreValidationError("channel must be non-empty string")
+        if retention_window_ms <= 0:
+            raise StoreValidationError("retention_window_ms must be positive")
+        if retain_minimum_count <= 0:
+            raise StoreValidationError("retain_minimum_count must be positive")
+        now_ms = _now_ms()
+        created_cutoff_at = now_ms - retention_window_ms
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            latest_row = connection.execute(
+                """
+                SELECT MAX(ui_event_id) AS latest_ui_event_id
+                FROM ui_outbound_events
+                WHERE channel = ?
+                """,
+                (channel,),
+            ).fetchone()
+            if latest_row is None or latest_row["latest_ui_event_id"] is None:
+                return 0
+            latest_ui_event_id = int(latest_row["latest_ui_event_id"])
+            id_cutoff = latest_ui_event_id - retain_minimum_count
+            if id_cutoff <= 0:
+                return 0
+            deleted_row_count = connection.execute(
+                """
+                DELETE FROM ui_outbound_events
+                WHERE channel = ?
+                  AND created_at < ?
+                  AND ui_event_id < ?
+                """,
+                (
+                    channel,
+                    created_cutoff_at,
+                    id_cutoff,
+                ),
+            ).rowcount
+        return int(deleted_row_count)
+
     # Block: Stream event read
     def read_ui_events(self, *, channel: str, after_event_id: int, limit: int = 100) -> list[dict[str, Any]]:
         with self._connect() as connection:
@@ -858,6 +905,60 @@ class SqliteStateStore:
             created_at=int(row["created_at"]),
             payload=json.loads(row["payload_json"]),
         )
+
+    # Block: Memory job failure
+    def fail_claimed_memory_job(
+        self,
+        *,
+        memory_job: MemoryJobRecord,
+        error: Exception,
+        max_tries: int,
+    ) -> str:
+        if max_tries <= 0:
+            raise StoreValidationError("max_tries must be positive")
+        failed_at = _now_ms()
+        error_text = _memory_job_error_text(error)
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            job_row = connection.execute(
+                """
+                SELECT tries, status
+                FROM memory_jobs
+                WHERE job_id = ?
+                """,
+                (memory_job.job_id,),
+            ).fetchone()
+            if job_row is None:
+                raise RuntimeError("memory job is missing")
+            if job_row["status"] != "claimed":
+                raise StoreConflictError("memory job must be claimed before failure handling")
+            tries = int(job_row["tries"])
+            next_status = "dead_letter" if tries >= max_tries else "queued"
+            completed_at = failed_at if next_status == "dead_letter" else None
+            connection.execute(
+                """
+                UPDATE memory_jobs
+                SET status = ?,
+                    updated_at = ?,
+                    claimed_at = CASE
+                        WHEN ? = 'queued' THEN NULL
+                        ELSE claimed_at
+                    END,
+                    completed_at = ?,
+                    last_error = ?
+                WHERE job_id = ?
+                  AND status = 'claimed'
+                """,
+                (
+                    next_status,
+                    failed_at,
+                    next_status,
+                    completed_at,
+                    error_text,
+                    memory_job.job_id,
+                ),
+            )
+        return next_status
 
     # Block: Memory job apply
     def complete_write_memory_job(self, *, memory_job: MemoryJobRecord) -> str:
@@ -1651,7 +1752,7 @@ class SqliteStateStore:
         job_ids: list[str] = []
         for event_row in event_rows:
             event_id = str(event_row["event_id"])
-            source_event_updated_at = int(event_row["created_at"])
+            source_event_updated_at = int(event_row["source_updated_at"])
             payload_json = {
                 "job_kind": "refresh_preview",
                 "cycle_id": cycle_id,
@@ -2538,6 +2639,13 @@ def _embedding_sync_job_idempotency_key(
     return "embedding_sync:" + cycle_id + ":" + embedding_model + ":" + ":".join(target_tokens)
 
 
+def _memory_job_error_text(error: Exception) -> str:
+    error_message = str(error).strip()
+    if not error_message:
+        return type(error).__name__
+    return f"{type(error).__name__}: {error_message}"[:500]
+
+
 def _quarantine_memory_job_idempotency_key(
     *,
     cycle_id: str,
@@ -2566,7 +2674,8 @@ def _fetch_events_for_ids(
             observation_summary,
             action_summary,
             result_summary,
-            created_at
+            created_at,
+            COALESCE(updated_at, created_at) AS source_updated_at
         FROM events
         WHERE event_id IN ({placeholders})
         """,

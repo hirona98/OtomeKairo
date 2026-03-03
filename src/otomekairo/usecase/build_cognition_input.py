@@ -98,10 +98,10 @@ def _build_selection_profile(state_snapshot: CognitionStateSnapshot) -> dict[str
         "habit_biases": dict(personality["habit_biases"]),
         "emotion_bias": dict(current_emotion["active_biases"]),
         "drive_bias": {
-            "task_progress_bias": _normalized_number(priority_effects.get("task_progress_bias", 0.0)),
-            "exploration_bias": _normalized_number(priority_effects.get("exploration_bias", 0.0)),
-            "maintenance_bias": _normalized_number(priority_effects.get("maintenance_bias", 0.0)),
-            "social_bias": _normalized_number(priority_effects.get("social_bias", 0.0)),
+            "task_progress_bias": _normalized_signed_number(priority_effects.get("task_progress_bias", 0.0)),
+            "exploration_bias": _normalized_signed_number(priority_effects.get("exploration_bias", 0.0)),
+            "maintenance_bias": _normalized_signed_number(priority_effects.get("maintenance_bias", 0.0)),
+            "social_bias": _normalized_signed_number(priority_effects.get("social_bias", 0.0)),
         },
     }
 
@@ -183,6 +183,19 @@ def _normalized_number(value: Any) -> float:
     numeric_value = float(value)
     if numeric_value < 0.0:
         return 0.0
+    if numeric_value > 1.0:
+        return 1.0
+    return numeric_value
+
+
+def _normalized_signed_number(value: Any) -> float:
+    if isinstance(value, bool):
+        return 0.0
+    if not isinstance(value, (int, float)):
+        return 0.0
+    numeric_value = float(value)
+    if numeric_value < -1.0:
+        return -1.0
     if numeric_value > 1.0:
         return 1.0
     return numeric_value

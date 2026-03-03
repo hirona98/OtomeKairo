@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 import uuid
 from pathlib import Path
 
@@ -18,6 +19,12 @@ from otomekairo.web.settings_api import build_settings_router
 from otomekairo.web.status_api import build_status_router
 
 
+# Block: Stream janitor constants
+STREAM_JANITOR_INTERVAL_MS = 60_000
+STREAM_RETENTION_WINDOW_MS = 86_400_000
+STREAM_RETAIN_MINIMUM_COUNT = 20_000
+
+
 # Block: App factory
 def create_app() -> FastAPI:
     store = SqliteStateStore(_default_db_path(), __version__)
@@ -26,11 +33,13 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title="OtomeKairo Settings Server", version=__version__)
     app.state.services = services
+    app.state.last_stream_janitor_at = 0
 
     # Block: Request id middleware
     @app.middleware("http")
     async def assign_request_id(request: Request, call_next):
         request.state.request_id = f"req_{uuid.uuid4().hex}"
+        _run_stream_janitor_if_due(app=app, services=services)
         return await call_next(request)
 
     # Block: API error handler
@@ -105,3 +114,22 @@ def create_app() -> FastAPI:
 # Block: Default database path
 def _default_db_path() -> Path:
     return Path(__file__).resolve().parents[3] / "data" / "core.sqlite3"
+
+
+# Block: Stream janitor
+def _run_stream_janitor_if_due(*, app: FastAPI, services: AppServices) -> None:
+    now_ms = _now_ms()
+    last_stream_janitor_at = int(getattr(app.state, "last_stream_janitor_at", 0))
+    if now_ms - last_stream_janitor_at < STREAM_JANITOR_INTERVAL_MS:
+        return
+    services.store.prune_ui_outbound_events(
+        channel="browser_chat",
+        retention_window_ms=STREAM_RETENTION_WINDOW_MS,
+        retain_minimum_count=STREAM_RETAIN_MINIMUM_COUNT,
+    )
+    app.state.last_stream_janitor_at = now_ms
+
+
+# Block: Time helper
+def _now_ms() -> int:
+    return int(time.time() * 1000)

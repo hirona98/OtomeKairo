@@ -41,6 +41,7 @@
 - 設定キー運用を詰めるとき: `docs/39_設定キー運用仕様.md`
 - 人格変化を詰めるとき: `docs/40_人格変化仕様.md`
 - 人格に基づく選択を詰めるとき: `docs/41_人格選択仕様.md`
+- 設定既定値を見るとき: `config/default_settings.json`
 - 実際の初期 SQL を見るとき: `sql/core_schema.sql`
 - 自律行動設計を詰めるとき: `docs/10_目標アーキテクチャ.md` と `docs/30_システム設計.md` と `docs/31_ランタイム処理仕様.md`
 - 採用済みの設計原則を確認するとき: `docs/10_目標アーキテクチャ.md` と `docs/30_システム設計.md` と `docs/31_ランタイム処理仕様.md` と `docs/32_記憶設計.md` と `docs/33_記憶ジョブ仕様.md` と `docs/34_SQLite論理スキーマ.md` と `docs/35_WebAPI仕様.md` と `docs/36_JSONデータ仕様.md` と `docs/37_起動初期化仕様.md` と `docs/38_入力ストリーム運用仕様.md` と `docs/39_設定キー運用仕様.md` と `docs/40_人格変化仕様.md` と `docs/41_人格選択仕様.md`
@@ -74,6 +75,7 @@
 - 起動順、初回 seed、DB 版、排他起動が変わったら `docs/37_起動初期化仕様.md` を更新する
 - 入力重複、`cancel`、`SSE` 保持運用が変わったら `docs/38_入力ストリーム運用仕様.md` を更新する
 - 設定キー、型制約、`apply_scope` の許可集合が変わったら `docs/39_設定キー運用仕様.md` を更新する
+- 設定既定値を変更したら `config/default_settings.json` と `docs/35_WebAPI仕様.md` と `docs/37_起動初期化仕様.md` を更新する
 - 人格の可変傾向、経験からの人格変化が変わったら `docs/40_人格変化仕様.md` を更新する
 - 人格に基づく選択、hard gate、soft score、行動種別ごとの選び方が変わったら `docs/41_人格選択仕様.md` を更新する
 - 初期 SQL 実装を変更したら `sql/core_schema.sql` と `docs/34_SQLite論理スキーマ.md` を両方更新する

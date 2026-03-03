@@ -25,6 +25,10 @@ from otomekairo.usecase.run_cognition import run_cognition_for_chat_message
 DEFAULT_LEASE_HEARTBEAT_MS = 5_000
 MINIMUM_LEASE_TTL_MS = 15_000
 DEFAULT_LEASE_TTL_MS = 60_000
+MAX_MEMORY_JOB_TRIES = 3
+PENDING_INPUT_FAILURE_REASON = "processing_failed"
+SETTINGS_OVERRIDE_FAILURE_REASON = "settings_processing_failed"
+CANCEL_FAILURE_REASON = "cancel_processing_failed"
 
 
 # Block: Runtime loop
@@ -69,36 +73,61 @@ class RuntimeLoop:
             if processed_memory:
                 return True
             return False
-        cycle_id = _opaque_id("cycle")
-        self._store.append_input_journal_for_pending_input(
-            pending_input=pending_input,
-            cycle_id=cycle_id,
-        )
-        resolved_at = _now_ms()
-        ui_events, action_results, resolution_status, discard_reason = self._resolve_pending_input(
-            pending_input=pending_input,
-            cycle_id=cycle_id,
-            resolved_at=resolved_at,
-        )
-        commit_payload = {
-            "cycle_kind": "short",
-            "trigger_reason": "external_input",
-            "processed_input_id": pending_input.input_id,
-            "processed_input_kind": pending_input.payload["input_kind"],
-            "emitted_event_types": [ui_event["event_type"] for ui_event in ui_events],
-            "executed_action_types": [action_result.action_type for action_result in action_results],
-            "resolution_status": resolution_status,
-        }
-        self._store.finalize_pending_input_cycle(
-            pending_input=pending_input,
-            cycle_id=cycle_id,
-            resolution_status=resolution_status,
-            action_results=action_results,
-            discard_reason=discard_reason,
-            ui_events=ui_events,
-            commit_payload=commit_payload,
-        )
+        self._process_claimed_pending_input(pending_input)
         return True
+
+    # Block: Claimed pending input processing
+    def _process_claimed_pending_input(self, pending_input: PendingInputRecord) -> None:
+        cycle_id = _opaque_id("cycle")
+        try:
+            self._store.append_input_journal_for_pending_input(
+                pending_input=pending_input,
+                cycle_id=cycle_id,
+            )
+            resolved_at = _now_ms()
+            ui_events, action_results, resolution_status, discard_reason = self._resolve_pending_input(
+                pending_input=pending_input,
+                cycle_id=cycle_id,
+                resolved_at=resolved_at,
+            )
+            commit_payload = {
+                "cycle_kind": "short",
+                "trigger_reason": "external_input",
+                "processed_input_id": pending_input.input_id,
+                "processed_input_kind": pending_input.payload["input_kind"],
+                "emitted_event_types": [ui_event["event_type"] for ui_event in ui_events],
+                "executed_action_types": [action_result.action_type for action_result in action_results],
+                "resolution_status": resolution_status,
+            }
+            self._store.finalize_pending_input_cycle(
+                pending_input=pending_input,
+                cycle_id=cycle_id,
+                resolution_status=resolution_status,
+                action_results=action_results,
+                discard_reason=discard_reason,
+                ui_events=ui_events,
+                commit_payload=commit_payload,
+            )
+        except Exception as error:
+            self._store.finalize_pending_input_cycle(
+                pending_input=pending_input,
+                cycle_id=cycle_id,
+                resolution_status="discarded",
+                action_results=[],
+                discard_reason=PENDING_INPUT_FAILURE_REASON,
+                ui_events=[],
+                commit_payload={
+                    "cycle_kind": "short",
+                    "trigger_reason": "external_input",
+                    "processed_input_id": pending_input.input_id,
+                    "processed_input_kind": pending_input.payload["input_kind"],
+                    "emitted_event_types": [],
+                    "executed_action_types": [],
+                    "resolution_status": "discarded",
+                    "error_kind": type(error).__name__,
+                    "error_message": _error_message_text(error),
+                },
+            )
 
     # Block: Pending input resolution
     def _resolve_pending_input(
@@ -170,49 +199,71 @@ class RuntimeLoop:
         if pending_input is None:
             return False
         cycle_id = _opaque_id("cycle")
-        resolved_at = _now_ms()
-        self._store.append_input_journal_for_pending_input(
-            pending_input=pending_input,
-            cycle_id=cycle_id,
-        )
-        action_result = ActionHistoryRecord(
-            result_id=_opaque_id("actres"),
-            command_id=_opaque_id("cmd"),
-            action_type="stop_active_message",
-            command={
-                "target_channel": channel,
-                "target_message_id": message_id,
-                "event_types": [],
-            },
-            started_at=resolved_at,
-            finished_at=resolved_at,
-            status="succeeded",
-            failure_mode=None,
-            observed_effects={
-                "target_message_id": message_id,
-                "stop_reason": "cancel_requested",
-            },
-            raw_result_ref=None,
-            adapter_trace_ref=None,
-        )
-        self._store.finalize_pending_input_cycle(
-            pending_input=pending_input,
-            cycle_id=cycle_id,
-            resolution_status="consumed",
-            action_results=[action_result],
-            discard_reason=None,
-            ui_events=[],
-            commit_payload={
-                "cycle_kind": "short",
-                "trigger_reason": "external_input",
-                "processed_input_id": pending_input.input_id,
-                "processed_input_kind": "cancel",
-                "emitted_event_types": [],
-                "executed_action_types": ["stop_active_message"],
-                "resolution_status": "consumed",
-            },
-        )
-        return True
+        try:
+            resolved_at = _now_ms()
+            self._store.append_input_journal_for_pending_input(
+                pending_input=pending_input,
+                cycle_id=cycle_id,
+            )
+            action_result = ActionHistoryRecord(
+                result_id=_opaque_id("actres"),
+                command_id=_opaque_id("cmd"),
+                action_type="stop_active_message",
+                command={
+                    "target_channel": channel,
+                    "target_message_id": message_id,
+                    "event_types": [],
+                },
+                started_at=resolved_at,
+                finished_at=resolved_at,
+                status="succeeded",
+                failure_mode=None,
+                observed_effects={
+                    "target_message_id": message_id,
+                    "stop_reason": "cancel_requested",
+                },
+                raw_result_ref=None,
+                adapter_trace_ref=None,
+            )
+            self._store.finalize_pending_input_cycle(
+                pending_input=pending_input,
+                cycle_id=cycle_id,
+                resolution_status="consumed",
+                action_results=[action_result],
+                discard_reason=None,
+                ui_events=[],
+                commit_payload={
+                    "cycle_kind": "short",
+                    "trigger_reason": "external_input",
+                    "processed_input_id": pending_input.input_id,
+                    "processed_input_kind": "cancel",
+                    "emitted_event_types": [],
+                    "executed_action_types": ["stop_active_message"],
+                    "resolution_status": "consumed",
+                },
+            )
+            return True
+        except Exception as error:
+            self._store.finalize_pending_input_cycle(
+                pending_input=pending_input,
+                cycle_id=cycle_id,
+                resolution_status="discarded",
+                action_results=[],
+                discard_reason=CANCEL_FAILURE_REASON,
+                ui_events=[],
+                commit_payload={
+                    "cycle_kind": "short",
+                    "trigger_reason": "external_input",
+                    "processed_input_id": pending_input.input_id,
+                    "processed_input_kind": "cancel",
+                    "emitted_event_types": [],
+                    "executed_action_types": [],
+                    "resolution_status": "discarded",
+                    "error_kind": type(error).__name__,
+                    "error_message": _error_message_text(error),
+                },
+            )
+            return False
 
     # Block: Settings iteration
     def _process_settings_override_once(self) -> bool:
@@ -220,20 +271,31 @@ class RuntimeLoop:
         if settings_override is None:
             return False
         cycle_id = _opaque_id("cycle")
-        self._store.append_input_journal_for_settings_override(
-            settings_override=settings_override,
-            cycle_id=cycle_id,
-        )
-        final_status, reject_reason = _evaluate_settings_override(settings_override)
-        self._store.finalize_settings_override(
-            override_id=settings_override.override_id,
-            key=settings_override.key,
-            requested_value_json=settings_override.requested_value_json,
-            apply_scope=settings_override.apply_scope,
-            cycle_id=cycle_id,
-            final_status=final_status,
-            reject_reason=reject_reason,
-        )
+        try:
+            self._store.append_input_journal_for_settings_override(
+                settings_override=settings_override,
+                cycle_id=cycle_id,
+            )
+            final_status, reject_reason = _evaluate_settings_override(settings_override)
+            self._store.finalize_settings_override(
+                override_id=settings_override.override_id,
+                key=settings_override.key,
+                requested_value_json=settings_override.requested_value_json,
+                apply_scope=settings_override.apply_scope,
+                cycle_id=cycle_id,
+                final_status=final_status,
+                reject_reason=reject_reason,
+            )
+        except Exception as error:
+            self._store.finalize_settings_override(
+                override_id=settings_override.override_id,
+                key=settings_override.key,
+                requested_value_json=settings_override.requested_value_json,
+                apply_scope=settings_override.apply_scope,
+                cycle_id=cycle_id,
+                final_status="rejected",
+                reject_reason=f"{SETTINGS_OVERRIDE_FAILURE_REASON}:{type(error).__name__}",
+            )
         return True
 
     # Block: Memory job iteration
@@ -241,7 +303,14 @@ class RuntimeLoop:
         memory_job = self._store.claim_next_memory_job()
         if memory_job is None:
             return False
-        self._memory_job_handler(memory_job.job_kind)(memory_job)
+        try:
+            self._memory_job_handler(memory_job.job_kind)(memory_job)
+        except Exception as error:
+            self._store.fail_claimed_memory_job(
+                memory_job=memory_job,
+                error=error,
+                max_tries=MAX_MEMORY_JOB_TRIES,
+            )
         return True
 
     # Block: Memory job dispatch
@@ -353,6 +422,14 @@ def _evaluate_settings_override(settings_override: SettingsOverrideRecord) -> tu
     except SettingsValidationError:
         return ("rejected", "invalid_settings_value")
     return ("applied", None)
+
+
+# Block: Error formatting
+def _error_message_text(error: Exception) -> str:
+    error_message = str(error).strip()
+    if not error_message:
+        return type(error).__name__
+    return error_message[:240]
 
 
 # Block: Unsupported input handling

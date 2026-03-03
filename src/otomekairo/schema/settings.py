@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 
@@ -20,7 +23,6 @@ class SettingDefinition:
     key: str
     value_type: str
     apply_scopes: tuple[str, ...]
-    default_value: Any
     min_value: int | float | None = None
     max_value: int | float | None = None
     min_length: int | None = None
@@ -29,19 +31,19 @@ class SettingDefinition:
 
 # Block: Registry source
 SETTING_DEFINITIONS: tuple[SettingDefinition, ...] = (
-    SettingDefinition("llm.default_model", "string", ("runtime", "next_boot"), "openrouter/default-model", min_length=1, max_length=256),
-    SettingDefinition("llm.embedding_model", "string", ("runtime", "next_boot"), "openrouter/default-embedding", min_length=1, max_length=256),
-    SettingDefinition("llm.temperature", "number", ("runtime", "next_boot"), 0.7, min_value=0.0, max_value=2.0),
-    SettingDefinition("llm.max_output_tokens", "integer", ("runtime", "next_boot"), 2048, min_value=256, max_value=8192),
-    SettingDefinition("runtime.idle_tick_ms", "integer", ("runtime", "next_boot"), 1000, min_value=250, max_value=60000),
-    SettingDefinition("runtime.long_cycle_min_interval_ms", "integer", ("runtime", "next_boot"), 10000, min_value=1000, max_value=300000),
-    SettingDefinition("runtime.context_budget_tokens", "integer", ("runtime", "next_boot"), 8192, min_value=1024, max_value=32768),
-    SettingDefinition("sensors.camera.enabled", "boolean", ("runtime",), True),
-    SettingDefinition("sensors.microphone.enabled", "boolean", ("runtime",), True),
-    SettingDefinition("output.tts.enabled", "boolean", ("runtime",), True),
-    SettingDefinition("output.tts.voice", "string", ("runtime", "next_boot"), "default", min_length=1, max_length=128),
-    SettingDefinition("integrations.sns.enabled", "boolean", ("runtime",), False),
-    SettingDefinition("integrations.line.enabled", "boolean", ("runtime",), False),
+    SettingDefinition("llm.default_model", "string", ("runtime", "next_boot"), min_length=1, max_length=256),
+    SettingDefinition("llm.embedding_model", "string", ("runtime", "next_boot"), min_length=1, max_length=256),
+    SettingDefinition("llm.temperature", "number", ("runtime", "next_boot"), min_value=0.0, max_value=2.0),
+    SettingDefinition("llm.max_output_tokens", "integer", ("runtime", "next_boot"), min_value=256, max_value=8192),
+    SettingDefinition("runtime.idle_tick_ms", "integer", ("runtime", "next_boot"), min_value=250, max_value=60000),
+    SettingDefinition("runtime.long_cycle_min_interval_ms", "integer", ("runtime", "next_boot"), min_value=1000, max_value=300000),
+    SettingDefinition("runtime.context_budget_tokens", "integer", ("runtime", "next_boot"), min_value=1024, max_value=32768),
+    SettingDefinition("sensors.camera.enabled", "boolean", ("runtime",)),
+    SettingDefinition("sensors.microphone.enabled", "boolean", ("runtime",)),
+    SettingDefinition("output.tts.enabled", "boolean", ("runtime",)),
+    SettingDefinition("output.tts.voice", "string", ("runtime", "next_boot"), min_length=1, max_length=128),
+    SettingDefinition("integrations.sns.enabled", "boolean", ("runtime",)),
+    SettingDefinition("integrations.line.enabled", "boolean", ("runtime",)),
 )
 
 
@@ -59,7 +61,7 @@ def get_setting_definition(key: str) -> SettingDefinition:
 
 # Block: Defaults export
 def build_default_settings() -> dict[str, Any]:
-    return {definition.key: definition.default_value for definition in SETTING_DEFINITIONS}
+    return dict(_read_default_settings_from_config())
 
 
 # Block: Value normalization
@@ -133,3 +135,34 @@ def _validate_length(definition: SettingDefinition, requested_value: Any) -> Non
         raise SettingsValidationError("invalid_settings_value", f"{definition.key} is too short")
     if definition.max_length is not None and len(requested_value) > definition.max_length:
         raise SettingsValidationError("invalid_settings_value", f"{definition.key} is too long")
+
+
+# Block: Config defaults
+@lru_cache(maxsize=1)
+def _read_default_settings_from_config() -> dict[str, Any]:
+    config_path = _settings_config_path()
+    loaded_value = json.loads(config_path.read_text(encoding="utf-8"))
+    if not isinstance(loaded_value, dict):
+        raise RuntimeError("config/default_settings.json must be an object")
+    expected_keys = set(SETTING_DEFINITION_MAP)
+    actual_keys = set(loaded_value)
+    if actual_keys != expected_keys:
+        missing_keys = sorted(expected_keys - actual_keys)
+        extra_keys = sorted(actual_keys - expected_keys)
+        raise RuntimeError(
+            "config/default_settings.json keys do not match registry: "
+            f"missing={missing_keys}, extra={extra_keys}"
+        )
+    normalized_defaults: dict[str, Any] = {}
+    for definition in SETTING_DEFINITIONS:
+        requested_value = loaded_value[definition.key]
+        _validate_type(definition, requested_value)
+        _validate_range(definition, requested_value)
+        _validate_length(definition, requested_value)
+        normalized_defaults[definition.key] = requested_value
+    return normalized_defaults
+
+
+# Block: Config path
+def _settings_config_path() -> Path:
+    return Path(__file__).resolve().parents[3] / "config" / "default_settings.json"

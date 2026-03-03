@@ -15,6 +15,7 @@ from otomekairo.schema.runtime_types import ActionHistoryRecord, PendingInputRec
 @dataclass(frozen=True, slots=True)
 class CognitionExecution:
     cognition_input: dict[str, Any]
+    cognition_result: dict[str, Any]
     ui_events: list[dict[str, Any]]
     action_results: list[ActionHistoryRecord]
 
@@ -91,18 +92,28 @@ def run_cognition_for_chat_message(
             )
             emitted_chunk_count += 1
 
-    # Block: Final message
+    # Block: Structured cognition result
     response_text = "".join(response_parts).strip()
     if not was_cancelled and not response_text:
         raise RuntimeError("cognition stream returned empty response")
+    cognition_result = _build_cognition_result(
+        pending_input=pending_input,
+        cycle_id=cycle_id,
+        message_id=message_id,
+        response_text=response_text,
+        emitted_chunk_count=emitted_chunk_count,
+        was_cancelled=was_cancelled,
+    )
+
+    # Block: Final message
     message_created_at = _now_ms()
-    if response_text:
+    if response_text and not was_cancelled:
         emit_event(
             "message",
             {
                 "message_id": message_id,
                 "role": "assistant",
-                "text": response_text,
+                "text": str(cognition_result["speech_draft"]["text"]),
                 "created_at": message_created_at,
                 "source_cycle_id": cycle_id,
                 "related_input_id": pending_input.input_id,
@@ -143,13 +154,15 @@ def run_cognition_for_chat_message(
                 "status_code_after": "idle",
                 "was_cancelled": was_cancelled,
                 "token_count": emitted_chunk_count,
+                "final_message_emitted": bool(response_text and not was_cancelled),
             },
             raw_result_ref=None,
-            adapter_trace_ref=None,
+            adapter_trace_ref={"cognition_result": cognition_result},
         )
     ]
     return CognitionExecution(
         cognition_input=cognition_input,
+        cognition_result=cognition_result,
         ui_events=ui_events,
         action_results=action_results,
     )
@@ -158,6 +171,47 @@ def run_cognition_for_chat_message(
 # Block: Id helper
 def _opaque_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex}"
+
+
+# Block: Cognition result builder
+def _build_cognition_result(
+    *,
+    pending_input: PendingInputRecord,
+    cycle_id: str,
+    message_id: str,
+    response_text: str,
+    emitted_chunk_count: int,
+    was_cancelled: bool,
+) -> dict[str, Any]:
+    return {
+        "intention_summary": "browser_chat に対して人格として応答する",
+        "decision_reason": "最新のテキスト入力を受け取り、現在の人格断面に基づいて返答を選ぶ",
+        "action_proposals": [
+            {
+                "action_type": "speak",
+                "target_channel": pending_input.channel,
+                "message_id": message_id,
+                "priority": 1.0,
+            }
+        ],
+        "step_hints": [],
+        "speech_draft": {
+            "text": response_text,
+            "language": "ja",
+            "delivery_mode": "stream",
+        },
+        "memory_focus": {
+            "focus_kind": "current_input_only",
+            "summary": "直近のチャット入力を主材料として判断した",
+        },
+        "reflection_seed": {
+            "cycle_id": cycle_id,
+            "input_kind": str(pending_input.payload["input_kind"]),
+            "message_id": message_id,
+            "token_count": emitted_chunk_count,
+            "was_cancelled": was_cancelled,
+        },
+    }
 
 
 # Block: Time helper

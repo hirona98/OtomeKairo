@@ -162,7 +162,7 @@ flowchart LR
 ### 役割
 
 - 現在有効な設定値と、未反映の設定変更要求を返す
-- `config/` の既定値、`runtime_settings`、`settings_overrides` の `queued / claimed` を参照して構成する
+- `config/default_settings.json` の既定値、`runtime_settings`、`settings_overrides` の `queued / claimed` を参照して構成する
 
 <!-- Block: Settings Get Response -->
 ### 成功応答
@@ -185,7 +185,7 @@ flowchart LR
 ```
 
 - `effective_settings` は、UI で編集対象にする設定だけを、`docs/39_設定キー運用仕様.md` と同じドット区切りキーで返す
-- `effective_settings` は、`config/` の既定値に対して、`runtime_settings.values_json` を上書きした現在有効値を返す
+- `effective_settings` は、`config/default_settings.json` の既定値に対して、`runtime_settings.values_json` を上書きした現在有効値を返す
 - `apply_scope="next_boot"` で `applied` 済みの設定は、次回ランタイム起動で materialize されるまで `effective_settings` に即時反映しない
 - 秘密情報は返さない
 

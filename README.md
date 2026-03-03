@@ -21,6 +21,7 @@
 - 設定キー運用仕様: `docs/39_設定キー運用仕様.md`
 - 人格変化仕様: `docs/40_人格変化仕様.md`
 - 人格選択仕様: `docs/41_人格選択仕様.md`
+- 設定既定値: `config/default_settings.json`
 - 初期 SQL 実装: `sql/core_schema.sql`
 - 参考メモ: `docs/note/記憶設計に関する先行研究のメモ.md`
 
@@ -33,9 +34,10 @@
 - `src/otomekairo/web/app.py`: FastAPI アプリを構成し、API ルータと例外処理を束ねる
 - `src/otomekairo/gateway/cognition_client.py`: 認知処理の外部境界を表す抽象を定義する
 - `src/otomekairo/usecase/build_cognition_input.py`: `self_state` などの現在状態から最小の `cognition_input` を組み立てる
-- `src/otomekairo/usecase/run_cognition.py`: 認知クライアントのストリーム出力を `token` / `message` / `status` の UI 応答と `action_history` へ変換する
+- `src/otomekairo/usecase/run_cognition.py`: 認知クライアントのストリーム出力から最小の `cognition_result` を構成し、`token` / `message` / `status` の UI 応答と `action_history` へ変換する
 - `src/otomekairo/infra/litellm_cognition_client.py`: `LiteLLM` を使って人格断面つきの認知呼び出しを行う
-- `src/otomekairo/infra/sqlite_state_store.py`: `core_schema.sql` を読み込む DB 初期化と、状態参照・入力受付・設定反映、短周期確定時の `write_memory` enqueue、`revisions` 記録、`memory_state` と `event` を対象にした `refresh_preview` / `embedding_sync`、`searchable=0` へ落とす `quarantine_memory` の enqueue / 適用を持つ
-- `src/otomekairo/runtime/main_loop.py`: `settings_overrides` と `pending_inputs` を消費し、待機中も応答中も lease heartbeat を維持しながら、`token` の即時追記、進行中 `cancel` の消費、`write_memory` / `refresh_preview` / `embedding_sync` / `quarantine_memory` の最小長周期処理までを行う
+- `src/otomekairo/infra/sqlite_state_store.py`: `core_schema.sql` を読み込む DB 初期化と、状態参照・入力受付・設定反映、短周期確定時の `write_memory` enqueue、`revisions` 記録、`memory_state` と `event` を対象にした `refresh_preview` / `embedding_sync`、`searchable=0` へ落とす `quarantine_memory`、`memory_jobs` の再キュー / `dead_letter`、`ui_outbound_events` の保持窓削除を持つ
+- `src/otomekairo/runtime/main_loop.py`: `settings_overrides` と `pending_inputs` を消費し、待機中も応答中も lease heartbeat を維持しながら、失敗時も `claimed` を終端状態へ確定し、`token` の即時追記、進行中 `cancel` の消費、`write_memory` / `refresh_preview` / `embedding_sync` / `quarantine_memory` の最小長周期処理までを行う
 - `src/otomekairo/schema/runtime_types.py`: ランタイムの共通データ形を `infra` から切り離して持つ
-- `src/otomekairo/schema/settings.py`: 設定キーの検証と有効設定の初期値を定義する
+- `src/otomekairo/schema/settings.py`: 設定キーの検証と `config/default_settings.json` からの既定値読み込みを持つ
+- `config/default_settings.json`: `runtime_settings` seed と Web の `effective_settings` に使う設定既定値の正本を持つ

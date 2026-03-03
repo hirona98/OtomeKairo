@@ -16,7 +16,7 @@
 
 - 固定するのは、初期実装で使う JSON オブジェクトのキー、型、必須項目、固定語彙である
 - 固定するのは、`pending_inputs.payload_json`、`settings_overrides.requested_value_json`、`ui_outbound_events.payload_json`、`action_history.command_json`、`action_history.observed_effects_json`、`memory_jobs.payload_ref_json`、`memory_job_payloads.payload_json`、主要な Web API 本文である
-- 固定するのは、`self_state.personality_json`、`self_state.current_emotion_json`、`self_state.long_term_goals_json`、`self_state.relationship_overview_json`、`self_state.invariants_json`、短周期の内部で使う `selection_profile`、`persona_consistency_score`、`attention_score_breakdown`、`self_initiated_score_breakdown`、`action_candidate_score`、長周期の内部で使う `personality_change_proposal`、`persona_updates` の形である
+- 固定するのは、`self_state.personality_json`、`self_state.current_emotion_json`、`self_state.long_term_goals_json`、`self_state.relationship_overview_json`、`self_state.invariants_json`、短周期の内部で使う `selection_profile`、`persona_consistency_score`、`attention_score_breakdown`、`self_initiated_score_breakdown`、`action_candidate_score`、`cognition_result`、長周期の内部で使う `personality_change_proposal`、`persona_updates` の形である
 - 固定しないのは、Python のクラス名、Pydantic モデル名、OpenAPI の自動生成細部である
 - 固定しないのは、将来追加する未使用フィールドや後段の拡張イベント種別である
 
@@ -455,6 +455,49 @@
 - `priority_hint_score` は、`proposal.priority` をそのまま信じるためではなく、同程度候補の補助比較にだけ使う
 - 各 `*_score` は、比較前に同じ `0.0..1.0` 尺度へ正規化済みでなければならない
 - `action_candidate_score` は永続化前提の正本ではなく、その短周期の候補比較ごとに再計算する
+
+<!-- Block: Cognition Result -->
+### `cognition_result`
+
+```json
+{
+  "intention_summary": "browser_chat に対して人格として応答する",
+  "decision_reason": "最新のテキスト入力を受け取り、現在の人格断面に基づいて返答を選ぶ",
+  "action_proposals": [
+    {
+      "action_type": "speak",
+      "target_channel": "browser_chat",
+      "message_id": "msg_...",
+      "priority": 1.0
+    }
+  ],
+  "step_hints": [],
+  "speech_draft": {
+    "text": "こんにちは。",
+    "language": "ja",
+    "delivery_mode": "stream"
+  },
+  "memory_focus": {
+    "focus_kind": "current_input_only",
+    "summary": "直近のチャット入力を主材料として判断した"
+  },
+  "reflection_seed": {
+    "cycle_id": "cycle_...",
+    "input_kind": "chat_message",
+    "message_id": "msg_...",
+    "token_count": 3,
+    "was_cancelled": false
+  }
+}
+```
+
+- `cognition_result` は、短周期の内部で使う構造化された認知結果である
+- 必須項目は `intention_summary`、`decision_reason`、`action_proposals`、`step_hints`、`speech_draft`、`memory_focus`、`reflection_seed` である
+- `action_proposals` と `step_hints` は配列に固定し、候補がない場合も空配列 `[]` を使う
+- `speech_draft` は、少なくとも `text`、`language`、`delivery_mode` を持つ
+- `memory_focus` は、少なくとも `focus_kind`、`summary` を持つ
+- `reflection_seed` は、少なくとも `cycle_id`、`input_kind`、`message_id`、`token_count`、`was_cancelled` を持つ
+- `cognition_result` は永続化前提の正本ではなく、その短周期の認知実行ごとに再構成する
 
 <!-- Block: Persona Update Group -->
 ## 人格変化の内部 JSON
