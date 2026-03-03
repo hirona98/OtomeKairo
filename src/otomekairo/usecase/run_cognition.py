@@ -9,6 +9,7 @@ from typing import Any, Callable, Iterable
 
 from otomekairo.gateway.cognition_client import CognitionClient, CognitionRequest
 from otomekairo.schema.runtime_types import ActionHistoryRecord, PendingInputRecord
+from otomekairo.usecase.validate_action import validate_chat_response_action
 
 
 # Block: Cognition execution
@@ -71,6 +72,13 @@ def run_cognition_for_chat_message(
         cycle_id=cycle_id,
         message_id=message_id,
     )
+    validated_action = validate_chat_response_action(
+        pending_channel=pending_input.channel,
+        message_id=message_id,
+        cognition_input=cognition_input,
+        cognition_result=cognition_result,
+        response_text=response_text,
+    )
 
     # Block: Streaming response loop
     emit_event(
@@ -88,7 +96,7 @@ def run_cognition_for_chat_message(
         emit_event(
             "token",
             {
-                "message_id": message_id,
+                "message_id": str(validated_action.proposal["message_id"]),
                 "text": chunk_text,
                 "chunk_index": emitted_chunk_count,
             },
@@ -103,7 +111,7 @@ def run_cognition_for_chat_message(
         emit_event(
             "message",
             {
-                "message_id": message_id,
+                "message_id": str(validated_action.proposal["message_id"]),
                 "role": "assistant",
                 "text": response_text,
                 "created_at": message_created_at,
@@ -132,9 +140,10 @@ def run_cognition_for_chat_message(
             command={
                 "target_channel": pending_input.channel,
                 "event_types": emitted_event_types,
-                "message_id": message_id,
+                "message_id": str(validated_action.proposal["message_id"]),
                 "role": "assistant",
                 "related_input_id": pending_input.input_id,
+                "proposal_ref": str(validated_action.proposal["proposal_id"]),
             },
             started_at=resolved_at,
             finished_at=message_created_at,
@@ -142,14 +151,18 @@ def run_cognition_for_chat_message(
             failure_mode="cancelled" if was_cancelled else None,
             observed_effects={
                 "emitted_event_types": emitted_event_types,
-                "message_id": message_id,
+                "message_id": str(validated_action.proposal["message_id"]),
                 "status_code_after": "idle",
                 "was_cancelled": was_cancelled,
                 "token_count": emitted_chunk_count,
                 "final_message_emitted": bool(response_text and not was_cancelled),
+                "action_candidate_score": validated_action.action_candidate_score,
             },
             raw_result_ref=None,
-            adapter_trace_ref={"cognition_result": cognition_result},
+            adapter_trace_ref={
+                "cognition_result": cognition_result,
+                "action_candidate_score": validated_action.action_candidate_score,
+            },
         )
     ]
     return CognitionExecution(

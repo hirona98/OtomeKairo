@@ -785,10 +785,11 @@
 ```json
 {
   "target_channel": "browser_chat",
-  "event_types": ["status", "message", "status"],
+  "event_types": ["status", "status", "token", "message", "status"],
   "message_id": "msg_...",
-  "role": "system_notice",
-  "related_input_id": "inp_..."
+  "role": "assistant",
+  "related_input_id": "inp_...",
+  "proposal_ref": "prop_..."
 }
 ```
 
@@ -798,6 +799,7 @@
 - `message_id` は、`event_type = message` を含む命令だけに付ける
 - `role` は、`message_id` を伴うメッセージ応答だけに付ける
 - `related_input_id` は、入力に対する応答行動だけに付ける
+- `proposal_ref` は、`cognition_result.action_proposals` から確定した候補を追跡したいときに付ける
 - `target_message_id` は、`cancel` のように既存メッセージを対象化する行動だけに付ける
 - `input_kind` は、未対応入力のエラー応答のように、原因となる入力種別を残したいときだけ付ける
 
@@ -809,9 +811,24 @@
 
 ```json
 {
-  "emitted_event_types": ["status", "message", "status"],
+  "emitted_event_types": ["status", "status", "token", "message", "status"],
   "message_id": "msg_...",
-  "status_code_after": "idle"
+  "status_code_after": "idle",
+  "was_cancelled": false,
+  "token_count": 3,
+  "final_message_emitted": true,
+  "action_candidate_score": {
+    "proposal_id": "prop_...",
+    "hard_gate_passed": true,
+    "task_fit_score": 1.0,
+    "personality_fit_score": 0.9,
+    "relationship_fit_score": 0.8,
+    "experience_fit_score": 0.8,
+    "drive_relief_score": 0.7,
+    "expected_stability_score": 0.8,
+    "priority_hint_score": 1.0,
+    "total_score": 0.87
+  }
 }
 ```
 
@@ -821,6 +838,10 @@
 - `notice_code` は、`notice` を生成した場合だけに付ける
 - `error_code` は、`error` を生成した場合だけに付ける
 - `status_code_after` は、最後に `status` を出した場合だけに付ける
+- `was_cancelled` は、途中停止が起きた応答だけに付ける
+- `token_count` は、`token` を流した応答だけに付ける
+- `final_message_emitted` は、最後に `message` を確定したかどうかを持つ
+- `action_candidate_score` は、`action validator` の最小比較結果を残したいときに付ける
 
 <!-- Block: Memory Job Group -->
 ## 記憶ジョブの JSON

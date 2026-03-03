@@ -35,6 +35,7 @@
 - `src/otomekairo/gateway/cognition_client.py`: 認知処理の外部境界を表す抽象を定義する
 - `src/otomekairo/usecase/build_cognition_input.py`: `self_state` などの現在状態から最小の `cognition_input` を組み立てる
 - `src/otomekairo/usecase/run_cognition.py`: 認知クライアントが返す `cognition_result` を受け取り、`speech_draft.text` を `token` / `message` / `status` の UI 応答と `action_history` へ変換する
+- `src/otomekairo/usecase/validate_action.py`: `cognition_result.action_proposals` から `speak` 候補を検査し、最小の `action validator` として確定候補を選ぶ
 - `src/otomekairo/infra/litellm_cognition_client.py`: `LiteLLM` を使って人格断面つきの認知呼び出しを行う
 - `src/otomekairo/infra/sqlite_state_store.py`: `core_schema.sql` を読み込む DB 初期化と、状態参照・入力受付・設定反映、短周期確定時の `write_memory` enqueue、`revisions` 記録、`memory_state` と `event` を対象にした `refresh_preview` / `embedding_sync`、`searchable=0` へ落とす `quarantine_memory`、`memory_jobs` の再キュー / `dead_letter`、`ui_outbound_events` の保持窓削除を持つ
 - `src/otomekairo/runtime/main_loop.py`: `settings_overrides` と `pending_inputs` を消費し、待機中も応答中も lease heartbeat を維持しながら、失敗時も `claimed` を終端状態へ確定し、`token` の即時追記、進行中 `cancel` の消費、`write_memory` / `refresh_preview` / `embedding_sync` / `quarantine_memory` の最小長周期処理までを行う
