@@ -981,81 +981,40 @@ class SqliteStateStore:
                 connection=connection,
                 event_ids=source_event_ids,
             )
-            memory_state_id = _opaque_id("mem")
             summary_text = _build_write_memory_summary_text(
                 primary_event_id=str(memory_job.payload["primary_event_id"]),
                 event_rows=event_rows,
             )
-            connection.execute(
-                """
-                INSERT INTO memory_states (
-                    memory_state_id,
-                    memory_kind,
-                    body_text,
-                    payload_json,
-                    confidence,
-                    importance,
-                    memory_strength,
-                    searchable,
-                    last_confirmed_at,
-                    evidence_event_ids_json,
-                    created_at,
-                    updated_at
+            memory_state_targets = [
+                self._insert_memory_state_with_revision(
+                    connection=connection,
+                    memory_kind="summary",
+                    body_text=summary_text,
+                    payload_json={
+                        "source_job_id": memory_job.job_id,
+                        "job_kind": memory_job.job_kind,
+                        "source_cycle_id": memory_job.payload["cycle_id"],
+                        "primary_event_id": memory_job.payload["primary_event_id"],
+                        "source_event_ids": source_event_ids,
+                        "summary_kind": "minimal_write_memory",
+                    },
+                    confidence=0.50,
+                    importance=0.50,
+                    memory_strength=0.50,
+                    last_confirmed_at=now_ms,
+                    evidence_event_ids=source_event_ids,
+                    created_at=now_ms,
+                    revision_reason="write_memory created summary",
                 )
-                VALUES (?, 'summary', ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
-                """,
-                (
-                    memory_state_id,
-                    summary_text,
-                    _json_text(
-                        {
-                            "source_job_id": memory_job.job_id,
-                            "job_kind": memory_job.job_kind,
-                            "source_cycle_id": memory_job.payload["cycle_id"],
-                            "primary_event_id": memory_job.payload["primary_event_id"],
-                            "source_event_ids": source_event_ids,
-                            "summary_kind": "minimal_write_memory",
-                        }
-                    ),
-                    0.50,
-                    0.50,
-                    0.50,
-                    now_ms,
-                    _json_text(source_event_ids),
-                    now_ms,
-                    now_ms,
-                ),
-            )
-            connection.execute(
-                """
-                INSERT INTO revisions (
-                    revision_id,
-                    entity_type,
-                    entity_id,
-                    before_json,
-                    after_json,
-                    reason,
-                    evidence_event_ids_json,
-                    created_at
+            ]
+            memory_state_targets.extend(
+                self._insert_external_fact_memory_states(
+                    connection=connection,
+                    cycle_id=str(memory_job.payload["cycle_id"]),
+                    source_job_id=memory_job.job_id,
+                    source_event_ids=source_event_ids,
+                    created_at=now_ms,
                 )
-                VALUES (?, 'memory_states', ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    _opaque_id("rev"),
-                    memory_state_id,
-                    _json_text({}),
-                    _json_text(
-                        {
-                            "memory_kind": "summary",
-                            "body_text": summary_text,
-                            "source_job_id": memory_job.job_id,
-                            "source_event_ids": source_event_ids,
-                        }
-                    ),
-                    "write_memory created summary",
-                    _json_text(source_event_ids),
-                    now_ms,
-                ),
             )
             self._enqueue_refresh_preview_jobs(
                 connection=connection,
@@ -1067,14 +1026,7 @@ class SqliteStateStore:
                 connection=connection,
                 cycle_id=str(memory_job.payload["cycle_id"]),
                 source_event_ids=source_event_ids,
-                targets=[
-                    {
-                        "entity_type": "memory_state",
-                        "entity_id": memory_state_id,
-                        "source_updated_at": now_ms,
-                        "current_searchable": True,
-                    }
-                ],
+                targets=memory_state_targets,
                 embedding_model=self._require_runtime_setting_string(
                     connection=connection,
                     key="llm.embedding_model",
@@ -1086,7 +1038,141 @@ class SqliteStateStore:
                 job_id=memory_job.job_id,
                 completed_at=now_ms,
             )
-        return memory_state_id
+        return str(memory_state_targets[0]["entity_id"])
+
+    # Block: Memory state insert
+    def _insert_memory_state_with_revision(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        memory_kind: str,
+        body_text: str,
+        payload_json: dict[str, Any],
+        confidence: float,
+        importance: float,
+        memory_strength: float,
+        last_confirmed_at: int,
+        evidence_event_ids: list[str],
+        created_at: int,
+        revision_reason: str,
+    ) -> dict[str, Any]:
+        memory_state_id = _opaque_id("mem")
+        connection.execute(
+            """
+            INSERT INTO memory_states (
+                memory_state_id,
+                memory_kind,
+                body_text,
+                payload_json,
+                confidence,
+                importance,
+                memory_strength,
+                searchable,
+                last_confirmed_at,
+                evidence_event_ids_json,
+                created_at,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
+            """,
+            (
+                memory_state_id,
+                memory_kind,
+                body_text,
+                _json_text(payload_json),
+                confidence,
+                importance,
+                memory_strength,
+                last_confirmed_at,
+                _json_text(evidence_event_ids),
+                created_at,
+                created_at,
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO revisions (
+                revision_id,
+                entity_type,
+                entity_id,
+                before_json,
+                after_json,
+                reason,
+                evidence_event_ids_json,
+                created_at
+            )
+            VALUES (?, 'memory_states', ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                _opaque_id("rev"),
+                memory_state_id,
+                _json_text({}),
+                _json_text(
+                    {
+                        "memory_kind": memory_kind,
+                        "body_text": body_text,
+                        **payload_json,
+                    }
+                ),
+                revision_reason,
+                _json_text(evidence_event_ids),
+                created_at,
+            ),
+        )
+        return {
+            "entity_type": "memory_state",
+            "entity_id": memory_state_id,
+            "source_updated_at": created_at,
+            "current_searchable": True,
+        }
+
+    # Block: External fact memory insert
+    def _insert_external_fact_memory_states(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        cycle_id: str,
+        source_job_id: str,
+        source_event_ids: list[str],
+        created_at: int,
+    ) -> list[dict[str, Any]]:
+        action_rows = _fetch_action_history_for_cycle(
+            connection=connection,
+            cycle_id=cycle_id,
+            action_type="complete_browse_task",
+        )
+        memory_state_targets: list[dict[str, Any]] = []
+        for action_row in action_rows:
+            command_json = json.loads(action_row["command_json"])
+            observed_effects_json = json.loads(action_row["observed_effects_json"])
+            query = _browse_query_from_action_history(command_json)
+            summary_text = _browse_summary_from_action_history(observed_effects_json)
+            related_task_id = _browse_task_id_from_action_history(command_json)
+            memory_state_targets.append(
+                self._insert_memory_state_with_revision(
+                    connection=connection,
+                    memory_kind="fact",
+                    body_text=f"外部確認: {query} => {summary_text}",
+                    payload_json={
+                        "source_job_id": source_job_id,
+                        "job_kind": "write_memory",
+                        "source_cycle_id": cycle_id,
+                        "source_event_ids": source_event_ids,
+                        "fact_kind": "external_search_result",
+                        "query": query,
+                        "summary_text": summary_text,
+                        "source_task_id": related_task_id,
+                    },
+                    confidence=0.85,
+                    importance=0.75,
+                    memory_strength=0.75,
+                    last_confirmed_at=created_at,
+                    evidence_event_ids=source_event_ids,
+                    created_at=created_at,
+                    revision_reason="write_memory created external fact",
+                )
+            )
+        return memory_state_targets
 
     def complete_refresh_preview_job(
         self,
@@ -3018,6 +3104,49 @@ def _fetch_events_for_ids(
             raise RuntimeError("source event for write_memory is missing")
         ordered_rows.append(row)
     return ordered_rows
+
+
+def _fetch_action_history_for_cycle(
+    *,
+    connection: sqlite3.Connection,
+    cycle_id: str,
+    action_type: str,
+) -> list[sqlite3.Row]:
+    return connection.execute(
+        """
+        SELECT command_json, observed_effects_json
+        FROM action_history
+        WHERE cycle_id = ?
+          AND action_type = ?
+          AND status = 'succeeded'
+        ORDER BY started_at ASC
+        """,
+        (cycle_id, action_type),
+    ).fetchall()
+
+
+def _browse_query_from_action_history(command_json: dict[str, Any]) -> str:
+    parameters = command_json.get("parameters")
+    if not isinstance(parameters, dict):
+        raise RuntimeError("browse action_history.command_json.parameters must be object")
+    query = parameters.get("query")
+    if not isinstance(query, str) or not query:
+        raise RuntimeError("browse action_history.command_json.parameters.query must be non-empty string")
+    return query
+
+
+def _browse_summary_from_action_history(observed_effects_json: dict[str, Any]) -> str:
+    summary_text = observed_effects_json.get("summary_text")
+    if not isinstance(summary_text, str) or not summary_text:
+        raise RuntimeError("browse action_history.observed_effects_json.summary_text must be non-empty string")
+    return summary_text
+
+
+def _browse_task_id_from_action_history(command_json: dict[str, Any]) -> str:
+    related_task_id = command_json.get("related_task_id")
+    if not isinstance(related_task_id, str) or not related_task_id:
+        raise RuntimeError("browse action_history.command_json.related_task_id must be non-empty string")
+    return related_task_id
 
 
 def _build_write_memory_summary_text(
