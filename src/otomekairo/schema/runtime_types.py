@@ -40,6 +40,7 @@ class SettingsChangeSetRecord:
 class MemoryJobRecord:
     job_id: str
     job_kind: str
+    tries: int
     created_at: int
     payload: dict[str, Any]
 

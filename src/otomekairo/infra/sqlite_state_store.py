@@ -1377,6 +1377,7 @@ class SqliteStateStore:
                 return MemoryJobRecord(
                     job_id=job_id,
                     job_kind=job_kind,
+                    tries=int(row["tries"]),
                     created_at=int(row["created_at"]),
                     payload=payload,
                 )
