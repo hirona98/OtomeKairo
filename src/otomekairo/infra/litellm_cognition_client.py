@@ -42,6 +42,8 @@ class LiteLLMCognitionClient:
 def _import_litellm_module() -> Any:
     import litellm
 
+    litellm.set_verbose = True
+    litellm._turn_on_debug()
     return litellm
 
 
