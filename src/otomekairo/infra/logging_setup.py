@@ -63,17 +63,23 @@ class SuppressFrequentAccessLogFilter(logging.Filter):
 # Block: Console formatter
 class ConsoleLogFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
-        message = " ".join(record.getMessage().split())
+        message = record.getMessage()
         formatted = (
             f"{self.formatTime(record)} "
             f"{record.levelname} "
             f"{record.name} - "
-            f"{message}"
+            f"{_single_line_message(message)}"
         )
+        pretty_message = _pretty_json_block(message)
+        if pretty_message is not None:
+            formatted += "\n" + _indented_block(pretty_message)
         if record.exc_info is not None:
             formatted += "\n" + self.formatException(record.exc_info)
         if record.stack_info is not None:
             formatted += "\n" + self.formatStack(record.stack_info)
+        extras = _record_extras(record)
+        if extras:
+            formatted += "\n" + _labeled_json_block("context", extras)
         return formatted
 
     def formatTime(  # noqa: N802
