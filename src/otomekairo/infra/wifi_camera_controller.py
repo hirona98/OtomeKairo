@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-from dataclasses import dataclass
 from typing import Any
 
 from otomekairo.gateway.camera_controller import (
@@ -11,22 +9,16 @@ from otomekairo.gateway.camera_controller import (
     CameraLookRequest,
     CameraLookResponse,
 )
-
-
-# Block: Environment settings
-@dataclass(frozen=True, slots=True)
-class CameraConnectionSettings:
-    host: str
-    username: str
-    password: str
-    control_port: int
-    stream_port: int
-
+from otomekairo.infra.wifi_camera_common import (
+    create_tapo_control_client,
+    normalized_optional_text,
+    read_camera_connection_settings,
+)
 
 # Block: Wi-Fi camera controller
 class WiFiCameraController(CameraController):
     def __init__(self) -> None:
-        self._settings = _read_connection_settings()
+        self._settings = read_camera_connection_settings()
         self._client: Any | None = None
 
     def is_available(self) -> bool:
@@ -57,24 +49,14 @@ class WiFiCameraController(CameraController):
         if self._settings is None:
             raise RuntimeError("camera settings are not configured")
         if self._client is None:
-            from pytapo import Tapo
-
-            self._client = Tapo(
-                self._settings.host,
-                self._settings.username,
-                self._settings.password,
-                controlPort=self._settings.control_port,
-                streamPort=self._settings.stream_port,
-                printDebugInformation=False,
-                printWarnInformation=False,
-            )
+            self._client = create_tapo_control_client(self._settings)
         return self._client
 
     # Block: Preset movement
     def _move_to_preset(self, request: CameraLookRequest) -> CameraLookResponse:
         camera = self._camera()
-        preset_name = _normalized_optional_text(request.preset_name)
-        preset_id = _normalized_optional_text(request.preset_id)
+        preset_name = normalized_optional_text(request.preset_name)
+        preset_id = normalized_optional_text(request.preset_id)
         available_presets = camera.getPresets()
         if not isinstance(available_presets, dict):
             raise RuntimeError("camera presets must be returned as an object")
@@ -101,26 +83,9 @@ class WiFiCameraController(CameraController):
             },
         )
 
-
-# Block: Settings loader
-def _read_connection_settings() -> CameraConnectionSettings | None:
-    host = _normalized_optional_text(os.environ.get("OTOMEKAIRO_CAMERA_HOST"))
-    username = _normalized_optional_text(os.environ.get("OTOMEKAIRO_CAMERA_USERNAME"))
-    password = _normalized_optional_text(os.environ.get("OTOMEKAIRO_CAMERA_PASSWORD"))
-    if host is None or username is None or password is None:
-        return None
-    return CameraConnectionSettings(
-        host=host,
-        username=username,
-        password=password,
-        control_port=_read_port("OTOMEKAIRO_CAMERA_CONTROL_PORT", default_value=443),
-        stream_port=_read_port("OTOMEKAIRO_CAMERA_STREAM_PORT", default_value=8800),
-    )
-
-
 # Block: Direction helpers
 def _validated_direction(direction: str | None) -> str:
-    normalized_direction = _normalized_optional_text(direction)
+    normalized_direction = normalized_optional_text(direction)
     if normalized_direction not in {"left", "right", "up", "down"}:
         raise RuntimeError("direction は left / right / up / down のいずれかにしてください")
     return normalized_direction
@@ -154,30 +119,6 @@ def _preset_id_by_name(*, available_presets: dict[Any, Any], preset_name: str) -
         if str(current_preset_name).strip().casefold() == expected_name:
             return str(current_preset_id)
     raise RuntimeError(f"preset_name '{preset_name}' は見つかりません")
-
-
-# Block: Environment helpers
-def _normalized_optional_text(value: Any) -> str | None:
-    if not isinstance(value, str):
-        return None
-    stripped_value = value.strip()
-    if not stripped_value:
-        return None
-    return stripped_value
-
-
-def _read_port(name: str, *, default_value: int) -> int:
-    raw_value = _normalized_optional_text(os.environ.get(name))
-    if raw_value is None:
-        return default_value
-    try:
-        port = int(raw_value)
-    except ValueError as error:
-        raise RuntimeError(f"{name} は整数で指定してください") from error
-    if port <= 0 or port > 65535:
-        raise RuntimeError(f"{name} は 1 から 65535 の範囲で指定してください")
-    return port
-
 
 # Block: Result payload helper
 def _raw_result_payload(raw_result: Any) -> dict[str, Any] | None:

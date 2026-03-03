@@ -80,14 +80,16 @@
 - `POST /api/settings/overrides`
 - `POST /api/chat/input`
 - `POST /api/chat/cancel`
+- `POST /api/camera/capture`
 - `GET /api/chat/stream`
+- `GET /captures/{capture_filename}`
 
 - 下の Mermaid 図は、ブラウザ、`設定 Web サーバ`、`人格ランタイム`、`SQLite` の受け渡しを要約したものである
 
 ```mermaid
 flowchart LR
-    browser["ブラウザ"] -->|"GET /\nGET /api/health\nGET /api/status\nGET /api/settings"| web["設定 Web サーバ"]
-    browser -->|"POST /api/chat/input\nPOST /api/chat/cancel\nPOST /api/settings/overrides"| web
+    browser["ブラウザ"] -->|"GET /\nGET /api/health\nGET /api/status\nGET /api/settings\nGET /captures/{capture_filename}"| web["設定 Web サーバ"]
+    browser -->|"POST /api/chat/input\nPOST /api/chat/cancel\nPOST /api/settings/overrides\nPOST /api/camera/capture"| web
     web <-->|read / write| db["SQLite"]
     runtime["人格ランタイム"] -->|"append ui_outbound_events"| db
     web -->|"SSE: GET /api/chat/stream"| browser
@@ -100,7 +102,7 @@ flowchart LR
 ### 役割
 
 - 最小のブラウザチャット UI を返す
-- 同一オリジンで `POST /api/chat/input`、`POST /api/chat/cancel`、`GET /api/chat/stream`、`GET /api/status`、`GET /api/settings` を使う
+- 同一オリジンで `POST /api/chat/input`、`POST /api/chat/cancel`、`POST /api/camera/capture`、`GET /api/chat/stream`、`GET /api/status`、`GET /api/settings`、`GET /captures/{capture_filename}` を使う
 - `src/otomekairo/web/static/` に置く HTML / CSS / JavaScript を返す
 
 <!-- Block: Browser UI Rules -->
@@ -109,8 +111,8 @@ flowchart LR
 - ログイン画面は持たず、起動直後にそのままチャット UI を表示する
 - 初期実装の見た目は `tmp/CocoroGhost/static/` に近いヘッダ、チャット欄、設定欄、ステータスバー構成にしてよい
 - `Mic` はブラウザの標準 `SpeechRecognition` を使って音声入力し、認識結果を `POST /api/chat/input` へ流す
+- `Cam` は `POST /api/camera/capture` で静止画を取得し、返った `image_url` をサムネイル表示してよい
 - `設定保存` は、初期実装では主要な一部設定だけを `POST /api/settings/overrides` へ流す
-- `Cam` は初期実装ではダミーでもよい
 - `browse` の初期実装では、UI は少なくとも `browse_queued` と `browse_completed` の `notice` を見分けられるようにしてよい
 - UI 側で永続ストレージを前提にしない
 - UI は `browser_chat` チャネル専用として扱う
@@ -343,6 +345,49 @@ flowchart LR
 ```
 
 - 成功時は `202 Accepted` を返す
+
+<!-- Block: Camera Capture -->
+## `POST /api/camera/capture`
+
+<!-- Block: Camera Capture Purpose -->
+### 役割
+
+- ブラウザから現在のカメラ静止画を 1 枚取得する
+- Web サーバは `pytapo` と `ffmpeg` を使って JPEG を生成し、`data/camera/` へ保存する
+- 応答では保存先の相対パスと、同一オリジンで読める `image_url` を返す
+
+<!-- Block: Camera Capture Request -->
+### 入力 JSON
+
+- リクエスト本文は不要である
+
+<!-- Block: Camera Capture Response -->
+### 成功応答
+
+```json
+{
+  "capture_id": "cap_...",
+  "image_path": "data/camera/cap_....jpg",
+  "image_url": "/captures/cap_....jpg",
+  "captured_at": 1760000000000
+}
+```
+
+- 成功時は `201 Created` を返す
+- `capture_id` は、不透明な capture 識別子である
+- `image_path` は、サーバ作業ディレクトリ基準の保存先相対パスである
+- `image_url` は、その静止画をブラウザが再取得するための同一オリジン URL である
+- カメラ接続設定が不足している場合は `409 Conflict` を返す
+- ストリーム接続や JPEG 生成に失敗した場合は `500 Internal Server Error` を返す
+
+<!-- Block: Camera Capture Asset -->
+## `GET /captures/{capture_filename}`
+
+<!-- Block: Camera Capture Asset Purpose -->
+### 役割
+
+- `POST /api/camera/capture` で保存した JPEG を同一オリジンで返す
+- ブラウザ UI は、この path をサムネイルと原寸表示の両方に使ってよい
 
 <!-- Block: Chat Stream -->
 ## `GET /api/chat/stream`

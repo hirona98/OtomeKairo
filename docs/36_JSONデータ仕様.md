@@ -1176,6 +1176,24 @@
 - `accepted` は `true` に固定する
 - `status` は `queued` に固定する
 
+<!-- Block: Camera Capture Response -->
+### `POST /api/camera/capture` の成功応答 JSON
+
+```json
+{
+  "capture_id": "cap_...",
+  "image_path": "data/camera/cap_....jpg",
+  "image_url": "/captures/cap_....jpg",
+  "captured_at": 1760000000000
+}
+```
+
+- 必須項目は `capture_id`、`image_path`、`image_url`、`captured_at` である
+- `capture_id` は、不透明な capture 識別子である
+- `image_path` は、サーバ作業ディレクトリ基準の保存先相対パスである
+- `image_url` は、同一オリジンで静止画を再取得する URL path である
+- `captured_at` は、静止画保存完了時点の UTC unix milliseconds である
+
 <!-- Block: Status Response -->
 ### `GET /api/status` の成功応答 JSON
 

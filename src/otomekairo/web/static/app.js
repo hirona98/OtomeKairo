@@ -10,6 +10,7 @@
   const cancelButton = document.getElementById("btn-cancel");
   const micButton = document.getElementById("btn-mic");
   const cameraButton = document.getElementById("btn-camera");
+  const attachments = document.getElementById("attachments");
   const settingsButton = document.getElementById("btn-settings");
   const settingsPanel = document.getElementById("settings-panel");
   const settingsDummyButton = document.getElementById("btn-settings-dummy");
@@ -70,7 +71,7 @@
       void handleMicClick();
     });
     cameraButton.addEventListener("click", () => {
-      appendNotice("camera_dummy", "カメラ UI はまだダミーです");
+      void handleCameraCapture();
     });
     window.addEventListener("beforeunload", stopStream);
   }
@@ -329,6 +330,26 @@
     }
   }
 
+  // Block: Camera capture
+  async function handleCameraCapture() {
+    cameraButton.disabled = true;
+    try {
+      const response = await fetch("/api/camera/capture", {
+        method: "POST",
+      });
+      const payload = await readJson(response);
+      if (!response.ok) {
+        throw new Error(readErrorMessage(payload));
+      }
+      appendCameraAttachment(payload);
+      appendNotice("camera_captured", "カメラ画像を取得しました");
+    } catch (error) {
+      appendError(`カメラ画像の取得に失敗しました: ${error.message}`);
+    } finally {
+      cameraButton.disabled = false;
+    }
+  }
+
   // Block: Snapshot refresh
   async function refreshSnapshots() {
     try {
@@ -499,6 +520,44 @@
     scrollToBottom();
   }
 
+  // Block: Camera attachment append
+  function appendCameraAttachment(payload) {
+    const imageUrl = payload && typeof payload.image_url === "string" ? payload.image_url.trim() : "";
+    if (!imageUrl) {
+      throw new Error("カメラ応答が不正です");
+    }
+    const captureId = payload && typeof payload.capture_id === "string" ? payload.capture_id.trim() : "";
+    const item = document.createElement("div");
+    item.className = "attachment";
+    if (captureId) {
+      item.dataset.captureId = captureId;
+    }
+
+    const thumbWrap = document.createElement("a");
+    thumbWrap.className = "attachment-thumb-wrap";
+    thumbWrap.href = imageUrl;
+    thumbWrap.target = "_blank";
+    thumbWrap.rel = "noreferrer";
+
+    const image = document.createElement("img");
+    image.className = "attachment-thumb";
+    image.src = imageUrl;
+    image.alt = captureId || "camera_capture";
+    thumbWrap.appendChild(image);
+
+    const removeButton = document.createElement("button");
+    removeButton.className = "attachment-remove";
+    removeButton.type = "button";
+    removeButton.setAttribute("aria-label", "画像を閉じる");
+    removeButton.textContent = "×";
+    removeButton.addEventListener("click", () => {
+      item.remove();
+    });
+
+    item.append(thumbWrap, removeButton);
+    attachments.appendChild(item);
+  }
+
   // Block: Runtime chip update
   function updateRuntimeChip(statusPayload) {
     const runtime = statusPayload.runtime || {};
@@ -591,7 +650,10 @@
     if (code === "cancel_requested") {
       return "停止";
     }
-    if (code === "settings_dummy" || code === "camera_dummy") {
+    if (code === "camera_captured") {
+      return "カメラ";
+    }
+    if (code === "settings_dummy") {
       return "ダミー";
     }
     return "通知";

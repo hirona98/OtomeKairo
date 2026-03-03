@@ -33,8 +33,9 @@
 - `src/otomekairo/boot/run_web.py`: `uvicorn` で Web サーバを起動し、既定では `0.0.0.0:8000` に bind する
 - `src/otomekairo/boot/run_runtime.py`: 人格ランタイムの常時ループを起動する
 - `src/otomekairo/boot/run_all.py`: Web サーバと人格ランタイムを同じ親プロセスで起動し、既存のランタイム lease が生きていればそれを再利用し、終了シグナル時に自分が起動した子プロセスだけを停止する
-- `src/otomekairo/web/app.py`: FastAPI アプリを構成し、API ルータ、最小ブラウザ UI (`GET /`)、例外処理を束ねる
-- `src/otomekairo/web/static/`: `tmp/CocoroGhost/static/` にかなり近い見た目の最小チャット UI を持ち、同一オリジンで `POST /api/chat/input` と `GET /api/chat/stream` を使い、`message` 到着時は `output.tts.enabled=true` ならブラウザの `SpeechSynthesis` で音声化し、`Mic` は標準 `SpeechRecognition` で音声入力し、設定パネルでは主要な一部設定を `POST /api/settings/overrides` へ保存できる
+- `src/otomekairo/web/app.py`: FastAPI アプリを構成し、API ルータ、静止画配信用の `/captures`、最小ブラウザ UI (`GET /`)、例外処理を束ねる
+- `src/otomekairo/web/camera_api.py`: `POST /api/camera/capture` でカメラ静止画を取得し、保存先パスと `image_url` を返す
+- `src/otomekairo/web/static/`: `tmp/CocoroGhost/static/` にかなり近い見た目の最小チャット UI を持ち、同一オリジンで `POST /api/chat/input`、`POST /api/camera/capture`、`GET /api/chat/stream` を使い、`message` 到着時は `output.tts.enabled=true` ならブラウザの `SpeechSynthesis` で音声化し、`Mic` は標準 `SpeechRecognition` で音声入力し、`Cam` は静止画をサムネイル表示し、設定パネルでは主要な一部設定を `POST /api/settings/overrides` へ保存できる
 - `src/otomekairo/gateway/cognition_client.py`: 認知処理の外部境界を表す抽象を定義する
 - `src/otomekairo/usecase/build_cognition_input.py`: `self_state` などの現在状態から最小の `cognition_input` を組み立て、`task_state` の進行中 / 外部待ちタスク、`sqlite-vec` で補強した直近の `summary` / `fact` 記憶、直近イベント列を `current_observation` と照合して絞り込み、`memory_bundle` として渡す
 - `src/otomekairo/usecase/run_cognition.py`: 認知クライアントが返す `cognition_result` を受け取り、`action_command` を使って `speak` は `token` / `message`、`notify` は `notice`、`look` は `pytapo` 経由のカメラ視点操作、`browse` は `waiting_external` の検索タスクとして実行し、`action_history` へ変換する
@@ -44,9 +45,12 @@
 - `src/otomekairo/gateway/search_client.py`: 外部検索の境界を表す抽象を定義する
 - `src/otomekairo/gateway/notification_client.py`: 外部通知の境界を表す抽象を定義する
 - `src/otomekairo/gateway/camera_controller.py`: カメラ視点操作の外部境界を定義する
+- `src/otomekairo/gateway/camera_sensor.py`: カメラ静止画取得の外部境界を定義する
 - `src/otomekairo/infra/duckduckgo_search_client.py`: DuckDuckGo Instant Answer API を使う最小の外部検索アダプタを持つ
 - `src/otomekairo/infra/line_notification_client.py`: `OTOMEKAIRO_LINE_CHANNEL_ACCESS_TOKEN` と `OTOMEKAIRO_LINE_TO_USER_ID` を使って LINE Messaging API の push を行う最小の通知アダプタを持つ
+- `src/otomekairo/infra/wifi_camera_common.py`: `pytapo` を使う Wi-Fi カメラ接続設定と共通クライアント生成をまとめる
 - `src/otomekairo/infra/wifi_camera_controller.py`: `OTOMEKAIRO_CAMERA_HOST` / `OTOMEKAIRO_CAMERA_USERNAME` / `OTOMEKAIRO_CAMERA_PASSWORD` を読み、`pytapo` 経由で `Tapo C220` などの視点操作を行う
+- `src/otomekairo/infra/wifi_camera_sensor.py`: `OTOMEKAIRO_CAMERA_CLOUD_PASSWORD` を使って `pytapo` のライブストリームから静止画を切り出し、`data/camera/` に保存する
 - `src/otomekairo/infra/sqlite_state_store.py`: `core_schema.sql` を読み込む DB 初期化と、`sqlite-vec` の `vec0` 仮想表初期化、状態参照・入力受付・設定反映、短周期確定時の `write_memory` enqueue、`revisions` 記録、`network_result` を伴う `browse` では `summary` に加えて `fact` の `memory_state` も作成し、`memory_state` と `event` を対象にした `refresh_preview` / `embedding_sync`、`searchable=0` へ落とす `quarantine_memory`、派生索引とジョブ履歴を掃除する `tidy_memory`、`memory_jobs` の再キュー / `dead_letter`、`ui_outbound_events` の保持窓削除を持つ
 - `src/otomekairo/runtime/main_loop.py`: `settings_overrides`、`pending_inputs`、`task_state(waiting_external)` を消費し、待機中も応答中も lease heartbeat を維持しながら、失敗時も `claimed` を終端状態へ確定し、`token` の即時追記、進行中 `cancel` の消費、`browse` の外部検索と `network_result` の再認知、`notify` の LINE push、短周期と長周期を交互に管理しつつ `runtime.long_cycle_min_interval_ms` で間隔制御したうえで、`write_memory` / `refresh_preview` / `embedding_sync` / `quarantine_memory` / `tidy_memory` の最小長周期処理までを行う
 - `src/otomekairo/schema/runtime_types.py`: ランタイムの共通データ形を `infra` から切り離して持つ
@@ -59,14 +63,16 @@
 1. リポジトリ直下で起動スクリプトを実行する  
    `./run_otomekairo.sh`
 2. ブラウザで `http://127.0.0.1:8000/` を開く
-3. テキスト入力、`Mic`、設定パネル、`browse` を含む応答経路を確認する
+3. テキスト入力、`Mic`、`Cam`、設定パネル、`browse` を含む応答経路を確認する
 
 - `LINE` 通知を使うときは、起動前に `OTOMEKAIRO_LINE_CHANNEL_ACCESS_TOKEN` と `OTOMEKAIRO_LINE_TO_USER_ID` を環境変数で渡す
 - `look` を使うときは、起動前に `OTOMEKAIRO_CAMERA_HOST` と `OTOMEKAIRO_CAMERA_USERNAME` と `OTOMEKAIRO_CAMERA_PASSWORD` を環境変数で渡す（Tapo アプリの「カメラのアカウント」を使う）
+- `Cam` で静止画を取るときは、追加で `OTOMEKAIRO_CAMERA_CLOUD_PASSWORD` を環境変数で渡す（Tapo アプリのクラウドアカウントのパスワード）
 - `LINE` を使わないときは、設定パネルで `integrations.line.enabled=false` のまま使う
 - `otomekairo` の console script を使う場合も、`./run_otomekairo.sh` と同じく Web とランタイムを同時に起動する
 - 既に別プロセスで人格ランタイムが稼働中なら、`./run_otomekairo.sh` はそのランタイムを再利用し、Web だけを追加起動する
 - 手動で分けて起動したいときは、`otomekairo-web` と `otomekairo-runtime` を別ターミナルで順に起動してよい
 - 既定の bind 先は `0.0.0.0:8000` だが、ブラウザからは `http://127.0.0.1:8000/` を開いてよい
 - `Mic` はブラウザ標準の `SpeechRecognition` がある環境だけで使える
+- `Cam` は `ffmpeg` が PATH にある環境だけで使える
 - `browse` は、UI 上では `検索タスク` と `検索結果` の通知を経てから最終応答へ進む
