@@ -8,7 +8,8 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from otomekairo import __version__
@@ -32,10 +33,14 @@ def create_app() -> FastAPI:
     store = SqliteStateStore(_default_db_path(), __version__)
     store.initialize()
     services = AppServices(store=store, default_settings=build_default_settings())
+    static_dir = _static_dir()
 
     app = FastAPI(title="OtomeKairo Settings Server", version=__version__)
     app.state.services = services
     app.state.last_stream_janitor_at = 0
+
+    # Block: Browser UI static files
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
     # Block: Request id middleware
     @app.middleware("http")
@@ -134,12 +139,22 @@ def create_app() -> FastAPI:
     app.include_router(build_chat_input_router(services))
     app.include_router(build_chat_stream_router(services))
 
+    # Block: Browser UI entrypoint
+    @app.get("/", include_in_schema=False)
+    async def get_browser_ui() -> FileResponse:
+        return FileResponse(static_dir / "index.html")
+
     return app
 
 
 # Block: Default database path
 def _default_db_path() -> Path:
     return Path(__file__).resolve().parents[3] / "data" / "core.sqlite3"
+
+
+# Block: Static asset path
+def _static_dir() -> Path:
+    return Path(__file__).resolve().parent / "static"
 
 
 # Block: Stream janitor

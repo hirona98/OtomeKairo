@@ -35,6 +35,7 @@
 - `memory_jobs` の payload 仕様を詰めるとき: `docs/33_記憶ジョブ仕様.md`
 - SQLite の保存設計を詰めるとき: `docs/34_SQLite論理スキーマ.md`
 - Web API 仕様を詰めるとき: `docs/35_WebAPI仕様.md`
+- ブラウザUIを直すとき: `src/otomekairo/web/static/` と `docs/35_WebAPI仕様.md`
 - JSON データ仕様を詰めるとき: `docs/36_JSONデータ仕様.md`
 - 起動初期化を詰めるとき: `docs/37_起動初期化仕様.md`
 - 入力ストリーム運用を詰めるとき: `docs/38_入力ストリーム運用仕様.md`
