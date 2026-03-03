@@ -54,6 +54,7 @@ def build_cognition_input(
         "attention_snapshot": state_snapshot.attention_state,
         "memory_bundle": _build_memory_bundle(
             memory_snapshot=state_snapshot.memory_snapshot,
+            current_observation=current_observation,
             resolved_at=resolved_at,
         ),
         "policy_snapshot": {
@@ -162,12 +163,28 @@ def _task_snapshot_entry_for_cognition(
 def _build_memory_bundle(
     *,
     memory_snapshot: dict[str, Any],
+    current_observation: dict[str, Any],
     resolved_at: int,
 ) -> dict[str, Any]:
+    selected_working_memory = _select_memory_entries(
+        memory_entries=memory_snapshot["working_memory_items"],
+        current_observation=current_observation,
+        limit=3,
+    )
+    selected_semantic_memory = _select_memory_entries(
+        memory_entries=memory_snapshot["semantic_items"],
+        current_observation=current_observation,
+        limit=3,
+    )
+    selected_recent_events = _select_recent_events(
+        event_entries=memory_snapshot["recent_event_window"],
+        current_observation=current_observation,
+        limit=5,
+    )
     return {
         "working_memory_items": [
             _memory_entry_for_cognition(memory_entry, resolved_at=resolved_at)
-            for memory_entry in memory_snapshot["working_memory_items"]
+            for memory_entry in selected_working_memory
         ],
         "episodic_items": [
             _memory_entry_for_cognition(memory_entry, resolved_at=resolved_at)
@@ -175,7 +192,7 @@ def _build_memory_bundle(
         ],
         "semantic_items": [
             _memory_entry_for_cognition(memory_entry, resolved_at=resolved_at)
-            for memory_entry in memory_snapshot["semantic_items"]
+            for memory_entry in selected_semantic_memory
         ],
         "affective_items": [
             _memory_entry_for_cognition(memory_entry, resolved_at=resolved_at)
@@ -191,9 +208,157 @@ def _build_memory_bundle(
         ],
         "recent_event_window": [
             _recent_event_for_cognition(event_entry, resolved_at=resolved_at)
-            for event_entry in memory_snapshot["recent_event_window"]
+            for event_entry in selected_recent_events
         ],
     }
+
+
+def _select_memory_entries(
+    *,
+    memory_entries: list[dict[str, Any]],
+    current_observation: dict[str, Any],
+    limit: int,
+) -> list[dict[str, Any]]:
+    if limit <= 0:
+        raise ValueError("memory selection limit must be positive")
+    scored_entries: list[tuple[float, int, dict[str, Any]]] = []
+    for memory_entry in memory_entries:
+        score = _memory_relevance_score(
+            memory_entry=memory_entry,
+            current_observation=current_observation,
+        )
+        if score <= 0.0:
+            continue
+        scored_entries.append(
+            (
+                score,
+                int(memory_entry["updated_at"]),
+                memory_entry,
+            )
+        )
+    scored_entries.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    return [
+        memory_entry
+        for _, _, memory_entry in scored_entries[:limit]
+    ]
+
+
+def _select_recent_events(
+    *,
+    event_entries: list[dict[str, Any]],
+    current_observation: dict[str, Any],
+    limit: int,
+) -> list[dict[str, Any]]:
+    if limit <= 0:
+        raise ValueError("recent event selection limit must be positive")
+    scored_entries: list[tuple[float, int, dict[str, Any]]] = []
+    for event_entry in event_entries:
+        score = _event_relevance_score(
+            event_entry=event_entry,
+            current_observation=current_observation,
+        )
+        if score <= 0.0:
+            continue
+        scored_entries.append(
+            (
+                score,
+                int(event_entry["created_at"]),
+                event_entry,
+            )
+        )
+    scored_entries.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    return [
+        event_entry
+        for _, _, event_entry in scored_entries[:limit]
+    ]
+
+
+def _memory_relevance_score(
+    *,
+    memory_entry: dict[str, Any],
+    current_observation: dict[str, Any],
+) -> float:
+    body_text = memory_entry["body_text"]
+    if not isinstance(body_text, str) or not body_text:
+        raise ValueError("memory entry body_text must be non-empty string")
+    payload = memory_entry["payload"]
+    if not isinstance(payload, dict):
+        raise ValueError("memory entry payload must be object")
+    score = 0.0
+    for text_hint in _observation_text_hints(current_observation):
+        if text_hint in body_text:
+            score += 1.0
+    query_hint = _observation_query_hint(current_observation)
+    if query_hint is not None:
+        payload_query = payload.get("query")
+        if payload_query == query_hint:
+            score += 1.5
+    source_task_id = current_observation.get("source_task_id")
+    if isinstance(source_task_id, str) and source_task_id:
+        payload_source_task_id = payload.get("source_task_id")
+        if payload_source_task_id == source_task_id:
+            score += 2.0
+    score += min(1.0, float(memory_entry["importance"])) * 0.2
+    score += min(1.0, float(memory_entry["memory_strength"])) * 0.2
+    return score
+
+
+def _event_relevance_score(
+    *,
+    event_entry: dict[str, Any],
+    current_observation: dict[str, Any],
+) -> float:
+    summary_text = event_entry["summary_text"]
+    if not isinstance(summary_text, str) or not summary_text:
+        raise ValueError("recent event summary_text must be non-empty string")
+    score = 0.0
+    for text_hint in _observation_text_hints(current_observation):
+        if text_hint in summary_text:
+            score += 1.0
+    if current_observation["input_kind"] == "network_result":
+        if event_entry["source"] == "network_result":
+            score += 1.0
+    return score
+
+
+def _observation_text_hints(current_observation: dict[str, Any]) -> list[str]:
+    observation_text = current_observation["observation_text"]
+    if not isinstance(observation_text, str) or not observation_text:
+        raise ValueError("current_observation.observation_text must be non-empty string")
+    hints: list[str] = [observation_text]
+    for token in _text_hint_tokens(observation_text):
+        if token not in hints:
+            hints.append(token)
+    query_hint = _observation_query_hint(current_observation)
+    if query_hint is not None and query_hint not in hints:
+        hints.append(query_hint)
+    return hints
+
+
+def _observation_query_hint(current_observation: dict[str, Any]) -> str | None:
+    if current_observation["input_kind"] == "network_result":
+        query = current_observation.get("query")
+        if not isinstance(query, str) or not query:
+            raise ValueError("network_result query must be non-empty string")
+        return query
+    text = current_observation.get("text")
+    if not isinstance(text, str) or not text:
+        raise ValueError("chat_message text must be non-empty string")
+    return None
+
+
+def _text_hint_tokens(text: str) -> list[str]:
+    normalized_text = text
+    for separator in ("　", "\n", "\t", ",", "、", ".", "。", "!", "！", "?", "？", ":", "：", ";", "；", "(", ")", "（", "）", "[", "]", "「", "」", "『", "』", "/", "／"):
+        normalized_text = normalized_text.replace(separator, " ")
+    tokens: list[str] = []
+    for raw_token in normalized_text.split(" "):
+        token = raw_token.strip()
+        if len(token) < 2:
+            continue
+        if token not in tokens:
+            tokens.append(token)
+    return tokens
 
 
 def _memory_entry_for_cognition(
