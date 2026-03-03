@@ -805,7 +805,7 @@
 ```
 
 - 必須項目は `status_code`、`label` である
-- `status_code` は、少なくとも `idle`、`thinking`、`speaking`、`waiting_external` を区別する
+- `status_code` は、少なくとも `idle`、`thinking`、`speaking`、`waiting_external`、`browsing`、`processing_external_result` を区別する
 - `cycle_id` は任意で、特定サイクルに紐づく更新だけに付ける
 
 <!-- Block: UI Notice -->
@@ -820,6 +820,7 @@
 
 - 必須項目は `notice_code`、`text` である
 - `notice_code` は、UI 側で分類できる固定語彙 `string` にする
+- 初期実装では、`browse_queued`、`browse_completed`、`settings_saved`、`settings_no_changes`、`cancel_requested` を使ってよい
 
 <!-- Block: UI Error -->
 #### `event_type = error`

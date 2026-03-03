@@ -62,3 +62,5 @@
 - `LINE` 通知を使うときは、起動前に `OTOMEKAIRO_LINE_CHANNEL_ACCESS_TOKEN` と `OTOMEKAIRO_LINE_TO_USER_ID` を環境変数で渡す
 - `LINE` を使わないときは、設定パネルで `integrations.line.enabled=false` のまま使う
 - `otomekairo-web` / `otomekairo-runtime` の console script を使う場合も、起動順は同じでよい
+- `Mic` はブラウザ標準の `SpeechRecognition` がある環境だけで使える
+- `browse` は、UI 上では `検索タスク` と `検索結果` の通知を経てから最終応答へ進む
