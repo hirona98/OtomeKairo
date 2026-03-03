@@ -34,7 +34,7 @@
 - `src/otomekairo/boot/run_runtime.py`: 人格ランタイムの常時ループを起動する
 - `src/otomekairo/boot/run_all.py`: Web サーバと人格ランタイムを同じ親プロセスで起動し、既存のランタイム lease が生きていればそれを再利用し、終了シグナル時に自分が起動した子プロセスだけを停止する
 - `src/otomekairo/web/app.py`: FastAPI アプリを構成し、API ルータ、静止画配信用の `/captures`、最小ブラウザ UI (`GET /`)、例外処理を束ねる
-- `src/otomekairo/web/camera_api.py`: `POST /api/camera/capture` でカメラ静止画を取得し、保存先パスと `image_url` を返す
+- `src/otomekairo/web/camera_api.py`: `POST /api/camera/capture` でカメラ静止画を取得し、`POST /api/camera/observe` でその画像を自発観測入力として認知キューへ積む
 - `src/otomekairo/web/static/`: `tmp/CocoroGhost/static/` にかなり近い見た目の最小チャット UI を持ち、同一オリジンで `POST /api/chat/input`、`POST /api/camera/capture`、`GET /api/chat/stream` を使い、`message` 到着時は `output.tts.enabled=true` ならブラウザの `SpeechSynthesis` で音声化し、`Mic` は標準 `SpeechRecognition` で音声入力し、`Cam` は静止画をサムネイル表示して次のチャット入力へ添付し、設定パネルでは主要な一部設定を `POST /api/settings/overrides` へ保存できる
 - `src/otomekairo/gateway/cognition_client.py`: 認知処理の外部境界を表す抽象を定義する
 - `src/otomekairo/usecase/build_cognition_input.py`: `self_state` などの現在状態から最小の `cognition_input` を組み立て、`task_state` の進行中 / 外部待ちタスク、`sqlite-vec` で補強した直近の `summary` / `fact` 記憶、直近イベント列を `current_observation` と照合して絞り込み、`memory_bundle` として渡す
@@ -69,6 +69,7 @@
 - `look` を使うときは、起動前に `OTOMEKAIRO_CAMERA_HOST` と `OTOMEKAIRO_CAMERA_USERNAME` と `OTOMEKAIRO_CAMERA_PASSWORD` を環境変数で渡す（Tapo アプリの「カメラのアカウント」を使う）
 - `Cam` で静止画を取るときは、追加で `OTOMEKAIRO_CAMERA_CLOUD_PASSWORD` を環境変数で渡す（Tapo アプリのクラウドアカウントのパスワード）
 - `Cam` で撮った画像は、次の `POST /api/chat/input` に添付され、テキストなしでも送信できる
+- 自発観測を起こしたいときは、`POST /api/camera/observe` で撮影と認知キュー投入を一度に行える
 - `LINE` を使わないときは、設定パネルで `integrations.line.enabled=false` のまま使う
 - `otomekairo` の console script を使う場合も、`./run_otomekairo.sh` と同じく Web とランタイムを同時に起動する
 - 既に別プロセスで人格ランタイムが稼働中なら、`./run_otomekairo.sh` はそのランタイムを再利用し、Web だけを追加起動する

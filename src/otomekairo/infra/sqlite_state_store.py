@@ -668,8 +668,6 @@ class SqliteStateStore:
             raise StoreValidationError("text is too long")
         if not stripped_text and not attachments:
             raise StoreValidationError("text or attachments must be provided")
-        input_id = _opaque_id("inp")
-        now_ms = _now_ms()
         payload: dict[str, Any] = {"input_kind": "chat_message"}
         if stripped_text:
             payload["text"] = stripped_text
@@ -677,6 +675,73 @@ class SqliteStateStore:
             payload["attachments"] = attachments
         if client_message_id:
             payload["client_message_id"] = client_message_id
+        return self._enqueue_pending_chat_message(
+            source="web_input",
+            client_message_id=client_message_id,
+            payload=payload,
+            priority=100,
+        )
+
+    # Block: Camera observation write
+    def enqueue_camera_observation(
+        self,
+        *,
+        capture_id: str,
+        image_path: str,
+        image_url: str,
+        captured_at: int,
+    ) -> dict[str, Any]:
+        if not isinstance(capture_id, str) or not capture_id:
+            raise StoreValidationError("capture_id must be non-empty string")
+        if not isinstance(image_path, str) or not image_path:
+            raise StoreValidationError("image_path must be non-empty string")
+        if not isinstance(image_url, str) or not image_url:
+            raise StoreValidationError("image_url must be non-empty string")
+        if isinstance(captured_at, bool) or not isinstance(captured_at, int):
+            raise StoreValidationError("captured_at must be integer")
+        payload = {
+            "input_kind": "chat_message",
+            "attachments": [
+                {
+                    "attachment_kind": "camera_still_image",
+                    "media_kind": "image",
+                    "capture_id": capture_id,
+                    "mime_type": "image/jpeg",
+                    "storage_path": image_path,
+                    "content_url": image_url,
+                    "captured_at": captured_at,
+                }
+            ],
+        }
+        enqueue_result = self._enqueue_pending_chat_message(
+            source="self_initiated",
+            client_message_id=None,
+            payload=payload,
+            priority=80,
+        )
+        return {
+            **enqueue_result,
+            "capture_id": capture_id,
+            "image_path": image_path,
+            "image_url": image_url,
+            "captured_at": captured_at,
+        }
+
+    # Block: Pending chat message write
+    def _enqueue_pending_chat_message(
+        self,
+        *,
+        source: str,
+        client_message_id: str | None,
+        payload: dict[str, Any],
+        priority: int,
+    ) -> dict[str, Any]:
+        if not isinstance(source, str) or not source:
+            raise StoreValidationError("source must be non-empty string")
+        if isinstance(priority, bool) or not isinstance(priority, int):
+            raise StoreValidationError("priority must be integer")
+        input_id = _opaque_id("inp")
+        now_ms = _now_ms()
         try:
             with self._connect() as connection:
                 connection.execute(
@@ -691,14 +756,15 @@ class SqliteStateStore:
                         priority,
                         status
                     )
-                    VALUES (?, 'web_input', 'browser_chat', ?, ?, ?, ?, 'queued')
+                    VALUES (?, ?, 'browser_chat', ?, ?, ?, ?, 'queued')
                     """,
                     (
                         input_id,
+                        source,
                         client_message_id,
                         json.dumps(payload, ensure_ascii=True, separators=(",", ":")),
                         now_ms,
-                        100,
+                        priority,
                     ),
                 )
         except sqlite3.IntegrityError as error:

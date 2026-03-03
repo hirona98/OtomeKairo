@@ -1216,6 +1216,29 @@
 - `image_url` は、同一オリジンで静止画を再取得する URL path である
 - `captured_at` は、静止画保存完了時点の UTC unix milliseconds である
 
+<!-- Block: Camera Observe Response -->
+### `POST /api/camera/observe` の成功応答 JSON
+
+```json
+{
+  "accepted": true,
+  "input_id": "inp_...",
+  "status": "queued",
+  "channel": "browser_chat",
+  "capture_id": "cap_...",
+  "image_path": "data/camera/cap_....jpg",
+  "image_url": "/captures/cap_....jpg",
+  "captured_at": 1760000000000
+}
+```
+
+- 必須項目は `accepted`、`input_id`、`status`、`channel`、`capture_id`、`image_path`、`image_url`、`captured_at` である
+- `accepted` は `true` に固定する
+- `status` は `queued` に固定する
+- `channel` は `browser_chat` に固定する
+- `input_id` は、生成した自発観測入力の ID である
+- `capture_id`、`image_path`、`image_url`、`captured_at` は、同時に取得した静止画の情報である
+
 <!-- Block: Status Response -->
 ### `GET /api/status` の成功応答 JSON
 

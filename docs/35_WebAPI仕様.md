@@ -81,6 +81,7 @@
 - `POST /api/chat/input`
 - `POST /api/chat/cancel`
 - `POST /api/camera/capture`
+- `POST /api/camera/observe`
 - `GET /api/chat/stream`
 - `GET /captures/{capture_filename}`
 
@@ -89,7 +90,7 @@
 ```mermaid
 flowchart LR
     browser["ブラウザ"] -->|"GET /\nGET /api/health\nGET /api/status\nGET /api/settings\nGET /captures/{capture_filename}"| web["設定 Web サーバ"]
-    browser -->|"POST /api/chat/input\nPOST /api/chat/cancel\nPOST /api/settings/overrides\nPOST /api/camera/capture"| web
+    browser -->|"POST /api/chat/input\nPOST /api/chat/cancel\nPOST /api/settings/overrides\nPOST /api/camera/capture\nPOST /api/camera/observe"| web
     web <-->|read / write| db["SQLite"]
     runtime["人格ランタイム"] -->|"append ui_outbound_events"| db
     web -->|"SSE: GET /api/chat/stream"| browser
@@ -385,6 +386,45 @@ flowchart LR
 - `capture_id` は、不透明な capture 識別子である
 - `image_path` は、サーバ作業ディレクトリ基準の保存先相対パスである
 - `image_url` は、その静止画をブラウザが再取得するための同一オリジン URL である
+- カメラ接続設定が不足している場合は `409 Conflict` を返す
+- ストリーム接続や JPEG 生成に失敗した場合は `500 Internal Server Error` を返す
+
+<!-- Block: Camera Observe -->
+## `POST /api/camera/observe`
+
+<!-- Block: Camera Observe Purpose -->
+### 役割
+
+- 現在のカメラ静止画を 1 枚取得し、そのまま自発観測入力として `pending_inputs` に積む
+- Web サーバは `source=self_initiated`、`input_kind=chat_message`、`camera_still_image` 添付 1 件で認知待ち入力を作る
+- 返した時点では応答本文は生成せず、後続のランタイム短周期で認知処理する
+
+<!-- Block: Camera Observe Request -->
+### 入力 JSON
+
+- リクエスト本文は不要である
+
+<!-- Block: Camera Observe Response -->
+### 成功応答
+
+```json
+{
+  "accepted": true,
+  "input_id": "inp_...",
+  "status": "queued",
+  "channel": "browser_chat",
+  "capture_id": "cap_...",
+  "image_path": "data/camera/cap_....jpg",
+  "image_url": "/captures/cap_....jpg",
+  "captured_at": 1760000000000
+}
+```
+
+- 成功時は `202 Accepted` を返す
+- `input_id` は、生成された自発観測入力の ID である
+- `status` は `queued` に固定する
+- `channel` は `browser_chat` に固定する
+- `capture_id`、`image_path`、`image_url`、`captured_at` は、同時に取得した静止画の情報である
 - カメラ接続設定が不足している場合は `409 Conflict` を返す
 - ストリーム接続や JPEG 生成に失敗した場合は `500 Internal Server Error` を返す
 
