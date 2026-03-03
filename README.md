@@ -21,6 +21,7 @@
 - 設定キー運用仕様: `docs/39_設定キー運用仕様.md`
 - 人格変化仕様: `docs/40_人格変化仕様.md`
 - 人格選択仕様: `docs/41_人格選択仕様.md`
+- 設定UI仕様: `docs/42_設定UI仕様.md`
 - 設定既定値: `config/default_settings.json`
 - 初期 SQL 実装: `sql/core_schema.sql`
 - 参考メモ: `docs/note/記憶設計に関する先行研究のメモ.md`

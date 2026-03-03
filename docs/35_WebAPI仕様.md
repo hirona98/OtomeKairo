@@ -12,6 +12,7 @@
 - 起動前の seed 前提は `docs/37_起動初期化仕様.md` を見る
 - 入力重複、`cancel`、`SSE` 保持運用は `docs/38_入力ストリーム運用仕様.md` を見る
 - 設定キー、型制約、`apply_scope` は `docs/39_設定キー運用仕様.md` を見る
+- 設定UIの目標となる編集モデルと専用 API は `docs/42_設定UI仕様.md` を見る
 - API の path、HTTP method、各エンドポイントの役割、`SSE` の接続方式で迷ったら、このドキュメントを正本として扱う
 
 <!-- Block: Scope -->
@@ -211,7 +212,7 @@ flowchart LR
 - `effective_settings` は、UI で編集対象にする設定だけを、`docs/39_設定キー運用仕様.md` と同じドット区切りキーで返す
 - `effective_settings` は、`config/default_settings.json` の既定値に対して、`runtime_settings.values_json` を上書きした現在有効値を返す
 - `apply_scope="next_boot"` で `applied` 済みの設定は、次回ランタイム起動で materialize されるまで `effective_settings` に即時反映しない
-- 秘密情報は返さない
+- `GET /api/settings` は UI の要約表示用なので、秘密情報を含めてもよいが、初期実装では必要な項目だけ返せばよい
 
 <!-- Block: Settings Post -->
 ## `POST /api/settings/overrides`
