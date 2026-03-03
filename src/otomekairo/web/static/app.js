@@ -3,6 +3,7 @@
 
   // Block: DOM references
   const chatScroll = document.getElementById("chat-scroll");
+  const chatPanel = document.getElementById("chat-panel");
   const chatForm = document.getElementById("chat-form");
   const chatInput = document.getElementById("chat-input");
   const sendButton = document.getElementById("btn-send");
@@ -11,6 +12,7 @@
   const cameraButton = document.getElementById("btn-camera");
   const settingsButton = document.getElementById("btn-settings");
   const settingsPanel = document.getElementById("settings-panel");
+  const settingsDummyButton = document.getElementById("btn-settings-dummy");
   const settingsReloadButton = document.getElementById("btn-settings-reload");
   const settingsSaveButton = document.getElementById("btn-settings-save");
   const settingsCloseButton = document.getElementById("btn-settings-close");
@@ -35,6 +37,7 @@
   // Block: Startup
   function start() {
     installEventHandlers();
+    updateSendEnabledState();
     connectStream();
     void refreshSnapshots();
     statusTimerId = window.setInterval(() => {
@@ -45,6 +48,8 @@
   // Block: Event handlers
   function installEventHandlers() {
     chatForm.addEventListener("submit", handleChatSubmit);
+    chatInput.addEventListener("input", handleComposerInput);
+    chatInput.addEventListener("keydown", handleComposerKeyDown);
     cancelButton.addEventListener("click", handleCancel);
     settingsButton.addEventListener("click", () => {
       void openSettingsPanel();
@@ -56,6 +61,11 @@
     settingsSaveButton.addEventListener("click", () => {
       void handleSettingsSave();
     });
+    if (settingsDummyButton !== null) {
+      settingsDummyButton.addEventListener("click", () => {
+        appendNotice("settings_dummy", "このボタンはまだダミーです");
+      });
+    }
     micButton.addEventListener("click", () => {
       void handleMicClick();
     });
@@ -63,6 +73,24 @@
       appendNotice("camera_dummy", "カメラ UI はまだダミーです");
     });
     window.addEventListener("beforeunload", stopStream);
+  }
+
+  // Block: Composer input
+  function handleComposerInput() {
+    autoResizeComposer();
+    updateSendEnabledState();
+  }
+
+  // Block: Composer keydown
+  function handleComposerKeyDown(event) {
+    if (event.key !== "Enter" || event.shiftKey) {
+      return;
+    }
+    event.preventDefault();
+    if (sendButton.disabled) {
+      return;
+    }
+    chatForm.requestSubmit();
   }
 
   // Block: Stream connect
@@ -132,6 +160,8 @@
     try {
       await submitChatText(text);
       chatInput.value = "";
+      autoResizeComposer();
+      updateSendEnabledState();
       chatInput.focus();
     } catch (error) {
       appendError(`送信に失敗しました: ${error.message}`);
@@ -164,6 +194,8 @@
 
   // Block: Settings open
   async function openSettingsPanel() {
+    chatPanel.classList.add("hidden");
+    chatForm.classList.add("hidden");
     settingsPanel.classList.remove("hidden");
     await refreshSnapshots();
     try {
@@ -176,6 +208,8 @@
   // Block: Settings close
   function closeSettingsPanel() {
     settingsPanel.classList.add("hidden");
+    chatPanel.classList.remove("hidden");
+    chatForm.classList.remove("hidden");
   }
 
   // Block: Settings reload
@@ -287,6 +321,8 @@
     try {
       await submitChatText(transcript);
       chatInput.value = "";
+      autoResizeComposer();
+      updateSendEnabledState();
       chatInput.focus();
     } catch (error) {
       appendError(`音声入力の送信に失敗しました: ${error.message}`);
@@ -376,9 +412,9 @@
     } else {
       const bubble = messageNode.querySelector(".bubble");
       bubble.textContent = text;
-      bubble.classList.remove("is-draft");
-      const meta = messageNode.querySelector(".meta");
-      meta.textContent = buildMetaLabel(String(payload.role || "assistant"));
+      const label = messageNode.querySelector(".bubble-time");
+      label.textContent = buildMetaLabel(String(payload.role || "assistant"));
+      label.classList.remove("empty");
       draftMessages.delete(messageId);
     }
     speakMessageText(text);
@@ -399,24 +435,28 @@
 
   // Block: Message append
   function appendMessage({ role, text, messageId, isDraft }) {
+    const rowRole = role === "user" ? "user" : "ai";
     const row = document.createElement("div");
-    row.className = `message-row ${role}`;
+    row.className = `bubble-row ${rowRole}`;
     if (messageId) {
       row.dataset.messageId = messageId;
     }
 
-    const bubble = document.createElement("div");
-    bubble.className = "bubble";
-    if (isDraft) {
-      bubble.classList.add("is-draft");
-    }
-    bubble.textContent = text;
-
     const meta = document.createElement("div");
-    meta.className = "meta";
-    meta.textContent = buildMetaLabel(role, isDraft);
+    meta.className = "bubble-time";
+    if (isDraft) {
+      meta.classList.add("empty");
+    }
+    meta.textContent = isDraft ? "" : buildMetaLabel(role, isDraft);
 
-    row.append(meta, bubble);
+    const bubble = document.createElement("div");
+    bubble.className = `bubble ${rowRole}`;
+    bubble.textContent = text;
+    if (rowRole === "user") {
+      row.append(meta, bubble);
+    } else {
+      row.append(bubble, meta);
+    }
     chatScroll.appendChild(row);
     scrollToBottom();
     return row;
@@ -425,18 +465,18 @@
   // Block: Notice append
   function appendNotice(code, text) {
     const row = document.createElement("div");
-    row.className = "message-row notice";
+    row.className = "bubble-row ai";
     row.dataset.noticeCode = String(code);
 
     const meta = document.createElement("div");
-    meta.className = "meta";
+    meta.className = "bubble-time";
     meta.textContent = buildNoticeMetaLabel(String(code));
 
     const bubble = document.createElement("div");
-    bubble.className = "bubble";
+    bubble.className = "bubble ai";
     bubble.textContent = text;
 
-    row.append(meta, bubble);
+    row.append(bubble, meta);
     chatScroll.appendChild(row);
     scrollToBottom();
   }
@@ -444,17 +484,17 @@
   // Block: Error append
   function appendError(text) {
     const row = document.createElement("div");
-    row.className = "message-row error";
-
-    const bubble = document.createElement("div");
-    bubble.className = "bubble";
-    bubble.textContent = text;
+    row.className = "bubble-row ai";
 
     const meta = document.createElement("div");
-    meta.className = "meta";
+    meta.className = "bubble-time";
     meta.textContent = "エラー";
 
-    row.append(meta, bubble);
+    const bubble = document.createElement("div");
+    bubble.className = "bubble ai";
+    bubble.textContent = text;
+
+    row.append(bubble, meta);
     chatScroll.appendChild(row);
     scrollToBottom();
   }
@@ -551,6 +591,9 @@
     if (code === "cancel_requested") {
       return "停止";
     }
+    if (code === "settings_dummy" || code === "camera_dummy") {
+      return "ダミー";
+    }
     return "通知";
   }
 
@@ -643,7 +686,18 @@
 
   // Block: Mic state
   function setMicListeningState(isListening) {
-    micButton.textContent = isListening ? "停止" : "Mic";
+    micButton.classList.toggle("listening", isListening);
+  }
+
+  // Block: Composer resize
+  function autoResizeComposer() {
+    chatInput.style.height = "auto";
+    chatInput.style.height = `${Math.min(chatInput.scrollHeight, 120)}px`;
+  }
+
+  // Block: Send state
+  function updateSendEnabledState() {
+    sendButton.disabled = chatInput.value.trim() === "";
   }
 
   // Block: Browser speech

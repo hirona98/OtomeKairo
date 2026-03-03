@@ -107,6 +107,7 @@ flowchart LR
 ### 初期実装で固定すること
 
 - ログイン画面は持たず、起動直後にそのままチャット UI を表示する
+- 初期実装の見た目は `tmp/CocoroGhost/static/` に近いヘッダ、チャット欄、設定欄、ステータスバー構成にしてよい
 - `Mic` はブラウザの標準 `SpeechRecognition` を使って音声入力し、認識結果を `POST /api/chat/input` へ流す
 - `設定保存` は、初期実装では主要な一部設定だけを `POST /api/settings/overrides` へ流す
 - `Cam` は初期実装ではダミーでもよい

@@ -144,6 +144,11 @@ def create_app() -> FastAPI:
     async def get_browser_ui() -> FileResponse:
         return FileResponse(static_dir / "index.html")
 
+    # Block: Browser favicon
+    @app.get("/favicon.ico", include_in_schema=False)
+    async def get_browser_favicon() -> FileResponse:
+        return FileResponse(static_dir / "favicon.ico")
+
     return app
 
 

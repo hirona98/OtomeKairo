@@ -1,21 +1,39 @@
-:root {
-  /* Block: Color palette */
-  --bg: #f4f7fb;
-  --panel: #ffffff;
-  --line: #d4dceb;
-  --text: #142033;
-  --muted: #55657f;
-  --brand: #3f6fc6;
-  --brand-strong: #2f59a8;
-  --brand-soft: #d9e5fb;
-  --danger: #c73b3b;
-  --danger-soft: #fce5e5;
-  --shadow: 0 10px 24px rgba(31, 55, 96, 0.08);
+/*
+  CocoroGhost Web UI
+  - CocoroUI.png 互換レイアウト（ゼロベース）
 
-  /* Block: Layout tokens */
-  --radius: 14px;
-  --radius-small: 10px;
-  --font: "Noto Sans JP", "Hiragino Sans", "Yu Gothic UI", system-ui, sans-serif;
+  方針:
+  - 色は CocoroUI.png の雰囲気（青ヘッダ / 白基調 / 淡い青のAIバブル）
+  - 余計な装飾は入れない（シンプル）
+  - レイアウト優先（デスクトップ/スマホ両対応）
+*/
+
+:root {
+  /* --- Palette --- */
+  /* NOTE: 一番外側の“ベース”は出さない（全面フラット）。 */
+  --bg: #ffffff;
+  --panel: #ffffff;
+  --border: #cfd5e3;
+  --text: #0f172a;
+  --muted: #475569;
+  --header: #3f6fc6;
+  --header-text: #ffffff;
+  --danger: #d92d20;
+
+  /* --- Chat bubbles --- */
+  --bubble-user: #3f6fc6;
+  --bubble-user-text: #ffffff;
+  --bubble-ai: #c9d9f7;
+  --bubble-ai-text: #0f172a;
+
+  /* --- Layout --- */
+  /* NOTE: 外枠で中央寄せしないため、幅制限は使わない。 */
+  --app-max-width: 100%;
+  --radius: 8px;
+  --shadow: 0 2px 10px rgba(15, 23, 42, 0.08);
+
+  --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", "Hiragino Sans",
+    "Yu Gothic UI", sans-serif;
 }
 
 * {
@@ -28,371 +46,891 @@ body {
 }
 
 body {
-  /* Block: Base page */
   margin: 0;
   font-family: var(--font);
   color: var(--text);
-  background:
-    radial-gradient(circle at top right, rgba(63, 111, 198, 0.14), transparent 28%),
-    linear-gradient(180deg, #eef3fb 0%, #f7f9fd 100%);
+  background: var(--bg);
 }
 
-.app-shell {
-  /* Block: App shell */
-  min-height: 100dvh;
+/* --- App frame --- */
+.app {
+  /* --- Mobile keyboard対応 ---
+     iOS Safari などでは、キーボード表示中に layout viewport が縮まず、
+     画面下部（入力欄）が隠れることがある。
+     JS 側で --app-height を visualViewport.height に追従させる。 */
+  height: var(--app-height, 100dvh);
   display: grid;
-  grid-template-rows: auto auto 1fr auto;
+  grid-template-rows: auto 1fr auto auto;
 }
 
+/* --- Header (blue bar) --- */
 .topbar {
-  /* Block: Top bar */
+  height: 56px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 16px 18px;
-  color: #ffffff;
-  background: linear-gradient(135deg, var(--brand) 0%, #5583d8 100%);
-  box-shadow: 0 8px 20px rgba(63, 111, 198, 0.22);
+  padding: 0 14px;
+  background: var(--header);
+  color: var(--header-text);
 }
 
 .topbar-title {
   font-size: 22px;
   font-weight: 700;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.2px;
 }
 
-.topbar-actions {
+.topbar-right {
   display: flex;
-  gap: 8px;
+  gap: 10px;
+  align-items: center;
 }
 
-.icon-button {
-  /* Block: Top bar button */
-  min-width: 52px;
-  height: 38px;
-  padding: 0 12px;
+.icon-btn {
+  width: 36px;
+  height: 36px;
+  padding: 0;
   border: 0;
-  border-radius: 999px;
-  color: #ffffff;
-  background: rgba(255, 255, 255, 0.16);
-  font: inherit;
-  font-size: 13px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.icon-button:hover {
-  background: rgba(255, 255, 255, 0.24);
-}
-
-.status-strip {
-  /* Block: Status strip */
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 12px 16px 0;
-}
-
-.status-chip {
-  min-height: 34px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.92);
   display: inline-flex;
   align-items: center;
-  padding: 0 12px;
-  border-radius: 999px;
-  background: rgba(63, 111, 198, 0.12);
-  color: var(--brand-strong);
-  font-size: 13px;
-  font-weight: 700;
+  justify-content: center;
+  border-radius: 6px;
 }
 
-.status-chip.secondary {
-  background: rgba(20, 32, 51, 0.08);
-  color: var(--muted);
+@media (hover: hover) and (pointer: fine) {
+  .icon-btn:hover {
+    background: rgba(255, 255, 255, 0.14);
+  }
 }
 
-.main-layout {
-  /* Block: Main area */
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 14px;
-  padding: 14px 16px 16px;
-  min-height: 0;
+.icon-btn.listening {
+  background: rgba(255, 255, 255, 0.18);
 }
 
-.chat-panel,
-.settings-panel {
-  /* Block: Panel shared */
-  min-height: 0;
-  border: 1px solid rgba(212, 220, 235, 0.9);
-  border-radius: var(--radius);
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: var(--shadow);
+@media (hover: hover) and (pointer: fine) {
+  .icon-btn.listening:hover {
+    background: rgba(255, 255, 255, 0.22);
+  }
 }
 
-.chat-panel {
-  display: flex;
-  flex-direction: column;
-}
-
-.chat-scroll {
-  /* Block: Scroll area */
-  min-height: 0;
-  height: 100%;
-  overflow: auto;
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.settings-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 14px;
-}
-
-.hidden {
+.icon-btn.listening .mic-slash {
   display: none;
 }
 
-.settings-header {
-  /* Block: Settings header */
+.icon-btn svg {
+  width: 22px;
+  height: 22px;
+  fill: currentColor;
+}
+
+/* --- Main --- */
+.main {
+  /* --- 外枠（ベース）を作らないため、余白なし --- */
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  min-height: 0; /* grid/flex 内スクロールのため必須 */
+}
+
+/* --- Login --- */
+.login {
+  width: min(var(--app-max-width), 100%);
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  justify-content: center;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
-.settings-title,
-.section-title {
-  font-size: 16px;
+.login-inner {
+  width: min(520px, 100%);
+  /* --- login もフラットに寄せる（最低限の枠のみ） --- */
+  border: 0;
+  background: transparent;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 0;
+}
+
+.login {
+  padding: 24px 12px;
+}
+
+.login-title {
+  font-size: 18px;
   font-weight: 700;
 }
 
-.settings-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+.login-desc {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
 }
 
-.panel-button {
-  /* Block: Panel button */
-  height: 36px;
+.login-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.login-input {
+  height: 40px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0 10px;
+  font-size: 14px;
+}
+
+.login-btn {
+  height: 40px;
   padding: 0 14px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  color: var(--text);
-  background: #ffffff;
-  font: inherit;
-  font-size: 13px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--header);
+  color: var(--header-text);
   font-weight: 700;
-  cursor: pointer;
 }
 
-.panel-button.primary,
-.composer-button.primary {
-  color: #ffffff;
-  border-color: var(--brand);
-  background: var(--brand);
+/* --- Status text --- */
+.status {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--muted);
+  min-height: 16px;
 }
 
-.panel-button.primary:hover,
-.composer-button.primary:hover {
-  background: var(--brand-strong);
+.status.error {
+  color: var(--danger);
+}
+
+/* --- Chat panel --- */
+.chat {
+  width: min(var(--app-max-width), 100%);
+  /* --- 外枠（カード）を作らず、フラットにする --- */
+  border: 0;
+  border-radius: 0;
+  background: var(--panel);
+  box-shadow: none;
+  overflow: hidden;
+  flex: 1 1 auto;
+  height: 100%;
+  min-height: 0; /* 子の overflow を効かせる */
+}
+
+.chat-scroll {
+  height: 100%;
+  overflow: auto;
+  padding: 12px;
+}
+
+/* --- Settings panel --- */
+.settings {
+  width: min(var(--app-max-width), 100%);
+  border: 0;
+  border-radius: 0;
+  background: var(--panel);
+  box-shadow: none;
+  flex: 1 1 auto;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+  gap: 10px;
+  overflow: auto;
+}
+
+.settings-toolbar {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  grid-template-areas:
+    "back spacer logout"
+    "actions actions actions";
+  gap: 8px 10px;
+  align-items: center;
+}
+
+.settings-btn-back {
+  grid-area: back;
+}
+
+.settings-toolbar-right {
+  grid-area: actions;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-self: start;
+}
+
+.settings-btn-logout {
+  grid-area: logout;
+  justify-self: end;
+  margin-left: 0;
+}
+
+.settings-btn {
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #ffffff;
+  color: var(--text);
+  padding: 0 14px;
+  font-weight: 700;
+}
+
+.settings-btn.primary {
+  background: var(--header);
+  border-color: var(--header);
+  color: var(--header-text);
+}
+
+.settings-btn.danger {
+  border-color: rgba(217, 45, 32, 0.28);
+  color: var(--danger);
+}
+
+.settings-title {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.settings-desc {
+  font-size: 12px;
+  color: var(--muted);
 }
 
 .settings-note {
+  font-size: 12px;
   color: var(--muted);
-  font-size: 13px;
-  line-height: 1.6;
+  margin-bottom: 8px;
 }
 
-.settings-form-grid {
-  /* Block: Settings form grid */
+.settings-note.danger {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.settings-tabs {
+  display: flex;
+  gap: 2px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 8px;
+}
+
+.settings-tab {
+  height: 34px;
+  border: 1px solid var(--border);
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: #f1f5ff;
+  color: #274891;
+  padding: 0 12px;
+  font-weight: 700;
+}
+
+.settings-tab.active {
+  background: #ffffff;
+  color: var(--text);
+}
+
+.settings-pages {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.settings-page {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.settings-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 10px;
+}
+
+.settings-card-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #315cbb;
+  margin-bottom: 8px;
+}
+
+.settings-preset-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.settings-select {
+  height: 34px;
+  min-width: 240px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0 8px;
+  background: #ffffff;
+  color: var(--text);
+  flex: 1 1 280px;
+}
+
+.settings-mini-btn {
+  height: 34px;
+  border: 1px solid #6e8fd4;
+  border-radius: 6px;
+  background: #4c73c7;
+  color: #ffffff;
+  font-weight: 700;
+  padding: 0 12px;
+}
+
+.settings-mini-btn.danger {
+  border-color: #d92d20;
+  background: #d92d20;
+}
+
+.settings-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 8px 12px;
 }
 
 .settings-field {
-  /* Block: Settings field */
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.settings-toggle {
-  /* Block: Settings toggle */
-  min-height: 44px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-small);
-  background: #f8faff;
-}
-
-.settings-label {
-  color: var(--muted);
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.settings-input {
-  width: 100%;
-  height: 42px;
-  padding: 0 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-small);
-  background: #ffffff;
-  color: var(--text);
-  font: inherit;
-  font-size: 14px;
-}
-
-.settings-input:focus {
-  outline: 2px solid rgba(63, 111, 198, 0.16);
-  border-color: var(--brand);
-}
-
-.settings-section {
-  /* Block: Settings block */
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.json-view {
-  margin: 0;
-  min-height: 140px;
-  max-height: 240px;
-  overflow: auto;
-  padding: 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-small);
-  background: #f8faff;
-  color: var(--text);
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.composer {
-  /* Block: Composer */
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: 10px;
-  padding: 0 16px 16px;
-}
-
-.composer-input-wrap {
-  min-width: 0;
-}
-
-.composer-input {
-  width: 100%;
-  height: 48px;
-  padding: 0 16px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.96);
-  color: var(--text);
-  font: inherit;
-  font-size: 15px;
-}
-
-.composer-input:focus {
-  outline: 2px solid rgba(63, 111, 198, 0.16);
-  border-color: var(--brand);
-}
-
-.composer-button {
-  /* Block: Composer button */
-  height: 48px;
-  padding: 0 18px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: #ffffff;
-  color: var(--text);
-  font: inherit;
-  font-size: 14px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.composer-button.secondary:hover,
-.panel-button:hover {
-  background: #f2f5fb;
-}
-
-.message-row {
-  /* Block: Message row */
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 
-.message-row.user {
+.settings-label {
+  font-size: 12px;
+  color: #315cbb;
+  font-weight: 700;
+}
+
+.settings-label.danger {
+  color: var(--danger);
+}
+
+.settings-input {
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0 8px;
+  font-size: 14px;
+}
+
+.settings-textarea {
+  width: 100%;
+  min-height: 220px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+  font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  color: var(--text);
+  background: #ffffff;
+  resize: vertical;
+  outline: none;
+}
+
+.settings-check {
+  margin-top: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* --- Chat bubbles --- */
+.bubble {
+  display: inline-block;
+  max-width: 78%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  margin: 10px 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.45;
+  font-size: 14px;
+}
+
+.bubble-text.hidden {
+  display: none;
+}
+
+.bubble-images {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.bubble-images.hidden {
+  display: none;
+}
+
+.bubble-image {
+  width: 160px;
+  max-width: 60vw;
+  height: auto;
+  border-radius: 10px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: #ffffff;
+  display: block;
+}
+
+.bubble.ai {
+  background: var(--bubble-ai);
+  color: var(--bubble-ai-text);
+  /* --- AI側: 左下の丸めを無効化（吹き出し感） --- */
+  border-bottom-left-radius: 0;
+  border-top-left-radius: 6px;
+}
+
+.bubble.user {
+  background: var(--bubble-user);
+  color: var(--bubble-user-text);
+  /* --- ユーザー側: 右下の丸めを無効化（吹き出し感） --- */
+  border-bottom-right-radius: 0;
+  border-top-right-radius: 6px;
+}
+
+.bubble-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.bubble-row.ai {
+  justify-content: flex-start;
+}
+
+.bubble-row.user {
+  justify-content: flex-end;
+}
+
+/* --- Bubble timestamp (LINE風) --- */
+.bubble-time {
+  font-size: 11px;
+  color: var(--muted);
+  opacity: 0.9;
+  white-space: nowrap;
+  margin: 10px 0; /* bubble の margin と揃えて底を合わせる */
+}
+
+.bubble-time.empty {
+  /* --- プレースホルダー中は空文字で保持し、レイアウトは維持する（受信時に時刻が出る） --- */
+  visibility: hidden;
+}
+
+/* --- Input panel (CocoroUI.png 風) --- */
+/* --- Input panel (LINE/スマホアプリ風) --- */
+.composer {
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  padding: 8px 10px calc(10px + env(safe-area-inset-bottom)) 10px;
+}
+
+.composer-row {
+  display: flex;
+  gap: 8px;
   align-items: flex-end;
 }
 
-.message-row.assistant {
-  align-items: flex-start;
-}
-
-.message-row.notice,
-.message-row.error {
+.composer-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 18px;
+  display: inline-flex;
   align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  background: #ffffff;
 }
 
-.bubble {
-  max-width: min(78ch, 88%);
-  padding: 12px 14px;
-  border-radius: 16px;
-  line-height: 1.65;
-  white-space: pre-wrap;
-  word-break: break-word;
+.composer-icon:hover {
+  background: #f6f8ff;
 }
 
-.message-row.user .bubble {
-  color: #ffffff;
-  background: linear-gradient(135deg, var(--brand) 0%, #5f8ce0 100%);
+.composer-icon svg {
+  width: 18px;
+  height: 18px;
 }
 
-.message-row.assistant .bubble {
-  background: var(--brand-soft);
+.composer-field {
+  flex: 1 1 auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 4px 8px;
+  display: flex;
+  align-items: center;
+  min-height: 36px;
 }
 
-.message-row.assistant .bubble.is-draft {
-  border: 1px dashed rgba(63, 111, 198, 0.4);
+.composer-textarea {
+  width: 100%;
+  border: 0;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 20px;
+  padding: 0;
+  min-height: 20px;
+  max-height: 120px;
+  overflow: auto;
 }
 
-.meta {
+.composer-send {
+  width: 74px;
+  height: 36px;
+  border: 0;
+  border-radius: 18px;
+  font-weight: 700;
+  background: #d9d9d9;
+  color: #6b7280;
+}
+
+.composer-send:enabled {
+  background: var(--header);
+  color: var(--header-text);
+}
+
+.composer-send.secondary {
+  background: #ffffff;
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+
+.composer-send.secondary:enabled {
+  background: #ffffff;
+  color: var(--muted);
+}
+
+.file-hidden {
+  display: none;
+}
+
+/* NOTE: 添付表示（chips）はUIでは出さない。 */
+.attachments {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
   color: var(--muted);
   font-size: 12px;
+  margin: 0 0 6px 44px; /* アイコン分だけ右に寄せる */
 }
 
-.message-row.notice .bubble,
-.message-row.error .bubble {
-  max-width: min(72ch, 94%);
-  padding: 8px 12px;
+/* NOTE: 画像が無いときは高さゼロ（=表示しない） */
+.attachments:empty {
+  display: none;
+  margin: 0;
+}
+
+.chip {
+  border: 1px solid var(--border);
+  background: #ffffff;
   border-radius: 999px;
-  font-size: 13px;
+  padding: 4px 8px;
+  max-width: 320px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.message-row.notice .bubble {
-  background: rgba(20, 32, 51, 0.08);
+/* --- Attachment previews --- */
+.attachment {
+  width: 44px;
+  height: 44px;
+  position: relative;
+  overflow: visible; /* ×ボタンを外側に出してもクリップしない */
 }
 
-.message-row.error .bubble {
+.attachment-thumb-wrap {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: #ffffff;
+}
+
+.attachment-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.attachment-remove {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  z-index: 2;
+  width: 20px;
+  height: 20px;
+  border-radius: 10px;
+  border: 1px solid rgba(15, 23, 42, 0.18);
+  background: rgba(255, 255, 255, 0.95);
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+
+.attachment-remove:active {
+  transform: scale(0.98);
+}
+
+/* --- Camera modal --- */
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: flex-end; /* モバイルは下から出す */
+  justify-content: center;
+  padding: 12px;
+}
+
+.modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.48);
+}
+
+.camera-sheet {
+  position: relative;
+  width: min(520px, 100%);
+  border-radius: 14px;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  padding: 10px;
+}
+
+.camera-preview {
+  position: relative;
+  width: 100%;
+  max-height: 62vh;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #0b1220;
+}
+
+.camera-video {
+  width: 100%;
+  height: 100%;
+  /* --- 既定はトリミングしない（比率が合わない部分は余白になる） --- */
+  object-fit: contain;
+  display: block;
+}
+
+.camera-preview.is-crop .camera-video {
+  /* --- 選択比率に合わない端末では、クロップで合わせる（標準カメラ寄せ） --- */
+  object-fit: cover;
+}
+
+.camera-mode-label {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(11, 18, 32, 0.72);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  user-select: none;
+  pointer-events: none;
+}
+
+.camera-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+.camera-controls {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 10px;
+}
+
+.camera-ratios {
+  display: inline-flex;
+  gap: 6px;
+  flex: 1 1 auto;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.ratio-btn {
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: #ffffff;
+  color: var(--muted);
+  font-weight: 700;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ratio-btn.selected {
+  border-color: var(--header);
+  color: var(--header);
+  background: #f6f8ff;
+}
+
+.camera-zoom {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.camera-zoom-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.camera-zoom-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.camera-zoom-value {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.camera-zoom-slider {
+  width: 100%;
+  margin-top: 6px;
+}
+
+.camera-btn {
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: #ffffff;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.camera-btn.icon-only {
+  width: 36px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.camera-icon {
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.camera-btn.primary {
+  background: var(--header);
+  border-color: var(--header);
+  color: var(--header-text);
+}
+
+.camera-btn.secondary {
+  background: #ffffff;
+}
+
+.camera-status {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  min-height: 16px;
+}
+
+.camera-status.error {
   color: var(--danger);
-  background: var(--danger-soft);
+}
+
+@media (min-width: 720px) {
+  /* --- デスクトップは中央寄せの方が自然 --- */
+  .modal {
+    align-items: center;
+  }
+}
+
+/* --- Status bar --- */
+.statusbar {
+  height: 28px;
+  background: #ffffff;
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.statusbar-left {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.statusbar-right {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* --- Utility classes --- */
+.settings-json-view {
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #f8faff;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 10px;
+  overflow: auto;
+  max-height: 220px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 .sr-only {
-  /* Block: Visually hidden */
   position: absolute;
   width: 1px;
   height: 1px;
@@ -404,36 +942,26 @@ body {
   border: 0;
 }
 
-@media (max-width: 720px) {
-  .topbar {
-    /* Block: Compact top bar */
-    padding: 14px 12px;
-  }
-
+/* --- Responsive --- */
+@media (max-width: 560px) {
   .topbar-title {
     font-size: 20px;
   }
 
-  .main-layout,
-  .composer {
-    padding-left: 12px;
-    padding-right: 12px;
-  }
-
-  .composer {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .composer-button,
-  .composer-input {
-    height: 46px;
+  .composer-send {
+    width: 68px;
   }
 
   .bubble {
-    max-width: 94%;
+    max-width: 90%;
   }
 
-  .settings-form-grid {
+  .settings-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-select {
+    min-width: 0;
+    width: 100%;
   }
 }
