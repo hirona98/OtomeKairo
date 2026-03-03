@@ -591,6 +591,10 @@ CREATE TABLE vec_items (
 CREATE INDEX idx_vec_items_entity_searchable_updated
     ON vec_items (entity_type, searchable, source_updated_at DESC);
 
+CREATE VIRTUAL TABLE vec_items_index USING vec0(
+    embedding float[32]
+);
+
 CREATE VIRTUAL TABLE events_fts USING fts5(
     event_id UNINDEXED,
     search_text

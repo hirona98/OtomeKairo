@@ -419,7 +419,7 @@ flowchart TD
 <!-- Block: Vec Items -->
 ### `vec_items`
 
-- 役割: `sqlite-vec` で使う埋め込み索引を保持する
+- 役割: `sqlite-vec` で使う埋め込み索引のメタ情報と生ベクトルを保持する
 - 主キー: `vec_item_id TEXT PRIMARY KEY`
 - 必須列: `entity_type`, `entity_id`, `embedding_model`, `embedding_scope`, `searchable`, `source_updated_at`, `embedding`
 - `entity_type` は、少なくとも `event`、`memory_state`、`event_affect` を区別する
@@ -427,6 +427,15 @@ flowchart TD
 - 同一対象・同一モデル・同一スコープの重複を許さない
 - 主要制約: `UNIQUE(entity_type, entity_id, embedding_model, embedding_scope)`
 - 主要索引: `(entity_type, searchable, source_updated_at DESC)`
+
+<!-- Block: Vec Items Index -->
+### `vec_items_index`
+
+- 役割: `sqlite-vec` の `vec0` 仮想表として、類似検索の対象ベクトルだけを保持する
+- 形式: `vec0` 仮想表とする
+- 保持列: `embedding`
+- `rowid` は `vec_items.rowid` と一致させ、メタ情報は必ず `vec_items` を正本として参照する
+- `searchable=0` の対象は、この仮想表から削除してよい
 
 <!-- Block: Events FTS -->
 ### `events_fts`
@@ -457,7 +466,7 @@ flowchart TD
 <!-- Block: Long Cycle Boundary -->
 ### 長周期の保存境界
 
-- 同じ長周期 transaction に含めるのは、`memory_jobs`、`memory_states`、`preference_memory`、`event_affects`、`event_links`、`event_threads`、`state_links`、`event_entities`、`state_entities`、`event_preview_cache`、`revisions`、`vec_items`、必要なら `self_state` と `skill_registry` とする
+- 同じ長周期 transaction に含めるのは、`memory_jobs`、`memory_states`、`preference_memory`、`event_affects`、`event_links`、`event_threads`、`state_links`、`event_entities`、`state_entities`、`event_preview_cache`、`revisions`、`vec_items`、`vec_items_index`、必要なら `self_state` と `skill_registry` とする
 - `write_memory` は、必要なら同じ長周期 transaction 内で followup の `memory_jobs` と `memory_job_payloads` を追加してよい
 - `refresh_preview` は、`event_preview_cache` と必要な followup の `memory_jobs` / `memory_job_payloads` 以外を更新してはならない
 - `quarantine_memory` は、`searchable` 系の更新と監査痕跡だけを確定する

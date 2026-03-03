@@ -231,7 +231,10 @@ class RuntimeLoop:
     ]:
         input_kind = pending_input.payload["input_kind"]
         if input_kind in {"chat_message", "network_result"}:
-            state_snapshot = self._store.read_cognition_state(self._default_settings)
+            state_snapshot = self._store.read_cognition_state(
+                self._default_settings,
+                observation_hint_text=_pending_input_observation_hint(pending_input),
+            )
             cognition_input = build_cognition_input(
                 pending_input=pending_input,
                 cycle_id=cycle_id,
@@ -542,6 +545,25 @@ def _pending_input_trigger_reason(pending_input: PendingInputRecord) -> str:
     if input_kind == "network_result":
         return "external_result"
     return "external_input"
+
+
+# Block: Pending input observation hint
+def _pending_input_observation_hint(pending_input: PendingInputRecord) -> str:
+    input_kind = str(pending_input.payload["input_kind"])
+    if input_kind == "chat_message":
+        text = pending_input.payload.get("text")
+        if not isinstance(text, str) or not text.strip():
+            raise RuntimeError("chat_message.text must be non-empty string")
+        return text.strip()
+    if input_kind == "network_result":
+        summary_text = pending_input.payload.get("summary_text")
+        query = pending_input.payload.get("query")
+        if not isinstance(summary_text, str) or not summary_text.strip():
+            raise RuntimeError("network_result.summary_text must be non-empty string")
+        if not isinstance(query, str) or not query.strip():
+            raise RuntimeError("network_result.query must be non-empty string")
+        return f"{query.strip()} {summary_text.strip()}"
+    raise RuntimeError("unsupported input_kind for cognition observation hint")
 
 
 # Block: Unsupported input handling

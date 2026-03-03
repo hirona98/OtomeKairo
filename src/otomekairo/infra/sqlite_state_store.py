@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import sqlite_vec
+
 from otomekairo.schema.runtime_types import (
     ActionHistoryRecord,
     CognitionStateSnapshot,
@@ -26,7 +28,8 @@ from otomekairo.schema.settings import build_default_settings, decode_requested_
 
 # Block: Schema constants
 SCHEMA_NAME = "core_schema"
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
+EMBEDDING_VECTOR_DIMENSION = 32
 
 
 # Block: API errors
@@ -64,6 +67,7 @@ class SqliteStateStore:
                 connection.executescript(self._schema_sql())
             else:
                 self._migrate_schema(connection, now_ms)
+            self._ensure_vec_index_schema(connection=connection)
             self._ensure_db_meta(connection, now_ms)
             self._seed_singletons(connection, now_ms)
         return BootstrapResult(db_path=self._db_path, initialized_at=now_ms)
@@ -177,7 +181,12 @@ class SqliteStateStore:
         }
 
     # Block: Cognition snapshot
-    def read_cognition_state(self, default_settings: dict[str, Any]) -> CognitionStateSnapshot:
+    def read_cognition_state(
+        self,
+        default_settings: dict[str, Any],
+        *,
+        observation_hint_text: str | None = None,
+    ) -> CognitionStateSnapshot:
         with self._connect() as connection:
             self_row = connection.execute(
                 """
@@ -292,6 +301,23 @@ class SqliteStateStore:
                 LIMIT 3
                 """
             ).fetchall()
+        if (
+            self_row is None
+            or attention_row is None
+            or body_row is None
+            or world_row is None
+            or drive_row is None
+            or runtime_settings_row is None
+        ):
+            raise RuntimeError("singleton state rows are missing")
+        effective_settings = _merge_runtime_settings(
+            default_settings,
+            json.loads(runtime_settings_row["values_json"]),
+        )
+        embedding_model = effective_settings.get("llm.embedding_model")
+        if not isinstance(embedding_model, str) or not embedding_model:
+            raise RuntimeError("llm.embedding_model must be non-empty string")
+        with self._connect() as connection:
             recent_event_rows = connection.execute(
                 """
                 SELECT
@@ -328,15 +354,23 @@ class SqliteStateStore:
                 LIMIT 8
                 """
             ).fetchall()
-        if (
-            self_row is None
-            or attention_row is None
-            or body_row is None
-            or world_row is None
-            or drive_row is None
-            or runtime_settings_row is None
-        ):
-            raise RuntimeError("singleton state rows are missing")
+            if observation_hint_text is not None and observation_hint_text.strip():
+                similarity_hits = _search_vec_similarity_hits(
+                    connection=connection,
+                    query_text=observation_hint_text.strip(),
+                    embedding_model=embedding_model,
+                    limit=8,
+                )
+                recent_event_rows = _merge_ranked_event_rows(
+                    connection=connection,
+                    ranked_hits=similarity_hits,
+                    fallback_rows=recent_event_rows,
+                )
+                memory_rows = _merge_ranked_memory_rows(
+                    connection=connection,
+                    ranked_hits=similarity_hits,
+                    fallback_rows=memory_rows,
+                )
         return CognitionStateSnapshot(
             self_state={
                 "personality": json.loads(self_row["personality_json"]),
@@ -385,10 +419,7 @@ class SqliteStateStore:
                 recent_event_rows=recent_event_rows,
                 memory_rows=memory_rows,
             ),
-            effective_settings=_merge_runtime_settings(
-                default_settings,
-                json.loads(runtime_settings_row["values_json"]),
-            ),
+            effective_settings=effective_settings,
         )
 
     # Block: Settings claim
@@ -1352,54 +1383,34 @@ class SqliteStateStore:
                             embedding_model=embedding_model,
                             embedding_scope=embedding_scope,
                         )
-                        connection.execute(
-                            """
-                            INSERT INTO vec_items (
-                                vec_item_id,
-                                entity_type,
-                                entity_id,
-                                embedding_model,
-                                embedding_scope,
-                                searchable,
-                                source_updated_at,
-                                embedding
-                            )
-                            VALUES (?, ?, ?, ?, ?, 1, ?, ?)
-                            ON CONFLICT(entity_type, entity_id, embedding_model, embedding_scope)
-                            DO UPDATE SET
-                                searchable = 1,
-                                source_updated_at = excluded.source_updated_at,
-                                embedding = excluded.embedding
-                            """,
-                            (
-                                _opaque_id("vec"),
-                                entity_type,
-                                entity_id,
-                                embedding_model,
-                                embedding_scope,
-                                source_updated_at,
-                                embedding_blob,
-                            ),
+                        vec_row_id = _upsert_vec_item_row(
+                            connection=connection,
+                            entity_type=entity_type,
+                            entity_id=entity_id,
+                            embedding_model=embedding_model,
+                            embedding_scope=embedding_scope,
+                            source_updated_at=source_updated_at,
+                            embedding_blob=embedding_blob,
+                        )
+                        _replace_vec_index_row(
+                            connection=connection,
+                            vec_row_id=vec_row_id,
+                            embedding_blob=embedding_blob,
                         )
                     else:
-                        connection.execute(
-                            """
-                            UPDATE vec_items
-                            SET searchable = 0,
-                                source_updated_at = ?
-                            WHERE entity_type = ?
-                              AND entity_id = ?
-                              AND embedding_model = ?
-                              AND embedding_scope = ?
-                            """,
-                            (
-                                source_updated_at,
-                                entity_type,
-                                entity_id,
-                                embedding_model,
-                                embedding_scope,
-                            ),
+                        vec_row_id = _mark_vec_item_unsearchable(
+                            connection=connection,
+                            entity_type=entity_type,
+                            entity_id=entity_id,
+                            embedding_model=embedding_model,
+                            embedding_scope=embedding_scope,
+                            source_updated_at=source_updated_at,
                         )
+                        if vec_row_id is not None:
+                            _delete_vec_index_row(
+                                connection=connection,
+                                vec_row_id=vec_row_id,
+                            )
                     updated_scope_count += 1
             self._mark_memory_job_completed(
                 connection=connection,
@@ -2677,6 +2688,9 @@ class SqliteStateStore:
         connection = sqlite3.connect(self._db_path)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
+        connection.enable_load_extension(True)
+        sqlite_vec.load(connection)
+        connection.enable_load_extension(False)
         return connection
 
     # Block: Schema existence
@@ -2705,8 +2719,21 @@ class SqliteStateStore:
             return
         if current_version > SCHEMA_VERSION:
             raise RuntimeError("schema_version is newer than this initializer")
-        if current_version != 2:
+        if current_version not in {2, 3}:
             raise RuntimeError("unsupported schema_version for migration")
+        while current_version < SCHEMA_VERSION:
+            if current_version == 2:
+                self._migrate_schema_2_to_3(connection=connection, now_ms=now_ms)
+                current_version = 3
+                continue
+            if current_version == 3:
+                self._migrate_schema_3_to_4(connection=connection, now_ms=now_ms)
+                current_version = 4
+                continue
+            raise RuntimeError("unsupported schema_version for migration")
+
+    # Block: Schema migration 2->3
+    def _migrate_schema_2_to_3(self, *, connection: sqlite3.Connection, now_ms: int) -> None:
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS runtime_settings (
@@ -2737,8 +2764,50 @@ class SqliteStateStore:
                 updated_at = ?
             WHERE meta_key = 'schema_version'
             """,
-            (_json_text(SCHEMA_VERSION), now_ms),
+            (_json_text(3), now_ms),
         )
+
+    # Block: Schema migration 3->4
+    def _migrate_schema_3_to_4(self, *, connection: sqlite3.Connection, now_ms: int) -> None:
+        self._ensure_vec_index_schema(connection=connection)
+        connection.execute(
+            """
+            UPDATE db_meta
+            SET meta_value_json = ?,
+                updated_at = ?
+            WHERE meta_key = 'schema_version'
+            """,
+            (_json_text(4), now_ms),
+        )
+
+    # Block: sqlite-vec schema ensure
+    def _ensure_vec_index_schema(self, *, connection: sqlite3.Connection) -> None:
+        connection.execute(
+            f"""
+            CREATE VIRTUAL TABLE IF NOT EXISTS vec_items_index USING vec0(
+                embedding float[{EMBEDDING_VECTOR_DIMENSION}]
+            )
+            """
+        )
+        rows = connection.execute(
+            """
+            SELECT rowid, embedding, searchable
+            FROM vec_items
+            """
+        ).fetchall()
+        for row in rows:
+            vec_row_id = int(row["rowid"])
+            if int(row["searchable"]) == 1:
+                _replace_vec_index_row(
+                    connection=connection,
+                    vec_row_id=vec_row_id,
+                    embedding_blob=bytes(row["embedding"]),
+                )
+                continue
+            _delete_vec_index_row(
+                connection=connection,
+                vec_row_id=vec_row_id,
+            )
 
     # Block: Schema version read
     def _read_schema_version(self, connection: sqlite3.Connection) -> int | None:
@@ -3261,6 +3330,299 @@ def _build_event_preview_text(row: sqlite3.Row) -> str:
     return "イベントのプレビューを生成できませんでした"
 
 
+# Block: vec_items upsert
+def _upsert_vec_item_row(
+    *,
+    connection: sqlite3.Connection,
+    entity_type: str,
+    entity_id: str,
+    embedding_model: str,
+    embedding_scope: str,
+    source_updated_at: int,
+    embedding_blob: bytes,
+) -> int:
+    connection.execute(
+        """
+        INSERT INTO vec_items (
+            vec_item_id,
+            entity_type,
+            entity_id,
+            embedding_model,
+            embedding_scope,
+            searchable,
+            source_updated_at,
+            embedding
+        )
+        VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+        ON CONFLICT(entity_type, entity_id, embedding_model, embedding_scope)
+        DO UPDATE SET
+            searchable = 1,
+            source_updated_at = excluded.source_updated_at,
+            embedding = excluded.embedding
+        """,
+        (
+            _opaque_id("vec"),
+            entity_type,
+            entity_id,
+            embedding_model,
+            embedding_scope,
+            source_updated_at,
+            embedding_blob,
+        ),
+    )
+    row = connection.execute(
+        """
+        SELECT rowid
+        FROM vec_items
+        WHERE entity_type = ?
+          AND entity_id = ?
+          AND embedding_model = ?
+          AND embedding_scope = ?
+        """,
+        (entity_type, entity_id, embedding_model, embedding_scope),
+    ).fetchone()
+    if row is None:
+        raise RuntimeError("vec_item row is missing after upsert")
+    return int(row["rowid"])
+
+
+# Block: vec_items unsearchable mark
+def _mark_vec_item_unsearchable(
+    *,
+    connection: sqlite3.Connection,
+    entity_type: str,
+    entity_id: str,
+    embedding_model: str,
+    embedding_scope: str,
+    source_updated_at: int,
+) -> int | None:
+    row = connection.execute(
+        """
+        SELECT rowid
+        FROM vec_items
+        WHERE entity_type = ?
+          AND entity_id = ?
+          AND embedding_model = ?
+          AND embedding_scope = ?
+        """,
+        (entity_type, entity_id, embedding_model, embedding_scope),
+    ).fetchone()
+    if row is None:
+        return None
+    vec_row_id = int(row["rowid"])
+    connection.execute(
+        """
+        UPDATE vec_items
+        SET searchable = 0,
+            source_updated_at = ?
+        WHERE rowid = ?
+        """,
+        (source_updated_at, vec_row_id),
+    )
+    return vec_row_id
+
+
+# Block: vec index replace
+def _replace_vec_index_row(
+    *,
+    connection: sqlite3.Connection,
+    vec_row_id: int,
+    embedding_blob: bytes,
+) -> None:
+    connection.execute(
+        """
+        DELETE FROM vec_items_index
+        WHERE rowid = ?
+        """,
+        (vec_row_id,),
+    )
+    connection.execute(
+        """
+        INSERT INTO vec_items_index (rowid, embedding)
+        VALUES (?, ?)
+        """,
+        (vec_row_id, embedding_blob),
+    )
+
+
+# Block: vec index delete
+def _delete_vec_index_row(
+    *,
+    connection: sqlite3.Connection,
+    vec_row_id: int,
+) -> None:
+    connection.execute(
+        """
+        DELETE FROM vec_items_index
+        WHERE rowid = ?
+        """,
+        (vec_row_id,),
+    )
+
+
+# Block: vec similarity search
+def _search_vec_similarity_hits(
+    *,
+    connection: sqlite3.Connection,
+    query_text: str,
+    embedding_model: str,
+    limit: int,
+) -> list[dict[str, Any]]:
+    query_blob = _build_embedding_blob(
+        source_text=query_text,
+        embedding_model=embedding_model,
+        embedding_scope="global",
+    )
+    raw_rows = connection.execute(
+        """
+        SELECT rowid, distance
+        FROM vec_items_index
+        WHERE embedding MATCH ?
+          AND k = ?
+        """,
+        (query_blob, limit),
+    ).fetchall()
+    hits: list[dict[str, Any]] = []
+    seen_pairs: set[tuple[str, str]] = set()
+    for raw_row in raw_rows:
+        metadata_row = connection.execute(
+            """
+            SELECT entity_type, entity_id, searchable
+            FROM vec_items
+            WHERE rowid = ?
+            """,
+            (int(raw_row["rowid"]),),
+        ).fetchone()
+        if metadata_row is None or int(metadata_row["searchable"]) != 1:
+            continue
+        entity_type = str(metadata_row["entity_type"])
+        entity_id = str(metadata_row["entity_id"])
+        pair = (entity_type, entity_id)
+        if pair in seen_pairs:
+            continue
+        seen_pairs.add(pair)
+        hits.append(
+            {
+                "entity_type": entity_type,
+                "entity_id": entity_id,
+                "distance": float(raw_row["distance"]),
+            }
+        )
+    return hits
+
+
+# Block: Ranked event merge
+def _merge_ranked_event_rows(
+    *,
+    connection: sqlite3.Connection,
+    ranked_hits: list[dict[str, Any]],
+    fallback_rows: list[sqlite3.Row],
+) -> list[sqlite3.Row]:
+    ranked_ids = [hit["entity_id"] for hit in ranked_hits if hit["entity_type"] == "event"]
+    ranked_rows = _fetch_event_rows_by_ids(
+        connection=connection,
+        event_ids=ranked_ids,
+    )
+    merged_rows: list[sqlite3.Row] = []
+    seen_ids: set[str] = set()
+    for row in ranked_rows + fallback_rows:
+        event_id = str(row["event_id"])
+        if event_id in seen_ids:
+            continue
+        seen_ids.add(event_id)
+        merged_rows.append(row)
+        if len(merged_rows) >= 5:
+            break
+    return merged_rows
+
+
+# Block: Ranked memory merge
+def _merge_ranked_memory_rows(
+    *,
+    connection: sqlite3.Connection,
+    ranked_hits: list[dict[str, Any]],
+    fallback_rows: list[sqlite3.Row],
+) -> list[sqlite3.Row]:
+    ranked_ids = [hit["entity_id"] for hit in ranked_hits if hit["entity_type"] == "memory_state"]
+    ranked_rows = _fetch_memory_rows_by_ids(
+        connection=connection,
+        memory_state_ids=ranked_ids,
+    )
+    merged_rows: list[sqlite3.Row] = []
+    seen_ids: set[str] = set()
+    for row in ranked_rows + fallback_rows:
+        memory_state_id = str(row["memory_state_id"])
+        if memory_state_id in seen_ids:
+            continue
+        seen_ids.add(memory_state_id)
+        merged_rows.append(row)
+        if len(merged_rows) >= 8:
+            break
+    return merged_rows
+
+
+# Block: Ranked event fetch
+def _fetch_event_rows_by_ids(
+    *,
+    connection: sqlite3.Connection,
+    event_ids: list[str],
+) -> list[sqlite3.Row]:
+    if not event_ids:
+        return []
+    placeholder_sql = ",".join("?" for _ in event_ids)
+    rows = connection.execute(
+        f"""
+        SELECT
+            event_id,
+            source,
+            kind,
+            observation_summary,
+            action_summary,
+            result_summary,
+            created_at
+        FROM events
+        WHERE searchable = 1
+          AND event_id IN ({placeholder_sql})
+        """,
+        tuple(event_ids),
+    ).fetchall()
+    row_map = {str(row["event_id"]): row for row in rows}
+    return [row_map[event_id] for event_id in event_ids if event_id in row_map]
+
+
+# Block: Ranked memory fetch
+def _fetch_memory_rows_by_ids(
+    *,
+    connection: sqlite3.Connection,
+    memory_state_ids: list[str],
+) -> list[sqlite3.Row]:
+    if not memory_state_ids:
+        return []
+    placeholder_sql = ",".join("?" for _ in memory_state_ids)
+    rows = connection.execute(
+        f"""
+        SELECT
+            memory_state_id,
+            memory_kind,
+            body_text,
+            payload_json,
+            confidence,
+            importance,
+            memory_strength,
+            created_at,
+            updated_at,
+            last_confirmed_at
+        FROM memory_states
+        WHERE searchable = 1
+          AND memory_kind IN ('summary', 'fact')
+          AND memory_state_id IN ({placeholder_sql})
+        """,
+        tuple(memory_state_ids),
+    ).fetchall()
+    row_map = {str(row["memory_state_id"]): row for row in rows}
+    return [row_map[memory_state_id] for memory_state_id in memory_state_ids if memory_state_id in row_map]
+
+
 def _normalize_embedding_scopes(requested_scopes: list[Any]) -> list[str]:
     normalized_scopes: list[str] = []
     for raw_scope in requested_scopes:
@@ -3326,8 +3688,45 @@ def _build_embedding_blob(
     embedding_model: str,
     embedding_scope: str,
 ) -> bytes:
-    payload = f"{embedding_model}\n{embedding_scope}\n{source_text}".encode("utf-8")
-    return hashlib.sha256(payload).digest()
+    return sqlite_vec.serialize_float32(
+        _build_embedding_vector(
+            source_text=source_text,
+            embedding_model=embedding_model,
+            embedding_scope=embedding_scope,
+        )
+    )
+
+
+# Block: Embedding vector build
+def _build_embedding_vector(
+    *,
+    source_text: str,
+    embedding_model: str,
+    embedding_scope: str,
+) -> list[float]:
+    del embedding_scope
+    tokens = _embedding_source_tokens(source_text)
+    vector = [0.0] * EMBEDDING_VECTOR_DIMENSION
+    for token in tokens:
+        digest = hashlib.sha256(f"{embedding_model}\n{token}".encode("utf-8")).digest()
+        for index in range(EMBEDDING_VECTOR_DIMENSION):
+            vector[index] += (digest[index] / 127.5) - 1.0
+    magnitude = sum(component * component for component in vector) ** 0.5
+    if magnitude == 0.0:
+        raise RuntimeError("embedding vector magnitude must not be zero")
+    return [component / magnitude for component in vector]
+
+
+# Block: Embedding tokenization
+def _embedding_source_tokens(source_text: str) -> list[str]:
+    normalized_text = source_text.strip().lower()
+    if not normalized_text:
+        raise RuntimeError("embedding source text must be non-empty")
+    raw_tokens = normalized_text.replace("\n", " ").split(" ")
+    tokens = [token for token in raw_tokens if token]
+    if not tokens:
+        raise RuntimeError("embedding source tokens must not be empty")
+    return tokens
 
 
 def _build_task_snapshot_rows(
