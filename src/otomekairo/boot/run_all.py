@@ -44,7 +44,7 @@ def main() -> None:
             child_env=child_env,
             module_name="otomekairo.boot.run_runtime",
         )
-    _install_signal_handlers(processes)
+    _install_signal_handlers()
     logger.info("OtomeKairo started")
     logger.info("Web: %s", web_url, extra={"web_url": web_url})
     if runtime_already_running:
@@ -113,10 +113,9 @@ def _runtime_already_running(repo_root: Path) -> bool:
 
 
 # Block: Signal registration
-def _install_signal_handlers(processes: dict[str, subprocess.Popen[str]]) -> None:
+def _install_signal_handlers() -> None:
     def handle_signal(signum: int, _frame: object) -> None:
         logger.info("Received signal: %s", signum, extra={"signal_number": signum})
-        _stop_child_processes(processes)
         raise SystemExit(0)
 
     signal.signal(signal.SIGINT, handle_signal)
@@ -138,17 +137,24 @@ def _wait_for_exit(processes: dict[str, subprocess.Popen[str]]) -> None:
 
 # Block: Process stop
 def _stop_child_processes(processes: dict[str, subprocess.Popen[str]]) -> None:
-    for process in processes.values():
-        if process.poll() is not None:
-            continue
-        process.terminate()
+    active_processes = [
+        process
+        for process in processes.values()
+        if process.poll() is None
+    ]
+    if not active_processes:
+        return
+    for process in active_processes:
+        process.send_signal(signal.SIGINT)
     deadline = time.time() + 5.0
-    for process in processes.values():
+    for process in active_processes:
         while process.poll() is None and time.time() < deadline:
             time.sleep(0.1)
-        if process.poll() is None:
-            process.kill()
-    for process in processes.values():
+    for process in active_processes:
+        if process.poll() is not None:
+            continue
+        process.kill()
+    for process in active_processes:
         if process.poll() is None:
             continue
         process.wait()
