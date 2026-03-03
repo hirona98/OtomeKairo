@@ -15,6 +15,7 @@ def build_cognition_input(
     cycle_id: str,
     resolved_at: int,
     state_snapshot: CognitionStateSnapshot,
+    camera_available: bool,
 ) -> dict[str, Any]:
     input_kind = str(pending_input.payload["input_kind"])
     if input_kind not in {"chat_message", "network_result"}:
@@ -64,6 +65,7 @@ def build_cognition_input(
             },
             "runtime_policy": {
                 "camera_enabled": bool(state_snapshot.effective_settings["sensors.camera.enabled"]),
+                "camera_available": bool(camera_available),
                 "microphone_enabled": bool(state_snapshot.effective_settings["sensors.microphone.enabled"]),
                 "tts_enabled": bool(state_snapshot.effective_settings["output.tts.enabled"]),
                 "line_enabled": bool(state_snapshot.effective_settings["integrations.line.enabled"]),

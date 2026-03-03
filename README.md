@@ -37,14 +37,16 @@
 - `src/otomekairo/web/static/`: `tmp/CocoroGhost/static/` にかなり近い見た目の最小チャット UI を持ち、同一オリジンで `POST /api/chat/input` と `GET /api/chat/stream` を使い、`message` 到着時は `output.tts.enabled=true` ならブラウザの `SpeechSynthesis` で音声化し、`Mic` は標準 `SpeechRecognition` で音声入力し、設定パネルでは主要な一部設定を `POST /api/settings/overrides` へ保存できる
 - `src/otomekairo/gateway/cognition_client.py`: 認知処理の外部境界を表す抽象を定義する
 - `src/otomekairo/usecase/build_cognition_input.py`: `self_state` などの現在状態から最小の `cognition_input` を組み立て、`task_state` の進行中 / 外部待ちタスク、`sqlite-vec` で補強した直近の `summary` / `fact` 記憶、直近イベント列を `current_observation` と照合して絞り込み、`memory_bundle` として渡す
-- `src/otomekairo/usecase/run_cognition.py`: 認知クライアントが返す `cognition_result` を受け取り、`action_command` を使って `speak` は `token` / `message`、`notify` は `notice`、`browse` は `waiting_external` の検索タスクとして実行し、`action_history` へ変換する
+- `src/otomekairo/usecase/run_cognition.py`: 認知クライアントが返す `cognition_result` を受け取り、`action_command` を使って `speak` は `token` / `message`、`notify` は `notice`、`look` は `pytapo` 経由のカメラ視点操作、`browse` は `waiting_external` の検索タスクとして実行し、`action_history` へ変換する
 - `src/otomekairo/usecase/run_browse_task.py`: `task_state(waiting_external)` の `browse` タスクを外部検索へ通し、検索結果を内部入力 `network_result` として次周期へ戻し、`action_history` へ変換する
-- `src/otomekairo/usecase/validate_action.py`: `cognition_result.action_proposals` から `speak` / `browse` / `notify` / `wait` を比較し、`selection_profile` の trait / style / relationship / emotion / drive、`memory_bundle`、`task_snapshot` を使って `execute / hold / reject` と構造化した `action_command` を確定する
+- `src/otomekairo/usecase/validate_action.py`: `cognition_result.action_proposals` から `speak` / `browse` / `notify` / `look` / `wait` を比較し、`selection_profile` の trait / style / relationship / emotion / drive、`memory_bundle`、`task_snapshot`、カメラ可用性を使って `execute / hold / reject` と構造化した `action_command` を確定する
 - `src/otomekairo/infra/litellm_cognition_client.py`: `LiteLLM` を使って人格断面つきの認知呼び出しを行い、`cognition_result.action_proposals` の最小形も厳密に検証する
 - `src/otomekairo/gateway/search_client.py`: 外部検索の境界を表す抽象を定義する
 - `src/otomekairo/gateway/notification_client.py`: 外部通知の境界を表す抽象を定義する
+- `src/otomekairo/gateway/camera_controller.py`: カメラ視点操作の外部境界を定義する
 - `src/otomekairo/infra/duckduckgo_search_client.py`: DuckDuckGo Instant Answer API を使う最小の外部検索アダプタを持つ
 - `src/otomekairo/infra/line_notification_client.py`: `OTOMEKAIRO_LINE_CHANNEL_ACCESS_TOKEN` と `OTOMEKAIRO_LINE_TO_USER_ID` を使って LINE Messaging API の push を行う最小の通知アダプタを持つ
+- `src/otomekairo/infra/wifi_camera_controller.py`: `OTOMEKAIRO_CAMERA_HOST` / `OTOMEKAIRO_CAMERA_USERNAME` / `OTOMEKAIRO_CAMERA_PASSWORD` を読み、`pytapo` 経由で `Tapo C220` などの視点操作を行う
 - `src/otomekairo/infra/sqlite_state_store.py`: `core_schema.sql` を読み込む DB 初期化と、`sqlite-vec` の `vec0` 仮想表初期化、状態参照・入力受付・設定反映、短周期確定時の `write_memory` enqueue、`revisions` 記録、`network_result` を伴う `browse` では `summary` に加えて `fact` の `memory_state` も作成し、`memory_state` と `event` を対象にした `refresh_preview` / `embedding_sync`、`searchable=0` へ落とす `quarantine_memory`、派生索引とジョブ履歴を掃除する `tidy_memory`、`memory_jobs` の再キュー / `dead_letter`、`ui_outbound_events` の保持窓削除を持つ
 - `src/otomekairo/runtime/main_loop.py`: `settings_overrides`、`pending_inputs`、`task_state(waiting_external)` を消費し、待機中も応答中も lease heartbeat を維持しながら、失敗時も `claimed` を終端状態へ確定し、`token` の即時追記、進行中 `cancel` の消費、`browse` の外部検索と `network_result` の再認知、`notify` の LINE push、短周期と長周期を交互に管理しつつ `runtime.long_cycle_min_interval_ms` で間隔制御したうえで、`write_memory` / `refresh_preview` / `embedding_sync` / `quarantine_memory` / `tidy_memory` の最小長周期処理までを行う
 - `src/otomekairo/schema/runtime_types.py`: ランタイムの共通データ形を `infra` から切り離して持つ
@@ -60,6 +62,7 @@
 3. テキスト入力、`Mic`、設定パネル、`browse` を含む応答経路を確認する
 
 - `LINE` 通知を使うときは、起動前に `OTOMEKAIRO_LINE_CHANNEL_ACCESS_TOKEN` と `OTOMEKAIRO_LINE_TO_USER_ID` を環境変数で渡す
+- `look` を使うときは、起動前に `OTOMEKAIRO_CAMERA_HOST` と `OTOMEKAIRO_CAMERA_USERNAME` と `OTOMEKAIRO_CAMERA_PASSWORD` を環境変数で渡す（Tapo アプリの「カメラのアカウント」を使う）
 - `LINE` を使わないときは、設定パネルで `integrations.line.enabled=false` のまま使う
 - `otomekairo` の console script を使う場合も、`./run_otomekairo.sh` と同じく Web とランタイムを同時に起動する
 - 既に別プロセスで人格ランタイムが稼働中なら、`./run_otomekairo.sh` はそのランタイムを再利用し、Web だけを追加起動する

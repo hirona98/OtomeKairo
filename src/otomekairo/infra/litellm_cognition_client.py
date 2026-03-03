@@ -9,7 +9,7 @@ from otomekairo.gateway.cognition_client import CognitionRequest, CognitionRespo
 
 
 # Block: Supported chat action types
-SUPPORTED_CHAT_ACTION_TYPES = {"speak", "browse", "notify", "wait"}
+SUPPORTED_CHAT_ACTION_TYPES = {"speak", "browse", "notify", "look", "wait"}
 
 
 # Block: LiteLLM cognition client
@@ -43,6 +43,7 @@ def _build_messages(request: CognitionRequest) -> list[dict[str, str]]:
     selection_profile = cognition_input["selection_profile"]
     current_observation = cognition_input["current_observation"]
     world_snapshot = cognition_input["world_snapshot"]
+    runtime_policy = cognition_input["policy_snapshot"]["runtime_policy"]
     system_prompt = "\n".join(
         [
             "あなたは OtomeKairo の人格中枢として振る舞う。",
@@ -53,13 +54,16 @@ def _build_messages(request: CognitionRequest) -> list[dict[str, str]]:
             "speech_draft は text, language, delivery_mode を持つ。",
             "action_proposals と step_hints は必ず配列にする。候補が無ければ [] を返す。",
             "action_proposals の各要素は object にし、action_type と priority を必ず入れる。",
-            "action_type は speak, browse, notify, wait のいずれかだけを使う。",
+            "action_type は speak, browse, notify, look, wait のいずれかだけを使う。",
             "speak と notify を返す場合は target_channel に browser_chat を必ず入れる。",
             "browse を返す場合は query に非空の検索文字列を必ず入れる。",
+            "look を返す場合は direction(left/right/up/down) か preset_id か preset_name を必ず入れる。",
             "delivery_mode は stream に固定する。",
             f"現在の感情ラベル: {persona_snapshot['current_emotion']['primary_label']}",
             f"話し方: {selection_profile['interaction_style']['speech_tone']}",
             f"現在の状況: {world_snapshot['situation_summary']}",
+            _camera_runtime_prompt_line(runtime_policy),
+            "カメラ状態の enabled または available が false のときは、look を提案せず speak で状態を伝える。",
             f"不変条件: {_format_invariants(persona_snapshot['invariants'])}",
         ]
     )
@@ -190,6 +194,8 @@ def _validate_action_proposals(action_proposals: list[Any]) -> None:
             query = proposal.get("query")
             if not isinstance(query, str) or not query.strip():
                 raise RuntimeError("LiteLLM cognition_result.action_proposals.browse requires non-empty query")
+        if action_type == "look":
+            _validate_look_action(proposal)
         elif "target_channel" in proposal:
             target_channel = proposal["target_channel"]
             if not isinstance(target_channel, str) or not target_channel:
@@ -220,6 +226,15 @@ def _format_goals(long_term_goals: dict[str, Any]) -> str:
     return ",".join(str(goal.get("title", "goal")) for goal in goals[:3] if isinstance(goal, dict))
 
 
+# Block: Camera runtime formatting
+def _camera_runtime_prompt_line(runtime_policy: dict[str, Any]) -> str:
+    return (
+        "カメラ状態: "
+        f"enabled={bool(runtime_policy.get('camera_enabled'))} "
+        f"available={bool(runtime_policy.get('camera_available'))}"
+    )
+
+
 # Block: Network result formatting
 def _network_result_prompt_line(current_observation: dict[str, Any]) -> str:
     if current_observation["input_kind"] != "network_result":
@@ -229,3 +244,23 @@ def _network_result_prompt_line(current_observation: dict[str, Any]) -> str:
         f"query={current_observation['query']} "
         f"source_task_id={current_observation['source_task_id']}"
     )
+
+
+# Block: Look action validation
+def _validate_look_action(proposal: dict[str, Any]) -> None:
+    direction = proposal.get("direction")
+    preset_id = proposal.get("preset_id")
+    preset_name = proposal.get("preset_name")
+    if isinstance(direction, str) and direction.strip():
+        if direction.strip() not in {"left", "right", "up", "down"}:
+            raise RuntimeError("LiteLLM cognition_result.action_proposals.look.direction is invalid")
+        if preset_id is not None or preset_name is not None:
+            raise RuntimeError("LiteLLM cognition_result.action_proposals.look must not mix direction and preset")
+        return
+    if isinstance(preset_id, str) and preset_id.strip():
+        if preset_name is not None:
+            raise RuntimeError("LiteLLM cognition_result.action_proposals.look must specify only one preset field")
+        return
+    if isinstance(preset_name, str) and preset_name.strip():
+        return
+    raise RuntimeError("LiteLLM cognition_result.action_proposals.look requires direction or preset")

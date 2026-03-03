@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 from typing import Any, Callable
 
+from otomekairo.gateway.camera_controller import CameraController
 from otomekairo import __version__
 from otomekairo.gateway.cognition_client import CognitionClient
 from otomekairo.gateway.notification_client import NotificationClient
@@ -49,6 +50,7 @@ class RuntimeLoop:
         cognition_client: CognitionClient,
         search_client: SearchClient,
         notification_client: NotificationClient,
+        camera_controller: CameraController,
         line_channel_access_token: str,
         line_to_user_id: str,
         lease_heartbeat_ms: int = DEFAULT_LEASE_HEARTBEAT_MS,
@@ -67,6 +69,7 @@ class RuntimeLoop:
         self._cognition_client = cognition_client
         self._search_client = search_client
         self._notification_client = notification_client
+        self._camera_controller = camera_controller
         self._line_channel_access_token = line_channel_access_token
         self._line_to_user_id = line_to_user_id
         self._lease_heartbeat_ms = lease_heartbeat_ms
@@ -250,6 +253,7 @@ class RuntimeLoop:
                 cycle_id=cycle_id,
                 resolved_at=resolved_at,
                 state_snapshot=state_snapshot,
+                camera_available=self._camera_controller.is_available(),
             )
             cognition_execution = run_cognition_for_browser_chat_input(
                 pending_input=pending_input,
@@ -259,6 +263,7 @@ class RuntimeLoop:
                 effective_settings=state_snapshot.effective_settings,
                 cognition_client=self._cognition_client,
                 notification_client=self._notification_client,
+                camera_controller=self._camera_controller,
                 line_channel_access_token=self._line_channel_access_token,
                 line_to_user_id=self._line_to_user_id,
                 emit_ui_event=lambda ui_event: self._append_ui_event(cycle_id=cycle_id, ui_event=ui_event),
@@ -543,6 +548,7 @@ def build_runtime_loop(*, db_path: Path | None = None) -> RuntimeLoop:
         cognition_client=_build_default_cognition_client(),
         search_client=_build_default_search_client(),
         notification_client=_build_default_notification_client(),
+        camera_controller=_build_default_camera_controller(),
         line_channel_access_token=_line_channel_access_token(),
         line_to_user_id=_line_to_user_id(),
         lease_heartbeat_ms=_lease_heartbeat_ms(),
@@ -692,6 +698,13 @@ def _build_default_notification_client() -> NotificationClient:
     from otomekairo.infra.line_notification_client import LineNotificationClient
 
     return LineNotificationClient()
+
+
+# Block: Camera controller factory
+def _build_default_camera_controller() -> CameraController:
+    from otomekairo.infra.wifi_camera_controller import WiFiCameraController
+
+    return WiFiCameraController()
 
 
 # Block: LINE credential helpers
