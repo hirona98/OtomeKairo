@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import time
 import uuid
+import os
 from pathlib import Path
 from typing import Any, Callable
 
 from otomekairo import __version__
 from otomekairo.gateway.cognition_client import CognitionClient
+from otomekairo.gateway.notification_client import NotificationClient
 from otomekairo.gateway.search_client import SearchClient
 from otomekairo.infra.sqlite_state_store import SqliteStateStore
 from otomekairo.schema.runtime_types import (
@@ -46,6 +48,9 @@ class RuntimeLoop:
         default_settings: dict[str, Any],
         cognition_client: CognitionClient,
         search_client: SearchClient,
+        notification_client: NotificationClient,
+        line_channel_access_token: str,
+        line_to_user_id: str,
         lease_heartbeat_ms: int = DEFAULT_LEASE_HEARTBEAT_MS,
         lease_ttl_ms: int = DEFAULT_LEASE_TTL_MS,
     ) -> None:
@@ -61,6 +66,9 @@ class RuntimeLoop:
         self._default_settings = default_settings
         self._cognition_client = cognition_client
         self._search_client = search_client
+        self._notification_client = notification_client
+        self._line_channel_access_token = line_channel_access_token
+        self._line_to_user_id = line_to_user_id
         self._lease_heartbeat_ms = lease_heartbeat_ms
         self._lease_ttl_ms = lease_ttl_ms
         self._boot_reconciled = False
@@ -235,7 +243,11 @@ class RuntimeLoop:
                 cycle_id=cycle_id,
                 resolved_at=resolved_at,
                 cognition_input=cognition_input,
+                effective_settings=state_snapshot.effective_settings,
                 cognition_client=self._cognition_client,
+                notification_client=self._notification_client,
+                line_channel_access_token=self._line_channel_access_token,
+                line_to_user_id=self._line_to_user_id,
                 emit_ui_event=lambda ui_event: self._append_ui_event(cycle_id=cycle_id, ui_event=ui_event),
                 consume_cancel=lambda message_id: self._consume_matching_cancel(
                     channel=pending_input.channel,
@@ -493,6 +505,9 @@ def build_runtime_loop(*, db_path: Path | None = None) -> RuntimeLoop:
         default_settings=build_default_settings(),
         cognition_client=_build_default_cognition_client(),
         search_client=_build_default_search_client(),
+        notification_client=_build_default_notification_client(),
+        line_channel_access_token=_line_channel_access_token(),
+        line_to_user_id=_line_to_user_id(),
         lease_heartbeat_ms=_lease_heartbeat_ms(),
         lease_ttl_ms=_lease_ttl_ms(),
     )
@@ -614,6 +629,22 @@ def _build_default_search_client() -> SearchClient:
     from otomekairo.infra.duckduckgo_search_client import DuckDuckGoSearchClient
 
     return DuckDuckGoSearchClient()
+
+
+# Block: Notification client factory
+def _build_default_notification_client() -> NotificationClient:
+    from otomekairo.infra.line_notification_client import LineNotificationClient
+
+    return LineNotificationClient()
+
+
+# Block: LINE credential helpers
+def _line_channel_access_token() -> str:
+    return os.environ.get("OTOMEKAIRO_LINE_CHANNEL_ACCESS_TOKEN", "")
+
+
+def _line_to_user_id() -> str:
+    return os.environ.get("OTOMEKAIRO_LINE_TO_USER_ID", "")
 
 
 def _opaque_id(prefix: str) -> str:

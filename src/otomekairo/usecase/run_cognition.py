@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from otomekairo.gateway.cognition_client import CognitionClient, CognitionRequest
+from otomekairo.gateway.notification_client import NotificationClient
 from otomekairo.schema.runtime_types import ActionHistoryRecord, PendingInputRecord, TaskStateMutationRecord
 from otomekairo.usecase.dispatch_action_command import ActionDispatchResult, dispatch_chat_action_command
 from otomekairo.usecase.validate_action import validate_chat_response_action
@@ -30,7 +31,11 @@ def run_cognition_for_browser_chat_input(
     cycle_id: str,
     resolved_at: int,
     cognition_input: dict[str, Any],
+    effective_settings: dict[str, Any],
     cognition_client: CognitionClient,
+    notification_client: NotificationClient,
+    line_channel_access_token: str,
+    line_to_user_id: str,
     emit_ui_event: Callable[[dict[str, Any]], None],
     consume_cancel: Callable[[str], bool],
 ) -> CognitionExecution:
@@ -93,6 +98,10 @@ def run_cognition_for_browser_chat_input(
         decision=validated_action.decision,
         emit_ui_event=emit_event,
         consume_cancel=lambda: consume_cancel(active_message_id),
+        notification_client=notification_client,
+        line_enabled=bool(effective_settings["integrations.line.enabled"]),
+        line_channel_access_token=line_channel_access_token,
+        line_to_user_id=line_to_user_id,
     )
     cognition_result["reflection_seed"]["token_count"] = int(
         dispatch_result.observed_effects.get("token_count", 0)
@@ -132,11 +141,12 @@ def run_cognition_for_browser_chat_input(
             status=dispatch_result.status,
             failure_mode=dispatch_result.failure_mode,
             observed_effects=observed_effects,
-            raw_result_ref=None,
+            raw_result_ref=dispatch_result.raw_result_ref,
             adapter_trace_ref={
                 "cognition_result": cognition_result,
                 "action_command": action_command,
                 "action_candidate_score": validated_action.action_candidate_score,
+                "dispatch_trace": dispatch_result.adapter_trace_ref,
             },
         )
     ]
@@ -191,8 +201,8 @@ def _action_history_type(*, decision: str, command_type: str | None) -> str:
         return "reject_chat_response"
     if command_type == "enqueue_browse_task":
         return "enqueue_browse_task"
-    if command_type == "browser_notice":
-        return "emit_browser_notice"
+    if command_type == "dispatch_notice":
+        return "dispatch_notice"
     return "emit_chat_response"
 
 
@@ -206,6 +216,10 @@ def _dispatch_result_for_decision(
     decision: str,
     emit_ui_event: Callable[[str, dict[str, Any]], None],
     consume_cancel: Callable[[], bool],
+    notification_client: NotificationClient,
+    line_enabled: bool,
+    line_channel_access_token: str,
+    line_to_user_id: str,
 ) -> ActionDispatchResult:
     if decision != "execute":
         emit_ui_event(
@@ -234,6 +248,8 @@ def _dispatch_result_for_decision(
             finished_at=_now_ms(),
             status="succeeded",
             failure_mode=None,
+            raw_result_ref=None,
+            adapter_trace_ref=None,
         )
     if action_command is None:
         raise RuntimeError("execute decision requires action_command")
@@ -247,6 +263,10 @@ def _dispatch_result_for_decision(
         action_command=action_command,
         emit_ui_event=lambda ui_event: emit_ui_event(ui_event["event_type"], ui_event["payload"]),
         consume_cancel=lambda _: consume_cancel(),
+        notification_client=notification_client,
+        line_enabled=line_enabled,
+        line_channel_access_token=line_channel_access_token,
+        line_to_user_id=line_to_user_id,
     )
 
 

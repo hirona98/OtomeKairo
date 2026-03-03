@@ -867,8 +867,8 @@
 - `role` は、`message_id` を伴うメッセージ応答だけに付ける
 - `related_input_id` は、入力に対する応答行動だけに付ける
 - `proposal_ref` は、`cognition_result.action_proposals` から確定した候補を追跡したいときに付ける
-- `command_type` は、初期実装では `speak_ui_message`、`browser_notice`、`enqueue_browse_task`、`execute_browse_task`、`abandon_browse_task` を使ってよい
-- `notice_code` と `text` は、`browser_notice` を実行する命令だけに付ける
+- `command_type` は、初期実装では `speak_ui_message`、`dispatch_notice`、`enqueue_browse_task`、`execute_browse_task`、`abandon_browse_task` を使ってよい
+- `notice_code` と `text` は、`dispatch_notice` を実行する命令だけに付ける
 - `target`、`parameters`、`preconditions`、`stop_conditions`、`timeout_ms`、`requires_reobserve`、`expected_effects` は、`execute` のとき `action_command` をそのまま残したい場合に付けてよい
 - `parameters.task_id`、`parameters.query`、`parameters.target_channel` は、`enqueue_browse_task` を実行する命令だけに付ける
 - `parameters.query` は、`execute_browse_task` と `abandon_browse_task` を実行する命令だけに付けてよい
@@ -926,6 +926,7 @@
 - `complete_browse_task` を実行した場合は、`related_task_id`、`task_status_after`、`summary_text` を付けてよい
 - `abandon_browse_task` を実行した場合は、`related_task_id`、`task_status_after`、`error_message` を付けてよい
 - `complete_browse_task` を実行した場合は、`followup_input_kind=\"network_result\"` を付けてよい
+- `dispatch_notice` を実行した場合は、`line_delivery` を `delivered`、`skipped`、`failed` のいずれかで付けてよい
 
 <!-- Block: Memory Job Group -->
 ## 記憶ジョブの JSON

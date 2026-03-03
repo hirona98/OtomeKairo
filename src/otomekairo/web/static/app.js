@@ -23,6 +23,7 @@
   let stream = null;
   const draftMessages = new Map();
   let statusTimerId = 0;
+  let latestSettings = null;
 
   // Block: Startup
   function start() {
@@ -153,6 +154,7 @@
   async function handleCancel() {
     cancelButton.disabled = true;
     try {
+      stopBrowserSpeech();
       const response = await fetch("/api/chat/cancel", {
         method: "POST",
         headers: {
@@ -198,6 +200,7 @@
       if (!settingsResponse.ok) {
         throw new Error(settingsPayload.message || "設定取得に失敗しました");
       }
+      latestSettings = settingsPayload;
       statusJson.textContent = formatJson(statusPayload);
       settingsJson.textContent = formatJson(settingsPayload);
       updateRuntimeChip(statusPayload);
@@ -259,6 +262,7 @@
       meta.textContent = buildMetaLabel(String(payload.role || "assistant"));
       draftMessages.delete(messageId);
     }
+    speakMessageText(text);
     scrollToBottom();
   }
 
@@ -376,6 +380,49 @@
   // Block: Scroll helper
   function scrollToBottom() {
     chatScroll.scrollTop = chatScroll.scrollHeight;
+  }
+
+  // Block: Browser speech
+  function speakMessageText(text) {
+    const effectiveSettings = latestSettings && typeof latestSettings === "object"
+      ? latestSettings.effective_settings
+      : null;
+    if (!effectiveSettings || effectiveSettings["output.tts.enabled"] !== true) {
+      return;
+    }
+    if (!("speechSynthesis" in window) || typeof window.SpeechSynthesisUtterance !== "function") {
+      appendError("このブラウザでは TTS が使えません");
+      return;
+    }
+    const messageText = String(text || "").trim();
+    if (!messageText) {
+      return;
+    }
+    const requestedVoice = String(effectiveSettings["output.tts.voice"] || "").trim();
+    if (!requestedVoice) {
+      appendError("TTS voice 設定が不正です");
+      return;
+    }
+    const utterance = new window.SpeechSynthesisUtterance(messageText);
+    if (requestedVoice !== "default") {
+      const voices = window.speechSynthesis.getVoices();
+      const matchedVoice = voices.find((voice) => voice.name === requestedVoice);
+      if (!matchedVoice) {
+        appendError(`指定された TTS voice が見つかりません: ${requestedVoice}`);
+        return;
+      }
+      utterance.voice = matchedVoice;
+    }
+    stopBrowserSpeech();
+    window.speechSynthesis.speak(utterance);
+  }
+
+  // Block: Browser speech stop
+  function stopBrowserSpeech() {
+    if (!("speechSynthesis" in window)) {
+      return;
+    }
+    window.speechSynthesis.cancel();
   }
 
   // Block: Start application

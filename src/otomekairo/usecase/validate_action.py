@@ -824,8 +824,8 @@ def _build_action_command(
     if action_type == "notify":
         return {
             "command_id": opaque_action_id("cmd"),
-            "command_type": "browser_notice",
-            "actuator_port": "browser_chat_ui",
+            "command_type": "dispatch_notice",
+            "actuator_port": "notification",
             "target": {
                 "channel": pending_channel,
             },
@@ -837,7 +837,7 @@ def _build_action_command(
                 "channel_matches_input": True,
             },
             "stop_conditions": {
-                "kind": "notice_emitted",
+                "kind": "notification_dispatched",
             },
             "timeout_ms": 5_000,
             "requires_reobserve": False,
