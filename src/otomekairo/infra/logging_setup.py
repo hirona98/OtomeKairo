@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
 
@@ -42,15 +43,11 @@ _STANDARD_LOG_RECORD_KEYS = {
 }
 
 
-# Block: Message normalization filter
-class CompactMessageFilter(logging.Filter):
+# Block: Empty message filter
+class EmptyMessageFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:  # noqa: A003
         message = record.getMessage().strip()
-        if not message:
-            return False
-        record.msg = " ".join(message.split())
-        record.args = ()
-        return True
+        return bool(message)
 
 
 # Block: Uvicorn access suppression filter
@@ -65,6 +62,20 @@ class SuppressFrequentAccessLogFilter(logging.Filter):
 
 # Block: Console formatter
 class ConsoleLogFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        message = " ".join(record.getMessage().split())
+        formatted = (
+            f"{self.formatTime(record)} "
+            f"{record.levelname} "
+            f"{record.name} - "
+            f"{message}"
+        )
+        if record.exc_info is not None:
+            formatted += "\n" + self.formatException(record.exc_info)
+        if record.stack_info is not None:
+            formatted += "\n" + self.formatStack(record.stack_info)
+        return formatted
+
     def formatTime(  # noqa: N802
         self,
         record: logging.LogRecord,
@@ -74,33 +85,37 @@ class ConsoleLogFormatter(logging.Formatter):
         return datetime.fromtimestamp(record.created).strftime("%H:%M:%S")
 
 
-# Block: JSON formatter
-class JsonLogFormatter(logging.Formatter):
+# Block: File formatter
+class FileLogFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
-        payload = {
-            "timestamp": datetime.fromtimestamp(
-                record.created,
-                tz=timezone.utc,
-            ).isoformat(timespec="milliseconds"),
-            "level": record.levelname,
-            "logger": record.name,
-            "message": record.getMessage(),
-            "module": record.module,
-            "function": record.funcName,
-            "line": record.lineno,
-            "process_name": record.processName,
-            "process_id": record.process,
-            "thread_name": record.threadName,
-            "thread_id": record.thread,
-        }
+        message = record.getMessage()
+        formatted = (
+            f"{self.formatTime(record)} "
+            f"{record.levelname} "
+            f"{record.name} "
+            f"[{record.processName}:{record.process}] "
+            f"{record.module}:{record.funcName}:{record.lineno} - "
+            f"{_single_line_message(message)}"
+        )
+        pretty_message = _pretty_json_block(message)
+        if pretty_message is not None:
+            formatted += "\n" + _indented_block(pretty_message)
         if record.exc_info is not None:
-            payload["exception"] = self.formatException(record.exc_info)
+            formatted += "\n" + self.formatException(record.exc_info)
         if record.stack_info is not None:
-            payload["stack"] = self.formatStack(record.stack_info)
+            formatted += "\n" + self.formatStack(record.stack_info)
         extras = _record_extras(record)
         if extras:
-            payload["context"] = extras
-        return json.dumps(payload, ensure_ascii=False)
+            formatted += "\n" + _labeled_json_block("context", extras)
+        return formatted
+
+    def formatTime(  # noqa: N802
+        self,
+        record: logging.LogRecord,
+        datefmt: str | None = None,
+    ) -> str:
+        del datefmt
+        return datetime.fromtimestamp(record.created).strftime("%Y-%m-%d %H:%M:%S")
 
 
 # Block: Public logging setup
@@ -122,13 +137,14 @@ def configure_process_logging(*, process_name: str) -> None:
     )
 
     # Block: File handler setup
-    file_handler = logging.FileHandler(
-        log_dir / f"otomekairo-{process_name}.jsonl",
-        mode="a",
+    file_handler = RotatingFileHandler(
+        log_dir / f"otomekairo-{process_name}.log",
+        maxBytes=1_000_000,
+        backupCount=2,
         encoding="utf-8",
     )
     file_handler.setLevel(logging.DEBUG)
-    file_handler.setFormatter(JsonLogFormatter())
+    file_handler.setFormatter(FileLogFormatter())
 
     root_logger.addHandler(console_handler)
     root_logger.addHandler(file_handler)
@@ -169,20 +185,20 @@ def _configure_library_loggers() -> None:
         ("openai", logging.INFO),
     ):
         logging.getLogger(logger_name).setLevel(level)
-    _attach_compact_filter("LiteLLM")
-    _attach_compact_filter("litellm")
-    _attach_compact_filter("py.warnings")
+    _attach_empty_filter("LiteLLM")
+    _attach_empty_filter("litellm")
+    _attach_empty_filter("py.warnings")
 
 
 # Block: Filter attach helper
-def _attach_compact_filter(logger_name: str) -> None:
+def _attach_empty_filter(logger_name: str) -> None:
     target_logger = logging.getLogger(logger_name)
     if any(
-        isinstance(current_filter, CompactMessageFilter)
+        isinstance(current_filter, EmptyMessageFilter)
         for current_filter in target_logger.filters
     ):
         return
-    target_logger.addFilter(CompactMessageFilter())
+    target_logger.addFilter(EmptyMessageFilter())
 
 
 # Block: Extra extraction
@@ -207,6 +223,36 @@ def _json_safe_value(value: Any) -> Any:
     if isinstance(value, (list, tuple)):
         return [_json_safe_value(item) for item in value]
     return repr(value)
+
+
+# Block: Message helpers
+def _single_line_message(message: str) -> str:
+    normalized = " ".join(message.split())
+    if not normalized:
+        return "(empty)"
+    return normalized
+
+
+def _pretty_json_block(message: str) -> str | None:
+    stripped = message.strip()
+    if not stripped:
+        return None
+    if not stripped.startswith(("{", "[")):
+        return None
+    try:
+        parsed_json = json.loads(stripped)
+    except json.JSONDecodeError:
+        return None
+    return json.dumps(parsed_json, ensure_ascii=False, indent=2)
+
+
+def _labeled_json_block(label: str, payload: dict[str, Any]) -> str:
+    formatted_json = json.dumps(payload, ensure_ascii=False, indent=2)
+    return f"{label}:\n{_indented_block(formatted_json)}"
+
+
+def _indented_block(text: str) -> str:
+    return "\n".join(f"  {line}" for line in text.splitlines())
 
 
 # Block: Repository root helper

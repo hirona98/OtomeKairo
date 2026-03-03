@@ -34,7 +34,7 @@
 - `src/otomekairo/boot/run_web.py`: `uvicorn` で Web サーバを起動し、既定では `0.0.0.0:8000` に bind する
 - `src/otomekairo/boot/run_runtime.py`: 人格ランタイムの常時ループを起動する
 - `src/otomekairo/boot/run_all.py`: Web サーバと人格ランタイムを同じ親プロセスで起動し、既存のランタイム lease が生きていればそれを再利用し、終了シグナル時に自分が起動した子プロセスだけを停止する
-- `src/otomekairo/infra/logging_setup.py`: `launcher / web / runtime` ごとに `log/otomekairo-*.jsonl` へ `DEBUG` の JSONL ログを出し、端末には `INFO` 以上だけを簡潔に出す共通ロギング設定を持つ
+- `src/otomekairo/infra/logging_setup.py`: `launcher / web / runtime` ごとに `log/otomekairo-*.log` へ `DEBUG` の通常テキストログを出し、端末には `INFO` 以上だけを簡潔に出し、JSON や `extra` の辞書はファイル側で読みやすく整形する共通ロギング設定を持つ
 - `src/otomekairo/web/app.py`: FastAPI アプリを構成し、API ルータ、最小ブラウザ UI (`GET /`)、例外処理を束ねる
 - `src/otomekairo/web/static/`: `tmp/CocoroGhost/static/` にかなり近い見た目の最小チャット UI を持ち、同一オリジンで `POST /api/chat/input` と `GET /api/chat/stream` を使い、`message` 到着時は `output.tts.enabled=true` ならブラウザの `SpeechSynthesis` で音声化し、`Mic` は標準 `SpeechRecognition` で音声入力し、設定パネルでは `GET /api/settings/editor` と `PUT /api/settings/editor` でプリセットを含む設定全体を保存できる
 - `src/otomekairo/gateway/cognition_client.py`: 認知処理の外部境界を表す抽象を定義する
@@ -42,7 +42,7 @@
 - `src/otomekairo/usecase/run_cognition.py`: 認知クライアントが返す `cognition_result` を受け取り、`action_command` を使って `speak` は `token` / `message`、`notify` は `notice`、`browse` は `waiting_external` の検索タスクとして実行し、`action_history` へ変換する
 - `src/otomekairo/usecase/run_browse_task.py`: `task_state(waiting_external)` の `browse` タスクを外部検索へ通し、検索結果を内部入力 `network_result` として次周期へ戻し、`action_history` へ変換する
 - `src/otomekairo/usecase/validate_action.py`: `cognition_result.action_proposals` から `speak` / `browse` / `notify` / `wait` を比較し、`selection_profile` の trait / style / relationship / emotion / drive、`memory_bundle`、`task_snapshot` を使って `execute / hold / reject` と構造化した `action_command` を確定する
-- `src/otomekairo/infra/litellm_cognition_client.py`: `LiteLLM` を使って人格断面つきの認知呼び出しを行い、`response_format={"type":"json_object"}` と厳密な shape 指示で `cognition_result` を構造化させ、`action_proposals` の最小形も厳密に検証しつつ、`LiteLLM` 自身の `DEBUG` ログもランタイムの JSONL ログへ残す
+- `src/otomekairo/infra/litellm_cognition_client.py`: `LiteLLM` を使って人格断面つきの認知呼び出しを行い、`response_format={"type":"json_object"}` と厳密な shape 指示で `cognition_result` を構造化させ、`action_proposals` の最小形も厳密に検証しつつ、`LiteLLM` 自身の `DEBUG` ログもランタイムの `.log` ファイルへ残す
 - `src/otomekairo/gateway/search_client.py`: 外部検索の境界を表す抽象を定義する
 - `src/otomekairo/gateway/notification_client.py`: 外部通知の境界を表す抽象を定義する
 - `src/otomekairo/infra/duckduckgo_search_client.py`: DuckDuckGo Instant Answer API を使う最小の外部検索アダプタを持つ
@@ -67,8 +67,8 @@
 - 既に別プロセスで人格ランタイムが稼働中なら、`./run_otomekairo.sh` はそのランタイムを再利用し、Web だけを追加起動する
 - 手動で分けて起動したいときは、`otomekairo-web` と `otomekairo-runtime` を別ターミナルで順に起動してよい
 - 既定の bind 先は `0.0.0.0:8000` だが、ブラウザからは `http://127.0.0.1:8000/` を開いてよい
-- 初期実装では、端末には `INFO` 以上だけを簡潔に表示し、`log/otomekairo-launcher.jsonl`、`log/otomekairo-web.jsonl`、`log/otomekairo-runtime.jsonl` に `DEBUG` の JSONL ログを残す
+- 初期実装では、端末には `INFO` 以上だけを簡潔に表示し、`log/otomekairo-launcher.log`、`log/otomekairo-web.log`、`log/otomekairo-runtime.log` に `DEBUG` の通常テキストログを残す
 - 初期実装では、Uvicorn のアクセスログは基本的に表示しつつ、`/api/status` と `/api/chat/stream` の定期アクセスだけ抑止する
-- 初期実装では、`LiteLLM` の詳細な `DEBUG` ログも `log/otomekairo-runtime.jsonl` に出る
+- 初期実装では、`LiteLLM` の詳細な `DEBUG` ログも `log/otomekairo-runtime.log` に出る
 - `Mic` はブラウザ標準の `SpeechRecognition` がある環境だけで使える
 - `browse` は、UI 上では `検索タスク` と `検索結果` の通知を経てから最終応答へ進む
