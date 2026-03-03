@@ -29,6 +29,7 @@ def main() -> None:
     configure_process_logging(process_name="launcher")
     repo_root = _repo_root()
     runtime_already_running = _runtime_already_running(repo_root)
+    shutdown_state = {"requested": False}
     child_env = _child_environment(repo_root)
     web_url = _web_url(child_env)
     processes = {
@@ -44,7 +45,7 @@ def main() -> None:
             child_env=child_env,
             module_name="otomekairo.boot.run_runtime",
         )
-    _install_signal_handlers()
+    _install_signal_handlers(shutdown_state)
     logger.info("OtomeKairo started")
     logger.info("Web: %s", web_url, extra={"web_url": web_url})
     if runtime_already_running:
@@ -55,7 +56,7 @@ def main() -> None:
     else:
         logger.info("Runtime: running", extra={"runtime_mode": "spawned"})
     try:
-        _wait_for_exit(processes)
+        _wait_for_exit(processes, shutdown_state)
     except RuntimeError as error:
         logger.error("%s", str(error))
         raise SystemExit(1) from error
@@ -113,18 +114,23 @@ def _runtime_already_running(repo_root: Path) -> bool:
 
 
 # Block: Signal registration
-def _install_signal_handlers() -> None:
+def _install_signal_handlers(shutdown_state: dict[str, bool]) -> None:
     def handle_signal(signum: int, _frame: object) -> None:
         del signum
-        raise SystemExit(0)
+        shutdown_state["requested"] = True
 
     signal.signal(signal.SIGINT, handle_signal)
     signal.signal(signal.SIGTERM, handle_signal)
 
 
 # Block: Process wait
-def _wait_for_exit(processes: dict[str, subprocess.Popen[str]]) -> None:
+def _wait_for_exit(
+    processes: dict[str, subprocess.Popen[str]],
+    shutdown_state: dict[str, bool],
+) -> None:
     while True:
+        if shutdown_state["requested"]:
+            raise SystemExit(0)
         for process_name, process in processes.items():
             return_code = process.poll()
             if return_code is None:

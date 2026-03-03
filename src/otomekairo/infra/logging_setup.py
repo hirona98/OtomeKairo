@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import ast
 import json
 import logging
@@ -58,20 +57,6 @@ class SuppressFrequentAccessLogFilter(logging.Filter):
         for path in SUPPRESSED_ACCESS_PATHS:
             if path in message:
                 return False
-        return True
-
-
-# Block: Expected shutdown error suppression filter
-class SuppressExpectedShutdownErrorFilter(logging.Filter):
-    def filter(self, record: logging.LogRecord) -> bool:  # noqa: A003
-        exc_info = record.exc_info
-        if exc_info is not None:
-            exc_type, _, _ = exc_info
-            if exc_type in (KeyboardInterrupt, asyncio.CancelledError):
-                return False
-        message = record.getMessage()
-        if "Exception in ASGI application" in message and "CancelledError" in message:
-            return False
         return True
 
 
@@ -205,7 +190,6 @@ def _configure_library_loggers() -> None:
         ("openai", logging.INFO),
     ):
         logging.getLogger(logger_name).setLevel(level)
-    _attach_filter("uvicorn.error", SuppressExpectedShutdownErrorFilter)
     _attach_empty_filter("LiteLLM")
     _attach_empty_filter("litellm")
     _attach_empty_filter("py.warnings")

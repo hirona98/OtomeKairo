@@ -34,6 +34,7 @@ def main() -> None:
         host=host,
         port=port,
         access_log=True,
+        lifespan="off",
         log_config=None,
     )
     server = ManagedSignalUvicornServer(config)
@@ -43,15 +44,8 @@ def main() -> None:
 
 # Block: Web signal handlers
 def _install_signal_handlers(server: ManagedSignalUvicornServer) -> None:
-    signal_count = {"count": 0}
-
     def handle_signal(signum: int, _frame: object) -> None:
-        del signum
-        signal_count["count"] += 1
-        if signal_count["count"] == 1:
-            server.should_exit = True
-            return
-        server.force_exit = True
+        server.handle_exit(signum, _frame)
 
     signal.signal(signal.SIGINT, handle_signal)
     signal.signal(signal.SIGTERM, handle_signal)

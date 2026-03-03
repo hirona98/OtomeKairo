@@ -68,7 +68,7 @@
 - 手動で分けて起動したいときは、`otomekairo-web` と `otomekairo-runtime` を別ターミナルで順に起動してよい
 - 既定の bind 先は `0.0.0.0:8000` だが、ブラウザからは `http://127.0.0.1:8000/` を開いてよい
 - `./run_otomekairo.sh` は、通常は `Ctrl+C` 1 回で Web とランタイムを順に停止し、ランタイム lease も解放する
-- `./run_otomekairo.sh` の通常終了では、想定内の `KeyboardInterrupt` や `CancelledError` をエラートレースとして出さない
+- 通常終了では、signal handler が例外を投げず、Web も `SSE` 切断を専用レスポンスで閉じるため、想定内の `KeyboardInterrupt` や `CancelledError` がエラートレースとして出ない構成にしている
 - 初期実装では、端末には `INFO` 以上だけを表示しつつ、単体の JSON だけでなく複数行メッセージ内や行末に埋め込まれた JSON / Python 辞書形式の構造化データや `context` の辞書も見やすく整形して出し、`log/otomekairo.log` に `DEBUG` の通常テキストログをまとめて残す
 - 初期実装では、Uvicorn のアクセスログは基本的に表示しつつ、`/api/status` と `/api/chat/stream` の定期アクセスだけ抑止する
 - 初期実装では、`LiteLLM` の詳細な `DEBUG` ログも `log/otomekairo.log` に出る

@@ -75,6 +75,7 @@ class RuntimeLoop:
         self._boot_reconciled = False
         self._prefer_long_cycle = False
         self._last_long_cycle_at_ms = 0
+        self._stop_requested = False
         logger.info(
             "runtime loop initialized",
             extra={
@@ -640,13 +641,17 @@ class RuntimeLoop:
     def run_forever(self) -> None:
         logger.info("runtime loop started")
         try:
-            while True:
+            while not self._stop_requested:
                 processed = self.run_once()
                 if not processed:
                     self._sleep_until_next_idle_tick()
         finally:
             logger.info("runtime loop stopping")
             self._store.release_runtime_lease(owner_token=self._owner_token)
+
+    # Block: Runtime stop request
+    def request_stop(self) -> None:
+        self._stop_requested = True
 
     # Block: Idle timing
     def _idle_tick_ms(self) -> int:
@@ -661,11 +666,11 @@ class RuntimeLoop:
     # Block: Idle wait with heartbeat
     def _sleep_until_next_idle_tick(self) -> None:
         remaining_ms = self._idle_tick_ms()
-        while remaining_ms > 0:
+        while remaining_ms > 0 and not self._stop_requested:
             sleep_ms = min(remaining_ms, self._lease_heartbeat_ms)
             time.sleep(sleep_ms / 1000.0)
             remaining_ms -= sleep_ms
-            if remaining_ms > 0:
+            if remaining_ms > 0 and not self._stop_requested:
                 self._refresh_runtime_lease()
 
     # Block: Lease refresh
