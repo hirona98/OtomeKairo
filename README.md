@@ -67,7 +67,7 @@
 - 既に別プロセスで人格ランタイムが稼働中なら、`./run_otomekairo.sh` はそのランタイムを再利用し、Web だけを追加起動する
 - 手動で分けて起動したいときは、`otomekairo-web` と `otomekairo-runtime` を別ターミナルで順に起動してよい
 - 既定の bind 先は `0.0.0.0:8000` だが、ブラウザからは `http://127.0.0.1:8000/` を開いてよい
-- 初期実装では、端末には `INFO` 以上だけを表示しつつ、JSON や `context` の辞書は見やすく整形して出し、`log/otomekairo.log` に `DEBUG` の通常テキストログをまとめて残す
+- 初期実装では、端末には `INFO` 以上だけを表示しつつ、単体の JSON だけでなく複数行メッセージ内に埋め込まれた JSON や `context` の辞書も見やすく整形して出し、`log/otomekairo.log` に `DEBUG` の通常テキストログをまとめて残す
 - 初期実装では、Uvicorn のアクセスログは基本的に表示しつつ、`/api/status` と `/api/chat/stream` の定期アクセスだけ抑止する
 - 初期実装では、`LiteLLM` の詳細な `DEBUG` ログも `log/otomekairo.log` に出る
 - `Mic` はブラウザ標準の `SpeechRecognition` がある環境だけで使える

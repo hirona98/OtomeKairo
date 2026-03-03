@@ -67,9 +67,9 @@ class ConsoleLogFormatter(logging.Formatter):
             f"{self.formatTime(record)} "
             f"{record.levelname} "
             f"{record.name} - "
-            f"{_single_line_message(message)}"
+            f"{_message_summary(message)}"
         )
-        pretty_message = _pretty_json_block(message)
+        pretty_message = _pretty_message_block(message)
         if pretty_message is not None:
             formatted += "\n" + _indented_block(pretty_message)
         if record.exc_info is not None:
@@ -100,9 +100,9 @@ class FileLogFormatter(logging.Formatter):
             f"{record.name} "
             f"[{record.processName}:{record.process}] "
             f"{record.module}:{record.funcName}:{record.lineno} - "
-            f"{_single_line_message(message)}"
+            f"{_message_summary(message)}"
         )
-        pretty_message = _pretty_json_block(message)
+        pretty_message = _pretty_message_block(message)
         if pretty_message is not None:
             formatted += "\n" + _indented_block(pretty_message)
         if record.exc_info is not None:
@@ -230,17 +230,36 @@ def _json_safe_value(value: Any) -> Any:
 
 
 # Block: Message helpers
-def _single_line_message(message: str) -> str:
-    normalized = " ".join(message.split())
-    if not normalized:
+def _message_summary(message: str) -> str:
+    lines = [line.strip() for line in message.splitlines() if line.strip()]
+    if not lines:
         return "(empty)"
-    return normalized
+    first_line = " ".join(lines[0].split())
+    if len(lines) == 1:
+        return first_line
+    return f"{first_line} ..."
 
 
-def _pretty_json_block(message: str) -> str | None:
-    stripped = message.strip()
-    if not stripped:
+def _pretty_message_block(message: str) -> str | None:
+    lines = [line.rstrip() for line in message.splitlines() if line.strip()]
+    if not lines:
         return None
+    if len(lines) == 1:
+        return _pretty_json_line(lines[0])
+    formatted_lines: list[str] = []
+    for line in lines:
+        pretty_json = _pretty_json_line(line)
+        if pretty_json is not None:
+            formatted_lines.extend(pretty_json.splitlines())
+            continue
+        formatted_lines.append(line)
+    if not formatted_lines:
+        return None
+    return "\n".join(formatted_lines)
+
+
+def _pretty_json_line(line: str) -> str | None:
+    stripped = line.strip()
     if not stripped.startswith(("{", "[")):
         return None
     try:
