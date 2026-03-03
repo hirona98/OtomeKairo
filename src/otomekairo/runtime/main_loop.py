@@ -72,6 +72,8 @@ class RuntimeLoop:
         self._lease_heartbeat_ms = lease_heartbeat_ms
         self._lease_ttl_ms = lease_ttl_ms
         self._boot_reconciled = False
+        self._prefer_long_cycle = False
+        self._last_long_cycle_at_ms = 0
 
     # Block: Single iteration
     def run_once(self) -> bool:
@@ -79,16 +81,24 @@ class RuntimeLoop:
         if not self._boot_reconciled:
             self._store.materialize_next_boot_settings()
             self._boot_reconciled = True
+        if self._prefer_long_cycle:
+            processed_memory = self._process_memory_job_once()
+            if processed_memory:
+                self._prefer_long_cycle = False
+                return True
         processed_settings = self._process_settings_override_once()
         if processed_settings:
+            self._prefer_long_cycle = True
             return True
         pending_input = self._store.claim_next_pending_input()
         if pending_input is not None:
             self._process_claimed_pending_input(pending_input)
+            self._prefer_long_cycle = True
             return True
         waiting_task = self._store.claim_next_waiting_browse_task()
         if waiting_task is not None:
             self._process_claimed_waiting_task(waiting_task)
+            self._prefer_long_cycle = True
             return True
         processed_memory = self._process_memory_job_once()
         if processed_memory:
@@ -403,6 +413,8 @@ class RuntimeLoop:
 
     # Block: Memory job iteration
     def _process_memory_job_once(self) -> bool:
+        if not self._is_long_cycle_due():
+            return False
         memory_job = self._store.claim_next_memory_job()
         if memory_job is None:
             return False
@@ -414,6 +426,7 @@ class RuntimeLoop:
                 error=error,
                 max_tries=MAX_MEMORY_JOB_TRIES,
             )
+        self._last_long_cycle_at_ms = _now_ms()
         return True
 
     # Block: Memory job dispatch
@@ -423,6 +436,7 @@ class RuntimeLoop:
             "refresh_preview": self._run_refresh_preview_job,
             "embedding_sync": self._run_embedding_sync_job,
             "quarantine_memory": self._run_quarantine_memory_job,
+            "tidy_memory": self._run_tidy_memory_job,
         }
         handler = handlers.get(job_kind)
         if handler is None:
@@ -455,6 +469,26 @@ class RuntimeLoop:
             memory_job=memory_job,
             embedding_model=embedding_model,
         )
+
+    def _run_tidy_memory_job(self, memory_job: MemoryJobRecord) -> None:
+        self._store.complete_tidy_memory_job(memory_job=memory_job)
+
+    # Block: Long cycle gate
+    def _is_long_cycle_due(self) -> bool:
+        now_ms = _now_ms()
+        if self._last_long_cycle_at_ms == 0:
+            return True
+        min_interval_ms = self._long_cycle_min_interval_ms()
+        return (now_ms - self._last_long_cycle_at_ms) >= min_interval_ms
+
+    def _long_cycle_min_interval_ms(self) -> int:
+        effective_settings = self._store.read_effective_settings(self._default_settings)
+        min_interval_ms = effective_settings["runtime.long_cycle_min_interval_ms"]
+        if isinstance(min_interval_ms, bool) or not isinstance(min_interval_ms, int):
+            raise RuntimeError("runtime.long_cycle_min_interval_ms must be integer")
+        if min_interval_ms <= 0:
+            raise RuntimeError("runtime.long_cycle_min_interval_ms must be positive")
+        return min_interval_ms
 
     # Block: Infinite loop
     def run_forever(self) -> None:

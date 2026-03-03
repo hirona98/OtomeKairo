@@ -770,6 +770,54 @@ class SqliteStateStore:
             "status": "queued",
         }
 
+    # Block: Tidy memory enqueue
+    def enqueue_tidy_memory(
+        self,
+        *,
+        maintenance_scope: str,
+        retention_cutoff_at: int,
+        target_refs: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        if not isinstance(maintenance_scope, str) or not maintenance_scope:
+            raise StoreValidationError("maintenance_scope must be non-empty string")
+        if maintenance_scope not in {"completed_jobs_gc", "stale_preview_gc", "stale_vector_gc"}:
+            raise StoreValidationError("maintenance_scope is invalid")
+        if isinstance(retention_cutoff_at, bool) or not isinstance(retention_cutoff_at, int):
+            raise StoreValidationError("retention_cutoff_at must be integer")
+        if retention_cutoff_at <= 0:
+            raise StoreValidationError("retention_cutoff_at must be positive")
+        normalized_target_refs = None
+        if target_refs is not None:
+            normalized_target_refs = _normalize_tidy_target_refs(target_refs)
+        if maintenance_scope == "completed_jobs_gc" and normalized_target_refs is not None:
+            raise StoreValidationError("target_refs is not allowed for completed_jobs_gc")
+        if maintenance_scope == "stale_preview_gc" and normalized_target_refs is not None:
+            for target_ref in normalized_target_refs:
+                if target_ref["entity_type"] != "event":
+                    raise StoreValidationError("stale_preview_gc target_refs must be event")
+        if maintenance_scope == "stale_vector_gc" and normalized_target_refs is not None:
+            for target_ref in normalized_target_refs:
+                if target_ref["entity_type"] not in {"event", "memory_state", "event_affect"}:
+                    raise StoreValidationError("stale_vector_gc target_refs is invalid")
+        cycle_id = _opaque_id("cycle")
+        created_at = _now_ms()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            job_ids = self._enqueue_tidy_memory_jobs(
+                connection=connection,
+                cycle_id=cycle_id,
+                maintenance_scope=maintenance_scope,
+                retention_cutoff_at=retention_cutoff_at,
+                target_refs=normalized_target_refs,
+                created_at=created_at,
+            )
+        return {
+            "accepted": True,
+            "cycle_id": cycle_id,
+            "job_ids": job_ids,
+            "status": "queued",
+        }
+
     # Block: Stream window read
     def read_stream_window(self, *, channel: str) -> tuple[int | None, int | None]:
         with self._connect() as connection:
@@ -996,10 +1044,8 @@ class SqliteStateStore:
                     memory_jobs.job_id,
                     memory_jobs.job_kind,
                     memory_jobs.created_at,
-                    memory_job_payloads.payload_json
+                    memory_jobs.payload_ref_json
                 FROM memory_jobs
-                JOIN memory_job_payloads
-                  ON json_extract(memory_jobs.payload_ref_json, '$.payload_id') = memory_job_payloads.payload_id
                 WHERE memory_jobs.status = 'queued'
                 ORDER BY memory_jobs.created_at ASC
                 LIMIT 1
@@ -1019,12 +1065,47 @@ class SqliteStateStore:
                 """,
                 (now_ms, now_ms, row["job_id"]),
             )
-        return MemoryJobRecord(
-            job_id=row["job_id"],
-            job_kind=row["job_kind"],
-            created_at=int(row["created_at"]),
-            payload=json.loads(row["payload_json"]),
-        )
+            job_id = str(row["job_id"])
+            job_kind = str(row["job_kind"])
+            try:
+                payload_ref = _resolve_memory_job_payload_ref(row["payload_ref_json"])
+                payload_row = connection.execute(
+                    """
+                    SELECT job_kind, payload_json
+                    FROM memory_job_payloads
+                    WHERE payload_id = ?
+                    """,
+                    (payload_ref["payload_id"],),
+                ).fetchone()
+                if payload_row is None:
+                    self._dead_letter_claimed_memory_job(
+                        connection=connection,
+                        job_id=job_id,
+                        dead_lettered_at=now_ms,
+                        last_error=f"missing memory_job_payloads row for payload_id={payload_ref['payload_id']}",
+                    )
+                    return None
+                payload = json.loads(payload_row["payload_json"])
+                if not isinstance(payload, dict):
+                    raise RuntimeError("memory_job_payloads.payload_json must be object")
+                if str(payload_row["job_kind"]) != job_kind:
+                    raise RuntimeError("memory_job_payloads.job_kind must match memory_jobs.job_kind")
+                if str(payload.get("job_kind")) != job_kind:
+                    raise RuntimeError("memory_job_payloads.payload_json.job_kind must match memory_jobs.job_kind")
+                return MemoryJobRecord(
+                    job_id=job_id,
+                    job_kind=job_kind,
+                    created_at=int(row["created_at"]),
+                    payload=payload,
+                )
+            except Exception as error:
+                self._dead_letter_claimed_memory_job(
+                    connection=connection,
+                    job_id=job_id,
+                    dead_lettered_at=now_ms,
+                    last_error=_memory_job_error_text(error),
+                )
+                return None
 
     # Block: Memory job failure
     def fail_claimed_memory_job(
@@ -1079,6 +1160,35 @@ class SqliteStateStore:
                 ),
             )
         return next_status
+
+    # Block: Dead letter handling
+    def _dead_letter_claimed_memory_job(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        job_id: str,
+        dead_lettered_at: int,
+        last_error: str,
+    ) -> None:
+        updated_row_count = connection.execute(
+            """
+            UPDATE memory_jobs
+            SET status = 'dead_letter',
+                updated_at = ?,
+                completed_at = ?,
+                last_error = ?
+            WHERE job_id = ?
+              AND status = 'claimed'
+            """,
+            (
+                dead_lettered_at,
+                dead_lettered_at,
+                last_error,
+                job_id,
+            ),
+        ).rowcount
+        if updated_row_count != 1:
+            raise StoreConflictError("memory job must be claimed before dead letter handling")
 
     # Block: Memory job apply
     def complete_write_memory_job(self, *, memory_job: MemoryJobRecord) -> str:
@@ -1485,6 +1595,156 @@ class SqliteStateStore:
                 embedding_model=embedding_model,
                 created_at=now_ms,
             )
+            self._mark_memory_job_completed(
+                connection=connection,
+                job_id=memory_job.job_id,
+                completed_at=now_ms,
+            )
+        return affected_count
+
+    # Block: Tidy memory apply
+    def complete_tidy_memory_job(self, *, memory_job: MemoryJobRecord) -> int:
+        if memory_job.job_kind != "tidy_memory":
+            raise StoreValidationError("memory_job.job_kind must be tidy_memory")
+        payload = memory_job.payload
+        maintenance_scope = payload.get("maintenance_scope")
+        retention_cutoff_at = payload.get("retention_cutoff_at")
+        source_event_ids = payload.get("source_event_ids")
+        if not isinstance(maintenance_scope, str) or not maintenance_scope:
+            raise StoreValidationError("tidy_memory maintenance_scope must be non-empty string")
+        if isinstance(retention_cutoff_at, bool) or not isinstance(retention_cutoff_at, int):
+            raise StoreValidationError("tidy_memory retention_cutoff_at must be integer")
+        if retention_cutoff_at <= 0:
+            raise StoreValidationError("tidy_memory retention_cutoff_at must be positive")
+        if not isinstance(source_event_ids, list):
+            raise StoreValidationError("tidy_memory source_event_ids must be a list")
+        for event_id in source_event_ids:
+            if not isinstance(event_id, str) or not event_id:
+                raise StoreValidationError("tidy_memory source_event_ids must contain non-empty strings")
+        raw_target_refs = payload.get("target_refs")
+        target_refs = None
+        if raw_target_refs is not None:
+            target_refs = _normalize_tidy_target_refs(raw_target_refs)
+        now_ms = _now_ms()
+        affected_count = 0
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            self._ensure_claimed_memory_job(
+                connection=connection,
+                job_id=memory_job.job_id,
+            )
+
+            # Block: Completed jobs GC
+            if maintenance_scope == "completed_jobs_gc":
+                if target_refs is not None:
+                    raise StoreValidationError("tidy_memory target_refs is not allowed for completed_jobs_gc")
+                affected_count += connection.execute(
+                    """
+                    DELETE FROM memory_jobs
+                    WHERE status IN ('completed', 'dead_letter')
+                      AND completed_at IS NOT NULL
+                      AND completed_at < ?
+                    """,
+                    (retention_cutoff_at,),
+                ).rowcount
+                affected_count += connection.execute(
+                    """
+                    DELETE FROM memory_job_payloads
+                    WHERE payload_id NOT IN (
+                        SELECT json_extract(payload_ref_json, '$.payload_id')
+                        FROM memory_jobs
+                        WHERE json_extract(payload_ref_json, '$.payload_id') IS NOT NULL
+                    )
+                    """,
+                ).rowcount
+
+            # Block: Stale preview GC
+            elif maintenance_scope == "stale_preview_gc":
+                target_event_ids = None
+                if target_refs is not None:
+                    target_event_ids = []
+                    for target_ref in target_refs:
+                        if target_ref["entity_type"] != "event":
+                            raise StoreValidationError("tidy_memory stale_preview_gc target_refs must be event")
+                        target_event_ids.append(target_ref["entity_id"])
+                placeholders = ""
+                parameters: tuple[Any, ...] = (retention_cutoff_at,)
+                if target_event_ids:
+                    placeholders = ",".join("?" for _ in target_event_ids)
+                    parameters = (retention_cutoff_at, *target_event_ids)
+                affected_count += connection.execute(
+                    f"""
+                    DELETE FROM event_preview_cache
+                    WHERE EXISTS (
+                        SELECT 1
+                        FROM events
+                        WHERE events.event_id = event_preview_cache.event_id
+                          AND events.searchable = 0
+                          AND COALESCE(events.updated_at, events.created_at) < ?
+                    )
+                    {f"AND event_preview_cache.event_id IN ({placeholders})" if placeholders else ""}
+                    """,
+                    parameters,
+                ).rowcount
+
+            # Block: Stale vector GC
+            elif maintenance_scope == "stale_vector_gc":
+                if target_refs is not None:
+                    for target_ref in target_refs:
+                        if target_ref["entity_type"] not in {"event", "memory_state", "event_affect"}:
+                            raise StoreValidationError("tidy_memory stale_vector_gc target_refs is invalid")
+                if target_refs is None:
+                    connection.execute(
+                        """
+                        DELETE FROM vec_items_index
+                        WHERE rowid IN (
+                            SELECT rowid
+                            FROM vec_items
+                            WHERE searchable = 0
+                              AND source_updated_at < ?
+                        )
+                        """,
+                        (retention_cutoff_at,),
+                    )
+                    affected_count += connection.execute(
+                        """
+                        DELETE FROM vec_items
+                        WHERE searchable = 0
+                          AND source_updated_at < ?
+                        """,
+                        (retention_cutoff_at,),
+                    ).rowcount
+                else:
+                    where_clauses = ["searchable = 0", "source_updated_at < ?"]
+                    parameters: list[Any] = [retention_cutoff_at]
+                    entity_conditions: list[str] = []
+                    for target_ref in target_refs:
+                        entity_conditions.append("(entity_type = ? AND entity_id = ?)")
+                        parameters.append(target_ref["entity_type"])
+                        parameters.append(target_ref["entity_id"])
+                    where_clauses.append("(" + " OR ".join(entity_conditions) + ")")
+                    where_sql = " AND ".join(where_clauses)
+                    rowids = [
+                        int(row["rowid"])
+                        for row in connection.execute(
+                            f"SELECT rowid FROM vec_items WHERE {where_sql}",
+                            tuple(parameters),
+                        ).fetchall()
+                    ]
+                    if rowids:
+                        placeholder_sql = ",".join("?" for _ in rowids)
+                        connection.execute(
+                            f"DELETE FROM vec_items_index WHERE rowid IN ({placeholder_sql})",
+                            tuple(rowids),
+                        )
+                        affected_count += connection.execute(
+                            f"DELETE FROM vec_items WHERE rowid IN ({placeholder_sql})",
+                            tuple(rowids),
+                        ).rowcount
+
+            else:
+                raise StoreValidationError("tidy_memory maintenance_scope is invalid")
+
             self._mark_memory_job_completed(
                 connection=connection,
                 job_id=memory_job.job_id,
@@ -2302,6 +2562,61 @@ class SqliteStateStore:
             self._insert_memory_job(
                 connection=connection,
                 job_kind="quarantine_memory",
+                payload_json=payload_json,
+                idempotency_key=idempotency_key,
+                created_at=created_at,
+            )
+        ]
+
+    # Block: Tidy memory enqueue
+    def _enqueue_tidy_memory_jobs(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        cycle_id: str,
+        maintenance_scope: str,
+        retention_cutoff_at: int,
+        target_refs: list[dict[str, str]] | None,
+        created_at: int,
+    ) -> list[str]:
+        if maintenance_scope not in {"completed_jobs_gc", "stale_preview_gc", "stale_vector_gc"}:
+            raise StoreValidationError("tidy_memory maintenance_scope is invalid")
+        if retention_cutoff_at <= 0:
+            raise StoreValidationError("tidy_memory retention_cutoff_at must be positive")
+        normalized_target_refs = None
+        if target_refs is not None:
+            normalized_target_refs = _normalize_tidy_target_refs(target_refs)
+        if maintenance_scope == "completed_jobs_gc" and normalized_target_refs is not None:
+            raise StoreValidationError("tidy_memory target_refs is not allowed for completed_jobs_gc")
+        if maintenance_scope == "stale_preview_gc" and normalized_target_refs is not None:
+            for target_ref in normalized_target_refs:
+                if target_ref["entity_type"] != "event":
+                    raise StoreValidationError("tidy_memory stale_preview_gc target_refs must be event")
+        if maintenance_scope == "stale_vector_gc" and normalized_target_refs is not None:
+            for target_ref in normalized_target_refs:
+                if target_ref["entity_type"] not in {"event", "memory_state", "event_affect"}:
+                    raise StoreValidationError("tidy_memory stale_vector_gc target_refs is invalid")
+        idempotency_key = _tidy_memory_job_idempotency_key(
+            cycle_id=cycle_id,
+            maintenance_scope=maintenance_scope,
+            retention_cutoff_at=retention_cutoff_at,
+            target_refs=normalized_target_refs,
+        )
+        payload_json: dict[str, Any] = {
+            "job_kind": "tidy_memory",
+            "cycle_id": cycle_id,
+            "source_event_ids": [],
+            "created_at": created_at,
+            "idempotency_key": idempotency_key,
+            "maintenance_scope": maintenance_scope,
+            "retention_cutoff_at": retention_cutoff_at,
+        }
+        if normalized_target_refs is not None:
+            payload_json["target_refs"] = normalized_target_refs
+        return [
+            self._insert_memory_job(
+                connection=connection,
+                job_kind="tidy_memory",
                 payload_json=payload_json,
                 idempotency_key=idempotency_key,
                 created_at=created_at,
@@ -3158,6 +3473,32 @@ def _write_memory_job_idempotency_key(*, cycle_id: str, event_ids: list[str]) ->
     return "write_memory:" + cycle_id + ":" + ":".join(event_ids)
 
 
+# Block: Memory job payload ref resolution
+def _resolve_memory_job_payload_ref(payload_ref_json: Any) -> dict[str, Any]:
+    if not isinstance(payload_ref_json, str) or not payload_ref_json:
+        raise RuntimeError("memory_jobs.payload_ref_json must be non-empty string")
+    try:
+        payload_ref = json.loads(payload_ref_json)
+    except json.JSONDecodeError as error:
+        raise RuntimeError("memory_jobs.payload_ref_json must be valid JSON") from error
+    if not isinstance(payload_ref, dict):
+        raise RuntimeError("memory_jobs.payload_ref_json must be object")
+    if payload_ref.get("payload_kind") != "memory_job_payload":
+        raise RuntimeError("memory_jobs.payload_ref_json.payload_kind must be memory_job_payload")
+    payload_id = payload_ref.get("payload_id")
+    if not isinstance(payload_id, str) or not payload_id:
+        raise RuntimeError("memory_jobs.payload_ref_json.payload_id must be non-empty string")
+    payload_version = payload_ref.get("payload_version")
+    if isinstance(payload_version, bool) or not isinstance(payload_version, int):
+        raise RuntimeError("memory_jobs.payload_ref_json.payload_version must be integer")
+    if payload_version < 1:
+        raise RuntimeError("memory_jobs.payload_ref_json.payload_version must be >= 1")
+    return {
+        "payload_id": payload_id,
+        "payload_version": payload_version,
+    }
+
+
 def _normalize_quarantine_targets(raw_targets: Any) -> list[dict[str, str]]:
     if not isinstance(raw_targets, list) or not raw_targets:
         raise StoreValidationError("quarantine_memory targets must not be empty")
@@ -3182,6 +3523,29 @@ def _normalize_quarantine_targets(raw_targets: Any) -> list[dict[str, str]]:
             }
         )
     return normalized_targets
+
+
+# Block: Tidy memory target normalization
+def _normalize_tidy_target_refs(raw_target_refs: Any) -> list[dict[str, str]]:
+    if not isinstance(raw_target_refs, list) or not raw_target_refs:
+        raise StoreValidationError("tidy_memory target_refs must not be empty")
+    normalized_refs: list[dict[str, str]] = []
+    for raw_target_ref in raw_target_refs:
+        if not isinstance(raw_target_ref, dict):
+            raise StoreValidationError("tidy_memory target_ref must be object")
+        entity_type = raw_target_ref.get("entity_type")
+        entity_id = raw_target_ref.get("entity_id")
+        if not isinstance(entity_type, str) or not entity_type:
+            raise StoreValidationError("tidy_memory target_ref.entity_type must be non-empty string")
+        if not isinstance(entity_id, str) or not entity_id:
+            raise StoreValidationError("tidy_memory target_ref.entity_id must be non-empty string")
+        normalized_refs.append(
+            {
+                "entity_type": entity_type,
+                "entity_id": entity_id,
+            }
+        )
+    return normalized_refs
 
 
 def _refresh_preview_job_idempotency_key(
@@ -3227,6 +3591,26 @@ def _quarantine_memory_job_idempotency_key(
         for target in targets
     ]
     return "quarantine_memory:" + cycle_id + ":" + reason_code + ":" + ":".join(target_tokens)
+
+
+# Block: Tidy memory job idempotency
+def _tidy_memory_job_idempotency_key(
+    *,
+    cycle_id: str,
+    maintenance_scope: str,
+    retention_cutoff_at: int,
+    target_refs: list[dict[str, str]] | None,
+) -> str:
+    target_tokens: list[str] = []
+    if target_refs:
+        target_tokens = [
+            f"{target_ref['entity_type']}:{target_ref['entity_id']}"
+            for target_ref in target_refs
+        ]
+    suffix = ":".join(target_tokens)
+    if suffix:
+        suffix = ":" + suffix
+    return f"tidy_memory:{cycle_id}:{maintenance_scope}:{int(retention_cutoff_at)}{suffix}"
 
 
 def _fetch_events_for_ids(
