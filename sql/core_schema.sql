@@ -33,6 +33,13 @@ CREATE TABLE self_state (
     updated_at INTEGER NOT NULL
 );
 
+CREATE TABLE runtime_settings (
+    row_id INTEGER PRIMARY KEY CHECK (row_id = 1),
+    values_json TEXT NOT NULL,
+    value_updated_at_json TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
 CREATE TABLE attention_state (
     row_id INTEGER PRIMARY KEY CHECK (row_id = 1),
     primary_focus_json TEXT NOT NULL,
@@ -583,6 +590,10 @@ CREATE TABLE vec_items (
 
 CREATE INDEX idx_vec_items_entity_searchable_updated
     ON vec_items (entity_type, searchable, source_updated_at DESC);
+
+CREATE VIRTUAL TABLE vec_items_index USING vec0(
+    embedding float[32]
+);
 
 CREATE VIRTUAL TABLE events_fts USING fts5(
     event_id UNINDEXED,

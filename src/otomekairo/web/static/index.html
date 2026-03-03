@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="ja">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+
+  <!-- Block: Document metadata -->
+  <title>CocoroAI - OtomeKairo</title>
+  <link rel="icon" href="/favicon.ico" type="image/x-icon" sizes="any" />
+  <link rel="shortcut icon" href="/favicon.ico" type="image/x-icon" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+
+<body>
+  <div class="app">
+    <!-- Block: Header -->
+    <header class="topbar">
+      <div class="topbar-left">
+        <div class="topbar-title">CocoroAI</div>
+      </div>
+      <div class="topbar-right">
+        <button class="icon-btn" id="btn-mic" type="button" title="音声入力" aria-label="音声入力">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z">
+            </path>
+            <path class="mic-slash" d="M4 4l16 16" stroke="currentColor" stroke-width="2" fill="none"></path>
+          </svg>
+        </button>
+        <button class="icon-btn" id="btn-settings" type="button" title="設定" aria-label="設定">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.2 7.2 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.58.22-1.12.52-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.7 7.8a.5.5 0 0 0 .12.64l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94L2.82 14.5a.5.5 0 0 0-.12.64l1.92 3.32c.13.22.39.3.6.22l2.39-.96c.5.41 1.05.72 1.63.94l.36 2.54c.05.24.26.42.5.42h3.84c.24 0 .45-.18.5-.42l.36-2.54c.58-.22 1.12-.52 1.63-.94l2.39.96c.22.08.47 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.56zM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5z">
+            </path>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Block: Main -->
+    <main class="main">
+      <section id="chat-panel" class="chat" aria-live="polite">
+        <div id="chat-scroll" class="chat-scroll"></div>
+      </section>
+
+      <section id="settings-panel" class="settings hidden" aria-live="polite">
+        <!-- Block: Settings toolbar -->
+        <div class="settings-toolbar">
+          <button id="btn-settings-close" class="settings-btn settings-btn-back" type="button">チャットに戻る</button>
+          <div class="settings-toolbar-right">
+            <button id="btn-settings-reload" class="settings-btn" type="button">再読込</button>
+            <button id="btn-settings-save" class="settings-btn primary" type="button">保存</button>
+          </div>
+          <button id="btn-settings-dummy" class="settings-btn danger settings-btn-logout" type="button">ダミー</button>
+        </div>
+
+        <!-- Block: Settings note -->
+        <div class="settings-desc">CocoroGhost 風の画面構成です。主要な一部設定だけ保存でき、他の操作はダミーです。</div>
+
+        <!-- Block: Settings tabs -->
+        <div class="settings-tabs" role="tablist" aria-label="設定タブ">
+          <button class="settings-tab active" type="button">ペルソナ</button>
+          <button class="settings-tab" type="button">会話</button>
+          <button class="settings-tab" type="button">記憶</button>
+          <button class="settings-tab" type="button">システム</button>
+        </div>
+
+        <!-- Block: Settings content -->
+        <div class="settings-pages">
+          <section class="settings-page">
+            <div class="settings-card">
+              <div class="settings-card-title">主要設定</div>
+              <div class="settings-grid">
+                <label class="settings-field" for="setting-llm-default-model">
+                  <span class="settings-label">LLM モデル</span>
+                  <input id="setting-llm-default-model" class="settings-input" type="text" />
+                </label>
+                <label class="settings-field" for="setting-llm-temperature">
+                  <span class="settings-label">Temperature</span>
+                  <input id="setting-llm-temperature" class="settings-input" type="number" min="0" max="2" step="0.1" />
+                </label>
+                <label class="settings-field" for="setting-runtime-idle-tick-ms">
+                  <span class="settings-label">Idle Tick (ms)</span>
+                  <input id="setting-runtime-idle-tick-ms" class="settings-input" type="number" min="250" max="60000" step="250" />
+                </label>
+                <label class="settings-field" for="setting-output-tts-voice">
+                  <span class="settings-label">TTS Voice</span>
+                  <input id="setting-output-tts-voice" class="settings-input" type="text" />
+                </label>
+              </div>
+              <label class="settings-check">
+                <input id="setting-output-tts-enabled" type="checkbox" />
+                <span>ブラウザ TTS を有効化する</span>
+              </label>
+              <label class="settings-check">
+                <input id="setting-integrations-line-enabled" type="checkbox" />
+                <span>外部通知を有効化する</span>
+              </label>
+            </div>
+
+            <div class="settings-card">
+              <div class="settings-card-title">現在状態</div>
+              <pre id="status-json" class="settings-json-view">{}</pre>
+            </div>
+
+            <div class="settings-card">
+              <div class="settings-card-title">有効設定</div>
+              <pre id="settings-json" class="settings-json-view">{}</pre>
+            </div>
+
+            <div id="settings-status" class="status"></div>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <!-- Block: Input -->
+    <form id="chat-form" class="composer" autocomplete="off">
+      <div id="attachments" class="attachments" aria-label="添付ファイル一覧"></div>
+      <div class="composer-row">
+        <button class="composer-icon" id="btn-camera" type="button" title="カメラ" aria-label="カメラ">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 8a2 2 0 0 1 2-2h3l1.6-1.6h2.8L15 6h3a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8z"
+              fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+            <circle cx="12" cy="12.5" r="3.2" fill="none" stroke="currentColor" stroke-width="2"></circle>
+          </svg>
+        </button>
+
+        <div class="composer-field">
+          <label class="sr-only" for="chat-input">メッセージ入力</label>
+          <textarea
+            id="chat-input"
+            class="composer-textarea"
+            rows="1"
+            maxlength="4000"
+            placeholder="テキストを入力"
+          ></textarea>
+        </div>
+
+        <button id="btn-cancel" class="composer-send secondary" type="button">停止</button>
+        <button id="btn-send" class="composer-send" type="submit">送信</button>
+      </div>
+    </form>
+
+    <!-- Block: Status bar -->
+    <footer class="statusbar">
+      <div id="connection-text" class="statusbar-left">状態: 接続中...</div>
+      <div id="runtime-text" class="statusbar-right">状態を確認中...</div>
+    </footer>
+  </div>
+
+  <!-- Block: Script -->
+  <script src="/static/app.js"></script>
+</body>
+
+</html>

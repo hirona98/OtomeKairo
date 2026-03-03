@@ -15,8 +15,8 @@
 ## このドキュメントで固定する範囲
 
 - 固定するのは、初期実装で使う JSON オブジェクトのキー、型、必須項目、固定語彙である
-- 固定するのは、`pending_inputs.payload_json`、`settings_overrides.requested_value_json`、`ui_outbound_events.payload_json`、`memory_jobs.payload_ref_json`、`memory_job_payloads.payload_json`、主要な Web API 本文である
-- 固定するのは、`self_state.personality_json`、`self_state.current_emotion_json`、`self_state.long_term_goals_json`、`self_state.relationship_overview_json`、`self_state.invariants_json`、短周期の内部で使う `selection_profile`、`persona_consistency_score`、`attention_score_breakdown`、`self_initiated_score_breakdown`、`action_candidate_score`、長周期の内部で使う `personality_change_proposal`、`persona_updates` の形である
+- 固定するのは、`pending_inputs.payload_json`、`settings_overrides.requested_value_json`、`ui_outbound_events.payload_json`、`action_history.command_json`、`action_history.observed_effects_json`、`memory_jobs.payload_ref_json`、`memory_job_payloads.payload_json`、主要な Web API 本文である
+- 固定するのは、`self_state.personality_json`、`self_state.current_emotion_json`、`self_state.long_term_goals_json`、`self_state.relationship_overview_json`、`self_state.invariants_json`、短周期の内部で使う `selection_profile`、`persona_consistency_score`、`attention_score_breakdown`、`self_initiated_score_breakdown`、`action_candidate_score`、`cognition_result`、長周期の内部で使う `personality_change_proposal`、`persona_updates` の形である
 - 固定しないのは、Python のクラス名、Pydantic モデル名、OpenAPI の自動生成細部である
 - 固定しないのは、将来追加する未使用フィールドや後段の拡張イベント種別である
 
@@ -351,6 +351,45 @@
 - `drive_bias` は、内部欲求から作る短期補正値であり、各値は `-1.0..+1.0` の `number` に固定する
 - `selection_profile` は永続化前提の正本ではなく、`self_state`、`current_emotion`、`relationship_overview`、`preference_memory`、`drive_state` から再構成する
 
+<!-- Block: Task Snapshot -->
+### `task_snapshot`
+
+```json
+{
+  "active_tasks": [],
+  "waiting_external_tasks": []
+}
+```
+
+- `task_snapshot` は、短周期の内部でだけ使う現在タスク断面である
+- 必須項目は `active_tasks`、`waiting_external_tasks` である
+- 各要素は、少なくとも `task_id`、`task_kind`、`task_status`、`goal_hint`、`completion_hint`、`resume_condition`、`interruptible`、`priority`、`created_at`、`updated_at` を持つ
+- `context assembler` は、各要素に人間可読な `created_at_*`、`updated_at_*`、`relative_time_text` を付与してよい
+- 初期実装では、`active_tasks` と `waiting_external_tasks` に優先度上位 `3` 件までを入れてよい
+
+<!-- Block: Memory Bundle -->
+### `memory_bundle`
+
+```json
+{
+  "working_memory_items": [],
+  "episodic_items": [],
+  "semantic_items": [],
+  "affective_items": [],
+  "relationship_items": [],
+  "reflection_items": [],
+  "recent_event_window": []
+}
+```
+
+- `memory_bundle` は、短周期の内部でだけ使う最終的な想起断面である
+- 必須項目は `working_memory_items`、`episodic_items`、`semantic_items`、`affective_items`、`relationship_items`、`reflection_items`、`recent_event_window` である
+- `working_memory_items`、`episodic_items`、`semantic_items`、`affective_items`、`relationship_items`、`reflection_items` の各要素は、少なくとも `memory_state_id`、`memory_kind`、`body_text`、`payload`、`confidence`、`importance`、`memory_strength`、`created_at`、`updated_at`、`last_confirmed_at` を持つ
+- `recent_event_window` の各要素は、少なくとも `event_id`、`source`、`kind`、`summary_text`、`created_at` を持つ
+- `context assembler` は、`memory_bundle` の各要素に人間可読な `*_utc_text`、`*_local_text`、`relative_time_text` を付与してよい
+- 初期実装では、`working_memory_items` に `memory_kind=summary`、`semantic_items` に `memory_kind=fact`、`recent_event_window` に直近 `5` 件の `searchable` な `events` を入れてよい
+- 初期実装では、`current_observation.observation_text` と、必要なら `query` / `source_task_id` への一致を使い、関連しない要素を `memory_bundle` から落としてよい
+
 <!-- Block: Persona Consistency Score -->
 ### `persona_consistency_score`
 
@@ -456,6 +495,54 @@
 - 各 `*_score` は、比較前に同じ `0.0..1.0` 尺度へ正規化済みでなければならない
 - `action_candidate_score` は永続化前提の正本ではなく、その短周期の候補比較ごとに再計算する
 
+<!-- Block: Cognition Result -->
+### `cognition_result`
+
+```json
+{
+  "intention_summary": "browser_chat に対して人格として応答する",
+  "decision_reason": "最新のテキスト入力を受け取り、現在の人格断面に基づいて返答を選ぶ",
+  "action_proposals": [
+    {
+      "action_type": "speak",
+      "target_channel": "browser_chat",
+      "priority": 1.0
+    }
+  ],
+  "step_hints": [],
+  "speech_draft": {
+    "text": "こんにちは。",
+    "language": "ja",
+    "delivery_mode": "stream"
+  },
+  "memory_focus": {
+    "focus_kind": "current_input_only",
+    "summary": "直近のチャット入力を主材料として判断した"
+  },
+  "reflection_seed": {
+    "cycle_id": "cycle_...",
+    "input_kind": "chat_message",
+    "message_id": "msg_...",
+    "token_count": 3,
+    "was_cancelled": false
+  }
+}
+```
+
+- `cognition_result` は、短周期の内部で使う構造化された認知結果である
+- `cognition_result` は、認知層が一度に返す JSON オブジェクトであり、後から補完前提で分割しない
+- 必須項目は `intention_summary`、`decision_reason`、`action_proposals`、`step_hints`、`speech_draft`、`memory_focus`、`reflection_seed` である
+- `action_proposals` と `step_hints` は配列に固定し、候補がない場合も空配列 `[]` を使う
+- 初期実装の `browser_chat` では、`action_proposals` の各要素は少なくとも `action_type` と `priority` を持つ
+- 初期実装の `browser_chat` では、`action_type` は `speak`、`browse`、`notify`、`wait` のいずれかだけを許可する
+- 初期実装の `browser_chat` では、`priority` は `0.0..1.0` の `number` に固定する
+- 初期実装の `browser_chat` では、`speak` と `notify` のとき `target_channel=\"browser_chat\"` を必須とする
+- 初期実装の `browser_chat` では、`browse` のとき `query` に非空の検索文字列を必須とする
+- `speech_draft` は、少なくとも `text`、`language`、`delivery_mode` を持つ
+- `memory_focus` は、少なくとも `focus_kind`、`summary` を持つ
+- `reflection_seed` は、少なくとも `cycle_id`、`input_kind`、`message_id`、`token_count`、`was_cancelled` を持つ
+- `cognition_result` は永続化前提の正本ではなく、その短周期の認知実行ごとに再構成する
+
 <!-- Block: Persona Update Group -->
 ## 人格変化の内部 JSON
 
@@ -531,6 +618,62 @@
 - `base_personality_updated_at` は、適用開始時の `self_state.personality_updated_at` と一致しなければならない
 - 適用時に `base_personality_updated_at` が現在の `self_state.personality_updated_at` と一致しない場合、その `persona_updates` は stale として棄却し、後続の `write_memory` で再生成する
 
+<!-- Block: Runtime Settings Group -->
+## ランタイム設定テーブルの JSON
+
+<!-- Block: Runtime Settings Values -->
+### `runtime_settings.values_json`
+
+```json
+{
+  "llm.default_model": "openrouter/default-model",
+  "llm.embedding_model": "openrouter/default-embedding",
+  "llm.temperature": 0.7,
+  "llm.max_output_tokens": 2048,
+  "runtime.idle_tick_ms": 1000
+}
+```
+
+- `runtime_settings.values_json` は、現在有効な設定値を全設定キーぶん持つ完全オブジェクトである
+- キーは、`docs/39_設定キー運用仕様.md` に登録されたドット区切り設定キーだけを許可する
+- 値の型は、各キーの登録 `value_type` と一致しなければならない
+- `apply_scope="runtime"` の `applied` は、このオブジェクトを同じ短周期で更新する
+- `apply_scope="next_boot"` の `applied` は、このオブジェクトを即時更新せず、次回ランタイム起動時の materialize で更新する
+
+<!-- Block: Runtime Settings Updated At -->
+### `runtime_settings.value_updated_at_json`
+
+```json
+{
+  "llm.default_model": 1760000000000,
+  "llm.embedding_model": 1760000000000,
+  "llm.temperature": 1760000000000,
+  "llm.max_output_tokens": 1760000000000,
+  "runtime.idle_tick_ms": 1760000000000
+}
+```
+
+- `runtime_settings.value_updated_at_json` は、各設定キーの最終反映時刻を `key -> unix_ms` で持つ完全オブジェクトである
+- キー集合は、`runtime_settings.values_json` と同一に固定する
+- 各値は、UTC unix milliseconds の `integer` に固定する
+- `next_boot` の materialize は、この時刻が既存値より新しいキーだけを更新する
+
+<!-- Block: Event Group -->
+## イベントテーブルの JSON
+
+<!-- Block: Event Input Journal Refs -->
+### `events.input_journal_refs_json`
+
+```json
+[
+  "obs_inp_..."
+]
+```
+
+- `events.input_journal_refs_json` は、その `events` 行の根拠になった `input_journal.observation_id` の順序付き配列である
+- 各要素は、不透明な `string` に固定する
+- 空配列は許可するが、外部入力や観測に由来する `events` では根拠がある限り省略しない
+
 <!-- Block: Control Plane Group -->
 ## 制御面テーブルの JSON
 
@@ -538,7 +681,8 @@
 ### `pending_inputs.payload_json`
 
 - `pending_inputs.payload_json` は、少なくとも `input_kind` を持つ
-- 初期段階の `browser_chat` では、`chat_message` と `cancel` の 2 種だけを受け付ける
+- Web API が受け付ける初期段階の `browser_chat` 入力は、`chat_message` と `cancel` の 2 種だけである
+- ランタイム内部では、外部検索結果を戻すために `network_result` を enqueue してよい
 
 <!-- Block: Pending Chat Message -->
 #### `chat_message`
@@ -554,6 +698,7 @@
 - 必須項目は `input_kind`、`text` である
 - `input_kind` は `chat_message` に固定する
 - `text` は、空文字列や空白のみを許可しない
+- `text` は、`4000` 文字を超えてはならない
 - `client_message_id` は任意で、同一クライアントからの再送判定に使う
 - `client_message_id` がある場合、Web サーバは `pending_inputs.client_message_id` にも同じ値を書き込む
 
@@ -570,6 +715,24 @@
 - 必須項目は `input_kind` である
 - `input_kind` は `cancel` に固定する
 - `target_message_id` は任意で、省略時は現在の `browser_chat` 応答全体を対象にしてよい
+
+<!-- Block: Pending Network Result -->
+#### `network_result`
+
+```json
+{
+  "input_kind": "network_result",
+  "query": "OpenAI",
+  "summary_text": "検索結果の要約",
+  "source_task_id": "task_..."
+}
+```
+
+- 必須項目は `input_kind`、`query`、`summary_text`、`source_task_id` である
+- `input_kind` は `network_result` に固定する
+- `query` は、外部検索に使った非空の文字列を持つ
+- `summary_text` は、外部検索アダプタが返した非空の要約文字列を持つ
+- `source_task_id` は、この結果を作った `browse` タスクを追跡するための ID を持つ
 
 <!-- Block: Settings Requested Value -->
 ### `settings_overrides.requested_value_json`
@@ -642,7 +805,7 @@
 ```
 
 - 必須項目は `status_code`、`label` である
-- `status_code` は、少なくとも `idle`、`thinking`、`speaking`、`waiting_external` を区別する
+- `status_code` は、少なくとも `idle`、`thinking`、`speaking`、`waiting_external`、`browsing`、`processing_external_result` を区別する
 - `cycle_id` は任意で、特定サイクルに紐づく更新だけに付ける
 
 <!-- Block: UI Notice -->
@@ -657,6 +820,7 @@
 
 - 必須項目は `notice_code`、`text` である
 - `notice_code` は、UI 側で分類できる固定語彙 `string` にする
+- 初期実装では、`browse_queued`、`browse_completed`、`settings_saved`、`settings_no_changes`、`cancel_requested` を使ってよい
 
 <!-- Block: UI Error -->
 #### `event_type = error`
@@ -671,6 +835,99 @@
 
 - 必須項目は `error_code`、`message` である
 - `retriable` は任意で、再試行可能なときだけ付ける
+- 短周期の内部失敗を UI へ通知するときは、`error_code="processing_failed"` を使う
+
+<!-- Block: Action History Group -->
+## 行動履歴の JSON
+
+<!-- Block: Action Command -->
+### `action_history.command_json`
+
+- `action_history.command_json` は、その行動で実行しようとした命令の最小記録である
+- 初期実装では、ブラウザ向けの UI 応答命令と、`browse` の task 再開命令をこの形で保持する
+
+```json
+{
+  "target_channel": "browser_chat",
+  "event_types": ["status", "status", "token", "message", "status"],
+  "decision": "execute",
+  "decision_reason": "speak_selected",
+  "related_input_id": "inp_...",
+  "proposal_ref": "prop_...",
+  "message_id": "msg_...",
+  "role": "assistant"
+}
+```
+
+- 必須項目は `target_channel`、`event_types`、`decision`、`decision_reason` である
+- `target_channel` は、初期段階では `browser_chat` に固定する
+- `event_types` は、実際に出そうとした `ui_outbound_events.event_type` の順序付き配列である
+- `decision` は、`execute`、`hold`、`reject` のいずれかを持つ
+- `decision_reason` は、`action validator` がその決定にした理由コードを持つ
+- `message_id` は、`event_type = message` を含む命令だけに付ける
+- `role` は、`message_id` を伴うメッセージ応答だけに付ける
+- `related_input_id` は、入力に対する応答行動だけに付ける
+- `proposal_ref` は、`cognition_result.action_proposals` から確定した候補を追跡したいときに付ける
+- `command_type` は、初期実装では `speak_ui_message`、`dispatch_notice`、`enqueue_browse_task`、`execute_browse_task`、`abandon_browse_task` を使ってよい
+- `notice_code` と `text` は、`dispatch_notice` を実行する命令だけに付ける
+- `target`、`parameters`、`preconditions`、`stop_conditions`、`timeout_ms`、`requires_reobserve`、`expected_effects` は、`execute` のとき `action_command` をそのまま残したい場合に付けてよい
+- `parameters.task_id`、`parameters.query`、`parameters.target_channel` は、`enqueue_browse_task` を実行する命令だけに付ける
+- `parameters.query` は、`execute_browse_task` と `abandon_browse_task` を実行する命令だけに付けてよい
+- `related_task_id` は、`execute_browse_task` と `abandon_browse_task` のように task 再開を処理する命令だけに付けてよい
+- `hold` と `reject` では、`message_id` と `role` を付けず、`event_types` は `status` だけでもよい
+- `target_message_id` は、`cancel` のように既存メッセージを対象化する行動だけに付ける
+- `input_kind` は、未対応入力のエラー応答のように、原因となる入力種別を残したいときだけ付ける
+
+<!-- Block: Action Effects -->
+### `action_history.observed_effects_json`
+
+- `action_history.observed_effects_json` は、その行動の直後に観測した最小結果である
+- 初期実装では、実際に UI へ流したイベント種別と主要 ID だけを保持する
+
+```json
+{
+  "emitted_event_types": ["status", "status", "token", "message", "status"],
+  "status_code_after": "idle",
+  "was_cancelled": false,
+  "token_count": 3,
+  "final_message_emitted": true,
+  "validator_decision": "execute",
+  "validator_reason": "speak_selected",
+  "selected_action_type": "speak",
+  "action_candidate_score": {
+    "proposal_id": "prop_...",
+    "hard_gate_passed": true,
+    "task_fit_score": 1.0,
+    "personality_fit_score": 0.9,
+    "relationship_fit_score": 0.8,
+    "experience_fit_score": 0.8,
+    "drive_relief_score": 0.7,
+    "expected_stability_score": 0.8,
+    "priority_hint_score": 1.0,
+    "total_score": 0.87
+  }
+}
+```
+
+- 必須項目は `emitted_event_types`、`validator_decision`、`validator_reason`、`action_candidate_score` である
+- `emitted_event_types` は、実際に `ui_outbound_events` へ追記した `event_type` の順序付き配列である
+- `message_id` は、メッセージ応答を生成した場合だけに付ける
+- `notice_code` は、`notice` を生成した場合だけに付ける
+- `error_code` は、`error` を生成した場合だけに付ける
+- `status_code_after` は、最後に `status` を出した場合だけに付ける
+- `was_cancelled` は、途中停止が起きた応答だけに付ける
+- `token_count` は、`token` を流した応答だけに付ける
+- `final_message_emitted` は、最後に `message` を確定したかどうかを持つ
+- `validator_decision` は、`action validator` の決定結果を持つ
+- `validator_reason` は、`action validator` の決定理由コードを持つ
+- `selected_action_type` は、比較で最上位になった候補の `action_type` を残したいときに付ける
+- `action_candidate_score` は、`action validator` の最小比較結果を残したいときに付ける
+- `hold` と `reject` では、`message_id` を付けず、`final_message_emitted=false` にする
+- `enqueue_browse_task` を実行した場合は、`queued_task_id`、`queued_task_kind`、`queued_task_status` を付けてよい
+- `complete_browse_task` を実行した場合は、`related_task_id`、`task_status_after`、`summary_text` を付けてよい
+- `abandon_browse_task` を実行した場合は、`related_task_id`、`task_status_after`、`error_message` を付けてよい
+- `complete_browse_task` を実行した場合は、`followup_input_kind=\"network_result\"` を付けてよい
+- `dispatch_notice` を実行した場合は、`line_delivery` を `delivered`、`skipped`、`failed` のいずれかで付けてよい
 
 <!-- Block: Memory Job Group -->
 ## 記憶ジョブの JSON
@@ -766,8 +1023,7 @@
   "targets": [
     {
       "entity_type": "memory_state",
-      "entity_id": "ms_...",
-      "current_searchable": true
+      "entity_id": "ms_..."
     }
   ]
 }
@@ -776,8 +1032,8 @@
 - 追加の必須項目は `reason_code`、`reason_note`、`targets` である
 - `reason_code` は、少なくとも `misretrieval_confirmed`、`stale_linkage`、`manual_quarantine` を区別する
 - `targets` は空配列を許可しない
-- `targets` の各要素は、少なくとも `entity_type`、`entity_id`、`current_searchable` を持つ
-- `entity_type` は、少なくとも `event`、`memory_state`、`event_affect` を区別する
+- `targets` の各要素は、少なくとも `entity_type`、`entity_id` を持つ
+- `entity_type` は、初期実装では `event`、`memory_state` を区別する
 
 <!-- Block: Embedding Sync -->
 #### `job_kind = embedding_sync`

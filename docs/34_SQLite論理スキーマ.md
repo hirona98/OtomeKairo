@@ -22,6 +22,7 @@
 - 固定するのは、`SQLite` 上の論理型であり、Python 側の ORM モデル名やクラス名ではない
 - `events.jsonl` は外部派生ログなので、このドキュメントの直接管理対象にしない
 - `config/` 配下の設定ファイルは SQLite に入れない
+- ただし、現在有効な設定の反映結果だけは `runtime_settings` に保持してよい
 
 <!-- Block: Common Rules -->
 ## 共通ルール
@@ -40,7 +41,7 @@
 ### テーブルの分類
 
 - append-only の正本ログは、`ui_outbound_events`、`input_journal`、`events`、`action_history`、`retrieval_runs`、`revisions`、`commit_records` とする
-- 更新で育つテーブルは、`db_meta`、`runtime_leases`、`self_state`、`attention_state`、`body_state`、`world_state`、`drive_state`、`task_state`、`working_memory_items`、`recent_event_window_items`、`skill_registry`、`pending_inputs`、`settings_overrides`、`memory_states`、`preference_memory`、`event_affects`、`event_links`、`event_threads`、`state_links`、`event_entities`、`state_entities`、`event_preview_cache`、`memory_jobs`、`memory_job_payloads`、`vec_items` とする
+- 更新で育つテーブルは、`db_meta`、`runtime_leases`、`self_state`、`runtime_settings`、`attention_state`、`body_state`、`world_state`、`drive_state`、`task_state`、`working_memory_items`、`recent_event_window_items`、`skill_registry`、`pending_inputs`、`settings_overrides`、`memory_states`、`preference_memory`、`event_affects`、`event_links`、`event_threads`、`state_links`、`event_entities`、`state_entities`、`event_preview_cache`、`memory_jobs`、`memory_job_payloads`、`vec_items` とする
 - append-only テーブルは、論理削除でなく追記を基本とし、通常更新を前提にしない
 - 例外として `event_preview_cache`、`memory_jobs`、`pending_inputs`、`settings_overrides` は更新を前提とする
 
@@ -49,7 +50,7 @@
 ```mermaid
 flowchart TD
     meta["起動メタ\n db_meta / runtime_leases"]
-    runtime["ランタイム状態\n self_state ... skill_registry"]
+    runtime["ランタイム状態\n self_state / runtime_settings ... skill_registry"]
     control["制御面\n pending_inputs / settings_overrides / ui_outbound_events"]
     eventlog["観測・行動\n input_journal / action_history / events / commit_records"]
     memory["記憶本体\n memory_states ... retrieval_runs"]
@@ -115,6 +116,17 @@ flowchart TD
   - `personality_updated_at` は、`personality_json` の版管理専用時刻であり、`base_personality_updated_at` の比較対象にする
   - `updated_at` は、`self_state` 行全体の更新時刻であり、感情や関係性の更新でも進んでよい
   - `personality_json` を更新する transaction では、`personality_updated_at` と `updated_at` を同時更新する
+
+- `runtime_settings`
+  - 役割: 現在有効な設定値の反映結果を 1 件で保持する
+  - 主キー: `row_id INTEGER PRIMARY KEY CHECK(row_id = 1)`
+  - 必須列: `values_json`, `value_updated_at_json`, `updated_at`
+  - `values_json` は、`docs/39_設定キー運用仕様.md` に登録された全キーを持つ完全オブジェクトとする
+  - `value_updated_at_json` は、各キーの最終反映時刻を `key -> unix_ms` で持つ
+  - `value_updated_at_json` は、`values_json` と同じキー集合を持つ
+  - `values_json` と `value_updated_at_json` の JSON 形は、`docs/36_JSONデータ仕様.md` を正本とする
+  - `runtime` scope の設定反映は、この行を同じ短周期で更新する
+  - `next_boot` scope の設定反映は、この行を即時更新せず、次回ランタイム起動時の materialize で更新する
 
 - `attention_state`
   - 役割: 現在の注意断面を 1 件で保持する
@@ -199,6 +211,8 @@ flowchart TD
 - 任意列: `claimed_at`, `resolved_at`, `reject_reason`
 - `status` は、少なくとも `queued`、`claimed`、`applied`、`rejected` を区別する
 - 主要索引: `(status, created_at ASC)`
+- `apply_scope="runtime"` で `applied` になった行は、同じ短周期で `runtime_settings` に反映する
+- `apply_scope="next_boot"` で `applied` になった行は、次回ランタイム起動時に `runtime_settings` へ materialize する候補として残す
 
 <!-- Block: UI Outbound -->
 ### `ui_outbound_events`
@@ -233,6 +247,7 @@ flowchart TD
 - 必須列: `cycle_id`, `command_id`, `action_type`, `command_json`, `started_at`, `finished_at`, `status`
 - 任意列: `failure_mode`, `observed_effects_json`, `raw_result_ref_json`, `adapter_trace_ref_json`
 - `status` は、少なくとも `succeeded`、`failed`、`stopped` を区別する
+- `command_json` と `observed_effects_json` の JSON 形は、`docs/36_JSONデータ仕様.md` を正本とする
 - 主要索引: `(cycle_id)`, `(status, finished_at DESC)`
 
 <!-- Block: Events -->
@@ -244,6 +259,7 @@ flowchart TD
 - 任意列: `updated_at`, `observation_summary`, `action_summary`, `result_summary`, `payload_ref_json`, `input_journal_refs_json`
 - `kind` は、少なくとも `observation`、`action`、`action_result`、`internal_decision`、`external_response` を区別する
 - `searchable` は、`0 / 1` で持つ
+- `input_journal_refs_json` の JSON 形は、`docs/36_JSONデータ仕様.md` を正本とする
 - 主要索引: `(cycle_id)`, `(created_at DESC)`, `(searchable, created_at DESC)`, `(source, created_at DESC)`
 
 <!-- Block: Commit Records -->
@@ -403,7 +419,7 @@ flowchart TD
 <!-- Block: Vec Items -->
 ### `vec_items`
 
-- 役割: `sqlite-vec` で使う埋め込み索引を保持する
+- 役割: `sqlite-vec` で使う埋め込み索引のメタ情報と生ベクトルを保持する
 - 主キー: `vec_item_id TEXT PRIMARY KEY`
 - 必須列: `entity_type`, `entity_id`, `embedding_model`, `embedding_scope`, `searchable`, `source_updated_at`, `embedding`
 - `entity_type` は、少なくとも `event`、`memory_state`、`event_affect` を区別する
@@ -411,6 +427,15 @@ flowchart TD
 - 同一対象・同一モデル・同一スコープの重複を許さない
 - 主要制約: `UNIQUE(entity_type, entity_id, embedding_model, embedding_scope)`
 - 主要索引: `(entity_type, searchable, source_updated_at DESC)`
+
+<!-- Block: Vec Items Index -->
+### `vec_items_index`
+
+- 役割: `sqlite-vec` の `vec0` 仮想表として、類似検索の対象ベクトルだけを保持する
+- 形式: `vec0` 仮想表とする
+- 保持列: `embedding`
+- `rowid` は `vec_items.rowid` と一致させ、メタ情報は必ず `vec_items` を正本として参照する
+- `searchable=0` の対象は、この仮想表から削除してよい
 
 <!-- Block: Events FTS -->
 ### `events_fts`
@@ -426,14 +451,14 @@ flowchart TD
 <!-- Block: Boot Boundary -->
 ### 起動初期化の保存境界
 
-- 同じ起動 transaction に含めるのは、`db_meta`、`self_state`、`attention_state`、`body_state`、`world_state`、`drive_state` とする
+- 同じ起動 transaction に含めるのは、`db_meta`、`self_state`、`runtime_settings`、`attention_state`、`body_state`、`world_state`、`drive_state` とする
 - `runtime_leases` の取得と更新は、seed 用 transaction と分けてよい
 - スキーマ版不一致や seed 失敗時は、起動を中断し、短周期や長周期を開始しない
 
 <!-- Block: Short Cycle Boundary -->
 ### 短周期の保存境界
 
-- 同じ短周期 transaction に含めるのは、`pending_inputs`、`settings_overrides`、`self_state`、`attention_state`、`body_state`、`world_state`、`drive_state`、`task_state`、`working_memory_items`、`recent_event_window_items`、`action_history`、`events`、`memory_jobs`、`memory_job_payloads`、`retrieval_runs`、`commit_records` とする
+- 同じ短周期 transaction に含めるのは、`pending_inputs`、`settings_overrides`、必要なら `runtime_settings`、`self_state`、`attention_state`、`body_state`、`world_state`、`drive_state`、`task_state`、`working_memory_items`、`recent_event_window_items`、`action_history`、`events`、`memory_jobs`、`memory_job_payloads`、`retrieval_runs`、`commit_records` とする
 - `input_journal` は、短周期 transaction の前に先行追記してよい
 - `ui_outbound_events` は、短周期 transaction と分離した append-only 追記を許す
 - `events.jsonl` は、`commit_records` をもとに後段で派生同期する
@@ -441,9 +466,9 @@ flowchart TD
 <!-- Block: Long Cycle Boundary -->
 ### 長周期の保存境界
 
-- 同じ長周期 transaction に含めるのは、`memory_jobs`、`memory_states`、`preference_memory`、`event_affects`、`event_links`、`event_threads`、`state_links`、`event_entities`、`state_entities`、`event_preview_cache`、`revisions`、`vec_items`、必要なら `self_state` と `skill_registry` とする
+- 同じ長周期 transaction に含めるのは、`memory_jobs`、`memory_states`、`preference_memory`、`event_affects`、`event_links`、`event_threads`、`state_links`、`event_entities`、`state_entities`、`event_preview_cache`、`revisions`、`vec_items`、`vec_items_index`、必要なら `self_state` と `skill_registry` とする
 - `write_memory` は、必要なら同じ長周期 transaction 内で followup の `memory_jobs` と `memory_job_payloads` を追加してよい
-- `refresh_preview` は、`event_preview_cache` 以外を更新してはならない
+- `refresh_preview` は、`event_preview_cache` と必要な followup の `memory_jobs` / `memory_job_payloads` 以外を更新してはならない
 - `quarantine_memory` は、`searchable` 系の更新と監査痕跡だけを確定する
 - `self_state` を同じ長周期で更新する場合は、`personality_json` の可変部分だけを更新し、`invariants_json` は変更しない
 

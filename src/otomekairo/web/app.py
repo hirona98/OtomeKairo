@@ -1,0 +1,199 @@
+"""FastAPI application assembly."""
+
+from __future__ import annotations
+
+import time
+import uuid
+from pathlib import Path
+
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+from otomekairo import __version__
+from otomekairo.infra.sqlite_state_store import StoreConflictError, StoreValidationError, SqliteStateStore
+from otomekairo.schema.settings import SettingsValidationError, build_default_settings
+from otomekairo.web.dependencies import ApiError, AppServices
+from otomekairo.web.chat_input_api import build_chat_input_router
+from otomekairo.web.chat_stream_api import build_chat_stream_router
+from otomekairo.web.settings_api import build_settings_router
+from otomekairo.web.status_api import build_status_router
+
+
+# Block: Stream janitor constants
+STREAM_JANITOR_INTERVAL_MS = 60_000
+STREAM_RETENTION_WINDOW_MS = 86_400_000
+STREAM_RETAIN_MINIMUM_COUNT = 20_000
+
+
+# Block: App factory
+def create_app() -> FastAPI:
+    store = SqliteStateStore(_default_db_path(), __version__)
+    store.initialize()
+    services = AppServices(store=store, default_settings=build_default_settings())
+    static_dir = _static_dir()
+
+    app = FastAPI(title="OtomeKairo Settings Server", version=__version__)
+    app.state.services = services
+    app.state.last_stream_janitor_at = 0
+
+    # Block: Browser UI static files
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+    # Block: Request id middleware
+    @app.middleware("http")
+    async def assign_request_id(request: Request, call_next):
+        request.state.request_id = f"req_{uuid.uuid4().hex}"
+        _run_stream_janitor_if_due(app=app, services=services)
+        return await call_next(request)
+
+    # Block: API error handler
+    @app.exception_handler(ApiError)
+    async def handle_api_error(request: Request, error: ApiError) -> JSONResponse:
+        return _error_response(
+            request=request,
+            status_code=error.status_code,
+            error_code=error.error_code,
+            message=error.message,
+        )
+
+    # Block: Store validation handler
+    @app.exception_handler(StoreValidationError)
+    async def handle_store_validation_error(request: Request, error: StoreValidationError) -> JSONResponse:
+        return _error_response(
+            request=request,
+            status_code=400,
+            error_code="invalid_request",
+            message=str(error),
+        )
+
+    # Block: Store conflict handler
+    @app.exception_handler(StoreConflictError)
+    async def handle_store_conflict_error(request: Request, error: StoreConflictError) -> JSONResponse:
+        return _error_response(
+            request=request,
+            status_code=409,
+            error_code=error.error_code,
+            message=error.message,
+        )
+
+    # Block: Settings validation handler
+    @app.exception_handler(SettingsValidationError)
+    async def handle_settings_validation_error(request: Request, error: SettingsValidationError) -> JSONResponse:
+        return _error_response(
+            request=request,
+            status_code=400,
+            error_code=error.error_code,
+            message=error.message,
+        )
+
+    # Block: Request validation handler
+    @app.exception_handler(RequestValidationError)
+    async def handle_request_validation_error(request: Request, _: RequestValidationError) -> JSONResponse:
+        return _error_response(
+            request=request,
+            status_code=400,
+            error_code="invalid_request",
+            message="request validation failed",
+        )
+
+    # Block: HTTP exception handler
+    @app.exception_handler(StarletteHTTPException)
+    async def handle_http_exception(request: Request, error: StarletteHTTPException) -> JSONResponse:
+        if error.status_code == 404:
+            return _error_response(
+                request=request,
+                status_code=404,
+                error_code="not_found",
+                message="resource not found",
+            )
+        if error.status_code == 405:
+            return _error_response(
+                request=request,
+                status_code=405,
+                error_code="method_not_allowed",
+                message="method not allowed",
+            )
+        return _error_response(
+            request=request,
+            status_code=error.status_code,
+            error_code="http_error",
+            message="request failed",
+        )
+
+    # Block: Generic error handler
+    @app.exception_handler(Exception)
+    async def handle_unexpected_error(request: Request, error: Exception) -> JSONResponse:
+        return _error_response(
+            request=request,
+            status_code=500,
+            error_code="internal_server_error",
+            message=str(error),
+        )
+
+    # Block: Router registration
+    app.include_router(build_status_router(services))
+    app.include_router(build_settings_router(services))
+    app.include_router(build_chat_input_router(services))
+    app.include_router(build_chat_stream_router(services))
+
+    # Block: Browser UI entrypoint
+    @app.get("/", include_in_schema=False)
+    async def get_browser_ui() -> FileResponse:
+        return FileResponse(static_dir / "index.html")
+
+    # Block: Browser favicon
+    @app.get("/favicon.ico", include_in_schema=False)
+    async def get_browser_favicon() -> FileResponse:
+        return FileResponse(static_dir / "favicon.ico")
+
+    return app
+
+
+# Block: Default database path
+def _default_db_path() -> Path:
+    return Path(__file__).resolve().parents[3] / "data" / "core.sqlite3"
+
+
+# Block: Static asset path
+def _static_dir() -> Path:
+    return Path(__file__).resolve().parent / "static"
+
+
+# Block: Stream janitor
+def _run_stream_janitor_if_due(*, app: FastAPI, services: AppServices) -> None:
+    now_ms = _now_ms()
+    last_stream_janitor_at = int(getattr(app.state, "last_stream_janitor_at", 0))
+    if now_ms - last_stream_janitor_at < STREAM_JANITOR_INTERVAL_MS:
+        return
+    services.store.prune_ui_outbound_events(
+        channel="browser_chat",
+        retention_window_ms=STREAM_RETENTION_WINDOW_MS,
+        retain_minimum_count=STREAM_RETAIN_MINIMUM_COUNT,
+    )
+    app.state.last_stream_janitor_at = now_ms
+
+
+# Block: Error response helper
+def _error_response(
+    *,
+    request: Request,
+    status_code: int,
+    error_code: str,
+    message: str,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "error_code": error_code,
+            "message": message,
+            "request_id": request.state.request_id,
+        },
+    )
+
+
+# Block: Time helper
+def _now_ms() -> int:
+    return int(time.time() * 1000)

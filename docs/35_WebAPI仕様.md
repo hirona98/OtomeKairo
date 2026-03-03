@@ -4,7 +4,7 @@
 ## このドキュメントの役割
 
 - このドキュメントは、`FastAPI + Uvicorn` で提供する Web API を、エンドポイント単位で固定する正本である
-- 目的は、ブラウザチャット、`SSE` 配信、設定変更、状態参照を、実装前に曖昧なく決めることにある
+- 目的は、ブラウザチャット、最小ブラウザ UI、`SSE` 配信、設定変更、状態参照を、実装前に曖昧なく決めることにある
 - Web サーバの責務分割は `docs/30_システム設計.md` を見る
 - ランタイムとの受け渡し仕様は `docs/31_ランタイム処理仕様.md` を見る
 - SQLite の保存先は `docs/34_SQLite論理スキーマ.md` を見る
@@ -17,7 +17,7 @@
 <!-- Block: Scope -->
 ## このドキュメントで固定する範囲
 
-- 固定するのは、初期実装で提供する HTTP API と `SSE` の仕様である
+- 固定するのは、初期実装で提供する HTTP API、最小ブラウザ UI の入口、`SSE` の仕様である
 - 固定するのは、ブラウザ UI から使う制御面 API であり、内部 Python 関数の呼び出しではない
 - 固定するのは、エンドポイントの意味、受付条件、主要な成功応答、主要な失敗応答である
 - 固定しないのは、認証方式の最終仕様、CORS の最終ポリシー、OpenAPI の自動生成細部である
@@ -49,6 +49,7 @@
 - `2xx` 以外の応答本文は、少なくとも `error_code`、`message`、`request_id` を持つ JSON とする
 - `request_id` は、その HTTP リクエスト単位で Web サーバが生成する追跡 ID である
 - エラー時も HTML を返さず、必ず JSON を返す
+- `404 Not Found`、`405 Method Not Allowed`、リクエスト検証失敗も、この error envelope に統一する
 
 ```json
 {
@@ -72,6 +73,7 @@
 <!-- Block: Endpoint Summary -->
 ### 初期実装で提供する API
 
+- `GET /`
 - `GET /api/health`
 - `GET /api/status`
 - `GET /api/settings`
@@ -84,12 +86,34 @@
 
 ```mermaid
 flowchart LR
-    browser["ブラウザ"] -->|"GET /api/health\nGET /api/status\nGET /api/settings"| web["設定 Web サーバ"]
+    browser["ブラウザ"] -->|"GET /\nGET /api/health\nGET /api/status\nGET /api/settings"| web["設定 Web サーバ"]
     browser -->|"POST /api/chat/input\nPOST /api/chat/cancel\nPOST /api/settings/overrides"| web
     web <-->|read / write| db["SQLite"]
     runtime["人格ランタイム"] -->|"append ui_outbound_events"| db
     web -->|"SSE: GET /api/chat/stream"| browser
 ```
+
+<!-- Block: Browser UI -->
+## `GET /`
+
+<!-- Block: Browser UI Purpose -->
+### 役割
+
+- 最小のブラウザチャット UI を返す
+- 同一オリジンで `POST /api/chat/input`、`POST /api/chat/cancel`、`GET /api/chat/stream`、`GET /api/status`、`GET /api/settings` を使う
+- `src/otomekairo/web/static/` に置く HTML / CSS / JavaScript を返す
+
+<!-- Block: Browser UI Rules -->
+### 初期実装で固定すること
+
+- ログイン画面は持たず、起動直後にそのままチャット UI を表示する
+- 初期実装の見た目は `tmp/CocoroGhost/static/` に近いヘッダ、チャット欄、設定欄、ステータスバー構成にしてよい
+- `Mic` はブラウザの標準 `SpeechRecognition` を使って音声入力し、認識結果を `POST /api/chat/input` へ流す
+- `設定保存` は、初期実装では主要な一部設定だけを `POST /api/settings/overrides` へ流す
+- `Cam` は初期実装ではダミーでもよい
+- `browse` の初期実装では、UI は少なくとも `browse_queued` と `browse_completed` の `notice` を見分けられるようにしてよい
+- UI 側で永続ストレージを前提にしない
+- UI は `browser_chat` チャネル専用として扱う
 
 <!-- Block: Health -->
 ## `GET /api/health`
@@ -162,7 +186,7 @@ flowchart LR
 ### 役割
 
 - 現在有効な設定値と、未反映の設定変更要求を返す
-- `config/` の現在値と、`settings_overrides` の `queued / claimed` を参照して構成する
+- `config/default_settings.json` の既定値、`runtime_settings`、`settings_overrides` の `queued / claimed` を参照して構成する
 
 <!-- Block: Settings Get Response -->
 ### 成功応答
@@ -185,6 +209,8 @@ flowchart LR
 ```
 
 - `effective_settings` は、UI で編集対象にする設定だけを、`docs/39_設定キー運用仕様.md` と同じドット区切りキーで返す
+- `effective_settings` は、`config/default_settings.json` の既定値に対して、`runtime_settings.values_json` を上書きした現在有効値を返す
+- `apply_scope="next_boot"` で `applied` 済みの設定は、次回ランタイム起動で materialize されるまで `effective_settings` に即時反映しない
 - 秘密情報は返さない
 
 <!-- Block: Settings Post -->
@@ -248,7 +274,7 @@ flowchart LR
 
 - 必須項目は `text` とする
 - `client_message_id` は任意だが、送る場合はクライアント側の再送判定に使える安定値とする
-- 空文字列、空白のみ、極端に長い入力は `400` とする
+- 空文字列、空白のみ、`4000` 文字超の入力は `400` とする
 
 <!-- Block: Chat Input Write -->
 ### DB への写像
@@ -375,11 +401,12 @@ data: {"message_id":"msg_...","text":"お","chunk_index":0}
   - 役割: UI に見せる状態変化
   - 必須項目: `status_code`, `label`
   - 任意項目: `cycle_id`
-  - `status_code` は、少なくとも `idle`, `thinking`, `speaking`, `waiting_external` を区別する
+  - `status_code` は、少なくとも `idle`, `thinking`, `speaking`, `waiting_external`, `browsing`, `processing_external_result` を区別する
 
 - `notice`
   - 役割: 自発行動や外部通知などの補助通知
   - 必須項目: `notice_code`, `text`
+  - `notice_code` は、初期実装では `browse_queued`, `browse_completed` のような進行通知も含んでよい
 
 - `error`
   - 役割: UI に見せる明示エラー
