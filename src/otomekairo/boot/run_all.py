@@ -115,7 +115,7 @@ def _runtime_already_running(repo_root: Path) -> bool:
 # Block: Signal registration
 def _install_signal_handlers() -> None:
     def handle_signal(signum: int, _frame: object) -> None:
-        logger.info("Received signal: %s", signum, extra={"signal_number": signum})
+        del signum
         raise SystemExit(0)
 
     signal.signal(signal.SIGINT, handle_signal)

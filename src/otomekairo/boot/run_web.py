@@ -46,14 +46,8 @@ def _install_signal_handlers(server: ManagedSignalUvicornServer) -> None:
     signal_count = {"count": 0}
 
     def handle_signal(signum: int, _frame: object) -> None:
+        del signum
         signal_count["count"] += 1
-        logger.info(
-            "received shutdown signal",
-            extra={
-                "signal_number": signum,
-                "signal_count": signal_count["count"],
-            },
-        )
         if signal_count["count"] == 1:
             server.should_exit = True
             return

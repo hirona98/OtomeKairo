@@ -25,7 +25,7 @@ def main() -> None:
 # Block: Runtime signal handlers
 def _install_signal_handlers() -> None:
     def handle_signal(signum: int, _frame: object) -> None:
-        logger.info("received shutdown signal", extra={"signal_number": signum})
+        del signum
         raise SystemExit(0)
 
     signal.signal(signal.SIGINT, handle_signal)
