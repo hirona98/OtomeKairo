@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import logging
 import os
@@ -234,6 +235,9 @@ def _message_summary(message: str) -> str:
     lines = [line.strip() for line in message.splitlines() if line.strip()]
     if not lines:
         return "(empty)"
+    structured_line = _pretty_structured_line(lines[0])
+    if structured_line is not None:
+        return structured_line[0]
     first_line = " ".join(lines[0].split())
     if len(lines) == 1:
         return first_line
@@ -245,12 +249,15 @@ def _pretty_message_block(message: str) -> str | None:
     if not lines:
         return None
     if len(lines) == 1:
-        return _pretty_json_line(lines[0])
+        structured_line = _pretty_structured_line(lines[0])
+        if structured_line is None:
+            return None
+        return structured_line[1]
     formatted_lines: list[str] = []
     for line in lines:
-        pretty_json = _pretty_json_line(line)
-        if pretty_json is not None:
-            formatted_lines.extend(pretty_json.splitlines())
+        structured_line = _pretty_structured_line(line)
+        if structured_line is not None:
+            formatted_lines.extend(structured_line[1].splitlines())
             continue
         formatted_lines.append(line)
     if not formatted_lines:
@@ -258,15 +265,45 @@ def _pretty_message_block(message: str) -> str | None:
     return "\n".join(formatted_lines)
 
 
-def _pretty_json_line(line: str) -> str | None:
+def _pretty_structured_line(line: str) -> tuple[str, str] | None:
     stripped = line.strip()
-    if not stripped.startswith(("{", "[")):
+    if not stripped:
+        return None
+    whole_block = _parse_structured_block(stripped)
+    if whole_block is not None:
+        return ("{...}", whole_block)
+    for index, char in enumerate(line):
+        if char not in "{[":
+            continue
+        prefix = line[:index].rstrip()
+        if not prefix:
+            continue
+        suffix = line[index:].strip()
+        suffix_block = _parse_structured_block(suffix)
+        if suffix_block is None:
+            continue
+        summary = f"{' '.join(prefix.split())} ..."
+        detail_prefix = prefix if prefix.endswith(":") else f"{prefix}:"
+        return (summary, f"{detail_prefix}\n{suffix_block}")
+    return None
+
+
+def _parse_structured_block(text: str) -> str | None:
+    if not text.startswith(("{", "[")):
         return None
     try:
-        parsed_json = json.loads(stripped)
+        parsed_json = json.loads(text)
+        return json.dumps(parsed_json, ensure_ascii=False, indent=2)
     except json.JSONDecodeError:
+        pass
+    try:
+        parsed_literal = ast.literal_eval(text)
+    except (SyntaxError, ValueError):
         return None
-    return json.dumps(parsed_json, ensure_ascii=False, indent=2)
+    if not isinstance(parsed_literal, (dict, list)):
+        return None
+    normalized_literal = _json_safe_value(parsed_literal)
+    return json.dumps(normalized_literal, ensure_ascii=False, indent=2)
 
 
 def _labeled_json_block(label: str, payload: dict[str, Any]) -> str:
