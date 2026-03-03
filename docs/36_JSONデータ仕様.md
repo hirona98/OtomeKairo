@@ -681,7 +681,7 @@
 ### `pending_inputs.payload_json`
 
 - `pending_inputs.payload_json` は、少なくとも `input_kind` を持つ
-- Web API が受け付ける初期段階の `browser_chat` 入力は、`chat_message` と `cancel` の 2 種だけである
+- Web API が受け付ける初期段階の `browser_chat` 入力は、`chat_message`、`camera_observation`、`cancel` の 3 種である
 - ランタイム内部では、外部検索結果を戻すために `network_result` を enqueue してよい
 
 <!-- Block: Pending Chat Message -->
@@ -715,6 +715,32 @@
 - `attachments` は任意だが、ある場合は 1 件以上の配列にする
 - `text` と `attachments` は、少なくともどちらか一方が必要である
 - 各添付は `camera_still_image` に固定し、`media_kind`、`capture_id`、`mime_type`、`storage_path`、`content_url`、`captured_at` を必須とする
+
+<!-- Block: Pending Camera Observation -->
+#### `camera_observation`
+
+```json
+{
+  "input_kind": "camera_observation",
+  "attachments": [
+    {
+      "attachment_kind": "camera_still_image",
+      "media_kind": "image",
+      "capture_id": "cap_0123456789abcdef0123456789abcdef",
+      "mime_type": "image/jpeg",
+      "storage_path": "data/camera/cap_0123456789abcdef0123456789abcdef.jpg",
+      "content_url": "/captures/cap_0123456789abcdef0123456789abcdef.jpg",
+      "captured_at": 1760000000000
+    }
+  ]
+}
+```
+
+- 必須項目は `input_kind` と `attachments` である
+- `input_kind` は `camera_observation` に固定する
+- `attachments` は、1 件以上の `camera_still_image` 配列に固定する
+- 各添付は `media_kind`、`capture_id`、`mime_type`、`storage_path`、`content_url`、`captured_at` を必須とする
+- 初期実装では、`POST /api/camera/observe` が `source=self_initiated` でこの形式を enqueue する
 
 <!-- Block: Pending Cancel -->
 #### `cancel`

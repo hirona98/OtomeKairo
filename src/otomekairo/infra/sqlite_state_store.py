@@ -675,7 +675,7 @@ class SqliteStateStore:
             payload["attachments"] = attachments
         if client_message_id:
             payload["client_message_id"] = client_message_id
-        return self._enqueue_pending_chat_message(
+        return self._enqueue_pending_input(
             source="web_input",
             client_message_id=client_message_id,
             payload=payload,
@@ -700,7 +700,7 @@ class SqliteStateStore:
         if isinstance(captured_at, bool) or not isinstance(captured_at, int):
             raise StoreValidationError("captured_at must be integer")
         payload = {
-            "input_kind": "chat_message",
+            "input_kind": "camera_observation",
             "attachments": [
                 {
                     "attachment_kind": "camera_still_image",
@@ -713,7 +713,7 @@ class SqliteStateStore:
                 }
             ],
         }
-        enqueue_result = self._enqueue_pending_chat_message(
+        enqueue_result = self._enqueue_pending_input(
             source="self_initiated",
             client_message_id=None,
             payload=payload,
@@ -727,8 +727,8 @@ class SqliteStateStore:
             "captured_at": captured_at,
         }
 
-    # Block: Pending chat message write
-    def _enqueue_pending_chat_message(
+    # Block: Pending input write
+    def _enqueue_pending_input(
         self,
         *,
         source: str,
@@ -3497,9 +3497,18 @@ def _public_primary_focus(primary_focus_json: dict[str, Any]) -> str:
 def _pending_input_receipt_summary(pending_input: PendingInputRecord) -> str:
     input_kind = str(pending_input.payload["input_kind"])
     if input_kind == "chat_message":
-        text = str(pending_input.payload["text"])
-        trimmed_text = text[:60]
-        return f"chat_message:{trimmed_text}"
+        text = pending_input.payload.get("text")
+        if isinstance(text, str) and text:
+            return f"chat_message:{text[:60]}"
+        attachments = pending_input.payload.get("attachments")
+        if isinstance(attachments, list) and attachments:
+            return f"chat_message:camera_images:{len(attachments)}"
+        return "chat_message"
+    if input_kind == "camera_observation":
+        attachments = pending_input.payload.get("attachments")
+        if isinstance(attachments, list) and attachments:
+            return f"camera_observation:camera_images:{len(attachments)}"
+        return "camera_observation"
     if input_kind == "network_result":
         query = str(pending_input.payload["query"])
         summary_text = str(pending_input.payload["summary_text"])

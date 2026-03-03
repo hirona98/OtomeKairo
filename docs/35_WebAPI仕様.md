@@ -294,7 +294,7 @@ flowchart LR
 - `source` は `web_input` に固定する
 - `channel` は `browser_chat` に固定する
 - `client_message_id` がある場合は、`pending_inputs.client_message_id` にも同じ値を入れる
-- `payload_json` には、少なくとも `input_kind="chat_message"`、`text`、必要なら `client_message_id` を入れる
+- `payload_json` には、`input_kind="chat_message"` を入れ、`text`、`attachments`、`client_message_id` は必要なものだけを入れる
 - 追加時の `status` は `queued` に固定する
 - 同じ `(channel, client_message_id)` が既にある場合は、追加せず `409 Conflict` を返す
 
@@ -396,13 +396,23 @@ flowchart LR
 ### 役割
 
 - 現在のカメラ静止画を 1 枚取得し、そのまま自発観測入力として `pending_inputs` に積む
-- Web サーバは `source=self_initiated`、`input_kind=chat_message`、`camera_still_image` 添付 1 件で認知待ち入力を作る
+- Web サーバは `source=self_initiated`、`input_kind=camera_observation`、`camera_still_image` 添付 1 件で認知待ち入力を作る
 - 返した時点では応答本文は生成せず、後続のランタイム短周期で認知処理する
 
 <!-- Block: Camera Observe Request -->
 ### 入力 JSON
 
 - リクエスト本文は不要である
+
+<!-- Block: Camera Observe Write -->
+### DB への写像
+
+- `pending_inputs` に 1 件追加する
+- `source` は `self_initiated` に固定する
+- `channel` は `browser_chat` に固定する
+- `client_message_id` は `null` に固定する
+- `payload_json` には、`input_kind="camera_observation"` と `camera_still_image` 添付 1 件を入れる
+- 追加時の `status` は `queued` に固定する
 
 <!-- Block: Camera Observe Response -->
 ### 成功応答

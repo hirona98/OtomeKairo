@@ -243,7 +243,7 @@ class RuntimeLoop:
         str | None,
     ]:
         input_kind = pending_input.payload["input_kind"]
-        if input_kind in {"chat_message", "network_result"}:
+        if input_kind in {"chat_message", "camera_observation", "network_result"}:
             state_snapshot = self._store.read_cognition_state(
                 self._default_settings,
                 observation_hint_text=_pending_input_observation_hint(pending_input),
@@ -584,6 +584,8 @@ def _pending_input_trigger_reason(pending_input: PendingInputRecord) -> str:
     input_kind = str(pending_input.payload["input_kind"])
     if input_kind == "network_result":
         return "external_result"
+    if pending_input.source == "self_initiated":
+        return "self_initiated"
     return "external_input"
 
 
@@ -604,6 +606,14 @@ def _pending_input_observation_hint(pending_input: PendingInputRecord) -> str:
         if attachment_count > 0:
             return f"カメラ画像 {attachment_count} 枚"
         raise RuntimeError("chat_message requires text or attachments")
+    if input_kind == "camera_observation":
+        attachments = pending_input.payload.get("attachments")
+        if not isinstance(attachments, list):
+            raise RuntimeError("camera_observation.attachments must be a list")
+        attachment_count = len(attachments)
+        if attachment_count <= 0:
+            raise RuntimeError("camera_observation.attachments must not be empty")
+        return f"カメラ画像 {attachment_count} 枚を自発観測"
     if input_kind == "network_result":
         summary_text = pending_input.payload.get("summary_text")
         query = pending_input.payload.get("query")

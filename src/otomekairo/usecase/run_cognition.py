@@ -183,6 +183,8 @@ def _initial_status_label(pending_input: PendingInputRecord) -> str:
     input_kind = str(pending_input.payload["input_kind"])
     if input_kind == "chat_message":
         return "入力を処理しています"
+    if input_kind == "camera_observation":
+        return "カメラ画像を観測しています"
     if input_kind == "network_result":
         return "検索結果をもとに応答を準備しています"
     raise RuntimeError("unsupported input_kind for cognition status")
