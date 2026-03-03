@@ -84,7 +84,14 @@ def run_cognition_for_chat_message(
         if validated_action.proposal is not None
         else message_id
     )
-    should_stream_response = validated_action.decision == "execute"
+    action_command = validated_action.action_command
+    command_type = (
+        str(action_command["command_type"])
+        if action_command is not None
+        else None
+    )
+    should_stream_response = command_type == "speak_ui_message"
+    should_emit_notice = command_type == "browser_notice"
 
     # Block: Streaming response loop
     if should_stream_response:
@@ -109,6 +116,14 @@ def run_cognition_for_chat_message(
                 },
             )
             emitted_chunk_count += 1
+    if should_emit_notice:
+        emit_event(
+            "notice",
+            {
+                "notice_code": str(action_command["notice_code"]),
+                "text": str(action_command["text"]),
+            },
+        )
     cognition_result["reflection_seed"]["token_count"] = emitted_chunk_count
     cognition_result["reflection_seed"]["was_cancelled"] = was_cancelled
 
@@ -118,7 +133,7 @@ def run_cognition_for_chat_message(
         emit_event(
             "message",
             {
-                "message_id": active_message_id,
+                "message_id": str(action_command["message_id"]),
                 "role": "assistant",
                 "text": response_text,
                 "created_at": message_created_at,
@@ -139,11 +154,10 @@ def run_cognition_for_chat_message(
 
     # Block: Action history
     emitted_event_types = [ui_event["event_type"] for ui_event in ui_events]
-    action_type = {
-        "execute": "emit_chat_response",
-        "hold": "hold_chat_response",
-        "reject": "reject_chat_response",
-    }[validated_action.decision]
+    action_type = _action_history_type(
+        decision=validated_action.decision,
+        command_type=command_type,
+    )
     command_payload = {
         "target_channel": pending_input.channel,
         "event_types": emitted_event_types,
@@ -164,10 +178,16 @@ def run_cognition_for_chat_message(
     if validated_action.proposal is not None:
         command_payload["proposal_ref"] = str(validated_action.proposal["proposal_id"])
         observed_effects["selected_action_type"] = str(validated_action.proposal["action_type"])
-    if should_stream_response:
-        command_payload["message_id"] = active_message_id
+    if should_stream_response and action_command is not None:
+        command_payload["command_type"] = str(action_command["command_type"])
+        command_payload["message_id"] = str(action_command["message_id"])
         command_payload["role"] = "assistant"
-        observed_effects["message_id"] = active_message_id
+        observed_effects["message_id"] = str(action_command["message_id"])
+    if should_emit_notice and action_command is not None:
+        command_payload["command_type"] = str(action_command["command_type"])
+        command_payload["notice_code"] = str(action_command["notice_code"])
+        command_payload["text"] = str(action_command["text"])
+        observed_effects["notice_code"] = str(action_command["notice_code"])
     action_results = [
         ActionHistoryRecord(
             result_id=_opaque_id("actres"),
@@ -188,6 +208,7 @@ def run_cognition_for_chat_message(
             raw_result_ref=None,
             adapter_trace_ref={
                 "cognition_result": cognition_result,
+                "action_command": action_command,
                 "action_candidate_score": validated_action.action_candidate_score,
             },
         )
@@ -244,6 +265,17 @@ def _iter_speech_chunks(response_text: str) -> Iterable[str]:
             current_chunk = ""
     if current_chunk:
         yield current_chunk
+
+
+# Block: Action history type helper
+def _action_history_type(*, decision: str, command_type: str | None) -> str:
+    if decision == "hold":
+        return "hold_chat_response"
+    if decision == "reject":
+        return "reject_chat_response"
+    if command_type == "browser_notice":
+        return "emit_browser_notice"
+    return "emit_chat_response"
 
 
 # Block: Action status helper

@@ -21,6 +21,7 @@ class ValidatedChatAction:
     decision: str
     decision_reason: str
     proposal: dict[str, Any] | None
+    action_command: dict[str, Any] | None
     action_candidate_score: dict[str, Any]
 
 
@@ -39,6 +40,7 @@ def validate_chat_response_action(
             decision="reject",
             decision_reason="no_action_proposals",
             proposal=None,
+            action_command=None,
             action_candidate_score=_empty_candidate_score(),
         )
     scored_candidates = [
@@ -60,6 +62,7 @@ def validate_chat_response_action(
             decision="reject",
             decision_reason="all_candidates_rejected_by_hard_gate",
             proposal=None,
+            action_command=None,
             action_candidate_score=_candidate_payload(best_candidate),
         )
     best_candidate = max(executable_candidates, key=lambda candidate: candidate["total_score"])
@@ -73,6 +76,7 @@ def validate_chat_response_action(
             decision="hold",
             decision_reason="personality_fit_below_threshold",
             proposal=selected_proposal,
+            action_command=None,
             action_candidate_score=_candidate_payload(best_candidate),
         )
     if action_type == "wait":
@@ -80,19 +84,28 @@ def validate_chat_response_action(
             decision="hold",
             decision_reason="wait_selected",
             proposal=selected_proposal,
+            action_command=None,
             action_candidate_score=_candidate_payload(best_candidate),
         )
-    if action_type != "speak":
+    if action_type == "browse":
         return ValidatedChatAction(
             decision="hold",
             decision_reason="action_type_not_implemented",
             proposal=selected_proposal,
+            action_command=None,
             action_candidate_score=_candidate_payload(best_candidate),
         )
+    action_command = _build_action_command(
+        action_type=action_type,
+        pending_channel=pending_channel,
+        proposal=selected_proposal,
+        response_text=response_text,
+    )
     return ValidatedChatAction(
         decision="execute",
-        decision_reason="speak_selected",
+        decision_reason=f"{action_type}_selected",
         proposal=selected_proposal,
+        action_command=action_command,
         action_candidate_score=_candidate_payload(best_candidate),
     )
 
@@ -185,7 +198,7 @@ def _passes_hard_gate(
     if action_type in forbidden_action_types:
         return False
     target_channel = proposal.get("target_channel")
-    if action_type == "speak" and target_channel != pending_channel:
+    if action_type in {"speak", "notify"} and target_channel != pending_channel:
         return False
     return not _has_strong_aversion(
         action_type=action_type,
@@ -345,6 +358,33 @@ def _materialize_selected_proposal(
     selected_proposal["proposal_id"] = _proposal_id(proposal, message_id)
     selected_proposal["message_id"] = message_id
     return selected_proposal
+
+
+# Block: Action command builder
+def _build_action_command(
+    *,
+    action_type: str,
+    pending_channel: str,
+    proposal: dict[str, Any],
+    response_text: str,
+) -> dict[str, Any]:
+    if action_type == "speak":
+        return {
+            "command_type": "speak_ui_message",
+            "target_channel": pending_channel,
+            "message_id": str(proposal["message_id"]),
+            "text": response_text,
+            "proposal_ref": str(proposal["proposal_id"]),
+        }
+    if action_type == "notify":
+        return {
+            "command_type": "browser_notice",
+            "target_channel": pending_channel,
+            "notice_code": "llm_notify",
+            "text": response_text,
+            "proposal_ref": str(proposal["proposal_id"]),
+        }
+    raise RuntimeError("unsupported action_type for execute command")
 
 
 # Block: Candidate payload

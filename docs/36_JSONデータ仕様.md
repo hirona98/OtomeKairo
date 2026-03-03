@@ -497,7 +497,7 @@
 - 初期実装の `browser_chat` では、`action_proposals` の各要素は少なくとも `action_type` と `priority` を持つ
 - 初期実装の `browser_chat` では、`action_type` は `speak`、`browse`、`notify`、`wait` のいずれかだけを許可する
 - 初期実装の `browser_chat` では、`priority` は `0.0..1.0` の `number` に固定する
-- 初期実装の `browser_chat` では、`speak` のときだけ `target_channel=\"browser_chat\"` を必須とする
+- 初期実装の `browser_chat` では、`speak` と `notify` のとき `target_channel=\"browser_chat\"` を必須とする
 - `speech_draft` は、少なくとも `text`、`language`、`delivery_mode` を持つ
 - `memory_focus` は、少なくとも `focus_kind`、`summary` を持つ
 - `reflection_seed` は、少なくとも `cycle_id`、`input_kind`、`message_id`、`token_count`、`was_cancelled` を持つ
@@ -807,6 +807,8 @@
 - `role` は、`message_id` を伴うメッセージ応答だけに付ける
 - `related_input_id` は、入力に対する応答行動だけに付ける
 - `proposal_ref` は、`cognition_result.action_proposals` から確定した候補を追跡したいときに付ける
+- `command_type` は、初期実装では `speak_ui_message` または `browser_notice` を使ってよい
+- `notice_code` と `text` は、`browser_notice` を実行する命令だけに付ける
 - `hold` と `reject` では、`message_id` と `role` を付けず、`event_types` は `status` だけでもよい
 - `target_message_id` は、`cancel` のように既存メッセージを対象化する行動だけに付ける
 - `input_kind` は、未対応入力のエラー応答のように、原因となる入力種別を残したいときだけ付ける
