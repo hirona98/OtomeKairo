@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import time
 import uuid
-import os
 from pathlib import Path
 from typing import Any, Callable
 
@@ -35,6 +34,7 @@ DEFAULT_LEASE_TTL_MS = 60_000
 MAX_MEMORY_JOB_TRIES = 3
 PENDING_INPUT_FAILURE_REASON = "processing_failed"
 SETTINGS_OVERRIDE_FAILURE_REASON = "settings_processing_failed"
+SETTINGS_CHANGE_SET_FAILURE_REASON = "settings_editor_processing_failed"
 CANCEL_FAILURE_REASON = "cancel_processing_failed"
 
 
@@ -49,8 +49,6 @@ class RuntimeLoop:
         cognition_client: CognitionClient,
         search_client: SearchClient,
         notification_client: NotificationClient,
-        line_channel_access_token: str,
-        line_to_user_id: str,
         lease_heartbeat_ms: int = DEFAULT_LEASE_HEARTBEAT_MS,
         lease_ttl_ms: int = DEFAULT_LEASE_TTL_MS,
     ) -> None:
@@ -67,8 +65,6 @@ class RuntimeLoop:
         self._cognition_client = cognition_client
         self._search_client = search_client
         self._notification_client = notification_client
-        self._line_channel_access_token = line_channel_access_token
-        self._line_to_user_id = line_to_user_id
         self._lease_heartbeat_ms = lease_heartbeat_ms
         self._lease_ttl_ms = lease_ttl_ms
         self._boot_reconciled = False
@@ -86,6 +82,10 @@ class RuntimeLoop:
             if processed_memory:
                 self._prefer_long_cycle = False
                 return True
+        processed_editor_settings = self._process_settings_change_set_once()
+        if processed_editor_settings:
+            self._prefer_long_cycle = True
+            return True
         processed_settings = self._process_settings_override_once()
         if processed_settings:
             self._prefer_long_cycle = True
@@ -259,8 +259,6 @@ class RuntimeLoop:
                 effective_settings=state_snapshot.effective_settings,
                 cognition_client=self._cognition_client,
                 notification_client=self._notification_client,
-                line_channel_access_token=self._line_channel_access_token,
-                line_to_user_id=self._line_to_user_id,
                 emit_ui_event=lambda ui_event: self._append_ui_event(cycle_id=cycle_id, ui_event=ui_event),
                 consume_cancel=lambda message_id: self._consume_matching_cancel(
                     channel=pending_input.channel,
@@ -378,7 +376,27 @@ class RuntimeLoop:
             )
             return False
 
-    # Block: Settings iteration
+    # Block: Settings change set iteration
+    def _process_settings_change_set_once(self) -> bool:
+        settings_change_set = self._store.claim_next_settings_change_set()
+        if settings_change_set is None:
+            return False
+        try:
+            self._store.finalize_settings_change_set(
+                change_set=settings_change_set,
+                default_settings=self._default_settings,
+                final_status="applied",
+            )
+        except Exception as error:
+            self._store.finalize_settings_change_set(
+                change_set=settings_change_set,
+                default_settings=self._default_settings,
+                final_status="rejected",
+                reject_reason=f"{SETTINGS_CHANGE_SET_FAILURE_REASON}:{type(error).__name__}",
+            )
+        return True
+
+    # Block: Settings override iteration
     def _process_settings_override_once(self) -> bool:
         settings_override = self._store.claim_next_settings_override()
         if settings_override is None:
@@ -543,8 +561,6 @@ def build_runtime_loop(*, db_path: Path | None = None) -> RuntimeLoop:
         cognition_client=_build_default_cognition_client(),
         search_client=_build_default_search_client(),
         notification_client=_build_default_notification_client(),
-        line_channel_access_token=_line_channel_access_token(),
-        line_to_user_id=_line_to_user_id(),
         lease_heartbeat_ms=_lease_heartbeat_ms(),
         lease_ttl_ms=_lease_ttl_ms(),
     )
@@ -692,15 +708,6 @@ def _build_default_notification_client() -> NotificationClient:
     from otomekairo.infra.line_notification_client import LineNotificationClient
 
     return LineNotificationClient()
-
-
-# Block: LINE credential helpers
-def _line_channel_access_token() -> str:
-    return os.environ.get("OTOMEKAIRO_LINE_CHANNEL_ACCESS_TOKEN", "")
-
-
-def _line_to_user_id() -> str:
-    return os.environ.get("OTOMEKAIRO_LINE_TO_USER_ID", "")
 
 
 def _opaque_id(prefix: str) -> str:

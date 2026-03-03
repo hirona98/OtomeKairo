@@ -19,16 +19,24 @@ from otomekairo.schema.runtime_types import (
     MemoryJobRecord,
     PendingInputRecord,
     PendingInputMutationRecord,
+    SettingsChangeSetRecord,
     SettingsOverrideRecord,
     TaskStateRecord,
     TaskStateMutationRecord,
 )
-from otomekairo.schema.settings import build_default_settings, decode_requested_value
+from otomekairo.schema.settings import (
+    build_default_settings,
+    build_default_settings_editor_state,
+    build_default_settings_presets,
+    build_settings_editor_direct_keys,
+    decode_requested_value,
+    normalize_settings_editor_document,
+)
 
 
 # Block: Schema constants
 SCHEMA_NAME = "core_schema"
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 EMBEDDING_VECTOR_DIMENSION = 32
 
 
@@ -179,6 +187,147 @@ class SqliteStateStore:
             "effective_settings": self.read_effective_settings(default_settings),
             "pending_overrides": pending_overrides,
         }
+
+    # Block: Settings editor snapshot
+    def read_settings_editor(self, default_settings: dict[str, Any]) -> dict[str, Any]:
+        with self._connect() as connection:
+            editor_row = connection.execute(
+                """
+                SELECT
+                    active_behavior_preset_id,
+                    active_llm_preset_id,
+                    active_memory_preset_id,
+                    active_output_preset_id,
+                    direct_values_json,
+                    revision,
+                    updated_at,
+                    last_applied_change_set_id
+                FROM settings_editor_state
+                WHERE row_id = 1
+                """
+            ).fetchone()
+            preset_rows = connection.execute(
+                """
+                SELECT
+                    preset_id,
+                    preset_kind,
+                    preset_name,
+                    payload_json,
+                    archived,
+                    sort_order,
+                    created_at,
+                    updated_at
+                FROM settings_presets
+                ORDER BY preset_kind ASC, sort_order ASC, updated_at DESC
+                """
+            ).fetchall()
+        if editor_row is None:
+            raise RuntimeError("settings_editor_state row is missing")
+        editor_state = _decode_settings_editor_state_row(editor_row)
+        preset_catalogs = _decode_settings_preset_catalog_rows(preset_rows)
+        runtime_projection = _materialize_runtime_settings_from_editor(
+            default_settings=default_settings,
+            editor_state=editor_state,
+            preset_catalogs=preset_catalogs,
+        )
+        return {
+            "editor_state": {
+                "revision": editor_state["revision"],
+                "active_behavior_preset_id": editor_state["active_behavior_preset_id"],
+                "active_llm_preset_id": editor_state["active_llm_preset_id"],
+                "active_memory_preset_id": editor_state["active_memory_preset_id"],
+                "active_output_preset_id": editor_state["active_output_preset_id"],
+                "direct_values": dict(editor_state["direct_values"]),
+            },
+            "preset_catalogs": preset_catalogs,
+            "constraints": {
+                "editable_direct_keys": list(build_settings_editor_direct_keys()),
+            },
+            "runtime_projection": runtime_projection,
+        }
+
+    # Block: Settings editor save
+    def save_settings_editor(
+        self,
+        *,
+        default_settings: dict[str, Any],
+        document: dict[str, Any],
+    ) -> dict[str, Any]:
+        normalized_document = normalize_settings_editor_document(document)
+        now_ms = _now_ms()
+        with self._connect() as connection:
+            editor_row = connection.execute(
+                """
+                SELECT
+                    active_behavior_preset_id,
+                    active_llm_preset_id,
+                    active_memory_preset_id,
+                    active_output_preset_id,
+                    direct_values_json,
+                    revision,
+                    updated_at,
+                    last_applied_change_set_id
+                FROM settings_editor_state
+                WHERE row_id = 1
+                """
+            ).fetchone()
+            if editor_row is None:
+                raise RuntimeError("settings_editor_state row is missing")
+            current_editor_state = _decode_settings_editor_state_row(editor_row)
+            current_revision = int(current_editor_state["revision"])
+            requested_revision = int(normalized_document["editor_state"]["revision"])
+            if requested_revision != current_revision:
+                raise StoreConflictError(
+                    "settings editor revision does not match",
+                    error_code="settings_editor_revision_conflict",
+                )
+            current_preset_rows = connection.execute(
+                """
+                SELECT
+                    preset_id,
+                    preset_kind,
+                    preset_name,
+                    payload_json,
+                    archived,
+                    sort_order,
+                    created_at,
+                    updated_at
+                FROM settings_presets
+                ORDER BY preset_kind ASC, sort_order ASC, updated_at DESC
+                """
+            ).fetchall()
+            current_preset_catalogs = _decode_settings_preset_catalog_rows(current_preset_rows)
+            if (
+                _canonical_editor_state_for_compare(current_editor_state)
+                == normalized_document["editor_state"]
+                and current_preset_catalogs == normalized_document["preset_catalogs"]
+            ):
+                return self.read_settings_editor(default_settings)
+            saved_editor_state = {
+                "active_behavior_preset_id": normalized_document["editor_state"]["active_behavior_preset_id"],
+                "active_llm_preset_id": normalized_document["editor_state"]["active_llm_preset_id"],
+                "active_memory_preset_id": normalized_document["editor_state"]["active_memory_preset_id"],
+                "active_output_preset_id": normalized_document["editor_state"]["active_output_preset_id"],
+                "direct_values": dict(normalized_document["editor_state"]["direct_values"]),
+                "revision": current_revision + 1,
+                "updated_at": now_ms,
+                "last_applied_change_set_id": current_editor_state.get("last_applied_change_set_id"),
+            }
+            _persist_settings_editor_state(connection=connection, editor_state=saved_editor_state)
+            _replace_settings_presets(
+                connection=connection,
+                preset_catalogs=normalized_document["preset_catalogs"],
+                now_ms=now_ms,
+            )
+            change_set_id = _opaque_id("setchg")
+            _insert_settings_change_set(
+                connection=connection,
+                change_set_id=change_set_id,
+                editor_state=saved_editor_state,
+                preset_catalogs=normalized_document["preset_catalogs"],
+                now_ms=now_ms,
+            )
+        return self.read_settings_editor(default_settings)
 
     # Block: Cognition snapshot
     def read_cognition_state(
@@ -567,6 +716,132 @@ class SqliteStateStore:
         if commit_row is None:
             raise RuntimeError("commit_records insert did not persist")
         return int(commit_row["commit_id"])
+
+    # Block: Settings change set claim
+    def claim_next_settings_change_set(self) -> SettingsChangeSetRecord | None:
+        now_ms = _now_ms()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """
+                SELECT change_set_id, editor_revision, payload_json, created_at
+                FROM settings_change_sets
+                WHERE status = 'queued'
+                ORDER BY created_at ASC
+                LIMIT 1
+                """
+            ).fetchone()
+            if row is None:
+                return None
+            connection.execute(
+                """
+                UPDATE settings_change_sets
+                SET status = 'claimed',
+                    claimed_at = ?
+                WHERE change_set_id = ?
+                  AND status = 'queued'
+                """,
+                (now_ms, row["change_set_id"]),
+            )
+        return SettingsChangeSetRecord(
+            change_set_id=str(row["change_set_id"]),
+            editor_revision=int(row["editor_revision"]),
+            payload_json=json.loads(row["payload_json"]),
+            created_at=int(row["created_at"]),
+        )
+
+    # Block: Settings change set finalize
+    def finalize_settings_change_set(
+        self,
+        *,
+        change_set: SettingsChangeSetRecord,
+        default_settings: dict[str, Any],
+        final_status: str,
+        reject_reason: str | None = None,
+    ) -> None:
+        if final_status not in {"applied", "rejected"}:
+            raise StoreValidationError("settings change set final_status is invalid")
+        resolved_at = _now_ms()
+        with self._connect() as connection:
+            if final_status == "applied":
+                editor_row = connection.execute(
+                    """
+                    SELECT
+                        active_behavior_preset_id,
+                        active_llm_preset_id,
+                        active_memory_preset_id,
+                        active_output_preset_id,
+                        direct_values_json,
+                        revision,
+                        updated_at,
+                        last_applied_change_set_id
+                    FROM settings_editor_state
+                    WHERE row_id = 1
+                    """
+                ).fetchone()
+                if editor_row is None:
+                    raise RuntimeError("settings_editor_state row is missing")
+                preset_rows = connection.execute(
+                    """
+                    SELECT
+                        preset_id,
+                        preset_kind,
+                        preset_name,
+                        payload_json,
+                        archived,
+                        sort_order,
+                        created_at,
+                        updated_at
+                    FROM settings_presets
+                    ORDER BY preset_kind ASC, sort_order ASC, updated_at DESC
+                    """
+                ).fetchall()
+                editor_state = _decode_settings_editor_state_row(editor_row)
+                if int(editor_state["revision"]) != change_set.editor_revision:
+                    final_status = "rejected"
+                    reject_reason = "stale_settings_change_set"
+                else:
+                    preset_catalogs = _decode_settings_preset_catalog_rows(preset_rows)
+                    runtime_values = _materialize_runtime_settings_from_editor(
+                        default_settings=default_settings,
+                        editor_state=editor_state,
+                        preset_catalogs=preset_catalogs,
+                    )
+                    connection.execute(
+                        """
+                        UPDATE runtime_settings
+                        SET values_json = ?,
+                            value_updated_at_json = ?,
+                            updated_at = ?
+                        WHERE row_id = 1
+                        """,
+                        (
+                            _json_text(runtime_values),
+                            _json_text({key: resolved_at for key in runtime_values}),
+                            resolved_at,
+                        ),
+                    )
+                    connection.execute(
+                        """
+                        UPDATE settings_editor_state
+                        SET last_applied_change_set_id = ?
+                        WHERE row_id = 1
+                        """,
+                        (change_set.change_set_id,),
+                    )
+            updated_row_count = connection.execute(
+                """
+                UPDATE settings_change_sets
+                SET status = ?,
+                    resolved_at = ?,
+                    reject_reason = ?
+                WHERE change_set_id = ?
+                  AND status = 'claimed'
+                """,
+                (final_status, resolved_at, reject_reason, change_set.change_set_id),
+            ).rowcount
+            if updated_row_count != 1:
+                raise StoreConflictError("settings change set must be claimed before finalization")
 
     # Block: Next boot materialization
     def materialize_next_boot_settings(self) -> None:
@@ -2017,6 +2292,68 @@ class SqliteStateStore:
             ),
         )
 
+    def _ensure_settings_editor_defaults(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        now_ms: int,
+    ) -> None:
+        default_settings = build_default_settings()
+        editor_seed = build_default_settings_editor_state(default_settings)
+        connection.execute(
+            """
+            INSERT INTO settings_editor_state (
+                row_id,
+                active_behavior_preset_id,
+                active_llm_preset_id,
+                active_memory_preset_id,
+                active_output_preset_id,
+                direct_values_json,
+                revision,
+                updated_at,
+                last_applied_change_set_id
+            )
+            VALUES (1, ?, ?, ?, ?, ?, ?, ?, NULL)
+            ON CONFLICT(row_id) DO NOTHING
+            """,
+            (
+                editor_seed["active_behavior_preset_id"],
+                editor_seed["active_llm_preset_id"],
+                editor_seed["active_memory_preset_id"],
+                editor_seed["active_output_preset_id"],
+                _json_text(editor_seed["direct_values_json"]),
+                int(editor_seed["revision"]),
+                now_ms,
+            ),
+        )
+        preset_seeds = build_default_settings_presets(default_settings)
+        for index, preset_seed in enumerate(preset_seeds):
+            connection.execute(
+                """
+                INSERT INTO settings_presets (
+                    preset_id,
+                    preset_kind,
+                    preset_name,
+                    payload_json,
+                    archived,
+                    sort_order,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, 0, ?, ?, ?)
+                ON CONFLICT(preset_id) DO NOTHING
+                """,
+                (
+                    preset_seed["preset_id"],
+                    preset_seed["preset_kind"],
+                    preset_seed["preset_name"],
+                    _json_text(preset_seed["payload"]),
+                    (index + 1) * 10,
+                    now_ms,
+                    now_ms,
+                ),
+            )
+
     # Block: Pending input claim
     def claim_next_pending_input(self) -> PendingInputRecord | None:
         now_ms = _now_ms()
@@ -3034,7 +3371,7 @@ class SqliteStateStore:
             return
         if current_version > SCHEMA_VERSION:
             raise RuntimeError("schema_version is newer than this initializer")
-        if current_version not in {2, 3}:
+        if current_version not in {2, 3, 4}:
             raise RuntimeError("unsupported schema_version for migration")
         while current_version < SCHEMA_VERSION:
             if current_version == 2:
@@ -3044,6 +3381,10 @@ class SqliteStateStore:
             if current_version == 3:
                 self._migrate_schema_3_to_4(connection=connection, now_ms=now_ms)
                 current_version = 4
+                continue
+            if current_version == 4:
+                self._migrate_schema_4_to_5(connection=connection, now_ms=now_ms)
+                current_version = 5
                 continue
             raise RuntimeError("unsupported schema_version for migration")
 
@@ -3093,6 +3434,85 @@ class SqliteStateStore:
             WHERE meta_key = 'schema_version'
             """,
             (_json_text(4), now_ms),
+        )
+
+    # Block: Schema migration 4->5
+    def _migrate_schema_4_to_5(self, *, connection: sqlite3.Connection, now_ms: int) -> None:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS settings_editor_state (
+                row_id INTEGER PRIMARY KEY CHECK (row_id = 1),
+                active_behavior_preset_id TEXT NOT NULL,
+                active_llm_preset_id TEXT NOT NULL,
+                active_memory_preset_id TEXT NOT NULL,
+                active_output_preset_id TEXT NOT NULL,
+                direct_values_json TEXT NOT NULL,
+                revision INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                last_applied_change_set_id TEXT
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS settings_presets (
+                preset_id TEXT PRIMARY KEY,
+                preset_kind TEXT NOT NULL CHECK (
+                    preset_kind IN ('behavior', 'llm', 'memory', 'output')
+                ),
+                preset_name TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                archived INTEGER NOT NULL CHECK (archived IN (0, 1)),
+                sort_order INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_settings_presets_kind_archived_sort
+                ON settings_presets (preset_kind, archived, sort_order ASC, updated_at DESC)
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS settings_change_sets (
+                change_set_id TEXT PRIMARY KEY,
+                editor_revision INTEGER NOT NULL,
+                payload_json TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                status TEXT NOT NULL CHECK (
+                    status IN ('queued', 'claimed', 'applied', 'rejected')
+                ),
+                claimed_at INTEGER,
+                resolved_at INTEGER,
+                reject_reason TEXT
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_settings_change_sets_status_created
+                ON settings_change_sets (status, created_at ASC)
+            """
+        )
+        self._ensure_runtime_settings_defaults(
+            connection=connection,
+            now_ms=now_ms,
+        )
+        self._ensure_settings_editor_defaults(
+            connection=connection,
+            now_ms=now_ms,
+        )
+        connection.execute(
+            """
+            UPDATE db_meta
+            SET meta_value_json = ?,
+                updated_at = ?
+            WHERE meta_key = 'schema_version'
+            """,
+            (_json_text(5), now_ms),
         )
 
     # Block: sqlite-vec schema ensure
@@ -3221,6 +3641,10 @@ class SqliteStateStore:
             ),
         )
         self._ensure_runtime_settings_defaults(
+            connection=connection,
+            now_ms=now_ms,
+        )
+        self._ensure_settings_editor_defaults(
             connection=connection,
             now_ms=now_ms,
         )
@@ -4005,6 +4429,255 @@ def _fetch_memory_rows_by_ids(
     ).fetchall()
     row_map = {str(row["memory_state_id"]): row for row in rows}
     return [row_map[memory_state_id] for memory_state_id in memory_state_ids if memory_state_id in row_map]
+
+
+# Block: Settings editor row decode
+def _decode_settings_editor_state_row(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "active_behavior_preset_id": str(row["active_behavior_preset_id"]),
+        "active_llm_preset_id": str(row["active_llm_preset_id"]),
+        "active_memory_preset_id": str(row["active_memory_preset_id"]),
+        "active_output_preset_id": str(row["active_output_preset_id"]),
+        "direct_values": json.loads(row["direct_values_json"]),
+        "revision": int(row["revision"]),
+        "updated_at": int(row["updated_at"]),
+        "last_applied_change_set_id": (
+            str(row["last_applied_change_set_id"])
+            if row["last_applied_change_set_id"] is not None
+            else None
+        ),
+    }
+
+
+# Block: Settings preset rows decode
+def _decode_settings_preset_catalog_rows(rows: list[sqlite3.Row]) -> dict[str, list[dict[str, Any]]]:
+    preset_catalogs = {
+        "behavior": [],
+        "llm": [],
+        "memory": [],
+        "output": [],
+    }
+    for row in rows:
+        preset_kind = str(row["preset_kind"])
+        preset_catalogs[preset_kind].append(
+            {
+                "preset_id": str(row["preset_id"]),
+                "preset_name": str(row["preset_name"]),
+                "archived": bool(row["archived"]),
+                "sort_order": int(row["sort_order"]),
+                "updated_at": int(row["updated_at"]),
+                "payload": json.loads(row["payload_json"]),
+            }
+        )
+    return preset_catalogs
+
+
+# Block: Settings editor compare helper
+def _canonical_editor_state_for_compare(editor_state: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "revision": int(editor_state["revision"]),
+        "active_behavior_preset_id": str(editor_state["active_behavior_preset_id"]),
+        "active_llm_preset_id": str(editor_state["active_llm_preset_id"]),
+        "active_memory_preset_id": str(editor_state["active_memory_preset_id"]),
+        "active_output_preset_id": str(editor_state["active_output_preset_id"]),
+        "direct_values": dict(editor_state["direct_values"]),
+    }
+
+
+# Block: Settings editor persistence
+def _persist_settings_editor_state(
+    *,
+    connection: sqlite3.Connection,
+    editor_state: dict[str, Any],
+) -> None:
+    connection.execute(
+        """
+        UPDATE settings_editor_state
+        SET active_behavior_preset_id = ?,
+            active_llm_preset_id = ?,
+            active_memory_preset_id = ?,
+            active_output_preset_id = ?,
+            direct_values_json = ?,
+            revision = ?,
+            updated_at = ?,
+            last_applied_change_set_id = ?
+        WHERE row_id = 1
+        """,
+        (
+            editor_state["active_behavior_preset_id"],
+            editor_state["active_llm_preset_id"],
+            editor_state["active_memory_preset_id"],
+            editor_state["active_output_preset_id"],
+            _json_text(editor_state["direct_values"]),
+            int(editor_state["revision"]),
+            int(editor_state["updated_at"]),
+            editor_state["last_applied_change_set_id"],
+        ),
+    )
+
+
+# Block: Settings preset replace
+def _replace_settings_presets(
+    *,
+    connection: sqlite3.Connection,
+    preset_catalogs: dict[str, list[dict[str, Any]]],
+    now_ms: int,
+) -> None:
+    expected_ids = [
+        str(preset_entry["preset_id"])
+        for preset_kind in ("behavior", "llm", "memory", "output")
+        for preset_entry in preset_catalogs[preset_kind]
+    ]
+    if expected_ids:
+        placeholder_sql = ",".join("?" for _ in expected_ids)
+        connection.execute(
+            f"DELETE FROM settings_presets WHERE preset_id NOT IN ({placeholder_sql})",
+            tuple(expected_ids),
+        )
+    else:
+        connection.execute("DELETE FROM settings_presets")
+    for preset_kind in ("behavior", "llm", "memory", "output"):
+        for preset_entry in preset_catalogs[preset_kind]:
+            created_at = int(preset_entry["updated_at"])
+            existing_row = connection.execute(
+                """
+                SELECT created_at
+                FROM settings_presets
+                WHERE preset_id = ?
+                """,
+                (preset_entry["preset_id"],),
+            ).fetchone()
+            if existing_row is not None:
+                created_at = int(existing_row["created_at"])
+            connection.execute(
+                """
+                INSERT INTO settings_presets (
+                    preset_id,
+                    preset_kind,
+                    preset_name,
+                    payload_json,
+                    archived,
+                    sort_order,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(preset_id) DO UPDATE SET
+                    preset_kind = excluded.preset_kind,
+                    preset_name = excluded.preset_name,
+                    payload_json = excluded.payload_json,
+                    archived = excluded.archived,
+                    sort_order = excluded.sort_order,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    preset_entry["preset_id"],
+                    preset_kind,
+                    preset_entry["preset_name"],
+                    _json_text(preset_entry["payload"]),
+                    1 if bool(preset_entry["archived"]) else 0,
+                    int(preset_entry["sort_order"]),
+                    created_at,
+                    now_ms,
+                ),
+            )
+
+
+# Block: Settings change set insert
+def _insert_settings_change_set(
+    *,
+    connection: sqlite3.Connection,
+    change_set_id: str,
+    editor_state: dict[str, Any],
+    preset_catalogs: dict[str, list[dict[str, Any]]],
+    now_ms: int,
+) -> None:
+    payload = {
+        "editor_revision": int(editor_state["revision"]),
+        "active_behavior_preset_id": editor_state["active_behavior_preset_id"],
+        "active_llm_preset_id": editor_state["active_llm_preset_id"],
+        "active_memory_preset_id": editor_state["active_memory_preset_id"],
+        "active_output_preset_id": editor_state["active_output_preset_id"],
+        "direct_values": dict(editor_state["direct_values"]),
+        "preset_versions": {
+            preset_kind: _active_preset_updated_at(
+                preset_entries=preset_catalogs[preset_kind],
+                preset_id=str(editor_state[f"active_{preset_kind}_preset_id"]),
+            )
+            for preset_kind in ("behavior", "llm", "memory", "output")
+        },
+    }
+    connection.execute(
+        """
+        INSERT INTO settings_change_sets (
+            change_set_id,
+            editor_revision,
+            payload_json,
+            created_at,
+            status
+        )
+        VALUES (?, ?, ?, ?, 'queued')
+        """,
+        (
+            change_set_id,
+            int(editor_state["revision"]),
+            _json_text(payload),
+            now_ms,
+        ),
+    )
+
+
+# Block: Active preset updated_at
+def _active_preset_updated_at(
+    *,
+    preset_entries: list[dict[str, Any]],
+    preset_id: str,
+) -> int:
+    for preset_entry in preset_entries:
+        if str(preset_entry["preset_id"]) == preset_id:
+            return int(preset_entry["updated_at"])
+    raise RuntimeError("active preset id is missing from preset_catalogs")
+
+
+# Block: Runtime settings from editor
+def _materialize_runtime_settings_from_editor(
+    *,
+    default_settings: dict[str, Any],
+    editor_state: dict[str, Any],
+    preset_catalogs: dict[str, list[dict[str, Any]]],
+) -> dict[str, Any]:
+    materialized = dict(default_settings)
+    llm_preset = _active_preset_payload(
+        preset_entries=preset_catalogs["llm"],
+        preset_id=str(editor_state["active_llm_preset_id"]),
+    )
+    memory_preset = _active_preset_payload(
+        preset_entries=preset_catalogs["memory"],
+        preset_id=str(editor_state["active_memory_preset_id"]),
+    )
+    output_preset = _active_preset_payload(
+        preset_entries=preset_catalogs["output"],
+        preset_id=str(editor_state["active_output_preset_id"]),
+    )
+    for payload in (llm_preset, memory_preset, output_preset):
+        for key, value in payload.items():
+            if key in materialized:
+                materialized[key] = value
+    for key, value in dict(editor_state["direct_values"]).items():
+        materialized[key] = value
+    return materialized
+
+
+# Block: Active preset payload helper
+def _active_preset_payload(
+    *,
+    preset_entries: list[dict[str, Any]],
+    preset_id: str,
+) -> dict[str, Any]:
+    for preset_entry in preset_entries:
+        if str(preset_entry["preset_id"]) == preset_id:
+            return dict(preset_entry["payload"])
+    raise RuntimeError("active preset payload is missing")
 
 
 def _normalize_embedding_scopes(requested_scopes: list[Any]) -> list[str]:

@@ -25,6 +25,11 @@ def build_settings_router(services: AppServices) -> APIRouter:
     async def get_settings() -> dict[str, object]:
         return services.store.read_settings(services.default_settings)
 
+    # Block: Settings editor read endpoint
+    @router.get("/api/settings/editor")
+    async def get_settings_editor() -> dict[str, object]:
+        return services.store.read_settings_editor(services.default_settings)
+
     # Block: Settings write endpoint
     @router.post("/api/settings/overrides", status_code=status.HTTP_202_ACCEPTED)
     async def post_settings_override(payload: SettingsOverrideRequest, response: Response) -> dict[str, object]:
@@ -38,6 +43,14 @@ def build_settings_router(services: AppServices) -> APIRouter:
             key=payload.key,
             requested_value_json=normalized_value,
             apply_scope=payload.apply_scope,
+        )
+
+    # Block: Settings editor write endpoint
+    @router.put("/api/settings/editor")
+    async def put_settings_editor(payload: dict[str, object]) -> dict[str, object]:
+        return services.store.save_settings_editor(
+            default_settings=services.default_settings,
+            document=payload,
         )
 
     return router

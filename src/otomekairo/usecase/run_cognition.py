@@ -34,8 +34,6 @@ def run_cognition_for_browser_chat_input(
     effective_settings: dict[str, Any],
     cognition_client: CognitionClient,
     notification_client: NotificationClient,
-    line_channel_access_token: str,
-    line_to_user_id: str,
     emit_ui_event: Callable[[dict[str, Any]], None],
     consume_cancel: Callable[[str], bool],
 ) -> CognitionExecution:
@@ -100,8 +98,8 @@ def run_cognition_for_browser_chat_input(
         consume_cancel=lambda: consume_cancel(active_message_id),
         notification_client=notification_client,
         line_enabled=bool(effective_settings["integrations.line.enabled"]),
-        line_channel_access_token=line_channel_access_token,
-        line_to_user_id=line_to_user_id,
+        line_channel_access_token=str(effective_settings["integrations.line.channel_access_token"]),
+        line_to_user_id=str(effective_settings["integrations.line.to_user_id"]),
     )
     cognition_result["reflection_seed"]["token_count"] = int(
         dispatch_result.observed_effects.get("token_count", 0)

@@ -89,8 +89,8 @@
 
 ```mermaid
 flowchart LR
-    browser["ブラウザ"] -->|"GET /\nGET /api/health\nGET /api/status\nGET /api/settings"| web["設定 Web サーバ"]
-    browser -->|"POST /api/chat/input\nPOST /api/chat/cancel\nPOST /api/settings/overrides"| web
+    browser["ブラウザ"] -->|"GET /\nGET /api/health\nGET /api/status\nGET /api/settings/editor"| web["設定 Web サーバ"]
+    browser -->|"POST /api/chat/input\nPOST /api/chat/cancel\nPUT /api/settings/editor"| web
     web <-->|read / write| db["SQLite"]
     runtime["人格ランタイム"] -->|"append ui_outbound_events"| db
     web -->|"SSE: GET /api/chat/stream"| browser
@@ -103,7 +103,7 @@ flowchart LR
 ### 役割
 
 - 最小のブラウザチャット UI を返す
-- 同一オリジンで `POST /api/chat/input`、`POST /api/chat/cancel`、`GET /api/chat/stream`、`GET /api/status`、`GET /api/settings` を使う
+- 同一オリジンで `POST /api/chat/input`、`POST /api/chat/cancel`、`GET /api/chat/stream`、`GET /api/status`、`GET /api/settings/editor` を使う
 - `src/otomekairo/web/static/` に置く HTML / CSS / JavaScript を返す
 
 <!-- Block: Browser UI Rules -->
@@ -112,7 +112,7 @@ flowchart LR
 - ログイン画面は持たず、起動直後にそのままチャット UI を表示する
 - 初期実装の見た目は `tmp/CocoroGhost/static/` に近いヘッダ、チャット欄、設定欄、ステータスバー構成にしてよい
 - `Mic` はブラウザの標準 `SpeechRecognition` を使って音声入力し、認識結果を `POST /api/chat/input` へ流す
-- `設定保存` は、初期実装では主要な一部設定だけを `POST /api/settings/overrides` へ流す
+- `設定保存` は、初期実装では `GET /api/settings/editor` と `PUT /api/settings/editor` を使って、設定全体を保存する
 - `Cam` は初期実装ではダミーでもよい
 - `browse` の初期実装では、UI は少なくとも `browse_queued` と `browse_completed` の `notice` を見分けられるようにしてよい
 - UI 側で永続ストレージを前提にしない
@@ -215,7 +215,7 @@ flowchart LR
 - `effective_settings` は、`config/default_settings.json` の既定値に対して、`runtime_settings.values_json` を上書きした現在有効値を返す
 - `apply_scope="next_boot"` で `applied` 済みの設定は、次回ランタイム起動で materialize されるまで `effective_settings` に即時反映しない
 - `GET /api/settings` は UI の要約表示用なので、必要なら API キーやトークンを含めてよい
-- 設定UIの主編集経路は、将来的に `GET /api/settings/editor` と `PUT /api/settings/editor` に置き換える
+- 設定UIの主編集経路は、`GET /api/settings/editor` と `PUT /api/settings/editor` に固定する
 
 <!-- Block: Settings Post -->
 ## `POST /api/settings/overrides`

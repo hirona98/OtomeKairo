@@ -751,20 +751,20 @@
 ```json
 {
   "output.tts.voice": "default",
-  "output_mode": "ui_and_tts",
-  "notify_route": "discord",
-  "line.channel_access_token": "line-token",
-  "line.to_user_id": "Uxxxx",
-  "discord.bot_token": "discord-token",
-  "discord.channel_id": "1234567890"
+  "output.mode": "ui_and_tts",
+  "integrations.notify_route": "discord",
+  "integrations.line.channel_access_token": "line-token",
+  "integrations.line.to_user_id": "Uxxxx",
+  "integrations.discord.bot_token": "discord-token",
+  "integrations.discord.channel_id": "1234567890"
 }
 ```
 
-- 必須項目は `output.tts.voice`、`output_mode`、`notify_route` である
-- `output_mode` は、`ui_only` または `ui_and_tts` の `string` に固定する
-- `notify_route` は、`ui_only`、`line`、`discord` のいずれかに固定する
-- `notify_route="line"` のときは `line.channel_access_token` と `line.to_user_id` を必須にする
-- `notify_route="discord"` のときは `discord.bot_token` と `discord.channel_id` を必須にする
+- 必須項目は `output.tts.voice`、`output.mode`、`integrations.notify_route` である
+- `output.mode` は、`ui_only` または `ui_and_tts` の `string` に固定する
+- `integrations.notify_route` は、`ui_only`、`line`、`discord` のいずれかに固定する
+- `integrations.notify_route="line"` のときは `integrations.line.channel_access_token` と `integrations.line.to_user_id` を必須にする
+- `integrations.notify_route="discord"` のときは `integrations.discord.bot_token` と `integrations.discord.channel_id` を必須にする
 
 <!-- Block: Settings Change Set Payload -->
 ### `settings_change_sets.payload_json`
