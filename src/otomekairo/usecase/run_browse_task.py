@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 from dataclasses import dataclass
@@ -13,6 +14,10 @@ from otomekairo.schema.runtime_types import (
     PendingInputMutationRecord,
     TaskStateRecord,
 )
+
+
+# Block: Module logger
+logger = logging.getLogger(__name__)
 
 
 # Block: Browse task execution
@@ -38,6 +43,15 @@ def run_browse_task(
     query = _browse_query(task)
     target_channel = _browse_target_channel(task)
     started_at = _now_ms()
+    logger.info(
+        "browse task started",
+        extra={
+            "cycle_id": cycle_id,
+            "task_id": task.task_id,
+            "query": query,
+            "channel": target_channel,
+        },
+    )
     ui_events: list[dict[str, Any]] = [
         {
             "channel": target_channel,
@@ -127,6 +141,16 @@ def run_browse_task(
         },
         priority=90,
         created_at=finished_at,
+    )
+    logger.info(
+        "browse task completed",
+        extra={
+            "cycle_id": cycle_id,
+            "task_id": task.task_id,
+            "query": query,
+            "summary_text": search_response.summary_text,
+            "followup_input_kind": "network_result",
+        },
     )
     return BrowseTaskExecution(
         ui_events=ui_events,

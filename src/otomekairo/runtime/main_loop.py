@@ -75,6 +75,14 @@ class RuntimeLoop:
         self._boot_reconciled = False
         self._prefer_long_cycle = False
         self._last_long_cycle_at_ms = 0
+        logger.info(
+            "runtime loop initialized",
+            extra={
+                "owner_token": owner_token,
+                "lease_heartbeat_ms": lease_heartbeat_ms,
+                "lease_ttl_ms": lease_ttl_ms,
+            },
+        )
 
     # Block: Single iteration
     def run_once(self) -> bool:
@@ -82,6 +90,7 @@ class RuntimeLoop:
         if not self._boot_reconciled:
             self._store.materialize_next_boot_settings()
             self._boot_reconciled = True
+            logger.info("runtime boot settings materialized")
         if self._prefer_long_cycle:
             processed_memory = self._process_memory_job_once()
             if processed_memory:
@@ -97,11 +106,27 @@ class RuntimeLoop:
             return True
         pending_input = self._store.claim_next_pending_input()
         if pending_input is not None:
+            logger.info(
+                "claimed pending input",
+                extra={
+                    "input_id": pending_input.input_id,
+                    "input_kind": pending_input.payload["input_kind"],
+                    "channel": pending_input.channel,
+                },
+            )
             self._process_claimed_pending_input(pending_input)
             self._prefer_long_cycle = True
             return True
         waiting_task = self._store.claim_next_waiting_browse_task()
         if waiting_task is not None:
+            logger.info(
+                "claimed waiting task",
+                extra={
+                    "task_id": waiting_task.task_id,
+                    "task_kind": waiting_task.task_kind,
+                    "task_status": waiting_task.task_status,
+                },
+            )
             self._process_claimed_waiting_task(waiting_task)
             self._prefer_long_cycle = True
             return True
@@ -148,6 +173,19 @@ class RuntimeLoop:
                 discard_reason=discard_reason,
                 ui_events=ui_events,
                 commit_payload=commit_payload,
+            )
+            logger.info(
+                "pending input finalized",
+                extra={
+                    "cycle_id": cycle_id,
+                    "input_id": pending_input.input_id,
+                    "input_kind": pending_input.payload["input_kind"],
+                    "resolution_status": resolution_status,
+                    "executed_action_types": [
+                        action_result.action_type for action_result in action_results
+                    ],
+                    "emitted_event_types": [ui_event["event_type"] for ui_event in ui_events],
+                },
             )
         except Exception as error:
             logger.exception("pending input processing failed: input_id=%s", pending_input.input_id)
@@ -204,6 +242,18 @@ class RuntimeLoop:
                         action_result.action_type for action_result in execution.action_results
                     ],
                     "final_task_status": execution.final_status,
+                },
+            )
+            logger.info(
+                "waiting task finalized",
+                extra={
+                    "cycle_id": cycle_id,
+                    "task_id": task.task_id,
+                    "task_kind": task.task_kind,
+                    "final_status": execution.final_status,
+                    "executed_action_types": [
+                        action_result.action_type for action_result in execution.action_results
+                    ],
                 },
             )
         except Exception as error:
@@ -392,11 +442,19 @@ class RuntimeLoop:
         settings_change_set = self._store.claim_next_settings_change_set()
         if settings_change_set is None:
             return False
+        logger.info(
+            "claimed settings change set",
+            extra={"change_set_id": settings_change_set.change_set_id},
+        )
         try:
             self._store.finalize_settings_change_set(
                 change_set=settings_change_set,
                 default_settings=self._default_settings,
                 final_status="applied",
+            )
+            logger.info(
+                "settings change set applied",
+                extra={"change_set_id": settings_change_set.change_set_id},
             )
         except Exception as error:
             logger.exception(
@@ -409,6 +467,13 @@ class RuntimeLoop:
                 final_status="rejected",
                 reject_reason=f"{SETTINGS_CHANGE_SET_FAILURE_REASON}:{type(error).__name__}",
             )
+            logger.warning(
+                "settings change set rejected",
+                extra={
+                    "change_set_id": settings_change_set.change_set_id,
+                    "reject_reason": f"{SETTINGS_CHANGE_SET_FAILURE_REASON}:{type(error).__name__}",
+                },
+            )
         return True
 
     # Block: Settings override iteration
@@ -417,6 +482,15 @@ class RuntimeLoop:
         if settings_override is None:
             return False
         cycle_id = _opaque_id("cycle")
+        logger.info(
+            "claimed settings override",
+            extra={
+                "cycle_id": cycle_id,
+                "override_id": settings_override.override_id,
+                "setting_key": settings_override.key,
+                "apply_scope": settings_override.apply_scope,
+            },
+        )
         try:
             self._store.append_input_journal_for_settings_override(
                 settings_override=settings_override,
@@ -432,6 +506,16 @@ class RuntimeLoop:
                 final_status=final_status,
                 reject_reason=reject_reason,
             )
+            logger.info(
+                "settings override finalized",
+                extra={
+                    "cycle_id": cycle_id,
+                    "override_id": settings_override.override_id,
+                    "setting_key": settings_override.key,
+                    "final_status": final_status,
+                    "reject_reason": reject_reason,
+                },
+            )
         except Exception as error:
             logger.exception(
                 "settings override processing failed: override_id=%s",
@@ -446,6 +530,15 @@ class RuntimeLoop:
                 final_status="rejected",
                 reject_reason=f"{SETTINGS_OVERRIDE_FAILURE_REASON}:{type(error).__name__}",
             )
+            logger.warning(
+                "settings override rejected after failure",
+                extra={
+                    "cycle_id": cycle_id,
+                    "override_id": settings_override.override_id,
+                    "setting_key": settings_override.key,
+                    "reject_reason": f"{SETTINGS_OVERRIDE_FAILURE_REASON}:{type(error).__name__}",
+                },
+            )
         return True
 
     # Block: Memory job iteration
@@ -455,8 +548,23 @@ class RuntimeLoop:
         memory_job = self._store.claim_next_memory_job()
         if memory_job is None:
             return False
+        logger.debug(
+            "claimed memory job",
+            extra={
+                "job_id": memory_job.job_id,
+                "job_kind": memory_job.job_kind,
+                "tries": memory_job.tries,
+            },
+        )
         try:
             self._memory_job_handler(memory_job.job_kind)(memory_job)
+            logger.debug(
+                "memory job completed",
+                extra={
+                    "job_id": memory_job.job_id,
+                    "job_kind": memory_job.job_kind,
+                },
+            )
         except Exception as error:
             logger.exception("memory job processing failed: job_id=%s", memory_job.job_id)
             self._store.fail_claimed_memory_job(
@@ -530,12 +638,14 @@ class RuntimeLoop:
 
     # Block: Infinite loop
     def run_forever(self) -> None:
+        logger.info("runtime loop started")
         try:
             while True:
                 processed = self.run_once()
                 if not processed:
                     self._sleep_until_next_idle_tick()
         finally:
+            logger.info("runtime loop stopping")
             self._store.release_runtime_lease(owner_token=self._owner_token)
 
     # Block: Idle timing
@@ -569,6 +679,7 @@ class RuntimeLoop:
 # Block: Runtime construction
 def build_runtime_loop(*, db_path: Path | None = None) -> RuntimeLoop:
     resolved_db_path = db_path or _default_db_path()
+    logger.info("initializing runtime loop", extra={"db_path": str(resolved_db_path)})
     store = SqliteStateStore(
         db_path=resolved_db_path,
         initializer_version=__version__,

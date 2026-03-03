@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import signal
 import subprocess
@@ -10,6 +11,7 @@ import time
 from pathlib import Path
 
 from otomekairo import __version__
+from otomekairo.infra.logging_setup import configure_process_logging
 from otomekairo.infra.sqlite_state_store import SqliteStateStore
 
 
@@ -18,8 +20,13 @@ WEB_PROCESS = "web"
 RUNTIME_PROCESS = "runtime"
 
 
+# Block: Module logger
+logger = logging.getLogger(__name__)
+
+
 # Block: Combined entrypoint
 def main() -> None:
+    configure_process_logging(process_name="launcher")
     repo_root = _repo_root()
     runtime_already_running = _runtime_already_running(repo_root)
     child_env = _child_environment(repo_root)
@@ -38,16 +45,19 @@ def main() -> None:
             module_name="otomekairo.boot.run_runtime",
         )
     _install_signal_handlers(processes)
-    print("OtomeKairo started")
-    print(f"  Web:     {web_url}")
+    logger.info("OtomeKairo started")
+    logger.info("Web: %s", web_url, extra={"web_url": web_url})
     if runtime_already_running:
-        print("  Runtime: already running (reuse existing lease)")
+        logger.info(
+            "Runtime: already running (reuse existing lease)",
+            extra={"runtime_mode": "reuse_existing"},
+        )
     else:
-        print("  Runtime: running")
+        logger.info("Runtime: running", extra={"runtime_mode": "spawned"})
     try:
         _wait_for_exit(processes)
     except RuntimeError as error:
-        print(str(error), file=sys.stderr)
+        logger.error("%s", str(error))
         raise SystemExit(1) from error
     finally:
         _stop_child_processes(processes)
@@ -105,7 +115,7 @@ def _runtime_already_running(repo_root: Path) -> bool:
 # Block: Signal registration
 def _install_signal_handlers(processes: dict[str, subprocess.Popen[str]]) -> None:
     def handle_signal(signum: int, _frame: object) -> None:
-        print(f"Received signal: {signum}")
+        logger.info("Received signal: %s", signum, extra={"signal_number": signum})
         _stop_child_processes(processes)
         raise SystemExit(0)
 
