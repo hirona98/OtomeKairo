@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 from pathlib import Path
@@ -36,6 +37,10 @@ PENDING_INPUT_FAILURE_REASON = "processing_failed"
 SETTINGS_OVERRIDE_FAILURE_REASON = "settings_processing_failed"
 SETTINGS_CHANGE_SET_FAILURE_REASON = "settings_editor_processing_failed"
 CANCEL_FAILURE_REASON = "cancel_processing_failed"
+
+
+# Block: Module logger
+logger = logging.getLogger(__name__)
 
 
 # Block: Runtime loop
@@ -145,6 +150,7 @@ class RuntimeLoop:
                 commit_payload=commit_payload,
             )
         except Exception as error:
+            logger.exception("pending input processing failed: input_id=%s", pending_input.input_id)
             ui_events = _failed_pending_input_events(
                 pending_input=pending_input,
                 error=error,
@@ -201,6 +207,7 @@ class RuntimeLoop:
                 },
             )
         except Exception as error:
+            logger.exception("waiting task processing failed: task_id=%s", task.task_id)
             ui_events = _failed_task_events(task=task, cycle_id=cycle_id)
             self._append_ui_events(cycle_id=cycle_id, ui_events=ui_events)
             failed_action = _failed_task_action_result(
@@ -357,6 +364,7 @@ class RuntimeLoop:
             )
             return True
         except Exception as error:
+            logger.exception("cancel processing failed: input_id=%s", pending_input.input_id)
             self._store.finalize_pending_input_cycle(
                 pending_input=pending_input,
                 cycle_id=cycle_id,
@@ -391,6 +399,10 @@ class RuntimeLoop:
                 final_status="applied",
             )
         except Exception as error:
+            logger.exception(
+                "settings editor processing failed: change_set_id=%s",
+                settings_change_set.change_set_id,
+            )
             self._store.finalize_settings_change_set(
                 change_set=settings_change_set,
                 default_settings=self._default_settings,
@@ -421,6 +433,10 @@ class RuntimeLoop:
                 reject_reason=reject_reason,
             )
         except Exception as error:
+            logger.exception(
+                "settings override processing failed: override_id=%s",
+                settings_override.override_id,
+            )
             self._store.finalize_settings_override(
                 override_id=settings_override.override_id,
                 key=settings_override.key,
@@ -442,6 +458,7 @@ class RuntimeLoop:
         try:
             self._memory_job_handler(memory_job.job_kind)(memory_job)
         except Exception as error:
+            logger.exception("memory job processing failed: job_id=%s", memory_job.job_id)
             self._store.fail_claimed_memory_job(
                 memory_job=memory_job,
                 error=error,
