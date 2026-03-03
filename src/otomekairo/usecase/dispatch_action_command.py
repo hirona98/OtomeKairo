@@ -7,6 +7,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable
 
+from otomekairo.gateway.camera_controller import CameraController, CameraLookRequest
 from otomekairo.gateway.notification_client import LineNotificationRequest, NotificationClient
 from otomekairo.schema.runtime_types import TaskStateMutationRecord
 
@@ -35,6 +36,7 @@ def dispatch_chat_action_command(
     emit_ui_event: Callable[[dict[str, Any]], None],
     consume_cancel: Callable[[str], bool],
     notification_client: NotificationClient,
+    camera_controller: CameraController,
     line_enabled: bool,
     line_channel_access_token: str,
     line_to_user_id: str,
@@ -59,6 +61,14 @@ def dispatch_chat_action_command(
             line_enabled=line_enabled,
             line_channel_access_token=line_channel_access_token,
             line_to_user_id=line_to_user_id,
+        )
+    if command_type == "control_camera_look":
+        return _dispatch_camera_look_command(
+            pending_input=pending_input,
+            cycle_id=cycle_id,
+            action_command=action_command,
+            emit_ui_event=emit_ui_event,
+            camera_controller=camera_controller,
         )
     if command_type == "enqueue_browse_task":
         return _dispatch_browse_task_command(
@@ -291,6 +301,141 @@ def _dispatch_notice_command(
     )
 
 
+# Block: Camera look dispatch
+def _dispatch_camera_look_command(
+    *,
+    pending_input: dict[str, Any],
+    cycle_id: str,
+    action_command: dict[str, Any],
+    emit_ui_event: Callable[[dict[str, Any]], None],
+    camera_controller: CameraController,
+) -> ActionDispatchResult:
+    emitted_event_types: list[str] = []
+    message_id = str(action_command["parameters"]["message_id"])
+    response_text = str(action_command["parameters"]["text"])
+
+    # Block: Camera move status
+    _emit_browser_event(
+        pending_input=pending_input,
+        event_type="status",
+        payload={
+            "status_code": "camera_moving",
+            "label": "カメラを動かしています",
+            "cycle_id": cycle_id,
+        },
+        emit_ui_event=emit_ui_event,
+        emitted_event_types=emitted_event_types,
+    )
+
+    # Block: Camera move execution
+    try:
+        look_response = camera_controller.move_view(
+            CameraLookRequest(
+                cycle_id=cycle_id,
+                direction=_optional_action_text(action_command["parameters"], "direction"),
+                preset_id=_optional_action_text(action_command["parameters"], "preset_id"),
+                preset_name=_optional_action_text(action_command["parameters"], "preset_name"),
+            )
+        )
+    except Exception as error:
+        # Block: Camera move failure event
+        _emit_browser_event(
+            pending_input=pending_input,
+            event_type="error",
+            payload={
+                "error_code": "camera_move_failed",
+                "message": _error_message_text(error),
+                "retriable": False,
+            },
+            emit_ui_event=emit_ui_event,
+            emitted_event_types=emitted_event_types,
+        )
+
+        # Block: Idle status after camera failure
+        _emit_browser_event(
+            pending_input=pending_input,
+            event_type="status",
+            payload={
+                "status_code": "idle",
+                "label": "待機中",
+                "cycle_id": cycle_id,
+            },
+            emit_ui_event=emit_ui_event,
+            emitted_event_types=emitted_event_types,
+        )
+
+        return ActionDispatchResult(
+            action_type="control_camera_look",
+            emitted_event_types=emitted_event_types,
+            observed_effects={
+                "status_code_after": "idle",
+                "camera_move": "failed",
+                "message_id": message_id,
+            },
+            task_mutations=[],
+            finished_at=_now_ms(),
+            status="failed",
+            failure_mode="camera_move_failed",
+            raw_result_ref=None,
+            adapter_trace_ref={
+                "camera_error": {
+                    "error_kind": type(error).__name__,
+                    "error_message": _error_message_text(error),
+                }
+            },
+        )
+
+    # Block: Camera move message
+    final_message_emitted = False
+    if response_text:
+        _emit_browser_event(
+            pending_input=pending_input,
+            event_type="message",
+            payload={
+                "message_id": message_id,
+                "role": "assistant",
+                "text": response_text,
+                "created_at": _now_ms(),
+                "source_cycle_id": cycle_id,
+                "related_input_id": str(pending_input["input_id"]),
+            },
+            emit_ui_event=emit_ui_event,
+            emitted_event_types=emitted_event_types,
+        )
+        final_message_emitted = True
+
+    # Block: Idle status
+    _emit_browser_event(
+        pending_input=pending_input,
+        event_type="status",
+        payload={
+            "status_code": "idle",
+            "label": "待機中",
+            "cycle_id": cycle_id,
+        },
+        emit_ui_event=emit_ui_event,
+        emitted_event_types=emitted_event_types,
+    )
+
+    return ActionDispatchResult(
+        action_type="control_camera_look",
+        emitted_event_types=emitted_event_types,
+        observed_effects={
+            "status_code_after": "idle",
+            "camera_move": "succeeded",
+            "movement_label": look_response.movement_label,
+            "message_id": message_id,
+            "final_message_emitted": final_message_emitted,
+        },
+        task_mutations=[],
+        finished_at=_now_ms(),
+        status="succeeded",
+        failure_mode=None,
+        raw_result_ref=look_response.raw_result_ref,
+        adapter_trace_ref=look_response.adapter_trace_ref,
+    )
+
+
 # Block: Browse task dispatch
 def _dispatch_browse_task_command(
     *,
@@ -429,3 +574,14 @@ def _error_message_text(error: Exception) -> str:
     if not message:
         return type(error).__name__
     return message[:240]
+
+
+# Block: Optional action text helper
+def _optional_action_text(parameters: dict[str, Any], key: str) -> str | None:
+    value = parameters.get(key)
+    if not isinstance(value, str):
+        return None
+    stripped_value = value.strip()
+    if not stripped_value:
+        return None
+    return stripped_value

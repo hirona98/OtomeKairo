@@ -83,14 +83,17 @@
 - `PUT /api/settings/editor`
 - `POST /api/chat/input`
 - `POST /api/chat/cancel`
+- `POST /api/camera/capture`
+- `POST /api/camera/observe`
 - `GET /api/chat/stream`
+- `GET /captures/{capture_filename}`
 
 - 下の Mermaid 図は、ブラウザ、`設定 Web サーバ`、`人格ランタイム`、`SQLite` の受け渡しを要約したものである
 
 ```mermaid
 flowchart LR
-    browser["ブラウザ"] -->|"GET /\nGET /api/health\nGET /api/status\nGET /api/settings/editor"| web["設定 Web サーバ"]
-    browser -->|"POST /api/chat/input\nPOST /api/chat/cancel\nPUT /api/settings/editor"| web
+    browser["ブラウザ"] -->|"GET /\nGET /api/health\nGET /api/status\nGET /api/settings/editor\nGET /captures/{capture_filename}"| web["設定 Web サーバ"]
+    browser -->|"POST /api/chat/input\nPOST /api/chat/cancel\nPOST /api/camera/capture\nPOST /api/camera/observe\nPUT /api/settings/editor"| web
     web <-->|read / write| db["SQLite"]
     runtime["人格ランタイム"] -->|"append ui_outbound_events"| db
     web -->|"SSE: GET /api/chat/stream"| browser
@@ -103,7 +106,7 @@ flowchart LR
 ### 役割
 
 - 最小のブラウザチャット UI を返す
-- 同一オリジンで `POST /api/chat/input`、`POST /api/chat/cancel`、`GET /api/chat/stream`、`GET /api/status`、`GET /api/settings/editor` を使う
+- 同一オリジンで `POST /api/chat/input`、`POST /api/chat/cancel`、`POST /api/camera/capture`、`GET /api/chat/stream`、`GET /api/status`、`GET /api/settings/editor`、`GET /captures/{capture_filename}` を使う
 - `src/otomekairo/web/static/` に置く HTML / CSS / JavaScript を返す
 
 <!-- Block: Browser UI Rules -->
@@ -112,8 +115,8 @@ flowchart LR
 - ログイン画面は持たず、起動直後にそのままチャット UI を表示する
 - 初期実装の見た目は `tmp/CocoroGhost/static/` に近いヘッダ、チャット欄、設定欄、ステータスバー構成にしてよい
 - `Mic` はブラウザの標準 `SpeechRecognition` を使って音声入力し、認識結果を `POST /api/chat/input` へ流す
+- `Cam` は `POST /api/camera/capture` で静止画を取得し、返った画像をサムネイル表示し、次の `POST /api/chat/input` へ添付してよい
 - `設定保存` は、初期実装では `GET /api/settings/editor` と `PUT /api/settings/editor` を使って、設定全体を保存する
-- `Cam` は初期実装ではダミーでもよい
 - `browse` の初期実装では、UI は少なくとも `browse_queued` と `browse_completed` の `notice` を見分けられるようにしてよい
 - UI 側で永続ストレージを前提にしない
 - UI は `browser_chat` チャネル専用として扱う
@@ -303,13 +306,21 @@ flowchart LR
 ```json
 {
   "text": "おはよう",
-  "client_message_id": "cli_msg_001"
+  "client_message_id": "cli_msg_001",
+  "attachments": [
+    {
+      "attachment_kind": "camera_still_image",
+      "capture_id": "cap_0123456789abcdef0123456789abcdef"
+    }
+  ]
 }
 ```
 
-- 必須項目は `text` とする
+- `text` と `attachments` はどちらも任意だが、少なくともどちらか 1 つは必要とする
 - `client_message_id` は任意だが、送る場合はクライアント側の再送判定に使える安定値とする
-- 空文字列、空白のみ、`4000` 文字超の入力は `400` とする
+- `text` を送る場合、空文字列、空白のみ、`4000` 文字超は `400` とする
+- `attachments` は任意で、送る場合は `camera_still_image` の配列とする
+- 各添付は `capture_id` を必須とし、`POST /api/camera/capture` で作った画像だけを受け付ける
 
 <!-- Block: Chat Input Write -->
 ### DB への写像
@@ -318,7 +329,7 @@ flowchart LR
 - `source` は `web_input` に固定する
 - `channel` は `browser_chat` に固定する
 - `client_message_id` がある場合は、`pending_inputs.client_message_id` にも同じ値を入れる
-- `payload_json` には、少なくとも `input_kind="chat_message"`、`text`、必要なら `client_message_id` を入れる
+- `payload_json` には、`input_kind="chat_message"` を入れ、`text`、`attachments`、`client_message_id` は必要なものだけを入れる
 - 追加時の `status` は `queued` に固定する
 - 同じ `(channel, client_message_id)` が既にある場合は、追加せず `409 Conflict` を返す
 
@@ -378,6 +389,98 @@ flowchart LR
 ```
 
 - 成功時は `202 Accepted` を返す
+
+<!-- Block: Camera Capture -->
+## `POST /api/camera/capture`
+
+<!-- Block: Camera Capture Purpose -->
+### 役割
+
+- ブラウザから現在のカメラ静止画を 1 枚取得する
+- Web サーバは `pytapo` と `ffmpeg` を使って JPEG を生成し、`data/camera/` へ保存する
+- 応答では保存先の相対パスと、同一オリジンで読める `image_url` を返す
+
+<!-- Block: Camera Capture Request -->
+### 入力 JSON
+
+- リクエスト本文は不要である
+
+<!-- Block: Camera Capture Response -->
+### 成功応答
+
+```json
+{
+  "capture_id": "cap_...",
+  "image_path": "data/camera/cap_....jpg",
+  "image_url": "/captures/cap_....jpg",
+  "captured_at": 1760000000000
+}
+```
+
+- 成功時は `201 Created` を返す
+- `capture_id` は、不透明な capture 識別子である
+- `image_path` は、サーバ作業ディレクトリ基準の保存先相対パスである
+- `image_url` は、その静止画をブラウザが再取得するための同一オリジン URL である
+- カメラ接続設定が不足している場合は `409 Conflict` を返す
+- ストリーム接続や JPEG 生成に失敗した場合は `500 Internal Server Error` を返す
+
+<!-- Block: Camera Observe -->
+## `POST /api/camera/observe`
+
+<!-- Block: Camera Observe Purpose -->
+### 役割
+
+- 現在のカメラ静止画を 1 枚取得し、そのまま自発観測入力として `pending_inputs` に積む
+- Web サーバは `source=self_initiated`、`input_kind=camera_observation`、`camera_still_image` 添付 1 件で認知待ち入力を作る
+- 返した時点では応答本文は生成せず、後続のランタイム短周期で認知処理する
+
+<!-- Block: Camera Observe Request -->
+### 入力 JSON
+
+- リクエスト本文は不要である
+
+<!-- Block: Camera Observe Write -->
+### DB への写像
+
+- `pending_inputs` に 1 件追加する
+- `source` は `self_initiated` に固定する
+- `channel` は `browser_chat` に固定する
+- `client_message_id` は `null` に固定する
+- `payload_json` には、`input_kind="camera_observation"` と `camera_still_image` 添付 1 件を入れる
+- 追加時の `status` は `queued` に固定する
+
+<!-- Block: Camera Observe Response -->
+### 成功応答
+
+```json
+{
+  "accepted": true,
+  "input_id": "inp_...",
+  "status": "queued",
+  "channel": "browser_chat",
+  "capture_id": "cap_...",
+  "image_path": "data/camera/cap_....jpg",
+  "image_url": "/captures/cap_....jpg",
+  "captured_at": 1760000000000
+}
+```
+
+- 成功時は `202 Accepted` を返す
+- `input_id` は、生成された自発観測入力の ID である
+- `status` は `queued` に固定する
+- `channel` は `browser_chat` に固定する
+- `capture_id`、`image_path`、`image_url`、`captured_at` は、同時に取得した静止画の情報である
+- カメラ接続設定が不足している場合は `409 Conflict` を返す
+- ストリーム接続や JPEG 生成に失敗した場合は `500 Internal Server Error` を返す
+
+<!-- Block: Camera Capture Asset -->
+## `GET /captures/{capture_filename}`
+
+<!-- Block: Camera Capture Asset Purpose -->
+### 役割
+
+- `POST /api/camera/capture` で保存した JPEG を同一オリジンで返す
+- ブラウザ UI は、この path をサムネイルと原寸表示の両方に使ってよい
 
 <!-- Block: Chat Stream -->
 ## `GET /api/chat/stream`

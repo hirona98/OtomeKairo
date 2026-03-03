@@ -938,17 +938,92 @@ class SqliteStateStore:
         return {"accepted": True, "override_id": override_id, "status": "queued"}
 
     # Block: Chat input write
-    def enqueue_chat_message(self, *, text: str, client_message_id: str | None) -> dict[str, Any]:
-        stripped_text = text.strip()
-        if not stripped_text:
-            raise StoreValidationError("text must not be blank")
+    def enqueue_chat_message(
+        self,
+        *,
+        text: str | None,
+        client_message_id: str | None,
+        attachments: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        stripped_text = text.strip() if isinstance(text, str) else ""
         if len(stripped_text) > 4000:
             raise StoreValidationError("text is too long")
-        input_id = _opaque_id("inp")
-        now_ms = _now_ms()
-        payload = {"input_kind": "chat_message", "text": stripped_text}
+        if not stripped_text and not attachments:
+            raise StoreValidationError("text or attachments must be provided")
+        payload: dict[str, Any] = {"input_kind": "chat_message"}
+        if stripped_text:
+            payload["text"] = stripped_text
+        if attachments:
+            payload["attachments"] = attachments
         if client_message_id:
             payload["client_message_id"] = client_message_id
+        return self._enqueue_pending_input(
+            source="web_input",
+            client_message_id=client_message_id,
+            payload=payload,
+            priority=100,
+        )
+
+    # Block: Camera observation write
+    def enqueue_camera_observation(
+        self,
+        *,
+        capture_id: str,
+        image_path: str,
+        image_url: str,
+        captured_at: int,
+    ) -> dict[str, Any]:
+        if not isinstance(capture_id, str) or not capture_id:
+            raise StoreValidationError("capture_id must be non-empty string")
+        if not isinstance(image_path, str) or not image_path:
+            raise StoreValidationError("image_path must be non-empty string")
+        if not isinstance(image_url, str) or not image_url:
+            raise StoreValidationError("image_url must be non-empty string")
+        if isinstance(captured_at, bool) or not isinstance(captured_at, int):
+            raise StoreValidationError("captured_at must be integer")
+        payload = {
+            "input_kind": "camera_observation",
+            "attachments": [
+                {
+                    "attachment_kind": "camera_still_image",
+                    "media_kind": "image",
+                    "capture_id": capture_id,
+                    "mime_type": "image/jpeg",
+                    "storage_path": image_path,
+                    "content_url": image_url,
+                    "captured_at": captured_at,
+                }
+            ],
+        }
+        enqueue_result = self._enqueue_pending_input(
+            source="self_initiated",
+            client_message_id=None,
+            payload=payload,
+            priority=80,
+        )
+        return {
+            **enqueue_result,
+            "capture_id": capture_id,
+            "image_path": image_path,
+            "image_url": image_url,
+            "captured_at": captured_at,
+        }
+
+    # Block: Pending input write
+    def _enqueue_pending_input(
+        self,
+        *,
+        source: str,
+        client_message_id: str | None,
+        payload: dict[str, Any],
+        priority: int,
+    ) -> dict[str, Any]:
+        if not isinstance(source, str) or not source:
+            raise StoreValidationError("source must be non-empty string")
+        if isinstance(priority, bool) or not isinstance(priority, int):
+            raise StoreValidationError("priority must be integer")
+        input_id = _opaque_id("inp")
+        now_ms = _now_ms()
         try:
             with self._connect() as connection:
                 connection.execute(
@@ -963,14 +1038,15 @@ class SqliteStateStore:
                         priority,
                         status
                     )
-                    VALUES (?, 'web_input', 'browser_chat', ?, ?, ?, ?, 'queued')
+                    VALUES (?, ?, 'browser_chat', ?, ?, ?, ?, 'queued')
                     """,
                     (
                         input_id,
+                        source,
                         client_message_id,
                         json.dumps(payload, ensure_ascii=True, separators=(",", ":")),
                         now_ms,
-                        100,
+                        priority,
                     ),
                 )
         except sqlite3.IntegrityError as error:
@@ -3980,9 +4056,18 @@ def _public_primary_focus(primary_focus_json: dict[str, Any]) -> str:
 def _pending_input_receipt_summary(pending_input: PendingInputRecord) -> str:
     input_kind = str(pending_input.payload["input_kind"])
     if input_kind == "chat_message":
-        text = str(pending_input.payload["text"])
-        trimmed_text = text[:60]
-        return f"chat_message:{trimmed_text}"
+        text = pending_input.payload.get("text")
+        if isinstance(text, str) and text:
+            return f"chat_message:{text[:60]}"
+        attachments = pending_input.payload.get("attachments")
+        if isinstance(attachments, list) and attachments:
+            return f"chat_message:camera_images:{len(attachments)}"
+        return "chat_message"
+    if input_kind == "camera_observation":
+        attachments = pending_input.payload.get("attachments")
+        if isinstance(attachments, list) and attachments:
+            return f"camera_observation:camera_images:{len(attachments)}"
+        return "camera_observation"
     if input_kind == "network_result":
         query = str(pending_input.payload["query"])
         summary_text = str(pending_input.payload["summary_text"])

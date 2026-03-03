@@ -128,6 +128,8 @@ def _validated_action_proposals(cognition_result: dict[str, Any]) -> list[dict[s
         action_type = _validated_action_type(proposal)
         if action_type == "browse":
             _browse_query_text(proposal)
+        if action_type == "look":
+            _validated_look_target(proposal)
         validated_proposals.append(proposal)
     return validated_proposals
 
@@ -237,6 +239,21 @@ def _passes_hard_gate(
         task_snapshot=cognition_input["task_snapshot"],
     ):
         return False
+    if action_type == "look":
+        policy_snapshot = _required_object(
+            cognition_input,
+            "policy_snapshot",
+            "cognition_input.policy_snapshot",
+        )
+        runtime_policy = _required_object(
+            policy_snapshot,
+            "runtime_policy",
+            "cognition_input.policy_snapshot.runtime_policy",
+        )
+        if not bool(runtime_policy.get("camera_enabled")):
+            return False
+        if not bool(runtime_policy.get("camera_available")):
+            return False
     return not _has_strong_aversion(
         action_type=action_type,
         learned_aversions=learned_aversions,
@@ -384,6 +401,15 @@ def _style_alignment(
         if speech_tone in {"direct", "firm"}:
             return 0.60
         raise RuntimeError("selection_profile.interaction_style.speech_tone is invalid")
+    if action_type == "look":
+        confirmation_style = interaction_style["confirmation_style"]
+        if confirmation_style == "careful":
+            return 0.85
+        if confirmation_style == "balanced":
+            return 0.75
+        if confirmation_style == "light":
+            return 0.60
+        raise RuntimeError("selection_profile.interaction_style.confirmation_style is invalid")
     if action_type == "wait":
         confirmation_style = interaction_style["confirmation_style"]
         if confirmation_style == "careful":
@@ -450,6 +476,13 @@ def _trait_alignment(
             + 0.35 * assertiveness
             + 0.20 * sociability
         )
+    if action_type == "look":
+        return _normalized_score(
+            0.45 * curiosity
+            + 0.25 * novelty_preference
+            + 0.20 * assertiveness
+            + 0.10 * (1.0 - caution)
+        )
     if action_type == "wait":
         return _normalized_score(
             0.70 * caution
@@ -482,6 +515,8 @@ def _relationship_alignment(
         if has_pending_relation:
             return 0.40
         return _normalized_score(0.45 + strongest_weight * 0.20)
+    if action_type == "look":
+        return _normalized_score(0.55 + strongest_weight * 0.15)
     if action_type == "wait":
         has_pending_relation = any(
             relationship["reason_tag"] == "pending_relation"
@@ -569,6 +604,10 @@ def _memory_support_score(
         if working_memory_items or recent_event_window:
             return 0.70
         return 0.45
+    if action_type == "look":
+        if working_memory_items or recent_event_window:
+            return 0.70
+        return 0.55
     if action_type == "wait":
         if current_observation["input_kind"] == "network_result" and semantic_items:
             return 0.30
@@ -613,6 +652,14 @@ def _emotion_alignment(
                 "selection_profile.emotion_bias.approach_bias",
             )
         )
+    if action_type == "look":
+        return _signed_bias_to_score(
+            _required_signed_score(
+                emotion_bias,
+                "approach_bias",
+                "selection_profile.emotion_bias.approach_bias",
+            )
+        )
     if action_type in {"speak", "notify"}:
         speech_intensity_bias = _required_signed_score(
             emotion_bias,
@@ -638,6 +685,14 @@ def _drive_alignment(
     drive_bias: dict[str, Any],
 ) -> float:
     if action_type == "browse":
+        return _signed_bias_to_score(
+            _required_signed_score(
+                drive_bias,
+                "exploration_bias",
+                "selection_profile.drive_bias.exploration_bias",
+            )
+        )
+    if action_type == "look":
         return _signed_bias_to_score(
             _required_signed_score(
                 drive_bias,
@@ -704,6 +759,7 @@ def _drive_relief_score(
         "speak": "social_bias",
         "notify": "social_bias",
         "browse": "exploration_bias",
+        "look": "exploration_bias",
         "wait": "maintenance_bias",
     }.get(action_type)
     if bias_key is None:
@@ -743,6 +799,10 @@ def _task_fit_score(
         if current_observation["input_kind"] == "network_result":
             return 0.25
         return 0.65
+    if action_type == "look":
+        if current_observation["input_kind"] == "network_result":
+            return 0.30
+        return 0.70
     if action_type == "wait":
         if waiting_external_tasks:
             return 0.75
@@ -771,6 +831,10 @@ def _expected_stability_score(
         if waiting_external_tasks:
             return 0.35
         return 0.55
+    if action_type == "look":
+        if waiting_external_tasks:
+            return 0.50
+        return 0.68
     raise RuntimeError("unsupported action_type for stability scoring")
 
 
@@ -875,6 +939,33 @@ def _build_action_command(
             },
             "proposal_ref": str(proposal["proposal_id"]),
         }
+    if action_type == "look":
+        return {
+            "command_id": opaque_action_id("cmd"),
+            "command_type": "control_camera_look",
+            "actuator_port": "wifi_camera",
+            "target": {
+                "device": "primary_camera",
+            },
+            "parameters": {
+                "message_id": str(proposal["message_id"]),
+                "text": response_text,
+                **_look_command_parameters(proposal),
+            },
+            "preconditions": {
+                "runtime_allows_camera_look": True,
+            },
+            "stop_conditions": {
+                "kind": "camera_move_completed",
+            },
+            "timeout_ms": 10_000,
+            "requires_reobserve": False,
+            "expected_effects": {
+                "emitted_event_types": ["status", "message", "status"],
+                "status_code_after": "idle",
+            },
+            "proposal_ref": str(proposal["proposal_id"]),
+        }
     raise RuntimeError("unsupported action_type for execute command")
 
 
@@ -884,6 +975,31 @@ def _browse_query_text(proposal: dict[str, Any]) -> str:
     if not isinstance(query, str) or not query.strip():
         raise RuntimeError("browse action requires non-empty query")
     return query.strip()
+
+
+# Block: Look target helpers
+def _validated_look_target(proposal: dict[str, Any]) -> dict[str, str]:
+    direction = proposal.get("direction")
+    if isinstance(direction, str) and direction.strip():
+        normalized_direction = direction.strip()
+        if normalized_direction not in {"left", "right", "up", "down"}:
+            raise RuntimeError("look action direction must be left/right/up/down")
+        if proposal.get("preset_id") is not None or proposal.get("preset_name") is not None:
+            raise RuntimeError("look action must not mix direction and preset")
+        return {"direction": normalized_direction}
+    preset_id = proposal.get("preset_id")
+    if isinstance(preset_id, str) and preset_id.strip():
+        if proposal.get("preset_name") is not None:
+            raise RuntimeError("look action must specify only one preset field")
+        return {"preset_id": preset_id.strip()}
+    preset_name = proposal.get("preset_name")
+    if isinstance(preset_name, str) and preset_name.strip():
+        return {"preset_name": preset_name.strip()}
+    raise RuntimeError("look action requires direction or preset")
+
+
+def _look_command_parameters(proposal: dict[str, Any]) -> dict[str, Any]:
+    return _validated_look_target(proposal)
 
 
 # Block: Candidate payload
@@ -924,7 +1040,7 @@ def _validated_action_type(proposal: dict[str, Any]) -> str:
     action_type = proposal.get("action_type")
     if not isinstance(action_type, str) or not action_type:
         raise RuntimeError("cognition_result.action_proposals.action_type must be a non-empty string")
-    if action_type not in {"speak", "browse", "notify", "wait"}:
+    if action_type not in {"speak", "browse", "notify", "look", "wait"}:
         raise RuntimeError("unsupported action_type in chat validator")
     return action_type
 
@@ -976,6 +1092,7 @@ def _proposal_action_style(action_type: str) -> str:
         "speak": "conversational_response",
         "notify": "push_notice",
         "browse": "external_lookup",
+        "look": "viewpoint_adjustment",
         "wait": "defer_action",
     }[action_type]
 

@@ -8,6 +8,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable
 
+from otomekairo.gateway.camera_controller import CameraController
 from otomekairo import __version__
 from otomekairo.gateway.cognition_client import CognitionClient
 from otomekairo.gateway.notification_client import NotificationClient
@@ -54,6 +55,7 @@ class RuntimeLoop:
         cognition_client: CognitionClient,
         search_client: SearchClient,
         notification_client: NotificationClient,
+        camera_controller: CameraController,
         lease_heartbeat_ms: int = DEFAULT_LEASE_HEARTBEAT_MS,
         lease_ttl_ms: int = DEFAULT_LEASE_TTL_MS,
     ) -> None:
@@ -70,6 +72,7 @@ class RuntimeLoop:
         self._cognition_client = cognition_client
         self._search_client = search_client
         self._notification_client = notification_client
+        self._camera_controller = camera_controller
         self._lease_heartbeat_ms = lease_heartbeat_ms
         self._lease_ttl_ms = lease_ttl_ms
         self._boot_reconciled = False
@@ -301,7 +304,7 @@ class RuntimeLoop:
         str | None,
     ]:
         input_kind = pending_input.payload["input_kind"]
-        if input_kind in {"chat_message", "network_result"}:
+        if input_kind in {"chat_message", "camera_observation", "network_result"}:
             state_snapshot = self._store.read_cognition_state(
                 self._default_settings,
                 observation_hint_text=_pending_input_observation_hint(pending_input),
@@ -311,6 +314,7 @@ class RuntimeLoop:
                 cycle_id=cycle_id,
                 resolved_at=resolved_at,
                 state_snapshot=state_snapshot,
+                camera_available=self._camera_controller.is_available(),
             )
             cognition_execution = run_cognition_for_browser_chat_input(
                 pending_input=pending_input,
@@ -320,6 +324,7 @@ class RuntimeLoop:
                 effective_settings=state_snapshot.effective_settings,
                 cognition_client=self._cognition_client,
                 notification_client=self._notification_client,
+                camera_controller=self._camera_controller,
                 emit_ui_event=lambda ui_event: self._append_ui_event(cycle_id=cycle_id, ui_event=ui_event),
                 consume_cancel=lambda message_id: self._consume_matching_cancel(
                     channel=pending_input.channel,
@@ -697,6 +702,7 @@ def build_runtime_loop(*, db_path: Path | None = None) -> RuntimeLoop:
         cognition_client=_build_default_cognition_client(),
         search_client=_build_default_search_client(),
         notification_client=_build_default_notification_client(),
+        camera_controller=_build_default_camera_controller(),
         lease_heartbeat_ms=_lease_heartbeat_ms(),
         lease_ttl_ms=_lease_ttl_ms(),
     )
@@ -730,6 +736,8 @@ def _pending_input_trigger_reason(pending_input: PendingInputRecord) -> str:
     input_kind = str(pending_input.payload["input_kind"])
     if input_kind == "network_result":
         return "external_result"
+    if pending_input.source == "self_initiated":
+        return "self_initiated"
     return "external_input"
 
 
@@ -738,9 +746,26 @@ def _pending_input_observation_hint(pending_input: PendingInputRecord) -> str:
     input_kind = str(pending_input.payload["input_kind"])
     if input_kind == "chat_message":
         text = pending_input.payload.get("text")
-        if not isinstance(text, str) or not text.strip():
-            raise RuntimeError("chat_message.text must be non-empty string")
-        return text.strip()
+        attachments = pending_input.payload.get("attachments")
+        normalized_text = text.strip() if isinstance(text, str) else ""
+        if attachments is not None and not isinstance(attachments, list):
+            raise RuntimeError("chat_message.attachments must be a list")
+        attachment_count = len(attachments) if isinstance(attachments, list) else 0
+        if normalized_text and attachment_count > 0:
+            return f"{normalized_text} カメラ画像 {attachment_count} 枚"
+        if normalized_text:
+            return normalized_text
+        if attachment_count > 0:
+            return f"カメラ画像 {attachment_count} 枚"
+        raise RuntimeError("chat_message requires text or attachments")
+    if input_kind == "camera_observation":
+        attachments = pending_input.payload.get("attachments")
+        if not isinstance(attachments, list):
+            raise RuntimeError("camera_observation.attachments must be a list")
+        attachment_count = len(attachments)
+        if attachment_count <= 0:
+            raise RuntimeError("camera_observation.attachments must not be empty")
+        return f"カメラ画像 {attachment_count} 枚を自発観測"
     if input_kind == "network_result":
         summary_text = pending_input.payload.get("summary_text")
         query = pending_input.payload.get("query")
@@ -849,6 +874,11 @@ def _build_default_notification_client() -> NotificationClient:
     return LineNotificationClient()
 
 
+# Block: Camera controller factory
+def _build_default_camera_controller() -> CameraController:
+    from otomekairo.infra.wifi_camera_controller import WiFiCameraController
+
+    return WiFiCameraController()
 def _opaque_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex}"
 

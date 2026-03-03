@@ -14,8 +14,11 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from otomekairo import __version__
+from otomekairo.infra.wifi_camera_common import default_camera_capture_dir
+from otomekairo.infra.wifi_camera_sensor import WiFiCameraSensor
 from otomekairo.infra.sqlite_state_store import StoreConflictError, StoreValidationError, SqliteStateStore
 from otomekairo.schema.settings import SettingsValidationError, build_default_settings
+from otomekairo.web.camera_api import build_camera_router
 from otomekairo.web.dependencies import ApiError, AppServices
 from otomekairo.web.chat_input_api import build_chat_input_router
 from otomekairo.web.chat_stream_api import build_chat_stream_router
@@ -53,8 +56,14 @@ class RequestContextMiddleware:
 def create_app() -> FastAPI:
     store = SqliteStateStore(_default_db_path(), __version__)
     store.initialize()
-    services = AppServices(store=store, default_settings=build_default_settings())
+    camera_sensor = WiFiCameraSensor()
+    services = AppServices(
+        store=store,
+        default_settings=build_default_settings(),
+        camera_sensor=camera_sensor,
+    )
     static_dir = _static_dir()
+    capture_dir = _camera_capture_dir()
 
     app = FastAPI(title="OtomeKairo Settings Server", version=__version__)
     app.state.services = services
@@ -62,6 +71,7 @@ def create_app() -> FastAPI:
 
     # Block: Browser UI static files
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
+    app.mount("/captures", StaticFiles(directory=capture_dir), name="captures")
 
     # Block: API error handler
     @app.exception_handler(ApiError)
@@ -152,6 +162,7 @@ def create_app() -> FastAPI:
     app.include_router(build_settings_router(services))
     app.include_router(build_chat_input_router(services))
     app.include_router(build_chat_stream_router(services))
+    app.include_router(build_camera_router(services))
 
     # Block: Browser UI entrypoint
     @app.get("/", include_in_schema=False)
@@ -174,6 +185,11 @@ def _default_db_path() -> Path:
 # Block: Static asset path
 def _static_dir() -> Path:
     return Path(__file__).resolve().parent / "static"
+
+
+# Block: Camera capture path
+def _camera_capture_dir() -> Path:
+    return default_camera_capture_dir()
 
 
 # Block: Stream janitor

@@ -835,7 +835,7 @@
 ### `pending_inputs.payload_json`
 
 - `pending_inputs.payload_json` は、少なくとも `input_kind` を持つ
-- Web API が受け付ける初期段階の `browser_chat` 入力は、`chat_message` と `cancel` の 2 種だけである
+- Web API が受け付ける初期段階の `browser_chat` 入力は、`chat_message`、`camera_observation`、`cancel` の 3 種である
 - ランタイム内部では、外部検索結果を戻すために `network_result` を enqueue してよい
 
 <!-- Block: Pending Chat Message -->
@@ -845,16 +845,56 @@
 {
   "input_kind": "chat_message",
   "text": "おはよう",
-  "client_message_id": "cli_msg_001"
+  "client_message_id": "cli_msg_001",
+  "attachments": [
+    {
+      "attachment_kind": "camera_still_image",
+      "media_kind": "image",
+      "capture_id": "cap_0123456789abcdef0123456789abcdef",
+      "mime_type": "image/jpeg",
+      "storage_path": "data/camera/cap_0123456789abcdef0123456789abcdef.jpg",
+      "content_url": "/captures/cap_0123456789abcdef0123456789abcdef.jpg",
+      "captured_at": 1760000000000
+    }
+  ]
 }
 ```
 
-- 必須項目は `input_kind`、`text` である
+- 必須項目は `input_kind` である
 - `input_kind` は `chat_message` に固定する
-- `text` は、空文字列や空白のみを許可しない
-- `text` は、`4000` 文字を超えてはならない
+- `text` は任意だが、ある場合は空文字列や空白のみを許可しない
+- `text` は、ある場合に `4000` 文字を超えてはならない
 - `client_message_id` は任意で、同一クライアントからの再送判定に使う
 - `client_message_id` がある場合、Web サーバは `pending_inputs.client_message_id` にも同じ値を書き込む
+- `attachments` は任意だが、ある場合は 1 件以上の配列にする
+- `text` と `attachments` は、少なくともどちらか一方が必要である
+- 各添付は `camera_still_image` に固定し、`media_kind`、`capture_id`、`mime_type`、`storage_path`、`content_url`、`captured_at` を必須とする
+
+<!-- Block: Pending Camera Observation -->
+#### `camera_observation`
+
+```json
+{
+  "input_kind": "camera_observation",
+  "attachments": [
+    {
+      "attachment_kind": "camera_still_image",
+      "media_kind": "image",
+      "capture_id": "cap_0123456789abcdef0123456789abcdef",
+      "mime_type": "image/jpeg",
+      "storage_path": "data/camera/cap_0123456789abcdef0123456789abcdef.jpg",
+      "content_url": "/captures/cap_0123456789abcdef0123456789abcdef.jpg",
+      "captured_at": 1760000000000
+    }
+  ]
+}
+```
+
+- 必須項目は `input_kind` と `attachments` である
+- `input_kind` は `camera_observation` に固定する
+- `attachments` は、1 件以上の `camera_still_image` 配列に固定する
+- 各添付は `media_kind`、`capture_id`、`mime_type`、`storage_path`、`content_url`、`captured_at` を必須とする
+- 初期実装では、`POST /api/camera/observe` が `source=self_initiated` でこの形式を enqueue する
 
 <!-- Block: Pending Cancel -->
 #### `cancel`
@@ -1325,14 +1365,22 @@
 ```json
 {
   "text": "おはよう",
-  "client_message_id": "cli_msg_001"
+  "client_message_id": "cli_msg_001",
+  "attachments": [
+    {
+      "attachment_kind": "camera_still_image",
+      "capture_id": "cap_0123456789abcdef0123456789abcdef"
+    }
+  ]
 }
 ```
 
-- 必須項目は `text` である
-- `text` は、空文字列や空白のみを許可しない
+- `text` は任意だが、ある場合は空文字列や空白のみを許可しない
 - `client_message_id` は任意で、クライアント側の再送判定に使う
 - `client_message_id` がある場合、同じ `channel` での再利用は許可しない
+- `attachments` は任意で、ある場合は `camera_still_image` の配列にする
+- 各添付は `attachment_kind` と `capture_id` を必須とする
+- `text` と `attachments` は、少なくともどちらか一方が必要である
 
 <!-- Block: Chat Input Response -->
 ### `POST /api/chat/input` の成功応答 JSON
@@ -1376,6 +1424,47 @@
 - 必須項目は `accepted`、`status` である
 - `accepted` は `true` に固定する
 - `status` は `queued` に固定する
+
+<!-- Block: Camera Capture Response -->
+### `POST /api/camera/capture` の成功応答 JSON
+
+```json
+{
+  "capture_id": "cap_...",
+  "image_path": "data/camera/cap_....jpg",
+  "image_url": "/captures/cap_....jpg",
+  "captured_at": 1760000000000
+}
+```
+
+- 必須項目は `capture_id`、`image_path`、`image_url`、`captured_at` である
+- `capture_id` は、不透明な capture 識別子である
+- `image_path` は、サーバ作業ディレクトリ基準の保存先相対パスである
+- `image_url` は、同一オリジンで静止画を再取得する URL path である
+- `captured_at` は、静止画保存完了時点の UTC unix milliseconds である
+
+<!-- Block: Camera Observe Response -->
+### `POST /api/camera/observe` の成功応答 JSON
+
+```json
+{
+  "accepted": true,
+  "input_id": "inp_...",
+  "status": "queued",
+  "channel": "browser_chat",
+  "capture_id": "cap_...",
+  "image_path": "data/camera/cap_....jpg",
+  "image_url": "/captures/cap_....jpg",
+  "captured_at": 1760000000000
+}
+```
+
+- 必須項目は `accepted`、`input_id`、`status`、`channel`、`capture_id`、`image_path`、`image_url`、`captured_at` である
+- `accepted` は `true` に固定する
+- `status` は `queued` に固定する
+- `channel` は `browser_chat` に固定する
+- `input_id` は、生成した自発観測入力の ID である
+- `capture_id`、`image_path`、`image_url`、`captured_at` は、同時に取得した静止画の情報である
 
 <!-- Block: Status Response -->
 ### `GET /api/status` の成功応答 JSON

@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import base64
 import json
+from pathlib import Path
 from typing import Any
 
 from otomekairo.gateway.cognition_client import CognitionRequest, CognitionResponse
 
 
 # Block: Supported chat action types
-SUPPORTED_CHAT_ACTION_TYPES = {"speak", "browse", "notify", "wait"}
+SUPPORTED_CHAT_ACTION_TYPES = {"speak", "browse", "notify", "look", "wait"}
 
 
 # Block: LiteLLM cognition client
@@ -47,12 +49,13 @@ def _import_litellm_module() -> Any:
 
 
 # Block: Prompt construction
-def _build_messages(request: CognitionRequest) -> list[dict[str, str]]:
+def _build_messages(request: CognitionRequest) -> list[dict[str, Any]]:
     cognition_input = request.cognition_input
     persona_snapshot = cognition_input["persona_snapshot"]
     selection_profile = cognition_input["selection_profile"]
     current_observation = cognition_input["current_observation"]
     world_snapshot = cognition_input["world_snapshot"]
+    runtime_policy = cognition_input["policy_snapshot"]["runtime_policy"]
     system_prompt = "\n".join(
         [
             "あなたは OtomeKairo の人格中枢として振る舞う。",
@@ -63,9 +66,10 @@ def _build_messages(request: CognitionRequest) -> list[dict[str, str]]:
             "speech_draft は object で、text, language, delivery_mode を必ず持つ。",
             "action_proposals と step_hints は必ず配列にする。候補が無ければ [] を返す。",
             "action_proposals の各要素は object にし、action_type と priority を必ず入れる。",
-            "action_type は speak, browse, notify, wait のいずれかだけを使う。",
+            "action_type は speak, browse, notify, look, wait のいずれかだけを使う。",
             "speak と notify を返す場合は target_channel に browser_chat を必ず入れる。",
             "browse を返す場合は query に非空の検索文字列を必ず入れる。",
+            "look を返す場合は direction(left/right/up/down) か preset_id か preset_name を必ず入れる。",
             "memory_focus は object で、focus_kind と summary を必ず持つ。",
             "memory_focus.focus_kind は observation, summary, fact, relation, preference, none のいずれかにする。",
             "reflection_seed は object で、message_id を必ず持つ。",
@@ -73,6 +77,9 @@ def _build_messages(request: CognitionRequest) -> list[dict[str, str]]:
             f"現在の感情ラベル: {persona_snapshot['current_emotion']['primary_label']}",
             f"話し方: {selection_profile['interaction_style']['speech_tone']}",
             f"現在の状況: {world_snapshot['situation_summary']}",
+            _camera_runtime_prompt_line(runtime_policy),
+            "添付画像がある場合は、画像とテキストの両方を使って判断する。",
+            "カメラ状態の enabled または available が false のときは、look を提案せず speak で状態を伝える。",
             f"不変条件: {_format_invariants(persona_snapshot['invariants'])}",
         ]
     )
@@ -81,6 +88,7 @@ def _build_messages(request: CognitionRequest) -> list[dict[str, str]]:
             f"入力種別: {request.input_kind}",
             f"受け取った内容: {current_observation['observation_text']}",
             f"受信時刻: {current_observation['captured_at_local_text']} ({current_observation['relative_time_text']})",
+            _attachment_prompt_line(current_observation),
             _network_result_prompt_line(current_observation),
             f"関係性の優先対象: {_format_relationship_priorities(selection_profile['relationship_priorities'])}",
             f"長期目標: {_format_goals(persona_snapshot['long_term_goals'])}",
@@ -93,7 +101,7 @@ def _build_messages(request: CognitionRequest) -> list[dict[str, str]]:
     )
     return [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_prompt},
+        {"role": "user", "content": _build_user_message_content(user_prompt=user_prompt, current_observation=current_observation)},
     ]
 
 
@@ -204,6 +212,8 @@ def _validate_action_proposals(action_proposals: list[Any]) -> None:
             query = proposal.get("query")
             if not isinstance(query, str) or not query.strip():
                 raise RuntimeError("LiteLLM cognition_result.action_proposals.browse requires non-empty query")
+        if action_type == "look":
+            _validate_look_action(proposal)
         elif "target_channel" in proposal:
             target_channel = proposal["target_channel"]
             if not isinstance(target_channel, str) or not target_channel:
@@ -234,6 +244,15 @@ def _format_goals(long_term_goals: dict[str, Any]) -> str:
     return ",".join(str(goal.get("title", "goal")) for goal in goals[:3] if isinstance(goal, dict))
 
 
+# Block: Camera runtime formatting
+def _camera_runtime_prompt_line(runtime_policy: dict[str, Any]) -> str:
+    return (
+        "カメラ状態: "
+        f"enabled={bool(runtime_policy.get('camera_enabled'))} "
+        f"available={bool(runtime_policy.get('camera_available'))}"
+    )
+
+
 # Block: Network result formatting
 def _network_result_prompt_line(current_observation: dict[str, Any]) -> str:
     if current_observation["input_kind"] != "network_result":
@@ -243,3 +262,84 @@ def _network_result_prompt_line(current_observation: dict[str, Any]) -> str:
         f"query={current_observation['query']} "
         f"source_task_id={current_observation['source_task_id']}"
     )
+
+
+# Block: Attachment formatting
+def _attachment_prompt_line(current_observation: dict[str, Any]) -> str:
+    attachments = current_observation.get("attachments")
+    if attachments is None:
+        return "添付画像: なし"
+    if not isinstance(attachments, list):
+        raise RuntimeError("current_observation.attachments must be a list")
+    if not attachments:
+        return "添付画像: なし"
+    return f"添付画像: {len(attachments)} 枚"
+
+
+def _build_user_message_content(
+    *,
+    user_prompt: str,
+    current_observation: dict[str, Any],
+) -> str | list[dict[str, Any]]:
+    attachments = current_observation.get("attachments")
+    if attachments is None:
+        return user_prompt
+    if not isinstance(attachments, list):
+        raise RuntimeError("current_observation.attachments must be a list")
+    if not attachments:
+        return user_prompt
+    content: list[dict[str, Any]] = [{"type": "text", "text": user_prompt}]
+    for attachment in attachments:
+        content.append(
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": _attachment_data_url(attachment),
+                },
+            }
+        )
+    return content
+
+
+def _attachment_data_url(attachment: Any) -> str:
+    if not isinstance(attachment, dict):
+        raise RuntimeError("current_observation.attachments must contain only objects")
+    storage_path = attachment.get("storage_path")
+    mime_type = attachment.get("mime_type")
+    if not isinstance(storage_path, str) or not storage_path:
+        raise RuntimeError("attachment.storage_path must be a non-empty string")
+    if not isinstance(mime_type, str) or not mime_type:
+        raise RuntimeError("attachment.mime_type must be a non-empty string")
+    file_path = _repo_path(storage_path)
+    if not file_path.is_file():
+        raise RuntimeError("attachment file is missing")
+    encoded_bytes = base64.b64encode(file_path.read_bytes())
+    encoded_text = encoded_bytes.decode("ascii")
+    return f"data:{mime_type};base64,{encoded_text}"
+
+
+def _repo_path(path_text: str) -> Path:
+    raw_path = Path(path_text)
+    if raw_path.is_absolute():
+        raise RuntimeError("attachment.storage_path must be relative path")
+    return Path(__file__).resolve().parents[3] / raw_path
+
+
+# Block: Look action validation
+def _validate_look_action(proposal: dict[str, Any]) -> None:
+    direction = proposal.get("direction")
+    preset_id = proposal.get("preset_id")
+    preset_name = proposal.get("preset_name")
+    if isinstance(direction, str) and direction.strip():
+        if direction.strip() not in {"left", "right", "up", "down"}:
+            raise RuntimeError("LiteLLM cognition_result.action_proposals.look.direction is invalid")
+        if preset_id is not None or preset_name is not None:
+            raise RuntimeError("LiteLLM cognition_result.action_proposals.look must not mix direction and preset")
+        return
+    if isinstance(preset_id, str) and preset_id.strip():
+        if preset_name is not None:
+            raise RuntimeError("LiteLLM cognition_result.action_proposals.look must specify only one preset field")
+        return
+    if isinstance(preset_name, str) and preset_name.strip():
+        return
+    raise RuntimeError("LiteLLM cognition_result.action_proposals.look requires direction or preset")
