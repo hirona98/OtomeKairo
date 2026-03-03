@@ -9,7 +9,7 @@ import uvicorn
 
 # Block: Uvicorn launcher
 def main() -> None:
-    host = os.environ.get("OTOMEKAIRO_HOST", "127.0.0.1")
+    host = os.environ.get("OTOMEKAIRO_HOST", "0.0.0.0")
     port = int(os.environ.get("OTOMEKAIRO_PORT", "8000"))
     uvicorn.run(
         "otomekairo.web.app:create_app",
@@ -17,3 +17,8 @@ def main() -> None:
         host=host,
         port=port,
     )
+
+
+# Block: Module entrypoint
+if __name__ == "__main__":
+    main()

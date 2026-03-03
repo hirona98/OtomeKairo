@@ -30,7 +30,7 @@
 
 - `pyproject.toml`: Python パッケージ定義、`LiteLLM` と `sqlite-vec` 依存、`otomekairo` / `otomekairo-web` / `otomekairo-runtime` の起動入口を持つ
 - `run_otomekairo.sh`: Web サーバと人格ランタイムを引数なしで同時起動する最短の実行スクリプト
-- `src/otomekairo/boot/run_web.py`: `uvicorn` で Web サーバを起動する
+- `src/otomekairo/boot/run_web.py`: `uvicorn` で Web サーバを起動し、既定では `0.0.0.0:8000` に bind する
 - `src/otomekairo/boot/run_runtime.py`: 人格ランタイムの常時ループを起動する
 - `src/otomekairo/boot/run_all.py`: Web サーバと人格ランタイムを同じ親プロセスで起動し、終了シグナル時に両方を停止する
 - `src/otomekairo/web/app.py`: FastAPI アプリを構成し、API ルータ、最小ブラウザ UI (`GET /`)、例外処理を束ねる
@@ -63,5 +63,6 @@
 - `LINE` を使わないときは、設定パネルで `integrations.line.enabled=false` のまま使う
 - `otomekairo` の console script を使う場合も、`./run_otomekairo.sh` と同じく Web とランタイムを同時に起動する
 - 手動で分けて起動したいときは、`otomekairo-web` と `otomekairo-runtime` を別ターミナルで順に起動してよい
+- 既定の bind 先は `0.0.0.0:8000` だが、ブラウザからは `http://127.0.0.1:8000/` を開いてよい
 - `Mic` はブラウザ標準の `SpeechRecognition` がある環境だけで使える
 - `browse` は、UI 上では `検索タスク` と `検索結果` の通知を経てから最終応答へ進む

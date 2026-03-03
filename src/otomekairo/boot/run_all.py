@@ -19,6 +19,7 @@ RUNTIME_PROCESS = "runtime"
 def main() -> None:
     repo_root = _repo_root()
     child_env = _child_environment(repo_root)
+    web_url = _web_url(child_env)
     processes = {
         WEB_PROCESS: _start_child_process(
             repo_root=repo_root,
@@ -33,7 +34,7 @@ def main() -> None:
     }
     _install_signal_handlers(processes)
     print("OtomeKairo started")
-    print("  Web:     http://127.0.0.1:8000/")
+    print(f"  Web:     {web_url}")
     print("  Runtime: running")
     try:
         _wait_for_exit(processes)
@@ -68,6 +69,12 @@ def _child_environment(repo_root: Path) -> dict[str, str]:
         pythonpath_entries.append(existing_pythonpath)
     child_env["PYTHONPATH"] = os.pathsep.join(pythonpath_entries)
     return child_env
+
+
+# Block: Browser URL
+def _web_url(child_env: dict[str, str]) -> str:
+    port = child_env.get("OTOMEKAIRO_PORT", "8000")
+    return f"http://127.0.0.1:{port}/"
 
 
 # Block: Signal registration
