@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import base64
 import json
+from pathlib import Path
 from typing import Any
 
 from otomekairo.gateway.cognition_client import CognitionRequest, CognitionResponse
@@ -37,7 +39,7 @@ def _import_litellm_module() -> Any:
 
 
 # Block: Prompt construction
-def _build_messages(request: CognitionRequest) -> list[dict[str, str]]:
+def _build_messages(request: CognitionRequest) -> list[dict[str, Any]]:
     cognition_input = request.cognition_input
     persona_snapshot = cognition_input["persona_snapshot"]
     selection_profile = cognition_input["selection_profile"]
@@ -63,6 +65,7 @@ def _build_messages(request: CognitionRequest) -> list[dict[str, str]]:
             f"話し方: {selection_profile['interaction_style']['speech_tone']}",
             f"現在の状況: {world_snapshot['situation_summary']}",
             _camera_runtime_prompt_line(runtime_policy),
+            "添付画像がある場合は、画像とテキストの両方を使って判断する。",
             "カメラ状態の enabled または available が false のときは、look を提案せず speak で状態を伝える。",
             f"不変条件: {_format_invariants(persona_snapshot['invariants'])}",
         ]
@@ -72,6 +75,7 @@ def _build_messages(request: CognitionRequest) -> list[dict[str, str]]:
             f"入力種別: {request.input_kind}",
             f"受け取った内容: {current_observation['observation_text']}",
             f"受信時刻: {current_observation['captured_at_local_text']} ({current_observation['relative_time_text']})",
+            _attachment_prompt_line(current_observation),
             _network_result_prompt_line(current_observation),
             f"関係性の優先対象: {_format_relationship_priorities(selection_profile['relationship_priorities'])}",
             f"長期目標: {_format_goals(persona_snapshot['long_term_goals'])}",
@@ -83,7 +87,7 @@ def _build_messages(request: CognitionRequest) -> list[dict[str, str]]:
     )
     return [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_prompt},
+        {"role": "user", "content": _build_user_message_content(user_prompt=user_prompt, current_observation=current_observation)},
     ]
 
 
@@ -244,6 +248,67 @@ def _network_result_prompt_line(current_observation: dict[str, Any]) -> str:
         f"query={current_observation['query']} "
         f"source_task_id={current_observation['source_task_id']}"
     )
+
+
+# Block: Attachment formatting
+def _attachment_prompt_line(current_observation: dict[str, Any]) -> str:
+    attachments = current_observation.get("attachments")
+    if attachments is None:
+        return "添付画像: なし"
+    if not isinstance(attachments, list):
+        raise RuntimeError("current_observation.attachments must be a list")
+    if not attachments:
+        return "添付画像: なし"
+    return f"添付画像: {len(attachments)} 枚"
+
+
+def _build_user_message_content(
+    *,
+    user_prompt: str,
+    current_observation: dict[str, Any],
+) -> str | list[dict[str, Any]]:
+    attachments = current_observation.get("attachments")
+    if attachments is None:
+        return user_prompt
+    if not isinstance(attachments, list):
+        raise RuntimeError("current_observation.attachments must be a list")
+    if not attachments:
+        return user_prompt
+    content: list[dict[str, Any]] = [{"type": "text", "text": user_prompt}]
+    for attachment in attachments:
+        content.append(
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": _attachment_data_url(attachment),
+                },
+            }
+        )
+    return content
+
+
+def _attachment_data_url(attachment: Any) -> str:
+    if not isinstance(attachment, dict):
+        raise RuntimeError("current_observation.attachments must contain only objects")
+    storage_path = attachment.get("storage_path")
+    mime_type = attachment.get("mime_type")
+    if not isinstance(storage_path, str) or not storage_path:
+        raise RuntimeError("attachment.storage_path must be a non-empty string")
+    if not isinstance(mime_type, str) or not mime_type:
+        raise RuntimeError("attachment.mime_type must be a non-empty string")
+    file_path = _repo_path(storage_path)
+    if not file_path.is_file():
+        raise RuntimeError("attachment file is missing")
+    encoded_bytes = base64.b64encode(file_path.read_bytes())
+    encoded_text = encoded_bytes.decode("ascii")
+    return f"data:{mime_type};base64,{encoded_text}"
+
+
+def _repo_path(path_text: str) -> Path:
+    raw_path = Path(path_text)
+    if raw_path.is_absolute():
+        raise RuntimeError("attachment.storage_path must be relative path")
+    return Path(__file__).resolve().parents[3] / raw_path
 
 
 # Block: Look action validation

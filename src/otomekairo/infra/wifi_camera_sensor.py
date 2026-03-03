@@ -10,6 +10,9 @@ from typing import Any
 
 from otomekairo.gateway.camera_sensor import CameraCaptureResponse, CameraSensor
 from otomekairo.infra.wifi_camera_common import (
+    camera_capture_file_path,
+    camera_capture_public_url,
+    camera_capture_relative_path,
     create_tapo_stream_client,
     default_camera_capture_dir,
     read_camera_connection_settings,
@@ -103,13 +106,14 @@ async def _capture_still_image(
         if not image_bytes:
             raise RuntimeError("カメラから静止画を取得できませんでした")
         capture_id = f"cap_{uuid.uuid4().hex}"
-        file_name = f"{capture_id}.jpg"
-        file_path = capture_dir / file_name
+        file_path = camera_capture_file_path(capture_id)
+        if file_path.parent != capture_dir:
+            raise RuntimeError("camera capture directory is inconsistent")
         file_path.write_bytes(image_bytes)
         return CameraCaptureResponse(
             capture_id=capture_id,
-            image_path=str(Path("data") / "camera" / file_name),
-            image_url=f"/captures/{file_name}",
+            image_path=str(camera_capture_relative_path(capture_id)),
+            image_url=camera_capture_public_url(capture_id),
             captured_at=_now_ms(),
         )
     except TimeoutError as error:

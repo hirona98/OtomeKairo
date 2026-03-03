@@ -111,7 +111,7 @@ flowchart LR
 - ログイン画面は持たず、起動直後にそのままチャット UI を表示する
 - 初期実装の見た目は `tmp/CocoroGhost/static/` に近いヘッダ、チャット欄、設定欄、ステータスバー構成にしてよい
 - `Mic` はブラウザの標準 `SpeechRecognition` を使って音声入力し、認識結果を `POST /api/chat/input` へ流す
-- `Cam` は `POST /api/camera/capture` で静止画を取得し、返った `image_url` をサムネイル表示してよい
+- `Cam` は `POST /api/camera/capture` で静止画を取得し、返った画像をサムネイル表示し、次の `POST /api/chat/input` へ添付してよい
 - `設定保存` は、初期実装では主要な一部設定だけを `POST /api/settings/overrides` へ流す
 - `browse` の初期実装では、UI は少なくとも `browse_queued` と `browse_completed` の `notice` を見分けられるようにしてよい
 - UI 側で永続ストレージを前提にしない
@@ -270,13 +270,21 @@ flowchart LR
 ```json
 {
   "text": "おはよう",
-  "client_message_id": "cli_msg_001"
+  "client_message_id": "cli_msg_001",
+  "attachments": [
+    {
+      "attachment_kind": "camera_still_image",
+      "capture_id": "cap_0123456789abcdef0123456789abcdef"
+    }
+  ]
 }
 ```
 
-- 必須項目は `text` とする
+- `text` と `attachments` はどちらも任意だが、少なくともどちらか 1 つは必要とする
 - `client_message_id` は任意だが、送る場合はクライアント側の再送判定に使える安定値とする
-- 空文字列、空白のみ、`4000` 文字超の入力は `400` とする
+- `text` を送る場合、空文字列、空白のみ、`4000` 文字超は `400` とする
+- `attachments` は任意で、送る場合は `camera_still_image` の配列とする
+- 各添付は `capture_id` を必須とし、`POST /api/camera/capture` で作った画像だけを受け付ける
 
 <!-- Block: Chat Input Write -->
 ### DB への写像

@@ -32,6 +32,7 @@
   let stream = null;
   let micRecognition = null;
   const draftMessages = new Map();
+  const pendingCameraAttachments = [];
   let statusTimerId = 0;
   let latestSettings = null;
 
@@ -155,7 +156,7 @@
   async function handleChatSubmit(event) {
     event.preventDefault();
     const text = chatInput.value.trim();
-    if (!text) {
+    if (!text && pendingCameraAttachments.length === 0) {
       return;
     }
     try {
@@ -522,27 +523,21 @@
 
   // Block: Camera attachment append
   function appendCameraAttachment(payload) {
-    const imageUrl = payload && typeof payload.image_url === "string" ? payload.image_url.trim() : "";
-    if (!imageUrl) {
-      throw new Error("カメラ応答が不正です");
-    }
-    const captureId = payload && typeof payload.capture_id === "string" ? payload.capture_id.trim() : "";
+    const attachment = buildPendingCameraAttachment(payload);
     const item = document.createElement("div");
     item.className = "attachment";
-    if (captureId) {
-      item.dataset.captureId = captureId;
-    }
+    item.dataset.captureId = attachment.captureId;
 
     const thumbWrap = document.createElement("a");
     thumbWrap.className = "attachment-thumb-wrap";
-    thumbWrap.href = imageUrl;
+    thumbWrap.href = attachment.imageUrl;
     thumbWrap.target = "_blank";
     thumbWrap.rel = "noreferrer";
 
     const image = document.createElement("img");
     image.className = "attachment-thumb";
-    image.src = imageUrl;
-    image.alt = captureId || "camera_capture";
+    image.src = attachment.imageUrl;
+    image.alt = attachment.captureId;
     thumbWrap.appendChild(image);
 
     const removeButton = document.createElement("button");
@@ -551,11 +546,45 @@
     removeButton.setAttribute("aria-label", "画像を閉じる");
     removeButton.textContent = "×";
     removeButton.addEventListener("click", () => {
+      removePendingCameraAttachment(attachment.captureId);
       item.remove();
+      updateSendEnabledState();
     });
 
     item.append(thumbWrap, removeButton);
     attachments.appendChild(item);
+    pendingCameraAttachments.push(attachment);
+    updateSendEnabledState();
+  }
+
+  // Block: Camera attachment build
+  function buildPendingCameraAttachment(payload) {
+    const captureId = payload && typeof payload.capture_id === "string" ? payload.capture_id.trim() : "";
+    const imageUrl = payload && typeof payload.image_url === "string" ? payload.image_url.trim() : "";
+    if (!captureId || !imageUrl) {
+      throw new Error("カメラ応答が不正です");
+    }
+    return {
+      attachmentKind: "camera_still_image",
+      captureId,
+      imageUrl,
+    };
+  }
+
+  // Block: Camera attachment remove
+  function removePendingCameraAttachment(captureId) {
+    const targetCaptureId = String(captureId || "");
+    const attachmentIndex = pendingCameraAttachments.findIndex((attachment) => attachment.captureId === targetCaptureId);
+    if (attachmentIndex === -1) {
+      return;
+    }
+    pendingCameraAttachments.splice(attachmentIndex, 1);
+  }
+
+  // Block: Camera attachment clear
+  function clearPendingCameraAttachments() {
+    pendingCameraAttachments.length = 0;
+    attachments.replaceChildren();
   }
 
   // Block: Runtime chip update
@@ -598,31 +627,61 @@
   // Block: Chat send helper
   async function submitChatText(text) {
     const messageText = String(text).trim();
-    if (!messageText) {
+    const outgoingAttachments = pendingCameraAttachments.map((attachment) => ({
+      attachment_kind: attachment.attachmentKind,
+      capture_id: attachment.captureId,
+    }));
+    if (!messageText && outgoingAttachments.length === 0) {
       throw new Error("空のメッセージは送信できません");
     }
     sendButton.disabled = true;
     try {
+      const requestBody = {};
+      if (messageText) {
+        requestBody.text = messageText;
+      }
+      if (outgoingAttachments.length > 0) {
+        requestBody.attachments = outgoingAttachments;
+      }
       const response = await fetch("/api/chat/input", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ text: messageText }),
+        body: JSON.stringify(requestBody),
       });
       const payload = await readJson(response);
       if (!response.ok) {
         throw new Error(readErrorMessage(payload));
       }
+      const userText = buildUserMessageEchoText({
+        text: messageText,
+        attachmentCount: outgoingAttachments.length,
+      });
       appendMessage({
         role: "user",
-        text: messageText,
+        text: userText,
         messageId: payload && "input_id" in payload ? String(payload.input_id) : "",
         isDraft: false,
       });
+      clearPendingCameraAttachments();
     } finally {
       sendButton.disabled = false;
+      updateSendEnabledState();
     }
+  }
+
+  // Block: User message echo
+  function buildUserMessageEchoText({ text, attachmentCount }) {
+    const normalizedText = String(text || "").trim();
+    const normalizedAttachmentCount = Number(attachmentCount || 0);
+    if (normalizedText && normalizedAttachmentCount > 0) {
+      return `${normalizedText}\n[画像 ${normalizedAttachmentCount} 枚]`;
+    }
+    if (normalizedText) {
+      return normalizedText;
+    }
+    return `[画像 ${normalizedAttachmentCount} 枚]`;
   }
 
   // Block: Meta label
@@ -759,7 +818,7 @@
 
   // Block: Send state
   function updateSendEnabledState() {
-    sendButton.disabled = chatInput.value.trim() === "";
+    sendButton.disabled = chatInput.value.trim() === "" && pendingCameraAttachments.length === 0;
   }
 
   // Block: Browser speech

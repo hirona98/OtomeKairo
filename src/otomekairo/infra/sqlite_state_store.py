@@ -656,15 +656,25 @@ class SqliteStateStore:
         return {"accepted": True, "override_id": override_id, "status": "queued"}
 
     # Block: Chat input write
-    def enqueue_chat_message(self, *, text: str, client_message_id: str | None) -> dict[str, Any]:
-        stripped_text = text.strip()
-        if not stripped_text:
-            raise StoreValidationError("text must not be blank")
+    def enqueue_chat_message(
+        self,
+        *,
+        text: str | None,
+        client_message_id: str | None,
+        attachments: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        stripped_text = text.strip() if isinstance(text, str) else ""
         if len(stripped_text) > 4000:
             raise StoreValidationError("text is too long")
+        if not stripped_text and not attachments:
+            raise StoreValidationError("text or attachments must be provided")
         input_id = _opaque_id("inp")
         now_ms = _now_ms()
-        payload = {"input_kind": "chat_message", "text": stripped_text}
+        payload: dict[str, Any] = {"input_kind": "chat_message"}
+        if stripped_text:
+            payload["text"] = stripped_text
+        if attachments:
+            payload["attachments"] = attachments
         if client_message_id:
             payload["client_message_id"] = client_message_id
         try:

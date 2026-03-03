@@ -592,9 +592,18 @@ def _pending_input_observation_hint(pending_input: PendingInputRecord) -> str:
     input_kind = str(pending_input.payload["input_kind"])
     if input_kind == "chat_message":
         text = pending_input.payload.get("text")
-        if not isinstance(text, str) or not text.strip():
-            raise RuntimeError("chat_message.text must be non-empty string")
-        return text.strip()
+        attachments = pending_input.payload.get("attachments")
+        normalized_text = text.strip() if isinstance(text, str) else ""
+        if attachments is not None and not isinstance(attachments, list):
+            raise RuntimeError("chat_message.attachments must be a list")
+        attachment_count = len(attachments) if isinstance(attachments, list) else 0
+        if normalized_text and attachment_count > 0:
+            return f"{normalized_text} カメラ画像 {attachment_count} 枚"
+        if normalized_text:
+            return normalized_text
+        if attachment_count > 0:
+            return f"カメラ画像 {attachment_count} 枚"
+        raise RuntimeError("chat_message requires text or attachments")
     if input_kind == "network_result":
         summary_text = pending_input.payload.get("summary_text")
         query = pending_input.payload.get("query")

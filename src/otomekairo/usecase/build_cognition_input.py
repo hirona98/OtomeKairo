@@ -99,13 +99,15 @@ def _build_current_observation(
         "relative_time_text": _relative_time_text(resolved_at, pending_input.created_at),
     }
     if input_kind == "chat_message":
-        text = pending_input.payload.get("text")
-        if not isinstance(text, str) or not text:
-            raise ValueError("chat_message.text must be non-empty string")
+        text = _validated_chat_text(pending_input.payload.get("text"))
+        attachments = _validated_chat_attachments(pending_input.payload.get("attachments"))
         return {
             **base_observation,
-            "observation_text": text,
-            "text": text,
+            "observation_text": _chat_observation_text(text=text, attachments=attachments),
+            "attachment_count": len(attachments),
+            "attachment_summary_text": _chat_attachment_summary_text(attachments),
+            "attachments": attachments,
+            **({"text": text} if text is not None else {}),
         }
     if input_kind == "network_result":
         summary_text = pending_input.payload.get("summary_text")
@@ -125,6 +127,77 @@ def _build_current_observation(
             "source_task_id": source_task_id,
         }
     raise ValueError("unsupported current_observation input_kind")
+
+
+# Block: Chat message helpers
+def _validated_chat_text(raw_text: Any) -> str | None:
+    if raw_text is None:
+        return None
+    if not isinstance(raw_text, str):
+        raise ValueError("chat_message.text must be string when present")
+    if not raw_text:
+        raise ValueError("chat_message.text must not be empty string")
+    return raw_text
+
+
+def _validated_chat_attachments(raw_attachments: Any) -> list[dict[str, Any]]:
+    if raw_attachments is None:
+        return []
+    if not isinstance(raw_attachments, list):
+        raise ValueError("chat_message.attachments must be a list")
+    attachments: list[dict[str, Any]] = []
+    for attachment in raw_attachments:
+        if not isinstance(attachment, dict):
+            raise ValueError("chat_message.attachments must contain only objects")
+        attachment_kind = attachment.get("attachment_kind")
+        media_kind = attachment.get("media_kind")
+        capture_id = attachment.get("capture_id")
+        mime_type = attachment.get("mime_type")
+        storage_path = attachment.get("storage_path")
+        content_url = attachment.get("content_url")
+        captured_at = attachment.get("captured_at")
+        if attachment_kind != "camera_still_image":
+            raise ValueError("chat_message.attachments.attachment_kind is invalid")
+        if media_kind != "image":
+            raise ValueError("chat_message.attachments.media_kind is invalid")
+        if not isinstance(capture_id, str) or not capture_id:
+            raise ValueError("chat_message.attachments.capture_id must be non-empty string")
+        if not isinstance(mime_type, str) or not mime_type:
+            raise ValueError("chat_message.attachments.mime_type must be non-empty string")
+        if not isinstance(storage_path, str) or not storage_path:
+            raise ValueError("chat_message.attachments.storage_path must be non-empty string")
+        if not isinstance(content_url, str) or not content_url:
+            raise ValueError("chat_message.attachments.content_url must be non-empty string")
+        if isinstance(captured_at, bool) or not isinstance(captured_at, int):
+            raise ValueError("chat_message.attachments.captured_at must be integer")
+        attachments.append(
+            {
+                "attachment_kind": attachment_kind,
+                "media_kind": media_kind,
+                "capture_id": capture_id,
+                "mime_type": mime_type,
+                "storage_path": storage_path,
+                "content_url": content_url,
+                "captured_at": captured_at,
+            }
+        )
+    return attachments
+
+
+def _chat_observation_text(*, text: str | None, attachments: list[dict[str, Any]]) -> str:
+    if text is not None and attachments:
+        return f"{text}\n（カメラ画像 {len(attachments)} 枚付き）"
+    if text is not None:
+        return text
+    if attachments:
+        return f"カメラ画像 {len(attachments)} 枚が添付された入力"
+    raise ValueError("chat_message requires text or attachments")
+
+
+def _chat_attachment_summary_text(attachments: list[dict[str, Any]]) -> str:
+    if not attachments:
+        return "添付なし"
+    return f"カメラ画像 {len(attachments)} 枚"
 
 
 # Block: Task snapshot builder
@@ -345,6 +418,8 @@ def _observation_query_hint(current_observation: dict[str, Any]) -> str | None:
             raise ValueError("network_result query must be non-empty string")
         return query
     text = current_observation.get("text")
+    if text is None:
+        return None
     if not isinstance(text, str) or not text:
         raise ValueError("chat_message text must be non-empty string")
     return None

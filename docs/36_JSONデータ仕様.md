@@ -691,16 +691,30 @@
 {
   "input_kind": "chat_message",
   "text": "おはよう",
-  "client_message_id": "cli_msg_001"
+  "client_message_id": "cli_msg_001",
+  "attachments": [
+    {
+      "attachment_kind": "camera_still_image",
+      "media_kind": "image",
+      "capture_id": "cap_0123456789abcdef0123456789abcdef",
+      "mime_type": "image/jpeg",
+      "storage_path": "data/camera/cap_0123456789abcdef0123456789abcdef.jpg",
+      "content_url": "/captures/cap_0123456789abcdef0123456789abcdef.jpg",
+      "captured_at": 1760000000000
+    }
+  ]
 }
 ```
 
-- 必須項目は `input_kind`、`text` である
+- 必須項目は `input_kind` である
 - `input_kind` は `chat_message` に固定する
-- `text` は、空文字列や空白のみを許可しない
-- `text` は、`4000` 文字を超えてはならない
+- `text` は任意だが、ある場合は空文字列や空白のみを許可しない
+- `text` は、ある場合に `4000` 文字を超えてはならない
 - `client_message_id` は任意で、同一クライアントからの再送判定に使う
 - `client_message_id` がある場合、Web サーバは `pending_inputs.client_message_id` にも同じ値を書き込む
+- `attachments` は任意だが、ある場合は 1 件以上の配列にする
+- `text` と `attachments` は、少なくともどちらか一方が必要である
+- 各添付は `camera_still_image` に固定し、`media_kind`、`capture_id`、`mime_type`、`storage_path`、`content_url`、`captured_at` を必須とする
 
 <!-- Block: Pending Cancel -->
 #### `cancel`
@@ -1124,14 +1138,22 @@
 ```json
 {
   "text": "おはよう",
-  "client_message_id": "cli_msg_001"
+  "client_message_id": "cli_msg_001",
+  "attachments": [
+    {
+      "attachment_kind": "camera_still_image",
+      "capture_id": "cap_0123456789abcdef0123456789abcdef"
+    }
+  ]
 }
 ```
 
-- 必須項目は `text` である
-- `text` は、空文字列や空白のみを許可しない
+- `text` は任意だが、ある場合は空文字列や空白のみを許可しない
 - `client_message_id` は任意で、クライアント側の再送判定に使う
 - `client_message_id` がある場合、同じ `channel` での再利用は許可しない
+- `attachments` は任意で、ある場合は `camera_still_image` の配列にする
+- 各添付は `attachment_kind` と `capture_id` を必須とする
+- `text` と `attachments` は、少なくともどちらか一方が必要である
 
 <!-- Block: Chat Input Response -->
 ### `POST /api/chat/input` の成功応答 JSON

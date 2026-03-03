@@ -82,6 +82,36 @@ def default_camera_capture_dir() -> Path:
     return CAMERA_CAPTURE_DIRECTORY
 
 
+# Block: Capture file helpers
+def validate_camera_capture_id(capture_id: str) -> str:
+    normalized_capture_id = _normalized_optional_text(capture_id)
+    if normalized_capture_id is None:
+        raise RuntimeError("capture_id must not be blank")
+    if not normalized_capture_id.startswith("cap_"):
+        raise RuntimeError("capture_id must start with cap_")
+    suffix = normalized_capture_id[4:]
+    if len(suffix) != 32:
+        raise RuntimeError("capture_id suffix length is invalid")
+    if any(character not in "0123456789abcdef" for character in suffix):
+        raise RuntimeError("capture_id suffix must be lowercase hex")
+    return normalized_capture_id
+
+
+def camera_capture_relative_path(capture_id: str) -> Path:
+    validated_capture_id = validate_camera_capture_id(capture_id)
+    return Path("data") / "camera" / f"{validated_capture_id}.jpg"
+
+
+def camera_capture_file_path(capture_id: str) -> Path:
+    validated_capture_id = validate_camera_capture_id(capture_id)
+    return default_camera_capture_dir() / f"{validated_capture_id}.jpg"
+
+
+def camera_capture_public_url(capture_id: str) -> str:
+    validated_capture_id = validate_camera_capture_id(capture_id)
+    return f"/captures/{validated_capture_id}.jpg"
+
+
 # Block: Environment helper
 def normalized_optional_text(value: Any) -> str | None:
     return _normalized_optional_text(value)
