@@ -250,6 +250,84 @@ class SqliteStateStore:
                 WHERE row_id = 1
                 """
             ).fetchone()
+            active_task_rows = connection.execute(
+                """
+                SELECT
+                    task_id,
+                    task_kind,
+                    task_status,
+                    goal_hint,
+                    completion_hint_json,
+                    resume_condition_json,
+                    interruptible,
+                    priority,
+                    created_at,
+                    updated_at,
+                    title,
+                    step_hints_json
+                FROM task_state
+                WHERE task_status = 'active'
+                ORDER BY priority DESC, updated_at DESC
+                LIMIT 3
+                """
+            ).fetchall()
+            waiting_task_rows = connection.execute(
+                """
+                SELECT
+                    task_id,
+                    task_kind,
+                    task_status,
+                    goal_hint,
+                    completion_hint_json,
+                    resume_condition_json,
+                    interruptible,
+                    priority,
+                    created_at,
+                    updated_at,
+                    title,
+                    step_hints_json
+                FROM task_state
+                WHERE task_status = 'waiting_external'
+                ORDER BY priority DESC, updated_at DESC
+                LIMIT 3
+                """
+            ).fetchall()
+            recent_event_rows = connection.execute(
+                """
+                SELECT
+                    event_id,
+                    source,
+                    kind,
+                    observation_summary,
+                    action_summary,
+                    result_summary,
+                    created_at
+                FROM events
+                WHERE searchable = 1
+                ORDER BY created_at DESC
+                LIMIT 5
+                """
+            ).fetchall()
+            memory_rows = connection.execute(
+                """
+                SELECT
+                    memory_state_id,
+                    memory_kind,
+                    body_text,
+                    payload_json,
+                    confidence,
+                    importance,
+                    memory_strength,
+                    created_at,
+                    updated_at,
+                    last_confirmed_at
+                FROM memory_states
+                WHERE searchable = 1
+                  AND memory_kind IN ('summary', 'fact')
+                ORDER BY updated_at DESC
+                LIMIT 8
+                """
+            ).fetchall()
         if (
             self_row is None
             or attention_row is None
@@ -299,6 +377,14 @@ class SqliteStateStore:
                 "priority_effects": json.loads(drive_row["priority_effects_json"]),
                 "updated_at": int(drive_row["updated_at"]),
             },
+            task_snapshot=_build_task_snapshot_rows(
+                active_task_rows=active_task_rows,
+                waiting_task_rows=waiting_task_rows,
+            ),
+            memory_snapshot=_build_memory_snapshot_rows(
+                recent_event_rows=recent_event_rows,
+                memory_rows=memory_rows,
+            ),
             effective_settings=_merge_runtime_settings(
                 default_settings,
                 json.loads(runtime_settings_row["values_json"]),
@@ -3242,6 +3328,99 @@ def _build_embedding_blob(
 ) -> bytes:
     payload = f"{embedding_model}\n{embedding_scope}\n{source_text}".encode("utf-8")
     return hashlib.sha256(payload).digest()
+
+
+def _build_task_snapshot_rows(
+    *,
+    active_task_rows: list[sqlite3.Row],
+    waiting_task_rows: list[sqlite3.Row],
+) -> dict[str, Any]:
+    return {
+        "active_tasks": [
+            _task_snapshot_entry(row)
+            for row in active_task_rows
+        ],
+        "waiting_external_tasks": [
+            _task_snapshot_entry(row)
+            for row in waiting_task_rows
+        ],
+    }
+
+
+def _task_snapshot_entry(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "task_id": str(row["task_id"]),
+        "task_kind": str(row["task_kind"]),
+        "task_status": str(row["task_status"]),
+        "goal_hint": str(row["goal_hint"]),
+        "completion_hint": json.loads(row["completion_hint_json"]),
+        "resume_condition": json.loads(row["resume_condition_json"]),
+        "interruptible": bool(row["interruptible"]),
+        "priority": int(row["priority"]),
+        "created_at": int(row["created_at"]),
+        "updated_at": int(row["updated_at"]),
+        "title": str(row["title"]) if row["title"] is not None else None,
+        "step_hints": (
+            json.loads(row["step_hints_json"])
+            if isinstance(row["step_hints_json"], str) and row["step_hints_json"]
+            else []
+        ),
+    }
+
+
+def _build_memory_snapshot_rows(
+    *,
+    recent_event_rows: list[sqlite3.Row],
+    memory_rows: list[sqlite3.Row],
+) -> dict[str, Any]:
+    working_memory_items: list[dict[str, Any]] = []
+    semantic_items: list[dict[str, Any]] = []
+    for row in memory_rows:
+        entry = _memory_snapshot_entry(row)
+        if str(row["memory_kind"]) == "summary":
+            if len(working_memory_items) < 3:
+                working_memory_items.append(entry)
+            continue
+        if str(row["memory_kind"]) == "fact":
+            if len(semantic_items) < 3:
+                semantic_items.append(entry)
+    return {
+        "working_memory_items": working_memory_items,
+        "episodic_items": [],
+        "semantic_items": semantic_items,
+        "affective_items": [],
+        "relationship_items": [],
+        "reflection_items": [],
+        "recent_event_window": [
+            _recent_event_entry(row)
+            for row in recent_event_rows
+        ],
+    }
+
+
+def _memory_snapshot_entry(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "memory_state_id": str(row["memory_state_id"]),
+        "memory_kind": str(row["memory_kind"]),
+        "body_text": str(row["body_text"]),
+        "payload": json.loads(row["payload_json"]),
+        "confidence": float(row["confidence"]),
+        "importance": float(row["importance"]),
+        "memory_strength": float(row["memory_strength"]),
+        "created_at": int(row["created_at"]),
+        "updated_at": int(row["updated_at"]),
+        "last_confirmed_at": int(row["last_confirmed_at"]),
+    }
+
+
+def _recent_event_entry(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "event_id": str(row["event_id"]),
+        "source": str(row["source"]),
+        "kind": str(row["kind"]),
+        "summary_text": _event_summary_text(row),
+        "created_at": int(row["created_at"]),
+    }
 
 
 def _event_summary_text(row: sqlite3.Row) -> str:

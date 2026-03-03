@@ -102,4 +102,6 @@ class CognitionStateSnapshot:
     body_state: dict[str, Any]
     world_state: dict[str, Any]
     drive_state: dict[str, Any]
+    task_snapshot: dict[str, Any]
+    memory_snapshot: dict[str, Any]
     effective_settings: dict[str, Any]

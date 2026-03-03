@@ -47,20 +47,15 @@ def build_cognition_input(
         "body_snapshot": state_snapshot.body_state,
         "world_snapshot": state_snapshot.world_state,
         "drive_snapshot": state_snapshot.drive_state,
-        "task_snapshot": {
-            "active_tasks": [],
-            "waiting_external_tasks": [],
-        },
+        "task_snapshot": _build_task_snapshot(
+            task_snapshot=state_snapshot.task_snapshot,
+            resolved_at=resolved_at,
+        ),
         "attention_snapshot": state_snapshot.attention_state,
-        "memory_bundle": {
-            "working_memory_items": [],
-            "episodic_items": [],
-            "semantic_items": [],
-            "affective_items": [],
-            "relationship_items": [],
-            "reflection_items": [],
-            "recent_event_window": [],
-        },
+        "memory_bundle": _build_memory_bundle(
+            memory_snapshot=state_snapshot.memory_snapshot,
+            resolved_at=resolved_at,
+        ),
         "policy_snapshot": {
             "system_policy": {
                 "respect_invariants": True,
@@ -126,6 +121,113 @@ def _build_current_observation(
             "source_task_id": source_task_id,
         }
     raise ValueError("unsupported current_observation input_kind")
+
+
+# Block: Task snapshot builder
+def _build_task_snapshot(
+    *,
+    task_snapshot: dict[str, Any],
+    resolved_at: int,
+) -> dict[str, Any]:
+    return {
+        "active_tasks": [
+            _task_snapshot_entry_for_cognition(task_entry, resolved_at=resolved_at)
+            for task_entry in task_snapshot["active_tasks"]
+        ],
+        "waiting_external_tasks": [
+            _task_snapshot_entry_for_cognition(task_entry, resolved_at=resolved_at)
+            for task_entry in task_snapshot["waiting_external_tasks"]
+        ],
+    }
+
+
+def _task_snapshot_entry_for_cognition(
+    task_entry: dict[str, Any],
+    *,
+    resolved_at: int,
+) -> dict[str, Any]:
+    updated_at = int(task_entry["updated_at"])
+    created_at = int(task_entry["created_at"])
+    return {
+        **task_entry,
+        "created_at_utc_text": _utc_text(created_at),
+        "created_at_local_text": _local_text(created_at),
+        "updated_at_utc_text": _utc_text(updated_at),
+        "updated_at_local_text": _local_text(updated_at),
+        "relative_time_text": _relative_time_text(resolved_at, updated_at),
+    }
+
+
+# Block: Memory bundle builder
+def _build_memory_bundle(
+    *,
+    memory_snapshot: dict[str, Any],
+    resolved_at: int,
+) -> dict[str, Any]:
+    return {
+        "working_memory_items": [
+            _memory_entry_for_cognition(memory_entry, resolved_at=resolved_at)
+            for memory_entry in memory_snapshot["working_memory_items"]
+        ],
+        "episodic_items": [
+            _memory_entry_for_cognition(memory_entry, resolved_at=resolved_at)
+            for memory_entry in memory_snapshot["episodic_items"]
+        ],
+        "semantic_items": [
+            _memory_entry_for_cognition(memory_entry, resolved_at=resolved_at)
+            for memory_entry in memory_snapshot["semantic_items"]
+        ],
+        "affective_items": [
+            _memory_entry_for_cognition(memory_entry, resolved_at=resolved_at)
+            for memory_entry in memory_snapshot["affective_items"]
+        ],
+        "relationship_items": [
+            _memory_entry_for_cognition(memory_entry, resolved_at=resolved_at)
+            for memory_entry in memory_snapshot["relationship_items"]
+        ],
+        "reflection_items": [
+            _memory_entry_for_cognition(memory_entry, resolved_at=resolved_at)
+            for memory_entry in memory_snapshot["reflection_items"]
+        ],
+        "recent_event_window": [
+            _recent_event_for_cognition(event_entry, resolved_at=resolved_at)
+            for event_entry in memory_snapshot["recent_event_window"]
+        ],
+    }
+
+
+def _memory_entry_for_cognition(
+    memory_entry: dict[str, Any],
+    *,
+    resolved_at: int,
+) -> dict[str, Any]:
+    updated_at = int(memory_entry["updated_at"])
+    created_at = int(memory_entry["created_at"])
+    last_confirmed_at = int(memory_entry["last_confirmed_at"])
+    return {
+        **memory_entry,
+        "created_at_utc_text": _utc_text(created_at),
+        "created_at_local_text": _local_text(created_at),
+        "updated_at_utc_text": _utc_text(updated_at),
+        "updated_at_local_text": _local_text(updated_at),
+        "last_confirmed_at_utc_text": _utc_text(last_confirmed_at),
+        "last_confirmed_at_local_text": _local_text(last_confirmed_at),
+        "relative_time_text": _relative_time_text(resolved_at, updated_at),
+    }
+
+
+def _recent_event_for_cognition(
+    event_entry: dict[str, Any],
+    *,
+    resolved_at: int,
+) -> dict[str, Any]:
+    created_at = int(event_entry["created_at"])
+    return {
+        **event_entry,
+        "created_at_utc_text": _utc_text(created_at),
+        "created_at_local_text": _local_text(created_at),
+        "relative_time_text": _relative_time_text(resolved_at, created_at),
+    }
 
 
 # Block: Selection profile

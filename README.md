@@ -33,7 +33,7 @@
 - `src/otomekairo/boot/run_runtime.py`: 人格ランタイムの常時ループを起動する
 - `src/otomekairo/web/app.py`: FastAPI アプリを構成し、API ルータと例外処理を束ねる
 - `src/otomekairo/gateway/cognition_client.py`: 認知処理の外部境界を表す抽象を定義する
-- `src/otomekairo/usecase/build_cognition_input.py`: `self_state` などの現在状態から最小の `cognition_input` を組み立てる
+- `src/otomekairo/usecase/build_cognition_input.py`: `self_state` などの現在状態から最小の `cognition_input` を組み立て、`task_state` の進行中 / 外部待ちタスク、直近の `summary` / `fact` 記憶、直近イベント列も `memory_bundle` として渡す
 - `src/otomekairo/usecase/run_cognition.py`: 認知クライアントが返す `cognition_result` を受け取り、`action_command` を使って `speak` は `token` / `message`、`notify` は `notice`、`browse` は `waiting_external` の検索タスクとして実行し、`action_history` へ変換する
 - `src/otomekairo/usecase/run_browse_task.py`: `task_state(waiting_external)` の `browse` タスクを外部検索へ通し、検索結果を内部入力 `network_result` として次周期へ戻し、`action_history` へ変換する
 - `src/otomekairo/usecase/validate_action.py`: `cognition_result.action_proposals` から `speak` / `browse` / `notify` / `wait` を比較し、`execute / hold / reject` と構造化した `action_command` を確定する

@@ -351,6 +351,44 @@
 - `drive_bias` は、内部欲求から作る短期補正値であり、各値は `-1.0..+1.0` の `number` に固定する
 - `selection_profile` は永続化前提の正本ではなく、`self_state`、`current_emotion`、`relationship_overview`、`preference_memory`、`drive_state` から再構成する
 
+<!-- Block: Task Snapshot -->
+### `task_snapshot`
+
+```json
+{
+  "active_tasks": [],
+  "waiting_external_tasks": []
+}
+```
+
+- `task_snapshot` は、短周期の内部でだけ使う現在タスク断面である
+- 必須項目は `active_tasks`、`waiting_external_tasks` である
+- 各要素は、少なくとも `task_id`、`task_kind`、`task_status`、`goal_hint`、`completion_hint`、`resume_condition`、`interruptible`、`priority`、`created_at`、`updated_at` を持つ
+- `context assembler` は、各要素に人間可読な `created_at_*`、`updated_at_*`、`relative_time_text` を付与してよい
+- 初期実装では、`active_tasks` と `waiting_external_tasks` に優先度上位 `3` 件までを入れてよい
+
+<!-- Block: Memory Bundle -->
+### `memory_bundle`
+
+```json
+{
+  "working_memory_items": [],
+  "episodic_items": [],
+  "semantic_items": [],
+  "affective_items": [],
+  "relationship_items": [],
+  "reflection_items": [],
+  "recent_event_window": []
+}
+```
+
+- `memory_bundle` は、短周期の内部でだけ使う最終的な想起断面である
+- 必須項目は `working_memory_items`、`episodic_items`、`semantic_items`、`affective_items`、`relationship_items`、`reflection_items`、`recent_event_window` である
+- `working_memory_items`、`episodic_items`、`semantic_items`、`affective_items`、`relationship_items`、`reflection_items` の各要素は、少なくとも `memory_state_id`、`memory_kind`、`body_text`、`payload`、`confidence`、`importance`、`memory_strength`、`created_at`、`updated_at`、`last_confirmed_at` を持つ
+- `recent_event_window` の各要素は、少なくとも `event_id`、`source`、`kind`、`summary_text`、`created_at` を持つ
+- `context assembler` は、`memory_bundle` の各要素に人間可読な `*_utc_text`、`*_local_text`、`relative_time_text` を付与してよい
+- 初期実装では、`working_memory_items` に `memory_kind=summary`、`semantic_items` に `memory_kind=fact`、`recent_event_window` に直近 `5` 件の `searchable` な `events` を入れてよい
+
 <!-- Block: Persona Consistency Score -->
 ### `persona_consistency_score`
 
