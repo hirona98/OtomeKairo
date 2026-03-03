@@ -17,6 +17,7 @@ from otomekairo.schema.runtime_types import (
     MemoryJobRecord,
     PendingInputRecord,
     SettingsOverrideRecord,
+    TaskStateMutationRecord,
 )
 from otomekairo.schema.settings import build_default_settings, decode_requested_value
 
@@ -1630,6 +1631,7 @@ class SqliteStateStore:
         cycle_id: str,
         resolution_status: str,
         action_results: list[ActionHistoryRecord],
+        task_mutations: list[TaskStateMutationRecord],
         ui_events: list[dict[str, Any]],
         commit_payload: dict[str, Any],
         discard_reason: str | None = None,
@@ -1638,6 +1640,10 @@ class SqliteStateStore:
             raise StoreValidationError("resolution_status is invalid")
         resolved_at = _now_ms()
         with self._connect() as connection:
+            self._apply_task_state_mutations(
+                connection=connection,
+                task_mutations=task_mutations,
+            )
             event_ids = self._insert_pending_input_events(
                 connection=connection,
                 pending_input=pending_input,
@@ -1698,6 +1704,52 @@ class SqliteStateStore:
         if commit_id is None:
             raise RuntimeError("commit_records insert did not persist")
         return int(commit_id["commit_id"])
+
+    # Block: Task state mutation apply
+    def _apply_task_state_mutations(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        task_mutations: list[TaskStateMutationRecord],
+    ) -> None:
+        for task_mutation in task_mutations:
+            if task_mutation.task_status != "waiting_external":
+                raise StoreValidationError("task mutation.task_status is invalid")
+            if task_mutation.priority < 0:
+                raise StoreValidationError("task mutation.priority must be non-negative")
+            connection.execute(
+                """
+                INSERT INTO task_state (
+                    task_id,
+                    task_kind,
+                    task_status,
+                    goal_hint,
+                    completion_hint_json,
+                    resume_condition_json,
+                    interruptible,
+                    priority,
+                    created_at,
+                    updated_at,
+                    title,
+                    step_hints_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    task_mutation.task_id,
+                    task_mutation.task_kind,
+                    task_mutation.task_status,
+                    task_mutation.goal_hint,
+                    _json_text(task_mutation.completion_hint),
+                    _json_text(task_mutation.resume_condition),
+                    1 if task_mutation.interruptible else 0,
+                    task_mutation.priority,
+                    task_mutation.created_at,
+                    task_mutation.created_at,
+                    task_mutation.title,
+                    _json_text(task_mutation.step_hints),
+                ),
+            )
 
     # Block: Memory job enqueue
     def _enqueue_write_memory_jobs(
@@ -2487,11 +2539,17 @@ class SqliteStateStore:
                 updated_at
             )
             VALUES (1, ?, ?, ?)
-            ON CONFLICT(row_id) DO NOTHING
+            ON CONFLICT(row_id) DO UPDATE SET
+                priority_effects_json = excluded.priority_effects_json,
+                updated_at = excluded.updated_at
+            WHERE json_extract(drive_state.priority_effects_json, '$.task_progress_bias') IS NULL
+               OR json_extract(drive_state.priority_effects_json, '$.exploration_bias') IS NULL
+               OR json_extract(drive_state.priority_effects_json, '$.maintenance_bias') IS NULL
+               OR json_extract(drive_state.priority_effects_json, '$.social_bias') IS NULL
             """,
             (
                 _json_text({}),
-                _json_text({}),
+                _json_text(_drive_state_priority_effects_seed()),
                 now_ms,
             ),
         )
@@ -2558,6 +2616,15 @@ def _self_state_invariants_seed() -> dict[str, Any]:
     }
 
 
+def _drive_state_priority_effects_seed() -> dict[str, Any]:
+    return {
+        "task_progress_bias": 0.0,
+        "exploration_bias": 0.0,
+        "maintenance_bias": 0.0,
+        "social_bias": 0.0,
+    }
+
+
 # Block: Public response helpers
 def _public_emotion_summary(current_emotion_json: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(current_emotion_json, dict):
@@ -2611,6 +2678,14 @@ def _action_command_summary(action_result: ActionHistoryRecord) -> str:
     target_channel = action_result.command.get("target_channel")
     if isinstance(target_channel, str) and target_channel:
         return f"{action_result.action_type} -> {target_channel}"
+    target = action_result.command.get("target")
+    if isinstance(target, dict):
+        target_channel = target.get("channel")
+        if isinstance(target_channel, str) and target_channel:
+            return f"{action_result.action_type} -> {target_channel}"
+        target_queue = target.get("queue")
+        if isinstance(target_queue, str) and target_queue:
+            return f"{action_result.action_type} -> {target_queue}"
     return action_result.action_type
 
 

@@ -15,6 +15,7 @@ from otomekairo.schema.runtime_types import (
     MemoryJobRecord,
     PendingInputRecord,
     SettingsOverrideRecord,
+    TaskStateMutationRecord,
 )
 from otomekairo.schema.settings import SettingsValidationError, build_default_settings, decode_requested_value, get_setting_definition
 from otomekairo.usecase.build_cognition_input import build_cognition_input
@@ -85,7 +86,13 @@ class RuntimeLoop:
                 cycle_id=cycle_id,
             )
             resolved_at = _now_ms()
-            ui_events, action_results, resolution_status, discard_reason = self._resolve_pending_input(
+            (
+                ui_events,
+                action_results,
+                task_mutations,
+                resolution_status,
+                discard_reason,
+            ) = self._resolve_pending_input(
                 pending_input=pending_input,
                 cycle_id=cycle_id,
                 resolved_at=resolved_at,
@@ -104,6 +111,7 @@ class RuntimeLoop:
                 cycle_id=cycle_id,
                 resolution_status=resolution_status,
                 action_results=action_results,
+                task_mutations=task_mutations,
                 discard_reason=discard_reason,
                 ui_events=ui_events,
                 commit_payload=commit_payload,
@@ -115,6 +123,7 @@ class RuntimeLoop:
                 cycle_id=cycle_id,
                 resolution_status="discarded",
                 action_results=[],
+                task_mutations=[],
                 discard_reason=PENDING_INPUT_FAILURE_REASON,
                 ui_events=ui_events,
                 commit_payload={
@@ -137,7 +146,13 @@ class RuntimeLoop:
         pending_input: PendingInputRecord,
         cycle_id: str,
         resolved_at: int,
-    ) -> tuple[list[dict[str, Any]], list[ActionHistoryRecord], str, str | None]:
+    ) -> tuple[
+        list[dict[str, Any]],
+        list[ActionHistoryRecord],
+        list[TaskStateMutationRecord],
+        str,
+        str | None,
+    ]:
         input_kind = pending_input.payload["input_kind"]
         if input_kind == "chat_message":
             state_snapshot = self._store.read_cognition_state(self._default_settings)
@@ -162,16 +177,18 @@ class RuntimeLoop:
             return (
                 cognition_execution.ui_events,
                 cognition_execution.action_results,
+                cognition_execution.task_mutations,
                 "consumed",
                 None,
             )
         if input_kind == "cancel":
-            return ([], [], "discarded", "cancel_target_not_found")
+            return ([], [], [], "discarded", "cancel_target_not_found")
         ui_events, action_results = _unsupported_input_events(pending_input, resolved_at)
         self._append_ui_events(cycle_id=cycle_id, ui_events=ui_events)
         return (
             ui_events,
             action_results,
+            [],
             "discarded",
             "unsupported_input_kind",
         )
@@ -231,6 +248,7 @@ class RuntimeLoop:
                 cycle_id=cycle_id,
                 resolution_status="consumed",
                 action_results=[action_result],
+                task_mutations=[],
                 discard_reason=None,
                 ui_events=[],
                 commit_payload={
@@ -250,6 +268,7 @@ class RuntimeLoop:
                 cycle_id=cycle_id,
                 resolution_status="discarded",
                 action_results=[],
+                task_mutations=[],
                 discard_reason=CANCEL_FAILURE_REASON,
                 ui_events=[],
                 commit_payload={

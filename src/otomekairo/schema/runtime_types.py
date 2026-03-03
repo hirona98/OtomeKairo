@@ -51,6 +51,22 @@ class ActionHistoryRecord:
     adapter_trace_ref: dict[str, Any] | None
 
 
+# Block: Task state mutation record
+@dataclass(frozen=True, slots=True)
+class TaskStateMutationRecord:
+    task_id: str
+    task_kind: str
+    task_status: str
+    goal_hint: str
+    completion_hint: dict[str, Any]
+    resume_condition: dict[str, Any]
+    interruptible: bool
+    priority: int
+    title: str | None
+    step_hints: list[dict[str, Any]]
+    created_at: int
+
+
 # Block: Cognition state snapshot
 @dataclass(frozen=True, slots=True)
 class CognitionStateSnapshot:

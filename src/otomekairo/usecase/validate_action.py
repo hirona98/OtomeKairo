@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from otomekairo.usecase.dispatch_action_command import opaque_action_id
+
 
 # Block: Score weights
 TASK_FIT_WEIGHT = 0.24
@@ -87,14 +89,6 @@ def validate_chat_response_action(
             action_command=None,
             action_candidate_score=_candidate_payload(best_candidate),
         )
-    if action_type == "browse":
-        return ValidatedChatAction(
-            decision="hold",
-            decision_reason="action_type_not_implemented",
-            proposal=selected_proposal,
-            action_command=None,
-            action_candidate_score=_candidate_payload(best_candidate),
-        )
     action_command = _build_action_command(
         action_type=action_type,
         pending_channel=pending_channel,
@@ -119,6 +113,9 @@ def _validated_action_proposals(cognition_result: dict[str, Any]) -> list[dict[s
     for proposal in action_proposals:
         if not isinstance(proposal, dict):
             raise RuntimeError("cognition_result.action_proposals must contain only objects")
+        action_type = _validated_action_type(proposal)
+        if action_type == "browse":
+            _browse_query_text(proposal)
         validated_proposals.append(proposal)
     return validated_proposals
 
@@ -370,21 +367,94 @@ def _build_action_command(
 ) -> dict[str, Any]:
     if action_type == "speak":
         return {
+            "command_id": opaque_action_id("cmd"),
             "command_type": "speak_ui_message",
-            "target_channel": pending_channel,
-            "message_id": str(proposal["message_id"]),
-            "text": response_text,
+            "actuator_port": "browser_chat_ui",
+            "target": {
+                "channel": pending_channel,
+            },
+            "parameters": {
+                "message_id": str(proposal["message_id"]),
+                "text": response_text,
+                "role": "assistant",
+            },
+            "preconditions": {
+                "channel_matches_input": True,
+            },
+            "stop_conditions": {
+                "kind": "message_completed_or_cancelled",
+            },
+            "timeout_ms": 30_000,
+            "requires_reobserve": False,
+            "expected_effects": {
+                "emitted_event_types": ["status", "token", "message", "status"],
+                "status_code_after": "idle",
+            },
             "proposal_ref": str(proposal["proposal_id"]),
         }
     if action_type == "notify":
         return {
+            "command_id": opaque_action_id("cmd"),
             "command_type": "browser_notice",
-            "target_channel": pending_channel,
-            "notice_code": "llm_notify",
-            "text": response_text,
+            "actuator_port": "browser_chat_ui",
+            "target": {
+                "channel": pending_channel,
+            },
+            "parameters": {
+                "notice_code": "llm_notify",
+                "text": response_text,
+            },
+            "preconditions": {
+                "channel_matches_input": True,
+            },
+            "stop_conditions": {
+                "kind": "notice_emitted",
+            },
+            "timeout_ms": 5_000,
+            "requires_reobserve": False,
+            "expected_effects": {
+                "emitted_event_types": ["notice", "status"],
+                "status_code_after": "idle",
+            },
+            "proposal_ref": str(proposal["proposal_id"]),
+        }
+    if action_type == "browse":
+        query = _browse_query_text(proposal)
+        return {
+            "command_id": opaque_action_id("cmd"),
+            "command_type": "enqueue_browse_task",
+            "actuator_port": "task_state",
+            "target": {
+                "queue": "task_state",
+            },
+            "parameters": {
+                "task_id": opaque_action_id("task"),
+                "query": query,
+                "target_channel": pending_channel,
+            },
+            "preconditions": {
+                "runtime_allows_browse": True,
+            },
+            "stop_conditions": {
+                "kind": "task_queued",
+            },
+            "timeout_ms": 5_000,
+            "requires_reobserve": False,
+            "expected_effects": {
+                "queued_task_kind": "browse",
+                "queued_task_status": "waiting_external",
+            },
             "proposal_ref": str(proposal["proposal_id"]),
         }
     raise RuntimeError("unsupported action_type for execute command")
+
+
+# Block: Browse query
+def _browse_query_text(proposal: dict[str, Any]) -> str:
+    query = proposal.get("query")
+    if not isinstance(query, str) or not query.strip():
+        raise RuntimeError("browse action requires non-empty query")
+    return query.strip()
 
 
 # Block: Candidate payload

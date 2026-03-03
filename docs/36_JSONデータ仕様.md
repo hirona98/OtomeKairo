@@ -498,6 +498,7 @@
 - 初期実装の `browser_chat` では、`action_type` は `speak`、`browse`、`notify`、`wait` のいずれかだけを許可する
 - 初期実装の `browser_chat` では、`priority` は `0.0..1.0` の `number` に固定する
 - 初期実装の `browser_chat` では、`speak` と `notify` のとき `target_channel=\"browser_chat\"` を必須とする
+- 初期実装の `browser_chat` では、`browse` のとき `query` に非空の検索文字列を必須とする
 - `speech_draft` は、少なくとも `text`、`language`、`delivery_mode` を持つ
 - `memory_focus` は、少なくとも `focus_kind`、`summary` を持つ
 - `reflection_seed` は、少なくとも `cycle_id`、`input_kind`、`message_id`、`token_count`、`was_cancelled` を持つ
@@ -808,8 +809,10 @@
 - `role` は、`message_id` を伴うメッセージ応答だけに付ける
 - `related_input_id` は、入力に対する応答行動だけに付ける
 - `proposal_ref` は、`cognition_result.action_proposals` から確定した候補を追跡したいときに付ける
-- `command_type` は、初期実装では `speak_ui_message` または `browser_notice` を使ってよい
+- `command_type` は、初期実装では `speak_ui_message`、`browser_notice`、`enqueue_browse_task` を使ってよい
 - `notice_code` と `text` は、`browser_notice` を実行する命令だけに付ける
+- `target`、`parameters`、`preconditions`、`stop_conditions`、`timeout_ms`、`requires_reobserve`、`expected_effects` は、`execute` のとき `action_command` をそのまま残したい場合に付けてよい
+- `parameters.task_id` と `parameters.query` は、`enqueue_browse_task` を実行する命令だけに付ける
 - `hold` と `reject` では、`message_id` と `role` を付けず、`event_types` は `status` だけでもよい
 - `target_message_id` は、`cancel` のように既存メッセージを対象化する行動だけに付ける
 - `input_kind` は、未対応入力のエラー応答のように、原因となる入力種別を残したいときだけ付ける
@@ -859,6 +862,7 @@
 - `selected_action_type` は、比較で最上位になった候補の `action_type` を残したいときに付ける
 - `action_candidate_score` は、`action validator` の最小比較結果を残したいときに付ける
 - `hold` と `reject` では、`message_id` を付けず、`final_message_emitted=false` にする
+- `enqueue_browse_task` を実行した場合は、`queued_task_id`、`queued_task_kind`、`queued_task_status` を付けてよい
 
 <!-- Block: Memory Job Group -->
 ## 記憶ジョブの JSON

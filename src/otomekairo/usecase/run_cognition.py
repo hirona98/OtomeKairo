@@ -5,10 +5,11 @@ from __future__ import annotations
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Any, Callable, Iterable
+from typing import Any, Callable
 
 from otomekairo.gateway.cognition_client import CognitionClient, CognitionRequest
-from otomekairo.schema.runtime_types import ActionHistoryRecord, PendingInputRecord
+from otomekairo.schema.runtime_types import ActionHistoryRecord, PendingInputRecord, TaskStateMutationRecord
+from otomekairo.usecase.dispatch_action_command import ActionDispatchResult, dispatch_chat_action_command
 from otomekairo.usecase.validate_action import validate_chat_response_action
 
 
@@ -19,6 +20,7 @@ class CognitionExecution:
     cognition_result: dict[str, Any]
     ui_events: list[dict[str, Any]]
     action_results: list[ActionHistoryRecord]
+    task_mutations: list[TaskStateMutationRecord]
 
 
 # Block: Chat cognition execution
@@ -39,8 +41,6 @@ def run_cognition_for_chat_message(
     )
     message_id = _opaque_id("msg")
     ui_events: list[dict[str, Any]] = []
-    emitted_chunk_count = 0
-    was_cancelled = False
 
     # Block: Immediate event emitter
     def emit_event(event_type: str, payload: dict[str, Any]) -> None:
@@ -85,125 +85,52 @@ def run_cognition_for_chat_message(
         else message_id
     )
     action_command = validated_action.action_command
-    command_type = (
-        str(action_command["command_type"])
-        if action_command is not None
-        else None
+    dispatch_result = _dispatch_result_for_decision(
+        pending_input=pending_input,
+        cycle_id=cycle_id,
+        resolved_at=resolved_at,
+        action_command=action_command,
+        decision=validated_action.decision,
+        emit_ui_event=emit_event,
+        consume_cancel=lambda: consume_cancel(active_message_id),
     )
-    should_stream_response = command_type == "speak_ui_message"
-    should_emit_notice = command_type == "browser_notice"
-
-    # Block: Streaming response loop
-    if should_stream_response:
-        emit_event(
-            "status",
-            {
-                "status_code": "speaking",
-                "label": "応答を返しています",
-                "cycle_id": cycle_id,
-            },
-        )
-        for chunk_text in _iter_speech_chunks(response_text):
-            if consume_cancel(active_message_id):
-                was_cancelled = True
-                break
-            emit_event(
-                "token",
-                {
-                    "message_id": active_message_id,
-                    "text": chunk_text,
-                    "chunk_index": emitted_chunk_count,
-                },
-            )
-            emitted_chunk_count += 1
-    if should_emit_notice:
-        emit_event(
-            "notice",
-            {
-                "notice_code": str(action_command["notice_code"]),
-                "text": str(action_command["text"]),
-            },
-        )
-    cognition_result["reflection_seed"]["token_count"] = emitted_chunk_count
-    cognition_result["reflection_seed"]["was_cancelled"] = was_cancelled
-
-    # Block: Final message
-    message_created_at = _now_ms()
-    if response_text and should_stream_response and not was_cancelled:
-        emit_event(
-            "message",
-            {
-                "message_id": str(action_command["message_id"]),
-                "role": "assistant",
-                "text": response_text,
-                "created_at": message_created_at,
-                "source_cycle_id": cycle_id,
-                "related_input_id": pending_input.input_id,
-            },
-        )
-
-    # Block: Final status
-    emit_event(
-        "status",
-        {
-            "status_code": "idle",
-            "label": "待機中",
-            "cycle_id": cycle_id,
-        },
+    cognition_result["reflection_seed"]["token_count"] = int(
+        dispatch_result.observed_effects.get("token_count", 0)
+    )
+    cognition_result["reflection_seed"]["was_cancelled"] = bool(
+        dispatch_result.observed_effects.get("was_cancelled", False)
     )
 
     # Block: Action history
-    emitted_event_types = [ui_event["event_type"] for ui_event in ui_events]
-    action_type = _action_history_type(
-        decision=validated_action.decision,
-        command_type=command_type,
+    emitted_event_types = dispatch_result.emitted_event_types
+    command_payload = _action_history_command(
+        pending_input=pending_input,
+        validated_action=validated_action,
+        action_command=action_command,
+        emitted_event_types=emitted_event_types,
     )
-    command_payload = {
-        "target_channel": pending_input.channel,
-        "event_types": emitted_event_types,
-        "decision": validated_action.decision,
-        "decision_reason": validated_action.decision_reason,
-        "related_input_id": pending_input.input_id,
-    }
     observed_effects = {
         "emitted_event_types": emitted_event_types,
-        "status_code_after": "idle",
-        "was_cancelled": was_cancelled,
-        "token_count": emitted_chunk_count,
-        "final_message_emitted": bool(response_text and should_stream_response and not was_cancelled),
+        **dispatch_result.observed_effects,
         "validator_decision": validated_action.decision,
         "validator_reason": validated_action.decision_reason,
         "action_candidate_score": validated_action.action_candidate_score,
     }
     if validated_action.proposal is not None:
-        command_payload["proposal_ref"] = str(validated_action.proposal["proposal_id"])
         observed_effects["selected_action_type"] = str(validated_action.proposal["action_type"])
-    if should_stream_response and action_command is not None:
-        command_payload["command_type"] = str(action_command["command_type"])
-        command_payload["message_id"] = str(action_command["message_id"])
-        command_payload["role"] = "assistant"
-        observed_effects["message_id"] = str(action_command["message_id"])
-    if should_emit_notice and action_command is not None:
-        command_payload["command_type"] = str(action_command["command_type"])
-        command_payload["notice_code"] = str(action_command["notice_code"])
-        command_payload["text"] = str(action_command["text"])
-        observed_effects["notice_code"] = str(action_command["notice_code"])
     action_results = [
         ActionHistoryRecord(
             result_id=_opaque_id("actres"),
-            command_id=_opaque_id("cmd"),
-            action_type=action_type,
+            command_id=_action_command_id(
+                decision=validated_action.decision,
+                action_command=action_command,
+            ),
+            action_type=dispatch_result.action_type,
             command=command_payload,
             started_at=resolved_at,
-            finished_at=message_created_at,
-            status=_action_status(
-                decision=validated_action.decision,
-                was_cancelled=was_cancelled,
-            ),
-            failure_mode=_failure_mode(
-                decision=validated_action.decision,
-                was_cancelled=was_cancelled,
-            ),
+            finished_at=dispatch_result.finished_at,
+            status=dispatch_result.status,
+            failure_mode=dispatch_result.failure_mode,
             observed_effects=observed_effects,
             raw_result_ref=None,
             adapter_trace_ref={
@@ -218,6 +145,7 @@ def run_cognition_for_chat_message(
         cognition_result=cognition_result,
         ui_events=ui_events,
         action_results=action_results,
+        task_mutations=dispatch_result.task_mutations,
     )
 
 
@@ -255,41 +183,108 @@ def _merge_reflection_seed(
     cognition_result["reflection_seed"] = merged_seed
 
 
-# Block: Token chunk iterator
-def _iter_speech_chunks(response_text: str) -> Iterable[str]:
-    current_chunk = ""
-    for character in response_text:
-        current_chunk += character
-        if character in "。！？\n" or len(current_chunk) >= 24:
-            yield current_chunk
-            current_chunk = ""
-    if current_chunk:
-        yield current_chunk
-
-
 # Block: Action history type helper
 def _action_history_type(*, decision: str, command_type: str | None) -> str:
     if decision == "hold":
         return "hold_chat_response"
     if decision == "reject":
         return "reject_chat_response"
+    if command_type == "enqueue_browse_task":
+        return "enqueue_browse_task"
     if command_type == "browser_notice":
         return "emit_browser_notice"
     return "emit_chat_response"
 
 
-# Block: Action status helper
-def _action_status(*, decision: str, was_cancelled: bool) -> str:
-    if was_cancelled:
-        return "stopped"
-    return "succeeded"
+# Block: Dispatch selector
+def _dispatch_result_for_decision(
+    *,
+    pending_input: PendingInputRecord,
+    cycle_id: str,
+    resolved_at: int,
+    action_command: dict[str, Any] | None,
+    decision: str,
+    emit_ui_event: Callable[[str, dict[str, Any]], None],
+    consume_cancel: Callable[[], bool],
+) -> ActionDispatchResult:
+    if decision != "execute":
+        emit_ui_event(
+            "status",
+            {
+                "status_code": "idle",
+                "label": "待機中",
+                "cycle_id": cycle_id,
+            },
+        )
+        command_type = (
+            str(action_command["command_type"])
+            if action_command is not None
+            else None
+        )
+        return ActionDispatchResult(
+            action_type=_action_history_type(
+                decision=decision,
+                command_type=command_type,
+            ),
+            emitted_event_types=["status"],
+            observed_effects={
+                "status_code_after": "idle",
+            },
+            task_mutations=[],
+            finished_at=_now_ms(),
+            status="succeeded",
+            failure_mode=None,
+        )
+    if action_command is None:
+        raise RuntimeError("execute decision requires action_command")
+    return dispatch_chat_action_command(
+        pending_input={
+            "input_id": pending_input.input_id,
+            "channel": pending_input.channel,
+        },
+        cycle_id=cycle_id,
+        resolved_at=resolved_at,
+        action_command=action_command,
+        emit_ui_event=lambda ui_event: emit_ui_event(ui_event["event_type"], ui_event["payload"]),
+        consume_cancel=lambda _: consume_cancel(),
+    )
 
 
-# Block: Failure mode helper
-def _failure_mode(*, decision: str, was_cancelled: bool) -> str | None:
-    if was_cancelled:
-        return "cancelled"
-    return None
+# Block: Action history command
+def _action_history_command(
+    *,
+    pending_input: PendingInputRecord,
+    validated_action: Any,
+    action_command: dict[str, Any] | None,
+    emitted_event_types: list[str],
+) -> dict[str, Any]:
+    if validated_action.decision != "execute" or action_command is None:
+        command_payload = {
+            "target_channel": pending_input.channel,
+            "event_types": emitted_event_types,
+            "decision": validated_action.decision,
+            "decision_reason": validated_action.decision_reason,
+            "related_input_id": pending_input.input_id,
+        }
+        if validated_action.proposal is not None:
+            command_payload["proposal_ref"] = str(validated_action.proposal["proposal_id"])
+        return command_payload
+    return {
+        **action_command,
+        "event_types": emitted_event_types,
+        "decision": validated_action.decision,
+        "decision_reason": validated_action.decision_reason,
+        "related_input_id": pending_input.input_id,
+    }
+
+
+# Block: Action command id
+def _action_command_id(*, decision: str, action_command: dict[str, Any] | None) -> str:
+    if decision == "execute":
+        if action_command is None:
+            raise RuntimeError("execute decision requires action_command")
+        return str(action_command["command_id"])
+    return _opaque_id("cmd")
 
 
 # Block: Time helper

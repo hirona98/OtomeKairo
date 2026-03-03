@@ -55,6 +55,7 @@ def _build_messages(request: CognitionRequest) -> list[dict[str, str]]:
             "action_proposals の各要素は object にし、action_type と priority を必ず入れる。",
             "action_type は speak, browse, notify, wait のいずれかだけを使う。",
             "speak と notify を返す場合は target_channel に browser_chat を必ず入れる。",
+            "browse を返す場合は query に非空の検索文字列を必ず入れる。",
             "delivery_mode は stream に固定する。",
             f"現在の感情ラベル: {persona_snapshot['current_emotion']['primary_label']}",
             f"話し方: {selection_profile['interaction_style']['speech_tone']}",
@@ -184,6 +185,10 @@ def _validate_action_proposals(action_proposals: list[Any]) -> None:
             target_channel = proposal.get("target_channel")
             if target_channel != "browser_chat":
                 raise RuntimeError("LiteLLM cognition_result.action_proposals.speak_or_notify must target browser_chat")
+        if action_type == "browse":
+            query = proposal.get("query")
+            if not isinstance(query, str) or not query.strip():
+                raise RuntimeError("LiteLLM cognition_result.action_proposals.browse requires non-empty query")
         elif "target_channel" in proposal:
             target_channel = proposal["target_channel"]
             if not isinstance(target_channel, str) or not target_channel:
