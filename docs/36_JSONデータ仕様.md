@@ -786,20 +786,25 @@
 {
   "target_channel": "browser_chat",
   "event_types": ["status", "status", "token", "message", "status"],
-  "message_id": "msg_...",
-  "role": "assistant",
+  "decision": "execute",
+  "decision_reason": "speak_selected",
   "related_input_id": "inp_...",
-  "proposal_ref": "prop_..."
+  "proposal_ref": "prop_...",
+  "message_id": "msg_...",
+  "role": "assistant"
 }
 ```
 
-- 必須項目は `target_channel`、`event_types` である
+- 必須項目は `target_channel`、`event_types`、`decision`、`decision_reason` である
 - `target_channel` は、初期段階では `browser_chat` に固定する
 - `event_types` は、実際に出そうとした `ui_outbound_events.event_type` の順序付き配列である
+- `decision` は、`execute`、`hold`、`reject` のいずれかを持つ
+- `decision_reason` は、`action validator` がその決定にした理由コードを持つ
 - `message_id` は、`event_type = message` を含む命令だけに付ける
 - `role` は、`message_id` を伴うメッセージ応答だけに付ける
 - `related_input_id` は、入力に対する応答行動だけに付ける
 - `proposal_ref` は、`cognition_result.action_proposals` から確定した候補を追跡したいときに付ける
+- `hold` と `reject` では、`message_id` と `role` を付けず、`event_types` は `status` だけでもよい
 - `target_message_id` は、`cancel` のように既存メッセージを対象化する行動だけに付ける
 - `input_kind` は、未対応入力のエラー応答のように、原因となる入力種別を残したいときだけ付ける
 
@@ -812,11 +817,13 @@
 ```json
 {
   "emitted_event_types": ["status", "status", "token", "message", "status"],
-  "message_id": "msg_...",
   "status_code_after": "idle",
   "was_cancelled": false,
   "token_count": 3,
   "final_message_emitted": true,
+  "validator_decision": "execute",
+  "validator_reason": "speak_selected",
+  "selected_action_type": "speak",
   "action_candidate_score": {
     "proposal_id": "prop_...",
     "hard_gate_passed": true,
@@ -832,7 +839,7 @@
 }
 ```
 
-- 必須項目は `emitted_event_types` である
+- 必須項目は `emitted_event_types`、`validator_decision`、`validator_reason`、`action_candidate_score` である
 - `emitted_event_types` は、実際に `ui_outbound_events` へ追記した `event_type` の順序付き配列である
 - `message_id` は、メッセージ応答を生成した場合だけに付ける
 - `notice_code` は、`notice` を生成した場合だけに付ける
@@ -841,7 +848,11 @@
 - `was_cancelled` は、途中停止が起きた応答だけに付ける
 - `token_count` は、`token` を流した応答だけに付ける
 - `final_message_emitted` は、最後に `message` を確定したかどうかを持つ
+- `validator_decision` は、`action validator` の決定結果を持つ
+- `validator_reason` は、`action validator` の決定理由コードを持つ
+- `selected_action_type` は、比較で最上位になった候補の `action_type` を残したいときに付ける
 - `action_candidate_score` は、`action validator` の最小比較結果を残したいときに付ける
+- `hold` と `reject` では、`message_id` を付けず、`final_message_emitted=false` にする
 
 <!-- Block: Memory Job Group -->
 ## 記憶ジョブの JSON

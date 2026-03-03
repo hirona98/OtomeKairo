@@ -18,7 +18,9 @@ EXPECTED_STABILITY_WEIGHT = 0.08
 # Block: Validation result
 @dataclass(frozen=True, slots=True)
 class ValidatedChatAction:
-    proposal: dict[str, Any]
+    decision: str
+    decision_reason: str
+    proposal: dict[str, Any] | None
     action_candidate_score: dict[str, Any]
 
 
@@ -32,38 +34,66 @@ def validate_chat_response_action(
     response_text: str,
 ) -> ValidatedChatAction:
     proposals = _validated_action_proposals(cognition_result)
-    speak_proposals = [
-        proposal
-        for proposal in proposals
-        if proposal.get("action_type") == "speak" and proposal.get("target_channel") == pending_channel
-    ]
-    if not speak_proposals:
-        raise RuntimeError("cognition_result.action_proposals must include speak for the active channel")
-    _validate_invariants(cognition_input)
+    if not proposals:
+        return ValidatedChatAction(
+            decision="reject",
+            decision_reason="no_action_proposals",
+            proposal=None,
+            action_candidate_score=_empty_candidate_score(),
+        )
     scored_candidates = [
-        _score_speak_proposal(
+        _score_candidate(
             proposal=proposal,
             message_id=message_id,
+            pending_channel=pending_channel,
             cognition_input=cognition_input,
             response_text=response_text,
         )
-        for proposal in speak_proposals
+        for proposal in proposals
     ]
-    best_candidate = max(scored_candidates, key=lambda candidate: candidate["total_score"])
-    if float(best_candidate["personality_fit_score"]) < 0.30:
-        raise RuntimeError("validated speak proposal is below minimum personality_fit_score")
+    executable_candidates = [
+        candidate for candidate in scored_candidates if bool(candidate["hard_gate_passed"])
+    ]
+    if not executable_candidates:
+        best_candidate = max(scored_candidates, key=lambda candidate: candidate["total_score"])
+        return ValidatedChatAction(
+            decision="reject",
+            decision_reason="all_candidates_rejected_by_hard_gate",
+            proposal=None,
+            action_candidate_score=_candidate_payload(best_candidate),
+        )
+    best_candidate = max(executable_candidates, key=lambda candidate: candidate["total_score"])
+    action_type = str(best_candidate["proposal"]["action_type"])
     selected_proposal = _materialize_selected_proposal(
         proposal=best_candidate["proposal"],
         message_id=message_id,
     )
-    candidate_score = {
-        key: value
-        for key, value in best_candidate.items()
-        if key != "proposal"
-    }
+    if float(best_candidate["personality_fit_score"]) < 0.30:
+        return ValidatedChatAction(
+            decision="hold",
+            decision_reason="personality_fit_below_threshold",
+            proposal=selected_proposal,
+            action_candidate_score=_candidate_payload(best_candidate),
+        )
+    if action_type == "wait":
+        return ValidatedChatAction(
+            decision="hold",
+            decision_reason="wait_selected",
+            proposal=selected_proposal,
+            action_candidate_score=_candidate_payload(best_candidate),
+        )
+    if action_type != "speak":
+        return ValidatedChatAction(
+            decision="hold",
+            decision_reason="action_type_not_implemented",
+            proposal=selected_proposal,
+            action_candidate_score=_candidate_payload(best_candidate),
+        )
     return ValidatedChatAction(
+        decision="execute",
+        decision_reason="speak_selected",
         proposal=selected_proposal,
-        action_candidate_score=candidate_score,
+        action_candidate_score=_candidate_payload(best_candidate),
     )
 
 
@@ -80,37 +110,44 @@ def _validated_action_proposals(cognition_result: dict[str, Any]) -> list[dict[s
     return validated_proposals
 
 
-# Block: Invariant validation
-def _validate_invariants(cognition_input: dict[str, Any]) -> None:
-    invariants = cognition_input["persona_snapshot"]["invariants"]
-    forbidden_action_types = invariants.get("forbidden_action_types", [])
-    if "speak" in forbidden_action_types:
-        raise RuntimeError("invariants forbid speak")
-
-
 # Block: Candidate scoring
-def _score_speak_proposal(
+def _score_candidate(
     *,
     proposal: dict[str, Any],
     message_id: str,
+    pending_channel: str,
     cognition_input: dict[str, Any],
     response_text: str,
 ) -> dict[str, Any]:
+    action_type = _validated_action_type(proposal)
     selection_profile = cognition_input["selection_profile"]
     relationship_priorities = selection_profile["relationship_priorities"]
     drive_bias = selection_profile["drive_bias"]
     interaction_style = selection_profile["interaction_style"]
     learned_aversions = selection_profile["learned_aversions"]
+    hard_gate_passed = _passes_hard_gate(
+        proposal=proposal,
+        pending_channel=pending_channel,
+        cognition_input=cognition_input,
+        learned_aversions=learned_aversions,
+    )
     priority_hint_score = _normalized_score(proposal.get("priority", 0.0))
-    personality_fit_score = _speech_personality_fit(
+    personality_fit_score = _personality_fit_score(
+        action_type=action_type,
         interaction_style=interaction_style,
         response_text=response_text,
     )
     relationship_fit_score = 0.80 if relationship_priorities else 0.50
-    experience_fit_score = _experience_fit_score(learned_aversions)
-    drive_relief_score = _drive_relief_score(drive_bias)
-    expected_stability_score = 0.80
-    task_fit_score = 1.00
+    experience_fit_score = _experience_fit_score(
+        action_type=action_type,
+        learned_aversions=learned_aversions,
+    )
+    drive_relief_score = _drive_relief_score(
+        action_type=action_type,
+        drive_bias=drive_bias,
+    )
+    expected_stability_score = _expected_stability_score(action_type)
+    task_fit_score = _task_fit_score(action_type)
     total_score = (
         TASK_FIT_WEIGHT * task_fit_score
         + PERSONALITY_FIT_WEIGHT * personality_fit_score
@@ -122,7 +159,7 @@ def _score_speak_proposal(
     return {
         "proposal": proposal,
         "proposal_id": _proposal_id(proposal, message_id),
-        "hard_gate_passed": True,
+        "hard_gate_passed": hard_gate_passed,
         "task_fit_score": task_fit_score,
         "personality_fit_score": personality_fit_score,
         "relationship_fit_score": relationship_fit_score,
@@ -134,7 +171,60 @@ def _score_speak_proposal(
     }
 
 
-# Block: Speech fit scoring
+# Block: Hard gate check
+def _passes_hard_gate(
+    *,
+    proposal: dict[str, Any],
+    pending_channel: str,
+    cognition_input: dict[str, Any],
+    learned_aversions: list[dict[str, Any]],
+) -> bool:
+    action_type = _validated_action_type(proposal)
+    invariants = cognition_input["persona_snapshot"]["invariants"]
+    forbidden_action_types = invariants.get("forbidden_action_types", [])
+    if action_type in forbidden_action_types:
+        return False
+    target_channel = proposal.get("target_channel")
+    if action_type == "speak" and target_channel != pending_channel:
+        return False
+    return not _has_strong_aversion(
+        action_type=action_type,
+        learned_aversions=learned_aversions,
+    )
+
+
+# Block: Personality fit scoring
+def _personality_fit_score(
+    *,
+    action_type: str,
+    interaction_style: dict[str, Any],
+    response_text: str,
+) -> float:
+    if action_type == "speak":
+        return _speech_personality_fit(
+            interaction_style=interaction_style,
+            response_text=response_text,
+        )
+    if action_type == "browse":
+        confirmation_style = interaction_style.get("confirmation_style")
+        if confirmation_style == "careful":
+            return 0.90
+        if confirmation_style == "balanced":
+            return 0.75
+        return 0.55
+    if action_type == "notify":
+        speech_tone = interaction_style.get("speech_tone")
+        if speech_tone in {"warm", "gentle"}:
+            return 0.85
+        return 0.65
+    if action_type == "wait":
+        confirmation_style = interaction_style.get("confirmation_style")
+        if confirmation_style == "careful":
+            return 0.90
+        return 0.60
+    raise RuntimeError("unsupported action_type for personality scoring")
+
+
 def _speech_personality_fit(
     *,
     interaction_style: dict[str, Any],
@@ -160,26 +250,89 @@ def _speech_personality_fit(
 
 
 # Block: Experience score
-def _experience_fit_score(learned_aversions: list[dict[str, Any]]) -> float:
+def _experience_fit_score(
+    *,
+    action_type: str,
+    learned_aversions: list[dict[str, Any]],
+) -> float:
+    if _has_strong_aversion(
+        action_type=action_type,
+        learned_aversions=learned_aversions,
+    ):
+        return 0.20
+    if action_type == "wait":
+        return 0.70
+    if action_type == "browse":
+        return 0.75
+    if action_type == "notify":
+        return 0.80
+    if action_type == "speak":
+        return 0.80
+    raise RuntimeError("unsupported action_type for experience scoring")
+
+
+def _has_strong_aversion(
+    *,
+    action_type: str,
+    learned_aversions: list[dict[str, Any]],
+) -> bool:
     for aversion in learned_aversions:
         if not isinstance(aversion, dict):
             raise RuntimeError("selection_profile.learned_aversions must contain only objects")
         if (
-            aversion.get("target_action_type") == "speak"
+            aversion.get("target_action_type") == action_type
             and _normalized_score(aversion.get("weight", 0.0)) >= 0.80
             and int(aversion.get("evidence_count", 0)) >= 4
         ):
-            return 0.20
-    return 0.80
+            return True
+    return False
 
 
 # Block: Drive score
-def _drive_relief_score(drive_bias: dict[str, Any]) -> float:
-    social_bias = drive_bias["social_bias"]
-    if not isinstance(social_bias, (int, float)):
-        raise RuntimeError("selection_profile.drive_bias.social_bias must be numeric")
-    normalized_value = (float(social_bias) + 1.0) / 2.0
+def _drive_relief_score(
+    *,
+    action_type: str,
+    drive_bias: dict[str, Any],
+) -> float:
+    bias_key = {
+        "speak": "social_bias",
+        "notify": "social_bias",
+        "browse": "exploration_bias",
+        "wait": "maintenance_bias",
+    }.get(action_type)
+    if bias_key is None:
+        raise RuntimeError("unsupported action_type for drive scoring")
+    bias_value = drive_bias[bias_key]
+    if not isinstance(bias_value, (int, float)):
+        raise RuntimeError("selection_profile.drive_bias values must be numeric")
+    normalized_value = (float(bias_value) + 1.0) / 2.0
     return _normalized_score(normalized_value)
+
+
+# Block: Task score
+def _task_fit_score(action_type: str) -> float:
+    if action_type == "speak":
+        return 1.00
+    if action_type == "notify":
+        return 0.75
+    if action_type == "browse":
+        return 0.65
+    if action_type == "wait":
+        return 0.60
+    raise RuntimeError("unsupported action_type for task scoring")
+
+
+# Block: Stability score
+def _expected_stability_score(action_type: str) -> float:
+    if action_type == "wait":
+        return 0.95
+    if action_type == "speak":
+        return 0.80
+    if action_type == "notify":
+        return 0.65
+    if action_type == "browse":
+        return 0.55
+    raise RuntimeError("unsupported action_type for stability scoring")
 
 
 # Block: Proposal materialization
@@ -194,12 +347,47 @@ def _materialize_selected_proposal(
     return selected_proposal
 
 
+# Block: Candidate payload
+def _candidate_payload(candidate: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in candidate.items()
+        if key != "proposal"
+    }
+
+
+# Block: Empty candidate score
+def _empty_candidate_score() -> dict[str, Any]:
+    return {
+        "proposal_id": "none",
+        "hard_gate_passed": False,
+        "task_fit_score": 0.0,
+        "personality_fit_score": 0.0,
+        "relationship_fit_score": 0.0,
+        "experience_fit_score": 0.0,
+        "drive_relief_score": 0.0,
+        "expected_stability_score": 0.0,
+        "priority_hint_score": 0.0,
+        "total_score": 0.0,
+    }
+
+
 # Block: Proposal id
 def _proposal_id(proposal: dict[str, Any], message_id: str) -> str:
     proposal_id = proposal.get("proposal_id")
     if isinstance(proposal_id, str) and proposal_id:
         return proposal_id
     return f"prop_{message_id}"
+
+
+# Block: Action type validation
+def _validated_action_type(proposal: dict[str, Any]) -> str:
+    action_type = proposal.get("action_type")
+    if not isinstance(action_type, str) or not action_type:
+        raise RuntimeError("cognition_result.action_proposals.action_type must be a non-empty string")
+    if action_type not in {"speak", "browse", "notify", "wait"}:
+        raise RuntimeError("unsupported action_type in chat validator")
+    return action_type
 
 
 # Block: Score helper

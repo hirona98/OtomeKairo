@@ -79,39 +79,46 @@ def run_cognition_for_chat_message(
         cognition_result=cognition_result,
         response_text=response_text,
     )
+    active_message_id = (
+        str(validated_action.proposal["message_id"])
+        if validated_action.proposal is not None
+        else message_id
+    )
+    should_stream_response = validated_action.decision == "execute"
 
     # Block: Streaming response loop
-    emit_event(
-        "status",
-        {
-            "status_code": "speaking",
-            "label": "応答を返しています",
-            "cycle_id": cycle_id,
-        },
-    )
-    for chunk_text in _iter_speech_chunks(response_text):
-        if consume_cancel(message_id):
-            was_cancelled = True
-            break
+    if should_stream_response:
         emit_event(
-            "token",
+            "status",
             {
-                "message_id": str(validated_action.proposal["message_id"]),
-                "text": chunk_text,
-                "chunk_index": emitted_chunk_count,
+                "status_code": "speaking",
+                "label": "応答を返しています",
+                "cycle_id": cycle_id,
             },
         )
-        emitted_chunk_count += 1
+        for chunk_text in _iter_speech_chunks(response_text):
+            if consume_cancel(active_message_id):
+                was_cancelled = True
+                break
+            emit_event(
+                "token",
+                {
+                    "message_id": active_message_id,
+                    "text": chunk_text,
+                    "chunk_index": emitted_chunk_count,
+                },
+            )
+            emitted_chunk_count += 1
     cognition_result["reflection_seed"]["token_count"] = emitted_chunk_count
     cognition_result["reflection_seed"]["was_cancelled"] = was_cancelled
 
     # Block: Final message
     message_created_at = _now_ms()
-    if response_text and not was_cancelled:
+    if response_text and should_stream_response and not was_cancelled:
         emit_event(
             "message",
             {
-                "message_id": str(validated_action.proposal["message_id"]),
+                "message_id": active_message_id,
                 "role": "assistant",
                 "text": response_text,
                 "created_at": message_created_at,
@@ -132,32 +139,52 @@ def run_cognition_for_chat_message(
 
     # Block: Action history
     emitted_event_types = [ui_event["event_type"] for ui_event in ui_events]
+    action_type = {
+        "execute": "emit_chat_response",
+        "hold": "hold_chat_response",
+        "reject": "reject_chat_response",
+    }[validated_action.decision]
+    command_payload = {
+        "target_channel": pending_input.channel,
+        "event_types": emitted_event_types,
+        "decision": validated_action.decision,
+        "decision_reason": validated_action.decision_reason,
+        "related_input_id": pending_input.input_id,
+    }
+    observed_effects = {
+        "emitted_event_types": emitted_event_types,
+        "status_code_after": "idle",
+        "was_cancelled": was_cancelled,
+        "token_count": emitted_chunk_count,
+        "final_message_emitted": bool(response_text and should_stream_response and not was_cancelled),
+        "validator_decision": validated_action.decision,
+        "validator_reason": validated_action.decision_reason,
+        "action_candidate_score": validated_action.action_candidate_score,
+    }
+    if validated_action.proposal is not None:
+        command_payload["proposal_ref"] = str(validated_action.proposal["proposal_id"])
+        observed_effects["selected_action_type"] = str(validated_action.proposal["action_type"])
+    if should_stream_response:
+        command_payload["message_id"] = active_message_id
+        command_payload["role"] = "assistant"
+        observed_effects["message_id"] = active_message_id
     action_results = [
         ActionHistoryRecord(
             result_id=_opaque_id("actres"),
             command_id=_opaque_id("cmd"),
-            action_type="emit_chat_response",
-            command={
-                "target_channel": pending_input.channel,
-                "event_types": emitted_event_types,
-                "message_id": str(validated_action.proposal["message_id"]),
-                "role": "assistant",
-                "related_input_id": pending_input.input_id,
-                "proposal_ref": str(validated_action.proposal["proposal_id"]),
-            },
+            action_type=action_type,
+            command=command_payload,
             started_at=resolved_at,
             finished_at=message_created_at,
-            status="stopped" if was_cancelled else "succeeded",
-            failure_mode="cancelled" if was_cancelled else None,
-            observed_effects={
-                "emitted_event_types": emitted_event_types,
-                "message_id": str(validated_action.proposal["message_id"]),
-                "status_code_after": "idle",
-                "was_cancelled": was_cancelled,
-                "token_count": emitted_chunk_count,
-                "final_message_emitted": bool(response_text and not was_cancelled),
-                "action_candidate_score": validated_action.action_candidate_score,
-            },
+            status=_action_status(
+                decision=validated_action.decision,
+                was_cancelled=was_cancelled,
+            ),
+            failure_mode=_failure_mode(
+                decision=validated_action.decision,
+                was_cancelled=was_cancelled,
+            ),
+            observed_effects=observed_effects,
             raw_result_ref=None,
             adapter_trace_ref={
                 "cognition_result": cognition_result,
@@ -217,6 +244,20 @@ def _iter_speech_chunks(response_text: str) -> Iterable[str]:
             current_chunk = ""
     if current_chunk:
         yield current_chunk
+
+
+# Block: Action status helper
+def _action_status(*, decision: str, was_cancelled: bool) -> str:
+    if was_cancelled:
+        return "stopped"
+    return "succeeded"
+
+
+# Block: Failure mode helper
+def _failure_mode(*, decision: str, was_cancelled: bool) -> str | None:
+    if was_cancelled:
+        return "cancelled"
+    return None
 
 
 # Block: Time helper
