@@ -943,6 +943,9 @@
   }
 
   function readNestedValue(root, path) {
+    if (isObject(root) && path in root) {
+      return root[path];
+    }
     const segments = path.split(".");
     let current = root;
     for (const segment of segments) {
@@ -955,6 +958,10 @@
   }
 
   function writeNestedValue(root, path, value) {
+    if (isObject(root) && path in root) {
+      root[path] = value;
+      return;
+    }
     const segments = path.split(".");
     let current = root;
     for (let index = 0; index < segments.length - 1; index += 1) {
