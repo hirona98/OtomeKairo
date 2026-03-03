@@ -56,60 +56,43 @@
         </div>
 
         <!-- Block: Settings note -->
-        <div class="settings-desc">CocoroGhost 風の画面構成です。主要な一部設定だけ保存でき、他の操作はダミーです。</div>
+        <div class="settings-desc">CocoroGhost 風の画面構成を保ちつつ、プリセットを含む設定全体をこの画面で編集します。</div>
 
         <!-- Block: Settings tabs -->
         <div class="settings-tabs" role="tablist" aria-label="設定タブ">
-          <button class="settings-tab active" type="button">ペルソナ</button>
-          <button class="settings-tab" type="button">会話</button>
-          <button class="settings-tab" type="button">記憶</button>
-          <button class="settings-tab" type="button">システム</button>
+          <button class="settings-tab active" data-settings-tab="behavior" type="button">振る舞い</button>
+          <button class="settings-tab" data-settings-tab="llm" type="button">会話</button>
+          <button class="settings-tab" data-settings-tab="memory" type="button">記憶</button>
+          <button class="settings-tab" data-settings-tab="system" type="button">システム</button>
         </div>
+
+        <div id="settings-status" class="status"></div>
 
         <!-- Block: Settings content -->
         <div class="settings-pages">
-          <section class="settings-page">
-            <div class="settings-card">
-              <div class="settings-card-title">主要設定</div>
-              <div class="settings-grid">
-                <label class="settings-field" for="setting-llm-default-model">
-                  <span class="settings-label">LLM モデル</span>
-                  <input id="setting-llm-default-model" class="settings-input" type="text" />
-                </label>
-                <label class="settings-field" for="setting-llm-temperature">
-                  <span class="settings-label">Temperature</span>
-                  <input id="setting-llm-temperature" class="settings-input" type="number" min="0" max="2" step="0.1" />
-                </label>
-                <label class="settings-field" for="setting-runtime-idle-tick-ms">
-                  <span class="settings-label">Idle Tick (ms)</span>
-                  <input id="setting-runtime-idle-tick-ms" class="settings-input" type="number" min="250" max="60000" step="250" />
-                </label>
-                <label class="settings-field" for="setting-output-tts-voice">
-                  <span class="settings-label">TTS Voice</span>
-                  <input id="setting-output-tts-voice" class="settings-input" type="text" />
-                </label>
-              </div>
-              <label class="settings-check">
-                <input id="setting-output-tts-enabled" type="checkbox" />
-                <span>ブラウザ TTS を有効化する</span>
-              </label>
-              <label class="settings-check">
-                <input id="setting-integrations-line-enabled" type="checkbox" />
-                <span>外部通知を有効化する</span>
-              </label>
-            </div>
+          <section class="settings-page" data-settings-page="behavior">
+            <div id="settings-behavior-card" class="settings-card"></div>
+          </section>
 
+          <section class="settings-page hidden" data-settings-page="llm">
+            <div id="settings-llm-card" class="settings-card"></div>
+          </section>
+
+          <section class="settings-page hidden" data-settings-page="memory">
+            <div id="settings-memory-card" class="settings-card"></div>
+          </section>
+
+          <section class="settings-page hidden" data-settings-page="system">
+            <div id="settings-output-card" class="settings-card"></div>
+            <div id="settings-direct-card" class="settings-card"></div>
             <div class="settings-card">
               <div class="settings-card-title">現在状態</div>
               <pre id="status-json" class="settings-json-view">{}</pre>
             </div>
-
             <div class="settings-card">
               <div class="settings-card-title">有効設定</div>
               <pre id="settings-json" class="settings-json-view">{}</pre>
             </div>
-
-            <div id="settings-status" class="status"></div>
           </section>
         </div>
       </section>

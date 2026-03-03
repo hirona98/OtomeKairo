@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 import time
 import uuid
-import os
 from pathlib import Path
 from typing import Any, Callable
 
@@ -35,7 +35,12 @@ DEFAULT_LEASE_TTL_MS = 60_000
 MAX_MEMORY_JOB_TRIES = 3
 PENDING_INPUT_FAILURE_REASON = "processing_failed"
 SETTINGS_OVERRIDE_FAILURE_REASON = "settings_processing_failed"
+SETTINGS_CHANGE_SET_FAILURE_REASON = "settings_editor_processing_failed"
 CANCEL_FAILURE_REASON = "cancel_processing_failed"
+
+
+# Block: Module logger
+logger = logging.getLogger(__name__)
 
 
 # Block: Runtime loop
@@ -49,8 +54,6 @@ class RuntimeLoop:
         cognition_client: CognitionClient,
         search_client: SearchClient,
         notification_client: NotificationClient,
-        line_channel_access_token: str,
-        line_to_user_id: str,
         lease_heartbeat_ms: int = DEFAULT_LEASE_HEARTBEAT_MS,
         lease_ttl_ms: int = DEFAULT_LEASE_TTL_MS,
     ) -> None:
@@ -67,13 +70,20 @@ class RuntimeLoop:
         self._cognition_client = cognition_client
         self._search_client = search_client
         self._notification_client = notification_client
-        self._line_channel_access_token = line_channel_access_token
-        self._line_to_user_id = line_to_user_id
         self._lease_heartbeat_ms = lease_heartbeat_ms
         self._lease_ttl_ms = lease_ttl_ms
         self._boot_reconciled = False
         self._prefer_long_cycle = False
         self._last_long_cycle_at_ms = 0
+        self._stop_requested = False
+        logger.info(
+            "runtime loop initialized",
+            extra={
+                "owner_token": owner_token,
+                "lease_heartbeat_ms": lease_heartbeat_ms,
+                "lease_ttl_ms": lease_ttl_ms,
+            },
+        )
 
     # Block: Single iteration
     def run_once(self) -> bool:
@@ -81,22 +91,43 @@ class RuntimeLoop:
         if not self._boot_reconciled:
             self._store.materialize_next_boot_settings()
             self._boot_reconciled = True
+            logger.info("runtime boot settings materialized")
         if self._prefer_long_cycle:
             processed_memory = self._process_memory_job_once()
             if processed_memory:
                 self._prefer_long_cycle = False
                 return True
+        processed_editor_settings = self._process_settings_change_set_once()
+        if processed_editor_settings:
+            self._prefer_long_cycle = True
+            return True
         processed_settings = self._process_settings_override_once()
         if processed_settings:
             self._prefer_long_cycle = True
             return True
         pending_input = self._store.claim_next_pending_input()
         if pending_input is not None:
+            logger.info(
+                "claimed pending input",
+                extra={
+                    "input_id": pending_input.input_id,
+                    "input_kind": pending_input.payload["input_kind"],
+                    "channel": pending_input.channel,
+                },
+            )
             self._process_claimed_pending_input(pending_input)
             self._prefer_long_cycle = True
             return True
         waiting_task = self._store.claim_next_waiting_browse_task()
         if waiting_task is not None:
+            logger.info(
+                "claimed waiting task",
+                extra={
+                    "task_id": waiting_task.task_id,
+                    "task_kind": waiting_task.task_kind,
+                    "task_status": waiting_task.task_status,
+                },
+            )
             self._process_claimed_waiting_task(waiting_task)
             self._prefer_long_cycle = True
             return True
@@ -144,8 +175,25 @@ class RuntimeLoop:
                 ui_events=ui_events,
                 commit_payload=commit_payload,
             )
+            logger.info(
+                "pending input finalized",
+                extra={
+                    "cycle_id": cycle_id,
+                    "input_id": pending_input.input_id,
+                    "input_kind": pending_input.payload["input_kind"],
+                    "resolution_status": resolution_status,
+                    "executed_action_types": [
+                        action_result.action_type for action_result in action_results
+                    ],
+                    "emitted_event_types": [ui_event["event_type"] for ui_event in ui_events],
+                },
+            )
         except Exception as error:
-            ui_events = _failed_pending_input_events(pending_input)
+            logger.exception("pending input processing failed: input_id=%s", pending_input.input_id)
+            ui_events = _failed_pending_input_events(
+                pending_input=pending_input,
+                error=error,
+            )
             self._store.finalize_pending_input_cycle(
                 pending_input=pending_input,
                 cycle_id=cycle_id,
@@ -197,7 +245,20 @@ class RuntimeLoop:
                     "final_task_status": execution.final_status,
                 },
             )
+            logger.info(
+                "waiting task finalized",
+                extra={
+                    "cycle_id": cycle_id,
+                    "task_id": task.task_id,
+                    "task_kind": task.task_kind,
+                    "final_status": execution.final_status,
+                    "executed_action_types": [
+                        action_result.action_type for action_result in execution.action_results
+                    ],
+                },
+            )
         except Exception as error:
+            logger.exception("waiting task processing failed: task_id=%s", task.task_id)
             ui_events = _failed_task_events(task=task, cycle_id=cycle_id)
             self._append_ui_events(cycle_id=cycle_id, ui_events=ui_events)
             failed_action = _failed_task_action_result(
@@ -259,8 +320,6 @@ class RuntimeLoop:
                 effective_settings=state_snapshot.effective_settings,
                 cognition_client=self._cognition_client,
                 notification_client=self._notification_client,
-                line_channel_access_token=self._line_channel_access_token,
-                line_to_user_id=self._line_to_user_id,
                 emit_ui_event=lambda ui_event: self._append_ui_event(cycle_id=cycle_id, ui_event=ui_event),
                 consume_cancel=lambda message_id: self._consume_matching_cancel(
                     channel=pending_input.channel,
@@ -356,6 +415,7 @@ class RuntimeLoop:
             )
             return True
         except Exception as error:
+            logger.exception("cancel processing failed: input_id=%s", pending_input.input_id)
             self._store.finalize_pending_input_cycle(
                 pending_input=pending_input,
                 cycle_id=cycle_id,
@@ -378,12 +438,60 @@ class RuntimeLoop:
             )
             return False
 
-    # Block: Settings iteration
+    # Block: Settings change set iteration
+    def _process_settings_change_set_once(self) -> bool:
+        settings_change_set = self._store.claim_next_settings_change_set()
+        if settings_change_set is None:
+            return False
+        logger.info(
+            "claimed settings change set",
+            extra={"change_set_id": settings_change_set.change_set_id},
+        )
+        try:
+            self._store.finalize_settings_change_set(
+                change_set=settings_change_set,
+                default_settings=self._default_settings,
+                final_status="applied",
+            )
+            logger.info(
+                "settings change set applied",
+                extra={"change_set_id": settings_change_set.change_set_id},
+            )
+        except Exception as error:
+            logger.exception(
+                "settings editor processing failed: change_set_id=%s",
+                settings_change_set.change_set_id,
+            )
+            self._store.finalize_settings_change_set(
+                change_set=settings_change_set,
+                default_settings=self._default_settings,
+                final_status="rejected",
+                reject_reason=f"{SETTINGS_CHANGE_SET_FAILURE_REASON}:{type(error).__name__}",
+            )
+            logger.warning(
+                "settings change set rejected",
+                extra={
+                    "change_set_id": settings_change_set.change_set_id,
+                    "reject_reason": f"{SETTINGS_CHANGE_SET_FAILURE_REASON}:{type(error).__name__}",
+                },
+            )
+        return True
+
+    # Block: Settings override iteration
     def _process_settings_override_once(self) -> bool:
         settings_override = self._store.claim_next_settings_override()
         if settings_override is None:
             return False
         cycle_id = _opaque_id("cycle")
+        logger.info(
+            "claimed settings override",
+            extra={
+                "cycle_id": cycle_id,
+                "override_id": settings_override.override_id,
+                "setting_key": settings_override.key,
+                "apply_scope": settings_override.apply_scope,
+            },
+        )
         try:
             self._store.append_input_journal_for_settings_override(
                 settings_override=settings_override,
@@ -399,7 +507,21 @@ class RuntimeLoop:
                 final_status=final_status,
                 reject_reason=reject_reason,
             )
+            logger.info(
+                "settings override finalized",
+                extra={
+                    "cycle_id": cycle_id,
+                    "override_id": settings_override.override_id,
+                    "setting_key": settings_override.key,
+                    "final_status": final_status,
+                    "reject_reason": reject_reason,
+                },
+            )
         except Exception as error:
+            logger.exception(
+                "settings override processing failed: override_id=%s",
+                settings_override.override_id,
+            )
             self._store.finalize_settings_override(
                 override_id=settings_override.override_id,
                 key=settings_override.key,
@@ -408,6 +530,15 @@ class RuntimeLoop:
                 cycle_id=cycle_id,
                 final_status="rejected",
                 reject_reason=f"{SETTINGS_OVERRIDE_FAILURE_REASON}:{type(error).__name__}",
+            )
+            logger.warning(
+                "settings override rejected after failure",
+                extra={
+                    "cycle_id": cycle_id,
+                    "override_id": settings_override.override_id,
+                    "setting_key": settings_override.key,
+                    "reject_reason": f"{SETTINGS_OVERRIDE_FAILURE_REASON}:{type(error).__name__}",
+                },
             )
         return True
 
@@ -418,9 +549,25 @@ class RuntimeLoop:
         memory_job = self._store.claim_next_memory_job()
         if memory_job is None:
             return False
+        logger.debug(
+            "claimed memory job",
+            extra={
+                "job_id": memory_job.job_id,
+                "job_kind": memory_job.job_kind,
+                "tries": memory_job.tries,
+            },
+        )
         try:
             self._memory_job_handler(memory_job.job_kind)(memory_job)
+            logger.debug(
+                "memory job completed",
+                extra={
+                    "job_id": memory_job.job_id,
+                    "job_kind": memory_job.job_kind,
+                },
+            )
         except Exception as error:
+            logger.exception("memory job processing failed: job_id=%s", memory_job.job_id)
             self._store.fail_claimed_memory_job(
                 memory_job=memory_job,
                 error=error,
@@ -492,13 +639,19 @@ class RuntimeLoop:
 
     # Block: Infinite loop
     def run_forever(self) -> None:
+        logger.info("runtime loop started")
         try:
-            while True:
+            while not self._stop_requested:
                 processed = self.run_once()
                 if not processed:
                     self._sleep_until_next_idle_tick()
         finally:
+            logger.info("runtime loop stopping")
             self._store.release_runtime_lease(owner_token=self._owner_token)
+
+    # Block: Runtime stop request
+    def request_stop(self) -> None:
+        self._stop_requested = True
 
     # Block: Idle timing
     def _idle_tick_ms(self) -> int:
@@ -513,11 +666,11 @@ class RuntimeLoop:
     # Block: Idle wait with heartbeat
     def _sleep_until_next_idle_tick(self) -> None:
         remaining_ms = self._idle_tick_ms()
-        while remaining_ms > 0:
+        while remaining_ms > 0 and not self._stop_requested:
             sleep_ms = min(remaining_ms, self._lease_heartbeat_ms)
             time.sleep(sleep_ms / 1000.0)
             remaining_ms -= sleep_ms
-            if remaining_ms > 0:
+            if remaining_ms > 0 and not self._stop_requested:
                 self._refresh_runtime_lease()
 
     # Block: Lease refresh
@@ -531,6 +684,7 @@ class RuntimeLoop:
 # Block: Runtime construction
 def build_runtime_loop(*, db_path: Path | None = None) -> RuntimeLoop:
     resolved_db_path = db_path or _default_db_path()
+    logger.info("initializing runtime loop", extra={"db_path": str(resolved_db_path)})
     store = SqliteStateStore(
         db_path=resolved_db_path,
         initializer_version=__version__,
@@ -543,8 +697,6 @@ def build_runtime_loop(*, db_path: Path | None = None) -> RuntimeLoop:
         cognition_client=_build_default_cognition_client(),
         search_client=_build_default_search_client(),
         notification_client=_build_default_notification_client(),
-        line_channel_access_token=_line_channel_access_token(),
-        line_to_user_id=_line_to_user_id(),
         lease_heartbeat_ms=_lease_heartbeat_ms(),
         lease_ttl_ms=_lease_ttl_ms(),
     )
@@ -643,14 +795,17 @@ def _unsupported_input_events(
 
 
 # Block: Failed input handling
-def _failed_pending_input_events(pending_input: PendingInputRecord) -> list[dict[str, Any]]:
+def _failed_pending_input_events(
+    pending_input: PendingInputRecord,
+    error: Exception,
+) -> list[dict[str, Any]]:
     return [
         {
             "channel": pending_input.channel,
             "event_type": "error",
             "payload": {
                 "error_code": PENDING_INPUT_FAILURE_REASON,
-                "message": "入力処理に失敗しました",
+                "message": f"入力処理に失敗しました: {_error_message_text(error)}",
                 "retriable": False,
             },
         }
@@ -692,15 +847,6 @@ def _build_default_notification_client() -> NotificationClient:
     from otomekairo.infra.line_notification_client import LineNotificationClient
 
     return LineNotificationClient()
-
-
-# Block: LINE credential helpers
-def _line_channel_access_token() -> str:
-    return os.environ.get("OTOMEKAIRO_LINE_CHANNEL_ACCESS_TOKEN", "")
-
-
-def _line_to_user_id() -> str:
-    return os.environ.get("OTOMEKAIRO_LINE_TO_USER_ID", "")
 
 
 def _opaque_id(prefix: str) -> str:

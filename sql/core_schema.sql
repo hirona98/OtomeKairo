@@ -40,6 +40,34 @@ CREATE TABLE runtime_settings (
     updated_at INTEGER NOT NULL
 );
 
+CREATE TABLE settings_editor_state (
+    row_id INTEGER PRIMARY KEY CHECK (row_id = 1),
+    active_behavior_preset_id TEXT NOT NULL,
+    active_llm_preset_id TEXT NOT NULL,
+    active_memory_preset_id TEXT NOT NULL,
+    active_output_preset_id TEXT NOT NULL,
+    direct_values_json TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    last_applied_change_set_id TEXT
+);
+
+CREATE TABLE settings_presets (
+    preset_id TEXT PRIMARY KEY,
+    preset_kind TEXT NOT NULL CHECK (
+        preset_kind IN ('behavior', 'llm', 'memory', 'output')
+    ),
+    preset_name TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    archived INTEGER NOT NULL CHECK (archived IN (0, 1)),
+    sort_order INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX idx_settings_presets_kind_archived_sort
+    ON settings_presets (preset_kind, archived, sort_order ASC, updated_at DESC);
+
 CREATE TABLE attention_state (
     row_id INTEGER PRIMARY KEY CHECK (row_id = 1),
     primary_focus_json TEXT NOT NULL,
@@ -182,6 +210,22 @@ CREATE TABLE settings_overrides (
 
 CREATE INDEX idx_settings_overrides_status_created
     ON settings_overrides (status, created_at ASC);
+
+CREATE TABLE settings_change_sets (
+    change_set_id TEXT PRIMARY KEY,
+    editor_revision INTEGER NOT NULL,
+    payload_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    status TEXT NOT NULL CHECK (
+        status IN ('queued', 'claimed', 'applied', 'rejected')
+    ),
+    claimed_at INTEGER,
+    resolved_at INTEGER,
+    reject_reason TEXT
+);
+
+CREATE INDEX idx_settings_change_sets_status_created
+    ON settings_change_sets (status, created_at ASC);
 
 CREATE TABLE ui_outbound_events (
     ui_event_id INTEGER PRIMARY KEY AUTOINCREMENT,

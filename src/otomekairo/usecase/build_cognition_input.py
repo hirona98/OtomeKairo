@@ -73,7 +73,9 @@ def build_cognition_input(
         "current_observation": current_observation,
         "context_budget": {
             "max_tokens": int(state_snapshot.effective_settings["runtime.context_budget_tokens"]),
-            "default_model": str(state_snapshot.effective_settings["llm.default_model"]),
+            "model": str(state_snapshot.effective_settings["llm.model"]),
+            "api_key": str(state_snapshot.effective_settings["llm.api_key"]),
+            "base_url": str(state_snapshot.effective_settings["llm.base_url"]),
             "temperature": float(state_snapshot.effective_settings["llm.temperature"]),
             "max_output_tokens": int(state_snapshot.effective_settings["llm.max_output_tokens"]),
         },

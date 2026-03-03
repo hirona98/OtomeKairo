@@ -40,6 +40,7 @@
 - 起動初期化を詰めるとき: `docs/37_起動初期化仕様.md`
 - 入力ストリーム運用を詰めるとき: `docs/38_入力ストリーム運用仕様.md`
 - 設定キー運用を詰めるとき: `docs/39_設定キー運用仕様.md`
+- 設定UIを詰めるとき: `docs/42_設定UI仕様.md`
 - 人格変化を詰めるとき: `docs/40_人格変化仕様.md`
 - 人格に基づく選択を詰めるとき: `docs/41_人格選択仕様.md`
 - 設定既定値を見るとき: `config/default_settings.json`
@@ -49,14 +50,15 @@
 - 採用済みの設計原則を確認するとき: `docs/10_目標アーキテクチャ.md` と `docs/30_システム設計.md` と `docs/31_ランタイム処理仕様.md` と `docs/32_記憶設計.md` と `docs/33_記憶ジョブ仕様.md` と `docs/34_SQLite論理スキーマ.md` と `docs/35_WebAPI仕様.md` と `docs/36_JSONデータ仕様.md` と `docs/37_起動初期化仕様.md` と `docs/38_入力ストリーム運用仕様.md` と `docs/39_設定キー運用仕様.md` と `docs/40_人格変化仕様.md` と `docs/41_人格選択仕様.md`
 - 記憶設計の背景判断を確認するとき: `docs/note/記憶設計に関する先行研究のメモ.md`
 - 自律行動設計の背景判断を確認するとき: `docs/note/自律行動システムの先行研究メモ.md`
-- 実装を始めるとき: `docs/10_目標アーキテクチャ.md` と `docs/30_システム設計.md` と `docs/31_ランタイム処理仕様.md` と `docs/32_記憶設計.md` と `docs/33_記憶ジョブ仕様.md` と `docs/34_SQLite論理スキーマ.md` と `docs/35_WebAPI仕様.md` と `docs/36_JSONデータ仕様.md` と `docs/37_起動初期化仕様.md` と `docs/38_入力ストリーム運用仕様.md` と `docs/39_設定キー運用仕様.md` と `docs/40_人格変化仕様.md` と `docs/41_人格選択仕様.md`
-- ドキュメントを直すとき: この `docs/00_index.md` と `docs/10_目標アーキテクチャ.md` と `docs/20_外部インタフェース.md` と `docs/30_システム設計.md` と `docs/31_ランタイム処理仕様.md` と `docs/32_記憶設計.md` と `docs/33_記憶ジョブ仕様.md` と `docs/34_SQLite論理スキーマ.md` と `docs/35_WebAPI仕様.md` と `docs/36_JSONデータ仕様.md` と `docs/37_起動初期化仕様.md` と `docs/38_入力ストリーム運用仕様.md` と `docs/39_設定キー運用仕様.md` と `docs/40_人格変化仕様.md` と `docs/41_人格選択仕様.md`
+- 実装を始めるとき: `docs/10_目標アーキテクチャ.md` と `docs/30_システム設計.md` と `docs/31_ランタイム処理仕様.md` と `docs/32_記憶設計.md` と `docs/33_記憶ジョブ仕様.md` と `docs/34_SQLite論理スキーマ.md` と `docs/35_WebAPI仕様.md` と `docs/36_JSONデータ仕様.md` と `docs/37_起動初期化仕様.md` と `docs/38_入力ストリーム運用仕様.md` と `docs/39_設定キー運用仕様.md` と `docs/40_人格変化仕様.md` と `docs/41_人格選択仕様.md` と `docs/42_設定UI仕様.md`
+- ドキュメントを直すとき: この `docs/00_index.md` と `docs/10_目標アーキテクチャ.md` と `docs/20_外部インタフェース.md` と `docs/30_システム設計.md` と `docs/31_ランタイム処理仕様.md` と `docs/32_記憶設計.md` と `docs/33_記憶ジョブ仕様.md` と `docs/34_SQLite論理スキーマ.md` と `docs/35_WebAPI仕様.md` と `docs/36_JSONデータ仕様.md` と `docs/37_起動初期化仕様.md` と `docs/38_入力ストリーム運用仕様.md` と `docs/39_設定キー運用仕様.md` と `docs/40_人格変化仕様.md` と `docs/41_人格選択仕様.md` と `docs/42_設定UI仕様.md`
 
 <!-- Block: Notes -->
 ## 参考メモ
 
 - 一時的な情報、比較検討、参考資料、最終設計書に不要な補足は `docs/note/` に置く
-- 研究メモは比較検討用であり、正本は `docs/10`、`docs/30`、`docs/31`、`docs/32`、`docs/33`、`docs/34`、`docs/35`、`docs/36`、`docs/37`、`docs/38`、`docs/39`、`docs/40`、`docs/41` だけで読める状態を維持する
+- 研究メモは比較検討用であり、正本は `docs/10`、`docs/30`、`docs/31`、`docs/32`、`docs/33`、`docs/34`、`docs/35`、`docs/36`、`docs/37`、`docs/38`、`docs/39`、`docs/40`、`docs/41`、`docs/42` だけで読める状態を維持する
+- 設定UIの目標仕様は `docs/42_設定UI仕様.md` を正本とする
 - 記憶設計の研究メモ: `docs/note/記憶設計に関する先行研究のメモ.md`
 - 自律行動システムの研究メモ: `docs/note/自律行動システムの先行研究メモ.md`
 - 類似システムの参考フロー図: `docs/note/ココロゴースト_システムフロー図.md`
@@ -80,5 +82,6 @@
 - 設定既定値を変更したら `config/default_settings.json` と `docs/35_WebAPI仕様.md` と `docs/37_起動初期化仕様.md` を更新する
 - 人格の可変傾向、経験からの人格変化が変わったら `docs/40_人格変化仕様.md` を更新する
 - 人格に基づく選択、hard gate、soft score、行動種別ごとの選び方が変わったら `docs/41_人格選択仕様.md` を更新する
+- 設定UIの保存モデル、プリセット、編集フローが変わったら `docs/42_設定UI仕様.md` を更新する
 - 初期 SQL 実装を変更したら `sql/core_schema.sql` と `docs/34_SQLite論理スキーマ.md` を両方更新する
 - 参考メモや一時資料を追加するときは `docs/note/` に置く

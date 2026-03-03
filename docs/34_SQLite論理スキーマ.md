@@ -22,7 +22,8 @@
 - 固定するのは、`SQLite` 上の論理型であり、Python 側の ORM モデル名やクラス名ではない
 - `events.jsonl` は外部派生ログなので、このドキュメントの直接管理対象にしない
 - `config/` 配下の設定ファイルは SQLite に入れない
-- ただし、現在有効な設定の反映結果だけは `runtime_settings` に保持してよい
+- ただし、現在有効な設定の反映結果は `runtime_settings` に保持してよい
+- 設定UIの編集正本は `settings_editor_state` と `settings_presets` に保持してよい
 
 <!-- Block: Common Rules -->
 ## 共通ルール
@@ -41,9 +42,9 @@
 ### テーブルの分類
 
 - append-only の正本ログは、`ui_outbound_events`、`input_journal`、`events`、`action_history`、`retrieval_runs`、`revisions`、`commit_records` とする
-- 更新で育つテーブルは、`db_meta`、`runtime_leases`、`self_state`、`runtime_settings`、`attention_state`、`body_state`、`world_state`、`drive_state`、`task_state`、`working_memory_items`、`recent_event_window_items`、`skill_registry`、`pending_inputs`、`settings_overrides`、`memory_states`、`preference_memory`、`event_affects`、`event_links`、`event_threads`、`state_links`、`event_entities`、`state_entities`、`event_preview_cache`、`memory_jobs`、`memory_job_payloads`、`vec_items` とする
+- 更新で育つテーブルは、`db_meta`、`runtime_leases`、`self_state`、`runtime_settings`、`settings_editor_state`、`settings_presets`、`attention_state`、`body_state`、`world_state`、`drive_state`、`task_state`、`working_memory_items`、`recent_event_window_items`、`skill_registry`、`pending_inputs`、`settings_overrides`、`settings_change_sets`、`memory_states`、`preference_memory`、`event_affects`、`event_links`、`event_threads`、`state_links`、`event_entities`、`state_entities`、`event_preview_cache`、`memory_jobs`、`memory_job_payloads`、`vec_items` とする
 - append-only テーブルは、論理削除でなく追記を基本とし、通常更新を前提にしない
-- 例外として `event_preview_cache`、`memory_jobs`、`pending_inputs`、`settings_overrides` は更新を前提とする
+- 例外として `event_preview_cache`、`memory_jobs`、`pending_inputs`、`settings_overrides`、`settings_change_sets` は更新を前提とする
 
 - 下の Mermaid 図は、テーブル群を役割ごとにまとめた見取り図である
 
@@ -51,13 +52,15 @@
 flowchart TD
     meta["起動メタ\n db_meta / runtime_leases"]
     runtime["ランタイム状態\n self_state / runtime_settings ... skill_registry"]
-    control["制御面\n pending_inputs / settings_overrides / ui_outbound_events"]
+    editor["設定UI正本\n settings_editor_state / settings_presets"]
+    control["制御面\n pending_inputs / settings_overrides / settings_change_sets / ui_outbound_events"]
     eventlog["観測・行動\n input_journal / action_history / events / commit_records"]
     memory["記憶本体\n memory_states ... retrieval_runs"]
     jobs["記憶ジョブ\n memory_jobs / memory_job_payloads"]
     index["索引\n vec_items / events_fts"]
 
     meta --> runtime
+    editor --> control
     runtime --> eventlog
     control --> eventlog
     eventlog --> memory
@@ -127,6 +130,24 @@ flowchart TD
   - `values_json` と `value_updated_at_json` の JSON 形は、`docs/36_JSONデータ仕様.md` を正本とする
   - `runtime` scope の設定反映は、この行を同じ短周期で更新する
   - `next_boot` scope の設定反映は、この行を即時更新せず、次回ランタイム起動時の materialize で更新する
+
+- `settings_editor_state`
+  - 役割: 設定UIが扱う全体編集状態の正本を 1 件で保持する
+  - 主キー: `row_id INTEGER PRIMARY KEY CHECK(row_id = 1)`
+  - 必須列: `active_behavior_preset_id`, `active_llm_preset_id`, `active_memory_preset_id`, `active_output_preset_id`, `direct_values_json`, `revision`, `updated_at`
+  - 任意列: `last_applied_change_set_id`
+  - `direct_values_json` は、設定UIの direct 値を全キーぶん持つ完全オブジェクトとする
+  - `direct_values_json` の JSON 形は、`docs/36_JSONデータ仕様.md` を正本とする
+  - `revision` は、`PUT /api/settings/editor` の楽観ロック用に単調増加の `INTEGER` で持つ
+
+- `settings_presets`
+  - 役割: 設定UIで複数保持するプリセット群の正本を保持する
+  - 主キー: `preset_id TEXT PRIMARY KEY`
+  - 必須列: `preset_kind`, `preset_name`, `payload_json`, `archived`, `sort_order`, `created_at`, `updated_at`
+  - `preset_kind` は、少なくとも `behavior`、`llm`、`memory`、`output` を区別する
+  - `payload_json` は、`preset_kind` ごとの固定形を持つ
+  - `payload_json` の JSON 形は、`docs/36_JSONデータ仕様.md` を正本とする
+  - 主要索引: `(preset_kind, archived, sort_order ASC, updated_at DESC)`
 
 - `attention_state`
   - 役割: 現在の注意断面を 1 件で保持する
@@ -213,6 +234,18 @@ flowchart TD
 - 主要索引: `(status, created_at ASC)`
 - `apply_scope="runtime"` で `applied` になった行は、同じ短周期で `runtime_settings` に反映する
 - `apply_scope="next_boot"` で `applied` になった行は、次回ランタイム起動時に `runtime_settings` へ materialize する候補として残す
+
+<!-- Block: Settings Change Sets -->
+### `settings_change_sets`
+
+- 役割: 設定UIの全体保存結果を、ランタイムへ渡す制御面キューとして保持する
+- 主キー: `change_set_id TEXT PRIMARY KEY`
+- 必須列: `editor_revision`, `payload_json`, `created_at`, `status`
+- 任意列: `claimed_at`, `resolved_at`, `reject_reason`
+- `status` は、少なくとも `queued`、`claimed`、`applied`、`rejected` を区別する
+- `payload_json` は、`PUT /api/settings/editor` の canonical な保存結果を 1 件ぶん持つ
+- `payload_json` の JSON 形は、`docs/36_JSONデータ仕様.md` を正本とする
+- 主要索引: `(status, created_at ASC)`
 
 <!-- Block: UI Outbound -->
 ### `ui_outbound_events`
@@ -451,14 +484,14 @@ flowchart TD
 <!-- Block: Boot Boundary -->
 ### 起動初期化の保存境界
 
-- 同じ起動 transaction に含めるのは、`db_meta`、`self_state`、`runtime_settings`、`attention_state`、`body_state`、`world_state`、`drive_state` とする
+- 同じ起動 transaction に含めるのは、`db_meta`、`self_state`、`runtime_settings`、`settings_editor_state`、必要なら初期の `settings_presets`、`attention_state`、`body_state`、`world_state`、`drive_state` とする
 - `runtime_leases` の取得と更新は、seed 用 transaction と分けてよい
 - スキーマ版不一致や seed 失敗時は、起動を中断し、短周期や長周期を開始しない
 
 <!-- Block: Short Cycle Boundary -->
 ### 短周期の保存境界
 
-- 同じ短周期 transaction に含めるのは、`pending_inputs`、`settings_overrides`、必要なら `runtime_settings`、`self_state`、`attention_state`、`body_state`、`world_state`、`drive_state`、`task_state`、`working_memory_items`、`recent_event_window_items`、`action_history`、`events`、`memory_jobs`、`memory_job_payloads`、`retrieval_runs`、`commit_records` とする
+- 同じ短周期 transaction に含めるのは、`pending_inputs`、`settings_overrides`、`settings_change_sets`、必要なら `runtime_settings`、`settings_editor_state`、`settings_presets`、`self_state`、`attention_state`、`body_state`、`world_state`、`drive_state`、`task_state`、`working_memory_items`、`recent_event_window_items`、`action_history`、`events`、`memory_jobs`、`memory_job_payloads`、`retrieval_runs`、`commit_records` とする
 - `input_journal` は、短周期 transaction の前に先行追記してよい
 - `ui_outbound_events` は、短周期 transaction と分離した append-only 追記を許す
 - `events.jsonl` は、`commit_records` をもとに後段で派生同期する
@@ -479,5 +512,6 @@ flowchart TD
 - コア状態の短周期保存と、ブラウザ向け `ui_outbound_events` は保存境界を分ける
 - `commit_records` が、短周期確定と `events.jsonl` 再生成の主な起点になる
 - `memory_jobs` と `memory_job_payloads` を分け、`payload_ref` は JSON 参照として保持する
+- 設定UIの全体編集正本は `settings_editor_state` と `settings_presets` に分け、ランタイム反映キューは `settings_change_sets` として分離する
 - `events` テーブルのエピソード正本と、`events.jsonl` の外部追跡ログは別物として扱う
 - このドキュメントを基準に、`sql/core_schema.sql` を更新するか、次は ORM モデルを作る

@@ -17,6 +17,18 @@ HEARTBEAT_INTERVAL_SECONDS = 15.0
 POLL_INTERVAL_SECONDS = 0.1
 
 
+# Block: Graceful SSE response
+class GracefulEventStreamResponse(StreamingResponse):
+    async def listen_for_disconnect(self, receive) -> None:
+        while True:
+            try:
+                message = await receive()
+            except asyncio.CancelledError:
+                return
+            if message["type"] == "http.disconnect":
+                return
+
+
 # Block: Router factory
 def build_chat_stream_router(services: AppServices) -> APIRouter:
     router = APIRouter()
@@ -37,7 +49,7 @@ def build_chat_stream_router(services: AppServices) -> APIRouter:
             last_event_id=parsed_last_event_id,
             stream_window=stream_window,
         )
-        return StreamingResponse(event_stream, media_type="text/event-stream")
+        return GracefulEventStreamResponse(event_stream, media_type="text/event-stream")
 
     return router
 

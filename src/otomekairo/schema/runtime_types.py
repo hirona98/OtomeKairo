@@ -26,11 +26,21 @@ class SettingsOverrideRecord:
     created_at: int
 
 
+# Block: Settings change set record
+@dataclass(frozen=True, slots=True)
+class SettingsChangeSetRecord:
+    change_set_id: str
+    editor_revision: int
+    payload_json: dict[str, Any]
+    created_at: int
+
+
 # Block: Memory job record
 @dataclass(frozen=True, slots=True)
 class MemoryJobRecord:
     job_id: str
     job_kind: str
+    tries: int
     created_at: int
     payload: dict[str, Any]
 

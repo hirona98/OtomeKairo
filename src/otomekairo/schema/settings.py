@@ -31,8 +31,12 @@ class SettingDefinition:
 
 # Block: Registry source
 SETTING_DEFINITIONS: tuple[SettingDefinition, ...] = (
-    SettingDefinition("llm.default_model", "string", ("runtime", "next_boot"), min_length=1, max_length=256),
+    SettingDefinition("llm.model", "string", ("runtime", "next_boot"), min_length=1, max_length=256),
+    SettingDefinition("llm.api_key", "string", ("runtime", "next_boot"), min_length=0, max_length=4096),
+    SettingDefinition("llm.base_url", "string", ("runtime", "next_boot"), min_length=0, max_length=512),
     SettingDefinition("llm.embedding_model", "string", ("runtime", "next_boot"), min_length=1, max_length=256),
+    SettingDefinition("llm.embedding_api_key", "string", ("runtime", "next_boot"), min_length=0, max_length=4096),
+    SettingDefinition("llm.embedding_base_url", "string", ("runtime", "next_boot"), min_length=0, max_length=512),
     SettingDefinition("llm.temperature", "number", ("runtime", "next_boot"), min_value=0.0, max_value=2.0),
     SettingDefinition("llm.max_output_tokens", "integer", ("runtime", "next_boot"), min_value=256, max_value=8192),
     SettingDefinition("runtime.idle_tick_ms", "integer", ("runtime", "next_boot"), min_value=250, max_value=60000),
@@ -42,13 +46,41 @@ SETTING_DEFINITIONS: tuple[SettingDefinition, ...] = (
     SettingDefinition("sensors.microphone.enabled", "boolean", ("runtime",)),
     SettingDefinition("output.tts.enabled", "boolean", ("runtime",)),
     SettingDefinition("output.tts.voice", "string", ("runtime", "next_boot"), min_length=1, max_length=128),
+    SettingDefinition("output.mode", "string", ("runtime", "next_boot"), min_length=1, max_length=64),
+    SettingDefinition("integrations.notify_route", "string", ("runtime", "next_boot"), min_length=1, max_length=64),
     SettingDefinition("integrations.sns.enabled", "boolean", ("runtime",)),
     SettingDefinition("integrations.line.enabled", "boolean", ("runtime",)),
+    SettingDefinition("integrations.line.channel_access_token", "string", ("runtime", "next_boot"), min_length=0, max_length=4096),
+    SettingDefinition("integrations.line.to_user_id", "string", ("runtime", "next_boot"), min_length=0, max_length=512),
+    SettingDefinition("integrations.discord.bot_token", "string", ("runtime", "next_boot"), min_length=0, max_length=4096),
+    SettingDefinition("integrations.discord.channel_id", "string", ("runtime", "next_boot"), min_length=0, max_length=256),
 )
 
 
 # Block: Registry index
 SETTING_DEFINITION_MAP = {definition.key: definition for definition in SETTING_DEFINITIONS}
+
+
+# Block: Editor setting constants
+SETTINGS_EDITOR_PRESET_KINDS = ("behavior", "llm", "memory", "output")
+SETTINGS_EDITOR_DIRECT_KEYS = (
+    "runtime.idle_tick_ms",
+    "runtime.long_cycle_min_interval_ms",
+    "sensors.microphone.enabled",
+    "sensors.camera.enabled",
+    "output.tts.enabled",
+    "integrations.sns.enabled",
+    "integrations.line.enabled",
+)
+
+
+# Block: Editor preset identifiers
+DEFAULT_SETTINGS_EDITOR_PRESET_IDS = {
+    "behavior": "preset_behavior_balanced",
+    "llm": "preset_llm_default",
+    "memory": "preset_memory_balanced",
+    "output": "preset_output_default",
+}
 
 
 # Block: Public registry helpers
@@ -62,6 +94,164 @@ def get_setting_definition(key: str) -> SettingDefinition:
 # Block: Defaults export
 def build_default_settings() -> dict[str, Any]:
     return dict(_read_default_settings_from_config())
+
+
+# Block: Direct key export
+def build_settings_editor_direct_keys() -> tuple[str, ...]:
+    return SETTINGS_EDITOR_DIRECT_KEYS
+
+
+# Block: Preset kind export
+def build_settings_editor_preset_kinds() -> tuple[str, ...]:
+    return SETTINGS_EDITOR_PRESET_KINDS
+
+
+# Block: Editor state seed
+def build_default_settings_editor_state(default_settings: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "active_behavior_preset_id": DEFAULT_SETTINGS_EDITOR_PRESET_IDS["behavior"],
+        "active_llm_preset_id": DEFAULT_SETTINGS_EDITOR_PRESET_IDS["llm"],
+        "active_memory_preset_id": DEFAULT_SETTINGS_EDITOR_PRESET_IDS["memory"],
+        "active_output_preset_id": DEFAULT_SETTINGS_EDITOR_PRESET_IDS["output"],
+        "direct_values_json": {
+            key: default_settings[key]
+            for key in SETTINGS_EDITOR_DIRECT_KEYS
+        },
+        "revision": 1,
+    }
+
+
+# Block: Preset seed export
+def build_default_settings_presets(default_settings: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+    return (
+        {
+            "preset_id": "preset_behavior_balanced",
+            "preset_kind": "behavior",
+            "preset_name": "標準",
+            "payload": {
+                "response_pace": "normal",
+                "proactivity_level": "medium",
+                "browse_preference": "balanced",
+                "notify_preference": "balanced",
+                "speech_style": "neutral",
+                "verbosity_bias": "balanced",
+            },
+        },
+        {
+            "preset_id": "preset_behavior_quiet",
+            "preset_kind": "behavior",
+            "preset_name": "静かめ",
+            "payload": {
+                "response_pace": "calm",
+                "proactivity_level": "low",
+                "browse_preference": "avoid",
+                "notify_preference": "quiet",
+                "speech_style": "soft",
+                "verbosity_bias": "short",
+            },
+        },
+        {
+            "preset_id": "preset_llm_default",
+            "preset_kind": "llm",
+            "preset_name": "標準",
+            "payload": {
+                "llm.model": str(default_settings["llm.model"]),
+                "llm.temperature": float(default_settings["llm.temperature"]),
+                "llm.max_output_tokens": int(default_settings["llm.max_output_tokens"]),
+                "llm.api_key": str(default_settings["llm.api_key"]),
+                "llm.base_url": str(default_settings["llm.base_url"]),
+            },
+        },
+        {
+            "preset_id": "preset_llm_precise",
+            "preset_kind": "llm",
+            "preset_name": "低温度",
+            "payload": {
+                "llm.model": str(default_settings["llm.model"]),
+                "llm.temperature": 0.3,
+                "llm.max_output_tokens": 1536,
+                "llm.api_key": str(default_settings["llm.api_key"]),
+                "llm.base_url": str(default_settings["llm.base_url"]),
+            },
+        },
+        {
+            "preset_id": "preset_memory_balanced",
+            "preset_kind": "memory",
+            "preset_name": "標準",
+            "payload": {
+                "llm.embedding_model": str(default_settings["llm.embedding_model"]),
+                "llm.embedding_api_key": str(default_settings["llm.embedding_api_key"]),
+                "llm.embedding_base_url": str(default_settings["llm.embedding_base_url"]),
+                "runtime.context_budget_tokens": int(default_settings["runtime.context_budget_tokens"]),
+                "retrieval_profile": {
+                    "semantic_top_k": 8,
+                    "recent_window_limit": 5,
+                    "fact_bias": 0.7,
+                    "summary_bias": 0.6,
+                    "event_bias": 0.4,
+                },
+            },
+        },
+        {
+            "preset_id": "preset_memory_dense",
+            "preset_kind": "memory",
+            "preset_name": "深め",
+            "payload": {
+                "llm.embedding_model": str(default_settings["llm.embedding_model"]),
+                "llm.embedding_api_key": str(default_settings["llm.embedding_api_key"]),
+                "llm.embedding_base_url": str(default_settings["llm.embedding_base_url"]),
+                "runtime.context_budget_tokens": 12288,
+                "retrieval_profile": {
+                    "semantic_top_k": 12,
+                    "recent_window_limit": 6,
+                    "fact_bias": 0.85,
+                    "summary_bias": 0.55,
+                    "event_bias": 0.35,
+                },
+            },
+        },
+        {
+            "preset_id": "preset_output_default",
+            "preset_kind": "output",
+            "preset_name": "標準",
+            "payload": {
+                "output.tts.voice": str(default_settings["output.tts.voice"]),
+                "output.mode": str(default_settings["output.mode"]),
+                "integrations.notify_route": str(default_settings["integrations.notify_route"]),
+                "integrations.line.channel_access_token": str(default_settings["integrations.line.channel_access_token"]),
+                "integrations.line.to_user_id": str(default_settings["integrations.line.to_user_id"]),
+                "integrations.discord.bot_token": str(default_settings["integrations.discord.bot_token"]),
+                "integrations.discord.channel_id": str(default_settings["integrations.discord.channel_id"]),
+            },
+        },
+        {
+            "preset_id": "preset_output_quiet",
+            "preset_kind": "output",
+            "preset_name": "UIのみ",
+            "payload": {
+                "output.tts.voice": str(default_settings["output.tts.voice"]),
+                "output.mode": "ui_only",
+                "integrations.notify_route": "ui_only",
+                "integrations.line.channel_access_token": str(default_settings["integrations.line.channel_access_token"]),
+                "integrations.line.to_user_id": str(default_settings["integrations.line.to_user_id"]),
+                "integrations.discord.bot_token": str(default_settings["integrations.discord.bot_token"]),
+                "integrations.discord.channel_id": str(default_settings["integrations.discord.channel_id"]),
+            },
+        },
+    )
+
+
+# Block: Editor payload normalization
+def normalize_settings_editor_document(document: Any) -> dict[str, Any]:
+    if not isinstance(document, dict):
+        raise SettingsValidationError("invalid_settings_editor_document", "settings editor payload must be an object")
+    editor_state = _normalize_editor_state(document.get("editor_state"))
+    preset_catalogs = _normalize_preset_catalogs(document.get("preset_catalogs"))
+    _validate_active_preset_ids(editor_state=editor_state, preset_catalogs=preset_catalogs)
+    return {
+        "editor_state": editor_state,
+        "preset_catalogs": preset_catalogs,
+    }
 
 
 # Block: Value normalization
@@ -135,6 +325,336 @@ def _validate_length(definition: SettingDefinition, requested_value: Any) -> Non
         raise SettingsValidationError("invalid_settings_value", f"{definition.key} is too short")
     if definition.max_length is not None and len(requested_value) > definition.max_length:
         raise SettingsValidationError("invalid_settings_value", f"{definition.key} is too long")
+
+
+# Block: Editor state normalization
+def _normalize_editor_state(editor_state: Any) -> dict[str, Any]:
+    if not isinstance(editor_state, dict):
+        raise SettingsValidationError("invalid_settings_editor_document", "editor_state must be an object")
+    normalized_revision = editor_state.get("revision")
+    if isinstance(normalized_revision, bool) or not isinstance(normalized_revision, int):
+        raise SettingsValidationError("invalid_settings_editor_document", "editor_state.revision must be integer")
+    direct_values = _normalize_direct_values(editor_state.get("direct_values"))
+    normalized_editor_state = {
+        "revision": normalized_revision,
+        "active_behavior_preset_id": _required_string(
+            editor_state.get("active_behavior_preset_id"),
+            "editor_state.active_behavior_preset_id",
+        ),
+        "active_llm_preset_id": _required_string(
+            editor_state.get("active_llm_preset_id"),
+            "editor_state.active_llm_preset_id",
+        ),
+        "active_memory_preset_id": _required_string(
+            editor_state.get("active_memory_preset_id"),
+            "editor_state.active_memory_preset_id",
+        ),
+        "active_output_preset_id": _required_string(
+            editor_state.get("active_output_preset_id"),
+            "editor_state.active_output_preset_id",
+        ),
+        "direct_values": direct_values,
+    }
+    return normalized_editor_state
+
+
+# Block: Direct values normalization
+def _normalize_direct_values(direct_values: Any) -> dict[str, Any]:
+    if not isinstance(direct_values, dict):
+        raise SettingsValidationError("invalid_settings_editor_document", "editor_state.direct_values must be an object")
+    expected_keys = set(SETTINGS_EDITOR_DIRECT_KEYS)
+    actual_keys = set(direct_values)
+    if actual_keys != expected_keys:
+        raise SettingsValidationError(
+            "invalid_settings_editor_document",
+            "editor_state.direct_values keys do not match direct key set",
+        )
+    normalized: dict[str, Any] = {}
+    for key in SETTINGS_EDITOR_DIRECT_KEYS:
+        definition = get_setting_definition(key)
+        value = direct_values[key]
+        _validate_type(definition, value)
+        _validate_range(definition, value)
+        _validate_length(definition, value)
+        normalized[key] = value
+    return normalized
+
+
+# Block: Preset catalog normalization
+def _normalize_preset_catalogs(preset_catalogs: Any) -> dict[str, list[dict[str, Any]]]:
+    if not isinstance(preset_catalogs, dict):
+        raise SettingsValidationError("invalid_settings_editor_document", "preset_catalogs must be an object")
+    expected_kinds = set(SETTINGS_EDITOR_PRESET_KINDS)
+    actual_kinds = set(preset_catalogs)
+    if actual_kinds != expected_kinds:
+        raise SettingsValidationError(
+            "invalid_settings_editor_document",
+            "preset_catalogs kinds do not match preset kinds",
+        )
+    normalized_catalogs: dict[str, list[dict[str, Any]]] = {}
+    for preset_kind in SETTINGS_EDITOR_PRESET_KINDS:
+        preset_entries = preset_catalogs[preset_kind]
+        if not isinstance(preset_entries, list) or not preset_entries:
+            raise SettingsValidationError(
+                "invalid_settings_editor_document",
+                f"preset_catalogs.{preset_kind} must be a non-empty array",
+            )
+        normalized_entries: list[dict[str, Any]] = []
+        seen_ids: set[str] = set()
+        for preset_entry in preset_entries:
+            normalized_entry = _normalize_preset_entry(
+                preset_kind=preset_kind,
+                preset_entry=preset_entry,
+            )
+            preset_id = str(normalized_entry["preset_id"])
+            if preset_id in seen_ids:
+                raise SettingsValidationError(
+                    "invalid_settings_editor_document",
+                    f"preset_catalogs.{preset_kind} contains duplicate preset_id",
+                )
+            seen_ids.add(preset_id)
+            normalized_entries.append(normalized_entry)
+        normalized_catalogs[preset_kind] = normalized_entries
+    return normalized_catalogs
+
+
+# Block: Preset entry normalization
+def _normalize_preset_entry(*, preset_kind: str, preset_entry: Any) -> dict[str, Any]:
+    if not isinstance(preset_entry, dict):
+        raise SettingsValidationError(
+            "invalid_settings_editor_document",
+            f"preset_catalogs.{preset_kind} entries must be objects",
+        )
+    archived = preset_entry.get("archived")
+    sort_order = preset_entry.get("sort_order")
+    updated_at = preset_entry.get("updated_at")
+    if not isinstance(archived, bool):
+        raise SettingsValidationError(
+            "invalid_settings_editor_document",
+            f"preset_catalogs.{preset_kind}.archived must be boolean",
+        )
+    if isinstance(sort_order, bool) or not isinstance(sort_order, int):
+        raise SettingsValidationError(
+            "invalid_settings_editor_document",
+            f"preset_catalogs.{preset_kind}.sort_order must be integer",
+        )
+    if isinstance(updated_at, bool) or not isinstance(updated_at, int):
+        raise SettingsValidationError(
+            "invalid_settings_editor_document",
+            f"preset_catalogs.{preset_kind}.updated_at must be integer",
+        )
+    payload = _normalize_preset_payload(
+        preset_kind=preset_kind,
+        payload=preset_entry.get("payload"),
+    )
+    return {
+        "preset_id": _required_string(
+            preset_entry.get("preset_id"),
+            f"preset_catalogs.{preset_kind}.preset_id",
+        ),
+        "preset_name": _required_string(
+            preset_entry.get("preset_name"),
+            f"preset_catalogs.{preset_kind}.preset_name",
+        ),
+        "archived": archived,
+        "sort_order": sort_order,
+        "updated_at": updated_at,
+        "payload": payload,
+    }
+
+
+# Block: Preset payload normalization
+def _normalize_preset_payload(*, preset_kind: str, payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise SettingsValidationError(
+            "invalid_settings_editor_document",
+            f"{preset_kind} preset payload must be an object",
+        )
+    if preset_kind == "behavior":
+        return _normalize_behavior_preset_payload(payload)
+    if preset_kind == "llm":
+        return _normalize_keyed_preset_payload(
+            payload=payload,
+            required_keys=(
+                "llm.model",
+                "llm.temperature",
+                "llm.max_output_tokens",
+                "llm.api_key",
+                "llm.base_url",
+            ),
+        )
+    if preset_kind == "memory":
+        return _normalize_memory_preset_payload(payload)
+    if preset_kind == "output":
+        return _normalize_output_preset_payload(payload)
+    raise SettingsValidationError("invalid_settings_editor_document", f"unsupported preset_kind: {preset_kind}")
+
+
+# Block: Behavior preset normalization
+def _normalize_behavior_preset_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    allowed_value_sets = {
+        "response_pace": {"calm", "normal", "quick"},
+        "proactivity_level": {"low", "medium", "high"},
+        "browse_preference": {"avoid", "balanced", "prefer"},
+        "notify_preference": {"quiet", "balanced", "proactive"},
+        "speech_style": {"soft", "neutral", "formal"},
+        "verbosity_bias": {"short", "balanced", "detailed"},
+    }
+    if set(payload) != set(allowed_value_sets):
+        raise SettingsValidationError("invalid_settings_editor_document", "behavior preset keys do not match fixed shape")
+    normalized: dict[str, Any] = {}
+    for key, allowed_values in allowed_value_sets.items():
+        value = _required_string(payload.get(key), f"behavior payload {key}")
+        if value not in allowed_values:
+            raise SettingsValidationError("invalid_settings_editor_document", f"behavior payload {key} is invalid")
+        normalized[key] = value
+    return normalized
+
+
+# Block: Memory preset normalization
+def _normalize_memory_preset_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    required_keys = {
+        "llm.embedding_model",
+        "llm.embedding_api_key",
+        "llm.embedding_base_url",
+        "runtime.context_budget_tokens",
+        "retrieval_profile",
+    }
+    if set(payload) != required_keys:
+        raise SettingsValidationError("invalid_settings_editor_document", "memory preset keys do not match fixed shape")
+    normalized = _normalize_keyed_preset_payload(
+        payload={
+            key: value
+            for key, value in payload.items()
+            if key != "retrieval_profile"
+        },
+        required_keys=(
+            "llm.embedding_model",
+            "llm.embedding_api_key",
+            "llm.embedding_base_url",
+            "runtime.context_budget_tokens",
+        ),
+    )
+    normalized["retrieval_profile"] = _normalize_retrieval_profile(payload["retrieval_profile"])
+    return normalized
+
+
+# Block: Output preset normalization
+def _normalize_output_preset_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    required_keys = {
+        "output.tts.voice",
+        "output.mode",
+        "integrations.notify_route",
+        "integrations.line.channel_access_token",
+        "integrations.line.to_user_id",
+        "integrations.discord.bot_token",
+        "integrations.discord.channel_id",
+    }
+    if set(payload) != required_keys:
+        raise SettingsValidationError("invalid_settings_editor_document", "output preset keys do not match fixed shape")
+    normalized = _normalize_keyed_preset_payload(
+        payload=payload,
+        required_keys=(
+            "output.tts.voice",
+            "output.mode",
+            "integrations.notify_route",
+            "integrations.line.channel_access_token",
+            "integrations.line.to_user_id",
+            "integrations.discord.bot_token",
+            "integrations.discord.channel_id",
+        ),
+    )
+    if normalized["output.mode"] not in {"ui_only", "ui_and_tts"}:
+        raise SettingsValidationError("invalid_settings_editor_document", "output.mode is invalid")
+    if normalized["integrations.notify_route"] not in {"ui_only", "line", "discord"}:
+        raise SettingsValidationError("invalid_settings_editor_document", "integrations.notify_route is invalid")
+    if normalized["integrations.notify_route"] == "line":
+        if not normalized["integrations.line.channel_access_token"] or not normalized["integrations.line.to_user_id"]:
+            raise SettingsValidationError("invalid_settings_editor_document", "line route requires line credentials")
+    if normalized["integrations.notify_route"] == "discord":
+        if not normalized["integrations.discord.bot_token"] or not normalized["integrations.discord.channel_id"]:
+            raise SettingsValidationError("invalid_settings_editor_document", "discord route requires discord credentials")
+    return normalized
+
+
+# Block: Retrieval profile normalization
+def _normalize_retrieval_profile(retrieval_profile: Any) -> dict[str, Any]:
+    if not isinstance(retrieval_profile, dict):
+        raise SettingsValidationError("invalid_settings_editor_document", "retrieval_profile must be an object")
+    required_keys = {
+        "semantic_top_k",
+        "recent_window_limit",
+        "fact_bias",
+        "summary_bias",
+        "event_bias",
+    }
+    if set(retrieval_profile) != required_keys:
+        raise SettingsValidationError("invalid_settings_editor_document", "retrieval_profile keys do not match fixed shape")
+    semantic_top_k = retrieval_profile["semantic_top_k"]
+    recent_window_limit = retrieval_profile["recent_window_limit"]
+    if isinstance(semantic_top_k, bool) or not isinstance(semantic_top_k, int) or semantic_top_k < 1 or semantic_top_k > 64:
+        raise SettingsValidationError("invalid_settings_editor_document", "semantic_top_k must be 1..64")
+    if isinstance(recent_window_limit, bool) or not isinstance(recent_window_limit, int) or recent_window_limit < 1 or recent_window_limit > 20:
+        raise SettingsValidationError("invalid_settings_editor_document", "recent_window_limit must be 1..20")
+    normalized = {
+        "semantic_top_k": semantic_top_k,
+        "recent_window_limit": recent_window_limit,
+    }
+    for key in ("fact_bias", "summary_bias", "event_bias"):
+        value = retrieval_profile[key]
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise SettingsValidationError("invalid_settings_editor_document", f"{key} must be number")
+        normalized_value = float(value)
+        if normalized_value < 0.0 or normalized_value > 1.0:
+            raise SettingsValidationError("invalid_settings_editor_document", f"{key} must be 0.0..1.0")
+        normalized[key] = normalized_value
+    return normalized
+
+
+# Block: Keyed preset normalization
+def _normalize_keyed_preset_payload(*, payload: dict[str, Any], required_keys: tuple[str, ...]) -> dict[str, Any]:
+    if set(payload) != set(required_keys):
+        raise SettingsValidationError("invalid_settings_editor_document", "preset payload keys do not match fixed shape")
+    normalized: dict[str, Any] = {}
+    for key in required_keys:
+        definition = get_setting_definition(key)
+        value = payload.get(key)
+        _validate_type(definition, value)
+        _validate_range(definition, value)
+        _validate_length(definition, value)
+        normalized[key] = value
+    return normalized
+
+
+# Block: Active preset validation
+def _validate_active_preset_ids(
+    *,
+    editor_state: dict[str, Any],
+    preset_catalogs: dict[str, list[dict[str, Any]]],
+) -> None:
+    for preset_kind, active_key in (
+        ("behavior", "active_behavior_preset_id"),
+        ("llm", "active_llm_preset_id"),
+        ("memory", "active_memory_preset_id"),
+        ("output", "active_output_preset_id"),
+    ):
+        active_preset_id = str(editor_state[active_key])
+        known_ids = {
+            str(entry["preset_id"])
+            for entry in preset_catalogs[preset_kind]
+        }
+        if active_preset_id not in known_ids:
+            raise SettingsValidationError(
+                "invalid_settings_editor_document",
+                f"{active_key} does not exist in preset_catalogs.{preset_kind}",
+            )
+
+
+# Block: Required string helper
+def _required_string(value: Any, field_name: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise SettingsValidationError("invalid_settings_editor_document", f"{field_name} must be non-empty string")
+    return value
 
 
 # Block: Config defaults

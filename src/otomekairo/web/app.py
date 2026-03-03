@@ -11,6 +11,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from otomekairo import __version__
 from otomekairo.infra.sqlite_state_store import StoreConflictError, StoreValidationError, SqliteStateStore
@@ -28,6 +29,26 @@ STREAM_RETENTION_WINDOW_MS = 86_400_000
 STREAM_RETAIN_MINIMUM_COUNT = 20_000
 
 
+# Block: Request context middleware
+class RequestContextMiddleware:
+    def __init__(self, app: ASGIApp, *, services: AppServices) -> None:
+        self._app = app
+        self._services = services
+        self._last_stream_janitor_at = 0
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self._app(scope, receive, send)
+            return
+        state = scope.setdefault("state", {})
+        state["request_id"] = f"req_{uuid.uuid4().hex}"
+        self._last_stream_janitor_at = _run_stream_janitor_if_due(
+            services=self._services,
+            last_stream_janitor_at=self._last_stream_janitor_at,
+        )
+        await self._app(scope, receive, send)
+
+
 # Block: App factory
 def create_app() -> FastAPI:
     store = SqliteStateStore(_default_db_path(), __version__)
@@ -37,17 +58,10 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title="OtomeKairo Settings Server", version=__version__)
     app.state.services = services
-    app.state.last_stream_janitor_at = 0
+    app.add_middleware(RequestContextMiddleware, services=services)
 
     # Block: Browser UI static files
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
-
-    # Block: Request id middleware
-    @app.middleware("http")
-    async def assign_request_id(request: Request, call_next):
-        request.state.request_id = f"req_{uuid.uuid4().hex}"
-        _run_stream_janitor_if_due(app=app, services=services)
-        return await call_next(request)
 
     # Block: API error handler
     @app.exception_handler(ApiError)
@@ -163,17 +177,20 @@ def _static_dir() -> Path:
 
 
 # Block: Stream janitor
-def _run_stream_janitor_if_due(*, app: FastAPI, services: AppServices) -> None:
+def _run_stream_janitor_if_due(
+    *,
+    services: AppServices,
+    last_stream_janitor_at: int,
+) -> int:
     now_ms = _now_ms()
-    last_stream_janitor_at = int(getattr(app.state, "last_stream_janitor_at", 0))
     if now_ms - last_stream_janitor_at < STREAM_JANITOR_INTERVAL_MS:
-        return
+        return last_stream_janitor_at
     services.store.prune_ui_outbound_events(
         channel="browser_chat",
         retention_window_ms=STREAM_RETENTION_WINDOW_MS,
         retain_minimum_count=STREAM_RETAIN_MINIMUM_COUNT,
     )
-    app.state.last_stream_janitor_at = now_ms
+    return now_ms
 
 
 # Block: Error response helper

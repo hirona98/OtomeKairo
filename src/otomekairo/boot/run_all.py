@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import signal
 import subprocess
@@ -10,6 +11,7 @@ import time
 from pathlib import Path
 
 from otomekairo import __version__
+from otomekairo.infra.logging_setup import configure_process_logging
 from otomekairo.infra.sqlite_state_store import SqliteStateStore
 
 
@@ -18,10 +20,16 @@ WEB_PROCESS = "web"
 RUNTIME_PROCESS = "runtime"
 
 
+# Block: Module logger
+logger = logging.getLogger(__name__)
+
+
 # Block: Combined entrypoint
 def main() -> None:
+    configure_process_logging(process_name="launcher")
     repo_root = _repo_root()
     runtime_already_running = _runtime_already_running(repo_root)
+    shutdown_state = {"requested": False}
     child_env = _child_environment(repo_root)
     web_url = _web_url(child_env)
     processes = {
@@ -37,17 +45,20 @@ def main() -> None:
             child_env=child_env,
             module_name="otomekairo.boot.run_runtime",
         )
-    _install_signal_handlers(processes)
-    print("OtomeKairo started")
-    print(f"  Web:     {web_url}")
+    _install_signal_handlers(shutdown_state)
+    logger.info("OtomeKairo started")
+    logger.info("Web: %s", web_url, extra={"web_url": web_url})
     if runtime_already_running:
-        print("  Runtime: already running (reuse existing lease)")
+        logger.info(
+            "Runtime: already running (reuse existing lease)",
+            extra={"runtime_mode": "reuse_existing"},
+        )
     else:
-        print("  Runtime: running")
+        logger.info("Runtime: running", extra={"runtime_mode": "spawned"})
     try:
-        _wait_for_exit(processes)
+        _wait_for_exit(processes, shutdown_state)
     except RuntimeError as error:
-        print(str(error), file=sys.stderr)
+        logger.error("%s", str(error))
         raise SystemExit(1) from error
     finally:
         _stop_child_processes(processes)
@@ -103,19 +114,23 @@ def _runtime_already_running(repo_root: Path) -> bool:
 
 
 # Block: Signal registration
-def _install_signal_handlers(processes: dict[str, subprocess.Popen[str]]) -> None:
+def _install_signal_handlers(shutdown_state: dict[str, bool]) -> None:
     def handle_signal(signum: int, _frame: object) -> None:
-        print(f"Received signal: {signum}")
-        _stop_child_processes(processes)
-        raise SystemExit(0)
+        del signum
+        shutdown_state["requested"] = True
 
     signal.signal(signal.SIGINT, handle_signal)
     signal.signal(signal.SIGTERM, handle_signal)
 
 
 # Block: Process wait
-def _wait_for_exit(processes: dict[str, subprocess.Popen[str]]) -> None:
+def _wait_for_exit(
+    processes: dict[str, subprocess.Popen[str]],
+    shutdown_state: dict[str, bool],
+) -> None:
     while True:
+        if shutdown_state["requested"]:
+            raise SystemExit(0)
         for process_name, process in processes.items():
             return_code = process.poll()
             if return_code is None:
@@ -128,17 +143,24 @@ def _wait_for_exit(processes: dict[str, subprocess.Popen[str]]) -> None:
 
 # Block: Process stop
 def _stop_child_processes(processes: dict[str, subprocess.Popen[str]]) -> None:
-    for process in processes.values():
-        if process.poll() is not None:
-            continue
-        process.terminate()
+    active_processes = [
+        process
+        for process in processes.values()
+        if process.poll() is None
+    ]
+    if not active_processes:
+        return
+    for process in active_processes:
+        process.send_signal(signal.SIGINT)
     deadline = time.time() + 5.0
-    for process in processes.values():
+    for process in active_processes:
         while process.poll() is None and time.time() < deadline:
             time.sleep(0.1)
-        if process.poll() is None:
-            process.kill()
-    for process in processes.values():
+    for process in active_processes:
+        if process.poll() is not None:
+            continue
+        process.kill()
+    for process in active_processes:
         if process.poll() is None:
             continue
         process.wait()

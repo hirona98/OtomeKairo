@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 from dataclasses import dataclass
@@ -12,6 +13,10 @@ from otomekairo.gateway.notification_client import NotificationClient
 from otomekairo.schema.runtime_types import ActionHistoryRecord, PendingInputRecord, TaskStateMutationRecord
 from otomekairo.usecase.dispatch_action_command import ActionDispatchResult, dispatch_chat_action_command
 from otomekairo.usecase.validate_action import validate_chat_response_action
+
+
+# Block: Module logger
+logger = logging.getLogger(__name__)
 
 
 # Block: Cognition execution
@@ -34,8 +39,6 @@ def run_cognition_for_browser_chat_input(
     effective_settings: dict[str, Any],
     cognition_client: CognitionClient,
     notification_client: NotificationClient,
-    line_channel_access_token: str,
-    line_to_user_id: str,
     emit_ui_event: Callable[[dict[str, Any]], None],
     consume_cancel: Callable[[str], bool],
 ) -> CognitionExecution:
@@ -69,6 +72,17 @@ def run_cognition_for_browser_chat_input(
 
     # Block: Structured cognition result
     cognition_result = cognition_client.generate_result(request).cognition_result
+    logger.debug(
+        "cognition result generated",
+        extra={
+            "cycle_id": cycle_id,
+            "input_id": pending_input.input_id,
+            "input_kind": pending_input.payload["input_kind"],
+            "intention_summary": cognition_result["intention_summary"],
+            "memory_focus_kind": cognition_result["memory_focus"]["focus_kind"],
+            "action_proposal_count": len(cognition_result["action_proposals"]),
+        },
+    )
     speech_draft = _validated_speech_draft(cognition_result)
     response_text = str(speech_draft["text"]).strip()
     _merge_reflection_seed(
@@ -90,6 +104,25 @@ def run_cognition_for_browser_chat_input(
         else message_id
     )
     action_command = validated_action.action_command
+    logger.info(
+        "action decision resolved",
+        extra={
+            "cycle_id": cycle_id,
+            "input_id": pending_input.input_id,
+            "decision": validated_action.decision,
+            "decision_reason": validated_action.decision_reason,
+            "selected_action_type": (
+                validated_action.proposal["action_type"]
+                if validated_action.proposal is not None
+                else None
+            ),
+            "command_type": (
+                action_command["command_type"]
+                if action_command is not None
+                else None
+            ),
+        },
+    )
     dispatch_result = _dispatch_result_for_decision(
         pending_input=pending_input,
         cycle_id=cycle_id,
@@ -100,14 +133,24 @@ def run_cognition_for_browser_chat_input(
         consume_cancel=lambda: consume_cancel(active_message_id),
         notification_client=notification_client,
         line_enabled=bool(effective_settings["integrations.line.enabled"]),
-        line_channel_access_token=line_channel_access_token,
-        line_to_user_id=line_to_user_id,
+        line_channel_access_token=str(effective_settings["integrations.line.channel_access_token"]),
+        line_to_user_id=str(effective_settings["integrations.line.to_user_id"]),
     )
     cognition_result["reflection_seed"]["token_count"] = int(
         dispatch_result.observed_effects.get("token_count", 0)
     )
     cognition_result["reflection_seed"]["was_cancelled"] = bool(
         dispatch_result.observed_effects.get("was_cancelled", False)
+    )
+    logger.debug(
+        "action dispatch finished",
+        extra={
+            "cycle_id": cycle_id,
+            "input_id": pending_input.input_id,
+            "action_type": dispatch_result.action_type,
+            "dispatch_status": dispatch_result.status,
+            "emitted_event_types": dispatch_result.emitted_event_types,
+        },
     )
 
     # Block: Action history

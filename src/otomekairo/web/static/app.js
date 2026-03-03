@@ -16,36 +16,92 @@
   const settingsReloadButton = document.getElementById("btn-settings-reload");
   const settingsSaveButton = document.getElementById("btn-settings-save");
   const settingsCloseButton = document.getElementById("btn-settings-close");
-  const llmDefaultModelInput = document.getElementById("setting-llm-default-model");
-  const llmTemperatureInput = document.getElementById("setting-llm-temperature");
-  const runtimeIdleTickInput = document.getElementById("setting-runtime-idle-tick-ms");
-  const outputTtsEnabledInput = document.getElementById("setting-output-tts-enabled");
-  const outputTtsVoiceInput = document.getElementById("setting-output-tts-voice");
-  const integrationsLineEnabledInput = document.getElementById("setting-integrations-line-enabled");
-  const settingsJson = document.getElementById("settings-json");
+  const settingsBehaviorCard = document.getElementById("settings-behavior-card");
+  const settingsLlmCard = document.getElementById("settings-llm-card");
+  const settingsMemoryCard = document.getElementById("settings-memory-card");
+  const settingsOutputCard = document.getElementById("settings-output-card");
+  const settingsDirectCard = document.getElementById("settings-direct-card");
+  const settingsStatus = document.getElementById("settings-status");
+  const settingsTabButtons = Array.from(document.querySelectorAll("[data-settings-tab]"));
+  const settingsPages = Array.from(document.querySelectorAll("[data-settings-page]"));
   const statusJson = document.getElementById("status-json");
+  const settingsJson = document.getElementById("settings-json");
   const connectionText = document.getElementById("connection-text");
   const runtimeText = document.getElementById("runtime-text");
+
+  // Block: Settings schema
+  const SETTINGS_TAB_KEYS = ["behavior", "llm", "memory", "system"];
+  const SETTINGS_PRESET_KINDS = ["behavior", "llm", "memory", "output"];
+  const PRESET_DESCRIPTORS = {
+    behavior: [
+      { path: "response_pace", label: "応答ペース", kind: "select", options: ["calm", "normal", "quick"] },
+      { path: "proactivity_level", label: "自発性", kind: "select", options: ["low", "medium", "high"] },
+      { path: "browse_preference", label: "検索傾向", kind: "select", options: ["avoid", "balanced", "prefer"] },
+      { path: "notify_preference", label: "通知傾向", kind: "select", options: ["quiet", "balanced", "proactive"] },
+      { path: "speech_style", label: "話し方", kind: "select", options: ["soft", "neutral", "formal"] },
+      { path: "verbosity_bias", label: "詳細さ", kind: "select", options: ["short", "balanced", "detailed"] },
+    ],
+    llm: [
+      { path: "llm.model", label: "LLM モデル (provider/model)", kind: "text" },
+      { path: "llm.temperature", label: "Temperature", kind: "number", min: 0, max: 2, step: 0.1 },
+      { path: "llm.max_output_tokens", label: "最大出力トークン", kind: "integer", min: 256, max: 8192, step: 1 },
+      { path: "llm.api_key", label: "LLM API キー", kind: "password" },
+      { path: "llm.base_url", label: "LLM Base URL（任意）", kind: "text" },
+    ],
+    memory: [
+      { path: "llm.embedding_model", label: "埋め込みモデル (provider/model)", kind: "text" },
+      { path: "llm.embedding_api_key", label: "埋め込み API キー", kind: "password" },
+      { path: "llm.embedding_base_url", label: "埋め込み Base URL（任意）", kind: "text" },
+      { path: "runtime.context_budget_tokens", label: "文脈上限", kind: "integer", min: 1024, max: 32768, step: 1 },
+      { path: "retrieval_profile.semantic_top_k", label: "Semantic Top K", kind: "integer", min: 1, max: 32, step: 1 },
+      { path: "retrieval_profile.recent_window_limit", label: "Recent Window", kind: "integer", min: 1, max: 16, step: 1 },
+      { path: "retrieval_profile.fact_bias", label: "Fact Bias", kind: "number", min: 0, max: 1, step: 0.05 },
+      { path: "retrieval_profile.summary_bias", label: "Summary Bias", kind: "number", min: 0, max: 1, step: 0.05 },
+      { path: "retrieval_profile.event_bias", label: "Event Bias", kind: "number", min: 0, max: 1, step: 0.05 },
+    ],
+    output: [
+      { path: "output.tts.voice", label: "TTS Voice", kind: "text" },
+      { path: "output.mode", label: "出力モード", kind: "select", options: ["ui_only", "ui_and_tts"] },
+      { path: "integrations.notify_route", label: "通知経路", kind: "select", options: ["ui_only", "line", "discord"] },
+      { path: "integrations.line.channel_access_token", label: "LINE トークン", kind: "password" },
+      { path: "integrations.line.to_user_id", label: "LINE 宛先", kind: "text" },
+      { path: "integrations.discord.bot_token", label: "Discord トークン", kind: "password" },
+      { path: "integrations.discord.channel_id", label: "Discord チャンネル", kind: "text" },
+    ],
+  };
+  const DIRECT_DESCRIPTORS = [
+    { key: "runtime.idle_tick_ms", label: "Idle Tick (ms)", kind: "integer", min: 250, max: 60000, step: 250 },
+    { key: "runtime.long_cycle_min_interval_ms", label: "Long Cycle (ms)", kind: "integer", min: 1000, max: 300000, step: 1000 },
+    { key: "sensors.microphone.enabled", label: "マイク入力", kind: "boolean" },
+    { key: "sensors.camera.enabled", label: "カメラ入力", kind: "boolean" },
+    { key: "output.tts.enabled", label: "ブラウザ TTS", kind: "boolean" },
+    { key: "integrations.sns.enabled", label: "SNS 連携", kind: "boolean" },
+    { key: "integrations.line.enabled", label: "外部通知", kind: "boolean" },
+  ];
 
   // Block: Runtime state
   let stream = null;
   let micRecognition = null;
-  const draftMessages = new Map();
   let statusTimerId = 0;
-  let latestSettings = null;
+  let latestStatusSnapshot = null;
+  let latestEditorSnapshot = null;
+  let editorDraft = null;
+  let activeSettingsTab = "behavior";
+  const draftMessages = new Map();
 
-  // Block: Startup
-  function start() {
+  // Block: Application startup
+  async function start() {
     installEventHandlers();
     updateSendEnabledState();
     connectStream();
-    void refreshSnapshots();
+    await refreshStatusSnapshot();
+    await loadSettingsEditorSnapshot();
     statusTimerId = window.setInterval(() => {
-      void refreshSnapshots();
+      void refreshStatusSnapshot();
     }, 5000);
   }
 
-  // Block: Event handlers
+  // Block: Event registration
   function installEventHandlers() {
     chatForm.addEventListener("submit", handleChatSubmit);
     chatInput.addEventListener("input", handleComposerInput);
@@ -61,9 +117,18 @@
     settingsSaveButton.addEventListener("click", () => {
       void handleSettingsSave();
     });
-    if (settingsDummyButton !== null) {
-      settingsDummyButton.addEventListener("click", () => {
-        appendNotice("settings_dummy", "このボタンはまだダミーです");
+    settingsDummyButton.addEventListener("click", () => {
+      appendNotice("settings_dummy", "このボタンはまだダミーです");
+    });
+    for (const button of settingsTabButtons) {
+      button.addEventListener("click", () => {
+        const tabKey = String(button.dataset.settingsTab || "");
+        if (!SETTINGS_TAB_KEYS.includes(tabKey)) {
+          appendError("設定タブの定義が不正です");
+          return;
+        }
+        activeSettingsTab = tabKey;
+        applySettingsTabState();
       });
     }
     micButton.addEventListener("click", () => {
@@ -75,13 +140,12 @@
     window.addEventListener("beforeunload", stopStream);
   }
 
-  // Block: Composer input
+  // Block: Composer handlers
   function handleComposerInput() {
     autoResizeComposer();
     updateSendEnabledState();
   }
 
-  // Block: Composer keydown
   function handleComposerKeyDown(event) {
     if (event.key !== "Enter" || event.shiftKey) {
       return;
@@ -93,7 +157,7 @@
     chatForm.requestSubmit();
   }
 
-  // Block: Stream connect
+  // Block: Stream lifecycle
   function connectStream() {
     stopStream();
     connectionText.textContent = "接続中...";
@@ -103,36 +167,36 @@
     });
     stream.addEventListener("status", (event) => {
       const payload = parsePayload(event.data);
-      if (!payload) {
+      if (payload === null) {
         return;
       }
       handleStatusEvent(payload);
     });
     stream.addEventListener("token", (event) => {
       const payload = parsePayload(event.data);
-      if (!payload) {
+      if (payload === null) {
         return;
       }
       handleTokenEvent(payload);
     });
     stream.addEventListener("message", (event) => {
       const payload = parsePayload(event.data);
-      if (!payload) {
+      if (payload === null) {
         return;
       }
       handleMessageEvent(payload);
     });
     stream.addEventListener("notice", (event) => {
       const payload = parsePayload(event.data);
-      if (!payload) {
+      if (payload === null) {
         return;
       }
       handleNoticeEvent(payload);
     });
     stream.addEventListener("error", (event) => {
-      if (event.data) {
+      if (typeof event.data === "string" && event.data) {
         const payload = parsePayload(event.data);
-        if (payload) {
+        if (payload !== null) {
           handleErrorEvent(payload);
           return;
         }
@@ -141,7 +205,6 @@
     });
   }
 
-  // Block: Stream stop
   function stopStream() {
     if (stream === null) {
       return;
@@ -150,7 +213,7 @@
     stream = null;
   }
 
-  // Block: Chat submit
+  // Block: Chat requests
   async function handleChatSubmit(event) {
     event.preventDefault();
     const text = chatInput.value.trim();
@@ -168,7 +231,6 @@
     }
   }
 
-  // Block: Cancel submit
   async function handleCancel() {
     cancelButton.disabled = true;
     try {
@@ -192,94 +254,91 @@
     }
   }
 
-  // Block: Settings open
+  async function submitChatText(text) {
+    const response = await fetch("/api/chat/input", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        channel: "browser_chat",
+        input_kind: "chat_message",
+        text,
+      }),
+    });
+    const payload = await readJson(response);
+    if (!response.ok) {
+      throw new Error(readErrorMessage(payload));
+    }
+    appendMessage({
+      role: "user",
+      text,
+      messageId: String(payload.input_id),
+      isDraft: false,
+    });
+  }
+
+  // Block: Settings panel actions
   async function openSettingsPanel() {
     chatPanel.classList.add("hidden");
     chatForm.classList.add("hidden");
     settingsPanel.classList.remove("hidden");
-    await refreshSnapshots();
-    try {
-      syncEditableSettingsFromSnapshot();
-    } catch (error) {
-      appendError(`設定表示に失敗しました: ${error.message}`);
-    }
+    await Promise.all([refreshStatusSnapshot(), loadSettingsEditorSnapshot()]);
   }
 
-  // Block: Settings close
   function closeSettingsPanel() {
     settingsPanel.classList.add("hidden");
     chatPanel.classList.remove("hidden");
     chatForm.classList.remove("hidden");
   }
 
-  // Block: Settings reload
   async function reloadSettingsPanel() {
-    await refreshSnapshots();
-    try {
-      syncEditableSettingsFromSnapshot();
-    } catch (error) {
-      appendError(`設定再読込に失敗しました: ${error.message}`);
-    }
+    await Promise.all([refreshStatusSnapshot(), loadSettingsEditorSnapshot()]);
   }
 
-  // Block: Settings save
   async function handleSettingsSave() {
-    let requestedSettings;
-    let effectiveSettings;
-    try {
-      effectiveSettings = requireEffectiveSettings();
-      requestedSettings = collectEditableSettings();
-    } catch (error) {
-      appendError(`設定保存に失敗しました: ${error.message}`);
-      return;
-    }
-    const changedEntries = Object.entries(requestedSettings).filter(([key, value]) => !Object.is(effectiveSettings[key], value));
-    if (changedEntries.length === 0) {
-      appendNotice("settings_no_changes", "変更はありません");
+    if (editorDraft === null) {
+      appendError("設定ドラフトが未初期化です");
       return;
     }
     settingsSaveButton.disabled = true;
     try {
-      for (const [key, requestedValue] of changedEntries) {
-        const response = await fetch("/api/settings/overrides", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            key,
-            requested_value: requestedValue,
-            apply_scope: "runtime",
-          }),
-        });
-        const payload = await readJson(response);
-        if (!response.ok) {
-          throw new Error(readErrorMessage(payload));
-        }
+      const response = await fetch("/api/settings/editor", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(editorDraft),
+      });
+      const payload = await readJson(response);
+      if (!response.ok) {
+        throw new Error(readErrorMessage(payload));
       }
-      appendNotice("settings_saved", `${changedEntries.length} 件の設定変更を受け付けました`);
-      await refreshSnapshots();
+      applyEditorSnapshot(payload);
+      settingsStatus.textContent = "設定を保存しました";
+      await refreshStatusSnapshot();
     } catch (error) {
-      appendError(`設定保存に失敗しました: ${error.message}`);
+      settingsStatus.textContent = `保存失敗: ${error.message}`;
     } finally {
       settingsSaveButton.disabled = false;
     }
   }
 
-  // Block: Mic click
+  // Block: Mic input
   async function handleMicClick() {
     if (micRecognition !== null) {
       micRecognition.stop();
       return;
     }
-    let effectiveSettings;
+    let runtimeProjection;
     try {
-      effectiveSettings = requireEffectiveSettings();
-      if (readBooleanSetting(effectiveSettings, "sensors.microphone.enabled") !== true) {
-        throw new Error("マイク入力は無効です");
-      }
+      runtimeProjection = requireRuntimeProjection();
     } catch (error) {
-      appendError(`音声入力を開始できません: ${error.message}`);
+      appendError(`マイク入力を開始できません: ${error.message}`);
+      return;
+    }
+    if (readBooleanRuntimeProjection(runtimeProjection, "sensors.microphone.enabled") !== true) {
+      appendError("マイク入力は無効です");
       return;
     }
     if (typeof window.SpeechRecognition !== "function") {
@@ -307,7 +366,6 @@
     recognition.start();
   }
 
-  // Block: Mic result
   async function handleMicResult(event) {
     if (!event.results || !event.results[0] || !event.results[0][0]) {
       appendError("音声入力の結果が不正です");
@@ -329,28 +387,18 @@
     }
   }
 
-  // Block: Snapshot refresh
-  async function refreshSnapshots() {
+  // Block: Snapshot loading
+  async function refreshStatusSnapshot() {
     try {
-      const [statusResponse, settingsResponse] = await Promise.all([
-        fetch("/api/status"),
-        fetch("/api/settings"),
-      ]);
-      const statusPayload = await readJson(statusResponse);
-      const settingsPayload = await readJson(settingsResponse);
-      if (!statusResponse.ok) {
-        throw new Error(readErrorMessage(statusPayload));
+      const response = await fetch("/api/status");
+      const payload = await readJson(response);
+      if (!response.ok) {
+        throw new Error(readErrorMessage(payload));
       }
-      if (!settingsResponse.ok) {
-        throw new Error(readErrorMessage(settingsPayload));
-      }
-      latestSettings = settingsPayload;
-      statusJson.textContent = formatJson(statusPayload);
-      settingsJson.textContent = formatJson(settingsPayload);
-      updateRuntimeChip(statusPayload);
-      connectionText.textContent = "SSE 接続中";
+      latestStatusSnapshot = payload;
+      statusJson.textContent = formatJson(payload);
+      updateRuntimeChip(payload);
     } catch (error) {
-      connectionText.textContent = "状態取得失敗";
       runtimeText.textContent = `状態取得に失敗しました: ${error.message}`;
       if (!settingsPanel.classList.contains("hidden")) {
         statusJson.textContent = runtimeText.textContent;
@@ -358,32 +406,278 @@
     }
   }
 
-  // Block: Settings form sync
-  function syncEditableSettingsFromSnapshot() {
-    const effectiveSettings = requireEffectiveSettings();
-    llmDefaultModelInput.value = readStringSetting(effectiveSettings, "llm.default_model");
-    llmTemperatureInput.value = String(readNumberSetting(effectiveSettings, "llm.temperature"));
-    runtimeIdleTickInput.value = String(readIntegerSetting(effectiveSettings, "runtime.idle_tick_ms"));
-    outputTtsEnabledInput.checked = readBooleanSetting(effectiveSettings, "output.tts.enabled");
-    outputTtsVoiceInput.value = readStringSetting(effectiveSettings, "output.tts.voice");
-    integrationsLineEnabledInput.checked = readBooleanSetting(effectiveSettings, "integrations.line.enabled");
+  async function loadSettingsEditorSnapshot() {
+    try {
+      const response = await fetch("/api/settings/editor");
+      const payload = await readJson(response);
+      if (!response.ok) {
+        throw new Error(readErrorMessage(payload));
+      }
+      applyEditorSnapshot(payload);
+    } catch (error) {
+      settingsStatus.textContent = `設定読込に失敗しました: ${error.message}`;
+      appendError(`設定読込に失敗しました: ${error.message}`);
+    }
   }
 
-  // Block: Status event handler
+  function applyEditorSnapshot(snapshot) {
+    validateEditorSnapshot(snapshot);
+    latestEditorSnapshot = snapshot;
+    editorDraft = {
+      editor_state: cloneJson(snapshot.editor_state),
+      preset_catalogs: cloneJson(snapshot.preset_catalogs),
+    };
+    settingsStatus.textContent = "サーバ正本を読込済み";
+    renderSettingsEditor();
+  }
+
+  function validateEditorSnapshot(snapshot) {
+    if (!isObject(snapshot)) {
+      throw new Error("設定スナップショットが不正です");
+    }
+    if (!isObject(snapshot.editor_state)) {
+      throw new Error("editor_state が不正です");
+    }
+    if (!isObject(snapshot.preset_catalogs)) {
+      throw new Error("preset_catalogs が不正です");
+    }
+    if (!isObject(snapshot.runtime_projection)) {
+      throw new Error("runtime_projection が不正です");
+    }
+  }
+
+  // Block: Settings editor rendering
+  function renderSettingsEditor() {
+    if (editorDraft === null || latestEditorSnapshot === null) {
+      return;
+    }
+    renderPresetCard("behavior", "振る舞いプリセット", settingsBehaviorCard);
+    renderPresetCard("llm", "会話プリセット", settingsLlmCard);
+    renderPresetCard("memory", "記憶プリセット", settingsMemoryCard);
+    renderPresetCard("output", "出力プリセット", settingsOutputCard);
+    renderDirectValuesCard();
+    settingsJson.textContent = formatJson(latestEditorSnapshot.runtime_projection);
+    if (latestStatusSnapshot !== null) {
+      statusJson.textContent = formatJson(latestStatusSnapshot);
+    }
+    applySettingsTabState();
+    attachSettingsEditorHandlers();
+    updateSettingsDirtyState();
+  }
+
+  function renderPresetCard(kind, title, container) {
+    const presetEntries = readPresetEntries(kind);
+    const activePresetId = readActivePresetId(kind);
+    const activePreset = requirePresetEntry(kind, activePresetId);
+    const selectOptions = presetEntries
+      .filter((entry) => entry.archived !== true || entry.preset_id === activePresetId)
+      .map((entry) => {
+        const selected = entry.preset_id === activePresetId ? " selected" : "";
+        const archivedTag = entry.archived === true ? " (archived)" : "";
+        return `<option value="${escapeHtml(entry.preset_id)}"${selected}>${escapeHtml(entry.preset_name)}${archivedTag}</option>`;
+      })
+      .join("");
+    const fieldsHtml = PRESET_DESCRIPTORS[kind]
+      .map((descriptor) => renderPresetField(kind, activePreset.payload, descriptor))
+      .join("");
+    container.innerHTML = `
+      <div class="settings-card-title">${escapeHtml(title)}</div>
+      <div class="settings-grid">
+        <label class="settings-field">
+          <span class="settings-label">使用プリセット</span>
+          <select class="settings-input" data-active-preset-kind="${escapeHtml(kind)}">${selectOptions}</select>
+        </label>
+        <label class="settings-field">
+          <span class="settings-label">プリセット名</span>
+          <input class="settings-input" type="text" value="${escapeHtml(activePreset.preset_name)}" data-preset-name-kind="${escapeHtml(kind)}" />
+        </label>
+      </div>
+      <div class="settings-grid">${fieldsHtml}</div>
+    `;
+  }
+
+  function renderPresetField(kind, payload, descriptor) {
+    const rawValue = readNestedValue(payload, descriptor.path);
+    const path = escapeHtml(descriptor.path);
+    const label = escapeHtml(descriptor.label);
+    if (descriptor.kind === "select") {
+      const optionsHtml = descriptor.options
+        .map((optionValue) => {
+          const selected = rawValue === optionValue ? " selected" : "";
+          return `<option value="${escapeHtml(optionValue)}"${selected}>${escapeHtml(optionValue)}</option>`;
+        })
+        .join("");
+      return `
+        <label class="settings-field">
+          <span class="settings-label">${label}</span>
+          <select class="settings-input" data-preset-kind="${escapeHtml(kind)}" data-preset-path="${path}" data-value-kind="string">${optionsHtml}</select>
+        </label>
+      `;
+    }
+    if (descriptor.kind === "password") {
+      return `
+        <label class="settings-field">
+          <span class="settings-label">${label}</span>
+          <input class="settings-input" type="password" value="${escapeHtml(requireString(rawValue, descriptor.path))}" data-preset-kind="${escapeHtml(kind)}" data-preset-path="${path}" data-value-kind="string" />
+        </label>
+      `;
+    }
+    if (descriptor.kind === "text") {
+      return `
+        <label class="settings-field">
+          <span class="settings-label">${label}</span>
+          <input class="settings-input" type="text" value="${escapeHtml(requireString(rawValue, descriptor.path))}" data-preset-kind="${escapeHtml(kind)}" data-preset-path="${path}" data-value-kind="string" />
+        </label>
+      `;
+    }
+    const numberValue = requireNumber(rawValue, descriptor.path);
+    const step = descriptor.step ?? 1;
+    const minAttr = descriptor.min !== undefined ? ` min="${descriptor.min}"` : "";
+    const maxAttr = descriptor.max !== undefined ? ` max="${descriptor.max}"` : "";
+    return `
+      <label class="settings-field">
+        <span class="settings-label">${label}</span>
+        <input class="settings-input" type="number" value="${String(numberValue)}" step="${String(step)}"${minAttr}${maxAttr} data-preset-kind="${escapeHtml(kind)}" data-preset-path="${path}" data-value-kind="${escapeHtml(descriptor.kind)}" />
+      </label>
+    `;
+  }
+
+  function renderDirectValuesCard() {
+    const directValues = requireDirectValues();
+    const fieldsHtml = DIRECT_DESCRIPTORS
+      .map((descriptor) => renderDirectField(directValues, descriptor))
+      .join("");
+    settingsDirectCard.innerHTML = `
+      <div class="settings-card-title">システム direct 値</div>
+      <div class="settings-grid">${fieldsHtml}</div>
+    `;
+  }
+
+  function renderDirectField(directValues, descriptor) {
+    const value = directValues[descriptor.key];
+    if (descriptor.kind === "boolean") {
+      return `
+        <label class="settings-check">
+          <input type="checkbox" ${value === true ? "checked" : ""} data-direct-key="${escapeHtml(descriptor.key)}" data-value-kind="boolean" />
+          <span>${escapeHtml(descriptor.label)}</span>
+        </label>
+      `;
+    }
+    const numberValue = descriptor.kind === "integer"
+      ? requireInteger(value, descriptor.key)
+      : requireNumber(value, descriptor.key);
+    const minAttr = descriptor.min !== undefined ? ` min="${descriptor.min}"` : "";
+    const maxAttr = descriptor.max !== undefined ? ` max="${descriptor.max}"` : "";
+    return `
+      <label class="settings-field">
+        <span class="settings-label">${escapeHtml(descriptor.label)}</span>
+        <input class="settings-input" type="number" value="${String(numberValue)}" step="${String(descriptor.step ?? 1)}"${minAttr}${maxAttr} data-direct-key="${escapeHtml(descriptor.key)}" data-value-kind="${escapeHtml(descriptor.kind)}" />
+      </label>
+    `;
+  }
+
+  function attachSettingsEditorHandlers() {
+    const activePresetInputs = settingsPanel.querySelectorAll("[data-active-preset-kind]");
+    for (const element of activePresetInputs) {
+      element.addEventListener("change", handleActivePresetChange);
+    }
+    const presetNameInputs = settingsPanel.querySelectorAll("[data-preset-name-kind]");
+    for (const element of presetNameInputs) {
+      element.addEventListener("input", handlePresetNameChange);
+    }
+    const presetValueInputs = settingsPanel.querySelectorAll("[data-preset-kind][data-preset-path]");
+    for (const element of presetValueInputs) {
+      element.addEventListener("input", handlePresetFieldChange);
+      element.addEventListener("change", handlePresetFieldChange);
+    }
+    const directValueInputs = settingsPanel.querySelectorAll("[data-direct-key]");
+    for (const element of directValueInputs) {
+      element.addEventListener("input", handleDirectFieldChange);
+      element.addEventListener("change", handleDirectFieldChange);
+    }
+  }
+
+  function handleActivePresetChange(event) {
+    if (editorDraft === null) {
+      appendError("設定ドラフトが未初期化です");
+      return;
+    }
+    const element = event.currentTarget;
+    const kind = String(element.dataset.activePresetKind || "");
+    if (!SETTINGS_PRESET_KINDS.includes(kind)) {
+      appendError("プリセット種別が不正です");
+      return;
+    }
+    writeActivePresetId(kind, String(element.value));
+    renderSettingsEditor();
+  }
+
+  function handlePresetNameChange(event) {
+    const element = event.currentTarget;
+    const kind = String(element.dataset.presetNameKind || "");
+    const presetEntry = requireActivePresetEntry(kind);
+    presetEntry.preset_name = String(element.value);
+    updateSettingsDirtyState();
+  }
+
+  function handlePresetFieldChange(event) {
+    const element = event.currentTarget;
+    const kind = String(element.dataset.presetKind || "");
+    const path = String(element.dataset.presetPath || "");
+    const valueKind = String(element.dataset.valueKind || "");
+    const presetEntry = requireActivePresetEntry(kind);
+    writeNestedValue(presetEntry.payload, path, readInputValue(element, valueKind));
+    updateSettingsDirtyState();
+  }
+
+  function handleDirectFieldChange(event) {
+    if (editorDraft === null) {
+      appendError("設定ドラフトが未初期化です");
+      return;
+    }
+    const element = event.currentTarget;
+    const key = String(element.dataset.directKey || "");
+    const valueKind = String(element.dataset.valueKind || "");
+    editorDraft.editor_state.direct_values[key] = readInputValue(element, valueKind);
+    updateSettingsDirtyState();
+  }
+
+  function updateSettingsDirtyState() {
+    if (editorDraft === null || latestEditorSnapshot === null) {
+      return;
+    }
+    const currentCanonical = JSON.stringify(editorDraft);
+    const serverCanonical = JSON.stringify({
+      editor_state: latestEditorSnapshot.editor_state,
+      preset_catalogs: latestEditorSnapshot.preset_catalogs,
+    });
+    settingsStatus.textContent = currentCanonical === serverCanonical
+      ? "保存済み"
+      : "未保存の変更があります";
+  }
+
+  function applySettingsTabState() {
+    for (const button of settingsTabButtons) {
+      const isActive = String(button.dataset.settingsTab || "") === activeSettingsTab;
+      button.classList.toggle("active", isActive);
+    }
+    for (const page of settingsPages) {
+      const isActive = String(page.dataset.settingsPage || "") === activeSettingsTab;
+      page.classList.toggle("hidden", !isActive);
+    }
+  }
+
+  // Block: Stream payload handlers
   function handleStatusEvent(payload) {
     const label = typeof payload.label === "string" ? payload.label : "状態更新";
     runtimeText.textContent = label;
   }
 
-  // Block: Token event handler
   function handleTokenEvent(payload) {
-    const messageId = String(payload.message_id || "");
-    if (!messageId) {
-      return;
-    }
-    const chunk = typeof payload.text === "string" ? payload.text : "";
+    const messageId = requireString(payload.message_id, "token.message_id");
+    const chunk = requireString(payload.text, "token.text");
     let messageNode = draftMessages.get(messageId);
-    if (!messageNode) {
+    if (messageNode === undefined) {
       messageNode = appendMessage({
         role: "assistant",
         text: "",
@@ -397,351 +691,180 @@
     scrollToBottom();
   }
 
-  // Block: Message event handler
   function handleMessageEvent(payload) {
-    const messageId = String(payload.message_id || "");
-    const text = typeof payload.text === "string" ? payload.text : "";
+    const messageId = requireString(payload.message_id, "message.message_id");
+    const role = requireString(payload.role, "message.role");
+    const text = requireString(payload.text, "message.text");
     let messageNode = draftMessages.get(messageId);
-    if (!messageNode) {
+    if (messageNode === undefined) {
       messageNode = appendMessage({
-        role: String(payload.role || "assistant"),
+        role,
         text,
         messageId,
         isDraft: false,
       });
     } else {
       const bubble = messageNode.querySelector(".bubble");
-      bubble.textContent = text;
       const label = messageNode.querySelector(".bubble-time");
-      label.textContent = buildMetaLabel(String(payload.role || "assistant"));
+      bubble.textContent = text;
+      label.textContent = buildMetaLabel(role);
       label.classList.remove("empty");
       draftMessages.delete(messageId);
     }
     speakMessageText(text);
-    scrollToBottom();
   }
 
-  // Block: Notice event handler
   function handleNoticeEvent(payload) {
-    const text = typeof payload.text === "string" ? payload.text : "通知";
-    appendNotice(String(payload.notice_code || "notice"), text);
+    const noticeCode = requireString(payload.notice_code, "notice.notice_code");
+    const text = typeof payload.label === "string" && payload.label
+      ? payload.label
+      : noticeCode;
+    appendNotice(noticeCode, text);
   }
 
-  // Block: Error event handler
   function handleErrorEvent(payload) {
-    const text = typeof payload.text === "string" ? payload.text : "エラーが発生しました";
-    appendError(text);
+    const message = typeof payload.message === "string" && payload.message
+      ? payload.message
+      : "処理中にエラーが発生しました";
+    appendError(message);
   }
 
-  // Block: Message append
+  // Block: UI message rendering
   function appendMessage({ role, text, messageId, isDraft }) {
-    const rowRole = role === "user" ? "user" : "ai";
     const row = document.createElement("div");
-    row.className = `bubble-row ${rowRole}`;
-    if (messageId) {
-      row.dataset.messageId = messageId;
-    }
+    row.className = `bubble-row ${role === "user" ? "right" : "left"}`;
+    row.dataset.messageId = messageId;
+
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+    bubble.textContent = text;
 
     const meta = document.createElement("div");
     meta.className = "bubble-time";
+    meta.textContent = buildMetaLabel(role);
     if (isDraft) {
       meta.classList.add("empty");
     }
-    meta.textContent = isDraft ? "" : buildMetaLabel(role, isDraft);
 
-    const bubble = document.createElement("div");
-    bubble.className = `bubble ${rowRole}`;
-    bubble.textContent = text;
-    if (rowRole === "user") {
-      row.append(meta, bubble);
-    } else {
-      row.append(bubble, meta);
-    }
+    row.appendChild(bubble);
+    row.appendChild(meta);
     chatScroll.appendChild(row);
     scrollToBottom();
     return row;
   }
 
-  // Block: Notice append
   function appendNotice(code, text) {
     const row = document.createElement("div");
-    row.className = "bubble-row ai";
-    row.dataset.noticeCode = String(code);
+    row.className = "bubble-row left";
+
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+    bubble.textContent = text;
 
     const meta = document.createElement("div");
     meta.className = "bubble-time";
-    meta.textContent = buildNoticeMetaLabel(String(code));
+    meta.textContent = buildMetaLabel(`notice:${code}`);
 
-    const bubble = document.createElement("div");
-    bubble.className = "bubble ai";
-    bubble.textContent = text;
-
-    row.append(bubble, meta);
+    row.appendChild(bubble);
+    row.appendChild(meta);
     chatScroll.appendChild(row);
     scrollToBottom();
   }
 
-  // Block: Error append
   function appendError(text) {
     const row = document.createElement("div");
-    row.className = "bubble-row ai";
+    row.className = "bubble-row left";
+
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+    bubble.textContent = text;
+    bubble.style.borderColor = "#aa3d52";
+    bubble.style.color = "#6b1022";
 
     const meta = document.createElement("div");
     meta.className = "bubble-time";
-    meta.textContent = "エラー";
+    meta.textContent = buildMetaLabel("error");
 
-    const bubble = document.createElement("div");
-    bubble.className = "bubble ai";
-    bubble.textContent = text;
-
-    row.append(bubble, meta);
+    row.appendChild(bubble);
+    row.appendChild(meta);
     chatScroll.appendChild(row);
     scrollToBottom();
   }
 
-  // Block: Runtime chip update
-  function updateRuntimeChip(statusPayload) {
-    const runtime = statusPayload.runtime || {};
-    const taskState = statusPayload.task_state || {};
-    const runningText = runtime.is_running ? "ランタイム稼働中" : "ランタイム停止中";
-    const activeCount = Number(taskState.active_task_count || 0);
-    const waitingCount = Number(taskState.waiting_task_count || 0);
-    runtimeText.textContent = `${runningText} / active:${activeCount} waiting:${waitingCount}`;
-  }
-
-  // Block: Payload parse
-  function parsePayload(text) {
-    try {
-      return JSON.parse(text);
-    } catch (_error) {
-      appendError("受信データの解析に失敗しました");
-      return null;
-    }
-  }
-
-  // Block: Response parse
-  async function readJson(response) {
-    const text = await response.text();
-    if (!text) {
-      return {};
-    }
-    return JSON.parse(text);
-  }
-
-  // Block: API error message
-  function readErrorMessage(payload) {
-    if (payload && typeof payload === "object" && typeof payload.message === "string" && payload.message.trim()) {
-      return payload.message;
-    }
-    throw new Error("エラー応答が不正です");
-  }
-
-  // Block: Chat send helper
-  async function submitChatText(text) {
-    const messageText = String(text).trim();
-    if (!messageText) {
-      throw new Error("空のメッセージは送信できません");
-    }
-    sendButton.disabled = true;
-    try {
-      const response = await fetch("/api/chat/input", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ text: messageText }),
-      });
-      const payload = await readJson(response);
-      if (!response.ok) {
-        throw new Error(readErrorMessage(payload));
-      }
-      appendMessage({
-        role: "user",
-        text: messageText,
-        messageId: payload && "input_id" in payload ? String(payload.input_id) : "",
-        isDraft: false,
-      });
-    } finally {
-      sendButton.disabled = false;
-    }
-  }
-
-  // Block: Meta label
-  function buildMetaLabel(role, isDraft = false) {
+  function buildMetaLabel(role) {
     if (role === "user") {
-      return "あなた";
+      return "user";
     }
-    if (isDraft) {
-      return "OtomeKairo（生成中）";
+    if (role === "assistant") {
+      return "assistant";
     }
-    return "OtomeKairo";
+    if (role.startsWith("notice:")) {
+      return role.slice("notice:".length);
+    }
+    return role;
   }
 
-  // Block: Notice meta label
-  function buildNoticeMetaLabel(code) {
-    if (code === "browse_queued") {
-      return "検索タスク";
+  // Block: Runtime status rendering
+  function updateRuntimeChip(statusPayload) {
+    if (!isObject(statusPayload) || !isObject(statusPayload.runtime)) {
+      throw new Error("status payload が不正です");
     }
-    if (code === "browse_completed") {
-      return "検索結果";
+    const runtime = statusPayload.runtime;
+    if (runtime.is_running === true) {
+      runtimeText.textContent = "人格ランタイム稼働中";
+      return;
     }
-    if (code === "settings_saved" || code === "settings_no_changes") {
-      return "設定";
-    }
-    if (code === "cancel_requested") {
-      return "停止";
-    }
-    if (code === "settings_dummy" || code === "camera_dummy") {
-      return "ダミー";
-    }
-    return "通知";
+    runtimeText.textContent = "人格ランタイム停止中";
   }
 
-  // Block: JSON format
-  function formatJson(value) {
-    return JSON.stringify(value, null, 2);
+  // Block: Composer helpers
+  function autoResizeComposer() {
+    chatInput.style.height = "auto";
+    chatInput.style.height = `${chatInput.scrollHeight}px`;
   }
 
-  // Block: Scroll helper
+  function updateSendEnabledState() {
+    sendButton.disabled = chatInput.value.trim().length === 0;
+  }
+
   function scrollToBottom() {
     chatScroll.scrollTop = chatScroll.scrollHeight;
   }
 
-  // Block: Effective settings access
-  function requireEffectiveSettings() {
-    if (!latestSettings || typeof latestSettings !== "object") {
-      throw new Error("設定スナップショットが未取得です");
-    }
-    const effectiveSettings = latestSettings.effective_settings;
-    if (!effectiveSettings || typeof effectiveSettings !== "object") {
-      throw new Error("有効設定が不正です");
-    }
-    return effectiveSettings;
-  }
-
-  // Block: String setting read
-  function readStringSetting(effectiveSettings, key) {
-    if (!(key in effectiveSettings) || typeof effectiveSettings[key] !== "string") {
-      throw new Error(`${key} が文字列ではありません`);
-    }
-    const value = effectiveSettings[key].trim();
-    if (!value) {
-      throw new Error(`${key} が空です`);
-    }
-    return value;
-  }
-
-  // Block: Number setting read
-  function readNumberSetting(effectiveSettings, key) {
-    if (!(key in effectiveSettings) || typeof effectiveSettings[key] !== "number" || !Number.isFinite(effectiveSettings[key])) {
-      throw new Error(`${key} が数値ではありません`);
-    }
-    return effectiveSettings[key];
-  }
-
-  // Block: Integer setting read
-  function readIntegerSetting(effectiveSettings, key) {
-    const value = readNumberSetting(effectiveSettings, key);
-    if (!Number.isInteger(value)) {
-      throw new Error(`${key} が整数ではありません`);
-    }
-    return value;
-  }
-
-  // Block: Boolean setting read
-  function readBooleanSetting(effectiveSettings, key) {
-    if (!(key in effectiveSettings) || typeof effectiveSettings[key] !== "boolean") {
-      throw new Error(`${key} が真偽値ではありません`);
-    }
-    return effectiveSettings[key];
-  }
-
-  // Block: Settings collect
-  function collectEditableSettings() {
-    const llmDefaultModel = llmDefaultModelInput.value.trim();
-    if (!llmDefaultModel) {
-      throw new Error("LLM モデルは必須です");
-    }
-    const llmTemperature = Number(llmTemperatureInput.value);
-    if (!Number.isFinite(llmTemperature) || llmTemperature < 0 || llmTemperature > 2) {
-      throw new Error("Temperature は 0.0 以上 2.0 以下で入力してください");
-    }
-    const runtimeIdleTick = Number(runtimeIdleTickInput.value);
-    if (!Number.isInteger(runtimeIdleTick) || runtimeIdleTick < 250 || runtimeIdleTick > 60000) {
-      throw new Error("Idle Tick は 250 以上 60000 以下の整数で入力してください");
-    }
-    const outputTtsVoice = outputTtsVoiceInput.value.trim();
-    if (!outputTtsVoice) {
-      throw new Error("TTS Voice は必須です");
-    }
-    return {
-      "llm.default_model": llmDefaultModel,
-      "llm.temperature": llmTemperature,
-      "runtime.idle_tick_ms": runtimeIdleTick,
-      "output.tts.enabled": outputTtsEnabledInput.checked,
-      "output.tts.voice": outputTtsVoice,
-      "integrations.line.enabled": integrationsLineEnabledInput.checked,
-    };
-  }
-
-  // Block: Mic state
-  function setMicListeningState(isListening) {
-    micButton.classList.toggle("listening", isListening);
-  }
-
-  // Block: Composer resize
-  function autoResizeComposer() {
-    chatInput.style.height = "auto";
-    chatInput.style.height = `${Math.min(chatInput.scrollHeight, 120)}px`;
-  }
-
-  // Block: Send state
-  function updateSendEnabledState() {
-    sendButton.disabled = chatInput.value.trim() === "";
-  }
-
-  // Block: Browser speech
+  // Block: Browser speech output
   function speakMessageText(text) {
-    let effectiveSettings;
+    if (!text) {
+      return;
+    }
+    if (!("speechSynthesis" in window)) {
+      return;
+    }
+    if (latestEditorSnapshot === null) {
+      return;
+    }
     try {
-      effectiveSettings = requireEffectiveSettings();
-      if (readBooleanSetting(effectiveSettings, "output.tts.enabled") !== true) {
+      const runtimeProjection = requireRuntimeProjection();
+      if (readBooleanRuntimeProjection(runtimeProjection, "output.tts.enabled") !== true) {
         return;
       }
-    } catch (error) {
-      appendError(`TTS を開始できません: ${error.message}`);
-      return;
-    }
-    if (!("speechSynthesis" in window) || typeof window.SpeechSynthesisUtterance !== "function") {
-      appendError("このブラウザでは TTS が使えません");
-      return;
-    }
-    const messageText = String(text || "").trim();
-    if (!messageText) {
-      return;
-    }
-    let requestedVoice;
-    try {
-      requestedVoice = readStringSetting(effectiveSettings, "output.tts.voice");
-    } catch (error) {
-      appendError(`TTS を開始できません: ${error.message}`);
-      return;
-    }
-    const utterance = new window.SpeechSynthesisUtterance(messageText);
-    if (requestedVoice !== "default") {
+      if (readStringRuntimeProjection(runtimeProjection, "output.mode") !== "ui_and_tts") {
+        return;
+      }
+      const voiceName = readStringRuntimeProjection(runtimeProjection, "output.tts.voice");
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = "ja-JP";
       const voices = window.speechSynthesis.getVoices();
-      const matchedVoice = voices.find((voice) => voice.name === requestedVoice);
-      if (!matchedVoice) {
-        appendError(`指定された TTS voice が見つかりません: ${requestedVoice}`);
-        return;
+      const selectedVoice = voices.find((voice) => voice.name === voiceName);
+      if (selectedVoice) {
+        utterance.voice = selectedVoice;
       }
-      utterance.voice = matchedVoice;
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(utterance);
+    } catch (error) {
+      appendError(`TTS を開始できません: ${error.message}`);
     }
-    stopBrowserSpeech();
-    window.speechSynthesis.speak(utterance);
   }
 
-  // Block: Browser speech stop
   function stopBrowserSpeech() {
     if (!("speechSynthesis" in window)) {
       return;
@@ -749,6 +872,218 @@
     window.speechSynthesis.cancel();
   }
 
-  // Block: Start application
-  start();
+  function setMicListeningState(isListening) {
+    micButton.classList.toggle("listening", isListening);
+  }
+
+  // Block: Settings draft helpers
+  function readPresetEntries(kind) {
+    if (editorDraft === null) {
+      throw new Error("設定ドラフトが未初期化です");
+    }
+    const entries = editorDraft.preset_catalogs[kind];
+    if (!Array.isArray(entries)) {
+      throw new Error(`${kind} preset_catalogs が不正です`);
+    }
+    return entries;
+  }
+
+  function readActivePresetId(kind) {
+    if (editorDraft === null) {
+      throw new Error("設定ドラフトが未初期化です");
+    }
+    const key = `active_${kind}_preset_id`;
+    return requireString(editorDraft.editor_state[key], key);
+  }
+
+  function writeActivePresetId(kind, presetId) {
+    if (editorDraft === null) {
+      throw new Error("設定ドラフトが未初期化です");
+    }
+    const key = `active_${kind}_preset_id`;
+    editorDraft.editor_state[key] = presetId;
+  }
+
+  function requireActivePresetEntry(kind) {
+    const presetId = readActivePresetId(kind);
+    return requirePresetEntry(kind, presetId);
+  }
+
+  function requirePresetEntry(kind, presetId) {
+    const entry = readPresetEntries(kind).find((candidate) => String(candidate.preset_id) === presetId);
+    if (entry === undefined) {
+      throw new Error(`${kind} のアクティブプリセットが見つかりません`);
+    }
+    if (!isObject(entry.payload)) {
+      throw new Error(`${kind} の payload が不正です`);
+    }
+    return entry;
+  }
+
+  function requireDirectValues() {
+    if (editorDraft === null || !isObject(editorDraft.editor_state)) {
+      throw new Error("direct_values が未初期化です");
+    }
+    const directValues = editorDraft.editor_state.direct_values;
+    if (!isObject(directValues)) {
+      throw new Error("direct_values が不正です");
+    }
+    return directValues;
+  }
+
+  function requireRuntimeProjection() {
+    if (latestEditorSnapshot === null || !isObject(latestEditorSnapshot.runtime_projection)) {
+      throw new Error("runtime_projection が未取得です");
+    }
+    return latestEditorSnapshot.runtime_projection;
+  }
+
+  function readNestedValue(root, path) {
+    if (isObject(root) && path in root) {
+      return root[path];
+    }
+    const segments = path.split(".");
+    let current = root;
+    for (const segment of segments) {
+      if (!isObject(current) || !(segment in current)) {
+        throw new Error(`${path} が不正です`);
+      }
+      current = current[segment];
+    }
+    return current;
+  }
+
+  function writeNestedValue(root, path, value) {
+    if (isObject(root) && path in root) {
+      root[path] = value;
+      return;
+    }
+    const segments = path.split(".");
+    let current = root;
+    for (let index = 0; index < segments.length - 1; index += 1) {
+      const segment = segments[index];
+      if (!isObject(current[segment])) {
+        current[segment] = {};
+      }
+      current = current[segment];
+    }
+    current[segments[segments.length - 1]] = value;
+  }
+
+  // Block: Value parsing
+  function readInputValue(element, valueKind) {
+    if (valueKind === "boolean") {
+      return element.checked === true;
+    }
+    if (valueKind === "integer") {
+      const value = Number.parseInt(element.value, 10);
+      if (!Number.isInteger(value)) {
+        throw new Error("整数入力が不正です");
+      }
+      return value;
+    }
+    if (valueKind === "number") {
+      const value = Number.parseFloat(element.value);
+      if (!Number.isFinite(value)) {
+        throw new Error("数値入力が不正です");
+      }
+      return value;
+    }
+    return String(element.value);
+  }
+
+  // Block: JSON helpers
+  async function readJson(response) {
+    const text = await response.text();
+    if (!text) {
+      return {};
+    }
+    const payload = JSON.parse(text);
+    if (!isObject(payload)) {
+      throw new Error("JSON 応答が不正です");
+    }
+    return payload;
+  }
+
+  function parsePayload(data) {
+    try {
+      const payload = JSON.parse(data);
+      if (!isObject(payload)) {
+        throw new Error("payload must be object");
+      }
+      return payload;
+    } catch (error) {
+      appendError(`SSE payload の解釈に失敗しました: ${error.message}`);
+      return null;
+    }
+  }
+
+  function readErrorMessage(payload) {
+    if (!isObject(payload) || typeof payload.message !== "string" || !payload.message) {
+      return "不明なエラー";
+    }
+    return payload.message;
+  }
+
+  function formatJson(value) {
+    return JSON.stringify(value, null, 2);
+  }
+
+  function cloneJson(value) {
+    return JSON.parse(JSON.stringify(value));
+  }
+
+  // Block: Type helpers
+  function isObject(value) {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+  }
+
+  function requireString(value, label) {
+    if (typeof value !== "string") {
+      throw new Error(`${label} が文字列ではありません`);
+    }
+    return value;
+  }
+
+  function requireNumber(value, label) {
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      throw new Error(`${label} が数値ではありません`);
+    }
+    return value;
+  }
+
+  function requireInteger(value, label) {
+    if (!Number.isInteger(value)) {
+      throw new Error(`${label} が整数ではありません`);
+    }
+    return value;
+  }
+
+  function readBooleanRuntimeProjection(runtimeProjection, key) {
+    const value = runtimeProjection[key];
+    if (typeof value !== "boolean") {
+      throw new Error(`${key} が boolean ではありません`);
+    }
+    return value;
+  }
+
+  function readStringRuntimeProjection(runtimeProjection, key) {
+    const value = runtimeProjection[key];
+    if (typeof value !== "string") {
+      throw new Error(`${key} が string ではありません`);
+    }
+    return value;
+  }
+
+  // Block: HTML escape
+  function escapeHtml(value) {
+    return String(value)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll("\"", "&quot;");
+  }
+
+  // Block: Startup invocation
+  void start();
 })();
