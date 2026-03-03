@@ -8,6 +8,10 @@ from typing import Any
 from otomekairo.gateway.cognition_client import CognitionRequest, CognitionResponse
 
 
+# Block: Supported chat action types
+SUPPORTED_CHAT_ACTION_TYPES = {"speak", "browse", "notify", "wait"}
+
+
 # Block: LiteLLM cognition client
 class LiteLLMCognitionClient:
     def __init__(self) -> None:
@@ -48,6 +52,9 @@ def _build_messages(request: CognitionRequest) -> list[dict[str, str]]:
             "JSON の必須キーは intention_summary, decision_reason, action_proposals, step_hints, speech_draft, memory_focus, reflection_seed である。",
             "speech_draft は text, language, delivery_mode を持つ。",
             "action_proposals と step_hints は必ず配列にする。候補が無ければ [] を返す。",
+            "action_proposals の各要素は object にし、action_type と priority を必ず入れる。",
+            "action_type は speak, browse, notify, wait のいずれかだけを使う。",
+            "speak を返す場合は target_channel に browser_chat を必ず入れる。",
             "delivery_mode は stream に固定する。",
             f"現在の感情ラベル: {persona_snapshot['current_emotion']['primary_label']}",
             f"話し方: {selection_profile['interaction_style']['speech_tone']}",
@@ -120,8 +127,16 @@ def _validate_cognition_result(cognition_result: dict[str, Any]) -> None:
     missing_keys = [key for key in sorted(required_keys) if key not in cognition_result]
     if missing_keys:
         raise RuntimeError(f"LiteLLM cognition_result keys are missing: {','.join(missing_keys)}")
-    if not isinstance(cognition_result["action_proposals"], list):
+    intention_summary = cognition_result["intention_summary"]
+    if not isinstance(intention_summary, str) or not intention_summary.strip():
+        raise RuntimeError("LiteLLM cognition_result.intention_summary must be a non-empty string")
+    decision_reason = cognition_result["decision_reason"]
+    if not isinstance(decision_reason, str) or not decision_reason.strip():
+        raise RuntimeError("LiteLLM cognition_result.decision_reason must be a non-empty string")
+    action_proposals = cognition_result["action_proposals"]
+    if not isinstance(action_proposals, list):
         raise RuntimeError("LiteLLM cognition_result.action_proposals must be a list")
+    _validate_action_proposals(action_proposals)
     if not isinstance(cognition_result["step_hints"], list):
         raise RuntimeError("LiteLLM cognition_result.step_hints must be a list")
     speech_draft = cognition_result["speech_draft"]
@@ -139,9 +154,40 @@ def _validate_cognition_result(cognition_result: dict[str, Any]) -> None:
     memory_focus = cognition_result["memory_focus"]
     if not isinstance(memory_focus, dict):
         raise RuntimeError("LiteLLM cognition_result.memory_focus must be an object")
+    focus_kind = memory_focus.get("focus_kind")
+    if not isinstance(focus_kind, str) or not focus_kind:
+        raise RuntimeError("LiteLLM cognition_result.memory_focus.focus_kind must be a string")
+    focus_summary = memory_focus.get("summary")
+    if not isinstance(focus_summary, str) or not focus_summary.strip():
+        raise RuntimeError("LiteLLM cognition_result.memory_focus.summary must be a non-empty string")
     reflection_seed = cognition_result["reflection_seed"]
     if not isinstance(reflection_seed, dict):
         raise RuntimeError("LiteLLM cognition_result.reflection_seed must be an object")
+
+
+# Block: Action proposal validation
+def _validate_action_proposals(action_proposals: list[Any]) -> None:
+    for proposal in action_proposals:
+        if not isinstance(proposal, dict):
+            raise RuntimeError("LiteLLM cognition_result.action_proposals must contain only objects")
+        action_type = proposal.get("action_type")
+        if not isinstance(action_type, str) or not action_type:
+            raise RuntimeError("LiteLLM cognition_result.action_proposals.action_type must be a non-empty string")
+        if action_type not in SUPPORTED_CHAT_ACTION_TYPES:
+            raise RuntimeError("LiteLLM cognition_result.action_proposals.action_type is not supported")
+        priority = proposal.get("priority")
+        if isinstance(priority, bool) or not isinstance(priority, (int, float)):
+            raise RuntimeError("LiteLLM cognition_result.action_proposals.priority must be numeric")
+        if float(priority) < 0.0 or float(priority) > 1.0:
+            raise RuntimeError("LiteLLM cognition_result.action_proposals.priority must be within 0.0..1.0")
+        if action_type == "speak":
+            target_channel = proposal.get("target_channel")
+            if target_channel != "browser_chat":
+                raise RuntimeError("LiteLLM cognition_result.action_proposals.speak must target browser_chat")
+        elif "target_channel" in proposal:
+            target_channel = proposal["target_channel"]
+            if not isinstance(target_channel, str) or not target_channel:
+                raise RuntimeError("LiteLLM cognition_result.action_proposals.target_channel must be a string")
 
 
 # Block: Formatting helpers

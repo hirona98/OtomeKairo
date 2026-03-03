@@ -467,7 +467,6 @@
     {
       "action_type": "speak",
       "target_channel": "browser_chat",
-      "message_id": "msg_...",
       "priority": 1.0
     }
   ],
@@ -495,6 +494,10 @@
 - `cognition_result` は、認知層が一度に返す JSON オブジェクトであり、後から補完前提で分割しない
 - 必須項目は `intention_summary`、`decision_reason`、`action_proposals`、`step_hints`、`speech_draft`、`memory_focus`、`reflection_seed` である
 - `action_proposals` と `step_hints` は配列に固定し、候補がない場合も空配列 `[]` を使う
+- 初期実装の `browser_chat` では、`action_proposals` の各要素は少なくとも `action_type` と `priority` を持つ
+- 初期実装の `browser_chat` では、`action_type` は `speak`、`browse`、`notify`、`wait` のいずれかだけを許可する
+- 初期実装の `browser_chat` では、`priority` は `0.0..1.0` の `number` に固定する
+- 初期実装の `browser_chat` では、`speak` のときだけ `target_channel=\"browser_chat\"` を必須とする
 - `speech_draft` は、少なくとも `text`、`language`、`delivery_mode` を持つ
 - `memory_focus` は、少なくとも `focus_kind`、`summary` を持つ
 - `reflection_seed` は、少なくとも `cycle_id`、`input_kind`、`message_id`、`token_count`、`was_cancelled` を持つ

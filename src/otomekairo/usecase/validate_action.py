@@ -131,7 +131,7 @@ def _score_candidate(
         cognition_input=cognition_input,
         learned_aversions=learned_aversions,
     )
-    priority_hint_score = _normalized_score(proposal.get("priority", 0.0))
+    priority_hint_score = _proposal_priority_score(proposal)
     personality_fit_score = _personality_fit_score(
         action_type=action_type,
         interaction_style=interaction_style,
@@ -388,6 +388,13 @@ def _validated_action_type(proposal: dict[str, Any]) -> str:
     if action_type not in {"speak", "browse", "notify", "wait"}:
         raise RuntimeError("unsupported action_type in chat validator")
     return action_type
+
+
+# Block: Proposal priority
+def _proposal_priority_score(proposal: dict[str, Any]) -> float:
+    if "priority" not in proposal:
+        raise RuntimeError("cognition_result.action_proposals.priority is required")
+    return _normalized_score(proposal["priority"])
 
 
 # Block: Score helper
