@@ -28,9 +28,11 @@
 <!-- Block: Current Implementation -->
 ## 現在の実装状況
 
-- `pyproject.toml`: Python パッケージ定義、`LiteLLM` と `sqlite-vec` 依存、`otomekairo-web` / `otomekairo-runtime` の起動入口を持つ
+- `pyproject.toml`: Python パッケージ定義、`LiteLLM` と `sqlite-vec` 依存、`otomekairo` / `otomekairo-web` / `otomekairo-runtime` の起動入口を持つ
+- `run_otomekairo.sh`: Web サーバと人格ランタイムを引数なしで同時起動する最短の実行スクリプト
 - `src/otomekairo/boot/run_web.py`: `uvicorn` で Web サーバを起動する
 - `src/otomekairo/boot/run_runtime.py`: 人格ランタイムの常時ループを起動する
+- `src/otomekairo/boot/run_all.py`: Web サーバと人格ランタイムを同じ親プロセスで起動し、終了シグナル時に両方を停止する
 - `src/otomekairo/web/app.py`: FastAPI アプリを構成し、API ルータ、最小ブラウザ UI (`GET /`)、例外処理を束ねる
 - `src/otomekairo/web/static/`: `tmp/CocoroGhost/static/` の見た目を簡略流用した最小チャット UI を持ち、同一オリジンで `POST /api/chat/input` と `GET /api/chat/stream` を使い、`message` 到着時は `output.tts.enabled=true` ならブラウザの `SpeechSynthesis` で音声化し、`Mic` は標準 `SpeechRecognition` で音声入力し、設定パネルでは主要な一部設定を `POST /api/settings/overrides` へ保存できる
 - `src/otomekairo/gateway/cognition_client.py`: 認知処理の外部境界を表す抽象を定義する
@@ -52,15 +54,14 @@
 <!-- Block: Startup Guide -->
 ## 起動と確認
 
-1. ターミナル 1 で Web サーバを起動する  
-   `PYTHONPATH=src python3 -m otomekairo.boot.run_web`
-2. ターミナル 2 で人格ランタイムを起動する  
-   `PYTHONPATH=src python3 -m otomekairo.boot.run_runtime`
-3. ブラウザで `http://127.0.0.1:8000/` を開く
-4. テキスト入力、`Mic`、設定パネル、`browse` を含む応答経路を確認する
+1. リポジトリ直下で起動スクリプトを実行する  
+   `./run_otomekairo.sh`
+2. ブラウザで `http://127.0.0.1:8000/` を開く
+3. テキスト入力、`Mic`、設定パネル、`browse` を含む応答経路を確認する
 
 - `LINE` 通知を使うときは、起動前に `OTOMEKAIRO_LINE_CHANNEL_ACCESS_TOKEN` と `OTOMEKAIRO_LINE_TO_USER_ID` を環境変数で渡す
 - `LINE` を使わないときは、設定パネルで `integrations.line.enabled=false` のまま使う
-- `otomekairo-web` / `otomekairo-runtime` の console script を使う場合も、起動順は同じでよい
+- `otomekairo` の console script を使う場合も、`./run_otomekairo.sh` と同じく Web とランタイムを同時に起動する
+- 手動で分けて起動したいときは、`otomekairo-web` と `otomekairo-runtime` を別ターミナルで順に起動してよい
 - `Mic` はブラウザ標準の `SpeechRecognition` がある環境だけで使える
 - `browse` は、UI 上では `検索タスク` と `検索結果` の通知を経てから最終応答へ進む
