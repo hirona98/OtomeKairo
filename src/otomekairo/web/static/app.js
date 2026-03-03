@@ -317,11 +317,9 @@
         throw new Error(readErrorMessage(payload));
       }
       applyEditorSnapshot(payload);
-      settingsStatus.textContent = "保存済み";
-      appendNotice("settings_saved", "設定を保存しました");
+      settingsStatus.textContent = "設定を保存しました";
       await refreshStatusSnapshot();
     } catch (error) {
-      appendError(`設定保存に失敗しました: ${error.message}`);
       settingsStatus.textContent = `保存失敗: ${error.message}`;
     } finally {
       settingsSaveButton.disabled = false;

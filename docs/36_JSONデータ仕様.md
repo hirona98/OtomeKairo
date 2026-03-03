@@ -1020,7 +1020,7 @@
 
 - 必須項目は `notice_code`、`text` である
 - `notice_code` は、UI 側で分類できる固定語彙 `string` にする
-- 初期実装では、`browse_queued`、`browse_completed`、`settings_saved`、`settings_no_changes`、`cancel_requested` を使ってよい
+- 初期実装では、`browse_queued`、`browse_completed`、`cancel_requested` を使ってよい
 
 <!-- Block: UI Error -->
 #### `event_type = error`
