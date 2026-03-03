@@ -41,6 +41,10 @@ EMBEDDING_VECTOR_DIMENSION = 32
 LEGACY_SETTING_KEY_ALIASES = {
     "llm.model": "llm.default_model",
 }
+LEGACY_OPTIONAL_BASE_URL_DEFAULTS = {
+    "llm.base_url": "https://openrouter.ai/api/v1",
+    "llm.embedding_base_url": "https://openrouter.ai/api/v1",
+}
 
 
 # Block: API errors
@@ -4589,6 +4593,9 @@ def _decode_settings_preset_catalog_rows(rows: list[sqlite3.Row]) -> dict[str, l
     }
     for row in rows:
         preset_kind = str(row["preset_kind"])
+        payload = json.loads(row["payload_json"])
+        if isinstance(payload, dict):
+            payload = _normalize_legacy_optional_base_urls(payload)
         preset_catalogs[preset_kind].append(
             {
                 "preset_id": str(row["preset_id"]),
@@ -4596,7 +4603,7 @@ def _decode_settings_preset_catalog_rows(rows: list[sqlite3.Row]) -> dict[str, l
                 "archived": bool(row["archived"]),
                 "sort_order": int(row["sort_order"]),
                 "updated_at": int(row["updated_at"]),
-                "payload": json.loads(row["payload_json"]),
+                "payload": payload,
             }
         )
     return preset_catalogs
@@ -5035,11 +5042,17 @@ def _normalize_runtime_settings_values(
     normalized: dict[str, Any] = {}
     for key in default_settings:
         if key in runtime_values:
-            normalized[key] = runtime_values[key]
+            normalized[key] = _normalize_legacy_optional_base_url_value(
+                key=key,
+                value=runtime_values[key],
+            )
             continue
         legacy_key = LEGACY_SETTING_KEY_ALIASES.get(key)
         if legacy_key is not None and legacy_key in runtime_values:
-            normalized[key] = runtime_values[legacy_key]
+            normalized[key] = _normalize_legacy_optional_base_url_value(
+                key=key,
+                value=runtime_values[legacy_key],
+            )
     return normalized
 
 
@@ -5061,6 +5074,29 @@ def _normalize_runtime_settings_updated_at(
             continue
         normalized[key] = timestamp
     return normalized
+
+
+# Block: Legacy optional base URL normalization
+def _normalize_legacy_optional_base_urls(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(payload)
+    for key in LEGACY_OPTIONAL_BASE_URL_DEFAULTS:
+        if key in normalized:
+            normalized[key] = _normalize_legacy_optional_base_url_value(
+                key=key,
+                value=normalized[key],
+            )
+    return normalized
+
+
+def _normalize_legacy_optional_base_url_value(*, key: str, value: Any) -> Any:
+    legacy_default_value = LEGACY_OPTIONAL_BASE_URL_DEFAULTS.get(key)
+    if (
+        legacy_default_value is not None
+        and isinstance(value, str)
+        and value == legacy_default_value
+    ):
+        return ""
+    return value
 
 
 def _runtime_settings_seed_timestamps(now_ms: int) -> dict[str, int]:
