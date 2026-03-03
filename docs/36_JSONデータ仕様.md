@@ -492,6 +492,7 @@
 ```
 
 - `cognition_result` は、短周期の内部で使う構造化された認知結果である
+- `cognition_result` は、認知層が一度に返す JSON オブジェクトであり、後から補完前提で分割しない
 - 必須項目は `intention_summary`、`decision_reason`、`action_proposals`、`step_hints`、`speech_draft`、`memory_focus`、`reflection_seed` である
 - `action_proposals` と `step_hints` は配列に固定し、候補がない場合も空配列 `[]` を使う
 - `speech_draft` は、少なくとも `text`、`language`、`delivery_mode` を持つ

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Iterable, Protocol
+from typing import Any, Protocol
 
 
 # Block: Cognition request
@@ -14,7 +14,13 @@ class CognitionRequest:
     cognition_input: dict[str, Any]
 
 
+# Block: Cognition response
+@dataclass(frozen=True, slots=True)
+class CognitionResponse:
+    cognition_result: dict[str, Any]
+
+
 # Block: Cognition client protocol
 class CognitionClient(Protocol):
-    def stream_text(self, request: CognitionRequest) -> Iterable[str]:
+    def generate_result(self, request: CognitionRequest) -> CognitionResponse:
         ...

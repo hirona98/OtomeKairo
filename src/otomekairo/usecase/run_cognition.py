@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 
 from otomekairo.gateway.cognition_client import CognitionClient, CognitionRequest
 from otomekairo.schema.runtime_types import ActionHistoryRecord, PendingInputRecord
@@ -38,7 +38,6 @@ def run_cognition_for_chat_message(
     )
     message_id = _opaque_id("msg")
     ui_events: list[dict[str, Any]] = []
-    response_parts: list[str] = []
     emitted_chunk_count = 0
     was_cancelled = False
 
@@ -62,48 +61,41 @@ def run_cognition_for_chat_message(
         },
     )
 
-    # Block: Streaming response loop
-    stream_started = False
-    if consume_cancel(message_id):
-        was_cancelled = True
-    else:
-        for chunk_text in cognition_client.stream_text(request):
-            if consume_cancel(message_id):
-                was_cancelled = True
-                break
-            if not stream_started:
-                emit_event(
-                    "status",
-                    {
-                        "status_code": "speaking",
-                        "label": "応答を返しています",
-                        "cycle_id": cycle_id,
-                    },
-                )
-                stream_started = True
-            response_parts.append(chunk_text)
-            emit_event(
-                "token",
-                {
-                    "message_id": message_id,
-                    "text": chunk_text,
-                    "chunk_index": emitted_chunk_count,
-                },
-            )
-            emitted_chunk_count += 1
-
     # Block: Structured cognition result
-    response_text = "".join(response_parts).strip()
-    if not was_cancelled and not response_text:
-        raise RuntimeError("cognition stream returned empty response")
-    cognition_result = _build_cognition_result(
+    cognition_result = cognition_client.generate_result(request).cognition_result
+    speech_draft = _validated_speech_draft(cognition_result)
+    response_text = str(speech_draft["text"]).strip()
+    _merge_reflection_seed(
+        cognition_result=cognition_result,
         pending_input=pending_input,
         cycle_id=cycle_id,
         message_id=message_id,
-        response_text=response_text,
-        emitted_chunk_count=emitted_chunk_count,
-        was_cancelled=was_cancelled,
     )
+
+    # Block: Streaming response loop
+    emit_event(
+        "status",
+        {
+            "status_code": "speaking",
+            "label": "応答を返しています",
+            "cycle_id": cycle_id,
+        },
+    )
+    for chunk_text in _iter_speech_chunks(response_text):
+        if consume_cancel(message_id):
+            was_cancelled = True
+            break
+        emit_event(
+            "token",
+            {
+                "message_id": message_id,
+                "text": chunk_text,
+                "chunk_index": emitted_chunk_count,
+            },
+        )
+        emitted_chunk_count += 1
+    cognition_result["reflection_seed"]["token_count"] = emitted_chunk_count
+    cognition_result["reflection_seed"]["was_cancelled"] = was_cancelled
 
     # Block: Final message
     message_created_at = _now_ms()
@@ -113,7 +105,7 @@ def run_cognition_for_chat_message(
             {
                 "message_id": message_id,
                 "role": "assistant",
-                "text": str(cognition_result["speech_draft"]["text"]),
+                "text": response_text,
                 "created_at": message_created_at,
                 "source_cycle_id": cycle_id,
                 "related_input_id": pending_input.input_id,
@@ -173,45 +165,45 @@ def _opaque_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex}"
 
 
-# Block: Cognition result builder
-def _build_cognition_result(
+# Block: Speech draft validation
+def _validated_speech_draft(cognition_result: dict[str, Any]) -> dict[str, Any]:
+    speech_draft = cognition_result.get("speech_draft")
+    if not isinstance(speech_draft, dict):
+        raise RuntimeError("cognition_result.speech_draft must be an object")
+    speech_text = speech_draft.get("text")
+    if not isinstance(speech_text, str) or not speech_text.strip():
+        raise RuntimeError("cognition_result.speech_draft.text must be a non-empty string")
+    return speech_draft
+
+
+# Block: Reflection seed merge
+def _merge_reflection_seed(
     *,
+    cognition_result: dict[str, Any],
     pending_input: PendingInputRecord,
     cycle_id: str,
     message_id: str,
-    response_text: str,
-    emitted_chunk_count: int,
-    was_cancelled: bool,
-) -> dict[str, Any]:
-    return {
-        "intention_summary": "browser_chat に対して人格として応答する",
-        "decision_reason": "最新のテキスト入力を受け取り、現在の人格断面に基づいて返答を選ぶ",
-        "action_proposals": [
-            {
-                "action_type": "speak",
-                "target_channel": pending_input.channel,
-                "message_id": message_id,
-                "priority": 1.0,
-            }
-        ],
-        "step_hints": [],
-        "speech_draft": {
-            "text": response_text,
-            "language": "ja",
-            "delivery_mode": "stream",
-        },
-        "memory_focus": {
-            "focus_kind": "current_input_only",
-            "summary": "直近のチャット入力を主材料として判断した",
-        },
-        "reflection_seed": {
-            "cycle_id": cycle_id,
-            "input_kind": str(pending_input.payload["input_kind"]),
-            "message_id": message_id,
-            "token_count": emitted_chunk_count,
-            "was_cancelled": was_cancelled,
-        },
-    }
+) -> None:
+    existing_seed = cognition_result.get("reflection_seed")
+    merged_seed = dict(existing_seed) if isinstance(existing_seed, dict) else {}
+    merged_seed["cycle_id"] = cycle_id
+    merged_seed["input_kind"] = str(pending_input.payload["input_kind"])
+    merged_seed["message_id"] = message_id
+    merged_seed["token_count"] = 0
+    merged_seed["was_cancelled"] = False
+    cognition_result["reflection_seed"] = merged_seed
+
+
+# Block: Token chunk iterator
+def _iter_speech_chunks(response_text: str) -> Iterable[str]:
+    current_chunk = ""
+    for character in response_text:
+        current_chunk += character
+        if character in "。！？\n" or len(current_chunk) >= 24:
+            yield current_chunk
+            current_chunk = ""
+    if current_chunk:
+        yield current_chunk
 
 
 # Block: Time helper
