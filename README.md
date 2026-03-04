@@ -67,6 +67,8 @@
 2. ブラウザで `http://127.0.0.1:8000/` を開く
 3. テキスト入力、`Mic`、`Cam`、設定パネル、`browse` を含む応答経路を確認する
 
+- VSCode では、ワークスペース直下の `.vscode/launch.json` に `OtomeKairo` 起動構成を用意しているので、`F5` で `otomekairo.boot.run_all` をそのまま起動できる
+
 - `LINE` 通知を使うときは、起動前に `OTOMEKAIRO_LINE_CHANNEL_ACCESS_TOKEN` と `OTOMEKAIRO_LINE_TO_USER_ID` を環境変数で渡す
 - `look` を使うときは、起動前に `OTOMEKAIRO_CAMERA_HOST` と `OTOMEKAIRO_CAMERA_USERNAME` と `OTOMEKAIRO_CAMERA_PASSWORD` を環境変数で渡す（Tapo アプリの「カメラのアカウント」を使う）
 - `Cam` で静止画を取るときは、追加で `OTOMEKAIRO_CAMERA_CLOUD_PASSWORD` を環境変数で渡す（Tapo アプリのクラウドアカウントのパスワード）
