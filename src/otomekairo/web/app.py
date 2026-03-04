@@ -56,10 +56,13 @@ class RequestContextMiddleware:
 def create_app() -> FastAPI:
     store = SqliteStateStore(_default_db_path(), __version__)
     store.initialize()
-    camera_sensor = WiFiCameraSensor()
+    default_settings = build_default_settings()
+    camera_sensor = WiFiCameraSensor(
+        camera_connection_loader=store.read_active_camera_connection,
+    )
     services = AppServices(
         store=store,
-        default_settings=build_default_settings(),
+        default_settings=default_settings,
         camera_sensor=camera_sensor,
     )
     static_dir = _static_dir()

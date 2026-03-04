@@ -15,7 +15,7 @@
 ## このドキュメントで固定する範囲
 
 - 固定するのは、初期実装で使う JSON オブジェクトのキー、型、必須項目、固定語彙である
-- 固定するのは、`pending_inputs.payload_json`、`settings_overrides.requested_value_json`、`settings_editor_state.direct_values_json`、`settings_presets.payload_json`、`settings_change_sets.payload_json`、`ui_outbound_events.payload_json`、`action_history.command_json`、`action_history.observed_effects_json`、`memory_jobs.payload_ref_json`、`memory_job_payloads.payload_json`、主要な Web API 本文である
+- 固定するのは、`pending_inputs.payload_json`、`settings_overrides.requested_value_json`、`settings_editor_state.system_values_json`、`settings_presets.payload_json`、`settings_change_sets.payload_json`、`ui_outbound_events.payload_json`、`action_history.command_json`、`action_history.observed_effects_json`、`memory_jobs.payload_ref_json`、`memory_job_payloads.payload_json`、主要な Web API 本文である
 - 固定するのは、`self_state.personality_json`、`self_state.current_emotion_json`、`self_state.long_term_goals_json`、`self_state.relationship_overview_json`、`self_state.invariants_json`、短周期の内部で使う `selection_profile`、`persona_consistency_score`、`attention_score_breakdown`、`self_initiated_score_breakdown`、`action_candidate_score`、`cognition_result`、長周期の内部で使う `personality_change_proposal`、`persona_updates` の形である
 - 固定しないのは、Python のクラス名、Pydantic モデル名、OpenAPI の自動生成細部である
 - 固定しないのは、将来追加する未使用フィールドや後段の拡張イベント種別である
@@ -665,8 +665,8 @@
 <!-- Block: Settings Editor Group -->
 ## 設定UIテーブルの JSON
 
-<!-- Block: Settings Editor Direct Values -->
-### `settings_editor_state.direct_values_json`
+<!-- Block: Settings Editor System Values -->
+### `settings_editor_state.system_values_json`
 
 ```json
 {
@@ -680,8 +680,8 @@
 }
 ```
 
-- `settings_editor_state.direct_values_json` は、設定UIで即時反映したい運用値だけを持つ完全オブジェクトである
-- キーは、`docs/42_設定UI仕様.md` で direct 値とされた設定キーだけを許可する
+- `settings_editor_state.system_values_json` は、設定UIで保持するシステム設定だけを持つ完全オブジェクトである
+- キーは、`docs/42_設定UI仕様.md` でシステム設定とされた設定キーだけを許可する
 - キー名は、`docs/39_設定キー運用仕様.md` と同じドット区切り設定キーをそのまま使う
 - 値の型は、各キーの登録 `value_type` と一致しなければならない
 - `settings_editor_state` の `revision` が更新される保存では、このオブジェクト全体を canonical な形で保持する
@@ -777,7 +777,8 @@
   "active_llm_preset_id": "preset_llm_001",
   "active_memory_preset_id": "preset_mem_001",
   "active_output_preset_id": "preset_out_001",
-  "direct_values": {
+  "active_camera_connection_id": "cam_001",
+  "system_values": {
     "runtime.idle_tick_ms": 1000
   },
   "preset_versions": {
@@ -790,8 +791,9 @@
 ```
 
 - `settings_change_sets.payload_json` は、設定UI保存の canonical 結果をランタイムへ渡すオブジェクトである
-- 必須項目は `editor_revision`、`active_behavior_preset_id`、`active_llm_preset_id`、`active_memory_preset_id`、`active_output_preset_id`、`direct_values`、`preset_versions` である
-- `direct_values` は、`settings_editor_state.direct_values_json` と同じ形に固定する
+- 必須項目は `editor_revision`、`active_behavior_preset_id`、`active_llm_preset_id`、`active_memory_preset_id`、`active_output_preset_id`、`system_values`、`preset_versions` である
+- `active_camera_connection_id` は任意で、アクティブなカメラ接続がある場合だけ入れる
+- `system_values` は、`settings_editor_state.system_values_json` と同じ形に固定する
 - `preset_versions` は、各アクティブプリセットの `updated_at` を `preset_kind -> unix_ms` で持つ
 
 <!-- Block: Settings Preset Entry -->
@@ -811,6 +813,26 @@
 - `settings_preset_entry` は、設定UI API が返すプリセット一覧の共通要素である
 - 必須項目は `preset_id`、`preset_name`、`archived`、`sort_order`、`updated_at`、`payload` である
 - `payload` は、その `preset_kind` に対応する `settings_presets.payload_json` の固定形に一致しなければならない
+
+<!-- Block: Camera Connection Entry -->
+### `camera_connection_entry`
+
+```json
+{
+  "camera_connection_id": "cam_001",
+  "display_name": "リビング",
+  "host": "192.168.10.20",
+  "username": "alice",
+  "password": "secret",
+  "sort_order": 10,
+  "updated_at": 1760000000000
+}
+```
+
+- `camera_connection_entry` は、設定UI API が返すカメラ接続一覧の共通要素である
+- 必須項目は `camera_connection_id`、`display_name`、`host`、`username`、`password`、`sort_order`、`updated_at` である
+- `host` は、接続先カメラの IP アドレスまたはホスト名を持つ
+- `host`、`username`、`password` は、未設定の下書き状態では空文字を許可する
 
 <!-- Block: Event Group -->
 ## イベントテーブルの JSON
@@ -958,7 +980,8 @@
     "active_llm_preset_id": "preset_llm_001",
     "active_memory_preset_id": "preset_mem_001",
     "active_output_preset_id": "preset_out_001",
-    "direct_values": {
+    "active_camera_connection_id": "cam_001",
+    "system_values": {
       "runtime.idle_tick_ms": 1000
     }
   },
@@ -968,8 +991,19 @@
     "memory": [],
     "output": []
   },
+  "camera_connections": [
+    {
+      "camera_connection_id": "cam_001",
+      "display_name": "リビング",
+      "host": "192.168.10.20",
+      "username": "alice",
+      "password": "secret",
+      "sort_order": 10,
+      "updated_at": 1760000000000
+    }
+  ],
   "constraints": {
-    "editable_direct_keys": [
+    "editable_system_keys": [
       "runtime.idle_tick_ms"
     ]
   },
@@ -979,10 +1013,12 @@
 }
 ```
 
-- `editor_state`、`preset_catalogs`、`constraints`、`runtime_projection` を必須にする
-- `editor_state.direct_values` は、`settings_editor_state.direct_values_json` と同じ形に固定する
+- `editor_state`、`preset_catalogs`、`camera_connections`、`constraints`、`runtime_projection` を必須にする
+- `editor_state.system_values` は、`settings_editor_state.system_values_json` と同じ形に固定する
 - `preset_catalogs` は、`preset_kind -> settings_preset_entry[]` の object に固定する
+- `camera_connections` は、`camera_connection_entry[]` の配列に固定する
 - `preset_catalogs.*.payload` には、API キーやトークンの生値をそのまま含めてよい
+- `camera_connections[*].password` も、初期実装ではマスキングせずそのまま含めてよい
 - `runtime_projection` は、現在アクティブな構成から導出された現在有効値の要約であり、ドット区切り設定キーをキー名に使ってよい
 
 <!-- Block: Settings Editor Put -->
@@ -993,7 +1029,9 @@
 - `PUT` の成功応答本文は、`GET /api/settings/editor` と同じ canonical 形に固定する
 - 保存時は、サーバ側で次の整合を必須にする
   - `editor_state.active_*_preset_id` は、それぞれ対応する `preset_catalogs` 内に存在しなければならない
+  - `editor_state.active_camera_connection_id` は、`camera_connections` が空でなければ必須であり、その中に存在しなければならない
   - `preset_catalogs` の各要素は、対応する `settings_presets.payload_json` の固定形に一致しなければならない
+  - `camera_connections` の各要素は、`camera_connection_entry` の固定形に一致しなければならない
   - `editor_state.revision` は、保存前の `settings_editor_state.revision` と一致しなければならない
 
 <!-- Block: UI Outbound -->

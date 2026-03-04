@@ -403,6 +403,12 @@ body {
   gap: 8px 12px;
 }
 
+.settings-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
 .settings-field {
   display: flex;
   flex-direction: column;

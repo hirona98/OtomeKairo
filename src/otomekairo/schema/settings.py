@@ -63,7 +63,7 @@ SETTING_DEFINITION_MAP = {definition.key: definition for definition in SETTING_D
 
 # Block: Editor setting constants
 SETTINGS_EDITOR_PRESET_KINDS = ("behavior", "llm", "memory", "output")
-SETTINGS_EDITOR_DIRECT_KEYS = (
+SETTINGS_EDITOR_SYSTEM_KEYS = (
     "runtime.idle_tick_ms",
     "runtime.long_cycle_min_interval_ms",
     "sensors.microphone.enabled",
@@ -96,9 +96,9 @@ def build_default_settings() -> dict[str, Any]:
     return dict(_read_default_settings_from_config())
 
 
-# Block: Direct key export
-def build_settings_editor_direct_keys() -> tuple[str, ...]:
-    return SETTINGS_EDITOR_DIRECT_KEYS
+# Block: System key export
+def build_settings_editor_system_keys() -> tuple[str, ...]:
+    return SETTINGS_EDITOR_SYSTEM_KEYS
 
 
 # Block: Preset kind export
@@ -113,9 +113,10 @@ def build_default_settings_editor_state(default_settings: dict[str, Any]) -> dic
         "active_llm_preset_id": DEFAULT_SETTINGS_EDITOR_PRESET_IDS["llm"],
         "active_memory_preset_id": DEFAULT_SETTINGS_EDITOR_PRESET_IDS["memory"],
         "active_output_preset_id": DEFAULT_SETTINGS_EDITOR_PRESET_IDS["output"],
-        "direct_values_json": {
+        "active_camera_connection_id": None,
+        "system_values_json": {
             key: default_settings[key]
-            for key in SETTINGS_EDITOR_DIRECT_KEYS
+            for key in SETTINGS_EDITOR_SYSTEM_KEYS
         },
         "revision": 1,
     }
@@ -241,6 +242,11 @@ def build_default_settings_presets(default_settings: dict[str, Any]) -> tuple[di
     )
 
 
+# Block: Camera connection seed export
+def build_default_camera_connections() -> tuple[dict[str, Any], ...]:
+    return ()
+
+
 # Block: Editor payload normalization
 def normalize_settings_editor_document(document: Any) -> dict[str, Any]:
     if not isinstance(document, dict):
@@ -253,10 +259,16 @@ def normalize_settings_editor_document(document: Any) -> dict[str, Any]:
         )
     editor_state = _normalize_editor_state(document.get("editor_state"))
     preset_catalogs = _normalize_preset_catalogs(document.get("preset_catalogs"))
+    camera_connections = _normalize_camera_connections(document.get("camera_connections"))
     _validate_active_preset_ids(editor_state=editor_state, preset_catalogs=preset_catalogs)
+    _validate_active_camera_connection_id(
+        editor_state=editor_state,
+        camera_connections=camera_connections,
+    )
     return {
         "editor_state": editor_state,
         "preset_catalogs": preset_catalogs,
+        "camera_connections": camera_connections,
     }
 
 
@@ -340,7 +352,7 @@ def _normalize_editor_state(editor_state: Any) -> dict[str, Any]:
     normalized_revision = editor_state.get("revision")
     if isinstance(normalized_revision, bool) or not isinstance(normalized_revision, int):
         raise SettingsValidationError("invalid_settings_editor_document", "editor_state.revision must be integer")
-    direct_values = _normalize_direct_values(editor_state.get("direct_values"))
+    system_values = _normalize_system_values(editor_state.get("system_values"))
     normalized_editor_state = {
         "revision": normalized_revision,
         "active_behavior_preset_id": _required_string(
@@ -359,31 +371,83 @@ def _normalize_editor_state(editor_state: Any) -> dict[str, Any]:
             editor_state.get("active_output_preset_id"),
             "editor_state.active_output_preset_id",
         ),
-        "direct_values": direct_values,
+        "active_camera_connection_id": _optional_string(
+            editor_state.get("active_camera_connection_id"),
+            "editor_state.active_camera_connection_id",
+        ),
+        "system_values": system_values,
     }
     return normalized_editor_state
 
 
-# Block: Direct values normalization
-def _normalize_direct_values(direct_values: Any) -> dict[str, Any]:
-    if not isinstance(direct_values, dict):
-        raise SettingsValidationError("invalid_settings_editor_document", "editor_state.direct_values must be an object")
-    expected_keys = set(SETTINGS_EDITOR_DIRECT_KEYS)
-    actual_keys = set(direct_values)
+# Block: System values normalization
+def _normalize_system_values(system_values: Any) -> dict[str, Any]:
+    if not isinstance(system_values, dict):
+        raise SettingsValidationError("invalid_settings_editor_document", "editor_state.system_values must be an object")
+    expected_keys = set(SETTINGS_EDITOR_SYSTEM_KEYS)
+    actual_keys = set(system_values)
     if actual_keys != expected_keys:
         raise SettingsValidationError(
             "invalid_settings_editor_document",
-            "editor_state.direct_values keys do not match direct key set",
+            "editor_state.system_values keys do not match system key set",
         )
     normalized: dict[str, Any] = {}
-    for key in SETTINGS_EDITOR_DIRECT_KEYS:
+    for key in SETTINGS_EDITOR_SYSTEM_KEYS:
         definition = get_setting_definition(key)
-        value = direct_values[key]
+        value = system_values[key]
         _validate_type(definition, value)
         _validate_range(definition, value)
         _validate_length(definition, value)
         normalized[key] = value
     return normalized
+
+
+# Block: Camera connections normalization
+def _normalize_camera_connections(camera_connections: Any) -> list[dict[str, Any]]:
+    if not isinstance(camera_connections, list):
+        raise SettingsValidationError("invalid_settings_editor_document", "camera_connections must be an array")
+    normalized_connections: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for camera_connection in camera_connections:
+        if not isinstance(camera_connection, dict):
+            raise SettingsValidationError("invalid_settings_editor_document", "camera_connections entries must be objects")
+        camera_connection_id = _required_string(
+            camera_connection.get("camera_connection_id"),
+            "camera_connections.camera_connection_id",
+        )
+        if camera_connection_id in seen_ids:
+            raise SettingsValidationError("invalid_settings_editor_document", "camera_connections contains duplicate camera_connection_id")
+        seen_ids.add(camera_connection_id)
+        sort_order = camera_connection.get("sort_order")
+        updated_at = camera_connection.get("updated_at")
+        if isinstance(sort_order, bool) or not isinstance(sort_order, int):
+            raise SettingsValidationError("invalid_settings_editor_document", "camera_connections.sort_order must be integer")
+        if isinstance(updated_at, bool) or not isinstance(updated_at, int):
+            raise SettingsValidationError("invalid_settings_editor_document", "camera_connections.updated_at must be integer")
+        normalized_connections.append(
+            {
+                "camera_connection_id": camera_connection_id,
+                "display_name": _required_string(
+                    camera_connection.get("display_name"),
+                    "camera_connections.display_name",
+                ),
+                "host": _string_value(
+                    camera_connection.get("host"),
+                    "camera_connections.host",
+                ),
+                "username": _string_value(
+                    camera_connection.get("username"),
+                    "camera_connections.username",
+                ),
+                "password": _string_value(
+                    camera_connection.get("password"),
+                    "camera_connections.password",
+                ),
+                "sort_order": sort_order,
+                "updated_at": updated_at,
+            }
+        )
+    return normalized_connections
 
 
 # Block: Preset catalog normalization
@@ -656,10 +720,56 @@ def _validate_active_preset_ids(
             )
 
 
+# Block: Active camera validation
+def _validate_active_camera_connection_id(
+    *,
+    editor_state: dict[str, Any],
+    camera_connections: list[dict[str, Any]],
+) -> None:
+    active_camera_connection_id = editor_state["active_camera_connection_id"]
+    if not camera_connections:
+        if active_camera_connection_id is not None:
+            raise SettingsValidationError(
+                "invalid_settings_editor_document",
+                "active_camera_connection_id must be null when camera_connections is empty",
+            )
+        return
+    if active_camera_connection_id is None:
+        raise SettingsValidationError(
+            "invalid_settings_editor_document",
+            "active_camera_connection_id must be set when camera_connections exists",
+        )
+    known_ids = {
+        str(camera_connection["camera_connection_id"])
+        for camera_connection in camera_connections
+    }
+    if active_camera_connection_id not in known_ids:
+        raise SettingsValidationError(
+            "invalid_settings_editor_document",
+            "active_camera_connection_id does not exist in camera_connections",
+        )
+
+
 # Block: Required string helper
 def _required_string(value: Any, field_name: str) -> str:
     if not isinstance(value, str) or not value:
         raise SettingsValidationError("invalid_settings_editor_document", f"{field_name} must be non-empty string")
+    return value
+
+
+# Block: Optional string helper
+def _optional_string(value: Any, field_name: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value:
+        raise SettingsValidationError("invalid_settings_editor_document", f"{field_name} must be null or non-empty string")
+    return value
+
+
+# Block: String value helper
+def _string_value(value: Any, field_name: str) -> str:
+    if not isinstance(value, str):
+        raise SettingsValidationError("invalid_settings_editor_document", f"{field_name} must be string")
     return value
 
 

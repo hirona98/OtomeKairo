@@ -267,7 +267,7 @@ flowchart LR
 ### 役割
 
 - 設定UIの描画に必要な canonical な全体状態を返す
-- `settings_editor_state`、`settings_presets`、現在の `runtime_projection` をまとめて返す
+- `settings_editor_state`、`settings_presets`、`camera_connections`、現在の `runtime_projection` をまとめて返す
 
 <!-- Block: Settings Editor Get Notes -->
 ### 成功応答の考え方
@@ -283,7 +283,7 @@ flowchart LR
 ### 役割
 
 - 設定UIの draft 全体を 1 回で保存する
-- `settings_editor_state` と `settings_presets` を同じ transaction で更新し、必要なら `settings_change_sets` を enqueue する
+- `settings_editor_state` と `settings_presets` と `camera_connections` を同じ transaction で更新し、必要なら `settings_change_sets` を enqueue する
 
 <!-- Block: Settings Editor Put Notes -->
 ### 成功応答の考え方
@@ -399,7 +399,7 @@ flowchart LR
 ### 役割
 
 - ブラウザから現在のカメラ静止画を 1 枚取得する
-- Web サーバは `pytapo` と `ffmpeg` を使って JPEG を生成し、`data/camera/` へ保存する
+- Web サーバは ONVIF のスナップショットを取得して JPEG を保存し、`data/camera/` へ保存する
 - 応答では保存先の相対パスと、同一オリジンで読める `image_url` を返す
 
 <!-- Block: Camera Capture Request -->
@@ -424,7 +424,7 @@ flowchart LR
 - `image_path` は、サーバ作業ディレクトリ基準の保存先相対パスである
 - `image_url` は、その静止画をブラウザが再取得するための同一オリジン URL である
 - カメラ接続設定が不足している場合は `409 Conflict` を返す
-- ストリーム接続や JPEG 生成に失敗した場合は `500 Internal Server Error` を返す
+- ONVIF 接続やスナップショット取得に失敗した場合は `500 Internal Server Error` を返す
 
 <!-- Block: Camera Observe -->
 ## `POST /api/camera/observe`

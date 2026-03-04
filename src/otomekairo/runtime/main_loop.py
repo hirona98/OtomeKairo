@@ -695,14 +695,15 @@ def build_runtime_loop(*, db_path: Path | None = None) -> RuntimeLoop:
         initializer_version=__version__,
     )
     store.initialize()
+    default_settings = build_default_settings()
     return RuntimeLoop(
         store=store,
         owner_token=_runtime_owner_token(),
-        default_settings=build_default_settings(),
+        default_settings=default_settings,
         cognition_client=_build_default_cognition_client(),
         search_client=_build_default_search_client(),
         notification_client=_build_default_notification_client(),
-        camera_controller=_build_default_camera_controller(),
+        camera_controller=_build_default_camera_controller(store=store),
         lease_heartbeat_ms=_lease_heartbeat_ms(),
         lease_ttl_ms=_lease_ttl_ms(),
     )
@@ -875,10 +876,12 @@ def _build_default_notification_client() -> NotificationClient:
 
 
 # Block: Camera controller factory
-def _build_default_camera_controller() -> CameraController:
+def _build_default_camera_controller(*, store: SqliteStateStore) -> CameraController:
     from otomekairo.infra.wifi_camera_controller import WiFiCameraController
 
-    return WiFiCameraController()
+    return WiFiCameraController(
+        camera_connection_loader=store.read_active_camera_connection,
+    )
 def _opaque_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex}"
 

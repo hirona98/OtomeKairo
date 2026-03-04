@@ -1,8 +1,9 @@
-"""PyTapo-backed Wi-Fi camera controller."""
+"""ONVIF-backed Wi-Fi camera controller."""
 
 from __future__ import annotations
 
-from typing import Any
+import time
+from typing import Any, Callable
 
 from otomekairo.gateway.camera_controller import (
     CameraController,
@@ -10,97 +11,186 @@ from otomekairo.gateway.camera_controller import (
     CameraLookResponse,
 )
 from otomekairo.infra.wifi_camera_common import (
-    create_tapo_control_client,
+    CameraConnectionSettings,
+    create_onvif_camera,
     normalized_optional_text,
     read_camera_connection_settings,
 )
 
+
+# Block: PTZ constants
+MOVE_DURATION_SECONDS = 0.35
+MOVE_SPEED = 0.6
+
+
+# Block: Direction vectors
+DIRECTION_VECTORS = {
+    "left": (-MOVE_SPEED, 0.0),
+    "right": (MOVE_SPEED, 0.0),
+    "up": (0.0, MOVE_SPEED),
+    "down": (0.0, -MOVE_SPEED),
+}
+
+
 # Block: Wi-Fi camera controller
 class WiFiCameraController(CameraController):
-    def __init__(self) -> None:
-        self._settings = read_camera_connection_settings()
-        self._client: Any | None = None
+    def __init__(self, *, camera_connection_loader: Callable[[], dict[str, Any] | None]) -> None:
+        self._camera_connection_loader = camera_connection_loader
+        self._cached_settings_key: tuple[str, str, str] | None = None
+        self._ptz_service: Any | None = None
+        self._profile_token: str | None = None
 
     def is_available(self) -> bool:
-        return self._settings is not None
+        return self._resolve_settings() is not None
 
     def move_view(self, request: CameraLookRequest) -> CameraLookResponse:
-        if self._settings is None:
-            raise RuntimeError("OTOMEKAIRO_CAMERA_HOST / USERNAME / PASSWORD を設定してください")
+        settings = self._require_settings()
+        ptz_service = self._ptz_service_for(settings)
+        profile_token = self._profile_token_for(settings)
         if request.preset_id is not None or request.preset_name is not None:
-            return self._move_to_preset(request)
+            return self._move_to_preset(
+                settings=settings,
+                ptz_service=ptz_service,
+                profile_token=profile_token,
+                request=request,
+            )
         direction = _validated_direction(request.direction)
         raw_result = _move_in_direction(
-            camera=self._camera(),
+            ptz_service=ptz_service,
+            profile_token=profile_token,
             direction=direction,
         )
         return CameraLookResponse(
             movement_label=_direction_label(direction),
             raw_result_ref=_raw_result_payload(raw_result),
             adapter_trace_ref={
-                "camera_host": self._settings.host,
+                "camera_host": settings.host,
                 "movement_mode": "direction",
                 "direction": direction,
             },
         )
 
-    # Block: Camera client access
-    def _camera(self) -> Any:
-        if self._settings is None:
-            raise RuntimeError("camera settings are not configured")
-        if self._client is None:
-            self._client = create_tapo_control_client(self._settings)
-        return self._client
+    # Block: Settings helpers
+    def _resolve_settings(self) -> CameraConnectionSettings | None:
+        return read_camera_connection_settings(self._camera_connection_loader())
+
+    def _require_settings(self) -> CameraConnectionSettings:
+        settings = self._resolve_settings()
+        if settings is None:
+            raise RuntimeError("カメラ接続が未設定です")
+        return settings
+
+    # Block: Client helpers
+    def _ptz_service_for(self, settings: CameraConnectionSettings) -> Any:
+        self._ensure_client(settings)
+        if self._ptz_service is None:
+            raise RuntimeError("camera ptz service is not initialized")
+        return self._ptz_service
+
+    def _profile_token_for(self, settings: CameraConnectionSettings) -> str:
+        self._ensure_client(settings)
+        if self._profile_token is None:
+            raise RuntimeError("camera profile token is not initialized")
+        return self._profile_token
+
+    def _ensure_client(self, settings: CameraConnectionSettings) -> None:
+        settings_key = _settings_key(settings)
+        if self._cached_settings_key == settings_key:
+            return
+        camera = create_onvif_camera(settings)
+        media_service = camera.create_media_service()
+        ptz_service = camera.create_ptz_service()
+        profile_token = _read_profile_token(media_service)
+        self._cached_settings_key = settings_key
+        self._ptz_service = ptz_service
+        self._profile_token = profile_token
 
     # Block: Preset movement
-    def _move_to_preset(self, request: CameraLookRequest) -> CameraLookResponse:
-        camera = self._camera()
+    def _move_to_preset(
+        self,
+        *,
+        settings: CameraConnectionSettings,
+        ptz_service: Any,
+        profile_token: str,
+        request: CameraLookRequest,
+    ) -> CameraLookResponse:
         preset_name = normalized_optional_text(request.preset_name)
         preset_id = normalized_optional_text(request.preset_id)
-        available_presets = camera.getPresets()
-        if not isinstance(available_presets, dict):
-            raise RuntimeError("camera presets must be returned as an object")
-        resolved_preset_id = preset_id
+        available_presets = ptz_service.GetPresets({"ProfileToken": profile_token})
+        if not isinstance(available_presets, (list, tuple)):
+            raise RuntimeError("camera presets must be returned as a list")
+        resolved_preset_token = preset_id
         resolved_preset_name = preset_name
-        if resolved_preset_id is None:
+        if resolved_preset_token is None:
             if resolved_preset_name is None:
                 raise RuntimeError("preset_id または preset_name が必要です")
-            resolved_preset_id = _preset_id_by_name(
+            resolved_preset_token = _preset_token_by_name(
                 available_presets=available_presets,
                 preset_name=resolved_preset_name,
             )
         if resolved_preset_name is None:
-            resolved_preset_name = str(available_presets.get(resolved_preset_id, resolved_preset_id))
-        raw_result = camera.setPreset(resolved_preset_id)
+            resolved_preset_name = _preset_name_by_token(
+                available_presets=available_presets,
+                preset_token=resolved_preset_token,
+            )
+        raw_result = ptz_service.GotoPreset(
+            {
+                "ProfileToken": profile_token,
+                "PresetToken": resolved_preset_token,
+            }
+        )
         return CameraLookResponse(
             movement_label=f"プリセット {resolved_preset_name}",
             raw_result_ref=_raw_result_payload(raw_result),
             adapter_trace_ref={
-                "camera_host": self._settings.host,
+                "camera_host": settings.host,
                 "movement_mode": "preset",
-                "preset_id": resolved_preset_id,
+                "preset_id": resolved_preset_token,
                 "preset_name": resolved_preset_name,
             },
         )
 
+
+# Block: ONVIF helpers
+def _read_profile_token(media_service: Any) -> str:
+    profiles = media_service.GetProfiles()
+    if not isinstance(profiles, (list, tuple)) or not profiles:
+        raise RuntimeError("カメラの ONVIF profile を取得できませんでした")
+    profile_token = _read_object_value(profiles[0], "token")
+    if profile_token is None:
+        raise RuntimeError("カメラの ONVIF profile token を取得できませんでした")
+    return profile_token
+
+
 # Block: Direction helpers
 def _validated_direction(direction: str | None) -> str:
     normalized_direction = normalized_optional_text(direction)
-    if normalized_direction not in {"left", "right", "up", "down"}:
+    if normalized_direction not in DIRECTION_VECTORS:
         raise RuntimeError("direction は left / right / up / down のいずれかにしてください")
     return normalized_direction
 
 
-def _move_in_direction(*, camera: Any, direction: str) -> Any:
-    if direction == "left":
-        return camera.moveMotorCounterClockWise()
-    if direction == "right":
-        return camera.moveMotorClockWise()
-    if direction == "up":
-        return camera.moveMotorVertical()
-    if direction == "down":
-        return camera.moveMotorHorizontal()
-    raise RuntimeError("unsupported direction")
+def _move_in_direction(*, ptz_service: Any, profile_token: str, direction: str) -> Any:
+    pan_speed, tilt_speed = DIRECTION_VECTORS[direction]
+    move_request = {
+        "ProfileToken": profile_token,
+        "Velocity": {
+            "PanTilt": {
+                "x": pan_speed,
+                "y": tilt_speed,
+            }
+        },
+    }
+    raw_result = ptz_service.ContinuousMove(move_request)
+    time.sleep(MOVE_DURATION_SECONDS)
+    ptz_service.Stop(
+        {
+            "ProfileToken": profile_token,
+            "PanTilt": True,
+            "Zoom": True,
+        }
+    )
+    return raw_result
 
 
 def _direction_label(direction: str) -> str:
@@ -113,12 +203,46 @@ def _direction_label(direction: str) -> str:
 
 
 # Block: Preset helpers
-def _preset_id_by_name(*, available_presets: dict[Any, Any], preset_name: str) -> str:
+def _preset_token_by_name(*, available_presets: list[Any], preset_name: str) -> str:
     expected_name = preset_name.casefold()
-    for current_preset_id, current_preset_name in available_presets.items():
-        if str(current_preset_name).strip().casefold() == expected_name:
-            return str(current_preset_id)
+    for current_preset in available_presets:
+        current_name = _read_object_value(current_preset, "Name")
+        current_token = _read_object_value(current_preset, "token")
+        if current_name is None or current_token is None:
+            continue
+        if current_name.casefold() == expected_name:
+            return current_token
     raise RuntimeError(f"preset_name '{preset_name}' は見つかりません")
+
+
+def _preset_name_by_token(*, available_presets: list[Any], preset_token: str) -> str:
+    for current_preset in available_presets:
+        current_token = _read_object_value(current_preset, "token")
+        current_name = _read_object_value(current_preset, "Name")
+        if current_token == preset_token:
+            return current_name or preset_token
+    return preset_token
+
+
+# Block: Generic object helpers
+def _read_object_value(source: Any, field_name: str) -> str | None:
+    if isinstance(source, dict):
+        raw_value = source.get(field_name)
+        if isinstance(raw_value, str) and raw_value:
+            return raw_value
+    raw_value = getattr(source, field_name, None)
+    if isinstance(raw_value, str) and raw_value:
+        return raw_value
+    return None
+
+
+def _settings_key(settings: CameraConnectionSettings) -> tuple[str, str, str]:
+    return (
+        settings.host,
+        settings.username,
+        settings.password,
+    )
+
 
 # Block: Result payload helper
 def _raw_result_payload(raw_result: Any) -> dict[str, Any] | None:

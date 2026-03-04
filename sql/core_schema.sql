@@ -46,7 +46,8 @@ CREATE TABLE settings_editor_state (
     active_llm_preset_id TEXT NOT NULL,
     active_memory_preset_id TEXT NOT NULL,
     active_output_preset_id TEXT NOT NULL,
-    direct_values_json TEXT NOT NULL,
+    active_camera_connection_id TEXT,
+    system_values_json TEXT NOT NULL,
     revision INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     last_applied_change_set_id TEXT
@@ -67,6 +68,20 @@ CREATE TABLE settings_presets (
 
 CREATE INDEX idx_settings_presets_kind_archived_sort
     ON settings_presets (preset_kind, archived, sort_order ASC, updated_at DESC);
+
+CREATE TABLE camera_connections (
+    camera_connection_id TEXT PRIMARY KEY,
+    display_name TEXT NOT NULL,
+    host TEXT NOT NULL,
+    username TEXT NOT NULL,
+    password TEXT NOT NULL,
+    sort_order INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX idx_camera_connections_sort
+    ON camera_connections (sort_order ASC, updated_at DESC);
 
 CREATE TABLE attention_state (
     row_id INTEGER PRIMARY KEY CHECK (row_id = 1),

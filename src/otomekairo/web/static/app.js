@@ -21,7 +21,8 @@
   const settingsLlmCard = document.getElementById("settings-llm-card");
   const settingsMemoryCard = document.getElementById("settings-memory-card");
   const settingsOutputCard = document.getElementById("settings-output-card");
-  const settingsDirectCard = document.getElementById("settings-direct-card");
+  const settingsSystemCard = document.getElementById("settings-system-card");
+  const settingsCameraCard = document.getElementById("settings-camera-card");
   const settingsStatus = document.getElementById("settings-status");
   const settingsTabButtons = Array.from(document.querySelectorAll("[data-settings-tab]"));
   const settingsPages = Array.from(document.querySelectorAll("[data-settings-page]"));
@@ -70,7 +71,7 @@
       { path: "integrations.discord.channel_id", label: "Discord チャンネル", kind: "text" },
     ],
   };
-  const DIRECT_DESCRIPTORS = [
+  const SYSTEM_DESCRIPTORS = [
     { key: "runtime.idle_tick_ms", label: "Idle Tick (ms)", kind: "integer", min: 250, max: 60000, step: 250 },
     { key: "runtime.long_cycle_min_interval_ms", label: "Long Cycle (ms)", kind: "integer", min: 1000, max: 300000, step: 1000 },
     { key: "sensors.microphone.enabled", label: "マイク入力", kind: "boolean" },
@@ -79,6 +80,7 @@
     { key: "integrations.sns.enabled", label: "SNS 連携", kind: "boolean" },
     { key: "integrations.line.enabled", label: "外部通知", kind: "boolean" },
   ];
+  const CAMERA_FIELD_KEYS = ["display_name", "host", "username", "password"];
 
   // Block: Runtime state
   let stream = null;
@@ -459,6 +461,7 @@
     editorDraft = {
       editor_state: cloneJson(snapshot.editor_state),
       preset_catalogs: cloneJson(snapshot.preset_catalogs),
+      camera_connections: cloneJson(snapshot.camera_connections),
     };
     settingsStatus.textContent = "サーバ正本を読込済み";
     renderSettingsEditor();
@@ -474,6 +477,9 @@
     if (!isObject(snapshot.preset_catalogs)) {
       throw new Error("preset_catalogs が不正です");
     }
+    if (!Array.isArray(snapshot.camera_connections)) {
+      throw new Error("camera_connections が不正です");
+    }
     if (!isObject(snapshot.runtime_projection)) {
       throw new Error("runtime_projection が不正です");
     }
@@ -488,7 +494,8 @@
     renderPresetCard("llm", "会話プリセット", settingsLlmCard);
     renderPresetCard("memory", "記憶プリセット", settingsMemoryCard);
     renderPresetCard("output", "出力プリセット", settingsOutputCard);
-    renderDirectValuesCard();
+    renderSystemValuesCard();
+    renderCameraConnectionsCard();
     settingsJson.textContent = formatJson(latestEditorSnapshot.runtime_projection);
     if (latestStatusSnapshot !== null) {
       statusJson.textContent = formatJson(latestStatusSnapshot);
@@ -575,23 +582,23 @@
     `;
   }
 
-  function renderDirectValuesCard() {
-    const directValues = requireDirectValues();
-    const fieldsHtml = DIRECT_DESCRIPTORS
-      .map((descriptor) => renderDirectField(directValues, descriptor))
+  function renderSystemValuesCard() {
+    const systemValues = requireSystemValues();
+    const fieldsHtml = SYSTEM_DESCRIPTORS
+      .map((descriptor) => renderSystemField(systemValues, descriptor))
       .join("");
-    settingsDirectCard.innerHTML = `
-      <div class="settings-card-title">システム direct 値</div>
+    settingsSystemCard.innerHTML = `
+      <div class="settings-card-title">システム設定</div>
       <div class="settings-grid">${fieldsHtml}</div>
     `;
   }
 
-  function renderDirectField(directValues, descriptor) {
-    const value = directValues[descriptor.key];
+  function renderSystemField(systemValues, descriptor) {
+    const value = systemValues[descriptor.key];
     if (descriptor.kind === "boolean") {
       return `
         <label class="settings-check">
-          <input type="checkbox" ${value === true ? "checked" : ""} data-direct-key="${escapeHtml(descriptor.key)}" data-value-kind="boolean" />
+          <input type="checkbox" ${value === true ? "checked" : ""} data-system-key="${escapeHtml(descriptor.key)}" data-value-kind="boolean" />
           <span>${escapeHtml(descriptor.label)}</span>
         </label>
       `;
@@ -604,8 +611,59 @@
     return `
       <label class="settings-field">
         <span class="settings-label">${escapeHtml(descriptor.label)}</span>
-        <input class="settings-input" type="number" value="${String(numberValue)}" step="${String(descriptor.step ?? 1)}"${minAttr}${maxAttr} data-direct-key="${escapeHtml(descriptor.key)}" data-value-kind="${escapeHtml(descriptor.kind)}" />
+        <input class="settings-input" type="number" value="${String(numberValue)}" step="${String(descriptor.step ?? 1)}"${minAttr}${maxAttr} data-system-key="${escapeHtml(descriptor.key)}" data-value-kind="${escapeHtml(descriptor.kind)}" />
       </label>
+    `;
+  }
+
+  function renderCameraConnectionsCard() {
+    const cameraConnections = readCameraConnections();
+    const activeCameraConnectionId = readActiveCameraConnectionId();
+    if (cameraConnections.length === 0) {
+      settingsCameraCard.innerHTML = `
+        <div class="settings-card-title">カメラ接続</div>
+        <div class="settings-desc">接続はまだありません。</div>
+        <div class="settings-actions">
+          <button class="settings-btn" type="button" data-camera-action="add">追加</button>
+        </div>
+      `;
+      return;
+    }
+    const selectOptions = cameraConnections
+      .map((cameraConnection) => {
+        const selected = cameraConnection.camera_connection_id === activeCameraConnectionId ? " selected" : "";
+        return `<option value="${escapeHtml(cameraConnection.camera_connection_id)}"${selected}>${escapeHtml(cameraConnection.display_name)}</option>`;
+      })
+      .join("");
+    const activeCameraConnection = requireActiveCameraConnection();
+    settingsCameraCard.innerHTML = `
+      <div class="settings-card-title">カメラ接続</div>
+      <div class="settings-grid">
+        <label class="settings-field">
+          <span class="settings-label">使用接続</span>
+          <select class="settings-input" data-active-camera-connection="true">${selectOptions}</select>
+        </label>
+        <label class="settings-field">
+          <span class="settings-label">表示名</span>
+          <input class="settings-input" type="text" value="${escapeHtml(activeCameraConnection.display_name)}" data-camera-field="display_name" />
+        </label>
+        <label class="settings-field">
+          <span class="settings-label">IP アドレス</span>
+          <input class="settings-input" type="text" value="${escapeHtml(activeCameraConnection.host)}" data-camera-field="host" />
+        </label>
+        <label class="settings-field">
+          <span class="settings-label">アカウント</span>
+          <input class="settings-input" type="text" value="${escapeHtml(activeCameraConnection.username)}" data-camera-field="username" />
+        </label>
+        <label class="settings-field">
+          <span class="settings-label">パスワード</span>
+          <input class="settings-input" type="password" value="${escapeHtml(activeCameraConnection.password)}" data-camera-field="password" />
+        </label>
+      </div>
+      <div class="settings-actions">
+        <button class="settings-btn" type="button" data-camera-action="add">追加</button>
+        <button class="settings-btn danger" type="button" data-camera-action="remove">削除</button>
+      </div>
     `;
   }
 
@@ -623,10 +681,23 @@
       element.addEventListener("input", handlePresetFieldChange);
       element.addEventListener("change", handlePresetFieldChange);
     }
-    const directValueInputs = settingsPanel.querySelectorAll("[data-direct-key]");
-    for (const element of directValueInputs) {
-      element.addEventListener("input", handleDirectFieldChange);
-      element.addEventListener("change", handleDirectFieldChange);
+    const systemValueInputs = settingsPanel.querySelectorAll("[data-system-key]");
+    for (const element of systemValueInputs) {
+      element.addEventListener("input", handleSystemFieldChange);
+      element.addEventListener("change", handleSystemFieldChange);
+    }
+    const activeCameraConnectionInputs = settingsPanel.querySelectorAll("[data-active-camera-connection]");
+    for (const element of activeCameraConnectionInputs) {
+      element.addEventListener("change", handleActiveCameraConnectionChange);
+    }
+    const cameraFieldInputs = settingsPanel.querySelectorAll("[data-camera-field]");
+    for (const element of cameraFieldInputs) {
+      element.addEventListener("input", handleCameraFieldChange);
+      element.addEventListener("change", handleCameraFieldChange);
+    }
+    const cameraActionButtons = settingsPanel.querySelectorAll("[data-camera-action]");
+    for (const element of cameraActionButtons) {
+      element.addEventListener("click", handleCameraAction);
     }
   }
 
@@ -663,16 +734,59 @@
     updateSettingsDirtyState();
   }
 
-  function handleDirectFieldChange(event) {
+  function handleSystemFieldChange(event) {
     if (editorDraft === null) {
       appendError("設定ドラフトが未初期化です");
       return;
     }
     const element = event.currentTarget;
-    const key = String(element.dataset.directKey || "");
+    const key = String(element.dataset.systemKey || "");
     const valueKind = String(element.dataset.valueKind || "");
-    editorDraft.editor_state.direct_values[key] = readInputValue(element, valueKind);
+    editorDraft.editor_state.system_values[key] = readInputValue(element, valueKind);
     updateSettingsDirtyState();
+  }
+
+  function handleActiveCameraConnectionChange(event) {
+    if (editorDraft === null) {
+      appendError("設定ドラフトが未初期化です");
+      return;
+    }
+    const element = event.currentTarget;
+    editorDraft.editor_state.active_camera_connection_id = String(element.value);
+    renderSettingsEditor();
+  }
+
+  function handleCameraFieldChange(event) {
+    const element = event.currentTarget;
+    const fieldName = String(element.dataset.cameraField || "");
+    if (!CAMERA_FIELD_KEYS.includes(fieldName)) {
+      appendError("カメラ項目が不正です");
+      return;
+    }
+    const activeCameraConnection = requireActiveCameraConnection();
+    activeCameraConnection[fieldName] = String(element.value);
+    activeCameraConnection.updated_at = Date.now();
+    updateSettingsDirtyState();
+  }
+
+  function handleCameraAction(event) {
+    if (editorDraft === null) {
+      appendError("設定ドラフトが未初期化です");
+      return;
+    }
+    const element = event.currentTarget;
+    const action = String(element.dataset.cameraAction || "");
+    if (action === "add") {
+      addCameraConnection();
+      renderSettingsEditor();
+      return;
+    }
+    if (action === "remove") {
+      removeActiveCameraConnection();
+      renderSettingsEditor();
+      return;
+    }
+    appendError("カメラ操作が不正です");
   }
 
   function updateSettingsDirtyState() {
@@ -683,6 +797,7 @@
     const serverCanonical = JSON.stringify({
       editor_state: latestEditorSnapshot.editor_state,
       preset_catalogs: latestEditorSnapshot.preset_catalogs,
+      camera_connections: latestEditorSnapshot.camera_connections,
     });
     settingsStatus.textContent = currentCanonical === serverCanonical
       ? "保存済み"
@@ -1033,15 +1148,87 @@
     return entry;
   }
 
-  function requireDirectValues() {
+  function requireSystemValues() {
     if (editorDraft === null || !isObject(editorDraft.editor_state)) {
-      throw new Error("direct_values が未初期化です");
+      throw new Error("system_values が未初期化です");
     }
-    const directValues = editorDraft.editor_state.direct_values;
-    if (!isObject(directValues)) {
-      throw new Error("direct_values が不正です");
+    const systemValues = editorDraft.editor_state.system_values;
+    if (!isObject(systemValues)) {
+      throw new Error("system_values が不正です");
     }
-    return directValues;
+    return systemValues;
+  }
+
+  function readCameraConnections() {
+    if (editorDraft === null) {
+      throw new Error("設定ドラフトが未初期化です");
+    }
+    if (!Array.isArray(editorDraft.camera_connections)) {
+      throw new Error("camera_connections が不正です");
+    }
+    return editorDraft.camera_connections;
+  }
+
+  function readActiveCameraConnectionId() {
+    if (editorDraft === null || !isObject(editorDraft.editor_state)) {
+      throw new Error("設定ドラフトが未初期化です");
+    }
+    const activeCameraConnectionId = editorDraft.editor_state.active_camera_connection_id;
+    if (activeCameraConnectionId === null) {
+      return null;
+    }
+    return requireString(activeCameraConnectionId, "active_camera_connection_id");
+  }
+
+  function requireActiveCameraConnection() {
+    const activeCameraConnectionId = readActiveCameraConnectionId();
+    if (activeCameraConnectionId === null) {
+      throw new Error("アクティブなカメラ接続がありません");
+    }
+    const cameraConnection = readCameraConnections()
+      .find((candidate) => String(candidate.camera_connection_id) === activeCameraConnectionId);
+    if (cameraConnection === undefined || !isObject(cameraConnection)) {
+      throw new Error("アクティブなカメラ接続が見つかりません");
+    }
+    return cameraConnection;
+  }
+
+  function addCameraConnection() {
+    if (!("crypto" in window) || typeof window.crypto.randomUUID !== "function") {
+      throw new Error("このブラウザではカメラ接続 ID を生成できません");
+    }
+    const cameraConnections = readCameraConnections();
+    const nextSortOrder = cameraConnections.length === 0
+      ? 10
+      : Math.max(...cameraConnections.map((cameraConnection) => requireInteger(cameraConnection.sort_order, "camera_connection.sort_order"))) + 10;
+    const cameraConnectionId = `cam_${window.crypto.randomUUID().replace(/-/g, "")}`;
+    const nowMs = Date.now();
+    cameraConnections.push({
+      camera_connection_id: cameraConnectionId,
+      display_name: `カメラ ${cameraConnections.length + 1}`,
+      host: "",
+      username: "",
+      password: "",
+      sort_order: nextSortOrder,
+      updated_at: nowMs,
+    });
+    editorDraft.editor_state.active_camera_connection_id = cameraConnectionId;
+    updateSettingsDirtyState();
+  }
+
+  function removeActiveCameraConnection() {
+    const activeCameraConnectionId = readActiveCameraConnectionId();
+    if (activeCameraConnectionId === null) {
+      return;
+    }
+    const cameraConnections = readCameraConnections();
+    const filteredCameraConnections = cameraConnections
+      .filter((cameraConnection) => String(cameraConnection.camera_connection_id) !== activeCameraConnectionId);
+    editorDraft.camera_connections = filteredCameraConnections;
+    editorDraft.editor_state.active_camera_connection_id = filteredCameraConnections.length === 0
+      ? null
+      : String(filteredCameraConnections[0].camera_connection_id);
+    updateSettingsDirtyState();
   }
 
   function requireRuntimeProjection() {

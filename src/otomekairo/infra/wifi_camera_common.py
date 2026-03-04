@@ -1,8 +1,7 @@
-"""Shared PyTapo-backed Wi-Fi camera helpers."""
+"""Shared ONVIF-backed Wi-Fi camera helpers."""
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -12,67 +11,43 @@ from typing import Any
 CAMERA_CAPTURE_DIRECTORY = Path(__file__).resolve().parents[3] / "data" / "camera"
 
 
-# Block: Environment settings
+# Block: Camera connection constants
+CAMERA_ONVIF_PORT = 2020
+
+
+# Block: Camera connection settings
 @dataclass(frozen=True, slots=True)
 class CameraConnectionSettings:
     host: str
     username: str
     password: str
-    control_port: int
-    stream_port: int
 
 
-# Block: Settings loaders
-def read_camera_connection_settings() -> CameraConnectionSettings | None:
-    host = _normalized_optional_text(os.environ.get("OTOMEKAIRO_CAMERA_HOST"))
-    username = _normalized_optional_text(os.environ.get("OTOMEKAIRO_CAMERA_USERNAME"))
-    password = _normalized_optional_text(os.environ.get("OTOMEKAIRO_CAMERA_PASSWORD"))
+# Block: Settings decode
+def read_camera_connection_settings(camera_connection: dict[str, Any] | None) -> CameraConnectionSettings | None:
+    if camera_connection is None:
+        return None
+    host = normalized_optional_text(camera_connection.get("host"))
+    username = normalized_optional_text(camera_connection.get("username"))
+    password = normalized_optional_text(camera_connection.get("password"))
     if host is None or username is None or password is None:
         return None
     return CameraConnectionSettings(
         host=host,
         username=username,
         password=password,
-        control_port=_read_port("OTOMEKAIRO_CAMERA_CONTROL_PORT", default_value=443),
-        stream_port=_read_port("OTOMEKAIRO_CAMERA_STREAM_PORT", default_value=8800),
     )
 
 
-def read_camera_stream_password() -> str | None:
-    return _normalized_optional_text(os.environ.get("OTOMEKAIRO_CAMERA_CLOUD_PASSWORD"))
+# Block: ONVIF client factory
+def create_onvif_camera(settings: CameraConnectionSettings) -> Any:
+    from onvif import ONVIFCamera
 
-
-# Block: Camera client factories
-def create_tapo_control_client(settings: CameraConnectionSettings) -> Any:
-    from pytapo import Tapo
-
-    return Tapo(
+    return ONVIFCamera(
         settings.host,
+        CAMERA_ONVIF_PORT,
         settings.username,
         settings.password,
-        controlPort=settings.control_port,
-        streamPort=settings.stream_port,
-        printDebugInformation=False,
-        printWarnInformation=False,
-    )
-
-
-def create_tapo_stream_client(
-    settings: CameraConnectionSettings,
-    *,
-    stream_password: str,
-) -> Any:
-    from pytapo import Tapo
-
-    return Tapo(
-        settings.host,
-        settings.username,
-        settings.password,
-        cloudPassword=stream_password,
-        controlPort=settings.control_port,
-        streamPort=settings.stream_port,
-        printDebugInformation=False,
-        printWarnInformation=False,
     )
 
 
@@ -84,9 +59,7 @@ def default_camera_capture_dir() -> Path:
 
 # Block: Capture file helpers
 def validate_camera_capture_id(capture_id: str) -> str:
-    normalized_capture_id = _normalized_optional_text(capture_id)
-    if normalized_capture_id is None:
-        raise RuntimeError("capture_id must not be blank")
+    normalized_capture_id = _required_text(capture_id, "capture_id")
     if not normalized_capture_id.startswith("cap_"):
         raise RuntimeError("capture_id must start with cap_")
     suffix = normalized_capture_id[4:]
@@ -112,12 +85,8 @@ def camera_capture_public_url(capture_id: str) -> str:
     return f"/captures/{validated_capture_id}.jpg"
 
 
-# Block: Environment helper
+# Block: Text helpers
 def normalized_optional_text(value: Any) -> str | None:
-    return _normalized_optional_text(value)
-
-
-def _normalized_optional_text(value: Any) -> str | None:
     if not isinstance(value, str):
         return None
     stripped_value = value.strip()
@@ -126,14 +95,8 @@ def _normalized_optional_text(value: Any) -> str | None:
     return stripped_value
 
 
-def _read_port(name: str, *, default_value: int) -> int:
-    raw_value = _normalized_optional_text(os.environ.get(name))
-    if raw_value is None:
-        return default_value
-    try:
-        port = int(raw_value)
-    except ValueError as error:
-        raise RuntimeError(f"{name} は整数で指定してください") from error
-    if port <= 0 or port > 65535:
-        raise RuntimeError(f"{name} は 1 から 65535 の範囲で指定してください")
-    return port
+def _required_text(value: Any, field_name: str) -> str:
+    normalized_value = normalized_optional_text(value)
+    if normalized_value is None:
+        raise RuntimeError(f"{field_name} must be non-empty string")
+    return normalized_value

@@ -134,10 +134,10 @@ flowchart TD
 - `settings_editor_state`
   - 役割: 設定UIが扱う全体編集状態の正本を 1 件で保持する
   - 主キー: `row_id INTEGER PRIMARY KEY CHECK(row_id = 1)`
-  - 必須列: `active_behavior_preset_id`, `active_llm_preset_id`, `active_memory_preset_id`, `active_output_preset_id`, `direct_values_json`, `revision`, `updated_at`
-  - 任意列: `last_applied_change_set_id`
-  - `direct_values_json` は、設定UIの direct 値を全キーぶん持つ完全オブジェクトとする
-  - `direct_values_json` の JSON 形は、`docs/36_JSONデータ仕様.md` を正本とする
+  - 必須列: `active_behavior_preset_id`, `active_llm_preset_id`, `active_memory_preset_id`, `active_output_preset_id`, `system_values_json`, `revision`, `updated_at`
+  - 任意列: `active_camera_connection_id`, `last_applied_change_set_id`
+  - `system_values_json` は、設定UIのシステム設定を全キーぶん持つ完全オブジェクトとする
+  - `system_values_json` の JSON 形は、`docs/36_JSONデータ仕様.md` を正本とする
   - `revision` は、`PUT /api/settings/editor` の楽観ロック用に単調増加の `INTEGER` で持つ
 
 - `settings_presets`
@@ -148,6 +148,13 @@ flowchart TD
   - `payload_json` は、`preset_kind` ごとの固定形を持つ
   - `payload_json` の JSON 形は、`docs/36_JSONデータ仕様.md` を正本とする
   - 主要索引: `(preset_kind, archived, sort_order ASC, updated_at DESC)`
+
+- `camera_connections`
+  - 役割: 設定UIで保持するカメラ接続先の正本を保持する
+  - 主キー: `camera_connection_id TEXT PRIMARY KEY`
+  - 必須列: `display_name`, `host`, `username`, `password`, `sort_order`, `created_at`, `updated_at`
+  - `active_camera_connection_id` が指す接続先だけを実際のカメラ操作に使う
+  - 主要索引: `(sort_order ASC, updated_at DESC)`
 
 - `attention_state`
   - 役割: 現在の注意断面を 1 件で保持する

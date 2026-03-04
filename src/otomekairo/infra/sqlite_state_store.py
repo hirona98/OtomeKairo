@@ -25,10 +25,11 @@ from otomekairo.schema.runtime_types import (
     TaskStateMutationRecord,
 )
 from otomekairo.schema.settings import (
+    build_default_camera_connections,
     build_default_settings,
     build_default_settings_editor_state,
     build_default_settings_presets,
-    build_settings_editor_direct_keys,
+    build_settings_editor_system_keys,
     decode_requested_value,
     normalize_settings_editor_document,
 )
@@ -36,7 +37,7 @@ from otomekairo.schema.settings import (
 
 # Block: Schema constants
 SCHEMA_NAME = "core_schema"
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 EMBEDDING_VECTOR_DIMENSION = 32
 LEGACY_SETTING_KEY_ALIASES = {
     "llm.model": "llm.default_model",
@@ -84,6 +85,10 @@ class SqliteStateStore:
                 self._migrate_schema(connection, now_ms)
             self._ensure_vec_index_schema(connection=connection)
             self._ensure_db_meta(connection, now_ms)
+            self._ensure_settings_editor_state_schema_v7(
+                connection=connection,
+                now_ms=now_ms,
+            )
             self._seed_singletons(connection, now_ms)
         return BootstrapResult(db_path=self._db_path, initialized_at=now_ms)
 
@@ -205,7 +210,8 @@ class SqliteStateStore:
                     active_llm_preset_id,
                     active_memory_preset_id,
                     active_output_preset_id,
-                    direct_values_json,
+                    active_camera_connection_id,
+                    system_values_json,
                     revision,
                     updated_at,
                     last_applied_change_set_id
@@ -228,10 +234,26 @@ class SqliteStateStore:
                 ORDER BY preset_kind ASC, sort_order ASC, updated_at DESC
                 """
             ).fetchall()
+            camera_connection_rows = connection.execute(
+                """
+                SELECT
+                    camera_connection_id,
+                    display_name,
+                    host,
+                    username,
+                    password,
+                    sort_order,
+                    created_at,
+                    updated_at
+                FROM camera_connections
+                ORDER BY sort_order ASC, updated_at DESC
+                """
+            ).fetchall()
         if editor_row is None:
             raise RuntimeError("settings_editor_state row is missing")
         editor_state = _decode_settings_editor_state_row(editor_row)
         preset_catalogs = _decode_settings_preset_catalog_rows(preset_rows)
+        camera_connections = _decode_camera_connection_rows(camera_connection_rows)
         runtime_projection = _materialize_runtime_settings_from_editor(
             default_settings=default_settings,
             editor_state=editor_state,
@@ -244,14 +266,54 @@ class SqliteStateStore:
                 "active_llm_preset_id": editor_state["active_llm_preset_id"],
                 "active_memory_preset_id": editor_state["active_memory_preset_id"],
                 "active_output_preset_id": editor_state["active_output_preset_id"],
-                "direct_values": dict(editor_state["direct_values"]),
+                "active_camera_connection_id": editor_state["active_camera_connection_id"],
+                "system_values": dict(editor_state["system_values"]),
             },
             "preset_catalogs": preset_catalogs,
+            "camera_connections": camera_connections,
             "constraints": {
-                "editable_direct_keys": list(build_settings_editor_direct_keys()),
+                "editable_system_keys": list(build_settings_editor_system_keys()),
             },
             "runtime_projection": runtime_projection,
         }
+
+    # Block: Active camera connection snapshot
+    def read_active_camera_connection(self) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            editor_row = connection.execute(
+                """
+                SELECT active_camera_connection_id
+                FROM settings_editor_state
+                WHERE row_id = 1
+                """
+            ).fetchone()
+            if editor_row is None:
+                raise RuntimeError("settings_editor_state row is missing")
+            active_camera_connection_id = editor_row["active_camera_connection_id"]
+            if active_camera_connection_id is None:
+                return None
+            camera_connection_row = connection.execute(
+                """
+                SELECT
+                    camera_connection_id,
+                    display_name,
+                    host,
+                    username,
+                    password,
+                    sort_order,
+                    created_at,
+                    updated_at
+                FROM camera_connections
+                WHERE camera_connection_id = ?
+                """,
+                (str(active_camera_connection_id),),
+            ).fetchone()
+        if camera_connection_row is None:
+            return None
+        camera_connections = _decode_camera_connection_rows([camera_connection_row])
+        if len(camera_connections) != 1:
+            raise RuntimeError("camera connection decode result is invalid")
+        return camera_connections[0]
 
     # Block: Settings editor save
     def save_settings_editor(
@@ -270,7 +332,8 @@ class SqliteStateStore:
                     active_llm_preset_id,
                     active_memory_preset_id,
                     active_output_preset_id,
-                    direct_values_json,
+                    active_camera_connection_id,
+                    system_values_json,
                     revision,
                     updated_at,
                     last_applied_change_set_id
@@ -303,11 +366,28 @@ class SqliteStateStore:
                 ORDER BY preset_kind ASC, sort_order ASC, updated_at DESC
                 """
             ).fetchall()
+            current_camera_connection_rows = connection.execute(
+                """
+                SELECT
+                    camera_connection_id,
+                    display_name,
+                    host,
+                    username,
+                    password,
+                    sort_order,
+                    created_at,
+                    updated_at
+                FROM camera_connections
+                ORDER BY sort_order ASC, updated_at DESC
+                """
+            ).fetchall()
             current_preset_catalogs = _decode_settings_preset_catalog_rows(current_preset_rows)
+            current_camera_connections = _decode_camera_connection_rows(current_camera_connection_rows)
             if (
                 _canonical_editor_state_for_compare(current_editor_state)
                 == normalized_document["editor_state"]
                 and current_preset_catalogs == normalized_document["preset_catalogs"]
+                and current_camera_connections == normalized_document["camera_connections"]
             ):
                 return self.read_settings_editor(default_settings)
             saved_editor_state = {
@@ -315,7 +395,8 @@ class SqliteStateStore:
                 "active_llm_preset_id": normalized_document["editor_state"]["active_llm_preset_id"],
                 "active_memory_preset_id": normalized_document["editor_state"]["active_memory_preset_id"],
                 "active_output_preset_id": normalized_document["editor_state"]["active_output_preset_id"],
-                "direct_values": dict(normalized_document["editor_state"]["direct_values"]),
+                "active_camera_connection_id": normalized_document["editor_state"]["active_camera_connection_id"],
+                "system_values": dict(normalized_document["editor_state"]["system_values"]),
                 "revision": current_revision + 1,
                 "updated_at": now_ms,
                 "last_applied_change_set_id": current_editor_state.get("last_applied_change_set_id"),
@@ -324,6 +405,11 @@ class SqliteStateStore:
             _replace_settings_presets(
                 connection=connection,
                 preset_catalogs=normalized_document["preset_catalogs"],
+                now_ms=now_ms,
+            )
+            _replace_camera_connections(
+                connection=connection,
+                camera_connections=normalized_document["camera_connections"],
                 now_ms=now_ms,
             )
             change_set_id = _opaque_id("setchg")
@@ -778,7 +864,8 @@ class SqliteStateStore:
                         active_llm_preset_id,
                         active_memory_preset_id,
                         active_output_preset_id,
-                        direct_values_json,
+                        active_camera_connection_id,
+                        system_values_json,
                         revision,
                         updated_at,
                         last_applied_change_set_id
@@ -803,12 +890,28 @@ class SqliteStateStore:
                     ORDER BY preset_kind ASC, sort_order ASC, updated_at DESC
                     """
                 ).fetchall()
+                camera_connection_rows = connection.execute(
+                    """
+                    SELECT
+                        camera_connection_id,
+                        display_name,
+                        host,
+                        username,
+                        password,
+                        sort_order,
+                        created_at,
+                        updated_at
+                    FROM camera_connections
+                    ORDER BY sort_order ASC, updated_at DESC
+                    """
+                ).fetchall()
                 editor_state = _decode_settings_editor_state_row(editor_row)
                 if int(editor_state["revision"]) != change_set.editor_revision:
                     final_status = "rejected"
                     reject_reason = "stale_settings_change_set"
                 else:
                     preset_catalogs = _decode_settings_preset_catalog_rows(preset_rows)
+                    camera_connections = _decode_camera_connection_rows(camera_connection_rows)
                     runtime_values = _materialize_runtime_settings_from_editor(
                         default_settings=default_settings,
                         editor_state=editor_state,
@@ -2400,12 +2503,13 @@ class SqliteStateStore:
                 active_llm_preset_id,
                 active_memory_preset_id,
                 active_output_preset_id,
-                direct_values_json,
+                active_camera_connection_id,
+                system_values_json,
                 revision,
                 updated_at,
                 last_applied_change_set_id
             )
-            VALUES (1, ?, ?, ?, ?, ?, ?, ?, NULL)
+            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
             ON CONFLICT(row_id) DO NOTHING
             """,
             (
@@ -2413,7 +2517,8 @@ class SqliteStateStore:
                 editor_seed["active_llm_preset_id"],
                 editor_seed["active_memory_preset_id"],
                 editor_seed["active_output_preset_id"],
-                _json_text(editor_seed["direct_values_json"]),
+                editor_seed["active_camera_connection_id"],
+                _json_text(editor_seed["system_values_json"]),
                 int(editor_seed["revision"]),
                 now_ms,
             ),
@@ -2445,6 +2550,224 @@ class SqliteStateStore:
                     now_ms,
                 ),
             )
+        camera_connection_seeds = build_default_camera_connections()
+        for index, camera_connection_seed in enumerate(camera_connection_seeds):
+            connection.execute(
+                """
+                INSERT INTO camera_connections (
+                    camera_connection_id,
+                    display_name,
+                    host,
+                    username,
+                    password,
+                    sort_order,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(camera_connection_id) DO NOTHING
+                """,
+                (
+                    camera_connection_seed["camera_connection_id"],
+                    camera_connection_seed["display_name"],
+                    camera_connection_seed["host"],
+                    camera_connection_seed["username"],
+                    camera_connection_seed["password"],
+                    (index + 1) * 10,
+                    now_ms,
+                    now_ms,
+                ),
+            )
+
+    # Block: Legacy settings editor seed for schema v5
+    def _ensure_settings_editor_defaults_v5(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        now_ms: int,
+    ) -> None:
+        default_settings = build_default_settings()
+        editor_seed = build_default_settings_editor_state(default_settings)
+        connection.execute(
+            """
+            INSERT INTO settings_editor_state (
+                row_id,
+                active_behavior_preset_id,
+                active_llm_preset_id,
+                active_memory_preset_id,
+                active_output_preset_id,
+                direct_values_json,
+                revision,
+                updated_at,
+                last_applied_change_set_id
+            )
+            VALUES (1, ?, ?, ?, ?, ?, ?, ?, NULL)
+            ON CONFLICT(row_id) DO NOTHING
+            """,
+            (
+                editor_seed["active_behavior_preset_id"],
+                editor_seed["active_llm_preset_id"],
+                editor_seed["active_memory_preset_id"],
+                editor_seed["active_output_preset_id"],
+                _json_text(editor_seed["system_values_json"]),
+                int(editor_seed["revision"]),
+                now_ms,
+            ),
+        )
+        preset_seeds = build_default_settings_presets(default_settings)
+        for index, preset_seed in enumerate(preset_seeds):
+            connection.execute(
+                """
+                INSERT INTO settings_presets (
+                    preset_id,
+                    preset_kind,
+                    preset_name,
+                    payload_json,
+                    archived,
+                    sort_order,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, 0, ?, ?, ?)
+                ON CONFLICT(preset_id) DO NOTHING
+                """,
+                (
+                    preset_seed["preset_id"],
+                    preset_seed["preset_kind"],
+                    preset_seed["preset_name"],
+                    _json_text(preset_seed["payload"]),
+                    (index + 1) * 10,
+                    now_ms,
+                    now_ms,
+                ),
+            )
+
+    # Block: Settings editor schema normalization
+    def _ensure_settings_editor_state_schema_v7(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        now_ms: int,
+    ) -> None:
+        column_rows = connection.execute(
+            """
+            PRAGMA table_info(settings_editor_state)
+            """
+        ).fetchall()
+        if not column_rows:
+            return
+        column_names = {str(row["name"]) for row in column_rows}
+        expected_column_names = {
+            "row_id",
+            "active_behavior_preset_id",
+            "active_llm_preset_id",
+            "active_memory_preset_id",
+            "active_output_preset_id",
+            "active_camera_connection_id",
+            "system_values_json",
+            "revision",
+            "updated_at",
+            "last_applied_change_set_id",
+        }
+        if column_names == expected_column_names:
+            return
+        default_settings = build_default_settings()
+        editor_seed = build_default_settings_editor_state(default_settings)
+        existing_row = connection.execute(
+            """
+            SELECT *
+            FROM settings_editor_state
+            WHERE row_id = 1
+            """
+        ).fetchone()
+        migrated_row: dict[str, Any] | None = None
+        if existing_row is not None:
+            system_values = dict(editor_seed["system_values_json"])
+            if "system_values_json" in column_names:
+                raw_system_values = json.loads(existing_row["system_values_json"])
+                if isinstance(raw_system_values, dict):
+                    for key in build_settings_editor_system_keys():
+                        if key in raw_system_values:
+                            system_values[key] = raw_system_values[key]
+            if "direct_values_json" in column_names:
+                raw_direct_values = json.loads(existing_row["direct_values_json"])
+                if isinstance(raw_direct_values, dict):
+                    for key in build_settings_editor_system_keys():
+                        if key in raw_direct_values:
+                            system_values[key] = raw_direct_values[key]
+            migrated_row = {
+                "active_behavior_preset_id": str(existing_row["active_behavior_preset_id"]),
+                "active_llm_preset_id": str(existing_row["active_llm_preset_id"]),
+                "active_memory_preset_id": str(existing_row["active_memory_preset_id"]),
+                "active_output_preset_id": str(existing_row["active_output_preset_id"]),
+                "active_camera_connection_id": (
+                    str(existing_row["active_camera_connection_id"])
+                    if "active_camera_connection_id" in column_names
+                    and existing_row["active_camera_connection_id"] is not None
+                    else None
+                ),
+                "system_values_json": system_values,
+                "revision": int(existing_row["revision"]),
+                "updated_at": int(existing_row["updated_at"]),
+                "last_applied_change_set_id": (
+                    str(existing_row["last_applied_change_set_id"])
+                    if existing_row["last_applied_change_set_id"] is not None
+                    else None
+                ),
+            }
+        temporary_table_name = f"settings_editor_state_legacy_{uuid.uuid4().hex}"
+        connection.execute(
+            f"""
+            ALTER TABLE settings_editor_state
+            RENAME TO {temporary_table_name}
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE settings_editor_state (
+                row_id INTEGER PRIMARY KEY CHECK (row_id = 1),
+                active_behavior_preset_id TEXT NOT NULL,
+                active_llm_preset_id TEXT NOT NULL,
+                active_memory_preset_id TEXT NOT NULL,
+                active_output_preset_id TEXT NOT NULL,
+                active_camera_connection_id TEXT,
+                system_values_json TEXT NOT NULL,
+                revision INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                last_applied_change_set_id TEXT
+            )
+            """
+        )
+        if migrated_row is not None:
+            connection.execute(
+                """
+                INSERT INTO settings_editor_state (
+                    row_id,
+                    active_behavior_preset_id,
+                    active_llm_preset_id,
+                    active_memory_preset_id,
+                    active_output_preset_id,
+                    active_camera_connection_id,
+                    system_values_json,
+                    revision,
+                    updated_at,
+                    last_applied_change_set_id
+                )
+                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    migrated_row["active_behavior_preset_id"],
+                    migrated_row["active_llm_preset_id"],
+                    migrated_row["active_memory_preset_id"],
+                    migrated_row["active_output_preset_id"],
+                    migrated_row["active_camera_connection_id"],
+                    _json_text(migrated_row["system_values_json"]),
+                    migrated_row["revision"],
+                    migrated_row["updated_at"],
+                    migrated_row["last_applied_change_set_id"],
+                ),
+            )
+        connection.execute(f"DROP TABLE {temporary_table_name}")
 
     # Block: Pending input claim
     def claim_next_pending_input(self) -> PendingInputRecord | None:
@@ -3463,7 +3786,7 @@ class SqliteStateStore:
             return
         if current_version > SCHEMA_VERSION:
             raise RuntimeError("schema_version is newer than this initializer")
-        if current_version not in {2, 3, 4, 5}:
+        if current_version not in {2, 3, 4, 5, 6}:
             raise RuntimeError("unsupported schema_version for migration")
         while current_version < SCHEMA_VERSION:
             if current_version == 2:
@@ -3481,6 +3804,10 @@ class SqliteStateStore:
             if current_version == 5:
                 self._migrate_schema_5_to_6(connection=connection, now_ms=now_ms)
                 current_version = 6
+                continue
+            if current_version == 6:
+                self._migrate_schema_6_to_7(connection=connection, now_ms=now_ms)
+                current_version = 7
                 continue
             raise RuntimeError("unsupported schema_version for migration")
 
@@ -3597,7 +3924,7 @@ class SqliteStateStore:
             connection=connection,
             now_ms=now_ms,
         )
-        self._ensure_settings_editor_defaults(
+        self._ensure_settings_editor_defaults_v5(
             connection=connection,
             now_ms=now_ms,
         )
@@ -3654,14 +3981,14 @@ class SqliteStateStore:
             """
         ).fetchone()
         editor_seed = build_default_settings_editor_state(default_settings)
-        editor_direct_values = dict(editor_seed["direct_values_json"])
+        editor_system_values = dict(editor_seed["system_values_json"])
         editor_revision = int(editor_seed["revision"])
         if editor_row is not None:
-            raw_direct_values = json.loads(editor_row["direct_values_json"])
-            if isinstance(raw_direct_values, dict):
-                for key in build_settings_editor_direct_keys():
-                    if key in raw_direct_values:
-                        editor_direct_values[key] = raw_direct_values[key]
+            legacy_direct_values = json.loads(editor_row["direct_values_json"])
+            if isinstance(legacy_direct_values, dict):
+                for key in build_settings_editor_system_keys():
+                    if key in legacy_direct_values:
+                        editor_system_values[key] = legacy_direct_values[key]
             editor_revision = int(editor_row["revision"]) + 1
             connection.execute(
                 """
@@ -3681,7 +4008,7 @@ class SqliteStateStore:
                     editor_seed["active_llm_preset_id"],
                     editor_seed["active_memory_preset_id"],
                     editor_seed["active_output_preset_id"],
-                    _json_text(editor_direct_values),
+                    _json_text(editor_system_values),
                     editor_revision,
                     now_ms,
                 ),
@@ -3724,6 +4051,47 @@ class SqliteStateStore:
             WHERE meta_key = 'schema_version'
             """,
             (_json_text(6), now_ms),
+        )
+
+    # Block: Schema migration 6->7
+    def _migrate_schema_6_to_7(self, *, connection: sqlite3.Connection, now_ms: int) -> None:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS camera_connections (
+                camera_connection_id TEXT PRIMARY KEY,
+                display_name TEXT NOT NULL,
+                host TEXT NOT NULL,
+                username TEXT NOT NULL,
+                password TEXT NOT NULL,
+                sort_order INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_camera_connections_sort
+                ON camera_connections (sort_order ASC, updated_at DESC)
+            """
+        )
+        self._ensure_runtime_settings_defaults(
+            connection=connection,
+            now_ms=now_ms,
+        )
+        self._ensure_settings_editor_state_schema_v7(
+            connection=connection,
+            now_ms=now_ms,
+        )
+        connection.execute("DELETE FROM settings_change_sets")
+        connection.execute(
+            """
+            UPDATE db_meta
+            SET meta_value_json = ?,
+                updated_at = ?
+            WHERE meta_key = 'schema_version'
+            """,
+            (_json_text(7), now_ms),
         )
 
     # Block: sqlite-vec schema ensure
@@ -4658,7 +5026,12 @@ def _decode_settings_editor_state_row(row: sqlite3.Row) -> dict[str, Any]:
         "active_llm_preset_id": str(row["active_llm_preset_id"]),
         "active_memory_preset_id": str(row["active_memory_preset_id"]),
         "active_output_preset_id": str(row["active_output_preset_id"]),
-        "direct_values": json.loads(row["direct_values_json"]),
+        "active_camera_connection_id": (
+            str(row["active_camera_connection_id"])
+            if row["active_camera_connection_id"] is not None
+            else None
+        ),
+        "system_values": json.loads(row["system_values_json"]),
         "revision": int(row["revision"]),
         "updated_at": int(row["updated_at"]),
         "last_applied_change_set_id": (
@@ -4695,6 +5068,24 @@ def _decode_settings_preset_catalog_rows(rows: list[sqlite3.Row]) -> dict[str, l
     return preset_catalogs
 
 
+# Block: Camera connection rows decode
+def _decode_camera_connection_rows(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
+    camera_connections: list[dict[str, Any]] = []
+    for row in rows:
+        camera_connections.append(
+            {
+                "camera_connection_id": str(row["camera_connection_id"]),
+                "display_name": str(row["display_name"]),
+                "host": str(row["host"]),
+                "username": str(row["username"]),
+                "password": str(row["password"]),
+                "sort_order": int(row["sort_order"]),
+                "updated_at": int(row["updated_at"]),
+            }
+        )
+    return camera_connections
+
+
 # Block: Settings editor compare helper
 def _canonical_editor_state_for_compare(editor_state: dict[str, Any]) -> dict[str, Any]:
     return {
@@ -4703,7 +5094,12 @@ def _canonical_editor_state_for_compare(editor_state: dict[str, Any]) -> dict[st
         "active_llm_preset_id": str(editor_state["active_llm_preset_id"]),
         "active_memory_preset_id": str(editor_state["active_memory_preset_id"]),
         "active_output_preset_id": str(editor_state["active_output_preset_id"]),
-        "direct_values": dict(editor_state["direct_values"]),
+        "active_camera_connection_id": (
+            str(editor_state["active_camera_connection_id"])
+            if editor_state["active_camera_connection_id"] is not None
+            else None
+        ),
+        "system_values": dict(editor_state["system_values"]),
     }
 
 
@@ -4720,7 +5116,8 @@ def _persist_settings_editor_state(
             active_llm_preset_id = ?,
             active_memory_preset_id = ?,
             active_output_preset_id = ?,
-            direct_values_json = ?,
+            active_camera_connection_id = ?,
+            system_values_json = ?,
             revision = ?,
             updated_at = ?,
             last_applied_change_set_id = ?
@@ -4731,7 +5128,8 @@ def _persist_settings_editor_state(
             editor_state["active_llm_preset_id"],
             editor_state["active_memory_preset_id"],
             editor_state["active_output_preset_id"],
-            _json_text(editor_state["direct_values"]),
+            editor_state["active_camera_connection_id"],
+            _json_text(editor_state["system_values"]),
             int(editor_state["revision"]),
             int(editor_state["updated_at"]),
             editor_state["last_applied_change_set_id"],
@@ -4806,6 +5204,71 @@ def _replace_settings_presets(
             )
 
 
+# Block: Camera connection replace
+def _replace_camera_connections(
+    *,
+    connection: sqlite3.Connection,
+    camera_connections: list[dict[str, Any]],
+    now_ms: int,
+) -> None:
+    expected_ids = [
+        str(camera_connection["camera_connection_id"])
+        for camera_connection in camera_connections
+    ]
+    if expected_ids:
+        placeholder_sql = ",".join("?" for _ in expected_ids)
+        connection.execute(
+            f"DELETE FROM camera_connections WHERE camera_connection_id NOT IN ({placeholder_sql})",
+            tuple(expected_ids),
+        )
+    else:
+        connection.execute("DELETE FROM camera_connections")
+    for camera_connection in camera_connections:
+        created_at = int(camera_connection["updated_at"])
+        existing_row = connection.execute(
+            """
+            SELECT created_at
+            FROM camera_connections
+            WHERE camera_connection_id = ?
+            """,
+            (camera_connection["camera_connection_id"],),
+        ).fetchone()
+        if existing_row is not None:
+            created_at = int(existing_row["created_at"])
+        connection.execute(
+            """
+            INSERT INTO camera_connections (
+                camera_connection_id,
+                display_name,
+                host,
+                username,
+                password,
+                sort_order,
+                created_at,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(camera_connection_id) DO UPDATE SET
+                display_name = excluded.display_name,
+                host = excluded.host,
+                username = excluded.username,
+                password = excluded.password,
+                sort_order = excluded.sort_order,
+                updated_at = excluded.updated_at
+            """,
+            (
+                camera_connection["camera_connection_id"],
+                camera_connection["display_name"],
+                camera_connection["host"],
+                camera_connection["username"],
+                camera_connection["password"],
+                int(camera_connection["sort_order"]),
+                created_at,
+                now_ms,
+            ),
+        )
+
+
 # Block: Settings change set insert
 def _insert_settings_change_set(
     *,
@@ -4821,7 +5284,8 @@ def _insert_settings_change_set(
         "active_llm_preset_id": editor_state["active_llm_preset_id"],
         "active_memory_preset_id": editor_state["active_memory_preset_id"],
         "active_output_preset_id": editor_state["active_output_preset_id"],
-        "direct_values": dict(editor_state["direct_values"]),
+        "active_camera_connection_id": editor_state["active_camera_connection_id"],
+        "system_values": dict(editor_state["system_values"]),
         "preset_versions": {
             preset_kind: _active_preset_updated_at(
                 preset_entries=preset_catalogs[preset_kind],
@@ -4886,7 +5350,7 @@ def _materialize_runtime_settings_from_editor(
         for key, value in payload.items():
             if key in materialized:
                 materialized[key] = value
-    for key, value in dict(editor_state["direct_values"]).items():
+    for key, value in dict(editor_state["system_values"]).items():
         materialized[key] = value
     return materialized
 
