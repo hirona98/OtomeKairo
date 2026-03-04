@@ -988,7 +988,9 @@
 <!-- Block: Settings Editor Put -->
 ### `PUT /api/settings/editor` の本文
 
-- リクエスト本文と成功応答本文は、`GET /api/settings/editor` と同じ canonical 形に固定する
+- `PUT` のリクエスト本文は、`editor_state` と `preset_catalogs` だけを持つオブジェクトに固定する
+- `constraints` と `runtime_projection` は読み取り専用のため、リクエスト本文へ含めない
+- `PUT` の成功応答本文は、`GET /api/settings/editor` と同じ canonical 形に固定する
 - 保存時は、サーバ側で次の整合を必須にする
   - `editor_state.active_*_preset_id` は、それぞれ対応する `preset_catalogs` 内に存在しなければならない
   - `preset_catalogs` の各要素は、対応する `settings_presets.payload_json` の固定形に一致しなければならない

@@ -288,7 +288,9 @@ flowchart LR
 <!-- Block: Settings Editor Put Notes -->
 ### 成功応答の考え方
 
-- リクエスト本文と成功応答本文は、`GET /api/settings/editor` と同じ canonical 形に固定する
+- リクエスト本文は、`editor_state` と `preset_catalogs` だけを持つ保存用の固定形にする
+- 成功応答本文は、`GET /api/settings/editor` と同じ canonical 形に固定する
+- `constraints` と `runtime_projection` は読み取り専用のため、`PUT` のリクエスト本文へ含めない
 - 本文の JSON 形は `docs/36_JSONデータ仕様.md` を正本とする
 
 <!-- Block: Chat Input -->

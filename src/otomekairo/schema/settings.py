@@ -245,6 +245,12 @@ def build_default_settings_presets(default_settings: dict[str, Any]) -> tuple[di
 def normalize_settings_editor_document(document: Any) -> dict[str, Any]:
     if not isinstance(document, dict):
         raise SettingsValidationError("invalid_settings_editor_document", "settings editor payload must be an object")
+    expected_keys = {"editor_state", "preset_catalogs"}
+    if set(document) != expected_keys:
+        raise SettingsValidationError(
+            "invalid_settings_editor_document",
+            "settings editor payload keys do not match fixed shape",
+        )
     editor_state = _normalize_editor_state(document.get("editor_state"))
     preset_catalogs = _normalize_preset_catalogs(document.get("preset_catalogs"))
     _validate_active_preset_ids(editor_state=editor_state, preset_catalogs=preset_catalogs)

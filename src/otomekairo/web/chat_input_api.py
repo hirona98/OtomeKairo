@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from fastapi import APIRouter, Response, status
 
 from otomekairo.infra.wifi_camera_common import (
@@ -20,17 +20,23 @@ SUPPORTED_CHAT_ATTACHMENT_KIND = "camera_still_image"
 
 # Block: Request models
 class ChatAttachmentRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     attachment_kind: str
     capture_id: str
 
 
 class ChatInputRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     text: str | None = None
     client_message_id: str | None = None
     attachments: list[ChatAttachmentRequest] = Field(default_factory=list)
 
 
 class ChatCancelRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     target_message_id: str | None = None
 
 
