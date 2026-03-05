@@ -44,9 +44,6 @@ SETTING_DEFINITIONS: tuple[SettingDefinition, ...] = (
     SettingDefinition("runtime.context_budget_tokens", "integer", ("runtime", "next_boot"), min_value=1024, max_value=32768),
     SettingDefinition("sensors.camera.enabled", "boolean", ("runtime",)),
     SettingDefinition("sensors.microphone.enabled", "boolean", ("runtime",)),
-    SettingDefinition("output.tts.enabled", "boolean", ("runtime",)),
-    SettingDefinition("output.tts.voice", "string", ("runtime", "next_boot"), min_length=1, max_length=128),
-    SettingDefinition("output.mode", "string", ("runtime", "next_boot"), min_length=1, max_length=64),
     SettingDefinition("integrations.notify_route", "string", ("runtime", "next_boot"), min_length=1, max_length=64),
     SettingDefinition("integrations.sns.enabled", "boolean", ("runtime",)),
     SettingDefinition("integrations.discord.bot_token", "string", ("runtime", "next_boot"), min_length=0, max_length=4096),
@@ -65,7 +62,6 @@ SETTINGS_EDITOR_SYSTEM_KEYS = (
     "runtime.long_cycle_min_interval_ms",
     "sensors.microphone.enabled",
     "sensors.camera.enabled",
-    "output.tts.enabled",
     "integrations.sns.enabled",
 )
 
@@ -212,8 +208,6 @@ def build_default_settings_presets(default_settings: dict[str, Any]) -> tuple[di
             "preset_kind": "output",
             "preset_name": "標準",
             "payload": {
-                "output.tts.voice": str(default_settings["output.tts.voice"]),
-                "output.mode": str(default_settings["output.mode"]),
                 "integrations.notify_route": str(default_settings["integrations.notify_route"]),
                 "integrations.discord.bot_token": str(default_settings["integrations.discord.bot_token"]),
                 "integrations.discord.channel_id": str(default_settings["integrations.discord.channel_id"]),
@@ -224,8 +218,6 @@ def build_default_settings_presets(default_settings: dict[str, Any]) -> tuple[di
             "preset_kind": "output",
             "preset_name": "UIのみ",
             "payload": {
-                "output.tts.voice": str(default_settings["output.tts.voice"]),
-                "output.mode": "ui_only",
                 "integrations.notify_route": "ui_only",
                 "integrations.discord.bot_token": str(default_settings["integrations.discord.bot_token"]),
                 "integrations.discord.channel_id": str(default_settings["integrations.discord.channel_id"]),
@@ -604,8 +596,6 @@ def _normalize_memory_preset_payload(payload: dict[str, Any]) -> dict[str, Any]:
 # Block: Output preset normalization
 def _normalize_output_preset_payload(payload: dict[str, Any]) -> dict[str, Any]:
     required_keys = {
-        "output.tts.voice",
-        "output.mode",
         "integrations.notify_route",
         "integrations.discord.bot_token",
         "integrations.discord.channel_id",
@@ -615,15 +605,11 @@ def _normalize_output_preset_payload(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = _normalize_keyed_preset_payload(
         payload=payload,
         required_keys=(
-            "output.tts.voice",
-            "output.mode",
             "integrations.notify_route",
             "integrations.discord.bot_token",
             "integrations.discord.channel_id",
         ),
     )
-    if normalized["output.mode"] not in {"ui_only", "ui_and_tts"}:
-        raise SettingsValidationError("invalid_settings_editor_document", "output.mode is invalid")
     if normalized["integrations.notify_route"] not in {"ui_only", "discord"}:
         raise SettingsValidationError("invalid_settings_editor_document", "integrations.notify_route is invalid")
     if normalized["integrations.notify_route"] == "discord":

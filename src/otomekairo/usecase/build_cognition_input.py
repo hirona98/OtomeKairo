@@ -67,7 +67,6 @@ def build_cognition_input(
                 "camera_enabled": bool(state_snapshot.effective_settings["sensors.camera.enabled"]),
                 "camera_available": bool(camera_available),
                 "microphone_enabled": bool(state_snapshot.effective_settings["sensors.microphone.enabled"]),
-                "tts_enabled": bool(state_snapshot.effective_settings["output.tts.enabled"]),
             },
         },
         "skill_candidates": [],

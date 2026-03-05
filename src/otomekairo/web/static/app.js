@@ -62,8 +62,6 @@
       { path: "retrieval_profile.event_bias", label: "Event Bias", kind: "number", min: 0, max: 1, step: 0.05 },
     ],
     output: [
-      { path: "output.tts.voice", label: "TTS Voice", kind: "text" },
-      { path: "output.mode", label: "出力モード", kind: "select", options: ["ui_only", "ui_and_tts"] },
       { path: "integrations.notify_route", label: "通知経路", kind: "select", options: ["ui_only", "discord"] },
       { path: "integrations.discord.bot_token", label: "Discord トークン", kind: "password" },
       { path: "integrations.discord.channel_id", label: "Discord チャンネル", kind: "text" },
@@ -74,7 +72,6 @@
     { key: "runtime.long_cycle_min_interval_ms", label: "Long Cycle (ms)", kind: "integer", min: 1000, max: 300000, step: 1000 },
     { key: "sensors.microphone.enabled", label: "マイク入力", kind: "boolean" },
     { key: "sensors.camera.enabled", label: "カメラ入力", kind: "boolean" },
-    { key: "output.tts.enabled", label: "ブラウザ TTS", kind: "boolean" },
     { key: "integrations.sns.enabled", label: "SNS 連携", kind: "boolean" },
   ];
   const CAMERA_FIELD_KEYS = ["display_name", "host", "username", "password"];
@@ -235,7 +232,6 @@
   async function handleCancel() {
     cancelButton.disabled = true;
     try {
-      stopBrowserSpeech();
       const response = await fetch("/api/chat/cancel", {
         method: "POST",
         headers: {
@@ -878,7 +874,6 @@
       label.classList.remove("empty");
       draftMessages.delete(messageId);
     }
-    speakMessageText(text);
   }
 
   function handleNoticeEvent(payload) {
@@ -1076,47 +1071,6 @@
 
   function scrollToBottom() {
     chatScroll.scrollTop = chatScroll.scrollHeight;
-  }
-
-  // Block: Browser speech output
-  function speakMessageText(text) {
-    if (!text) {
-      return;
-    }
-    if (!("speechSynthesis" in window)) {
-      return;
-    }
-    if (latestEditorSnapshot === null) {
-      return;
-    }
-    try {
-      const runtimeProjection = requireRuntimeProjection();
-      if (readBooleanRuntimeProjection(runtimeProjection, "output.tts.enabled") !== true) {
-        return;
-      }
-      if (readStringRuntimeProjection(runtimeProjection, "output.mode") !== "ui_and_tts") {
-        return;
-      }
-      const voiceName = readStringRuntimeProjection(runtimeProjection, "output.tts.voice");
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = "ja-JP";
-      const voices = window.speechSynthesis.getVoices();
-      const selectedVoice = voices.find((voice) => voice.name === voiceName);
-      if (selectedVoice) {
-        utterance.voice = selectedVoice;
-      }
-      window.speechSynthesis.cancel();
-      window.speechSynthesis.speak(utterance);
-    } catch (error) {
-      appendError(`TTS を開始できません: ${error.message}`);
-    }
-  }
-
-  function stopBrowserSpeech() {
-    if (!("speechSynthesis" in window)) {
-      return;
-    }
-    window.speechSynthesis.cancel();
   }
 
   function setMicListeningState(isListening) {
@@ -1382,14 +1336,6 @@
     const value = runtimeProjection[key];
     if (typeof value !== "boolean") {
       throw new Error(`${key} が boolean ではありません`);
-    }
-    return value;
-  }
-
-  function readStringRuntimeProjection(runtimeProjection, key) {
-    const value = runtimeProjection[key];
-    if (typeof value !== "string") {
-      throw new Error(`${key} が string ではありません`);
     }
     return value;
   }

@@ -672,7 +672,6 @@
   "runtime.long_cycle_min_interval_ms": 10000,
   "sensors.microphone.enabled": true,
   "sensors.camera.enabled": true,
-  "output.tts.enabled": true,
   "integrations.sns.enabled": false
 }
 ```
@@ -748,16 +747,13 @@
 
 ```json
 {
-  "output.tts.voice": "default",
-  "output.mode": "ui_and_tts",
   "integrations.notify_route": "discord",
   "integrations.discord.bot_token": "discord-token",
   "integrations.discord.channel_id": "1234567890"
 }
 ```
 
-- 必須項目は `output.tts.voice`、`output.mode`、`integrations.notify_route` である
-- `output.mode` は、`ui_only` または `ui_and_tts` の `string` に固定する
+- 必須項目は `integrations.notify_route` である
 - `integrations.notify_route` は、`ui_only` または `discord` に固定する
 - `integrations.notify_route="discord"` のときは `integrations.discord.bot_token` と `integrations.discord.channel_id` を必須にする
 
