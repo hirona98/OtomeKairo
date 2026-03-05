@@ -558,7 +558,7 @@
       return `
         <label class="settings-field">
           <span class="settings-label">${label}</span>
-          <input class="settings-input" type="password" value="${escapeHtml(requireString(rawValue, descriptor.path))}" data-preset-kind="${escapeHtml(kind)}" data-preset-path="${path}" data-value-kind="string" />
+          <input class="settings-input" type="text" value="${escapeHtml(requireString(rawValue, descriptor.path))}" data-preset-kind="${escapeHtml(kind)}" data-preset-path="${path}" data-value-kind="string" />
         </label>
       `;
     }
@@ -618,7 +618,6 @@
 
   function renderCameraConnectionsCard() {
     const cameraConnections = readCameraConnections();
-    const activeCameraConnectionId = readActiveCameraConnectionId();
     if (cameraConnections.length === 0) {
       settingsCameraCard.innerHTML = `
         <div class="settings-card-title">カメラ接続</div>
@@ -629,20 +628,42 @@
       `;
       return;
     }
-    const selectOptions = cameraConnections
+    const activeCameraConnectionId = readActiveCameraConnectionId();
+    const rowsHtml = cameraConnections
       .map((cameraConnection) => {
-        const selected = cameraConnection.camera_connection_id === activeCameraConnectionId ? " selected" : "";
-        return `<option value="${escapeHtml(cameraConnection.camera_connection_id)}"${selected}>${escapeHtml(cameraConnection.display_name)}</option>`;
+        const isActive = cameraConnection.camera_connection_id === activeCameraConnectionId;
+        const activeClass = isActive ? " settings-table-row-active" : "";
+        const activeLabel = isActive ? "使用中" : "";
+        return `
+          <tr class="settings-table-row${activeClass}" data-camera-row-id="${escapeHtml(cameraConnection.camera_connection_id)}">
+            <td>${activeLabel}</td>
+            <td>${renderTableCellText(cameraConnection.display_name)}</td>
+            <td>${renderTableCellText(cameraConnection.host)}</td>
+            <td>${renderTableCellText(cameraConnection.username)}</td>
+            <td>${renderTableCellText(cameraConnection.password)}</td>
+          </tr>
+        `;
       })
       .join("");
     const activeCameraConnection = requireActiveCameraConnection();
     settingsCameraCard.innerHTML = `
       <div class="settings-card-title">カメラ接続</div>
+      <div class="settings-note">一覧を選ぶと下の編集欄が切り替わります。</div>
+      <div class="settings-table-wrap">
+        <table class="settings-table">
+          <thead>
+            <tr>
+              <th>使用</th>
+              <th>表示名</th>
+              <th>IP アドレス</th>
+              <th>アカウント</th>
+              <th>パスワード</th>
+            </tr>
+          </thead>
+          <tbody>${rowsHtml}</tbody>
+        </table>
+      </div>
       <div class="settings-grid">
-        <label class="settings-field">
-          <span class="settings-label">使用接続</span>
-          <select class="settings-input" data-active-camera-connection="true">${selectOptions}</select>
-        </label>
         <label class="settings-field">
           <span class="settings-label">表示名</span>
           <input class="settings-input" type="text" value="${escapeHtml(activeCameraConnection.display_name)}" data-camera-field="display_name" />
@@ -657,7 +678,7 @@
         </label>
         <label class="settings-field">
           <span class="settings-label">パスワード</span>
-          <input class="settings-input" type="password" value="${escapeHtml(activeCameraConnection.password)}" data-camera-field="password" />
+          <input class="settings-input" type="text" value="${escapeHtml(activeCameraConnection.password)}" data-camera-field="password" />
         </label>
       </div>
       <div class="settings-actions">
@@ -686,9 +707,9 @@
       element.addEventListener("input", handleSystemFieldChange);
       element.addEventListener("change", handleSystemFieldChange);
     }
-    const activeCameraConnectionInputs = settingsPanel.querySelectorAll("[data-active-camera-connection]");
-    for (const element of activeCameraConnectionInputs) {
-      element.addEventListener("change", handleActiveCameraConnectionChange);
+    const cameraRows = settingsPanel.querySelectorAll("[data-camera-row-id]");
+    for (const element of cameraRows) {
+      element.addEventListener("click", handleCameraRowSelect);
     }
     const cameraFieldInputs = settingsPanel.querySelectorAll("[data-camera-field]");
     for (const element of cameraFieldInputs) {
@@ -746,13 +767,14 @@
     updateSettingsDirtyState();
   }
 
-  function handleActiveCameraConnectionChange(event) {
+  // Block: Camera selection handlers
+  function handleCameraRowSelect(event) {
     if (editorDraft === null) {
       appendError("設定ドラフトが未初期化です");
       return;
     }
     const element = event.currentTarget;
-    editorDraft.editor_state.active_camera_connection_id = String(element.value);
+    editorDraft.editor_state.active_camera_connection_id = String(element.dataset.cameraRowId || "");
     renderSettingsEditor();
   }
 
@@ -1373,6 +1395,14 @@
       throw new Error(`${key} が string ではありません`);
     }
     return value;
+  }
+
+  // Block: Settings HTML helpers
+  function renderTableCellText(value) {
+    if (typeof value !== "string" || value.length === 0) {
+      return "—";
+    }
+    return escapeHtml(value);
   }
 
   // Block: HTML escape

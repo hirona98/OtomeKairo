@@ -403,6 +403,52 @@ body {
   gap: 8px 12px;
 }
 
+/* Block: Settings camera table */
+.settings-table-wrap {
+  overflow-x: auto;
+  margin-bottom: 10px;
+}
+
+.settings-table {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.settings-table th,
+.settings-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  font-size: 13px;
+}
+
+.settings-table th {
+  background: #edf3ff;
+  color: #315cbb;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.settings-table-row {
+  cursor: pointer;
+}
+
+.settings-table-row:hover {
+  background: #f7faff;
+}
+
+.settings-table-row-active {
+  background: #eef4ff;
+}
+
+.settings-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
 .settings-actions {
   display: flex;
   gap: 8px;

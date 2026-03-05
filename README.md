@@ -70,7 +70,8 @@
 - VSCode では、ワークスペース直下の `.vscode/launch.json` に `OtomeKairo` 起動構成を用意しているので、`F5` で `otomekairo.boot.run_all` をそのまま起動できる
 
 - `LINE` 通知を使うときは、起動前に `OTOMEKAIRO_LINE_CHANNEL_ACCESS_TOKEN` と `OTOMEKAIRO_LINE_TO_USER_ID` を環境変数で渡す
-- `look` と `Cam` を使うときは、設定画面の `システム` タブでカメラ接続を追加し、IP アドレス・アカウント・パスワードを保存する
+- `look` と `Cam` を使うときは、設定画面の `システム` タブでカメラ接続を追加し、表形式の接続一覧から対象を選んで、IP アドレス・アカウント・パスワードを保存する
+- 設定画面の API キー、トークン、パスワード欄は、確認しやすさを優先して通常の文字列入力欄で表示する
 - `Cam` で撮った画像は、次の `POST /api/chat/input` に添付され、テキストなしでも送信できる
 - 自発観測を起こしたいときは、`POST /api/camera/observe` で撮影と認知キュー投入を一度に行える
 - `LINE` を使わないときは、設定パネルで `integrations.line.enabled=false` のまま使う
