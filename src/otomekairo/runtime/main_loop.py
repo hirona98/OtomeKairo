@@ -11,7 +11,6 @@ from typing import Any, Callable
 from otomekairo.gateway.camera_controller import CameraController
 from otomekairo import __version__
 from otomekairo.gateway.cognition_client import CognitionClient
-from otomekairo.gateway.notification_client import NotificationClient
 from otomekairo.gateway.search_client import SearchClient
 from otomekairo.infra.sqlite_state_store import SqliteStateStore
 from otomekairo.schema.runtime_types import (
@@ -54,7 +53,6 @@ class RuntimeLoop:
         default_settings: dict[str, Any],
         cognition_client: CognitionClient,
         search_client: SearchClient,
-        notification_client: NotificationClient,
         camera_controller: CameraController,
         lease_heartbeat_ms: int = DEFAULT_LEASE_HEARTBEAT_MS,
         lease_ttl_ms: int = DEFAULT_LEASE_TTL_MS,
@@ -71,7 +69,6 @@ class RuntimeLoop:
         self._default_settings = default_settings
         self._cognition_client = cognition_client
         self._search_client = search_client
-        self._notification_client = notification_client
         self._camera_controller = camera_controller
         self._lease_heartbeat_ms = lease_heartbeat_ms
         self._lease_ttl_ms = lease_ttl_ms
@@ -321,9 +318,7 @@ class RuntimeLoop:
                 cycle_id=cycle_id,
                 resolved_at=resolved_at,
                 cognition_input=cognition_input,
-                effective_settings=state_snapshot.effective_settings,
                 cognition_client=self._cognition_client,
-                notification_client=self._notification_client,
                 camera_controller=self._camera_controller,
                 emit_ui_event=lambda ui_event: self._append_ui_event(cycle_id=cycle_id, ui_event=ui_event),
                 consume_cancel=lambda message_id: self._consume_matching_cancel(
@@ -702,7 +697,6 @@ def build_runtime_loop(*, db_path: Path | None = None) -> RuntimeLoop:
         default_settings=default_settings,
         cognition_client=_build_default_cognition_client(),
         search_client=_build_default_search_client(),
-        notification_client=_build_default_notification_client(),
         camera_controller=_build_default_camera_controller(store=store),
         lease_heartbeat_ms=_lease_heartbeat_ms(),
         lease_ttl_ms=_lease_ttl_ms(),
@@ -868,13 +862,6 @@ def _build_default_search_client() -> SearchClient:
     return DuckDuckGoSearchClient()
 
 
-# Block: Notification client factory
-def _build_default_notification_client() -> NotificationClient:
-    from otomekairo.infra.line_notification_client import LineNotificationClient
-
-    return LineNotificationClient()
-
-
 # Block: Camera controller factory
 def _build_default_camera_controller(*, store: SqliteStateStore) -> CameraController:
     from otomekairo.infra.wifi_camera_controller import WiFiCameraController
@@ -882,6 +869,9 @@ def _build_default_camera_controller(*, store: SqliteStateStore) -> CameraContro
     return WiFiCameraController(
         camera_connection_loader=store.read_active_camera_connection,
     )
+
+
+# Block: Runtime helper ids
 def _opaque_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex}"
 

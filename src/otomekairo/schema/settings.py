@@ -49,9 +49,6 @@ SETTING_DEFINITIONS: tuple[SettingDefinition, ...] = (
     SettingDefinition("output.mode", "string", ("runtime", "next_boot"), min_length=1, max_length=64),
     SettingDefinition("integrations.notify_route", "string", ("runtime", "next_boot"), min_length=1, max_length=64),
     SettingDefinition("integrations.sns.enabled", "boolean", ("runtime",)),
-    SettingDefinition("integrations.line.enabled", "boolean", ("runtime",)),
-    SettingDefinition("integrations.line.channel_access_token", "string", ("runtime", "next_boot"), min_length=0, max_length=4096),
-    SettingDefinition("integrations.line.to_user_id", "string", ("runtime", "next_boot"), min_length=0, max_length=512),
     SettingDefinition("integrations.discord.bot_token", "string", ("runtime", "next_boot"), min_length=0, max_length=4096),
     SettingDefinition("integrations.discord.channel_id", "string", ("runtime", "next_boot"), min_length=0, max_length=256),
 )
@@ -70,7 +67,6 @@ SETTINGS_EDITOR_SYSTEM_KEYS = (
     "sensors.camera.enabled",
     "output.tts.enabled",
     "integrations.sns.enabled",
-    "integrations.line.enabled",
 )
 
 
@@ -219,8 +215,6 @@ def build_default_settings_presets(default_settings: dict[str, Any]) -> tuple[di
                 "output.tts.voice": str(default_settings["output.tts.voice"]),
                 "output.mode": str(default_settings["output.mode"]),
                 "integrations.notify_route": str(default_settings["integrations.notify_route"]),
-                "integrations.line.channel_access_token": str(default_settings["integrations.line.channel_access_token"]),
-                "integrations.line.to_user_id": str(default_settings["integrations.line.to_user_id"]),
                 "integrations.discord.bot_token": str(default_settings["integrations.discord.bot_token"]),
                 "integrations.discord.channel_id": str(default_settings["integrations.discord.channel_id"]),
             },
@@ -233,8 +227,6 @@ def build_default_settings_presets(default_settings: dict[str, Any]) -> tuple[di
                 "output.tts.voice": str(default_settings["output.tts.voice"]),
                 "output.mode": "ui_only",
                 "integrations.notify_route": "ui_only",
-                "integrations.line.channel_access_token": str(default_settings["integrations.line.channel_access_token"]),
-                "integrations.line.to_user_id": str(default_settings["integrations.line.to_user_id"]),
                 "integrations.discord.bot_token": str(default_settings["integrations.discord.bot_token"]),
                 "integrations.discord.channel_id": str(default_settings["integrations.discord.channel_id"]),
             },
@@ -615,8 +607,6 @@ def _normalize_output_preset_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "output.tts.voice",
         "output.mode",
         "integrations.notify_route",
-        "integrations.line.channel_access_token",
-        "integrations.line.to_user_id",
         "integrations.discord.bot_token",
         "integrations.discord.channel_id",
     }
@@ -628,19 +618,14 @@ def _normalize_output_preset_payload(payload: dict[str, Any]) -> dict[str, Any]:
             "output.tts.voice",
             "output.mode",
             "integrations.notify_route",
-            "integrations.line.channel_access_token",
-            "integrations.line.to_user_id",
             "integrations.discord.bot_token",
             "integrations.discord.channel_id",
         ),
     )
     if normalized["output.mode"] not in {"ui_only", "ui_and_tts"}:
         raise SettingsValidationError("invalid_settings_editor_document", "output.mode is invalid")
-    if normalized["integrations.notify_route"] not in {"ui_only", "line", "discord"}:
+    if normalized["integrations.notify_route"] not in {"ui_only", "discord"}:
         raise SettingsValidationError("invalid_settings_editor_document", "integrations.notify_route is invalid")
-    if normalized["integrations.notify_route"] == "line":
-        if not normalized["integrations.line.channel_access_token"] or not normalized["integrations.line.to_user_id"]:
-            raise SettingsValidationError("invalid_settings_editor_document", "line route requires line credentials")
     if normalized["integrations.notify_route"] == "discord":
         if not normalized["integrations.discord.bot_token"] or not normalized["integrations.discord.channel_id"]:
             raise SettingsValidationError("invalid_settings_editor_document", "discord route requires discord credentials")

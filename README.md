@@ -40,21 +40,19 @@
 - `src/otomekairo/web/static/`: `tmp/CocoroGhost/static/` にかなり近い見た目の最小チャット UI を持ち、同一オリジンで `POST /api/chat/input`、`POST /api/camera/capture`、`GET /api/chat/stream` を使い、`message` 到着時は `output.tts.enabled=true` ならブラウザの `SpeechSynthesis` で音声化し、`Mic` は標準 `SpeechRecognition` で音声入力し、`Cam` は静止画をサムネイル表示して次のチャット入力へ添付し、設定パネルでは `GET /api/settings/editor` と `PUT /api/settings/editor` でプリセット・システム設定・カメラ接続をまとめて保存できる
 - `src/otomekairo/gateway/cognition_client.py`: 認知処理の外部境界を表す抽象を定義する
 - `src/otomekairo/usecase/build_cognition_input.py`: `self_state` などの現在状態から最小の `cognition_input` を組み立て、`task_state` の進行中 / 外部待ちタスク、`sqlite-vec` で補強した直近の `summary` / `fact` 記憶、直近イベント列を `current_observation` と照合して絞り込み、`memory_bundle` として渡す
-- `src/otomekairo/usecase/run_cognition.py`: 認知クライアントが返す `cognition_result` を受け取り、`action_command` を使って `speak` は `token` / `message`、`notify` は `notice`、`look` は ONVIF 経由のカメラ視点操作、`browse` は `waiting_external` の検索タスクとして実行し、`action_history` へ変換する
+- `src/otomekairo/usecase/run_cognition.py`: 認知クライアントが返す `cognition_result` を受け取り、`action_command` を使って `speak` は `token` / `message`、`notify` はユーザー通知イベント (`notice`)、`look` は ONVIF 経由のカメラ視点操作、`browse` は `waiting_external` の検索タスクとして実行し、`action_history` へ変換する
 - `src/otomekairo/usecase/run_browse_task.py`: `task_state(waiting_external)` の `browse` タスクを外部検索へ通し、検索結果を内部入力 `network_result` として次周期へ戻し、`action_history` へ変換する
 - `src/otomekairo/usecase/validate_action.py`: `cognition_result.action_proposals` から `speak` / `browse` / `notify` / `look` / `wait` を比較し、`selection_profile` の trait / style / relationship / emotion / drive、`memory_bundle`、`task_snapshot`、カメラ可用性を使って `execute / hold / reject` と構造化した `action_command` を確定する
 - `src/otomekairo/infra/litellm_cognition_client.py`: `LiteLLM` を使って人格断面つきの認知呼び出しを行い、`response_format={"type":"json_object"}` と厳密な shape 指示で `cognition_result` を構造化させ、`action_proposals` の最小形も厳密に検証しつつ、`LiteLLM` 自身の `DEBUG` ログもランタイムの `.log` ファイルへ残す
 - `src/otomekairo/gateway/search_client.py`: 外部検索の境界を表す抽象を定義する
-- `src/otomekairo/gateway/notification_client.py`: 外部通知の境界を表す抽象を定義する
 - `src/otomekairo/gateway/camera_controller.py`: カメラ視点操作の外部境界を定義する
 - `src/otomekairo/gateway/camera_sensor.py`: カメラ静止画取得の外部境界を定義する
 - `src/otomekairo/infra/duckduckgo_search_client.py`: DuckDuckGo Instant Answer API を使う最小の外部検索アダプタを持つ
-- `src/otomekairo/infra/line_notification_client.py`: `OTOMEKAIRO_LINE_CHANNEL_ACCESS_TOKEN` と `OTOMEKAIRO_LINE_TO_USER_ID` を使って LINE Messaging API の push を行う最小の通知アダプタを持つ
 - `src/otomekairo/infra/wifi_camera_common.py`: ONVIF 接続に使う Wi-Fi カメラ設定の正規化と共通クライアント生成をまとめる
 - `src/otomekairo/infra/wifi_camera_controller.py`: 設定UIで保存したアクティブなカメラ接続を読み、ONVIF 経由で `Tapo C220` などの視点操作を行う
 - `src/otomekairo/infra/wifi_camera_sensor.py`: 設定UIで保存したアクティブなカメラ接続を読み、ONVIF スナップショットを `data/camera/` に保存する
 - `src/otomekairo/infra/sqlite_state_store.py`: `core_schema.sql` を読み込む DB 初期化と、`sqlite-vec` の `vec0` 仮想表初期化、状態参照・入力受付・設定反映、短周期確定時の `write_memory` enqueue、`revisions` 記録、`network_result` を伴う `browse` では `summary` に加えて `fact` の `memory_state` も作成し、`memory_state` と `event` を対象にした `refresh_preview` / `embedding_sync`、`searchable=0` へ落とす `quarantine_memory`、派生索引とジョブ履歴を掃除する `tidy_memory`、`memory_jobs` の再キュー / `dead_letter`、`ui_outbound_events` の保持窓削除を持つ
-- `src/otomekairo/runtime/main_loop.py`: `settings_overrides`、`pending_inputs`、`task_state(waiting_external)` を消費し、待機中も応答中も lease heartbeat を維持しながら、失敗時も `claimed` を終端状態へ確定しつつ `logger.exception(...)` で stderr にスタックトレースも出し、`token` の即時追記、進行中 `cancel` の消費、`browse` の外部検索と `network_result` の再認知、`notify` の LINE push、短周期と長周期を交互に管理しつつ `runtime.long_cycle_min_interval_ms` で間隔制御したうえで、`write_memory` / `refresh_preview` / `embedding_sync` / `quarantine_memory` / `tidy_memory` の最小長周期処理までを行う
+- `src/otomekairo/runtime/main_loop.py`: `settings_overrides`、`pending_inputs`、`task_state(waiting_external)` を消費し、待機中も応答中も lease heartbeat を維持しながら、失敗時も `claimed` を終端状態へ確定しつつ `logger.exception(...)` で stderr にスタックトレースも出し、`token` の即時追記、進行中 `cancel` の消費、`browse` の外部検索と `network_result` の再認知、`notify` のユーザー通知発行、短周期と長周期を交互に管理しつつ `runtime.long_cycle_min_interval_ms` で間隔制御したうえで、`write_memory` / `refresh_preview` / `embedding_sync` / `quarantine_memory` / `tidy_memory` の最小長周期処理までを行う
 - `src/otomekairo/schema/runtime_types.py`: ランタイムの共通データ形を `infra` から切り離して持つ
 - `src/otomekairo/schema/settings.py`: 設定キーの検証と `config/default_settings.json` からの既定値読み込みを持つ
 - `config/default_settings.json`: `runtime_settings` seed と Web の `effective_settings` に使う設定既定値の正本を持つ
@@ -69,12 +67,10 @@
 
 - VSCode では、ワークスペース直下の `.vscode/launch.json` に `OtomeKairo` 起動構成を用意しているので、`F5` で `otomekairo.boot.run_all` をそのまま起動できる
 
-- `LINE` 通知を使うときは、起動前に `OTOMEKAIRO_LINE_CHANNEL_ACCESS_TOKEN` と `OTOMEKAIRO_LINE_TO_USER_ID` を環境変数で渡す
 - `look` と `Cam` を使うときは、設定画面の `システム` タブでカメラ接続を追加し、表形式の接続一覧から対象を選んで、IP アドレス・アカウント・パスワードを保存する
 - 設定画面の API キー、トークン、パスワード欄は、確認しやすさを優先して通常の文字列入力欄で表示する
 - `Cam` で撮った画像は、次の `POST /api/chat/input` に添付され、テキストなしでも送信できる
 - 自発観測を起こしたいときは、`POST /api/camera/observe` で撮影と認知キュー投入を一度に行える
-- `LINE` を使わないときは、設定パネルで `integrations.line.enabled=false` のまま使う
 - `otomekairo` の console script を使う場合も、`./run_otomekairo.sh` と同じく Web とランタイムを同時に起動する
 - 既に別プロセスで人格ランタイムが稼働中なら、`./run_otomekairo.sh` はそのランタイムを再利用し、Web だけを追加起動する
 - 手動で分けて起動したいときは、`otomekairo-web` と `otomekairo-runtime` を別ターミナルで順に起動してよい

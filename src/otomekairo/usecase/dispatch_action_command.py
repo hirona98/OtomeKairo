@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from typing import Any, Callable, Iterable
 
 from otomekairo.gateway.camera_controller import CameraController, CameraLookRequest
-from otomekairo.gateway.notification_client import LineNotificationRequest, NotificationClient
 from otomekairo.schema.runtime_types import TaskStateMutationRecord
 
 
@@ -35,11 +34,7 @@ def dispatch_chat_action_command(
     action_command: dict[str, Any],
     emit_ui_event: Callable[[dict[str, Any]], None],
     consume_cancel: Callable[[str], bool],
-    notification_client: NotificationClient,
     camera_controller: CameraController,
-    line_enabled: bool,
-    line_channel_access_token: str,
-    line_to_user_id: str,
 ) -> ActionDispatchResult:
     command_type = str(action_command["command_type"])
     if command_type == "speak_ui_message":
@@ -57,10 +52,6 @@ def dispatch_chat_action_command(
             cycle_id=cycle_id,
             action_command=action_command,
             emit_ui_event=emit_ui_event,
-            notification_client=notification_client,
-            line_enabled=line_enabled,
-            line_channel_access_token=line_channel_access_token,
-            line_to_user_id=line_to_user_id,
         )
     if command_type == "control_camera_look":
         return _dispatch_camera_look_command(
@@ -187,77 +178,10 @@ def _dispatch_notice_command(
     cycle_id: str,
     action_command: dict[str, Any],
     emit_ui_event: Callable[[dict[str, Any]], None],
-    notification_client: NotificationClient,
-    line_enabled: bool,
-    line_channel_access_token: str,
-    line_to_user_id: str,
 ) -> ActionDispatchResult:
     emitted_event_types: list[str] = []
     notice_code = str(action_command["parameters"]["notice_code"])
     notice_text = str(action_command["parameters"]["text"])
-    line_result_ref: dict[str, Any] | None = None
-    line_trace_ref: dict[str, Any] | None = None
-
-    # Block: Optional LINE delivery
-    try:
-        if line_enabled:
-            line_response = notification_client.send_line_text(
-                LineNotificationRequest(
-                    cycle_id=cycle_id,
-                    text=notice_text,
-                    channel_access_token=line_channel_access_token,
-                    to_user_id=line_to_user_id,
-                )
-            )
-            line_result_ref = line_response.raw_result_ref
-            line_trace_ref = line_response.adapter_trace_ref
-    except Exception as error:
-        # Block: Notification failure event
-        _emit_browser_event(
-            pending_input=pending_input,
-            event_type="error",
-            payload={
-                "error_code": "line_delivery_failed",
-                "message": _error_message_text(error),
-                "retriable": False,
-            },
-            emit_ui_event=emit_ui_event,
-            emitted_event_types=emitted_event_types,
-        )
-
-        # Block: Idle status after failure
-        _emit_browser_event(
-            pending_input=pending_input,
-            event_type="status",
-            payload={
-                "status_code": "idle",
-                "label": "待機中",
-                "cycle_id": cycle_id,
-            },
-            emit_ui_event=emit_ui_event,
-            emitted_event_types=emitted_event_types,
-        )
-
-        return ActionDispatchResult(
-            action_type="dispatch_notice",
-            emitted_event_types=emitted_event_types,
-            observed_effects={
-                "status_code_after": "idle",
-                "error_code": "line_delivery_failed",
-                "line_delivery": "failed",
-            },
-            task_mutations=[],
-            finished_at=_now_ms(),
-            status="failed",
-            failure_mode="line_delivery_failed",
-            raw_result_ref=line_result_ref,
-            adapter_trace_ref={
-                "line_error": {
-                    "error_kind": type(error).__name__,
-                    "error_message": _error_message_text(error),
-                }
-            },
-        )
 
     # Block: Notice output
     _emit_browser_event(
@@ -290,14 +214,13 @@ def _dispatch_notice_command(
         observed_effects={
             "status_code_after": "idle",
             "notice_code": notice_code,
-            "line_delivery": "delivered" if line_enabled else "skipped",
         },
         task_mutations=[],
         finished_at=_now_ms(),
         status="succeeded",
         failure_mode=None,
-        raw_result_ref=line_result_ref,
-        adapter_trace_ref=line_trace_ref,
+        raw_result_ref=None,
+        adapter_trace_ref=None,
     )
 
 

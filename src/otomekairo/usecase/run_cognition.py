@@ -10,7 +10,6 @@ from typing import Any, Callable
 
 from otomekairo.gateway.camera_controller import CameraController
 from otomekairo.gateway.cognition_client import CognitionClient, CognitionRequest
-from otomekairo.gateway.notification_client import NotificationClient
 from otomekairo.schema.runtime_types import ActionHistoryRecord, PendingInputRecord, TaskStateMutationRecord
 from otomekairo.usecase.dispatch_action_command import ActionDispatchResult, dispatch_chat_action_command
 from otomekairo.usecase.validate_action import validate_chat_response_action
@@ -37,9 +36,7 @@ def run_cognition_for_browser_chat_input(
     cycle_id: str,
     resolved_at: int,
     cognition_input: dict[str, Any],
-    effective_settings: dict[str, Any],
     cognition_client: CognitionClient,
-    notification_client: NotificationClient,
     camera_controller: CameraController,
     emit_ui_event: Callable[[dict[str, Any]], None],
     consume_cancel: Callable[[str], bool],
@@ -133,11 +130,7 @@ def run_cognition_for_browser_chat_input(
         decision=validated_action.decision,
         emit_ui_event=emit_event,
         consume_cancel=lambda: consume_cancel(active_message_id),
-        notification_client=notification_client,
         camera_controller=camera_controller,
-        line_enabled=bool(effective_settings["integrations.line.enabled"]),
-        line_channel_access_token=str(effective_settings["integrations.line.channel_access_token"]),
-        line_to_user_id=str(effective_settings["integrations.line.to_user_id"]),
     )
     cognition_result["reflection_seed"]["token_count"] = int(
         dispatch_result.observed_effects.get("token_count", 0)
@@ -276,11 +269,7 @@ def _dispatch_result_for_decision(
     decision: str,
     emit_ui_event: Callable[[str, dict[str, Any]], None],
     consume_cancel: Callable[[], bool],
-    notification_client: NotificationClient,
     camera_controller: CameraController,
-    line_enabled: bool,
-    line_channel_access_token: str,
-    line_to_user_id: str,
 ) -> ActionDispatchResult:
     if decision != "execute":
         emit_ui_event(
@@ -324,11 +313,7 @@ def _dispatch_result_for_decision(
         action_command=action_command,
         emit_ui_event=lambda ui_event: emit_ui_event(ui_event["event_type"], ui_event["payload"]),
         consume_cancel=lambda _: consume_cancel(),
-        notification_client=notification_client,
         camera_controller=camera_controller,
-        line_enabled=line_enabled,
-        line_channel_access_token=line_channel_access_token,
-        line_to_user_id=line_to_user_id,
     )
 
 

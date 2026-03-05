@@ -17,9 +17,6 @@
   "output.mode": "ui_and_tts",
   "integrations.notify_route": "ui_only",
   "integrations.sns.enabled": false,
-  "integrations.line.enabled": false,
-  "integrations.line.channel_access_token": "",
-  "integrations.line.to_user_id": "",
   "integrations.discord.bot_token": "",
   "integrations.discord.channel_id": ""
 }

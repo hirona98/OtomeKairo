@@ -632,9 +632,7 @@
   "llm.embedding_api_key": "emb-example",
   "llm.temperature": 0.7,
   "llm.max_output_tokens": 2048,
-  "runtime.idle_tick_ms": 1000,
-  "integrations.line.channel_access_token": "line-token",
-  "integrations.line.to_user_id": "Uxxxx"
+  "runtime.idle_tick_ms": 1000
 }
 ```
 
@@ -675,8 +673,7 @@
   "sensors.microphone.enabled": true,
   "sensors.camera.enabled": true,
   "output.tts.enabled": true,
-  "integrations.sns.enabled": false,
-  "integrations.line.enabled": false
+  "integrations.sns.enabled": false
 }
 ```
 
@@ -754,8 +751,6 @@
   "output.tts.voice": "default",
   "output.mode": "ui_and_tts",
   "integrations.notify_route": "discord",
-  "integrations.line.channel_access_token": "line-token",
-  "integrations.line.to_user_id": "Uxxxx",
   "integrations.discord.bot_token": "discord-token",
   "integrations.discord.channel_id": "1234567890"
 }
@@ -763,8 +758,7 @@
 
 - 必須項目は `output.tts.voice`、`output.mode`、`integrations.notify_route` である
 - `output.mode` は、`ui_only` または `ui_and_tts` の `string` に固定する
-- `integrations.notify_route` は、`ui_only`、`line`、`discord` のいずれかに固定する
-- `integrations.notify_route="line"` のときは `integrations.line.channel_access_token` と `integrations.line.to_user_id` を必須にする
+- `integrations.notify_route` は、`ui_only` または `discord` に固定する
 - `integrations.notify_route="discord"` のときは `integrations.discord.bot_token` と `integrations.discord.channel_id` を必須にする
 
 <!-- Block: Settings Change Set Payload -->
@@ -1208,7 +1202,7 @@
 - `complete_browse_task` を実行した場合は、`related_task_id`、`task_status_after`、`summary_text` を付けてよい
 - `abandon_browse_task` を実行した場合は、`related_task_id`、`task_status_after`、`error_message` を付けてよい
 - `complete_browse_task` を実行した場合は、`followup_input_kind=\"network_result\"` を付けてよい
-- `dispatch_notice` を実行した場合は、`line_delivery` を `delivered`、`skipped`、`failed` のいずれかで付けてよい
+- `dispatch_notice` を実行した場合は、`notice_code` を付けてよい
 
 <!-- Block: Memory Job Group -->
 ## 記憶ジョブの JSON

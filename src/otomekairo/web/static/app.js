@@ -64,9 +64,7 @@
     output: [
       { path: "output.tts.voice", label: "TTS Voice", kind: "text" },
       { path: "output.mode", label: "出力モード", kind: "select", options: ["ui_only", "ui_and_tts"] },
-      { path: "integrations.notify_route", label: "通知経路", kind: "select", options: ["ui_only", "line", "discord"] },
-      { path: "integrations.line.channel_access_token", label: "LINE トークン", kind: "password" },
-      { path: "integrations.line.to_user_id", label: "LINE 宛先", kind: "text" },
+      { path: "integrations.notify_route", label: "通知経路", kind: "select", options: ["ui_only", "discord"] },
       { path: "integrations.discord.bot_token", label: "Discord トークン", kind: "password" },
       { path: "integrations.discord.channel_id", label: "Discord チャンネル", kind: "text" },
     ],
@@ -78,7 +76,6 @@
     { key: "sensors.camera.enabled", label: "カメラ入力", kind: "boolean" },
     { key: "output.tts.enabled", label: "ブラウザ TTS", kind: "boolean" },
     { key: "integrations.sns.enabled", label: "SNS 連携", kind: "boolean" },
-    { key: "integrations.line.enabled", label: "外部通知", kind: "boolean" },
   ];
   const CAMERA_FIELD_KEYS = ["display_name", "host", "username", "password"];
 
