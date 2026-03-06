@@ -12,6 +12,7 @@ from otomekairo.gateway.camera_controller import CameraController
 from otomekairo import __version__
 from otomekairo.gateway.cognition_client import CognitionClient
 from otomekairo.gateway.search_client import SearchClient
+from otomekairo.gateway.speech_synthesizer import SpeechSynthesizer
 from otomekairo.infra.sqlite_state_store import SqliteStateStore
 from otomekairo.schema.runtime_types import (
     ActionHistoryRecord,
@@ -54,6 +55,7 @@ class RuntimeLoop:
         cognition_client: CognitionClient,
         search_client: SearchClient,
         camera_controller: CameraController,
+        speech_synthesizer: SpeechSynthesizer,
         lease_heartbeat_ms: int = DEFAULT_LEASE_HEARTBEAT_MS,
         lease_ttl_ms: int = DEFAULT_LEASE_TTL_MS,
     ) -> None:
@@ -70,6 +72,7 @@ class RuntimeLoop:
         self._cognition_client = cognition_client
         self._search_client = search_client
         self._camera_controller = camera_controller
+        self._speech_synthesizer = speech_synthesizer
         self._lease_heartbeat_ms = lease_heartbeat_ms
         self._lease_ttl_ms = lease_ttl_ms
         self._boot_reconciled = False
@@ -318,8 +321,10 @@ class RuntimeLoop:
                 cycle_id=cycle_id,
                 resolved_at=resolved_at,
                 cognition_input=cognition_input,
+                effective_settings=state_snapshot.effective_settings,
                 cognition_client=self._cognition_client,
                 camera_controller=self._camera_controller,
+                speech_synthesizer=self._speech_synthesizer,
                 emit_ui_event=lambda ui_event: self._append_ui_event(cycle_id=cycle_id, ui_event=ui_event),
                 consume_cancel=lambda message_id: self._consume_matching_cancel(
                     channel=pending_input.channel,
@@ -698,6 +703,7 @@ def build_runtime_loop(*, db_path: Path | None = None) -> RuntimeLoop:
         cognition_client=_build_default_cognition_client(),
         search_client=_build_default_search_client(),
         camera_controller=_build_default_camera_controller(store=store),
+        speech_synthesizer=_build_default_speech_synthesizer(),
         lease_heartbeat_ms=_lease_heartbeat_ms(),
         lease_ttl_ms=_lease_ttl_ms(),
     )
@@ -860,6 +866,18 @@ def _build_default_search_client() -> SearchClient:
     from otomekairo.infra.duckduckgo_search_client import DuckDuckGoSearchClient
 
     return DuckDuckGoSearchClient()
+
+
+# Block: Speech synthesizer factory
+def _build_default_speech_synthesizer() -> SpeechSynthesizer:
+    from otomekairo.infra.aivis_cloud_speech_synthesizer import (
+        AivisCloudSpeechSynthesizer,
+        default_tts_audio_dir,
+    )
+
+    return AivisCloudSpeechSynthesizer(
+        audio_output_dir=default_tts_audio_dir(),
+    )
 
 
 # Block: Camera controller factory

@@ -37,7 +37,7 @@
 - `src/otomekairo/infra/logging_setup.py`: `launcher / web / runtime` の全ログを `log/otomekairo.log` へ `DEBUG` の通常テキストログとしてまとめ、端末には `INFO` 以上だけを出しつつ、JSON や `extra` の辞書は端末・ファイルの両方で読みやすく整形する共通ロギング設定を持つ
 - `src/otomekairo/web/app.py`: FastAPI アプリを構成し、API ルータ、静止画配信用の `/captures`、最小ブラウザ UI (`GET /`)、例外処理を束ねる
 - `src/otomekairo/web/camera_api.py`: `POST /api/camera/capture` でカメラ静止画を取得し、`POST /api/camera/observe` でその画像を自発観測入力として認知キューへ積む
-- `src/otomekairo/web/static/`: `tmp/CocoroGhost/static/` にかなり近い見た目の最小チャット UI を持ち、同一オリジンで `POST /api/chat/input`、`POST /api/camera/capture`、`GET /api/chat/stream` を使い、`message` 到着時はチャット表示へ反映し、`Mic` は標準 `SpeechRecognition` で音声入力し、`Cam` は静止画をサムネイル表示して次のチャット入力へ添付し、設定パネルでは `GET /api/settings/editor` と `PUT /api/settings/editor` でプリセット・システム設定・カメラ接続をまとめて保存できる
+- `src/otomekairo/web/static/`: `tmp/CocoroGhost/static/` にかなり近い見た目の最小チャット UI を持ち、同一オリジンで `POST /api/chat/input`、`POST /api/camera/capture`、`GET /api/chat/stream` を使い、`message` 到着時はチャット表示へ反映し、`audio_url` があればサーバ生成のクラウドTTS音声を再生し、`Mic` は標準 `SpeechRecognition` で音声入力し、`Cam` は静止画をサムネイル表示して次のチャット入力へ添付し、設定パネルでは `GET /api/settings/editor` と `PUT /api/settings/editor` でプリセット・システム設定・カメラ接続をまとめて保存できる
 - `src/otomekairo/gateway/cognition_client.py`: 認知処理の外部境界を表す抽象を定義する
 - `src/otomekairo/usecase/build_cognition_input.py`: `self_state` などの現在状態から最小の `cognition_input` を組み立て、`task_state` の進行中 / 外部待ちタスク、`sqlite-vec` で補強した直近の `summary` / `fact` 記憶、直近イベント列を `current_observation` と照合して絞り込み、`memory_bundle` として渡す
 - `src/otomekairo/usecase/run_cognition.py`: 認知クライアントが返す `cognition_result` を受け取り、`action_command` を使って `speak` は `token` / `message`、`notify` はユーザー通知イベント (`notice`)、`look` は ONVIF 経由のカメラ視点操作、`browse` は `waiting_external` の検索タスクとして実行し、`action_history` へ変換する

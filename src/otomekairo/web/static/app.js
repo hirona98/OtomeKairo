@@ -62,6 +62,19 @@
       { path: "retrieval_profile.event_bias", label: "Event Bias", kind: "number", min: 0, max: 1, step: 0.05 },
     ],
     output: [
+      { path: "speech.tts.enabled", label: "クラウド TTS", kind: "boolean" },
+      { path: "speech.tts.api_key", label: "TTS API キー", kind: "password" },
+      { path: "speech.tts.endpoint_url", label: "TTS Endpoint URL", kind: "text" },
+      { path: "speech.tts.model_uuid", label: "Model UUID", kind: "text" },
+      { path: "speech.tts.speaker_uuid", label: "Speaker UUID", kind: "text" },
+      { path: "speech.tts.style_id", label: "Style ID", kind: "integer", min: 0, max: 999999, step: 1 },
+      { path: "speech.tts.language", label: "言語", kind: "text" },
+      { path: "speech.tts.speaking_rate", label: "Speaking Rate", kind: "number", min: 0.25, max: 4.0, step: 0.05 },
+      { path: "speech.tts.emotional_intensity", label: "Emotional Intensity", kind: "number", min: 0.0, max: 2.0, step: 0.05 },
+      { path: "speech.tts.tempo_dynamics", label: "Tempo Dynamics", kind: "number", min: 0.0, max: 2.0, step: 0.05 },
+      { path: "speech.tts.pitch", label: "Pitch", kind: "number", min: -1.0, max: 1.0, step: 0.05 },
+      { path: "speech.tts.volume", label: "Volume", kind: "number", min: 0.0, max: 2.0, step: 0.05 },
+      { path: "speech.tts.output_format", label: "音声フォーマット", kind: "select", options: ["wav", "mp3", "ogg", "aac", "flac"] },
       { path: "integrations.notify_route", label: "通知経路", kind: "select", options: ["ui_only", "discord"] },
       { path: "integrations.discord.bot_token", label: "Discord トークン", kind: "password" },
       { path: "integrations.discord.channel_id", label: "Discord チャンネル", kind: "text" },
@@ -86,6 +99,7 @@
   let editorDraft = null;
   let activeSettingsTab = "behavior";
   const draftMessages = new Map();
+  let activeSpeechAudio = null;
 
   // Block: Application startup
   async function start() {
@@ -232,6 +246,7 @@
   async function handleCancel() {
     cancelButton.disabled = true;
     try {
+      stopActiveSpeechAudio();
       const response = await fetch("/api/chat/cancel", {
         method: "POST",
         headers: {
@@ -533,6 +548,14 @@
     const rawValue = readNestedValue(payload, descriptor.path);
     const path = escapeHtml(descriptor.path);
     const label = escapeHtml(descriptor.label);
+    if (descriptor.kind === "boolean") {
+      return `
+        <label class="settings-check">
+          <input type="checkbox" ${rawValue === true ? "checked" : ""} data-preset-kind="${escapeHtml(kind)}" data-preset-path="${path}" data-value-kind="boolean" />
+          <span>${label}</span>
+        </label>
+      `;
+    }
     if (descriptor.kind === "select") {
       const optionsHtml = descriptor.options
         .map((optionValue) => {
@@ -858,6 +881,7 @@
     const messageId = requireString(payload.message_id, "message.message_id");
     const role = requireString(payload.role, "message.role");
     const text = requireString(payload.text, "message.text");
+    const audioUrl = readOptionalString(payload.audio_url);
     let messageNode = draftMessages.get(messageId);
     if (messageNode === undefined) {
       messageNode = appendMessage({
@@ -874,12 +898,15 @@
       label.classList.remove("empty");
       draftMessages.delete(messageId);
     }
+    if (audioUrl !== null) {
+      playRemoteSpeechAudio(audioUrl);
+    }
   }
 
   function handleNoticeEvent(payload) {
     const noticeCode = requireString(payload.notice_code, "notice.notice_code");
-    const text = typeof payload.label === "string" && payload.label
-      ? payload.label
+    const text = typeof payload.text === "string" && payload.text
+      ? payload.text
       : noticeCode;
     appendNotice(noticeCode, text);
   }
@@ -1071,6 +1098,45 @@
 
   function scrollToBottom() {
     chatScroll.scrollTop = chatScroll.scrollHeight;
+  }
+
+  // Block: Cloud speech output
+  function playRemoteSpeechAudio(audioUrl) {
+    if (typeof audioUrl !== "string" || audioUrl.length === 0) {
+      return;
+    }
+    stopActiveSpeechAudio();
+    const audio = new Audio(audioUrl);
+    activeSpeechAudio = audio;
+    audio.addEventListener("ended", () => {
+      if (activeSpeechAudio === audio) {
+        activeSpeechAudio = null;
+      }
+    });
+    audio.addEventListener("error", () => {
+      if (activeSpeechAudio === audio) {
+        activeSpeechAudio = null;
+      }
+      appendError("音声再生に失敗しました");
+    });
+    const playPromise = audio.play();
+    if (playPromise && typeof playPromise.catch === "function") {
+      playPromise.catch((error) => {
+        if (activeSpeechAudio === audio) {
+          activeSpeechAudio = null;
+        }
+        appendError(`音声再生を開始できません: ${error.message}`);
+      });
+    }
+  }
+
+  function stopActiveSpeechAudio() {
+    if (activeSpeechAudio === null) {
+      return;
+    }
+    activeSpeechAudio.pause();
+    activeSpeechAudio.currentTime = 0;
+    activeSpeechAudio = null;
   }
 
   function setMicListeningState(isListening) {
@@ -1314,6 +1380,13 @@
   function requireString(value, label) {
     if (typeof value !== "string") {
       throw new Error(`${label} が文字列ではありません`);
+    }
+    return value;
+  }
+
+  function readOptionalString(value) {
+    if (typeof value !== "string" || value.length === 0) {
+      return null;
     }
     return value;
   }

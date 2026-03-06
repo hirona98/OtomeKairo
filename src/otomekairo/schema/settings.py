@@ -44,6 +44,19 @@ SETTING_DEFINITIONS: tuple[SettingDefinition, ...] = (
     SettingDefinition("runtime.context_budget_tokens", "integer", ("runtime", "next_boot"), min_value=1024, max_value=32768),
     SettingDefinition("sensors.camera.enabled", "boolean", ("runtime",)),
     SettingDefinition("sensors.microphone.enabled", "boolean", ("runtime",)),
+    SettingDefinition("speech.tts.enabled", "boolean", ("runtime", "next_boot")),
+    SettingDefinition("speech.tts.api_key", "string", ("runtime", "next_boot"), min_length=0, max_length=4096),
+    SettingDefinition("speech.tts.endpoint_url", "string", ("runtime", "next_boot"), min_length=0, max_length=512),
+    SettingDefinition("speech.tts.model_uuid", "string", ("runtime", "next_boot"), min_length=0, max_length=128),
+    SettingDefinition("speech.tts.speaker_uuid", "string", ("runtime", "next_boot"), min_length=0, max_length=128),
+    SettingDefinition("speech.tts.style_id", "integer", ("runtime", "next_boot"), min_value=0, max_value=999999),
+    SettingDefinition("speech.tts.language", "string", ("runtime", "next_boot"), min_length=1, max_length=32),
+    SettingDefinition("speech.tts.speaking_rate", "number", ("runtime", "next_boot"), min_value=0.25, max_value=4.0),
+    SettingDefinition("speech.tts.emotional_intensity", "number", ("runtime", "next_boot"), min_value=0.0, max_value=2.0),
+    SettingDefinition("speech.tts.tempo_dynamics", "number", ("runtime", "next_boot"), min_value=0.0, max_value=2.0),
+    SettingDefinition("speech.tts.pitch", "number", ("runtime", "next_boot"), min_value=-1.0, max_value=1.0),
+    SettingDefinition("speech.tts.volume", "number", ("runtime", "next_boot"), min_value=0.0, max_value=2.0),
+    SettingDefinition("speech.tts.output_format", "string", ("runtime", "next_boot"), min_length=1, max_length=16),
     SettingDefinition("integrations.notify_route", "string", ("runtime", "next_boot"), min_length=1, max_length=64),
     SettingDefinition("integrations.sns.enabled", "boolean", ("runtime",)),
     SettingDefinition("integrations.discord.bot_token", "string", ("runtime", "next_boot"), min_length=0, max_length=4096),
@@ -208,6 +221,19 @@ def build_default_settings_presets(default_settings: dict[str, Any]) -> tuple[di
             "preset_kind": "output",
             "preset_name": "標準",
             "payload": {
+                "speech.tts.enabled": bool(default_settings["speech.tts.enabled"]),
+                "speech.tts.api_key": str(default_settings["speech.tts.api_key"]),
+                "speech.tts.endpoint_url": str(default_settings["speech.tts.endpoint_url"]),
+                "speech.tts.model_uuid": str(default_settings["speech.tts.model_uuid"]),
+                "speech.tts.speaker_uuid": str(default_settings["speech.tts.speaker_uuid"]),
+                "speech.tts.style_id": int(default_settings["speech.tts.style_id"]),
+                "speech.tts.language": str(default_settings["speech.tts.language"]),
+                "speech.tts.speaking_rate": float(default_settings["speech.tts.speaking_rate"]),
+                "speech.tts.emotional_intensity": float(default_settings["speech.tts.emotional_intensity"]),
+                "speech.tts.tempo_dynamics": float(default_settings["speech.tts.tempo_dynamics"]),
+                "speech.tts.pitch": float(default_settings["speech.tts.pitch"]),
+                "speech.tts.volume": float(default_settings["speech.tts.volume"]),
+                "speech.tts.output_format": str(default_settings["speech.tts.output_format"]),
                 "integrations.notify_route": str(default_settings["integrations.notify_route"]),
                 "integrations.discord.bot_token": str(default_settings["integrations.discord.bot_token"]),
                 "integrations.discord.channel_id": str(default_settings["integrations.discord.channel_id"]),
@@ -218,6 +244,19 @@ def build_default_settings_presets(default_settings: dict[str, Any]) -> tuple[di
             "preset_kind": "output",
             "preset_name": "UIのみ",
             "payload": {
+                "speech.tts.enabled": bool(default_settings["speech.tts.enabled"]),
+                "speech.tts.api_key": str(default_settings["speech.tts.api_key"]),
+                "speech.tts.endpoint_url": str(default_settings["speech.tts.endpoint_url"]),
+                "speech.tts.model_uuid": str(default_settings["speech.tts.model_uuid"]),
+                "speech.tts.speaker_uuid": str(default_settings["speech.tts.speaker_uuid"]),
+                "speech.tts.style_id": int(default_settings["speech.tts.style_id"]),
+                "speech.tts.language": str(default_settings["speech.tts.language"]),
+                "speech.tts.speaking_rate": float(default_settings["speech.tts.speaking_rate"]),
+                "speech.tts.emotional_intensity": float(default_settings["speech.tts.emotional_intensity"]),
+                "speech.tts.tempo_dynamics": float(default_settings["speech.tts.tempo_dynamics"]),
+                "speech.tts.pitch": float(default_settings["speech.tts.pitch"]),
+                "speech.tts.volume": float(default_settings["speech.tts.volume"]),
+                "speech.tts.output_format": str(default_settings["speech.tts.output_format"]),
                 "integrations.notify_route": "ui_only",
                 "integrations.discord.bot_token": str(default_settings["integrations.discord.bot_token"]),
                 "integrations.discord.channel_id": str(default_settings["integrations.discord.channel_id"]),
@@ -235,7 +274,7 @@ def build_default_camera_connections() -> tuple[dict[str, Any], ...]:
 def normalize_settings_editor_document(document: Any) -> dict[str, Any]:
     if not isinstance(document, dict):
         raise SettingsValidationError("invalid_settings_editor_document", "settings editor payload must be an object")
-    expected_keys = {"editor_state", "preset_catalogs"}
+    expected_keys = {"editor_state", "preset_catalogs", "camera_connections"}
     if set(document) != expected_keys:
         raise SettingsValidationError(
             "invalid_settings_editor_document",
@@ -596,6 +635,19 @@ def _normalize_memory_preset_payload(payload: dict[str, Any]) -> dict[str, Any]:
 # Block: Output preset normalization
 def _normalize_output_preset_payload(payload: dict[str, Any]) -> dict[str, Any]:
     required_keys = {
+        "speech.tts.enabled",
+        "speech.tts.api_key",
+        "speech.tts.endpoint_url",
+        "speech.tts.model_uuid",
+        "speech.tts.speaker_uuid",
+        "speech.tts.style_id",
+        "speech.tts.language",
+        "speech.tts.speaking_rate",
+        "speech.tts.emotional_intensity",
+        "speech.tts.tempo_dynamics",
+        "speech.tts.pitch",
+        "speech.tts.volume",
+        "speech.tts.output_format",
         "integrations.notify_route",
         "integrations.discord.bot_token",
         "integrations.discord.channel_id",
@@ -605,11 +657,38 @@ def _normalize_output_preset_payload(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = _normalize_keyed_preset_payload(
         payload=payload,
         required_keys=(
+            "speech.tts.enabled",
+            "speech.tts.api_key",
+            "speech.tts.endpoint_url",
+            "speech.tts.model_uuid",
+            "speech.tts.speaker_uuid",
+            "speech.tts.style_id",
+            "speech.tts.language",
+            "speech.tts.speaking_rate",
+            "speech.tts.emotional_intensity",
+            "speech.tts.tempo_dynamics",
+            "speech.tts.pitch",
+            "speech.tts.volume",
+            "speech.tts.output_format",
             "integrations.notify_route",
             "integrations.discord.bot_token",
             "integrations.discord.channel_id",
         ),
     )
+    if normalized["speech.tts.output_format"] not in {"wav", "mp3", "ogg", "aac", "flac"}:
+        raise SettingsValidationError("invalid_settings_editor_document", "speech.tts.output_format is invalid")
+    if normalized["speech.tts.enabled"] is True:
+        for key in (
+            "speech.tts.api_key",
+            "speech.tts.endpoint_url",
+            "speech.tts.model_uuid",
+            "speech.tts.speaker_uuid",
+        ):
+            if not normalized[key]:
+                raise SettingsValidationError(
+                    "invalid_settings_editor_document",
+                    f"{key} is required when speech.tts.enabled is true",
+                )
     if normalized["integrations.notify_route"] not in {"ui_only", "discord"}:
         raise SettingsValidationError("invalid_settings_editor_document", "integrations.notify_route is invalid")
     if normalized["integrations.notify_route"] == "discord":

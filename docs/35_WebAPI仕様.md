@@ -87,12 +87,13 @@
 - `POST /api/camera/observe`
 - `GET /api/chat/stream`
 - `GET /captures/{capture_filename}`
+- `GET /audio/{audio_filename}`
 
 - 下の Mermaid 図は、ブラウザ、`設定 Web サーバ`、`人格ランタイム`、`SQLite` の受け渡しを要約したものである
 
 ```mermaid
 flowchart LR
-    browser["ブラウザ"] -->|"GET /\nGET /api/health\nGET /api/status\nGET /api/settings/editor\nGET /captures/{capture_filename}"| web["設定 Web サーバ"]
+    browser["ブラウザ"] -->|"GET /\nGET /api/health\nGET /api/status\nGET /api/settings/editor\nGET /captures/{capture_filename}\nGET /audio/{audio_filename}"| web["設定 Web サーバ"]
     browser -->|"POST /api/chat/input\nPOST /api/chat/cancel\nPOST /api/camera/capture\nPOST /api/camera/observe\nPUT /api/settings/editor"| web
     web <-->|read / write| db["SQLite"]
     runtime["人格ランタイム"] -->|"append ui_outbound_events"| db
@@ -106,7 +107,7 @@ flowchart LR
 ### 役割
 
 - 最小のブラウザチャット UI を返す
-- 同一オリジンで `POST /api/chat/input`、`POST /api/chat/cancel`、`POST /api/camera/capture`、`GET /api/chat/stream`、`GET /api/status`、`GET /api/settings/editor`、`GET /captures/{capture_filename}` を使う
+- 同一オリジンで `POST /api/chat/input`、`POST /api/chat/cancel`、`POST /api/camera/capture`、`GET /api/chat/stream`、`GET /api/status`、`GET /api/settings/editor`、`GET /captures/{capture_filename}`、`GET /audio/{audio_filename}` を使う
 - `src/otomekairo/web/static/` に置く HTML / CSS / JavaScript を返す
 
 <!-- Block: Browser UI Rules -->
@@ -116,6 +117,7 @@ flowchart LR
 - 初期実装の見た目は `tmp/CocoroGhost/static/` に近いヘッダ、チャット欄、設定欄、ステータスバー構成にしてよい
 - `Mic` はブラウザの標準 `SpeechRecognition` を使って音声入力し、認識結果を `POST /api/chat/input` へ流す
 - `Cam` は `POST /api/camera/capture` で静止画を取得し、返った画像をサムネイル表示し、次の `POST /api/chat/input` へ添付してよい
+- `message` に `audio_url` がある場合は、`GET /audio/{audio_filename}` で取得した音声を再生してよい
 - `設定保存` は、初期実装では `GET /api/settings/editor` と `PUT /api/settings/editor` を使って、設定全体を保存する
 - `browse` の初期実装では、UI は少なくとも `browse_queued` と `browse_completed` の `notice` を見分けられるようにしてよい
 - UI 側で永続ストレージを前提にしない
@@ -288,7 +290,7 @@ flowchart LR
 <!-- Block: Settings Editor Put Notes -->
 ### 成功応答の考え方
 
-- リクエスト本文は、`editor_state` と `preset_catalogs` だけを持つ保存用の固定形にする
+- リクエスト本文は、`editor_state`、`preset_catalogs`、`camera_connections` を持つ保存用の固定形にする
 - 成功応答本文は、`GET /api/settings/editor` と同じ canonical 形に固定する
 - `constraints` と `runtime_projection` は読み取り専用のため、`PUT` のリクエスト本文へ含めない
 - 本文の JSON 形は `docs/36_JSONデータ仕様.md` を正本とする
@@ -484,6 +486,15 @@ flowchart LR
 - `POST /api/camera/capture` で保存した JPEG を同一オリジンで返す
 - ブラウザ UI は、この path をサムネイルと原寸表示の両方に使ってよい
 
+<!-- Block: TTS Audio Asset -->
+## `GET /audio/{audio_filename}`
+
+<!-- Block: TTS Audio Asset Purpose -->
+### 役割
+
+- `speak` 実行時にクラウド TTS で生成した音声ファイルを同一オリジンで返す
+- ブラウザ UI は、`message.audio_url` を `audio` 要素で再生してよい
+
 <!-- Block: Chat Stream -->
 ## `GET /api/chat/stream`
 
@@ -534,7 +545,7 @@ data: {"message_id":"msg_...","text":"お","chunk_index":0}
 - `message`
   - 役割: 完成した 1 メッセージ
   - 必須項目: `message_id`, `role`, `text`, `created_at`
-  - 任意項目: `source_cycle_id`, `related_input_id`
+  - 任意項目: `source_cycle_id`, `related_input_id`, `audio_url`, `audio_mime_type`
   - `role` は、少なくとも `assistant`、`system_notice` を区別する
 
 - `status`

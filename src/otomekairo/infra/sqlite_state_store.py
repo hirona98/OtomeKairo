@@ -46,6 +46,24 @@ LEGACY_OPTIONAL_BASE_URL_DEFAULTS = {
     "llm.base_url": "https://openrouter.ai/api/v1",
     "llm.embedding_base_url": "https://openrouter.ai/api/v1",
 }
+OUTPUT_PRESET_SETTING_KEYS = (
+    "speech.tts.enabled",
+    "speech.tts.api_key",
+    "speech.tts.endpoint_url",
+    "speech.tts.model_uuid",
+    "speech.tts.speaker_uuid",
+    "speech.tts.style_id",
+    "speech.tts.language",
+    "speech.tts.speaking_rate",
+    "speech.tts.emotional_intensity",
+    "speech.tts.tempo_dynamics",
+    "speech.tts.pitch",
+    "speech.tts.volume",
+    "speech.tts.output_format",
+    "integrations.notify_route",
+    "integrations.discord.bot_token",
+    "integrations.discord.channel_id",
+)
 
 
 # Block: API errors
@@ -5021,6 +5039,7 @@ def _fetch_memory_rows_by_ids(
 
 # Block: Settings editor row decode
 def _decode_settings_editor_state_row(row: sqlite3.Row) -> dict[str, Any]:
+    raw_system_values = json.loads(row["system_values_json"])
     return {
         "active_behavior_preset_id": str(row["active_behavior_preset_id"]),
         "active_llm_preset_id": str(row["active_llm_preset_id"]),
@@ -5031,7 +5050,7 @@ def _decode_settings_editor_state_row(row: sqlite3.Row) -> dict[str, Any]:
             if row["active_camera_connection_id"] is not None
             else None
         ),
-        "system_values": json.loads(row["system_values_json"]),
+        "system_values": _normalize_settings_editor_system_values(raw_system_values),
         "revision": int(row["revision"]),
         "updated_at": int(row["updated_at"]),
         "last_applied_change_set_id": (
@@ -5040,6 +5059,22 @@ def _decode_settings_editor_state_row(row: sqlite3.Row) -> dict[str, Any]:
             else None
         ),
     }
+
+
+# Block: Settings editor system values normalization
+def _normalize_settings_editor_system_values(raw_system_values: Any) -> dict[str, Any]:
+    system_values = {
+        key: default_value
+        for key, default_value in build_default_settings_editor_state(
+            build_default_settings()
+        )["system_values_json"].items()
+    }
+    if not isinstance(raw_system_values, dict):
+        return system_values
+    for key in build_settings_editor_system_keys():
+        if key in raw_system_values:
+            system_values[key] = raw_system_values[key]
+    return system_values
 
 
 # Block: Settings preset rows decode
@@ -5055,6 +5090,10 @@ def _decode_settings_preset_catalog_rows(rows: list[sqlite3.Row]) -> dict[str, l
         payload = json.loads(row["payload_json"])
         if isinstance(payload, dict):
             payload = _normalize_legacy_optional_base_urls(payload)
+            payload = _normalize_legacy_output_preset_payload(
+                preset_kind=preset_kind,
+                payload=payload,
+            )
         preset_catalogs[preset_kind].append(
             {
                 "preset_id": str(row["preset_id"]),
@@ -5647,6 +5686,57 @@ def _normalize_legacy_optional_base_url_value(*, key: str, value: Any) -> Any:
     ):
         return ""
     return value
+
+
+# Block: Legacy output preset normalization
+def _normalize_legacy_output_preset_payload(
+    *,
+    preset_kind: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    if preset_kind != "output":
+        return payload
+    if set(payload) == set(OUTPUT_PRESET_SETTING_KEYS):
+        return payload
+    default_settings = build_default_settings()
+    normalized: dict[str, Any] = {
+        key: default_settings[key]
+        for key in OUTPUT_PRESET_SETTING_KEYS
+    }
+    for key in OUTPUT_PRESET_SETTING_KEYS:
+        value = payload.get(key)
+        if value is not None:
+            normalized[key] = value
+    required_tts_keys = (
+        "speech.tts.api_key",
+        "speech.tts.endpoint_url",
+        "speech.tts.model_uuid",
+        "speech.tts.speaker_uuid",
+    )
+    legacy_output_mode = payload.get("output.mode")
+    if legacy_output_mode == "ui_only":
+        normalized["speech.tts.enabled"] = False
+    elif legacy_output_mode == "ui_and_tts":
+        normalized["speech.tts.enabled"] = all(
+            isinstance(normalized[key], str) and normalized[key].strip()
+            for key in required_tts_keys
+        )
+    legacy_notify_route = payload.get("integrations.notify_route")
+    if legacy_notify_route in {"ui_only", "discord"}:
+        normalized["integrations.notify_route"] = legacy_notify_route
+    legacy_discord_token = payload.get("integrations.discord.bot_token")
+    if isinstance(legacy_discord_token, str):
+        normalized["integrations.discord.bot_token"] = legacy_discord_token
+    legacy_discord_channel = payload.get("integrations.discord.channel_id")
+    if isinstance(legacy_discord_channel, str):
+        normalized["integrations.discord.channel_id"] = legacy_discord_channel
+    if normalized["speech.tts.enabled"] is True:
+        if not all(
+            isinstance(normalized[key], str) and normalized[key].strip()
+            for key in required_tts_keys
+        ):
+            normalized["speech.tts.enabled"] = False
+    return normalized
 
 
 def _runtime_settings_seed_timestamps(now_ms: int) -> dict[str, int]:

@@ -8,6 +8,11 @@ from dataclasses import dataclass
 from typing import Any, Callable, Iterable
 
 from otomekairo.gateway.camera_controller import CameraController, CameraLookRequest
+from otomekairo.gateway.speech_synthesizer import (
+    SpeechSynthesisRequest,
+    SpeechSynthesisResponse,
+    SpeechSynthesizer,
+)
 from otomekairo.schema.runtime_types import TaskStateMutationRecord
 
 
@@ -35,6 +40,8 @@ def dispatch_chat_action_command(
     emit_ui_event: Callable[[dict[str, Any]], None],
     consume_cancel: Callable[[str], bool],
     camera_controller: CameraController,
+    speech_synthesizer: SpeechSynthesizer,
+    effective_settings: dict[str, Any],
 ) -> ActionDispatchResult:
     command_type = str(action_command["command_type"])
     if command_type == "speak_ui_message":
@@ -45,6 +52,8 @@ def dispatch_chat_action_command(
             action_command=action_command,
             emit_ui_event=emit_ui_event,
             consume_cancel=consume_cancel,
+            speech_synthesizer=speech_synthesizer,
+            effective_settings=effective_settings,
         )
     if command_type == "dispatch_notice":
         return _dispatch_notice_command(
@@ -81,6 +90,8 @@ def _dispatch_speak_command(
     action_command: dict[str, Any],
     emit_ui_event: Callable[[dict[str, Any]], None],
     consume_cancel: Callable[[str], bool],
+    speech_synthesizer: SpeechSynthesizer,
+    effective_settings: dict[str, Any],
 ) -> ActionDispatchResult:
     message_id = str(action_command["parameters"]["message_id"])
     response_text = str(action_command["parameters"]["text"])
@@ -100,6 +111,66 @@ def _dispatch_speak_command(
         emit_ui_event=emit_ui_event,
         emitted_event_types=emitted_event_types,
     )
+
+    # Block: Cloud speech synthesis
+    synthesis_result: SpeechSynthesisResponse | None = None
+    try:
+        synthesis_result = _synthesize_speech_if_enabled(
+            cycle_id=cycle_id,
+            message_id=message_id,
+            response_text=response_text,
+            speech_synthesizer=speech_synthesizer,
+            effective_settings=effective_settings,
+        )
+    except Exception as error:
+        # Block: TTS failure event
+        _emit_browser_event(
+            pending_input=pending_input,
+            event_type="error",
+            payload={
+                "error_code": "tts_synthesis_failed",
+                "message": f"クラウドTTSに失敗しました: {_error_message_text(error)}",
+                "retriable": False,
+            },
+            emit_ui_event=emit_ui_event,
+            emitted_event_types=emitted_event_types,
+        )
+        # Block: Idle status after TTS failure
+        _emit_browser_event(
+            pending_input=pending_input,
+            event_type="status",
+            payload={
+                "status_code": "idle",
+                "label": "待機中",
+                "cycle_id": cycle_id,
+            },
+            emit_ui_event=emit_ui_event,
+            emitted_event_types=emitted_event_types,
+        )
+        return ActionDispatchResult(
+            action_type="emit_chat_response",
+            emitted_event_types=emitted_event_types,
+            observed_effects={
+                "status_code_after": "idle",
+                "was_cancelled": False,
+                "token_count": 0,
+                "final_message_emitted": False,
+                "message_id": message_id,
+                "tts_enabled": bool(effective_settings.get("speech.tts.enabled")),
+                "tts_audio_generated": False,
+            },
+            task_mutations=[],
+            finished_at=_now_ms(),
+            status="failed",
+            failure_mode="tts_synthesis_failed",
+            raw_result_ref=None,
+            adapter_trace_ref={
+                "tts_error": {
+                    "error_kind": type(error).__name__,
+                    "error_message": _error_message_text(error),
+                }
+            },
+        )
 
     # Block: Token streaming
     for chunk_text in _iter_speech_chunks(response_text):
@@ -123,17 +194,21 @@ def _dispatch_speak_command(
     finished_at = _now_ms()
     final_message_emitted = False
     if response_text and not was_cancelled:
+        final_message_payload = {
+            "message_id": message_id,
+            "role": "assistant",
+            "text": response_text,
+            "created_at": finished_at,
+            "source_cycle_id": cycle_id,
+            "related_input_id": str(pending_input["input_id"]),
+        }
+        if synthesis_result is not None:
+            final_message_payload["audio_url"] = synthesis_result.audio_url
+            final_message_payload["audio_mime_type"] = synthesis_result.mime_type
         _emit_browser_event(
             pending_input=pending_input,
             event_type="message",
-            payload={
-                "message_id": message_id,
-                "role": "assistant",
-                "text": response_text,
-                "created_at": finished_at,
-                "source_cycle_id": cycle_id,
-                "related_input_id": str(pending_input["input_id"]),
-            },
+            payload=final_message_payload,
             emit_ui_event=emit_ui_event,
             emitted_event_types=emitted_event_types,
         )
@@ -161,13 +236,15 @@ def _dispatch_speak_command(
             "token_count": emitted_chunk_count,
             "final_message_emitted": final_message_emitted,
             "message_id": message_id,
+            "tts_enabled": bool(effective_settings.get("speech.tts.enabled")),
+            "tts_audio_generated": synthesis_result is not None,
         },
         task_mutations=[],
         finished_at=finished_at,
         status="stopped" if was_cancelled else "succeeded",
         failure_mode="cancelled" if was_cancelled else None,
-        raw_result_ref=None,
-        adapter_trace_ref=None,
+        raw_result_ref=synthesis_result.raw_result_ref if synthesis_result is not None else None,
+        adapter_trace_ref=synthesis_result.adapter_trace_ref if synthesis_result is not None else None,
     )
 
 
@@ -467,6 +544,79 @@ def _emit_browser_event(
     }
     emitted_event_types.append(event_type)
     emit_ui_event(ui_event)
+
+
+# Block: Cloud speech synthesis execution
+def _synthesize_speech_if_enabled(
+    *,
+    cycle_id: str,
+    message_id: str,
+    response_text: str,
+    speech_synthesizer: SpeechSynthesizer,
+    effective_settings: dict[str, Any],
+) -> SpeechSynthesisResponse | None:
+    tts_enabled = effective_settings.get("speech.tts.enabled")
+    if not isinstance(tts_enabled, bool):
+        raise RuntimeError("speech.tts.enabled must be boolean")
+    if not tts_enabled:
+        return None
+    synthesis_request = _build_speech_synthesis_request(
+        cycle_id=cycle_id,
+        message_id=message_id,
+        response_text=response_text,
+        effective_settings=effective_settings,
+    )
+    return speech_synthesizer.synthesize(synthesis_request)
+
+
+# Block: Cloud speech request build
+def _build_speech_synthesis_request(
+    *,
+    cycle_id: str,
+    message_id: str,
+    response_text: str,
+    effective_settings: dict[str, Any],
+) -> SpeechSynthesisRequest:
+    return SpeechSynthesisRequest(
+        cycle_id=cycle_id,
+        message_id=message_id,
+        text=response_text,
+        api_key=_required_non_empty_setting(effective_settings, "speech.tts.api_key"),
+        endpoint_url=_required_non_empty_setting(effective_settings, "speech.tts.endpoint_url"),
+        model_uuid=_required_non_empty_setting(effective_settings, "speech.tts.model_uuid"),
+        speaker_uuid=_required_non_empty_setting(effective_settings, "speech.tts.speaker_uuid"),
+        style_id=_required_setting_int(effective_settings, "speech.tts.style_id"),
+        use_ssml=False,
+        language=_required_non_empty_setting(effective_settings, "speech.tts.language"),
+        speaking_rate=_required_setting_number(effective_settings, "speech.tts.speaking_rate"),
+        emotional_intensity=_required_setting_number(effective_settings, "speech.tts.emotional_intensity"),
+        tempo_dynamics=_required_setting_number(effective_settings, "speech.tts.tempo_dynamics"),
+        pitch=_required_setting_number(effective_settings, "speech.tts.pitch"),
+        volume=_required_setting_number(effective_settings, "speech.tts.volume"),
+        output_format=_required_non_empty_setting(effective_settings, "speech.tts.output_format"),
+    )
+
+
+# Block: Settings read helpers
+def _required_non_empty_setting(effective_settings: dict[str, Any], key: str) -> str:
+    value = effective_settings.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise RuntimeError(f"{key} must be non-empty string")
+    return value.strip()
+
+
+def _required_setting_int(effective_settings: dict[str, Any], key: str) -> int:
+    value = effective_settings.get(key)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise RuntimeError(f"{key} must be integer")
+    return value
+
+
+def _required_setting_number(effective_settings: dict[str, Any], key: str) -> float:
+    value = effective_settings.get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise RuntimeError(f"{key} must be number")
+    return float(value)
 
 
 # Block: Token chunk iterator

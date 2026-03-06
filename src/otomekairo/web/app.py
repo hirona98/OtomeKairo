@@ -14,6 +14,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from otomekairo import __version__
+from otomekairo.infra.aivis_cloud_speech_synthesizer import default_tts_audio_dir
 from otomekairo.infra.wifi_camera_common import default_camera_capture_dir
 from otomekairo.infra.wifi_camera_sensor import WiFiCameraSensor
 from otomekairo.infra.sqlite_state_store import StoreConflictError, StoreValidationError, SqliteStateStore
@@ -67,6 +68,7 @@ def create_app() -> FastAPI:
     )
     static_dir = _static_dir()
     capture_dir = _camera_capture_dir()
+    tts_audio_dir = _tts_audio_dir()
 
     app = FastAPI(title="OtomeKairo Settings Server", version=__version__)
     app.state.services = services
@@ -75,6 +77,7 @@ def create_app() -> FastAPI:
     # Block: Browser UI static files
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
     app.mount("/captures", StaticFiles(directory=capture_dir), name="captures")
+    app.mount("/audio", StaticFiles(directory=tts_audio_dir), name="audio")
 
     # Block: API error handler
     @app.exception_handler(ApiError)
@@ -193,6 +196,13 @@ def _static_dir() -> Path:
 # Block: Camera capture path
 def _camera_capture_dir() -> Path:
     return default_camera_capture_dir()
+
+
+# Block: TTS audio path
+def _tts_audio_dir() -> Path:
+    audio_dir = default_tts_audio_dir()
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    return audio_dir
 
 
 # Block: Stream janitor

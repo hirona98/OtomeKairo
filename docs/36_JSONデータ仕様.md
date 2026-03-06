@@ -632,7 +632,10 @@
   "llm.embedding_api_key": "emb-example",
   "llm.temperature": 0.7,
   "llm.max_output_tokens": 2048,
-  "runtime.idle_tick_ms": 1000
+  "runtime.idle_tick_ms": 1000,
+  "speech.tts.enabled": false,
+  "speech.tts.endpoint_url": "https://api.aivis-project.com/v1/tts/synthesize",
+  "speech.tts.output_format": "wav"
 }
 ```
 
@@ -651,7 +654,8 @@
   "llm.embedding_model": 1760000000000,
   "llm.temperature": 1760000000000,
   "llm.max_output_tokens": 1760000000000,
-  "runtime.idle_tick_ms": 1760000000000
+  "runtime.idle_tick_ms": 1760000000000,
+  "speech.tts.enabled": 1760000000000
 }
 ```
 
@@ -681,6 +685,7 @@
 - キー名は、`docs/39_設定キー運用仕様.md` と同じドット区切り設定キーをそのまま使う
 - 値の型は、各キーの登録 `value_type` と一致しなければならない
 - `settings_editor_state` の `revision` が更新される保存では、このオブジェクト全体を canonical な形で保持する
+- 旧構成の `system_values_json` に未使用キーが残っている場合、読み出し時に現行キー集合へ正規化して返す
 
 <!-- Block: Settings Preset Payload -->
 ### `settings_presets.payload_json`
@@ -747,15 +752,31 @@
 
 ```json
 {
+  "speech.tts.enabled": true,
+  "speech.tts.api_key": "tts-key",
+  "speech.tts.endpoint_url": "https://api.aivis-project.com/v1/tts/synthesize",
+  "speech.tts.model_uuid": "model-uuid",
+  "speech.tts.speaker_uuid": "speaker-uuid",
+  "speech.tts.style_id": 0,
+  "speech.tts.language": "ja",
+  "speech.tts.speaking_rate": 1.0,
+  "speech.tts.emotional_intensity": 1.0,
+  "speech.tts.tempo_dynamics": 1.0,
+  "speech.tts.pitch": 0.0,
+  "speech.tts.volume": 1.0,
+  "speech.tts.output_format": "wav",
   "integrations.notify_route": "discord",
   "integrations.discord.bot_token": "discord-token",
   "integrations.discord.channel_id": "1234567890"
 }
 ```
 
-- 必須項目は `integrations.notify_route` である
+- 必須項目は `speech.tts.enabled`、`speech.tts.output_format`、`integrations.notify_route` である
+- `speech.tts.enabled=true` のときは `speech.tts.api_key`、`speech.tts.endpoint_url`、`speech.tts.model_uuid`、`speech.tts.speaker_uuid` を必須にする
+- `speech.tts.output_format` は `wav`、`mp3`、`ogg`、`aac`、`flac` のいずれかに固定する
 - `integrations.notify_route` は、`ui_only` または `discord` に固定する
 - `integrations.notify_route="discord"` のときは `integrations.discord.bot_token` と `integrations.discord.channel_id` を必須にする
+- 旧構成の `output.mode` / `integrations.line.*` を含む payload は、読み出し時に `speech.tts.*` + `integrations.notify_route` + `integrations.discord.*` の固定形へ正規化する
 
 <!-- Block: Settings Change Set Payload -->
 ### `settings_change_sets.payload_json`
@@ -1014,7 +1035,7 @@
 <!-- Block: Settings Editor Put -->
 ### `PUT /api/settings/editor` の本文
 
-- `PUT` のリクエスト本文は、`editor_state` と `preset_catalogs` だけを持つオブジェクトに固定する
+- `PUT` のリクエスト本文は、`editor_state`、`preset_catalogs`、`camera_connections` を持つオブジェクトに固定する
 - `constraints` と `runtime_projection` は読み取り専用のため、リクエスト本文へ含めない
 - `PUT` の成功応答本文は、`GET /api/settings/editor` と同じ canonical 形に固定する
 - 保存時は、サーバ側で次の整合を必須にする
@@ -1056,13 +1077,15 @@
   "text": "おはようございます。",
   "created_at": 1760000000000,
   "source_cycle_id": "cycle_...",
-  "related_input_id": "inp_..."
+  "related_input_id": "inp_...",
+  "audio_url": "/audio/tts_msg_....wav",
+  "audio_mime_type": "audio/wav"
 }
 ```
 
 - 必須項目は `message_id`、`role`、`text`、`created_at` である
 - `role` は、少なくとも `assistant`、`system_notice` を区別する
-- `source_cycle_id`、`related_input_id` は任意である
+- `source_cycle_id`、`related_input_id`、`audio_url`、`audio_mime_type` は任意である
 
 <!-- Block: UI Status -->
 #### `event_type = status`
