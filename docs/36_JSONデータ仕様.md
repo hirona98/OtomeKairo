@@ -138,10 +138,10 @@
 - `trait_values` は、`sociability`、`caution`、`curiosity`、`persistence`、`warmth`、`assertiveness`、`novelty_preference` を必須キーとして持つ
 - `trait_values` の各値は、`-1.0..+1.0` の `number` に固定する
 - `preferred_interaction_style` は、`speech_tone`、`distance_style`、`confirmation_style`、`response_pace` を必須キーとして持つ
-- `speech_tone` は、少なくとも `soft`、`neutral`、`direct` を区別する
+- `speech_tone` は、少なくとも `gentle`、`neutral`、`firm` を区別する
 - `distance_style` は、少なくとも `reserved`、`balanced`、`close` を区別する
-- `confirmation_style` は、少なくとも `minimal`、`balanced`、`careful` を区別する
-- `response_pace` は、少なくとも `slow`、`balanced`、`quick` を区別する
+- `confirmation_style` は、少なくとも `light`、`balanced`、`careful` を区別する
+- `response_pace` は、少なくとも `careful`、`balanced`、`quick` を区別する
 - `learned_preferences` と `learned_aversions` は、`personality_preference_entry` の配列に固定する
 - `habit_biases.preferred_action_types` は、行動種別の順序付き配列である
 - `habit_biases.preferred_observation_kinds` は、観測種別の順序付き配列である
@@ -633,12 +633,21 @@
   "llm.temperature": 0.7,
   "llm.max_output_tokens": 2048,
   "runtime.idle_tick_ms": 1000,
+  "behavior.second_person_label": "",
+  "behavior.system_prompt": "",
+  "behavior.addon_prompt": "",
+  "behavior.response_pace": "balanced",
+  "behavior.speech_style": "neutral",
+  "character.vrm_file_path": "",
+  "character.material.convert_unlit_to_mtoon": false,
   "speech.tts.enabled": false,
   "speech.tts.provider": "aivis-cloud",
   "speech.tts.aivis_cloud.endpoint_url": "https://api.aivis-project.com/v1/tts/synthesize",
   "speech.tts.aivis_cloud.output_format": "wav",
   "speech.tts.voicevox.endpoint_url": "http://127.0.0.1:50021",
-  "speech.tts.style_bert_vits2.endpoint_url": "http://127.0.0.1:5000"
+  "speech.tts.style_bert_vits2.endpoint_url": "http://127.0.0.1:5000",
+  "speech.stt.enabled": false,
+  "speech.stt.provider": "amivoice"
 }
 ```
 
@@ -701,12 +710,15 @@
 
 ```json
 {
-  "response_pace": "normal",
-  "proactivity_level": "medium",
-  "browse_preference": "balanced",
-  "notify_preference": "balanced",
-  "speech_style": "neutral",
-  "verbosity_bias": "balanced"
+  "behavior.second_person_label": "マスター",
+  "behavior.system_prompt": "あなたは落ち着いて丁寧に話す。",
+  "behavior.addon_prompt": "返答は2文以内を基本にする。",
+  "behavior.response_pace": "balanced",
+  "behavior.proactivity_level": "medium",
+  "behavior.browse_preference": "balanced",
+  "behavior.notify_preference": "balanced",
+  "behavior.speech_style": "neutral",
+  "behavior.verbosity_bias": "balanced"
 }
 ```
 
@@ -756,6 +768,10 @@
 
 ```json
 {
+  "character.vrm_file_path": "/model/otome.vrm",
+  "character.material.convert_unlit_to_mtoon": false,
+  "character.material.enable_shadow_off": true,
+  "character.material.shadow_off_meshes": "Face",
   "speech.tts.enabled": true,
   "speech.tts.provider": "aivis-cloud",
   "speech.tts.aivis_cloud.api_key": "tts-key",
@@ -797,18 +813,25 @@
   "speech.tts.style_bert_vits2.split_interval": 0.5,
   "speech.tts.style_bert_vits2.assist_text": "",
   "speech.tts.style_bert_vits2.assist_text_weight": 0.0,
+  "speech.stt.enabled": true,
+  "speech.stt.provider": "amivoice",
+  "speech.stt.wake_word": "こんにちは, ハロー",
+  "speech.stt.amivoice.profile_id": "service-id",
+  "speech.stt.amivoice.api_key": "stt-key",
   "integrations.notify_route": "discord",
   "integrations.discord.bot_token": "discord-token",
   "integrations.discord.channel_id": "1234567890"
 }
 ```
 
-- 必須項目は、`speech.tts.enabled`、`speech.tts.provider`、各プロバイダ固有キー、`integrations.notify_route`、`integrations.discord.*` である
+- 必須項目は、`character.*`、`speech.tts.*`、`speech.stt.*`、`integrations.notify_route`、`integrations.discord.*` である
 - `speech.tts.provider` は、`aivis-cloud`、`voicevox`、`style-bert-vits2` のいずれかに固定する
 - `speech.tts.enabled=true` かつ `speech.tts.provider="aivis-cloud"` のときは `speech.tts.aivis_cloud.api_key`、`speech.tts.aivis_cloud.endpoint_url`、`speech.tts.aivis_cloud.model_uuid`、`speech.tts.aivis_cloud.speaker_uuid` を必須にする
 - `speech.tts.enabled=true` かつ `speech.tts.provider="voicevox"` のときは `speech.tts.voicevox.endpoint_url` を必須にする
 - `speech.tts.enabled=true` かつ `speech.tts.provider="style-bert-vits2"` のときは `speech.tts.style_bert_vits2.endpoint_url` を必須にする
 - `speech.tts.aivis_cloud.output_format` は `wav`、`mp3`、`ogg`、`aac`、`flac` のいずれかに固定する
+- `speech.stt.provider` は、`amivoice` に固定する
+- `speech.stt.enabled=true` のときは `speech.stt.amivoice.api_key` を必須にする
 - `integrations.notify_route` は、`ui_only` または `discord` に固定する
 - `integrations.notify_route="discord"` のときは `integrations.discord.bot_token` と `integrations.discord.channel_id` を必須にする
 

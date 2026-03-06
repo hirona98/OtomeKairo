@@ -20,7 +20,11 @@ def build_cognition_input(
     input_kind = str(pending_input.payload["input_kind"])
     if input_kind not in {"chat_message", "camera_observation", "network_result"}:
         raise ValueError("cognition_input is only supported for chat_message, camera_observation, and network_result")
-    selection_profile = _build_selection_profile(state_snapshot)
+    behavior_settings = _build_behavior_settings(state_snapshot.effective_settings)
+    selection_profile = _build_selection_profile(
+        state_snapshot=state_snapshot,
+        behavior_settings=behavior_settings,
+    )
     current_observation = _build_current_observation(
         pending_input=pending_input,
         resolved_at=resolved_at,
@@ -37,13 +41,14 @@ def build_cognition_input(
             "input_kind": input_kind,
         },
         "time_context": _build_time_context(resolved_at),
-        "persona_snapshot": {
+        "self_snapshot": {
             "personality": state_snapshot.self_state["personality"],
             "current_emotion": state_snapshot.self_state["current_emotion"],
             "long_term_goals": state_snapshot.self_state["long_term_goals"],
             "relationship_overview": state_snapshot.self_state["relationship_overview"],
             "invariants": state_snapshot.self_state["invariants"],
         },
+        "behavior_settings": behavior_settings,
         "selection_profile": selection_profile,
         "body_snapshot": state_snapshot.body_state,
         "world_snapshot": state_snapshot.world_state,
@@ -504,14 +509,21 @@ def _recent_event_for_cognition(
 
 
 # Block: Selection profile
-def _build_selection_profile(state_snapshot: CognitionStateSnapshot) -> dict[str, Any]:
+def _build_selection_profile(
+    state_snapshot: CognitionStateSnapshot,
+    *,
+    behavior_settings: dict[str, str],
+) -> dict[str, Any]:
     personality = state_snapshot.self_state["personality"]
     current_emotion = state_snapshot.self_state["current_emotion"]
     relationship_overview = state_snapshot.self_state["relationship_overview"]
     priority_effects = state_snapshot.drive_state["priority_effects"]
+    interaction_style = dict(personality["preferred_interaction_style"])
+    interaction_style["speech_tone"] = behavior_settings["speech_style"]
+    interaction_style["response_pace"] = behavior_settings["response_pace"]
     return {
         "trait_values": dict(personality["trait_values"]),
-        "interaction_style": dict(personality["preferred_interaction_style"]),
+        "interaction_style": interaction_style,
         "relationship_priorities": _build_relationship_priorities(relationship_overview),
         "learned_preferences": list(personality["learned_preferences"]),
         "learned_aversions": list(personality["learned_aversions"]),
@@ -535,6 +547,21 @@ def _build_selection_profile(state_snapshot: CognitionStateSnapshot) -> dict[str
                 field_name="drive_state.priority_effects.social_bias",
             ),
         },
+    }
+
+
+# Block: Behavior settings
+def _build_behavior_settings(effective_settings: dict[str, Any]) -> dict[str, str]:
+    return {
+        "second_person_label": _required_string_setting(effective_settings, "behavior.second_person_label"),
+        "system_prompt": _required_string_setting(effective_settings, "behavior.system_prompt"),
+        "addon_prompt": _required_string_setting(effective_settings, "behavior.addon_prompt"),
+        "response_pace": _required_string_setting(effective_settings, "behavior.response_pace"),
+        "proactivity_level": _required_string_setting(effective_settings, "behavior.proactivity_level"),
+        "browse_preference": _required_string_setting(effective_settings, "behavior.browse_preference"),
+        "notify_preference": _required_string_setting(effective_settings, "behavior.notify_preference"),
+        "speech_style": _required_string_setting(effective_settings, "behavior.speech_style"),
+        "verbosity_bias": _required_string_setting(effective_settings, "behavior.verbosity_bias"),
     }
 
 
@@ -609,6 +636,14 @@ def _local_text(unix_ms: int) -> str:
     local_dt = datetime.fromtimestamp(unix_ms / 1000, tz=timezone.utc).astimezone()
     timezone_name = local_dt.tzname() or "UTC"
     return local_dt.strftime(f"%Y-%m-%d %H:%M:%S {timezone_name}")
+
+
+# Block: Required setting helpers
+def _required_string_setting(effective_settings: dict[str, Any], key: str) -> str:
+    value = effective_settings.get(key)
+    if not isinstance(value, str):
+        raise ValueError(f"{key} must be string")
+    return value
 
 
 def _relative_time_text(now_ms: int, past_ms: int) -> str:

@@ -56,7 +56,8 @@
           </div>
           <!-- Block: Settings tabs -->
           <div class="settings-tabs" role="tablist" aria-label="設定タブ">
-            <button class="settings-tab active" data-settings-tab="behavior" type="button">振る舞い</button>
+            <button class="settings-tab active" data-settings-tab="character" type="button">キャラクター</button>
+            <button class="settings-tab" data-settings-tab="behavior" type="button">振る舞い</button>
             <button class="settings-tab" data-settings-tab="llm" type="button">会話</button>
             <button class="settings-tab" data-settings-tab="memory" type="button">記憶</button>
             <button class="settings-tab" data-settings-tab="system" type="button">システム</button>
@@ -65,7 +66,11 @@
           <!-- Block: Settings content -->
           <div class="settings-body">
             <div class="settings-pages">
-              <section class="settings-page" data-settings-page="behavior">
+              <section class="settings-page" data-settings-page="character">
+                <div id="settings-character-card" class="settings-card"></div>
+              </section>
+
+              <section class="settings-page hidden" data-settings-page="behavior">
                 <div id="settings-behavior-card" class="settings-card"></div>
               </section>
 
@@ -78,7 +83,7 @@
               </section>
 
               <section class="settings-page hidden" data-settings-page="system">
-                <div id="settings-output-card" class="settings-card"></div>
+                <div id="settings-notify-card" class="settings-card"></div>
                 <div id="settings-system-card" class="settings-card"></div>
                 <div id="settings-camera-card" class="settings-card"></div>
                 <details class="settings-diagnostics">

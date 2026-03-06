@@ -2623,6 +2623,38 @@ class SqliteStateStore:
                     now_ms,
                 ),
             )
+        # Block: Behavior preset migration
+        behavior_preset_rows = connection.execute(
+            """
+            SELECT preset_id, payload_json
+            FROM settings_presets
+            WHERE preset_kind = 'behavior'
+            """
+        ).fetchall()
+        for behavior_preset_row in behavior_preset_rows:
+            raw_payload = json.loads(behavior_preset_row["payload_json"])
+            if not isinstance(raw_payload, dict):
+                raise RuntimeError("settings_presets.behavior payload_json must be object")
+            normalized_payload = _normalize_legacy_behavior_preset_payload(
+                preset_kind="behavior",
+                payload=raw_payload,
+                default_settings=default_settings,
+            )
+            if normalized_payload == raw_payload:
+                continue
+            connection.execute(
+                """
+                UPDATE settings_presets
+                SET payload_json = ?,
+                    updated_at = ?
+                WHERE preset_id = ?
+                """,
+                (
+                    _json_text(normalized_payload),
+                    now_ms,
+                    str(behavior_preset_row["preset_id"]),
+                ),
+            )
         # Block: Output preset migration
         output_preset_rows = connection.execute(
             """
@@ -5427,6 +5459,10 @@ def _materialize_runtime_settings_from_editor(
     preset_catalogs: dict[str, list[dict[str, Any]]],
 ) -> dict[str, Any]:
     materialized = dict(default_settings)
+    behavior_preset = _active_preset_payload(
+        preset_entries=preset_catalogs["behavior"],
+        preset_id=str(editor_state["active_behavior_preset_id"]),
+    )
     llm_preset = _active_preset_payload(
         preset_entries=preset_catalogs["llm"],
         preset_id=str(editor_state["active_llm_preset_id"]),
@@ -5439,7 +5475,7 @@ def _materialize_runtime_settings_from_editor(
         preset_entries=preset_catalogs["output"],
         preset_id=str(editor_state["active_output_preset_id"]),
     )
-    for payload in (llm_preset, memory_preset, output_preset):
+    for payload in (behavior_preset, llm_preset, memory_preset, output_preset):
         for key, value in payload.items():
             if key in materialized:
                 materialized[key] = value
@@ -5750,6 +5786,68 @@ def _normalize_legacy_optional_base_url_value(*, key: str, value: Any) -> Any:
     ):
         return ""
     return value
+
+
+# Block: Behavior preset migration helper
+def _normalize_legacy_behavior_preset_payload(
+    *,
+    preset_kind: str,
+    payload: dict[str, Any],
+    default_settings: dict[str, Any],
+) -> dict[str, Any]:
+    if preset_kind != "behavior":
+        return payload
+    normalized = {
+        "behavior.second_person_label": str(default_settings["behavior.second_person_label"]),
+        "behavior.system_prompt": str(default_settings["behavior.system_prompt"]),
+        "behavior.addon_prompt": str(default_settings["behavior.addon_prompt"]),
+        "behavior.response_pace": str(default_settings["behavior.response_pace"]),
+        "behavior.proactivity_level": str(default_settings["behavior.proactivity_level"]),
+        "behavior.browse_preference": str(default_settings["behavior.browse_preference"]),
+        "behavior.notify_preference": str(default_settings["behavior.notify_preference"]),
+        "behavior.speech_style": str(default_settings["behavior.speech_style"]),
+        "behavior.verbosity_bias": str(default_settings["behavior.verbosity_bias"]),
+    }
+    if set(payload) == set(normalized):
+        return payload
+    current_key_map = {
+        "behavior.second_person_label": "behavior.second_person_label",
+        "behavior.system_prompt": "behavior.system_prompt",
+        "behavior.addon_prompt": "behavior.addon_prompt",
+        "behavior.response_pace": "behavior.response_pace",
+        "behavior.proactivity_level": "behavior.proactivity_level",
+        "behavior.browse_preference": "behavior.browse_preference",
+        "behavior.notify_preference": "behavior.notify_preference",
+        "behavior.speech_style": "behavior.speech_style",
+        "behavior.verbosity_bias": "behavior.verbosity_bias",
+        "response_pace": "behavior.response_pace",
+        "proactivity_level": "behavior.proactivity_level",
+        "browse_preference": "behavior.browse_preference",
+        "notify_preference": "behavior.notify_preference",
+        "speech_style": "behavior.speech_style",
+        "verbosity_bias": "behavior.verbosity_bias",
+        "second_person_label": "behavior.second_person_label",
+        "system_prompt": "behavior.system_prompt",
+        "addon_prompt": "behavior.addon_prompt",
+    }
+    for source_key, target_key in current_key_map.items():
+        if source_key in payload:
+            normalized[target_key] = payload[source_key]
+    response_pace_map = {
+        "calm": "careful",
+        "normal": "balanced",
+    }
+    speech_style_map = {
+        "soft": "gentle",
+        "formal": "firm",
+    }
+    response_pace = normalized["behavior.response_pace"]
+    if response_pace in response_pace_map:
+        normalized["behavior.response_pace"] = response_pace_map[response_pace]
+    speech_style = normalized["behavior.speech_style"]
+    if speech_style in speech_style_map:
+        normalized["behavior.speech_style"] = speech_style_map[speech_style]
+    return normalized
 
 
 # Block: Output preset migration helper

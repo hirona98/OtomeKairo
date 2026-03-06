@@ -415,6 +415,59 @@ body {
   line-height: 1.5;
 }
 
+.settings-note-indented {
+  margin-left: 152px;
+}
+
+/* Block: Settings sub-sections */
+.settings-subsection {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.settings-subsection-title {
+  color: #4873cf;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.settings-expander {
+  border: 1px solid #d8d8d8;
+  background: #fafafa;
+}
+
+.settings-expander-summary {
+  padding: 8px 10px;
+  color: #4873cf;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+
+.settings-expander-summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings-expander-summary::before {
+  content: "▶";
+  display: inline-block;
+  margin-right: 8px;
+  color: #666666;
+  font-size: 11px;
+}
+
+.settings-expander[open] .settings-expander-summary::before {
+  content: "▼";
+}
+
+.settings-expander-body {
+  padding: 0 10px 10px;
+}
+
 .settings-stack {
   display: flex;
   flex-direction: column;
@@ -442,9 +495,21 @@ body {
 
 .settings-row-control {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   min-width: 0;
+}
+
+.settings-inline-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.settings-inline-actions > .settings-input {
+  flex: 1 1 280px;
 }
 
 .settings-input {
@@ -1121,6 +1186,10 @@ body {
   .settings-row-control > .settings-input,
   .settings-input-number {
     width: 100%;
+  }
+
+  .settings-note-indented {
+    margin-left: 0;
   }
 
   .settings-footer {

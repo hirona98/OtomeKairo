@@ -216,18 +216,18 @@ def _passes_hard_gate(
     learned_aversions: list[dict[str, Any]],
 ) -> bool:
     action_type = _validated_action_type(proposal)
-    invariants = cognition_input["persona_snapshot"]["invariants"]
+    invariants = cognition_input["self_snapshot"]["invariants"]
     forbidden_action_types = _required_list(
         invariants,
         "forbidden_action_types",
-        "persona_snapshot.invariants.forbidden_action_types",
+        "self_snapshot.invariants.forbidden_action_types",
     )
     if action_type in forbidden_action_types:
         return False
     forbidden_action_styles = _required_list(
         invariants,
         "forbidden_action_styles",
-        "persona_snapshot.invariants.forbidden_action_styles",
+        "self_snapshot.invariants.forbidden_action_styles",
     )
     if _proposal_action_style(action_type) in forbidden_action_styles:
         return False

@@ -51,7 +51,8 @@ def _import_litellm_module() -> Any:
 # Block: Prompt construction
 def _build_messages(request: CognitionRequest) -> list[dict[str, Any]]:
     cognition_input = request.cognition_input
-    persona_snapshot = cognition_input["persona_snapshot"]
+    self_snapshot = cognition_input["self_snapshot"]
+    behavior_settings = cognition_input["behavior_settings"]
     selection_profile = cognition_input["selection_profile"]
     current_observation = cognition_input["current_observation"]
     world_snapshot = cognition_input["world_snapshot"]
@@ -74,13 +75,17 @@ def _build_messages(request: CognitionRequest) -> list[dict[str, Any]]:
             "memory_focus.focus_kind は observation, summary, fact, relation, preference, none のいずれかにする。",
             "reflection_seed は object で、message_id を必ず持つ。",
             "delivery_mode は stream に固定する。",
-            f"現在の感情ラベル: {persona_snapshot['current_emotion']['primary_label']}",
+            f"現在の感情ラベル: {self_snapshot['current_emotion']['primary_label']}",
+            _second_person_label_prompt_line(behavior_settings),
             f"話し方: {selection_profile['interaction_style']['speech_tone']}",
+            _behavior_hint_prompt_line(behavior_settings),
+            _optional_behavior_prompt_line(title="振る舞い指示", text=behavior_settings["system_prompt"]),
+            _optional_behavior_prompt_line(title="追加指示", text=behavior_settings["addon_prompt"]),
             f"現在の状況: {world_snapshot['situation_summary']}",
             _camera_runtime_prompt_line(runtime_policy),
             "添付画像がある場合は、画像とテキストの両方を使って判断する。",
             "カメラ状態の enabled または available が false のときは、look を提案せず speak で状態を伝える。",
-            f"不変条件: {_format_invariants(persona_snapshot['invariants'])}",
+            f"不変条件: {_format_invariants(self_snapshot['invariants'])}",
         ]
     )
     user_prompt = "\n".join(
@@ -91,7 +96,7 @@ def _build_messages(request: CognitionRequest) -> list[dict[str, Any]]:
             _attachment_prompt_line(current_observation),
             _network_result_prompt_line(current_observation),
             f"関係性の優先対象: {_format_relationship_priorities(selection_profile['relationship_priorities'])}",
-            f"長期目標: {_format_goals(persona_snapshot['long_term_goals'])}",
+            f"長期目標: {_format_goals(self_snapshot['long_term_goals'])}",
             f"cycle_id: {request.cycle_id}",
             "この人格として、今どう返すかを構造化して一度で決めること。",
             "speech_draft.text は実際にユーザーへ見せる本文そのものにすること。",
@@ -242,6 +247,31 @@ def _format_goals(long_term_goals: dict[str, Any]) -> str:
     if not goals:
         return "未設定"
     return ",".join(str(goal.get("title", "goal")) for goal in goals[:3] if isinstance(goal, dict))
+
+
+# Block: Behavior prompt formatting
+def _second_person_label_prompt_line(behavior_settings: dict[str, Any]) -> str:
+    second_person_label = behavior_settings["second_person_label"]
+    if not second_person_label:
+        return "ユーザーの呼び方: 未指定"
+    return f"ユーザーの呼び方: {second_person_label}"
+
+
+def _behavior_hint_prompt_line(behavior_settings: dict[str, Any]) -> str:
+    return (
+        "応答傾向: "
+        f"response_pace={behavior_settings['response_pace']} "
+        f"proactivity={behavior_settings['proactivity_level']} "
+        f"browse={behavior_settings['browse_preference']} "
+        f"notify={behavior_settings['notify_preference']} "
+        f"verbosity={behavior_settings['verbosity_bias']}"
+    )
+
+
+def _optional_behavior_prompt_line(*, title: str, text: Any) -> str:
+    if not isinstance(text, str) or not text:
+        return f"{title}: なし"
+    return f"{title}: {text}"
 
 
 # Block: Camera runtime formatting

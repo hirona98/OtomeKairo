@@ -17,10 +17,11 @@
   const settingsOkButton = document.getElementById("btn-settings-ok");
   const settingsCancelButton = document.getElementById("btn-settings-cancel");
   const settingsApplyButton = document.getElementById("btn-settings-apply");
+  const settingsCharacterCard = document.getElementById("settings-character-card");
   const settingsBehaviorCard = document.getElementById("settings-behavior-card");
   const settingsLlmCard = document.getElementById("settings-llm-card");
   const settingsMemoryCard = document.getElementById("settings-memory-card");
-  const settingsOutputCard = document.getElementById("settings-output-card");
+  const settingsNotifyCard = document.getElementById("settings-notify-card");
   const settingsSystemCard = document.getElementById("settings-system-card");
   const settingsCameraCard = document.getElementById("settings-camera-card");
   const settingsStatus = document.getElementById("settings-status");
@@ -32,46 +33,64 @@
   const runtimeText = document.getElementById("runtime-text");
 
   // Block: Settings schema
-  const SETTINGS_TAB_KEYS = ["behavior", "llm", "memory", "system"];
+  const SETTINGS_TAB_KEYS = ["character", "behavior", "llm", "memory", "system"];
   const SETTINGS_PRESET_KINDS = ["behavior", "llm", "memory", "output"];
-  const PRESET_SECTION_META = {
-    behavior: {
-      title: "行動設定",
-      description: "行動選択に使う傾向だけをここで切り替えます。",
-    },
-    llm: {
-      title: "LLM設定",
-      description: "会話生成に使うモデルと接続情報をまとめます。",
-    },
-    memory: {
-      title: "Embedding設定",
-      description: "記憶検索と文脈組み立てに使う設定をまとめます。",
-    },
-  };
   const TTS_PROVIDER_LABELS = {
     "aivis-cloud": "Aivis Cloud API",
-    voicevox: "VOICEVOX",
+    voicevox: "VOICEVOX/SHAREVOX/AivisSpeech",
     "style-bert-vits2": "Style-Bert-VITS2",
   };
+  const STT_PROVIDER_LABELS = {
+    amivoice: "AmiVoice",
+  };
+  const TTS_ADVANCED_SECTION_TITLES = {
+    "aivis-cloud": "Aivis Cloud API詳細設定",
+    voicevox: "VOICEVOX詳細設定",
+    "style-bert-vits2": "Style-Bert-VITS2 詳細設定",
+  };
+  const BEHAVIOR_OPTION_LABELS = {
+    "behavior.response_pace": {
+      careful: "慎重",
+      balanced: "標準",
+      quick: "迅速",
+    },
+    "behavior.proactivity_level": {
+      low: "低い",
+      medium: "標準",
+      high: "高い",
+    },
+    "behavior.browse_preference": {
+      avoid: "控えめ",
+      balanced: "標準",
+      prefer: "積極的",
+    },
+    "behavior.notify_preference": {
+      quiet: "静かめ",
+      balanced: "標準",
+      proactive: "積極的",
+    },
+    "behavior.speech_style": {
+      gentle: "やわらかめ",
+      neutral: "標準",
+      firm: "はっきり",
+    },
+    "behavior.verbosity_bias": {
+      short: "短め",
+      balanced: "標準",
+      detailed: "詳しめ",
+    },
+  };
   const PRESET_DESCRIPTORS = {
-    behavior: [
-      { path: "response_pace", label: "応答ペース", kind: "select", options: ["calm", "normal", "quick"] },
-      { path: "proactivity_level", label: "自発性", kind: "select", options: ["low", "medium", "high"] },
-      { path: "browse_preference", label: "検索傾向", kind: "select", options: ["avoid", "balanced", "prefer"] },
-      { path: "notify_preference", label: "通知傾向", kind: "select", options: ["quiet", "balanced", "proactive"] },
-      { path: "speech_style", label: "話し方", kind: "select", options: ["soft", "neutral", "formal"] },
-      { path: "verbosity_bias", label: "詳細さ", kind: "select", options: ["short", "balanced", "detailed"] },
-    ],
     llm: [
       { path: "llm.model", label: "LLM モデル (provider/model)", kind: "text" },
       { path: "llm.temperature", label: "Temperature", kind: "number", min: 0, max: 2, step: 0.1 },
       { path: "llm.max_output_tokens", label: "最大出力トークン", kind: "integer", min: 256, max: 8192, step: 1 },
-      { path: "llm.api_key", label: "LLM API キー", kind: "password" },
+      { path: "llm.api_key", label: "LLM API キー", kind: "password", clipboardActions: true },
       { path: "llm.base_url", label: "LLM Base URL（任意）", kind: "text" },
     ],
     memory: [
       { path: "llm.embedding_model", label: "埋め込みモデル (provider/model)", kind: "text" },
-      { path: "llm.embedding_api_key", label: "埋め込み API キー", kind: "password" },
+      { path: "llm.embedding_api_key", label: "埋め込み API キー", kind: "password", clipboardActions: true },
       { path: "llm.embedding_base_url", label: "埋め込み Base URL（任意）", kind: "text" },
       { path: "runtime.context_budget_tokens", label: "文脈上限", kind: "integer", min: 1024, max: 32768, step: 1 },
       { path: "retrieval_profile.semantic_top_k", label: "Semantic Top K", kind: "integer", min: 1, max: 32, step: 1 },
@@ -81,11 +100,81 @@
       { path: "retrieval_profile.event_bias", label: "Event Bias", kind: "number", min: 0, max: 1, step: 0.05 },
     ],
   };
+  const BEHAVIOR_PROMPT_DESCRIPTORS = [
+    { path: "behavior.second_person_label", label: "ユーザーの呼び方", kind: "text" },
+    { path: "behavior.system_prompt", label: "振る舞い本文", kind: "textarea", rows: 12 },
+  ];
+  const BEHAVIOR_ADDON_DESCRIPTORS = [
+    { path: "behavior.addon_prompt", label: "追加プロンプト", kind: "textarea", rows: 6 },
+  ];
+  const BEHAVIOR_DESCRIPTORS = [
+    {
+      path: "behavior.response_pace",
+      label: "応答ペース",
+      kind: "select",
+      options: ["careful", "balanced", "quick"],
+      optionLabels: BEHAVIOR_OPTION_LABELS["behavior.response_pace"],
+    },
+    {
+      path: "behavior.proactivity_level",
+      label: "自発性",
+      kind: "select",
+      options: ["low", "medium", "high"],
+      optionLabels: BEHAVIOR_OPTION_LABELS["behavior.proactivity_level"],
+    },
+    {
+      path: "behavior.browse_preference",
+      label: "検索傾向",
+      kind: "select",
+      options: ["avoid", "balanced", "prefer"],
+      optionLabels: BEHAVIOR_OPTION_LABELS["behavior.browse_preference"],
+    },
+    {
+      path: "behavior.notify_preference",
+      label: "通知傾向",
+      kind: "select",
+      options: ["quiet", "balanced", "proactive"],
+      optionLabels: BEHAVIOR_OPTION_LABELS["behavior.notify_preference"],
+    },
+    {
+      path: "behavior.speech_style",
+      label: "話し方",
+      kind: "select",
+      options: ["gentle", "neutral", "firm"],
+      optionLabels: BEHAVIOR_OPTION_LABELS["behavior.speech_style"],
+    },
+    {
+      path: "behavior.verbosity_bias",
+      label: "詳細さ",
+      kind: "select",
+      options: ["short", "balanced", "detailed"],
+      optionLabels: BEHAVIOR_OPTION_LABELS["behavior.verbosity_bias"],
+    },
+  ];
+  const CHARACTER_MATERIAL_DESCRIPTORS = [
+    {
+      path: "character.material.convert_unlit_to_mtoon",
+      label: "UnlitをMToonに変換する（正常に表示されないときに有効にしてみてください）",
+      kind: "boolean",
+    },
+    {
+      path: "character.material.enable_shadow_off",
+      label: "指定したメッシュに影を落とさない（顔などを想定）",
+      kind: "boolean",
+    },
+    {
+      path: "character.material.shadow_off_meshes",
+      label: "メッシュ名",
+      kind: "text",
+      disabledWhenPath: "character.material.enable_shadow_off",
+      disabledWhenValue: false,
+    },
+  ];
   const OUTPUT_COMMON_DESCRIPTORS = [
-    { path: "speech.tts.enabled", label: "TTS 有効化", kind: "boolean" },
+    { path: "speech.tts.enabled", label: "TTSを使用する", kind: "boolean" },
     {
       path: "speech.tts.provider",
-      label: "TTS プロバイダ",
+      label: "エンジン",
       kind: "select",
       options: ["aivis-cloud", "voicevox", "style-bert-vits2"],
       optionLabels: TTS_PROVIDER_LABELS,
@@ -93,7 +182,7 @@
   ];
   const OUTPUT_PROVIDER_DESCRIPTORS = {
     "aivis-cloud": [
-      { path: "speech.tts.aivis_cloud.api_key", label: "API キー", kind: "password" },
+      { path: "speech.tts.aivis_cloud.api_key", label: "API Key", kind: "password", clipboardActions: true },
       { path: "speech.tts.aivis_cloud.endpoint_url", label: "Endpoint URL", kind: "text" },
       { path: "speech.tts.aivis_cloud.model_uuid", label: "Model UUID", kind: "text" },
       { path: "speech.tts.aivis_cloud.speaker_uuid", label: "Speaker UUID", kind: "text" },
@@ -138,6 +227,19 @@
       { path: "speech.tts.style_bert_vits2.assist_text_weight", label: "Assist Weight", kind: "number", min: 0.0, max: 10.0, step: 0.05 },
     ],
   };
+  const OUTPUT_STT_DESCRIPTORS = [
+    { path: "speech.stt.enabled", label: "STTを使用する", kind: "boolean" },
+    {
+      path: "speech.stt.provider",
+      label: "エンジン",
+      kind: "select",
+      options: ["amivoice"],
+      optionLabels: STT_PROVIDER_LABELS,
+    },
+    { path: "speech.stt.wake_word", label: "Wake Word", kind: "text" },
+    { path: "speech.stt.amivoice.profile_id", label: "Profile ID", kind: "text" },
+    { path: "speech.stt.amivoice.api_key", label: "API Key", kind: "password", clipboardActions: true },
+  ];
   const OUTPUT_NOTIFY_DESCRIPTORS = [
     {
       path: "integrations.notify_route",
@@ -152,6 +254,61 @@
     { path: "integrations.discord.bot_token", label: "Discord トークン", kind: "password" },
     { path: "integrations.discord.channel_id", label: "Discord チャンネル", kind: "text" },
   ];
+  const OUTPUT_PROVIDER_BASIC_PATHS = {
+    "aivis-cloud": [
+      "speech.tts.aivis_cloud.api_key",
+      "speech.tts.aivis_cloud.endpoint_url",
+      "speech.tts.aivis_cloud.model_uuid",
+      "speech.tts.aivis_cloud.speaker_uuid",
+      "speech.tts.aivis_cloud.style_id",
+    ],
+    voicevox: [
+      "speech.tts.voicevox.endpoint_url",
+      "speech.tts.voicevox.speaker_id",
+    ],
+    "style-bert-vits2": [
+      "speech.tts.style_bert_vits2.endpoint_url",
+      "speech.tts.style_bert_vits2.model_name",
+      "speech.tts.style_bert_vits2.model_id",
+      "speech.tts.style_bert_vits2.speaker_name",
+      "speech.tts.style_bert_vits2.speaker_id",
+    ],
+  };
+  const OUTPUT_PROVIDER_ADVANCED_PATHS = {
+    "aivis-cloud": [
+      "speech.tts.aivis_cloud.use_ssml",
+      "speech.tts.aivis_cloud.language",
+      "speech.tts.aivis_cloud.speaking_rate",
+      "speech.tts.aivis_cloud.emotional_intensity",
+      "speech.tts.aivis_cloud.tempo_dynamics",
+      "speech.tts.aivis_cloud.pitch",
+      "speech.tts.aivis_cloud.volume",
+      "speech.tts.aivis_cloud.output_format",
+    ],
+    voicevox: [
+      "speech.tts.voicevox.speed_scale",
+      "speech.tts.voicevox.pitch_scale",
+      "speech.tts.voicevox.intonation_scale",
+      "speech.tts.voicevox.volume_scale",
+      "speech.tts.voicevox.pre_phoneme_length",
+      "speech.tts.voicevox.post_phoneme_length",
+      "speech.tts.voicevox.output_sampling_rate",
+      "speech.tts.voicevox.output_stereo",
+    ],
+    "style-bert-vits2": [
+      "speech.tts.style_bert_vits2.style",
+      "speech.tts.style_bert_vits2.style_weight",
+      "speech.tts.style_bert_vits2.language",
+      "speech.tts.style_bert_vits2.sdp_ratio",
+      "speech.tts.style_bert_vits2.noise",
+      "speech.tts.style_bert_vits2.noise_w",
+      "speech.tts.style_bert_vits2.length",
+      "speech.tts.style_bert_vits2.auto_split",
+      "speech.tts.style_bert_vits2.split_interval",
+      "speech.tts.style_bert_vits2.assist_text",
+      "speech.tts.style_bert_vits2.assist_text_weight",
+    ],
+  };
   const SYSTEM_DESCRIPTORS = [
     { key: "runtime.idle_tick_ms", label: "Idle Tick (ms)", kind: "integer", min: 250, max: 60000, step: 250 },
     { key: "runtime.long_cycle_min_interval_ms", label: "Long Cycle (ms)", kind: "integer", min: 1000, max: 300000, step: 1000 },
@@ -169,7 +326,7 @@
   let latestStatusSnapshot = null;
   let latestEditorSnapshot = null;
   let editorDraft = null;
-  let activeSettingsTab = "behavior";
+  let activeSettingsTab = "character";
   const draftMessages = new Map();
   let activeSpeechAudio = null;
 
@@ -601,10 +758,11 @@
     if (editorDraft === null || latestEditorSnapshot === null) {
       return;
     }
-    renderPresetCard("behavior", "振る舞いプリセット", settingsBehaviorCard);
-    renderPresetCard("llm", "会話プリセット", settingsLlmCard);
-    renderPresetCard("memory", "記憶プリセット", settingsMemoryCard);
-    renderPresetCard("output", "出力プリセット", settingsOutputCard);
+    renderCharacterPresetCard();
+    renderBehaviorPresetCard();
+    renderLlmPresetCard();
+    renderMemoryPresetCard();
+    renderNotificationSettingsCard();
     renderSystemValuesCard();
     renderCameraConnectionsCard();
     settingsJson.textContent = formatJson(latestEditorSnapshot.runtime_projection);
@@ -616,11 +774,207 @@
     updateSettingsDirtyState();
   }
 
-  function renderPresetCard(kind, title, container) {
-    const presetEntries = readPresetEntries(kind);
-    const activePresetId = readActivePresetId(kind);
-    const activePreset = requirePresetEntry(kind, activePresetId);
-    const selectOptions = presetEntries
+  // Block: Behavior preset rendering
+  function renderBehaviorPresetCard() {
+    const activePresetId = readActivePresetId("behavior");
+    const activePreset = requirePresetEntry("behavior", activePresetId);
+    const selectOptions = buildPresetSelectOptions(readPresetEntries("behavior"), activePresetId);
+    settingsBehaviorCard.innerHTML = `
+      <div class="settings-card-title">振る舞い設定</div>
+      <div class="settings-stack">
+        ${renderSettingsGroup(
+          "振る舞いプロンプト",
+          "呼び方と振る舞い指示をここで管理します。",
+          [
+            renderPresetSelectionFields("behavior", activePreset, selectOptions),
+            BEHAVIOR_PROMPT_DESCRIPTORS
+              .map((descriptor) => renderPresetField("behavior", activePreset.payload, descriptor))
+              .join(""),
+          ].join(""),
+        )}
+        ${renderSettingsGroup(
+          "追加プロンプト（任意）",
+          "VRMの表情指定や会話の文字数制限などを入れてください。記憶更新処理の人格には使用しません。",
+          BEHAVIOR_ADDON_DESCRIPTORS
+            .map((descriptor) => renderPresetField("behavior", activePreset.payload, descriptor))
+            .join(""),
+        )}
+        ${renderSettingsGroup(
+          "行動傾向",
+          "OtomeKairo 独自の傾向設定です。会話方針と認知判断に反映します。",
+          BEHAVIOR_DESCRIPTORS
+            .map((descriptor) => renderPresetField("behavior", activePreset.payload, descriptor))
+            .join(""),
+        )}
+      </div>
+    `;
+  }
+
+  // Block: LLM preset rendering
+  function renderLlmPresetCard() {
+    const activePresetId = readActivePresetId("llm");
+    const activePreset = requirePresetEntry("llm", activePresetId);
+    const selectOptions = buildPresetSelectOptions(readPresetEntries("llm"), activePresetId);
+    settingsLlmCard.innerHTML = `
+      <div class="settings-card-title">会話設定</div>
+      <div class="settings-stack">
+        ${renderStaticCheckRow("会話機能（LLM）を使用する - 記憶タブも設定してください", true)}
+        ${renderSettingsGroup(
+          "プリセット選択",
+          "システムプロンプトは「振る舞い」タブで設定します。",
+          renderPresetSelectionToolbar("llm", selectOptions),
+        )}
+        ${renderSettingsGroup(
+          "基本設定",
+          "",
+          renderPresetNameField("llm", activePreset.preset_name),
+        )}
+        ${renderSettingsGroup(
+          "LLM設定",
+          "",
+          PRESET_DESCRIPTORS.llm
+            .map((descriptor) => renderPresetField("llm", activePreset.payload, descriptor))
+            .join(""),
+        )}
+      </div>
+    `;
+  }
+
+  // Block: Memory preset rendering
+  function renderMemoryPresetCard() {
+    const activePresetId = readActivePresetId("memory");
+    const activePreset = requirePresetEntry("memory", activePresetId);
+    const selectOptions = buildPresetSelectOptions(readPresetEntries("memory"), activePresetId);
+    settingsMemoryCard.innerHTML = `
+      <div class="settings-card-title">記憶設定</div>
+      <div class="settings-stack">
+        ${renderStaticCheckRow("記憶機能（Embedding）を使用する - OFFには出来ません", true)}
+        ${renderSettingsGroup(
+          "プリセット選択",
+          "",
+          renderPresetSelectionToolbar("memory", selectOptions),
+        )}
+        ${renderSettingsGroup(
+          "Embedding設定",
+          "※ 記憶検索と文脈組み立てに使う設定です。",
+          [
+            renderPresetNameField("memory", activePreset.preset_name),
+            PRESET_DESCRIPTORS.memory
+              .map((descriptor) => renderPresetField("memory", activePreset.payload, descriptor))
+              .join(""),
+          ].join(""),
+        )}
+      </div>
+    `;
+  }
+
+  // Block: Character preset rendering
+  function renderCharacterPresetCard() {
+    const activePresetId = readActivePresetId("output");
+    const activePreset = requirePresetEntry("output", activePresetId);
+    const selectOptions = buildPresetSelectOptions(readPresetEntries("output"), activePresetId);
+    settingsCharacterCard.innerHTML = `
+      <div class="settings-card-title">キャラクター設定</div>
+      <div class="settings-stack">
+        ${renderSettingsGroup(
+          "キャラクター選択",
+          "LLM(AI)を使う場合は振る舞い / 会話 / 記憶タブも設定してください。",
+          renderPresetSelectionToolbar("output", selectOptions),
+        )}
+        ${renderSettingsGroup(
+          "基本設定",
+          "",
+          [
+            renderPresetNameField("output", activePreset.preset_name),
+            renderVrmFileField("output", activePreset.payload),
+            renderIndentedNote("未指定の場合はVRM表示/音声出力が無効になります。"),
+          ].join(""),
+        )}
+        ${renderSettingsGroup(
+          "マテリアル・影設定",
+          "",
+          CHARACTER_MATERIAL_DESCRIPTORS
+            .map((descriptor) => renderPresetField("output", activePreset.payload, descriptor))
+            .join(""),
+        )}
+        ${renderCharacterSpeechGroup(activePreset.payload)}
+        ${renderCharacterSttGroup(activePreset.payload)}
+      </div>
+    `;
+  }
+
+  function renderCharacterSpeechGroup(payload) {
+    const provider = requireOutputProvider(payload);
+    const providerDescriptors = OUTPUT_PROVIDER_DESCRIPTORS[provider];
+    if (!Array.isArray(providerDescriptors)) {
+      throw new Error(`未対応の TTS プロバイダです: ${provider}`);
+    }
+    const basicFieldsHtml = filterDescriptorList(providerDescriptors, OUTPUT_PROVIDER_BASIC_PATHS[provider])
+      .map((descriptor) => renderPresetField("output", payload, descriptor))
+      .join("");
+    const advancedFieldsHtml = filterDescriptorList(providerDescriptors, OUTPUT_PROVIDER_ADVANCED_PATHS[provider])
+      .map((descriptor) => renderPresetField("output", payload, descriptor))
+      .join("");
+    return renderSettingsGroup(
+      "音声合成",
+      "VRM表示時のみ有効です",
+      [
+        renderIndentedNote(`現在のエンジン: ${TTS_PROVIDER_LABELS[provider]}`),
+        OUTPUT_COMMON_DESCRIPTORS
+          .map((descriptor) => renderPresetField("output", payload, descriptor))
+          .join(""),
+        renderSettingsSubsection(`${TTS_PROVIDER_LABELS[provider]} 設定`, basicFieldsHtml),
+        renderSettingsExpander(TTS_ADVANCED_SECTION_TITLES[provider], advancedFieldsHtml),
+      ].join(""),
+    );
+  }
+
+  function renderCharacterSttGroup(payload) {
+    return renderSettingsGroup(
+      "音声認識 (現状AmiVoiceのみ)",
+      "システムタブも設定してください",
+      [
+        renderPresetField("output", payload, OUTPUT_STT_DESCRIPTORS[0]),
+        renderPresetField("output", payload, OUTPUT_STT_DESCRIPTORS[1]),
+        renderPresetField("output", payload, OUTPUT_STT_DESCRIPTORS[2]),
+        renderIndentedNote("音声認識を開始するキーワードです。空欄の場合は常に有効です。\n複数設定する場合はカンマ区切りにしてください。（例: こんにちは, ハロー, ミク）"),
+        renderPresetField("output", payload, OUTPUT_STT_DESCRIPTORS[3]),
+        renderIndentedNote("単語登録を使う場合に入力してください。エンジンは -a-general を使います。"),
+        renderPresetField("output", payload, OUTPUT_STT_DESCRIPTORS[4]),
+      ].join(""),
+    );
+  }
+
+  function renderNotificationSettingsCard() {
+    const activePresetId = readActivePresetId("output");
+    const activePreset = requirePresetEntry("output", activePresetId);
+    const notifyRoute = requireOutputNotifyRoute(activePreset.payload);
+    const notifyFieldsHtml = (notifyRoute === "discord"
+      ? OUTPUT_NOTIFY_DESCRIPTORS
+      : OUTPUT_NOTIFY_DESCRIPTORS.filter((descriptor) => descriptor.path === "integrations.notify_route"))
+      .map((descriptor) => renderPresetField("output", activePreset.payload, descriptor))
+      .join("");
+    settingsNotifyCard.innerHTML = `
+      <div class="settings-card-title">通知設定</div>
+      ${renderSettingsGroup(
+        "通知",
+        `現在のキャラクタープリセット: ${activePreset.preset_name}`,
+        notifyFieldsHtml,
+      )}
+    `;
+  }
+
+  // Block: Preset selection rendering
+  function renderPresetSelectionFields(kind, activePreset, selectOptions) {
+    return `
+      ${renderPresetSelectionToolbar(kind, selectOptions)}
+      ${renderPresetNameField(kind, activePreset.preset_name)}
+    `;
+  }
+
+  // Block: Preset selection helpers
+  function buildPresetSelectOptions(presetEntries, activePresetId) {
+    return presetEntries
       .filter((entry) => entry.archived !== true || entry.preset_id === activePresetId)
       .map((entry) => {
         const selected = entry.preset_id === activePresetId ? " selected" : "";
@@ -628,37 +982,9 @@
         return `<option value="${escapeHtml(entry.preset_id)}"${selected}>${escapeHtml(entry.preset_name)}${archivedTag}</option>`;
       })
       .join("");
-    const selectionSectionHtml = renderSettingsGroup(
-      "プリセット選択",
-      kind === "output"
-        ? "TTS と通知の組み合わせをプリセットとして保持します。"
-        : "設定プリセットを切り替えて編集します。",
-      renderPresetSelectionFields(
-        kind,
-        activePreset,
-        selectOptions,
-      ),
-    );
-    const bodySectionHtml = kind === "output"
-      ? renderOutputPresetFields(activePreset.payload)
-      : renderSettingsGroup(
-        PRESET_SECTION_META[kind].title,
-        PRESET_SECTION_META[kind].description,
-        PRESET_DESCRIPTORS[kind]
-          .map((descriptor) => renderPresetField(kind, activePreset.payload, descriptor))
-          .join(""),
-      );
-    container.innerHTML = `
-      <div class="settings-card-title">${escapeHtml(title)}</div>
-      <div class="settings-stack">
-        ${selectionSectionHtml}
-        ${bodySectionHtml}
-      </div>
-    `;
   }
 
-  // Block: Preset selection rendering
-  function renderPresetSelectionFields(kind, activePreset, selectOptions) {
+  function renderPresetSelectionToolbar(kind, selectOptions) {
     return `
       <div class="settings-preset-toolbar">
         <select class="settings-input" data-active-preset-kind="${escapeHtml(kind)}">${selectOptions}</select>
@@ -666,10 +992,39 @@
         <button class="settings-btn settings-btn-small" type="button" data-preset-action="duplicate" data-preset-action-kind="${escapeHtml(kind)}">複製</button>
         <button class="settings-btn settings-btn-small danger" type="button" data-preset-action="archive" data-preset-action-kind="${escapeHtml(kind)}">削除</button>
       </div>
-      ${renderRowField(
-        "プリセット名",
-        `<input class="settings-input" type="text" value="${escapeHtml(activePreset.preset_name)}" data-preset-name-kind="${escapeHtml(kind)}" />`,
-      )}
+    `;
+  }
+
+  function renderPresetNameField(kind, presetName) {
+    return renderRowField(
+      "プリセット名",
+      `<input class="settings-input" type="text" value="${escapeHtml(presetName)}" data-preset-name-kind="${escapeHtml(kind)}" />`,
+    );
+  }
+
+  function renderVrmFileField(kind, payload) {
+    const value = requireString(readNestedValue(payload, "character.vrm_file_path"), "character.vrm_file_path");
+    return renderRowField(
+      "VRMファイル",
+      `
+        <span class="settings-inline-actions">
+          <input class="settings-input" type="text" value="${escapeHtml(value)}" data-preset-kind="${escapeHtml(kind)}" data-preset-path="character.vrm_file_path" data-value-kind="string" />
+          <button class="settings-btn settings-btn-small" type="button" data-preset-prompt-kind="${escapeHtml(kind)}" data-preset-prompt-path="character.vrm_file_path" data-preset-prompt-title="VRMファイル" data-preset-prompt-message="VRMファイルのパスを入力してください">開く...</button>
+        </span>
+      `,
+    );
+  }
+
+  function renderIndentedNote(text) {
+    return `<div class="settings-note settings-note-indented">${escapeHtml(text).replaceAll("\n", "<br />")}</div>`;
+  }
+
+  function renderStaticCheckRow(label, checked) {
+    return `
+      <label class="settings-check-row">
+        <input type="checkbox" ${checked ? "checked" : ""} disabled />
+        <span class="settings-check-text">${escapeHtml(label)}</span>
+      </label>
     `;
   }
 
@@ -689,51 +1044,44 @@
     `;
   }
 
-  // Block: Output preset rendering
-  function renderOutputPresetFields(payload) {
-    const provider = requireOutputProvider(payload);
-    const notifyRoute = requireOutputNotifyRoute(payload);
-    const providerDescriptors = OUTPUT_PROVIDER_DESCRIPTORS[provider];
-    if (!Array.isArray(providerDescriptors)) {
-      throw new Error(`未対応の TTS プロバイダです: ${provider}`);
+  // Block: Group helper rendering
+  function renderSettingsSubsection(title, bodyHtml) {
+    if (!bodyHtml) {
+      return "";
     }
-    const notifyDescriptors = notifyRoute === "discord"
-      ? OUTPUT_NOTIFY_DESCRIPTORS
-      : OUTPUT_NOTIFY_DESCRIPTORS.filter((descriptor) => descriptor.path === "integrations.notify_route");
-    const commonFieldsHtml = OUTPUT_COMMON_DESCRIPTORS
-      .map((descriptor) => renderPresetField("output", payload, descriptor))
-      .join("");
-    const providerFieldsHtml = providerDescriptors
-      .map((descriptor) => renderPresetField("output", payload, descriptor))
-      .join("");
-    const notifyFieldsHtml = notifyDescriptors
-      .map((descriptor) => renderPresetField("output", payload, descriptor))
-      .join("");
-    return [
-      renderSettingsGroup(
-        "TTS 共通",
-        `現在のプロバイダ: ${TTS_PROVIDER_LABELS[provider]}`,
-        commonFieldsHtml,
-      ),
-      renderSettingsGroup(
-        `${TTS_PROVIDER_LABELS[provider]} 設定`,
-        "選択中の TTS プロバイダに必要な接続設定と音声パラメータを編集します。",
-        providerFieldsHtml,
-      ),
-      renderSettingsGroup(
-        "通知設定",
-        notifyRoute === "discord"
-          ? "Discord 通知を有効にしています。"
-          : "UI 内通知のみを使います。",
-        notifyFieldsHtml,
-      ),
-    ].join("");
+    return `
+      <div class="settings-subsection">
+        <div class="settings-subsection-title">${escapeHtml(title)}</div>
+        <div class="settings-stack">${bodyHtml}</div>
+      </div>
+    `;
+  }
+
+  function renderSettingsExpander(title, bodyHtml) {
+    if (!bodyHtml) {
+      return "";
+    }
+    return `
+      <details class="settings-expander">
+        <summary class="settings-expander-summary">${escapeHtml(title)}</summary>
+        <div class="settings-expander-body">
+          <div class="settings-stack">${bodyHtml}</div>
+        </div>
+      </details>
+    `;
+  }
+
+  function filterDescriptorList(descriptors, allowedPaths) {
+    return descriptors.filter((descriptor) => allowedPaths.includes(descriptor.path));
   }
 
   function renderPresetField(kind, payload, descriptor) {
     const rawValue = readNestedValue(payload, descriptor.path);
     const path = escapeHtml(descriptor.path);
     const label = escapeHtml(descriptor.label);
+    const isDisabled = descriptor.disabledWhenPath !== undefined
+      && readNestedValue(payload, descriptor.disabledWhenPath) === descriptor.disabledWhenValue;
+    const disabledAttr = isDisabled ? " disabled" : "";
     if (descriptor.kind === "boolean") {
       return `
         <label class="settings-check-row">
@@ -754,19 +1102,40 @@
         .join("");
       return renderRowField(
         label,
-        `<select class="settings-input" data-preset-kind="${escapeHtml(kind)}" data-preset-path="${path}" data-value-kind="string">${optionsHtml}</select>`,
+        `<select class="settings-input" data-preset-kind="${escapeHtml(kind)}" data-preset-path="${path}" data-value-kind="string"${disabledAttr}>${optionsHtml}</select>`,
       );
     }
     if (descriptor.kind === "password") {
+      if (descriptor.clipboardActions === true) {
+        return renderRowField(
+          label,
+          `
+            <span class="settings-inline-actions">
+              <input class="settings-input" type="text" value="${escapeHtml(requireString(rawValue, descriptor.path))}" data-preset-kind="${escapeHtml(kind)}" data-preset-path="${path}" data-value-kind="string"${disabledAttr} />
+              <button class="settings-btn settings-btn-small" type="button" data-preset-clipboard-action="copy" data-preset-clipboard-kind="${escapeHtml(kind)}" data-preset-clipboard-path="${path}">コピー</button>
+              <button class="settings-btn settings-btn-small" type="button" data-preset-clipboard-action="paste" data-preset-clipboard-kind="${escapeHtml(kind)}" data-preset-clipboard-path="${path}">上書き貼付け</button>
+            </span>
+          `,
+        );
+      }
       return renderRowField(
         label,
-        `<input class="settings-input" type="text" value="${escapeHtml(requireString(rawValue, descriptor.path))}" data-preset-kind="${escapeHtml(kind)}" data-preset-path="${path}" data-value-kind="string" />`,
+        `<input class="settings-input" type="text" value="${escapeHtml(requireString(rawValue, descriptor.path))}" data-preset-kind="${escapeHtml(kind)}" data-preset-path="${path}" data-value-kind="string"${disabledAttr} />`,
       );
     }
     if (descriptor.kind === "text") {
       return renderRowField(
         label,
-        `<input class="settings-input" type="text" value="${escapeHtml(requireString(rawValue, descriptor.path))}" data-preset-kind="${escapeHtml(kind)}" data-preset-path="${path}" data-value-kind="string" />`,
+        `<input class="settings-input" type="text" value="${escapeHtml(requireString(rawValue, descriptor.path))}" data-preset-kind="${escapeHtml(kind)}" data-preset-path="${path}" data-value-kind="string"${disabledAttr} />`,
+      );
+    }
+    if (descriptor.kind === "textarea") {
+      const rows = Number.isInteger(descriptor.rows) && descriptor.rows > 0
+        ? descriptor.rows
+        : 6;
+      return renderRowField(
+        label,
+        `<textarea class="settings-input settings-textarea" rows="${String(rows)}" data-preset-kind="${escapeHtml(kind)}" data-preset-path="${path}" data-value-kind="string"${disabledAttr}>${escapeHtml(requireString(rawValue, descriptor.path))}</textarea>`,
       );
     }
     const numberValue = requireNumber(rawValue, descriptor.path);
@@ -775,7 +1144,7 @@
     const maxAttr = descriptor.max !== undefined ? ` max="${descriptor.max}"` : "";
     return renderRowField(
       label,
-      `<input class="settings-input settings-input-number" type="number" value="${String(numberValue)}" step="${String(step)}"${minAttr}${maxAttr} data-preset-kind="${escapeHtml(kind)}" data-preset-path="${path}" data-value-kind="${escapeHtml(descriptor.kind)}" />`,
+      `<input class="settings-input settings-input-number" type="number" value="${String(numberValue)}" step="${String(step)}"${minAttr}${maxAttr} data-preset-kind="${escapeHtml(kind)}" data-preset-path="${path}" data-value-kind="${escapeHtml(descriptor.kind)}"${disabledAttr} />`,
     );
   }
 
@@ -916,6 +1285,16 @@
       element.addEventListener("input", handlePresetFieldChange);
       element.addEventListener("change", handlePresetFieldChange);
     }
+    const presetPromptButtons = settingsPanel.querySelectorAll("[data-preset-prompt-kind][data-preset-prompt-path]");
+    for (const element of presetPromptButtons) {
+      element.addEventListener("click", handlePresetPromptPathAction);
+    }
+    const presetClipboardButtons = settingsPanel.querySelectorAll("[data-preset-clipboard-action][data-preset-clipboard-kind][data-preset-clipboard-path]");
+    for (const element of presetClipboardButtons) {
+      element.addEventListener("click", (event) => {
+        void handlePresetClipboardAction(event);
+      });
+    }
     const systemValueInputs = settingsPanel.querySelectorAll("[data-system-key]");
     for (const element of systemValueInputs) {
       element.addEventListener("input", handleSystemFieldChange);
@@ -996,11 +1375,64 @@
     const valueKind = String(element.dataset.valueKind || "");
     const presetEntry = requireActivePresetEntry(kind);
     writeNestedValue(presetEntry.payload, path, readInputValue(element, valueKind));
-    if (kind === "output" && (path === "speech.tts.provider" || path === "integrations.notify_route")) {
+    if (
+      kind === "output"
+      && (
+        path === "speech.tts.provider"
+        || path === "integrations.notify_route"
+        || path === "character.material.enable_shadow_off"
+      )
+    ) {
       renderSettingsEditor();
       return;
     }
     updateSettingsDirtyState();
+  }
+
+  function handlePresetPromptPathAction(event) {
+    const element = event.currentTarget;
+    const kind = String(element.dataset.presetPromptKind || "");
+    const path = String(element.dataset.presetPromptPath || "");
+    const title = String(element.dataset.presetPromptTitle || "設定");
+    const message = String(element.dataset.presetPromptMessage || "値を入力してください");
+    const presetEntry = requireActivePresetEntry(kind);
+    const currentValue = readNestedValue(presetEntry.payload, path);
+    const nextValue = window.prompt(`${title}\n${message}`, typeof currentValue === "string" ? currentValue : "");
+    if (nextValue === null) {
+      return;
+    }
+    writeNestedValue(presetEntry.payload, path, nextValue);
+    renderSettingsEditor();
+  }
+
+  async function handlePresetClipboardAction(event) {
+    const element = event.currentTarget;
+    const action = String(element.dataset.presetClipboardAction || "");
+    const kind = String(element.dataset.presetClipboardKind || "");
+    const path = String(element.dataset.presetClipboardPath || "");
+    const presetEntry = requireActivePresetEntry(kind);
+    try {
+      if (action === "copy") {
+        const currentValue = readNestedValue(presetEntry.payload, path);
+        if (typeof currentValue !== "string") {
+          appendError("コピー対象が文字列ではありません");
+          return;
+        }
+        await navigator.clipboard.writeText(currentValue);
+        settingsStatus.textContent = "クリップボードへコピーしました";
+        return;
+      }
+      if (action === "paste") {
+        const clipboardText = await navigator.clipboard.readText();
+        writeNestedValue(presetEntry.payload, path, clipboardText);
+        renderSettingsEditor();
+        settingsStatus.textContent = "クリップボードから貼り付けました";
+        return;
+      }
+      appendError("クリップボード操作が不正です");
+    } catch (error) {
+      appendError(`クリップボード操作に失敗しました: ${error.message}`);
+    }
   }
 
   function handleSystemFieldChange(event) {

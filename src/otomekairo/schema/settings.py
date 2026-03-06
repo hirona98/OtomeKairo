@@ -42,8 +42,21 @@ SETTING_DEFINITIONS: tuple[SettingDefinition, ...] = (
     SettingDefinition("runtime.idle_tick_ms", "integer", ("runtime", "next_boot"), min_value=250, max_value=60000),
     SettingDefinition("runtime.long_cycle_min_interval_ms", "integer", ("runtime", "next_boot"), min_value=1000, max_value=300000),
     SettingDefinition("runtime.context_budget_tokens", "integer", ("runtime", "next_boot"), min_value=1024, max_value=32768),
+    SettingDefinition("behavior.second_person_label", "string", ("runtime", "next_boot"), min_length=0, max_length=128),
+    SettingDefinition("behavior.system_prompt", "string", ("runtime", "next_boot"), min_length=0, max_length=20000),
+    SettingDefinition("behavior.addon_prompt", "string", ("runtime", "next_boot"), min_length=0, max_length=20000),
+    SettingDefinition("behavior.response_pace", "string", ("runtime", "next_boot"), min_length=1, max_length=32),
+    SettingDefinition("behavior.proactivity_level", "string", ("runtime", "next_boot"), min_length=1, max_length=32),
+    SettingDefinition("behavior.browse_preference", "string", ("runtime", "next_boot"), min_length=1, max_length=32),
+    SettingDefinition("behavior.notify_preference", "string", ("runtime", "next_boot"), min_length=1, max_length=32),
+    SettingDefinition("behavior.speech_style", "string", ("runtime", "next_boot"), min_length=1, max_length=32),
+    SettingDefinition("behavior.verbosity_bias", "string", ("runtime", "next_boot"), min_length=1, max_length=32),
     SettingDefinition("sensors.camera.enabled", "boolean", ("runtime",)),
     SettingDefinition("sensors.microphone.enabled", "boolean", ("runtime",)),
+    SettingDefinition("character.vrm_file_path", "string", ("runtime", "next_boot"), min_length=0, max_length=1024),
+    SettingDefinition("character.material.convert_unlit_to_mtoon", "boolean", ("runtime", "next_boot")),
+    SettingDefinition("character.material.enable_shadow_off", "boolean", ("runtime", "next_boot")),
+    SettingDefinition("character.material.shadow_off_meshes", "string", ("runtime", "next_boot"), min_length=0, max_length=4096),
     SettingDefinition("speech.tts.enabled", "boolean", ("runtime", "next_boot")),
     SettingDefinition("speech.tts.provider", "string", ("runtime", "next_boot"), min_length=1, max_length=64),
     SettingDefinition("speech.tts.aivis_cloud.api_key", "string", ("runtime", "next_boot"), min_length=0, max_length=4096),
@@ -85,6 +98,11 @@ SETTING_DEFINITIONS: tuple[SettingDefinition, ...] = (
     SettingDefinition("speech.tts.style_bert_vits2.split_interval", "number", ("runtime", "next_boot"), min_value=0.0, max_value=30.0),
     SettingDefinition("speech.tts.style_bert_vits2.assist_text", "string", ("runtime", "next_boot"), min_length=0, max_length=4096),
     SettingDefinition("speech.tts.style_bert_vits2.assist_text_weight", "number", ("runtime", "next_boot"), min_value=0.0, max_value=10.0),
+    SettingDefinition("speech.stt.enabled", "boolean", ("runtime", "next_boot")),
+    SettingDefinition("speech.stt.provider", "string", ("runtime", "next_boot"), min_length=1, max_length=64),
+    SettingDefinition("speech.stt.wake_word", "string", ("runtime", "next_boot"), min_length=0, max_length=1024),
+    SettingDefinition("speech.stt.amivoice.profile_id", "string", ("runtime", "next_boot"), min_length=0, max_length=256),
+    SettingDefinition("speech.stt.amivoice.api_key", "string", ("runtime", "next_boot"), min_length=0, max_length=4096),
     SettingDefinition("integrations.notify_route", "string", ("runtime", "next_boot"), min_length=1, max_length=64),
     SettingDefinition("integrations.sns.enabled", "boolean", ("runtime",)),
     SettingDefinition("integrations.discord.bot_token", "string", ("runtime", "next_boot"), min_length=0, max_length=4096),
@@ -109,8 +127,24 @@ SETTINGS_EDITOR_SYSTEM_KEYS = (
 
 # Block: Output preset constants
 SUPPORTED_TTS_PROVIDERS = ("aivis-cloud", "voicevox", "style-bert-vits2")
+SUPPORTED_STT_PROVIDERS = ("amivoice",)
 AIVIS_CLOUD_OUTPUT_FORMATS = ("wav", "mp3", "ogg", "aac", "flac")
+BEHAVIOR_PRESET_SETTING_KEYS = (
+    "behavior.second_person_label",
+    "behavior.system_prompt",
+    "behavior.addon_prompt",
+    "behavior.response_pace",
+    "behavior.proactivity_level",
+    "behavior.browse_preference",
+    "behavior.notify_preference",
+    "behavior.speech_style",
+    "behavior.verbosity_bias",
+)
 OUTPUT_PRESET_SETTING_KEYS = (
+    "character.vrm_file_path",
+    "character.material.convert_unlit_to_mtoon",
+    "character.material.enable_shadow_off",
+    "character.material.shadow_off_meshes",
     "speech.tts.enabled",
     "speech.tts.provider",
     "speech.tts.aivis_cloud.api_key",
@@ -152,6 +186,11 @@ OUTPUT_PRESET_SETTING_KEYS = (
     "speech.tts.style_bert_vits2.split_interval",
     "speech.tts.style_bert_vits2.assist_text",
     "speech.tts.style_bert_vits2.assist_text_weight",
+    "speech.stt.enabled",
+    "speech.stt.provider",
+    "speech.stt.wake_word",
+    "speech.stt.amivoice.profile_id",
+    "speech.stt.amivoice.api_key",
     "integrations.notify_route",
     "integrations.discord.bot_token",
     "integrations.discord.channel_id",
@@ -238,12 +277,15 @@ def build_default_settings_presets(default_settings: dict[str, Any]) -> tuple[di
             "preset_kind": "behavior",
             "preset_name": "標準",
             "payload": {
-                "response_pace": "normal",
-                "proactivity_level": "medium",
-                "browse_preference": "balanced",
-                "notify_preference": "balanced",
-                "speech_style": "neutral",
-                "verbosity_bias": "balanced",
+                "behavior.second_person_label": str(default_settings["behavior.second_person_label"]),
+                "behavior.system_prompt": str(default_settings["behavior.system_prompt"]),
+                "behavior.addon_prompt": str(default_settings["behavior.addon_prompt"]),
+                "behavior.response_pace": str(default_settings["behavior.response_pace"]),
+                "behavior.proactivity_level": str(default_settings["behavior.proactivity_level"]),
+                "behavior.browse_preference": str(default_settings["behavior.browse_preference"]),
+                "behavior.notify_preference": str(default_settings["behavior.notify_preference"]),
+                "behavior.speech_style": str(default_settings["behavior.speech_style"]),
+                "behavior.verbosity_bias": str(default_settings["behavior.verbosity_bias"]),
             },
         },
         {
@@ -251,12 +293,15 @@ def build_default_settings_presets(default_settings: dict[str, Any]) -> tuple[di
             "preset_kind": "behavior",
             "preset_name": "静かめ",
             "payload": {
-                "response_pace": "calm",
-                "proactivity_level": "low",
-                "browse_preference": "avoid",
-                "notify_preference": "quiet",
-                "speech_style": "soft",
-                "verbosity_bias": "short",
+                "behavior.second_person_label": "",
+                "behavior.system_prompt": "",
+                "behavior.addon_prompt": "",
+                "behavior.response_pace": "careful",
+                "behavior.proactivity_level": "low",
+                "behavior.browse_preference": "avoid",
+                "behavior.notify_preference": "quiet",
+                "behavior.speech_style": "gentle",
+                "behavior.verbosity_bias": "short",
             },
         },
         {
@@ -658,21 +703,21 @@ def _normalize_preset_payload(*, preset_kind: str, payload: Any) -> dict[str, An
 # Block: Behavior preset normalization
 def _normalize_behavior_preset_payload(payload: dict[str, Any]) -> dict[str, Any]:
     allowed_value_sets = {
-        "response_pace": {"calm", "normal", "quick"},
-        "proactivity_level": {"low", "medium", "high"},
-        "browse_preference": {"avoid", "balanced", "prefer"},
-        "notify_preference": {"quiet", "balanced", "proactive"},
-        "speech_style": {"soft", "neutral", "formal"},
-        "verbosity_bias": {"short", "balanced", "detailed"},
+        "behavior.response_pace": {"careful", "balanced", "quick"},
+        "behavior.proactivity_level": {"low", "medium", "high"},
+        "behavior.browse_preference": {"avoid", "balanced", "prefer"},
+        "behavior.notify_preference": {"quiet", "balanced", "proactive"},
+        "behavior.speech_style": {"gentle", "neutral", "firm"},
+        "behavior.verbosity_bias": {"short", "balanced", "detailed"},
     }
-    if set(payload) != set(allowed_value_sets):
-        raise SettingsValidationError("invalid_settings_editor_document", "behavior preset keys do not match fixed shape")
-    normalized: dict[str, Any] = {}
+    normalized = _normalize_keyed_preset_payload(
+        payload=payload,
+        required_keys=BEHAVIOR_PRESET_SETTING_KEYS,
+    )
     for key, allowed_values in allowed_value_sets.items():
-        value = _required_string(payload.get(key), f"behavior payload {key}")
+        value = _required_string(normalized.get(key), f"behavior payload {key}")
         if value not in allowed_values:
             raise SettingsValidationError("invalid_settings_editor_document", f"behavior payload {key} is invalid")
-        normalized[key] = value
     return normalized
 
 
@@ -719,6 +764,10 @@ def _normalize_output_preset_payload(payload: dict[str, Any]) -> dict[str, Any]:
         raise SettingsValidationError("invalid_settings_editor_document", "speech.tts.aivis_cloud.output_format is invalid")
     if normalized["speech.tts.enabled"] is True:
         _validate_enabled_tts_provider_settings(normalized)
+    if normalized["speech.stt.provider"] not in SUPPORTED_STT_PROVIDERS:
+        raise SettingsValidationError("invalid_settings_editor_document", "speech.stt.provider is invalid")
+    if normalized["speech.stt.enabled"] is True:
+        _validate_enabled_stt_provider_settings(normalized)
     if normalized["integrations.notify_route"] not in {"ui_only", "discord"}:
         raise SettingsValidationError("invalid_settings_editor_document", "integrations.notify_route is invalid")
     if normalized["integrations.notify_route"] == "discord":
@@ -758,6 +807,18 @@ def _validate_enabled_tts_provider_settings(normalized: dict[str, Any]) -> None:
             )
         return
     raise SettingsValidationError("invalid_settings_editor_document", "speech.tts.provider is invalid")
+
+
+# Block: Enabled STT provider validation
+def _validate_enabled_stt_provider_settings(normalized: dict[str, Any]) -> None:
+    stt_provider = str(normalized["speech.stt.provider"])
+    if stt_provider != "amivoice":
+        raise SettingsValidationError("invalid_settings_editor_document", "speech.stt.provider is invalid")
+    if not normalized["speech.stt.amivoice.api_key"]:
+        raise SettingsValidationError(
+            "invalid_settings_editor_document",
+            "speech.stt.amivoice.api_key is required when speech.stt.enabled is true",
+        )
 
 
 # Block: Retrieval profile normalization

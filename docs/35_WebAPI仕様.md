@@ -119,6 +119,9 @@ flowchart LR
 - `Cam` は `POST /api/camera/capture` で静止画を取得し、返った画像をサムネイル表示し、次の `POST /api/chat/input` へ添付してよい
 - `message` に `audio_url` がある場合は、`GET /audio/{audio_filename}` で取得した音声を再生してよい
 - `設定保存` は、初期実装では `GET /api/settings/editor` と `PUT /api/settings/editor` を使って、設定全体を保存する
+- 設定画面は左端に `キャラクター` タブを置き、続けて `振る舞い`、`会話`、`記憶`、`システム` を並べる
+- `振る舞い` タブには `振る舞いプロンプト`、`追加プロンプト（任意）`、`行動傾向` を置き、`CocoroConsole` 相当の会話指示と OtomeKairo 独自の傾向設定をまとめて編集する
+- `キャラクター` タブには `キャラクター選択`、`基本設定`、`マテリアル・影設定`、`音声合成`、`音声認識` を含める
 - `browse` の初期実装では、UI は少なくとも `browse_queued` と `browse_completed` の `notice` を見分けられるようにしてよい
 - UI 側で永続ストレージを前提にしない
 - UI は `browser_chat` チャネル専用として扱う
@@ -218,6 +221,7 @@ flowchart LR
 
 - `effective_settings` は、UI で編集対象にする設定だけを、`docs/39_設定キー運用仕様.md` と同じドット区切りキーで返す
 - `effective_settings` は、`config/default_settings.json` の既定値に対して、`runtime_settings.values_json` を上書きした現在有効値を返す
+- `effective_settings` には、`behavior.*`、`character.*`、`speech.tts.*`、`speech.stt.*`、`integrations.*` を含めてよい
 - `apply_scope="next_boot"` で `applied` 済みの設定は、次回ランタイム起動で materialize されるまで `effective_settings` に即時反映しない
 - `GET /api/settings` は UI の要約表示用なので、必要なら API キーやトークンを含めてよい
 - 設定UIの主編集経路は、`GET /api/settings/editor` と `PUT /api/settings/editor` に固定する
@@ -277,6 +281,7 @@ flowchart LR
 - 本文の JSON 形は `docs/36_JSONデータ仕様.md` を正本とする
 - 設定UIは、このレスポンスだけで現在のフォームを描画できる状態でなければならない
 - 初期設計では、`preset_catalogs.*.payload` に API キーやトークンの生値をそのまま含めてよい
+- `preset_catalogs.output.payload` は、キャラクター関連、TTS、STT、通知設定をまとめた固定形にする
 
 <!-- Block: Settings Editor Put -->
 ## `PUT /api/settings/editor`
