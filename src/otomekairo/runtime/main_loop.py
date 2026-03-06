@@ -872,11 +872,31 @@ def _build_default_search_client() -> SearchClient:
 def _build_default_speech_synthesizer() -> SpeechSynthesizer:
     from otomekairo.infra.aivis_cloud_speech_synthesizer import (
         AivisCloudSpeechSynthesizer,
-        default_tts_audio_dir,
+    )
+    from otomekairo.infra.speech_synthesis_common import default_tts_audio_dir
+    from otomekairo.infra.style_bert_vits2_speech_synthesizer import (
+        StyleBertVits2SpeechSynthesizer,
+    )
+    from otomekairo.infra.switching_speech_synthesizer import (
+        SwitchingSpeechSynthesizer,
+    )
+    from otomekairo.infra.voicevox_speech_synthesizer import (
+        VoicevoxSpeechSynthesizer,
     )
 
-    return AivisCloudSpeechSynthesizer(
-        audio_output_dir=default_tts_audio_dir(),
+    audio_output_dir = default_tts_audio_dir()
+    return SwitchingSpeechSynthesizer(
+        provider_synthesizers={
+            "aivis-cloud": AivisCloudSpeechSynthesizer(
+                audio_output_dir=audio_output_dir,
+            ),
+            "voicevox": VoicevoxSpeechSynthesizer(
+                audio_output_dir=audio_output_dir,
+            ),
+            "style-bert-vits2": StyleBertVits2SpeechSynthesizer(
+                audio_output_dir=audio_output_dir,
+            ),
+        }
     )
 
 

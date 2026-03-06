@@ -26,9 +26,11 @@ from otomekairo.schema.runtime_types import (
 )
 from otomekairo.schema.settings import (
     build_default_camera_connections,
+    build_default_output_preset_payload,
     build_default_settings,
     build_default_settings_editor_state,
     build_default_settings_presets,
+    build_output_preset_setting_keys,
     build_settings_editor_system_keys,
     decode_requested_value,
     normalize_settings_editor_document,
@@ -41,29 +43,29 @@ SCHEMA_VERSION = 7
 EMBEDDING_VECTOR_DIMENSION = 32
 LEGACY_SETTING_KEY_ALIASES = {
     "llm.model": "llm.default_model",
+    "speech.tts.aivis_cloud.api_key": "speech.tts.api_key",
+    "speech.tts.aivis_cloud.endpoint_url": "speech.tts.endpoint_url",
+    "speech.tts.aivis_cloud.model_uuid": "speech.tts.model_uuid",
+    "speech.tts.aivis_cloud.speaker_uuid": "speech.tts.speaker_uuid",
+    "speech.tts.aivis_cloud.style_id": "speech.tts.style_id",
+    "speech.tts.aivis_cloud.language": "speech.tts.language",
+    "speech.tts.aivis_cloud.speaking_rate": "speech.tts.speaking_rate",
+    "speech.tts.aivis_cloud.emotional_intensity": "speech.tts.emotional_intensity",
+    "speech.tts.aivis_cloud.tempo_dynamics": "speech.tts.tempo_dynamics",
+    "speech.tts.aivis_cloud.pitch": "speech.tts.pitch",
+    "speech.tts.aivis_cloud.volume": "speech.tts.volume",
+    "speech.tts.aivis_cloud.output_format": "speech.tts.output_format",
 }
 LEGACY_OPTIONAL_BASE_URL_DEFAULTS = {
     "llm.base_url": "https://openrouter.ai/api/v1",
     "llm.embedding_base_url": "https://openrouter.ai/api/v1",
 }
-OUTPUT_PRESET_SETTING_KEYS = (
-    "speech.tts.enabled",
-    "speech.tts.api_key",
-    "speech.tts.endpoint_url",
-    "speech.tts.model_uuid",
-    "speech.tts.speaker_uuid",
-    "speech.tts.style_id",
-    "speech.tts.language",
-    "speech.tts.speaking_rate",
-    "speech.tts.emotional_intensity",
-    "speech.tts.tempo_dynamics",
-    "speech.tts.pitch",
-    "speech.tts.volume",
-    "speech.tts.output_format",
-    "integrations.notify_route",
-    "integrations.discord.bot_token",
-    "integrations.discord.channel_id",
+LEGACY_AIVIS_RUNTIME_KEYS = tuple(
+    legacy_key
+    for current_key, legacy_key in LEGACY_SETTING_KEY_ALIASES.items()
+    if current_key.startswith("speech.tts.aivis_cloud.")
 )
+OUTPUT_PRESET_SETTING_KEYS = build_output_preset_setting_keys()
 
 
 # Block: API errors
@@ -2596,6 +2598,62 @@ class SqliteStateStore:
                     now_ms,
                 ),
             )
+        # Block: Settings editor system values migration
+        editor_row = connection.execute(
+            """
+            SELECT system_values_json
+            FROM settings_editor_state
+            WHERE row_id = 1
+            """
+        ).fetchone()
+        if editor_row is None:
+            raise RuntimeError("settings_editor_state row is missing")
+        raw_system_values = json.loads(editor_row["system_values_json"])
+        normalized_system_values = _normalize_settings_editor_system_values(raw_system_values)
+        if normalized_system_values != raw_system_values:
+            connection.execute(
+                """
+                UPDATE settings_editor_state
+                SET system_values_json = ?,
+                    updated_at = ?
+                WHERE row_id = 1
+                """,
+                (
+                    _json_text(normalized_system_values),
+                    now_ms,
+                ),
+            )
+        # Block: Output preset migration
+        output_preset_rows = connection.execute(
+            """
+            SELECT preset_id, payload_json
+            FROM settings_presets
+            WHERE preset_kind = 'output'
+            """
+        ).fetchall()
+        for output_preset_row in output_preset_rows:
+            raw_payload = json.loads(output_preset_row["payload_json"])
+            if not isinstance(raw_payload, dict):
+                raise RuntimeError("settings_presets.output payload_json must be object")
+            normalized_payload = _normalize_legacy_output_preset_payload(
+                preset_kind="output",
+                payload=raw_payload,
+            )
+            if normalized_payload == raw_payload:
+                continue
+            connection.execute(
+                """
+                UPDATE settings_presets
+                SET payload_json = ?,
+                    updated_at = ?
+                WHERE preset_id = ?
+                """,
+                (
+                    _json_text(normalized_payload),
+                    now_ms,
+                    str(output_preset_row["preset_id"]),
+                ),
+            )
 
     # Block: Legacy settings editor seed for schema v5
     def _ensure_settings_editor_defaults_v5(
@@ -5090,10 +5148,6 @@ def _decode_settings_preset_catalog_rows(rows: list[sqlite3.Row]) -> dict[str, l
         payload = json.loads(row["payload_json"])
         if isinstance(payload, dict):
             payload = _normalize_legacy_optional_base_urls(payload)
-            payload = _normalize_legacy_output_preset_payload(
-                preset_kind=preset_kind,
-                payload=payload,
-            )
         preset_catalogs[preset_kind].append(
             {
                 "preset_id": str(row["preset_id"]),
@@ -5642,6 +5696,9 @@ def _normalize_runtime_settings_values(
                 key=key,
                 value=runtime_values[legacy_key],
             )
+    if "speech.tts.provider" not in normalized:
+        if any(legacy_key in runtime_values for legacy_key in LEGACY_AIVIS_RUNTIME_KEYS):
+            normalized["speech.tts.provider"] = "aivis-cloud"
     return normalized
 
 
@@ -5662,6 +5719,13 @@ def _normalize_runtime_settings_updated_at(
         if isinstance(timestamp, bool) or not isinstance(timestamp, int):
             continue
         normalized[key] = timestamp
+    if "speech.tts.provider" not in current_updated_at:
+        for legacy_key in LEGACY_AIVIS_RUNTIME_KEYS:
+            timestamp = current_updated_at.get(legacy_key)
+            if isinstance(timestamp, bool) or not isinstance(timestamp, int):
+                continue
+            normalized["speech.tts.provider"] = timestamp
+            break
     return normalized
 
 
@@ -5688,7 +5752,7 @@ def _normalize_legacy_optional_base_url_value(*, key: str, value: Any) -> Any:
     return value
 
 
-# Block: Legacy output preset normalization
+# Block: Output preset migration helper
 def _normalize_legacy_output_preset_payload(
     *,
     preset_kind: str,
@@ -5699,19 +5763,39 @@ def _normalize_legacy_output_preset_payload(
     if set(payload) == set(OUTPUT_PRESET_SETTING_KEYS):
         return payload
     default_settings = build_default_settings()
-    normalized: dict[str, Any] = {
-        key: default_settings[key]
-        for key in OUTPUT_PRESET_SETTING_KEYS
-    }
+    normalized = build_default_output_preset_payload(default_settings)
     for key in OUTPUT_PRESET_SETTING_KEYS:
         value = payload.get(key)
         if value is not None:
             normalized[key] = value
+    legacy_aivis_key_map = {
+        "speech.tts.api_key": "speech.tts.aivis_cloud.api_key",
+        "speech.tts.endpoint_url": "speech.tts.aivis_cloud.endpoint_url",
+        "speech.tts.model_uuid": "speech.tts.aivis_cloud.model_uuid",
+        "speech.tts.speaker_uuid": "speech.tts.aivis_cloud.speaker_uuid",
+        "speech.tts.style_id": "speech.tts.aivis_cloud.style_id",
+        "speech.tts.language": "speech.tts.aivis_cloud.language",
+        "speech.tts.speaking_rate": "speech.tts.aivis_cloud.speaking_rate",
+        "speech.tts.emotional_intensity": "speech.tts.aivis_cloud.emotional_intensity",
+        "speech.tts.tempo_dynamics": "speech.tts.aivis_cloud.tempo_dynamics",
+        "speech.tts.pitch": "speech.tts.aivis_cloud.pitch",
+        "speech.tts.volume": "speech.tts.aivis_cloud.volume",
+        "speech.tts.output_format": "speech.tts.aivis_cloud.output_format",
+    }
+    saw_legacy_aivis_key = False
+    for legacy_key, normalized_key in legacy_aivis_key_map.items():
+        if legacy_key in payload:
+            normalized[normalized_key] = payload[legacy_key]
+            saw_legacy_aivis_key = True
+    if "speech.tts.enabled" in payload:
+        normalized["speech.tts.enabled"] = payload["speech.tts.enabled"]
+    if saw_legacy_aivis_key:
+        normalized["speech.tts.provider"] = "aivis-cloud"
     required_tts_keys = (
-        "speech.tts.api_key",
-        "speech.tts.endpoint_url",
-        "speech.tts.model_uuid",
-        "speech.tts.speaker_uuid",
+        "speech.tts.aivis_cloud.api_key",
+        "speech.tts.aivis_cloud.endpoint_url",
+        "speech.tts.aivis_cloud.model_uuid",
+        "speech.tts.aivis_cloud.speaker_uuid",
     )
     legacy_output_mode = payload.get("output.mode")
     if legacy_output_mode == "ui_only":
@@ -5721,6 +5805,7 @@ def _normalize_legacy_output_preset_payload(
             isinstance(normalized[key], str) and normalized[key].strip()
             for key in required_tts_keys
         )
+        normalized["speech.tts.provider"] = "aivis-cloud"
     legacy_notify_route = payload.get("integrations.notify_route")
     if legacy_notify_route in {"ui_only", "discord"}:
         normalized["integrations.notify_route"] = legacy_notify_route

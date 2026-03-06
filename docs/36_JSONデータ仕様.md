@@ -634,8 +634,11 @@
   "llm.max_output_tokens": 2048,
   "runtime.idle_tick_ms": 1000,
   "speech.tts.enabled": false,
-  "speech.tts.endpoint_url": "https://api.aivis-project.com/v1/tts/synthesize",
-  "speech.tts.output_format": "wav"
+  "speech.tts.provider": "aivis-cloud",
+  "speech.tts.aivis_cloud.endpoint_url": "https://api.aivis-project.com/v1/tts/synthesize",
+  "speech.tts.aivis_cloud.output_format": "wav",
+  "speech.tts.voicevox.endpoint_url": "http://127.0.0.1:50021",
+  "speech.tts.style_bert_vits2.endpoint_url": "http://127.0.0.1:5000"
 }
 ```
 
@@ -655,7 +658,8 @@
   "llm.temperature": 1760000000000,
   "llm.max_output_tokens": 1760000000000,
   "runtime.idle_tick_ms": 1760000000000,
-  "speech.tts.enabled": 1760000000000
+  "speech.tts.enabled": 1760000000000,
+  "speech.tts.provider": 1760000000000
 }
 ```
 
@@ -685,7 +689,7 @@
 - キー名は、`docs/39_設定キー運用仕様.md` と同じドット区切り設定キーをそのまま使う
 - 値の型は、各キーの登録 `value_type` と一致しなければならない
 - `settings_editor_state` の `revision` が更新される保存では、このオブジェクト全体を canonical な形で保持する
-- 旧構成の `system_values_json` に未使用キーが残っている場合、読み出し時に現行キー集合へ正規化して返す
+- `system_values_json` は、現行のシステム設定キー集合だけを保持し、追加キーは受け付けない
 
 <!-- Block: Settings Preset Payload -->
 ### `settings_presets.payload_json`
@@ -753,30 +757,60 @@
 ```json
 {
   "speech.tts.enabled": true,
-  "speech.tts.api_key": "tts-key",
-  "speech.tts.endpoint_url": "https://api.aivis-project.com/v1/tts/synthesize",
-  "speech.tts.model_uuid": "model-uuid",
-  "speech.tts.speaker_uuid": "speaker-uuid",
-  "speech.tts.style_id": 0,
-  "speech.tts.language": "ja",
-  "speech.tts.speaking_rate": 1.0,
-  "speech.tts.emotional_intensity": 1.0,
-  "speech.tts.tempo_dynamics": 1.0,
-  "speech.tts.pitch": 0.0,
-  "speech.tts.volume": 1.0,
-  "speech.tts.output_format": "wav",
+  "speech.tts.provider": "aivis-cloud",
+  "speech.tts.aivis_cloud.api_key": "tts-key",
+  "speech.tts.aivis_cloud.endpoint_url": "https://api.aivis-project.com/v1/tts/synthesize",
+  "speech.tts.aivis_cloud.model_uuid": "model-uuid",
+  "speech.tts.aivis_cloud.speaker_uuid": "speaker-uuid",
+  "speech.tts.aivis_cloud.style_id": 0,
+  "speech.tts.aivis_cloud.use_ssml": false,
+  "speech.tts.aivis_cloud.language": "ja",
+  "speech.tts.aivis_cloud.speaking_rate": 1.0,
+  "speech.tts.aivis_cloud.emotional_intensity": 1.0,
+  "speech.tts.aivis_cloud.tempo_dynamics": 1.0,
+  "speech.tts.aivis_cloud.pitch": 0.0,
+  "speech.tts.aivis_cloud.volume": 1.0,
+  "speech.tts.aivis_cloud.output_format": "wav",
+  "speech.tts.voicevox.endpoint_url": "http://127.0.0.1:50021",
+  "speech.tts.voicevox.speaker_id": 0,
+  "speech.tts.voicevox.speed_scale": 1.0,
+  "speech.tts.voicevox.pitch_scale": 0.0,
+  "speech.tts.voicevox.intonation_scale": 1.0,
+  "speech.tts.voicevox.volume_scale": 1.0,
+  "speech.tts.voicevox.pre_phoneme_length": 0.1,
+  "speech.tts.voicevox.post_phoneme_length": 0.1,
+  "speech.tts.voicevox.output_sampling_rate": 24000,
+  "speech.tts.voicevox.output_stereo": false,
+  "speech.tts.style_bert_vits2.endpoint_url": "http://127.0.0.1:5000",
+  "speech.tts.style_bert_vits2.model_name": "amitaro",
+  "speech.tts.style_bert_vits2.model_id": 0,
+  "speech.tts.style_bert_vits2.speaker_name": "あみたろ",
+  "speech.tts.style_bert_vits2.speaker_id": 0,
+  "speech.tts.style_bert_vits2.style": "Neutral",
+  "speech.tts.style_bert_vits2.style_weight": 1.0,
+  "speech.tts.style_bert_vits2.sdp_ratio": 0.2,
+  "speech.tts.style_bert_vits2.noise": 0.6,
+  "speech.tts.style_bert_vits2.noise_w": 0.8,
+  "speech.tts.style_bert_vits2.length": 1.0,
+  "speech.tts.style_bert_vits2.language": "JP",
+  "speech.tts.style_bert_vits2.auto_split": true,
+  "speech.tts.style_bert_vits2.split_interval": 0.5,
+  "speech.tts.style_bert_vits2.assist_text": "",
+  "speech.tts.style_bert_vits2.assist_text_weight": 0.0,
   "integrations.notify_route": "discord",
   "integrations.discord.bot_token": "discord-token",
   "integrations.discord.channel_id": "1234567890"
 }
 ```
 
-- 必須項目は `speech.tts.enabled`、`speech.tts.output_format`、`integrations.notify_route` である
-- `speech.tts.enabled=true` のときは `speech.tts.api_key`、`speech.tts.endpoint_url`、`speech.tts.model_uuid`、`speech.tts.speaker_uuid` を必須にする
-- `speech.tts.output_format` は `wav`、`mp3`、`ogg`、`aac`、`flac` のいずれかに固定する
+- 必須項目は、`speech.tts.enabled`、`speech.tts.provider`、各プロバイダ固有キー、`integrations.notify_route`、`integrations.discord.*` である
+- `speech.tts.provider` は、`aivis-cloud`、`voicevox`、`style-bert-vits2` のいずれかに固定する
+- `speech.tts.enabled=true` かつ `speech.tts.provider="aivis-cloud"` のときは `speech.tts.aivis_cloud.api_key`、`speech.tts.aivis_cloud.endpoint_url`、`speech.tts.aivis_cloud.model_uuid`、`speech.tts.aivis_cloud.speaker_uuid` を必須にする
+- `speech.tts.enabled=true` かつ `speech.tts.provider="voicevox"` のときは `speech.tts.voicevox.endpoint_url` を必須にする
+- `speech.tts.enabled=true` かつ `speech.tts.provider="style-bert-vits2"` のときは `speech.tts.style_bert_vits2.endpoint_url` を必須にする
+- `speech.tts.aivis_cloud.output_format` は `wav`、`mp3`、`ogg`、`aac`、`flac` のいずれかに固定する
 - `integrations.notify_route` は、`ui_only` または `discord` に固定する
 - `integrations.notify_route="discord"` のときは `integrations.discord.bot_token` と `integrations.discord.channel_id` を必須にする
-- 旧構成の `output.mode` / `integrations.line.*` を含む payload は、読み出し時に `speech.tts.*` + `integrations.notify_route` + `integrations.discord.*` の固定形へ正規化する
 
 <!-- Block: Settings Change Set Payload -->
 ### `settings_change_sets.payload_json`

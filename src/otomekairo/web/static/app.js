@@ -34,6 +34,11 @@
   // Block: Settings schema
   const SETTINGS_TAB_KEYS = ["behavior", "llm", "memory", "system"];
   const SETTINGS_PRESET_KINDS = ["behavior", "llm", "memory", "output"];
+  const TTS_PROVIDER_LABELS = {
+    "aivis-cloud": "Aivis Cloud API",
+    voicevox: "VOICEVOX",
+    "style-bert-vits2": "Style-Bert-VITS2",
+  };
   const PRESET_DESCRIPTORS = {
     behavior: [
       { path: "response_pace", label: "応答ペース", kind: "select", options: ["calm", "normal", "quick"] },
@@ -61,25 +66,78 @@
       { path: "retrieval_profile.summary_bias", label: "Summary Bias", kind: "number", min: 0, max: 1, step: 0.05 },
       { path: "retrieval_profile.event_bias", label: "Event Bias", kind: "number", min: 0, max: 1, step: 0.05 },
     ],
-    output: [
-      { path: "speech.tts.enabled", label: "クラウド TTS", kind: "boolean" },
-      { path: "speech.tts.api_key", label: "TTS API キー", kind: "password" },
-      { path: "speech.tts.endpoint_url", label: "TTS Endpoint URL", kind: "text" },
-      { path: "speech.tts.model_uuid", label: "Model UUID", kind: "text" },
-      { path: "speech.tts.speaker_uuid", label: "Speaker UUID", kind: "text" },
-      { path: "speech.tts.style_id", label: "Style ID", kind: "integer", min: 0, max: 999999, step: 1 },
-      { path: "speech.tts.language", label: "言語", kind: "text" },
-      { path: "speech.tts.speaking_rate", label: "Speaking Rate", kind: "number", min: 0.25, max: 4.0, step: 0.05 },
-      { path: "speech.tts.emotional_intensity", label: "Emotional Intensity", kind: "number", min: 0.0, max: 2.0, step: 0.05 },
-      { path: "speech.tts.tempo_dynamics", label: "Tempo Dynamics", kind: "number", min: 0.0, max: 2.0, step: 0.05 },
-      { path: "speech.tts.pitch", label: "Pitch", kind: "number", min: -1.0, max: 1.0, step: 0.05 },
-      { path: "speech.tts.volume", label: "Volume", kind: "number", min: 0.0, max: 2.0, step: 0.05 },
-      { path: "speech.tts.output_format", label: "音声フォーマット", kind: "select", options: ["wav", "mp3", "ogg", "aac", "flac"] },
-      { path: "integrations.notify_route", label: "通知経路", kind: "select", options: ["ui_only", "discord"] },
-      { path: "integrations.discord.bot_token", label: "Discord トークン", kind: "password" },
-      { path: "integrations.discord.channel_id", label: "Discord チャンネル", kind: "text" },
+  };
+  const OUTPUT_COMMON_DESCRIPTORS = [
+    { path: "speech.tts.enabled", label: "TTS 有効化", kind: "boolean" },
+    {
+      path: "speech.tts.provider",
+      label: "TTS プロバイダ",
+      kind: "select",
+      options: ["aivis-cloud", "voicevox", "style-bert-vits2"],
+      optionLabels: TTS_PROVIDER_LABELS,
+    },
+  ];
+  const OUTPUT_PROVIDER_DESCRIPTORS = {
+    "aivis-cloud": [
+      { path: "speech.tts.aivis_cloud.api_key", label: "API キー", kind: "password" },
+      { path: "speech.tts.aivis_cloud.endpoint_url", label: "Endpoint URL", kind: "text" },
+      { path: "speech.tts.aivis_cloud.model_uuid", label: "Model UUID", kind: "text" },
+      { path: "speech.tts.aivis_cloud.speaker_uuid", label: "Speaker UUID", kind: "text" },
+      { path: "speech.tts.aivis_cloud.style_id", label: "Style ID", kind: "integer", min: 0, max: 999999, step: 1 },
+      { path: "speech.tts.aivis_cloud.use_ssml", label: "SSML を使う", kind: "boolean" },
+      { path: "speech.tts.aivis_cloud.language", label: "言語", kind: "text" },
+      { path: "speech.tts.aivis_cloud.speaking_rate", label: "Speaking Rate", kind: "number", min: 0.25, max: 4.0, step: 0.05 },
+      { path: "speech.tts.aivis_cloud.emotional_intensity", label: "Emotional Intensity", kind: "number", min: 0.0, max: 2.0, step: 0.05 },
+      { path: "speech.tts.aivis_cloud.tempo_dynamics", label: "Tempo Dynamics", kind: "number", min: 0.0, max: 2.0, step: 0.05 },
+      { path: "speech.tts.aivis_cloud.pitch", label: "Pitch", kind: "number", min: -1.0, max: 1.0, step: 0.05 },
+      { path: "speech.tts.aivis_cloud.volume", label: "Volume", kind: "number", min: 0.0, max: 2.0, step: 0.05 },
+      { path: "speech.tts.aivis_cloud.output_format", label: "音声フォーマット", kind: "select", options: ["wav", "mp3", "ogg", "aac", "flac"] },
+    ],
+    voicevox: [
+      { path: "speech.tts.voicevox.endpoint_url", label: "Endpoint URL", kind: "text" },
+      { path: "speech.tts.voicevox.speaker_id", label: "Speaker ID", kind: "integer", min: 0, max: 999999, step: 1 },
+      { path: "speech.tts.voicevox.speed_scale", label: "話速", kind: "number", min: 0.5, max: 2.0, step: 0.05 },
+      { path: "speech.tts.voicevox.pitch_scale", label: "音高", kind: "number", min: -0.15, max: 0.15, step: 0.01 },
+      { path: "speech.tts.voicevox.intonation_scale", label: "抑揚", kind: "number", min: 0.0, max: 2.0, step: 0.05 },
+      { path: "speech.tts.voicevox.volume_scale", label: "音量", kind: "number", min: 0.0, max: 2.0, step: 0.05 },
+      { path: "speech.tts.voicevox.pre_phoneme_length", label: "発話前無音", kind: "number", min: 0.0, max: 1.5, step: 0.05 },
+      { path: "speech.tts.voicevox.post_phoneme_length", label: "発話後無音", kind: "number", min: 0.0, max: 1.5, step: 0.05 },
+      { path: "speech.tts.voicevox.output_sampling_rate", label: "サンプリングレート", kind: "integer", min: 8000, max: 48000, step: 1000 },
+      { path: "speech.tts.voicevox.output_stereo", label: "ステレオ出力", kind: "boolean" },
+    ],
+    "style-bert-vits2": [
+      { path: "speech.tts.style_bert_vits2.endpoint_url", label: "Endpoint URL", kind: "text" },
+      { path: "speech.tts.style_bert_vits2.model_name", label: "Model Name", kind: "text" },
+      { path: "speech.tts.style_bert_vits2.model_id", label: "Model ID", kind: "integer", min: 0, max: 999999, step: 1 },
+      { path: "speech.tts.style_bert_vits2.speaker_name", label: "Speaker Name", kind: "text" },
+      { path: "speech.tts.style_bert_vits2.speaker_id", label: "Speaker ID", kind: "integer", min: 0, max: 999999, step: 1 },
+      { path: "speech.tts.style_bert_vits2.style", label: "Style", kind: "text" },
+      { path: "speech.tts.style_bert_vits2.style_weight", label: "Style Weight", kind: "number", min: 0.0, max: 10.0, step: 0.05 },
+      { path: "speech.tts.style_bert_vits2.sdp_ratio", label: "SDP Ratio", kind: "number", min: 0.0, max: 1.0, step: 0.05 },
+      { path: "speech.tts.style_bert_vits2.noise", label: "Noise", kind: "number", min: 0.0, max: 10.0, step: 0.05 },
+      { path: "speech.tts.style_bert_vits2.noise_w", label: "Noise W", kind: "number", min: 0.0, max: 10.0, step: 0.05 },
+      { path: "speech.tts.style_bert_vits2.length", label: "Length", kind: "number", min: 0.25, max: 4.0, step: 0.05 },
+      { path: "speech.tts.style_bert_vits2.language", label: "言語", kind: "select", options: ["JP", "EN", "ZH"] },
+      { path: "speech.tts.style_bert_vits2.auto_split", label: "自動分割", kind: "boolean" },
+      { path: "speech.tts.style_bert_vits2.split_interval", label: "分割間隔", kind: "number", min: 0.0, max: 30.0, step: 0.1 },
+      { path: "speech.tts.style_bert_vits2.assist_text", label: "Assist Text", kind: "text" },
+      { path: "speech.tts.style_bert_vits2.assist_text_weight", label: "Assist Weight", kind: "number", min: 0.0, max: 10.0, step: 0.05 },
     ],
   };
+  const OUTPUT_NOTIFY_DESCRIPTORS = [
+    {
+      path: "integrations.notify_route",
+      label: "通知経路",
+      kind: "select",
+      options: ["ui_only", "discord"],
+      optionLabels: {
+        ui_only: "UI only",
+        discord: "Discord",
+      },
+    },
+    { path: "integrations.discord.bot_token", label: "Discord トークン", kind: "password" },
+    { path: "integrations.discord.channel_id", label: "Discord チャンネル", kind: "text" },
+  ];
   const SYSTEM_DESCRIPTORS = [
     { key: "runtime.idle_tick_ms", label: "Idle Tick (ms)", kind: "integer", min: 250, max: 60000, step: 250 },
     { key: "runtime.long_cycle_min_interval_ms", label: "Long Cycle (ms)", kind: "integer", min: 1000, max: 300000, step: 1000 },
@@ -517,6 +575,7 @@
     const presetEntries = readPresetEntries(kind);
     const activePresetId = readActivePresetId(kind);
     const activePreset = requirePresetEntry(kind, activePresetId);
+    const fieldsContainerClass = kind === "output" ? "settings-stack" : "settings-grid";
     const selectOptions = presetEntries
       .filter((entry) => entry.archived !== true || entry.preset_id === activePresetId)
       .map((entry) => {
@@ -525,9 +584,11 @@
         return `<option value="${escapeHtml(entry.preset_id)}"${selected}>${escapeHtml(entry.preset_name)}${archivedTag}</option>`;
       })
       .join("");
-    const fieldsHtml = PRESET_DESCRIPTORS[kind]
-      .map((descriptor) => renderPresetField(kind, activePreset.payload, descriptor))
-      .join("");
+    const fieldsHtml = kind === "output"
+      ? renderOutputPresetFields(activePreset.payload)
+      : PRESET_DESCRIPTORS[kind]
+        .map((descriptor) => renderPresetField(kind, activePreset.payload, descriptor))
+        .join("");
     container.innerHTML = `
       <div class="settings-card-title">${escapeHtml(title)}</div>
       <div class="settings-grid">
@@ -540,7 +601,58 @@
           <input class="settings-input" type="text" value="${escapeHtml(activePreset.preset_name)}" data-preset-name-kind="${escapeHtml(kind)}" />
         </label>
       </div>
-      <div class="settings-grid">${fieldsHtml}</div>
+      <div class="${fieldsContainerClass}">${fieldsHtml}</div>
+    `;
+  }
+
+  // Block: Output preset rendering
+  function renderOutputPresetFields(payload) {
+    const provider = requireOutputProvider(payload);
+    const notifyRoute = requireOutputNotifyRoute(payload);
+    const providerDescriptors = OUTPUT_PROVIDER_DESCRIPTORS[provider];
+    if (!Array.isArray(providerDescriptors)) {
+      throw new Error(`未対応の TTS プロバイダです: ${provider}`);
+    }
+    const notifyDescriptors = notifyRoute === "discord"
+      ? OUTPUT_NOTIFY_DESCRIPTORS
+      : OUTPUT_NOTIFY_DESCRIPTORS.filter((descriptor) => descriptor.path === "integrations.notify_route");
+    const commonFieldsHtml = OUTPUT_COMMON_DESCRIPTORS
+      .map((descriptor) => renderPresetField("output", payload, descriptor))
+      .join("");
+    const providerFieldsHtml = providerDescriptors
+      .map((descriptor) => renderPresetField("output", payload, descriptor))
+      .join("");
+    const notifyFieldsHtml = notifyDescriptors
+      .map((descriptor) => renderPresetField("output", payload, descriptor))
+      .join("");
+    return [
+      renderOutputSection(
+        "TTS 共通",
+        `現在のプロバイダ: ${TTS_PROVIDER_LABELS[provider]}`,
+        commonFieldsHtml,
+      ),
+      renderOutputSection(
+        `${TTS_PROVIDER_LABELS[provider]} 設定`,
+        "選択中の TTS プロバイダに必要な接続設定と音声パラメータを編集します。",
+        providerFieldsHtml,
+      ),
+      renderOutputSection(
+        "通知設定",
+        notifyRoute === "discord"
+          ? "Discord 通知を有効にしています。"
+          : "UI 内通知のみを使います。",
+        notifyFieldsHtml,
+      ),
+    ].join("");
+  }
+
+  function renderOutputSection(title, description, fieldsHtml) {
+    return `
+      <div class="settings-section">
+        <div class="settings-card-title">${escapeHtml(title)}</div>
+        <div class="settings-note">${escapeHtml(description)}</div>
+        <div class="settings-grid">${fieldsHtml}</div>
+      </div>
     `;
   }
 
@@ -560,7 +672,10 @@
       const optionsHtml = descriptor.options
         .map((optionValue) => {
           const selected = rawValue === optionValue ? " selected" : "";
-          return `<option value="${escapeHtml(optionValue)}"${selected}>${escapeHtml(optionValue)}</option>`;
+          const optionLabel = isObject(descriptor.optionLabels) && typeof descriptor.optionLabels[optionValue] === "string"
+            ? descriptor.optionLabels[optionValue]
+            : optionValue;
+          return `<option value="${escapeHtml(optionValue)}"${selected}>${escapeHtml(optionLabel)}</option>`;
         })
         .join("");
       return `
@@ -768,6 +883,10 @@
     const valueKind = String(element.dataset.valueKind || "");
     const presetEntry = requireActivePresetEntry(kind);
     writeNestedValue(presetEntry.payload, path, readInputValue(element, valueKind));
+    if (kind === "output" && (path === "speech.tts.provider" || path === "integrations.notify_route")) {
+      renderSettingsEditor();
+      return;
+    }
     updateSettingsDirtyState();
   }
 
@@ -1217,6 +1336,23 @@
       return null;
     }
     return requireString(activeCameraConnectionId, "active_camera_connection_id");
+  }
+
+  // Block: Output preset helpers
+  function requireOutputProvider(payload) {
+    const provider = requireString(readNestedValue(payload, "speech.tts.provider"), "speech.tts.provider");
+    if (!(provider in OUTPUT_PROVIDER_DESCRIPTORS) || !(provider in TTS_PROVIDER_LABELS)) {
+      throw new Error(`未対応の TTS プロバイダです: ${provider}`);
+    }
+    return provider;
+  }
+
+  function requireOutputNotifyRoute(payload) {
+    const notifyRoute = requireString(readNestedValue(payload, "integrations.notify_route"), "integrations.notify_route");
+    if (notifyRoute !== "ui_only" && notifyRoute !== "discord") {
+      throw new Error(`未対応の通知経路です: ${notifyRoute}`);
+    }
+    return notifyRoute;
   }
 
   function requireActiveCameraConnection() {

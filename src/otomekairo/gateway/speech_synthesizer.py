@@ -12,19 +12,8 @@ class SpeechSynthesisRequest:
     cycle_id: str
     message_id: str
     text: str
-    api_key: str
-    endpoint_url: str
-    model_uuid: str
-    speaker_uuid: str
-    style_id: int
-    use_ssml: bool
-    language: str
-    speaking_rate: float
-    emotional_intensity: float
-    tempo_dynamics: float
-    pitch: float
-    volume: float
-    output_format: str
+    provider: str
+    provider_settings: dict[str, Any]
 
 
 # Block: Synthesis response

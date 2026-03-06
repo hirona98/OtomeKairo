@@ -45,18 +45,46 @@ SETTING_DEFINITIONS: tuple[SettingDefinition, ...] = (
     SettingDefinition("sensors.camera.enabled", "boolean", ("runtime",)),
     SettingDefinition("sensors.microphone.enabled", "boolean", ("runtime",)),
     SettingDefinition("speech.tts.enabled", "boolean", ("runtime", "next_boot")),
-    SettingDefinition("speech.tts.api_key", "string", ("runtime", "next_boot"), min_length=0, max_length=4096),
-    SettingDefinition("speech.tts.endpoint_url", "string", ("runtime", "next_boot"), min_length=0, max_length=512),
-    SettingDefinition("speech.tts.model_uuid", "string", ("runtime", "next_boot"), min_length=0, max_length=128),
-    SettingDefinition("speech.tts.speaker_uuid", "string", ("runtime", "next_boot"), min_length=0, max_length=128),
-    SettingDefinition("speech.tts.style_id", "integer", ("runtime", "next_boot"), min_value=0, max_value=999999),
-    SettingDefinition("speech.tts.language", "string", ("runtime", "next_boot"), min_length=1, max_length=32),
-    SettingDefinition("speech.tts.speaking_rate", "number", ("runtime", "next_boot"), min_value=0.25, max_value=4.0),
-    SettingDefinition("speech.tts.emotional_intensity", "number", ("runtime", "next_boot"), min_value=0.0, max_value=2.0),
-    SettingDefinition("speech.tts.tempo_dynamics", "number", ("runtime", "next_boot"), min_value=0.0, max_value=2.0),
-    SettingDefinition("speech.tts.pitch", "number", ("runtime", "next_boot"), min_value=-1.0, max_value=1.0),
-    SettingDefinition("speech.tts.volume", "number", ("runtime", "next_boot"), min_value=0.0, max_value=2.0),
-    SettingDefinition("speech.tts.output_format", "string", ("runtime", "next_boot"), min_length=1, max_length=16),
+    SettingDefinition("speech.tts.provider", "string", ("runtime", "next_boot"), min_length=1, max_length=64),
+    SettingDefinition("speech.tts.aivis_cloud.api_key", "string", ("runtime", "next_boot"), min_length=0, max_length=4096),
+    SettingDefinition("speech.tts.aivis_cloud.endpoint_url", "string", ("runtime", "next_boot"), min_length=0, max_length=512),
+    SettingDefinition("speech.tts.aivis_cloud.model_uuid", "string", ("runtime", "next_boot"), min_length=0, max_length=128),
+    SettingDefinition("speech.tts.aivis_cloud.speaker_uuid", "string", ("runtime", "next_boot"), min_length=0, max_length=128),
+    SettingDefinition("speech.tts.aivis_cloud.style_id", "integer", ("runtime", "next_boot"), min_value=0, max_value=999999),
+    SettingDefinition("speech.tts.aivis_cloud.use_ssml", "boolean", ("runtime", "next_boot")),
+    SettingDefinition("speech.tts.aivis_cloud.language", "string", ("runtime", "next_boot"), min_length=1, max_length=32),
+    SettingDefinition("speech.tts.aivis_cloud.speaking_rate", "number", ("runtime", "next_boot"), min_value=0.25, max_value=4.0),
+    SettingDefinition("speech.tts.aivis_cloud.emotional_intensity", "number", ("runtime", "next_boot"), min_value=0.0, max_value=2.0),
+    SettingDefinition("speech.tts.aivis_cloud.tempo_dynamics", "number", ("runtime", "next_boot"), min_value=0.0, max_value=2.0),
+    SettingDefinition("speech.tts.aivis_cloud.pitch", "number", ("runtime", "next_boot"), min_value=-1.0, max_value=1.0),
+    SettingDefinition("speech.tts.aivis_cloud.volume", "number", ("runtime", "next_boot"), min_value=0.0, max_value=2.0),
+    SettingDefinition("speech.tts.aivis_cloud.output_format", "string", ("runtime", "next_boot"), min_length=1, max_length=16),
+    SettingDefinition("speech.tts.voicevox.endpoint_url", "string", ("runtime", "next_boot"), min_length=0, max_length=512),
+    SettingDefinition("speech.tts.voicevox.speaker_id", "integer", ("runtime", "next_boot"), min_value=0, max_value=999999),
+    SettingDefinition("speech.tts.voicevox.speed_scale", "number", ("runtime", "next_boot"), min_value=0.5, max_value=2.0),
+    SettingDefinition("speech.tts.voicevox.pitch_scale", "number", ("runtime", "next_boot"), min_value=-0.15, max_value=0.15),
+    SettingDefinition("speech.tts.voicevox.intonation_scale", "number", ("runtime", "next_boot"), min_value=0.0, max_value=2.0),
+    SettingDefinition("speech.tts.voicevox.volume_scale", "number", ("runtime", "next_boot"), min_value=0.0, max_value=2.0),
+    SettingDefinition("speech.tts.voicevox.pre_phoneme_length", "number", ("runtime", "next_boot"), min_value=0.0, max_value=1.5),
+    SettingDefinition("speech.tts.voicevox.post_phoneme_length", "number", ("runtime", "next_boot"), min_value=0.0, max_value=1.5),
+    SettingDefinition("speech.tts.voicevox.output_sampling_rate", "integer", ("runtime", "next_boot"), min_value=8000, max_value=48000),
+    SettingDefinition("speech.tts.voicevox.output_stereo", "boolean", ("runtime", "next_boot")),
+    SettingDefinition("speech.tts.style_bert_vits2.endpoint_url", "string", ("runtime", "next_boot"), min_length=0, max_length=512),
+    SettingDefinition("speech.tts.style_bert_vits2.model_name", "string", ("runtime", "next_boot"), min_length=0, max_length=128),
+    SettingDefinition("speech.tts.style_bert_vits2.model_id", "integer", ("runtime", "next_boot"), min_value=0, max_value=999999),
+    SettingDefinition("speech.tts.style_bert_vits2.speaker_name", "string", ("runtime", "next_boot"), min_length=0, max_length=128),
+    SettingDefinition("speech.tts.style_bert_vits2.speaker_id", "integer", ("runtime", "next_boot"), min_value=0, max_value=999999),
+    SettingDefinition("speech.tts.style_bert_vits2.style", "string", ("runtime", "next_boot"), min_length=1, max_length=128),
+    SettingDefinition("speech.tts.style_bert_vits2.style_weight", "number", ("runtime", "next_boot"), min_value=0.0, max_value=10.0),
+    SettingDefinition("speech.tts.style_bert_vits2.sdp_ratio", "number", ("runtime", "next_boot"), min_value=0.0, max_value=1.0),
+    SettingDefinition("speech.tts.style_bert_vits2.noise", "number", ("runtime", "next_boot"), min_value=0.0, max_value=10.0),
+    SettingDefinition("speech.tts.style_bert_vits2.noise_w", "number", ("runtime", "next_boot"), min_value=0.0, max_value=10.0),
+    SettingDefinition("speech.tts.style_bert_vits2.length", "number", ("runtime", "next_boot"), min_value=0.25, max_value=4.0),
+    SettingDefinition("speech.tts.style_bert_vits2.language", "string", ("runtime", "next_boot"), min_length=1, max_length=32),
+    SettingDefinition("speech.tts.style_bert_vits2.auto_split", "boolean", ("runtime", "next_boot")),
+    SettingDefinition("speech.tts.style_bert_vits2.split_interval", "number", ("runtime", "next_boot"), min_value=0.0, max_value=30.0),
+    SettingDefinition("speech.tts.style_bert_vits2.assist_text", "string", ("runtime", "next_boot"), min_length=0, max_length=4096),
+    SettingDefinition("speech.tts.style_bert_vits2.assist_text_weight", "number", ("runtime", "next_boot"), min_value=0.0, max_value=10.0),
     SettingDefinition("integrations.notify_route", "string", ("runtime", "next_boot"), min_length=1, max_length=64),
     SettingDefinition("integrations.sns.enabled", "boolean", ("runtime",)),
     SettingDefinition("integrations.discord.bot_token", "string", ("runtime", "next_boot"), min_length=0, max_length=4096),
@@ -76,6 +104,57 @@ SETTINGS_EDITOR_SYSTEM_KEYS = (
     "sensors.microphone.enabled",
     "sensors.camera.enabled",
     "integrations.sns.enabled",
+)
+
+
+# Block: Output preset constants
+SUPPORTED_TTS_PROVIDERS = ("aivis-cloud", "voicevox", "style-bert-vits2")
+AIVIS_CLOUD_OUTPUT_FORMATS = ("wav", "mp3", "ogg", "aac", "flac")
+OUTPUT_PRESET_SETTING_KEYS = (
+    "speech.tts.enabled",
+    "speech.tts.provider",
+    "speech.tts.aivis_cloud.api_key",
+    "speech.tts.aivis_cloud.endpoint_url",
+    "speech.tts.aivis_cloud.model_uuid",
+    "speech.tts.aivis_cloud.speaker_uuid",
+    "speech.tts.aivis_cloud.style_id",
+    "speech.tts.aivis_cloud.use_ssml",
+    "speech.tts.aivis_cloud.language",
+    "speech.tts.aivis_cloud.speaking_rate",
+    "speech.tts.aivis_cloud.emotional_intensity",
+    "speech.tts.aivis_cloud.tempo_dynamics",
+    "speech.tts.aivis_cloud.pitch",
+    "speech.tts.aivis_cloud.volume",
+    "speech.tts.aivis_cloud.output_format",
+    "speech.tts.voicevox.endpoint_url",
+    "speech.tts.voicevox.speaker_id",
+    "speech.tts.voicevox.speed_scale",
+    "speech.tts.voicevox.pitch_scale",
+    "speech.tts.voicevox.intonation_scale",
+    "speech.tts.voicevox.volume_scale",
+    "speech.tts.voicevox.pre_phoneme_length",
+    "speech.tts.voicevox.post_phoneme_length",
+    "speech.tts.voicevox.output_sampling_rate",
+    "speech.tts.voicevox.output_stereo",
+    "speech.tts.style_bert_vits2.endpoint_url",
+    "speech.tts.style_bert_vits2.model_name",
+    "speech.tts.style_bert_vits2.model_id",
+    "speech.tts.style_bert_vits2.speaker_name",
+    "speech.tts.style_bert_vits2.speaker_id",
+    "speech.tts.style_bert_vits2.style",
+    "speech.tts.style_bert_vits2.style_weight",
+    "speech.tts.style_bert_vits2.sdp_ratio",
+    "speech.tts.style_bert_vits2.noise",
+    "speech.tts.style_bert_vits2.noise_w",
+    "speech.tts.style_bert_vits2.length",
+    "speech.tts.style_bert_vits2.language",
+    "speech.tts.style_bert_vits2.auto_split",
+    "speech.tts.style_bert_vits2.split_interval",
+    "speech.tts.style_bert_vits2.assist_text",
+    "speech.tts.style_bert_vits2.assist_text_weight",
+    "integrations.notify_route",
+    "integrations.discord.bot_token",
+    "integrations.discord.channel_id",
 )
 
 
@@ -111,6 +190,11 @@ def build_settings_editor_preset_kinds() -> tuple[str, ...]:
     return SETTINGS_EDITOR_PRESET_KINDS
 
 
+# Block: Output preset keys export
+def build_output_preset_setting_keys() -> tuple[str, ...]:
+    return OUTPUT_PRESET_SETTING_KEYS
+
+
 # Block: Editor state seed
 def build_default_settings_editor_state(default_settings: dict[str, Any]) -> dict[str, Any]:
     return {
@@ -125,6 +209,25 @@ def build_default_settings_editor_state(default_settings: dict[str, Any]) -> dic
         },
         "revision": 1,
     }
+
+
+# Block: Output preset payload seed
+def build_default_output_preset_payload(
+    default_settings: dict[str, Any],
+    *,
+    notify_route: str | None = None,
+) -> dict[str, Any]:
+    payload = {
+        key: default_settings[key]
+        for key in OUTPUT_PRESET_SETTING_KEYS
+        if key not in {"integrations.notify_route"}
+    }
+    payload["integrations.notify_route"] = (
+        notify_route
+        if notify_route is not None
+        else str(default_settings["integrations.notify_route"])
+    )
+    return payload
 
 
 # Block: Preset seed export
@@ -220,47 +323,16 @@ def build_default_settings_presets(default_settings: dict[str, Any]) -> tuple[di
             "preset_id": "preset_output_default",
             "preset_kind": "output",
             "preset_name": "標準",
-            "payload": {
-                "speech.tts.enabled": bool(default_settings["speech.tts.enabled"]),
-                "speech.tts.api_key": str(default_settings["speech.tts.api_key"]),
-                "speech.tts.endpoint_url": str(default_settings["speech.tts.endpoint_url"]),
-                "speech.tts.model_uuid": str(default_settings["speech.tts.model_uuid"]),
-                "speech.tts.speaker_uuid": str(default_settings["speech.tts.speaker_uuid"]),
-                "speech.tts.style_id": int(default_settings["speech.tts.style_id"]),
-                "speech.tts.language": str(default_settings["speech.tts.language"]),
-                "speech.tts.speaking_rate": float(default_settings["speech.tts.speaking_rate"]),
-                "speech.tts.emotional_intensity": float(default_settings["speech.tts.emotional_intensity"]),
-                "speech.tts.tempo_dynamics": float(default_settings["speech.tts.tempo_dynamics"]),
-                "speech.tts.pitch": float(default_settings["speech.tts.pitch"]),
-                "speech.tts.volume": float(default_settings["speech.tts.volume"]),
-                "speech.tts.output_format": str(default_settings["speech.tts.output_format"]),
-                "integrations.notify_route": str(default_settings["integrations.notify_route"]),
-                "integrations.discord.bot_token": str(default_settings["integrations.discord.bot_token"]),
-                "integrations.discord.channel_id": str(default_settings["integrations.discord.channel_id"]),
-            },
+            "payload": build_default_output_preset_payload(default_settings),
         },
         {
             "preset_id": "preset_output_quiet",
             "preset_kind": "output",
             "preset_name": "UIのみ",
-            "payload": {
-                "speech.tts.enabled": bool(default_settings["speech.tts.enabled"]),
-                "speech.tts.api_key": str(default_settings["speech.tts.api_key"]),
-                "speech.tts.endpoint_url": str(default_settings["speech.tts.endpoint_url"]),
-                "speech.tts.model_uuid": str(default_settings["speech.tts.model_uuid"]),
-                "speech.tts.speaker_uuid": str(default_settings["speech.tts.speaker_uuid"]),
-                "speech.tts.style_id": int(default_settings["speech.tts.style_id"]),
-                "speech.tts.language": str(default_settings["speech.tts.language"]),
-                "speech.tts.speaking_rate": float(default_settings["speech.tts.speaking_rate"]),
-                "speech.tts.emotional_intensity": float(default_settings["speech.tts.emotional_intensity"]),
-                "speech.tts.tempo_dynamics": float(default_settings["speech.tts.tempo_dynamics"]),
-                "speech.tts.pitch": float(default_settings["speech.tts.pitch"]),
-                "speech.tts.volume": float(default_settings["speech.tts.volume"]),
-                "speech.tts.output_format": str(default_settings["speech.tts.output_format"]),
-                "integrations.notify_route": "ui_only",
-                "integrations.discord.bot_token": str(default_settings["integrations.discord.bot_token"]),
-                "integrations.discord.channel_id": str(default_settings["integrations.discord.channel_id"]),
-            },
+            "payload": build_default_output_preset_payload(
+                default_settings,
+                notify_route="ui_only",
+            ),
         },
     )
 
@@ -634,67 +706,58 @@ def _normalize_memory_preset_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 # Block: Output preset normalization
 def _normalize_output_preset_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    required_keys = {
-        "speech.tts.enabled",
-        "speech.tts.api_key",
-        "speech.tts.endpoint_url",
-        "speech.tts.model_uuid",
-        "speech.tts.speaker_uuid",
-        "speech.tts.style_id",
-        "speech.tts.language",
-        "speech.tts.speaking_rate",
-        "speech.tts.emotional_intensity",
-        "speech.tts.tempo_dynamics",
-        "speech.tts.pitch",
-        "speech.tts.volume",
-        "speech.tts.output_format",
-        "integrations.notify_route",
-        "integrations.discord.bot_token",
-        "integrations.discord.channel_id",
-    }
-    if set(payload) != required_keys:
+    if set(payload) != set(OUTPUT_PRESET_SETTING_KEYS):
         raise SettingsValidationError("invalid_settings_editor_document", "output preset keys do not match fixed shape")
     normalized = _normalize_keyed_preset_payload(
         payload=payload,
-        required_keys=(
-            "speech.tts.enabled",
-            "speech.tts.api_key",
-            "speech.tts.endpoint_url",
-            "speech.tts.model_uuid",
-            "speech.tts.speaker_uuid",
-            "speech.tts.style_id",
-            "speech.tts.language",
-            "speech.tts.speaking_rate",
-            "speech.tts.emotional_intensity",
-            "speech.tts.tempo_dynamics",
-            "speech.tts.pitch",
-            "speech.tts.volume",
-            "speech.tts.output_format",
-            "integrations.notify_route",
-            "integrations.discord.bot_token",
-            "integrations.discord.channel_id",
-        ),
+        required_keys=OUTPUT_PRESET_SETTING_KEYS,
     )
-    if normalized["speech.tts.output_format"] not in {"wav", "mp3", "ogg", "aac", "flac"}:
-        raise SettingsValidationError("invalid_settings_editor_document", "speech.tts.output_format is invalid")
+    tts_provider = normalized["speech.tts.provider"]
+    if tts_provider not in SUPPORTED_TTS_PROVIDERS:
+        raise SettingsValidationError("invalid_settings_editor_document", "speech.tts.provider is invalid")
+    if normalized["speech.tts.aivis_cloud.output_format"] not in AIVIS_CLOUD_OUTPUT_FORMATS:
+        raise SettingsValidationError("invalid_settings_editor_document", "speech.tts.aivis_cloud.output_format is invalid")
     if normalized["speech.tts.enabled"] is True:
-        for key in (
-            "speech.tts.api_key",
-            "speech.tts.endpoint_url",
-            "speech.tts.model_uuid",
-            "speech.tts.speaker_uuid",
-        ):
-            if not normalized[key]:
-                raise SettingsValidationError(
-                    "invalid_settings_editor_document",
-                    f"{key} is required when speech.tts.enabled is true",
-                )
+        _validate_enabled_tts_provider_settings(normalized)
     if normalized["integrations.notify_route"] not in {"ui_only", "discord"}:
         raise SettingsValidationError("invalid_settings_editor_document", "integrations.notify_route is invalid")
     if normalized["integrations.notify_route"] == "discord":
         if not normalized["integrations.discord.bot_token"] or not normalized["integrations.discord.channel_id"]:
             raise SettingsValidationError("invalid_settings_editor_document", "discord route requires discord credentials")
     return normalized
+
+
+# Block: Enabled TTS provider validation
+def _validate_enabled_tts_provider_settings(normalized: dict[str, Any]) -> None:
+    tts_provider = str(normalized["speech.tts.provider"])
+    if tts_provider == "aivis-cloud":
+        for key in (
+            "speech.tts.aivis_cloud.api_key",
+            "speech.tts.aivis_cloud.endpoint_url",
+            "speech.tts.aivis_cloud.model_uuid",
+            "speech.tts.aivis_cloud.speaker_uuid",
+        ):
+            if not normalized[key]:
+                raise SettingsValidationError(
+                    "invalid_settings_editor_document",
+                    f"{key} is required when speech.tts.enabled is true",
+                )
+        return
+    if tts_provider == "voicevox":
+        if not normalized["speech.tts.voicevox.endpoint_url"]:
+            raise SettingsValidationError(
+                "invalid_settings_editor_document",
+                "speech.tts.voicevox.endpoint_url is required when speech.tts.enabled is true",
+            )
+        return
+    if tts_provider == "style-bert-vits2":
+        if not normalized["speech.tts.style_bert_vits2.endpoint_url"]:
+            raise SettingsValidationError(
+                "invalid_settings_editor_document",
+                "speech.tts.style_bert_vits2.endpoint_url is required when speech.tts.enabled is true",
+            )
+        return
+    raise SettingsValidationError("invalid_settings_editor_document", "speech.tts.provider is invalid")
 
 
 # Block: Retrieval profile normalization

@@ -112,7 +112,7 @@ def _dispatch_speak_command(
         emitted_event_types=emitted_event_types,
     )
 
-    # Block: Cloud speech synthesis
+    # Block: Speech synthesis
     synthesis_result: SpeechSynthesisResponse | None = None
     try:
         synthesis_result = _synthesize_speech_if_enabled(
@@ -129,7 +129,7 @@ def _dispatch_speak_command(
             event_type="error",
             payload={
                 "error_code": "tts_synthesis_failed",
-                "message": f"クラウドTTSに失敗しました: {_error_message_text(error)}",
+                "message": f"TTS に失敗しました: {_error_message_text(error)}",
                 "retriable": False,
             },
             emit_ui_event=emit_ui_event,
@@ -577,27 +577,84 @@ def _build_speech_synthesis_request(
     response_text: str,
     effective_settings: dict[str, Any],
 ) -> SpeechSynthesisRequest:
+    provider = _required_non_empty_setting(effective_settings, "speech.tts.provider")
     return SpeechSynthesisRequest(
         cycle_id=cycle_id,
         message_id=message_id,
         text=response_text,
-        api_key=_required_non_empty_setting(effective_settings, "speech.tts.api_key"),
-        endpoint_url=_required_non_empty_setting(effective_settings, "speech.tts.endpoint_url"),
-        model_uuid=_required_non_empty_setting(effective_settings, "speech.tts.model_uuid"),
-        speaker_uuid=_required_non_empty_setting(effective_settings, "speech.tts.speaker_uuid"),
-        style_id=_required_setting_int(effective_settings, "speech.tts.style_id"),
-        use_ssml=False,
-        language=_required_non_empty_setting(effective_settings, "speech.tts.language"),
-        speaking_rate=_required_setting_number(effective_settings, "speech.tts.speaking_rate"),
-        emotional_intensity=_required_setting_number(effective_settings, "speech.tts.emotional_intensity"),
-        tempo_dynamics=_required_setting_number(effective_settings, "speech.tts.tempo_dynamics"),
-        pitch=_required_setting_number(effective_settings, "speech.tts.pitch"),
-        volume=_required_setting_number(effective_settings, "speech.tts.volume"),
-        output_format=_required_non_empty_setting(effective_settings, "speech.tts.output_format"),
+        provider=provider,
+        provider_settings=_build_provider_settings(
+            provider=provider,
+            effective_settings=effective_settings,
+        ),
     )
 
 
+# Block: Provider settings build
+def _build_provider_settings(
+    *,
+    provider: str,
+    effective_settings: dict[str, Any],
+) -> dict[str, Any]:
+    if provider == "aivis-cloud":
+        return {
+            "api_key": _required_non_empty_setting(effective_settings, "speech.tts.aivis_cloud.api_key"),
+            "endpoint_url": _required_non_empty_setting(effective_settings, "speech.tts.aivis_cloud.endpoint_url"),
+            "model_uuid": _required_non_empty_setting(effective_settings, "speech.tts.aivis_cloud.model_uuid"),
+            "speaker_uuid": _required_non_empty_setting(effective_settings, "speech.tts.aivis_cloud.speaker_uuid"),
+            "style_id": _required_setting_int(effective_settings, "speech.tts.aivis_cloud.style_id"),
+            "use_ssml": _required_setting_bool(effective_settings, "speech.tts.aivis_cloud.use_ssml"),
+            "language": _required_non_empty_setting(effective_settings, "speech.tts.aivis_cloud.language"),
+            "speaking_rate": _required_setting_number(effective_settings, "speech.tts.aivis_cloud.speaking_rate"),
+            "emotional_intensity": _required_setting_number(effective_settings, "speech.tts.aivis_cloud.emotional_intensity"),
+            "tempo_dynamics": _required_setting_number(effective_settings, "speech.tts.aivis_cloud.tempo_dynamics"),
+            "pitch": _required_setting_number(effective_settings, "speech.tts.aivis_cloud.pitch"),
+            "volume": _required_setting_number(effective_settings, "speech.tts.aivis_cloud.volume"),
+            "output_format": _required_non_empty_setting(effective_settings, "speech.tts.aivis_cloud.output_format"),
+        }
+    if provider == "voicevox":
+        return {
+            "endpoint_url": _required_non_empty_setting(effective_settings, "speech.tts.voicevox.endpoint_url"),
+            "speaker_id": _required_setting_int(effective_settings, "speech.tts.voicevox.speaker_id"),
+            "speed_scale": _required_setting_number(effective_settings, "speech.tts.voicevox.speed_scale"),
+            "pitch_scale": _required_setting_number(effective_settings, "speech.tts.voicevox.pitch_scale"),
+            "intonation_scale": _required_setting_number(effective_settings, "speech.tts.voicevox.intonation_scale"),
+            "volume_scale": _required_setting_number(effective_settings, "speech.tts.voicevox.volume_scale"),
+            "pre_phoneme_length": _required_setting_number(effective_settings, "speech.tts.voicevox.pre_phoneme_length"),
+            "post_phoneme_length": _required_setting_number(effective_settings, "speech.tts.voicevox.post_phoneme_length"),
+            "output_sampling_rate": _required_setting_int(effective_settings, "speech.tts.voicevox.output_sampling_rate"),
+            "output_stereo": _required_setting_bool(effective_settings, "speech.tts.voicevox.output_stereo"),
+        }
+    if provider == "style-bert-vits2":
+        return {
+            "endpoint_url": _required_non_empty_setting(effective_settings, "speech.tts.style_bert_vits2.endpoint_url"),
+            "model_name": _required_setting_string(effective_settings, "speech.tts.style_bert_vits2.model_name"),
+            "model_id": _required_setting_int(effective_settings, "speech.tts.style_bert_vits2.model_id"),
+            "speaker_name": _required_setting_string(effective_settings, "speech.tts.style_bert_vits2.speaker_name"),
+            "speaker_id": _required_setting_int(effective_settings, "speech.tts.style_bert_vits2.speaker_id"),
+            "style": _required_non_empty_setting(effective_settings, "speech.tts.style_bert_vits2.style"),
+            "style_weight": _required_setting_number(effective_settings, "speech.tts.style_bert_vits2.style_weight"),
+            "sdp_ratio": _required_setting_number(effective_settings, "speech.tts.style_bert_vits2.sdp_ratio"),
+            "noise": _required_setting_number(effective_settings, "speech.tts.style_bert_vits2.noise"),
+            "noise_w": _required_setting_number(effective_settings, "speech.tts.style_bert_vits2.noise_w"),
+            "length": _required_setting_number(effective_settings, "speech.tts.style_bert_vits2.length"),
+            "language": _required_non_empty_setting(effective_settings, "speech.tts.style_bert_vits2.language"),
+            "auto_split": _required_setting_bool(effective_settings, "speech.tts.style_bert_vits2.auto_split"),
+            "split_interval": _required_setting_number(effective_settings, "speech.tts.style_bert_vits2.split_interval"),
+            "assist_text": _required_setting_string(effective_settings, "speech.tts.style_bert_vits2.assist_text"),
+            "assist_text_weight": _required_setting_number(effective_settings, "speech.tts.style_bert_vits2.assist_text_weight"),
+        }
+    raise RuntimeError("speech.tts.provider is unsupported")
+
+
 # Block: Settings read helpers
+def _required_setting_string(effective_settings: dict[str, Any], key: str) -> str:
+    value = effective_settings.get(key)
+    if not isinstance(value, str):
+        raise RuntimeError(f"{key} must be string")
+    return value
+
+
 def _required_non_empty_setting(effective_settings: dict[str, Any], key: str) -> str:
     value = effective_settings.get(key)
     if not isinstance(value, str) or not value.strip():
@@ -617,6 +674,13 @@ def _required_setting_number(effective_settings: dict[str, Any], key: str) -> fl
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise RuntimeError(f"{key} must be number")
     return float(value)
+
+
+def _required_setting_bool(effective_settings: dict[str, Any], key: str) -> bool:
+    value = effective_settings.get(key)
+    if not isinstance(value, bool):
+        raise RuntimeError(f"{key} must be boolean")
+    return value
 
 
 # Block: Token chunk iterator

@@ -14,7 +14,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from otomekairo import __version__
-from otomekairo.infra.aivis_cloud_speech_synthesizer import default_tts_audio_dir
+from otomekairo.infra.speech_synthesis_common import default_tts_audio_dir
 from otomekairo.infra.wifi_camera_common import default_camera_capture_dir
 from otomekairo.infra.wifi_camera_sensor import WiFiCameraSensor
 from otomekairo.infra.sqlite_state_store import StoreConflictError, StoreValidationError, SqliteStateStore

@@ -363,6 +363,13 @@ body {
   margin-bottom: 8px;
 }
 
+/* Block: Settings sections */
+.settings-section + .settings-section {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
 .settings-preset-row {
   display: flex;
   gap: 8px;
@@ -401,6 +408,12 @@ body {
   display: grid;
   grid-template-columns: repeat(2, minmax(220px, 1fr));
   gap: 8px 12px;
+}
+
+/* Block: Settings stacks */
+.settings-stack {
+  display: flex;
+  flex-direction: column;
 }
 
 /* Block: Settings camera table */

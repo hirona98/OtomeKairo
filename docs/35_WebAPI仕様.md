@@ -492,7 +492,7 @@ flowchart LR
 <!-- Block: TTS Audio Asset Purpose -->
 ### 役割
 
-- `speak` 実行時にクラウド TTS で生成した音声ファイルを同一オリジンで返す
+- `speak` 実行時に選択中の TTS プロバイダで生成した音声ファイルを同一オリジンで返す
 - ブラウザ UI は、`message.audio_url` を `audio` 要素で再生してよい
 
 <!-- Block: Chat Stream -->
