@@ -334,7 +334,7 @@ body {
   border: 0;
   border-bottom: 3px solid transparent;
   background: #f0f0f0;
-  color: #666666;
+  color: var(--muted);
   padding: 0 15px;
   font-size: 14px;
   font-weight: 400;
@@ -344,12 +344,12 @@ body {
 
 .settings-tab:hover {
   background: #f7f7f7;
-  color: #4873cf;
+  color: var(--text);
 }
 
 .settings-tab.active {
   background: #ffffff;
-  color: #4873cf;
+  color: var(--text);
   border-bottom-color: #4873cf;
 }
 
@@ -381,7 +381,7 @@ body {
 .settings-card-title {
   font-size: 15px;
   font-weight: 700;
-  color: #4873cf;
+  color: var(--text);
   margin-bottom: 10px;
 }
 
@@ -398,7 +398,7 @@ body {
   left: 12px;
   padding: 0 6px;
   background: #ffffff;
-  color: #4873cf;
+  color: var(--text);
   font-size: 14px;
   font-weight: 700;
 }
@@ -428,7 +428,7 @@ body {
 }
 
 .settings-subsection-title {
-  color: #4873cf;
+  color: var(--text);
   font-size: 13px;
   font-weight: 700;
 }
@@ -440,7 +440,7 @@ body {
 
 .settings-expander-summary {
   padding: 8px 10px;
-  color: #4873cf;
+  color: var(--text);
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
@@ -520,7 +520,7 @@ body {
   border-radius: 0;
   padding: 0 6px;
   background: #ffffff;
-  color: #0078d7;
+  color: var(--text);
   font-size: 14px;
 }
 
@@ -538,7 +538,7 @@ body {
   align-items: center;
   gap: 8px;
   min-height: 24px;
-  color: #4873cf;
+  color: var(--text);
   font-size: 14px;
 }
 
@@ -603,7 +603,7 @@ body {
   border-radius: 0;
   padding: 8px;
   font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-  color: #0078d7;
+  color: var(--text);
   background: #ffffff;
   resize: vertical;
   outline: none;
@@ -652,7 +652,7 @@ body {
 }
 
 .settings-diagnostics-summary {
-  color: #4873cf;
+  color: var(--text);
   font-weight: 700;
   cursor: pointer;
   user-select: none;
