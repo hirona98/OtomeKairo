@@ -13,10 +13,10 @@
   const attachments = document.getElementById("attachments");
   const settingsButton = document.getElementById("btn-settings");
   const settingsPanel = document.getElementById("settings-panel");
-  const settingsDummyButton = document.getElementById("btn-settings-dummy");
   const settingsReloadButton = document.getElementById("btn-settings-reload");
-  const settingsSaveButton = document.getElementById("btn-settings-save");
-  const settingsCloseButton = document.getElementById("btn-settings-close");
+  const settingsOkButton = document.getElementById("btn-settings-ok");
+  const settingsCancelButton = document.getElementById("btn-settings-cancel");
+  const settingsApplyButton = document.getElementById("btn-settings-apply");
   const settingsBehaviorCard = document.getElementById("settings-behavior-card");
   const settingsLlmCard = document.getElementById("settings-llm-card");
   const settingsMemoryCard = document.getElementById("settings-memory-card");
@@ -34,6 +34,20 @@
   // Block: Settings schema
   const SETTINGS_TAB_KEYS = ["behavior", "llm", "memory", "system"];
   const SETTINGS_PRESET_KINDS = ["behavior", "llm", "memory", "output"];
+  const PRESET_SECTION_META = {
+    behavior: {
+      title: "行動設定",
+      description: "行動選択に使う傾向だけをここで切り替えます。",
+    },
+    llm: {
+      title: "LLM設定",
+      description: "会話生成に使うモデルと接続情報をまとめます。",
+    },
+    memory: {
+      title: "Embedding設定",
+      description: "記憶検索と文脈組み立てに使う設定をまとめます。",
+    },
+  };
   const TTS_PROVIDER_LABELS = {
     "aivis-cloud": "Aivis Cloud API",
     voicevox: "VOICEVOX",
@@ -180,15 +194,15 @@
     settingsButton.addEventListener("click", () => {
       void openSettingsPanel();
     });
-    settingsCloseButton.addEventListener("click", closeSettingsPanel);
     settingsReloadButton.addEventListener("click", () => {
       void reloadSettingsPanel();
     });
-    settingsSaveButton.addEventListener("click", () => {
-      void handleSettingsSave();
+    settingsOkButton.addEventListener("click", () => {
+      void handleSettingsOk();
     });
-    settingsDummyButton.addEventListener("click", () => {
-      appendNotice("settings_dummy", "このボタンはまだダミーです");
+    settingsCancelButton.addEventListener("click", handleSettingsCancel);
+    settingsApplyButton.addEventListener("click", () => {
+      void handleSettingsApply();
     });
     for (const button of settingsTabButtons) {
       button.addEventListener("click", () => {
@@ -377,12 +391,37 @@
     await Promise.all([refreshStatusSnapshot(), loadSettingsEditorSnapshot()]);
   }
 
-  async function handleSettingsSave() {
+  // Block: Settings save helpers
+  async function handleSettingsOk() {
     if (editorDraft === null) {
       appendError("設定ドラフトが未初期化です");
       return;
     }
-    settingsSaveButton.disabled = true;
+    if (isSettingsDraftDirty() !== true) {
+      closeSettingsPanel();
+      return;
+    }
+    await saveSettingsEditor(true);
+  }
+
+  function handleSettingsCancel() {
+    discardSettingsDraft();
+    closeSettingsPanel();
+  }
+
+  async function handleSettingsApply() {
+    await saveSettingsEditor(false);
+  }
+
+  async function saveSettingsEditor(closeAfterSave) {
+    if (editorDraft === null) {
+      appendError("設定ドラフトが未初期化です");
+      return;
+    }
+    settingsOkButton.disabled = true;
+    settingsCancelButton.disabled = true;
+    settingsApplyButton.disabled = true;
+    settingsReloadButton.disabled = true;
     try {
       const response = await fetch("/api/settings/editor", {
         method: "PUT",
@@ -398,10 +437,16 @@
       applyEditorSnapshot(payload);
       settingsStatus.textContent = "設定を保存しました";
       await refreshStatusSnapshot();
+      if (closeAfterSave === true) {
+        closeSettingsPanel();
+      }
     } catch (error) {
       settingsStatus.textContent = `保存失敗: ${error.message}`;
     } finally {
-      settingsSaveButton.disabled = false;
+      settingsOkButton.disabled = false;
+      settingsCancelButton.disabled = false;
+      settingsApplyButton.disabled = false;
+      settingsReloadButton.disabled = false;
     }
   }
 
@@ -575,7 +620,6 @@
     const presetEntries = readPresetEntries(kind);
     const activePresetId = readActivePresetId(kind);
     const activePreset = requirePresetEntry(kind, activePresetId);
-    const fieldsContainerClass = kind === "output" ? "settings-stack" : "settings-grid";
     const selectOptions = presetEntries
       .filter((entry) => entry.archived !== true || entry.preset_id === activePresetId)
       .map((entry) => {
@@ -584,24 +628,64 @@
         return `<option value="${escapeHtml(entry.preset_id)}"${selected}>${escapeHtml(entry.preset_name)}${archivedTag}</option>`;
       })
       .join("");
-    const fieldsHtml = kind === "output"
+    const selectionSectionHtml = renderSettingsGroup(
+      "プリセット選択",
+      kind === "output"
+        ? "TTS と通知の組み合わせをプリセットとして保持します。"
+        : "設定プリセットを切り替えて編集します。",
+      renderPresetSelectionFields(
+        kind,
+        activePreset,
+        selectOptions,
+      ),
+    );
+    const bodySectionHtml = kind === "output"
       ? renderOutputPresetFields(activePreset.payload)
-      : PRESET_DESCRIPTORS[kind]
-        .map((descriptor) => renderPresetField(kind, activePreset.payload, descriptor))
-        .join("");
+      : renderSettingsGroup(
+        PRESET_SECTION_META[kind].title,
+        PRESET_SECTION_META[kind].description,
+        PRESET_DESCRIPTORS[kind]
+          .map((descriptor) => renderPresetField(kind, activePreset.payload, descriptor))
+          .join(""),
+      );
     container.innerHTML = `
       <div class="settings-card-title">${escapeHtml(title)}</div>
-      <div class="settings-grid">
-        <label class="settings-field">
-          <span class="settings-label">使用プリセット</span>
-          <select class="settings-input" data-active-preset-kind="${escapeHtml(kind)}">${selectOptions}</select>
-        </label>
-        <label class="settings-field">
-          <span class="settings-label">プリセット名</span>
-          <input class="settings-input" type="text" value="${escapeHtml(activePreset.preset_name)}" data-preset-name-kind="${escapeHtml(kind)}" />
-        </label>
+      <div class="settings-stack">
+        ${selectionSectionHtml}
+        ${bodySectionHtml}
       </div>
-      <div class="${fieldsContainerClass}">${fieldsHtml}</div>
+    `;
+  }
+
+  // Block: Preset selection rendering
+  function renderPresetSelectionFields(kind, activePreset, selectOptions) {
+    return `
+      <div class="settings-preset-toolbar">
+        <select class="settings-input" data-active-preset-kind="${escapeHtml(kind)}">${selectOptions}</select>
+        <button class="settings-btn settings-btn-small" type="button" data-preset-action="add" data-preset-action-kind="${escapeHtml(kind)}">追加</button>
+        <button class="settings-btn settings-btn-small" type="button" data-preset-action="duplicate" data-preset-action-kind="${escapeHtml(kind)}">複製</button>
+        <button class="settings-btn settings-btn-small danger" type="button" data-preset-action="archive" data-preset-action-kind="${escapeHtml(kind)}">削除</button>
+      </div>
+      ${renderRowField(
+        "プリセット名",
+        `<input class="settings-input" type="text" value="${escapeHtml(activePreset.preset_name)}" data-preset-name-kind="${escapeHtml(kind)}" />`,
+      )}
+    `;
+  }
+
+  // Block: Group rendering
+  function renderSettingsGroup(title, description, bodyHtml) {
+    const descriptionHtml = description
+      ? `<div class="settings-note">${escapeHtml(description)}</div>`
+      : "";
+    return `
+      <section class="settings-group">
+        <div class="settings-group-title">${escapeHtml(title)}</div>
+        <div class="settings-group-body">
+          ${descriptionHtml}
+          <div class="settings-stack">${bodyHtml}</div>
+        </div>
+      </section>
     `;
   }
 
@@ -626,17 +710,17 @@
       .map((descriptor) => renderPresetField("output", payload, descriptor))
       .join("");
     return [
-      renderOutputSection(
+      renderSettingsGroup(
         "TTS 共通",
         `現在のプロバイダ: ${TTS_PROVIDER_LABELS[provider]}`,
         commonFieldsHtml,
       ),
-      renderOutputSection(
+      renderSettingsGroup(
         `${TTS_PROVIDER_LABELS[provider]} 設定`,
         "選択中の TTS プロバイダに必要な接続設定と音声パラメータを編集します。",
         providerFieldsHtml,
       ),
-      renderOutputSection(
+      renderSettingsGroup(
         "通知設定",
         notifyRoute === "discord"
           ? "Discord 通知を有効にしています。"
@@ -646,25 +730,15 @@
     ].join("");
   }
 
-  function renderOutputSection(title, description, fieldsHtml) {
-    return `
-      <div class="settings-section">
-        <div class="settings-card-title">${escapeHtml(title)}</div>
-        <div class="settings-note">${escapeHtml(description)}</div>
-        <div class="settings-grid">${fieldsHtml}</div>
-      </div>
-    `;
-  }
-
   function renderPresetField(kind, payload, descriptor) {
     const rawValue = readNestedValue(payload, descriptor.path);
     const path = escapeHtml(descriptor.path);
     const label = escapeHtml(descriptor.label);
     if (descriptor.kind === "boolean") {
       return `
-        <label class="settings-check">
+        <label class="settings-check-row">
           <input type="checkbox" ${rawValue === true ? "checked" : ""} data-preset-kind="${escapeHtml(kind)}" data-preset-path="${path}" data-value-kind="boolean" />
-          <span>${label}</span>
+          <span class="settings-check-text">${label}</span>
         </label>
       `;
     }
@@ -678,37 +752,38 @@
           return `<option value="${escapeHtml(optionValue)}"${selected}>${escapeHtml(optionLabel)}</option>`;
         })
         .join("");
-      return `
-        <label class="settings-field">
-          <span class="settings-label">${label}</span>
-          <select class="settings-input" data-preset-kind="${escapeHtml(kind)}" data-preset-path="${path}" data-value-kind="string">${optionsHtml}</select>
-        </label>
-      `;
+      return renderRowField(
+        label,
+        `<select class="settings-input" data-preset-kind="${escapeHtml(kind)}" data-preset-path="${path}" data-value-kind="string">${optionsHtml}</select>`,
+      );
     }
     if (descriptor.kind === "password") {
-      return `
-        <label class="settings-field">
-          <span class="settings-label">${label}</span>
-          <input class="settings-input" type="text" value="${escapeHtml(requireString(rawValue, descriptor.path))}" data-preset-kind="${escapeHtml(kind)}" data-preset-path="${path}" data-value-kind="string" />
-        </label>
-      `;
+      return renderRowField(
+        label,
+        `<input class="settings-input" type="text" value="${escapeHtml(requireString(rawValue, descriptor.path))}" data-preset-kind="${escapeHtml(kind)}" data-preset-path="${path}" data-value-kind="string" />`,
+      );
     }
     if (descriptor.kind === "text") {
-      return `
-        <label class="settings-field">
-          <span class="settings-label">${label}</span>
-          <input class="settings-input" type="text" value="${escapeHtml(requireString(rawValue, descriptor.path))}" data-preset-kind="${escapeHtml(kind)}" data-preset-path="${path}" data-value-kind="string" />
-        </label>
-      `;
+      return renderRowField(
+        label,
+        `<input class="settings-input" type="text" value="${escapeHtml(requireString(rawValue, descriptor.path))}" data-preset-kind="${escapeHtml(kind)}" data-preset-path="${path}" data-value-kind="string" />`,
+      );
     }
     const numberValue = requireNumber(rawValue, descriptor.path);
     const step = descriptor.step ?? 1;
     const minAttr = descriptor.min !== undefined ? ` min="${descriptor.min}"` : "";
     const maxAttr = descriptor.max !== undefined ? ` max="${descriptor.max}"` : "";
+    return renderRowField(
+      label,
+      `<input class="settings-input settings-input-number" type="number" value="${String(numberValue)}" step="${String(step)}"${minAttr}${maxAttr} data-preset-kind="${escapeHtml(kind)}" data-preset-path="${path}" data-value-kind="${escapeHtml(descriptor.kind)}" />`,
+    );
+  }
+
+  function renderRowField(label, controlHtml) {
     return `
-      <label class="settings-field">
-        <span class="settings-label">${label}</span>
-        <input class="settings-input" type="number" value="${String(numberValue)}" step="${String(step)}"${minAttr}${maxAttr} data-preset-kind="${escapeHtml(kind)}" data-preset-path="${path}" data-value-kind="${escapeHtml(descriptor.kind)}" />
+      <label class="settings-row-field">
+        <span class="settings-row-label">${escapeHtml(label)}</span>
+        <span class="settings-row-control">${controlHtml}</span>
       </label>
     `;
   }
@@ -720,7 +795,11 @@
       .join("");
     settingsSystemCard.innerHTML = `
       <div class="settings-card-title">システム設定</div>
-      <div class="settings-grid">${fieldsHtml}</div>
+      ${renderSettingsGroup(
+        "運用設定",
+        "ランタイムの運用値をここで調整します。",
+        fieldsHtml,
+      )}
     `;
   }
 
@@ -728,9 +807,9 @@
     const value = systemValues[descriptor.key];
     if (descriptor.kind === "boolean") {
       return `
-        <label class="settings-check">
+        <label class="settings-check-row">
           <input type="checkbox" ${value === true ? "checked" : ""} data-system-key="${escapeHtml(descriptor.key)}" data-value-kind="boolean" />
-          <span>${escapeHtml(descriptor.label)}</span>
+          <span class="settings-check-text">${escapeHtml(descriptor.label)}</span>
         </label>
       `;
     }
@@ -739,12 +818,10 @@
       : requireNumber(value, descriptor.key);
     const minAttr = descriptor.min !== undefined ? ` min="${descriptor.min}"` : "";
     const maxAttr = descriptor.max !== undefined ? ` max="${descriptor.max}"` : "";
-    return `
-      <label class="settings-field">
-        <span class="settings-label">${escapeHtml(descriptor.label)}</span>
-        <input class="settings-input" type="number" value="${String(numberValue)}" step="${String(descriptor.step ?? 1)}"${minAttr}${maxAttr} data-system-key="${escapeHtml(descriptor.key)}" data-value-kind="${escapeHtml(descriptor.kind)}" />
-      </label>
-    `;
+    return renderRowField(
+      descriptor.label,
+      `<input class="settings-input settings-input-number" type="number" value="${String(numberValue)}" step="${String(descriptor.step ?? 1)}"${minAttr}${maxAttr} data-system-key="${escapeHtml(descriptor.key)}" data-value-kind="${escapeHtml(descriptor.kind)}" />`,
+    );
   }
 
   function renderCameraConnectionsCard() {
@@ -752,10 +829,15 @@
     if (cameraConnections.length === 0) {
       settingsCameraCard.innerHTML = `
         <div class="settings-card-title">カメラ接続</div>
-        <div class="settings-desc">接続はまだありません。</div>
-        <div class="settings-actions">
-          <button class="settings-btn" type="button" data-camera-action="add">追加</button>
-        </div>
+        ${renderSettingsGroup(
+          "接続一覧",
+          "接続はまだありません。",
+          `
+            <div class="settings-actions">
+              <button class="settings-btn settings-btn-small" type="button" data-camera-action="add">追加</button>
+            </div>
+          `,
+        )}
       `;
       return;
     }
@@ -779,43 +861,40 @@
     const activeCameraConnection = requireActiveCameraConnection();
     settingsCameraCard.innerHTML = `
       <div class="settings-card-title">カメラ接続</div>
-      <div class="settings-note">一覧を選ぶと下の編集欄が切り替わります。</div>
-      <div class="settings-table-wrap">
-        <table class="settings-table">
-          <thead>
-            <tr>
-              <th>使用</th>
-              <th>表示名</th>
-              <th>IP アドレス</th>
-              <th>アカウント</th>
-              <th>パスワード</th>
-            </tr>
-          </thead>
-          <tbody>${rowsHtml}</tbody>
-        </table>
-      </div>
-      <div class="settings-grid">
-        <label class="settings-field">
-          <span class="settings-label">表示名</span>
-          <input class="settings-input" type="text" value="${escapeHtml(activeCameraConnection.display_name)}" data-camera-field="display_name" />
-        </label>
-        <label class="settings-field">
-          <span class="settings-label">IP アドレス</span>
-          <input class="settings-input" type="text" value="${escapeHtml(activeCameraConnection.host)}" data-camera-field="host" />
-        </label>
-        <label class="settings-field">
-          <span class="settings-label">アカウント</span>
-          <input class="settings-input" type="text" value="${escapeHtml(activeCameraConnection.username)}" data-camera-field="username" />
-        </label>
-        <label class="settings-field">
-          <span class="settings-label">パスワード</span>
-          <input class="settings-input" type="text" value="${escapeHtml(activeCameraConnection.password)}" data-camera-field="password" />
-        </label>
-      </div>
-      <div class="settings-actions">
-        <button class="settings-btn" type="button" data-camera-action="add">追加</button>
-        <button class="settings-btn danger" type="button" data-camera-action="remove">削除</button>
-      </div>
+      ${renderSettingsGroup(
+        "接続一覧",
+        "一覧を選ぶと下の編集欄が切り替わります。",
+        `
+          <div class="settings-table-wrap">
+            <table class="settings-table">
+              <thead>
+                <tr>
+                  <th>使用</th>
+                  <th>表示名</th>
+                  <th>IP アドレス</th>
+                  <th>アカウント</th>
+                  <th>パスワード</th>
+                </tr>
+              </thead>
+              <tbody>${rowsHtml}</tbody>
+            </table>
+          </div>
+          <div class="settings-actions">
+            <button class="settings-btn settings-btn-small" type="button" data-camera-action="add">追加</button>
+            <button class="settings-btn settings-btn-small danger" type="button" data-camera-action="remove">削除</button>
+          </div>
+        `,
+      )}
+      ${renderSettingsGroup(
+        "接続設定",
+        "",
+        [
+          renderRowField("表示名", `<input class="settings-input" type="text" value="${escapeHtml(activeCameraConnection.display_name)}" data-camera-field="display_name" />`),
+          renderRowField("IP アドレス", `<input class="settings-input" type="text" value="${escapeHtml(activeCameraConnection.host)}" data-camera-field="host" />`),
+          renderRowField("アカウント", `<input class="settings-input" type="text" value="${escapeHtml(activeCameraConnection.username)}" data-camera-field="username" />`),
+          renderRowField("パスワード", `<input class="settings-input" type="text" value="${escapeHtml(activeCameraConnection.password)}" data-camera-field="password" />`),
+        ].join(""),
+      )}
     `;
   }
 
@@ -827,6 +906,10 @@
     const presetNameInputs = settingsPanel.querySelectorAll("[data-preset-name-kind]");
     for (const element of presetNameInputs) {
       element.addEventListener("input", handlePresetNameChange);
+    }
+    const presetActionButtons = settingsPanel.querySelectorAll("[data-preset-action][data-preset-action-kind]");
+    for (const element of presetActionButtons) {
+      element.addEventListener("click", handlePresetAction);
     }
     const presetValueInputs = settingsPanel.querySelectorAll("[data-preset-kind][data-preset-path]");
     for (const element of presetValueInputs) {
@@ -874,6 +957,36 @@
     const presetEntry = requireActivePresetEntry(kind);
     presetEntry.preset_name = String(element.value);
     updateSettingsDirtyState();
+  }
+
+  function handlePresetAction(event) {
+    if (editorDraft === null) {
+      appendError("設定ドラフトが未初期化です");
+      return;
+    }
+    const element = event.currentTarget;
+    const kind = String(element.dataset.presetActionKind || "");
+    const action = String(element.dataset.presetAction || "");
+    if (!SETTINGS_PRESET_KINDS.includes(kind)) {
+      appendError("プリセット種別が不正です");
+      return;
+    }
+    if (action === "add") {
+      addPreset(kind);
+      renderSettingsEditor();
+      return;
+    }
+    if (action === "duplicate") {
+      duplicateActivePreset(kind);
+      renderSettingsEditor();
+      return;
+    }
+    if (action === "archive") {
+      archiveActivePreset(kind);
+      renderSettingsEditor();
+      return;
+    }
+    appendError("プリセット操作が不正です");
   }
 
   function handlePresetFieldChange(event) {
@@ -946,9 +1059,20 @@
     appendError("カメラ操作が不正です");
   }
 
-  function updateSettingsDirtyState() {
-    if (editorDraft === null || latestEditorSnapshot === null) {
+  function discardSettingsDraft() {
+    if (latestEditorSnapshot === null) {
       return;
+    }
+    editorDraft = {
+      editor_state: cloneJson(latestEditorSnapshot.editor_state),
+      preset_catalogs: cloneJson(latestEditorSnapshot.preset_catalogs),
+      camera_connections: cloneJson(latestEditorSnapshot.camera_connections),
+    };
+  }
+
+  function isSettingsDraftDirty() {
+    if (editorDraft === null || latestEditorSnapshot === null) {
+      return false;
     }
     const currentCanonical = JSON.stringify(editorDraft);
     const serverCanonical = JSON.stringify({
@@ -956,9 +1080,13 @@
       preset_catalogs: latestEditorSnapshot.preset_catalogs,
       camera_connections: latestEditorSnapshot.camera_connections,
     });
-    settingsStatus.textContent = currentCanonical === serverCanonical
-      ? "保存済み"
-      : "未保存の変更があります";
+    return currentCanonical !== serverCanonical;
+  }
+
+  function updateSettingsDirtyState() {
+    settingsStatus.textContent = isSettingsDraftDirty() === true
+      ? "未保存の変更があります"
+      : "保存済み";
   }
 
   function applySettingsTabState() {
@@ -1304,6 +1432,121 @@
       throw new Error(`${kind} の payload が不正です`);
     }
     return entry;
+  }
+
+  function addPreset(kind) {
+    if (!("crypto" in window) || typeof window.crypto.randomUUID !== "function") {
+      throw new Error("このブラウザではプリセット ID を生成できません");
+    }
+    const presetEntries = readPresetEntries(kind);
+    const presetId = `${presetIdPrefix(kind)}_${window.crypto.randomUUID().replace(/-/g, "")}`;
+    const nextSortOrder = presetEntries.length === 0
+      ? 10
+      : Math.max(...presetEntries.map((entry) => requireInteger(entry.sort_order, `${kind}.sort_order`))) + 10;
+    const nowMs = Date.now();
+    const basePayload = buildDefaultPresetPayload(kind);
+    presetEntries.push({
+      preset_id: presetId,
+      preset_name: `${presetBaseName(kind)} ${visiblePresetCount(kind) + 1}`,
+      archived: false,
+      sort_order: nextSortOrder,
+      updated_at: nowMs,
+      payload: basePayload,
+    });
+    writeActivePresetId(kind, presetId);
+    updateSettingsDirtyState();
+  }
+
+  function duplicateActivePreset(kind) {
+    if (!("crypto" in window) || typeof window.crypto.randomUUID !== "function") {
+      throw new Error("このブラウザではプリセット ID を生成できません");
+    }
+    const presetEntries = readPresetEntries(kind);
+    const activePreset = requireActivePresetEntry(kind);
+    const presetId = `${presetIdPrefix(kind)}_${window.crypto.randomUUID().replace(/-/g, "")}`;
+    const nextSortOrder = presetEntries.length === 0
+      ? 10
+      : Math.max(...presetEntries.map((entry) => requireInteger(entry.sort_order, `${kind}.sort_order`))) + 10;
+    const nowMs = Date.now();
+    presetEntries.push({
+      preset_id: presetId,
+      preset_name: `${activePreset.preset_name} のコピー`,
+      archived: false,
+      sort_order: nextSortOrder,
+      updated_at: nowMs,
+      payload: cloneJson(activePreset.payload),
+    });
+    writeActivePresetId(kind, presetId);
+    updateSettingsDirtyState();
+  }
+
+  function archiveActivePreset(kind) {
+    const presetEntries = readPresetEntries(kind);
+    const activePresetId = readActivePresetId(kind);
+    const visibleEntries = presetEntries.filter((entry) => entry.archived !== true);
+    if (visibleEntries.length <= 1) {
+      appendError("最後のプリセットは削除できません");
+      return;
+    }
+    const activePreset = requireActivePresetEntry(kind);
+    activePreset.archived = true;
+    activePreset.updated_at = Date.now();
+    const nextActiveEntry = visibleEntries.find((entry) => String(entry.preset_id) !== activePresetId);
+    if (nextActiveEntry === undefined) {
+      throw new Error("切り替え先のプリセットが見つかりません");
+    }
+    writeActivePresetId(kind, String(nextActiveEntry.preset_id));
+    updateSettingsDirtyState();
+  }
+
+  function buildDefaultPresetPayload(kind) {
+    if (latestEditorSnapshot !== null && isObject(latestEditorSnapshot.preset_catalogs)) {
+      const snapshotEntries = latestEditorSnapshot.preset_catalogs[kind];
+      if (Array.isArray(snapshotEntries) && snapshotEntries.length > 0) {
+        const templateEntry = snapshotEntries.find((entry) => entry.archived !== true && isObject(entry.payload))
+          || snapshotEntries.find((entry) => isObject(entry.payload));
+        if (templateEntry !== undefined) {
+          return cloneJson(templateEntry.payload);
+        }
+      }
+    }
+    return cloneJson(requireActivePresetEntry(kind).payload);
+  }
+
+  function presetIdPrefix(kind) {
+    if (kind === "behavior") {
+      return "preset_beh";
+    }
+    if (kind === "llm") {
+      return "preset_llm";
+    }
+    if (kind === "memory") {
+      return "preset_mem";
+    }
+    if (kind === "output") {
+      return "preset_out";
+    }
+    throw new Error(`未対応のプリセット種別です: ${kind}`);
+  }
+
+  function presetBaseName(kind) {
+    if (kind === "behavior") {
+      return "振る舞い";
+    }
+    if (kind === "llm") {
+      return "会話";
+    }
+    if (kind === "memory") {
+      return "記憶";
+    }
+    if (kind === "output") {
+      return "出力";
+    }
+    throw new Error(`未対応のプリセット種別です: ${kind}`);
+  }
+
+  function visiblePresetCount(kind) {
+    return readPresetEntries(kind).filter((entry) => entry.archived !== true).length;
   }
 
   function requireSystemValues() {

@@ -45,56 +45,69 @@
       </section>
 
       <section id="settings-panel" class="settings hidden" aria-live="polite">
-        <!-- Block: Settings toolbar -->
-        <div class="settings-toolbar">
-          <button id="btn-settings-close" class="settings-btn settings-btn-back" type="button">チャットに戻る</button>
-          <div class="settings-toolbar-right">
-            <button id="btn-settings-reload" class="settings-btn" type="button">再読込</button>
-            <button id="btn-settings-save" class="settings-btn primary" type="button">保存</button>
+        <!-- Block: Settings window -->
+        <div class="settings-window">
+          <!-- Block: Settings header -->
+          <div class="settings-window-header">
+            <div>
+              <div class="settings-window-title">設定</div>
+              <div class="settings-window-subtitle">プリセット単位で編集し、保存時にまとめて反映します。</div>
+            </div>
           </div>
-          <button id="btn-settings-dummy" class="settings-btn danger settings-btn-logout" type="button">ダミー</button>
-        </div>
+          <!-- Block: Settings tabs -->
+          <div class="settings-tabs" role="tablist" aria-label="設定タブ">
+            <button class="settings-tab active" data-settings-tab="behavior" type="button">振る舞い</button>
+            <button class="settings-tab" data-settings-tab="llm" type="button">会話</button>
+            <button class="settings-tab" data-settings-tab="memory" type="button">記憶</button>
+            <button class="settings-tab" data-settings-tab="system" type="button">システム</button>
+          </div>
 
-        <!-- Block: Settings note -->
-        <div class="settings-desc">CocoroGhost 風の画面構成を保ちつつ、プリセットを含む設定全体をこの画面で編集します。</div>
+          <!-- Block: Settings content -->
+          <div class="settings-body">
+            <div class="settings-pages">
+              <section class="settings-page" data-settings-page="behavior">
+                <div id="settings-behavior-card" class="settings-card"></div>
+              </section>
 
-        <!-- Block: Settings tabs -->
-        <div class="settings-tabs" role="tablist" aria-label="設定タブ">
-          <button class="settings-tab active" data-settings-tab="behavior" type="button">振る舞い</button>
-          <button class="settings-tab" data-settings-tab="llm" type="button">会話</button>
-          <button class="settings-tab" data-settings-tab="memory" type="button">記憶</button>
-          <button class="settings-tab" data-settings-tab="system" type="button">システム</button>
-        </div>
+              <section class="settings-page hidden" data-settings-page="llm">
+                <div id="settings-llm-card" class="settings-card"></div>
+              </section>
 
-        <div id="settings-status" class="status"></div>
+              <section class="settings-page hidden" data-settings-page="memory">
+                <div id="settings-memory-card" class="settings-card"></div>
+              </section>
 
-        <!-- Block: Settings content -->
-        <div class="settings-pages">
-          <section class="settings-page" data-settings-page="behavior">
-            <div id="settings-behavior-card" class="settings-card"></div>
-          </section>
-
-          <section class="settings-page hidden" data-settings-page="llm">
-            <div id="settings-llm-card" class="settings-card"></div>
-          </section>
-
-          <section class="settings-page hidden" data-settings-page="memory">
-            <div id="settings-memory-card" class="settings-card"></div>
-          </section>
-
-          <section class="settings-page hidden" data-settings-page="system">
-            <div id="settings-output-card" class="settings-card"></div>
-            <div id="settings-system-card" class="settings-card"></div>
-            <div id="settings-camera-card" class="settings-card"></div>
-            <div class="settings-card">
-              <div class="settings-card-title">現在状態</div>
-              <pre id="status-json" class="settings-json-view">{}</pre>
+              <section class="settings-page hidden" data-settings-page="system">
+                <div id="settings-output-card" class="settings-card"></div>
+                <div id="settings-system-card" class="settings-card"></div>
+                <div id="settings-camera-card" class="settings-card"></div>
+                <details class="settings-diagnostics">
+                  <summary class="settings-diagnostics-summary">診断情報</summary>
+                  <div class="settings-card">
+                    <div class="settings-card-title">現在状態</div>
+                    <pre id="status-json" class="settings-json-view">{}</pre>
+                  </div>
+                  <div class="settings-card">
+                    <div class="settings-card-title">有効設定</div>
+                    <pre id="settings-json" class="settings-json-view">{}</pre>
+                  </div>
+                </details>
+              </section>
             </div>
-            <div class="settings-card">
-              <div class="settings-card-title">有効設定</div>
-              <pre id="settings-json" class="settings-json-view">{}</pre>
+          </div>
+
+          <!-- Block: Settings footer -->
+          <div class="settings-footer">
+            <div class="settings-footer-left">
+              <button id="btn-settings-reload" class="settings-btn" type="button">再読込</button>
             </div>
-          </section>
+            <div id="settings-status" class="settings-footer-status">保存済み</div>
+            <div class="settings-footer-right">
+              <button id="btn-settings-ok" class="settings-btn" type="button">OK</button>
+              <button id="btn-settings-cancel" class="settings-btn" type="button">キャンセル</button>
+              <button id="btn-settings-apply" class="settings-btn" type="button">適用</button>
+            </div>
+          </div>
         </div>
       </section>
     </main>
