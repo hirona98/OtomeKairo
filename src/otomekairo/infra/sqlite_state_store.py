@@ -34,6 +34,12 @@ from otomekairo.schema.settings import (
     decode_requested_value,
     normalize_settings_editor_document,
 )
+from otomekairo.usecase.write_memory_plan import (
+    build_write_memory_plan,
+    validate_write_memory_event_snapshots,
+    validate_write_memory_payload,
+    validate_write_memory_plan,
+)
 
 
 # Block: Schema constants
@@ -1738,9 +1744,8 @@ class SqliteStateStore:
     def complete_write_memory_job(self, *, memory_job: MemoryJobRecord) -> str:
         if memory_job.job_kind != "write_memory":
             raise StoreValidationError("memory_job.job_kind must be write_memory")
-        source_event_ids = memory_job.payload["source_event_ids"]
-        if not isinstance(source_event_ids, list) or not source_event_ids:
-            raise StoreValidationError("write_memory source_event_ids must not be empty")
+        validated_payload = validate_write_memory_payload(memory_job.payload)
+        source_event_ids = list(validated_payload["source_event_ids"])
         now_ms = _now_ms()
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -1752,50 +1757,39 @@ class SqliteStateStore:
                 connection=connection,
                 event_ids=source_event_ids,
             )
-            summary_text = _build_write_memory_summary_text(
-                primary_event_id=str(memory_job.payload["primary_event_id"]),
-                event_rows=event_rows,
+            event_entries = _write_memory_plan_event_entries(event_rows)
+            validate_write_memory_event_snapshots(
+                payload=validated_payload,
+                event_entries=event_entries,
             )
-            memory_state_targets = [
-                self._insert_memory_state_with_revision(
-                    connection=connection,
-                    memory_kind="summary",
-                    body_text=summary_text,
-                    payload_json={
-                        "source_job_id": memory_job.job_id,
-                        "job_kind": memory_job.job_kind,
-                        "source_cycle_id": memory_job.payload["cycle_id"],
-                        "primary_event_id": memory_job.payload["primary_event_id"],
-                        "source_event_ids": source_event_ids,
-                        "summary_kind": "minimal_write_memory",
-                    },
-                    confidence=0.50,
-                    importance=0.50,
-                    memory_strength=0.50,
-                    last_confirmed_at=now_ms,
-                    evidence_event_ids=source_event_ids,
-                    created_at=now_ms,
-                    revision_reason="write_memory created summary",
-                )
-            ]
-            memory_state_targets.extend(
-                self._insert_external_fact_memory_states(
-                    connection=connection,
-                    cycle_id=str(memory_job.payload["cycle_id"]),
+            browse_fact_entries = _browse_fact_entries_for_write_memory_plan(
+                connection=connection,
+                cycle_id=str(validated_payload["cycle_id"]),
+            )
+            memory_write_plan = validate_write_memory_plan(
+                plan=build_write_memory_plan(
                     source_job_id=memory_job.job_id,
-                    source_event_ids=source_event_ids,
-                    created_at=now_ms,
-                )
+                    payload=validated_payload,
+                    event_entries=event_entries,
+                    browse_fact_entries=browse_fact_entries,
+                    applied_at=now_ms,
+                ),
+                payload=validated_payload,
+            )
+            memory_state_targets = self._apply_write_memory_plan(
+                connection=connection,
+                memory_write_plan=memory_write_plan,
+                created_at=now_ms,
             )
             self._enqueue_refresh_preview_jobs(
                 connection=connection,
-                cycle_id=str(memory_job.payload["cycle_id"]),
+                cycle_id=str(validated_payload["cycle_id"]),
                 event_rows=event_rows,
                 created_at=now_ms,
             )
             self._enqueue_embedding_sync_jobs(
                 connection=connection,
-                cycle_id=str(memory_job.payload["cycle_id"]),
+                cycle_id=str(validated_payload["cycle_id"]),
                 source_event_ids=source_event_ids,
                 targets=memory_state_targets,
                 embedding_model=self._require_runtime_setting_string(
@@ -1897,50 +1891,31 @@ class SqliteStateStore:
             "current_searchable": True,
         }
 
-    # Block: External fact memory insert
-    def _insert_external_fact_memory_states(
+    # Block: Write memory plan apply
+    def _apply_write_memory_plan(
         self,
         *,
         connection: sqlite3.Connection,
-        cycle_id: str,
-        source_job_id: str,
-        source_event_ids: list[str],
+        memory_write_plan: dict[str, Any],
         created_at: int,
     ) -> list[dict[str, Any]]:
-        action_rows = _fetch_action_history_for_cycle(
-            connection=connection,
-            cycle_id=cycle_id,
-            action_type="complete_browse_task",
-        )
         memory_state_targets: list[dict[str, Any]] = []
-        for action_row in action_rows:
-            command_json = json.loads(action_row["command_json"])
-            observed_effects_json = json.loads(action_row["observed_effects_json"])
-            query = _browse_query_from_action_history(command_json)
-            summary_text = _browse_summary_from_action_history(observed_effects_json)
-            related_task_id = _browse_task_id_from_action_history(command_json)
+        for state_update in memory_write_plan["state_updates"]:
+            if state_update["operation"] != "upsert":
+                raise RuntimeError("write_memory initial implementation only supports upsert")
             memory_state_targets.append(
                 self._insert_memory_state_with_revision(
                     connection=connection,
-                    memory_kind="fact",
-                    body_text=f"外部確認: {query} => {summary_text}",
-                    payload_json={
-                        "source_job_id": source_job_id,
-                        "job_kind": "write_memory",
-                        "source_cycle_id": cycle_id,
-                        "source_event_ids": source_event_ids,
-                        "fact_kind": "external_search_result",
-                        "query": query,
-                        "summary_text": summary_text,
-                        "source_task_id": related_task_id,
-                    },
-                    confidence=0.85,
-                    importance=0.75,
-                    memory_strength=0.75,
-                    last_confirmed_at=created_at,
-                    evidence_event_ids=source_event_ids,
+                    memory_kind=str(state_update["memory_kind"]),
+                    body_text=str(state_update["body_text"]),
+                    payload_json=dict(state_update["payload"]),
+                    confidence=float(state_update["confidence"]),
+                    importance=float(state_update["importance"]),
+                    memory_strength=float(state_update["memory_strength"]),
+                    last_confirmed_at=int(state_update["last_confirmed_at"]),
+                    evidence_event_ids=list(state_update["evidence_event_ids"]),
                     created_at=created_at,
-                    revision_reason="write_memory created external fact",
+                    revision_reason=str(state_update["revision_reason"]),
                 )
             )
         return memory_state_targets
@@ -5179,23 +5154,41 @@ def _browse_task_id_from_action_history(command_json: dict[str, Any]) -> str:
     return related_task_id
 
 
-def _build_write_memory_summary_text(
+# Block: Write memory plan events
+def _write_memory_plan_event_entries(event_rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
+    return [
+        {
+            "event_id": str(row["event_id"]),
+            "summary_text": _event_summary_text(row),
+            "source_updated_at": int(row["source_updated_at"]),
+        }
+        for row in event_rows
+    ]
+
+
+# Block: Write memory plan browse facts
+def _browse_fact_entries_for_write_memory_plan(
     *,
-    primary_event_id: str,
-    event_rows: list[sqlite3.Row],
-) -> str:
-    summary_parts: list[str] = []
-    for row in event_rows:
-        event_id = str(row["event_id"])
-        body = _event_summary_text(row)
-        if event_id == primary_event_id:
-            summary_parts.append(f"中心:{body}")
-            continue
-        summary_parts.append(body)
-    combined_text = " / ".join(part for part in summary_parts if part)
-    if combined_text:
-        return combined_text[:1000]
-    return "短周期で確定した出来事を要約した記憶"
+    connection: sqlite3.Connection,
+    cycle_id: str,
+) -> list[dict[str, Any]]:
+    action_rows = _fetch_action_history_for_cycle(
+        connection=connection,
+        cycle_id=cycle_id,
+        action_type="complete_browse_task",
+    )
+    browse_fact_entries: list[dict[str, Any]] = []
+    for action_row in action_rows:
+        command_json = json.loads(action_row["command_json"])
+        observed_effects_json = json.loads(action_row["observed_effects_json"])
+        browse_fact_entries.append(
+            {
+                "query": _browse_query_from_action_history(command_json),
+                "summary_text": _browse_summary_from_action_history(observed_effects_json),
+                "source_task_id": _browse_task_id_from_action_history(command_json),
+            }
+        )
+    return browse_fact_entries
 
 
 def _build_event_preview_text(row: sqlite3.Row) -> str:

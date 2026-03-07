@@ -1079,6 +1079,10 @@
     {
       "event_id": "evt_001",
       "event_updated_at": 1760000000000
+    },
+    {
+      "event_id": "evt_002",
+      "event_updated_at": 1760000000500
     }
   ]
 }
@@ -1089,6 +1093,7 @@
 - `reflection_seed_ref` は、少なくとも `ref_kind`、`ref_id` を持つ
 - `event_snapshot_refs` の各要素は、少なくとも `event_id`、`event_updated_at` を持つ
 - `event_snapshot_refs` は空配列を許可しない
+- `event_snapshot_refs` は、`source_event_ids` と同じ順序で全件を並べなければならない
 - `write_memory` は、この payload 自体に `persona_updates` を含めない
 - `persona_updates` は、`write_memory` 実行中に生成される内部差分としてだけ扱う
 
