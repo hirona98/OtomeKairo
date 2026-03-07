@@ -14,11 +14,18 @@
 <!-- Block: Scope -->
 ## このドキュメントで固定する範囲
 
-- 固定するのは、初期実装で使う JSON オブジェクトのキー、型、必須項目、固定語彙である
+- 固定するのは、current 実装で使う JSON オブジェクトのキー、型、必須項目、固定語彙である
 - 固定するのは、`pending_inputs.payload_json`、`settings_overrides.requested_value_json`、`settings_editor_state.system_values_json`、5 種のプリセットテーブルの `payload_json`、`settings_change_sets.payload_json`、`ui_outbound_events.payload_json`、`action_history.command_json`、`action_history.observed_effects_json`、`memory_jobs.payload_ref_json`、`memory_job_payloads.payload_json`、`preference_memory.target_entity_ref_json`、`event_affects.moment_affect_labels_json`、`event_affects.vad_json`、主要な Web API 本文である
 - 固定するのは、`self_state.personality_json`、`self_state.current_emotion_json`、`self_state.long_term_goals_json`、`self_state.relationship_overview_json`、`self_state.invariants_json`、短周期の内部で使う `selection_profile`、`memory_bundle`、`retrieval_context`、`last_persona_update_summary`、`persona_consistency_score`、`attention_score_breakdown`、`self_initiated_score_breakdown`、`action_candidate_score`、`cognition_result`、長周期の内部で使う `MemoryWritePlan`、`personality_change_proposal`、`persona_updates` の形である
 - 固定しないのは、Python のクラス名、Pydantic モデル名、OpenAPI の自動生成細部である
 - 固定しないのは、将来追加する未使用フィールドや後段の拡張イベント種別である
+
+<!-- Block: Read Guide -->
+## target と current の読み分け
+
+- JSON キー名と shape の固定は target/current 共通の正本として読む
+- `current`、`browser_chat`、`status api`、`settings UI` に紐づく補足は、現在の実装で実際に出入りする shape を示す
+- 後続の `初期実装` 補足は、特に断りがない限り current の `browser_chat` 実装を指す
 
 <!-- Block: Common Rules -->
 ## 共通ルール
@@ -472,9 +479,55 @@
 - `working_memory_items`、`episodic_items`、`semantic_items`、`affective_items`、`relationship_items`、`reflection_items` の各要素は、少なくとも `memory_state_id`、`memory_kind`、`body_text`、`payload`、`confidence`、`importance`、`memory_strength`、`created_at`、`updated_at`、`last_confirmed_at` を持つ
 - `recent_event_window` の各要素は、少なくとも `event_id`、`source`、`kind`、`summary_text`、`created_at` を持つ
 - `context assembler` は、`memory_bundle` の各要素に人間可読な `*_utc_text`、`*_local_text`、`relative_time_text` を付与してよい
-- 初期実装では、`working_memory_items` に `memory_kind=summary`、`semantic_items` に `memory_kind=fact`、`recent_event_window` に直近 `5` 件の `searchable` な `events` を入れてよい
+- 初期実装では、`working_memory_items` に `memory_kind=summary`、`semantic_items` に `memory_kind=fact`、`recent_event_window` に active memory preset の `retrieval_profile.recent_window_limit` 件までの `searchable` な `events` を入れてよい
 - 初期実装では、`episodic_items.memory_kind` に `episodic_event`、`affective_items.memory_kind` に `long_mood_state` または `event_affect`、`relationship_items.memory_kind` に `relation` または `preference`、`reflection_items.memory_kind` に `reflection_note` を使ってよい
 - 初期実装では、`current_observation.observation_text` と、必要なら `query` / `source_task_id` への一致を使い、関連しない要素を `memory_bundle` から落としてよい
+- 初期実装の `reflection_items[].payload` は、少なくとも `what_happened` と `event_summaries` を持ち、必要なら `what_worked`、`what_failed`、`retry_hint`、`avoid_pattern`、`reflection_seed_ref`、`reflection_seed`、`action_outcomes` を持ってよい
+
+### `reflection_note.payload`
+
+```json
+{
+  "source_job_id": "job_...",
+  "job_kind": "write_memory",
+  "source_cycle_id": "cycle_...",
+  "primary_event_id": "evt_001",
+  "source_event_ids": ["evt_001", "evt_002"],
+  "reflection_seed_ref": {
+    "ref_kind": "event",
+    "ref_id": "evt_001"
+  },
+  "reflection_seed": {
+    "cycle_id": "cycle_...",
+    "input_kind": "chat_message",
+    "message_id": "msg_...",
+    "token_count": 12,
+    "was_cancelled": false
+  },
+  "event_summaries": [
+    "検索したいと依頼された",
+    "検索タスクが失敗した"
+  ],
+  "action_outcomes": [
+    {
+      "action_type": "enqueue_browse_task",
+      "status": "failed",
+      "failure_mode": "network_unavailable",
+      "decision_reason": "browse_selected",
+      "validator_reason": "browse_selected",
+      "selected_action_type": "browse"
+    }
+  ],
+  "what_happened": "検索したいと依頼された / 検索タスクが失敗した / browseは失敗した",
+  "what_failed": "browse が失敗した: network_unavailable",
+  "retry_hint": "query と source_task_id を確認してから browse をやり直す",
+  "avoid_pattern": "同じ query を条件未確認のまま連打しない"
+}
+```
+
+- `reflection_note.payload` は、`memory_kind=\"reflection_note\"` の `payload` に入る初期実装の固定形である
+- 必須項目は `source_job_id`、`job_kind`、`source_cycle_id`、`primary_event_id`、`source_event_ids`、`reflection_seed_ref`、`event_summaries`、`action_outcomes`、`what_happened` である
+- `reflection_seed`、`what_worked`、`what_failed`、`retry_hint`、`avoid_pattern` は、材料があるときだけ持ってよい
 
 ### `retrieval_context`
 
@@ -487,7 +540,15 @@
       "explicit_years": [],
       "has_explicit_time_hint": false
     },
+    "profile": {
+      "semantic_top_k": 8,
+      "recent_window_limit": 5,
+      "fact_bias": 0.7,
+      "summary_bias": 0.6,
+      "event_bias": 0.4
+    },
     "limits": {
+      "semantic_candidate_top_k": 8,
       "working_memory_items": 3,
       "episodic_items": 3,
       "semantic_items": 3,
@@ -521,7 +582,7 @@
         "slot": "semantic_items",
         "item_ref": "memory_state:mem_010",
         "score": 1.8,
-        "reason_codes": ["matched_query", "mode_priority"]
+        "reason_codes": ["matched_query", "mode_priority", "profile_bias"]
       }
     ]
   }
@@ -530,7 +591,9 @@
 
 - `retrieval_context` は、短周期の内部でだけ使う `RetrievalPlan` と選別結果の要約である
 - 必須項目は `plan` と `selected` である
-- `plan` は、少なくとも `mode`、`queries`、`time_hint`、`limits` を持つ
+- `plan` は、少なくとも `mode`、`queries`、`time_hint`、`profile`、`limits` を持つ
+- `profile` は、active memory preset の `retrieval_profile` をそのまま持つ
+- `limits.semantic_candidate_top_k` は、意味検索候補の上限である
 - `selected` は、少なくとも `selected_counts`、`selected_refs`、`selection_trace` を持つ
 
 ### `retrieval_candidates_json`
@@ -588,7 +651,7 @@
       "slot": "semantic_items",
       "item_ref": "memory_state:mem_010",
       "score": 1.8,
-      "reason_codes": ["matched_query", "mode_priority"]
+      "reason_codes": ["matched_query", "mode_priority", "profile_bias"]
     }
   ]
 }
@@ -765,14 +828,14 @@
 - `cognition_result` は、短周期の内部で使う構造化された認知結果である
 - `cognition_result` は、認知層が一度に返す JSON オブジェクトであり、後から補完前提で分割しない
 - 必須項目は `intention_summary`、`decision_reason`、`action_proposals`、`step_hints`、`speech_draft`、`memory_focus`、`reflection_seed` である
-- 初期実装では、`LiteLLM` への `response_format` を strict な `json_schema` に固定し、この節の shape を provider 呼び出し時点でも拘束する
+- current 実装では、`LiteLLM` への `response_format` を strict な `json_schema` に固定し、この節の shape を provider 呼び出し時点でも拘束する
 - `action_proposals` と `step_hints` は配列に固定し、候補がない場合も空配列 `[]` を使う
-- 初期実装の `browser_chat` では、`action_proposals` の各要素は少なくとも `action_type` と `priority` を持つ
-- 初期実装の `browser_chat` では、`action_type` は `speak`、`browse`、`notify`、`look`、`wait` のいずれかだけを許可する
-- 初期実装の `browser_chat` では、`priority` は `0.0..1.0` の `number` に固定する
-- 初期実装の `action validator` では、`priority >= 0.80` を緊急ヒントとして使ってよい
-- 初期実装の `browser_chat` では、`speak` と `notify` のとき `target_channel=\"browser_chat\"` を必須とする
-- 初期実装の `browser_chat` では、`browse` のとき `query` に非空の検索文字列を必須とする
+- current の `browser_chat` では、`action_proposals` の各要素は少なくとも `action_type` と `priority` を持つ
+- current の `browser_chat` では、`action_type` は `speak`、`browse`、`notify`、`look`、`wait` のいずれかだけを許可する
+- current の `browser_chat` では、`priority` は `0.0..1.0` の `number` に固定する
+- current の `action validator` では、`priority >= 0.80` を緊急ヒントとして使ってよい
+- current の `browser_chat` では、`speak` と `notify` のとき `target_channel=\"browser_chat\"` を必須とする
+- current の `browser_chat` では、`browse` のとき `query` に非空の検索文字列を必須とする
 - `speech_draft` は、少なくとも `text`、`language`、`delivery_mode` を持つ
 - `memory_focus` は、少なくとも `focus_kind`、`summary` を持つ
 - `reflection_seed` は、少なくとも `cycle_id`、`input_kind`、`message_id`、`token_count`、`was_cancelled` を持つ
@@ -1074,6 +1137,7 @@
 
 - `settings_editor_state.system_values_json` は、設定UIで保持するシステム設定だけを持つ完全オブジェクトである
 - キーは `runtime.idle_tick_ms`、`runtime.long_cycle_min_interval_ms`、`sensors.microphone.enabled`、`sensors.camera.enabled`、`integrations.sns.enabled`、`integrations.notify_route`、`integrations.discord.bot_token`、`integrations.discord.channel_id` に固定する
+- current の `browser_chat` 実装で直接使っているのは主に `runtime.*`、`sensors.camera.enabled`、`camera_connections` であり、`sensors.microphone.enabled` と `integrations.*` は保存対象だが未接続の項目を含む
 
 <!-- Block: Character Preset Payload -->
 ### `character_presets.payload_json`
@@ -1094,6 +1158,7 @@
 
 - `character_presets.payload_json` は `character.*`、`speech.tts.*`、`speech.stt.*` の固定形を持つ
 - 通知経路と Discord 認証情報は含めない
+- `speech.stt.*` は設定UIと `runtime_settings` には反映するが、current のランタイムはまだ live microphone input を開始しない
 
 <!-- Block: Behavior Preset Payload -->
 ### `behavior_presets.payload_json`
@@ -1286,7 +1351,7 @@
 ```
 
 - 必須項目は `message_id`、`role`、`text`、`created_at` である
-- `role` は、少なくとも `assistant`、`system_notice` を区別する
+- current 実装の `role` は `assistant` を使う
 - `source_cycle_id`、`related_input_id`、`audio_url`、`audio_mime_type` は任意である
 
 <!-- Block: UI Status -->
@@ -1309,14 +1374,15 @@
 
 ```json
 {
-  "notice_code": "self_initiated_action",
-  "text": "周囲の確認を開始します"
+  "notice_code": "browse_queued",
+  "text": "検索タスクを追加しました: 今日の天気"
 }
 ```
 
 - 必須項目は `notice_code`、`text` である
 - `notice_code` は、UI 側で分類できる固定語彙 `string` にする
-- 初期実装では、`browse_queued`、`browse_completed`、`cancel_requested` を使ってよい
+- current 実装では、DB に保存される `notice` として `browse_queued`、`browse_completed` を使ってよい
+- 保持範囲外からの `SSE` 再開時は、保存しない合成 `notice` として `stream_reset` を使ってよい
 
 <!-- Block: UI Error -->
 #### `event_type = error`
@@ -1340,7 +1406,7 @@
 ### `action_history.command_json`
 
 - `action_history.command_json` は、その行動で実行しようとした命令の最小記録である
-- 初期実装では、ブラウザ向けの UI 応答命令と、`browse` の task 再開命令をこの形で保持する
+- current 実装では、ブラウザ向けの UI 応答命令と、`browse` の task 再開命令をこの形で保持する
 
 ```json
 {
@@ -1364,7 +1430,7 @@
 - `role` は、`message_id` を伴うメッセージ応答だけに付ける
 - `related_input_id` は、入力に対する応答行動だけに付ける
 - `proposal_ref` は、`cognition_result.action_proposals` から確定した候補を追跡したいときに付ける
-- `command_type` は、初期実装では `speak_ui_message`、`dispatch_notice`、`enqueue_browse_task`、`control_camera_look`、`execute_browse_task`、`abandon_browse_task` を使ってよい
+- `command_type` は、current 実装では `speak_ui_message`、`dispatch_notice`、`enqueue_browse_task`、`control_camera_look`、`execute_browse_task`、`abandon_browse_task` を使ってよい
 - `notice_code` と `text` は、`dispatch_notice` を実行する命令だけに付ける
 - `target`、`parameters`、`preconditions`、`stop_conditions`、`timeout_ms`、`requires_reobserve`、`expected_effects` は、`execute` のとき `action_command` をそのまま残したい場合に付けてよい
 - `parameters.task_id`、`parameters.query`、`parameters.target_channel` は、`enqueue_browse_task` を実行する命令だけに付ける
@@ -1378,7 +1444,7 @@
 ### `action_history.observed_effects_json`
 
 - `action_history.observed_effects_json` は、その行動の直後に観測した最小結果である
-- 初期実装では、実際に UI へ流したイベント種別と主要 ID だけを保持する
+- current 実装では、実際に UI へ流したイベント種別と主要 ID だけを保持する
 
 ```json
 {
@@ -1784,7 +1850,7 @@
 - `runtime.last_retrieval` は、`retrieval_runs` が 1 件以上ある場合だけ持つ
 - `self_state.current_emotion` は、少なくとも `v`、`a`、`d`、`labels` を持つ
 - `self_state.last_persona_update` は、`revisions.entity_type=self_state.personality` が 1 件以上ある場合だけ持つ
-- `attention_state.primary_focus` は、表示用の短い `string` とする
+- `attention_state.primary_focus` は、current 実装では `observation`、`task`、`relationship`、`idle` のいずれかを返す短い `string` とする
 - `task_state.active_task_count`、`task_state.waiting_task_count` は `integer` に固定する
 
 <!-- Block: Stream Data -->
