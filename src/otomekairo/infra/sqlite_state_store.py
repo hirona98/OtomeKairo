@@ -2964,22 +2964,23 @@ class SqliteStateStore:
                         created_at=now_ms,
                     )
                     affected_count += 1
-                embedding_targets.append(
-                    {
-                        "entity_type": entity_type,
-                        "entity_id": entity_id,
-                        "source_updated_at": source_updated_at,
-                        "current_searchable": False,
-                    }
+                    embedding_targets.append(
+                        {
+                            "entity_type": entity_type,
+                            "entity_id": entity_id,
+                            "source_updated_at": source_updated_at,
+                            "current_searchable": False,
+                        }
+                    )
+            if embedding_targets:
+                self._enqueue_embedding_sync_jobs(
+                    connection=connection,
+                    cycle_id=str(memory_job.payload["cycle_id"]),
+                    source_event_ids=source_event_ids,
+                    targets=embedding_targets,
+                    embedding_model=embedding_model,
+                    created_at=now_ms,
                 )
-            self._enqueue_embedding_sync_jobs(
-                connection=connection,
-                cycle_id=str(memory_job.payload["cycle_id"]),
-                source_event_ids=source_event_ids,
-                targets=embedding_targets,
-                embedding_model=embedding_model,
-                created_at=now_ms,
-            )
             self._mark_memory_job_completed(
                 connection=connection,
                 job_id=memory_job.job_id,
@@ -5950,6 +5951,7 @@ def _normalize_quarantine_targets(raw_targets: Any) -> list[dict[str, str]]:
     if not isinstance(raw_targets, list) or not raw_targets:
         raise StoreValidationError("quarantine_memory targets must not be empty")
     normalized_targets: list[dict[str, str]] = []
+    seen_targets: set[tuple[str, str]] = set()
     for raw_target in raw_targets:
         if not isinstance(raw_target, dict):
             raise StoreValidationError("quarantine_memory target must be object")
@@ -5963,11 +5965,11 @@ def _normalize_quarantine_targets(raw_targets: Any) -> list[dict[str, str]]:
             raise StoreValidationError("quarantine_memory target.entity_type is invalid")
         if not isinstance(entity_id, str) or not entity_id:
             raise StoreValidationError("quarantine_memory target.entity_id must be non-empty string")
-        normalized_targets.append(
-            {
-                "entity_type": entity_type,
-                "entity_id": entity_id,
-            }
+        _append_unique_entity_target(
+            normalized_targets=normalized_targets,
+            seen_targets=seen_targets,
+            entity_type=entity_type,
+            entity_id=entity_id,
         )
     return normalized_targets
 
@@ -5977,6 +5979,7 @@ def _normalize_tidy_target_refs(raw_target_refs: Any) -> list[dict[str, str]]:
     if not isinstance(raw_target_refs, list) or not raw_target_refs:
         raise StoreValidationError("tidy_memory target_refs must not be empty")
     normalized_refs: list[dict[str, str]] = []
+    seen_refs: set[tuple[str, str]] = set()
     for raw_target_ref in raw_target_refs:
         if not isinstance(raw_target_ref, dict):
             raise StoreValidationError("tidy_memory target_ref must be object")
@@ -5986,13 +5989,33 @@ def _normalize_tidy_target_refs(raw_target_refs: Any) -> list[dict[str, str]]:
             raise StoreValidationError("tidy_memory target_ref.entity_type must be non-empty string")
         if not isinstance(entity_id, str) or not entity_id:
             raise StoreValidationError("tidy_memory target_ref.entity_id must be non-empty string")
-        normalized_refs.append(
-            {
-                "entity_type": entity_type,
-                "entity_id": entity_id,
-            }
+        _append_unique_entity_target(
+            normalized_targets=normalized_refs,
+            seen_targets=seen_refs,
+            entity_type=entity_type,
+            entity_id=entity_id,
         )
     return normalized_refs
+
+
+# Block: Entity target dedup
+def _append_unique_entity_target(
+    *,
+    normalized_targets: list[dict[str, str]],
+    seen_targets: set[tuple[str, str]],
+    entity_type: str,
+    entity_id: str,
+) -> None:
+    target_key = (entity_type, entity_id)
+    if target_key in seen_targets:
+        return
+    seen_targets.add(target_key)
+    normalized_targets.append(
+        {
+            "entity_type": entity_type,
+            "entity_id": entity_id,
+        }
+    )
 
 
 def _refresh_preview_job_idempotency_key(

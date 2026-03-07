@@ -1457,6 +1457,7 @@
 - `targets` は空配列を許可しない
 - `targets` の各要素は、少なくとも `entity_type`、`entity_id` を持つ
 - `entity_type` は、初期実装では `event`、`memory_state` を区別する
+- 同じ `(entity_type, entity_id)` が重複していても、payload 正規化で 1 件に畳み込んでよい
 
 <!-- Block: Embedding Sync -->
 #### `job_kind = embedding_sync`
@@ -1505,6 +1506,7 @@
 - 追加の必須項目は `maintenance_scope`、`retention_cutoff_at` である
 - `maintenance_scope` は、少なくとも `completed_jobs_gc`、`stale_preview_gc`、`stale_vector_gc` を区別する
 - `target_refs` は任意で、指定する場合は各要素が少なくとも `entity_type`、`entity_id` を持つ
+- `target_refs` に同じ `(entity_type, entity_id)` が重複していても、payload 正規化で 1 件に畳み込んでよい
 
 <!-- Block: Web Api Group -->
 ## Web API の JSON
