@@ -154,6 +154,14 @@ class SqliteStateStore:
                 LIMIT 1
                 """
             ).fetchone()
+            retrieval_row = connection.execute(
+                """
+                SELECT cycle_id, created_at, plan_json, selected_json, resolved_event_ids_json
+                FROM retrieval_runs
+                ORDER BY created_at DESC
+                LIMIT 1
+                """
+            ).fetchone()
             self_row = connection.execute(
                 """
                 SELECT current_emotion_json
@@ -176,20 +184,36 @@ class SqliteStateStore:
                 FROM task_state
                 """
             ).fetchone()
+            persona_revision_row = connection.execute(
+                """
+                SELECT before_json, after_json, reason, evidence_event_ids_json, created_at
+                FROM revisions
+                WHERE entity_type = 'self_state.personality'
+                ORDER BY created_at DESC
+                LIMIT 1
+                """
+            ).fetchone()
         if self_row is None or attention_row is None:
             raise RuntimeError("singleton state rows are missing")
         runtime_payload: dict[str, Any] = {"is_running": runtime_row is not None}
         if commit_row is not None:
             runtime_payload["last_cycle_id"] = commit_row["cycle_id"]
             runtime_payload["last_commit_id"] = commit_row["commit_id"]
+        if retrieval_row is not None:
+            runtime_payload["last_retrieval"] = _public_retrieval_summary(retrieval_row)
         current_emotion_json = json.loads(self_row["current_emotion_json"])
         primary_focus_json = json.loads(attention_row["primary_focus_json"])
         active_count = int(task_counts_row["active_count"] or 0)
         waiting_count = int(task_counts_row["waiting_count"] or 0)
+        self_state_payload: dict[str, Any] = {
+            "current_emotion": _public_emotion_summary(current_emotion_json),
+        }
+        if persona_revision_row is not None:
+            self_state_payload["last_persona_update"] = _public_persona_update(persona_revision_row)
         return {
             "server_time": now_ms,
             "runtime": runtime_payload,
-            "self_state": {"current_emotion": _public_emotion_summary(current_emotion_json)},
+            "self_state": self_state_payload,
             "attention_state": {"primary_focus": _public_primary_focus(primary_focus_json)},
             "task_state": {
                 "active_task_count": active_count,
@@ -628,6 +652,15 @@ class SqliteStateStore:
                 LIMIT 3
                 """
             ).fetchall()
+            persona_revision_row = connection.execute(
+                """
+                SELECT before_json, after_json, reason, evidence_event_ids_json, created_at
+                FROM revisions
+                WHERE entity_type = 'self_state.personality'
+                ORDER BY created_at DESC
+                LIMIT 1
+                """
+            ).fetchone()
         if (
             self_row is None
             or attention_row is None
@@ -658,7 +691,7 @@ class SqliteStateStore:
                 FROM events
                 WHERE searchable = 1
                 ORDER BY created_at DESC
-                LIMIT 5
+                LIMIT 8
                 """
             ).fetchall()
             memory_rows = connection.execute(
@@ -676,9 +709,51 @@ class SqliteStateStore:
                     last_confirmed_at
                 FROM memory_states
                 WHERE searchable = 1
-                  AND memory_kind IN ('summary', 'fact')
+                  AND memory_kind IN ('summary', 'fact', 'relation', 'long_mood_state', 'reflection_note')
                 ORDER BY updated_at DESC
-                LIMIT 8
+                LIMIT 16
+                """
+            ).fetchall()
+            affect_rows = connection.execute(
+                """
+                SELECT
+                    event_affects.event_affect_id,
+                    event_affects.event_id,
+                    event_affects.moment_affect_text,
+                    event_affects.moment_affect_labels_json,
+                    event_affects.vad_json,
+                    event_affects.confidence,
+                    event_affects.created_at,
+                    events.source,
+                    events.kind,
+                    events.observation_summary,
+                    events.action_summary,
+                    events.result_summary
+                FROM event_affects
+                INNER JOIN events
+                        ON events.event_id = event_affects.event_id
+                WHERE events.searchable = 1
+                ORDER BY event_affects.created_at DESC
+                LIMIT 6
+                """
+            ).fetchall()
+            preference_rows = connection.execute(
+                """
+                SELECT
+                    preference_id,
+                    owner_scope,
+                    target_entity_ref_json,
+                    domain,
+                    polarity,
+                    status,
+                    confidence,
+                    evidence_event_ids_json,
+                    created_at,
+                    updated_at
+                FROM preference_memory
+                WHERE status IN ('candidate', 'confirmed')
+                ORDER BY updated_at DESC
+                LIMIT 6
                 """
             ).fetchall()
             if observation_hint_text is not None and observation_hint_text.strip():
@@ -707,6 +782,11 @@ class SqliteStateStore:
                 "invariants": json.loads(self_row["invariants_json"]),
                 "personality_updated_at": int(self_row["personality_updated_at"]),
                 "updated_at": int(self_row["updated_at"]),
+                **(
+                    {"latest_persona_update": _public_persona_update(persona_revision_row)}
+                    if persona_revision_row is not None
+                    else {}
+                ),
             },
             attention_state={
                 "primary_focus": json.loads(attention_row["primary_focus_json"]),
@@ -745,6 +825,8 @@ class SqliteStateStore:
             memory_snapshot=_build_memory_snapshot_rows(
                 recent_event_rows=recent_event_rows,
                 memory_rows=memory_rows,
+                affect_rows=affect_rows,
+                preference_rows=preference_rows,
             ),
             effective_settings=effective_settings,
         )
@@ -3696,6 +3778,7 @@ class SqliteStateStore:
         task_mutations: list[TaskStateMutationRecord],
         ui_events: list[dict[str, Any]],
         commit_payload: dict[str, Any],
+        retrieval_run: dict[str, Any] | None = None,
         discard_reason: str | None = None,
     ) -> int:
         if resolution_status not in {"consumed", "discarded"}:
@@ -3718,6 +3801,13 @@ class SqliteStateStore:
                 connection=connection,
                 cycle_id=cycle_id,
                 event_ids=event_ids,
+                created_at=resolved_at,
+            )
+            retrieval_run_id = self._insert_retrieval_run(
+                connection=connection,
+                cycle_id=cycle_id,
+                retrieval_run=retrieval_run,
+                resolved_event_ids=event_ids,
                 created_at=resolved_at,
             )
             updated_row_count = connection.execute(
@@ -3751,6 +3841,11 @@ class SqliteStateStore:
                             **commit_payload,
                             "event_ids": event_ids,
                             "enqueued_memory_job_ids": enqueued_memory_job_ids,
+                            **(
+                                {"retrieval_run_id": retrieval_run_id}
+                                if retrieval_run_id is not None
+                                else {}
+                            ),
                         }
                     ),
                 ),
@@ -3766,6 +3861,53 @@ class SqliteStateStore:
         if commit_id is None:
             raise RuntimeError("commit_records insert did not persist")
         return int(commit_id["commit_id"])
+
+    # Block: Retrieval run write
+    def _insert_retrieval_run(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        cycle_id: str,
+        retrieval_run: dict[str, Any] | None,
+        resolved_event_ids: list[str],
+        created_at: int,
+    ) -> str | None:
+        if retrieval_run is None:
+            return None
+        plan_json = retrieval_run.get("plan_json")
+        candidates_json = retrieval_run.get("candidates_json")
+        selected_json = retrieval_run.get("selected_json")
+        if not isinstance(plan_json, dict):
+            raise StoreValidationError("retrieval_run.plan_json must be object")
+        if not isinstance(candidates_json, dict):
+            raise StoreValidationError("retrieval_run.candidates_json must be object")
+        if not isinstance(selected_json, dict):
+            raise StoreValidationError("retrieval_run.selected_json must be object")
+        run_id = _opaque_id("retr")
+        connection.execute(
+            """
+            INSERT INTO retrieval_runs (
+                run_id,
+                cycle_id,
+                created_at,
+                plan_json,
+                candidates_json,
+                selected_json,
+                resolved_event_ids_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                run_id,
+                cycle_id,
+                created_at,
+                _json_text(plan_json),
+                _json_text(candidates_json),
+                _json_text(selected_json),
+                _json_text(resolved_event_ids),
+            ),
+        )
+        return run_id
 
     # Block: Task cycle finalize
     def finalize_task_cycle(
@@ -5649,6 +5791,32 @@ def _public_emotion_summary(current_emotion_json: dict[str, Any]) -> dict[str, A
     }
 
 
+def _public_retrieval_summary(row: sqlite3.Row) -> dict[str, Any]:
+    plan_json = json.loads(row["plan_json"])
+    selected_json = json.loads(row["selected_json"])
+    payload = {
+        "cycle_id": str(row["cycle_id"]),
+        "created_at": int(row["created_at"]),
+        "mode": str(plan_json["mode"]),
+        "queries": list(plan_json["queries"]),
+        "selected_counts": dict(selected_json["selected_counts"]),
+    }
+    if isinstance(row["resolved_event_ids_json"], str) and row["resolved_event_ids_json"]:
+        payload["resolved_event_ids"] = json.loads(row["resolved_event_ids_json"])
+    return payload
+
+
+def _public_persona_update(row: sqlite3.Row) -> dict[str, Any]:
+    before_json = json.loads(row["before_json"])
+    after_json = json.loads(row["after_json"])
+    return {
+        "created_at": int(row["created_at"]),
+        "reason": str(row["reason"]),
+        "evidence_event_ids": json.loads(row["evidence_event_ids_json"]),
+        "updated_traits": _trait_update_entries(before_json=before_json, after_json=after_json),
+    }
+
+
 def _public_primary_focus(primary_focus_json: dict[str, Any]) -> str:
     if not isinstance(primary_focus_json, dict):
         raise RuntimeError("attention_state.primary_focus_json must be an object")
@@ -5656,6 +5824,35 @@ def _public_primary_focus(primary_focus_json: dict[str, Any]) -> str:
     if not isinstance(focus_kind, str) or not focus_kind:
         raise RuntimeError("attention_state.primary_focus_json.kind is required")
     return focus_kind
+
+
+def _trait_update_entries(
+    *,
+    before_json: dict[str, Any],
+    after_json: dict[str, Any],
+) -> list[dict[str, Any]]:
+    before_traits = before_json.get("trait_values")
+    after_traits = after_json.get("trait_values")
+    if not isinstance(before_traits, dict) or not isinstance(after_traits, dict):
+        return []
+    updated_traits: list[dict[str, Any]] = []
+    for trait_name in sorted(after_traits):
+        before_value = before_traits.get(trait_name)
+        after_value = after_traits.get(trait_name)
+        if not isinstance(before_value, (int, float)) or not isinstance(after_value, (int, float)):
+            continue
+        delta = round(float(after_value) - float(before_value), 4)
+        if delta == 0.0:
+            continue
+        updated_traits.append(
+            {
+                "trait_name": trait_name,
+                "before": float(before_value),
+                "after": float(after_value),
+                "delta": delta,
+            }
+        )
+    return updated_traits
 
 
 # Block: Journal helpers
@@ -6291,7 +6488,7 @@ def _fetch_memory_rows_by_ids(
             last_confirmed_at
         FROM memory_states
         WHERE searchable = 1
-          AND memory_kind IN ('summary', 'fact')
+          AND memory_kind IN ('summary', 'fact', 'relation', 'long_mood_state', 'reflection_note')
           AND memory_state_id IN ({placeholder_sql})
         """,
         tuple(memory_state_ids),
@@ -6868,25 +7065,45 @@ def _build_memory_snapshot_rows(
     *,
     recent_event_rows: list[sqlite3.Row],
     memory_rows: list[sqlite3.Row],
+    affect_rows: list[sqlite3.Row],
+    preference_rows: list[sqlite3.Row],
 ) -> dict[str, Any]:
     working_memory_items: list[dict[str, Any]] = []
+    episodic_items: list[dict[str, Any]] = []
     semantic_items: list[dict[str, Any]] = []
+    affective_items: list[dict[str, Any]] = []
+    relationship_items: list[dict[str, Any]] = []
+    reflection_items: list[dict[str, Any]] = []
+    for row in recent_event_rows:
+        episodic_items.append(_event_memory_snapshot_entry(row))
     for row in memory_rows:
         entry = _memory_snapshot_entry(row)
-        if str(row["memory_kind"]) == "summary":
-            if len(working_memory_items) < 3:
-                working_memory_items.append(entry)
+        memory_kind = str(row["memory_kind"])
+        if memory_kind == "summary":
+            working_memory_items.append(entry)
             continue
-        if str(row["memory_kind"]) == "fact":
-            if len(semantic_items) < 3:
-                semantic_items.append(entry)
+        if memory_kind == "fact":
+            semantic_items.append(entry)
+            continue
+        if memory_kind == "long_mood_state":
+            affective_items.append(entry)
+            continue
+        if memory_kind == "relation":
+            relationship_items.append(entry)
+            continue
+        if memory_kind == "reflection_note":
+            reflection_items.append(entry)
+    for row in affect_rows:
+        affective_items.append(_event_affect_snapshot_entry(row))
+    for row in preference_rows:
+        relationship_items.append(_preference_snapshot_entry(row))
     return {
-        "working_memory_items": working_memory_items,
-        "episodic_items": [],
+        "working_memory_items": working_memory_items[:3],
+        "episodic_items": episodic_items,
         "semantic_items": semantic_items,
-        "affective_items": [],
-        "relationship_items": [],
-        "reflection_items": [],
+        "affective_items": affective_items,
+        "relationship_items": relationship_items,
+        "reflection_items": reflection_items,
         "recent_event_window": [
             _recent_event_entry(row)
             for row in recent_event_rows
@@ -6907,6 +7124,101 @@ def _memory_snapshot_entry(row: sqlite3.Row) -> dict[str, Any]:
         "updated_at": int(row["updated_at"]),
         "last_confirmed_at": int(row["last_confirmed_at"]),
     }
+
+
+def _event_memory_snapshot_entry(row: sqlite3.Row) -> dict[str, Any]:
+    summary_text = _event_summary_text(row)
+    created_at = int(row["created_at"])
+    return {
+        "memory_state_id": str(row["event_id"]),
+        "memory_kind": "episodic_event",
+        "body_text": summary_text,
+        "payload": {
+            "event_id": str(row["event_id"]),
+            "source": str(row["source"]),
+            "kind": str(row["kind"]),
+            "summary_text": summary_text,
+        },
+        "confidence": 1.0,
+        "importance": 0.65,
+        "memory_strength": 0.45,
+        "created_at": created_at,
+        "updated_at": created_at,
+        "last_confirmed_at": created_at,
+    }
+
+
+def _event_affect_snapshot_entry(row: sqlite3.Row) -> dict[str, Any]:
+    created_at = int(row["created_at"])
+    confidence = float(row["confidence"])
+    return {
+        "memory_state_id": str(row["event_affect_id"]),
+        "memory_kind": "event_affect",
+        "body_text": str(row["moment_affect_text"]),
+        "payload": {
+            "event_id": str(row["event_id"]),
+            "labels": json.loads(row["moment_affect_labels_json"]),
+            "vad": json.loads(row["vad_json"]),
+            "event_source": str(row["source"]),
+            "event_kind": str(row["kind"]),
+            "event_summary_text": _event_summary_text(row),
+        },
+        "confidence": confidence,
+        "importance": min(1.0, confidence + 0.10),
+        "memory_strength": min(1.0, confidence + 0.05),
+        "created_at": created_at,
+        "updated_at": created_at,
+        "last_confirmed_at": created_at,
+    }
+
+
+def _preference_snapshot_entry(row: sqlite3.Row) -> dict[str, Any]:
+    target_entity_ref = json.loads(row["target_entity_ref_json"])
+    evidence_event_ids = json.loads(row["evidence_event_ids_json"])
+    return {
+        "memory_state_id": str(row["preference_id"]),
+        "memory_kind": "preference",
+        "body_text": " ".join(
+            [
+                str(row["owner_scope"]),
+                str(row["domain"]),
+                str(row["polarity"]),
+                _preference_target_text(target_entity_ref),
+            ]
+        ).strip(),
+        "payload": {
+            "owner_scope": str(row["owner_scope"]),
+            "target_entity_ref": target_entity_ref,
+            "domain": str(row["domain"]),
+            "polarity": str(row["polarity"]),
+            "status": str(row["status"]),
+            "evidence_event_ids": evidence_event_ids,
+        },
+        "confidence": float(row["confidence"]),
+        "importance": min(1.0, float(row["confidence"]) + 0.10),
+        "memory_strength": _memory_strength_from_evidence(evidence_event_ids),
+        "created_at": int(row["created_at"]),
+        "updated_at": int(row["updated_at"]),
+        "last_confirmed_at": int(row["updated_at"]),
+    }
+
+
+def _preference_target_text(target_entity_ref: Any) -> str:
+    if isinstance(target_entity_ref, str):
+        return target_entity_ref
+    if not isinstance(target_entity_ref, dict):
+        return json.dumps(target_entity_ref, sort_keys=True)
+    for key in ("target_key", "name", "entity_name", "entity_ref", "text"):
+        value = target_entity_ref.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return json.dumps(target_entity_ref, sort_keys=True)
+
+
+def _memory_strength_from_evidence(evidence_event_ids: Any) -> float:
+    if not isinstance(evidence_event_ids, list):
+        return 0.25
+    return min(1.0, 0.20 + len(evidence_event_ids) * 0.15)
 
 
 def _recent_event_entry(row: sqlite3.Row) -> dict[str, Any]:

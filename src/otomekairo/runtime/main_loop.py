@@ -154,6 +154,7 @@ class RuntimeLoop:
                 task_mutations,
                 resolution_status,
                 discard_reason,
+                retrieval_run,
             ) = self._resolve_pending_input(
                 pending_input=pending_input,
                 cycle_id=cycle_id,
@@ -176,6 +177,7 @@ class RuntimeLoop:
                 task_mutations=task_mutations,
                 discard_reason=discard_reason,
                 ui_events=ui_events,
+                retrieval_run=retrieval_run,
                 commit_payload=commit_payload,
             )
             logger.info(
@@ -302,6 +304,7 @@ class RuntimeLoop:
         list[TaskStateMutationRecord],
         str,
         str | None,
+        dict[str, Any] | None,
     ]:
         input_kind = pending_input.payload["input_kind"]
         if input_kind in {"chat_message", "camera_observation", "network_result"}:
@@ -309,7 +312,7 @@ class RuntimeLoop:
                 self._default_settings,
                 observation_hint_text=_pending_input_observation_hint(pending_input),
             )
-            cognition_input = build_cognition_input(
+            built_input = build_cognition_input(
                 pending_input=pending_input,
                 cycle_id=cycle_id,
                 resolved_at=resolved_at,
@@ -320,7 +323,7 @@ class RuntimeLoop:
                 pending_input=pending_input,
                 cycle_id=cycle_id,
                 resolved_at=resolved_at,
-                cognition_input=cognition_input,
+                cognition_input=built_input.cognition_input,
                 effective_settings=state_snapshot.effective_settings,
                 cognition_client=self._cognition_client,
                 camera_controller=self._camera_controller,
@@ -337,9 +340,10 @@ class RuntimeLoop:
                 cognition_execution.task_mutations,
                 "consumed",
                 None,
+                built_input.retrieval_run,
             )
         if input_kind == "cancel":
-            return ([], [], [], "discarded", "cancel_target_not_found")
+            return ([], [], [], "discarded", "cancel_target_not_found", None)
         ui_events, action_results = _unsupported_input_events(pending_input, resolved_at)
         self._append_ui_events(cycle_id=cycle_id, ui_events=ui_events)
         return (
@@ -348,6 +352,7 @@ class RuntimeLoop:
             [],
             "discarded",
             "unsupported_input_kind",
+            None,
         )
 
     # Block: UI event append

@@ -55,6 +55,8 @@ def _build_messages(request: CognitionRequest) -> list[dict[str, Any]]:
     behavior_settings = cognition_input["behavior_settings"]
     selection_profile = cognition_input["selection_profile"]
     current_observation = cognition_input["current_observation"]
+    memory_bundle = cognition_input["memory_bundle"]
+    retrieval_context = cognition_input["retrieval_context"]
     world_snapshot = cognition_input["world_snapshot"]
     runtime_policy = cognition_input["policy_snapshot"]["runtime_policy"]
     system_prompt = "\n".join(
@@ -72,7 +74,7 @@ def _build_messages(request: CognitionRequest) -> list[dict[str, Any]]:
             "browse を返す場合は query に非空の検索文字列を必ず入れる。",
             "look を返す場合は direction(left/right/up/down) か preset_id か preset_name を必ず入れる。",
             "memory_focus は object で、focus_kind と summary を必ず持つ。",
-            "memory_focus.focus_kind は observation, summary, fact, relation, preference, none のいずれかにする。",
+            "memory_focus.focus_kind は observation, summary, episodic, fact, affective, relation, preference, reflection, none のいずれかにする。",
             "reflection_seed は object で、message_id を必ず持つ。",
             "delivery_mode は stream に固定する。",
             f"現在の感情ラベル: {self_snapshot['current_emotion']['primary_label']}",
@@ -86,6 +88,7 @@ def _build_messages(request: CognitionRequest) -> list[dict[str, Any]]:
             "添付画像がある場合は、画像とテキストの両方を使って判断する。",
             "カメラ状態の enabled または available が false のときは、look を提案せず speak で状態を伝える。",
             f"不変条件: {_format_invariants(self_snapshot['invariants'])}",
+            _persona_update_prompt_line(self_snapshot),
         ]
     )
     user_prompt = "\n".join(
@@ -97,6 +100,8 @@ def _build_messages(request: CognitionRequest) -> list[dict[str, Any]]:
             _network_result_prompt_line(current_observation),
             f"関係性の優先対象: {_format_relationship_priorities(selection_profile['relationship_priorities'])}",
             f"長期目標: {_format_goals(self_snapshot['long_term_goals'])}",
+            _retrieval_prompt_line(retrieval_context),
+            _memory_bundle_prompt_line(memory_bundle),
             f"cycle_id: {request.cycle_id}",
             "この人格として、今どう返すかを構造化して一度で決めること。",
             "speech_draft.text は実際にユーザーへ見せる本文そのものにすること。",
@@ -247,6 +252,67 @@ def _format_goals(long_term_goals: dict[str, Any]) -> str:
     if not goals:
         return "未設定"
     return ",".join(str(goal.get("title", "goal")) for goal in goals[:3] if isinstance(goal, dict))
+
+
+def _retrieval_prompt_line(retrieval_context: dict[str, Any]) -> str:
+    plan = retrieval_context.get("plan")
+    selected = retrieval_context.get("selected")
+    if not isinstance(plan, dict) or not isinstance(selected, dict):
+        raise RuntimeError("cognition_input.retrieval_context must contain plan and selected")
+    mode = plan.get("mode")
+    queries = plan.get("queries")
+    selected_counts = selected.get("selected_counts")
+    if not isinstance(mode, str):
+        raise RuntimeError("retrieval_context.plan.mode must be string")
+    if not isinstance(queries, list):
+        raise RuntimeError("retrieval_context.plan.queries must be list")
+    if not isinstance(selected_counts, dict):
+        raise RuntimeError("retrieval_context.selected.selected_counts must be object")
+    query_text = ",".join(str(query) for query in queries[:3]) if queries else "なし"
+    selected_text = ",".join(
+        f"{key}={value}"
+        for key, value in selected_counts.items()
+        if isinstance(value, int) and value > 0
+    )
+    if not selected_text:
+        selected_text = "なし"
+    return f"想起計画: mode={mode} queries={query_text} selected={selected_text}"
+
+
+def _memory_bundle_prompt_line(memory_bundle: dict[str, Any]) -> str:
+    required_keys = (
+        "working_memory_items",
+        "episodic_items",
+        "semantic_items",
+        "affective_items",
+        "relationship_items",
+        "reflection_items",
+        "recent_event_window",
+    )
+    parts: list[str] = []
+    for key in required_keys:
+        value = memory_bundle.get(key)
+        if not isinstance(value, list):
+            raise RuntimeError(f"memory_bundle.{key} must be a list")
+        parts.append(f"{key}={len(value)}")
+    return "想起断面: " + " ".join(parts)
+
+
+def _persona_update_prompt_line(self_snapshot: dict[str, Any]) -> str:
+    last_persona_update = self_snapshot.get("last_persona_update")
+    if not isinstance(last_persona_update, dict):
+        return "直近の人格更新: なし"
+    reason = last_persona_update.get("reason")
+    updated_traits = last_persona_update.get("updated_traits")
+    if not isinstance(reason, str) or not isinstance(updated_traits, list):
+        raise RuntimeError("self_snapshot.last_persona_update is invalid")
+    trait_names = [
+        str(trait_entry.get("trait_name"))
+        for trait_entry in updated_traits
+        if isinstance(trait_entry, dict) and isinstance(trait_entry.get("trait_name"), str)
+    ]
+    trait_text = ",".join(trait_names[:4]) if trait_names else "trait なし"
+    return f"直近の人格更新: {reason} / {trait_text}"
 
 
 # Block: Behavior prompt formatting
