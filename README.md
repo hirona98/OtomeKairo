@@ -50,7 +50,7 @@
 - `src/otomekairo/infra/duckduckgo_search_client.py`: DuckDuckGo Instant Answer API を使う最小の外部検索アダプタを持つ
 - `src/otomekairo/infra/wifi_camera_common.py`: ONVIF 接続に使う Wi-Fi カメラ設定の正規化と共通クライアント生成をまとめる
 - `src/otomekairo/infra/wifi_camera_controller.py`: 設定UIで `使用` が有効なカメラ接続を読み、先頭の有効接続に対して ONVIF 経由で `Tapo C220` などの視点操作を行う
-- `src/otomekairo/infra/wifi_camera_sensor.py`: 設定UIで `使用` が有効なカメラ接続を読み、先頭の有効接続から ONVIF スナップショットを `data/camera/` に保存する
+- `src/otomekairo/infra/wifi_camera_sensor.py`: 設定UIで `使用` が有効なカメラ接続を読み、先頭の有効接続から ONVIF で RTSP stream URI を取得し、`ffmpeg` で 1 フレームを `data/camera/` の JPEG として保存する
 - `src/otomekairo/infra/sqlite_state_store.py`: `core_schema.sql` を読み込む DB 初期化と、`sqlite-vec` の `vec0` 仮想表初期化、状態参照・入力受付・設定反映、短周期確定時の `write_memory` enqueue、`revisions` 記録、`network_result` を伴う `browse` では `summary` に加えて `fact` の `memory_state` も作成し、`memory_state` と `event` を対象にした `refresh_preview` / `embedding_sync`、`searchable=0` へ落とす `quarantine_memory`、派生索引とジョブ履歴を掃除する `tidy_memory`、`memory_jobs` の再キュー / `dead_letter`、`ui_outbound_events` の保持窓削除を持つ
 - `src/otomekairo/runtime/main_loop.py`: `settings_overrides`、`settings_change_sets`、`pending_inputs`、`task_state(waiting_external)` を消費し、待機中も応答中も lease heartbeat を維持しながら、失敗時も `claimed` を終端状態へ確定しつつ `logger.exception(...)` で stderr にスタックトレースも出し、`token` の即時追記、進行中 `cancel` の消費、`browse` の外部検索と `network_result` の再認知、`notify` のユーザー通知発行、設定UI保存結果からの `runtime_settings` materialize、短周期と長周期を交互に管理しつつ `runtime.long_cycle_min_interval_ms` で間隔制御したうえで、`write_memory` / `refresh_preview` / `embedding_sync` / `quarantine_memory` / `tidy_memory` の最小長周期処理までを行う
 - `src/otomekairo/schema/runtime_types.py`: ランタイムの共通データ形を `infra` から切り離して持つ
@@ -68,6 +68,7 @@
 - VSCode では、ワークスペース直下の `.vscode/launch.json` に `OtomeKairo` 起動構成を用意しているので、`F5` で `otomekairo.boot.run_all` をそのまま起動できる
 
 - `look` と `Cam` を使うときは、設定画面の `システム` タブで `追加` から行を増やし、表形式の接続一覧で IP アドレス・アカウント・パスワードを編集したうえで、AI に使わせる接続だけ `使用` をオンにして保存する
+- `Cam`、`POST /api/camera/observe`、`look` 後の追跡観測を使うときは、実行環境に `ffmpeg` が入っている必要がある
 - 設定画面の API キー、トークン、パスワード欄は、確認しやすさを優先して通常の文字列入力欄で表示する
 - `Cam` で撮った画像は、次の `POST /api/chat/input` に添付され、テキストなしでも送信できる
 - 自発観測を起こしたいときは、`POST /api/camera/observe` で撮影と認知キュー投入を一度に行える
