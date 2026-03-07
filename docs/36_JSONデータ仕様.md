@@ -14,11 +14,18 @@
 <!-- Block: Scope -->
 ## このドキュメントで固定する範囲
 
-- 固定するのは、初期実装で使う JSON オブジェクトのキー、型、必須項目、固定語彙である
+- 固定するのは、current 実装で使う JSON オブジェクトのキー、型、必須項目、固定語彙である
 - 固定するのは、`pending_inputs.payload_json`、`settings_overrides.requested_value_json`、`settings_editor_state.system_values_json`、5 種のプリセットテーブルの `payload_json`、`settings_change_sets.payload_json`、`ui_outbound_events.payload_json`、`action_history.command_json`、`action_history.observed_effects_json`、`memory_jobs.payload_ref_json`、`memory_job_payloads.payload_json`、`preference_memory.target_entity_ref_json`、`event_affects.moment_affect_labels_json`、`event_affects.vad_json`、主要な Web API 本文である
 - 固定するのは、`self_state.personality_json`、`self_state.current_emotion_json`、`self_state.long_term_goals_json`、`self_state.relationship_overview_json`、`self_state.invariants_json`、短周期の内部で使う `selection_profile`、`memory_bundle`、`retrieval_context`、`last_persona_update_summary`、`persona_consistency_score`、`attention_score_breakdown`、`self_initiated_score_breakdown`、`action_candidate_score`、`cognition_result`、長周期の内部で使う `MemoryWritePlan`、`personality_change_proposal`、`persona_updates` の形である
 - 固定しないのは、Python のクラス名、Pydantic モデル名、OpenAPI の自動生成細部である
 - 固定しないのは、将来追加する未使用フィールドや後段の拡張イベント種別である
+
+<!-- Block: Read Guide -->
+## target と current の読み分け
+
+- JSON キー名と shape の固定は target/current 共通の正本として読む
+- `current`、`browser_chat`、`status api`、`settings UI` に紐づく補足は、現在の実装で実際に出入りする shape を示す
+- 後続の `初期実装` 補足は、特に断りがない限り current の `browser_chat` 実装を指す
 
 <!-- Block: Common Rules -->
 ## 共通ルール
@@ -765,14 +772,14 @@
 - `cognition_result` は、短周期の内部で使う構造化された認知結果である
 - `cognition_result` は、認知層が一度に返す JSON オブジェクトであり、後から補完前提で分割しない
 - 必須項目は `intention_summary`、`decision_reason`、`action_proposals`、`step_hints`、`speech_draft`、`memory_focus`、`reflection_seed` である
-- 初期実装では、`LiteLLM` への `response_format` を strict な `json_schema` に固定し、この節の shape を provider 呼び出し時点でも拘束する
+- current 実装では、`LiteLLM` への `response_format` を strict な `json_schema` に固定し、この節の shape を provider 呼び出し時点でも拘束する
 - `action_proposals` と `step_hints` は配列に固定し、候補がない場合も空配列 `[]` を使う
-- 初期実装の `browser_chat` では、`action_proposals` の各要素は少なくとも `action_type` と `priority` を持つ
-- 初期実装の `browser_chat` では、`action_type` は `speak`、`browse`、`notify`、`look`、`wait` のいずれかだけを許可する
-- 初期実装の `browser_chat` では、`priority` は `0.0..1.0` の `number` に固定する
-- 初期実装の `action validator` では、`priority >= 0.80` を緊急ヒントとして使ってよい
-- 初期実装の `browser_chat` では、`speak` と `notify` のとき `target_channel=\"browser_chat\"` を必須とする
-- 初期実装の `browser_chat` では、`browse` のとき `query` に非空の検索文字列を必須とする
+- current の `browser_chat` では、`action_proposals` の各要素は少なくとも `action_type` と `priority` を持つ
+- current の `browser_chat` では、`action_type` は `speak`、`browse`、`notify`、`look`、`wait` のいずれかだけを許可する
+- current の `browser_chat` では、`priority` は `0.0..1.0` の `number` に固定する
+- current の `action validator` では、`priority >= 0.80` を緊急ヒントとして使ってよい
+- current の `browser_chat` では、`speak` と `notify` のとき `target_channel=\"browser_chat\"` を必須とする
+- current の `browser_chat` では、`browse` のとき `query` に非空の検索文字列を必須とする
 - `speech_draft` は、少なくとも `text`、`language`、`delivery_mode` を持つ
 - `memory_focus` は、少なくとも `focus_kind`、`summary` を持つ
 - `reflection_seed` は、少なくとも `cycle_id`、`input_kind`、`message_id`、`token_count`、`was_cancelled` を持つ
@@ -1074,6 +1081,7 @@
 
 - `settings_editor_state.system_values_json` は、設定UIで保持するシステム設定だけを持つ完全オブジェクトである
 - キーは `runtime.idle_tick_ms`、`runtime.long_cycle_min_interval_ms`、`sensors.microphone.enabled`、`sensors.camera.enabled`、`integrations.sns.enabled`、`integrations.notify_route`、`integrations.discord.bot_token`、`integrations.discord.channel_id` に固定する
+- current の `browser_chat` 実装で直接使っているのは主に `runtime.*`、`sensors.camera.enabled`、`camera_connections` であり、`sensors.microphone.enabled` と `integrations.*` は保存対象だが未接続の項目を含む
 
 <!-- Block: Character Preset Payload -->
 ### `character_presets.payload_json`
@@ -1094,6 +1102,7 @@
 
 - `character_presets.payload_json` は `character.*`、`speech.tts.*`、`speech.stt.*` の固定形を持つ
 - 通知経路と Discord 認証情報は含めない
+- `speech.stt.*` は設定UIと `runtime_settings` には反映するが、current のランタイムはまだ live microphone input を開始しない
 
 <!-- Block: Behavior Preset Payload -->
 ### `behavior_presets.payload_json`
@@ -1286,7 +1295,7 @@
 ```
 
 - 必須項目は `message_id`、`role`、`text`、`created_at` である
-- `role` は、少なくとも `assistant`、`system_notice` を区別する
+- current 実装の `role` は `assistant` を使う
 - `source_cycle_id`、`related_input_id`、`audio_url`、`audio_mime_type` は任意である
 
 <!-- Block: UI Status -->
@@ -1309,14 +1318,15 @@
 
 ```json
 {
-  "notice_code": "self_initiated_action",
-  "text": "周囲の確認を開始します"
+  "notice_code": "browse_queued",
+  "text": "検索タスクを追加しました: 今日の天気"
 }
 ```
 
 - 必須項目は `notice_code`、`text` である
 - `notice_code` は、UI 側で分類できる固定語彙 `string` にする
-- 初期実装では、`browse_queued`、`browse_completed`、`cancel_requested` を使ってよい
+- current 実装では、DB に保存される `notice` として `browse_queued`、`browse_completed` を使ってよい
+- 保持範囲外からの `SSE` 再開時は、保存しない合成 `notice` として `stream_reset` を使ってよい
 
 <!-- Block: UI Error -->
 #### `event_type = error`
@@ -1340,7 +1350,7 @@
 ### `action_history.command_json`
 
 - `action_history.command_json` は、その行動で実行しようとした命令の最小記録である
-- 初期実装では、ブラウザ向けの UI 応答命令と、`browse` の task 再開命令をこの形で保持する
+- current 実装では、ブラウザ向けの UI 応答命令と、`browse` の task 再開命令をこの形で保持する
 
 ```json
 {
@@ -1364,7 +1374,7 @@
 - `role` は、`message_id` を伴うメッセージ応答だけに付ける
 - `related_input_id` は、入力に対する応答行動だけに付ける
 - `proposal_ref` は、`cognition_result.action_proposals` から確定した候補を追跡したいときに付ける
-- `command_type` は、初期実装では `speak_ui_message`、`dispatch_notice`、`enqueue_browse_task`、`control_camera_look`、`execute_browse_task`、`abandon_browse_task` を使ってよい
+- `command_type` は、current 実装では `speak_ui_message`、`dispatch_notice`、`enqueue_browse_task`、`control_camera_look`、`execute_browse_task`、`abandon_browse_task` を使ってよい
 - `notice_code` と `text` は、`dispatch_notice` を実行する命令だけに付ける
 - `target`、`parameters`、`preconditions`、`stop_conditions`、`timeout_ms`、`requires_reobserve`、`expected_effects` は、`execute` のとき `action_command` をそのまま残したい場合に付けてよい
 - `parameters.task_id`、`parameters.query`、`parameters.target_channel` は、`enqueue_browse_task` を実行する命令だけに付ける
@@ -1378,7 +1388,7 @@
 ### `action_history.observed_effects_json`
 
 - `action_history.observed_effects_json` は、その行動の直後に観測した最小結果である
-- 初期実装では、実際に UI へ流したイベント種別と主要 ID だけを保持する
+- current 実装では、実際に UI へ流したイベント種別と主要 ID だけを保持する
 
 ```json
 {
@@ -1768,7 +1778,7 @@
     }
   },
   "attention_state": {
-    "primary_focus": "browser_chat"
+    "primary_focus": "observation"
   },
   "task_state": {
     "active_task_count": 1,
@@ -1784,7 +1794,7 @@
 - `runtime.last_retrieval` は、`retrieval_runs` が 1 件以上ある場合だけ持つ
 - `self_state.current_emotion` は、少なくとも `v`、`a`、`d`、`labels` を持つ
 - `self_state.last_persona_update` は、`revisions.entity_type=self_state.personality` が 1 件以上ある場合だけ持つ
-- `attention_state.primary_focus` は、表示用の短い `string` とする
+- `attention_state.primary_focus` は、current 実装では `observation`、`task`、`relationship`、`idle` のいずれかを返す短い `string` とする
 - `task_state.active_task_count`、`task_state.waiting_task_count` は `integer` に固定する
 
 <!-- Block: Stream Data -->
