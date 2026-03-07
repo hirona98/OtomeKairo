@@ -166,7 +166,22 @@ flowchart LR
 {
   "server_time": 1760000000000,
   "runtime": {
-    "is_running": false
+    "is_running": false,
+    "last_retrieval": {
+      "cycle_id": "cycle_...",
+      "created_at": 1760000000000,
+      "mode": "associative_recent",
+      "queries": ["最近の会話"],
+      "selected_counts": {
+        "working_memory_items": 2,
+        "episodic_items": 1,
+        "semantic_items": 1,
+        "affective_items": 0,
+        "relationship_items": 1,
+        "reflection_items": 0,
+        "recent_event_window": 3
+      }
+    }
   },
   "self_state": {
     "current_emotion": {
@@ -174,6 +189,19 @@ flowchart LR
       "a": 0.18,
       "d": 0.03,
       "labels": ["calm"]
+    },
+    "last_persona_update": {
+      "created_at": 1760000000000,
+      "reason": "persona update applied",
+      "evidence_event_ids": ["evt_001"],
+      "updated_traits": [
+        {
+          "trait_name": "caution",
+          "before": 0.10,
+          "after": 0.18,
+          "delta": 0.08
+        }
+      ]
     }
   },
   "attention_state": {
@@ -189,6 +217,8 @@ flowchart LR
 - `runtime.is_running` は Web サーバ観点の観測値であり、心拍監視や最終更新時刻から決める
 - `runtime.last_cycle_id` は、短周期が 1 回以上完了している場合だけ返す
 - `last_commit_id` は、`commit_records.commit_id` の最新値がある場合だけ返す
+- `runtime.last_retrieval` は、`retrieval_runs` が 1 件以上ある場合だけ返し、直近の `RetrievalPlan` と選別件数を要約する
+- `self_state.last_persona_update` は、`revisions.entity_type=self_state.personality` が 1 件以上ある場合だけ返す
 - 初回起動直後で短周期未実行のときは、`runtime.is_running=false` とし、`last_cycle_id` と `last_commit_id` は省略する
 - 全状態を丸ごと返さず、UI 表示に必要な要点だけを返す
 

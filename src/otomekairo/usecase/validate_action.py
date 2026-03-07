@@ -167,7 +167,13 @@ def _score_candidate(
     personality_fit_score = _personality_fit_score(persona_consistency=persona_consistency)
     relationship_fit_score = persona_consistency["relationship_alignment"]
     experience_fit_score = _experience_fit_score(
+        action_type=action_type,
         persona_consistency=persona_consistency,
+        self_snapshot=_required_object(
+            cognition_input,
+            "self_snapshot",
+            "cognition_input.self_snapshot",
+        ),
     )
     drive_relief_score = _drive_relief_score(
         action_type=action_type,
@@ -575,10 +581,30 @@ def _memory_support_score(
         "working_memory_items",
         "cognition_input.memory_bundle.working_memory_items",
     )
+    episodic_items = _required_list(
+        memory_bundle,
+        "episodic_items",
+        "cognition_input.memory_bundle.episodic_items",
+    )
     semantic_items = _required_list(
         memory_bundle,
         "semantic_items",
         "cognition_input.memory_bundle.semantic_items",
+    )
+    affective_items = _required_list(
+        memory_bundle,
+        "affective_items",
+        "cognition_input.memory_bundle.affective_items",
+    )
+    relationship_items = _required_list(
+        memory_bundle,
+        "relationship_items",
+        "cognition_input.memory_bundle.relationship_items",
+    )
+    reflection_items = _required_list(
+        memory_bundle,
+        "reflection_items",
+        "cognition_input.memory_bundle.reflection_items",
     )
     recent_event_window = _required_list(
         memory_bundle,
@@ -597,22 +623,98 @@ def _memory_support_score(
             )
             if payload.get("query") == query_hint:
                 return 0.20
+        if _has_reflection_caution(
+            reflection_items=reflection_items,
+            current_observation=current_observation,
+            query_hint=query_hint,
+        ):
+            return 0.30
+        if _negative_affect_support(affective_items=affective_items) >= 0.70:
+            return 0.35
+        if episodic_items or recent_event_window:
+            return 0.65
         return 0.75
     if action_type in {"speak", "notify"}:
-        if current_observation["input_kind"] == "network_result" and semantic_items:
+        if current_observation["input_kind"] == "network_result" and (semantic_items or episodic_items):
             return 0.95
+        if relationship_items:
+            return 0.85
+        if affective_items:
+            return 0.78
         if working_memory_items or recent_event_window:
             return 0.70
         return 0.45
     if action_type == "look":
+        if relationship_items or affective_items:
+            return 0.80
         if working_memory_items or recent_event_window:
             return 0.70
+        if episodic_items:
+            return 0.65
         return 0.55
     if action_type == "wait":
+        if _has_reflection_caution(
+            reflection_items=reflection_items,
+            current_observation=current_observation,
+            query_hint=None,
+        ):
+            return 0.90
+        if _negative_affect_support(affective_items=affective_items) >= 0.60:
+            return 0.80
         if current_observation["input_kind"] == "network_result" and semantic_items:
             return 0.30
         return 0.60
     raise RuntimeError("unsupported action_type for memory support scoring")
+
+
+# Block: Reflection and affect helpers
+def _has_reflection_caution(
+    *,
+    reflection_items: list[dict[str, Any]],
+    current_observation: dict[str, Any],
+    query_hint: str | None,
+) -> bool:
+    caution_tokens = {"失敗", "回避", "避け", "注意", "保留", "待機"}
+    observation_text = str(current_observation["observation_text"])
+    for reflection_item in reflection_items:
+        if not isinstance(reflection_item, dict):
+            raise RuntimeError("memory_bundle.reflection_items must contain only objects")
+        body_text = reflection_item.get("body_text")
+        if not isinstance(body_text, str):
+            continue
+        if query_hint is not None and query_hint in body_text:
+            return True
+        if observation_text and observation_text in body_text:
+            return True
+        if any(token in body_text for token in caution_tokens):
+            return True
+    return False
+
+
+def _negative_affect_support(
+    *,
+    affective_items: list[dict[str, Any]],
+) -> float:
+    strongest_signal = 0.0
+    for affective_item in affective_items:
+        if not isinstance(affective_item, dict):
+            raise RuntimeError("memory_bundle.affective_items must contain only objects")
+        payload = affective_item.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        vad = payload.get("vad")
+        if isinstance(vad, dict):
+            valence = vad.get("v")
+            arousal = vad.get("a")
+            if isinstance(valence, (int, float)) and isinstance(arousal, (int, float)):
+                strongest_signal = max(
+                    strongest_signal,
+                    _normalized_score((1.0 - float(valence)) * 0.50 + float(arousal) * 0.30),
+                )
+        labels = payload.get("labels")
+        if isinstance(labels, list) and any(str(label) in {"tense", "guarded", "frustrated"} for label in labels):
+            strongest_signal = max(strongest_signal, 0.75)
+    return strongest_signal
 
 
 # Block: Aversion penalty
@@ -722,14 +824,57 @@ def _drive_alignment(
 # Block: Experience score
 def _experience_fit_score(
     *,
+    action_type: str,
     persona_consistency: dict[str, Any],
+    self_snapshot: dict[str, Any],
 ) -> float:
     preference_alignment = _normalized_score(persona_consistency["preference_alignment"])
     aversion_penalty = _normalized_score(persona_consistency["aversion_penalty"])
-    return _normalized_score(
-        preference_alignment * 0.65
-        + (1.0 - aversion_penalty) * 0.35
+    persona_update_support = _persona_update_support_score(
+        action_type=action_type,
+        self_snapshot=self_snapshot,
     )
+    return _normalized_score(
+        preference_alignment * 0.55
+        + (1.0 - aversion_penalty) * 0.25
+        + persona_update_support * 0.20
+    )
+
+
+def _persona_update_support_score(
+    *,
+    action_type: str,
+    self_snapshot: dict[str, Any],
+) -> float:
+    last_persona_update = self_snapshot.get("last_persona_update")
+    if not isinstance(last_persona_update, dict):
+        return 0.50
+    updated_traits = last_persona_update.get("updated_traits")
+    if not isinstance(updated_traits, list):
+        return 0.50
+    support_score = 0.50
+    for trait_entry in updated_traits:
+        if not isinstance(trait_entry, dict):
+            continue
+        trait_name = trait_entry.get("trait_name")
+        delta = trait_entry.get("delta")
+        if not isinstance(trait_name, str) or not isinstance(delta, (int, float)):
+            continue
+        if action_type == "browse":
+            if trait_name in {"curiosity", "novelty_preference"}:
+                support_score += float(delta) * 0.60
+            if trait_name == "caution":
+                support_score -= float(delta) * 0.70
+        if action_type == "look":
+            if trait_name in {"curiosity", "novelty_preference"}:
+                support_score += float(delta) * 0.55
+            if trait_name == "caution":
+                support_score -= float(delta) * 0.50
+        if action_type == "wait" and trait_name == "caution":
+            support_score += float(delta) * 0.80
+        if action_type in {"speak", "notify"} and trait_name in {"warmth", "sociability", "assertiveness"}:
+            support_score += float(delta) * 0.50
+    return _normalized_score(support_score)
 
 
 def _has_strong_aversion(

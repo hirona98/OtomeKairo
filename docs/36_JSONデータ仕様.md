@@ -16,7 +16,7 @@
 
 - 固定するのは、初期実装で使う JSON オブジェクトのキー、型、必須項目、固定語彙である
 - 固定するのは、`pending_inputs.payload_json`、`settings_overrides.requested_value_json`、`settings_editor_state.system_values_json`、5 種のプリセットテーブルの `payload_json`、`settings_change_sets.payload_json`、`ui_outbound_events.payload_json`、`action_history.command_json`、`action_history.observed_effects_json`、`memory_jobs.payload_ref_json`、`memory_job_payloads.payload_json`、主要な Web API 本文である
-- 固定するのは、`self_state.personality_json`、`self_state.current_emotion_json`、`self_state.long_term_goals_json`、`self_state.relationship_overview_json`、`self_state.invariants_json`、短周期の内部で使う `selection_profile`、`persona_consistency_score`、`attention_score_breakdown`、`self_initiated_score_breakdown`、`action_candidate_score`、`cognition_result`、長周期の内部で使う `personality_change_proposal`、`persona_updates` の形である
+- 固定するのは、`self_state.personality_json`、`self_state.current_emotion_json`、`self_state.long_term_goals_json`、`self_state.relationship_overview_json`、`self_state.invariants_json`、短周期の内部で使う `selection_profile`、`memory_bundle`、`retrieval_context`、`last_persona_update_summary`、`persona_consistency_score`、`attention_score_breakdown`、`self_initiated_score_breakdown`、`action_candidate_score`、`cognition_result`、長周期の内部で使う `personality_change_proposal`、`persona_updates` の形である
 - 固定しないのは、Python のクラス名、Pydantic モデル名、OpenAPI の自動生成細部である
 - 固定しないのは、将来追加する未使用フィールドや後段の拡張イベント種別である
 
@@ -388,7 +388,152 @@
 - `recent_event_window` の各要素は、少なくとも `event_id`、`source`、`kind`、`summary_text`、`created_at` を持つ
 - `context assembler` は、`memory_bundle` の各要素に人間可読な `*_utc_text`、`*_local_text`、`relative_time_text` を付与してよい
 - 初期実装では、`working_memory_items` に `memory_kind=summary`、`semantic_items` に `memory_kind=fact`、`recent_event_window` に直近 `5` 件の `searchable` な `events` を入れてよい
+- 初期実装では、`episodic_items.memory_kind` に `episodic_event`、`affective_items.memory_kind` に `long_mood_state` または `event_affect`、`relationship_items.memory_kind` に `relation` または `preference`、`reflection_items.memory_kind` に `reflection_note` を使ってよい
 - 初期実装では、`current_observation.observation_text` と、必要なら `query` / `source_task_id` への一致を使い、関連しない要素を `memory_bundle` から落としてよい
+
+### `retrieval_context`
+
+```json
+{
+  "plan": {
+    "mode": "associative_recent",
+    "queries": ["最近の会話"],
+    "time_hint": {
+      "explicit_years": [],
+      "has_explicit_time_hint": false
+    },
+    "limits": {
+      "working_memory_items": 3,
+      "episodic_items": 3,
+      "semantic_items": 3,
+      "affective_items": 2,
+      "relationship_items": 2,
+      "reflection_items": 2,
+      "recent_event_window": 5
+    }
+  },
+  "selected": {
+    "selected_counts": {
+      "working_memory_items": 2,
+      "episodic_items": 1,
+      "semantic_items": 1,
+      "affective_items": 0,
+      "relationship_items": 1,
+      "reflection_items": 0,
+      "recent_event_window": 3
+    },
+    "selected_refs": {
+      "working_memory_item_ids": ["mem_001"],
+      "episodic_item_ids": ["evt_001"],
+      "semantic_item_ids": ["mem_010"],
+      "affective_item_ids": [],
+      "relationship_item_ids": ["pref_001"],
+      "reflection_item_ids": [],
+      "recent_event_ids": ["evt_001", "evt_002"]
+    },
+    "selection_trace": [
+      {
+        "slot": "semantic_items",
+        "item_ref": "memory_state:mem_010",
+        "score": 1.8,
+        "reason_codes": ["matched_query", "mode_priority"]
+      }
+    ]
+  }
+}
+```
+
+- `retrieval_context` は、短周期の内部でだけ使う `RetrievalPlan` と選別結果の要約である
+- 必須項目は `plan` と `selected` である
+- `plan` は、少なくとも `mode`、`queries`、`time_hint`、`limits` を持つ
+- `selected` は、少なくとも `selected_counts`、`selected_refs`、`selection_trace` を持つ
+
+### `retrieval_candidates_json`
+
+```json
+{
+  "total_candidate_count": 7,
+  "category_counts": {
+    "working_memory_items": 2,
+    "episodic_items": 2,
+    "semantic_items": 1,
+    "affective_items": 0,
+    "relationship_items": 1,
+    "reflection_items": 0,
+    "recent_event_window": 1
+  },
+  "non_empty_categories": [
+    "working_memory_items",
+    "episodic_items",
+    "semantic_items",
+    "relationship_items",
+    "recent_event_window"
+  ]
+}
+```
+
+- `retrieval_candidates_json` は、`retrieval_runs.candidates_json` に保存する候補統計の最小形である
+- 必須項目は `total_candidate_count`、`category_counts`、`non_empty_categories` である
+- `category_counts` は、`memory_bundle` と同じ slot 名をキーにした件数マップである
+
+### `retrieval_selected_json`
+
+```json
+{
+  "selected_counts": {
+    "working_memory_items": 2,
+    "episodic_items": 1,
+    "semantic_items": 1,
+    "affective_items": 0,
+    "relationship_items": 1,
+    "reflection_items": 0,
+    "recent_event_window": 3
+  },
+  "selected_refs": {
+    "working_memory_item_ids": ["mem_001"],
+    "episodic_item_ids": ["evt_001"],
+    "semantic_item_ids": ["mem_010"],
+    "affective_item_ids": [],
+    "relationship_item_ids": ["pref_001"],
+    "reflection_item_ids": [],
+    "recent_event_ids": ["evt_001", "evt_002"]
+  },
+  "selection_trace": [
+    {
+      "slot": "semantic_items",
+      "item_ref": "memory_state:mem_010",
+      "score": 1.8,
+      "reason_codes": ["matched_query", "mode_priority"]
+    }
+  ]
+}
+```
+
+- `retrieval_selected_json` は、`retrieval_runs.selected_json` に保存する最終選別結果の最小形である
+- 必須項目は `selected_counts`、`selected_refs`、`selection_trace` である
+- `selection_trace` の各要素は、少なくとも `slot`、`item_ref`、`score`、`reason_codes` を持つ
+
+### `last_persona_update_summary`
+
+```json
+{
+  "created_at": 1760000000000,
+  "reason": "persona update applied",
+  "evidence_event_ids": ["evt_001"],
+  "updated_traits": [
+    {
+      "trait_name": "caution",
+      "before": 0.10,
+      "after": 0.18,
+      "delta": 0.08
+    }
+  ]
+}
+```
+
+- `last_persona_update_summary` は、直近の `self_state.personality` 更新を短周期や `status` で参照するための要約である
+- 必須項目は `created_at`、`reason`、`evidence_event_ids`、`updated_traits` である
+- `updated_traits` の各要素は、少なくとも `trait_name`、`before`、`after`、`delta` を持つ
 
 <!-- Block: Persona Consistency Score -->
 ### `persona_consistency_score`
@@ -1341,7 +1486,22 @@
 {
   "server_time": 1760000000000,
   "runtime": {
-    "is_running": false
+    "is_running": false,
+    "last_retrieval": {
+      "cycle_id": "cycle_...",
+      "created_at": 1760000000000,
+      "mode": "associative_recent",
+      "queries": ["最近の会話"],
+      "selected_counts": {
+        "working_memory_items": 2,
+        "episodic_items": 1,
+        "semantic_items": 1,
+        "affective_items": 0,
+        "relationship_items": 1,
+        "reflection_items": 0,
+        "recent_event_window": 3
+      }
+    }
   },
   "self_state": {
     "current_emotion": {
@@ -1349,6 +1509,12 @@
       "a": 0.18,
       "d": 0.03,
       "labels": ["calm"]
+    },
+    "last_persona_update": {
+      "created_at": 1760000000000,
+      "reason": "persona update applied",
+      "evidence_event_ids": ["evt_001"],
+      "updated_traits": []
     }
   },
   "attention_state": {
@@ -1365,7 +1531,9 @@
 - `runtime` は、少なくとも `is_running` を持つ
 - `runtime.last_cycle_id` は、短周期が 1 回以上完了している場合だけ持つ
 - `runtime.last_commit_id` は、`commit_records` が 1 件以上ある場合だけ持つ
+- `runtime.last_retrieval` は、`retrieval_runs` が 1 件以上ある場合だけ持つ
 - `self_state.current_emotion` は、少なくとも `v`、`a`、`d`、`labels` を持つ
+- `self_state.last_persona_update` は、`revisions.entity_type=self_state.personality` が 1 件以上ある場合だけ持つ
 - `attention_state.primary_focus` は、表示用の短い `string` とする
 - `task_state.active_task_count`、`task_state.waiting_task_count` は `integer` に固定する
 
