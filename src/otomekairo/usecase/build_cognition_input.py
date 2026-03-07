@@ -33,8 +33,10 @@ def build_cognition_input(
     camera_available: bool,
 ) -> BuiltCognitionInput:
     input_kind = str(pending_input.payload["input_kind"])
-    if input_kind not in {"chat_message", "camera_observation", "network_result"}:
-        raise ValueError("cognition_input is only supported for chat_message, camera_observation, and network_result")
+    if input_kind not in {"chat_message", "camera_observation", "network_result", "idle_tick"}:
+        raise ValueError(
+            "cognition_input is only supported for chat_message, camera_observation, network_result, and idle_tick"
+        )
     behavior_settings = _build_behavior_settings(state_snapshot.effective_settings)
     selection_profile = _build_selection_profile(
         state_snapshot=state_snapshot,
@@ -206,6 +208,17 @@ def _build_current_observation(
             "summary_text": summary_text,
             "source_task_id": source_task_id,
         }
+    if input_kind == "idle_tick":
+        idle_duration_ms = pending_input.payload.get("idle_duration_ms")
+        if isinstance(idle_duration_ms, bool) or not isinstance(idle_duration_ms, int):
+            raise ValueError("idle_tick.idle_duration_ms must be integer")
+        if idle_duration_ms <= 0:
+            raise ValueError("idle_tick.idle_duration_ms must be positive")
+        return {
+            **base_observation,
+            "observation_text": _idle_tick_observation_text(idle_duration_ms),
+            "idle_duration_ms": idle_duration_ms,
+        }
     raise ValueError("unsupported current_observation input_kind")
 
 
@@ -296,6 +309,11 @@ def _camera_attachment_summary_text(attachments: list[dict[str, Any]]) -> str:
     if not attachments:
         return "添付なし"
     return f"カメラ画像 {len(attachments)} 枚"
+
+
+# Block: Idle tick observation text
+def _idle_tick_observation_text(idle_duration_ms: int) -> str:
+    return f"{idle_duration_ms}ms の idle_tick が到来した"
 
 
 # Block: Task snapshot builder

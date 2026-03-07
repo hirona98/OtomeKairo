@@ -239,6 +239,8 @@ def _initial_status_label(pending_input: PendingInputRecord) -> str:
         return "カメラ画像を観測しています"
     if input_kind == "network_result":
         return "検索結果をもとに応答を準備しています"
+    if input_kind == "idle_tick":
+        return "アイドル状態を点検しています"
     raise RuntimeError("unsupported input_kind for cognition status")
 
 

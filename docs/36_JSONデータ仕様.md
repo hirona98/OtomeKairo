@@ -108,6 +108,26 @@
 - `target_kind` は、少なくとも `action_type`、`observation_kind` を区別する
 - `target_key` は、対象を表す非空の `string` である
 
+<!-- Block: Pending Input Payload -->
+### `pending_inputs.payload_json`
+
+```json
+{
+  "input_kind": "idle_tick",
+  "trigger_reason": "idle_tick",
+  "idle_duration_ms": 1000
+}
+```
+
+- `pending_inputs.payload_json` は、current の受理入力本文である
+- 必須項目は `input_kind` である
+- current の `input_kind` は `chat_message`、`camera_observation`、`network_result`、`idle_tick`、`cancel` に固定する
+- `chat_message` は、`message_kind="dialogue_turn"`、`trigger_reason="external_input"` を持ち、必要なら `text`、`attachments`、`client_message_id` を持ってよい
+- `camera_observation` は、`trigger_reason` と `attachments` を必須とし、`attachments` は `camera_still_image` を 1 件以上持つ配列に固定する
+- `network_result` は、`trigger_reason="external_result"`、`query`、`summary_text`、`source_task_id` を必須とする
+- `idle_tick` は、`trigger_reason="idle_tick"` と正の `idle_duration_ms` を必須とし、`text` や `attachments` を持たない
+- `cancel` は、`trigger_reason="external_input"` を必須とし、必要なら `target_message_id` を持ってよい
+
 <!-- Block: Error Body -->
 ### エラー応答 JSON
 
@@ -389,6 +409,29 @@
 - 各要素は、少なくとも `task_id`、`task_kind`、`task_status`、`goal_hint`、`completion_hint`、`resume_condition`、`interruptible`、`priority`、`created_at`、`updated_at` を持つ
 - `context assembler` は、各要素に人間可読な `created_at_*`、`updated_at_*`、`relative_time_text` を付与してよい
 - 初期実装では、`active_tasks` と `waiting_external_tasks` に優先度上位 `3` 件までを入れてよい
+
+<!-- Block: Current Observation -->
+### `current_observation`
+
+```json
+{
+  "source": "idle_tick",
+  "kind": "internal_trigger",
+  "trigger_reason": "idle_tick",
+  "input_kind": "idle_tick",
+  "captured_at": 1760000000000,
+  "observation_text": "1000ms の idle_tick が到来した",
+  "idle_duration_ms": 1000
+}
+```
+
+- `current_observation` は、その短周期で主材料として扱う観測断面である
+- 必須項目は `source`、`kind`、`trigger_reason`、`input_kind`、`captured_at`、`observation_text` である
+- current の `input_kind` は `chat_message`、`camera_observation`、`network_result`、`idle_tick` に固定する
+- `chat_message` は、必要なら `attachment_count`、`attachment_summary_text`、`attachments` を持ってよい
+- `camera_observation` は、`attachment_count`、`attachment_summary_text`、`attachments` を必須とし、`trigger_reason=post_action_followup` の場合は追跡観測として扱う
+- `network_result` は、`query`、`summary_text`、`source_task_id` を必須とする
+- `idle_tick` は、正の `idle_duration_ms` を必須とする
 
 <!-- Block: Attention Focus Entry -->
 ### `attention_focus_entry`

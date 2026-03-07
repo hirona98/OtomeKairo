@@ -1357,6 +1357,27 @@ class SqliteStateStore:
             "captured_at": captured_at,
         }
 
+    # Block: Idle tick write
+    def enqueue_idle_tick(
+        self,
+        *,
+        idle_duration_ms: int,
+    ) -> dict[str, Any]:
+        if isinstance(idle_duration_ms, bool) or not isinstance(idle_duration_ms, int):
+            raise StoreValidationError("idle_duration_ms must be integer")
+        if idle_duration_ms <= 0:
+            raise StoreValidationError("idle_duration_ms must be positive")
+        return self._enqueue_pending_input(
+            source="idle_tick",
+            client_message_id=None,
+            payload={
+                "input_kind": "idle_tick",
+                "trigger_reason": "idle_tick",
+                "idle_duration_ms": idle_duration_ms,
+            },
+            priority=10,
+        )
+
     # Block: Pending input write
     def _enqueue_pending_input(
         self,
@@ -4004,6 +4025,34 @@ class SqliteStateStore:
             created_at=int(row["created_at"]),
             payload=json.loads(row["payload_json"]),
         )
+
+    # Block: Pending input discard
+    def discard_queued_pending_input(
+        self,
+        *,
+        input_id: str,
+        discard_reason: str,
+    ) -> bool:
+        if not isinstance(input_id, str) or not input_id:
+            raise StoreValidationError("input_id must be non-empty string")
+        if not isinstance(discard_reason, str) or not discard_reason:
+            raise StoreValidationError("discard_reason must be non-empty string")
+        resolved_at = _now_ms()
+        with self._connect() as connection:
+            updated_row_count = connection.execute(
+                """
+                UPDATE pending_inputs
+                SET status = 'discarded',
+                    resolved_at = ?,
+                    discard_reason = ?
+                WHERE input_id = ?
+                  AND status = 'queued'
+                """,
+                (resolved_at, discard_reason, input_id),
+            ).rowcount
+        if updated_row_count not in {0, 1}:
+            raise StoreConflictError("pending input discard updated unexpected row count")
+        return updated_row_count == 1
 
     # Block: Waiting browse task claim
     def claim_next_waiting_browse_task(self) -> TaskStateRecord | None:
@@ -7073,6 +7122,19 @@ def _pending_input_situation_summary(
         if "emit_chat_response" in action_types:
             return "検索結果を要約して応答した"
         return "検索結果を取り込んだ" if resolution_status == "consumed" else "検索結果入力を棄却した"
+    if input_kind == "idle_tick":
+        if "control_camera_look" in action_types and has_followup_camera_observation:
+            return "idle_tick を処理し、視点調整と追跡観測を開始した"
+        if "enqueue_browse_task" in action_types:
+            query = _queued_browse_query(action_results)
+            if query is not None:
+                return f"idle_tick を処理して検索した: {query}"
+            return "idle_tick を処理して検索した"
+        if "emit_chat_response" in action_types:
+            return "idle_tick を処理して応答した"
+        if "dispatch_notice" in action_types:
+            return "idle_tick を処理して通知した"
+        return "idle_tick を処理した" if resolution_status == "consumed" else "idle_tick を棄却した"
     if input_kind == "cancel":
         return "停止要求を処理した" if resolution_status == "consumed" else "停止要求を棄却した"
     if resolution_status == "consumed":
@@ -7367,6 +7429,9 @@ def _pending_input_receipt_summary(pending_input: PendingInputRecord) -> str:
         query = str(pending_input.payload["query"])
         summary_text = str(pending_input.payload["summary_text"])
         return f"network_result:{query}:{summary_text[:40]}"
+    if input_kind == "idle_tick":
+        idle_duration_ms = int(pending_input.payload["idle_duration_ms"])
+        return f"idle_tick:{idle_duration_ms}"
     if input_kind == "cancel":
         return "cancel request"
     return f"input:{input_kind}"

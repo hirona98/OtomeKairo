@@ -36,6 +36,7 @@
 
 - current の組み込みブラウザ UI が実際に使うのは `GET /`、`GET /api/status`、`GET /api/settings/editor`、`PUT /api/settings/editor`、`POST /api/chat/input`、`POST /api/chat/cancel`、`POST /api/camera/capture`、`GET /api/chat/stream`、`GET /captures/{capture_filename}`、`GET /audio/{audio_filename}` である
 - `POST /api/camera/observe` は公開 API として実装済みだが、current の組み込み UI からは呼ばれない
+- `idle_tick` は公開 API を持たず、ランタイムが `pending_inputs` へ内部 enqueue する
 - current の `GET /api/status` は、runtime 全断面ではなく、runtime 要約、感情要約、主注意 summary、`body_state` 要約、`world_state` 要約、`drive_state` 要約、task 件数だけを返す
 - current の `GET /api/chat/stream` は `channel=browser_chat` だけを受け付け、他の値は `400` にする
 - current の `notice` は主に `browse_queued`、`browse_completed`、保持範囲外再開の `stream_reset` を使う
