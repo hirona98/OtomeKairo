@@ -40,6 +40,7 @@ from otomekairo.usecase.observation_normalization import (
     normalize_observation_source,
 )
 from otomekairo.usecase.persona_change import evaluate_persona_change
+from otomekairo.usecase.runtime_live_state import build_runtime_live_state
 from otomekairo.usecase.write_memory_plan import (
     build_write_memory_plan,
     validate_write_memory_event_snapshots,
@@ -181,6 +182,27 @@ class SqliteStateStore:
                 WHERE row_id = 1
                 """
             ).fetchone()
+            body_row = connection.execute(
+                """
+                SELECT posture_json, sensor_availability_json, load_json
+                FROM body_state
+                WHERE row_id = 1
+                """
+            ).fetchone()
+            world_row = connection.execute(
+                """
+                SELECT situation_summary, external_waits_json
+                FROM world_state
+                WHERE row_id = 1
+                """
+            ).fetchone()
+            drive_row = connection.execute(
+                """
+                SELECT priority_effects_json
+                FROM drive_state
+                WHERE row_id = 1
+                """
+            ).fetchone()
             task_counts_row = connection.execute(
                 """
                 SELECT
@@ -198,7 +220,13 @@ class SqliteStateStore:
                 LIMIT 1
                 """
             ).fetchone()
-        if self_row is None or attention_row is None:
+        if (
+            self_row is None
+            or attention_row is None
+            or body_row is None
+            or world_row is None
+            or drive_row is None
+        ):
             raise RuntimeError("singleton state rows are missing")
         runtime_payload: dict[str, Any] = {"is_running": runtime_row is not None}
         if commit_row is not None:
@@ -208,6 +236,11 @@ class SqliteStateStore:
             runtime_payload["last_retrieval"] = _public_retrieval_summary(retrieval_row)
         current_emotion_json = json.loads(self_row["current_emotion_json"])
         primary_focus_json = json.loads(attention_row["primary_focus_json"])
+        posture_json = json.loads(body_row["posture_json"])
+        sensor_availability_json = json.loads(body_row["sensor_availability_json"])
+        load_json = json.loads(body_row["load_json"])
+        external_waits_json = json.loads(world_row["external_waits_json"])
+        priority_effects_json = json.loads(drive_row["priority_effects_json"])
         active_count = int(task_counts_row["active_count"] or 0)
         waiting_count = int(task_counts_row["waiting_count"] or 0)
         self_state_payload: dict[str, Any] = {
@@ -220,6 +253,18 @@ class SqliteStateStore:
             "runtime": runtime_payload,
             "self_state": self_state_payload,
             "attention_state": {"primary_focus": _public_primary_focus(primary_focus_json)},
+            "body_state": _public_body_state_summary(
+                posture_json=posture_json,
+                sensor_availability_json=sensor_availability_json,
+                load_json=load_json,
+            ),
+            "world_state": _public_world_state_summary(
+                situation_summary=str(world_row["situation_summary"]),
+                external_waits_json=external_waits_json,
+            ),
+            "drive_state": _public_drive_state_summary(
+                priority_effects_json=priority_effects_json,
+            ),
             "task_state": {
                 "active_task_count": active_count,
                 "waiting_task_count": waiting_count,
@@ -911,6 +956,7 @@ class SqliteStateStore:
         cycle_id: str,
         final_status: str,
         reject_reason: str | None = None,
+        camera_available: bool,
     ) -> int:
         if final_status not in {"applied", "rejected"}:
             raise StoreValidationError("final_status is invalid")
@@ -923,6 +969,12 @@ class SqliteStateStore:
                     key=key,
                     value=applied_value,
                     applied_at=resolved_at,
+                )
+                self._sync_runtime_live_state(
+                    connection=connection,
+                    camera_available=camera_available,
+                    updated_at=resolved_at,
+                    cycle_context=None,
                 )
             event_ids = self._insert_settings_override_events(
                 connection=connection,
@@ -1035,6 +1087,7 @@ class SqliteStateStore:
         default_settings: dict[str, Any],
         final_status: str,
         reject_reason: str | None = None,
+        camera_available: bool,
     ) -> None:
         if final_status not in {"applied", "rejected"}:
             raise StoreValidationError("settings change set final_status is invalid")
@@ -1126,6 +1179,12 @@ class SqliteStateStore:
                         WHERE row_id = 1
                         """,
                         (change_set.change_set_id,),
+                    )
+                    self._sync_runtime_live_state(
+                        connection=connection,
+                        camera_available=camera_available,
+                        updated_at=resolved_at,
+                        cycle_context=None,
                     )
             updated_row_count = connection.execute(
                 """
@@ -4051,6 +4110,270 @@ class SqliteStateStore:
         if updated_row_count != 1:
             raise RuntimeError("attention_state row is missing")
 
+    # Block: Body state replace
+    def _replace_body_state(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        body_state: dict[str, Any],
+    ) -> None:
+        posture = body_state.get("posture")
+        mobility = body_state.get("mobility")
+        sensor_availability = body_state.get("sensor_availability")
+        output_locks = body_state.get("output_locks")
+        load = body_state.get("load")
+        updated_at = body_state.get("updated_at")
+        if not isinstance(posture, dict):
+            raise StoreValidationError("body_state.posture must be an object")
+        if not isinstance(mobility, dict):
+            raise StoreValidationError("body_state.mobility must be an object")
+        if not isinstance(sensor_availability, dict):
+            raise StoreValidationError("body_state.sensor_availability must be an object")
+        if not isinstance(output_locks, dict):
+            raise StoreValidationError("body_state.output_locks must be an object")
+        if not isinstance(load, dict):
+            raise StoreValidationError("body_state.load must be an object")
+        if isinstance(updated_at, bool) or not isinstance(updated_at, int):
+            raise StoreValidationError("body_state.updated_at must be integer")
+        updated_row_count = connection.execute(
+            """
+            UPDATE body_state
+            SET posture_json = ?,
+                mobility_json = ?,
+                sensor_availability_json = ?,
+                output_locks_json = ?,
+                load_json = ?,
+                updated_at = ?
+            WHERE row_id = 1
+            """,
+            (
+                _json_text(posture),
+                _json_text(mobility),
+                _json_text(sensor_availability),
+                _json_text(output_locks),
+                _json_text(load),
+                updated_at,
+            ),
+        ).rowcount
+        if updated_row_count != 1:
+            raise RuntimeError("body_state row is missing")
+
+    # Block: World state replace
+    def _replace_world_state(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        world_state: dict[str, Any],
+    ) -> None:
+        location = world_state.get("location")
+        situation_summary = world_state.get("situation_summary")
+        surroundings = world_state.get("surroundings")
+        affordances = world_state.get("affordances")
+        constraints = world_state.get("constraints")
+        attention_targets = world_state.get("attention_targets")
+        external_waits = world_state.get("external_waits")
+        updated_at = world_state.get("updated_at")
+        if not isinstance(location, dict):
+            raise StoreValidationError("world_state.location must be an object")
+        if not isinstance(situation_summary, str) or not situation_summary:
+            raise StoreValidationError("world_state.situation_summary must be non-empty string")
+        if not isinstance(surroundings, dict):
+            raise StoreValidationError("world_state.surroundings must be an object")
+        if not isinstance(affordances, dict):
+            raise StoreValidationError("world_state.affordances must be an object")
+        if not isinstance(constraints, dict):
+            raise StoreValidationError("world_state.constraints must be an object")
+        if not isinstance(attention_targets, dict):
+            raise StoreValidationError("world_state.attention_targets must be an object")
+        if not isinstance(external_waits, dict):
+            raise StoreValidationError("world_state.external_waits must be an object")
+        if isinstance(updated_at, bool) or not isinstance(updated_at, int):
+            raise StoreValidationError("world_state.updated_at must be integer")
+        updated_row_count = connection.execute(
+            """
+            UPDATE world_state
+            SET location_json = ?,
+                situation_summary = ?,
+                surroundings_json = ?,
+                affordances_json = ?,
+                constraints_json = ?,
+                attention_targets_json = ?,
+                external_waits_json = ?,
+                updated_at = ?
+            WHERE row_id = 1
+            """,
+            (
+                _json_text(location),
+                situation_summary,
+                _json_text(surroundings),
+                _json_text(affordances),
+                _json_text(constraints),
+                _json_text(attention_targets),
+                _json_text(external_waits),
+                updated_at,
+            ),
+        ).rowcount
+        if updated_row_count != 1:
+            raise RuntimeError("world_state row is missing")
+
+    # Block: Drive state replace
+    def _replace_drive_state(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        drive_state: dict[str, Any],
+    ) -> None:
+        drive_levels = drive_state.get("drive_levels")
+        priority_effects = drive_state.get("priority_effects")
+        updated_at = drive_state.get("updated_at")
+        if not isinstance(drive_levels, dict):
+            raise StoreValidationError("drive_state.drive_levels must be an object")
+        if not isinstance(priority_effects, dict):
+            raise StoreValidationError("drive_state.priority_effects must be an object")
+        if isinstance(updated_at, bool) or not isinstance(updated_at, int):
+            raise StoreValidationError("drive_state.updated_at must be integer")
+        updated_row_count = connection.execute(
+            """
+            UPDATE drive_state
+            SET drive_levels_json = ?,
+                priority_effects_json = ?,
+                updated_at = ?
+            WHERE row_id = 1
+            """,
+            (
+                _json_text(drive_levels),
+                _json_text(priority_effects),
+                updated_at,
+            ),
+        ).rowcount
+        if updated_row_count != 1:
+            raise RuntimeError("drive_state row is missing")
+
+    # Block: Runtime live state sync
+    def _sync_runtime_live_state(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        camera_available: bool,
+        updated_at: int,
+        cycle_context: dict[str, Any] | None,
+    ) -> None:
+        runtime_settings_row = connection.execute(
+            """
+            SELECT values_json
+            FROM runtime_settings
+            WHERE row_id = 1
+            """
+        ).fetchone()
+        attention_row = connection.execute(
+            """
+            SELECT primary_focus_json, secondary_focuses_json
+            FROM attention_state
+            WHERE row_id = 1
+            """
+        ).fetchone()
+        body_row = connection.execute(
+            """
+            SELECT
+                posture_json,
+                mobility_json,
+                sensor_availability_json,
+                output_locks_json,
+                load_json,
+                updated_at
+            FROM body_state
+            WHERE row_id = 1
+            """
+        ).fetchone()
+        world_row = connection.execute(
+            """
+            SELECT
+                location_json,
+                situation_summary,
+                surroundings_json,
+                affordances_json,
+                constraints_json,
+                attention_targets_json,
+                external_waits_json,
+                updated_at
+            FROM world_state
+            WHERE row_id = 1
+            """
+        ).fetchone()
+        active_task_rows = connection.execute(
+            """
+            SELECT
+                task_id,
+                task_kind,
+                task_status,
+                goal_hint,
+                completion_hint_json,
+                resume_condition_json,
+                interruptible,
+                priority,
+                created_at,
+                updated_at,
+                title,
+                step_hints_json
+            FROM task_state
+            WHERE task_status = 'active'
+            ORDER BY priority DESC, updated_at DESC
+            """
+        ).fetchall()
+        waiting_task_rows = connection.execute(
+            """
+            SELECT
+                task_id,
+                task_kind,
+                task_status,
+                goal_hint,
+                completion_hint_json,
+                resume_condition_json,
+                interruptible,
+                priority,
+                created_at,
+                updated_at,
+                title,
+                step_hints_json
+            FROM task_state
+            WHERE task_status = 'waiting_external'
+            ORDER BY priority DESC, updated_at DESC
+            """
+        ).fetchall()
+        if (
+            runtime_settings_row is None
+            or attention_row is None
+            or body_row is None
+            or world_row is None
+        ):
+            raise RuntimeError("runtime live state source rows are missing")
+        live_state = build_runtime_live_state(
+            effective_settings=json.loads(runtime_settings_row["values_json"]),
+            camera_available=camera_available,
+            attention_state={
+                "primary_focus": json.loads(attention_row["primary_focus_json"]),
+                "secondary_focuses": json.loads(attention_row["secondary_focuses_json"]),
+            },
+            active_tasks=[_task_snapshot_entry(row) for row in active_task_rows],
+            waiting_tasks=[_task_snapshot_entry(row) for row in waiting_task_rows],
+            previous_body_state=_decode_body_state_row(body_row),
+            previous_world_state=_decode_world_state_row(world_row),
+            cycle_context=cycle_context,
+            updated_at=updated_at,
+        )
+        self._replace_body_state(
+            connection=connection,
+            body_state=live_state["body_state"],
+        )
+        self._replace_world_state(
+            connection=connection,
+            world_state=live_state["world_state"],
+        )
+        self._replace_drive_state(
+            connection=connection,
+            drive_state=live_state["drive_state"],
+        )
+
     # Block: Pending input journal append
     def append_input_journal_for_pending_input(
         self,
@@ -4085,6 +4408,7 @@ class SqliteStateStore:
         retrieval_run: dict[str, Any] | None = None,
         attention_snapshot: dict[str, Any] | None = None,
         discard_reason: str | None = None,
+        camera_available: bool,
     ) -> int:
         if resolution_status not in {"consumed", "discarded"}:
             raise StoreValidationError("resolution_status is invalid")
@@ -4133,6 +4457,16 @@ class SqliteStateStore:
             ).rowcount
             if updated_row_count != 1:
                 raise StoreConflictError("pending input must be claimed before finalization")
+            self._sync_runtime_live_state(
+                connection=connection,
+                camera_available=camera_available,
+                updated_at=resolved_at,
+                cycle_context=_pending_input_cycle_context(
+                    pending_input=pending_input,
+                    resolution_status=resolution_status,
+                    action_results=action_results,
+                ),
+            )
             connection.execute(
                 """
                 INSERT INTO commit_records (
@@ -4232,6 +4566,7 @@ class SqliteStateStore:
         pending_input_mutations: list[PendingInputMutationRecord],
         ui_events: list[dict[str, Any]],
         commit_payload: dict[str, Any],
+        camera_available: bool,
     ) -> int:
         if final_status not in {"completed", "abandoned"}:
             raise StoreValidationError("task final_status is invalid")
@@ -4265,6 +4600,17 @@ class SqliteStateStore:
                 cycle_id=cycle_id,
                 event_ids=event_ids,
                 created_at=resolved_at,
+            )
+            self._sync_runtime_live_state(
+                connection=connection,
+                camera_available=camera_available,
+                updated_at=resolved_at,
+                cycle_context=_task_cycle_context(
+                    task=task,
+                    final_status=final_status,
+                    action_results=action_results,
+                    pending_input_mutations=pending_input_mutations,
+                ),
             )
             connection.execute(
                 """
@@ -6100,13 +6446,17 @@ class SqliteStateStore:
             ON CONFLICT(row_id) DO NOTHING
             """,
             (
-                _json_text({"mode": "idle"}),
-                _json_text({}),
-                _json_text({}),
-                _json_text({}),
-                _json_text({}),
+                _json_text(_body_state_posture_seed()),
+                _json_text(_body_state_mobility_seed()),
+                _json_text(_body_state_sensor_availability_seed()),
+                _json_text(_body_state_output_locks_seed()),
+                _json_text(_body_state_load_seed()),
                 now_ms,
             ),
+        )
+        self._ensure_body_state_defaults(
+            connection=connection,
+            now_ms=now_ms,
         )
         # Block: world_state seed
         connection.execute(
@@ -6126,15 +6476,19 @@ class SqliteStateStore:
             ON CONFLICT(row_id) DO NOTHING
             """,
             (
-                _json_text({"state": "unknown"}),
-                "unknown",
-                _json_text({}),
-                _json_text({}),
-                _json_text({}),
-                _json_text({}),
-                _json_text({}),
+                _json_text(_world_state_location_seed()),
+                _world_state_situation_summary_seed(),
+                _json_text(_world_state_surroundings_seed()),
+                _json_text(_world_state_affordances_seed()),
+                _json_text(_world_state_constraints_seed()),
+                _json_text(_world_state_attention_targets_seed()),
+                _json_text(_world_state_external_waits_seed()),
                 now_ms,
             ),
+        )
+        self._ensure_world_state_defaults(
+            connection=connection,
+            now_ms=now_ms,
         )
         # Block: drive_state seed
         connection.execute(
@@ -6155,10 +6509,14 @@ class SqliteStateStore:
                OR json_extract(drive_state.priority_effects_json, '$.social_bias') IS NULL
             """,
             (
-                _json_text({}),
+                _json_text(_drive_state_drive_levels_seed()),
                 _json_text(_drive_state_priority_effects_seed()),
                 now_ms,
             ),
+        )
+        self._ensure_drive_state_defaults(
+            connection=connection,
+            now_ms=now_ms,
         )
 
     # Block: Attention state defaults
@@ -6202,6 +6560,128 @@ class SqliteStateStore:
             ),
         )
 
+    # Block: Body state defaults
+    def _ensure_body_state_defaults(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        now_ms: int,
+    ) -> None:
+        row = connection.execute(
+            """
+            SELECT posture_json, mobility_json, sensor_availability_json, output_locks_json, load_json
+            FROM body_state
+            WHERE row_id = 1
+            """
+        ).fetchone()
+        if row is None:
+            raise RuntimeError("body_state row is missing")
+        if _body_state_has_current_shape(row):
+            return
+        connection.execute(
+            """
+            UPDATE body_state
+            SET posture_json = ?,
+                mobility_json = ?,
+                sensor_availability_json = ?,
+                output_locks_json = ?,
+                load_json = ?,
+                updated_at = ?
+            WHERE row_id = 1
+            """,
+            (
+                _json_text(_body_state_posture_seed()),
+                _json_text(_body_state_mobility_seed()),
+                _json_text(_body_state_sensor_availability_seed()),
+                _json_text(_body_state_output_locks_seed()),
+                _json_text(_body_state_load_seed()),
+                now_ms,
+            ),
+        )
+
+    # Block: World state defaults
+    def _ensure_world_state_defaults(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        now_ms: int,
+    ) -> None:
+        row = connection.execute(
+            """
+            SELECT
+                location_json,
+                situation_summary,
+                surroundings_json,
+                affordances_json,
+                constraints_json,
+                attention_targets_json,
+                external_waits_json
+            FROM world_state
+            WHERE row_id = 1
+            """
+        ).fetchone()
+        if row is None:
+            raise RuntimeError("world_state row is missing")
+        if _world_state_has_current_shape(row):
+            return
+        connection.execute(
+            """
+            UPDATE world_state
+            SET location_json = ?,
+                situation_summary = ?,
+                surroundings_json = ?,
+                affordances_json = ?,
+                constraints_json = ?,
+                attention_targets_json = ?,
+                external_waits_json = ?,
+                updated_at = ?
+            WHERE row_id = 1
+            """,
+            (
+                _json_text(_world_state_location_seed()),
+                _world_state_situation_summary_seed(),
+                _json_text(_world_state_surroundings_seed()),
+                _json_text(_world_state_affordances_seed()),
+                _json_text(_world_state_constraints_seed()),
+                _json_text(_world_state_attention_targets_seed()),
+                _json_text(_world_state_external_waits_seed()),
+                now_ms,
+            ),
+        )
+
+    # Block: Drive state defaults
+    def _ensure_drive_state_defaults(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        now_ms: int,
+    ) -> None:
+        row = connection.execute(
+            """
+            SELECT drive_levels_json, priority_effects_json
+            FROM drive_state
+            WHERE row_id = 1
+            """
+        ).fetchone()
+        if row is None:
+            raise RuntimeError("drive_state row is missing")
+        if _drive_state_has_current_shape(row):
+            return
+        connection.execute(
+            """
+            UPDATE drive_state
+            SET drive_levels_json = ?,
+                priority_effects_json = ?,
+                updated_at = ?
+            WHERE row_id = 1
+            """,
+            (
+                _json_text(_drive_state_drive_levels_seed()),
+                _json_text(_drive_state_priority_effects_seed()),
+                now_ms,
+            ),
+        )
+
 
 # Block: Seed JSON helpers
 # Block: Attention seed
@@ -6212,6 +6692,90 @@ def _attention_primary_focus_seed() -> dict[str, Any]:
         "summary": "待機中",
         "score_hint": 0.0,
         "reason_codes": ["idle"],
+    }
+
+
+# Block: Body seed
+def _body_state_posture_seed() -> dict[str, Any]:
+    return {"mode": "idle"}
+
+
+def _body_state_mobility_seed() -> dict[str, Any]:
+    return {"mode": "fixed"}
+
+
+def _body_state_sensor_availability_seed() -> dict[str, Any]:
+    return {
+        "camera": False,
+        "microphone": False,
+    }
+
+
+def _body_state_output_locks_seed() -> dict[str, Any]:
+    return {
+        "speech": False,
+        "camera": False,
+        "browse": False,
+    }
+
+
+def _body_state_load_seed() -> dict[str, Any]:
+    return {
+        "task_queue_pressure": 0.0,
+        "interaction_load": 0.0,
+        "last_action_count": 0,
+    }
+
+
+# Block: World seed
+def _world_state_location_seed() -> dict[str, Any]:
+    return {
+        "state": "unknown",
+        "channel": "browser_chat",
+    }
+
+
+def _world_state_situation_summary_seed() -> str:
+    return "待機中"
+
+
+def _world_state_surroundings_seed() -> dict[str, Any]:
+    return {
+        "current_channel": "browser_chat",
+        "latest_observation_kind": "idle",
+        "latest_observation_source": "runtime",
+        "latest_action_types": [],
+    }
+
+
+def _world_state_affordances_seed() -> dict[str, Any]:
+    return {
+        "speak": True,
+        "browse": True,
+        "notify": True,
+        "look": False,
+    }
+
+
+def _world_state_constraints_seed() -> dict[str, Any]:
+    return {
+        "look_unavailable": True,
+        "live_microphone_input_unavailable": True,
+        "has_external_wait": False,
+    }
+
+
+def _world_state_attention_targets_seed() -> dict[str, Any]:
+    return {
+        "primary_focus": _attention_primary_focus_seed(),
+        "secondary_focuses": [],
+    }
+
+
+def _world_state_external_waits_seed() -> dict[str, Any]:
+    return {
+        "count": 0,
+        "items": [],
     }
 
 
@@ -6282,6 +6846,368 @@ def _drive_state_priority_effects_seed() -> dict[str, Any]:
         "maintenance_bias": 0.0,
         "social_bias": 0.0,
     }
+
+
+def _drive_state_drive_levels_seed() -> dict[str, Any]:
+    return {
+        "task_progress": 0.0,
+        "exploration": 0.0,
+        "maintenance": 0.0,
+        "social": 0.0,
+    }
+
+
+# Block: Shape checks
+def _body_state_has_current_shape(row: sqlite3.Row) -> bool:
+    posture = json.loads(row["posture_json"])
+    mobility = json.loads(row["mobility_json"])
+    sensor_availability = json.loads(row["sensor_availability_json"])
+    output_locks = json.loads(row["output_locks_json"])
+    load = json.loads(row["load_json"])
+    return (
+        isinstance(posture, dict)
+        and isinstance(posture.get("mode"), str)
+        and isinstance(mobility, dict)
+        and isinstance(mobility.get("mode"), str)
+        and isinstance(sensor_availability, dict)
+        and isinstance(sensor_availability.get("camera"), bool)
+        and isinstance(sensor_availability.get("microphone"), bool)
+        and isinstance(output_locks, dict)
+        and isinstance(output_locks.get("speech"), bool)
+        and isinstance(output_locks.get("camera"), bool)
+        and isinstance(output_locks.get("browse"), bool)
+        and isinstance(load, dict)
+        and not isinstance(load.get("task_queue_pressure"), bool)
+        and isinstance(load.get("task_queue_pressure"), (int, float))
+        and not isinstance(load.get("interaction_load"), bool)
+        and isinstance(load.get("interaction_load"), (int, float))
+        and not isinstance(load.get("last_action_count"), bool)
+        and isinstance(load.get("last_action_count"), int)
+    )
+
+
+def _world_state_has_current_shape(row: sqlite3.Row) -> bool:
+    location = json.loads(row["location_json"])
+    surroundings = json.loads(row["surroundings_json"])
+    affordances = json.loads(row["affordances_json"])
+    constraints = json.loads(row["constraints_json"])
+    attention_targets = json.loads(row["attention_targets_json"])
+    external_waits = json.loads(row["external_waits_json"])
+    situation_summary = row["situation_summary"]
+    return (
+        isinstance(location, dict)
+        and isinstance(location.get("state"), str)
+        and isinstance(location.get("channel"), str)
+        and isinstance(situation_summary, str)
+        and bool(situation_summary)
+        and isinstance(surroundings, dict)
+        and isinstance(surroundings.get("current_channel"), str)
+        and isinstance(surroundings.get("latest_observation_kind"), str)
+        and isinstance(surroundings.get("latest_observation_source"), str)
+        and isinstance(surroundings.get("latest_action_types"), list)
+        and isinstance(affordances, dict)
+        and isinstance(affordances.get("speak"), bool)
+        and isinstance(affordances.get("browse"), bool)
+        and isinstance(affordances.get("notify"), bool)
+        and isinstance(affordances.get("look"), bool)
+        and isinstance(constraints, dict)
+        and isinstance(constraints.get("look_unavailable"), bool)
+        and isinstance(constraints.get("live_microphone_input_unavailable"), bool)
+        and isinstance(constraints.get("has_external_wait"), bool)
+        and isinstance(attention_targets, dict)
+        and isinstance(attention_targets.get("primary_focus"), dict)
+        and isinstance(attention_targets.get("secondary_focuses"), list)
+        and isinstance(external_waits, dict)
+        and not isinstance(external_waits.get("count"), bool)
+        and isinstance(external_waits.get("count"), int)
+        and isinstance(external_waits.get("items"), list)
+    )
+
+
+def _drive_state_has_current_shape(row: sqlite3.Row) -> bool:
+    drive_levels = json.loads(row["drive_levels_json"])
+    priority_effects = json.loads(row["priority_effects_json"])
+    return (
+        isinstance(drive_levels, dict)
+        and not isinstance(drive_levels.get("task_progress"), bool)
+        and isinstance(drive_levels.get("task_progress"), (int, float))
+        and not isinstance(drive_levels.get("exploration"), bool)
+        and isinstance(drive_levels.get("exploration"), (int, float))
+        and not isinstance(drive_levels.get("maintenance"), bool)
+        and isinstance(drive_levels.get("maintenance"), (int, float))
+        and not isinstance(drive_levels.get("social"), bool)
+        and isinstance(drive_levels.get("social"), (int, float))
+        and isinstance(priority_effects, dict)
+        and not isinstance(priority_effects.get("task_progress_bias"), bool)
+        and isinstance(priority_effects.get("task_progress_bias"), (int, float))
+        and not isinstance(priority_effects.get("exploration_bias"), bool)
+        and isinstance(priority_effects.get("exploration_bias"), (int, float))
+        and not isinstance(priority_effects.get("maintenance_bias"), bool)
+        and isinstance(priority_effects.get("maintenance_bias"), (int, float))
+        and not isinstance(priority_effects.get("social_bias"), bool)
+        and isinstance(priority_effects.get("social_bias"), (int, float))
+    )
+
+
+# Block: Runtime live state decode
+def _decode_body_state_row(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "posture": json.loads(row["posture_json"]),
+        "mobility": json.loads(row["mobility_json"]),
+        "sensor_availability": json.loads(row["sensor_availability_json"]),
+        "output_locks": json.loads(row["output_locks_json"]),
+        "load": json.loads(row["load_json"]),
+        "updated_at": int(row["updated_at"]),
+    }
+
+
+def _decode_world_state_row(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "location": json.loads(row["location_json"]),
+        "situation_summary": str(row["situation_summary"]),
+        "surroundings": json.loads(row["surroundings_json"]),
+        "affordances": json.loads(row["affordances_json"]),
+        "constraints": json.loads(row["constraints_json"]),
+        "attention_targets": json.loads(row["attention_targets_json"]),
+        "external_waits": json.loads(row["external_waits_json"]),
+        "updated_at": int(row["updated_at"]),
+    }
+
+
+# Block: Runtime live state cycle context
+def _pending_input_cycle_context(
+    *,
+    pending_input: PendingInputRecord,
+    resolution_status: str,
+    action_results: list[ActionHistoryRecord],
+) -> dict[str, Any]:
+    return {
+        "channel": pending_input.channel,
+        "observation_source": normalize_observation_source(
+            source=pending_input.source,
+            payload=pending_input.payload,
+        ),
+        "observation_kind": normalize_observation_kind(payload=pending_input.payload),
+        "action_types": [action_result.action_type for action_result in action_results],
+        "situation_summary": _pending_input_situation_summary(
+            pending_input=pending_input,
+            resolution_status=resolution_status,
+            action_results=action_results,
+        ),
+    }
+
+
+def _task_cycle_context(
+    *,
+    task: TaskStateRecord,
+    final_status: str,
+    action_results: list[ActionHistoryRecord],
+    pending_input_mutations: list[PendingInputMutationRecord],
+) -> dict[str, Any]:
+    return {
+        "channel": _task_record_channel(task),
+        "observation_source": _task_cycle_observation_source(pending_input_mutations),
+        "observation_kind": _task_cycle_observation_kind(pending_input_mutations),
+        "action_types": [action_result.action_type for action_result in action_results],
+        "situation_summary": _task_cycle_situation_summary(
+            task=task,
+            final_status=final_status,
+        ),
+    }
+
+
+def _pending_input_situation_summary(
+    *,
+    pending_input: PendingInputRecord,
+    resolution_status: str,
+    action_results: list[ActionHistoryRecord],
+) -> str:
+    input_kind = str(pending_input.payload["input_kind"])
+    action_types = {action_result.action_type for action_result in action_results}
+    if input_kind == "chat_message":
+        if "enqueue_browse_task" in action_types:
+            query = _queued_browse_query(action_results)
+            if query is not None:
+                return f"検索タスクを登録した: {query}"
+            return "検索タスクを登録した"
+        if "emit_chat_response" in action_types:
+            return "チャット応答を返した"
+        if "dispatch_notice" in action_types:
+            return "通知を返した"
+        if "control_camera_look" in action_types:
+            return "カメラ視点を調整した"
+        return "チャット入力を処理した" if resolution_status == "consumed" else "チャット入力を棄却した"
+    if input_kind == "camera_observation":
+        if "enqueue_browse_task" in action_types:
+            query = _queued_browse_query(action_results)
+            if query is not None:
+                return f"カメラ観測をもとに検索した: {query}"
+            return "カメラ観測をもとに検索した"
+        if "control_camera_look" in action_types:
+            return "カメラ観測をもとに視点を調整した"
+        if "emit_chat_response" in action_types:
+            return "カメラ観測を処理して応答した"
+        return "カメラ観測を処理した" if resolution_status == "consumed" else "カメラ観測を棄却した"
+    if input_kind == "network_result":
+        if "emit_chat_response" in action_types:
+            return "検索結果を要約して応答した"
+        return "検索結果を取り込んだ" if resolution_status == "consumed" else "検索結果入力を棄却した"
+    if input_kind == "cancel":
+        return "停止要求を処理した" if resolution_status == "consumed" else "停止要求を棄却した"
+    if resolution_status == "consumed":
+        return f"{input_kind} を処理した"
+    return f"{input_kind} を棄却した"
+
+
+def _task_cycle_situation_summary(
+    *,
+    task: TaskStateRecord,
+    final_status: str,
+) -> str:
+    if task.task_kind == "browse":
+        query = _task_record_query(task) or task.goal_hint
+        if final_status == "completed":
+            return f"外部検索を完了した: {query}"
+        return f"外部検索に失敗した: {query}"
+    if final_status == "completed":
+        return f"タスクを完了した: {task.goal_hint}"
+    return f"タスクを中断した: {task.goal_hint}"
+
+
+def _task_cycle_observation_kind(
+    pending_input_mutations: list[PendingInputMutationRecord],
+) -> str | None:
+    for pending_input_mutation in pending_input_mutations:
+        input_kind = pending_input_mutation.payload.get("input_kind")
+        if input_kind == "network_result":
+            return "search_result"
+    return None
+
+
+def _task_cycle_observation_source(
+    pending_input_mutations: list[PendingInputMutationRecord],
+) -> str:
+    for pending_input_mutation in pending_input_mutations:
+        if pending_input_mutation.payload.get("input_kind") == "network_result":
+            return "network_result"
+    return "runtime_task"
+
+
+def _task_record_channel(task: TaskStateRecord) -> str:
+    target_channel = task.completion_hint.get("target_channel")
+    if not isinstance(target_channel, str) or not target_channel:
+        raise RuntimeError("task.completion_hint.target_channel must be non-empty string")
+    return target_channel
+
+
+def _task_record_query(task: TaskStateRecord) -> str | None:
+    query = task.completion_hint.get("query")
+    if query is None:
+        return None
+    if not isinstance(query, str) or not query:
+        raise RuntimeError("task.completion_hint.query must be non-empty string")
+    return query
+
+
+def _queued_browse_query(action_results: list[ActionHistoryRecord]) -> str | None:
+    for action_result in action_results:
+        if action_result.action_type != "enqueue_browse_task":
+            continue
+        observed_effects = action_result.observed_effects
+        if not isinstance(observed_effects, dict):
+            raise RuntimeError("enqueue_browse_task observed_effects must be an object")
+        query = observed_effects.get("query")
+        if isinstance(query, str) and query:
+            return query
+    return None
+
+
+# Block: Public live state summaries
+def _public_body_state_summary(
+    *,
+    posture_json: dict[str, Any],
+    sensor_availability_json: dict[str, Any],
+    load_json: dict[str, Any],
+) -> dict[str, Any]:
+    posture_mode = posture_json.get("mode")
+    if not isinstance(posture_mode, str) or not posture_mode:
+        raise RuntimeError("body_state.posture_json.mode is required")
+    camera_available = sensor_availability_json.get("camera")
+    microphone_available = sensor_availability_json.get("microphone")
+    if not isinstance(camera_available, bool):
+        raise RuntimeError("body_state.sensor_availability_json.camera is required")
+    if not isinstance(microphone_available, bool):
+        raise RuntimeError("body_state.sensor_availability_json.microphone is required")
+    task_queue_pressure = load_json.get("task_queue_pressure")
+    interaction_load = load_json.get("interaction_load")
+    if isinstance(task_queue_pressure, bool) or not isinstance(task_queue_pressure, (int, float)):
+        raise RuntimeError("body_state.load_json.task_queue_pressure is required")
+    if isinstance(interaction_load, bool) or not isinstance(interaction_load, (int, float)):
+        raise RuntimeError("body_state.load_json.interaction_load is required")
+    return {
+        "posture_mode": posture_mode,
+        "sensor_availability": {
+            "camera": camera_available,
+            "microphone": microphone_available,
+        },
+        "load": {
+            "task_queue_pressure": float(task_queue_pressure),
+            "interaction_load": float(interaction_load),
+        },
+    }
+
+
+def _public_world_state_summary(
+    *,
+    situation_summary: str,
+    external_waits_json: dict[str, Any],
+) -> dict[str, Any]:
+    wait_count = external_waits_json.get("count")
+    if isinstance(wait_count, bool) or not isinstance(wait_count, int):
+        raise RuntimeError("world_state.external_waits_json.count is required")
+    if not situation_summary:
+        raise RuntimeError("world_state.situation_summary is required")
+    return {
+        "situation_summary": situation_summary,
+        "external_wait_count": wait_count,
+    }
+
+
+def _public_drive_state_summary(
+    *,
+    priority_effects_json: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "priority_effects": {
+            "task_progress_bias": _required_numeric_field(
+                priority_effects_json,
+                "task_progress_bias",
+                "drive_state.priority_effects_json.task_progress_bias",
+            ),
+            "exploration_bias": _required_numeric_field(
+                priority_effects_json,
+                "exploration_bias",
+                "drive_state.priority_effects_json.exploration_bias",
+            ),
+            "maintenance_bias": _required_numeric_field(
+                priority_effects_json,
+                "maintenance_bias",
+                "drive_state.priority_effects_json.maintenance_bias",
+            ),
+            "social_bias": _required_numeric_field(
+                priority_effects_json,
+                "social_bias",
+                "drive_state.priority_effects_json.social_bias",
+            ),
+        }
+    }
+
+
+def _required_numeric_field(payload: dict[str, Any], key: str, field_name: str) -> float:
+    value = payload.get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise RuntimeError(f"{field_name} must be numeric")
+    return float(value)
 
 
 # Block: Public response helpers

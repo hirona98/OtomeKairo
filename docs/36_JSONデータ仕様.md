@@ -1836,21 +1836,50 @@
   "attention_state": {
     "primary_focus": "待機中"
   },
+  "body_state": {
+    "posture_mode": "awaiting_external",
+    "sensor_availability": {
+      "camera": true,
+      "microphone": false
+    },
+    "load": {
+      "task_queue_pressure": 0.35,
+      "interaction_load": 0.0
+    }
+  },
+  "world_state": {
+    "situation_summary": "外部結果待ち: 近所のイベント",
+    "external_wait_count": 1
+  },
+  "drive_state": {
+    "priority_effects": {
+      "task_progress_bias": 0.35,
+      "exploration_bias": 0.15,
+      "maintenance_bias": 0.25,
+      "social_bias": 0.0
+    }
+  },
   "task_state": {
-    "active_task_count": 1,
-    "waiting_task_count": 0
+    "active_task_count": 0,
+    "waiting_task_count": 1
   }
 }
 ```
 
-- 必須項目は `server_time`、`runtime`、`self_state`、`attention_state`、`task_state` である
+- 必須項目は `server_time`、`runtime`、`self_state`、`attention_state`、`body_state`、`world_state`、`drive_state`、`task_state` である
 - `runtime` は、少なくとも `is_running` を持つ
 - `runtime.last_cycle_id` は、短周期が 1 回以上完了している場合だけ持つ
 - `runtime.last_commit_id` は、`commit_records` が 1 件以上ある場合だけ持つ
 - `runtime.last_retrieval` は、`retrieval_runs` が 1 件以上ある場合だけ持つ
 - `self_state.current_emotion` は、少なくとも `v`、`a`、`d`、`labels` を持つ
 - `self_state.last_persona_update` は、`revisions.entity_type=self_state.personality` が 1 件以上ある場合だけ持つ
-- `attention_state.primary_focus` は、current 実装では `observation`、`task`、`relationship`、`idle` のいずれかを返す短い `string` とする
+- `attention_state.primary_focus` は、current 実装では `attention_state.primary_focus_json.summary` をそのまま返す短い `string` とする
+- `body_state.posture_mode` は `string` に固定する
+- `body_state.sensor_availability.camera` と `body_state.sensor_availability.microphone` は `boolean` に固定する
+- `body_state.load.task_queue_pressure` と `body_state.load.interaction_load` は `number` に固定する
+- `world_state.situation_summary` は `string` に固定する
+- `world_state.external_wait_count` は `integer` に固定する
+- `drive_state.priority_effects` は `task_progress_bias`、`exploration_bias`、`maintenance_bias`、`social_bias` を持つ `object` に固定する
 - `task_state.active_task_count`、`task_state.waiting_task_count` は `integer` に固定する
 
 <!-- Block: Stream Data -->

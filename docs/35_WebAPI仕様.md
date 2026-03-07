@@ -36,7 +36,7 @@
 
 - current の組み込みブラウザ UI が実際に使うのは `GET /`、`GET /api/status`、`GET /api/settings/editor`、`PUT /api/settings/editor`、`POST /api/chat/input`、`POST /api/chat/cancel`、`POST /api/camera/capture`、`GET /api/chat/stream`、`GET /captures/{capture_filename}`、`GET /audio/{audio_filename}` である
 - `POST /api/camera/observe` は公開 API として実装済みだが、current の組み込み UI からは呼ばれない
-- current の `GET /api/status` は、runtime 全断面ではなく、runtime 要約、感情要約、主注意 kind、task 件数だけを返す
+- current の `GET /api/status` は、runtime 全断面ではなく、runtime 要約、感情要約、主注意 summary、`body_state` 要約、`world_state` 要約、`drive_state` 要約、task 件数だけを返す
 - current の `GET /api/chat/stream` は `channel=browser_chat` だけを受け付け、他の値は `400` にする
 - current の `notice` は主に `browse_queued`、`browse_completed`、保持範囲外再開の `stream_reset` を使う
 
@@ -176,7 +176,7 @@ flowchart LR
 ### 役割
 
 - 現在の人格ランタイムの参照用スナップショットを返す
-- Web サーバは状態を更新せず、runtime の lease、直近 commit、直近 retrieval、`self_state.current_emotion`、`attention_state.primary_focus`、task 件数を読み出して要約する
+- Web サーバは状態を更新せず、runtime の lease、直近 commit、直近 retrieval、`self_state.current_emotion`、`attention_state.primary_focus`、`body_state`、`world_state`、`drive_state`、task 件数を読み出して要約する
 
 <!-- Block: Status Response -->
 ### 成功応答
@@ -226,9 +226,32 @@ flowchart LR
   "attention_state": {
     "primary_focus": "待機中"
   },
+  "body_state": {
+    "posture_mode": "awaiting_external",
+    "sensor_availability": {
+      "camera": true,
+      "microphone": false
+    },
+    "load": {
+      "task_queue_pressure": 0.35,
+      "interaction_load": 0.0
+    }
+  },
+  "world_state": {
+    "situation_summary": "外部結果待ち: 近所のイベント",
+    "external_wait_count": 1
+  },
+  "drive_state": {
+    "priority_effects": {
+      "task_progress_bias": 0.35,
+      "exploration_bias": 0.15,
+      "maintenance_bias": 0.25,
+      "social_bias": 0.0
+    }
+  },
   "task_state": {
-    "active_task_count": 1,
-    "waiting_task_count": 0
+    "active_task_count": 0,
+    "waiting_task_count": 1
   }
 }
 ```
@@ -239,6 +262,11 @@ flowchart LR
 - `runtime.last_retrieval` は、`retrieval_runs` が 1 件以上ある場合だけ返し、直近の `RetrievalPlan` と選別件数を要約する
 - `self_state.last_persona_update` は、`revisions.entity_type=self_state.personality` が 1 件以上ある場合だけ返す
 - `attention_state.primary_focus` は、`attention_state.primary_focus_json.summary` から取り出した表示用文字列を返す
+- `body_state.posture_mode` は、`body_state.posture_json.mode` を返す
+- `body_state.sensor_availability` は、current 実装で接続済みの live sensor 可用性を返し、`microphone` は未接続のため `false` を返す
+- `world_state.situation_summary` は、現在の外部待ち、直近観測、直近 task 完了のいずれかを優先した短い表示文を返す
+- `world_state.external_wait_count` は、`world_state.external_waits_json.count` を返す
+- `drive_state.priority_effects` は、`drive_state.priority_effects_json` の 4 つの bias をそのまま返す
 - 初回起動直後で短周期未実行のときは、`runtime.is_running=false` とし、`last_cycle_id` と `last_commit_id` は省略する
 - 全状態を丸ごと返さず、UI 表示に必要な要点だけを返す
 
