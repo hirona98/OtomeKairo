@@ -359,6 +359,7 @@
 - 必須項目は `trait_values`、`interaction_style`、`relationship_priorities`、`learned_preferences`、`learned_aversions`、`habit_biases`、`emotion_bias`、`drive_bias` である
 - `trait_values` は、`self_state.personality_json.trait_values` と同じ固定キーを持つ
 - `interaction_style` は、`self_state.personality_json.preferred_interaction_style` と同じ固定キーを持つ
+- `interaction_style.speech_tone` と `interaction_style.response_pace` は、その短周期の `behavior_settings.speech_style` / `behavior_settings.response_pace` を上書きした短期補正済み値を入れてよい
 - `relationship_priorities` は、`relationship_priority_entry` の配列である
 - `learned_preferences` と `learned_aversions` は、`personality_preference_entry` の配列である
 - `habit_biases` は、`self_state.personality_json.habit_biases` と同じ固定キーを持つ
@@ -584,12 +585,13 @@
   "habit_updates": {
     "preferred_action_types": ["look", "browse"]
   },
+  "evidence_event_ids": ["evt_001", "evt_002", "evt_010"],
   "evidence_summary": "探索寄りの行動選択が複数周期で安定した"
 }
 ```
 
 - `personality_change_proposal` は、長周期の `write_memory` 内部で作る未適用の提案オブジェクトである
-- 必須項目は `base_personality_updated_at`、`trait_deltas`、`preference_promotions`、`aversion_promotions`、`habit_updates`、`evidence_summary` である
+- 必須項目は `base_personality_updated_at`、`trait_deltas`、`preference_promotions`、`aversion_promotions`、`habit_updates`、`evidence_event_ids`、`evidence_summary` である
 - `style_updates` は任意で、変化がある場合だけ持つ
 - `trait_deltas` の各要素は、`trait_name`、`delta`、`reason`、`evidence_count`、`source_cycle_ids` を必須とする
 - `trait_name` は、`self_state.personality_json.trait_values` に存在するキーだけを許可する
@@ -597,8 +599,11 @@
 - `source_cycle_ids` は空配列を許可しない
 - `base_personality_updated_at` は、提案生成時に読んだ `self_state.personality_updated_at` の値である
 - `source_cycle_ids` は、証拠に使った `events` を生んだ短周期の `cycle_id` だけを数える
+- `evidence_event_ids` は、その提案の根拠に採用した `event_id` を重複なしで集約した配列であり、`revisions.evidence_event_ids_json` の入力に使う
 - `preference_promotions` と `aversion_promotions` は、`personality_preference_entry` の配列である
 - `habit_updates` は、`preferred_action_types`、`preferred_observation_kinds`、`avoided_action_styles` のうち変更対象だけを持つ部分オブジェクトでよい
+- 初期実装の `preference_promotions` / `aversion_promotions` では、少なくとも `domain=action_type` と `domain=observation_kind` を使ってよい
+- 閾値未満のときは、`trait_deltas=[]`、`preference_promotions=[]`、`aversion_promotions=[]`、`habit_updates={}`、`evidence_event_ids=[]` の empty proposal を返してよい
 
 <!-- Block: Persona Updates -->
 ### `persona_updates`
@@ -617,21 +622,24 @@
   "habit_updates": {
     "preferred_action_types": ["look", "browse"]
   },
+  "evidence_event_ids": ["evt_001", "evt_002", "evt_010"],
   "evidence_summary": "探索寄りの行動選択が複数周期で安定した"
 }
 ```
 
 - `persona_updates` は、`bounded apply` 後に `self_state.personality_json` へ反映可能な差分オブジェクトである
-- 必須項目は `base_personality_updated_at`、`updated_trait_values`、`preference_promotions`、`aversion_promotions`、`habit_updates`、`evidence_summary` である
+- 必須項目は `base_personality_updated_at`、`updated_trait_values`、`preference_promotions`、`aversion_promotions`、`habit_updates`、`evidence_event_ids`、`evidence_summary` である
 - `style_updates` は任意で、変化がある場合だけ持つ
 - `updated_trait_values` は、`trait_name -> absolute_value` の部分オブジェクトである
 - `updated_trait_values` に含めてよいキーは、`self_state.personality_json.trait_values` の固定キーだけである
 - `updated_trait_values` の各値は、`-1.0..+1.0` の `number` に clamp 済みでなければならない
 - `preference_promotions` と `aversion_promotions` は、`personality_preference_entry` の配列である
 - `habit_updates` は、`self_state.personality_json.habit_biases` に上書きする部分オブジェクトである
+- `evidence_event_ids` は、適用する差分を正当化した `event_id` の集約であり、`self_state.personality` の `revisions.evidence_event_ids_json` にそのまま保存する
 - `evidence_summary` は、監査と `revisions` の理由づけに使う短い要約である
 - `base_personality_updated_at` は、適用開始時の `self_state.personality_updated_at` と一致しなければならない
 - 適用時に `base_personality_updated_at` が現在の `self_state.personality_updated_at` と一致しない場合、その `persona_updates` は stale として棄却し、後続の `write_memory` で再生成する
+- 初期実装では、`preference_promotions` と `aversion_promotions` の各 `weight` を現在値から `0.15` 以内だけ動かした値として返してよい
 
 <!-- Block: Memory Write Group -->
 ## 記憶更新の内部 JSON

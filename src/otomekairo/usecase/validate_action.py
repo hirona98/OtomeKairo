@@ -149,11 +149,13 @@ def _score_candidate(
     memory_bundle = cognition_input["memory_bundle"]
     current_observation = cognition_input["current_observation"]
     learned_aversions = selection_profile["learned_aversions"]
+    habit_biases = selection_profile["habit_biases"]
     hard_gate_passed = _passes_hard_gate(
         proposal=proposal,
         pending_channel=pending_channel,
         cognition_input=cognition_input,
         learned_aversions=learned_aversions,
+        habit_biases=habit_biases,
     )
     priority_hint_score = _proposal_priority_score(proposal)
     persona_consistency = _persona_consistency_score(
@@ -214,6 +216,7 @@ def _passes_hard_gate(
     pending_channel: str,
     cognition_input: dict[str, Any],
     learned_aversions: list[dict[str, Any]],
+    habit_biases: dict[str, Any],
 ) -> bool:
     action_type = _validated_action_type(proposal)
     invariants = cognition_input["self_snapshot"]["invariants"]
@@ -257,6 +260,7 @@ def _passes_hard_gate(
     return not _has_strong_aversion(
         action_type=action_type,
         learned_aversions=learned_aversions,
+        habit_biases=habit_biases,
     )
 
 
@@ -317,6 +321,11 @@ def _persona_consistency_score(
             selection_profile,
             "learned_aversions",
             "selection_profile.learned_aversions",
+        ),
+        habit_biases=_required_object(
+            selection_profile,
+            "habit_biases",
+            "selection_profile.habit_biases",
         ),
     )
     emotion_alignment = _emotion_alignment(
@@ -543,16 +552,30 @@ def _preference_alignment(
         "preferred_action_types",
         "selection_profile.habit_biases.preferred_action_types",
     )
+    preferred_observation_kinds = _required_list(
+        habit_biases,
+        "preferred_observation_kinds",
+        "selection_profile.habit_biases.preferred_observation_kinds",
+    )
     base_score = 0.50
     if action_type in preferred_action_types:
-        base_score += 0.20
-    for preference in learned_preferences:
-        if not isinstance(preference, dict):
-            raise RuntimeError("selection_profile.learned_preferences must contain only objects")
-        if preference.get("target_action_type") != action_type:
-            continue
-        base_score += _normalized_score(preference["weight"]) * 0.20
-        break
+        base_score += 0.18
+    observation_kind = _observation_kind_for_action(action_type)
+    if observation_kind is not None and observation_kind in preferred_observation_kinds:
+        base_score += 0.10
+    base_score += _matched_preference_weight(
+        entries=learned_preferences,
+        domain="action_type",
+        target_key=action_type,
+        field_name="selection_profile.learned_preferences",
+    ) * 0.20
+    if observation_kind is not None:
+        base_score += _matched_preference_weight(
+            entries=learned_preferences,
+            domain="observation_kind",
+            target_key=observation_kind,
+            field_name="selection_profile.learned_preferences",
+        ) * 0.12
     base_score += _memory_support_score(
         action_type=action_type,
         proposal=proposal,
@@ -620,14 +643,33 @@ def _aversion_penalty(
     *,
     action_type: str,
     learned_aversions: list[dict[str, Any]],
+    habit_biases: dict[str, Any],
 ) -> float:
-    for aversion in learned_aversions:
-        if not isinstance(aversion, dict):
-            raise RuntimeError("selection_profile.learned_aversions must contain only objects")
-        if aversion.get("target_action_type") != action_type:
-            continue
-        return _normalized_score(aversion["weight"])
-    return 0.0
+    penalty = _matched_preference_weight(
+        entries=learned_aversions,
+        domain="action_type",
+        target_key=action_type,
+        field_name="selection_profile.learned_aversions",
+    )
+    observation_kind = _observation_kind_for_action(action_type)
+    if observation_kind is not None:
+        penalty = max(
+            penalty,
+            _matched_preference_weight(
+                entries=learned_aversions,
+                domain="observation_kind",
+                target_key=observation_kind,
+                field_name="selection_profile.learned_aversions",
+            ) * 0.85,
+        )
+    avoided_action_styles = _required_list(
+        habit_biases,
+        "avoided_action_styles",
+        "selection_profile.habit_biases.avoided_action_styles",
+    )
+    if _proposal_action_style(action_type) in avoided_action_styles:
+        penalty = max(penalty, 0.35)
+    return _normalized_score(penalty)
 
 
 # Block: Emotion alignment
@@ -736,17 +778,86 @@ def _has_strong_aversion(
     *,
     action_type: str,
     learned_aversions: list[dict[str, Any]],
+    habit_biases: dict[str, Any],
 ) -> bool:
-    for aversion in learned_aversions:
-        if not isinstance(aversion, dict):
-            raise RuntimeError("selection_profile.learned_aversions must contain only objects")
-        if (
-            aversion.get("target_action_type") == action_type
-            and _normalized_score(aversion.get("weight", 0.0)) >= 0.80
-            and int(aversion.get("evidence_count", 0)) >= 4
-        ):
-            return True
+    del habit_biases
+    strong_action_type_aversion = _matched_preference_entry(
+        entries=learned_aversions,
+        domain="action_type",
+        target_key=action_type,
+        field_name="selection_profile.learned_aversions",
+    )
+    if (
+        strong_action_type_aversion is not None
+        and _normalized_score(strong_action_type_aversion["weight"]) >= 0.80
+        and int(strong_action_type_aversion["evidence_count"]) >= 4
+    ):
+        return True
+    observation_kind = _observation_kind_for_action(action_type)
+    strong_observation_aversion = None
+    if observation_kind is not None:
+        strong_observation_aversion = _matched_preference_entry(
+            entries=learned_aversions,
+            domain="observation_kind",
+            target_key=observation_kind,
+            field_name="selection_profile.learned_aversions",
+        )
+    if (
+        strong_observation_aversion is not None
+        and _normalized_score(strong_observation_aversion["weight"]) >= 0.80
+        and int(strong_observation_aversion["evidence_count"]) >= 4
+    ):
+        return True
     return False
+
+
+# Block: Preference match weight
+def _matched_preference_weight(
+    *,
+    entries: list[dict[str, Any]],
+    domain: str,
+    target_key: str,
+    field_name: str,
+) -> float:
+    matched_entry = _matched_preference_entry(
+        entries=entries,
+        domain=domain,
+        target_key=target_key,
+        field_name=field_name,
+    )
+    if matched_entry is None:
+        return 0.0
+    return _normalized_score(matched_entry["weight"])
+
+
+# Block: Preference match entry
+def _matched_preference_entry(
+    *,
+    entries: list[dict[str, Any]],
+    domain: str,
+    target_key: str,
+    field_name: str,
+) -> dict[str, Any] | None:
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise RuntimeError(f"{field_name} must contain only objects")
+        if entry.get("domain") != domain:
+            continue
+        if entry.get("target_key") != target_key:
+            continue
+        evidence_count = entry.get("evidence_count")
+        if not isinstance(evidence_count, int) or evidence_count < 1:
+            raise RuntimeError(f"{field_name}.evidence_count must be integer >= 1")
+        return entry
+    return None
+
+
+# Block: Observation kind helper
+def _observation_kind_for_action(action_type: str) -> str | None:
+    return {
+        "browse": "web_search",
+        "look": "camera_scene",
+    }.get(action_type)
 
 
 # Block: Drive score
