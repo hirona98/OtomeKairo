@@ -468,6 +468,43 @@
 - 各 `*_fit` は、比較前に同じ `0.0..1.0` 尺度へ正規化済みでなければならない
 - `self_initiated_score_breakdown` は永続化前提の正本ではなく、その短周期の比較ごとに再計算する
 
+<!-- Block: Skill Candidate Entry -->
+### `skill_candidate_entry`
+
+```json
+{
+  "skill_id": "skill_browse",
+  "summary": "browse centered reusable pattern",
+  "trigger_pattern": {
+    "initiative_kind": "unexplored_check",
+    "input_kind": "chat_message"
+  },
+  "preconditions": {
+    "preferred_action_type": "browse",
+    "avoided_action_styles": []
+  },
+  "action_pattern": {
+    "action_type": "browse"
+  },
+  "success_signature": {
+    "fit_score": 0.74,
+    "evidence_source": "personality_bias"
+  }
+}
+```
+
+- `skill_candidate_entry` は、その短周期で認知入力へ渡す再利用候補 skill の内部オブジェクトである
+- 必須項目は `skill_id`、`summary`、`trigger_pattern`、`preconditions`、`action_pattern`、`success_signature` である
+- `skill_id` は、不透明な `string` に固定する
+- `summary` は、その候補がどの行動様式を再利用しようとしているかを示す短い `string` である
+- `trigger_pattern.initiative_kind` は、`task_progress`、`unexplored_check`、`self_maintenance`、`skill_rehearsal` のいずれかに固定する
+- `trigger_pattern.input_kind` は、少なくとも `chat_message`、`camera_observation`、`network_result` を区別する
+- `preconditions.preferred_action_type` は、その候補が前提にしている `action_type` を示す `string` である
+- `preconditions.avoided_action_styles` は、同時に避けるべき行動様式の配列である
+- `action_pattern.action_type` は、少なくとも `speak`、`browse`、`notify`、`look`、`wait` を区別する
+- `success_signature.fit_score` は、`0.0..1.0` の `number` に固定する
+- `success_signature.evidence_source` は、その候補を作った根拠種別を表す短い `string` である
+
 <!-- Block: Action Candidate Score -->
 ### `action_candidate_score`
 
@@ -491,7 +528,7 @@
 - `proposal_id` は、比較対象の `action_proposal.proposal_id` と同じ `string` である
 - `hard_gate_passed` は、`boolean` に固定する
 - 各 `*_score` と `total_score` は、`0.0..1.0` の `number` に固定する
-- `personality_fit_score` は、必要なら `persona_consistency_score` の `trait_alignment`、`style_alignment`、`overall_score` を使って計算してよい
+- 初期実装の `personality_fit_score` は、`persona_consistency_score.trait_alignment * 0.50 + persona_consistency_score.style_alignment * 0.50` として計算してよい
 - `priority_hint_score` は、`proposal.priority` をそのまま信じるためではなく、同程度候補の補助比較にだけ使う
 - 各 `*_score` は、比較前に同じ `0.0..1.0` 尺度へ正規化済みでなければならない
 - `action_candidate_score` は永続化前提の正本ではなく、その短周期の候補比較ごとに再計算する

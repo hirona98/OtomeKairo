@@ -54,9 +54,12 @@ def _build_messages(request: CognitionRequest) -> list[dict[str, Any]]:
     self_snapshot = cognition_input["self_snapshot"]
     behavior_settings = cognition_input["behavior_settings"]
     selection_profile = cognition_input["selection_profile"]
+    attention_score_breakdown = cognition_input["attention_score_breakdown"]
+    self_initiated_score_breakdown = cognition_input["self_initiated_score_breakdown"]
     current_observation = cognition_input["current_observation"]
     world_snapshot = cognition_input["world_snapshot"]
     runtime_policy = cognition_input["policy_snapshot"]["runtime_policy"]
+    skill_candidates = cognition_input["skill_candidates"]
     system_prompt = "\n".join(
         [
             "あなたは OtomeKairo の人格中枢として振る舞う。",
@@ -97,6 +100,9 @@ def _build_messages(request: CognitionRequest) -> list[dict[str, Any]]:
             _network_result_prompt_line(current_observation),
             f"関係性の優先対象: {_format_relationship_priorities(selection_profile['relationship_priorities'])}",
             f"長期目標: {_format_goals(self_snapshot['long_term_goals'])}",
+            _attention_score_prompt_line(attention_score_breakdown),
+            _self_initiated_prompt_line(self_initiated_score_breakdown),
+            _skill_candidates_prompt_line(skill_candidates),
             f"cycle_id: {request.cycle_id}",
             "この人格として、今どう返すかを構造化して一度で決めること。",
             "speech_draft.text は実際にユーザーへ見せる本文そのものにすること。",
@@ -247,6 +253,48 @@ def _format_goals(long_term_goals: dict[str, Any]) -> str:
     if not goals:
         return "未設定"
     return ",".join(str(goal.get("title", "goal")) for goal in goals[:3] if isinstance(goal, dict))
+
+
+def _attention_score_prompt_line(attention_score_breakdown: dict[str, Any]) -> str:
+    return (
+        "主注意の評価: "
+        f"focus={attention_score_breakdown['focus_ref']} "
+        f"total={attention_score_breakdown['total_score']:.2f} "
+        f"personality_fit={attention_score_breakdown['personality_fit_score']:.2f} "
+        f"experience_bias={attention_score_breakdown['experience_bias_score']:.2f}"
+    )
+
+
+def _self_initiated_prompt_line(self_initiated_score_breakdown: dict[str, Any]) -> str:
+    return (
+        "自発候補の傾き: "
+        f"kind={self_initiated_score_breakdown['initiative_kind']} "
+        f"gate={bool(self_initiated_score_breakdown['hard_gate_passed'])} "
+        f"total={self_initiated_score_breakdown['total_score']:.2f}"
+    )
+
+
+def _skill_candidates_prompt_line(skill_candidates: list[dict[str, Any]]) -> str:
+    if not skill_candidates:
+        return "再利用候補スキル: なし"
+    formatted_candidates = []
+    for skill_candidate in skill_candidates[:3]:
+        if not isinstance(skill_candidate, dict):
+            raise RuntimeError("skill_candidates must contain only objects")
+        action_pattern = skill_candidate.get("action_pattern")
+        if not isinstance(action_pattern, dict):
+            raise RuntimeError("skill_candidates.action_pattern must be object")
+        action_type = action_pattern.get("action_type")
+        if not isinstance(action_type, str) or not action_type:
+            raise RuntimeError("skill_candidates.action_pattern.action_type must be string")
+        success_signature = skill_candidate.get("success_signature")
+        if not isinstance(success_signature, dict):
+            raise RuntimeError("skill_candidates.success_signature must be object")
+        fit_score = success_signature.get("fit_score")
+        if isinstance(fit_score, bool) or not isinstance(fit_score, (int, float)):
+            raise RuntimeError("skill_candidates.success_signature.fit_score must be numeric")
+        formatted_candidates.append(f"{action_type}:{float(fit_score):.2f}")
+    return "再利用候補スキル: " + ", ".join(formatted_candidates)
 
 
 # Block: Behavior prompt formatting

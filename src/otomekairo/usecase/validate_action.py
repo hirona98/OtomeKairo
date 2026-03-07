@@ -15,6 +15,13 @@ RELATIONSHIP_FIT_WEIGHT = 0.18
 EXPERIENCE_FIT_WEIGHT = 0.16
 DRIVE_RELIEF_WEIGHT = 0.10
 EXPECTED_STABILITY_WEIGHT = 0.08
+PERSONALITY_FIT_TRAIT_WEIGHT = 0.50
+PERSONALITY_FIT_STYLE_WEIGHT = 0.50
+NON_URGENT_PRIORITY_THRESHOLD = 0.85
+AVERSION_HOLD_THRESHOLD = 0.70
+AVERSION_REJECT_THRESHOLD = 0.85
+RELATIONSHIP_HOLD_THRESHOLD = 0.40
+RELATIONSHIP_REJECT_THRESHOLD = 0.35
 
 
 # Block: Validation result
@@ -85,6 +92,18 @@ def validate_chat_response_action(
         proposal=best_candidate["proposal"],
         message_id=message_id,
     )
+    aversion_conflict_decision = _aversion_conflict_decision(
+        candidate=best_candidate,
+    )
+    if aversion_conflict_decision is not None:
+        decision, decision_reason = aversion_conflict_decision
+        return ValidatedChatAction(
+            decision=decision,
+            decision_reason=decision_reason,
+            proposal=selected_proposal,
+            action_command=None,
+            action_candidate_score=_candidate_payload(best_candidate),
+        )
     if float(best_candidate["personality_fit_score"]) < 0.30:
         return ValidatedChatAction(
             decision="hold",
@@ -372,11 +391,9 @@ def _personality_fit_score(
 ) -> float:
     trait_alignment = _normalized_score(persona_consistency["trait_alignment"])
     style_alignment = _normalized_score(persona_consistency["style_alignment"])
-    overall_score = _normalized_score(persona_consistency["overall_score"])
     return _normalized_score(
-        trait_alignment * 0.35
-        + style_alignment * 0.35
-        + overall_score * 0.30
+        trait_alignment * PERSONALITY_FIT_TRAIT_WEIGHT
+        + style_alignment * PERSONALITY_FIT_STYLE_WEIGHT
     )
 
 
@@ -772,6 +789,29 @@ def _experience_fit_score(
         preference_alignment * 0.65
         + (1.0 - aversion_penalty) * 0.35
     )
+
+
+def _aversion_conflict_decision(candidate: dict[str, Any]) -> tuple[str, str] | None:
+    priority_hint_score = _normalized_score(candidate["priority_hint_score"])
+    if priority_hint_score >= NON_URGENT_PRIORITY_THRESHOLD:
+        return None
+    aversion_penalty = _normalized_score(
+        candidate["persona_consistency"]["aversion_penalty"]
+    )
+    relationship_fit_score = _normalized_score(
+        candidate["relationship_fit_score"]
+    )
+    if (
+        aversion_penalty >= AVERSION_REJECT_THRESHOLD
+        and relationship_fit_score <= RELATIONSHIP_REJECT_THRESHOLD
+    ):
+        return ("reject", "aversion_relationship_conflict_rejected")
+    if (
+        aversion_penalty >= AVERSION_HOLD_THRESHOLD
+        and relationship_fit_score <= RELATIONSHIP_HOLD_THRESHOLD
+    ):
+        return ("hold", "aversion_relationship_conflict_held")
+    return None
 
 
 def _has_strong_aversion(

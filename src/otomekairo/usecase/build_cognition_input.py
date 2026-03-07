@@ -6,6 +6,11 @@ from datetime import datetime, timezone
 from typing import Any
 
 from otomekairo.schema.runtime_types import CognitionStateSnapshot, PendingInputRecord
+from otomekairo.usecase.persona_runtime_support import (
+    build_attention_score_breakdown,
+    build_self_initiated_score_breakdown,
+    build_skill_candidates,
+)
 
 
 # Block: Public builder
@@ -28,6 +33,32 @@ def build_cognition_input(
     current_observation = _build_current_observation(
         pending_input=pending_input,
         resolved_at=resolved_at,
+    )
+    task_snapshot = _build_task_snapshot(
+        task_snapshot=state_snapshot.task_snapshot,
+        resolved_at=resolved_at,
+    )
+    memory_bundle = _build_memory_bundle(
+        memory_snapshot=state_snapshot.memory_snapshot,
+        current_observation=current_observation,
+        resolved_at=resolved_at,
+    )
+    attention_score_breakdown = build_attention_score_breakdown(
+        selection_profile=selection_profile,
+        attention_snapshot=state_snapshot.attention_state,
+        task_snapshot=task_snapshot,
+        memory_bundle=memory_bundle,
+        current_observation=current_observation,
+    )
+    self_initiated_score_breakdown = build_self_initiated_score_breakdown(
+        pending_input_source=str(pending_input.source),
+        selection_profile=selection_profile,
+        task_snapshot=task_snapshot,
+    )
+    skill_candidates = build_skill_candidates(
+        selection_profile=selection_profile,
+        self_initiated_score_breakdown=self_initiated_score_breakdown,
+        current_observation=current_observation,
     )
     return {
         "cycle_meta": {
@@ -53,16 +84,11 @@ def build_cognition_input(
         "body_snapshot": state_snapshot.body_state,
         "world_snapshot": state_snapshot.world_state,
         "drive_snapshot": state_snapshot.drive_state,
-        "task_snapshot": _build_task_snapshot(
-            task_snapshot=state_snapshot.task_snapshot,
-            resolved_at=resolved_at,
-        ),
+        "task_snapshot": task_snapshot,
         "attention_snapshot": state_snapshot.attention_state,
-        "memory_bundle": _build_memory_bundle(
-            memory_snapshot=state_snapshot.memory_snapshot,
-            current_observation=current_observation,
-            resolved_at=resolved_at,
-        ),
+        "attention_score_breakdown": attention_score_breakdown,
+        "self_initiated_score_breakdown": self_initiated_score_breakdown,
+        "memory_bundle": memory_bundle,
         "policy_snapshot": {
             "system_policy": {
                 "respect_invariants": True,
@@ -74,7 +100,7 @@ def build_cognition_input(
                 "microphone_enabled": bool(state_snapshot.effective_settings["sensors.microphone.enabled"]),
             },
         },
-        "skill_candidates": [],
+        "skill_candidates": skill_candidates,
         "current_observation": current_observation,
         "context_budget": {
             "max_tokens": int(state_snapshot.effective_settings["runtime.context_budget_tokens"]),
