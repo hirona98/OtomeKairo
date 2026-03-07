@@ -2070,21 +2070,31 @@ class SqliteStateStore:
             entity_type="memory_states",
             entity_id=memory_state_id,
             before_json={},
-            after_json={
-                "memory_kind": memory_kind,
-                "body_text": body_text,
-                **payload_json,
-            },
+            after_json=_memory_state_revision_json(
+                memory_kind=memory_kind,
+                body_text=body_text,
+                payload_json=payload_json,
+                confidence=confidence,
+                importance=importance,
+                memory_strength=memory_strength,
+                searchable=True,
+                last_confirmed_at=last_confirmed_at,
+                evidence_event_ids=evidence_event_ids,
+                created_at=created_at,
+                updated_at=created_at,
+                valid_from_ts=None,
+                valid_to_ts=None,
+                last_accessed_at=None,
+            ),
             revision_reason=revision_reason,
             evidence_event_ids=evidence_event_ids,
             created_at=created_at,
         )
-        return {
-            "entity_type": "memory_state",
-            "entity_id": memory_state_id,
-            "source_updated_at": created_at,
-            "current_searchable": True,
-        }
+        return _memory_state_target(
+            entity_id=memory_state_id,
+            source_updated_at=created_at,
+            current_searchable=True,
+        )
 
     # Block: Write memory plan apply
     def _apply_write_memory_plan(
@@ -2094,7 +2104,7 @@ class SqliteStateStore:
         memory_write_plan: dict[str, Any],
         created_at: int,
     ) -> dict[str, list[dict[str, Any]]]:
-        memory_state_targets, state_id_by_ref = self._apply_state_updates(
+        memory_state_targets, state_embedding_targets, state_id_by_ref = self._apply_state_updates(
             connection=connection,
             state_updates=list(memory_write_plan["state_updates"]),
             created_at=created_at,
@@ -2118,7 +2128,7 @@ class SqliteStateStore:
         return {
             "memory_state_targets": memory_state_targets,
             "embedding_targets": [
-                *memory_state_targets,
+                *state_embedding_targets,
                 *event_affect_targets,
             ],
         }
@@ -2130,28 +2140,249 @@ class SqliteStateStore:
         connection: sqlite3.Connection,
         state_updates: list[dict[str, Any]],
         created_at: int,
-    ) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, str]]:
         memory_state_targets: list[dict[str, Any]] = []
+        embedding_targets: list[dict[str, Any]] = []
         state_id_by_ref: dict[str, str] = {}
         for state_update in state_updates:
-            if state_update["operation"] != "upsert":
-                raise RuntimeError("write_memory initial implementation only supports upsert")
-            memory_state_target = self._insert_memory_state_with_revision(
-                connection=connection,
-                memory_kind=str(state_update["memory_kind"]),
-                body_text=str(state_update["body_text"]),
-                payload_json=dict(state_update["payload"]),
+            operation = str(state_update["operation"])
+            if operation == "upsert":
+                memory_state_target = self._insert_memory_state_with_revision(
+                    connection=connection,
+                    memory_kind=str(state_update["memory_kind"]),
+                    body_text=str(state_update["body_text"]),
+                    payload_json=dict(state_update["payload"]),
+                    confidence=float(state_update["confidence"]),
+                    importance=float(state_update["importance"]),
+                    memory_strength=float(state_update["memory_strength"]),
+                    last_confirmed_at=int(state_update["last_confirmed_at"]),
+                    evidence_event_ids=list(state_update["evidence_event_ids"]),
+                    created_at=created_at,
+                    revision_reason=str(state_update["revision_reason"]),
+                )
+                embedding_targets.append(dict(memory_state_target))
+            else:
+                memory_state_target, embedding_target = self._apply_existing_memory_state_update(
+                    connection=connection,
+                    state_update=state_update,
+                    created_at=created_at,
+                )
+                if embedding_target is not None:
+                    embedding_targets.append(embedding_target)
+            memory_state_targets.append(memory_state_target)
+            state_id_by_ref[str(state_update["state_ref"])] = str(memory_state_target["entity_id"])
+        return (memory_state_targets, embedding_targets, state_id_by_ref)
+
+    # Block: Existing state update apply
+    def _apply_existing_memory_state_update(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        state_update: dict[str, Any],
+        created_at: int,
+    ) -> tuple[dict[str, Any], dict[str, Any] | None]:
+        target_state_row = self._fetch_memory_state_row_for_update(
+            connection=connection,
+            memory_state_id=str(state_update["target_state_id"]),
+        )
+        target_memory_kind = str(target_state_row["memory_kind"])
+        if target_memory_kind != str(state_update["memory_kind"]):
+            raise RuntimeError("write_memory state_updates.memory_kind must match target_state_id memory_kind")
+        operation = str(state_update["operation"])
+        before_json = _memory_state_revision_json_from_row(target_state_row)
+        if operation == "close":
+            after_json = self._closed_memory_state_revision_json(
+                before_json=before_json,
+                valid_to_ts=int(state_update["valid_to_ts"]),
+                evidence_event_ids=list(state_update["evidence_event_ids"]),
+                updated_at=created_at,
+            )
+        elif operation == "mark_done":
+            after_json = self._done_memory_state_revision_json(
+                before_json=before_json,
+                done_at=int(state_update["done_at"]),
+                done_reason=str(state_update["done_reason"]),
+                evidence_event_ids=list(state_update["evidence_event_ids"]),
+                updated_at=created_at,
+            )
+        elif operation == "revise_confidence":
+            after_json = self._revised_memory_state_revision_json(
+                before_json=before_json,
                 confidence=float(state_update["confidence"]),
                 importance=float(state_update["importance"]),
                 memory_strength=float(state_update["memory_strength"]),
                 last_confirmed_at=int(state_update["last_confirmed_at"]),
                 evidence_event_ids=list(state_update["evidence_event_ids"]),
-                created_at=created_at,
-                revision_reason=str(state_update["revision_reason"]),
+                updated_at=created_at,
             )
-            memory_state_targets.append(memory_state_target)
-            state_id_by_ref[str(state_update["state_ref"])] = str(memory_state_target["entity_id"])
-        return (memory_state_targets, state_id_by_ref)
+        else:
+            raise RuntimeError("write_memory state_updates.operation is invalid")
+        if after_json == before_json:
+            return (
+                _memory_state_target(
+                    entity_id=str(target_state_row["memory_state_id"]),
+                    source_updated_at=int(target_state_row["updated_at"]),
+                    current_searchable=bool(target_state_row["searchable"]),
+                ),
+                None,
+            )
+        connection.execute(
+            """
+            UPDATE memory_states
+            SET payload_json = ?,
+                confidence = ?,
+                importance = ?,
+                memory_strength = ?,
+                searchable = ?,
+                last_confirmed_at = ?,
+                evidence_event_ids_json = ?,
+                updated_at = ?,
+                valid_to_ts = ?
+            WHERE memory_state_id = ?
+            """,
+            (
+                _json_text(after_json["payload"]),
+                float(after_json["confidence"]),
+                float(after_json["importance"]),
+                float(after_json["memory_strength"]),
+                1 if bool(after_json["searchable"]) else 0,
+                int(after_json["last_confirmed_at"]),
+                _json_text(list(after_json["evidence_event_ids"])),
+                int(after_json["updated_at"]),
+                after_json.get("valid_to_ts"),
+                str(target_state_row["memory_state_id"]),
+            ),
+        )
+        self._insert_revision(
+            connection=connection,
+            entity_type="memory_states",
+            entity_id=str(target_state_row["memory_state_id"]),
+            before_json=before_json,
+            after_json=after_json,
+            revision_reason=str(state_update["revision_reason"]),
+            evidence_event_ids=list(after_json["evidence_event_ids"]),
+            created_at=created_at,
+        )
+        memory_state_target = _memory_state_target(
+            entity_id=str(target_state_row["memory_state_id"]),
+            source_updated_at=created_at,
+            current_searchable=bool(after_json["searchable"]),
+        )
+        embedding_target = None
+        if bool(before_json["searchable"]) != bool(after_json["searchable"]):
+            embedding_target = dict(memory_state_target)
+        return (memory_state_target, embedding_target)
+
+    # Block: Memory state fetch for update
+    def _fetch_memory_state_row_for_update(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        memory_state_id: str,
+    ) -> sqlite3.Row:
+        row = connection.execute(
+            """
+            SELECT
+                memory_state_id,
+                memory_kind,
+                body_text,
+                payload_json,
+                confidence,
+                importance,
+                memory_strength,
+                searchable,
+                last_confirmed_at,
+                evidence_event_ids_json,
+                created_at,
+                updated_at,
+                valid_from_ts,
+                valid_to_ts,
+                last_accessed_at
+            FROM memory_states
+            WHERE memory_state_id = ?
+            """,
+            (memory_state_id,),
+        ).fetchone()
+        if row is None:
+            raise RuntimeError("write_memory state_updates.target_state_id is missing")
+        return row
+
+    # Block: Closed state revision json
+    def _closed_memory_state_revision_json(
+        self,
+        *,
+        before_json: dict[str, Any],
+        valid_to_ts: int,
+        evidence_event_ids: list[str],
+        updated_at: int,
+    ) -> dict[str, Any]:
+        return {
+            **before_json,
+            "searchable": False,
+            "last_confirmed_at": updated_at,
+            "evidence_event_ids": _merged_unique_strings(
+                list(before_json["evidence_event_ids"]),
+                evidence_event_ids,
+            ),
+            "updated_at": updated_at,
+            "valid_to_ts": valid_to_ts,
+        }
+
+    # Block: Done state revision json
+    def _done_memory_state_revision_json(
+        self,
+        *,
+        before_json: dict[str, Any],
+        done_at: int,
+        done_reason: str,
+        evidence_event_ids: list[str],
+        updated_at: int,
+    ) -> dict[str, Any]:
+        after_payload = dict(before_json["payload"])
+        after_payload["status"] = "done"
+        after_payload["done_at"] = done_at
+        after_payload["done_reason"] = done_reason
+        after_payload["done_evidence_event_ids"] = _merged_unique_strings(
+            _string_list_or_empty(after_payload.get("done_evidence_event_ids")),
+            evidence_event_ids,
+        )
+        return {
+            **before_json,
+            "payload": after_payload,
+            "searchable": False,
+            "last_confirmed_at": updated_at,
+            "evidence_event_ids": _merged_unique_strings(
+                list(before_json["evidence_event_ids"]),
+                evidence_event_ids,
+            ),
+            "updated_at": updated_at,
+            "valid_to_ts": done_at,
+        }
+
+    # Block: Revised state revision json
+    def _revised_memory_state_revision_json(
+        self,
+        *,
+        before_json: dict[str, Any],
+        confidence: float,
+        importance: float,
+        memory_strength: float,
+        last_confirmed_at: int,
+        evidence_event_ids: list[str],
+        updated_at: int,
+    ) -> dict[str, Any]:
+        return {
+            **before_json,
+            "confidence": confidence,
+            "importance": importance,
+            "memory_strength": memory_strength,
+            "last_confirmed_at": last_confirmed_at,
+            "evidence_event_ids": _merged_unique_strings(
+                list(before_json["evidence_event_ids"]),
+                evidence_event_ids,
+            ),
+            "updated_at": updated_at,
+        }
 
     # Block: Preference update apply
     def _apply_preference_updates(
@@ -7244,6 +7475,80 @@ def _memory_strength_from_evidence(evidence_event_ids: Any) -> float:
     return min(1.0, 0.20 + len(evidence_event_ids) * 0.15)
 
 
+# Block: Memory state revision json
+def _memory_state_revision_json(
+    *,
+    memory_kind: str,
+    body_text: str,
+    payload_json: dict[str, Any],
+    confidence: float,
+    importance: float,
+    memory_strength: float,
+    searchable: bool,
+    last_confirmed_at: int,
+    evidence_event_ids: list[str],
+    created_at: int,
+    updated_at: int,
+    valid_from_ts: int | None,
+    valid_to_ts: int | None,
+    last_accessed_at: int | None,
+) -> dict[str, Any]:
+    revision_json = {
+        "memory_kind": memory_kind,
+        "body_text": body_text,
+        "payload": payload_json,
+        "confidence": confidence,
+        "importance": importance,
+        "memory_strength": memory_strength,
+        "searchable": searchable,
+        "last_confirmed_at": last_confirmed_at,
+        "evidence_event_ids": evidence_event_ids,
+        "created_at": created_at,
+        "updated_at": updated_at,
+    }
+    if valid_from_ts is not None:
+        revision_json["valid_from_ts"] = valid_from_ts
+    if valid_to_ts is not None:
+        revision_json["valid_to_ts"] = valid_to_ts
+    if last_accessed_at is not None:
+        revision_json["last_accessed_at"] = last_accessed_at
+    return revision_json
+
+
+def _memory_state_revision_json_from_row(row: sqlite3.Row) -> dict[str, Any]:
+    return _memory_state_revision_json(
+        memory_kind=str(row["memory_kind"]),
+        body_text=str(row["body_text"]),
+        payload_json=_decoded_object_json(row["payload_json"]),
+        confidence=float(row["confidence"]),
+        importance=float(row["importance"]),
+        memory_strength=float(row["memory_strength"]),
+        searchable=bool(row["searchable"]),
+        last_confirmed_at=int(row["last_confirmed_at"]),
+        evidence_event_ids=_decoded_string_array_json(row["evidence_event_ids_json"]),
+        created_at=int(row["created_at"]),
+        updated_at=int(row["updated_at"]),
+        valid_from_ts=row["valid_from_ts"],
+        valid_to_ts=row["valid_to_ts"],
+        last_accessed_at=row["last_accessed_at"],
+    )
+
+
+# Block: Memory state target helper
+def _memory_state_target(
+    *,
+    entity_id: str,
+    source_updated_at: int,
+    current_searchable: bool,
+) -> dict[str, Any]:
+    return {
+        "entity_type": "memory_state",
+        "entity_id": entity_id,
+        "source_updated_at": source_updated_at,
+        "current_searchable": current_searchable,
+    }
+
+
 def _recent_event_entry(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "event_id": str(row["event_id"]),
@@ -7875,6 +8180,19 @@ def _string_list(value: Any, *, field_name: str) -> list[str]:
     for item in value:
         if not isinstance(item, str) or not item:
             raise RuntimeError(f"{field_name} must contain only non-empty strings")
+        string_values.append(item)
+    return string_values
+
+
+def _string_list_or_empty(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise RuntimeError("string list value must be a list when present")
+    string_values: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item:
+            raise RuntimeError("string list value must contain only non-empty strings")
         string_values.append(item)
     return string_values
 

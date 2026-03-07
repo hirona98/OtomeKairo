@@ -322,6 +322,7 @@ def validate_write_memory_plan(
         raise RuntimeError("write_memory plan.state_updates must not be empty")
     normalized_state_updates: list[dict[str, Any]] = []
     known_state_refs: list[str] = []
+    known_target_state_ids: set[str] = set()
     for state_update in state_updates:
         normalized_state_update = _validate_state_update(
             state_update=state_update,
@@ -331,6 +332,11 @@ def validate_write_memory_plan(
         if state_ref in known_state_refs:
             raise RuntimeError("write_memory plan.state_updates.state_ref must be unique")
         known_state_refs.append(state_ref)
+        target_state_id = normalized_state_update.get("target_state_id")
+        if isinstance(target_state_id, str):
+            if target_state_id in known_target_state_ids:
+                raise RuntimeError("write_memory plan.state_updates.target_state_id must be unique")
+            known_target_state_ids.add(target_state_id)
         normalized_state_updates.append(normalized_state_update)
     normalized_preference_updates = _validate_preference_updates(
         preference_updates=normalized_plan.get("preference_updates"),
@@ -438,31 +444,94 @@ def _validate_state_update(
     )
     if operation not in WRITE_MEMORY_STATE_UPDATE_OPERATIONS:
         raise RuntimeError("write_memory plan.state_updates.operation is invalid")
-    if operation != "upsert":
-        raise RuntimeError("write_memory initial implementation only supports upsert state_updates")
     evidence_event_ids = _validate_evidence_event_ids(
         value=normalized_state_update.get("evidence_event_ids"),
         source_event_ids=source_event_ids,
         field_name="write_memory plan.state_updates.evidence_event_ids",
     )
-    return {
+    normalized_common_fields = {
         "state_ref": _required_non_empty_string(
             normalized_state_update.get("state_ref"),
             "write_memory plan.state_updates.state_ref must be non-empty string",
         ),
         "operation": operation,
-        "memory_kind": _required_non_empty_string(
-            normalized_state_update.get("memory_kind"),
-            "write_memory plan.state_updates.memory_kind must be non-empty string",
+        "evidence_event_ids": evidence_event_ids,
+        "revision_reason": _required_non_empty_string(
+            normalized_state_update.get("revision_reason"),
+            "write_memory plan.state_updates.revision_reason must be non-empty string",
         ),
-        "body_text": _required_non_empty_string(
-            normalized_state_update.get("body_text"),
-            "write_memory plan.state_updates.body_text must be non-empty string",
-        ),
-        "payload": _required_object(
-            normalized_state_update.get("payload"),
-            "write_memory plan.state_updates.payload must be an object",
-        ),
+    }
+    if operation == "upsert":
+        return {
+            **normalized_common_fields,
+            "memory_kind": _required_non_empty_string(
+                normalized_state_update.get("memory_kind"),
+                "write_memory plan.state_updates.memory_kind must be non-empty string",
+            ),
+            "body_text": _required_non_empty_string(
+                normalized_state_update.get("body_text"),
+                "write_memory plan.state_updates.body_text must be non-empty string",
+            ),
+            "payload": _required_object(
+                normalized_state_update.get("payload"),
+                "write_memory plan.state_updates.payload must be an object",
+            ),
+            "confidence": _required_score(
+                normalized_state_update.get("confidence"),
+                "write_memory plan.state_updates.confidence must be numeric within 0.0..1.0",
+            ),
+            "importance": _required_score(
+                normalized_state_update.get("importance"),
+                "write_memory plan.state_updates.importance must be numeric within 0.0..1.0",
+            ),
+            "memory_strength": _required_score(
+                normalized_state_update.get("memory_strength"),
+                "write_memory plan.state_updates.memory_strength must be numeric within 0.0..1.0",
+            ),
+            "last_confirmed_at": _required_positive_integer(
+                normalized_state_update.get("last_confirmed_at"),
+                "write_memory plan.state_updates.last_confirmed_at must be positive integer",
+            ),
+        }
+    target_state_id = _required_non_empty_string(
+        normalized_state_update.get("target_state_id"),
+        "write_memory plan.state_updates.target_state_id must be non-empty string",
+    )
+    memory_kind = _required_non_empty_string(
+        normalized_state_update.get("memory_kind"),
+        "write_memory plan.state_updates.memory_kind must be non-empty string",
+    )
+    if operation == "close":
+        return {
+            **normalized_common_fields,
+            "target_state_id": target_state_id,
+            "memory_kind": memory_kind,
+            "valid_to_ts": _required_positive_integer(
+                normalized_state_update.get("valid_to_ts"),
+                "write_memory plan.state_updates.valid_to_ts must be positive integer",
+            ),
+        }
+    if operation == "mark_done":
+        if memory_kind != "task":
+            raise RuntimeError("write_memory plan.state_updates.mark_done requires memory_kind=task")
+        return {
+            **normalized_common_fields,
+            "target_state_id": target_state_id,
+            "memory_kind": memory_kind,
+            "done_at": _required_positive_integer(
+                normalized_state_update.get("done_at"),
+                "write_memory plan.state_updates.done_at must be positive integer",
+            ),
+            "done_reason": _required_non_empty_string(
+                normalized_state_update.get("done_reason"),
+                "write_memory plan.state_updates.done_reason must be non-empty string",
+            ),
+        }
+    return {
+        **normalized_common_fields,
+        "target_state_id": target_state_id,
+        "operation": operation,
+        "memory_kind": memory_kind,
         "confidence": _required_score(
             normalized_state_update.get("confidence"),
             "write_memory plan.state_updates.confidence must be numeric within 0.0..1.0",
@@ -475,14 +544,9 @@ def _validate_state_update(
             normalized_state_update.get("memory_strength"),
             "write_memory plan.state_updates.memory_strength must be numeric within 0.0..1.0",
         ),
-        "last_confirmed_at": _required_integer(
+        "last_confirmed_at": _required_positive_integer(
             normalized_state_update.get("last_confirmed_at"),
-            "write_memory plan.state_updates.last_confirmed_at must be integer",
-        ),
-        "evidence_event_ids": evidence_event_ids,
-        "revision_reason": _required_non_empty_string(
-            normalized_state_update.get("revision_reason"),
-            "write_memory plan.state_updates.revision_reason must be non-empty string",
+            "write_memory plan.state_updates.last_confirmed_at must be positive integer",
         ),
     }
 
@@ -1189,6 +1253,13 @@ def _required_integer(value: Any, message: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise RuntimeError(message)
     return value
+
+
+def _required_positive_integer(value: Any, message: str) -> int:
+    integer_value = _required_integer(value, message)
+    if integer_value <= 0:
+        raise RuntimeError(message)
+    return integer_value
 
 
 def _required_non_empty_string(value: Any, message: str) -> str:

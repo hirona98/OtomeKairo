@@ -924,9 +924,13 @@
 - `MemoryWritePlan` は、長周期の `write_memory` 内部で生成・検証してから適用する固定 shape のオブジェクトである
 - 必須項目は `event_annotations`、`state_updates`、`preference_updates`、`event_affect`、`context_updates`、`revision_reasons` である
 - `event_annotations` は、`memory_job_payloads.payload_json.source_event_ids` と同じ件数・同じ順序で並ばなければならない
-- `state_updates` の各要素は、少なくとも `state_ref`、`operation`、`memory_kind`、`body_text`、`payload`、`confidence`、`importance`、`memory_strength`、`last_confirmed_at`、`evidence_event_ids`、`revision_reason` を持つ
+- `state_updates` の各要素は、少なくとも `state_ref`、`operation`、`memory_kind`、`evidence_event_ids`、`revision_reason` を持つ
 - `state_ref` は、`context_updates.state_links` から参照するための内部別名であり、同一 `MemoryWritePlan` 内で一意でなければならない
-- 現在の実装では、`state_updates.operation` は `upsert` だけを許可する
+- `operation = upsert` のときは、追加で `body_text`、`payload`、`confidence`、`importance`、`memory_strength`、`last_confirmed_at` を必須とする
+- `operation = close` のときは、追加で `target_state_id`、`valid_to_ts` を必須とする
+- `operation = mark_done` のときは、追加で `target_state_id`、`done_at`、`done_reason` を必須とし、`memory_kind` は `task` に固定する
+- `operation = revise_confidence` のときは、追加で `target_state_id`、`confidence`、`importance`、`memory_strength`、`last_confirmed_at` を必須とする
+- `close` と `mark_done` は、現在の実装では `memory_states.searchable=0` への切替まで同時に適用する
 - `preference_updates.target_entity_ref` は `preference_target_entity_ref` を使う
 - `event_affect.vad` は、`v`、`a`、`d` の 3 キーを必須とし、各値は `-1.0..+1.0` の `number` とする
 - `context_updates` は、`event_links`、`event_threads`、`state_links` の 3 キーを必須とする
