@@ -47,7 +47,7 @@
       listKey: "conversation_presets",
       activeKey: "active_conversation_preset_id",
       idPrefix: "preset_conversation",
-      baseName: "会話",
+      baseName: "LLM",
     },
     memory: {
       listKey: "memory_presets",
@@ -774,29 +774,29 @@
       <div class="settings-card-title">振る舞い設定</div>
       <div class="settings-stack">
         ${renderSettingsGroup(
-          "振る舞いプロンプト",
-          "呼び方と振る舞い指示をここで管理します。",
-          [
-            renderPresetSelectionFields("behavior", activePreset, selectOptions),
-            BEHAVIOR_PROMPT_DESCRIPTORS
-              .map((descriptor) => renderPresetField("behavior", activePreset.payload, descriptor))
-              .join(""),
-          ].join(""),
-        )}
+      "振る舞いプロンプト",
+      "呼び方と振る舞い指示をここで管理します。",
+      [
+        renderPresetSelectionFields("behavior", activePreset, selectOptions),
+        BEHAVIOR_PROMPT_DESCRIPTORS
+          .map((descriptor) => renderPresetField("behavior", activePreset.payload, descriptor))
+          .join(""),
+      ].join(""),
+    )}
         ${renderSettingsGroup(
-          "追加プロンプト（任意）",
-          "VRMの表情指定や会話の文字数制限などを入れてください。記憶更新処理の人格には使用しません。",
-          BEHAVIOR_ADDON_DESCRIPTORS
-            .map((descriptor) => renderPresetField("behavior", activePreset.payload, descriptor))
-            .join(""),
-        )}
+      "追加プロンプト（任意）",
+      "VRMの表情指定や会話の文字数制限などを入れてください。記憶更新処理の人格には使用しません。",
+      BEHAVIOR_ADDON_DESCRIPTORS
+        .map((descriptor) => renderPresetField("behavior", activePreset.payload, descriptor))
+        .join(""),
+    )}
         ${renderSettingsGroup(
-          "行動傾向",
-          "OtomeKairo 独自の傾向設定です。会話方針と認知判断に反映します。",
-          BEHAVIOR_DESCRIPTORS
-            .map((descriptor) => renderPresetField("behavior", activePreset.payload, descriptor))
-            .join(""),
-        )}
+      "行動傾向",
+      "OtomeKairo 独自の傾向設定です。会話方針と認知判断に反映します。",
+      BEHAVIOR_DESCRIPTORS
+        .map((descriptor) => renderPresetField("behavior", activePreset.payload, descriptor))
+        .join(""),
+    )}
       </div>
     `;
   }
@@ -807,32 +807,32 @@
     const activePreset = requirePresetEntry("conversation", activePresetId);
     const selectOptions = buildPresetSelectOptions(readPresetEntries("conversation"), activePresetId);
     settingsConversationCard.innerHTML = `
-      <div class="settings-card-title">会話設定</div>
+      <div class="settings-card-title">LLM設定</div>
       <div class="settings-stack">
         ${renderSettingsGroup(
-          "プリセット選択",
-          "システムプロンプトは「振る舞い」タブで設定します。",
-          renderPresetSelectionToolbar("conversation", selectOptions),
-        )}
+      "プリセット選択",
+      "システムプロンプトは「振る舞い」タブで設定します。",
+      renderPresetSelectionToolbar("conversation", selectOptions),
+    )}
         ${renderSettingsGroup(
-          "基本設定",
-          "",
-          renderPresetNameField("conversation", activePreset.preset_name),
-        )}
+      "基本設定",
+      "",
+      renderPresetNameField("conversation", activePreset.preset_name),
+    )}
         ${renderSettingsGroup(
-          "LLM設定",
-          "",
-          CONVERSATION_LLM_DESCRIPTORS
-            .map((descriptor) => renderPresetField("conversation", activePreset.payload, descriptor))
-            .join(""),
-        )}
+      "LLM設定",
+      "",
+      CONVERSATION_LLM_DESCRIPTORS
+        .map((descriptor) => renderPresetField("conversation", activePreset.payload, descriptor))
+        .join(""),
+    )}
         ${renderSettingsGroup(
-          "画像認識LLM設定",
-          "",
-          CONVERSATION_VISION_DESCRIPTORS
-            .map((descriptor) => renderPresetField("conversation", activePreset.payload, descriptor))
-            .join(""),
-        )}
+      "画像認識LLM設定",
+      "",
+      CONVERSATION_VISION_DESCRIPTORS
+        .map((descriptor) => renderPresetField("conversation", activePreset.payload, descriptor))
+        .join(""),
+    )}
       </div>
     `;
   }
@@ -846,27 +846,27 @@
       <div class="settings-card-title">記憶設定</div>
       <div class="settings-stack">
         ${renderSettingsGroup(
-          "プリセット選択",
-          "",
-          renderPresetSelectionToolbar("memory", selectOptions),
-        )}
+      "プリセット選択",
+      "",
+      renderPresetSelectionToolbar("memory", selectOptions),
+    )}
         ${renderSettingsGroup(
-          "Embedding設定",
-          "※ 記憶検索と文脈組み立てに使う設定です。",
-          [
-            renderPresetNameField("memory", activePreset.preset_name),
-            MEMORY_EMBEDDING_DESCRIPTORS
-              .map((descriptor) => renderPresetField("memory", activePreset.payload, descriptor))
-              .join(""),
-          ].join(""),
-        )}
+      "Embedding設定",
+      "※ 記憶検索と文脈組み立てに使う設定です。",
+      [
+        renderPresetNameField("memory", activePreset.preset_name),
+        MEMORY_EMBEDDING_DESCRIPTORS
+          .map((descriptor) => renderPresetField("memory", activePreset.payload, descriptor))
+          .join(""),
+      ].join(""),
+    )}
         ${renderSettingsGroup(
-          "記憶検索設定",
-          "",
-          MEMORY_RETRIEVAL_DESCRIPTORS
-            .map((descriptor) => renderPresetField("memory", activePreset.payload, descriptor))
-            .join(""),
-        )}
+      "記憶検索設定",
+      "",
+      MEMORY_RETRIEVAL_DESCRIPTORS
+        .map((descriptor) => renderPresetField("memory", activePreset.payload, descriptor))
+        .join(""),
+    )}
       </div>
     `;
   }
@@ -883,38 +883,38 @@
       <div class="settings-card-title">モーション設定</div>
       <div class="settings-stack">
         ${renderSettingsGroup(
-          "アニメーションセット選択",
-          "",
-          renderPresetSelectionToolbar("motion", selectOptions),
-        )}
+      "アニメーションセット選択",
+      "",
+      renderPresetSelectionToolbar("motion", selectOptions),
+    )}
         ${renderSettingsGroup(
-          "基本設定",
-          "",
-          [
-            renderPresetNameField("motion", activePreset.preset_name),
-            renderPresetField("motion", activePreset.payload, {
-              path: "motion.posture_change_loop_count_standing",
-              label: "立ち姿勢ループ回数",
-              kind: "integer",
-              min: 1,
-              max: 9999,
-              step: 1,
-            }),
-            renderPresetField("motion", activePreset.payload, {
-              path: "motion.posture_change_loop_count_sitting_floor",
-              label: "座り姿勢ループ回数",
-              kind: "integer",
-              min: 1,
-              max: 9999,
-              step: 1,
-            }),
-          ].join(""),
-        )}
+      "基本設定",
+      "",
+      [
+        renderPresetNameField("motion", activePreset.preset_name),
+        renderPresetField("motion", activePreset.payload, {
+          path: "motion.posture_change_loop_count_standing",
+          label: "立ち姿勢ループ回数",
+          kind: "integer",
+          min: 1,
+          max: 9999,
+          step: 1,
+        }),
+        renderPresetField("motion", activePreset.payload, {
+          path: "motion.posture_change_loop_count_sitting_floor",
+          label: "座り姿勢ループ回数",
+          kind: "integer",
+          min: 1,
+          max: 9999,
+          step: 1,
+        }),
+      ].join(""),
+    )}
         ${renderSettingsGroup(
-          "アニメーションリスト",
-          "",
-          renderMotionAnimationEditor(animations),
-        )}
+      "アニメーションリスト",
+      "",
+      renderMotionAnimationEditor(animations),
+    )}
       </div>
     `;
   }
@@ -926,8 +926,8 @@
         <td>
           <select class="settings-input" data-motion-index="${String(index)}" data-motion-field="animation_type" data-value-kind="integer">
             ${Object.entries(MOTION_ANIMATION_TYPE_LABELS)
-              .map(([value, label]) => `<option value="${escapeHtml(value)}"${Number(animation.animation_type) === Number(value) ? " selected" : ""}>${escapeHtml(label)}</option>`)
-              .join("")}
+        .map(([value, label]) => `<option value="${escapeHtml(value)}"${Number(animation.animation_type) === Number(value) ? " selected" : ""}>${escapeHtml(label)}</option>`)
+        .join("")}
           </select>
         </td>
         <td><input class="settings-input" type="text" value="${escapeHtml(requireString(animation.animation_name, "motion.animation_name"))}" data-motion-index="${String(index)}" data-motion-field="animation_name" /></td>
@@ -965,26 +965,26 @@
       <div class="settings-card-title">キャラクター設定</div>
       <div class="settings-stack">
         ${renderSettingsGroup(
-          "キャラクター選択",
-          "LLM(AI)を使う場合は振る舞い / 会話 / 記憶タブも設定してください。",
-          renderPresetSelectionToolbar("character", selectOptions),
-        )}
+      "キャラクター選択",
+      "LLM(AI)を使う場合は振る舞い / 会話 / 記憶タブも設定してください。",
+      renderPresetSelectionToolbar("character", selectOptions),
+    )}
         ${renderSettingsGroup(
-          "基本設定",
-          "",
-          [
-            renderPresetNameField("character", activePreset.preset_name),
-            renderVrmFileField("character", activePreset.payload),
-            renderIndentedNote("未指定の場合はVRM表示/音声出力が無効になります。"),
-          ].join(""),
-        )}
+      "基本設定",
+      "",
+      [
+        renderPresetNameField("character", activePreset.preset_name),
+        renderVrmFileField("character", activePreset.payload),
+        renderIndentedNote("未指定の場合はVRM表示/音声出力が無効になります。"),
+      ].join(""),
+    )}
         ${renderSettingsGroup(
-          "マテリアル・影設定",
-          "",
-          CHARACTER_MATERIAL_DESCRIPTORS
-            .map((descriptor) => renderPresetField("character", activePreset.payload, descriptor))
-            .join(""),
-        )}
+      "マテリアル・影設定",
+      "",
+      CHARACTER_MATERIAL_DESCRIPTORS
+        .map((descriptor) => renderPresetField("character", activePreset.payload, descriptor))
+        .join(""),
+    )}
         ${renderCharacterSpeechGroup(activePreset.payload)}
         ${renderCharacterSttGroup(activePreset.payload)}
       </div>
@@ -1250,15 +1250,15 @@
     settingsSystemCard.innerHTML = `
       <div class="settings-card-title">システム設定</div>
       ${renderSettingsGroup(
-        "通知",
-        "",
-        notifyFieldsHtml,
-      )}
+      "通知",
+      "",
+      notifyFieldsHtml,
+    )}
       ${renderSettingsGroup(
-        "運用設定",
-        "ランタイムの運用値をここで調整します。",
-        runtimeFieldsHtml,
-      )}
+      "運用設定",
+      "ランタイムの運用値をここで調整します。",
+      runtimeFieldsHtml,
+    )}
     `;
   }
 
@@ -1359,9 +1359,9 @@
     settingsCameraCard.innerHTML = `
       <div class="settings-card-title">カメラ接続</div>
       ${renderSettingsGroup(
-        "接続一覧",
-        "AI に使わせる接続だけ「使用」をオンにしてください。追加は一覧の末尾へ行を足します。",
-        `
+      "接続一覧",
+      "AI に使わせる接続だけ「使用」をオンにしてください。追加は一覧の末尾へ行を足します。",
+      `
           <div class="settings-table-wrap">
             <table class="settings-table">
               <thead>
@@ -1381,7 +1381,7 @@
             <button class="settings-btn settings-btn-small" type="button" data-camera-action="add">追加</button>
           </div>
         `,
-      )}
+    )}
     `;
   }
 
