@@ -25,12 +25,11 @@ from otomekairo.schema.runtime_types import (
     TaskStateMutationRecord,
 )
 from otomekairo.schema.settings import (
+    build_character_preset_setting_keys,
     build_default_camera_connections,
-    build_default_output_preset_payload,
     build_default_settings,
     build_default_settings_editor_state,
-    build_default_settings_presets,
-    build_output_preset_setting_keys,
+    build_default_settings_editor_presets,
     build_settings_editor_system_keys,
     decode_requested_value,
     normalize_settings_editor_document,
@@ -39,7 +38,7 @@ from otomekairo.schema.settings import (
 
 # Block: Schema constants
 SCHEMA_NAME = "core_schema"
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 EMBEDDING_VECTOR_DIMENSION = 32
 LEGACY_SETTING_KEY_ALIASES = {
     "llm.model": "llm.default_model",
@@ -65,7 +64,18 @@ LEGACY_AIVIS_RUNTIME_KEYS = tuple(
     for current_key, legacy_key in LEGACY_SETTING_KEY_ALIASES.items()
     if current_key.startswith("speech.tts.aivis_cloud.")
 )
-OUTPUT_PRESET_SETTING_KEYS = build_output_preset_setting_keys()
+LEGACY_OUTPUT_PRESET_SETTING_KEYS = build_character_preset_setting_keys() + (
+    "integrations.notify_route",
+    "integrations.discord.bot_token",
+    "integrations.discord.channel_id",
+)
+SETTINGS_EDITOR_PRESET_TABLE_NAMES = (
+    "character_presets",
+    "behavior_presets",
+    "conversation_presets",
+    "memory_presets",
+    "motion_presets",
+)
 
 
 # Block: API errors
@@ -105,7 +115,7 @@ class SqliteStateStore:
                 self._migrate_schema(connection, now_ms)
             self._ensure_vec_index_schema(connection=connection)
             self._ensure_db_meta(connection, now_ms)
-            self._ensure_settings_editor_state_schema_v7(
+            self._ensure_settings_editor_schema_v8(
                 connection=connection,
                 now_ms=now_ms,
             )
@@ -226,10 +236,11 @@ class SqliteStateStore:
             editor_row = connection.execute(
                 """
                 SELECT
+                    active_character_preset_id,
                     active_behavior_preset_id,
-                    active_llm_preset_id,
+                    active_conversation_preset_id,
                     active_memory_preset_id,
-                    active_output_preset_id,
+                    active_motion_preset_id,
                     active_camera_connection_id,
                     system_values_json,
                     revision,
@@ -239,21 +250,26 @@ class SqliteStateStore:
                 WHERE row_id = 1
                 """
             ).fetchone()
-            preset_rows = connection.execute(
-                """
-                SELECT
-                    preset_id,
-                    preset_kind,
-                    preset_name,
-                    payload_json,
-                    archived,
-                    sort_order,
-                    created_at,
-                    updated_at
-                FROM settings_presets
-                ORDER BY preset_kind ASC, sort_order ASC, updated_at DESC
-                """
-            ).fetchall()
+            character_rows = _fetch_editor_preset_rows(
+                connection=connection,
+                table_name="character_presets",
+            )
+            behavior_rows = _fetch_editor_preset_rows(
+                connection=connection,
+                table_name="behavior_presets",
+            )
+            conversation_rows = _fetch_editor_preset_rows(
+                connection=connection,
+                table_name="conversation_presets",
+            )
+            memory_rows = _fetch_editor_preset_rows(
+                connection=connection,
+                table_name="memory_presets",
+            )
+            motion_rows = _fetch_editor_preset_rows(
+                connection=connection,
+                table_name="motion_presets",
+            )
             camera_connection_rows = connection.execute(
                 """
                 SELECT
@@ -272,29 +288,48 @@ class SqliteStateStore:
         if editor_row is None:
             raise RuntimeError("settings_editor_state row is missing")
         editor_state = _decode_settings_editor_state_row(editor_row)
-        preset_catalogs = _decode_settings_preset_catalog_rows(preset_rows)
+        character_presets = _decode_settings_preset_rows(character_rows)
+        behavior_presets = _decode_settings_preset_rows(behavior_rows)
+        conversation_presets = _decode_settings_preset_rows(conversation_rows)
+        memory_presets = _decode_settings_preset_rows(memory_rows)
+        motion_presets = _decode_settings_preset_rows(motion_rows)
         camera_connections = _decode_camera_connection_rows(camera_connection_rows)
-        runtime_projection = _materialize_runtime_settings_from_editor(
+        effective_settings = _materialize_effective_settings_from_editor(
             default_settings=default_settings,
             editor_state=editor_state,
-            preset_catalogs=preset_catalogs,
+            character_presets=character_presets,
+            behavior_presets=behavior_presets,
+            conversation_presets=conversation_presets,
+            memory_presets=memory_presets,
+            motion_presets=motion_presets,
         )
         return {
             "editor_state": {
                 "revision": editor_state["revision"],
+                "active_character_preset_id": editor_state["active_character_preset_id"],
                 "active_behavior_preset_id": editor_state["active_behavior_preset_id"],
-                "active_llm_preset_id": editor_state["active_llm_preset_id"],
+                "active_conversation_preset_id": editor_state["active_conversation_preset_id"],
                 "active_memory_preset_id": editor_state["active_memory_preset_id"],
-                "active_output_preset_id": editor_state["active_output_preset_id"],
+                "active_motion_preset_id": editor_state["active_motion_preset_id"],
                 "active_camera_connection_id": editor_state["active_camera_connection_id"],
                 "system_values": dict(editor_state["system_values"]),
             },
-            "preset_catalogs": preset_catalogs,
+            "character_presets": character_presets,
+            "behavior_presets": behavior_presets,
+            "conversation_presets": conversation_presets,
+            "memory_presets": memory_presets,
+            "motion_presets": motion_presets,
             "camera_connections": camera_connections,
             "constraints": {
                 "editable_system_keys": list(build_settings_editor_system_keys()),
             },
-            "runtime_projection": runtime_projection,
+            "runtime_projection": {
+                "effective_settings": effective_settings,
+                "active_motion_preset": _active_preset_payload(
+                    preset_entries=motion_presets,
+                    preset_id=str(editor_state["active_motion_preset_id"]),
+                ),
+            },
         }
 
     # Block: Active camera connection snapshot
@@ -348,10 +383,11 @@ class SqliteStateStore:
             editor_row = connection.execute(
                 """
                 SELECT
+                    active_character_preset_id,
                     active_behavior_preset_id,
-                    active_llm_preset_id,
+                    active_conversation_preset_id,
                     active_memory_preset_id,
-                    active_output_preset_id,
+                    active_motion_preset_id,
                     active_camera_connection_id,
                     system_values_json,
                     revision,
@@ -371,21 +407,6 @@ class SqliteStateStore:
                     "settings editor revision does not match",
                     error_code="settings_editor_revision_conflict",
                 )
-            current_preset_rows = connection.execute(
-                """
-                SELECT
-                    preset_id,
-                    preset_kind,
-                    preset_name,
-                    payload_json,
-                    archived,
-                    sort_order,
-                    created_at,
-                    updated_at
-                FROM settings_presets
-                ORDER BY preset_kind ASC, sort_order ASC, updated_at DESC
-                """
-            ).fetchall()
             current_camera_connection_rows = connection.execute(
                 """
                 SELECT
@@ -401,20 +422,39 @@ class SqliteStateStore:
                 ORDER BY sort_order ASC, updated_at DESC
                 """
             ).fetchall()
-            current_preset_catalogs = _decode_settings_preset_catalog_rows(current_preset_rows)
+            current_character_presets = _decode_settings_preset_rows(
+                _fetch_editor_preset_rows(connection=connection, table_name="character_presets")
+            )
+            current_behavior_presets = _decode_settings_preset_rows(
+                _fetch_editor_preset_rows(connection=connection, table_name="behavior_presets")
+            )
+            current_conversation_presets = _decode_settings_preset_rows(
+                _fetch_editor_preset_rows(connection=connection, table_name="conversation_presets")
+            )
+            current_memory_presets = _decode_settings_preset_rows(
+                _fetch_editor_preset_rows(connection=connection, table_name="memory_presets")
+            )
+            current_motion_presets = _decode_settings_preset_rows(
+                _fetch_editor_preset_rows(connection=connection, table_name="motion_presets")
+            )
             current_camera_connections = _decode_camera_connection_rows(current_camera_connection_rows)
             if (
                 _canonical_editor_state_for_compare(current_editor_state)
                 == normalized_document["editor_state"]
-                and current_preset_catalogs == normalized_document["preset_catalogs"]
+                and current_character_presets == normalized_document["character_presets"]
+                and current_behavior_presets == normalized_document["behavior_presets"]
+                and current_conversation_presets == normalized_document["conversation_presets"]
+                and current_memory_presets == normalized_document["memory_presets"]
+                and current_motion_presets == normalized_document["motion_presets"]
                 and current_camera_connections == normalized_document["camera_connections"]
             ):
                 return self.read_settings_editor(default_settings)
             saved_editor_state = {
+                "active_character_preset_id": normalized_document["editor_state"]["active_character_preset_id"],
                 "active_behavior_preset_id": normalized_document["editor_state"]["active_behavior_preset_id"],
-                "active_llm_preset_id": normalized_document["editor_state"]["active_llm_preset_id"],
+                "active_conversation_preset_id": normalized_document["editor_state"]["active_conversation_preset_id"],
                 "active_memory_preset_id": normalized_document["editor_state"]["active_memory_preset_id"],
-                "active_output_preset_id": normalized_document["editor_state"]["active_output_preset_id"],
+                "active_motion_preset_id": normalized_document["editor_state"]["active_motion_preset_id"],
                 "active_camera_connection_id": normalized_document["editor_state"]["active_camera_connection_id"],
                 "system_values": dict(normalized_document["editor_state"]["system_values"]),
                 "revision": current_revision + 1,
@@ -422,9 +462,34 @@ class SqliteStateStore:
                 "last_applied_change_set_id": current_editor_state.get("last_applied_change_set_id"),
             }
             _persist_settings_editor_state(connection=connection, editor_state=saved_editor_state)
-            _replace_settings_presets(
+            _replace_editor_preset_rows(
                 connection=connection,
-                preset_catalogs=normalized_document["preset_catalogs"],
+                table_name="character_presets",
+                preset_entries=normalized_document["character_presets"],
+                now_ms=now_ms,
+            )
+            _replace_editor_preset_rows(
+                connection=connection,
+                table_name="behavior_presets",
+                preset_entries=normalized_document["behavior_presets"],
+                now_ms=now_ms,
+            )
+            _replace_editor_preset_rows(
+                connection=connection,
+                table_name="conversation_presets",
+                preset_entries=normalized_document["conversation_presets"],
+                now_ms=now_ms,
+            )
+            _replace_editor_preset_rows(
+                connection=connection,
+                table_name="memory_presets",
+                preset_entries=normalized_document["memory_presets"],
+                now_ms=now_ms,
+            )
+            _replace_editor_preset_rows(
+                connection=connection,
+                table_name="motion_presets",
+                preset_entries=normalized_document["motion_presets"],
                 now_ms=now_ms,
             )
             _replace_camera_connections(
@@ -437,7 +502,11 @@ class SqliteStateStore:
                 connection=connection,
                 change_set_id=change_set_id,
                 editor_state=saved_editor_state,
-                preset_catalogs=normalized_document["preset_catalogs"],
+                character_presets=normalized_document["character_presets"],
+                behavior_presets=normalized_document["behavior_presets"],
+                conversation_presets=normalized_document["conversation_presets"],
+                memory_presets=normalized_document["memory_presets"],
+                motion_presets=normalized_document["motion_presets"],
                 now_ms=now_ms,
             )
         return self.read_settings_editor(default_settings)
@@ -880,10 +949,11 @@ class SqliteStateStore:
                 editor_row = connection.execute(
                     """
                     SELECT
+                        active_character_preset_id,
                         active_behavior_preset_id,
-                        active_llm_preset_id,
+                        active_conversation_preset_id,
                         active_memory_preset_id,
-                        active_output_preset_id,
+                        active_motion_preset_id,
                         active_camera_connection_id,
                         system_values_json,
                         revision,
@@ -895,21 +965,6 @@ class SqliteStateStore:
                 ).fetchone()
                 if editor_row is None:
                     raise RuntimeError("settings_editor_state row is missing")
-                preset_rows = connection.execute(
-                    """
-                    SELECT
-                        preset_id,
-                        preset_kind,
-                        preset_name,
-                        payload_json,
-                        archived,
-                        sort_order,
-                        created_at,
-                        updated_at
-                    FROM settings_presets
-                    ORDER BY preset_kind ASC, sort_order ASC, updated_at DESC
-                    """
-                ).fetchall()
                 camera_connection_rows = connection.execute(
                     """
                     SELECT
@@ -930,12 +985,30 @@ class SqliteStateStore:
                     final_status = "rejected"
                     reject_reason = "stale_settings_change_set"
                 else:
-                    preset_catalogs = _decode_settings_preset_catalog_rows(preset_rows)
+                    character_presets = _decode_settings_preset_rows(
+                        _fetch_editor_preset_rows(connection=connection, table_name="character_presets")
+                    )
+                    behavior_presets = _decode_settings_preset_rows(
+                        _fetch_editor_preset_rows(connection=connection, table_name="behavior_presets")
+                    )
+                    conversation_presets = _decode_settings_preset_rows(
+                        _fetch_editor_preset_rows(connection=connection, table_name="conversation_presets")
+                    )
+                    memory_presets = _decode_settings_preset_rows(
+                        _fetch_editor_preset_rows(connection=connection, table_name="memory_presets")
+                    )
+                    motion_presets = _decode_settings_preset_rows(
+                        _fetch_editor_preset_rows(connection=connection, table_name="motion_presets")
+                    )
                     camera_connections = _decode_camera_connection_rows(camera_connection_rows)
-                    runtime_values = _materialize_runtime_settings_from_editor(
+                    runtime_values = _materialize_effective_settings_from_editor(
                         default_settings=default_settings,
                         editor_state=editor_state,
-                        preset_catalogs=preset_catalogs,
+                        character_presets=character_presets,
+                        behavior_presets=behavior_presets,
+                        conversation_presets=conversation_presets,
+                        memory_presets=memory_presets,
+                        motion_presets=motion_presets,
                     )
                     connection.execute(
                         """
@@ -2519,57 +2592,58 @@ class SqliteStateStore:
             """
             INSERT INTO settings_editor_state (
                 row_id,
+                active_character_preset_id,
                 active_behavior_preset_id,
-                active_llm_preset_id,
+                active_conversation_preset_id,
                 active_memory_preset_id,
-                active_output_preset_id,
+                active_motion_preset_id,
                 active_camera_connection_id,
                 system_values_json,
                 revision,
                 updated_at,
                 last_applied_change_set_id
             )
-            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
             ON CONFLICT(row_id) DO NOTHING
             """,
             (
+                editor_seed["active_character_preset_id"],
                 editor_seed["active_behavior_preset_id"],
-                editor_seed["active_llm_preset_id"],
+                editor_seed["active_conversation_preset_id"],
                 editor_seed["active_memory_preset_id"],
-                editor_seed["active_output_preset_id"],
+                editor_seed["active_motion_preset_id"],
                 editor_seed["active_camera_connection_id"],
                 _json_text(editor_seed["system_values_json"]),
                 int(editor_seed["revision"]),
                 now_ms,
             ),
         )
-        preset_seeds = build_default_settings_presets(default_settings)
-        for index, preset_seed in enumerate(preset_seeds):
-            connection.execute(
-                """
-                INSERT INTO settings_presets (
-                    preset_id,
-                    preset_kind,
-                    preset_name,
-                    payload_json,
-                    archived,
-                    sort_order,
-                    created_at,
-                    updated_at
+        preset_seed_catalogs = build_default_settings_editor_presets(default_settings)
+        for table_name in SETTINGS_EDITOR_PRESET_TABLE_NAMES:
+            for index, preset_seed in enumerate(preset_seed_catalogs[table_name]):
+                connection.execute(
+                    f"""
+                    INSERT INTO {table_name} (
+                        preset_id,
+                        preset_name,
+                        payload_json,
+                        archived,
+                        sort_order,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES (?, ?, ?, 0, ?, ?, ?)
+                    ON CONFLICT(preset_id) DO NOTHING
+                    """,
+                    (
+                        preset_seed["preset_id"],
+                        preset_seed["preset_name"],
+                        _json_text(preset_seed["payload"]),
+                        (index + 1) * 10,
+                        now_ms,
+                        now_ms,
+                    ),
                 )
-                VALUES (?, ?, ?, ?, 0, ?, ?, ?)
-                ON CONFLICT(preset_id) DO NOTHING
-                """,
-                (
-                    preset_seed["preset_id"],
-                    preset_seed["preset_kind"],
-                    preset_seed["preset_name"],
-                    _json_text(preset_seed["payload"]),
-                    (index + 1) * 10,
-                    now_ms,
-                    now_ms,
-                ),
-            )
         camera_connection_seeds = build_default_camera_connections()
         for index, camera_connection_seed in enumerate(camera_connection_seeds):
             connection.execute(
@@ -2623,69 +2697,6 @@ class SqliteStateStore:
                     now_ms,
                 ),
             )
-        # Block: Behavior preset migration
-        behavior_preset_rows = connection.execute(
-            """
-            SELECT preset_id, payload_json
-            FROM settings_presets
-            WHERE preset_kind = 'behavior'
-            """
-        ).fetchall()
-        for behavior_preset_row in behavior_preset_rows:
-            raw_payload = json.loads(behavior_preset_row["payload_json"])
-            if not isinstance(raw_payload, dict):
-                raise RuntimeError("settings_presets.behavior payload_json must be object")
-            normalized_payload = _normalize_legacy_behavior_preset_payload(
-                preset_kind="behavior",
-                payload=raw_payload,
-                default_settings=default_settings,
-            )
-            if normalized_payload == raw_payload:
-                continue
-            connection.execute(
-                """
-                UPDATE settings_presets
-                SET payload_json = ?,
-                    updated_at = ?
-                WHERE preset_id = ?
-                """,
-                (
-                    _json_text(normalized_payload),
-                    now_ms,
-                    str(behavior_preset_row["preset_id"]),
-                ),
-            )
-        # Block: Output preset migration
-        output_preset_rows = connection.execute(
-            """
-            SELECT preset_id, payload_json
-            FROM settings_presets
-            WHERE preset_kind = 'output'
-            """
-        ).fetchall()
-        for output_preset_row in output_preset_rows:
-            raw_payload = json.loads(output_preset_row["payload_json"])
-            if not isinstance(raw_payload, dict):
-                raise RuntimeError("settings_presets.output payload_json must be object")
-            normalized_payload = _normalize_legacy_output_preset_payload(
-                preset_kind="output",
-                payload=raw_payload,
-            )
-            if normalized_payload == raw_payload:
-                continue
-            connection.execute(
-                """
-                UPDATE settings_presets
-                SET payload_json = ?,
-                    updated_at = ?
-                WHERE preset_id = ?
-                """,
-                (
-                    _json_text(normalized_payload),
-                    now_ms,
-                    str(output_preset_row["preset_id"]),
-                ),
-            )
 
     # Block: Legacy settings editor seed for schema v5
     def _ensure_settings_editor_defaults_v5(
@@ -2722,7 +2733,7 @@ class SqliteStateStore:
                 now_ms,
             ),
         )
-        preset_seeds = build_default_settings_presets(default_settings)
+        preset_seeds = _legacy_settings_preset_seeds_from_defaults(default_settings)
         for index, preset_seed in enumerate(preset_seeds):
             connection.execute(
                 """
@@ -2751,7 +2762,7 @@ class SqliteStateStore:
             )
 
     # Block: Settings editor schema normalization
-    def _ensure_settings_editor_state_schema_v7(
+    def _ensure_settings_editor_schema_v8(
         self,
         *,
         connection: sqlite3.Connection,
@@ -2767,115 +2778,40 @@ class SqliteStateStore:
         column_names = {str(row["name"]) for row in column_rows}
         expected_column_names = {
             "row_id",
+            "active_character_preset_id",
             "active_behavior_preset_id",
-            "active_llm_preset_id",
+            "active_conversation_preset_id",
             "active_memory_preset_id",
-            "active_output_preset_id",
+            "active_motion_preset_id",
             "active_camera_connection_id",
             "system_values_json",
             "revision",
             "updated_at",
             "last_applied_change_set_id",
         }
-        if column_names == expected_column_names:
-            return
-        default_settings = build_default_settings()
-        editor_seed = build_default_settings_editor_state(default_settings)
-        existing_row = connection.execute(
-            """
-            SELECT *
-            FROM settings_editor_state
-            WHERE row_id = 1
-            """
-        ).fetchone()
-        migrated_row: dict[str, Any] | None = None
-        if existing_row is not None:
-            system_values = dict(editor_seed["system_values_json"])
-            if "system_values_json" in column_names:
-                raw_system_values = json.loads(existing_row["system_values_json"])
-                if isinstance(raw_system_values, dict):
-                    for key in build_settings_editor_system_keys():
-                        if key in raw_system_values:
-                            system_values[key] = raw_system_values[key]
-            if "direct_values_json" in column_names:
-                raw_direct_values = json.loads(existing_row["direct_values_json"])
-                if isinstance(raw_direct_values, dict):
-                    for key in build_settings_editor_system_keys():
-                        if key in raw_direct_values:
-                            system_values[key] = raw_direct_values[key]
-            migrated_row = {
-                "active_behavior_preset_id": str(existing_row["active_behavior_preset_id"]),
-                "active_llm_preset_id": str(existing_row["active_llm_preset_id"]),
-                "active_memory_preset_id": str(existing_row["active_memory_preset_id"]),
-                "active_output_preset_id": str(existing_row["active_output_preset_id"]),
-                "active_camera_connection_id": (
-                    str(existing_row["active_camera_connection_id"])
-                    if "active_camera_connection_id" in column_names
-                    and existing_row["active_camera_connection_id"] is not None
-                    else None
-                ),
-                "system_values_json": system_values,
-                "revision": int(existing_row["revision"]),
-                "updated_at": int(existing_row["updated_at"]),
-                "last_applied_change_set_id": (
-                    str(existing_row["last_applied_change_set_id"])
-                    if existing_row["last_applied_change_set_id"] is not None
-                    else None
-                ),
-            }
-        temporary_table_name = f"settings_editor_state_legacy_{uuid.uuid4().hex}"
-        connection.execute(
-            f"""
-            ALTER TABLE settings_editor_state
-            RENAME TO {temporary_table_name}
-            """
-        )
-        connection.execute(
-            """
-            CREATE TABLE settings_editor_state (
-                row_id INTEGER PRIMARY KEY CHECK (row_id = 1),
-                active_behavior_preset_id TEXT NOT NULL,
-                active_llm_preset_id TEXT NOT NULL,
-                active_memory_preset_id TEXT NOT NULL,
-                active_output_preset_id TEXT NOT NULL,
-                active_camera_connection_id TEXT,
-                system_values_json TEXT NOT NULL,
-                revision INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL,
-                last_applied_change_set_id TEXT
-            )
-            """
-        )
-        if migrated_row is not None:
+        if column_names != expected_column_names:
+            raise RuntimeError("settings_editor_state schema must already be normalized to v8")
+        for table_name in SETTINGS_EDITOR_PRESET_TABLE_NAMES:
             connection.execute(
-                """
-                INSERT INTO settings_editor_state (
-                    row_id,
-                    active_behavior_preset_id,
-                    active_llm_preset_id,
-                    active_memory_preset_id,
-                    active_output_preset_id,
-                    active_camera_connection_id,
-                    system_values_json,
-                    revision,
-                    updated_at,
-                    last_applied_change_set_id
+                f"""
+                CREATE TABLE IF NOT EXISTS {table_name} (
+                    preset_id TEXT PRIMARY KEY,
+                    preset_name TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    archived INTEGER NOT NULL CHECK (archived IN (0, 1)),
+                    sort_order INTEGER NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
                 )
-                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    migrated_row["active_behavior_preset_id"],
-                    migrated_row["active_llm_preset_id"],
-                    migrated_row["active_memory_preset_id"],
-                    migrated_row["active_output_preset_id"],
-                    migrated_row["active_camera_connection_id"],
-                    _json_text(migrated_row["system_values_json"]),
-                    migrated_row["revision"],
-                    migrated_row["updated_at"],
-                    migrated_row["last_applied_change_set_id"],
-                ),
+                """
             )
-        connection.execute(f"DROP TABLE {temporary_table_name}")
+            connection.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS idx_{table_name}_archived_sort
+                    ON {table_name} (archived, sort_order ASC, updated_at DESC)
+                """
+            )
+        self._ensure_settings_editor_defaults(connection=connection, now_ms=now_ms)
 
     # Block: Pending input claim
     def claim_next_pending_input(self) -> PendingInputRecord | None:
@@ -3894,7 +3830,7 @@ class SqliteStateStore:
             return
         if current_version > SCHEMA_VERSION:
             raise RuntimeError("schema_version is newer than this initializer")
-        if current_version not in {2, 3, 4, 5, 6}:
+        if current_version not in {2, 3, 4, 5, 6, 7}:
             raise RuntimeError("unsupported schema_version for migration")
         while current_version < SCHEMA_VERSION:
             if current_version == 2:
@@ -3916,6 +3852,10 @@ class SqliteStateStore:
             if current_version == 6:
                 self._migrate_schema_6_to_7(connection=connection, now_ms=now_ms)
                 current_version = 7
+                continue
+            if current_version == 7:
+                self._migrate_schema_7_to_8(connection=connection, now_ms=now_ms)
+                current_version = 8
                 continue
             raise RuntimeError("unsupported schema_version for migration")
 
@@ -4088,7 +4028,7 @@ class SqliteStateStore:
             WHERE row_id = 1
             """
         ).fetchone()
-        editor_seed = build_default_settings_editor_state(default_settings)
+        editor_seed = _legacy_settings_editor_state_seed_v5(default_settings)
         editor_system_values = dict(editor_seed["system_values_json"])
         editor_revision = int(editor_seed["revision"])
         if editor_row is not None:
@@ -4123,7 +4063,7 @@ class SqliteStateStore:
             )
         connection.execute("DELETE FROM settings_presets")
         connection.execute("DELETE FROM settings_change_sets")
-        preset_seeds = build_default_settings_presets(
+        preset_seeds = _legacy_settings_preset_seeds_from_defaults(
             _merge_runtime_settings(default_settings, normalized_values),
         )
         for index, preset_seed in enumerate(preset_seeds):
@@ -4187,10 +4127,6 @@ class SqliteStateStore:
             connection=connection,
             now_ms=now_ms,
         )
-        self._ensure_settings_editor_state_schema_v7(
-            connection=connection,
-            now_ms=now_ms,
-        )
         connection.execute("DELETE FROM settings_change_sets")
         connection.execute(
             """
@@ -4200,6 +4136,278 @@ class SqliteStateStore:
             WHERE meta_key = 'schema_version'
             """,
             (_json_text(7), now_ms),
+        )
+
+    # Block: Schema migration 7->8
+    def _migrate_schema_7_to_8(self, *, connection: sqlite3.Connection, now_ms: int) -> None:
+        default_settings = build_default_settings()
+        preset_seed_catalogs = build_default_settings_editor_presets(default_settings)
+        legacy_editor_row = connection.execute(
+            """
+            SELECT *
+            FROM settings_editor_state
+            WHERE row_id = 1
+            """
+        ).fetchone()
+        legacy_preset_rows = connection.execute(
+            """
+            SELECT
+                preset_id,
+                preset_kind,
+                preset_name,
+                payload_json,
+                archived,
+                sort_order,
+                created_at,
+                updated_at
+            FROM settings_presets
+            ORDER BY preset_kind ASC, sort_order ASC, updated_at DESC
+            """
+        ).fetchall()
+        legacy_presets_by_kind = {
+            "behavior": [],
+            "llm": [],
+            "memory": [],
+            "output": [],
+        }
+        for legacy_preset_row in legacy_preset_rows:
+            legacy_presets_by_kind[str(legacy_preset_row["preset_kind"])].append(legacy_preset_row)
+        temporary_editor_table = f"settings_editor_state_v7_{uuid.uuid4().hex}"
+        connection.execute(f"ALTER TABLE settings_editor_state RENAME TO {temporary_editor_table}")
+        connection.execute("DROP TABLE settings_presets")
+        connection.execute("DROP INDEX IF EXISTS idx_settings_presets_kind_archived_sort")
+        connection.execute(
+            """
+            CREATE TABLE settings_editor_state (
+                row_id INTEGER PRIMARY KEY CHECK (row_id = 1),
+                active_character_preset_id TEXT NOT NULL,
+                active_behavior_preset_id TEXT NOT NULL,
+                active_conversation_preset_id TEXT NOT NULL,
+                active_memory_preset_id TEXT NOT NULL,
+                active_motion_preset_id TEXT NOT NULL,
+                active_camera_connection_id TEXT,
+                system_values_json TEXT NOT NULL,
+                revision INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                last_applied_change_set_id TEXT
+            )
+            """
+        )
+        for table_name in SETTINGS_EDITOR_PRESET_TABLE_NAMES:
+            connection.execute(
+                f"""
+                CREATE TABLE {table_name} (
+                    preset_id TEXT PRIMARY KEY,
+                    preset_name TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    archived INTEGER NOT NULL CHECK (archived IN (0, 1)),
+                    sort_order INTEGER NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                f"""
+                CREATE INDEX idx_{table_name}_archived_sort
+                    ON {table_name} (archived, sort_order ASC, updated_at DESC)
+                """
+            )
+        active_output_payload = _active_legacy_output_payload_for_migration(
+            legacy_presets_by_kind=legacy_presets_by_kind,
+            active_output_preset_id=(
+                str(legacy_editor_row["active_output_preset_id"])
+                if legacy_editor_row is not None
+                else None
+            ),
+            default_settings=default_settings,
+        )
+        system_values = _build_v8_system_values_from_v7_row(
+            legacy_editor_row=legacy_editor_row,
+            active_output_payload=active_output_payload,
+            default_settings=default_settings,
+        )
+        editor_seed = build_default_settings_editor_state(default_settings)
+        migrated_editor_state = {
+            "active_character_preset_id": (
+                str(legacy_editor_row["active_output_preset_id"])
+                if legacy_editor_row is not None
+                else editor_seed["active_character_preset_id"]
+            ),
+            "active_behavior_preset_id": (
+                str(legacy_editor_row["active_behavior_preset_id"])
+                if legacy_editor_row is not None
+                else editor_seed["active_behavior_preset_id"]
+            ),
+            "active_conversation_preset_id": (
+                str(legacy_editor_row["active_llm_preset_id"])
+                if legacy_editor_row is not None
+                else editor_seed["active_conversation_preset_id"]
+            ),
+            "active_memory_preset_id": (
+                str(legacy_editor_row["active_memory_preset_id"])
+                if legacy_editor_row is not None
+                else editor_seed["active_memory_preset_id"]
+            ),
+            "active_motion_preset_id": editor_seed["active_motion_preset_id"],
+            "active_camera_connection_id": (
+                str(legacy_editor_row["active_camera_connection_id"])
+                if legacy_editor_row is not None and legacy_editor_row["active_camera_connection_id"] is not None
+                else None
+            ),
+            "system_values_json": system_values,
+            "revision": int(legacy_editor_row["revision"]) if legacy_editor_row is not None else 1,
+            "updated_at": int(legacy_editor_row["updated_at"]) if legacy_editor_row is not None else now_ms,
+            "last_applied_change_set_id": (
+                str(legacy_editor_row["last_applied_change_set_id"])
+                if legacy_editor_row is not None and legacy_editor_row["last_applied_change_set_id"] is not None
+                else None
+            ),
+        }
+        connection.execute(
+            """
+            INSERT INTO settings_editor_state (
+                row_id,
+                active_character_preset_id,
+                active_behavior_preset_id,
+                active_conversation_preset_id,
+                active_memory_preset_id,
+                active_motion_preset_id,
+                active_camera_connection_id,
+                system_values_json,
+                revision,
+                updated_at,
+                last_applied_change_set_id
+            )
+            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                migrated_editor_state["active_character_preset_id"],
+                migrated_editor_state["active_behavior_preset_id"],
+                migrated_editor_state["active_conversation_preset_id"],
+                migrated_editor_state["active_memory_preset_id"],
+                migrated_editor_state["active_motion_preset_id"],
+                migrated_editor_state["active_camera_connection_id"],
+                _json_text(migrated_editor_state["system_values_json"]),
+                migrated_editor_state["revision"],
+                migrated_editor_state["updated_at"],
+                migrated_editor_state["last_applied_change_set_id"],
+            ),
+        )
+        _insert_migrated_editor_presets(
+            connection=connection,
+            table_name="character_presets",
+            preset_rows=legacy_presets_by_kind["output"],
+            payload_builder=lambda payload: _migrate_output_payload_to_character_payload(
+                legacy_payload=payload,
+                default_settings=default_settings,
+            ),
+            fallback_entries=preset_seed_catalogs["character_presets"],
+            now_ms=now_ms,
+        )
+        _insert_migrated_editor_presets(
+            connection=connection,
+            table_name="behavior_presets",
+            preset_rows=legacy_presets_by_kind["behavior"],
+            payload_builder=lambda payload: _migrate_behavior_payload_to_v8(
+                legacy_payload=payload,
+                default_settings=default_settings,
+            ),
+            fallback_entries=preset_seed_catalogs["behavior_presets"],
+            now_ms=now_ms,
+        )
+        _insert_migrated_editor_presets(
+            connection=connection,
+            table_name="conversation_presets",
+            preset_rows=legacy_presets_by_kind["llm"],
+            payload_builder=lambda payload: _migrate_llm_payload_to_conversation_payload(
+                legacy_payload=payload,
+                default_settings=default_settings,
+            ),
+            fallback_entries=preset_seed_catalogs["conversation_presets"],
+            now_ms=now_ms,
+        )
+        _insert_migrated_editor_presets(
+            connection=connection,
+            table_name="memory_presets",
+            preset_rows=legacy_presets_by_kind["memory"],
+            payload_builder=lambda payload: _migrate_memory_payload_to_v8(
+                legacy_payload=payload,
+                default_settings=default_settings,
+            ),
+            fallback_entries=preset_seed_catalogs["memory_presets"],
+            now_ms=now_ms,
+        )
+        _insert_migrated_editor_presets(
+            connection=connection,
+            table_name="motion_presets",
+            preset_rows=[],
+            payload_builder=lambda payload: payload,
+            fallback_entries=preset_seed_catalogs["motion_presets"],
+            now_ms=now_ms,
+        )
+        connection.execute(f"DROP TABLE {temporary_editor_table}")
+        connection.execute("DELETE FROM settings_change_sets")
+        self._ensure_settings_editor_defaults(connection=connection, now_ms=now_ms)
+        effective_settings = _materialize_effective_settings_from_editor(
+            default_settings=default_settings,
+            editor_state=_decode_settings_editor_state_row(
+                connection.execute(
+                    """
+                    SELECT
+                        active_character_preset_id,
+                        active_behavior_preset_id,
+                        active_conversation_preset_id,
+                        active_memory_preset_id,
+                        active_motion_preset_id,
+                        active_camera_connection_id,
+                        system_values_json,
+                        revision,
+                        updated_at,
+                        last_applied_change_set_id
+                    FROM settings_editor_state
+                    WHERE row_id = 1
+                    """
+                ).fetchone()
+            ),
+            character_presets=_decode_settings_preset_rows(
+                _fetch_editor_preset_rows(connection=connection, table_name="character_presets")
+            ),
+            behavior_presets=_decode_settings_preset_rows(
+                _fetch_editor_preset_rows(connection=connection, table_name="behavior_presets")
+            ),
+            conversation_presets=_decode_settings_preset_rows(
+                _fetch_editor_preset_rows(connection=connection, table_name="conversation_presets")
+            ),
+            memory_presets=_decode_settings_preset_rows(
+                _fetch_editor_preset_rows(connection=connection, table_name="memory_presets")
+            ),
+            motion_presets=_decode_settings_preset_rows(
+                _fetch_editor_preset_rows(connection=connection, table_name="motion_presets")
+            ),
+        )
+        connection.execute(
+            """
+            UPDATE runtime_settings
+            SET values_json = ?,
+                value_updated_at_json = ?,
+                updated_at = ?
+            WHERE row_id = 1
+            """,
+            (
+                _json_text(effective_settings),
+                _json_text({key: now_ms for key in effective_settings}),
+                now_ms,
+            ),
+        )
+        connection.execute(
+            """
+            UPDATE db_meta
+            SET meta_value_json = ?,
+                updated_at = ?
+            WHERE meta_key = 'schema_version'
+            """,
+            (_json_text(8), now_ms),
         )
 
     # Block: sqlite-vec schema ensure
@@ -5131,10 +5339,11 @@ def _fetch_memory_rows_by_ids(
 def _decode_settings_editor_state_row(row: sqlite3.Row) -> dict[str, Any]:
     raw_system_values = json.loads(row["system_values_json"])
     return {
+        "active_character_preset_id": str(row["active_character_preset_id"]),
         "active_behavior_preset_id": str(row["active_behavior_preset_id"]),
-        "active_llm_preset_id": str(row["active_llm_preset_id"]),
+        "active_conversation_preset_id": str(row["active_conversation_preset_id"]),
         "active_memory_preset_id": str(row["active_memory_preset_id"]),
-        "active_output_preset_id": str(row["active_output_preset_id"]),
+        "active_motion_preset_id": str(row["active_motion_preset_id"]),
         "active_camera_connection_id": (
             str(row["active_camera_connection_id"])
             if row["active_camera_connection_id"] is not None
@@ -5167,20 +5376,34 @@ def _normalize_settings_editor_system_values(raw_system_values: Any) -> dict[str
     return system_values
 
 
+# Block: Settings preset rows fetch
+def _fetch_editor_preset_rows(
+    *,
+    connection: sqlite3.Connection,
+    table_name: str,
+) -> list[sqlite3.Row]:
+    return connection.execute(
+        f"""
+        SELECT
+            preset_id,
+            preset_name,
+            payload_json,
+            archived,
+            sort_order,
+            created_at,
+            updated_at
+        FROM {table_name}
+        ORDER BY sort_order ASC, updated_at DESC
+        """
+    ).fetchall()
+
+
 # Block: Settings preset rows decode
-def _decode_settings_preset_catalog_rows(rows: list[sqlite3.Row]) -> dict[str, list[dict[str, Any]]]:
-    preset_catalogs = {
-        "behavior": [],
-        "llm": [],
-        "memory": [],
-        "output": [],
-    }
+def _decode_settings_preset_rows(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
+    preset_entries: list[dict[str, Any]] = []
     for row in rows:
-        preset_kind = str(row["preset_kind"])
         payload = json.loads(row["payload_json"])
-        if isinstance(payload, dict):
-            payload = _normalize_legacy_optional_base_urls(payload)
-        preset_catalogs[preset_kind].append(
+        preset_entries.append(
             {
                 "preset_id": str(row["preset_id"]),
                 "preset_name": str(row["preset_name"]),
@@ -5190,7 +5413,7 @@ def _decode_settings_preset_catalog_rows(rows: list[sqlite3.Row]) -> dict[str, l
                 "payload": payload,
             }
         )
-    return preset_catalogs
+    return preset_entries
 
 
 # Block: Camera connection rows decode
@@ -5215,10 +5438,11 @@ def _decode_camera_connection_rows(rows: list[sqlite3.Row]) -> list[dict[str, An
 def _canonical_editor_state_for_compare(editor_state: dict[str, Any]) -> dict[str, Any]:
     return {
         "revision": int(editor_state["revision"]),
+        "active_character_preset_id": str(editor_state["active_character_preset_id"]),
         "active_behavior_preset_id": str(editor_state["active_behavior_preset_id"]),
-        "active_llm_preset_id": str(editor_state["active_llm_preset_id"]),
+        "active_conversation_preset_id": str(editor_state["active_conversation_preset_id"]),
         "active_memory_preset_id": str(editor_state["active_memory_preset_id"]),
-        "active_output_preset_id": str(editor_state["active_output_preset_id"]),
+        "active_motion_preset_id": str(editor_state["active_motion_preset_id"]),
         "active_camera_connection_id": (
             str(editor_state["active_camera_connection_id"])
             if editor_state["active_camera_connection_id"] is not None
@@ -5237,10 +5461,11 @@ def _persist_settings_editor_state(
     connection.execute(
         """
         UPDATE settings_editor_state
-        SET active_behavior_preset_id = ?,
-            active_llm_preset_id = ?,
+        SET active_character_preset_id = ?,
+            active_behavior_preset_id = ?,
+            active_conversation_preset_id = ?,
             active_memory_preset_id = ?,
-            active_output_preset_id = ?,
+            active_motion_preset_id = ?,
             active_camera_connection_id = ?,
             system_values_json = ?,
             revision = ?,
@@ -5249,10 +5474,11 @@ def _persist_settings_editor_state(
         WHERE row_id = 1
         """,
         (
+            editor_state["active_character_preset_id"],
             editor_state["active_behavior_preset_id"],
-            editor_state["active_llm_preset_id"],
+            editor_state["active_conversation_preset_id"],
             editor_state["active_memory_preset_id"],
-            editor_state["active_output_preset_id"],
+            editor_state["active_motion_preset_id"],
             editor_state["active_camera_connection_id"],
             _json_text(editor_state["system_values"]),
             int(editor_state["revision"]),
@@ -5263,70 +5489,66 @@ def _persist_settings_editor_state(
 
 
 # Block: Settings preset replace
-def _replace_settings_presets(
+def _replace_editor_preset_rows(
     *,
     connection: sqlite3.Connection,
-    preset_catalogs: dict[str, list[dict[str, Any]]],
+    table_name: str,
+    preset_entries: list[dict[str, Any]],
     now_ms: int,
 ) -> None:
     expected_ids = [
         str(preset_entry["preset_id"])
-        for preset_kind in ("behavior", "llm", "memory", "output")
-        for preset_entry in preset_catalogs[preset_kind]
+        for preset_entry in preset_entries
     ]
     if expected_ids:
         placeholder_sql = ",".join("?" for _ in expected_ids)
         connection.execute(
-            f"DELETE FROM settings_presets WHERE preset_id NOT IN ({placeholder_sql})",
+            f"DELETE FROM {table_name} WHERE preset_id NOT IN ({placeholder_sql})",
             tuple(expected_ids),
         )
     else:
-        connection.execute("DELETE FROM settings_presets")
-    for preset_kind in ("behavior", "llm", "memory", "output"):
-        for preset_entry in preset_catalogs[preset_kind]:
-            created_at = int(preset_entry["updated_at"])
-            existing_row = connection.execute(
-                """
-                SELECT created_at
-                FROM settings_presets
-                WHERE preset_id = ?
-                """,
-                (preset_entry["preset_id"],),
-            ).fetchone()
-            if existing_row is not None:
-                created_at = int(existing_row["created_at"])
-            connection.execute(
-                """
-                INSERT INTO settings_presets (
-                    preset_id,
-                    preset_kind,
-                    preset_name,
-                    payload_json,
-                    archived,
-                    sort_order,
-                    created_at,
-                    updated_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(preset_id) DO UPDATE SET
-                    preset_kind = excluded.preset_kind,
-                    preset_name = excluded.preset_name,
-                    payload_json = excluded.payload_json,
-                    archived = excluded.archived,
-                    sort_order = excluded.sort_order,
-                    updated_at = excluded.updated_at
-                """,
-                (
-                    preset_entry["preset_id"],
-                    preset_kind,
-                    preset_entry["preset_name"],
-                    _json_text(preset_entry["payload"]),
-                    1 if bool(preset_entry["archived"]) else 0,
-                    int(preset_entry["sort_order"]),
-                    created_at,
-                    now_ms,
-                ),
+        connection.execute(f"DELETE FROM {table_name}")
+    for preset_entry in preset_entries:
+        created_at = int(preset_entry["updated_at"])
+        existing_row = connection.execute(
+            f"""
+            SELECT created_at
+            FROM {table_name}
+            WHERE preset_id = ?
+            """,
+            (preset_entry["preset_id"],),
+        ).fetchone()
+        if existing_row is not None:
+            created_at = int(existing_row["created_at"])
+        connection.execute(
+            f"""
+            INSERT INTO {table_name} (
+                preset_id,
+                preset_name,
+                payload_json,
+                archived,
+                sort_order,
+                created_at,
+                updated_at
             )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(preset_id) DO UPDATE SET
+                preset_name = excluded.preset_name,
+                payload_json = excluded.payload_json,
+                archived = excluded.archived,
+                sort_order = excluded.sort_order,
+                updated_at = excluded.updated_at
+            """,
+            (
+                preset_entry["preset_id"],
+                preset_entry["preset_name"],
+                _json_text(preset_entry["payload"]),
+                1 if bool(preset_entry["archived"]) else 0,
+                int(preset_entry["sort_order"]),
+                created_at,
+                now_ms,
+            ),
+        )
 
 
 # Block: Camera connection replace
@@ -5400,23 +5622,43 @@ def _insert_settings_change_set(
     connection: sqlite3.Connection,
     change_set_id: str,
     editor_state: dict[str, Any],
-    preset_catalogs: dict[str, list[dict[str, Any]]],
+    character_presets: list[dict[str, Any]],
+    behavior_presets: list[dict[str, Any]],
+    conversation_presets: list[dict[str, Any]],
+    memory_presets: list[dict[str, Any]],
+    motion_presets: list[dict[str, Any]],
     now_ms: int,
 ) -> None:
     payload = {
         "editor_revision": int(editor_state["revision"]),
+        "active_character_preset_id": editor_state["active_character_preset_id"],
         "active_behavior_preset_id": editor_state["active_behavior_preset_id"],
-        "active_llm_preset_id": editor_state["active_llm_preset_id"],
+        "active_conversation_preset_id": editor_state["active_conversation_preset_id"],
         "active_memory_preset_id": editor_state["active_memory_preset_id"],
-        "active_output_preset_id": editor_state["active_output_preset_id"],
+        "active_motion_preset_id": editor_state["active_motion_preset_id"],
         "active_camera_connection_id": editor_state["active_camera_connection_id"],
         "system_values": dict(editor_state["system_values"]),
         "preset_versions": {
-            preset_kind: _active_preset_updated_at(
-                preset_entries=preset_catalogs[preset_kind],
-                preset_id=str(editor_state[f"active_{preset_kind}_preset_id"]),
-            )
-            for preset_kind in ("behavior", "llm", "memory", "output")
+            "character": _active_preset_updated_at(
+                preset_entries=character_presets,
+                preset_id=str(editor_state["active_character_preset_id"]),
+            ),
+            "behavior": _active_preset_updated_at(
+                preset_entries=behavior_presets,
+                preset_id=str(editor_state["active_behavior_preset_id"]),
+            ),
+            "conversation": _active_preset_updated_at(
+                preset_entries=conversation_presets,
+                preset_id=str(editor_state["active_conversation_preset_id"]),
+            ),
+            "memory": _active_preset_updated_at(
+                preset_entries=memory_presets,
+                preset_id=str(editor_state["active_memory_preset_id"]),
+            ),
+            "motion": _active_preset_updated_at(
+                preset_entries=motion_presets,
+                preset_id=str(editor_state["active_motion_preset_id"]),
+            ),
         },
     }
     connection.execute(
@@ -5448,37 +5690,57 @@ def _active_preset_updated_at(
     for preset_entry in preset_entries:
         if str(preset_entry["preset_id"]) == preset_id:
             return int(preset_entry["updated_at"])
-    raise RuntimeError("active preset id is missing from preset_catalogs")
+    raise RuntimeError("active preset id is missing from preset entries")
 
 
 # Block: Runtime settings from editor
-def _materialize_runtime_settings_from_editor(
+def _materialize_effective_settings_from_editor(
     *,
     default_settings: dict[str, Any],
     editor_state: dict[str, Any],
-    preset_catalogs: dict[str, list[dict[str, Any]]],
+    character_presets: list[dict[str, Any]],
+    behavior_presets: list[dict[str, Any]],
+    conversation_presets: list[dict[str, Any]],
+    memory_presets: list[dict[str, Any]],
+    motion_presets: list[dict[str, Any]],
 ) -> dict[str, Any]:
     materialized = dict(default_settings)
+
+    # Block: Resolve active preset payloads
+    character_preset = _active_preset_payload(
+        preset_entries=character_presets,
+        preset_id=str(editor_state["active_character_preset_id"]),
+    )
     behavior_preset = _active_preset_payload(
-        preset_entries=preset_catalogs["behavior"],
+        preset_entries=behavior_presets,
         preset_id=str(editor_state["active_behavior_preset_id"]),
     )
-    llm_preset = _active_preset_payload(
-        preset_entries=preset_catalogs["llm"],
-        preset_id=str(editor_state["active_llm_preset_id"]),
+    conversation_preset = _active_preset_payload(
+        preset_entries=conversation_presets,
+        preset_id=str(editor_state["active_conversation_preset_id"]),
     )
     memory_preset = _active_preset_payload(
-        preset_entries=preset_catalogs["memory"],
+        preset_entries=memory_presets,
         preset_id=str(editor_state["active_memory_preset_id"]),
     )
-    output_preset = _active_preset_payload(
-        preset_entries=preset_catalogs["output"],
-        preset_id=str(editor_state["active_output_preset_id"]),
+    motion_preset = _active_preset_payload(
+        preset_entries=motion_presets,
+        preset_id=str(editor_state["active_motion_preset_id"]),
     )
-    for payload in (behavior_preset, llm_preset, memory_preset, output_preset):
+
+    # Block: Materialize scalar settings
+    for payload in (
+        character_preset,
+        behavior_preset,
+        conversation_preset,
+        memory_preset,
+        motion_preset,
+    ):
         for key, value in payload.items():
             if key in materialized:
                 materialized[key] = value
+
+    # Block: Apply system overrides
     for key, value in dict(editor_state["system_values"]).items():
         materialized[key] = value
     return materialized
@@ -5788,6 +6050,301 @@ def _normalize_legacy_optional_base_url_value(*, key: str, value: Any) -> Any:
     return value
 
 
+# Block: Legacy schema v5 editor seed
+def _legacy_settings_editor_state_seed_v5(default_settings: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "active_behavior_preset_id": "preset_behavior_default",
+        "active_llm_preset_id": "preset_llm_default",
+        "active_memory_preset_id": "preset_memory_default",
+        "active_output_preset_id": "preset_output_default",
+        "system_values_json": {
+            key: default_settings[key]
+            for key in build_settings_editor_system_keys()
+        },
+        "revision": 1,
+    }
+
+
+# Block: Legacy output payload seed
+def _build_legacy_output_preset_payload(default_settings: dict[str, Any]) -> dict[str, Any]:
+    payload = {
+        key: default_settings[key]
+        for key in LEGACY_OUTPUT_PRESET_SETTING_KEYS
+        if key in default_settings
+    }
+    payload["integrations.notify_route"] = str(default_settings["integrations.notify_route"])
+    payload["integrations.discord.bot_token"] = str(default_settings["integrations.discord.bot_token"])
+    payload["integrations.discord.channel_id"] = str(default_settings["integrations.discord.channel_id"])
+    return payload
+
+
+# Block: Legacy preset seed export
+def _legacy_settings_preset_seeds_from_defaults(default_settings: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+    return (
+        {
+            "preset_id": "preset_behavior_default",
+            "preset_kind": "behavior",
+            "preset_name": "標準",
+            "payload": {
+                "behavior.second_person_label": str(default_settings["behavior.second_person_label"]),
+                "behavior.system_prompt": str(default_settings["behavior.system_prompt"]),
+                "behavior.addon_prompt": str(default_settings["behavior.addon_prompt"]),
+                "behavior.response_pace": str(default_settings["behavior.response_pace"]),
+                "behavior.proactivity_level": str(default_settings["behavior.proactivity_level"]),
+                "behavior.browse_preference": str(default_settings["behavior.browse_preference"]),
+                "behavior.notify_preference": str(default_settings["behavior.notify_preference"]),
+                "behavior.speech_style": str(default_settings["behavior.speech_style"]),
+                "behavior.verbosity_bias": str(default_settings["behavior.verbosity_bias"]),
+            },
+        },
+        {
+            "preset_id": "preset_llm_default",
+            "preset_kind": "llm",
+            "preset_name": "標準",
+            "payload": {
+                "llm.model": str(default_settings["llm.model"]),
+                "llm.temperature": float(default_settings["llm.temperature"]),
+                "llm.max_output_tokens": int(default_settings["llm.max_output_tokens"]),
+                "llm.api_key": str(default_settings["llm.api_key"]),
+                "llm.base_url": str(default_settings["llm.base_url"]),
+            },
+        },
+        {
+            "preset_id": "preset_memory_default",
+            "preset_kind": "memory",
+            "preset_name": "標準",
+            "payload": {
+                "llm.embedding_model": str(default_settings["llm.embedding_model"]),
+                "llm.embedding_api_key": str(default_settings["llm.embedding_api_key"]),
+                "llm.embedding_base_url": str(default_settings["llm.embedding_base_url"]),
+                "runtime.context_budget_tokens": int(default_settings["runtime.context_budget_tokens"]),
+                "retrieval_profile": {
+                    "semantic_top_k": 8,
+                    "recent_window_limit": 5,
+                    "fact_bias": 0.7,
+                    "summary_bias": 0.6,
+                    "event_bias": 0.4,
+                },
+            },
+        },
+        {
+            "preset_id": "preset_output_default",
+            "preset_kind": "output",
+            "preset_name": "新規キャラクター",
+            "payload": _build_legacy_output_preset_payload(default_settings),
+        },
+    )
+
+
+# Block: Active legacy output payload for migration
+def _active_legacy_output_payload_for_migration(
+    *,
+    legacy_presets_by_kind: dict[str, list[sqlite3.Row]],
+    active_output_preset_id: str | None,
+    default_settings: dict[str, Any],
+) -> dict[str, Any]:
+    output_rows = legacy_presets_by_kind.get("output", [])
+    target_row = None
+    if active_output_preset_id is not None:
+        target_row = next(
+            (row for row in output_rows if str(row["preset_id"]) == active_output_preset_id),
+            None,
+        )
+    if target_row is None and output_rows:
+        target_row = output_rows[0]
+    if target_row is None:
+        return _build_legacy_output_preset_payload(default_settings)
+    raw_payload = json.loads(target_row["payload_json"])
+    if not isinstance(raw_payload, dict):
+        return _build_legacy_output_preset_payload(default_settings)
+    return _normalize_legacy_output_preset_payload(
+        preset_kind="output",
+        payload=raw_payload,
+    )
+
+
+# Block: V8 system values migration
+def _build_v8_system_values_from_v7_row(
+    *,
+    legacy_editor_row: sqlite3.Row | None,
+    active_output_payload: dict[str, Any],
+    default_settings: dict[str, Any],
+) -> dict[str, Any]:
+    system_values = {
+        key: default_settings[key]
+        for key in build_settings_editor_system_keys()
+    }
+    if legacy_editor_row is not None:
+        row_keys = set(legacy_editor_row.keys())
+        if "system_values_json" in row_keys and legacy_editor_row["system_values_json"] is not None:
+            raw_system_values = json.loads(legacy_editor_row["system_values_json"])
+            if isinstance(raw_system_values, dict):
+                for key in build_settings_editor_system_keys():
+                    if key in raw_system_values:
+                        system_values[key] = raw_system_values[key]
+        if "direct_values_json" in row_keys and legacy_editor_row["direct_values_json"] is not None:
+            raw_direct_values = json.loads(legacy_editor_row["direct_values_json"])
+            if isinstance(raw_direct_values, dict):
+                for key in build_settings_editor_system_keys():
+                    if key in raw_direct_values:
+                        system_values[key] = raw_direct_values[key]
+    for key in (
+        "integrations.notify_route",
+        "integrations.discord.bot_token",
+        "integrations.discord.channel_id",
+    ):
+        if key in active_output_payload:
+            system_values[key] = active_output_payload[key]
+    return system_values
+
+
+# Block: Migrated preset insert
+def _insert_migrated_editor_presets(
+    *,
+    connection: sqlite3.Connection,
+    table_name: str,
+    preset_rows: list[sqlite3.Row],
+    payload_builder: Any,
+    fallback_entries: tuple[dict[str, Any], ...],
+    now_ms: int,
+) -> None:
+    if preset_rows:
+        for preset_row in preset_rows:
+            raw_payload = json.loads(preset_row["payload_json"])
+            payload = payload_builder(raw_payload if isinstance(raw_payload, dict) else {})
+            connection.execute(
+                f"""
+                INSERT INTO {table_name} (
+                    preset_id,
+                    preset_name,
+                    payload_json,
+                    archived,
+                    sort_order,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(preset_row["preset_id"]),
+                    str(preset_row["preset_name"]),
+                    _json_text(payload),
+                    int(preset_row["archived"]),
+                    int(preset_row["sort_order"]),
+                    int(preset_row["created_at"]),
+                    int(preset_row["updated_at"]),
+                ),
+            )
+        return
+    for index, preset_entry in enumerate(fallback_entries):
+        connection.execute(
+            f"""
+            INSERT INTO {table_name} (
+                preset_id,
+                preset_name,
+                payload_json,
+                archived,
+                sort_order,
+                created_at,
+                updated_at
+            )
+            VALUES (?, ?, ?, 0, ?, ?, ?)
+            """,
+            (
+                preset_entry["preset_id"],
+                preset_entry["preset_name"],
+                _json_text(preset_entry["payload"]),
+                (index + 1) * 10,
+                now_ms,
+                now_ms,
+            ),
+        )
+
+
+# Block: Legacy output to character payload migration
+def _migrate_output_payload_to_character_payload(
+    *,
+    legacy_payload: dict[str, Any],
+    default_settings: dict[str, Any],
+) -> dict[str, Any]:
+    normalized_legacy_payload = _normalize_legacy_output_preset_payload(
+        preset_kind="output",
+        payload=legacy_payload,
+    )
+    character_payload = {
+        key: default_settings[key]
+        for key in build_character_preset_setting_keys()
+    }
+    for key in character_payload:
+        if key in normalized_legacy_payload:
+            character_payload[key] = normalized_legacy_payload[key]
+    return character_payload
+
+
+# Block: Legacy behavior payload migration
+def _migrate_behavior_payload_to_v8(
+    *,
+    legacy_payload: dict[str, Any],
+    default_settings: dict[str, Any],
+) -> dict[str, Any]:
+    return _normalize_legacy_behavior_preset_payload(
+        preset_kind="behavior",
+        payload=legacy_payload,
+        default_settings=default_settings,
+    )
+
+
+# Block: Legacy llm payload migration
+def _migrate_llm_payload_to_conversation_payload(
+    *,
+    legacy_payload: dict[str, Any],
+    default_settings: dict[str, Any],
+) -> dict[str, Any]:
+    payload = _deep_copy_jsonable(
+        build_default_settings_editor_presets(default_settings)["conversation_presets"][0]["payload"]
+    )
+    normalized_legacy_payload = _normalize_legacy_optional_base_urls(legacy_payload)
+    for key in (
+        "llm.model",
+        "llm.api_key",
+        "llm.base_url",
+        "llm.temperature",
+        "llm.max_output_tokens",
+    ):
+        if key in normalized_legacy_payload:
+            payload[key] = normalized_legacy_payload[key]
+    return payload
+
+
+# Block: Legacy memory payload migration
+def _migrate_memory_payload_to_v8(
+    *,
+    legacy_payload: dict[str, Any],
+    default_settings: dict[str, Any],
+) -> dict[str, Any]:
+    payload = _deep_copy_jsonable(
+        build_default_settings_editor_presets(default_settings)["memory_presets"][0]["payload"]
+    )
+    normalized_legacy_payload = _normalize_legacy_optional_base_urls(legacy_payload)
+    for key in (
+        "llm.embedding_model",
+        "llm.embedding_api_key",
+        "llm.embedding_base_url",
+        "runtime.context_budget_tokens",
+    ):
+        if key in normalized_legacy_payload:
+            payload[key] = normalized_legacy_payload[key]
+    retrieval_profile = normalized_legacy_payload.get("retrieval_profile")
+    if isinstance(retrieval_profile, dict):
+        payload["retrieval_profile"] = retrieval_profile
+    return payload
+
+
+# Block: JSON deep copy
+def _deep_copy_jsonable(value: Any) -> Any:
+    return json.loads(json.dumps(value))
+
+
 # Block: Behavior preset migration helper
 def _normalize_legacy_behavior_preset_payload(
     *,
@@ -5858,11 +6415,11 @@ def _normalize_legacy_output_preset_payload(
 ) -> dict[str, Any]:
     if preset_kind != "output":
         return payload
-    if set(payload) == set(OUTPUT_PRESET_SETTING_KEYS):
+    if set(payload) == set(LEGACY_OUTPUT_PRESET_SETTING_KEYS):
         return payload
     default_settings = build_default_settings()
-    normalized = build_default_output_preset_payload(default_settings)
-    for key in OUTPUT_PRESET_SETTING_KEYS:
+    normalized = _build_legacy_output_preset_payload(default_settings)
+    for key in LEGACY_OUTPUT_PRESET_SETTING_KEYS:
         value = payload.get(key)
         if value is not None:
             normalized[key] = value

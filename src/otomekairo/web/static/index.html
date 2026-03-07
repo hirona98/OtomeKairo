@@ -50,8 +50,9 @@
           <div class="settings-tabs" role="tablist" aria-label="設定タブ">
             <button class="settings-tab active" data-settings-tab="character" type="button">キャラクター</button>
             <button class="settings-tab" data-settings-tab="behavior" type="button">振る舞い</button>
-            <button class="settings-tab" data-settings-tab="llm" type="button">会話</button>
+            <button class="settings-tab" data-settings-tab="conversation" type="button">会話</button>
             <button class="settings-tab" data-settings-tab="memory" type="button">記憶</button>
+            <button class="settings-tab" data-settings-tab="motion" type="button">モーション</button>
             <button class="settings-tab" data-settings-tab="system" type="button">システム</button>
           </div>
 
@@ -66,16 +67,19 @@
                 <div id="settings-behavior-card" class="settings-card"></div>
               </section>
 
-              <section class="settings-page hidden" data-settings-page="llm">
-                <div id="settings-llm-card" class="settings-card"></div>
+              <section class="settings-page hidden" data-settings-page="conversation">
+                <div id="settings-conversation-card" class="settings-card"></div>
               </section>
 
               <section class="settings-page hidden" data-settings-page="memory">
                 <div id="settings-memory-card" class="settings-card"></div>
               </section>
 
+              <section class="settings-page hidden" data-settings-page="motion">
+                <div id="settings-motion-card" class="settings-card"></div>
+              </section>
+
               <section class="settings-page hidden" data-settings-page="system">
-                <div id="settings-notify-card" class="settings-card"></div>
                 <div id="settings-system-card" class="settings-card"></div>
                 <div id="settings-camera-card" class="settings-card"></div>
                 <details class="settings-diagnostics">

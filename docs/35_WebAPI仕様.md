@@ -114,12 +114,12 @@ flowchart LR
 ### 初期実装で固定すること
 
 - ログイン画面は持たず、起動直後にそのままチャット UI を表示する
-- 初期実装の見た目は `tmp/CocoroGhost/static/` に近いヘッダ、チャット欄、設定欄、ステータスバー構成にしてよい
+- 初期実装の設定画面は `tmp/CocoroConsole` の設定ウインドウをベースにしてよい
 - ブラウザUIの入力手段は、テキスト入力と `Cam` による静止画添付に固定する
 - `Cam` は `POST /api/camera/capture` で静止画を取得し、返った画像をサムネイル表示し、次の `POST /api/chat/input` へ添付してよい
 - `message` に `audio_url` がある場合は、`GET /audio/{audio_filename}` で取得した音声を再生してよい
 - `設定保存` は、初期実装では `GET /api/settings/editor` と `PUT /api/settings/editor` を使って、設定全体を保存する
-- 設定画面は左端に `キャラクター` タブを置き、続けて `振る舞い`、`会話`、`記憶`、`システム` を並べる
+- 設定画面は左端に `キャラクター` タブを置き、続けて `振る舞い`、`会話`、`記憶`、`モーション`、`システム` を並べる
 - `振る舞い` タブには `振る舞いプロンプト`、`追加プロンプト（任意）`、`行動傾向` を置き、`CocoroConsole` 相当の会話指示と OtomeKairo 独自の傾向設定をまとめて編集する
 - `キャラクター` タブには `キャラクター選択`、`基本設定`、`マテリアル・影設定`、`音声合成`、`音声認識` を含める
 - `browse` の初期実装では、UI は少なくとも `browse_queued` と `browse_completed` の `notice` を見分けられるようにしてよい
@@ -206,7 +206,8 @@ flowchart LR
 {
   "effective_settings": {
     "llm.model": "openai/gpt-5-mini",
-    "behavior.second_person_label": "マスター"
+    "behavior.second_person_label": "マスター",
+    "motion.posture_change_loop_count_standing": 30
   },
   "pending_overrides": [
     {
@@ -219,12 +220,11 @@ flowchart LR
 }
 ```
 
-- `effective_settings` は、UI で編集対象にする設定だけを、`docs/39_設定キー運用仕様.md` と同じドット区切りキーで返す
-- `effective_settings` は、`config/default_settings.json` の既定値に対して、`runtime_settings.values_json` を上書きした現在有効値を返す
-- `effective_settings` には、`behavior.*`、`character.*`、`speech.tts.*`、`speech.stt.*`、`integrations.*` を含めてよい
+- `effective_settings` は、`config/default_settings.json` に対して `runtime_settings.values_json` を上書きした現在有効値を返す
+- `effective_settings` には、会話、記憶、振る舞い、キャラクター、TTS、STT、モーション、通知の scalar キーを含めてよい
 - `apply_scope="next_boot"` で `applied` 済みの設定は、次回ランタイム起動で materialize されるまで `effective_settings` に即時反映しない
-- `GET /api/settings` は UI の要約表示用なので、必要なら API キーやトークンを含めてよい
-- 設定UIの主編集経路は、`GET /api/settings/editor` と `PUT /api/settings/editor` に固定する
+- `GET /api/settings` は UI の要約表示用であり、秘密値も含めてよい
+- 設定UIの主編集経路は `GET /api/settings/editor` と `PUT /api/settings/editor` に固定する
 
 <!-- Block: Settings Post -->
 ## `POST /api/settings/overrides`
@@ -232,8 +232,9 @@ flowchart LR
 <!-- Block: Settings Post Purpose -->
 ### 役割
 
-- 設定変更要求を `settings_overrides` へ積む
+- scalar な設定変更要求を `settings_overrides` へ積む
 - Web サーバは設定を即時反映しない
+- `retrieval_profile` や `motion.animations` のような構造化値はこの API では扱わない
 
 <!-- Block: Settings Post Request -->
 ### 入力 JSON
@@ -247,10 +248,10 @@ flowchart LR
 ```
 
 - 必須項目は `key`、`requested_value`、`apply_scope` とする
-- `key` は `docs/39_設定キー運用仕様.md` に登録された値だけを受け付ける
-- `apply_scope` は、キーごとに許可された値だけを受け付ける
-- `requested_value` は、対象 `key` に登録された `string`、`integer`、`number`、`boolean` のいずれかで受け付ける
-- `requested_value` の型と範囲は、キーごとの定義に従って検証する
+- `key` は `docs/39_設定キー運用仕様.md` に登録された scalar キーだけを受け付ける
+- `apply_scope` はキーごとに許可された値だけを受け付ける
+- `requested_value` は対象 `key` に登録された `string`、`integer`、`number`、`boolean` のいずれかで受け付ける
+- `requested_value` の型と範囲はキーごとの定義に従って検証する
 
 <!-- Block: Settings Post Response -->
 ### 成功応答
@@ -265,7 +266,7 @@ flowchart LR
 
 - 成功時は `202 Accepted` を返す
 - DB には `settings_overrides.requested_value_json={"value_type": ..., "value": ...}`、`status="queued"` で挿入する
-- 未登録キー、`apply_scope` 不一致、型違反、範囲違反は `400 Bad Request` で拒否する
+- 未登録キー、構造化値、`apply_scope` 不一致、型違反、範囲違反は `400 Bad Request` で拒否する
 
 <!-- Block: Settings Editor Get -->
 ## `GET /api/settings/editor`
@@ -274,15 +275,16 @@ flowchart LR
 ### 役割
 
 - 設定UIの描画に必要な canonical な全体状態を返す
-- `settings_editor_state`、`settings_presets`、`camera_connections`、現在の `runtime_projection` をまとめて返す
+- `settings_editor_state`、5 種のプリセットテーブル、`camera_connections`、現在の `runtime_projection` をまとめて返す
 
 <!-- Block: Settings Editor Get Notes -->
 ### 成功応答の考え方
 
 - 本文の JSON 形は `docs/36_JSONデータ仕様.md` を正本とする
-- 設定UIは、このレスポンスだけで現在のフォームを描画できる状態でなければならない
-- 初期設計では、`preset_catalogs.*.payload` に API キーやトークンの生値をそのまま含めてよい
-- `preset_catalogs.output.payload` は、キャラクター関連、TTS、STT、通知設定をまとめた固定形にする
+- 応答の top-level は `editor_state`、`character_presets`、`behavior_presets`、`conversation_presets`、`memory_presets`、`motion_presets`、`camera_connections`、`constraints`、`runtime_projection` に固定する
+- `runtime_projection` は `effective_settings` と `active_motion_preset` を持つ
+- 設定UIは、このレスポンスだけで現在のフォームを描画できなければならない
+- API キー、トークン、パスワードもマスキングせずそのまま返してよい
 
 <!-- Block: Settings Editor Put -->
 ## `PUT /api/settings/editor`
@@ -291,14 +293,15 @@ flowchart LR
 ### 役割
 
 - 設定UIの draft 全体を 1 回で保存する
-- `settings_editor_state` と `settings_presets` と `camera_connections` を同じ transaction で更新し、必要なら `settings_change_sets` を enqueue する
+- `settings_editor_state`、5 種のプリセットテーブル、`camera_connections` を同じ transaction で更新し、`settings_change_sets` を enqueue する
 
 <!-- Block: Settings Editor Put Notes -->
 ### 成功応答の考え方
 
-- リクエスト本文は、`editor_state`、`preset_catalogs`、`camera_connections` を持つ保存用の固定形にする
-- 成功応答本文は、`GET /api/settings/editor` と同じ canonical 形に固定する
+- リクエスト本文は `editor_state`、`character_presets`、`behavior_presets`、`conversation_presets`、`memory_presets`、`motion_presets`、`camera_connections` を持つ保存用の固定形にする
+- 成功応答本文は `GET /api/settings/editor` と同じ canonical 形に固定する
 - `constraints` と `runtime_projection` は読み取り専用のため、`PUT` のリクエスト本文へ含めない
+- サーバは `editor_state.revision` 一致を必須にし、不一致なら `409 Conflict` を返す
 - 本文の JSON 形は `docs/36_JSONデータ仕様.md` を正本とする
 
 <!-- Block: Chat Input -->

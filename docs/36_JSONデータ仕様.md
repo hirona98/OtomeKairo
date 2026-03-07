@@ -15,7 +15,7 @@
 ## このドキュメントで固定する範囲
 
 - 固定するのは、初期実装で使う JSON オブジェクトのキー、型、必須項目、固定語彙である
-- 固定するのは、`pending_inputs.payload_json`、`settings_overrides.requested_value_json`、`settings_editor_state.system_values_json`、`settings_presets.payload_json`、`settings_change_sets.payload_json`、`ui_outbound_events.payload_json`、`action_history.command_json`、`action_history.observed_effects_json`、`memory_jobs.payload_ref_json`、`memory_job_payloads.payload_json`、主要な Web API 本文である
+- 固定するのは、`pending_inputs.payload_json`、`settings_overrides.requested_value_json`、`settings_editor_state.system_values_json`、5 種のプリセットテーブルの `payload_json`、`settings_change_sets.payload_json`、`ui_outbound_events.payload_json`、`action_history.command_json`、`action_history.observed_effects_json`、`memory_jobs.payload_ref_json`、`memory_job_payloads.payload_json`、主要な Web API 本文である
 - 固定するのは、`self_state.personality_json`、`self_state.current_emotion_json`、`self_state.long_term_goals_json`、`self_state.relationship_overview_json`、`self_state.invariants_json`、短周期の内部で使う `selection_profile`、`persona_consistency_score`、`attention_score_breakdown`、`self_initiated_score_breakdown`、`action_candidate_score`、`cognition_result`、長周期の内部で使う `personality_change_proposal`、`persona_updates` の形である
 - 固定しないのは、Python のクラス名、Pydantic モデル名、OpenAPI の自動生成細部である
 - 固定しないのは、将来追加する未使用フィールドや後段の拡張イベント種別である
@@ -627,37 +627,22 @@
 ```json
 {
   "llm.model": "openai/gpt-5-mini",
-  "llm.api_key": "sk-example",
+  "llm.image_model": "openai/gpt-5-mini",
   "llm.embedding_model": "openai/text-embedding-3-large",
-  "llm.embedding_api_key": "emb-example",
-  "llm.temperature": 0.7,
-  "llm.max_output_tokens": 4096,
   "runtime.idle_tick_ms": 1000,
   "behavior.second_person_label": "マスター",
-  "behavior.system_prompt": "あなたはバーチャル・シンガーの「初音ミク」として振る舞ってください。",
-  "behavior.addon_prompt": "# 感情タグ（任意）",
-  "behavior.response_pace": "balanced",
-  "behavior.speech_style": "neutral",
   "character.vrm_file_path": "",
-  "character.material.convert_unlit_to_mtoon": false,
-  "character.material.enable_shadow_off": true,
-  "character.material.shadow_off_meshes": "Face, U_Char_1",
-  "speech.tts.enabled": false,
   "speech.tts.provider": "voicevox",
-  "speech.tts.aivis_cloud.endpoint_url": "https://api.aivis-project.com/v1/tts/synthesize",
-  "speech.tts.aivis_cloud.output_format": "wav",
-  "speech.tts.voicevox.endpoint_url": "http://127.0.0.1:50021",
-  "speech.tts.style_bert_vits2.endpoint_url": "http://127.0.0.1:5000",
-  "speech.stt.enabled": false,
-  "speech.stt.provider": "amivoice"
+  "speech.stt.provider": "amivoice",
+  "motion.posture_change_loop_count_standing": 30,
+  "integrations.notify_route": "ui_only"
 }
 ```
 
-- `runtime_settings.values_json` は、現在有効な設定値を全設定キーぶん持つ完全オブジェクトである
-- キーは、`docs/39_設定キー運用仕様.md` に登録されたドット区切り設定キーだけを許可する
-- 値の型は、各キーの登録 `value_type` と一致しなければならない
-- `apply_scope="runtime"` の `applied` は、このオブジェクトを同じ短周期で更新する
-- `apply_scope="next_boot"` の `applied` は、このオブジェクトを即時更新せず、次回ランタイム起動時の materialize で更新する
+- `runtime_settings.values_json` は、現在有効な scalar 設定値を全設定キーぶん持つ完全オブジェクトである
+- キーは `docs/39_設定キー運用仕様.md` に登録された設定キーだけを許可する
+- 値の型は各キーの登録 `value_type` と一致しなければならない
+- `motion.animations` や `retrieval_profile` のような構造化値はこのオブジェクトへ直接入れない
 
 <!-- Block: Runtime Settings Updated At -->
 ### `runtime_settings.value_updated_at_json`
@@ -665,19 +650,15 @@
 ```json
 {
   "llm.model": 1760000000000,
-  "llm.embedding_model": 1760000000000,
-  "llm.temperature": 1760000000000,
-  "llm.max_output_tokens": 1760000000000,
-  "runtime.idle_tick_ms": 1760000000000,
-  "speech.tts.enabled": 1760000000000,
-  "speech.tts.provider": 1760000000000
+  "behavior.second_person_label": 1760000000000,
+  "speech.tts.provider": 1760000000000,
+  "motion.posture_change_loop_count_standing": 1760000000000,
+  "integrations.notify_route": 1760000000000
 }
 ```
 
 - `runtime_settings.value_updated_at_json` は、各設定キーの最終反映時刻を `key -> unix_ms` で持つ完全オブジェクトである
-- キー集合は、`runtime_settings.values_json` と同一に固定する
-- 各値は、UTC unix milliseconds の `integer` に固定する
-- `next_boot` の materialize は、この時刻が既存値より新しいキーだけを更新する
+- キー集合は `runtime_settings.values_json` と同一に固定する
 
 <!-- Block: Settings Editor Group -->
 ## 設定UIテーブルの JSON
@@ -691,30 +672,44 @@
   "runtime.long_cycle_min_interval_ms": 10000,
   "sensors.microphone.enabled": true,
   "sensors.camera.enabled": true,
-  "integrations.sns.enabled": false
+  "integrations.sns.enabled": false,
+  "integrations.notify_route": "ui_only",
+  "integrations.discord.bot_token": "",
+  "integrations.discord.channel_id": ""
 }
 ```
 
 - `settings_editor_state.system_values_json` は、設定UIで保持するシステム設定だけを持つ完全オブジェクトである
-- キーは、`docs/42_設定UI仕様.md` でシステム設定とされた設定キーだけを許可する
-- キー名は、`docs/39_設定キー運用仕様.md` と同じドット区切り設定キーをそのまま使う
-- 値の型は、各キーの登録 `value_type` と一致しなければならない
-- `settings_editor_state` の `revision` が更新される保存では、このオブジェクト全体を canonical な形で保持する
-- `system_values_json` は、現行のシステム設定キー集合だけを保持し、追加キーは受け付けない
+- キーは `runtime.idle_tick_ms`、`runtime.long_cycle_min_interval_ms`、`sensors.microphone.enabled`、`sensors.camera.enabled`、`integrations.sns.enabled`、`integrations.notify_route`、`integrations.discord.bot_token`、`integrations.discord.channel_id` に固定する
 
-<!-- Block: Settings Preset Payload -->
-### `settings_presets.payload_json`
+<!-- Block: Character Preset Payload -->
+### `character_presets.payload_json`
 
-- `settings_presets.payload_json` は、`preset_kind` ごとに固定形を持つ
-- すべての `preset_kind` で、未定義キーは受け付けない
+```json
+{
+  "character.vrm_file_path": "",
+  "character.material.convert_unlit_to_mtoon": false,
+  "character.material.enable_shadow_off": true,
+  "character.material.shadow_off_meshes": "Face, U_Char_1",
+  "speech.tts.enabled": false,
+  "speech.tts.provider": "voicevox",
+  "speech.stt.enabled": false,
+  "speech.stt.provider": "amivoice",
+  "speech.stt.language": "ja"
+}
+```
 
-#### `preset_kind = behavior`
+- `character_presets.payload_json` は `character.*`、`speech.tts.*`、`speech.stt.*` の固定形を持つ
+- 通知経路と Discord 認証情報は含めない
+
+<!-- Block: Behavior Preset Payload -->
+### `behavior_presets.payload_json`
 
 ```json
 {
   "behavior.second_person_label": "マスター",
-  "behavior.system_prompt": "あなたはバーチャル・シンガーの「初音ミク」として振る舞ってください。",
-  "behavior.addon_prompt": "# 感情タグ（任意）",
+  "behavior.system_prompt": "...",
+  "behavior.addon_prompt": "...",
   "behavior.response_pace": "balanced",
   "behavior.proactivity_level": "medium",
   "behavior.browse_preference": "balanced",
@@ -724,32 +719,43 @@
 }
 ```
 
-- 各項目は、`docs/42_設定UI仕様.md` に定義した固定列挙だけを取る
+- `behavior_presets.payload_json` は `behavior.*` の固定形を持つ
 
-#### `preset_kind = llm`
+<!-- Block: Conversation Preset Payload -->
+### `conversation_presets.payload_json`
 
 ```json
 {
   "llm.model": "openai/gpt-5-mini",
+  "llm.api_key": "",
+  "llm.base_url": "",
   "llm.temperature": 0.7,
   "llm.max_output_tokens": 4096,
-  "llm.api_key": "sk-example",
-  "llm.base_url": ""
+  "llm.reasoning_effort": "",
+  "llm.reply_web_search_enabled": true,
+  "llm.max_turns_window": 50,
+  "llm.image_model": "openai/gpt-5-mini",
+  "llm.image_api_key": "",
+  "llm.image_base_url": "",
+  "llm.max_output_tokens_vision": 4096,
+  "llm.image_timeout_seconds": 60
 }
 ```
 
-- 必須項目は `llm.model`、`llm.temperature`、`llm.max_output_tokens`、`llm.api_key` である
-- `llm.model` は `provider/model` 形式の単一文字列に固定する
-- `llm.base_url` は任意で、空文字は未指定を表す
+- `conversation_presets.payload_json` は会話生成と画像認識に使う `llm.*` の固定形を持つ
 
-#### `preset_kind = memory`
+<!-- Block: Memory Preset Payload -->
+### `memory_presets.payload_json`
 
 ```json
 {
   "llm.embedding_model": "openai/text-embedding-3-large",
-  "llm.embedding_api_key": "emb-example",
+  "llm.embedding_api_key": "",
   "llm.embedding_base_url": "",
   "runtime.context_budget_tokens": 8192,
+  "memory.embedding_dimension": 3072,
+  "memory.similar_episodes_limit": 60,
+  "memory.max_inject_tokens": 1200,
   "retrieval_profile": {
     "semantic_top_k": 8,
     "recent_window_limit": 5,
@@ -760,82 +766,28 @@
 }
 ```
 
-- 必須項目は `llm.embedding_model`、`llm.embedding_api_key`、`runtime.context_budget_tokens`、`retrieval_profile` である
-- `llm.embedding_model` は `provider/model` 形式の単一文字列に固定する
-- `llm.embedding_base_url` は任意で、空文字は未指定を表す
-- `retrieval_profile` の各 bias は `0.0..1.0` の `number` に固定する
-- `semantic_top_k` は `1..64` の `integer`、`recent_window_limit` は `1..20` の `integer` に固定する
+- `memory_presets.payload_json` は `llm.embedding_*`、`runtime.context_budget_tokens`、`memory.*`、`retrieval_profile` の固定形を持つ
 
-#### `preset_kind = output`
+<!-- Block: Motion Preset Payload -->
+### `motion_presets.payload_json`
 
 ```json
 {
-  "character.vrm_file_path": "",
-  "character.material.convert_unlit_to_mtoon": false,
-  "character.material.enable_shadow_off": true,
-  "character.material.shadow_off_meshes": "Face, U_Char_1",
-  "speech.tts.enabled": false,
-  "speech.tts.provider": "voicevox",
-  "speech.tts.aivis_cloud.api_key": "",
-  "speech.tts.aivis_cloud.endpoint_url": "https://api.aivis-project.com/v1/tts/synthesize",
-  "speech.tts.aivis_cloud.model_uuid": "",
-  "speech.tts.aivis_cloud.speaker_uuid": "",
-  "speech.tts.aivis_cloud.style_id": 0,
-  "speech.tts.aivis_cloud.use_ssml": false,
-  "speech.tts.aivis_cloud.language": "ja",
-  "speech.tts.aivis_cloud.speaking_rate": 1.0,
-  "speech.tts.aivis_cloud.emotional_intensity": 1.0,
-  "speech.tts.aivis_cloud.tempo_dynamics": 1.0,
-  "speech.tts.aivis_cloud.pitch": 0.0,
-  "speech.tts.aivis_cloud.volume": 1.0,
-  "speech.tts.aivis_cloud.output_format": "wav",
-  "speech.tts.voicevox.endpoint_url": "http://127.0.0.1:50021",
-  "speech.tts.voicevox.speaker_id": 0,
-  "speech.tts.voicevox.speed_scale": 1.0,
-  "speech.tts.voicevox.pitch_scale": 0.0,
-  "speech.tts.voicevox.intonation_scale": 1.0,
-  "speech.tts.voicevox.volume_scale": 1.0,
-  "speech.tts.voicevox.pre_phoneme_length": 0.1,
-  "speech.tts.voicevox.post_phoneme_length": 0.1,
-  "speech.tts.voicevox.output_sampling_rate": 24000,
-  "speech.tts.voicevox.output_stereo": false,
-  "speech.tts.style_bert_vits2.endpoint_url": "http://127.0.0.1:5000",
-  "speech.tts.style_bert_vits2.model_name": "amitaro",
-  "speech.tts.style_bert_vits2.model_id": 0,
-  "speech.tts.style_bert_vits2.speaker_name": "あみたろ",
-  "speech.tts.style_bert_vits2.speaker_id": 0,
-  "speech.tts.style_bert_vits2.style": "Neutral",
-  "speech.tts.style_bert_vits2.style_weight": 1.0,
-  "speech.tts.style_bert_vits2.sdp_ratio": 0.2,
-  "speech.tts.style_bert_vits2.noise": 0.6,
-  "speech.tts.style_bert_vits2.noise_w": 0.8,
-  "speech.tts.style_bert_vits2.length": 1.0,
-  "speech.tts.style_bert_vits2.language": "JP",
-  "speech.tts.style_bert_vits2.auto_split": true,
-  "speech.tts.style_bert_vits2.split_interval": 0.5,
-  "speech.tts.style_bert_vits2.assist_text": "",
-  "speech.tts.style_bert_vits2.assist_text_weight": 0.0,
-  "speech.stt.enabled": false,
-  "speech.stt.provider": "amivoice",
-  "speech.stt.wake_word": "",
-  "speech.stt.amivoice.profile_id": "",
-  "speech.stt.amivoice.api_key": "",
-  "integrations.notify_route": "ui_only",
-  "integrations.discord.bot_token": "",
-  "integrations.discord.channel_id": ""
+  "motion.posture_change_loop_count_standing": 30,
+  "motion.posture_change_loop_count_sitting_floor": 30,
+  "animations": [
+    {
+      "display_name": "待機",
+      "animation_type": 0,
+      "animation_name": "idle",
+      "is_enabled": true
+    }
+  ]
 }
 ```
 
-- 必須項目は、`character.*`、`speech.tts.*`、`speech.stt.*`、`integrations.notify_route`、`integrations.discord.*` である
-- `speech.tts.provider` は、`aivis-cloud`、`voicevox`、`style-bert-vits2` のいずれかに固定する
-- `speech.tts.enabled=true` かつ `speech.tts.provider="aivis-cloud"` のときは `speech.tts.aivis_cloud.api_key`、`speech.tts.aivis_cloud.endpoint_url`、`speech.tts.aivis_cloud.model_uuid`、`speech.tts.aivis_cloud.speaker_uuid` を必須にする
-- `speech.tts.enabled=true` かつ `speech.tts.provider="voicevox"` のときは `speech.tts.voicevox.endpoint_url` を必須にする
-- `speech.tts.enabled=true` かつ `speech.tts.provider="style-bert-vits2"` のときは `speech.tts.style_bert_vits2.endpoint_url` を必須にする
-- `speech.tts.aivis_cloud.output_format` は `wav`、`mp3`、`ogg`、`aac`、`flac` のいずれかに固定する
-- `speech.stt.provider` は、`amivoice` に固定する
-- `speech.stt.enabled=true` のときは `speech.stt.amivoice.api_key` を必須にする
-- `integrations.notify_route` は、`ui_only` または `discord` に固定する
-- `integrations.notify_route="discord"` のときは `integrations.discord.bot_token` と `integrations.discord.channel_id` を必須にする
+- `motion_presets.payload_json` は 2 つの scalar 設定と `animations[]` の固定形を持つ
+- `animation_type` は `0`、`1`、`2` の整数に固定する
 
 <!-- Block: Settings Change Set Payload -->
 ### `settings_change_sets.payload_json`
@@ -843,36 +795,36 @@
 ```json
 {
   "editor_revision": 12,
-  "active_behavior_preset_id": "preset_beh_001",
-  "active_llm_preset_id": "preset_llm_001",
-  "active_memory_preset_id": "preset_mem_001",
-  "active_output_preset_id": "preset_out_001",
+  "active_character_preset_id": "preset_character_default",
+  "active_behavior_preset_id": "preset_behavior_default",
+  "active_conversation_preset_id": "preset_conversation_default",
+  "active_memory_preset_id": "preset_memory_default",
+  "active_motion_preset_id": "preset_motion_default",
   "active_camera_connection_id": "cam_001",
   "system_values": {
-    "runtime.idle_tick_ms": 1000
+    "runtime.idle_tick_ms": 1000,
+    "integrations.notify_route": "ui_only"
   },
   "preset_versions": {
+    "character": 1760000000000,
     "behavior": 1760000000000,
-    "llm": 1760000000000,
+    "conversation": 1760000000000,
     "memory": 1760000000000,
-    "output": 1760000000000
+    "motion": 1760000000000
   }
 }
 ```
 
 - `settings_change_sets.payload_json` は、設定UI保存の canonical 結果をランタイムへ渡すオブジェクトである
-- 必須項目は `editor_revision`、`active_behavior_preset_id`、`active_llm_preset_id`、`active_memory_preset_id`、`active_output_preset_id`、`system_values`、`preset_versions` である
-- `active_camera_connection_id` は任意で、アクティブなカメラ接続がある場合だけ入れる
-- `system_values` は、`settings_editor_state.system_values_json` と同じ形に固定する
-- `preset_versions` は、各アクティブプリセットの `updated_at` を `preset_kind -> unix_ms` で持つ
+- `preset_versions` は `character`、`behavior`、`conversation`、`memory`、`motion` の 5 キーに固定する
 
 <!-- Block: Settings Preset Entry -->
 ### `settings_preset_entry`
 
 ```json
 {
-  "preset_id": "preset_llm_001",
-  "preset_name": "default",
+  "preset_id": "preset_conversation_default",
+  "preset_name": "標準",
   "archived": false,
   "sort_order": 10,
   "updated_at": 1760000000000,
@@ -880,9 +832,8 @@
 }
 ```
 
-- `settings_preset_entry` は、設定UI API が返すプリセット一覧の共通要素である
-- 必須項目は `preset_id`、`preset_name`、`archived`、`sort_order`、`updated_at`、`payload` である
-- `payload` は、その `preset_kind` に対応する `settings_presets.payload_json` の固定形に一致しなければならない
+- `settings_preset_entry` は、設定UI API が返すプリセット配列の共通要素である
+- `payload` は、その配列に対応するテーブルの `payload_json` 固定形に一致しなければならない
 
 <!-- Block: Camera Connection Entry -->
 ### `camera_connection_entry`
@@ -900,209 +851,6 @@
 ```
 
 - `camera_connection_entry` は、設定UI API が返すカメラ接続一覧の共通要素である
-- 必須項目は `camera_connection_id`、`display_name`、`host`、`username`、`password`、`sort_order`、`updated_at` である
-- `host` は、接続先カメラの IP アドレスまたはホスト名を持つ
-- `host`、`username`、`password` は、未設定の下書き状態では空文字を許可する
-
-<!-- Block: Event Group -->
-## イベントテーブルの JSON
-
-<!-- Block: Event Input Journal Refs -->
-### `events.input_journal_refs_json`
-
-```json
-[
-  "obs_inp_..."
-]
-```
-
-- `events.input_journal_refs_json` は、その `events` 行の根拠になった `input_journal.observation_id` の順序付き配列である
-- 各要素は、不透明な `string` に固定する
-- 空配列は許可するが、外部入力や観測に由来する `events` では根拠がある限り省略しない
-
-<!-- Block: Control Plane Group -->
-## 制御面テーブルの JSON
-
-<!-- Block: Pending Inputs -->
-### `pending_inputs.payload_json`
-
-- `pending_inputs.payload_json` は、少なくとも `input_kind` を持つ
-- Web API が受け付ける初期段階の `browser_chat` 入力は、`chat_message`、`camera_observation`、`cancel` の 3 種である
-- ランタイム内部では、外部検索結果を戻すために `network_result` を enqueue してよい
-
-<!-- Block: Pending Chat Message -->
-#### `chat_message`
-
-```json
-{
-  "input_kind": "chat_message",
-  "text": "おはよう",
-  "client_message_id": "cli_msg_001",
-  "attachments": [
-    {
-      "attachment_kind": "camera_still_image",
-      "media_kind": "image",
-      "capture_id": "cap_0123456789abcdef0123456789abcdef",
-      "mime_type": "image/jpeg",
-      "storage_path": "data/camera/cap_0123456789abcdef0123456789abcdef.jpg",
-      "content_url": "/captures/cap_0123456789abcdef0123456789abcdef.jpg",
-      "captured_at": 1760000000000
-    }
-  ]
-}
-```
-
-- 必須項目は `input_kind` である
-- `input_kind` は `chat_message` に固定する
-- `text` は任意だが、ある場合は空文字列や空白のみを許可しない
-- `text` は、ある場合に `4000` 文字を超えてはならない
-- `client_message_id` は任意で、同一クライアントからの再送判定に使う
-- `client_message_id` がある場合、Web サーバは `pending_inputs.client_message_id` にも同じ値を書き込む
-- `attachments` は任意だが、ある場合は 1 件以上の配列にする
-- `text` と `attachments` は、少なくともどちらか一方が必要である
-- 各添付は `camera_still_image` に固定し、`media_kind`、`capture_id`、`mime_type`、`storage_path`、`content_url`、`captured_at` を必須とする
-
-<!-- Block: Pending Camera Observation -->
-#### `camera_observation`
-
-```json
-{
-  "input_kind": "camera_observation",
-  "attachments": [
-    {
-      "attachment_kind": "camera_still_image",
-      "media_kind": "image",
-      "capture_id": "cap_0123456789abcdef0123456789abcdef",
-      "mime_type": "image/jpeg",
-      "storage_path": "data/camera/cap_0123456789abcdef0123456789abcdef.jpg",
-      "content_url": "/captures/cap_0123456789abcdef0123456789abcdef.jpg",
-      "captured_at": 1760000000000
-    }
-  ]
-}
-```
-
-- 必須項目は `input_kind` と `attachments` である
-- `input_kind` は `camera_observation` に固定する
-- `attachments` は、1 件以上の `camera_still_image` 配列に固定する
-- 各添付は `media_kind`、`capture_id`、`mime_type`、`storage_path`、`content_url`、`captured_at` を必須とする
-- 初期実装では、`POST /api/camera/observe` が `source=self_initiated` でこの形式を enqueue する
-
-<!-- Block: Pending Cancel -->
-#### `cancel`
-
-```json
-{
-  "input_kind": "cancel",
-  "target_message_id": "msg_..."
-}
-```
-
-- 必須項目は `input_kind` である
-- `input_kind` は `cancel` に固定する
-- `target_message_id` は任意で、省略時は現在の `browser_chat` 応答全体を対象にしてよい
-
-<!-- Block: Pending Network Result -->
-#### `network_result`
-
-```json
-{
-  "input_kind": "network_result",
-  "query": "OpenAI",
-  "summary_text": "検索結果の要約",
-  "source_task_id": "task_..."
-}
-```
-
-- 必須項目は `input_kind`、`query`、`summary_text`、`source_task_id` である
-- `input_kind` は `network_result` に固定する
-- `query` は、外部検索に使った非空の文字列を持つ
-- `summary_text` は、外部検索アダプタが返した非空の要約文字列を持つ
-- `source_task_id` は、この結果を作った `browse` タスクを追跡するための ID を持つ
-
-<!-- Block: Settings Requested Value -->
-### `settings_overrides.requested_value_json`
-
-- `settings_overrides.requested_value_json` は、要求値そのものではなく、型付きの正規化オブジェクトで保持する
-- `POST /api/settings/overrides` の `requested_value` は、Web サーバでこの形へ正規化してから保存する
-- `value_type` は、対象 `key` の登録定義と一致しなければならない
-
-```json
-{
-  "value_type": "string",
-  "value": "openrouter/.../model"
-}
-```
-
-- 必須項目は `value_type`、`value` である
-- `value_type` は、現在の公開設定キーでは `string`、`integer`、`number`、`boolean` だけを取る
-- `value` は、`value_type` と整合する JSON 値をそのまま持つ
-- Web サーバは、`requested_value` の型変換を推測せず、そのまま検証して保存する
-
-<!-- Block: Settings Editor Response -->
-### `GET /api/settings/editor` の本文
-
-```json
-{
-  "editor_state": {
-    "revision": 12,
-    "active_behavior_preset_id": "preset_beh_001",
-    "active_llm_preset_id": "preset_llm_001",
-    "active_memory_preset_id": "preset_mem_001",
-    "active_output_preset_id": "preset_out_001",
-    "active_camera_connection_id": "cam_001",
-    "system_values": {
-      "runtime.idle_tick_ms": 1000
-    }
-  },
-  "preset_catalogs": {
-    "behavior": [],
-    "llm": [],
-    "memory": [],
-    "output": []
-  },
-  "camera_connections": [
-    {
-      "camera_connection_id": "cam_001",
-      "display_name": "リビング",
-      "host": "192.168.10.20",
-      "username": "alice",
-      "password": "secret",
-      "sort_order": 10,
-      "updated_at": 1760000000000
-    }
-  ],
-  "constraints": {
-    "editable_system_keys": [
-      "runtime.idle_tick_ms"
-    ]
-  },
-  "runtime_projection": {
-    "llm.model": "openai/gpt-5-mini"
-  }
-}
-```
-
-- `editor_state`、`preset_catalogs`、`camera_connections`、`constraints`、`runtime_projection` を必須にする
-- `editor_state.system_values` は、`settings_editor_state.system_values_json` と同じ形に固定する
-- `preset_catalogs` は、`preset_kind -> settings_preset_entry[]` の object に固定する
-- `camera_connections` は、`camera_connection_entry[]` の配列に固定する
-- `preset_catalogs.*.payload` には、API キーやトークンの生値をそのまま含めてよい
-- `camera_connections[*].password` も、初期実装ではマスキングせずそのまま含めてよい
-- `runtime_projection` は、現在アクティブな構成から導出された現在有効値の要約であり、ドット区切り設定キーをキー名に使ってよい
-
-<!-- Block: Settings Editor Put -->
-### `PUT /api/settings/editor` の本文
-
-- `PUT` のリクエスト本文は、`editor_state`、`preset_catalogs`、`camera_connections` を持つオブジェクトに固定する
-- `constraints` と `runtime_projection` は読み取り専用のため、リクエスト本文へ含めない
-- `PUT` の成功応答本文は、`GET /api/settings/editor` と同じ canonical 形に固定する
-- 保存時は、サーバ側で次の整合を必須にする
-  - `editor_state.active_*_preset_id` は、それぞれ対応する `preset_catalogs` 内に存在しなければならない
-  - `editor_state.active_camera_connection_id` は、`camera_connections` が空でなければ必須であり、その中に存在しなければならない
-  - `preset_catalogs` の各要素は、対応する `settings_presets.payload_json` の固定形に一致しなければならない
-  - `camera_connections` の各要素は、`camera_connection_entry` の固定形に一致しなければならない
-  - `editor_state.revision` は、保存前の `settings_editor_state.revision` と一致しなければならない
 
 <!-- Block: UI Outbound -->
 ### `ui_outbound_events.payload_json`

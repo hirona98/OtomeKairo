@@ -18,9 +18,9 @@
   const settingsApplyButton = document.getElementById("btn-settings-apply");
   const settingsCharacterCard = document.getElementById("settings-character-card");
   const settingsBehaviorCard = document.getElementById("settings-behavior-card");
-  const settingsLlmCard = document.getElementById("settings-llm-card");
+  const settingsConversationCard = document.getElementById("settings-conversation-card");
   const settingsMemoryCard = document.getElementById("settings-memory-card");
-  const settingsNotifyCard = document.getElementById("settings-notify-card");
+  const settingsMotionCard = document.getElementById("settings-motion-card");
   const settingsSystemCard = document.getElementById("settings-system-card");
   const settingsCameraCard = document.getElementById("settings-camera-card");
   const settingsStatus = document.getElementById("settings-status");
@@ -32,8 +32,39 @@
   const runtimeText = document.getElementById("runtime-text");
 
   // Block: Settings schema
-  const SETTINGS_TAB_KEYS = ["character", "behavior", "llm", "memory", "system"];
-  const SETTINGS_PRESET_KINDS = ["behavior", "llm", "memory", "output"];
+  const SETTINGS_TAB_KEYS = ["character", "behavior", "conversation", "memory", "motion", "system"];
+  const PRESET_COLLECTION_CONFIG = {
+    character: {
+      listKey: "character_presets",
+      activeKey: "active_character_preset_id",
+      idPrefix: "preset_character",
+      baseName: "新規キャラクター",
+    },
+    behavior: {
+      listKey: "behavior_presets",
+      activeKey: "active_behavior_preset_id",
+      idPrefix: "preset_behavior",
+      baseName: "振る舞い",
+    },
+    conversation: {
+      listKey: "conversation_presets",
+      activeKey: "active_conversation_preset_id",
+      idPrefix: "preset_conversation",
+      baseName: "会話",
+    },
+    memory: {
+      listKey: "memory_presets",
+      activeKey: "active_memory_preset_id",
+      idPrefix: "preset_memory",
+      baseName: "記憶",
+    },
+    motion: {
+      listKey: "motion_presets",
+      activeKey: "active_motion_preset_id",
+      idPrefix: "preset_motion",
+      baseName: "モーション",
+    },
+  };
   const TTS_PROVIDER_LABELS = {
     "aivis-cloud": "Aivis Cloud API",
     voicevox: "VOICEVOX/SHAREVOX/AivisSpeech",
@@ -78,26 +109,6 @@
       balanced: "標準",
       detailed: "詳しめ",
     },
-  };
-  const PRESET_DESCRIPTORS = {
-    llm: [
-      { path: "llm.model", label: "LLM モデル (provider/model)", kind: "text" },
-      { path: "llm.temperature", label: "Temperature", kind: "number", min: 0, max: 2, step: 0.1 },
-      { path: "llm.max_output_tokens", label: "最大出力トークン", kind: "integer", min: 256, max: 8192, step: 1 },
-      { path: "llm.api_key", label: "LLM API キー", kind: "password", clipboardActions: true },
-      { path: "llm.base_url", label: "LLM Base URL（任意）", kind: "text" },
-    ],
-    memory: [
-      { path: "llm.embedding_model", label: "埋め込みモデル (provider/model)", kind: "text" },
-      { path: "llm.embedding_api_key", label: "埋め込み API キー", kind: "password", clipboardActions: true },
-      { path: "llm.embedding_base_url", label: "埋め込み Base URL（任意）", kind: "text" },
-      { path: "runtime.context_budget_tokens", label: "文脈上限", kind: "integer", min: 1024, max: 32768, step: 1 },
-      { path: "retrieval_profile.semantic_top_k", label: "Semantic Top K", kind: "integer", min: 1, max: 32, step: 1 },
-      { path: "retrieval_profile.recent_window_limit", label: "Recent Window", kind: "integer", min: 1, max: 16, step: 1 },
-      { path: "retrieval_profile.fact_bias", label: "Fact Bias", kind: "number", min: 0, max: 1, step: 0.05 },
-      { path: "retrieval_profile.summary_bias", label: "Summary Bias", kind: "number", min: 0, max: 1, step: 0.05 },
-      { path: "retrieval_profile.event_bias", label: "Event Bias", kind: "number", min: 0, max: 1, step: 0.05 },
-    ],
   };
   const BEHAVIOR_PROMPT_DESCRIPTORS = [
     { path: "behavior.second_person_label", label: "ユーザーの呼び方", kind: "text" },
@@ -169,7 +180,7 @@
       disabledWhenValue: false,
     },
   ];
-  const OUTPUT_COMMON_DESCRIPTORS = [
+  const CHARACTER_TTS_COMMON_DESCRIPTORS = [
     { path: "speech.tts.enabled", label: "TTSを使用する", kind: "boolean" },
     {
       path: "speech.tts.provider",
@@ -179,7 +190,7 @@
       optionLabels: TTS_PROVIDER_LABELS,
     },
   ];
-  const OUTPUT_PROVIDER_DESCRIPTORS = {
+  const CHARACTER_TTS_PROVIDER_DESCRIPTORS = {
     "aivis-cloud": [
       { path: "speech.tts.aivis_cloud.api_key", label: "API Key", kind: "password", clipboardActions: true },
       { path: "speech.tts.aivis_cloud.endpoint_url", label: "Endpoint URL", kind: "text" },
@@ -226,7 +237,7 @@
       { path: "speech.tts.style_bert_vits2.assist_text_weight", label: "Assist Weight", kind: "number", min: 0.0, max: 10.0, step: 0.05 },
     ],
   };
-  const OUTPUT_STT_DESCRIPTORS = [
+  const CHARACTER_STT_DESCRIPTORS = [
     { path: "speech.stt.enabled", label: "STTを使用する", kind: "boolean" },
     {
       path: "speech.stt.provider",
@@ -236,12 +247,57 @@
       optionLabels: STT_PROVIDER_LABELS,
     },
     { path: "speech.stt.wake_word", label: "Wake Word", kind: "text" },
+    { path: "speech.stt.language", label: "言語", kind: "text" },
     { path: "speech.stt.amivoice.profile_id", label: "Profile ID", kind: "text" },
     { path: "speech.stt.amivoice.api_key", label: "API Key", kind: "password", clipboardActions: true },
   ];
-  const OUTPUT_NOTIFY_DESCRIPTORS = [
+  const CONVERSATION_LLM_DESCRIPTORS = [
+    { path: "llm.model", label: "LLM モデル (provider/model)", kind: "text" },
+    { path: "llm.api_key", label: "LLM API キー", kind: "password", clipboardActions: true },
+    { path: "llm.base_url", label: "LLM Base URL（任意）", kind: "text" },
+    { path: "llm.temperature", label: "Temperature", kind: "number", min: 0, max: 2, step: 0.1 },
+    { path: "llm.max_output_tokens", label: "最大出力トークン", kind: "integer", min: 256, max: 8192, step: 1 },
     {
-      path: "integrations.notify_route",
+      path: "llm.reasoning_effort",
+      label: "Reasoning Effort",
+      kind: "select",
+      options: ["", "low", "medium", "high"],
+      optionLabels: {
+        "": "未指定",
+        low: "low",
+        medium: "medium",
+        high: "high",
+      },
+    },
+    { path: "llm.reply_web_search_enabled", label: "最終応答でWeb検索を許可する", kind: "boolean" },
+    { path: "llm.max_turns_window", label: "会話履歴ターン数", kind: "integer", min: 1, max: 200, step: 1 },
+  ];
+  const CONVERSATION_VISION_DESCRIPTORS = [
+    { path: "llm.image_model", label: "画像LLMモデル", kind: "text" },
+    { path: "llm.image_api_key", label: "画像LLM API キー", kind: "password", clipboardActions: true },
+    { path: "llm.image_base_url", label: "画像LLM Base URL（任意）", kind: "text" },
+    { path: "llm.max_output_tokens_vision", label: "画像最大出力トークン", kind: "integer", min: 256, max: 8192, step: 1 },
+    { path: "llm.image_timeout_seconds", label: "画像タイムアウト(秒)", kind: "integer", min: 1, max: 600, step: 1 },
+  ];
+  const MEMORY_EMBEDDING_DESCRIPTORS = [
+    { path: "llm.embedding_model", label: "埋め込みモデル (provider/model)", kind: "text" },
+    { path: "llm.embedding_api_key", label: "埋め込み API キー", kind: "password", clipboardActions: true },
+    { path: "llm.embedding_base_url", label: "埋め込み Base URL（任意）", kind: "text" },
+    { path: "memory.embedding_dimension", label: "Embedding 次元数", kind: "integer", min: 1, max: 8192, step: 1 },
+  ];
+  const MEMORY_RETRIEVAL_DESCRIPTORS = [
+    { path: "memory.similar_episodes_limit", label: "類似エピソード上限", kind: "integer", min: 1, max: 512, step: 1 },
+    { path: "memory.max_inject_tokens", label: "最大注入トークン", kind: "integer", min: 256, max: 32768, step: 1 },
+    { path: "runtime.context_budget_tokens", label: "文脈上限", kind: "integer", min: 1024, max: 32768, step: 1 },
+    { path: "retrieval_profile.semantic_top_k", label: "Semantic Top K", kind: "integer", min: 1, max: 64, step: 1 },
+    { path: "retrieval_profile.recent_window_limit", label: "Recent Window", kind: "integer", min: 1, max: 20, step: 1 },
+    { path: "retrieval_profile.fact_bias", label: "Fact Bias", kind: "number", min: 0, max: 1, step: 0.05 },
+    { path: "retrieval_profile.summary_bias", label: "Summary Bias", kind: "number", min: 0, max: 1, step: 0.05 },
+    { path: "retrieval_profile.event_bias", label: "Event Bias", kind: "number", min: 0, max: 1, step: 0.05 },
+  ];
+  const SYSTEM_NOTIFY_DESCRIPTORS = [
+    {
+      key: "integrations.notify_route",
       label: "通知経路",
       kind: "select",
       options: ["ui_only", "discord"],
@@ -250,10 +306,10 @@
         discord: "Discord",
       },
     },
-    { path: "integrations.discord.bot_token", label: "Discord トークン", kind: "password" },
-    { path: "integrations.discord.channel_id", label: "Discord チャンネル", kind: "text" },
+    { key: "integrations.discord.bot_token", label: "Discord トークン", kind: "password", clipboardActions: true },
+    { key: "integrations.discord.channel_id", label: "Discord チャンネル", kind: "text" },
   ];
-  const OUTPUT_PROVIDER_BASIC_PATHS = {
+  const CHARACTER_TTS_PROVIDER_BASIC_PATHS = {
     "aivis-cloud": [
       "speech.tts.aivis_cloud.api_key",
       "speech.tts.aivis_cloud.endpoint_url",
@@ -273,7 +329,7 @@
       "speech.tts.style_bert_vits2.speaker_id",
     ],
   };
-  const OUTPUT_PROVIDER_ADVANCED_PATHS = {
+  const CHARACTER_TTS_PROVIDER_ADVANCED_PATHS = {
     "aivis-cloud": [
       "speech.tts.aivis_cloud.use_ssml",
       "speech.tts.aivis_cloud.language",
@@ -308,13 +364,18 @@
       "speech.tts.style_bert_vits2.assist_text_weight",
     ],
   };
-  const SYSTEM_DESCRIPTORS = [
+  const SYSTEM_RUNTIME_DESCRIPTORS = [
     { key: "runtime.idle_tick_ms", label: "Idle Tick (ms)", kind: "integer", min: 250, max: 60000, step: 250 },
     { key: "runtime.long_cycle_min_interval_ms", label: "Long Cycle (ms)", kind: "integer", min: 1000, max: 300000, step: 1000 },
     { key: "sensors.microphone.enabled", label: "マイク入力", kind: "boolean" },
     { key: "sensors.camera.enabled", label: "カメラ入力", kind: "boolean" },
     { key: "integrations.sns.enabled", label: "SNS 連携", kind: "boolean" },
   ];
+  const MOTION_ANIMATION_TYPE_LABELS = {
+    0: "Standing",
+    1: "SittingFloor",
+    2: "LyingDown",
+  };
   const CAMERA_FIELD_KEYS = ["display_name", "host", "username", "password"];
 
   // Block: Runtime state
@@ -325,6 +386,7 @@
   let latestEditorSnapshot = null;
   let editorDraft = null;
   let activeSettingsTab = "character";
+  let localDraftIdCounter = 0;
   const draftMessages = new Map();
   let activeSpeechAudio = null;
 
@@ -658,11 +720,7 @@
   function applyEditorSnapshot(snapshot) {
     validateEditorSnapshot(snapshot);
     latestEditorSnapshot = snapshot;
-    editorDraft = {
-      editor_state: cloneJson(snapshot.editor_state),
-      preset_catalogs: cloneJson(snapshot.preset_catalogs),
-      camera_connections: cloneJson(snapshot.camera_connections),
-    };
+    editorDraft = buildEditorDraft(snapshot);
     settingsStatus.textContent = "サーバ正本を読込済み";
     renderSettingsEditor();
   }
@@ -674,8 +732,20 @@
     if (!isObject(snapshot.editor_state)) {
       throw new Error("editor_state が不正です");
     }
-    if (!isObject(snapshot.preset_catalogs)) {
-      throw new Error("preset_catalogs が不正です");
+    if (!Array.isArray(snapshot.character_presets)) {
+      throw new Error("character_presets が不正です");
+    }
+    if (!Array.isArray(snapshot.behavior_presets)) {
+      throw new Error("behavior_presets が不正です");
+    }
+    if (!Array.isArray(snapshot.conversation_presets)) {
+      throw new Error("conversation_presets が不正です");
+    }
+    if (!Array.isArray(snapshot.memory_presets)) {
+      throw new Error("memory_presets が不正です");
+    }
+    if (!Array.isArray(snapshot.motion_presets)) {
+      throw new Error("motion_presets が不正です");
     }
     if (!Array.isArray(snapshot.camera_connections)) {
       throw new Error("camera_connections が不正です");
@@ -685,6 +755,18 @@
     }
   }
 
+  function buildEditorDraft(snapshot) {
+    return {
+      editor_state: cloneJson(snapshot.editor_state),
+      character_presets: cloneJson(snapshot.character_presets),
+      behavior_presets: cloneJson(snapshot.behavior_presets),
+      conversation_presets: cloneJson(snapshot.conversation_presets),
+      memory_presets: cloneJson(snapshot.memory_presets),
+      motion_presets: cloneJson(snapshot.motion_presets),
+      camera_connections: cloneJson(snapshot.camera_connections),
+    };
+  }
+
   // Block: Settings editor rendering
   function renderSettingsEditor() {
     if (editorDraft === null || latestEditorSnapshot === null) {
@@ -692,9 +774,9 @@
     }
     renderCharacterPresetCard();
     renderBehaviorPresetCard();
-    renderLlmPresetCard();
+    renderConversationPresetCard();
     renderMemoryPresetCard();
-    renderNotificationSettingsCard();
+    renderMotionPresetCard();
     renderSystemValuesCard();
     renderCameraConnectionsCard();
     settingsJson.textContent = formatJson(latestEditorSnapshot.runtime_projection);
@@ -742,30 +824,36 @@
     `;
   }
 
-  // Block: LLM preset rendering
-  function renderLlmPresetCard() {
-    const activePresetId = readActivePresetId("llm");
-    const activePreset = requirePresetEntry("llm", activePresetId);
-    const selectOptions = buildPresetSelectOptions(readPresetEntries("llm"), activePresetId);
-    settingsLlmCard.innerHTML = `
+  // Block: Conversation preset rendering
+  function renderConversationPresetCard() {
+    const activePresetId = readActivePresetId("conversation");
+    const activePreset = requirePresetEntry("conversation", activePresetId);
+    const selectOptions = buildPresetSelectOptions(readPresetEntries("conversation"), activePresetId);
+    settingsConversationCard.innerHTML = `
       <div class="settings-card-title">会話設定</div>
       <div class="settings-stack">
-        ${renderStaticCheckRow("会話機能（LLM）を使用する - 記憶タブも設定してください", true)}
         ${renderSettingsGroup(
           "プリセット選択",
           "システムプロンプトは「振る舞い」タブで設定します。",
-          renderPresetSelectionToolbar("llm", selectOptions),
+          renderPresetSelectionToolbar("conversation", selectOptions),
         )}
         ${renderSettingsGroup(
           "基本設定",
           "",
-          renderPresetNameField("llm", activePreset.preset_name),
+          renderPresetNameField("conversation", activePreset.preset_name),
         )}
         ${renderSettingsGroup(
           "LLM設定",
           "",
-          PRESET_DESCRIPTORS.llm
-            .map((descriptor) => renderPresetField("llm", activePreset.payload, descriptor))
+          CONVERSATION_LLM_DESCRIPTORS
+            .map((descriptor) => renderPresetField("conversation", activePreset.payload, descriptor))
+            .join(""),
+        )}
+        ${renderSettingsGroup(
+          "画像認識LLM設定",
+          "",
+          CONVERSATION_VISION_DESCRIPTORS
+            .map((descriptor) => renderPresetField("conversation", activePreset.payload, descriptor))
             .join(""),
         )}
       </div>
@@ -780,7 +868,6 @@
     settingsMemoryCard.innerHTML = `
       <div class="settings-card-title">記憶設定</div>
       <div class="settings-stack">
-        ${renderStaticCheckRow("記憶機能（Embedding）を使用する - OFFには出来ません", true)}
         ${renderSettingsGroup(
           "プリセット選択",
           "",
@@ -791,34 +878,126 @@
           "※ 記憶検索と文脈組み立てに使う設定です。",
           [
             renderPresetNameField("memory", activePreset.preset_name),
-            PRESET_DESCRIPTORS.memory
+            MEMORY_EMBEDDING_DESCRIPTORS
               .map((descriptor) => renderPresetField("memory", activePreset.payload, descriptor))
               .join(""),
           ].join(""),
         )}
+        ${renderSettingsGroup(
+          "記憶検索設定",
+          "",
+          MEMORY_RETRIEVAL_DESCRIPTORS
+            .map((descriptor) => renderPresetField("memory", activePreset.payload, descriptor))
+            .join(""),
+        )}
+      </div>
+    `;
+  }
+
+  // Block: Motion preset rendering
+  function renderMotionPresetCard() {
+    const activePresetId = readActivePresetId("motion");
+    const activePreset = requirePresetEntry("motion", activePresetId);
+    const selectOptions = buildPresetSelectOptions(readPresetEntries("motion"), activePresetId);
+    const animations = Array.isArray(activePreset.payload.animations)
+      ? activePreset.payload.animations
+      : [];
+    settingsMotionCard.innerHTML = `
+      <div class="settings-card-title">モーション設定</div>
+      <div class="settings-stack">
+        ${renderSettingsGroup(
+          "アニメーションセット選択",
+          "",
+          renderPresetSelectionToolbar("motion", selectOptions),
+        )}
+        ${renderSettingsGroup(
+          "基本設定",
+          "",
+          [
+            renderPresetNameField("motion", activePreset.preset_name),
+            renderPresetField("motion", activePreset.payload, {
+              path: "motion.posture_change_loop_count_standing",
+              label: "立ち姿勢ループ回数",
+              kind: "integer",
+              min: 1,
+              max: 9999,
+              step: 1,
+            }),
+            renderPresetField("motion", activePreset.payload, {
+              path: "motion.posture_change_loop_count_sitting_floor",
+              label: "座り姿勢ループ回数",
+              kind: "integer",
+              min: 1,
+              max: 9999,
+              step: 1,
+            }),
+          ].join(""),
+        )}
+        ${renderSettingsGroup(
+          "アニメーションリスト",
+          "",
+          renderMotionAnimationEditor(animations),
+        )}
+      </div>
+    `;
+  }
+
+  function renderMotionAnimationEditor(animations) {
+    const rowsHtml = animations.map((animation, index) => `
+      <tr>
+        <td><input class="settings-input" type="text" value="${escapeHtml(requireString(animation.display_name, "motion.display_name"))}" data-motion-index="${String(index)}" data-motion-field="display_name" /></td>
+        <td>
+          <select class="settings-input" data-motion-index="${String(index)}" data-motion-field="animation_type" data-value-kind="integer">
+            ${Object.entries(MOTION_ANIMATION_TYPE_LABELS)
+              .map(([value, label]) => `<option value="${escapeHtml(value)}"${Number(animation.animation_type) === Number(value) ? " selected" : ""}>${escapeHtml(label)}</option>`)
+              .join("")}
+          </select>
+        </td>
+        <td><input class="settings-input" type="text" value="${escapeHtml(requireString(animation.animation_name, "motion.animation_name"))}" data-motion-index="${String(index)}" data-motion-field="animation_name" /></td>
+        <td><input type="checkbox" ${animation.is_enabled === true ? "checked" : ""} data-motion-index="${String(index)}" data-motion-field="is_enabled" data-value-kind="boolean" /></td>
+        <td><button class="settings-btn settings-btn-small danger" type="button" data-motion-action="remove" data-motion-index="${String(index)}">削除</button></td>
+      </tr>
+    `).join("");
+    return `
+      <div class="settings-table-wrap">
+        <table class="settings-table">
+          <thead>
+            <tr>
+              <th>表示名</th>
+              <th>種別</th>
+              <th>アニメーション名</th>
+              <th>有効</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>${rowsHtml}</tbody>
+        </table>
+      </div>
+      <div class="settings-actions">
+        <button class="settings-btn settings-btn-small" type="button" data-motion-action="add">追加</button>
       </div>
     `;
   }
 
   // Block: Character preset rendering
   function renderCharacterPresetCard() {
-    const activePresetId = readActivePresetId("output");
-    const activePreset = requirePresetEntry("output", activePresetId);
-    const selectOptions = buildPresetSelectOptions(readPresetEntries("output"), activePresetId);
+    const activePresetId = readActivePresetId("character");
+    const activePreset = requirePresetEntry("character", activePresetId);
+    const selectOptions = buildPresetSelectOptions(readPresetEntries("character"), activePresetId);
     settingsCharacterCard.innerHTML = `
       <div class="settings-card-title">キャラクター設定</div>
       <div class="settings-stack">
         ${renderSettingsGroup(
           "キャラクター選択",
           "LLM(AI)を使う場合は振る舞い / 会話 / 記憶タブも設定してください。",
-          renderPresetSelectionToolbar("output", selectOptions),
+          renderPresetSelectionToolbar("character", selectOptions),
         )}
         ${renderSettingsGroup(
           "基本設定",
           "",
           [
-            renderPresetNameField("output", activePreset.preset_name),
-            renderVrmFileField("output", activePreset.payload),
+            renderPresetNameField("character", activePreset.preset_name),
+            renderVrmFileField("character", activePreset.payload),
             renderIndentedNote("未指定の場合はVRM表示/音声出力が無効になります。"),
           ].join(""),
         )}
@@ -826,7 +1005,7 @@
           "マテリアル・影設定",
           "",
           CHARACTER_MATERIAL_DESCRIPTORS
-            .map((descriptor) => renderPresetField("output", activePreset.payload, descriptor))
+            .map((descriptor) => renderPresetField("character", activePreset.payload, descriptor))
             .join(""),
         )}
         ${renderCharacterSpeechGroup(activePreset.payload)}
@@ -836,24 +1015,23 @@
   }
 
   function renderCharacterSpeechGroup(payload) {
-    const provider = requireOutputProvider(payload);
-    const providerDescriptors = OUTPUT_PROVIDER_DESCRIPTORS[provider];
+    const provider = requireCharacterTtsProvider(payload);
+    const providerDescriptors = CHARACTER_TTS_PROVIDER_DESCRIPTORS[provider];
     if (!Array.isArray(providerDescriptors)) {
       throw new Error(`未対応の TTS プロバイダです: ${provider}`);
     }
-    const basicFieldsHtml = filterDescriptorList(providerDescriptors, OUTPUT_PROVIDER_BASIC_PATHS[provider])
-      .map((descriptor) => renderPresetField("output", payload, descriptor))
+    const basicFieldsHtml = filterDescriptorList(providerDescriptors, CHARACTER_TTS_PROVIDER_BASIC_PATHS[provider])
+      .map((descriptor) => renderPresetField("character", payload, descriptor))
       .join("");
-    const advancedFieldsHtml = filterDescriptorList(providerDescriptors, OUTPUT_PROVIDER_ADVANCED_PATHS[provider])
-      .map((descriptor) => renderPresetField("output", payload, descriptor))
+    const advancedFieldsHtml = filterDescriptorList(providerDescriptors, CHARACTER_TTS_PROVIDER_ADVANCED_PATHS[provider])
+      .map((descriptor) => renderPresetField("character", payload, descriptor))
       .join("");
     return renderSettingsGroup(
       "音声合成",
-      "VRM表示時のみ有効です",
+      "",
       [
-        renderIndentedNote(`現在のエンジン: ${TTS_PROVIDER_LABELS[provider]}`),
-        OUTPUT_COMMON_DESCRIPTORS
-          .map((descriptor) => renderPresetField("output", payload, descriptor))
+        CHARACTER_TTS_COMMON_DESCRIPTORS
+          .map((descriptor) => renderPresetField("character", payload, descriptor))
           .join(""),
         renderSettingsSubsection(`${TTS_PROVIDER_LABELS[provider]} 設定`, basicFieldsHtml),
         renderSettingsExpander(TTS_ADVANCED_SECTION_TITLES[provider], advancedFieldsHtml),
@@ -863,37 +1041,19 @@
 
   function renderCharacterSttGroup(payload) {
     return renderSettingsGroup(
-      "音声認識 (現状AmiVoiceのみ)",
-      "システムタブも設定してください",
+      "音声認識",
+      "",
       [
-        renderPresetField("output", payload, OUTPUT_STT_DESCRIPTORS[0]),
-        renderPresetField("output", payload, OUTPUT_STT_DESCRIPTORS[1]),
-        renderPresetField("output", payload, OUTPUT_STT_DESCRIPTORS[2]),
-        renderIndentedNote("音声認識を開始するキーワードです。空欄の場合は常に有効です。\n複数設定する場合はカンマ区切りにしてください。（例: こんにちは, ハロー, ミク）"),
-        renderPresetField("output", payload, OUTPUT_STT_DESCRIPTORS[3]),
+        renderPresetField("character", payload, CHARACTER_STT_DESCRIPTORS[0]),
+        renderPresetField("character", payload, CHARACTER_STT_DESCRIPTORS[1]),
+        renderPresetField("character", payload, CHARACTER_STT_DESCRIPTORS[2]),
+        renderIndentedNote("起動ワードです。空欄の場合は常時待受します。複数指定する場合はカンマ区切りです。"),
+        renderPresetField("character", payload, CHARACTER_STT_DESCRIPTORS[3]),
+        renderPresetField("character", payload, CHARACTER_STT_DESCRIPTORS[4]),
         renderIndentedNote("単語登録を使う場合に入力してください。エンジンは -a-general を使います。"),
-        renderPresetField("output", payload, OUTPUT_STT_DESCRIPTORS[4]),
+        renderPresetField("character", payload, CHARACTER_STT_DESCRIPTORS[5]),
       ].join(""),
     );
-  }
-
-  function renderNotificationSettingsCard() {
-    const activePresetId = readActivePresetId("output");
-    const activePreset = requirePresetEntry("output", activePresetId);
-    const notifyRoute = requireOutputNotifyRoute(activePreset.payload);
-    const notifyFieldsHtml = (notifyRoute === "discord"
-      ? OUTPUT_NOTIFY_DESCRIPTORS
-      : OUTPUT_NOTIFY_DESCRIPTORS.filter((descriptor) => descriptor.path === "integrations.notify_route"))
-      .map((descriptor) => renderPresetField("output", activePreset.payload, descriptor))
-      .join("");
-    settingsNotifyCard.innerHTML = `
-      <div class="settings-card-title">通知設定</div>
-      ${renderSettingsGroup(
-        "通知",
-        `現在のキャラクタープリセット: ${activePreset.preset_name}`,
-        notifyFieldsHtml,
-      )}
-    `;
   }
 
   // Block: Preset selection rendering
@@ -1003,6 +1163,15 @@
     `;
   }
 
+  // Block: Character TTS helpers
+  function requireCharacterTtsProvider(payload) {
+    const provider = requireString(readNestedValue(payload, "speech.tts.provider"), "speech.tts.provider");
+    if (!(provider in CHARACTER_TTS_PROVIDER_DESCRIPTORS) || !(provider in TTS_PROVIDER_LABELS)) {
+      throw new Error(`未対応の TTS プロバイダです: ${provider}`);
+    }
+    return provider;
+  }
+
   function filterDescriptorList(descriptors, allowedPaths) {
     return descriptors.filter((descriptor) => allowedPaths.includes(descriptor.path));
   }
@@ -1070,7 +1239,9 @@
         `<textarea class="settings-input settings-textarea" rows="${String(rows)}" data-preset-kind="${escapeHtml(kind)}" data-preset-path="${path}" data-value-kind="string"${disabledAttr}>${escapeHtml(requireString(rawValue, descriptor.path))}</textarea>`,
       );
     }
-    const numberValue = requireNumber(rawValue, descriptor.path);
+    const numberValue = descriptor.kind === "integer"
+      ? requireInteger(rawValue, descriptor.path)
+      : requireNumber(rawValue, descriptor.path);
     const step = descriptor.step ?? 1;
     const minAttr = descriptor.min !== undefined ? ` min="${descriptor.min}"` : "";
     const maxAttr = descriptor.max !== undefined ? ` max="${descriptor.max}"` : "";
@@ -1091,15 +1262,25 @@
 
   function renderSystemValuesCard() {
     const systemValues = requireSystemValues();
-    const fieldsHtml = SYSTEM_DESCRIPTORS
+    const notifyRoute = requireNotifyRoute(systemValues);
+    const notifyFieldsHtml = SYSTEM_NOTIFY_DESCRIPTORS
+      .filter((descriptor) => notifyRoute === "discord" || descriptor.key === "integrations.notify_route")
+      .map((descriptor) => renderSystemField(systemValues, descriptor))
+      .join("");
+    const runtimeFieldsHtml = SYSTEM_RUNTIME_DESCRIPTORS
       .map((descriptor) => renderSystemField(systemValues, descriptor))
       .join("");
     settingsSystemCard.innerHTML = `
       <div class="settings-card-title">システム設定</div>
       ${renderSettingsGroup(
+        "通知",
+        "",
+        notifyFieldsHtml,
+      )}
+      ${renderSettingsGroup(
         "運用設定",
         "ランタイムの運用値をここで調整します。",
-        fieldsHtml,
+        runtimeFieldsHtml,
       )}
     `;
   }
@@ -1113,6 +1294,39 @@
           <span class="settings-check-text">${escapeHtml(descriptor.label)}</span>
         </label>
       `;
+    }
+    if (descriptor.kind === "select") {
+      const optionsHtml = descriptor.options
+        .map((optionValue) => {
+          const optionLabel = isObject(descriptor.optionLabels) && typeof descriptor.optionLabels[optionValue] === "string"
+            ? descriptor.optionLabels[optionValue]
+            : optionValue;
+          const selected = value === optionValue ? " selected" : "";
+          return `<option value="${escapeHtml(optionValue)}"${selected}>${escapeHtml(optionLabel)}</option>`;
+        })
+        .join("");
+      return renderRowField(
+        descriptor.label,
+        `<select class="settings-input" data-system-key="${escapeHtml(descriptor.key)}" data-value-kind="string">${optionsHtml}</select>`,
+      );
+    }
+    if (descriptor.kind === "password" && descriptor.clipboardActions === true) {
+      return renderRowField(
+        descriptor.label,
+        `
+          <span class="settings-inline-actions">
+            <input class="settings-input" type="text" value="${escapeHtml(requireString(value, descriptor.key))}" data-system-key="${escapeHtml(descriptor.key)}" data-value-kind="string" />
+            <button class="settings-btn settings-btn-small" type="button" data-system-clipboard-action="copy" data-system-key="${escapeHtml(descriptor.key)}">コピー</button>
+            <button class="settings-btn settings-btn-small" type="button" data-system-clipboard-action="paste" data-system-key="${escapeHtml(descriptor.key)}">上書き貼付け</button>
+          </span>
+        `,
+      );
+    }
+    if (descriptor.kind === "password" || descriptor.kind === "text") {
+      return renderRowField(
+        descriptor.label,
+        `<input class="settings-input" type="text" value="${escapeHtml(requireString(value, descriptor.key))}" data-system-key="${escapeHtml(descriptor.key)}" data-value-kind="string" />`,
+      );
     }
     const numberValue = descriptor.kind === "integer"
       ? requireInteger(value, descriptor.key)
@@ -1232,6 +1446,21 @@
       element.addEventListener("input", handleSystemFieldChange);
       element.addEventListener("change", handleSystemFieldChange);
     }
+    const systemClipboardButtons = settingsPanel.querySelectorAll("[data-system-clipboard-action][data-system-key]");
+    for (const element of systemClipboardButtons) {
+      element.addEventListener("click", (event) => {
+        void handleSystemClipboardAction(event);
+      });
+    }
+    const motionActionButtons = settingsPanel.querySelectorAll("[data-motion-action]");
+    for (const element of motionActionButtons) {
+      element.addEventListener("click", handleMotionAction);
+    }
+    const motionFieldInputs = settingsPanel.querySelectorAll("[data-motion-index][data-motion-field]");
+    for (const element of motionFieldInputs) {
+      element.addEventListener("input", handleMotionFieldChange);
+      element.addEventListener("change", handleMotionFieldChange);
+    }
     const cameraRows = settingsPanel.querySelectorAll("[data-camera-row-id]");
     for (const element of cameraRows) {
       element.addEventListener("click", handleCameraRowSelect);
@@ -1254,7 +1483,7 @@
     }
     const element = event.currentTarget;
     const kind = String(element.dataset.activePresetKind || "");
-    if (!SETTINGS_PRESET_KINDS.includes(kind)) {
+    if (!(kind in PRESET_COLLECTION_CONFIG)) {
       appendError("プリセット種別が不正です");
       return;
     }
@@ -1278,26 +1507,30 @@
     const element = event.currentTarget;
     const kind = String(element.dataset.presetActionKind || "");
     const action = String(element.dataset.presetAction || "");
-    if (!SETTINGS_PRESET_KINDS.includes(kind)) {
+    if (!(kind in PRESET_COLLECTION_CONFIG)) {
       appendError("プリセット種別が不正です");
       return;
     }
-    if (action === "add") {
-      addPreset(kind);
-      renderSettingsEditor();
-      return;
+    try {
+      if (action === "add") {
+        addPreset(kind);
+        renderSettingsEditor();
+        return;
+      }
+      if (action === "duplicate") {
+        duplicateActivePreset(kind);
+        renderSettingsEditor();
+        return;
+      }
+      if (action === "archive") {
+        archiveActivePreset(kind);
+        renderSettingsEditor();
+        return;
+      }
+      appendError("プリセット操作が不正です");
+    } catch (error) {
+      appendError(`プリセット操作に失敗しました: ${error.message}`);
     }
-    if (action === "duplicate") {
-      duplicateActivePreset(kind);
-      renderSettingsEditor();
-      return;
-    }
-    if (action === "archive") {
-      archiveActivePreset(kind);
-      renderSettingsEditor();
-      return;
-    }
-    appendError("プリセット操作が不正です");
   }
 
   function handlePresetFieldChange(event) {
@@ -1308,12 +1541,8 @@
     const presetEntry = requireActivePresetEntry(kind);
     writeNestedValue(presetEntry.payload, path, readInputValue(element, valueKind));
     if (
-      kind === "output"
-      && (
-        path === "speech.tts.provider"
-        || path === "integrations.notify_route"
-        || path === "character.material.enable_shadow_off"
-      )
+      (kind === "character" && (path === "speech.tts.provider" || path === "character.material.enable_shadow_off"))
+      || (kind === "motion" && path.startsWith("motion."))
     ) {
       renderSettingsEditor();
       return;
@@ -1376,6 +1605,85 @@
     const key = String(element.dataset.systemKey || "");
     const valueKind = String(element.dataset.valueKind || "");
     editorDraft.editor_state.system_values[key] = readInputValue(element, valueKind);
+    if (key === "integrations.notify_route") {
+      renderSettingsEditor();
+      return;
+    }
+    updateSettingsDirtyState();
+  }
+
+  async function handleSystemClipboardAction(event) {
+    const element = event.currentTarget;
+    const action = String(element.dataset.systemClipboardAction || "");
+    const key = String(element.dataset.systemKey || "");
+    const systemValues = requireSystemValues();
+    try {
+      if (action === "copy") {
+        const currentValue = systemValues[key];
+        if (typeof currentValue !== "string") {
+          appendError("コピー対象が文字列ではありません");
+          return;
+        }
+        await navigator.clipboard.writeText(currentValue);
+        settingsStatus.textContent = "クリップボードへコピーしました";
+        return;
+      }
+      if (action === "paste") {
+        systemValues[key] = await navigator.clipboard.readText();
+        renderSettingsEditor();
+        settingsStatus.textContent = "クリップボードから貼り付けました";
+        return;
+      }
+      appendError("クリップボード操作が不正です");
+    } catch (error) {
+      appendError(`クリップボード操作に失敗しました: ${error.message}`);
+    }
+  }
+
+  function handleMotionAction(event) {
+    const element = event.currentTarget;
+    const action = String(element.dataset.motionAction || "");
+    const activeMotionPreset = requireActivePresetEntry("motion");
+    if (!Array.isArray(activeMotionPreset.payload.animations)) {
+      activeMotionPreset.payload.animations = [];
+    }
+    if (action === "add") {
+      activeMotionPreset.payload.animations.push({
+        display_name: `モーション ${activeMotionPreset.payload.animations.length + 1}`,
+        animation_type: 0,
+        animation_name: `animation_${activeMotionPreset.payload.animations.length + 1}`,
+        is_enabled: true,
+      });
+      renderSettingsEditor();
+      return;
+    }
+    if (action === "remove") {
+      const index = Number.parseInt(String(element.dataset.motionIndex || ""), 10);
+      if (!Number.isInteger(index) || index < 0 || index >= activeMotionPreset.payload.animations.length) {
+        appendError("モーション行が不正です");
+        return;
+      }
+      activeMotionPreset.payload.animations.splice(index, 1);
+      renderSettingsEditor();
+      return;
+    }
+    appendError("モーション操作が不正です");
+  }
+
+  function handleMotionFieldChange(event) {
+    const element = event.currentTarget;
+    const index = Number.parseInt(String(element.dataset.motionIndex || ""), 10);
+    const fieldName = String(element.dataset.motionField || "");
+    const valueKind = String(element.dataset.valueKind || "string");
+    const activeMotionPreset = requireActivePresetEntry("motion");
+    if (!Array.isArray(activeMotionPreset.payload.animations)) {
+      throw new Error("motion.animations が不正です");
+    }
+    if (!Number.isInteger(index) || index < 0 || index >= activeMotionPreset.payload.animations.length) {
+      appendError("モーション行が不正です");
+      return;
+    }
+    activeMotionPreset.payload.animations[index][fieldName] = readInputValue(element, valueKind);
     updateSettingsDirtyState();
   }
 
@@ -1427,24 +1735,14 @@
     if (latestEditorSnapshot === null) {
       return;
     }
-    editorDraft = {
-      editor_state: cloneJson(latestEditorSnapshot.editor_state),
-      preset_catalogs: cloneJson(latestEditorSnapshot.preset_catalogs),
-      camera_connections: cloneJson(latestEditorSnapshot.camera_connections),
-    };
+    editorDraft = buildEditorDraft(latestEditorSnapshot);
   }
 
   function isSettingsDraftDirty() {
     if (editorDraft === null || latestEditorSnapshot === null) {
       return false;
     }
-    const currentCanonical = JSON.stringify(editorDraft);
-    const serverCanonical = JSON.stringify({
-      editor_state: latestEditorSnapshot.editor_state,
-      preset_catalogs: latestEditorSnapshot.preset_catalogs,
-      camera_connections: latestEditorSnapshot.camera_connections,
-    });
-    return currentCanonical !== serverCanonical;
+    return JSON.stringify(editorDraft) !== JSON.stringify(buildEditorDraft(latestEditorSnapshot));
   }
 
   function updateSettingsDirtyState() {
@@ -1483,8 +1781,11 @@
       });
       draftMessages.set(messageId, messageNode);
     }
-    const bubble = messageNode.querySelector(".bubble");
-    bubble.textContent += chunk;
+    const bubbleText = messageNode.querySelector(".bubble-text");
+    if (!(bubbleText instanceof HTMLElement)) {
+      throw new Error("bubble-text が見つかりません");
+    }
+    bubbleText.textContent += chunk;
     scrollToBottom();
   }
 
@@ -1502,11 +1803,14 @@
         isDraft: false,
       });
     } else {
-      const bubble = messageNode.querySelector(".bubble");
-      const label = messageNode.querySelector(".bubble-time");
-      bubble.textContent = text;
-      label.textContent = buildMetaLabel(role);
-      label.classList.remove("empty");
+      const bubbleText = messageNode.querySelector(".bubble-text");
+      const meta = messageNode.querySelector(".bubble-time");
+      if (!(bubbleText instanceof HTMLElement) || !(meta instanceof HTMLElement)) {
+        throw new Error("message node が不正です");
+      }
+      bubbleText.textContent = text;
+      meta.textContent = buildMetaLabel(role);
+      meta.classList.remove("empty");
       draftMessages.delete(messageId);
     }
     if (audioUrl !== null) {
@@ -1516,33 +1820,38 @@
 
   function handleNoticeEvent(payload) {
     const noticeCode = requireString(payload.notice_code, "notice.notice_code");
-    const text = typeof payload.text === "string" && payload.text
+    const text = typeof payload.text === "string" && payload.text.length > 0
       ? payload.text
       : noticeCode;
     appendNotice(noticeCode, text);
   }
 
   function handleErrorEvent(payload) {
-    const message = typeof payload.message === "string" && payload.message
+    const message = typeof payload.message === "string" && payload.message.length > 0
       ? payload.message
       : "処理中にエラーが発生しました";
     appendError(message);
   }
 
-  // Block: UI message rendering
+  // Block: Message rendering
   function appendMessage({ role, text, messageId, isDraft }) {
+    const normalizedRole = role === "user" ? "user" : "assistant";
     const row = document.createElement("div");
-    row.className = `bubble-row ${role === "user" ? "right" : "left"}`;
+    row.className = `bubble-row ${normalizedRole === "user" ? "user" : "ai"}`;
     row.dataset.messageId = messageId;
 
     const bubble = document.createElement("div");
-    bubble.className = "bubble";
-    bubble.textContent = text;
+    bubble.className = `bubble ${normalizedRole === "user" ? "user" : "ai"}`;
+
+    const bubbleText = document.createElement("div");
+    bubbleText.className = "bubble-text";
+    bubbleText.textContent = text;
+    bubble.appendChild(bubbleText);
 
     const meta = document.createElement("div");
     meta.className = "bubble-time";
-    meta.textContent = buildMetaLabel(role);
-    if (isDraft) {
+    meta.textContent = buildMetaLabel(normalizedRole);
+    if (isDraft === true) {
       meta.classList.add("empty");
     }
 
@@ -1555,11 +1864,15 @@
 
   function appendNotice(code, text) {
     const row = document.createElement("div");
-    row.className = "bubble-row left";
+    row.className = "bubble-row ai";
 
     const bubble = document.createElement("div");
-    bubble.className = "bubble";
-    bubble.textContent = text;
+    bubble.className = "bubble ai";
+
+    const bubbleText = document.createElement("div");
+    bubbleText.className = "bubble-text";
+    bubbleText.textContent = text;
+    bubble.appendChild(bubbleText);
 
     const meta = document.createElement("div");
     meta.className = "bubble-time";
@@ -1572,14 +1885,21 @@
   }
 
   function appendError(text) {
+    if (!settingsPanel.classList.contains("hidden")) {
+      settingsStatus.textContent = text;
+    }
     const row = document.createElement("div");
-    row.className = "bubble-row left";
+    row.className = "bubble-row ai";
 
     const bubble = document.createElement("div");
-    bubble.className = "bubble";
-    bubble.textContent = text;
+    bubble.className = "bubble ai";
     bubble.style.borderColor = "#aa3d52";
     bubble.style.color = "#6b1022";
+
+    const bubbleText = document.createElement("div");
+    bubbleText.className = "bubble-text";
+    bubbleText.textContent = text;
+    bubble.appendChild(bubbleText);
 
     const meta = document.createElement("div");
     meta.className = "bubble-time";
@@ -1591,7 +1911,7 @@
     scrollToBottom();
   }
 
-  // Block: Camera attachment append
+  // Block: Camera attachments
   function appendCameraAttachment(payload) {
     const attachment = buildPendingCameraAttachment(payload);
     const item = document.createElement("div");
@@ -1627,7 +1947,6 @@
     updateSendEnabledState();
   }
 
-  // Block: Camera attachment build
   function buildPendingCameraAttachment(payload) {
     const captureId = payload && typeof payload.capture_id === "string" ? payload.capture_id.trim() : "";
     const imageUrl = payload && typeof payload.image_url === "string" ? payload.image_url.trim() : "";
@@ -1641,7 +1960,6 @@
     };
   }
 
-  // Block: Camera attachment remove
   function removePendingCameraAttachment(captureId) {
     const targetCaptureId = String(captureId || "");
     const attachmentIndex = pendingCameraAttachments.findIndex((attachment) => attachment.captureId === targetCaptureId);
@@ -1651,13 +1969,13 @@
     pendingCameraAttachments.splice(attachmentIndex, 1);
   }
 
-  // Block: Camera attachment clear
   function clearPendingCameraAttachments() {
     pendingCameraAttachments.length = 0;
     attachments.replaceChildren();
+    updateSendEnabledState();
   }
 
-  // Block: User message echo
+  // Block: Chat UI helpers
   function buildUserMessageEchoText({ text, attachmentCount }) {
     const normalizedText = String(text || "").trim();
     const normalizedAttachmentCount = Number(attachmentCount || 0);
@@ -1670,7 +1988,6 @@
     return `[画像 ${normalizedAttachmentCount} 枚]`;
   }
 
-  // Block: Meta label
   function buildMetaLabel(role) {
     if (role === "user") {
       return "user";
@@ -1684,7 +2001,6 @@
     return role;
   }
 
-  // Block: Runtime status rendering
   function updateRuntimeChip(statusPayload) {
     if (!isObject(statusPayload) || !isObject(statusPayload.runtime)) {
       throw new Error("status payload が不正です");
@@ -1697,7 +2013,6 @@
     runtimeText.textContent = "人格ランタイム停止中";
   }
 
-  // Block: Composer helpers
   function autoResizeComposer() {
     chatInput.style.height = "auto";
     chatInput.style.height = `${chatInput.scrollHeight}px`;
@@ -1711,7 +2026,7 @@
     chatScroll.scrollTop = chatScroll.scrollHeight;
   }
 
-  // Block: Cloud speech output
+  // Block: Remote audio playback
   function playRemoteSpeechAudio(audioUrl) {
     if (typeof audioUrl !== "string" || audioUrl.length === 0) {
       return;
@@ -1755,9 +2070,10 @@
     if (editorDraft === null) {
       throw new Error("設定ドラフトが未初期化です");
     }
-    const entries = editorDraft.preset_catalogs[kind];
+    const config = requirePresetCollectionConfig(kind);
+    const entries = editorDraft[config.listKey];
     if (!Array.isArray(entries)) {
-      throw new Error(`${kind} preset_catalogs が不正です`);
+      throw new Error(`${config.listKey} が不正です`);
     }
     return entries;
   }
@@ -1766,21 +2082,20 @@
     if (editorDraft === null) {
       throw new Error("設定ドラフトが未初期化です");
     }
-    const key = `active_${kind}_preset_id`;
-    return requireString(editorDraft.editor_state[key], key);
+    const config = requirePresetCollectionConfig(kind);
+    return requireString(editorDraft.editor_state[config.activeKey], config.activeKey);
   }
 
   function writeActivePresetId(kind, presetId) {
     if (editorDraft === null) {
       throw new Error("設定ドラフトが未初期化です");
     }
-    const key = `active_${kind}_preset_id`;
-    editorDraft.editor_state[key] = presetId;
+    const config = requirePresetCollectionConfig(kind);
+    editorDraft.editor_state[config.activeKey] = presetId;
   }
 
   function requireActivePresetEntry(kind) {
-    const presetId = readActivePresetId(kind);
-    return requirePresetEntry(kind, presetId);
+    return requirePresetEntry(kind, readActivePresetId(kind));
   }
 
   function requirePresetEntry(kind, presetId) {
@@ -1794,46 +2109,45 @@
     return entry;
   }
 
+  // Block: Draft ID helpers
+  function buildDraftEntityId(prefix) {
+    localDraftIdCounter += 1;
+    return `${prefix}_${Date.now()}_${localDraftIdCounter}`;
+  }
+
   function addPreset(kind) {
-    if (!("crypto" in window) || typeof window.crypto.randomUUID !== "function") {
-      throw new Error("このブラウザではプリセット ID を生成できません");
-    }
+    const config = requirePresetCollectionConfig(kind);
     const presetEntries = readPresetEntries(kind);
-    const presetId = `${presetIdPrefix(kind)}_${window.crypto.randomUUID().replace(/-/g, "")}`;
+    const presetId = buildDraftEntityId(config.idPrefix);
     const nextSortOrder = presetEntries.length === 0
       ? 10
       : Math.max(...presetEntries.map((entry) => requireInteger(entry.sort_order, `${kind}.sort_order`))) + 10;
-    const nowMs = Date.now();
-    const basePayload = buildDefaultPresetPayload(kind);
     presetEntries.push({
       preset_id: presetId,
-      preset_name: `${presetBaseName(kind)} ${visiblePresetCount(kind) + 1}`,
+      preset_name: `${config.baseName} ${visiblePresetCount(kind) + 1}`,
       archived: false,
       sort_order: nextSortOrder,
-      updated_at: nowMs,
-      payload: basePayload,
+      updated_at: Date.now(),
+      payload: buildDefaultPresetPayload(kind),
     });
     writeActivePresetId(kind, presetId);
     updateSettingsDirtyState();
   }
 
   function duplicateActivePreset(kind) {
-    if (!("crypto" in window) || typeof window.crypto.randomUUID !== "function") {
-      throw new Error("このブラウザではプリセット ID を生成できません");
-    }
+    const config = requirePresetCollectionConfig(kind);
     const presetEntries = readPresetEntries(kind);
     const activePreset = requireActivePresetEntry(kind);
-    const presetId = `${presetIdPrefix(kind)}_${window.crypto.randomUUID().replace(/-/g, "")}`;
+    const presetId = buildDraftEntityId(config.idPrefix);
     const nextSortOrder = presetEntries.length === 0
       ? 10
       : Math.max(...presetEntries.map((entry) => requireInteger(entry.sort_order, `${kind}.sort_order`))) + 10;
-    const nowMs = Date.now();
     presetEntries.push({
       preset_id: presetId,
       preset_name: `${activePreset.preset_name} のコピー`,
       archived: false,
       sort_order: nextSortOrder,
-      updated_at: nowMs,
+      updated_at: Date.now(),
       payload: cloneJson(activePreset.payload),
     });
     writeActivePresetId(kind, presetId);
@@ -1845,8 +2159,7 @@
     const activePresetId = readActivePresetId(kind);
     const visibleEntries = presetEntries.filter((entry) => entry.archived !== true);
     if (visibleEntries.length <= 1) {
-      appendError("最後のプリセットは削除できません");
-      return;
+      throw new Error("最後のプリセットは削除できません");
     }
     const activePreset = requireActivePresetEntry(kind);
     activePreset.archived = true;
@@ -1860,8 +2173,9 @@
   }
 
   function buildDefaultPresetPayload(kind) {
-    if (latestEditorSnapshot !== null && isObject(latestEditorSnapshot.preset_catalogs)) {
-      const snapshotEntries = latestEditorSnapshot.preset_catalogs[kind];
+    if (latestEditorSnapshot !== null) {
+      const config = requirePresetCollectionConfig(kind);
+      const snapshotEntries = latestEditorSnapshot[config.listKey];
       if (Array.isArray(snapshotEntries) && snapshotEntries.length > 0) {
         const templateEntry = snapshotEntries.find((entry) => entry.archived !== true && isObject(entry.payload))
           || snapshotEntries.find((entry) => isObject(entry.payload));
@@ -1873,42 +2187,11 @@
     return cloneJson(requireActivePresetEntry(kind).payload);
   }
 
-  function presetIdPrefix(kind) {
-    if (kind === "behavior") {
-      return "preset_beh";
-    }
-    if (kind === "llm") {
-      return "preset_llm";
-    }
-    if (kind === "memory") {
-      return "preset_mem";
-    }
-    if (kind === "output") {
-      return "preset_out";
-    }
-    throw new Error(`未対応のプリセット種別です: ${kind}`);
-  }
-
-  function presetBaseName(kind) {
-    if (kind === "behavior") {
-      return "振る舞い";
-    }
-    if (kind === "llm") {
-      return "会話";
-    }
-    if (kind === "memory") {
-      return "記憶";
-    }
-    if (kind === "output") {
-      return "出力";
-    }
-    throw new Error(`未対応のプリセット種別です: ${kind}`);
-  }
-
   function visiblePresetCount(kind) {
     return readPresetEntries(kind).filter((entry) => entry.archived !== true).length;
   }
 
+  // Block: System draft helpers
   function requireSystemValues() {
     if (editorDraft === null || !isObject(editorDraft.editor_state)) {
       throw new Error("system_values が未初期化です");
@@ -1920,6 +2203,15 @@
     return systemValues;
   }
 
+  function requireNotifyRoute(systemValues) {
+    const notifyRoute = requireString(systemValues["integrations.notify_route"], "integrations.notify_route");
+    if (notifyRoute !== "ui_only" && notifyRoute !== "discord") {
+      throw new Error(`未対応の通知経路です: ${notifyRoute}`);
+    }
+    return notifyRoute;
+  }
+
+  // Block: Camera draft helpers
   function readCameraConnections() {
     if (editorDraft === null) {
       throw new Error("設定ドラフトが未初期化です");
@@ -1941,23 +2233,6 @@
     return requireString(activeCameraConnectionId, "active_camera_connection_id");
   }
 
-  // Block: Output preset helpers
-  function requireOutputProvider(payload) {
-    const provider = requireString(readNestedValue(payload, "speech.tts.provider"), "speech.tts.provider");
-    if (!(provider in OUTPUT_PROVIDER_DESCRIPTORS) || !(provider in TTS_PROVIDER_LABELS)) {
-      throw new Error(`未対応の TTS プロバイダです: ${provider}`);
-    }
-    return provider;
-  }
-
-  function requireOutputNotifyRoute(payload) {
-    const notifyRoute = requireString(readNestedValue(payload, "integrations.notify_route"), "integrations.notify_route");
-    if (notifyRoute !== "ui_only" && notifyRoute !== "discord") {
-      throw new Error(`未対応の通知経路です: ${notifyRoute}`);
-    }
-    return notifyRoute;
-  }
-
   function requireActiveCameraConnection() {
     const activeCameraConnectionId = readActiveCameraConnectionId();
     if (activeCameraConnectionId === null) {
@@ -1972,14 +2247,14 @@
   }
 
   function addCameraConnection() {
-    if (!("crypto" in window) || typeof window.crypto.randomUUID !== "function") {
-      throw new Error("このブラウザではカメラ接続 ID を生成できません");
+    if (editorDraft === null || !isObject(editorDraft.editor_state)) {
+      throw new Error("設定ドラフトが未初期化です");
     }
     const cameraConnections = readCameraConnections();
     const nextSortOrder = cameraConnections.length === 0
       ? 10
       : Math.max(...cameraConnections.map((cameraConnection) => requireInteger(cameraConnection.sort_order, "camera_connection.sort_order"))) + 10;
-    const cameraConnectionId = `cam_${window.crypto.randomUUID().replace(/-/g, "")}`;
+    const cameraConnectionId = buildDraftEntityId("cam");
     const nowMs = Date.now();
     cameraConnections.push({
       camera_connection_id: cameraConnectionId,
@@ -1995,12 +2270,14 @@
   }
 
   function removeActiveCameraConnection() {
+    if (editorDraft === null || !isObject(editorDraft.editor_state)) {
+      throw new Error("設定ドラフトが未初期化です");
+    }
     const activeCameraConnectionId = readActiveCameraConnectionId();
     if (activeCameraConnectionId === null) {
       return;
     }
-    const cameraConnections = readCameraConnections();
-    const filteredCameraConnections = cameraConnections
+    const filteredCameraConnections = readCameraConnections()
       .filter((cameraConnection) => String(cameraConnection.camera_connection_id) !== activeCameraConnectionId);
     editorDraft.camera_connections = filteredCameraConnections;
     editorDraft.editor_state.active_camera_connection_id = filteredCameraConnections.length === 0
@@ -2009,11 +2286,12 @@
     updateSettingsDirtyState();
   }
 
-  function requireRuntimeProjection() {
-    if (latestEditorSnapshot === null || !isObject(latestEditorSnapshot.runtime_projection)) {
-      throw new Error("runtime_projection が未取得です");
+  function requirePresetCollectionConfig(kind) {
+    const config = PRESET_COLLECTION_CONFIG[kind];
+    if (!isObject(config)) {
+      throw new Error(`未対応のプリセット種別です: ${kind}`);
     }
-    return latestEditorSnapshot.runtime_projection;
+    return config;
   }
 
   function readNestedValue(root, path) {
