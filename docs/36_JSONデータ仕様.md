@@ -479,9 +479,55 @@
 - `working_memory_items`、`episodic_items`、`semantic_items`、`affective_items`、`relationship_items`、`reflection_items` の各要素は、少なくとも `memory_state_id`、`memory_kind`、`body_text`、`payload`、`confidence`、`importance`、`memory_strength`、`created_at`、`updated_at`、`last_confirmed_at` を持つ
 - `recent_event_window` の各要素は、少なくとも `event_id`、`source`、`kind`、`summary_text`、`created_at` を持つ
 - `context assembler` は、`memory_bundle` の各要素に人間可読な `*_utc_text`、`*_local_text`、`relative_time_text` を付与してよい
-- 初期実装では、`working_memory_items` に `memory_kind=summary`、`semantic_items` に `memory_kind=fact`、`recent_event_window` に直近 `5` 件の `searchable` な `events` を入れてよい
+- 初期実装では、`working_memory_items` に `memory_kind=summary`、`semantic_items` に `memory_kind=fact`、`recent_event_window` に active memory preset の `retrieval_profile.recent_window_limit` 件までの `searchable` な `events` を入れてよい
 - 初期実装では、`episodic_items.memory_kind` に `episodic_event`、`affective_items.memory_kind` に `long_mood_state` または `event_affect`、`relationship_items.memory_kind` に `relation` または `preference`、`reflection_items.memory_kind` に `reflection_note` を使ってよい
 - 初期実装では、`current_observation.observation_text` と、必要なら `query` / `source_task_id` への一致を使い、関連しない要素を `memory_bundle` から落としてよい
+- 初期実装の `reflection_items[].payload` は、少なくとも `what_happened` と `event_summaries` を持ち、必要なら `what_worked`、`what_failed`、`retry_hint`、`avoid_pattern`、`reflection_seed_ref`、`reflection_seed`、`action_outcomes` を持ってよい
+
+### `reflection_note.payload`
+
+```json
+{
+  "source_job_id": "job_...",
+  "job_kind": "write_memory",
+  "source_cycle_id": "cycle_...",
+  "primary_event_id": "evt_001",
+  "source_event_ids": ["evt_001", "evt_002"],
+  "reflection_seed_ref": {
+    "ref_kind": "event",
+    "ref_id": "evt_001"
+  },
+  "reflection_seed": {
+    "cycle_id": "cycle_...",
+    "input_kind": "chat_message",
+    "message_id": "msg_...",
+    "token_count": 12,
+    "was_cancelled": false
+  },
+  "event_summaries": [
+    "検索したいと依頼された",
+    "検索タスクが失敗した"
+  ],
+  "action_outcomes": [
+    {
+      "action_type": "enqueue_browse_task",
+      "status": "failed",
+      "failure_mode": "network_unavailable",
+      "decision_reason": "browse_selected",
+      "validator_reason": "browse_selected",
+      "selected_action_type": "browse"
+    }
+  ],
+  "what_happened": "検索したいと依頼された / 検索タスクが失敗した / browseは失敗した",
+  "what_failed": "browse が失敗した: network_unavailable",
+  "retry_hint": "query と source_task_id を確認してから browse をやり直す",
+  "avoid_pattern": "同じ query を条件未確認のまま連打しない"
+}
+```
+
+- `reflection_note.payload` は、`memory_kind=\"reflection_note\"` の `payload` に入る初期実装の固定形である
+- 必須項目は `source_job_id`、`job_kind`、`source_cycle_id`、`primary_event_id`、`source_event_ids`、`reflection_seed_ref`、`event_summaries`、`action_outcomes`、`what_happened` である
+- `reflection_seed`、`what_worked`、`what_failed`、`retry_hint`、`avoid_pattern` は、材料があるときだけ持ってよい
 
 ### `retrieval_context`
 
@@ -494,7 +540,15 @@
       "explicit_years": [],
       "has_explicit_time_hint": false
     },
+    "profile": {
+      "semantic_top_k": 8,
+      "recent_window_limit": 5,
+      "fact_bias": 0.7,
+      "summary_bias": 0.6,
+      "event_bias": 0.4
+    },
     "limits": {
+      "semantic_candidate_top_k": 8,
       "working_memory_items": 3,
       "episodic_items": 3,
       "semantic_items": 3,
@@ -528,7 +582,7 @@
         "slot": "semantic_items",
         "item_ref": "memory_state:mem_010",
         "score": 1.8,
-        "reason_codes": ["matched_query", "mode_priority"]
+        "reason_codes": ["matched_query", "mode_priority", "profile_bias"]
       }
     ]
   }
@@ -537,7 +591,9 @@
 
 - `retrieval_context` は、短周期の内部でだけ使う `RetrievalPlan` と選別結果の要約である
 - 必須項目は `plan` と `selected` である
-- `plan` は、少なくとも `mode`、`queries`、`time_hint`、`limits` を持つ
+- `plan` は、少なくとも `mode`、`queries`、`time_hint`、`profile`、`limits` を持つ
+- `profile` は、active memory preset の `retrieval_profile` をそのまま持つ
+- `limits.semantic_candidate_top_k` は、意味検索候補の上限である
 - `selected` は、少なくとも `selected_counts`、`selected_refs`、`selection_trace` を持つ
 
 ### `retrieval_candidates_json`
@@ -595,7 +651,7 @@
       "slot": "semantic_items",
       "item_ref": "memory_state:mem_010",
       "score": 1.8,
-      "reason_codes": ["matched_query", "mode_priority"]
+      "reason_codes": ["matched_query", "mode_priority", "profile_bias"]
     }
   ]
 }
