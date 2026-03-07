@@ -25,6 +25,7 @@ from otomekairo.schema.runtime_types import (
 )
 from otomekairo.schema.settings import SettingsValidationError, build_default_settings, decode_requested_value, get_setting_definition
 from otomekairo.usecase.build_cognition_input import build_cognition_input
+from otomekairo.usecase.observation_normalization import normalize_trigger_reason
 from otomekairo.usecase.run_browse_task import run_browse_task
 from otomekairo.usecase.run_cognition import run_cognition_for_browser_chat_input
 
@@ -95,6 +96,13 @@ class RuntimeLoop:
             self._store.materialize_next_boot_settings()
             self._boot_reconciled = True
             logger.info("runtime boot settings materialized")
+        replayed_commit_logs = self._store.sync_pending_commit_logs(max_commits=4)
+        did_replay_commit_logs = replayed_commit_logs > 0
+        if replayed_commit_logs > 0:
+            logger.debug(
+                "commit logs replayed",
+                extra={"replayed_commit_logs": replayed_commit_logs},
+            )
         if self._prefer_long_cycle:
             processed_memory = self._process_memory_job_once()
             if processed_memory:
@@ -137,6 +145,8 @@ class RuntimeLoop:
         processed_memory = self._process_memory_job_once()
         if processed_memory:
             return True
+        if did_replay_commit_logs:
+            return True
         return False
 
     # Block: Claimed pending input processing
@@ -155,6 +165,7 @@ class RuntimeLoop:
                 resolution_status,
                 discard_reason,
                 retrieval_run,
+                attention_snapshot,
             ) = self._resolve_pending_input(
                 pending_input=pending_input,
                 cycle_id=cycle_id,
@@ -168,6 +179,11 @@ class RuntimeLoop:
                 "emitted_event_types": [ui_event["event_type"] for ui_event in ui_events],
                 "executed_action_types": [action_result.action_type for action_result in action_results],
                 "resolution_status": resolution_status,
+                **(
+                    {"attention_primary_focus": attention_snapshot["primary_focus"]["summary"]}
+                    if attention_snapshot is not None
+                    else {}
+                ),
             }
             self._store.finalize_pending_input_cycle(
                 pending_input=pending_input,
@@ -178,6 +194,7 @@ class RuntimeLoop:
                 discard_reason=discard_reason,
                 ui_events=ui_events,
                 retrieval_run=retrieval_run,
+                attention_snapshot=attention_snapshot,
                 commit_payload=commit_payload,
             )
             logger.info(
@@ -207,6 +224,7 @@ class RuntimeLoop:
                 task_mutations=[],
                 discard_reason=PENDING_INPUT_FAILURE_REASON,
                 ui_events=ui_events,
+                attention_snapshot=None,
                 commit_payload={
                     "cycle_kind": "short",
                     "trigger_reason": _pending_input_trigger_reason(pending_input),
@@ -305,6 +323,7 @@ class RuntimeLoop:
         str,
         str | None,
         dict[str, Any] | None,
+        dict[str, Any] | None,
     ]:
         input_kind = pending_input.payload["input_kind"]
         if input_kind in {"chat_message", "camera_observation", "network_result"}:
@@ -341,9 +360,10 @@ class RuntimeLoop:
                 "consumed",
                 None,
                 built_input.retrieval_run,
+                built_input.cognition_input["attention_snapshot"],
             )
         if input_kind == "cancel":
-            return ([], [], [], "discarded", "cancel_target_not_found", None)
+            return ([], [], [], "discarded", "cancel_target_not_found", None, None)
         ui_events, action_results = _unsupported_input_events(pending_input, resolved_at)
         self._append_ui_events(cycle_id=cycle_id, ui_events=ui_events)
         return (
@@ -352,6 +372,7 @@ class RuntimeLoop:
             [],
             "discarded",
             "unsupported_input_kind",
+            None,
             None,
         )
 
@@ -739,12 +760,10 @@ def _error_message_text(error: Exception) -> str:
 
 # Block: Pending input trigger reason
 def _pending_input_trigger_reason(pending_input: PendingInputRecord) -> str:
-    input_kind = str(pending_input.payload["input_kind"])
-    if input_kind == "network_result":
-        return "external_result"
-    if pending_input.source == "self_initiated":
-        return "self_initiated"
-    return "external_input"
+    return normalize_trigger_reason(
+        source=pending_input.source,
+        payload=pending_input.payload,
+    )
 
 
 # Block: Pending input observation hint

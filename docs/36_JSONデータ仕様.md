@@ -1834,7 +1834,7 @@
     }
   },
   "attention_state": {
-    "primary_focus": "observation"
+    "primary_focus": "待機中"
   },
   "task_state": {
     "active_task_count": 1,

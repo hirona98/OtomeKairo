@@ -224,7 +224,7 @@ flowchart LR
     }
   },
   "attention_state": {
-    "primary_focus": "observation"
+    "primary_focus": "待機中"
   },
   "task_state": {
     "active_task_count": 1,
@@ -238,8 +238,8 @@ flowchart LR
 - `last_commit_id` は、`commit_records.commit_id` の最新値がある場合だけ返す
 - `runtime.last_retrieval` は、`retrieval_runs` が 1 件以上ある場合だけ返し、直近の `RetrievalPlan` と選別件数を要約する
 - `self_state.last_persona_update` は、`revisions.entity_type=self_state.personality` が 1 件以上ある場合だけ返す
+- `attention_state.primary_focus` は、`attention_state.primary_focus_json.summary` から取り出した表示用文字列を返す
 - 初回起動直後で短周期未実行のときは、`runtime.is_running=false` とし、`last_cycle_id` と `last_commit_id` は省略する
-- `attention_state.primary_focus` は、current 実装では `observation`、`task`、`relationship`、`idle` のような focus kind を返す
 - 全状態を丸ごと返さず、UI 表示に必要な要点だけを返す
 
 <!-- Block: Settings Get -->

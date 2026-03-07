@@ -337,6 +337,7 @@ flowchart TD
 - `cycle_id` は一意とし、同じ短周期の二重 commit を許さない
 - `log_sync_status` は、少なくとも `pending`、`synced`、`needs_replay` を区別する
 - `commit_payload_json` には、`events.jsonl` 再生成に必要な確定差分の要点だけを保持する
+- 初期実装では、少なくとも `cycle_kind`、`trigger_reason`、`event_ids`、UI/行動の要約、必要なら `retrieval_run_id` を保持する
 - 主要制約: `UNIQUE(cycle_id)`
 - 主要索引: `(log_sync_status, committed_at ASC)`
 
