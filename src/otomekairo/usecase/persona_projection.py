@@ -318,6 +318,8 @@ def _observation_attention_urgency(*, observation_kind: str) -> float:
         return 0.90
     if observation_kind == "camera_observation":
         return 0.62
+    if observation_kind == "idle_tick":
+        return 0.24
     raise ValueError("unsupported observation_kind for attention urgency")
 
 
@@ -362,6 +364,8 @@ def _observation_attention_personality_fit(
         return _clamp_unit(0.45 * curiosity + 0.35 * caution + 0.20 * novelty_preference)
     if observation_kind == "camera_observation":
         return _clamp_unit(0.55 * curiosity + 0.25 * novelty_preference + 0.20 * caution)
+    if observation_kind == "idle_tick":
+        return _clamp_unit(0.40 * caution + 0.35 * curiosity + 0.25 * novelty_preference)
     raise ValueError("unsupported observation_kind for attention personality fit")
 
 

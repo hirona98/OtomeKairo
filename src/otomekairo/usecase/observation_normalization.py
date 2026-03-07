@@ -24,6 +24,8 @@ def normalize_observation_kind(*, payload: dict[str, Any]) -> str:
         return "scene_change"
     if input_kind == "network_result":
         return "search_result"
+    if input_kind == "idle_tick":
+        return "internal_trigger"
     if input_kind == "cancel":
         return "instruction"
     return input_kind
@@ -35,6 +37,8 @@ def normalize_trigger_reason(*, source: str, payload: dict[str, Any]) -> str:
     if isinstance(trigger_reason, str) and trigger_reason:
         return trigger_reason
     input_kind = _input_kind(payload)
+    if input_kind == "idle_tick" or source == "idle_tick":
+        return "idle_tick"
     if input_kind == "network_result" or source == "network_result":
         return "external_result"
     if input_kind == "camera_observation":

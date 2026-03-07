@@ -82,6 +82,7 @@ class RuntimeLoop:
         self._boot_reconciled = False
         self._prefer_long_cycle = False
         self._last_long_cycle_at_ms = 0
+        self._last_activity_at_ms = _now_ms()
         self._stop_requested = False
         logger.info(
             "runtime loop initialized",
@@ -102,6 +103,7 @@ class RuntimeLoop:
         replayed_commit_logs = self._store.sync_pending_commit_logs(max_commits=4)
         did_replay_commit_logs = replayed_commit_logs > 0
         if replayed_commit_logs > 0:
+            self._mark_runtime_activity()
             logger.debug(
                 "commit logs replayed",
                 extra={"replayed_commit_logs": replayed_commit_logs},
@@ -110,14 +112,17 @@ class RuntimeLoop:
             processed_memory = self._process_memory_job_once()
             if processed_memory:
                 self._prefer_long_cycle = False
+                self._mark_runtime_activity()
                 return True
         processed_editor_settings = self._process_settings_change_set_once()
         if processed_editor_settings:
             self._prefer_long_cycle = True
+            self._mark_runtime_activity()
             return True
         processed_settings = self._process_settings_override_once()
         if processed_settings:
             self._prefer_long_cycle = True
+            self._mark_runtime_activity()
             return True
         pending_input = self._store.claim_next_pending_input()
         if pending_input is not None:
@@ -131,6 +136,7 @@ class RuntimeLoop:
             )
             self._process_claimed_pending_input(pending_input)
             self._prefer_long_cycle = True
+            self._mark_runtime_activity()
             return True
         waiting_task = self._store.claim_next_waiting_browse_task()
         if waiting_task is not None:
@@ -144,9 +150,25 @@ class RuntimeLoop:
             )
             self._process_claimed_waiting_task(waiting_task)
             self._prefer_long_cycle = True
+            self._mark_runtime_activity()
             return True
         processed_memory = self._process_memory_job_once()
         if processed_memory:
+            self._mark_runtime_activity()
+            return True
+        pending_input = self._claim_idle_tick_pending_input_if_due()
+        if pending_input is not None:
+            logger.info(
+                "claimed pending input",
+                extra={
+                    "input_id": pending_input.input_id,
+                    "input_kind": pending_input.payload["input_kind"],
+                    "channel": pending_input.channel,
+                },
+            )
+            self._process_claimed_pending_input(pending_input)
+            self._prefer_long_cycle = True
+            self._mark_runtime_activity()
             return True
         if did_replay_commit_logs:
             return True
@@ -338,7 +360,7 @@ class RuntimeLoop:
         dict[str, Any] | None,
     ]:
         input_kind = pending_input.payload["input_kind"]
-        if input_kind in {"chat_message", "camera_observation", "network_result"}:
+        if input_kind in {"chat_message", "camera_observation", "network_result", "idle_tick"}:
             state_snapshot = self._store.read_cognition_state(
                 self._default_settings,
                 observation_hint_text=_pending_input_observation_hint(pending_input),
@@ -707,6 +729,10 @@ class RuntimeLoop:
     def request_stop(self) -> None:
         self._stop_requested = True
 
+    # Block: Runtime activity tracking
+    def _mark_runtime_activity(self) -> None:
+        self._last_activity_at_ms = _now_ms()
+
     # Block: Idle timing
     def _idle_tick_ms(self) -> int:
         effective_settings = self._store.read_effective_settings(self._default_settings)
@@ -717,9 +743,49 @@ class RuntimeLoop:
             raise RuntimeError("runtime.idle_tick_ms must be positive")
         return idle_tick_ms
 
+    # Block: Idle trigger state
+    def _idle_duration_ms(self) -> int:
+        return max(0, _now_ms() - self._last_activity_at_ms)
+
+    def _idle_tick_due(self) -> bool:
+        return self._idle_duration_ms() >= self._idle_tick_ms()
+
+    # Block: Idle trigger claim
+    def _claim_idle_tick_pending_input_if_due(self) -> PendingInputRecord | None:
+        if not self._idle_tick_due():
+            return None
+        idle_duration_ms = self._idle_duration_ms()
+        enqueue_result = self._store.enqueue_idle_tick(idle_duration_ms=idle_duration_ms)
+        idle_input_id = str(enqueue_result["input_id"])
+        logger.info(
+            "idle tick enqueued",
+            extra={
+                "input_id": idle_input_id,
+                "idle_duration_ms": idle_duration_ms,
+            },
+        )
+        pending_input = self._store.claim_next_pending_input()
+        if pending_input is None:
+            raise RuntimeError("idle_tick must be claimable immediately after enqueue")
+        if pending_input.input_id == idle_input_id:
+            return pending_input
+        self._store.discard_queued_pending_input(
+            input_id=idle_input_id,
+            discard_reason="idle_tick_superseded",
+        )
+        logger.info(
+            "idle tick superseded by higher priority input",
+            extra={
+                "idle_input_id": idle_input_id,
+                "claimed_input_id": pending_input.input_id,
+                "claimed_input_kind": pending_input.payload["input_kind"],
+            },
+        )
+        return pending_input
+
     # Block: Idle wait with heartbeat
     def _sleep_until_next_idle_tick(self) -> None:
-        remaining_ms = self._idle_tick_ms()
+        remaining_ms = max(0, self._idle_tick_ms() - self._idle_duration_ms())
         while remaining_ms > 0 and not self._stop_requested:
             sleep_ms = min(remaining_ms, self._lease_heartbeat_ms)
             time.sleep(sleep_ms / 1000.0)
@@ -830,6 +896,13 @@ def _pending_input_observation_hint(pending_input: PendingInputRecord) -> str:
         if not isinstance(query, str) or not query.strip():
             raise RuntimeError("network_result.query must be non-empty string")
         return f"{query.strip()} {summary_text.strip()}"
+    if input_kind == "idle_tick":
+        idle_duration_ms = pending_input.payload.get("idle_duration_ms")
+        if isinstance(idle_duration_ms, bool) or not isinstance(idle_duration_ms, int):
+            raise RuntimeError("idle_tick.idle_duration_ms must be integer")
+        if idle_duration_ms <= 0:
+            raise RuntimeError("idle_tick.idle_duration_ms must be positive")
+        return f"{idle_duration_ms}ms の idle_tick が到来した"
     raise RuntimeError("unsupported input_kind for cognition observation hint")
 
 
