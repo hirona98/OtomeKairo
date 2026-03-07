@@ -6,15 +6,16 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from otomekairo.schema.settings import normalize_retrieval_profile
 
-# Block: Retrieval constants
+
+# Block: Retrieval selection limits
 WORKING_MEMORY_LIMIT = 3
 EPISODIC_LIMIT = 3
 SEMANTIC_LIMIT = 3
 AFFECTIVE_LIMIT = 2
 RELATIONSHIP_LIMIT = 2
 REFLECTION_LIMIT = 2
-RECENT_EVENT_LIMIT = 5
 
 
 # Block: Retrieval artifacts
@@ -30,11 +31,14 @@ class RetrievalArtifacts:
 def build_retrieval_artifacts(
     *,
     memory_snapshot: dict[str, Any],
+    retrieval_profile: dict[str, Any],
     current_observation: dict[str, Any],
     task_snapshot: dict[str, Any],
     resolved_at: int,
 ) -> RetrievalArtifacts:
+    normalized_retrieval_profile = normalize_retrieval_profile(retrieval_profile)
     retrieval_plan = _build_retrieval_plan(
+        retrieval_profile=normalized_retrieval_profile,
         current_observation=current_observation,
         task_snapshot=task_snapshot,
     )
@@ -84,7 +88,7 @@ def build_retrieval_artifacts(
         event_entries=memory_snapshot["recent_event_window"],
         current_observation=current_observation,
         retrieval_plan=retrieval_plan,
-        limit=RECENT_EVENT_LIMIT,
+        limit=int(retrieval_plan["limits"]["recent_event_window"]),
     )
     selection_trace = [
         *working_traces,
@@ -139,10 +143,12 @@ def build_retrieval_artifacts(
 # Block: Retrieval plan
 def _build_retrieval_plan(
     *,
+    retrieval_profile: dict[str, Any],
     current_observation: dict[str, Any],
     task_snapshot: dict[str, Any],
 ) -> dict[str, Any]:
     explicit_years = _explicit_years(current_observation=current_observation)
+    limits = _build_selection_limits(retrieval_profile=retrieval_profile)
     return {
         "mode": _retrieval_mode(
             current_observation=current_observation,
@@ -156,15 +162,8 @@ def _build_retrieval_plan(
             "explicit_years": explicit_years,
             "has_explicit_time_hint": bool(explicit_years),
         },
-        "limits": {
-            "working_memory_items": WORKING_MEMORY_LIMIT,
-            "episodic_items": EPISODIC_LIMIT,
-            "semantic_items": SEMANTIC_LIMIT,
-            "affective_items": AFFECTIVE_LIMIT,
-            "relationship_items": RELATIONSHIP_LIMIT,
-            "reflection_items": REFLECTION_LIMIT,
-            "recent_event_window": RECENT_EVENT_LIMIT,
-        },
+        "profile": dict(retrieval_profile),
+        "limits": limits,
     }
 
 
@@ -199,6 +198,20 @@ def _append_unique_text(target: list[str], text: str) -> None:
         return
     if normalized not in target:
         target.append(normalized)
+
+
+# Block: Selection limit helpers
+def _build_selection_limits(*, retrieval_profile: dict[str, Any]) -> dict[str, int]:
+    return {
+        "working_memory_items": WORKING_MEMORY_LIMIT,
+        "episodic_items": EPISODIC_LIMIT,
+        "semantic_items": SEMANTIC_LIMIT,
+        "affective_items": AFFECTIVE_LIMIT,
+        "relationship_items": RELATIONSHIP_LIMIT,
+        "reflection_items": REFLECTION_LIMIT,
+        "recent_event_window": int(retrieval_profile["recent_window_limit"]),
+        "semantic_candidate_top_k": int(retrieval_profile["semantic_top_k"]),
+    }
 
 
 # Block: Mode helpers
@@ -431,6 +444,13 @@ def _memory_relevance_score(
     if mode_bonus > 0.0:
         score += mode_bonus
         _append_reason(reason_codes, "mode_priority")
+    profile_bias = _memory_profile_bias(
+        memory_kind=str(memory_entry["memory_kind"]),
+        retrieval_plan=retrieval_plan,
+    )
+    if profile_bias > 0.0:
+        score += profile_bias
+        _append_reason(reason_codes, "profile_bias")
     importance = min(1.0, float(memory_entry["importance"]))
     memory_strength = min(1.0, float(memory_entry["memory_strength"]))
     if importance > 0.0:
@@ -463,6 +483,10 @@ def _event_relevance_score(
     if retrieval_plan["mode"] == "associative_recent":
         score += 0.4
         _append_reason(reason_codes, "mode_priority")
+    profile_bias = _event_profile_bias(retrieval_plan=retrieval_plan)
+    if profile_bias > 0.0:
+        score += profile_bias
+        _append_reason(reason_codes, "profile_bias")
     return (score, reason_codes)
 
 
@@ -481,6 +505,31 @@ def _mode_bonus(
     if mode == "associative_recent" and memory_kind in {"summary", "episodic_event"}:
         return 0.25
     return 0.0
+
+
+# Block: Profile bias helpers
+def _memory_profile_bias(
+    *,
+    memory_kind: str,
+    retrieval_plan: dict[str, Any],
+) -> float:
+    profile = retrieval_plan.get("profile")
+    if not isinstance(profile, dict):
+        raise ValueError("retrieval_plan.profile must be object")
+    if memory_kind == "summary":
+        return float(profile["summary_bias"]) * 0.35
+    if memory_kind in {"fact", "relation", "preference"}:
+        return float(profile["fact_bias"]) * 0.35
+    if memory_kind == "episodic_event":
+        return float(profile["event_bias"]) * 0.35
+    return 0.0
+
+
+def _event_profile_bias(*, retrieval_plan: dict[str, Any]) -> float:
+    profile = retrieval_plan.get("profile")
+    if not isinstance(profile, dict):
+        raise ValueError("retrieval_plan.profile must be object")
+    return float(profile["event_bias"]) * 0.35
 
 
 def _payload_contains_text_hint(
