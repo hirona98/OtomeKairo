@@ -196,6 +196,7 @@ class RuntimeLoop:
                 retrieval_run=retrieval_run,
                 attention_snapshot=attention_snapshot,
                 commit_payload=commit_payload,
+                camera_available=self._camera_controller.is_available(),
             )
             logger.info(
                 "pending input finalized",
@@ -236,6 +237,7 @@ class RuntimeLoop:
                     "error_kind": type(error).__name__,
                     "error_message": _error_message_text(error),
                 },
+                camera_available=self._camera_controller.is_available(),
             )
 
     # Block: Claimed waiting task processing
@@ -267,6 +269,7 @@ class RuntimeLoop:
                     ],
                     "final_task_status": execution.final_status,
                 },
+                camera_available=self._camera_controller.is_available(),
             )
             logger.info(
                 "waiting task finalized",
@@ -307,6 +310,7 @@ class RuntimeLoop:
                     "error_kind": type(error).__name__,
                     "error_message": _error_message_text(error),
                 },
+                camera_available=self._camera_controller.is_available(),
             )
 
     # Block: Pending input resolution
@@ -443,6 +447,7 @@ class RuntimeLoop:
                     "executed_action_types": ["stop_active_message"],
                     "resolution_status": "consumed",
                 },
+                camera_available=self._camera_controller.is_available(),
             )
             return True
         except Exception as error:
@@ -466,6 +471,7 @@ class RuntimeLoop:
                     "error_kind": type(error).__name__,
                     "error_message": _error_message_text(error),
                 },
+                camera_available=self._camera_controller.is_available(),
             )
             return False
 
@@ -483,6 +489,7 @@ class RuntimeLoop:
                 change_set=settings_change_set,
                 default_settings=self._default_settings,
                 final_status="applied",
+                camera_available=self._camera_controller.is_available(),
             )
             logger.info(
                 "settings change set applied",
@@ -498,6 +505,7 @@ class RuntimeLoop:
                 default_settings=self._default_settings,
                 final_status="rejected",
                 reject_reason=f"{SETTINGS_CHANGE_SET_FAILURE_REASON}:{type(error).__name__}",
+                camera_available=self._camera_controller.is_available(),
             )
             logger.warning(
                 "settings change set rejected",
@@ -537,6 +545,7 @@ class RuntimeLoop:
                 cycle_id=cycle_id,
                 final_status=final_status,
                 reject_reason=reject_reason,
+                camera_available=self._camera_controller.is_available(),
             )
             logger.info(
                 "settings override finalized",
@@ -561,6 +570,7 @@ class RuntimeLoop:
                 cycle_id=cycle_id,
                 final_status="rejected",
                 reject_reason=f"{SETTINGS_OVERRIDE_FAILURE_REASON}:{type(error).__name__}",
+                camera_available=self._camera_controller.is_available(),
             )
             logger.warning(
                 "settings override rejected after failure",
