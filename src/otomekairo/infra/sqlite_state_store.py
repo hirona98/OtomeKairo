@@ -34,6 +34,7 @@ from otomekairo.schema.settings import (
     decode_requested_value,
     normalize_settings_editor_document,
 )
+from otomekairo.usecase.persona_change import evaluate_persona_change
 from otomekairo.usecase.write_memory_plan import (
     build_write_memory_plan,
     validate_write_memory_event_snapshots,
@@ -1781,6 +1782,32 @@ class SqliteStateStore:
                 memory_write_plan=memory_write_plan,
                 created_at=now_ms,
             )
+            self_state_row = connection.execute(
+                """
+                SELECT personality_json, personality_updated_at
+                FROM self_state
+                WHERE row_id = 1
+                """
+            ).fetchone()
+            if self_state_row is None:
+                raise RuntimeError("self_state row is missing")
+            persona_change = evaluate_persona_change(
+                connection=connection,
+                now_ms=now_ms,
+                current_personality=json.loads(self_state_row["personality_json"]),
+                current_personality_updated_at=int(self_state_row["personality_updated_at"]),
+            )
+            if (
+                persona_change.persona_updates is not None
+                and persona_change.updated_personality is not None
+            ):
+                self._apply_persona_updates(
+                    connection=connection,
+                    current_personality=json.loads(self_state_row["personality_json"]),
+                    updated_personality=persona_change.updated_personality,
+                    persona_updates=persona_change.persona_updates,
+                    updated_at=now_ms,
+                )
             self._enqueue_refresh_preview_jobs(
                 connection=connection,
                 cycle_id=str(validated_payload["cycle_id"]),
@@ -1804,6 +1831,64 @@ class SqliteStateStore:
                 completed_at=now_ms,
             )
         return str(memory_state_targets[0]["entity_id"])
+
+    # Block: Persona update apply
+    def _apply_persona_updates(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        current_personality: dict[str, Any],
+        updated_personality: dict[str, Any],
+        persona_updates: dict[str, Any],
+        updated_at: int,
+    ) -> bool:
+        evidence_event_ids = _string_list(
+            persona_updates.get("evidence_event_ids"),
+            field_name="persona_updates.evidence_event_ids",
+        )
+        base_personality_updated_at = int(persona_updates["base_personality_updated_at"])
+        updated_row_count = connection.execute(
+            """
+            UPDATE self_state
+            SET personality_json = ?,
+                personality_updated_at = ?,
+                updated_at = ?
+            WHERE row_id = 1
+              AND personality_updated_at = ?
+            """,
+            (
+                _json_text(updated_personality),
+                updated_at,
+                updated_at,
+                base_personality_updated_at,
+            ),
+        ).rowcount
+        if updated_row_count != 1:
+            return False
+        connection.execute(
+            """
+            INSERT INTO revisions (
+                revision_id,
+                entity_type,
+                entity_id,
+                before_json,
+                after_json,
+                reason,
+                evidence_event_ids_json,
+                created_at
+            )
+            VALUES (?, 'self_state.personality', 'self_state', ?, ?, ?, ?, ?)
+            """,
+            (
+                _opaque_id("rev"),
+                _json_text(current_personality),
+                _json_text(updated_personality),
+                f"write_memory applied persona_updates: {persona_updates['evidence_summary']}",
+                _json_text(evidence_event_ids),
+                updated_at,
+            ),
+        )
+        return True
 
     # Block: Memory state insert
     def _insert_memory_state_with_revision(
@@ -6683,6 +6768,18 @@ def _opaque_id(prefix: str) -> str:
 
 def _json_text(value: Any) -> str:
     return json.dumps(value, ensure_ascii=True, separators=(",", ":"))
+
+
+# Block: String list helper
+def _string_list(value: Any, *, field_name: str) -> list[str]:
+    if not isinstance(value, list) or not value:
+        raise RuntimeError(f"{field_name} must be non-empty list")
+    string_values: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item:
+            raise RuntimeError(f"{field_name} must contain only non-empty strings")
+        string_values.append(item)
+    return string_values
 
 
 def _now_ms() -> int:
