@@ -129,8 +129,26 @@
 
     <!-- Block: Status bar -->
     <footer class="statusbar">
-      <div id="connection-text" class="statusbar-left">状態: 接続中...</div>
-      <div id="runtime-text" class="statusbar-right">状態を確認中...</div>
+      <!-- Block: Status bar primary row -->
+      <div class="statusbar-main">
+        <div id="connection-text" class="statusbar-left">状態: 接続中...</div>
+        <div id="runtime-text" class="statusbar-right">状態を確認中...</div>
+      </div>
+      <!-- Block: Status monitor -->
+      <div class="statusbar-monitor">
+        <div class="statusbar-monitor-row">
+          <div class="statusbar-monitor-label">稼働</div>
+          <div id="runtime-summary-text" class="statusbar-monitor-value">確認中...</div>
+        </div>
+        <div class="statusbar-monitor-row">
+          <div class="statusbar-monitor-label">直近の想起</div>
+          <div id="retrieval-summary-text" class="statusbar-monitor-value">まだありません</div>
+        </div>
+        <div class="statusbar-monitor-row">
+          <div class="statusbar-monitor-label">人格更新</div>
+          <div id="persona-update-summary-text" class="statusbar-monitor-value">まだありません</div>
+        </div>
+      </div>
     </footer>
   </div>
 
