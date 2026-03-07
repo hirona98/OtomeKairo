@@ -240,6 +240,28 @@ SUPPORTED_NOTIFY_ROUTES = ("ui_only", "discord")
 SUPPORTED_REASONING_EFFORTS = ("", "low", "medium", "high")
 AIVIS_CLOUD_OUTPUT_FORMATS = ("wav", "mp3", "ogg", "aac", "flac")
 MOTION_ANIMATION_TYPE_VALUES = (0, 1, 2)
+BEHAVIOR_RESPONSE_PACE_VALUES = ("careful", "balanced", "quick")
+BEHAVIOR_PROACTIVITY_LEVEL_VALUES = ("low", "medium", "high")
+BEHAVIOR_BROWSE_PREFERENCE_VALUES = ("avoid", "balanced", "prefer")
+BEHAVIOR_NOTIFY_PREFERENCE_VALUES = ("quiet", "balanced", "proactive")
+BEHAVIOR_SPEECH_STYLE_VALUES = ("gentle", "neutral", "firm")
+BEHAVIOR_VERBOSITY_BIAS_VALUES = ("short", "balanced", "detailed")
+
+
+# Block: Enumerated setting values
+ENUM_SETTING_ALLOWED_VALUES: dict[str, tuple[str, ...]] = {
+    "llm.reasoning_effort": SUPPORTED_REASONING_EFFORTS,
+    "behavior.response_pace": BEHAVIOR_RESPONSE_PACE_VALUES,
+    "behavior.proactivity_level": BEHAVIOR_PROACTIVITY_LEVEL_VALUES,
+    "behavior.browse_preference": BEHAVIOR_BROWSE_PREFERENCE_VALUES,
+    "behavior.notify_preference": BEHAVIOR_NOTIFY_PREFERENCE_VALUES,
+    "behavior.speech_style": BEHAVIOR_SPEECH_STYLE_VALUES,
+    "behavior.verbosity_bias": BEHAVIOR_VERBOSITY_BIAS_VALUES,
+    "speech.tts.provider": SUPPORTED_TTS_PROVIDERS,
+    "speech.tts.aivis_cloud.output_format": AIVIS_CLOUD_OUTPUT_FORMATS,
+    "speech.stt.provider": SUPPORTED_STT_PROVIDERS,
+    "integrations.notify_route": SUPPORTED_NOTIFY_ROUTES,
+}
 
 
 # Block: Public registry helpers
@@ -492,6 +514,7 @@ def normalize_requested_value(key: str, requested_value: Any, apply_scope: str) 
     _validate_type(definition, requested_value)
     _validate_range(definition, requested_value)
     _validate_length(definition, requested_value)
+    _validate_enumeration(definition, requested_value)
     return {"value_type": definition.value_type, "value": requested_value}
 
 
@@ -508,6 +531,7 @@ def decode_requested_value(key: str, requested_value_json: dict[str, Any]) -> An
     _validate_type(definition, requested_value)
     _validate_range(definition, requested_value)
     _validate_length(definition, requested_value)
+    _validate_enumeration(definition, requested_value)
     return requested_value
 
 
@@ -552,6 +576,15 @@ def _validate_length(definition: SettingDefinition, requested_value: Any) -> Non
         raise SettingsValidationError("invalid_settings_value", f"{definition.key} is too short")
     if definition.max_length is not None and len(requested_value) > definition.max_length:
         raise SettingsValidationError("invalid_settings_value", f"{definition.key} is too long")
+
+
+# Block: Enumerated string validation
+def _validate_enumeration(definition: SettingDefinition, requested_value: Any) -> None:
+    allowed_values = ENUM_SETTING_ALLOWED_VALUES.get(definition.key)
+    if allowed_values is None:
+        return
+    if requested_value not in allowed_values:
+        raise SettingsValidationError("invalid_settings_value", f"{definition.key} is invalid")
 
 
 # Block: Editor state normalization
@@ -806,13 +839,15 @@ def _normalize_behavior_preset_payload(payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise SettingsValidationError("invalid_settings_editor_document", "behavior preset payload must be an object")
     normalized = _normalize_keyed_values(payload, BEHAVIOR_PRESET_SETTING_KEYS)
+
+    # Block: Behavior enumeration validation
     allowed_value_sets = {
-        "behavior.response_pace": {"careful", "balanced", "quick"},
-        "behavior.proactivity_level": {"low", "medium", "high"},
-        "behavior.browse_preference": {"avoid", "balanced", "prefer"},
-        "behavior.notify_preference": {"quiet", "balanced", "proactive"},
-        "behavior.speech_style": {"gentle", "neutral", "firm"},
-        "behavior.verbosity_bias": {"short", "balanced", "detailed"},
+        "behavior.response_pace": BEHAVIOR_RESPONSE_PACE_VALUES,
+        "behavior.proactivity_level": BEHAVIOR_PROACTIVITY_LEVEL_VALUES,
+        "behavior.browse_preference": BEHAVIOR_BROWSE_PREFERENCE_VALUES,
+        "behavior.notify_preference": BEHAVIOR_NOTIFY_PREFERENCE_VALUES,
+        "behavior.speech_style": BEHAVIOR_SPEECH_STYLE_VALUES,
+        "behavior.verbosity_bias": BEHAVIOR_VERBOSITY_BIAS_VALUES,
     }
     for key, allowed_values in allowed_value_sets.items():
         if str(normalized[key]) not in allowed_values:

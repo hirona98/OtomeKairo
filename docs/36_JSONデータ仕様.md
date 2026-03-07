@@ -534,7 +534,7 @@
 - 必須項目は `intention_summary`、`decision_reason`、`action_proposals`、`step_hints`、`speech_draft`、`memory_focus`、`reflection_seed` である
 - `action_proposals` と `step_hints` は配列に固定し、候補がない場合も空配列 `[]` を使う
 - 初期実装の `browser_chat` では、`action_proposals` の各要素は少なくとも `action_type` と `priority` を持つ
-- 初期実装の `browser_chat` では、`action_type` は `speak`、`browse`、`notify`、`wait` のいずれかだけを許可する
+- 初期実装の `browser_chat` では、`action_type` は `speak`、`browse`、`notify`、`look`、`wait` のいずれかだけを許可する
 - 初期実装の `browser_chat` では、`priority` は `0.0..1.0` の `number` に固定する
 - 初期実装の `browser_chat` では、`speak` と `notify` のとき `target_channel=\"browser_chat\"` を必須とする
 - 初期実装の `browser_chat` では、`browse` のとき `query` に非空の検索文字列を必須とする
@@ -908,7 +908,7 @@
 ```
 
 - 必須項目は `status_code`、`label` である
-- `status_code` は、少なくとも `idle`、`thinking`、`speaking`、`waiting_external`、`browsing`、`processing_external_result` を区別する
+- `status_code` は、少なくとも `idle`、`thinking`、`speaking`、`camera_moving`、`waiting_external`、`browsing`、`processing_external_result` を区別する
 - `cycle_id` は任意で、特定サイクルに紐づく更新だけに付ける
 
 <!-- Block: UI Notice -->
@@ -971,7 +971,7 @@
 - `role` は、`message_id` を伴うメッセージ応答だけに付ける
 - `related_input_id` は、入力に対する応答行動だけに付ける
 - `proposal_ref` は、`cognition_result.action_proposals` から確定した候補を追跡したいときに付ける
-- `command_type` は、初期実装では `speak_ui_message`、`dispatch_notice`、`enqueue_browse_task`、`execute_browse_task`、`abandon_browse_task` を使ってよい
+- `command_type` は、初期実装では `speak_ui_message`、`dispatch_notice`、`enqueue_browse_task`、`control_camera_look`、`execute_browse_task`、`abandon_browse_task` を使ってよい
 - `notice_code` と `text` は、`dispatch_notice` を実行する命令だけに付ける
 - `target`、`parameters`、`preconditions`、`stop_conditions`、`timeout_ms`、`requires_reobserve`、`expected_effects` は、`execute` のとき `action_command` をそのまま残したい場合に付けてよい
 - `parameters.task_id`、`parameters.query`、`parameters.target_channel` は、`enqueue_browse_task` を実行する命令だけに付ける

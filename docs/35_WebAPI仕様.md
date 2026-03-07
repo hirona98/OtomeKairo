@@ -563,7 +563,7 @@ data: {"message_id":"msg_...","text":"お","chunk_index":0}
   - 役割: UI に見せる状態変化
   - 必須項目: `status_code`, `label`
   - 任意項目: `cycle_id`
-  - `status_code` は、少なくとも `idle`, `thinking`, `speaking`, `waiting_external`, `browsing`, `processing_external_result` を区別する
+  - `status_code` は、少なくとも `idle`, `thinking`, `speaking`, `camera_moving`, `waiting_external`, `browsing`, `processing_external_result` を区別する
 
 - `notice`
   - 役割: 自発行動や外部通知などの補助通知
