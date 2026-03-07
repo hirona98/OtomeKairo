@@ -360,6 +360,8 @@ flowchart TD
 - 主キー: `preference_id TEXT PRIMARY KEY`
 - 必須列: `owner_scope`, `target_entity_ref_json`, `domain`, `polarity`, `status`, `confidence`, `evidence_event_ids_json`, `created_at`, `updated_at`
 - `owner_scope` は、少なくとも `self`、`other_entity` を区別する
+- `target_entity_ref_json` は、少なくとも `target_kind`、`target_key` を持つ JSON とする
+- 初期実装の `target_entity_ref_json.target_kind` は、少なくとも `action_type`、`observation_kind` を区別する
 - `polarity` は、`like`、`dislike` に固定する
 - `status` は、`candidate`、`confirmed`、`revoked` に固定する
 - 主要索引: `(owner_scope, status, updated_at DESC)`, `(domain, polarity, status)`
@@ -371,6 +373,7 @@ flowchart TD
 - 主キー: `event_affect_id TEXT PRIMARY KEY`
 - 必須列: `event_id`, `moment_affect_text`, `moment_affect_labels_json`, `vad_json`, `confidence`, `created_at`
 - `event_id` は一意とし、1 イベント 1 件を基本とする
+- `moment_affect_labels_json` は、短い感情ラベルの順序付き配列を持つ JSON とする
 - `vad_json` は、`v`、`a`、`d` の 3 軸を持つ JSON とする
 - 主要制約: `UNIQUE(event_id)`
 - 主要索引: `(created_at DESC)`
@@ -393,6 +396,7 @@ flowchart TD
 - 主キー: `event_thread_id TEXT PRIMARY KEY`
 - 必須列: `event_id`, `thread_key`, `confidence`, `created_at`, `updated_at`
 - 任意列: `thread_role`
+- 初期実装では、`thread_key` に `cycle:<cycle_id>` を使って同一短周期のイベント束を表してよい
 - 同一イベント・同一スレッドの重複を許さない
 - 主要制約: `UNIQUE(event_id, thread_key)`
 - 主要索引: `(event_id)`, `(thread_key)`
@@ -404,6 +408,7 @@ flowchart TD
 - 主キー: `state_link_id TEXT PRIMARY KEY`
 - 必須列: `from_state_id`, `to_state_id`, `label`, `confidence`, `evidence_event_ids_json`, `created_at`, `updated_at`
 - `label` は、少なくとも `relates_to`、`derived_from`、`supports`、`contradicts` を区別する
+- 初期実装では、外部確認済み `fact` から同周期の `summary` へ `supports` を張ってよい
 - 同一向き・同一ラベルの重複を許さない
 - 主要制約: `UNIQUE(from_state_id, to_state_id, label)`
 - 主要索引: `(from_state_id)`, `(to_state_id)`, `(label)`

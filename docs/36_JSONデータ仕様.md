@@ -15,8 +15,8 @@
 ## このドキュメントで固定する範囲
 
 - 固定するのは、初期実装で使う JSON オブジェクトのキー、型、必須項目、固定語彙である
-- 固定するのは、`pending_inputs.payload_json`、`settings_overrides.requested_value_json`、`settings_editor_state.system_values_json`、5 種のプリセットテーブルの `payload_json`、`settings_change_sets.payload_json`、`ui_outbound_events.payload_json`、`action_history.command_json`、`action_history.observed_effects_json`、`memory_jobs.payload_ref_json`、`memory_job_payloads.payload_json`、主要な Web API 本文である
-- 固定するのは、`self_state.personality_json`、`self_state.current_emotion_json`、`self_state.long_term_goals_json`、`self_state.relationship_overview_json`、`self_state.invariants_json`、短周期の内部で使う `selection_profile`、`persona_consistency_score`、`attention_score_breakdown`、`self_initiated_score_breakdown`、`action_candidate_score`、`cognition_result`、長周期の内部で使う `personality_change_proposal`、`persona_updates` の形である
+- 固定するのは、`pending_inputs.payload_json`、`settings_overrides.requested_value_json`、`settings_editor_state.system_values_json`、5 種のプリセットテーブルの `payload_json`、`settings_change_sets.payload_json`、`ui_outbound_events.payload_json`、`action_history.command_json`、`action_history.observed_effects_json`、`memory_jobs.payload_ref_json`、`memory_job_payloads.payload_json`、`preference_memory.target_entity_ref_json`、`event_affects.moment_affect_labels_json`、`event_affects.vad_json`、主要な Web API 本文である
+- 固定するのは、`self_state.personality_json`、`self_state.current_emotion_json`、`self_state.long_term_goals_json`、`self_state.relationship_overview_json`、`self_state.invariants_json`、短周期の内部で使う `selection_profile`、`persona_consistency_score`、`attention_score_breakdown`、`self_initiated_score_breakdown`、`action_candidate_score`、`cognition_result`、長周期の内部で使う `MemoryWritePlan`、`personality_change_proposal`、`persona_updates` の形である
 - 固定しないのは、Python のクラス名、Pydantic モデル名、OpenAPI の自動生成細部である
 - 固定しないのは、将来追加する未使用フィールドや後段の拡張イベント種別である
 
@@ -85,6 +85,21 @@
 - `target_key` は、対象を表す短い `string` である
 - `weight` は、`0.0..1.0` の `number` に固定する
 - `evidence_count` は、昇格根拠件数を示す `integer` であり、`1` 未満を許可しない
+
+<!-- Block: Preference Target Ref -->
+### `preference_target_entity_ref`
+
+```json
+{
+  "target_kind": "action_type",
+  "target_key": "browse"
+}
+```
+
+- `preference_target_entity_ref` は、`preference_memory.target_entity_ref_json` と `MemoryWritePlan.preference_updates.target_entity_ref` で共通に使う
+- 必須項目は `target_kind`、`target_key` である
+- `target_kind` は、少なくとも `action_type`、`observation_kind` を区別する
+- `target_key` は、対象を表す非空の `string` である
 
 <!-- Block: Error Body -->
 ### エラー応答 JSON
@@ -617,6 +632,153 @@
 - `evidence_summary` は、監査と `revisions` の理由づけに使う短い要約である
 - `base_personality_updated_at` は、適用開始時の `self_state.personality_updated_at` と一致しなければならない
 - 適用時に `base_personality_updated_at` が現在の `self_state.personality_updated_at` と一致しない場合、その `persona_updates` は stale として棄却し、後続の `write_memory` で再生成する
+
+<!-- Block: Memory Write Group -->
+## 記憶更新の内部 JSON
+
+<!-- Block: Memory Write Plan -->
+### `MemoryWritePlan`
+
+```json
+{
+  "event_annotations": [
+    {
+      "event_id": "evt_001",
+      "about_time": null,
+      "entities": [],
+      "thread_hints": ["cycle:cycle_001"]
+    },
+    {
+      "event_id": "evt_002",
+      "about_time": null,
+      "entities": [],
+      "thread_hints": ["cycle:cycle_001"]
+    }
+  ],
+  "state_updates": [
+    {
+      "state_ref": "summary_primary",
+      "operation": "upsert",
+      "memory_kind": "summary",
+      "body_text": "中心:ユーザーが外部確認を求めた",
+      "payload": {
+        "source_job_id": "job_001",
+        "job_kind": "write_memory",
+        "source_cycle_id": "cycle_001",
+        "primary_event_id": "evt_001",
+        "source_event_ids": ["evt_001", "evt_002"],
+        "summary_kind": "minimal_write_memory"
+      },
+      "confidence": 0.5,
+      "importance": 0.5,
+      "memory_strength": 0.5,
+      "last_confirmed_at": 1760000000000,
+      "evidence_event_ids": ["evt_001"],
+      "revision_reason": "write_memory created summary"
+    },
+    {
+      "state_ref": "fact_external_1",
+      "operation": "upsert",
+      "memory_kind": "fact",
+      "body_text": "外部確認: 東京の天気 => 晴れで風は弱い",
+      "payload": {
+        "source_job_id": "job_001",
+        "job_kind": "write_memory",
+        "source_cycle_id": "cycle_001",
+        "source_event_ids": ["evt_001", "evt_002"],
+        "fact_kind": "external_search_result",
+        "query": "東京の天気",
+        "summary_text": "晴れで風は弱い",
+        "source_task_id": "task_001"
+      },
+      "confidence": 0.85,
+      "importance": 0.75,
+      "memory_strength": 0.75,
+      "last_confirmed_at": 1760000000000,
+      "evidence_event_ids": ["evt_001", "evt_002"],
+      "revision_reason": "write_memory created external fact"
+    }
+  ],
+  "preference_updates": [
+    {
+      "owner_scope": "self",
+      "target_entity_ref": {
+        "target_kind": "action_type",
+        "target_key": "browse"
+      },
+      "domain": "action_type",
+      "polarity": "like",
+      "status": "candidate",
+      "confidence": 0.59,
+      "evidence_event_ids": ["evt_001", "evt_002"],
+      "revision_reason": "write_memory observed browse leaning like"
+    }
+  ],
+  "event_affect": [
+    {
+      "event_id": "evt_001",
+      "moment_affect_text": "新しい観測に触れて、好奇心が少し動いた",
+      "moment_affect_labels": ["curious"],
+      "vad": {
+        "v": 0.16,
+        "a": 0.24,
+        "d": 0.08
+      },
+      "confidence": 0.6,
+      "evidence_event_ids": ["evt_001"],
+      "revision_reason": "write_memory inferred event affect"
+    }
+  ],
+  "context_updates": {
+    "event_links": [
+      {
+        "from_event_id": "evt_002",
+        "to_event_id": "evt_001",
+        "label": "continuation",
+        "confidence": 0.6,
+        "evidence_event_ids": ["evt_001", "evt_002"],
+        "revision_reason": "write_memory linked ordered source events"
+      }
+    ],
+    "event_threads": [
+      {
+        "event_id": "evt_001",
+        "thread_key": "cycle:cycle_001",
+        "confidence": 0.68,
+        "thread_role": "primary",
+        "evidence_event_ids": ["evt_001", "evt_002"],
+        "revision_reason": "write_memory grouped source events into cycle thread"
+      }
+    ],
+    "state_links": [
+      {
+        "from_state_ref": "fact_external_1",
+        "to_state_ref": "summary_primary",
+        "label": "supports",
+        "confidence": 0.72,
+        "evidence_event_ids": ["evt_001", "evt_002"],
+        "revision_reason": "write_memory linked external fact to summary"
+      }
+    ]
+  },
+  "revision_reasons": [
+    "write_memory created summary",
+    "write_memory created external fact"
+  ]
+}
+```
+
+- `MemoryWritePlan` は、長周期の `write_memory` 内部で生成・検証してから適用する固定 shape のオブジェクトである
+- 必須項目は `event_annotations`、`state_updates`、`preference_updates`、`event_affect`、`context_updates`、`revision_reasons` である
+- `event_annotations` は、`memory_job_payloads.payload_json.source_event_ids` と同じ件数・同じ順序で並ばなければならない
+- `state_updates` の各要素は、少なくとも `state_ref`、`operation`、`memory_kind`、`body_text`、`payload`、`confidence`、`importance`、`memory_strength`、`last_confirmed_at`、`evidence_event_ids`、`revision_reason` を持つ
+- `state_ref` は、`context_updates.state_links` から参照するための内部別名であり、同一 `MemoryWritePlan` 内で一意でなければならない
+- 現在の実装では、`state_updates.operation` は `upsert` だけを許可する
+- `preference_updates.target_entity_ref` は `preference_target_entity_ref` を使う
+- `event_affect.vad` は、`v`、`a`、`d` の 3 キーを必須とし、各値は `-1.0..+1.0` の `number` とする
+- `context_updates` は、`event_links`、`event_threads`、`state_links` の 3 キーを必須とする
+- `context_updates.state_links` は、永続 ID ではなく同一 `MemoryWritePlan.state_updates` 内の `state_ref` を参照する
+- `revision_reasons` は、`state_updates` と同じ件数を持ち、各要素は対応する `state_updates.revision_reason` と一致しなければならない
 
 <!-- Block: Runtime Settings Group -->
 ## ランタイム設定テーブルの JSON
