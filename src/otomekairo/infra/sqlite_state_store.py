@@ -1762,6 +1762,10 @@ class SqliteStateStore:
                 payload=validated_payload,
                 event_entries=event_entries,
             )
+            action_entries = _action_entries_for_write_memory_plan(
+                connection=connection,
+                cycle_id=str(validated_payload["cycle_id"]),
+            )
             browse_fact_entries = _browse_fact_entries_for_write_memory_plan(
                 connection=connection,
                 cycle_id=str(validated_payload["cycle_id"]),
@@ -1771,12 +1775,13 @@ class SqliteStateStore:
                     source_job_id=memory_job.job_id,
                     payload=validated_payload,
                     event_entries=event_entries,
+                    action_entries=action_entries,
                     browse_fact_entries=browse_fact_entries,
                     applied_at=now_ms,
                 ),
                 payload=validated_payload,
             )
-            memory_state_targets = self._apply_write_memory_plan(
+            write_memory_apply_result = self._apply_write_memory_plan(
                 connection=connection,
                 memory_write_plan=memory_write_plan,
                 created_at=now_ms,
@@ -1791,7 +1796,7 @@ class SqliteStateStore:
                 connection=connection,
                 cycle_id=str(validated_payload["cycle_id"]),
                 source_event_ids=source_event_ids,
-                targets=memory_state_targets,
+                targets=list(write_memory_apply_result["embedding_targets"]),
                 embedding_model=self._require_runtime_setting_string(
                     connection=connection,
                     key="llm.embedding_model",
@@ -1803,7 +1808,46 @@ class SqliteStateStore:
                 job_id=memory_job.job_id,
                 completed_at=now_ms,
             )
-        return str(memory_state_targets[0]["entity_id"])
+        return str(write_memory_apply_result["memory_state_targets"][0]["entity_id"])
+
+    # Block: Revision insert
+    def _insert_revision(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        entity_type: str,
+        entity_id: str,
+        before_json: dict[str, Any],
+        after_json: dict[str, Any],
+        revision_reason: str,
+        evidence_event_ids: list[str],
+        created_at: int,
+    ) -> None:
+        connection.execute(
+            """
+            INSERT INTO revisions (
+                revision_id,
+                entity_type,
+                entity_id,
+                before_json,
+                after_json,
+                reason,
+                evidence_event_ids_json,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                _opaque_id("rev"),
+                entity_type,
+                entity_id,
+                _json_text(before_json),
+                _json_text(after_json),
+                revision_reason,
+                _json_text(evidence_event_ids),
+                created_at,
+            ),
+        )
 
     # Block: Memory state insert
     def _insert_memory_state_with_revision(
@@ -1854,35 +1898,19 @@ class SqliteStateStore:
                 created_at,
             ),
         )
-        connection.execute(
-            """
-            INSERT INTO revisions (
-                revision_id,
-                entity_type,
-                entity_id,
-                before_json,
-                after_json,
-                reason,
-                evidence_event_ids_json,
-                created_at
-            )
-            VALUES (?, 'memory_states', ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                _opaque_id("rev"),
-                memory_state_id,
-                _json_text({}),
-                _json_text(
-                    {
-                        "memory_kind": memory_kind,
-                        "body_text": body_text,
-                        **payload_json,
-                    }
-                ),
-                revision_reason,
-                _json_text(evidence_event_ids),
-                created_at,
-            ),
+        self._insert_revision(
+            connection=connection,
+            entity_type="memory_states",
+            entity_id=memory_state_id,
+            before_json={},
+            after_json={
+                "memory_kind": memory_kind,
+                "body_text": body_text,
+                **payload_json,
+            },
+            revision_reason=revision_reason,
+            evidence_event_ids=evidence_event_ids,
+            created_at=created_at,
         )
         return {
             "entity_type": "memory_state",
@@ -1898,27 +1926,698 @@ class SqliteStateStore:
         connection: sqlite3.Connection,
         memory_write_plan: dict[str, Any],
         created_at: int,
-    ) -> list[dict[str, Any]]:
+    ) -> dict[str, list[dict[str, Any]]]:
+        memory_state_targets, state_id_by_ref = self._apply_state_updates(
+            connection=connection,
+            state_updates=list(memory_write_plan["state_updates"]),
+            created_at=created_at,
+        )
+        self._apply_preference_updates(
+            connection=connection,
+            preference_updates=list(memory_write_plan["preference_updates"]),
+            created_at=created_at,
+        )
+        event_affect_targets = self._apply_event_affect_updates(
+            connection=connection,
+            event_affect_updates=list(memory_write_plan["event_affect"]),
+            created_at=created_at,
+        )
+        self._apply_context_updates(
+            connection=connection,
+            context_updates=dict(memory_write_plan["context_updates"]),
+            state_id_by_ref=state_id_by_ref,
+            created_at=created_at,
+        )
+        return {
+            "memory_state_targets": memory_state_targets,
+            "embedding_targets": [
+                *memory_state_targets,
+                *event_affect_targets,
+            ],
+        }
+
+    # Block: State update apply
+    def _apply_state_updates(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        state_updates: list[dict[str, Any]],
+        created_at: int,
+    ) -> tuple[list[dict[str, Any]], dict[str, str]]:
         memory_state_targets: list[dict[str, Any]] = []
-        for state_update in memory_write_plan["state_updates"]:
+        state_id_by_ref: dict[str, str] = {}
+        for state_update in state_updates:
             if state_update["operation"] != "upsert":
                 raise RuntimeError("write_memory initial implementation only supports upsert")
-            memory_state_targets.append(
-                self._insert_memory_state_with_revision(
+            memory_state_target = self._insert_memory_state_with_revision(
+                connection=connection,
+                memory_kind=str(state_update["memory_kind"]),
+                body_text=str(state_update["body_text"]),
+                payload_json=dict(state_update["payload"]),
+                confidence=float(state_update["confidence"]),
+                importance=float(state_update["importance"]),
+                memory_strength=float(state_update["memory_strength"]),
+                last_confirmed_at=int(state_update["last_confirmed_at"]),
+                evidence_event_ids=list(state_update["evidence_event_ids"]),
+                created_at=created_at,
+                revision_reason=str(state_update["revision_reason"]),
+            )
+            memory_state_targets.append(memory_state_target)
+            state_id_by_ref[str(state_update["state_ref"])] = str(memory_state_target["entity_id"])
+        return (memory_state_targets, state_id_by_ref)
+
+    # Block: Preference update apply
+    def _apply_preference_updates(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        preference_updates: list[dict[str, Any]],
+        created_at: int,
+    ) -> None:
+        for preference_update in preference_updates:
+            self._upsert_preference_memory_with_revision(
+                connection=connection,
+                preference_update=preference_update,
+                created_at=created_at,
+            )
+
+    # Block: Event affect apply
+    def _apply_event_affect_updates(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        event_affect_updates: list[dict[str, Any]],
+        created_at: int,
+    ) -> list[dict[str, Any]]:
+        embedding_targets: list[dict[str, Any]] = []
+        for event_affect_update in event_affect_updates:
+            embedding_targets.append(
+                self._upsert_event_affect_with_revision(
                     connection=connection,
-                    memory_kind=str(state_update["memory_kind"]),
-                    body_text=str(state_update["body_text"]),
-                    payload_json=dict(state_update["payload"]),
-                    confidence=float(state_update["confidence"]),
-                    importance=float(state_update["importance"]),
-                    memory_strength=float(state_update["memory_strength"]),
-                    last_confirmed_at=int(state_update["last_confirmed_at"]),
-                    evidence_event_ids=list(state_update["evidence_event_ids"]),
+                    event_affect_update=event_affect_update,
                     created_at=created_at,
-                    revision_reason=str(state_update["revision_reason"]),
                 )
             )
-        return memory_state_targets
+        return embedding_targets
+
+    # Block: Context update apply
+    def _apply_context_updates(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        context_updates: dict[str, Any],
+        state_id_by_ref: dict[str, str],
+        created_at: int,
+    ) -> None:
+        for event_link_update in list(context_updates["event_links"]):
+            self._upsert_event_link_with_revision(
+                connection=connection,
+                event_link_update=event_link_update,
+                created_at=created_at,
+            )
+        for event_thread_update in list(context_updates["event_threads"]):
+            self._upsert_event_thread_with_revision(
+                connection=connection,
+                event_thread_update=event_thread_update,
+                created_at=created_at,
+            )
+        for state_link_update in list(context_updates["state_links"]):
+            from_state_id = state_id_by_ref.get(str(state_link_update["from_state_ref"]))
+            to_state_id = state_id_by_ref.get(str(state_link_update["to_state_ref"]))
+            if from_state_id is None or to_state_id is None:
+                raise RuntimeError("write_memory state_links must resolve to inserted state refs")
+            self._upsert_state_link_with_revision(
+                connection=connection,
+                from_state_id=from_state_id,
+                to_state_id=to_state_id,
+                state_link_update=state_link_update,
+                created_at=created_at,
+            )
+
+    # Block: Preference memory upsert
+    def _upsert_preference_memory_with_revision(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        preference_update: dict[str, Any],
+        created_at: int,
+    ) -> None:
+        target_entity_ref = dict(preference_update["target_entity_ref"])
+        target_entity_ref_json = _json_text(target_entity_ref)
+        existing_row = connection.execute(
+            """
+            SELECT preference_id,
+                   owner_scope,
+                   target_entity_ref_json,
+                   domain,
+                   polarity,
+                   status,
+                   confidence,
+                   evidence_event_ids_json,
+                   created_at,
+                   updated_at
+            FROM preference_memory
+            WHERE owner_scope = ?
+              AND target_entity_ref_json = ?
+              AND domain = ?
+              AND polarity = ?
+            ORDER BY updated_at DESC, created_at DESC, preference_id DESC
+            LIMIT 1
+            """,
+            (
+                str(preference_update["owner_scope"]),
+                target_entity_ref_json,
+                str(preference_update["domain"]),
+                str(preference_update["polarity"]),
+            ),
+        ).fetchone()
+        merged_evidence_event_ids = _merged_unique_strings(
+            _decoded_string_array_json(
+                existing_row["evidence_event_ids_json"] if existing_row is not None else None
+            ),
+            list(preference_update["evidence_event_ids"]),
+        )
+        after_json = {
+            "owner_scope": str(preference_update["owner_scope"]),
+            "target_entity_ref": target_entity_ref,
+            "domain": str(preference_update["domain"]),
+            "polarity": str(preference_update["polarity"]),
+            "status": str(preference_update["status"]),
+            "confidence": float(preference_update["confidence"]),
+        }
+        if existing_row is None:
+            preference_id = _opaque_id("pref")
+            connection.execute(
+                """
+                INSERT INTO preference_memory (
+                    preference_id,
+                    owner_scope,
+                    target_entity_ref_json,
+                    domain,
+                    polarity,
+                    status,
+                    confidence,
+                    evidence_event_ids_json,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    preference_id,
+                    str(preference_update["owner_scope"]),
+                    target_entity_ref_json,
+                    str(preference_update["domain"]),
+                    str(preference_update["polarity"]),
+                    str(preference_update["status"]),
+                    float(preference_update["confidence"]),
+                    _json_text(merged_evidence_event_ids),
+                    created_at,
+                    created_at,
+                ),
+            )
+            self._insert_revision(
+                connection=connection,
+                entity_type="preference_memory",
+                entity_id=preference_id,
+                before_json={},
+                after_json=after_json,
+                revision_reason=str(preference_update["revision_reason"]),
+                evidence_event_ids=merged_evidence_event_ids,
+                created_at=created_at,
+            )
+            return
+        preference_id = str(existing_row["preference_id"])
+        before_json = {
+            "owner_scope": str(existing_row["owner_scope"]),
+            "target_entity_ref": _decoded_object_json(existing_row["target_entity_ref_json"]),
+            "domain": str(existing_row["domain"]),
+            "polarity": str(existing_row["polarity"]),
+            "status": str(existing_row["status"]),
+            "confidence": float(existing_row["confidence"]),
+        }
+        connection.execute(
+            """
+            UPDATE preference_memory
+            SET status = ?,
+                confidence = ?,
+                evidence_event_ids_json = ?,
+                updated_at = ?
+            WHERE preference_id = ?
+            """,
+            (
+                str(preference_update["status"]),
+                float(preference_update["confidence"]),
+                _json_text(merged_evidence_event_ids),
+                created_at,
+                preference_id,
+            ),
+        )
+        self._insert_revision(
+            connection=connection,
+            entity_type="preference_memory",
+            entity_id=preference_id,
+            before_json=before_json,
+            after_json=after_json,
+            revision_reason=str(preference_update["revision_reason"]),
+            evidence_event_ids=merged_evidence_event_ids,
+            created_at=created_at,
+        )
+
+    # Block: Event affect upsert
+    def _upsert_event_affect_with_revision(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        event_affect_update: dict[str, Any],
+        created_at: int,
+    ) -> dict[str, Any]:
+        existing_row = connection.execute(
+            """
+            SELECT event_affect_id,
+                   event_id,
+                   moment_affect_text,
+                   moment_affect_labels_json,
+                   vad_json,
+                   confidence,
+                   created_at
+            FROM event_affects
+            WHERE event_id = ?
+            """,
+            (str(event_affect_update["event_id"]),),
+        ).fetchone()
+        after_json = {
+            "event_id": str(event_affect_update["event_id"]),
+            "moment_affect_text": str(event_affect_update["moment_affect_text"]),
+            "moment_affect_labels": list(event_affect_update["moment_affect_labels"]),
+            "vad": dict(event_affect_update["vad"]),
+            "confidence": float(event_affect_update["confidence"]),
+        }
+        if existing_row is None:
+            event_affect_id = _opaque_id("eaf")
+            connection.execute(
+                """
+                INSERT INTO event_affects (
+                    event_affect_id,
+                    event_id,
+                    moment_affect_text,
+                    moment_affect_labels_json,
+                    vad_json,
+                    confidence,
+                    created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event_affect_id,
+                    str(event_affect_update["event_id"]),
+                    str(event_affect_update["moment_affect_text"]),
+                    _json_text(list(event_affect_update["moment_affect_labels"])),
+                    _json_text(dict(event_affect_update["vad"])),
+                    float(event_affect_update["confidence"]),
+                    created_at,
+                ),
+            )
+            self._insert_revision(
+                connection=connection,
+                entity_type="event_affects",
+                entity_id=event_affect_id,
+                before_json={},
+                after_json=after_json,
+                revision_reason=str(event_affect_update["revision_reason"]),
+                evidence_event_ids=list(event_affect_update["evidence_event_ids"]),
+                created_at=created_at,
+            )
+            return {
+                "entity_type": "event_affect",
+                "entity_id": event_affect_id,
+                "source_updated_at": created_at,
+                "current_searchable": True,
+            }
+        event_affect_id = str(existing_row["event_affect_id"])
+        before_json = {
+            "event_id": str(existing_row["event_id"]),
+            "moment_affect_text": str(existing_row["moment_affect_text"]),
+            "moment_affect_labels": _decoded_string_array_json(existing_row["moment_affect_labels_json"]),
+            "vad": _decoded_object_json(existing_row["vad_json"]),
+            "confidence": float(existing_row["confidence"]),
+        }
+        connection.execute(
+            """
+            UPDATE event_affects
+            SET moment_affect_text = ?,
+                moment_affect_labels_json = ?,
+                vad_json = ?,
+                confidence = ?
+            WHERE event_affect_id = ?
+            """,
+            (
+                str(event_affect_update["moment_affect_text"]),
+                _json_text(list(event_affect_update["moment_affect_labels"])),
+                _json_text(dict(event_affect_update["vad"])),
+                float(event_affect_update["confidence"]),
+                event_affect_id,
+            ),
+        )
+        self._insert_revision(
+            connection=connection,
+            entity_type="event_affects",
+            entity_id=event_affect_id,
+            before_json=before_json,
+            after_json=after_json,
+            revision_reason=str(event_affect_update["revision_reason"]),
+            evidence_event_ids=list(event_affect_update["evidence_event_ids"]),
+            created_at=created_at,
+        )
+        return {
+            "entity_type": "event_affect",
+            "entity_id": event_affect_id,
+            "source_updated_at": created_at,
+            "current_searchable": True,
+        }
+
+    # Block: Event link upsert
+    def _upsert_event_link_with_revision(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        event_link_update: dict[str, Any],
+        created_at: int,
+    ) -> None:
+        existing_row = connection.execute(
+            """
+            SELECT event_link_id,
+                   from_event_id,
+                   to_event_id,
+                   label,
+                   confidence,
+                   evidence_event_ids_json
+            FROM event_links
+            WHERE from_event_id = ?
+              AND to_event_id = ?
+              AND label = ?
+            """,
+            (
+                str(event_link_update["from_event_id"]),
+                str(event_link_update["to_event_id"]),
+                str(event_link_update["label"]),
+            ),
+        ).fetchone()
+        merged_evidence_event_ids = _merged_unique_strings(
+            _decoded_string_array_json(
+                existing_row["evidence_event_ids_json"] if existing_row is not None else None
+            ),
+            list(event_link_update["evidence_event_ids"]),
+        )
+        after_json = {
+            "from_event_id": str(event_link_update["from_event_id"]),
+            "to_event_id": str(event_link_update["to_event_id"]),
+            "label": str(event_link_update["label"]),
+            "confidence": float(event_link_update["confidence"]),
+        }
+        if existing_row is None:
+            event_link_id = _opaque_id("eln")
+            connection.execute(
+                """
+                INSERT INTO event_links (
+                    event_link_id,
+                    from_event_id,
+                    to_event_id,
+                    label,
+                    confidence,
+                    evidence_event_ids_json,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event_link_id,
+                    str(event_link_update["from_event_id"]),
+                    str(event_link_update["to_event_id"]),
+                    str(event_link_update["label"]),
+                    float(event_link_update["confidence"]),
+                    _json_text(merged_evidence_event_ids),
+                    created_at,
+                    created_at,
+                ),
+            )
+            self._insert_revision(
+                connection=connection,
+                entity_type="event_links",
+                entity_id=event_link_id,
+                before_json={},
+                after_json=after_json,
+                revision_reason=str(event_link_update["revision_reason"]),
+                evidence_event_ids=merged_evidence_event_ids,
+                created_at=created_at,
+            )
+            return
+        event_link_id = str(existing_row["event_link_id"])
+        before_json = {
+            "from_event_id": str(existing_row["from_event_id"]),
+            "to_event_id": str(existing_row["to_event_id"]),
+            "label": str(existing_row["label"]),
+            "confidence": float(existing_row["confidence"]),
+        }
+        connection.execute(
+            """
+            UPDATE event_links
+            SET confidence = ?,
+                evidence_event_ids_json = ?,
+                updated_at = ?
+            WHERE event_link_id = ?
+            """,
+            (
+                float(event_link_update["confidence"]),
+                _json_text(merged_evidence_event_ids),
+                created_at,
+                event_link_id,
+            ),
+        )
+        self._insert_revision(
+            connection=connection,
+            entity_type="event_links",
+            entity_id=event_link_id,
+            before_json=before_json,
+            after_json=after_json,
+            revision_reason=str(event_link_update["revision_reason"]),
+            evidence_event_ids=merged_evidence_event_ids,
+            created_at=created_at,
+        )
+
+    # Block: Event thread upsert
+    def _upsert_event_thread_with_revision(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        event_thread_update: dict[str, Any],
+        created_at: int,
+    ) -> None:
+        existing_row = connection.execute(
+            """
+            SELECT event_thread_id,
+                   event_id,
+                   thread_key,
+                   confidence,
+                   created_at,
+                   updated_at,
+                   thread_role
+            FROM event_threads
+            WHERE event_id = ?
+              AND thread_key = ?
+            """,
+            (
+                str(event_thread_update["event_id"]),
+                str(event_thread_update["thread_key"]),
+            ),
+        ).fetchone()
+        after_json = {
+            "event_id": str(event_thread_update["event_id"]),
+            "thread_key": str(event_thread_update["thread_key"]),
+            "confidence": float(event_thread_update["confidence"]),
+            "thread_role": event_thread_update.get("thread_role"),
+        }
+        if existing_row is None:
+            event_thread_id = _opaque_id("eth")
+            connection.execute(
+                """
+                INSERT INTO event_threads (
+                    event_thread_id,
+                    event_id,
+                    thread_key,
+                    confidence,
+                    created_at,
+                    updated_at,
+                    thread_role
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event_thread_id,
+                    str(event_thread_update["event_id"]),
+                    str(event_thread_update["thread_key"]),
+                    float(event_thread_update["confidence"]),
+                    created_at,
+                    created_at,
+                    event_thread_update.get("thread_role"),
+                ),
+            )
+            self._insert_revision(
+                connection=connection,
+                entity_type="event_threads",
+                entity_id=event_thread_id,
+                before_json={},
+                after_json=after_json,
+                revision_reason=str(event_thread_update["revision_reason"]),
+                evidence_event_ids=list(event_thread_update["evidence_event_ids"]),
+                created_at=created_at,
+            )
+            return
+        event_thread_id = str(existing_row["event_thread_id"])
+        before_json = {
+            "event_id": str(existing_row["event_id"]),
+            "thread_key": str(existing_row["thread_key"]),
+            "confidence": float(existing_row["confidence"]),
+            "thread_role": existing_row["thread_role"],
+        }
+        connection.execute(
+            """
+            UPDATE event_threads
+            SET confidence = ?,
+                updated_at = ?,
+                thread_role = ?
+            WHERE event_thread_id = ?
+            """,
+            (
+                float(event_thread_update["confidence"]),
+                created_at,
+                event_thread_update.get("thread_role"),
+                event_thread_id,
+            ),
+        )
+        self._insert_revision(
+            connection=connection,
+            entity_type="event_threads",
+            entity_id=event_thread_id,
+            before_json=before_json,
+            after_json=after_json,
+            revision_reason=str(event_thread_update["revision_reason"]),
+            evidence_event_ids=list(event_thread_update["evidence_event_ids"]),
+            created_at=created_at,
+        )
+
+    # Block: State link upsert
+    def _upsert_state_link_with_revision(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        from_state_id: str,
+        to_state_id: str,
+        state_link_update: dict[str, Any],
+        created_at: int,
+    ) -> None:
+        existing_row = connection.execute(
+            """
+            SELECT state_link_id,
+                   from_state_id,
+                   to_state_id,
+                   label,
+                   confidence,
+                   evidence_event_ids_json
+            FROM state_links
+            WHERE from_state_id = ?
+              AND to_state_id = ?
+              AND label = ?
+            """,
+            (
+                from_state_id,
+                to_state_id,
+                str(state_link_update["label"]),
+            ),
+        ).fetchone()
+        merged_evidence_event_ids = _merged_unique_strings(
+            _decoded_string_array_json(
+                existing_row["evidence_event_ids_json"] if existing_row is not None else None
+            ),
+            list(state_link_update["evidence_event_ids"]),
+        )
+        after_json = {
+            "from_state_id": from_state_id,
+            "to_state_id": to_state_id,
+            "label": str(state_link_update["label"]),
+            "confidence": float(state_link_update["confidence"]),
+        }
+        if existing_row is None:
+            state_link_id = _opaque_id("sln")
+            connection.execute(
+                """
+                INSERT INTO state_links (
+                    state_link_id,
+                    from_state_id,
+                    to_state_id,
+                    label,
+                    confidence,
+                    evidence_event_ids_json,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    state_link_id,
+                    from_state_id,
+                    to_state_id,
+                    str(state_link_update["label"]),
+                    float(state_link_update["confidence"]),
+                    _json_text(merged_evidence_event_ids),
+                    created_at,
+                    created_at,
+                ),
+            )
+            self._insert_revision(
+                connection=connection,
+                entity_type="state_links",
+                entity_id=state_link_id,
+                before_json={},
+                after_json=after_json,
+                revision_reason=str(state_link_update["revision_reason"]),
+                evidence_event_ids=merged_evidence_event_ids,
+                created_at=created_at,
+            )
+            return
+        state_link_id = str(existing_row["state_link_id"])
+        before_json = {
+            "from_state_id": str(existing_row["from_state_id"]),
+            "to_state_id": str(existing_row["to_state_id"]),
+            "label": str(existing_row["label"]),
+            "confidence": float(existing_row["confidence"]),
+        }
+        connection.execute(
+            """
+            UPDATE state_links
+            SET confidence = ?,
+                evidence_event_ids_json = ?,
+                updated_at = ?
+            WHERE state_link_id = ?
+            """,
+            (
+                float(state_link_update["confidence"]),
+                _json_text(merged_evidence_event_ids),
+                created_at,
+                state_link_id,
+            ),
+        )
+        self._insert_revision(
+            connection=connection,
+            entity_type="state_links",
+            entity_id=state_link_id,
+            before_json=before_json,
+            after_json=after_json,
+            revision_reason=str(state_link_update["revision_reason"]),
+            evidence_event_ids=merged_evidence_event_ids,
+            created_at=created_at,
+        )
 
     def complete_refresh_preview_job(
         self,
@@ -5159,10 +5858,35 @@ def _write_memory_plan_event_entries(event_rows: list[sqlite3.Row]) -> list[dict
     return [
         {
             "event_id": str(row["event_id"]),
+            "kind": str(row["kind"]),
             "summary_text": _event_summary_text(row),
             "source_updated_at": int(row["source_updated_at"]),
         }
         for row in event_rows
+    ]
+
+
+# Block: Write memory plan actions
+def _action_entries_for_write_memory_plan(
+    *,
+    connection: sqlite3.Connection,
+    cycle_id: str,
+) -> list[dict[str, Any]]:
+    action_rows = connection.execute(
+        """
+        SELECT action_type, status
+        FROM action_history
+        WHERE cycle_id = ?
+        ORDER BY started_at ASC
+        """,
+        (cycle_id,),
+    ).fetchall()
+    return [
+        {
+            "action_type": str(row["action_type"]),
+            "status": str(row["status"]),
+        }
+        for row in action_rows
     ]
 
 
@@ -6675,6 +7399,44 @@ def _upsert_runtime_setting_value(
 # Block: Generic helpers
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
+
+
+# Block: JSON object decode
+def _decoded_object_json(value: Any) -> dict[str, Any]:
+    if value is None:
+        return {}
+    decoded = json.loads(str(value))
+    if not isinstance(decoded, dict):
+        raise RuntimeError("decoded JSON must be an object")
+    return decoded
+
+
+# Block: JSON string array decode
+def _decoded_string_array_json(value: Any) -> list[str]:
+    if value is None:
+        return []
+    decoded = json.loads(str(value))
+    if not isinstance(decoded, list):
+        raise RuntimeError("decoded JSON must be an array")
+    normalized: list[str] = []
+    for item in decoded:
+        if not isinstance(item, str) or not item:
+            raise RuntimeError("decoded JSON array entries must be non-empty strings")
+        normalized.append(item)
+    return normalized
+
+
+# Block: Unique string merge
+def _merged_unique_strings(*groups: list[str]) -> list[str]:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for group in groups:
+        for item in group:
+            if item in seen:
+                continue
+            seen.add(item)
+            merged.append(item)
+    return merged
 
 
 def _opaque_id(prefix: str) -> str:
