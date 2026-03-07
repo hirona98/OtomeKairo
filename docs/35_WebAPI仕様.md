@@ -205,8 +205,8 @@ flowchart LR
 ```json
 {
   "effective_settings": {
-    "llm.model": "...",
-    "llm.temperature": 0.7
+    "llm.model": "openai/gpt-5-mini",
+    "behavior.second_person_label": "マスター"
   },
   "pending_overrides": [
     {

@@ -626,22 +626,24 @@
 
 ```json
 {
-  "llm.model": "openrouter/default-model",
+  "llm.model": "openai/gpt-5-mini",
   "llm.api_key": "sk-example",
-  "llm.embedding_model": "openrouter/default-embedding",
+  "llm.embedding_model": "openai/text-embedding-3-large",
   "llm.embedding_api_key": "emb-example",
   "llm.temperature": 0.7,
-  "llm.max_output_tokens": 2048,
+  "llm.max_output_tokens": 4096,
   "runtime.idle_tick_ms": 1000,
-  "behavior.second_person_label": "",
-  "behavior.system_prompt": "",
-  "behavior.addon_prompt": "",
+  "behavior.second_person_label": "マスター",
+  "behavior.system_prompt": "あなたはバーチャル・シンガーの「初音ミク」として振る舞ってください。",
+  "behavior.addon_prompt": "# 感情タグ（任意）",
   "behavior.response_pace": "balanced",
   "behavior.speech_style": "neutral",
   "character.vrm_file_path": "",
   "character.material.convert_unlit_to_mtoon": false,
+  "character.material.enable_shadow_off": true,
+  "character.material.shadow_off_meshes": "Face, U_Char_1",
   "speech.tts.enabled": false,
-  "speech.tts.provider": "aivis-cloud",
+  "speech.tts.provider": "voicevox",
   "speech.tts.aivis_cloud.endpoint_url": "https://api.aivis-project.com/v1/tts/synthesize",
   "speech.tts.aivis_cloud.output_format": "wav",
   "speech.tts.voicevox.endpoint_url": "http://127.0.0.1:50021",
@@ -711,8 +713,8 @@
 ```json
 {
   "behavior.second_person_label": "マスター",
-  "behavior.system_prompt": "あなたは落ち着いて丁寧に話す。",
-  "behavior.addon_prompt": "返答は2文以内を基本にする。",
+  "behavior.system_prompt": "あなたはバーチャル・シンガーの「初音ミク」として振る舞ってください。",
+  "behavior.addon_prompt": "# 感情タグ（任意）",
   "behavior.response_pace": "balanced",
   "behavior.proactivity_level": "medium",
   "behavior.browse_preference": "balanced",
@@ -728,9 +730,9 @@
 
 ```json
 {
-  "llm.model": "openrouter/default-model",
+  "llm.model": "openai/gpt-5-mini",
   "llm.temperature": 0.7,
-  "llm.max_output_tokens": 2048,
+  "llm.max_output_tokens": 4096,
   "llm.api_key": "sk-example",
   "llm.base_url": ""
 }
@@ -744,7 +746,7 @@
 
 ```json
 {
-  "llm.embedding_model": "openrouter/default-embedding",
+  "llm.embedding_model": "openai/text-embedding-3-large",
   "llm.embedding_api_key": "emb-example",
   "llm.embedding_base_url": "",
   "runtime.context_budget_tokens": 8192,
@@ -768,16 +770,16 @@
 
 ```json
 {
-  "character.vrm_file_path": "/model/otome.vrm",
+  "character.vrm_file_path": "",
   "character.material.convert_unlit_to_mtoon": false,
   "character.material.enable_shadow_off": true,
-  "character.material.shadow_off_meshes": "Face",
-  "speech.tts.enabled": true,
-  "speech.tts.provider": "aivis-cloud",
-  "speech.tts.aivis_cloud.api_key": "tts-key",
+  "character.material.shadow_off_meshes": "Face, U_Char_1",
+  "speech.tts.enabled": false,
+  "speech.tts.provider": "voicevox",
+  "speech.tts.aivis_cloud.api_key": "",
   "speech.tts.aivis_cloud.endpoint_url": "https://api.aivis-project.com/v1/tts/synthesize",
-  "speech.tts.aivis_cloud.model_uuid": "model-uuid",
-  "speech.tts.aivis_cloud.speaker_uuid": "speaker-uuid",
+  "speech.tts.aivis_cloud.model_uuid": "",
+  "speech.tts.aivis_cloud.speaker_uuid": "",
   "speech.tts.aivis_cloud.style_id": 0,
   "speech.tts.aivis_cloud.use_ssml": false,
   "speech.tts.aivis_cloud.language": "ja",
@@ -813,14 +815,14 @@
   "speech.tts.style_bert_vits2.split_interval": 0.5,
   "speech.tts.style_bert_vits2.assist_text": "",
   "speech.tts.style_bert_vits2.assist_text_weight": 0.0,
-  "speech.stt.enabled": true,
+  "speech.stt.enabled": false,
   "speech.stt.provider": "amivoice",
-  "speech.stt.wake_word": "こんにちは, ハロー",
-  "speech.stt.amivoice.profile_id": "service-id",
-  "speech.stt.amivoice.api_key": "stt-key",
-  "integrations.notify_route": "discord",
-  "integrations.discord.bot_token": "discord-token",
-  "integrations.discord.channel_id": "1234567890"
+  "speech.stt.wake_word": "",
+  "speech.stt.amivoice.profile_id": "",
+  "speech.stt.amivoice.api_key": "",
+  "integrations.notify_route": "ui_only",
+  "integrations.discord.bot_token": "",
+  "integrations.discord.channel_id": ""
 }
 ```
 
@@ -1076,7 +1078,7 @@
     ]
   },
   "runtime_projection": {
-    "llm.model": "openrouter/default-model"
+    "llm.model": "openai/gpt-5-mini"
   }
 }
 ```

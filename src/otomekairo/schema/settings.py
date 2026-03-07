@@ -293,9 +293,9 @@ def build_default_settings_presets(default_settings: dict[str, Any]) -> tuple[di
             "preset_kind": "behavior",
             "preset_name": "静かめ",
             "payload": {
-                "behavior.second_person_label": "",
-                "behavior.system_prompt": "",
-                "behavior.addon_prompt": "",
+                "behavior.second_person_label": str(default_settings["behavior.second_person_label"]),
+                "behavior.system_prompt": str(default_settings["behavior.system_prompt"]),
+                "behavior.addon_prompt": str(default_settings["behavior.addon_prompt"]),
                 "behavior.response_pace": "careful",
                 "behavior.proactivity_level": "low",
                 "behavior.browse_preference": "avoid",
