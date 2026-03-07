@@ -115,7 +115,7 @@ flowchart LR
 
 - ログイン画面は持たず、起動直後にそのままチャット UI を表示する
 - 初期実装の見た目は `tmp/CocoroGhost/static/` に近いヘッダ、チャット欄、設定欄、ステータスバー構成にしてよい
-- `Mic` はブラウザの標準 `SpeechRecognition` を使って音声入力し、認識結果を `POST /api/chat/input` へ流す
+- ブラウザUIの入力手段は、テキスト入力と `Cam` による静止画添付に固定する
 - `Cam` は `POST /api/camera/capture` で静止画を取得し、返った画像をサムネイル表示し、次の `POST /api/chat/input` へ添付してよい
 - `message` に `audio_url` がある場合は、`GET /audio/{audio_filename}` で取得した音声を再生してよい
 - `設定保存` は、初期実装では `GET /api/settings/editor` と `PUT /api/settings/editor` を使って、設定全体を保存する
@@ -249,6 +249,7 @@ flowchart LR
 - 必須項目は `key`、`requested_value`、`apply_scope` とする
 - `key` は `docs/39_設定キー運用仕様.md` に登録された値だけを受け付ける
 - `apply_scope` は、キーごとに許可された値だけを受け付ける
+- `requested_value` は、対象 `key` に登録された `string`、`integer`、`number`、`boolean` のいずれかで受け付ける
 - `requested_value` の型と範囲は、キーごとの定義に従って検証する
 
 <!-- Block: Settings Post Response -->
@@ -263,7 +264,7 @@ flowchart LR
 ```
 
 - 成功時は `202 Accepted` を返す
-- DB には `settings_overrides.status="queued"` で挿入する
+- DB には `settings_overrides.requested_value_json={"value_type": ..., "value": ...}`、`status="queued"` で挿入する
 - 未登録キー、`apply_scope` 不一致、型違反、範囲違反は `400 Bad Request` で拒否する
 
 <!-- Block: Settings Editor Get -->

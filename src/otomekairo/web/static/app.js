@@ -8,7 +8,6 @@
   const chatInput = document.getElementById("chat-input");
   const sendButton = document.getElementById("btn-send");
   const cancelButton = document.getElementById("btn-cancel");
-  const micButton = document.getElementById("btn-mic");
   const cameraButton = document.getElementById("btn-camera");
   const attachments = document.getElementById("attachments");
   const settingsButton = document.getElementById("btn-settings");
@@ -320,7 +319,6 @@
 
   // Block: Runtime state
   let stream = null;
-  let micRecognition = null;
   const pendingCameraAttachments = [];
   let statusTimerId = 0;
   let latestStatusSnapshot = null;
@@ -372,9 +370,6 @@
         applySettingsTabState();
       });
     }
-    micButton.addEventListener("click", () => {
-      void handleMicClick();
-    });
     cameraButton.addEventListener("click", () => {
       void handleCameraCapture();
     });
@@ -604,69 +599,6 @@
       settingsCancelButton.disabled = false;
       settingsApplyButton.disabled = false;
       settingsReloadButton.disabled = false;
-    }
-  }
-
-  // Block: Mic input
-  async function handleMicClick() {
-    if (micRecognition !== null) {
-      micRecognition.stop();
-      return;
-    }
-    let runtimeProjection;
-    try {
-      runtimeProjection = requireRuntimeProjection();
-    } catch (error) {
-      appendError(`マイク入力を開始できません: ${error.message}`);
-      return;
-    }
-    if (readBooleanRuntimeProjection(runtimeProjection, "sensors.microphone.enabled") !== true) {
-      appendError("マイク入力は無効です");
-      return;
-    }
-    if (typeof window.SpeechRecognition !== "function") {
-      appendError("このブラウザでは音声入力が使えません");
-      return;
-    }
-    const recognition = new window.SpeechRecognition();
-    micRecognition = recognition;
-    recognition.lang = "ja-JP";
-    recognition.interimResults = false;
-    recognition.continuous = false;
-    recognition.maxAlternatives = 1;
-    setMicListeningState(true);
-    recognition.addEventListener("result", (event) => {
-      void handleMicResult(event);
-    });
-    recognition.addEventListener("error", (event) => {
-      const errorCode = event && typeof event.error === "string" ? event.error : "unknown";
-      appendError(`音声入力に失敗しました: ${errorCode}`);
-    });
-    recognition.addEventListener("end", () => {
-      micRecognition = null;
-      setMicListeningState(false);
-    });
-    recognition.start();
-  }
-
-  async function handleMicResult(event) {
-    if (!event.results || !event.results[0] || !event.results[0][0]) {
-      appendError("音声入力の結果が不正です");
-      return;
-    }
-    const transcript = String(event.results[0][0].transcript).trim();
-    if (!transcript) {
-      appendError("音声入力が空です");
-      return;
-    }
-    try {
-      await submitChatText(transcript);
-      chatInput.value = "";
-      autoResizeComposer();
-      updateSendEnabledState();
-      chatInput.focus();
-    } catch (error) {
-      appendError(`音声入力の送信に失敗しました: ${error.message}`);
     }
   }
 
@@ -1816,10 +1748,6 @@
     activeSpeechAudio.pause();
     activeSpeechAudio.currentTime = 0;
     activeSpeechAudio = null;
-  }
-
-  function setMicListeningState(isListening) {
-    micButton.classList.toggle("listening", isListening);
   }
 
   // Block: Settings draft helpers

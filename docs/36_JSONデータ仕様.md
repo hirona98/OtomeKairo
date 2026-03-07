@@ -1035,9 +1035,9 @@
 ```
 
 - 必須項目は `value_type`、`value` である
-- `value_type` は、少なくとも `string`、`integer`、`number`、`boolean`、`object`、`array` を区別する
+- `value_type` は、現在の公開設定キーでは `string`、`integer`、`number`、`boolean` だけを取る
 - `value` は、`value_type` と整合する JSON 値をそのまま持つ
-- 初期段階での主要ユースケースは `string` だが、型変換の推測は行わない
+- Web サーバは、`requested_value` の型変換を推測せず、そのまま検証して保存する
 
 <!-- Block: Settings Editor Response -->
 ### `GET /api/settings/editor` の本文
@@ -1455,6 +1455,7 @@
 - `requested_value` は、対象 `key` に登録された型だけを許可する
 - 初期公開キーでは `string`、`integer`、`number`、`boolean` だけを受け付ける
 - `apply_scope` は、対象 `key` に登録された許可値だけを受け付ける
+- Web サーバは、受け取った `requested_value` を `settings_overrides.requested_value_json` の正規化形へ変換して保存する
 
 <!-- Block: Settings Override Response -->
 ### `POST /api/settings/overrides` の成功応答 JSON

@@ -105,20 +105,6 @@ body {
   }
 }
 
-.icon-btn.listening {
-  background: rgba(255, 255, 255, 0.18);
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .icon-btn.listening:hover {
-    background: rgba(255, 255, 255, 0.22);
-  }
-}
-
-.icon-btn.listening .mic-slash {
-  display: none;
-}
-
 .icon-btn svg {
   width: 22px;
   height: 22px;
