@@ -491,7 +491,7 @@ flowchart LR
 ### 役割
 
 - ブラウザから現在のカメラ静止画を 1 枚取得する
-- Web サーバは ONVIF のスナップショットを取得して JPEG を保存し、`data/camera/` へ保存する
+- Web サーバは ONVIF の media profile から RTSP stream URI を取得し、`ffmpeg` で 1 フレームを JPEG として `data/camera/` へ保存する
 - 応答では保存先の相対パスと、同一オリジンで読める `image_url` を返す
 
 <!-- Block: Camera Capture Request -->
@@ -516,7 +516,7 @@ flowchart LR
 - `image_path` は、サーバ作業ディレクトリ基準の保存先相対パスである
 - `image_url` は、その静止画をブラウザが再取得するための同一オリジン URL である
 - カメラ接続設定が不足している場合は `409 Conflict` を返す
-- ONVIF 接続やスナップショット取得に失敗した場合は `500 Internal Server Error` を返す
+- ONVIF 接続、RTSP stream 解決、`ffmpeg` による JPEG 生成のいずれかに失敗した場合は `500 Internal Server Error` を返す
 
 <!-- Block: Camera Observe -->
 ## `POST /api/camera/observe`
@@ -566,7 +566,7 @@ flowchart LR
 - `capture_id`、`image_path`、`image_url`、`captured_at` は、同時に取得した静止画の情報である
 - `POST /api/camera/observe` は `source=post_action_followup` の追跡観測入力を作らない。`post_action_followup` は runtime 内の `look` 行動成功時だけが enqueue する
 - カメラ接続設定が不足している場合は `409 Conflict` を返す
-- ストリーム接続や JPEG 生成に失敗した場合は `500 Internal Server Error` を返す
+- ONVIF 接続、RTSP stream 解決、`ffmpeg` による JPEG 生成のいずれかに失敗した場合は `500 Internal Server Error` を返す
 
 <!-- Block: Camera Capture Asset -->
 ## `GET /captures/{capture_filename}`
