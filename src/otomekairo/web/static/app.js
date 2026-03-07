@@ -27,6 +27,9 @@
   const settingsPages = Array.from(document.querySelectorAll("[data-settings-page]"));
   const connectionText = document.getElementById("connection-text");
   const runtimeText = document.getElementById("runtime-text");
+  const runtimeSummaryText = document.getElementById("runtime-summary-text");
+  const retrievalSummaryText = document.getElementById("retrieval-summary-text");
+  const personaUpdateSummaryText = document.getElementById("persona-update-summary-text");
 
   // Block: Settings schema
   const SETTINGS_TAB_KEYS = ["character", "behavior", "conversation", "memory", "motion", "system"];
@@ -681,6 +684,12 @@
       updateRuntimeChip(payload);
     } catch (error) {
       runtimeText.textContent = `状態取得に失敗しました: ${error.message}`;
+      runtimeSummaryText.textContent = "状態取得に失敗しました";
+      runtimeSummaryText.title = "";
+      retrievalSummaryText.textContent = "状態未取得";
+      retrievalSummaryText.title = "";
+      personaUpdateSummaryText.textContent = "状態未取得";
+      personaUpdateSummaryText.title = "";
     }
   }
 
@@ -1971,15 +1980,177 @@
   }
 
   function updateRuntimeChip(statusPayload) {
-    if (!isObject(statusPayload) || !isObject(statusPayload.runtime)) {
+    if (!isObject(statusPayload) || !isObject(statusPayload.runtime) || !isObject(statusPayload.self_state)) {
       throw new Error("status payload が不正です");
     }
     const runtime = statusPayload.runtime;
+    const selfState = statusPayload.self_state;
+    applyStatusSummary(runtimeSummaryText, buildRuntimeSummary(runtime));
+    applyStatusSummary(retrievalSummaryText, buildRetrievalSummary(runtime.last_retrieval));
+    applyStatusSummary(personaUpdateSummaryText, buildPersonaUpdateSummary(selfState.last_persona_update));
     if (runtime.is_running === true) {
       runtimeText.textContent = "人格ランタイム稼働中";
       return;
     }
     runtimeText.textContent = "人格ランタイム停止中";
+  }
+
+  // Block: Status summary rendering
+  function applyStatusSummary(element, summary) {
+    if (!(element instanceof HTMLElement)) {
+      throw new Error("status summary element が見つかりません");
+    }
+    element.textContent = summary.text;
+    element.title = summary.title;
+  }
+
+  function buildRuntimeSummary(runtime) {
+    const parts = [runtime.is_running === true ? "稼働中" : "停止中"];
+    if (Number.isInteger(runtime.last_commit_id)) {
+      parts.push(`commit ${String(runtime.last_commit_id)}`);
+    }
+    if (typeof runtime.last_cycle_id === "string" && runtime.last_cycle_id.length > 0) {
+      parts.push(runtime.last_cycle_id);
+    }
+    return {
+      text: parts.join(" / "),
+      title: parts.join("\n"),
+    };
+  }
+
+  function buildRetrievalSummary(lastRetrieval) {
+    if (!isObject(lastRetrieval)) {
+      return { text: "まだありません", title: "" };
+    }
+    const createdAt = requireInteger(lastRetrieval.created_at, "runtime.last_retrieval.created_at");
+    const mode = requireString(lastRetrieval.mode, "runtime.last_retrieval.mode");
+    const cycleId = requireString(lastRetrieval.cycle_id, "runtime.last_retrieval.cycle_id");
+    const queries = readStringArray(lastRetrieval.queries, "runtime.last_retrieval.queries");
+    const selectedCounts = requireCountMap(lastRetrieval.selected_counts, "runtime.last_retrieval.selected_counts");
+    const totalCount = Object.values(selectedCounts).reduce((total, count) => total + count, 0);
+    return {
+      text: `${formatStatusTimestamp(createdAt)} / ${mode} / ${summarizeQueries(queries)} / 合計 ${String(totalCount)} 件`,
+      title: [
+        `cycle: ${cycleId}`,
+        `queries: ${queries.length > 0 ? queries.join(" / ") : "なし"}`,
+        `selected: ${formatSelectedCounts(selectedCounts)}`,
+      ].join("\n"),
+    };
+  }
+
+  function buildPersonaUpdateSummary(lastPersonaUpdate) {
+    if (!isObject(lastPersonaUpdate)) {
+      return { text: "まだありません", title: "" };
+    }
+    const createdAt = requireInteger(lastPersonaUpdate.created_at, "self_state.last_persona_update.created_at");
+    const reason = requireString(lastPersonaUpdate.reason, "self_state.last_persona_update.reason");
+    const updatedTraits = readUpdatedTraits(lastPersonaUpdate.updated_traits, "self_state.last_persona_update.updated_traits");
+    const evidenceEventIds = readStringArray(
+      lastPersonaUpdate.evidence_event_ids,
+      "self_state.last_persona_update.evidence_event_ids",
+    );
+    const traitSummary = updatedTraits.length > 0
+      ? summarizeTraitUpdates(updatedTraits)
+      : reason;
+    return {
+      text: `${formatStatusTimestamp(createdAt)} / ${traitSummary}`,
+      title: [
+        `reason: ${reason}`,
+        `traits: ${updatedTraits.length > 0 ? formatTraitUpdates(updatedTraits) : "なし"}`,
+        `evidence: ${evidenceEventIds.length > 0 ? evidenceEventIds.join(", ") : "なし"}`,
+      ].join("\n"),
+    };
+  }
+
+  // Block: Status summary helpers
+  function summarizeQueries(queries) {
+    if (queries.length === 0) {
+      return "query なし";
+    }
+    const firstQuery = clipText(queries[0], 36);
+    if (queries.length === 1) {
+      return `「${firstQuery}」`;
+    }
+    return `「${firstQuery}」ほか ${String(queries.length - 1)} 件`;
+  }
+
+  function summarizeTraitUpdates(updatedTraits) {
+    const visibleTraits = updatedTraits.slice(0, 3).map((trait) => {
+      const delta = requireNumber(trait.delta, `updated_traits.${trait.trait_name}.delta`);
+      return `${requireString(trait.trait_name, "updated_traits.trait_name")} ${formatSignedDecimal(delta)}`;
+    });
+    if (updatedTraits.length > 3) {
+      visibleTraits.push(`他 ${String(updatedTraits.length - 3)} 件`);
+    }
+    return visibleTraits.join(", ");
+  }
+
+  function formatSelectedCounts(selectedCounts) {
+    return Object.entries(selectedCounts)
+      .map(([key, value]) => `${key}=${String(value)}`)
+      .join(", ");
+  }
+
+  function formatTraitUpdates(updatedTraits) {
+    return updatedTraits
+      .map((trait) => {
+        const traitName = requireString(trait.trait_name, "updated_traits.trait_name");
+        const before = requireNumber(trait.before, `updated_traits.${traitName}.before`);
+        const after = requireNumber(trait.after, `updated_traits.${traitName}.after`);
+        const delta = requireNumber(trait.delta, `updated_traits.${traitName}.delta`);
+        return `${traitName}: ${before.toFixed(2)} -> ${after.toFixed(2)} (${formatSignedDecimal(delta)})`;
+      })
+      .join(", ");
+  }
+
+  function formatStatusTimestamp(timestampMs) {
+    return new Date(timestampMs).toLocaleString("ja-JP", {
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }
+
+  function formatSignedDecimal(value) {
+    return `${value >= 0 ? "+" : ""}${value.toFixed(2)}`;
+  }
+
+  function clipText(text, maxLength) {
+    if (text.length <= maxLength) {
+      return text;
+    }
+    return `${text.slice(0, maxLength - 3)}...`;
+  }
+
+  function readStringArray(value, label) {
+    if (!Array.isArray(value)) {
+      throw new Error(`${label} が配列ではありません`);
+    }
+    return value.map((item, index) => requireString(item, `${label}[${String(index)}]`));
+  }
+
+  function requireCountMap(value, label) {
+    if (!isObject(value)) {
+      throw new Error(`${label} が object ではありません`);
+    }
+    const counts = {};
+    for (const [key, rawValue] of Object.entries(value)) {
+      counts[key] = requireInteger(rawValue, `${label}.${key}`);
+    }
+    return counts;
+  }
+
+  function readUpdatedTraits(value, label) {
+    if (!Array.isArray(value)) {
+      throw new Error(`${label} が配列ではありません`);
+    }
+    return value.map((item, index) => {
+      if (!isObject(item)) {
+        throw new Error(`${label}[${String(index)}] が object ではありません`);
+      }
+      return item;
+    });
   }
 
   function autoResizeComposer() {
