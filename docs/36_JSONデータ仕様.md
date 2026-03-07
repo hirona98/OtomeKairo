@@ -749,7 +749,7 @@
     "delivery_mode": "stream"
   },
   "memory_focus": {
-    "focus_kind": "current_input_only",
+    "focus_kind": "observation",
     "summary": "直近のチャット入力を主材料として判断した"
   },
   "reflection_seed": {
@@ -765,6 +765,7 @@
 - `cognition_result` は、短周期の内部で使う構造化された認知結果である
 - `cognition_result` は、認知層が一度に返す JSON オブジェクトであり、後から補完前提で分割しない
 - 必須項目は `intention_summary`、`decision_reason`、`action_proposals`、`step_hints`、`speech_draft`、`memory_focus`、`reflection_seed` である
+- 初期実装では、`LiteLLM` への `response_format` を strict な `json_schema` に固定し、この節の shape を provider 呼び出し時点でも拘束する
 - `action_proposals` と `step_hints` は配列に固定し、候補がない場合も空配列 `[]` を使う
 - 初期実装の `browser_chat` では、`action_proposals` の各要素は少なくとも `action_type` と `priority` を持つ
 - 初期実装の `browser_chat` では、`action_type` は `speak`、`browse`、`notify`、`look`、`wait` のいずれかだけを許可する

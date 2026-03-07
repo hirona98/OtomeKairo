@@ -18,6 +18,7 @@ SUPPORTED_CHAT_ACTION_TYPES = {"speak", "browse", "notify", "look", "wait"}
 class LiteLLMCognitionClient:
     def __init__(self) -> None:
         self._litellm = _import_litellm_module()
+        self._litellm.enable_json_schema_validation = True
 
     # Block: Structured completion call
     def generate_result(self, request: CognitionRequest) -> CognitionResponse:
@@ -27,7 +28,7 @@ class LiteLLMCognitionClient:
             "messages": _build_messages(request),
             "temperature": float(context_budget["temperature"]),
             "max_tokens": int(context_budget["max_output_tokens"]),
-            "response_format": {"type": "json_object"},
+            "response_format": _cognition_response_format(),
         }
         api_key = str(context_budget["api_key"])
         if api_key:
@@ -71,6 +72,7 @@ def _build_messages(request: CognitionRequest) -> list[dict[str, Any]]:
             "speech_draft は object で、text, language, delivery_mode を必ず持つ。",
             "action_proposals と step_hints は必ず配列にする。候補が無ければ [] を返す。",
             "action_proposals の各要素は object にし、action_type と priority を必ず入れる。",
+            "priority は 0.0 以上 1.0 以下の number に固定し、範囲外の値を返さない。",
             "action_type は speak, browse, notify, look, wait のいずれかだけを使う。",
             "speak と notify を返す場合は target_channel に browser_chat を必ず入れる。",
             "browse を返す場合は query に非空の検索文字列を必ず入れる。",
@@ -117,6 +119,176 @@ def _build_messages(request: CognitionRequest) -> list[dict[str, Any]]:
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": _build_user_message_content(user_prompt=user_prompt, current_observation=current_observation)},
     ]
+
+
+# Block: Response format schema
+def _cognition_response_format() -> dict[str, Any]:
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "otomekairo_cognition_result",
+            "strict": True,
+            "schema": _cognition_result_schema(),
+        },
+    }
+
+
+# Block: Cognition result schema
+def _cognition_result_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "intention_summary",
+            "decision_reason",
+            "action_proposals",
+            "step_hints",
+            "speech_draft",
+            "memory_focus",
+            "reflection_seed",
+        ],
+        "properties": {
+            "intention_summary": {
+                "type": "string",
+                "minLength": 1,
+            },
+            "decision_reason": {
+                "type": "string",
+                "minLength": 1,
+            },
+            "action_proposals": {
+                "type": "array",
+                "items": _action_proposal_schema(),
+            },
+            "step_hints": {
+                "type": "array",
+                "items": {},
+            },
+            "speech_draft": {
+                "type": "object",
+                "additionalProperties": True,
+                "required": ["text", "language", "delivery_mode"],
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "minLength": 1,
+                    },
+                    "language": {
+                        "type": "string",
+                        "minLength": 1,
+                    },
+                    "delivery_mode": {
+                        "type": "string",
+                        "const": "stream",
+                    },
+                },
+            },
+            "memory_focus": {
+                "type": "object",
+                "additionalProperties": True,
+                "required": ["focus_kind", "summary"],
+                "properties": {
+                    "focus_kind": {
+                        "type": "string",
+                        "minLength": 1,
+                    },
+                    "summary": {
+                        "type": "string",
+                        "minLength": 1,
+                    },
+                },
+            },
+            "reflection_seed": {
+                "type": "object",
+                "additionalProperties": True,
+            },
+        },
+    }
+
+
+# Block: Action proposal schema
+def _action_proposal_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "additionalProperties": True,
+        "required": ["action_type", "priority"],
+        "properties": {
+            "action_type": {
+                "type": "string",
+                "enum": sorted(SUPPORTED_CHAT_ACTION_TYPES),
+            },
+            "priority": {
+                "type": "number",
+                "minimum": 0.0,
+                "maximum": 1.0,
+            },
+            "target_channel": {
+                "type": "string",
+                "const": "browser_chat",
+            },
+            "query": {
+                "type": "string",
+                "minLength": 1,
+            },
+            "direction": {
+                "type": "string",
+                "enum": ["left", "right", "up", "down"],
+            },
+            "preset_id": {
+                "type": "string",
+                "minLength": 1,
+            },
+            "preset_name": {
+                "type": "string",
+                "minLength": 1,
+            },
+        },
+        "allOf": [
+            {
+                "if": {
+                    "properties": {
+                        "action_type": {
+                            "enum": ["speak", "notify"],
+                        },
+                    },
+                    "required": ["action_type"],
+                },
+                "then": {
+                    "required": ["target_channel"],
+                },
+            },
+            {
+                "if": {
+                    "properties": {
+                        "action_type": {
+                            "const": "browse",
+                        },
+                    },
+                    "required": ["action_type"],
+                },
+                "then": {
+                    "required": ["query"],
+                },
+            },
+            {
+                "if": {
+                    "properties": {
+                        "action_type": {
+                            "const": "look",
+                        },
+                    },
+                    "required": ["action_type"],
+                },
+                "then": {
+                    "anyOf": [
+                        {"required": ["direction"]},
+                        {"required": ["preset_id"]},
+                        {"required": ["preset_name"]},
+                    ],
+                },
+            },
+        ],
+    }
 
 
 # Block: Completion parsing
