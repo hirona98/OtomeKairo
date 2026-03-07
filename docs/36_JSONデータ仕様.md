@@ -383,6 +383,75 @@
 - `context assembler` は、各要素に人間可読な `created_at_*`、`updated_at_*`、`relative_time_text` を付与してよい
 - 初期実装では、`active_tasks` と `waiting_external_tasks` に優先度上位 `3` 件までを入れてよい
 
+<!-- Block: Attention Focus Entry -->
+### `attention_focus_entry`
+
+```json
+{
+  "focus_ref": "observation:network_result",
+  "focus_kind": "observation",
+  "summary": "検索結果の要約",
+  "score_hint": 0.72,
+  "reason_codes": ["input_kind:network_result", "external_result"]
+}
+```
+
+- `attention_focus_entry` は、`attention_snapshot` の主注意候補や再確認候補で共通に使う短周期用オブジェクトである
+- 必須項目は `focus_ref`、`focus_kind`、`summary`、`score_hint`、`reason_codes` である
+- `focus_ref` は、`observation:*`、`task:*`、`relationship:*` などの短い参照 `string` である
+- `focus_kind` は、少なくとも `observation`、`task`、`relationship`、`idle` を区別する
+- `summary` は、`LLM` に渡してよい短い説明文 `string` である
+- `score_hint` は、`0.0..1.0` の `number` に固定する
+- `reason_codes` は、主注意になった理由を表す `string` 配列である
+
+<!-- Block: Attention Snapshot -->
+### `attention_snapshot`
+
+```json
+{
+  "primary_focus": {
+    "focus_ref": "observation:network_result",
+    "focus_kind": "observation",
+    "summary": "検索結果の要約",
+    "score_hint": 0.72,
+    "reason_codes": ["input_kind:network_result", "external_result"]
+  },
+  "secondary_focuses": [],
+  "suppressed_items": [],
+  "revisit_queue": [],
+  "updated_at": 1760000000000
+}
+```
+
+- `attention_snapshot` は、`LLM` へ渡す主注意断面である
+- 必須項目は `primary_focus`、`secondary_focuses`、`suppressed_items`、`revisit_queue`、`updated_at` である
+- `primary_focus` は、`attention_focus_entry` に固定する
+- `secondary_focuses` は、`attention_focus_entry` の配列に固定する
+- `suppressed_items` は、`focus_ref`、`focus_kind`、`summary`、`reason_codes` を持つ配列に固定する
+- `revisit_queue` は、`attention_focus_entry` に `delta_from_primary` を追加した配列に固定する
+- `updated_at` は、その断面の基準時刻を示す `unix ms` の `integer` である
+
+<!-- Block: Skill Candidate Entry -->
+### `skill_candidate_entry`
+
+```json
+{
+  "skill_id": "inspect_unresolved_observation",
+  "initiative_kind": "unexplored_check",
+  "fit_score": 0.40,
+  "suggested_action_types": ["browse", "look"],
+  "reason_codes": ["curiosity_fit", "novelty_fit"]
+}
+```
+
+- `skill_candidate_entry` は、`cognition_input.skill_candidates` で使う短周期用のスキル候補である
+- 必須項目は `skill_id`、`initiative_kind`、`fit_score`、`suggested_action_types`、`reason_codes` である
+- `skill_id` は、その候補スキルを表す固定語彙 `string` である
+- `initiative_kind` は、`self_initiated_score_breakdown.initiative_kind` と同じ語彙を使う
+- `fit_score` は、`0.0..1.0` の `number` に固定する
+- `suggested_action_types` は、候補化してよい `action_type` の配列である
+- `reason_codes` は、候補化の根拠を表す `string` 配列である
+
 <!-- Block: Memory Bundle -->
 ### `memory_bundle`
 
@@ -601,6 +670,7 @@
 - 各 `*_score` と `total_score` は、`0.0..1.0` の `number` に固定する
 - `personality_fit_score` は、必要なら候補ごとの `persona_consistency_score` を元に計算してよい
 - 各 `*_score` は、比較前に同じ `0.0..1.0` 尺度へ正規化済みでなければならない
+- 初期実装では、`attention_score_breakdown` の比較結果を `attention_snapshot.primary_focus`、`secondary_focuses`、`revisit_queue` へ写してよい
 - `attention_score_breakdown` は永続化前提の正本ではなく、その短周期の候補比較ごとに再計算する
 
 <!-- Block: Self Initiated Score Breakdown -->
@@ -626,6 +696,8 @@
 - `hard_gate_passed` は、`boolean` に固定する
 - 各 `*_fit` と `total_score` は、`0.0..1.0` の `number` に固定する
 - 各 `*_fit` は、比較前に同じ `0.0..1.0` 尺度へ正規化済みでなければならない
+- 初期実装では、`self_initiated_score_breakdown` のうち `hard_gate_passed=true` かつ `total_score >= 0.30` の候補を `skill_candidate_entry` へ写してよい
+- 初期実装では、自発起動そのものの閾値は `total_score >= 0.55` を維持してよい
 - `self_initiated_score_breakdown` は永続化前提の正本ではなく、その短周期の比較ごとに再計算する
 
 <!-- Block: Action Candidate Score -->

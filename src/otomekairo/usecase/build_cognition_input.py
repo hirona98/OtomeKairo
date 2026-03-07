@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from otomekairo.schema.runtime_types import CognitionStateSnapshot, PendingInputRecord
+from otomekairo.usecase.persona_projection import build_attention_snapshot, build_skill_candidates
 from otomekairo.usecase.retrieval_flow import build_retrieval_artifacts
 
 
@@ -54,6 +55,19 @@ def build_cognition_input(
     latest_persona_update = state_snapshot.self_state.get("latest_persona_update")
     if isinstance(latest_persona_update, dict):
         self_snapshot["last_persona_update"] = latest_persona_update
+    attention_snapshot = build_attention_snapshot(
+        current_observation=current_observation,
+        selection_profile=selection_profile,
+        task_snapshot=state_snapshot.task_snapshot,
+        attention_state=state_snapshot.attention_state,
+    )
+    skill_candidates = build_skill_candidates(
+        current_observation=current_observation,
+        selection_profile=selection_profile,
+        behavior_settings=behavior_settings,
+        body_state=state_snapshot.body_state,
+        task_snapshot=state_snapshot.task_snapshot,
+    )
     return BuiltCognitionInput(
         cognition_input={
             "cycle_meta": {
@@ -77,7 +91,7 @@ def build_cognition_input(
                 task_snapshot=state_snapshot.task_snapshot,
                 resolved_at=resolved_at,
             ),
-            "attention_snapshot": state_snapshot.attention_state,
+            "attention_snapshot": attention_snapshot,
             "memory_bundle": retrieval_artifacts.memory_bundle,
             "retrieval_context": {
                 "plan": retrieval_artifacts.retrieval_plan,
@@ -94,7 +108,7 @@ def build_cognition_input(
                     "microphone_enabled": bool(state_snapshot.effective_settings["sensors.microphone.enabled"]),
                 },
             },
-            "skill_candidates": [],
+            "skill_candidates": skill_candidates,
             "current_observation": current_observation,
             "context_budget": {
                 "max_tokens": int(state_snapshot.effective_settings["runtime.context_budget_tokens"]),

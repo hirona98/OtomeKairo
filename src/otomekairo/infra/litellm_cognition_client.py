@@ -58,6 +58,8 @@ def _build_messages(request: CognitionRequest) -> list[dict[str, Any]]:
     memory_bundle = cognition_input["memory_bundle"]
     retrieval_context = cognition_input["retrieval_context"]
     world_snapshot = cognition_input["world_snapshot"]
+    attention_snapshot = cognition_input["attention_snapshot"]
+    skill_candidates = cognition_input["skill_candidates"]
     runtime_policy = cognition_input["policy_snapshot"]["runtime_policy"]
     system_prompt = "\n".join(
         [
@@ -100,6 +102,8 @@ def _build_messages(request: CognitionRequest) -> list[dict[str, Any]]:
             _network_result_prompt_line(current_observation),
             f"関係性の優先対象: {_format_relationship_priorities(selection_profile['relationship_priorities'])}",
             f"長期目標: {_format_goals(self_snapshot['long_term_goals'])}",
+            _attention_prompt_line(attention_snapshot),
+            _skill_candidates_prompt_line(skill_candidates),
             _retrieval_prompt_line(retrieval_context),
             _memory_bundle_prompt_line(memory_bundle),
             f"cycle_id: {request.cycle_id}",
@@ -296,6 +300,49 @@ def _memory_bundle_prompt_line(memory_bundle: dict[str, Any]) -> str:
             raise RuntimeError(f"memory_bundle.{key} must be a list")
         parts.append(f"{key}={len(value)}")
     return "想起断面: " + " ".join(parts)
+
+
+def _attention_prompt_line(attention_snapshot: dict[str, Any]) -> str:
+    primary_focus = attention_snapshot.get("primary_focus")
+    if not isinstance(primary_focus, dict):
+        raise RuntimeError("cognition_input.attention_snapshot.primary_focus must be object")
+    focus_kind = primary_focus.get("focus_kind")
+    summary = primary_focus.get("summary")
+    reason_codes = primary_focus.get("reason_codes")
+    if not isinstance(focus_kind, str) or not isinstance(summary, str):
+        raise RuntimeError("attention_snapshot.primary_focus is invalid")
+    if not isinstance(reason_codes, list):
+        raise RuntimeError("attention_snapshot.primary_focus.reason_codes must be list")
+    reason_text = ",".join(str(code) for code in reason_codes[:3]) if reason_codes else "なし"
+    return f"主注意: kind={focus_kind} summary={summary} reasons={reason_text}"
+
+
+def _skill_candidates_prompt_line(skill_candidates: list[dict[str, Any]]) -> str:
+    if not isinstance(skill_candidates, list):
+        raise RuntimeError("cognition_input.skill_candidates must be list")
+    if not skill_candidates:
+        return "自然な次行動候補: なし"
+    formatted_candidates = []
+    for candidate in skill_candidates[:3]:
+        if not isinstance(candidate, dict):
+            raise RuntimeError("cognition_input.skill_candidates must contain only objects")
+        skill_id = candidate.get("skill_id")
+        initiative_kind = candidate.get("initiative_kind")
+        fit_score = candidate.get("fit_score")
+        suggested_action_types = candidate.get("suggested_action_types")
+        if (
+            not isinstance(skill_id, str)
+            or not isinstance(initiative_kind, str)
+            or isinstance(fit_score, bool)
+            or not isinstance(fit_score, (int, float))
+            or not isinstance(suggested_action_types, list)
+        ):
+            raise RuntimeError("cognition_input.skill_candidates entry is invalid")
+        action_text = ",".join(str(action_type) for action_type in suggested_action_types[:2])
+        formatted_candidates.append(
+            f"{skill_id}:{initiative_kind}:{float(fit_score):.2f}:{action_text}"
+        )
+    return "自然な次行動候補: " + " / ".join(formatted_candidates)
 
 
 def _persona_update_prompt_line(self_snapshot: dict[str, Any]) -> str:
