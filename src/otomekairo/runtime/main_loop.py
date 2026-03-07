@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from otomekairo.gateway.camera_controller import CameraController
+from otomekairo.gateway.camera_sensor import CameraSensor
 from otomekairo import __version__
 from otomekairo.gateway.cognition_client import CognitionClient
 from otomekairo.gateway.search_client import SearchClient
@@ -56,6 +57,7 @@ class RuntimeLoop:
         cognition_client: CognitionClient,
         search_client: SearchClient,
         camera_controller: CameraController,
+        camera_sensor: CameraSensor,
         speech_synthesizer: SpeechSynthesizer,
         lease_heartbeat_ms: int = DEFAULT_LEASE_HEARTBEAT_MS,
         lease_ttl_ms: int = DEFAULT_LEASE_TTL_MS,
@@ -73,6 +75,7 @@ class RuntimeLoop:
         self._cognition_client = cognition_client
         self._search_client = search_client
         self._camera_controller = camera_controller
+        self._camera_sensor = camera_sensor
         self._speech_synthesizer = speech_synthesizer
         self._lease_heartbeat_ms = lease_heartbeat_ms
         self._lease_ttl_ms = lease_ttl_ms
@@ -162,6 +165,7 @@ class RuntimeLoop:
                 ui_events,
                 action_results,
                 task_mutations,
+                pending_input_mutations,
                 resolution_status,
                 discard_reason,
                 retrieval_run,
@@ -191,12 +195,13 @@ class RuntimeLoop:
                 resolution_status=resolution_status,
                 action_results=action_results,
                 task_mutations=task_mutations,
+                pending_input_mutations=pending_input_mutations,
                 discard_reason=discard_reason,
                 ui_events=ui_events,
                 retrieval_run=retrieval_run,
                 attention_snapshot=attention_snapshot,
                 commit_payload=commit_payload,
-                camera_available=self._camera_controller.is_available(),
+                camera_available=self._camera_available(),
             )
             logger.info(
                 "pending input finalized",
@@ -209,6 +214,7 @@ class RuntimeLoop:
                         action_result.action_type for action_result in action_results
                     ],
                     "emitted_event_types": [ui_event["event_type"] for ui_event in ui_events],
+                    "followup_input_count": len(pending_input_mutations),
                 },
             )
         except Exception as error:
@@ -223,6 +229,7 @@ class RuntimeLoop:
                 resolution_status="discarded",
                 action_results=[],
                 task_mutations=[],
+                pending_input_mutations=[],
                 discard_reason=PENDING_INPUT_FAILURE_REASON,
                 ui_events=ui_events,
                 attention_snapshot=None,
@@ -237,7 +244,7 @@ class RuntimeLoop:
                     "error_kind": type(error).__name__,
                     "error_message": _error_message_text(error),
                 },
-                camera_available=self._camera_controller.is_available(),
+                camera_available=self._camera_available(),
             )
 
     # Block: Claimed waiting task processing
@@ -269,7 +276,7 @@ class RuntimeLoop:
                     ],
                     "final_task_status": execution.final_status,
                 },
-                camera_available=self._camera_controller.is_available(),
+                camera_available=self._camera_available(),
             )
             logger.info(
                 "waiting task finalized",
@@ -310,7 +317,7 @@ class RuntimeLoop:
                     "error_kind": type(error).__name__,
                     "error_message": _error_message_text(error),
                 },
-                camera_available=self._camera_controller.is_available(),
+                camera_available=self._camera_available(),
             )
 
     # Block: Pending input resolution
@@ -324,6 +331,7 @@ class RuntimeLoop:
         list[dict[str, Any]],
         list[ActionHistoryRecord],
         list[TaskStateMutationRecord],
+        list[PendingInputMutationRecord],
         str,
         str | None,
         dict[str, Any] | None,
@@ -340,7 +348,7 @@ class RuntimeLoop:
                 cycle_id=cycle_id,
                 resolved_at=resolved_at,
                 state_snapshot=state_snapshot,
-                camera_available=self._camera_controller.is_available(),
+                camera_available=self._camera_available(),
             )
             cognition_execution = run_cognition_for_browser_chat_input(
                 pending_input=pending_input,
@@ -350,6 +358,7 @@ class RuntimeLoop:
                 effective_settings=state_snapshot.effective_settings,
                 cognition_client=self._cognition_client,
                 camera_controller=self._camera_controller,
+                camera_sensor=self._camera_sensor,
                 speech_synthesizer=self._speech_synthesizer,
                 emit_ui_event=lambda ui_event: self._append_ui_event(cycle_id=cycle_id, ui_event=ui_event),
                 consume_cancel=lambda message_id: self._consume_matching_cancel(
@@ -361,18 +370,20 @@ class RuntimeLoop:
                 cognition_execution.ui_events,
                 cognition_execution.action_results,
                 cognition_execution.task_mutations,
+                cognition_execution.pending_input_mutations,
                 "consumed",
                 None,
                 built_input.retrieval_run,
                 built_input.cognition_input["attention_snapshot"],
             )
         if input_kind == "cancel":
-            return ([], [], [], "discarded", "cancel_target_not_found", None, None)
+            return ([], [], [], [], "discarded", "cancel_target_not_found", None, None)
         ui_events, action_results = _unsupported_input_events(pending_input, resolved_at)
         self._append_ui_events(cycle_id=cycle_id, ui_events=ui_events)
         return (
             ui_events,
             action_results,
+            [],
             [],
             "discarded",
             "unsupported_input_kind",
@@ -436,6 +447,7 @@ class RuntimeLoop:
                 resolution_status="consumed",
                 action_results=[action_result],
                 task_mutations=[],
+                pending_input_mutations=[],
                 discard_reason=None,
                 ui_events=[],
                 commit_payload={
@@ -447,7 +459,7 @@ class RuntimeLoop:
                     "executed_action_types": ["stop_active_message"],
                     "resolution_status": "consumed",
                 },
-                camera_available=self._camera_controller.is_available(),
+                camera_available=self._camera_available(),
             )
             return True
         except Exception as error:
@@ -458,6 +470,7 @@ class RuntimeLoop:
                 resolution_status="discarded",
                 action_results=[],
                 task_mutations=[],
+                pending_input_mutations=[],
                 discard_reason=CANCEL_FAILURE_REASON,
                 ui_events=[],
                 commit_payload={
@@ -471,7 +484,7 @@ class RuntimeLoop:
                     "error_kind": type(error).__name__,
                     "error_message": _error_message_text(error),
                 },
-                camera_available=self._camera_controller.is_available(),
+                camera_available=self._camera_available(),
             )
             return False
 
@@ -489,7 +502,7 @@ class RuntimeLoop:
                 change_set=settings_change_set,
                 default_settings=self._default_settings,
                 final_status="applied",
-                camera_available=self._camera_controller.is_available(),
+                camera_available=self._camera_available(),
             )
             logger.info(
                 "settings change set applied",
@@ -505,7 +518,7 @@ class RuntimeLoop:
                 default_settings=self._default_settings,
                 final_status="rejected",
                 reject_reason=f"{SETTINGS_CHANGE_SET_FAILURE_REASON}:{type(error).__name__}",
-                camera_available=self._camera_controller.is_available(),
+                camera_available=self._camera_available(),
             )
             logger.warning(
                 "settings change set rejected",
@@ -545,7 +558,7 @@ class RuntimeLoop:
                 cycle_id=cycle_id,
                 final_status=final_status,
                 reject_reason=reject_reason,
-                camera_available=self._camera_controller.is_available(),
+                camera_available=self._camera_available(),
             )
             logger.info(
                 "settings override finalized",
@@ -570,7 +583,7 @@ class RuntimeLoop:
                 cycle_id=cycle_id,
                 final_status="rejected",
                 reject_reason=f"{SETTINGS_OVERRIDE_FAILURE_REASON}:{type(error).__name__}",
-                camera_available=self._camera_controller.is_available(),
+                camera_available=self._camera_available(),
             )
             logger.warning(
                 "settings override rejected after failure",
@@ -721,6 +734,10 @@ class RuntimeLoop:
             lease_ttl_ms=self._lease_ttl_ms,
         )
 
+    # Block: Camera availability helper
+    def _camera_available(self) -> bool:
+        return self._camera_controller.is_available() and self._camera_sensor.is_available()
+
 
 # Block: Runtime construction
 def build_runtime_loop(*, db_path: Path | None = None) -> RuntimeLoop:
@@ -739,6 +756,7 @@ def build_runtime_loop(*, db_path: Path | None = None) -> RuntimeLoop:
         cognition_client=_build_default_cognition_client(),
         search_client=_build_default_search_client(),
         camera_controller=_build_default_camera_controller(store=store),
+        camera_sensor=_build_default_camera_sensor(store=store),
         speech_synthesizer=_build_default_speech_synthesizer(),
         lease_heartbeat_ms=_lease_heartbeat_ms(),
         lease_ttl_ms=_lease_ttl_ms(),
@@ -800,6 +818,9 @@ def _pending_input_observation_hint(pending_input: PendingInputRecord) -> str:
         attachment_count = len(attachments)
         if attachment_count <= 0:
             raise RuntimeError("camera_observation.attachments must not be empty")
+        trigger_reason = pending_input.payload.get("trigger_reason")
+        if trigger_reason == "post_action_followup":
+            return f"カメラ画像 {attachment_count} 枚を追跡観測"
         return f"カメラ画像 {attachment_count} 枚を自発観測"
     if input_kind == "network_result":
         summary_text = pending_input.payload.get("summary_text")
@@ -939,6 +960,15 @@ def _build_default_camera_controller(*, store: SqliteStateStore) -> CameraContro
     from otomekairo.infra.wifi_camera_controller import WiFiCameraController
 
     return WiFiCameraController(
+        camera_connection_loader=store.read_enabled_camera_connection,
+    )
+
+
+# Block: Camera sensor factory
+def _build_default_camera_sensor(*, store: SqliteStateStore) -> CameraSensor:
+    from otomekairo.infra.wifi_camera_sensor import WiFiCameraSensor
+
+    return WiFiCameraSensor(
         camera_connection_loader=store.read_enabled_camera_connection,
     )
 

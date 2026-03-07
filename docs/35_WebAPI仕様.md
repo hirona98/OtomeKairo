@@ -524,7 +524,7 @@ flowchart LR
 ### 役割
 
 - 現在のカメラ静止画を 1 枚取得し、そのまま自発観測入力として `pending_inputs` に積む
-- Web サーバは `source=self_initiated`、`input_kind=camera_observation`、`camera_still_image` 添付 1 件で認知待ち入力を作る
+- Web サーバは `source=camera`、`payload.trigger_reason=self_initiated`、`input_kind=camera_observation`、`camera_still_image` 添付 1 件で認知待ち入力を作る
 - 返した時点では応答本文は生成せず、後続のランタイム短周期で認知処理する
 
 <!-- Block: Camera Observe Request -->
@@ -536,10 +536,10 @@ flowchart LR
 ### DB への写像
 
 - `pending_inputs` に 1 件追加する
-- `source` は `self_initiated` に固定する
+- `source` は `camera` に固定する
 - `channel` は `browser_chat` に固定する
 - `client_message_id` は `null` に固定する
-- `payload_json` には、`input_kind="camera_observation"` と `camera_still_image` 添付 1 件を入れる
+- `payload_json` には、`input_kind="camera_observation"`、`trigger_reason="self_initiated"`、`camera_still_image` 添付 1 件を入れる
 - 追加時の `status` は `queued` に固定する
 
 <!-- Block: Camera Observe Response -->
@@ -563,6 +563,7 @@ flowchart LR
 - `status` は `queued` に固定する
 - `channel` は `browser_chat` に固定する
 - `capture_id`、`image_path`、`image_url`、`captured_at` は、同時に取得した静止画の情報である
+- `POST /api/camera/observe` は `source=post_action_followup` の追跡観測入力を作らない。`post_action_followup` は runtime 内の `look` 行動成功時だけが enqueue する
 - カメラ接続設定が不足している場合は `409 Conflict` を返す
 - ストリーム接続や JPEG 生成に失敗した場合は `500 Internal Server Error` を返す
 

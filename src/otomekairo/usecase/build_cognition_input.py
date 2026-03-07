@@ -178,9 +178,13 @@ def _build_current_observation(
         )
         if not attachments:
             raise ValueError("camera_observation requires attachments")
+        trigger_reason = pending_input.payload.get("trigger_reason")
         return {
             **base_observation,
-            "observation_text": _camera_observation_text(attachments),
+            "observation_text": _camera_observation_text(
+                attachments,
+                trigger_reason=trigger_reason,
+            ),
             "attachment_count": len(attachments),
             "attachment_summary_text": _camera_attachment_summary_text(attachments),
             "attachments": attachments,
@@ -277,7 +281,13 @@ def _chat_observation_text(*, text: str | None, attachments: list[dict[str, Any]
 
 
 # Block: Camera observation text
-def _camera_observation_text(attachments: list[dict[str, Any]]) -> str:
+def _camera_observation_text(
+    attachments: list[dict[str, Any]],
+    *,
+    trigger_reason: Any,
+) -> str:
+    if trigger_reason == "post_action_followup":
+        return f"カメラ画像 {len(attachments)} 枚を追跡観測した"
     return f"カメラ画像 {len(attachments)} 枚を自発観測した"
 
 
