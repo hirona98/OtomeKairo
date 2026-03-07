@@ -12,7 +12,6 @@
   const attachments = document.getElementById("attachments");
   const settingsButton = document.getElementById("btn-settings");
   const settingsPanel = document.getElementById("settings-panel");
-  const settingsReloadButton = document.getElementById("btn-settings-reload");
   const settingsOkButton = document.getElementById("btn-settings-ok");
   const settingsCancelButton = document.getElementById("btn-settings-cancel");
   const settingsApplyButton = document.getElementById("btn-settings-apply");
@@ -26,8 +25,6 @@
   const settingsStatus = document.getElementById("settings-status");
   const settingsTabButtons = Array.from(document.querySelectorAll("[data-settings-tab]"));
   const settingsPages = Array.from(document.querySelectorAll("[data-settings-page]"));
-  const statusJson = document.getElementById("status-json");
-  const settingsJson = document.getElementById("settings-json");
   const connectionText = document.getElementById("connection-text");
   const runtimeText = document.getElementById("runtime-text");
 
@@ -376,13 +373,12 @@
     1: "SittingFloor",
     2: "LyingDown",
   };
-  const CAMERA_FIELD_KEYS = ["display_name", "host", "username", "password"];
+  const CAMERA_FIELD_KEYS = ["is_enabled", "display_name", "host", "username", "password"];
 
   // Block: Runtime state
   let stream = null;
   const pendingCameraAttachments = [];
   let statusTimerId = 0;
-  let latestStatusSnapshot = null;
   let latestEditorSnapshot = null;
   let editorDraft = null;
   let activeSettingsTab = "character";
@@ -396,7 +392,6 @@
     updateSendEnabledState();
     connectStream();
     await refreshStatusSnapshot();
-    await loadSettingsEditorSnapshot();
     statusTimerId = window.setInterval(() => {
       void refreshStatusSnapshot();
     }, 5000);
@@ -410,9 +405,6 @@
     cancelButton.addEventListener("click", handleCancel);
     settingsButton.addEventListener("click", () => {
       void openSettingsPanel();
-    });
-    settingsReloadButton.addEventListener("click", () => {
-      void reloadSettingsPanel();
     });
     settingsOkButton.addEventListener("click", () => {
       void handleSettingsOk();
@@ -592,17 +584,13 @@
     chatPanel.classList.add("hidden");
     chatForm.classList.add("hidden");
     settingsPanel.classList.remove("hidden");
-    await Promise.all([refreshStatusSnapshot(), loadSettingsEditorSnapshot()]);
+    await loadSettingsEditorSnapshot();
   }
 
   function closeSettingsPanel() {
     settingsPanel.classList.add("hidden");
     chatPanel.classList.remove("hidden");
     chatForm.classList.remove("hidden");
-  }
-
-  async function reloadSettingsPanel() {
-    await Promise.all([refreshStatusSnapshot(), loadSettingsEditorSnapshot()]);
   }
 
   // Block: Settings save helpers
@@ -635,7 +623,6 @@
     settingsOkButton.disabled = true;
     settingsCancelButton.disabled = true;
     settingsApplyButton.disabled = true;
-    settingsReloadButton.disabled = true;
     try {
       const response = await fetch("/api/settings/editor", {
         method: "PUT",
@@ -660,7 +647,6 @@
       settingsOkButton.disabled = false;
       settingsCancelButton.disabled = false;
       settingsApplyButton.disabled = false;
-      settingsReloadButton.disabled = false;
     }
   }
 
@@ -692,14 +678,9 @@
       if (!response.ok) {
         throw new Error(readErrorMessage(payload));
       }
-      latestStatusSnapshot = payload;
-      statusJson.textContent = formatJson(payload);
       updateRuntimeChip(payload);
     } catch (error) {
       runtimeText.textContent = `状態取得に失敗しました: ${error.message}`;
-      if (!settingsPanel.classList.contains("hidden")) {
-        statusJson.textContent = runtimeText.textContent;
-      }
     }
   }
 
@@ -779,10 +760,6 @@
     renderMotionPresetCard();
     renderSystemValuesCard();
     renderCameraConnectionsCard();
-    settingsJson.textContent = formatJson(latestEditorSnapshot.runtime_projection);
-    if (latestStatusSnapshot !== null) {
-      statusJson.textContent = formatJson(latestStatusSnapshot);
-    }
     applySettingsTabState();
     attachSettingsEditorHandlers();
     updateSettingsDirtyState();
@@ -1341,44 +1318,49 @@
 
   function renderCameraConnectionsCard() {
     const cameraConnections = readCameraConnections();
-    if (cameraConnections.length === 0) {
-      settingsCameraCard.innerHTML = `
-        <div class="settings-card-title">カメラ接続</div>
-        ${renderSettingsGroup(
-          "接続一覧",
-          "接続はまだありません。",
-          `
-            <div class="settings-actions">
-              <button class="settings-btn settings-btn-small" type="button" data-camera-action="add">追加</button>
-            </div>
-          `,
-        )}
-      `;
-      return;
-    }
-    const activeCameraConnectionId = readActiveCameraConnectionId();
     const rowsHtml = cameraConnections
       .map((cameraConnection) => {
-        const isActive = cameraConnection.camera_connection_id === activeCameraConnectionId;
-        const activeClass = isActive ? " settings-table-row-active" : "";
-        const activeLabel = isActive ? "使用中" : "";
         return `
-          <tr class="settings-table-row${activeClass}" data-camera-row-id="${escapeHtml(cameraConnection.camera_connection_id)}">
-            <td>${activeLabel}</td>
-            <td>${renderTableCellText(cameraConnection.display_name)}</td>
-            <td>${renderTableCellText(cameraConnection.host)}</td>
-            <td>${renderTableCellText(cameraConnection.username)}</td>
-            <td>${renderTableCellText(cameraConnection.password)}</td>
+          <tr class="settings-table-row">
+            <td class="settings-table-cell-select">
+              <input
+                class="settings-table-check"
+                type="checkbox"
+                data-camera-id="${escapeHtml(cameraConnection.camera_connection_id)}"
+                data-camera-field="is_enabled"
+                data-value-kind="boolean"
+                ${cameraConnection.is_enabled === true ? "checked" : ""}
+              />
+            </td>
+            <td>
+              <input class="settings-input settings-table-input" type="text" value="${escapeHtml(cameraConnection.display_name)}" data-camera-id="${escapeHtml(cameraConnection.camera_connection_id)}" data-camera-field="display_name" />
+            </td>
+            <td>
+              <input class="settings-input settings-table-input" type="text" value="${escapeHtml(cameraConnection.host)}" data-camera-id="${escapeHtml(cameraConnection.camera_connection_id)}" data-camera-field="host" />
+            </td>
+            <td>
+              <input class="settings-input settings-table-input" type="text" value="${escapeHtml(cameraConnection.username)}" data-camera-id="${escapeHtml(cameraConnection.camera_connection_id)}" data-camera-field="username" />
+            </td>
+            <td>
+              <input class="settings-input settings-table-input" type="text" value="${escapeHtml(cameraConnection.password)}" data-camera-id="${escapeHtml(cameraConnection.camera_connection_id)}" data-camera-field="password" />
+            </td>
+            <td class="settings-table-cell-action">
+              <button class="settings-btn settings-btn-small danger" type="button" data-camera-action="remove" data-camera-id="${escapeHtml(cameraConnection.camera_connection_id)}">削除</button>
+            </td>
           </tr>
         `;
       })
       .join("");
-    const activeCameraConnection = requireActiveCameraConnection();
+    const tableBodyHtml = rowsHtml || `
+      <tr class="settings-table-row-empty">
+        <td class="settings-table-empty" colspan="6">カメラ接続はまだありません。</td>
+      </tr>
+    `;
     settingsCameraCard.innerHTML = `
       <div class="settings-card-title">カメラ接続</div>
       ${renderSettingsGroup(
         "接続一覧",
-        "一覧を選ぶと下の編集欄が切り替わります。",
+        "AI に使わせる接続だけ「使用」をオンにしてください。追加は一覧の末尾へ行を足します。",
         `
           <div class="settings-table-wrap">
             <table class="settings-table">
@@ -1389,26 +1371,16 @@
                   <th>IP アドレス</th>
                   <th>アカウント</th>
                   <th>パスワード</th>
+                  <th>削除</th>
                 </tr>
               </thead>
-              <tbody>${rowsHtml}</tbody>
+              <tbody>${tableBodyHtml}</tbody>
             </table>
           </div>
           <div class="settings-actions">
             <button class="settings-btn settings-btn-small" type="button" data-camera-action="add">追加</button>
-            <button class="settings-btn settings-btn-small danger" type="button" data-camera-action="remove">削除</button>
           </div>
         `,
-      )}
-      ${renderSettingsGroup(
-        "接続設定",
-        "",
-        [
-          renderRowField("表示名", `<input class="settings-input" type="text" value="${escapeHtml(activeCameraConnection.display_name)}" data-camera-field="display_name" />`),
-          renderRowField("IP アドレス", `<input class="settings-input" type="text" value="${escapeHtml(activeCameraConnection.host)}" data-camera-field="host" />`),
-          renderRowField("アカウント", `<input class="settings-input" type="text" value="${escapeHtml(activeCameraConnection.username)}" data-camera-field="username" />`),
-          renderRowField("パスワード", `<input class="settings-input" type="text" value="${escapeHtml(activeCameraConnection.password)}" data-camera-field="password" />`),
-        ].join(""),
       )}
     `;
   }
@@ -1461,11 +1433,7 @@
       element.addEventListener("input", handleMotionFieldChange);
       element.addEventListener("change", handleMotionFieldChange);
     }
-    const cameraRows = settingsPanel.querySelectorAll("[data-camera-row-id]");
-    for (const element of cameraRows) {
-      element.addEventListener("click", handleCameraRowSelect);
-    }
-    const cameraFieldInputs = settingsPanel.querySelectorAll("[data-camera-field]");
+    const cameraFieldInputs = settingsPanel.querySelectorAll("[data-camera-id][data-camera-field]");
     for (const element of cameraFieldInputs) {
       element.addEventListener("input", handleCameraFieldChange);
       element.addEventListener("change", handleCameraFieldChange);
@@ -1688,27 +1656,23 @@
   }
 
   // Block: Camera selection handlers
-  function handleCameraRowSelect(event) {
-    if (editorDraft === null) {
-      appendError("設定ドラフトが未初期化です");
-      return;
-    }
-    const element = event.currentTarget;
-    editorDraft.editor_state.active_camera_connection_id = String(element.dataset.cameraRowId || "");
-    renderSettingsEditor();
-  }
-
   function handleCameraFieldChange(event) {
     const element = event.currentTarget;
+    const cameraConnectionId = String(element.dataset.cameraId || "");
     const fieldName = String(element.dataset.cameraField || "");
+    const valueKind = String(element.dataset.valueKind || "string");
     if (!CAMERA_FIELD_KEYS.includes(fieldName)) {
       appendError("カメラ項目が不正です");
       return;
     }
-    const activeCameraConnection = requireActiveCameraConnection();
-    activeCameraConnection[fieldName] = String(element.value);
-    activeCameraConnection.updated_at = Date.now();
-    updateSettingsDirtyState();
+    try {
+      const cameraConnection = requireCameraConnection(cameraConnectionId);
+      cameraConnection[fieldName] = readInputValue(element, valueKind);
+      cameraConnection.updated_at = Date.now();
+      updateSettingsDirtyState();
+    } catch (error) {
+      appendError(`カメラ項目の更新に失敗しました: ${error.message}`);
+    }
   }
 
   function handleCameraAction(event) {
@@ -1718,14 +1682,19 @@
     }
     const element = event.currentTarget;
     const action = String(element.dataset.cameraAction || "");
-    if (action === "add") {
-      addCameraConnection();
-      renderSettingsEditor();
-      return;
-    }
-    if (action === "remove") {
-      removeActiveCameraConnection();
-      renderSettingsEditor();
+    try {
+      if (action === "add") {
+        addCameraConnection();
+        renderSettingsEditor();
+        return;
+      }
+      if (action === "remove") {
+        removeCameraConnection(String(element.dataset.cameraId || ""));
+        renderSettingsEditor();
+        return;
+      }
+    } catch (error) {
+      appendError(`カメラ操作に失敗しました: ${error.message}`);
       return;
     }
     appendError("カメラ操作が不正です");
@@ -2222,67 +2191,42 @@
     return editorDraft.camera_connections;
   }
 
-  function readActiveCameraConnectionId() {
-    if (editorDraft === null || !isObject(editorDraft.editor_state)) {
-      throw new Error("設定ドラフトが未初期化です");
-    }
-    const activeCameraConnectionId = editorDraft.editor_state.active_camera_connection_id;
-    if (activeCameraConnectionId === null) {
-      return null;
-    }
-    return requireString(activeCameraConnectionId, "active_camera_connection_id");
-  }
-
-  function requireActiveCameraConnection() {
-    const activeCameraConnectionId = readActiveCameraConnectionId();
-    if (activeCameraConnectionId === null) {
-      throw new Error("アクティブなカメラ接続がありません");
-    }
+  function requireCameraConnection(cameraConnectionId) {
+    const requiredCameraConnectionId = requireString(cameraConnectionId, "camera_connection_id");
     const cameraConnection = readCameraConnections()
-      .find((candidate) => String(candidate.camera_connection_id) === activeCameraConnectionId);
+      .find((candidate) => String(candidate.camera_connection_id) === requiredCameraConnectionId);
     if (cameraConnection === undefined || !isObject(cameraConnection)) {
-      throw new Error("アクティブなカメラ接続が見つかりません");
+      throw new Error("カメラ接続が見つかりません");
     }
     return cameraConnection;
   }
 
   function addCameraConnection() {
-    if (editorDraft === null || !isObject(editorDraft.editor_state)) {
-      throw new Error("設定ドラフトが未初期化です");
-    }
     const cameraConnections = readCameraConnections();
     const nextSortOrder = cameraConnections.length === 0
       ? 10
       : Math.max(...cameraConnections.map((cameraConnection) => requireInteger(cameraConnection.sort_order, "camera_connection.sort_order"))) + 10;
     const cameraConnectionId = buildDraftEntityId("cam");
+    const nextIndex = cameraConnections.length + 1;
     const nowMs = Date.now();
     cameraConnections.push({
       camera_connection_id: cameraConnectionId,
-      display_name: `カメラ ${cameraConnections.length + 1}`,
+      is_enabled: false,
+      display_name: `カメラ ${nextIndex}`,
       host: "",
       username: "",
       password: "",
       sort_order: nextSortOrder,
       updated_at: nowMs,
     });
-    editorDraft.editor_state.active_camera_connection_id = cameraConnectionId;
     updateSettingsDirtyState();
   }
 
-  function removeActiveCameraConnection() {
-    if (editorDraft === null || !isObject(editorDraft.editor_state)) {
-      throw new Error("設定ドラフトが未初期化です");
-    }
-    const activeCameraConnectionId = readActiveCameraConnectionId();
-    if (activeCameraConnectionId === null) {
-      return;
-    }
-    const filteredCameraConnections = readCameraConnections()
-      .filter((cameraConnection) => String(cameraConnection.camera_connection_id) !== activeCameraConnectionId);
-    editorDraft.camera_connections = filteredCameraConnections;
-    editorDraft.editor_state.active_camera_connection_id = filteredCameraConnections.length === 0
-      ? null
-      : String(filteredCameraConnections[0].camera_connection_id);
+  function removeCameraConnection(cameraConnectionId) {
+    const requiredCameraConnectionId = requireString(cameraConnectionId, "camera_connection_id");
+    requireCameraConnection(requiredCameraConnectionId);
+    editorDraft.camera_connections = readCameraConnections()
+      .filter((cameraConnection) => String(cameraConnection.camera_connection_id) !== requiredCameraConnectionId);
     updateSettingsDirtyState();
   }
 
@@ -2381,10 +2325,6 @@
     return payload.message;
   }
 
-  function formatJson(value) {
-    return JSON.stringify(value, null, 2);
-  }
-
   function cloneJson(value) {
     return JSON.parse(JSON.stringify(value));
   }
@@ -2428,14 +2368,6 @@
       throw new Error(`${key} が boolean ではありません`);
     }
     return value;
-  }
-
-  // Block: Settings HTML helpers
-  function renderTableCellText(value) {
-    if (typeof value !== "string" || value.length === 0) {
-      return "—";
-    }
-    return escapeHtml(value);
   }
 
   // Block: HTML escape

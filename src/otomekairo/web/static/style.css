@@ -560,20 +560,31 @@ body {
   white-space: nowrap;
 }
 
-.settings-table-row {
-  cursor: pointer;
-}
-
-.settings-table-row:hover {
-  background: #f8fbff;
-}
-
-.settings-table-row-active {
-  background: #edf4ff;
-}
-
 .settings-table tbody tr:last-child td {
   border-bottom: none;
+}
+
+.settings-table-cell-select {
+  width: 56px;
+  text-align: center !important;
+}
+
+.settings-table-check {
+  margin: 0;
+}
+
+.settings-table-input {
+  min-width: 140px;
+}
+
+.settings-table-cell-action {
+  width: 84px;
+  text-align: center !important;
+}
+
+.settings-table-empty {
+  color: var(--muted);
+  text-align: center !important;
 }
 
 .settings-actions {
@@ -597,7 +608,7 @@ body {
 
 .settings-footer {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;
   align-items: center;
   padding: 15px 20px;
@@ -605,15 +616,10 @@ body {
   background: #f5f5f5;
 }
 
-.settings-footer-left,
 .settings-footer-right {
   display: flex;
   align-items: center;
   gap: 10px;
-}
-
-.settings-footer-left .settings-btn {
-  min-width: 100px;
 }
 
 .settings-footer-right {
@@ -626,22 +632,9 @@ body {
 
 .settings-footer-status {
   min-height: 16px;
-  text-align: center;
+  text-align: left;
   font-size: 12px;
   color: #666666;
-}
-
-.settings-diagnostics {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.settings-diagnostics-summary {
-  color: var(--text);
-  font-weight: 700;
-  cursor: pointer;
-  user-select: none;
 }
 
 .hidden {
@@ -1110,21 +1103,6 @@ body {
   white-space: nowrap;
 }
 
-/* --- Utility classes --- */
-.settings-json-view {
-  margin: 0;
-  border: 1px solid var(--border);
-  border-radius: 0;
-  background: #f8faff;
-  color: var(--text);
-  font-size: 12px;
-  line-height: 1.5;
-  padding: 10px;
-  overflow: auto;
-  max-height: 220px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-}
-
 .sr-only {
   position: absolute;
   width: 1px;
@@ -1182,7 +1160,6 @@ body {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .settings-footer-left,
   .settings-footer-right {
     justify-content: flex-start;
     flex-wrap: wrap;
@@ -1191,4 +1168,5 @@ body {
   .settings-footer-status {
     text-align: left;
   }
+
 }

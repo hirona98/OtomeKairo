@@ -38,7 +38,7 @@ from otomekairo.schema.settings import (
 
 # Block: Schema constants
 SCHEMA_NAME = "core_schema"
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 EMBEDDING_VECTOR_DIMENSION = 32
 LEGACY_SETTING_KEY_ALIASES = {
     "llm.model": "llm.default_model",
@@ -115,7 +115,7 @@ class SqliteStateStore:
                 self._migrate_schema(connection, now_ms)
             self._ensure_vec_index_schema(connection=connection)
             self._ensure_db_meta(connection, now_ms)
-            self._ensure_settings_editor_schema_v8(
+            self._ensure_settings_editor_schema_v9(
                 connection=connection,
                 now_ms=now_ms,
             )
@@ -241,7 +241,6 @@ class SqliteStateStore:
                     active_conversation_preset_id,
                     active_memory_preset_id,
                     active_motion_preset_id,
-                    active_camera_connection_id,
                     system_values_json,
                     revision,
                     updated_at,
@@ -274,6 +273,7 @@ class SqliteStateStore:
                 """
                 SELECT
                     camera_connection_id,
+                    is_enabled,
                     display_name,
                     host,
                     username,
@@ -311,7 +311,6 @@ class SqliteStateStore:
                 "active_conversation_preset_id": editor_state["active_conversation_preset_id"],
                 "active_memory_preset_id": editor_state["active_memory_preset_id"],
                 "active_motion_preset_id": editor_state["active_motion_preset_id"],
-                "active_camera_connection_id": editor_state["active_camera_connection_id"],
                 "system_values": dict(editor_state["system_values"]),
             },
             "character_presets": character_presets,
@@ -332,25 +331,14 @@ class SqliteStateStore:
             },
         }
 
-    # Block: Active camera connection snapshot
-    def read_active_camera_connection(self) -> dict[str, Any] | None:
+    # Block: Enabled camera connection snapshot
+    def read_enabled_camera_connection(self) -> dict[str, Any] | None:
         with self._connect() as connection:
-            editor_row = connection.execute(
-                """
-                SELECT active_camera_connection_id
-                FROM settings_editor_state
-                WHERE row_id = 1
-                """
-            ).fetchone()
-            if editor_row is None:
-                raise RuntimeError("settings_editor_state row is missing")
-            active_camera_connection_id = editor_row["active_camera_connection_id"]
-            if active_camera_connection_id is None:
-                return None
             camera_connection_row = connection.execute(
                 """
                 SELECT
                     camera_connection_id,
+                    is_enabled,
                     display_name,
                     host,
                     username,
@@ -359,9 +347,10 @@ class SqliteStateStore:
                     created_at,
                     updated_at
                 FROM camera_connections
-                WHERE camera_connection_id = ?
-                """,
-                (str(active_camera_connection_id),),
+                WHERE is_enabled = 1
+                ORDER BY sort_order ASC, updated_at DESC
+                LIMIT 1
+                """
             ).fetchone()
         if camera_connection_row is None:
             return None
@@ -388,7 +377,6 @@ class SqliteStateStore:
                     active_conversation_preset_id,
                     active_memory_preset_id,
                     active_motion_preset_id,
-                    active_camera_connection_id,
                     system_values_json,
                     revision,
                     updated_at,
@@ -411,6 +399,7 @@ class SqliteStateStore:
                 """
                 SELECT
                     camera_connection_id,
+                    is_enabled,
                     display_name,
                     host,
                     username,
@@ -455,7 +444,6 @@ class SqliteStateStore:
                 "active_conversation_preset_id": normalized_document["editor_state"]["active_conversation_preset_id"],
                 "active_memory_preset_id": normalized_document["editor_state"]["active_memory_preset_id"],
                 "active_motion_preset_id": normalized_document["editor_state"]["active_motion_preset_id"],
-                "active_camera_connection_id": normalized_document["editor_state"]["active_camera_connection_id"],
                 "system_values": dict(normalized_document["editor_state"]["system_values"]),
                 "revision": current_revision + 1,
                 "updated_at": now_ms,
@@ -507,6 +495,7 @@ class SqliteStateStore:
                 conversation_presets=normalized_document["conversation_presets"],
                 memory_presets=normalized_document["memory_presets"],
                 motion_presets=normalized_document["motion_presets"],
+                camera_connections=normalized_document["camera_connections"],
                 now_ms=now_ms,
             )
         return self.read_settings_editor(default_settings)
@@ -954,7 +943,6 @@ class SqliteStateStore:
                         active_conversation_preset_id,
                         active_memory_preset_id,
                         active_motion_preset_id,
-                        active_camera_connection_id,
                         system_values_json,
                         revision,
                         updated_at,
@@ -969,6 +957,7 @@ class SqliteStateStore:
                     """
                     SELECT
                         camera_connection_id,
+                        is_enabled,
                         display_name,
                         host,
                         username,
@@ -2597,13 +2586,12 @@ class SqliteStateStore:
                 active_conversation_preset_id,
                 active_memory_preset_id,
                 active_motion_preset_id,
-                active_camera_connection_id,
                 system_values_json,
                 revision,
                 updated_at,
                 last_applied_change_set_id
             )
-            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
             ON CONFLICT(row_id) DO NOTHING
             """,
             (
@@ -2612,7 +2600,6 @@ class SqliteStateStore:
                 editor_seed["active_conversation_preset_id"],
                 editor_seed["active_memory_preset_id"],
                 editor_seed["active_motion_preset_id"],
-                editor_seed["active_camera_connection_id"],
                 _json_text(editor_seed["system_values_json"]),
                 int(editor_seed["revision"]),
                 now_ms,
@@ -2650,6 +2637,7 @@ class SqliteStateStore:
                 """
                 INSERT INTO camera_connections (
                     camera_connection_id,
+                    is_enabled,
                     display_name,
                     host,
                     username,
@@ -2658,11 +2646,12 @@ class SqliteStateStore:
                     created_at,
                     updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(camera_connection_id) DO NOTHING
                 """,
                 (
                     camera_connection_seed["camera_connection_id"],
+                    1 if bool(camera_connection_seed["is_enabled"]) else 0,
                     camera_connection_seed["display_name"],
                     camera_connection_seed["host"],
                     camera_connection_seed["username"],
@@ -2762,7 +2751,7 @@ class SqliteStateStore:
             )
 
     # Block: Settings editor schema normalization
-    def _ensure_settings_editor_schema_v8(
+    def _ensure_settings_editor_schema_v9(
         self,
         *,
         connection: sqlite3.Connection,
@@ -2783,14 +2772,32 @@ class SqliteStateStore:
             "active_conversation_preset_id",
             "active_memory_preset_id",
             "active_motion_preset_id",
-            "active_camera_connection_id",
             "system_values_json",
             "revision",
             "updated_at",
             "last_applied_change_set_id",
         }
         if column_names != expected_column_names:
-            raise RuntimeError("settings_editor_state schema must already be normalized to v8")
+            raise RuntimeError("settings_editor_state schema must already be normalized to v9")
+        camera_column_rows = connection.execute(
+            """
+            PRAGMA table_info(camera_connections)
+            """
+        ).fetchall()
+        camera_column_names = {str(row["name"]) for row in camera_column_rows}
+        expected_camera_column_names = {
+            "camera_connection_id",
+            "is_enabled",
+            "display_name",
+            "host",
+            "username",
+            "password",
+            "sort_order",
+            "created_at",
+            "updated_at",
+        }
+        if camera_column_names != expected_camera_column_names:
+            raise RuntimeError("camera_connections schema must already be normalized to v9")
         for table_name in SETTINGS_EDITOR_PRESET_TABLE_NAMES:
             connection.execute(
                 f"""
@@ -3830,7 +3837,7 @@ class SqliteStateStore:
             return
         if current_version > SCHEMA_VERSION:
             raise RuntimeError("schema_version is newer than this initializer")
-        if current_version not in {2, 3, 4, 5, 6, 7}:
+        if current_version not in {2, 3, 4, 5, 6, 7, 8}:
             raise RuntimeError("unsupported schema_version for migration")
         while current_version < SCHEMA_VERSION:
             if current_version == 2:
@@ -3856,6 +3863,10 @@ class SqliteStateStore:
             if current_version == 7:
                 self._migrate_schema_7_to_8(connection=connection, now_ms=now_ms)
                 current_version = 8
+                continue
+            if current_version == 8:
+                self._migrate_schema_8_to_9(connection=connection, now_ms=now_ms)
+                current_version = 9
                 continue
             raise RuntimeError("unsupported schema_version for migration")
 
@@ -4408,6 +4419,158 @@ class SqliteStateStore:
             WHERE meta_key = 'schema_version'
             """,
             (_json_text(8), now_ms),
+        )
+
+    # Block: Schema migration 8->9
+    def _migrate_schema_8_to_9(self, *, connection: sqlite3.Connection, now_ms: int) -> None:
+        legacy_editor_row = connection.execute(
+            """
+            SELECT *
+            FROM settings_editor_state
+            WHERE row_id = 1
+            """
+        ).fetchone()
+        if legacy_editor_row is None:
+            raise RuntimeError("settings_editor_state row is missing")
+        active_camera_connection_id = (
+            str(legacy_editor_row["active_camera_connection_id"])
+            if legacy_editor_row["active_camera_connection_id"] is not None
+            else None
+        )
+        temporary_editor_table = f"settings_editor_state_v8_{uuid.uuid4().hex}"
+        connection.execute(f"ALTER TABLE settings_editor_state RENAME TO {temporary_editor_table}")
+        connection.execute(
+            """
+            CREATE TABLE settings_editor_state (
+                row_id INTEGER PRIMARY KEY CHECK (row_id = 1),
+                active_character_preset_id TEXT NOT NULL,
+                active_behavior_preset_id TEXT NOT NULL,
+                active_conversation_preset_id TEXT NOT NULL,
+                active_memory_preset_id TEXT NOT NULL,
+                active_motion_preset_id TEXT NOT NULL,
+                system_values_json TEXT NOT NULL,
+                revision INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                last_applied_change_set_id TEXT
+            )
+            """
+        )
+        connection.execute(
+            f"""
+            INSERT INTO settings_editor_state (
+                row_id,
+                active_character_preset_id,
+                active_behavior_preset_id,
+                active_conversation_preset_id,
+                active_memory_preset_id,
+                active_motion_preset_id,
+                system_values_json,
+                revision,
+                updated_at,
+                last_applied_change_set_id
+            )
+            SELECT
+                row_id,
+                active_character_preset_id,
+                active_behavior_preset_id,
+                active_conversation_preset_id,
+                active_memory_preset_id,
+                active_motion_preset_id,
+                system_values_json,
+                revision,
+                updated_at,
+                last_applied_change_set_id
+            FROM {temporary_editor_table}
+            """
+        )
+        connection.execute(f"DROP TABLE {temporary_editor_table}")
+        temporary_camera_table = f"camera_connections_v8_{uuid.uuid4().hex}"
+        connection.execute("DROP INDEX IF EXISTS idx_camera_connections_sort")
+        connection.execute(f"ALTER TABLE camera_connections RENAME TO {temporary_camera_table}")
+        connection.execute(
+            """
+            CREATE TABLE camera_connections (
+                camera_connection_id TEXT PRIMARY KEY,
+                is_enabled INTEGER NOT NULL CHECK (is_enabled IN (0, 1)),
+                display_name TEXT NOT NULL,
+                host TEXT NOT NULL,
+                username TEXT NOT NULL,
+                password TEXT NOT NULL,
+                sort_order INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX idx_camera_connections_sort
+                ON camera_connections (sort_order ASC, updated_at DESC)
+            """
+        )
+        legacy_camera_rows = connection.execute(
+            f"""
+            SELECT
+                camera_connection_id,
+                display_name,
+                host,
+                username,
+                password,
+                sort_order,
+                created_at,
+                updated_at
+            FROM {temporary_camera_table}
+            ORDER BY sort_order ASC, updated_at DESC
+            """
+        ).fetchall()
+        for legacy_camera_row in legacy_camera_rows:
+            has_credentials = (
+                bool(str(legacy_camera_row["host"]).strip())
+                and bool(str(legacy_camera_row["username"]).strip())
+                and bool(str(legacy_camera_row["password"]).strip())
+            )
+            is_enabled = (
+                active_camera_connection_id is not None
+                and str(legacy_camera_row["camera_connection_id"]) == active_camera_connection_id
+                and has_credentials is True
+            )
+            connection.execute(
+                """
+                INSERT INTO camera_connections (
+                    camera_connection_id,
+                    is_enabled,
+                    display_name,
+                    host,
+                    username,
+                    password,
+                    sort_order,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(legacy_camera_row["camera_connection_id"]),
+                    1 if is_enabled else 0,
+                    str(legacy_camera_row["display_name"]),
+                    str(legacy_camera_row["host"]),
+                    str(legacy_camera_row["username"]),
+                    str(legacy_camera_row["password"]),
+                    int(legacy_camera_row["sort_order"]),
+                    int(legacy_camera_row["created_at"]),
+                    int(legacy_camera_row["updated_at"]),
+                ),
+            )
+        connection.execute(f"DROP TABLE {temporary_camera_table}")
+        connection.execute("DELETE FROM settings_change_sets")
+        connection.execute(
+            """
+            UPDATE db_meta
+            SET meta_value_json = ?,
+                updated_at = ?
+            WHERE meta_key = 'schema_version'
+            """,
+            (_json_text(9), now_ms),
         )
 
     # Block: sqlite-vec schema ensure
@@ -5344,11 +5507,6 @@ def _decode_settings_editor_state_row(row: sqlite3.Row) -> dict[str, Any]:
         "active_conversation_preset_id": str(row["active_conversation_preset_id"]),
         "active_memory_preset_id": str(row["active_memory_preset_id"]),
         "active_motion_preset_id": str(row["active_motion_preset_id"]),
-        "active_camera_connection_id": (
-            str(row["active_camera_connection_id"])
-            if row["active_camera_connection_id"] is not None
-            else None
-        ),
         "system_values": _normalize_settings_editor_system_values(raw_system_values),
         "revision": int(row["revision"]),
         "updated_at": int(row["updated_at"]),
@@ -5423,6 +5581,7 @@ def _decode_camera_connection_rows(rows: list[sqlite3.Row]) -> list[dict[str, An
         camera_connections.append(
             {
                 "camera_connection_id": str(row["camera_connection_id"]),
+                "is_enabled": bool(row["is_enabled"]),
                 "display_name": str(row["display_name"]),
                 "host": str(row["host"]),
                 "username": str(row["username"]),
@@ -5443,11 +5602,6 @@ def _canonical_editor_state_for_compare(editor_state: dict[str, Any]) -> dict[st
         "active_conversation_preset_id": str(editor_state["active_conversation_preset_id"]),
         "active_memory_preset_id": str(editor_state["active_memory_preset_id"]),
         "active_motion_preset_id": str(editor_state["active_motion_preset_id"]),
-        "active_camera_connection_id": (
-            str(editor_state["active_camera_connection_id"])
-            if editor_state["active_camera_connection_id"] is not None
-            else None
-        ),
         "system_values": dict(editor_state["system_values"]),
     }
 
@@ -5466,7 +5620,6 @@ def _persist_settings_editor_state(
             active_conversation_preset_id = ?,
             active_memory_preset_id = ?,
             active_motion_preset_id = ?,
-            active_camera_connection_id = ?,
             system_values_json = ?,
             revision = ?,
             updated_at = ?,
@@ -5479,7 +5632,6 @@ def _persist_settings_editor_state(
             editor_state["active_conversation_preset_id"],
             editor_state["active_memory_preset_id"],
             editor_state["active_motion_preset_id"],
-            editor_state["active_camera_connection_id"],
             _json_text(editor_state["system_values"]),
             int(editor_state["revision"]),
             int(editor_state["updated_at"]),
@@ -5586,6 +5738,7 @@ def _replace_camera_connections(
             """
             INSERT INTO camera_connections (
                 camera_connection_id,
+                is_enabled,
                 display_name,
                 host,
                 username,
@@ -5594,8 +5747,9 @@ def _replace_camera_connections(
                 created_at,
                 updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(camera_connection_id) DO UPDATE SET
+                is_enabled = excluded.is_enabled,
                 display_name = excluded.display_name,
                 host = excluded.host,
                 username = excluded.username,
@@ -5605,6 +5759,7 @@ def _replace_camera_connections(
             """,
             (
                 camera_connection["camera_connection_id"],
+                1 if bool(camera_connection["is_enabled"]) else 0,
                 camera_connection["display_name"],
                 camera_connection["host"],
                 camera_connection["username"],
@@ -5627,6 +5782,7 @@ def _insert_settings_change_set(
     conversation_presets: list[dict[str, Any]],
     memory_presets: list[dict[str, Any]],
     motion_presets: list[dict[str, Any]],
+    camera_connections: list[dict[str, Any]],
     now_ms: int,
 ) -> None:
     payload = {
@@ -5636,8 +5792,12 @@ def _insert_settings_change_set(
         "active_conversation_preset_id": editor_state["active_conversation_preset_id"],
         "active_memory_preset_id": editor_state["active_memory_preset_id"],
         "active_motion_preset_id": editor_state["active_motion_preset_id"],
-        "active_camera_connection_id": editor_state["active_camera_connection_id"],
         "system_values": dict(editor_state["system_values"]),
+        "enabled_camera_connection_ids": [
+            str(camera_connection["camera_connection_id"])
+            for camera_connection in camera_connections
+            if bool(camera_connection["is_enabled"]) is True
+        ],
         "preset_versions": {
             "character": _active_preset_updated_at(
                 preset_entries=character_presets,

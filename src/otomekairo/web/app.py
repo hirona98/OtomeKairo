@@ -59,7 +59,7 @@ def create_app() -> FastAPI:
     store.initialize()
     default_settings = build_default_settings()
     camera_sensor = WiFiCameraSensor(
-        camera_connection_loader=store.read_active_camera_connection,
+        camera_connection_loader=store.read_enabled_camera_connection,
     )
     services = AppServices(
         store=store,

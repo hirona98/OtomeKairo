@@ -905,7 +905,7 @@ def _build_default_camera_controller(*, store: SqliteStateStore) -> CameraContro
     from otomekairo.infra.wifi_camera_controller import WiFiCameraController
 
     return WiFiCameraController(
-        camera_connection_loader=store.read_active_camera_connection,
+        camera_connection_loader=store.read_enabled_camera_connection,
     )
 
 

@@ -800,7 +800,7 @@
   "active_conversation_preset_id": "preset_conversation_default",
   "active_memory_preset_id": "preset_memory_default",
   "active_motion_preset_id": "preset_motion_default",
-  "active_camera_connection_id": "cam_001",
+  "enabled_camera_connection_ids": ["cam_001", "cam_003"],
   "system_values": {
     "runtime.idle_tick_ms": 1000,
     "integrations.notify_route": "ui_only"
@@ -841,6 +841,7 @@
 ```json
 {
   "camera_connection_id": "cam_001",
+  "is_enabled": true,
   "display_name": "リビング",
   "host": "192.168.10.20",
   "username": "alice",
@@ -851,6 +852,7 @@
 ```
 
 - `camera_connection_entry` は、設定UI API が返すカメラ接続一覧の共通要素である
+- `is_enabled=true` の行は、AI が使ってよいカメラ接続として扱う
 
 <!-- Block: UI Outbound -->
 ### `ui_outbound_events.payload_json`
