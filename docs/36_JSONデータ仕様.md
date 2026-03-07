@@ -651,7 +651,7 @@
 - `proposal_id` は、比較対象の `action_proposal.proposal_id` と同じ `string` である
 - `hard_gate_passed` は、`boolean` に固定する
 - 各 `*_score` と `total_score` は、`0.0..1.0` の `number` に固定する
-- `personality_fit_score` は、必要なら `persona_consistency_score` の `trait_alignment`、`style_alignment`、`overall_score` を使って計算してよい
+- `personality_fit_score` は、初期実装では `persona_consistency_score` の `trait_alignment` と `style_alignment` を `0.50 : 0.50` で合成してよい
 - `priority_hint_score` は、`proposal.priority` をそのまま信じるためではなく、同程度候補の補助比較にだけ使う
 - 各 `*_score` は、比較前に同じ `0.0..1.0` 尺度へ正規化済みでなければならない
 - `action_candidate_score` は永続化前提の正本ではなく、その短周期の候補比較ごとに再計算する
@@ -697,6 +697,7 @@
 - 初期実装の `browser_chat` では、`action_proposals` の各要素は少なくとも `action_type` と `priority` を持つ
 - 初期実装の `browser_chat` では、`action_type` は `speak`、`browse`、`notify`、`look`、`wait` のいずれかだけを許可する
 - 初期実装の `browser_chat` では、`priority` は `0.0..1.0` の `number` に固定する
+- 初期実装の `action validator` では、`priority >= 0.80` を緊急ヒントとして使ってよい
 - 初期実装の `browser_chat` では、`speak` と `notify` のとき `target_channel=\"browser_chat\"` を必須とする
 - 初期実装の `browser_chat` では、`browse` のとき `query` に非空の検索文字列を必須とする
 - `speech_draft` は、少なくとも `text`、`language`、`delivery_mode` を持つ
