@@ -254,6 +254,25 @@ def build_write_memory_plan(
                 "revision_reason": "write_memory linked external fact to summary",
             }
         )
+    reflection_state_update = _build_reflection_state_update(
+        source_job_id=source_job_id,
+        payload=payload,
+        event_entries=event_entries,
+        action_entries=action_entries,
+        applied_at=applied_at,
+    )
+    if reflection_state_update is not None:
+        state_updates.append(reflection_state_update)
+        state_links.append(
+            {
+                "from_state_ref": str(reflection_state_update["state_ref"]),
+                "to_state_ref": summary_state_ref,
+                "label": "derived_from",
+                "confidence": 0.70,
+                "evidence_event_ids": source_event_ids,
+                "revision_reason": "write_memory linked reflection note to summary",
+            }
+        )
     return {
         "event_annotations": [
             {
@@ -905,6 +924,358 @@ def _validate_state_links(
             }
         )
     return normalized_entries
+
+
+# Block: Reflection state update build
+def _build_reflection_state_update(
+    *,
+    source_job_id: str,
+    payload: dict[str, Any],
+    event_entries: list[dict[str, Any]],
+    action_entries: list[dict[str, Any]],
+    applied_at: int,
+) -> dict[str, Any] | None:
+    event_summaries = _event_summary_texts(event_entries=event_entries)
+    if not event_summaries:
+        return None
+    source_event_ids = list(payload["source_event_ids"])
+    primary_action_entry = _primary_reflection_action_entry(action_entries=action_entries)
+    what_happened = _reflection_what_happened(
+        event_summaries=event_summaries,
+        primary_action_entry=primary_action_entry,
+    )
+    what_worked = _reflection_what_worked(primary_action_entry=primary_action_entry)
+    what_failed = _reflection_what_failed(primary_action_entry=primary_action_entry)
+    retry_hint = _reflection_retry_hint(primary_action_entry=primary_action_entry)
+    avoid_pattern = _reflection_avoid_pattern(primary_action_entry=primary_action_entry)
+    body_text = _build_reflection_memory_body_text(
+        what_happened=what_happened,
+        what_worked=what_worked,
+        what_failed=what_failed,
+        retry_hint=retry_hint,
+        avoid_pattern=avoid_pattern,
+    )
+    confidence = _reflection_confidence(primary_action_entry=primary_action_entry)
+    payload_json = {
+        "source_job_id": source_job_id,
+        "job_kind": "write_memory",
+        "source_cycle_id": str(payload["cycle_id"]),
+        "primary_event_id": str(payload["primary_event_id"]),
+        "source_event_ids": source_event_ids,
+        "reflection_seed_ref": dict(payload["reflection_seed_ref"]),
+        "what_happened": what_happened,
+        "event_summaries": event_summaries,
+        "action_outcomes": _reflection_action_outcomes(action_entries=action_entries),
+    }
+    reflection_seed = _reflection_seed(action_entries=action_entries)
+    if reflection_seed is not None:
+        payload_json["reflection_seed"] = reflection_seed
+    if what_worked is not None:
+        payload_json["what_worked"] = what_worked
+    if what_failed is not None:
+        payload_json["what_failed"] = what_failed
+    if retry_hint is not None:
+        payload_json["retry_hint"] = retry_hint
+    if avoid_pattern is not None:
+        payload_json["avoid_pattern"] = avoid_pattern
+    return {
+        "state_ref": "reflection_primary",
+        "operation": "upsert",
+        "memory_kind": "reflection_note",
+        "body_text": body_text,
+        "payload": payload_json,
+        "confidence": confidence,
+        "importance": round(min(0.95, confidence + 0.12), 2),
+        "memory_strength": round(min(0.90, confidence + 0.08), 2),
+        "last_confirmed_at": applied_at,
+        "evidence_event_ids": source_event_ids,
+        "revision_reason": "write_memory created reflection note",
+    }
+
+
+# Block: Reflection event summaries
+def _event_summary_texts(*, event_entries: list[dict[str, Any]]) -> list[str]:
+    summaries: list[str] = []
+    for event_entry in event_entries:
+        summary_text = _required_non_empty_string(
+            event_entry.get("summary_text"),
+            "write_memory event entry.summary_text must be non-empty string",
+        )
+        summaries.append(summary_text)
+    return summaries
+
+
+# Block: Reflection action pick
+def _primary_reflection_action_entry(
+    *,
+    action_entries: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    if not action_entries:
+        return None
+    return action_entries[-1]
+
+
+# Block: Reflection happened summary
+def _reflection_what_happened(
+    *,
+    event_summaries: list[str],
+    primary_action_entry: dict[str, Any] | None,
+) -> str:
+    happened_text = " / ".join(event_summaries[:3])
+    if primary_action_entry is None:
+        return happened_text[:600]
+    action_label = _reflection_action_label(
+        action_type=_required_non_empty_string(
+            primary_action_entry.get("action_type"),
+            "write_memory action entry.action_type must be non-empty string",
+        )
+    )
+    status = _required_non_empty_string(
+        primary_action_entry.get("status"),
+        "write_memory action entry.status must be non-empty string",
+    )
+    return f"{happened_text} / {action_label}は{_reflection_status_text(status=status)}"[:600]
+
+
+# Block: Reflection worked summary
+def _reflection_what_worked(*, primary_action_entry: dict[str, Any] | None) -> str | None:
+    if primary_action_entry is None:
+        return None
+    status = _required_non_empty_string(
+        primary_action_entry.get("status"),
+        "write_memory action entry.status must be non-empty string",
+    )
+    action_type = _required_non_empty_string(
+        primary_action_entry.get("action_type"),
+        "write_memory action entry.action_type must be non-empty string",
+    )
+    if status != "succeeded":
+        return None
+    if action_type in {"hold_chat_response", "reject_chat_response"}:
+        return f"{_reflection_action_label(action_type=action_type)} 判断が妥当だった"
+    return f"{_reflection_action_label(action_type=action_type)} を最後まで実行できた"
+
+
+# Block: Reflection failed summary
+def _reflection_what_failed(*, primary_action_entry: dict[str, Any] | None) -> str | None:
+    if primary_action_entry is None:
+        return None
+    status = _required_non_empty_string(
+        primary_action_entry.get("status"),
+        "write_memory action entry.status must be non-empty string",
+    )
+    action_type = _required_non_empty_string(
+        primary_action_entry.get("action_type"),
+        "write_memory action entry.action_type must be non-empty string",
+    )
+    if action_type in {"hold_chat_response", "reject_chat_response"}:
+        return None
+    if status == "failed":
+        failure_mode = primary_action_entry.get("failure_mode")
+        if isinstance(failure_mode, str) and failure_mode:
+            return f"{_reflection_action_label(action_type=action_type)} が失敗した: {failure_mode}"
+        return f"{_reflection_action_label(action_type=action_type)} が失敗した"
+    if status == "stopped":
+        return f"{_reflection_action_label(action_type=action_type)} は途中で止まった"
+    return None
+
+
+# Block: Reflection retry hint
+def _reflection_retry_hint(*, primary_action_entry: dict[str, Any] | None) -> str | None:
+    if primary_action_entry is None:
+        return None
+    action_type = _required_non_empty_string(
+        primary_action_entry.get("action_type"),
+        "write_memory action entry.action_type must be non-empty string",
+    )
+    status = _required_non_empty_string(
+        primary_action_entry.get("status"),
+        "write_memory action entry.status must be non-empty string",
+    )
+    if action_type == "hold_chat_response":
+        return "追加条件が揃ったときだけ再判断する"
+    if action_type == "reject_chat_response":
+        return "hard gate を満たす候補だけで再判断する"
+    if status == "failed":
+        return _failed_retry_hint(action_type=action_type)
+    if status == "stopped":
+        return _stopped_retry_hint(action_type=action_type)
+    return None
+
+
+# Block: Reflection avoid pattern
+def _reflection_avoid_pattern(*, primary_action_entry: dict[str, Any] | None) -> str | None:
+    if primary_action_entry is None:
+        return None
+    action_type = _required_non_empty_string(
+        primary_action_entry.get("action_type"),
+        "write_memory action entry.action_type must be non-empty string",
+    )
+    status = _required_non_empty_string(
+        primary_action_entry.get("status"),
+        "write_memory action entry.status must be non-empty string",
+    )
+    if action_type in {"hold_chat_response", "reject_chat_response"}:
+        return "整合性の低い候補をそのまま実行しない"
+    if status == "failed":
+        return _failed_avoid_pattern(action_type=action_type)
+    if status == "stopped":
+        return "中断直後に同じ条件で出力を続けない"
+    return None
+
+
+# Block: Reflection memory text
+def _build_reflection_memory_body_text(
+    *,
+    what_happened: str,
+    what_worked: str | None,
+    what_failed: str | None,
+    retry_hint: str | None,
+    avoid_pattern: str | None,
+) -> str:
+    reflection_parts = [what_happened]
+    if what_worked is not None:
+        reflection_parts.append(f"work:{what_worked}")
+    if what_failed is not None:
+        reflection_parts.append(f"fail:{what_failed}")
+    if retry_hint is not None:
+        reflection_parts.append(f"retry:{retry_hint}")
+    if avoid_pattern is not None:
+        reflection_parts.append(f"avoid:{avoid_pattern}")
+    return " / ".join(reflection_parts)[:1000]
+
+
+# Block: Reflection confidence
+def _reflection_confidence(*, primary_action_entry: dict[str, Any] | None) -> float:
+    if primary_action_entry is None:
+        return 0.60
+    action_type = _required_non_empty_string(
+        primary_action_entry.get("action_type"),
+        "write_memory action entry.action_type must be non-empty string",
+    )
+    status = _required_non_empty_string(
+        primary_action_entry.get("status"),
+        "write_memory action entry.status must be non-empty string",
+    )
+    if action_type in {"hold_chat_response", "reject_chat_response"}:
+        return 0.72
+    if status == "failed":
+        return 0.82
+    if status == "stopped":
+        return 0.76
+    return 0.66
+
+
+# Block: Reflection action outcomes
+def _reflection_action_outcomes(*, action_entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    outcomes: list[dict[str, Any]] = []
+    for action_entry in action_entries:
+        action_type = _required_non_empty_string(
+            action_entry.get("action_type"),
+            "write_memory action entry.action_type must be non-empty string",
+        )
+        status = _required_non_empty_string(
+            action_entry.get("status"),
+            "write_memory action entry.status must be non-empty string",
+        )
+        outcome = {
+            "action_type": action_type,
+            "status": status,
+        }
+        failure_mode = action_entry.get("failure_mode")
+        if isinstance(failure_mode, str) and failure_mode:
+            outcome["failure_mode"] = failure_mode
+        command = action_entry.get("command")
+        if isinstance(command, dict):
+            decision_reason = command.get("decision_reason")
+            if isinstance(decision_reason, str) and decision_reason:
+                outcome["decision_reason"] = decision_reason
+        observed_effects = action_entry.get("observed_effects")
+        if isinstance(observed_effects, dict):
+            validator_reason = observed_effects.get("validator_reason")
+            if isinstance(validator_reason, str) and validator_reason:
+                outcome["validator_reason"] = validator_reason
+            selected_action_type = observed_effects.get("selected_action_type")
+            if isinstance(selected_action_type, str) and selected_action_type:
+                outcome["selected_action_type"] = selected_action_type
+        outcomes.append(outcome)
+    return outcomes
+
+
+# Block: Reflection seed extract
+def _reflection_seed(*, action_entries: list[dict[str, Any]]) -> dict[str, Any] | None:
+    for action_entry in reversed(action_entries):
+        adapter_trace = action_entry.get("adapter_trace")
+        if not isinstance(adapter_trace, dict):
+            continue
+        cognition_result = adapter_trace.get("cognition_result")
+        if not isinstance(cognition_result, dict):
+            continue
+        reflection_seed = cognition_result.get("reflection_seed")
+        if isinstance(reflection_seed, dict):
+            return dict(reflection_seed)
+    return None
+
+
+# Block: Reflection text helpers
+def _reflection_action_label(*, action_type: str) -> str:
+    normalized_action_type = _normalized_action_type(action_type=action_type)
+    if normalized_action_type == "browse":
+        return "browse"
+    if normalized_action_type == "look":
+        return "look"
+    if normalized_action_type == "notify":
+        return "notify"
+    if normalized_action_type == "speak":
+        return "speak"
+    if action_type == "hold_chat_response":
+        return "hold"
+    if action_type == "reject_chat_response":
+        return "reject"
+    return action_type
+
+
+def _reflection_status_text(*, status: str) -> str:
+    if status == "succeeded":
+        return "成功した"
+    if status == "failed":
+        return "失敗した"
+    if status == "stopped":
+        return "停止した"
+    raise RuntimeError("write_memory action entry.status is invalid")
+
+
+def _failed_retry_hint(*, action_type: str) -> str:
+    normalized_action_type = _normalized_action_type(action_type=action_type)
+    if normalized_action_type == "browse":
+        return "query と source_task_id を確認してから browse をやり直す"
+    if normalized_action_type == "look":
+        return "カメラ接続と target を確認してから look をやり直す"
+    if normalized_action_type == "notify":
+        return "通知先と route を確認してから notify をやり直す"
+    if normalized_action_type == "speak":
+        return "発話を短く整えてから speak をやり直す"
+    return "条件を確認してから同系統の行動をやり直す"
+
+
+def _stopped_retry_hint(*, action_type: str) -> str:
+    normalized_action_type = _normalized_action_type(action_type=action_type)
+    if normalized_action_type == "speak":
+        return "中断理由を解消してから speak を再開する"
+    return "中断理由を解消してから同系統の行動を再開する"
+
+
+def _failed_avoid_pattern(*, action_type: str) -> str:
+    normalized_action_type = _normalized_action_type(action_type=action_type)
+    if normalized_action_type == "browse":
+        return "同じ query を条件未確認のまま連打しない"
+    if normalized_action_type == "look":
+        return "camera unavailable のまま look を連打しない"
+    if normalized_action_type == "notify":
+        return "通知経路が不確かなまま notify を繰り返さない"
+    if normalized_action_type == "speak":
+        return "同じ長文をそのまま再送しない"
+    return "失敗条件を解消せずに同じ行動を繰り返さない"
 
 
 # Block: Preference update build

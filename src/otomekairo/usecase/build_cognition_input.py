@@ -41,6 +41,7 @@ def build_cognition_input(
     )
     retrieval_artifacts = build_retrieval_artifacts(
         memory_snapshot=state_snapshot.memory_snapshot,
+        retrieval_profile=state_snapshot.retrieval_profile,
         current_observation=current_observation,
         task_snapshot=state_snapshot.task_snapshot,
         resolved_at=resolved_at,

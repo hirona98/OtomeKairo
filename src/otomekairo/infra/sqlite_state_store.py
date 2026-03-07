@@ -32,6 +32,7 @@ from otomekairo.schema.settings import (
     build_default_settings_editor_presets,
     build_settings_editor_system_keys,
     decode_requested_value,
+    normalize_retrieval_profile,
     normalize_settings_editor_document,
 )
 from otomekairo.usecase.persona_change import evaluate_persona_change
@@ -678,6 +679,13 @@ class SqliteStateStore:
         if not isinstance(embedding_model, str) or not embedding_model:
             raise RuntimeError("llm.embedding_model must be non-empty string")
         with self._connect() as connection:
+            retrieval_profile = _read_active_retrieval_profile(connection=connection)
+            similarity_limit = int(retrieval_profile["semantic_top_k"])
+            similar_episodes_limit = effective_settings.get("memory.similar_episodes_limit")
+            if isinstance(similar_episodes_limit, int) and not isinstance(similar_episodes_limit, bool):
+                similarity_limit = min(similarity_limit, similar_episodes_limit)
+            recent_event_fetch_limit = max(8, int(retrieval_profile["recent_window_limit"]))
+            memory_fetch_limit = max(16, similarity_limit * 2)
             recent_event_rows = connection.execute(
                 """
                 SELECT
@@ -691,8 +699,9 @@ class SqliteStateStore:
                 FROM events
                 WHERE searchable = 1
                 ORDER BY created_at DESC
-                LIMIT 8
-                """
+                LIMIT ?
+                """,
+                (recent_event_fetch_limit,),
             ).fetchall()
             memory_rows = connection.execute(
                 """
@@ -711,8 +720,9 @@ class SqliteStateStore:
                 WHERE searchable = 1
                   AND memory_kind IN ('summary', 'fact', 'relation', 'long_mood_state', 'reflection_note')
                 ORDER BY updated_at DESC
-                LIMIT 16
-                """
+                LIMIT ?
+                """,
+                (memory_fetch_limit,),
             ).fetchall()
             affect_rows = connection.execute(
                 """
@@ -761,7 +771,7 @@ class SqliteStateStore:
                     connection=connection,
                     query_text=observation_hint_text.strip(),
                     embedding_model=embedding_model,
-                    limit=8,
+                    limit=similarity_limit,
                 )
                 recent_event_rows = _merge_ranked_event_rows(
                     connection=connection,
@@ -828,6 +838,7 @@ class SqliteStateStore:
                 affect_rows=affect_rows,
                 preference_rows=preference_rows,
             ),
+            retrieval_profile=retrieval_profile,
             effective_settings=effective_settings,
         )
 
@@ -6427,7 +6438,12 @@ def _action_entries_for_write_memory_plan(
 ) -> list[dict[str, Any]]:
     action_rows = connection.execute(
         """
-        SELECT action_type, status
+        SELECT action_type,
+               status,
+               failure_mode,
+               command_json,
+               observed_effects_json,
+               adapter_trace_ref_json
         FROM action_history
         WHERE cycle_id = ?
         ORDER BY started_at ASC
@@ -6438,9 +6454,40 @@ def _action_entries_for_write_memory_plan(
         {
             "action_type": str(row["action_type"]),
             "status": str(row["status"]),
+            "failure_mode": (
+                str(row["failure_mode"])
+                if row["failure_mode"] is not None
+                else None
+            ),
+            "command": _decoded_optional_json_object(
+                raw_value=row["command_json"],
+                field_name="action_history.command_json",
+            ),
+            "observed_effects": _decoded_optional_json_object(
+                raw_value=row["observed_effects_json"],
+                field_name="action_history.observed_effects_json",
+            ),
+            "adapter_trace": _decoded_optional_json_object(
+                raw_value=row["adapter_trace_ref_json"],
+                field_name="action_history.adapter_trace_ref_json",
+            ),
         }
         for row in action_rows
     ]
+
+
+# Block: Optional action history json decode
+def _decoded_optional_json_object(
+    *,
+    raw_value: Any,
+    field_name: str,
+) -> dict[str, Any] | None:
+    if raw_value is None:
+        return None
+    decoded_value = json.loads(raw_value)
+    if not isinstance(decoded_value, dict):
+        raise RuntimeError(f"{field_name} must decode to object")
+    return decoded_value
 
 
 # Block: Write memory plan browse facts
@@ -6842,6 +6889,33 @@ def _decode_settings_preset_rows(rows: list[sqlite3.Row]) -> list[dict[str, Any]
             }
         )
     return preset_entries
+
+
+# Block: Active retrieval profile read
+def _read_active_retrieval_profile(*, connection: sqlite3.Connection) -> dict[str, Any]:
+    editor_row = connection.execute(
+        """
+        SELECT active_memory_preset_id
+        FROM settings_editor_state
+        WHERE row_id = 1
+        """
+    ).fetchone()
+    if editor_row is None:
+        raise RuntimeError("settings_editor_state row is missing")
+    memory_row = connection.execute(
+        """
+        SELECT payload_json
+        FROM memory_presets
+        WHERE preset_id = ?
+        """,
+        (str(editor_row["active_memory_preset_id"]),),
+    ).fetchone()
+    if memory_row is None:
+        raise RuntimeError("active memory preset is missing")
+    payload = json.loads(memory_row["payload_json"])
+    if not isinstance(payload, dict):
+        raise RuntimeError("memory_presets.payload_json must be object")
+    return normalize_retrieval_profile(payload.get("retrieval_profile"))
 
 
 # Block: Camera connection rows decode

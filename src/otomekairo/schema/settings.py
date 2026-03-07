@@ -955,6 +955,11 @@ def _validate_enabled_stt_provider_settings(normalized: dict[str, Any]) -> None:
 
 
 # Block: Retrieval profile normalization
+def normalize_retrieval_profile(retrieval_profile: Any) -> dict[str, Any]:
+    return _normalize_retrieval_profile(retrieval_profile)
+
+
+# Block: Retrieval profile normalization
 def _normalize_retrieval_profile(retrieval_profile: Any) -> dict[str, Any]:
     if not isinstance(retrieval_profile, dict):
         raise SettingsValidationError("invalid_settings_editor_document", "retrieval_profile must be an object")
