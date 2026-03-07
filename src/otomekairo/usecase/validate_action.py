@@ -17,6 +17,13 @@ DRIVE_RELIEF_WEIGHT = 0.10
 EXPECTED_STABILITY_WEIGHT = 0.08
 
 
+# Block: Hold thresholds
+LOW_PERSONALITY_FIT_THRESHOLD = 0.30
+HIGH_AVERSION_PENALTY_THRESHOLD = 0.70
+LOW_RELATIONSHIP_FIT_THRESHOLD = 0.35
+URGENT_PRIORITY_THRESHOLD = 0.80
+
+
 # Block: Validation result
 @dataclass(frozen=True, slots=True)
 class ValidatedChatAction:
@@ -85,18 +92,26 @@ def validate_chat_response_action(
         proposal=best_candidate["proposal"],
         message_id=message_id,
     )
-    if float(best_candidate["personality_fit_score"]) < 0.30:
-        return ValidatedChatAction(
-            decision="hold",
-            decision_reason="personality_fit_below_threshold",
-            proposal=selected_proposal,
-            action_command=None,
-            action_candidate_score=_candidate_payload(best_candidate),
-        )
     if action_type == "wait":
         return ValidatedChatAction(
             decision="hold",
             decision_reason="wait_selected",
+            proposal=selected_proposal,
+            action_command=None,
+            action_candidate_score=_candidate_payload(best_candidate),
+        )
+    if _should_hold_for_aversion_relationship_conflict(best_candidate):
+        return ValidatedChatAction(
+            decision="hold",
+            decision_reason="aversion_relationship_conflict",
+            proposal=selected_proposal,
+            action_command=None,
+            action_candidate_score=_candidate_payload(best_candidate),
+        )
+    if _should_hold_for_low_personality_fit(best_candidate):
+        return ValidatedChatAction(
+            decision="hold",
+            decision_reason="personality_fit_below_threshold",
             proposal=selected_proposal,
             action_command=None,
             action_candidate_score=_candidate_payload(best_candidate),
@@ -378,12 +393,34 @@ def _personality_fit_score(
 ) -> float:
     trait_alignment = _normalized_score(persona_consistency["trait_alignment"])
     style_alignment = _normalized_score(persona_consistency["style_alignment"])
-    overall_score = _normalized_score(persona_consistency["overall_score"])
-    return _normalized_score(
-        trait_alignment * 0.35
-        + style_alignment * 0.35
-        + overall_score * 0.30
+    return _normalized_score(trait_alignment * 0.50 + style_alignment * 0.50)
+
+
+# Block: Hold decision helpers
+def _should_hold_for_aversion_relationship_conflict(candidate: dict[str, Any]) -> bool:
+    if _is_urgent_candidate(candidate):
+        return False
+    persona_consistency = candidate["persona_consistency"]
+    aversion_penalty = _normalized_score(persona_consistency["aversion_penalty"])
+    relationship_fit_score = _normalized_score(candidate["relationship_fit_score"])
+    return (
+        aversion_penalty >= HIGH_AVERSION_PENALTY_THRESHOLD
+        and relationship_fit_score <= LOW_RELATIONSHIP_FIT_THRESHOLD
     )
+
+
+def _should_hold_for_low_personality_fit(candidate: dict[str, Any]) -> bool:
+    if _is_urgent_candidate(candidate):
+        return False
+    return (
+        _normalized_score(candidate["personality_fit_score"])
+        < LOW_PERSONALITY_FIT_THRESHOLD
+    )
+
+
+def _is_urgent_candidate(candidate: dict[str, Any]) -> bool:
+    priority_hint_score = _normalized_score(candidate["priority_hint_score"])
+    return priority_hint_score >= URGENT_PRIORITY_THRESHOLD
 
 
 # Block: Style alignment
