@@ -1675,6 +1675,7 @@ class SqliteStateStore:
                 SELECT
                     memory_jobs.job_id,
                     memory_jobs.job_kind,
+                    memory_jobs.tries,
                     memory_jobs.created_at,
                     memory_jobs.payload_ref_json
                 FROM memory_jobs
@@ -4356,6 +4357,10 @@ class SqliteStateStore:
             return []
         primary_event_id = event_ids[0]
         idempotency_key = _write_memory_job_idempotency_key(cycle_id=cycle_id, event_ids=event_ids)
+        event_snapshot_refs = _event_snapshot_refs_for_write_memory_job(
+            connection=connection,
+            event_ids=event_ids,
+        )
         payload_json = {
             "job_kind": "write_memory",
             "cycle_id": cycle_id,
@@ -4367,13 +4372,7 @@ class SqliteStateStore:
                 "ref_kind": "event",
                 "ref_id": primary_event_id,
             },
-            "event_snapshot_refs": [
-                {
-                    "event_id": event_id,
-                    "event_updated_at": created_at,
-                }
-                for event_id in event_ids
-            ],
+            "event_snapshot_refs": event_snapshot_refs,
         }
         return [
             self._insert_memory_job(
@@ -6344,6 +6343,24 @@ def _fetch_events_for_ids(
             raise RuntimeError("source event for write_memory is missing")
         ordered_rows.append(row)
     return ordered_rows
+
+
+# Block: Write memory event snapshot refs
+def _event_snapshot_refs_for_write_memory_job(
+    *,
+    connection: sqlite3.Connection,
+    event_ids: list[str],
+) -> list[dict[str, int | str]]:
+    return [
+        {
+            "event_id": str(row["event_id"]),
+            "event_updated_at": int(row["source_updated_at"]),
+        }
+        for row in _fetch_events_for_ids(
+            connection=connection,
+            event_ids=event_ids,
+        )
+    ]
 
 
 def _fetch_action_history_for_cycle(
