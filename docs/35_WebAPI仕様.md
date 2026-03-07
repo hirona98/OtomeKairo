@@ -4,6 +4,7 @@
 ## このドキュメントの役割
 
 - このドキュメントは、`FastAPI + Uvicorn` で提供する Web API を、エンドポイント単位で固定する正本である
+- このドキュメントは、target の API 面と current の `browser_chat` 公開面を混ぜずに読むための正本である
 - 目的は、ブラウザチャット、最小ブラウザ UI、`SSE` 配信、設定変更、状態参照を、実装前に曖昧なく決めることにある
 - Web サーバの責務分割は `docs/30_システム設計.md` を見る
 - ランタイムとの受け渡し仕様は `docs/31_ランタイム処理仕様.md` を見る
@@ -18,10 +19,26 @@
 <!-- Block: Scope -->
 ## このドキュメントで固定する範囲
 
-- 固定するのは、初期実装で提供する HTTP API、最小ブラウザ UI の入口、`SSE` の仕様である
+- 固定するのは、current 実装で提供する HTTP API、最小ブラウザ UI の入口、`SSE` の仕様である
 - 固定するのは、ブラウザ UI から使う制御面 API であり、内部 Python 関数の呼び出しではない
 - 固定するのは、エンドポイントの意味、受付条件、主要な成功応答、主要な失敗応答である
 - 固定しないのは、認証方式の最終仕様、CORS の最終ポリシー、OpenAPI の自動生成細部である
+
+<!-- Block: Read Guide -->
+## target と current の読み分け
+
+- 後続のエンドポイント定義は target の正本として保ちつつ、`current browser_chat 公開面` と `current` 明記の補足で現実装を読む
+- `browser_chat` や最小 UI に紐づく `初期実装` の補足は、現在の `browser_chat` 実装を固定説明したものである
+- target と current が衝突する場合、今どの API が実際に動くかの判断では current を優先する
+
+<!-- Block: Current Surface -->
+## current `browser_chat` 公開面
+
+- current の組み込みブラウザ UI が実際に使うのは `GET /`、`GET /api/status`、`GET /api/settings/editor`、`PUT /api/settings/editor`、`POST /api/chat/input`、`POST /api/chat/cancel`、`POST /api/camera/capture`、`GET /api/chat/stream`、`GET /captures/{capture_filename}`、`GET /audio/{audio_filename}` である
+- `POST /api/camera/observe` は公開 API として実装済みだが、current の組み込み UI からは呼ばれない
+- current の `GET /api/status` は、runtime 全断面ではなく、runtime 要約、感情要約、主注意 kind、task 件数だけを返す
+- current の `GET /api/chat/stream` は `channel=browser_chat` だけを受け付け、他の値は `400` にする
+- current の `notice` は主に `browse_queued`、`browse_completed`、保持範囲外再開の `stream_reset` を使う
 
 <!-- Block: Common Rules -->
 ## 共通ルール
@@ -29,8 +46,8 @@
 <!-- Block: Transport -->
 ### 伝送の基本方針
 
-- ブラウザからサーバへの要求は、`GET` と `POST` に分ける
-- 状態変更や入力受付は、必ず `POST` を使う
+- ブラウザからサーバへの要求は、`GET`、`POST`、`PUT` に分ける
+- 状態変更や入力受付は、`POST` または `PUT` を使う
 - 継続的なサーバ発の通知は、`SSE` を使う
 - `SSE` はサーバ -> ブラウザの一方向とし、ブラウザ -> サーバの逆方向は別の `POST` で扱う
 - WebSocket は初期段階では採用しない
@@ -107,25 +124,26 @@ flowchart LR
 ### 役割
 
 - 最小のブラウザチャット UI を返す
-- 同一オリジンで `POST /api/chat/input`、`POST /api/chat/cancel`、`POST /api/camera/capture`、`GET /api/chat/stream`、`GET /api/status`、`GET /api/settings/editor`、`GET /captures/{capture_filename}`、`GET /audio/{audio_filename}` を使う
+- 同一オリジンで `POST /api/chat/input`、`POST /api/chat/cancel`、`POST /api/camera/capture`、`GET /api/chat/stream`、`GET /api/status`、`GET /api/settings/editor`、`PUT /api/settings/editor`、`GET /captures/{capture_filename}`、`GET /audio/{audio_filename}` を使う
 - `src/otomekairo/web/static/` に置く HTML / CSS / JavaScript を返す
 
 <!-- Block: Browser UI Rules -->
-### 初期実装で固定すること
+### current `browser_chat` で固定すること
 
 - ログイン画面は持たず、起動直後にそのままチャット UI を表示する
-- 初期実装の設定画面は `tmp/CocoroConsole` の設定ウインドウをベースにしてよい
+- current の設定画面は `tmp/CocoroConsole` の設定ウインドウをベースにしてよい
 - ブラウザUIの入力手段は、テキスト入力と `Cam` による静止画添付に固定する
 - `Cam` は `POST /api/camera/capture` で静止画を取得し、返った画像をサムネイル表示し、次の `POST /api/chat/input` へ添付してよい
+- current の `Cam` ボタンは `POST /api/camera/observe` ではなく `POST /api/camera/capture` だけを呼ぶ
 - `message` に `audio_url` がある場合は、`GET /audio/{audio_filename}` で取得した音声を再生してよい
-- `設定保存` は、初期実装では `GET /api/settings/editor` と `PUT /api/settings/editor` を使って、設定全体を保存する
+- `設定保存` は、current では `GET /api/settings/editor` と `PUT /api/settings/editor` を使って、設定全体を保存する
 - 設定画面は左端に `キャラクター` タブを置き、続けて `振る舞い`、`会話`、`記憶`、`モーション`、`システム` を並べる
 - `振る舞い` タブには `振る舞いプロンプト`、`追加プロンプト（任意）`、`行動傾向` を置き、`CocoroConsole` 相当の会話指示と OtomeKairo 独自の傾向設定をまとめて編集する
 - `キャラクター` タブには `キャラクター選択`、`基本設定`、`マテリアル・影設定`、`音声合成`、`音声認識` を含める
 - チャット画面下部の管理表示は、`GET /api/status` の `runtime.last_retrieval` と `self_state.last_persona_update` を、直近の要約として表示してよい
 - `システム` タブのカメラ接続追加は、一覧下部の `追加` で空行を末尾へ足して行う
 - 既存のカメラ接続は一覧テーブル上で直接編集し、`使用` は複数チェック可能にする
-- `browse` の初期実装では、UI は少なくとも `browse_queued` と `browse_completed` の `notice` を見分けられるようにしてよい
+- current の `browse` では、UI は少なくとも `browse_queued` と `browse_completed` の `notice` を見分けられるようにしてよい
 - UI 側で永続ストレージを前提にしない
 - UI は `browser_chat` チャネル専用として扱う
 
@@ -158,7 +176,7 @@ flowchart LR
 ### 役割
 
 - 現在の人格ランタイムの参照用スナップショットを返す
-- Web サーバは状態を更新せず、`self_state`、`attention_state`、`body_state`、`world_state`、`drive_state`、`task_state` の正本を読み出す
+- Web サーバは状態を更新せず、runtime の lease、直近 commit、直近 retrieval、`self_state.current_emotion`、`attention_state.primary_focus`、task 件数を読み出して要約する
 
 <!-- Block: Status Response -->
 ### 成功応答
@@ -206,7 +224,7 @@ flowchart LR
     }
   },
   "attention_state": {
-    "primary_focus": "browser_chat"
+    "primary_focus": "observation"
   },
   "task_state": {
     "active_task_count": 1,
@@ -221,6 +239,7 @@ flowchart LR
 - `runtime.last_retrieval` は、`retrieval_runs` が 1 件以上ある場合だけ返し、直近の `RetrievalPlan` と選別件数を要約する
 - `self_state.last_persona_update` は、`revisions.entity_type=self_state.personality` が 1 件以上ある場合だけ返す
 - 初回起動直後で短周期未実行のときは、`runtime.is_running=false` とし、`last_cycle_id` と `last_commit_id` は省略する
+- `attention_state.primary_focus` は、current 実装では `observation`、`task`、`relationship`、`idle` のような focus kind を返す
 - 全状態を丸ごと返さず、UI 表示に必要な要点だけを返す
 
 <!-- Block: Settings Get -->
@@ -550,6 +569,7 @@ flowchart LR
 ### クエリとヘッダ
 
 - `channel` クエリは任意とし、省略時は `browser_chat` を使う
+- current 実装では、`channel` に `browser_chat` 以外を指定すると `400 Bad Request` にする
 - `Last-Event-ID` ヘッダがあれば、その値より大きい `ui_event_id` から再開する
 - `Last-Event-ID` が無効な整数なら `400` とする
 
@@ -588,7 +608,7 @@ data: {"message_id":"msg_...","text":"お","chunk_index":0}
   - 役割: 完成した 1 メッセージ
   - 必須項目: `message_id`, `role`, `text`, `created_at`
   - 任意項目: `source_cycle_id`, `related_input_id`, `audio_url`, `audio_mime_type`
-  - `role` は、少なくとも `assistant`、`system_notice` を区別する
+  - current 実装の `role` は `assistant` を使う
 
 - `status`
   - 役割: UI に見せる状態変化
@@ -599,7 +619,7 @@ data: {"message_id":"msg_...","text":"お","chunk_index":0}
 - `notice`
   - 役割: 自発行動や外部通知などの補助通知
   - 必須項目: `notice_code`, `text`
-  - `notice_code` は、初期実装では `browse_queued`, `browse_completed` のような進行通知も含んでよい
+  - `notice_code` は、current 実装では主に `browse_queued`、`browse_completed` を使い、保持範囲外再開時だけ合成 `stream_reset` を使ってよい
 
 - `error`
   - 役割: UI に見せる明示エラー
