@@ -32,7 +32,7 @@ def build_attention_snapshot(
     current_observation: dict[str, Any],
     selection_profile: dict[str, Any],
     task_snapshot: dict[str, Any],
-    attention_state: dict[str, Any],
+    resolved_at: int,
 ) -> dict[str, Any]:
     candidates = _attention_candidates(
         current_observation=current_observation,
@@ -51,7 +51,7 @@ def build_attention_snapshot(
             "secondary_focuses": [],
             "suppressed_items": [],
             "revisit_queue": [],
-            "updated_at": int(attention_state["updated_at"]),
+            "updated_at": resolved_at,
         }
     scored_candidates = [
         _score_attention_candidate(
@@ -99,7 +99,7 @@ def build_attention_snapshot(
             if not bool(candidate["hard_gate_passed"])
         ][:2],
         "revisit_queue": revisit_queue,
-        "updated_at": int(attention_state["updated_at"]),
+        "updated_at": resolved_at,
     }
 
 

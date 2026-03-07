@@ -7,6 +7,11 @@ from datetime import datetime, timezone
 from typing import Any
 
 from otomekairo.schema.runtime_types import CognitionStateSnapshot, PendingInputRecord
+from otomekairo.usecase.observation_normalization import (
+    normalize_observation_kind,
+    normalize_observation_source,
+    normalize_trigger_reason,
+)
 from otomekairo.usecase.persona_projection import build_attention_snapshot, build_skill_candidates
 from otomekairo.usecase.retrieval_flow import build_retrieval_artifacts
 
@@ -59,7 +64,7 @@ def build_cognition_input(
         current_observation=current_observation,
         selection_profile=selection_profile,
         task_snapshot=state_snapshot.task_snapshot,
-        attention_state=state_snapshot.attention_state,
+        resolved_at=resolved_at,
     )
     skill_candidates = build_skill_candidates(
         current_observation=current_observation,
@@ -72,10 +77,9 @@ def build_cognition_input(
         cognition_input={
             "cycle_meta": {
                 "cycle_id": cycle_id,
-                "trigger_reason": (
-                    "external_result"
-                    if input_kind == "network_result"
-                    else ("self_initiated" if pending_input.source == "self_initiated" else "external_input")
+                "trigger_reason": normalize_trigger_reason(
+                    source=pending_input.source,
+                    payload=pending_input.payload,
                 ),
                 "input_id": pending_input.input_id,
                 "input_kind": input_kind,
@@ -136,6 +140,11 @@ def _build_current_observation(
     input_kind = str(pending_input.payload["input_kind"])
     base_observation = {
         "source": pending_input.source,
+        "kind": normalize_observation_kind(payload=pending_input.payload),
+        "trigger_reason": normalize_trigger_reason(
+            source=pending_input.source,
+            payload=pending_input.payload,
+        ),
         "channel": pending_input.channel,
         "input_kind": input_kind,
         "captured_at": pending_input.created_at,
@@ -143,6 +152,10 @@ def _build_current_observation(
         "captured_at_local_text": _local_text(pending_input.created_at),
         "relative_time_text": _relative_time_text(resolved_at, pending_input.created_at),
     }
+    base_observation["source"] = normalize_observation_source(
+        source=str(base_observation["source"]),
+        payload=pending_input.payload,
+    )
     if input_kind == "chat_message":
         text = _validated_chat_text(pending_input.payload.get("text"))
         attachments = _validated_camera_attachments(

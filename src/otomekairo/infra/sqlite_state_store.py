@@ -34,6 +34,10 @@ from otomekairo.schema.settings import (
     decode_requested_value,
     normalize_settings_editor_document,
 )
+from otomekairo.usecase.observation_normalization import (
+    normalize_observation_kind,
+    normalize_observation_source,
+)
 from otomekairo.usecase.persona_change import evaluate_persona_change
 from otomekairo.usecase.write_memory_plan import (
     build_write_memory_plan,
@@ -975,7 +979,9 @@ class SqliteStateStore:
             ).fetchone()
         if commit_row is None:
             raise RuntimeError("commit_records insert did not persist")
-        return int(commit_row["commit_id"])
+        commit_id = int(commit_row["commit_id"])
+        self.sync_commit_log(commit_id=commit_id)
+        return commit_id
 
     # Block: Settings change set claim
     def claim_next_settings_change_set(self) -> SettingsChangeSetRecord | None:
@@ -1224,7 +1230,11 @@ class SqliteStateStore:
             raise StoreValidationError("text is too long")
         if not stripped_text and not attachments:
             raise StoreValidationError("text or attachments must be provided")
-        payload: dict[str, Any] = {"input_kind": "chat_message"}
+        payload: dict[str, Any] = {
+            "input_kind": "chat_message",
+            "message_kind": "dialogue_turn",
+            "trigger_reason": "external_input",
+        }
         if stripped_text:
             payload["text"] = stripped_text
         if attachments:
@@ -1257,6 +1267,7 @@ class SqliteStateStore:
             raise StoreValidationError("captured_at must be integer")
         payload = {
             "input_kind": "camera_observation",
+            "trigger_reason": "self_initiated",
             "attachments": [
                 {
                     "attachment_kind": "camera_still_image",
@@ -1270,7 +1281,7 @@ class SqliteStateStore:
             ],
         }
         enqueue_result = self._enqueue_pending_input(
-            source="self_initiated",
+            source="camera",
             client_message_id=None,
             payload=payload,
             priority=80,
@@ -1339,7 +1350,10 @@ class SqliteStateStore:
     def enqueue_cancel(self, *, target_message_id: str | None) -> dict[str, Any]:
         input_id = _opaque_id("inp")
         now_ms = _now_ms()
-        payload: dict[str, Any] = {"input_kind": "cancel"}
+        payload: dict[str, Any] = {
+            "input_kind": "cancel",
+            "trigger_reason": "external_input",
+        }
         if target_message_id:
             payload["target_message_id"] = target_message_id
         with self._connect() as connection:
@@ -3983,6 +3997,49 @@ class SqliteStateStore:
             updated_at=now_ms,
         )
 
+    # Block: Attention state replace
+    def _replace_attention_state(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        attention_snapshot: dict[str, Any],
+    ) -> None:
+        primary_focus = attention_snapshot.get("primary_focus")
+        secondary_focuses = attention_snapshot.get("secondary_focuses")
+        suppressed_items = attention_snapshot.get("suppressed_items")
+        revisit_queue = attention_snapshot.get("revisit_queue")
+        updated_at = attention_snapshot.get("updated_at")
+        if not isinstance(primary_focus, dict):
+            raise StoreValidationError("attention_snapshot.primary_focus must be an object")
+        if not isinstance(secondary_focuses, list):
+            raise StoreValidationError("attention_snapshot.secondary_focuses must be a list")
+        if not isinstance(suppressed_items, list):
+            raise StoreValidationError("attention_snapshot.suppressed_items must be a list")
+        if not isinstance(revisit_queue, list):
+            raise StoreValidationError("attention_snapshot.revisit_queue must be a list")
+        if isinstance(updated_at, bool) or not isinstance(updated_at, int):
+            raise StoreValidationError("attention_snapshot.updated_at must be integer")
+        updated_row_count = connection.execute(
+            """
+            UPDATE attention_state
+            SET primary_focus_json = ?,
+                secondary_focuses_json = ?,
+                suppressed_items_json = ?,
+                revisit_queue_json = ?,
+                updated_at = ?
+            WHERE row_id = 1
+            """,
+            (
+                _json_text(primary_focus),
+                _json_text(secondary_focuses),
+                _json_text(suppressed_items),
+                _json_text(revisit_queue),
+                updated_at,
+            ),
+        ).rowcount
+        if updated_row_count != 1:
+            raise RuntimeError("attention_state row is missing")
+
     # Block: Pending input journal append
     def append_input_journal_for_pending_input(
         self,
@@ -3993,8 +4050,11 @@ class SqliteStateStore:
         self._append_input_journal(
             observation_id=f"obs_{pending_input.input_id}",
             cycle_id=cycle_id,
-            source=pending_input.source,
-            kind=str(pending_input.payload["input_kind"]),
+            source=normalize_observation_source(
+                source=pending_input.source,
+                payload=pending_input.payload,
+            ),
+            kind=normalize_observation_kind(payload=pending_input.payload),
             captured_at=pending_input.created_at,
             receipt_summary=_pending_input_receipt_summary(pending_input),
             payload_id=pending_input.input_id,
@@ -4012,6 +4072,7 @@ class SqliteStateStore:
         ui_events: list[dict[str, Any]],
         commit_payload: dict[str, Any],
         retrieval_run: dict[str, Any] | None = None,
+        attention_snapshot: dict[str, Any] | None = None,
         discard_reason: str | None = None,
     ) -> int:
         if resolution_status not in {"consumed", "discarded"}:
@@ -4022,6 +4083,11 @@ class SqliteStateStore:
                 connection=connection,
                 task_mutations=task_mutations,
             )
+            if attention_snapshot is not None:
+                self._replace_attention_state(
+                    connection=connection,
+                    attention_snapshot=attention_snapshot,
+                )
             event_ids = self._insert_pending_input_events(
                 connection=connection,
                 pending_input=pending_input,
@@ -4093,7 +4159,9 @@ class SqliteStateStore:
             ).fetchone()
         if commit_id is None:
             raise RuntimeError("commit_records insert did not persist")
-        return int(commit_id["commit_id"])
+        finalized_commit_id = int(commit_id["commit_id"])
+        self.sync_commit_log(commit_id=finalized_commit_id)
+        return finalized_commit_id
 
     # Block: Retrieval run write
     def _insert_retrieval_run(
@@ -4220,7 +4288,9 @@ class SqliteStateStore:
             ).fetchone()
         if commit_id is None:
             raise RuntimeError("commit_records insert did not persist")
-        return int(commit_id["commit_id"])
+        finalized_commit_id = int(commit_id["commit_id"])
+        self.sync_commit_log(commit_id=finalized_commit_id)
+        return finalized_commit_id
 
     # Block: Pending input mutation write
     def _insert_pending_input_mutations(
@@ -4757,7 +4827,10 @@ class SqliteStateStore:
                 connection=connection,
                 cycle_id=cycle_id,
                 created_at=pending_input.created_at,
-                source=pending_input.source,
+                source=normalize_observation_source(
+                    source=pending_input.source,
+                    payload=pending_input.payload,
+                ),
                 kind="observation",
                 searchable=True,
                 observation_summary=_pending_input_receipt_summary(pending_input),
@@ -4932,6 +5005,142 @@ class SqliteStateStore:
             ),
         )
         return event_id
+
+    # Block: Commit log replay
+    def sync_pending_commit_logs(self, *, max_commits: int = 8) -> int:
+        if isinstance(max_commits, bool) or not isinstance(max_commits, int):
+            raise StoreValidationError("max_commits must be integer")
+        if max_commits <= 0:
+            raise StoreValidationError("max_commits must be positive")
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT commit_id
+                FROM commit_records
+                WHERE log_sync_status IN ('pending', 'needs_replay')
+                ORDER BY committed_at ASC, commit_id ASC
+                LIMIT ?
+                """,
+                (max_commits,),
+            ).fetchall()
+        synced_count = 0
+        for row in rows:
+            if self.sync_commit_log(commit_id=int(row["commit_id"])):
+                synced_count += 1
+        return synced_count
+
+    # Block: Commit log sync
+    def sync_commit_log(self, *, commit_id: int) -> bool:
+        if isinstance(commit_id, bool) or not isinstance(commit_id, int):
+            raise StoreValidationError("commit_id must be integer")
+        if commit_id <= 0:
+            raise StoreValidationError("commit_id must be positive")
+        try:
+            if self._events_log_contains_commit_id(commit_id=commit_id):
+                self._update_commit_log_sync_status(
+                    commit_id=commit_id,
+                    status="synced",
+                    last_log_sync_error=None,
+                )
+                return True
+            commit_log_entry = self._build_commit_log_entry(commit_id=commit_id)
+            self._append_commit_log_entry(commit_log_entry=commit_log_entry)
+            self._update_commit_log_sync_status(
+                commit_id=commit_id,
+                status="synced",
+                last_log_sync_error=None,
+            )
+            return True
+        except Exception as error:
+            self._update_commit_log_sync_status(
+                commit_id=commit_id,
+                status="needs_replay",
+                last_log_sync_error=_commit_log_sync_error_text(error),
+            )
+            return False
+
+    # Block: Commit log entry build
+    def _build_commit_log_entry(self, *, commit_id: int) -> dict[str, Any]:
+        with self._connect() as connection:
+            commit_row = connection.execute(
+                """
+                SELECT commit_id, cycle_id, committed_at, commit_payload_json
+                FROM commit_records
+                WHERE commit_id = ?
+                """,
+                (commit_id,),
+            ).fetchone()
+            if commit_row is None:
+                raise RuntimeError("commit_record is missing")
+            commit_payload = json.loads(commit_row["commit_payload_json"])
+            event_ids = commit_payload.get("event_ids", [])
+            if not isinstance(event_ids, list):
+                raise RuntimeError("commit_payload_json.event_ids must be a list")
+            event_rows = (
+                _fetch_events_for_ids(connection=connection, event_ids=[str(event_id) for event_id in event_ids])
+                if event_ids
+                else []
+            )
+        return {
+            "commit_id": int(commit_row["commit_id"]),
+            "cycle_id": str(commit_row["cycle_id"]),
+            "committed_at": int(commit_row["committed_at"]),
+            "commit_payload": commit_payload,
+            "events": [_event_log_entry(row) for row in event_rows],
+        }
+
+    # Block: Commit log append
+    def _append_commit_log_entry(self, *, commit_log_entry: dict[str, Any]) -> None:
+        events_log_path = self._events_log_path()
+        events_log_path.parent.mkdir(parents=True, exist_ok=True)
+        with events_log_path.open("a", encoding="utf-8") as log_file:
+            log_file.write(_json_text(commit_log_entry))
+            log_file.write("\n")
+
+    # Block: Commit id scan
+    def _events_log_contains_commit_id(self, *, commit_id: int) -> bool:
+        events_log_path = self._events_log_path()
+        if not events_log_path.exists():
+            return False
+        with events_log_path.open("r", encoding="utf-8") as log_file:
+            for line in log_file:
+                stripped_line = line.strip()
+                if not stripped_line:
+                    continue
+                log_entry = json.loads(stripped_line)
+                if not isinstance(log_entry, dict):
+                    raise RuntimeError("events.jsonl entry must be an object")
+                logged_commit_id = log_entry.get("commit_id")
+                if isinstance(logged_commit_id, int) and logged_commit_id == commit_id:
+                    return True
+        return False
+
+    # Block: Commit log status update
+    def _update_commit_log_sync_status(
+        self,
+        *,
+        commit_id: int,
+        status: str,
+        last_log_sync_error: str | None,
+    ) -> None:
+        if status not in {"synced", "needs_replay"}:
+            raise StoreValidationError("status is invalid")
+        with self._connect() as connection:
+            updated_row_count = connection.execute(
+                """
+                UPDATE commit_records
+                SET log_sync_status = ?,
+                    last_log_sync_error = ?
+                WHERE commit_id = ?
+                """,
+                (status, last_log_sync_error, commit_id),
+            ).rowcount
+        if updated_row_count != 1:
+            raise RuntimeError("commit_record must exist before log sync update")
+
+    # Block: Events log path
+    def _events_log_path(self) -> Path:
+        return self._db_path.parent / "events.jsonl"
 
     # Block: SQLite connection
     def _connect(self) -> sqlite3.Connection:
@@ -5853,12 +6062,16 @@ class SqliteStateStore:
             ON CONFLICT(row_id) DO NOTHING
             """,
             (
-                _json_text({"kind": "idle"}),
+                _json_text(_attention_primary_focus_seed()),
                 _json_text([]),
                 _json_text([]),
                 _json_text([]),
                 now_ms,
             ),
+        )
+        self._ensure_attention_state_defaults(
+            connection=connection,
+            now_ms=now_ms,
         )
         # Block: body_state seed
         connection.execute(
@@ -5937,8 +6150,60 @@ class SqliteStateStore:
             ),
         )
 
+    # Block: Attention state defaults
+    def _ensure_attention_state_defaults(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        now_ms: int,
+    ) -> None:
+        row = connection.execute(
+            """
+            SELECT primary_focus_json
+            FROM attention_state
+            WHERE row_id = 1
+            """
+        ).fetchone()
+        if row is None:
+            raise RuntimeError("attention_state row is missing")
+        primary_focus = json.loads(row["primary_focus_json"])
+        if not isinstance(primary_focus, dict):
+            raise RuntimeError("attention_state.primary_focus_json must be object")
+        required_keys = {"focus_ref", "focus_kind", "summary", "score_hint", "reason_codes"}
+        if required_keys.issubset(primary_focus):
+            return
+        connection.execute(
+            """
+            UPDATE attention_state
+            SET primary_focus_json = ?,
+                secondary_focuses_json = ?,
+                suppressed_items_json = ?,
+                revisit_queue_json = ?,
+                updated_at = ?
+            WHERE row_id = 1
+            """,
+            (
+                _json_text(_attention_primary_focus_seed()),
+                _json_text([]),
+                _json_text([]),
+                _json_text([]),
+                now_ms,
+            ),
+        )
+
 
 # Block: Seed JSON helpers
+# Block: Attention seed
+def _attention_primary_focus_seed() -> dict[str, Any]:
+    return {
+        "focus_ref": "attention:idle",
+        "focus_kind": "idle",
+        "summary": "待機中",
+        "score_hint": 0.0,
+        "reason_codes": ["idle"],
+    }
+
+
 def _self_state_personality_seed() -> dict[str, Any]:
     return {
         "trait_values": {
@@ -6048,13 +6313,47 @@ def _public_persona_update(row: sqlite3.Row) -> dict[str, Any]:
     }
 
 
+# Block: Event log entry
+def _event_log_entry(row: sqlite3.Row) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "event_id": str(row["event_id"]),
+        "created_at": int(row["created_at"]),
+        "source": str(row["source"]),
+        "kind": str(row["kind"]),
+        "searchable": bool(row["searchable"]),
+    }
+    updated_at = row["updated_at"]
+    if updated_at is not None:
+        payload["updated_at"] = int(updated_at)
+    if isinstance(row["observation_summary"], str) and row["observation_summary"]:
+        payload["observation_summary"] = str(row["observation_summary"])
+    if isinstance(row["action_summary"], str) and row["action_summary"]:
+        payload["action_summary"] = str(row["action_summary"])
+    if isinstance(row["result_summary"], str) and row["result_summary"]:
+        payload["result_summary"] = str(row["result_summary"])
+    if isinstance(row["payload_ref_json"], str) and row["payload_ref_json"]:
+        payload["payload_ref"] = json.loads(row["payload_ref_json"])
+    if isinstance(row["input_journal_refs_json"], str) and row["input_journal_refs_json"]:
+        payload["input_journal_refs"] = json.loads(row["input_journal_refs_json"])
+    return payload
+
+
+# Block: Commit log sync error
+def _commit_log_sync_error_text(error: Exception) -> str:
+    compact_message = " ".join(str(error).split())
+    if not compact_message:
+        return type(error).__name__
+    return compact_message[:240]
+
+
+# Block: Public primary focus
 def _public_primary_focus(primary_focus_json: dict[str, Any]) -> str:
     if not isinstance(primary_focus_json, dict):
         raise RuntimeError("attention_state.primary_focus_json must be an object")
-    focus_kind = primary_focus_json.get("kind")
-    if not isinstance(focus_kind, str) or not focus_kind:
-        raise RuntimeError("attention_state.primary_focus_json.kind is required")
-    return focus_kind
+    summary = primary_focus_json.get("summary")
+    if not isinstance(summary, str) or not summary:
+        raise RuntimeError("attention_state.primary_focus_json.summary is required")
+    return summary
 
 
 def _trait_update_entries(
@@ -6323,11 +6622,15 @@ def _fetch_events_for_ids(
         f"""
         SELECT
             event_id,
+            source,
             kind,
             searchable,
+            updated_at,
             observation_summary,
             action_summary,
             result_summary,
+            payload_ref_json,
+            input_journal_refs_json,
             created_at,
             COALESCE(updated_at, created_at) AS source_updated_at
         FROM events
