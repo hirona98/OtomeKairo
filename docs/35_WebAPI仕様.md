@@ -142,6 +142,7 @@ flowchart LR
 - `振る舞い` タブには `振る舞いプロンプト`、`追加プロンプト（任意）`、`行動傾向` を置き、`CocoroConsole` 相当の会話指示と OtomeKairo 独自の傾向設定をまとめて編集する
 - `キャラクター` タブには `キャラクター選択`、`基本設定`、`マテリアル・影設定`、`音声合成`、`音声認識` を含める
 - チャット画面下部の管理表示は、`GET /api/status` の `runtime.last_retrieval` と `self_state.last_persona_update` を、直近の要約として表示してよい
+- `runtime.last_retrieval` は、時刻、mode、query 要約、合計件数に加えて、`selected_counts` のカテゴリ別内訳も `合計 17 件（作業2 / エピ1 / ...）` 形式で本文表示してよい
 - `システム` タブのカメラ接続追加は、一覧下部の `追加` で空行を末尾へ足して行う
 - 既存のカメラ接続は一覧テーブル上で直接編集し、`使用` は複数チェック可能にする
 - current の `browse` では、UI は少なくとも `browse_queued` と `browse_completed` の `notice` を見分けられるようにしてよい

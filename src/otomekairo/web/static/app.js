@@ -2029,7 +2029,7 @@
     const selectedCounts = requireCountMap(lastRetrieval.selected_counts, "runtime.last_retrieval.selected_counts");
     const totalCount = Object.values(selectedCounts).reduce((total, count) => total + count, 0);
     return {
-      text: `${formatStatusTimestamp(createdAt)} / ${mode} / ${summarizeQueries(queries)} / 合計 ${String(totalCount)} 件`,
+      text: `${formatStatusTimestamp(createdAt)} / ${mode} / ${summarizeQueries(queries)} / 合計 ${String(totalCount)} 件（${summarizeSelectedCounts(selectedCounts)}）`,
       title: [
         `cycle: ${cycleId}`,
         `queries: ${queries.length > 0 ? queries.join(" / ") : "なし"}`,
@@ -2089,6 +2089,21 @@
     return Object.entries(selectedCounts)
       .map(([key, value]) => `${key}=${String(value)}`)
       .join(", ");
+  }
+
+  function summarizeSelectedCounts(selectedCounts) {
+    const labelMap = {
+      working_memory_items: "作業",
+      episodic_items: "エピ",
+      semantic_items: "意味",
+      affective_items: "感情",
+      relationship_items: "関係",
+      reflection_items: "反省",
+      recent_event_window: "直近",
+    };
+    return Object.entries(labelMap)
+      .map(([key, label]) => `${label}${String(requireInteger(selectedCounts[key] ?? 0, `selected_counts.${key}`))}`)
+      .join(" / ");
   }
 
   function formatTraitUpdates(updatedTraits) {
