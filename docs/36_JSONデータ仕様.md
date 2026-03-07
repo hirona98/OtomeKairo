@@ -1433,6 +1433,7 @@
 - `command_type` は、current 実装では `speak_ui_message`、`dispatch_notice`、`enqueue_browse_task`、`control_camera_look`、`execute_browse_task`、`abandon_browse_task` を使ってよい
 - `notice_code` と `text` は、`dispatch_notice` を実行する命令だけに付ける
 - `target`、`parameters`、`preconditions`、`stop_conditions`、`timeout_ms`、`requires_reobserve`、`expected_effects` は、`execute` のとき `action_command` をそのまま残したい場合に付けてよい
+- current の `control_camera_look` では、`requires_reobserve=true` に固定し、`expected_effects.followup_input_kind=\"camera_observation\"`、`expected_effects.followup_trigger_reason=\"post_action_followup\"` を持たせてよい
 - `parameters.task_id`、`parameters.query`、`parameters.target_channel` は、`enqueue_browse_task` を実行する命令だけに付ける
 - `parameters.query` は、`execute_browse_task` と `abandon_browse_task` を実行する命令だけに付けてよい
 - `related_task_id` は、`execute_browse_task` と `abandon_browse_task` のように task 再開を処理する命令だけに付けてよい
@@ -1489,6 +1490,7 @@
 - `complete_browse_task` を実行した場合は、`related_task_id`、`task_status_after`、`summary_text` を付けてよい
 - `abandon_browse_task` を実行した場合は、`related_task_id`、`task_status_after`、`error_message` を付けてよい
 - `complete_browse_task` を実行した場合は、`followup_input_kind=\"network_result\"` を付けてよい
+- `control_camera_look` を実行した場合は、`followup_required`、`followup_input_kind=\"camera_observation\"`、`followup_input_source=\"post_action_followup\"`、`followup_trigger_reason=\"post_action_followup\"`、`followup_capture` を付けてよい
 - `dispatch_notice` を実行した場合は、`notice_code` を付けてよい
 
 <!-- Block: Memory Job Group -->

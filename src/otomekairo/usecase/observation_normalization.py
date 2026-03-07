@@ -9,6 +9,8 @@ from typing import Any
 def normalize_observation_source(*, source: str, payload: dict[str, Any]) -> str:
     input_kind = _input_kind(payload)
     if input_kind == "camera_observation":
+        if source == "post_action_followup":
+            return "post_action_followup"
         return "camera"
     return source
 

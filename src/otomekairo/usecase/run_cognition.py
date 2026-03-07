@@ -9,9 +9,15 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from otomekairo.gateway.camera_controller import CameraController
+from otomekairo.gateway.camera_sensor import CameraSensor
 from otomekairo.gateway.cognition_client import CognitionClient, CognitionRequest
 from otomekairo.gateway.speech_synthesizer import SpeechSynthesizer
-from otomekairo.schema.runtime_types import ActionHistoryRecord, PendingInputRecord, TaskStateMutationRecord
+from otomekairo.schema.runtime_types import (
+    ActionHistoryRecord,
+    PendingInputMutationRecord,
+    PendingInputRecord,
+    TaskStateMutationRecord,
+)
 from otomekairo.usecase.dispatch_action_command import ActionDispatchResult, dispatch_chat_action_command
 from otomekairo.usecase.validate_action import validate_chat_response_action
 
@@ -28,6 +34,7 @@ class CognitionExecution:
     ui_events: list[dict[str, Any]]
     action_results: list[ActionHistoryRecord]
     task_mutations: list[TaskStateMutationRecord]
+    pending_input_mutations: list[PendingInputMutationRecord]
 
 
 # Block: Browser chat cognition execution
@@ -40,6 +47,7 @@ def run_cognition_for_browser_chat_input(
     effective_settings: dict[str, Any],
     cognition_client: CognitionClient,
     camera_controller: CameraController,
+    camera_sensor: CameraSensor,
     speech_synthesizer: SpeechSynthesizer,
     emit_ui_event: Callable[[dict[str, Any]], None],
     consume_cancel: Callable[[str], bool],
@@ -134,6 +142,7 @@ def run_cognition_for_browser_chat_input(
         emit_ui_event=emit_event,
         consume_cancel=lambda: consume_cancel(active_message_id),
         camera_controller=camera_controller,
+        camera_sensor=camera_sensor,
         speech_synthesizer=speech_synthesizer,
         effective_settings=effective_settings,
     )
@@ -151,6 +160,7 @@ def run_cognition_for_browser_chat_input(
             "action_type": dispatch_result.action_type,
             "dispatch_status": dispatch_result.status,
             "emitted_event_types": dispatch_result.emitted_event_types,
+            "followup_input_count": len(dispatch_result.pending_input_mutations),
         },
     )
 
@@ -200,6 +210,7 @@ def run_cognition_for_browser_chat_input(
         ui_events=ui_events,
         action_results=action_results,
         task_mutations=dispatch_result.task_mutations,
+        pending_input_mutations=dispatch_result.pending_input_mutations,
     )
 
 
@@ -275,6 +286,7 @@ def _dispatch_result_for_decision(
     emit_ui_event: Callable[[str, dict[str, Any]], None],
     consume_cancel: Callable[[], bool],
     camera_controller: CameraController,
+    camera_sensor: CameraSensor,
     speech_synthesizer: SpeechSynthesizer,
     effective_settings: dict[str, Any],
 ) -> ActionDispatchResult:
@@ -302,6 +314,7 @@ def _dispatch_result_for_decision(
                 "status_code_after": "idle",
             },
             task_mutations=[],
+            pending_input_mutations=[],
             finished_at=_now_ms(),
             status="succeeded",
             failure_mode=None,
@@ -321,6 +334,7 @@ def _dispatch_result_for_decision(
         emit_ui_event=lambda ui_event: emit_ui_event(ui_event["event_type"], ui_event["payload"]),
         consume_cancel=lambda _: consume_cancel(),
         camera_controller=camera_controller,
+        camera_sensor=camera_sensor,
         speech_synthesizer=speech_synthesizer,
         effective_settings=effective_settings,
     )

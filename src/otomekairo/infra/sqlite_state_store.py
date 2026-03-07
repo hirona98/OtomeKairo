@@ -39,6 +39,7 @@ from otomekairo.usecase.observation_normalization import (
     normalize_observation_kind,
     normalize_observation_source,
 )
+from otomekairo.usecase.camera_observation_payload import build_camera_observation_payload
 from otomekairo.usecase.persona_change import evaluate_persona_change
 from otomekairo.usecase.runtime_live_state import build_runtime_live_state
 from otomekairo.usecase.write_memory_plan import (
@@ -1335,21 +1336,13 @@ class SqliteStateStore:
             raise StoreValidationError("image_url must be non-empty string")
         if isinstance(captured_at, bool) or not isinstance(captured_at, int):
             raise StoreValidationError("captured_at must be integer")
-        payload = {
-            "input_kind": "camera_observation",
-            "trigger_reason": "self_initiated",
-            "attachments": [
-                {
-                    "attachment_kind": "camera_still_image",
-                    "media_kind": "image",
-                    "capture_id": capture_id,
-                    "mime_type": "image/jpeg",
-                    "storage_path": image_path,
-                    "content_url": image_url,
-                    "captured_at": captured_at,
-                }
-            ],
-        }
+        payload = build_camera_observation_payload(
+            capture_id=capture_id,
+            image_path=image_path,
+            image_url=image_url,
+            captured_at=captured_at,
+            trigger_reason="self_initiated",
+        )
         enqueue_result = self._enqueue_pending_input(
             source="camera",
             client_message_id=None,
@@ -4403,6 +4396,7 @@ class SqliteStateStore:
         resolution_status: str,
         action_results: list[ActionHistoryRecord],
         task_mutations: list[TaskStateMutationRecord],
+        pending_input_mutations: list[PendingInputMutationRecord],
         ui_events: list[dict[str, Any]],
         commit_payload: dict[str, Any],
         retrieval_run: dict[str, Any] | None = None,
@@ -4423,6 +4417,10 @@ class SqliteStateStore:
                     connection=connection,
                     attention_snapshot=attention_snapshot,
                 )
+            followup_input_ids = self._insert_pending_input_mutations(
+                connection=connection,
+                pending_input_mutations=pending_input_mutations,
+            )
             event_ids = self._insert_pending_input_events(
                 connection=connection,
                 pending_input=pending_input,
@@ -4465,6 +4463,7 @@ class SqliteStateStore:
                     pending_input=pending_input,
                     resolution_status=resolution_status,
                     action_results=action_results,
+                    pending_input_mutations=pending_input_mutations,
                 ),
             )
             connection.execute(
@@ -4483,6 +4482,7 @@ class SqliteStateStore:
                     _json_text(
                         {
                             **commit_payload,
+                            "followup_input_ids": followup_input_ids,
                             "event_ids": event_ids,
                             "enqueued_memory_job_ids": enqueued_memory_job_ids,
                             **(
@@ -6980,6 +6980,7 @@ def _pending_input_cycle_context(
     pending_input: PendingInputRecord,
     resolution_status: str,
     action_results: list[ActionHistoryRecord],
+    pending_input_mutations: list[PendingInputMutationRecord],
 ) -> dict[str, Any]:
     return {
         "channel": pending_input.channel,
@@ -6993,6 +6994,7 @@ def _pending_input_cycle_context(
             pending_input=pending_input,
             resolution_status=resolution_status,
             action_results=action_results,
+            pending_input_mutations=pending_input_mutations,
         ),
     }
 
@@ -7021,15 +7023,22 @@ def _pending_input_situation_summary(
     pending_input: PendingInputRecord,
     resolution_status: str,
     action_results: list[ActionHistoryRecord],
+    pending_input_mutations: list[PendingInputMutationRecord],
 ) -> str:
     input_kind = str(pending_input.payload["input_kind"])
     action_types = {action_result.action_type for action_result in action_results}
+    has_followup_camera_observation = any(
+        pending_input_mutation.payload.get("input_kind") == "camera_observation"
+        for pending_input_mutation in pending_input_mutations
+    )
     if input_kind == "chat_message":
         if "enqueue_browse_task" in action_types:
             query = _queued_browse_query(action_results)
             if query is not None:
                 return f"検索タスクを登録した: {query}"
             return "検索タスクを登録した"
+        if "control_camera_look" in action_types and has_followup_camera_observation:
+            return "カメラ視点を調整し、追跡観測を登録した"
         if "emit_chat_response" in action_types:
             return "チャット応答を返した"
         if "dispatch_notice" in action_types:
@@ -7038,16 +7047,28 @@ def _pending_input_situation_summary(
             return "カメラ視点を調整した"
         return "チャット入力を処理した" if resolution_status == "consumed" else "チャット入力を棄却した"
     if input_kind == "camera_observation":
+        trigger_reason = pending_input.payload.get("trigger_reason")
+        is_followup_observation = trigger_reason == "post_action_followup"
         if "enqueue_browse_task" in action_types:
             query = _queued_browse_query(action_results)
             if query is not None:
                 return f"カメラ観測をもとに検索した: {query}"
             return "カメラ観測をもとに検索した"
         if "control_camera_look" in action_types:
+            if has_followup_camera_observation:
+                return "カメラ観測をもとに視点を調整し、追跡観測を登録した"
             return "カメラ観測をもとに視点を調整した"
         if "emit_chat_response" in action_types:
+            if is_followup_observation:
+                return "追跡観測を処理して応答した"
             return "カメラ観測を処理して応答した"
-        return "カメラ観測を処理した" if resolution_status == "consumed" else "カメラ観測を棄却した"
+        if resolution_status == "consumed":
+            if is_followup_observation:
+                return "追跡観測を処理した"
+            return "カメラ観測を処理した"
+        if is_followup_observation:
+            return "追跡観測を棄却した"
+        return "カメラ観測を棄却した"
     if input_kind == "network_result":
         if "emit_chat_response" in action_types:
             return "検索結果を要約して応答した"
@@ -7335,6 +7356,10 @@ def _pending_input_receipt_summary(pending_input: PendingInputRecord) -> str:
         return "chat_message"
     if input_kind == "camera_observation":
         attachments = pending_input.payload.get("attachments")
+        if pending_input.source == "post_action_followup":
+            if isinstance(attachments, list) and attachments:
+                return f"camera_observation:post_action_followup:camera_images:{len(attachments)}"
+            return "camera_observation:post_action_followup"
         if isinstance(attachments, list) and attachments:
             return f"camera_observation:camera_images:{len(attachments)}"
         return "camera_observation"

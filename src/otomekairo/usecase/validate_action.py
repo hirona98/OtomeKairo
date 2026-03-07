@@ -1252,10 +1252,12 @@ def _build_action_command(
                 "kind": "camera_move_completed",
             },
             "timeout_ms": 10_000,
-            "requires_reobserve": False,
+            "requires_reobserve": True,
             "expected_effects": {
                 "emitted_event_types": ["status", "message", "status"],
                 "status_code_after": "idle",
+                "followup_input_kind": "camera_observation",
+                "followup_trigger_reason": "post_action_followup",
             },
             "proposal_ref": str(proposal["proposal_id"]),
         }

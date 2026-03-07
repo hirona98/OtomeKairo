@@ -8,12 +8,14 @@ from dataclasses import dataclass
 from typing import Any, Callable, Iterable
 
 from otomekairo.gateway.camera_controller import CameraController, CameraLookRequest
+from otomekairo.gateway.camera_sensor import CameraSensor
 from otomekairo.gateway.speech_synthesizer import (
     SpeechSynthesisRequest,
     SpeechSynthesisResponse,
     SpeechSynthesizer,
 )
-from otomekairo.schema.runtime_types import TaskStateMutationRecord
+from otomekairo.schema.runtime_types import PendingInputMutationRecord, TaskStateMutationRecord
+from otomekairo.usecase.camera_observation_payload import build_camera_observation_payload
 
 
 # Block: Dispatch result
@@ -23,6 +25,7 @@ class ActionDispatchResult:
     emitted_event_types: list[str]
     observed_effects: dict[str, Any]
     task_mutations: list[TaskStateMutationRecord]
+    pending_input_mutations: list[PendingInputMutationRecord]
     finished_at: int
     status: str
     failure_mode: str | None
@@ -40,6 +43,7 @@ def dispatch_chat_action_command(
     emit_ui_event: Callable[[dict[str, Any]], None],
     consume_cancel: Callable[[str], bool],
     camera_controller: CameraController,
+    camera_sensor: CameraSensor,
     speech_synthesizer: SpeechSynthesizer,
     effective_settings: dict[str, Any],
 ) -> ActionDispatchResult:
@@ -69,6 +73,7 @@ def dispatch_chat_action_command(
             action_command=action_command,
             emit_ui_event=emit_ui_event,
             camera_controller=camera_controller,
+            camera_sensor=camera_sensor,
         )
     if command_type == "enqueue_browse_task":
         return _dispatch_browse_task_command(
@@ -160,6 +165,7 @@ def _dispatch_speak_command(
                 "tts_audio_generated": False,
             },
             task_mutations=[],
+            pending_input_mutations=[],
             finished_at=_now_ms(),
             status="failed",
             failure_mode="tts_synthesis_failed",
@@ -240,6 +246,7 @@ def _dispatch_speak_command(
             "tts_audio_generated": synthesis_result is not None,
         },
         task_mutations=[],
+        pending_input_mutations=[],
         finished_at=finished_at,
         status="stopped" if was_cancelled else "succeeded",
         failure_mode="cancelled" if was_cancelled else None,
@@ -293,6 +300,7 @@ def _dispatch_notice_command(
             "notice_code": notice_code,
         },
         task_mutations=[],
+        pending_input_mutations=[],
         finished_at=_now_ms(),
         status="succeeded",
         failure_mode=None,
@@ -309,10 +317,15 @@ def _dispatch_camera_look_command(
     action_command: dict[str, Any],
     emit_ui_event: Callable[[dict[str, Any]], None],
     camera_controller: CameraController,
+    camera_sensor: CameraSensor,
 ) -> ActionDispatchResult:
     emitted_event_types: list[str] = []
     message_id = str(action_command["parameters"]["message_id"])
     response_text = str(action_command["parameters"]["text"])
+    requires_reobserve = _required_action_bool(
+        action_command=action_command,
+        field_name="requires_reobserve",
+    )
 
     # Block: Camera move status
     _emit_browser_event(
@@ -320,7 +333,7 @@ def _dispatch_camera_look_command(
         event_type="status",
         payload={
             "status_code": "camera_moving",
-            "label": "カメラを動かしています",
+            "label": "カメラ視点を調整しています",
             "cycle_id": cycle_id,
         },
         emit_ui_event=emit_ui_event,
@@ -373,6 +386,7 @@ def _dispatch_camera_look_command(
                 "message_id": message_id,
             },
             task_mutations=[],
+            pending_input_mutations=[],
             finished_at=_now_ms(),
             status="failed",
             failure_mode="camera_move_failed",
@@ -384,6 +398,69 @@ def _dispatch_camera_look_command(
                 }
             },
         )
+
+    # Block: Follow-up observation capture
+    followup_pending_input_mutations: list[PendingInputMutationRecord] = []
+    if requires_reobserve:
+        try:
+            followup_pending_input_mutations = [
+                _build_followup_camera_observation_mutation(
+                    channel=str(pending_input["channel"]),
+                    camera_sensor=camera_sensor,
+                )
+            ]
+        except Exception as error:
+            _emit_browser_event(
+                pending_input=pending_input,
+                event_type="error",
+                payload={
+                    "error_code": "camera_followup_failed",
+                    "message": _error_message_text(error),
+                    "retriable": False,
+                },
+                emit_ui_event=emit_ui_event,
+                emitted_event_types=emitted_event_types,
+            )
+
+            # Block: Idle status after follow-up failure
+            _emit_browser_event(
+                pending_input=pending_input,
+                event_type="status",
+                payload={
+                    "status_code": "idle",
+                    "label": "待機中",
+                    "cycle_id": cycle_id,
+                },
+                emit_ui_event=emit_ui_event,
+                emitted_event_types=emitted_event_types,
+            )
+
+            return ActionDispatchResult(
+                action_type="control_camera_look",
+                emitted_event_types=emitted_event_types,
+                observed_effects={
+                    "status_code_after": "idle",
+                    "camera_move": "succeeded",
+                    "movement_label": look_response.movement_label,
+                    "message_id": message_id,
+                    "followup_required": True,
+                    "followup_input_kind": "camera_observation",
+                    "followup_capture": "failed",
+                },
+                task_mutations=[],
+                pending_input_mutations=[],
+                finished_at=_now_ms(),
+                status="failed",
+                failure_mode="camera_followup_failed",
+                raw_result_ref=look_response.raw_result_ref,
+                adapter_trace_ref={
+                    "camera_move_trace": look_response.adapter_trace_ref,
+                    "camera_followup_error": {
+                        "error_kind": type(error).__name__,
+                        "error_message": _error_message_text(error),
+                    },
+                },
+            )
 
     # Block: Camera move message
     final_message_emitted = False
@@ -426,13 +503,38 @@ def _dispatch_camera_look_command(
             "movement_label": look_response.movement_label,
             "message_id": message_id,
             "final_message_emitted": final_message_emitted,
+            "followup_required": requires_reobserve,
+            **(
+                {
+                    "followup_input_kind": "camera_observation",
+                    "followup_input_source": "post_action_followup",
+                    "followup_trigger_reason": "post_action_followup",
+                    "followup_capture": "queued",
+                }
+                if requires_reobserve
+                else {}
+            ),
         },
         task_mutations=[],
+        pending_input_mutations=followup_pending_input_mutations,
         finished_at=_now_ms(),
         status="succeeded",
         failure_mode=None,
         raw_result_ref=look_response.raw_result_ref,
-        adapter_trace_ref=look_response.adapter_trace_ref,
+        adapter_trace_ref={
+            "camera_move_trace": look_response.adapter_trace_ref,
+            **(
+                {
+                    "camera_followup_capture": {
+                        "capture_id": str(
+                            followup_pending_input_mutations[0].payload["attachments"][0]["capture_id"]
+                        ),
+                    }
+                }
+                if followup_pending_input_mutations
+                else {}
+            ),
+        },
     )
 
 
@@ -520,11 +622,36 @@ def _dispatch_browse_task_command(
                 created_at=resolved_at,
             )
         ],
+        pending_input_mutations=[],
         finished_at=_now_ms(),
         status="succeeded",
         failure_mode=None,
         raw_result_ref=None,
         adapter_trace_ref=None,
+    )
+
+
+# Block: Follow-up observation helper
+def _build_followup_camera_observation_mutation(
+    *,
+    channel: str,
+    camera_sensor: CameraSensor,
+) -> PendingInputMutationRecord:
+    if not camera_sensor.is_available():
+        raise RuntimeError("カメラの接続設定が不足しています")
+    capture = camera_sensor.capture_still_image()
+    return PendingInputMutationRecord(
+        source="post_action_followup",
+        channel=channel,
+        payload=build_camera_observation_payload(
+            capture_id=capture.capture_id,
+            image_path=capture.image_path,
+            image_url=capture.image_url,
+            captured_at=capture.captured_at,
+            trigger_reason="post_action_followup",
+        ),
+        priority=95,
+        created_at=capture.captured_at,
     )
 
 
@@ -711,6 +838,14 @@ def _error_message_text(error: Exception) -> str:
     if not message:
         return type(error).__name__
     return message[:240]
+
+
+# Block: Action boolean reader
+def _required_action_bool(*, action_command: dict[str, Any], field_name: str) -> bool:
+    value = action_command.get(field_name)
+    if not isinstance(value, bool):
+        raise RuntimeError(f"action_command.{field_name} must be boolean")
+    return value
 
 
 # Block: Optional action text helper
