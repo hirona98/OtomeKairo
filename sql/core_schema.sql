@@ -47,10 +47,10 @@ CREATE TABLE settings_editor_state (
     active_conversation_preset_id TEXT NOT NULL,
     active_memory_preset_id TEXT NOT NULL,
     active_motion_preset_id TEXT NOT NULL,
+    active_camera_connection_id TEXT,
     system_values_json TEXT NOT NULL,
     revision INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL,
-    last_applied_change_set_id TEXT
+    updated_at INTEGER NOT NULL
 );
 
 CREATE TABLE character_presets (
@@ -120,7 +120,6 @@ CREATE INDEX idx_motion_presets_archived_sort
 
 CREATE TABLE camera_connections (
     camera_connection_id TEXT PRIMARY KEY,
-    is_enabled INTEGER NOT NULL CHECK (is_enabled IN (0, 1)),
     display_name TEXT NOT NULL,
     host TEXT NOT NULL,
     username TEXT NOT NULL,

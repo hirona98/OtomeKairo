@@ -376,7 +376,7 @@
     1: "SittingFloor",
     2: "LyingDown",
   };
-  const CAMERA_FIELD_KEYS = ["is_enabled", "display_name", "host", "username", "password"];
+  const CAMERA_FIELD_KEYS = ["display_name", "host", "username", "password"];
 
   // Block: Runtime state
   let stream = null;
@@ -1342,10 +1342,8 @@
               <input
                 class="settings-table-check"
                 type="checkbox"
-                data-camera-id="${escapeHtml(cameraConnection.camera_connection_id)}"
-                data-camera-field="is_enabled"
-                data-value-kind="boolean"
-                ${cameraConnection.is_enabled === true ? "checked" : ""}
+                data-camera-select-id="${escapeHtml(cameraConnection.camera_connection_id)}"
+                ${isActiveCameraConnection(cameraConnection.camera_connection_id) ? "checked" : ""}
               />
             </td>
             <td>
@@ -1376,7 +1374,7 @@
       <div class="settings-card-title">カメラ接続</div>
       ${renderSettingsGroup(
       "接続一覧",
-      "AI に使わせる接続だけ「使用」をオンにしてください。追加は一覧の末尾へ行を足します。",
+      "AI に使わせる接続を 1 件だけ「使用」にしてください。追加は一覧の末尾へ行を足します。",
       `
           <div class="settings-table-wrap">
             <table class="settings-table">
@@ -1448,6 +1446,10 @@
     for (const element of motionFieldInputs) {
       element.addEventListener("input", handleMotionFieldChange);
       element.addEventListener("change", handleMotionFieldChange);
+    }
+    const cameraSelectInputs = settingsPanel.querySelectorAll("[data-camera-select-id]");
+    for (const element of cameraSelectInputs) {
+      element.addEventListener("change", handleCameraSelectionChange);
     }
     const cameraFieldInputs = settingsPanel.querySelectorAll("[data-camera-id][data-camera-field]");
     for (const element of cameraFieldInputs) {
@@ -1672,6 +1674,22 @@
   }
 
   // Block: Camera selection handlers
+  function handleCameraSelectionChange(event) {
+    if (editorDraft === null) {
+      appendError("設定ドラフトが未初期化です");
+      return;
+    }
+    const element = event.currentTarget;
+    const cameraConnectionId = String(element.dataset.cameraSelectId || "");
+    try {
+      requireCameraConnection(cameraConnectionId);
+      writeActiveCameraConnectionId(element.checked === true ? cameraConnectionId : null);
+      renderSettingsEditor();
+    } catch (error) {
+      appendError(`カメラ選択の更新に失敗しました: ${error.message}`);
+    }
+  }
+
   function handleCameraFieldChange(event) {
     const element = event.currentTarget;
     const cameraConnectionId = String(element.dataset.cameraId || "");
@@ -2406,6 +2424,31 @@
     return editorDraft.camera_connections;
   }
 
+  function readActiveCameraConnectionId() {
+    if (editorDraft === null || !isObject(editorDraft.editor_state)) {
+      throw new Error("editor_state が不正です");
+    }
+    const activeCameraConnectionId = editorDraft.editor_state.active_camera_connection_id;
+    if (activeCameraConnectionId === null) {
+      return null;
+    }
+    return requireString(activeCameraConnectionId, "editor_state.active_camera_connection_id");
+  }
+
+  function writeActiveCameraConnectionId(cameraConnectionId) {
+    if (editorDraft === null || !isObject(editorDraft.editor_state)) {
+      throw new Error("editor_state が不正です");
+    }
+    editorDraft.editor_state.active_camera_connection_id = cameraConnectionId === null
+      ? null
+      : requireString(cameraConnectionId, "editor_state.active_camera_connection_id");
+    updateSettingsDirtyState();
+  }
+
+  function isActiveCameraConnection(cameraConnectionId) {
+    return readActiveCameraConnectionId() === requireString(cameraConnectionId, "camera_connection_id");
+  }
+
   function requireCameraConnection(cameraConnectionId) {
     const requiredCameraConnectionId = requireString(cameraConnectionId, "camera_connection_id");
     const cameraConnection = readCameraConnections()
@@ -2426,7 +2469,6 @@
     const nowMs = Date.now();
     cameraConnections.push({
       camera_connection_id: cameraConnectionId,
-      is_enabled: false,
       display_name: `カメラ ${nextIndex}`,
       host: "",
       username: "",
@@ -2440,6 +2482,9 @@
   function removeCameraConnection(cameraConnectionId) {
     const requiredCameraConnectionId = requireString(cameraConnectionId, "camera_connection_id");
     requireCameraConnection(requiredCameraConnectionId);
+    if (readActiveCameraConnectionId() === requiredCameraConnectionId) {
+      writeActiveCameraConnectionId(null);
+    }
     editorDraft.camera_connections = readCameraConnections()
       .filter((cameraConnection) => String(cameraConnection.camera_connection_id) !== requiredCameraConnectionId);
     updateSettingsDirtyState();

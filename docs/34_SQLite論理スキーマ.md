@@ -135,7 +135,8 @@ flowchart TD
   - 役割: 設定UIが扱う全体編集状態の正本を 1 件で保持する
   - 主キー: `row_id INTEGER PRIMARY KEY CHECK(row_id = 1)`
   - 必須列: `active_character_preset_id`, `active_behavior_preset_id`, `active_conversation_preset_id`, `active_memory_preset_id`, `active_motion_preset_id`, `system_values_json`, `revision`, `updated_at`
-  - 任意列: `last_applied_change_set_id`
+  - 任意列: `active_camera_connection_id`
+  - `active_camera_connection_id` は AI が現在使うカメラ接続 1 件の ID を持ち、未選択なら `NULL` を許す
   - `system_values_json` はシステム設定の完全オブジェクトを保持する
   - `revision` は `PUT /api/settings/editor` の楽観ロック用に単調増加の `INTEGER` で持つ
 
@@ -177,8 +178,8 @@ flowchart TD
 - `camera_connections`
   - 役割: 設定UIで保持するカメラ接続先の正本を保持する
   - 主キー: `camera_connection_id TEXT PRIMARY KEY`
-  - 必須列: `is_enabled`, `display_name`, `host`, `username`, `password`, `sort_order`, `created_at`, `updated_at`
-  - `is_enabled=1` の接続だけを AI 利用対象にし、現行 ONVIF 実装はそのうち `sort_order` 最小の 1 件を実行に使う
+  - 必須列: `display_name`, `host`, `username`, `password`, `sort_order`, `created_at`, `updated_at`
+  - どの接続を AI 利用対象にするかは `settings_editor_state.active_camera_connection_id` で選ぶ
   - 主要索引: `(sort_order ASC, updated_at DESC)`
 
 - `attention_state`
@@ -277,6 +278,7 @@ flowchart TD
 - 任意列: `claimed_at`, `resolved_at`, `reject_reason`
 - `status` は、少なくとも `queued`、`claimed`、`applied`、`rejected` を区別する
 - `payload_json` は、`PUT /api/settings/editor` の canonical な保存結果を 1 件ぶん持つ
+- `applied` / `rejected` は queue 側の処理結果であり、設定UI正本の列へ書き戻さない
 - `payload_json` の JSON 形は、`docs/36_JSONデータ仕様.md` を正本とする
 - 主要索引: `(status, created_at ASC)`
 
@@ -530,7 +532,8 @@ flowchart TD
 <!-- Block: Short Cycle Boundary -->
 ### 短周期の保存境界
 
-- 同じ短周期 transaction に含めるのは、`pending_inputs`、`settings_overrides`、`settings_change_sets`、必要なら `runtime_settings`、`settings_editor_state`、5 プリセットテーブル、`camera_connections`、`self_state`、`attention_state`、`body_state`、`world_state`、`drive_state`、`task_state`、`working_memory_items`、`recent_event_window_items`、`action_history`、`events`、`memory_jobs`、`memory_job_payloads`、`retrieval_runs`、`commit_records` とする
+- 同じ短周期 transaction に含めるのは、`pending_inputs`、`settings_overrides`、`settings_change_sets`、必要なら `runtime_settings`、`self_state`、`attention_state`、`body_state`、`world_state`、`drive_state`、`task_state`、`working_memory_items`、`recent_event_window_items`、`action_history`、`events`、`memory_jobs`、`memory_job_payloads`、`retrieval_runs`、`commit_records` とする
+- `settings_change_sets` を適用するときは、`settings_editor_state`、5 プリセットテーブル、`camera_connections` を同一 transaction 内で read-only に参照してよいが、mutation 対象には含めない
 - `input_journal` は、短周期 transaction の前に先行追記してよい
 - `ui_outbound_events` は、短周期 transaction と分離した append-only 追記を許す
 - `events.jsonl` は、`commit_records` をもとに後段で派生同期する

@@ -1182,6 +1182,29 @@
 - キーは `runtime.idle_tick_ms`、`runtime.long_cycle_min_interval_ms`、`sensors.microphone.enabled`、`sensors.camera.enabled`、`integrations.sns.enabled`、`integrations.notify_route`、`integrations.discord.bot_token`、`integrations.discord.channel_id` に固定する
 - current の `browser_chat` 実装で直接使っているのは主に `runtime.*`、`sensors.camera.enabled`、`camera_connections` であり、`sensors.microphone.enabled` と `integrations.*` は保存対象だが未接続の項目を含む
 
+<!-- Block: Settings Editor State -->
+### `settings editor api.editor_state`
+
+```json
+{
+  "revision": 12,
+  "active_character_preset_id": "preset_character_default",
+  "active_behavior_preset_id": "preset_behavior_default",
+  "active_conversation_preset_id": "preset_conversation_default",
+  "active_memory_preset_id": "preset_memory_default",
+  "active_motion_preset_id": "preset_motion_default",
+  "active_camera_connection_id": "cam_001",
+  "system_values": {
+    "runtime.idle_tick_ms": 1000,
+    "integrations.notify_route": "ui_only"
+  }
+}
+```
+
+- `settings editor api.editor_state` は、設定UI保存対象の singleton state を API 用に展開した形である
+- `active_camera_connection_id` は `camera_connection_id` を 1 件だけ指すか、未選択なら `null` を使う
+- `system_values` の shape は `settings_editor_state.system_values_json` と同一である
+
 <!-- Block: Character Preset Payload -->
 ### `character_presets.payload_json`
 
@@ -1301,7 +1324,7 @@
   "active_conversation_preset_id": "preset_conversation_default",
   "active_memory_preset_id": "preset_memory_default",
   "active_motion_preset_id": "preset_motion_default",
-  "enabled_camera_connection_ids": ["cam_001", "cam_003"],
+  "active_camera_connection_id": "cam_001",
   "system_values": {
     "runtime.idle_tick_ms": 1000,
     "integrations.notify_route": "ui_only"
@@ -1342,7 +1365,6 @@
 ```json
 {
   "camera_connection_id": "cam_001",
-  "is_enabled": true,
   "display_name": "リビング",
   "host": "192.168.10.20",
   "username": "alice",
@@ -1353,7 +1375,7 @@
 ```
 
 - `camera_connection_entry` は、設定UI API が返すカメラ接続一覧の共通要素である
-- `is_enabled=true` の行は、AI が使ってよいカメラ接続として扱う
+- AI が使う接続は `settings editor api.editor_state.active_camera_connection_id` で 1 件だけ選ぶ
 
 <!-- Block: UI Outbound -->
 ### `ui_outbound_events.payload_json`
