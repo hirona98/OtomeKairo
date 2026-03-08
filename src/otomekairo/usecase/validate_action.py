@@ -65,6 +65,7 @@ def validate_chat_response_action(
     executable_candidates = [
         candidate for candidate in scored_candidates if bool(candidate["hard_gate_passed"])
     ]
+    executable_candidates = _suppress_redundant_speak_when_look_available(executable_candidates)
     if not executable_candidates:
         best_candidate = max(
             scored_candidates,
@@ -423,6 +424,26 @@ def _should_hold_for_low_personality_fit(candidate: dict[str, Any]) -> bool:
 def _is_urgent_candidate(candidate: dict[str, Any]) -> bool:
     priority_hint_score = _normalized_score(candidate["priority_hint_score"])
     return priority_hint_score >= URGENT_PRIORITY_THRESHOLD
+
+
+# Block: Look-first conflict resolution
+def _suppress_redundant_speak_when_look_available(
+    executable_candidates: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    has_look_candidate = any(
+        _validated_action_type(candidate["proposal"]) == "look"
+        for candidate in executable_candidates
+    )
+    if not has_look_candidate:
+        return executable_candidates
+    filtered_candidates = [
+        candidate
+        for candidate in executable_candidates
+        if _validated_action_type(candidate["proposal"]) != "speak"
+    ]
+    if not filtered_candidates:
+        return executable_candidates
+    return filtered_candidates
 
 
 # Block: Style alignment

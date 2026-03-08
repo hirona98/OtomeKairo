@@ -79,6 +79,8 @@ def _build_messages(request: CognitionRequest) -> list[dict[str, Any]]:
             "speak と notify を返す場合は target_channel に browser_chat を必ず入れる。",
             "browse を返す場合は query に非空の検索文字列を必ず入れる。",
             "look を返す場合は camera_connection_id と、direction(left/right/up/down) か preset_id か preset_name を必ず入れる。",
+            "look を主行動として提案する場合、speech_draft.text は視点変更と確認開始を伝える案内文にしてよく、同じ内容を伝えるだけの speak 候補は重ねて返さない。",
+            "look を提案した時点では、まだ見ていない内容を断定で speech_draft.text に書かない。",
             "memory_focus は object で、focus_kind と summary を必ず持つ。",
             "memory_focus.focus_kind は observation, summary, episodic, fact, affective, relation, preference, reflection, none のいずれかにする。",
             "reflection_seed は object で、message_id を必ず持つ。",
