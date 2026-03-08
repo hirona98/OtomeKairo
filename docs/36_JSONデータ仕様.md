@@ -512,15 +512,26 @@
   "camera_connection_id": "cam_living",
   "display_name": "リビング",
   "can_look": true,
-  "can_capture": true
+  "can_capture": true,
+  "presets": [
+    {
+      "preset_id": "1",
+      "preset_name": "正面"
+    },
+    {
+      "preset_id": "2",
+      "preset_name": "後方"
+    }
+  ]
 }
 ```
 
 - `camera_candidate_entry` は、`cognition_input.camera_candidates` で使う短周期用のカメラ候補である
-- 必須項目は `camera_connection_id`、`display_name`、`can_look`、`can_capture` である
+- 必須項目は `camera_connection_id`、`display_name`、`can_look`、`can_capture`、`presets` である
 - `camera_connection_id` は、`look` 提案と `control_camera_look` の対象指定に使う
 - `display_name` は、`LLM` が候補を見分けるための短い表示名である
-- current 実装では、`camera_candidates` は `camera_connections[].is_enabled=true` の順序付き一覧から構成する
+- `presets[]` の各要素は、少なくとも `preset_id` と `preset_name` を持つ
+- current 実装では、`camera_candidates` は `camera_connections[].is_enabled=true` の順序付き一覧を camera adapter が live に解決して構成する
 
 <!-- Block: Memory Bundle -->
 ### `memory_bundle`
@@ -1395,7 +1406,8 @@
 
 - `camera_connection_entry` は、設定UI API が返すカメラ接続一覧の共通要素である
 - `is_enabled=true` の行が AI 利用候補であり、複数件を許可する
-- current の runtime は `is_enabled=true` の一覧を `camera_candidates` として認知入力へ渡し、`look` では `camera_connection_id` を必須にして候補から 1 台を選ぶ
+- current の runtime は `is_enabled=true` の一覧を camera adapter へ渡して `camera_candidates` を組み、`look` では `camera_connection_id` を必須にして候補から 1 台を選ぶ
+- current の `camera_candidates[].presets[]` がある場合、`look` は `preset_name` / `preset_id` にその候補の値だけを使ってよい
 
 <!-- Block: UI Outbound -->
 ### `ui_outbound_events.payload_json`

@@ -6,9 +6,11 @@ import time
 from typing import Any, Callable
 
 from otomekairo.gateway.camera_controller import (
+    CameraCandidate,
     CameraController,
     CameraLookRequest,
     CameraLookResponse,
+    CameraPresetCandidate,
 )
 from otomekairo.infra.wifi_camera_common import (
     CameraConnectionSettings,
@@ -39,12 +41,26 @@ class WiFiCameraController(CameraController):
         self._cached_settings_key: tuple[str, str, str] | None = None
         self._ptz_service: Any | None = None
         self._profile_token: str | None = None
+        self._preset_candidates_cache: dict[tuple[str, str, str], tuple[CameraPresetCandidate, ...]] = {}
 
     def is_available(self) -> bool:
         try:
             return bool(self._resolved_enabled_settings())
         except RuntimeError:
             return False
+
+    # Block: Candidate listing
+    def list_candidates(self) -> list[CameraCandidate]:
+        return [
+            CameraCandidate(
+                camera_connection_id=settings.camera_connection_id,
+                display_name=settings.display_name,
+                can_look=True,
+                can_capture=True,
+                presets=self._preset_candidates_for(settings),
+            )
+            for settings in self._resolved_enabled_settings()
+        ]
 
     def move_view(self, request: CameraLookRequest) -> CameraLookResponse:
         settings = self._require_settings(camera_connection_id=request.camera_connection_id)
@@ -127,6 +143,25 @@ class WiFiCameraController(CameraController):
         self._ptz_service = ptz_service
         self._profile_token = profile_token
 
+    # Block: Preset candidate cache
+    def _preset_candidates_for(
+        self,
+        settings: CameraConnectionSettings,
+    ) -> tuple[CameraPresetCandidate, ...]:
+        settings_key = _settings_key(settings)
+        cached_candidates = self._preset_candidates_cache.get(settings_key)
+        if cached_candidates is not None:
+            return cached_candidates
+        ptz_service = self._ptz_service_for(settings)
+        profile_token = self._profile_token_for(settings)
+        available_presets = _read_available_presets(
+            ptz_service=ptz_service,
+            profile_token=profile_token,
+        )
+        preset_candidates = _build_preset_candidates(available_presets)
+        self._preset_candidates_cache[settings_key] = preset_candidates
+        return preset_candidates
+
     # Block: Preset movement
     def _move_to_preset(
         self,
@@ -138,9 +173,10 @@ class WiFiCameraController(CameraController):
     ) -> CameraLookResponse:
         preset_name = normalized_optional_text(request.preset_name)
         preset_id = normalized_optional_text(request.preset_id)
-        available_presets = ptz_service.GetPresets({"ProfileToken": profile_token})
-        if not isinstance(available_presets, (list, tuple)):
-            raise RuntimeError("camera presets must be returned as a list")
+        available_presets = _read_available_presets(
+            ptz_service=ptz_service,
+            profile_token=profile_token,
+        )
         resolved_preset_token = preset_id
         resolved_preset_name = preset_name
         if resolved_preset_token is None:
@@ -186,6 +222,32 @@ def _read_profile_token(media_service: Any) -> str:
     if profile_token is None:
         raise RuntimeError("カメラの ONVIF profile token を取得できませんでした")
     return profile_token
+
+
+# Block: Preset listing helpers
+def _read_available_presets(*, ptz_service: Any, profile_token: str) -> list[Any]:
+    available_presets = ptz_service.GetPresets({"ProfileToken": profile_token})
+    if not isinstance(available_presets, (list, tuple)):
+        raise RuntimeError("camera presets must be returned as a list")
+    return list(available_presets)
+
+
+def _build_preset_candidates(
+    available_presets: list[Any],
+) -> tuple[CameraPresetCandidate, ...]:
+    preset_candidates: list[CameraPresetCandidate] = []
+    for current_preset in available_presets:
+        preset_id = _read_object_value(current_preset, "token")
+        if preset_id is None:
+            continue
+        preset_name = _read_object_value(current_preset, "Name") or preset_id
+        preset_candidates.append(
+            CameraPresetCandidate(
+                preset_id=preset_id,
+                preset_name=preset_name,
+            )
+        )
+    return tuple(preset_candidates)
 
 
 # Block: Direction helpers

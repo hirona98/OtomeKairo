@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from otomekairo.gateway.camera_controller import CameraCandidate, CameraPresetCandidate
 from otomekairo.schema.runtime_types import CognitionStateSnapshot, PendingInputRecord
 from otomekairo.usecase.observation_normalization import (
     normalize_observation_kind,
@@ -30,7 +31,7 @@ def build_cognition_input(
     cycle_id: str,
     resolved_at: int,
     state_snapshot: CognitionStateSnapshot,
-    enabled_camera_connections: list[dict[str, Any]],
+    camera_candidates: list[CameraCandidate],
     camera_available: bool,
 ) -> BuiltCognitionInput:
     input_kind = str(pending_input.payload["input_kind"])
@@ -38,7 +39,7 @@ def build_cognition_input(
         raise ValueError(
             "cognition_input is only supported for chat_message, microphone_message, camera_observation, network_result, and idle_tick"
         )
-    camera_candidates = _build_camera_candidates(enabled_camera_connections)
+    camera_candidates_payload = _build_camera_candidates(camera_candidates)
     behavior_settings = _build_behavior_settings(state_snapshot.effective_settings)
     selection_profile = _build_selection_profile(
         state_snapshot=state_snapshot,
@@ -114,11 +115,11 @@ def build_cognition_input(
                 "runtime_policy": {
                     "camera_enabled": bool(state_snapshot.effective_settings["sensors.camera.enabled"]),
                     "camera_available": bool(camera_available),
-                    "camera_candidate_count": len(camera_candidates),
+                    "camera_candidate_count": len(camera_candidates_payload),
                     "microphone_enabled": bool(state_snapshot.effective_settings["sensors.microphone.enabled"]),
                 },
             },
-            "camera_candidates": camera_candidates,
+            "camera_candidates": camera_candidates_payload,
             "skill_candidates": skill_candidates,
             "current_observation": current_observation,
             "context_budget": {
@@ -358,26 +359,38 @@ def _camera_attachment_summary_text(attachments: list[dict[str, Any]]) -> str:
 
 
 # Block: Camera candidate builder
-def _build_camera_candidates(enabled_camera_connections: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    camera_candidates: list[dict[str, Any]] = []
-    for camera_connection in enabled_camera_connections:
-        if not isinstance(camera_connection, dict):
-            raise ValueError("enabled_camera_connections must contain only objects")
-        camera_connection_id = camera_connection.get("camera_connection_id")
-        display_name = camera_connection.get("display_name")
-        if not isinstance(camera_connection_id, str) or not camera_connection_id:
-            raise ValueError("enabled_camera_connections.camera_connection_id must be non-empty string")
-        if not isinstance(display_name, str) or not display_name:
-            raise ValueError("enabled_camera_connections.display_name must be non-empty string")
-        camera_candidates.append(
+def _build_camera_candidates(camera_candidates: list[CameraCandidate]) -> list[dict[str, Any]]:
+    built_candidates: list[dict[str, Any]] = []
+    for camera_candidate in camera_candidates:
+        if not isinstance(camera_candidate, CameraCandidate):
+            raise ValueError("camera_candidates must contain only CameraCandidate entries")
+        built_candidates.append(
             {
-                "camera_connection_id": camera_connection_id,
-                "display_name": display_name,
-                "can_look": True,
-                "can_capture": True,
+                "camera_connection_id": camera_candidate.camera_connection_id,
+                "display_name": camera_candidate.display_name,
+                "can_look": bool(camera_candidate.can_look),
+                "can_capture": bool(camera_candidate.can_capture),
+                "presets": _build_camera_preset_candidates(camera_candidate.presets),
             }
         )
-    return camera_candidates
+    return built_candidates
+
+
+# Block: Camera preset candidate builder
+def _build_camera_preset_candidates(
+    preset_candidates: tuple[CameraPresetCandidate, ...],
+) -> list[dict[str, Any]]:
+    built_presets: list[dict[str, Any]] = []
+    for preset_candidate in preset_candidates:
+        if not isinstance(preset_candidate, CameraPresetCandidate):
+            raise ValueError("camera_candidates.presets must contain only CameraPresetCandidate entries")
+        built_presets.append(
+            {
+                "preset_id": preset_candidate.preset_id,
+                "preset_name": preset_candidate.preset_name,
+            }
+        )
+    return built_presets
 
 
 # Block: Idle tick observation text

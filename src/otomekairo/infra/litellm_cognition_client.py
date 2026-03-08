@@ -79,6 +79,7 @@ def _build_messages(request: CognitionRequest) -> list[dict[str, Any]]:
             "speak と notify を返す場合は target_channel に browser_chat を必ず入れる。",
             "browse を返す場合は query に非空の検索文字列を必ず入れる。",
             "look を返す場合は camera_connection_id と、direction(left/right/up/down) か preset_id か preset_name を必ず入れる。",
+            "camera_candidates[].presets があるカメラでは、広い視点変更や前後左右の確認に preset_name を優先し、direction は微調整にだけ使う。",
             "look を主行動として提案する場合、speech_draft.text は視点変更と確認開始を伝える案内文にしてよく、同じ内容を伝えるだけの speak 候補は重ねて返さない。",
             "look を提案した時点では、まだ見ていない内容を断定で speech_draft.text に書かない。",
             "memory_focus は object で、focus_kind と summary を必ず持つ。",
@@ -95,6 +96,7 @@ def _build_messages(request: CognitionRequest) -> list[dict[str, Any]]:
             _camera_runtime_prompt_line(runtime_policy, camera_candidates),
             "添付画像がある場合は、画像とテキストの両方を使って判断する。",
             "camera_candidates にない camera_connection_id は使わない。",
+            "preset_name を返す場合は camera_candidates[].presets に列挙された名前をそのまま使う。",
             "カメラ状態の enabled または available が false のときは、look を提案せず speak で状態を伝える。",
             f"不変条件: {_format_invariants(self_snapshot['invariants'])}",
             _persona_update_prompt_line(self_snapshot),
@@ -582,11 +584,14 @@ def _camera_runtime_prompt_line(
             raise RuntimeError("cognition_input.camera_candidates must contain only objects")
         camera_connection_id = candidate.get("camera_connection_id")
         display_name = candidate.get("display_name")
+        presets = candidate.get("presets")
         if not isinstance(camera_connection_id, str) or not camera_connection_id:
             raise RuntimeError("camera_candidates.camera_connection_id must be string")
         if not isinstance(display_name, str) or not display_name:
             raise RuntimeError("camera_candidates.display_name must be string")
-        candidate_labels.append(f"{display_name}({camera_connection_id})")
+        candidate_labels.append(
+            f"{display_name}({camera_connection_id}) presets={_camera_preset_prompt_text(presets)}"
+        )
     candidate_text = "なし"
     if candidate_labels:
         candidate_text = " / ".join(candidate_labels[:5])
@@ -596,6 +601,26 @@ def _camera_runtime_prompt_line(
         f"available={bool(runtime_policy.get('camera_available'))} "
         f"candidates={candidate_text}"
     )
+
+
+# Block: Camera preset formatting
+def _camera_preset_prompt_text(presets: Any) -> str:
+    if not isinstance(presets, list):
+        raise RuntimeError("camera_candidates.presets must be a list")
+    preset_labels: list[str] = []
+    for preset in presets:
+        if not isinstance(preset, dict):
+            raise RuntimeError("camera_candidates.presets must contain only objects")
+        preset_name = preset.get("preset_name")
+        preset_id = preset.get("preset_id")
+        if not isinstance(preset_name, str) or not preset_name:
+            raise RuntimeError("camera_candidates.presets.preset_name must be string")
+        if not isinstance(preset_id, str) or not preset_id:
+            raise RuntimeError("camera_candidates.presets.preset_id must be string")
+        preset_labels.append(f"{preset_name}[{preset_id}]")
+    if not preset_labels:
+        return "なし"
+    return ", ".join(preset_labels[:8])
 
 
 # Block: Network result formatting

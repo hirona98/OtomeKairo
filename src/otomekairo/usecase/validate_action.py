@@ -1344,9 +1344,51 @@ def _look_camera_candidate(
     for candidate in camera_candidates:
         if not isinstance(candidate, dict):
             raise RuntimeError("cognition_input.camera_candidates must contain only objects")
-        if candidate.get("camera_connection_id") == look_target["camera_connection_id"]:
+        if candidate.get("camera_connection_id") != look_target["camera_connection_id"]:
+            continue
+        if not bool(candidate.get("can_look")):
+            return None
+        if _camera_candidate_supports_look_target(candidate, look_target):
             return candidate
     return None
+
+
+# Block: Look target candidate matching
+def _camera_candidate_supports_look_target(
+    candidate: dict[str, Any],
+    look_target: dict[str, str],
+) -> bool:
+    if "direction" in look_target:
+        return True
+    presets = candidate.get("presets")
+    if not isinstance(presets, list):
+        raise RuntimeError("cognition_input.camera_candidates.presets must be a list")
+    if "preset_id" in look_target:
+        expected_preset_id = look_target["preset_id"]
+        return any(_camera_candidate_preset_id(preset) == expected_preset_id for preset in presets)
+    if "preset_name" in look_target:
+        expected_preset_name = look_target["preset_name"]
+        return any(_camera_candidate_preset_name(preset) == expected_preset_name for preset in presets)
+    raise RuntimeError("look_target must contain direction, preset_id, or preset_name")
+
+
+# Block: Camera preset candidate fields
+def _camera_candidate_preset_id(preset: Any) -> str:
+    if not isinstance(preset, dict):
+        raise RuntimeError("cognition_input.camera_candidates.presets must contain only objects")
+    preset_id = preset.get("preset_id")
+    if not isinstance(preset_id, str) or not preset_id:
+        raise RuntimeError("cognition_input.camera_candidates.presets.preset_id must be non-empty string")
+    return preset_id
+
+
+def _camera_candidate_preset_name(preset: Any) -> str:
+    if not isinstance(preset, dict):
+        raise RuntimeError("cognition_input.camera_candidates.presets must contain only objects")
+    preset_name = preset.get("preset_name")
+    if not isinstance(preset_name, str) or not preset_name:
+        raise RuntimeError("cognition_input.camera_candidates.presets.preset_name must be non-empty string")
+    return preset_name
 
 
 # Block: Candidate payload

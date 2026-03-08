@@ -367,13 +367,15 @@ class RuntimeLoop:
                 self._default_settings,
                 observation_hint_text=_pending_input_observation_hint(pending_input),
             )
+            # Block: Camera candidate resolution
+            camera_candidates = self._camera_candidates_for_state(state_snapshot.effective_settings)
             built_input = build_cognition_input(
                 pending_input=pending_input,
                 cycle_id=cycle_id,
                 resolved_at=resolved_at,
                 state_snapshot=state_snapshot,
-                enabled_camera_connections=self._store.read_enabled_camera_connections(),
-                camera_available=self._camera_available(),
+                camera_candidates=camera_candidates,
+                camera_available=bool(camera_candidates) and self._camera_sensor.is_available(),
             )
             cognition_execution = run_cognition_for_browser_chat_input(
                 pending_input=pending_input,
@@ -827,6 +829,15 @@ class RuntimeLoop:
         if self._last_lease_refresh_at_ms == 0:
             return 0
         return self._last_lease_refresh_at_ms + self._lease_heartbeat_ms
+
+    # Block: Camera candidate helper
+    def _camera_candidates_for_state(
+        self,
+        effective_settings: dict[str, Any],
+    ) -> list[Any]:
+        if not bool(effective_settings["sensors.camera.enabled"]):
+            return []
+        return self._camera_controller.list_candidates()
 
     # Block: Camera availability helper
     def _camera_available(self) -> bool:
