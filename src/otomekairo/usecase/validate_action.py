@@ -1229,6 +1229,16 @@ def _build_action_command(
         }
     if action_type == "browse":
         query = _browse_query_text(proposal)
+        expected_event_types = ["status", "notice", "status"]
+        parameters: dict[str, Any] = {
+            "task_id": opaque_action_id("task"),
+            "query": query,
+            "target_channel": pending_channel,
+        }
+        if response_text:
+            parameters["message_id"] = str(proposal["message_id"])
+            parameters["text"] = response_text
+            expected_event_types = ["status", "message", "status"]
         return {
             "command_id": opaque_action_id("cmd"),
             "command_type": "enqueue_browse_task",
@@ -1236,11 +1246,7 @@ def _build_action_command(
             "target": {
                 "queue": "task_state",
             },
-            "parameters": {
-                "task_id": opaque_action_id("task"),
-                "query": query,
-                "target_channel": pending_channel,
-            },
+            "parameters": parameters,
             "preconditions": {
                 "runtime_allows_browse": True,
             },
@@ -1250,6 +1256,7 @@ def _build_action_command(
             "timeout_ms": 5_000,
             "requires_reobserve": False,
             "expected_effects": {
+                "emitted_event_types": expected_event_types,
                 "queued_task_kind": "browse",
                 "queued_task_status": "waiting_external",
             },

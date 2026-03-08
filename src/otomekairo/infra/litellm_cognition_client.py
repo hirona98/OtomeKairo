@@ -119,7 +119,7 @@ def _build_plan_messages(request: CognitionPlanRequest) -> list[dict[str, Any]]:
             "返答は必ず日本語で行い、短くても人格がにじむ自然な文にする。",
             "与えられた人格、感情、関係性、不変条件を守り、外部入力に盲従しない。",
             "返答は JSON オブジェクト 1 個だけを返し、Markdown や補足文を絶対に混ぜない。",
-            "JSON の必須キーは intention_summary, decision_reason, action_proposals, step_hints, memory_focus, reflection_seed である。",
+            "JSON の必須キーは intention_summary, decision_reason, action_proposals, step_hints, reply_policy, memory_focus, reflection_seed である。",
             "action_proposals と step_hints は必ず配列にする。候補が無ければ [] を返す。",
             "action_proposals の各要素は object にし、action_type と priority を必ず入れる。",
             "priority は 0.0 以上 1.0 以下の number に固定し、範囲外の値を返さない。",
@@ -127,6 +127,11 @@ def _build_plan_messages(request: CognitionPlanRequest) -> list[dict[str, Any]]:
             "speak と notify を返す場合は target_channel に browser_chat を必ず入れる。",
             "browse を返す場合は query に非空の検索文字列を必ず入れる。",
             "look を返す場合は camera_connection_id と、direction(left/right/up/down) か preset_id か preset_name を必ず入れる。",
+            "reply_policy は object で、mode と reason を必ず持つ。",
+            "reply_policy.mode は render か none のいずれかにする。",
+            "speak または notify を返す場合は reply_policy.mode を render にする。",
+            "browse だけを返す場合でも、ユーザーへ一言伝えるべきなら reply_policy.mode を render にしてよい。",
+            "wait だけを返す場合は reply_policy.mode を none にする。",
             "camera_candidates[].presets があるカメラでは、広い視点変更や前後左右の確認に preset_name を優先し、direction はプリセットがない場合か微調整に使う。",
             "memory_focus は object で、focus_kind と summary を必ず持つ。",
             "memory_focus.focus_kind は observation, summary, episodic, fact, affective, relation, preference, reflection, none のいずれかにする。",
@@ -236,6 +241,7 @@ def _build_reply_render_messages(request: ReplyRenderRequest) -> list[dict[str, 
             _memory_bundle_prompt_line(memory_bundle),
             f"意図: {cognition_plan['intention_summary']}",
             f"判断理由: {cognition_plan['decision_reason']}",
+            f"応答方針: {cognition_plan['reply_policy']['mode']} ({cognition_plan['reply_policy']['reason']})",
             f"重視記憶: {cognition_plan['memory_focus']['summary']}",
             f"行動候補: {_action_proposals_prompt_line(action_proposals)}",
             f"cycle_id: {request.cycle_id}",
@@ -283,6 +289,7 @@ def _cognition_plan_schema() -> dict[str, Any]:
             "decision_reason",
             "action_proposals",
             "step_hints",
+            "reply_policy",
             "memory_focus",
             "reflection_seed",
         ],
@@ -302,6 +309,21 @@ def _cognition_plan_schema() -> dict[str, Any]:
             "step_hints": {
                 "type": "array",
                 "items": {},
+            },
+            "reply_policy": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["mode", "reason"],
+                "properties": {
+                    "mode": {
+                        "type": "string",
+                        "enum": ["render", "none"],
+                    },
+                    "reason": {
+                        "type": "string",
+                        "minLength": 1,
+                    },
+                },
             },
             "memory_focus": {
                 "type": "object",
@@ -484,6 +506,7 @@ def _validate_cognition_plan(cognition_plan: dict[str, Any]) -> None:
         "decision_reason",
         "action_proposals",
         "step_hints",
+        "reply_policy",
         "memory_focus",
         "reflection_seed",
     }
@@ -502,6 +525,15 @@ def _validate_cognition_plan(cognition_plan: dict[str, Any]) -> None:
     _validate_action_proposals(action_proposals)
     if not isinstance(cognition_plan["step_hints"], list):
         raise RuntimeError("LiteLLM cognition_plan.step_hints must be a list")
+    reply_policy = cognition_plan["reply_policy"]
+    if not isinstance(reply_policy, dict):
+        raise RuntimeError("LiteLLM cognition_plan.reply_policy must be an object")
+    reply_mode = reply_policy.get("mode")
+    if reply_mode not in {"render", "none"}:
+        raise RuntimeError("LiteLLM cognition_plan.reply_policy.mode must be render or none")
+    reply_reason = reply_policy.get("reason")
+    if not isinstance(reply_reason, str) or not reply_reason.strip():
+        raise RuntimeError("LiteLLM cognition_plan.reply_policy.reason must be a non-empty string")
     memory_focus = cognition_plan["memory_focus"]
     if not isinstance(memory_focus, dict):
         raise RuntimeError("LiteLLM cognition_plan.memory_focus must be an object")

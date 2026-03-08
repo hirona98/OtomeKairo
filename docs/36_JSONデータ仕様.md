@@ -1024,6 +1024,10 @@
     }
   ],
   "step_hints": [],
+  "reply_policy": {
+    "mode": "render",
+    "reason": "ユーザーへ直接応答する"
+  },
   "memory_focus": {
     "focus_kind": "observation",
     "summary": "直近のチャット入力を主材料として判断した"
@@ -1035,7 +1039,7 @@
 ```
 
 - `cognition_plan` は、短周期の内部で使う認知計画オブジェクトである
-- 必須項目は `intention_summary`、`decision_reason`、`action_proposals`、`step_hints`、`memory_focus`、`reflection_seed` である
+- 必須項目は `intention_summary`、`decision_reason`、`action_proposals`、`step_hints`、`reply_policy`、`memory_focus`、`reflection_seed` である
 - `action_proposals` と `step_hints` は配列に固定し、候補がない場合も空配列 `[]` を使う
 - current の `browser_chat` では、`action_proposals` の各要素は少なくとも `action_type` と `priority` を持つ
 - current の `browser_chat` では、`action_type` は `speak`、`browse`、`notify`、`look`、`wait` のいずれかだけを許可する
@@ -1043,6 +1047,8 @@
 - current の `browser_chat` では、`speak` と `notify` のとき `target_channel="browser_chat"` を必須とする
 - current の `browser_chat` では、`browse` のとき `query` に非空の検索文字列を必須とする
 - current の `browser_chat` では、`look` のとき `camera_connection_id` と、`direction` / `preset_id` / `preset_name` のいずれかを必須とする
+- `reply_policy` は、少なくとも `mode` と `reason` を持つ
+- current の `browser_chat` では、`reply_policy.mode` は `render` または `none` を使う
 - `memory_focus` は、少なくとも `focus_kind`、`summary` を持つ
 - current の `browser_chat` では、`reflection_seed.message_id` は `string` を必須とし、計画段では空文字列を許可する
 
@@ -1738,6 +1744,7 @@
 - `target`、`parameters`、`preconditions`、`stop_conditions`、`timeout_ms`、`requires_reobserve`、`expected_effects` は、`execute` のとき `action_command` をそのまま残したい場合に付けてよい
 - current の `control_camera_look` では、`parameters.camera_connection_id` を必須とし、`requires_reobserve=true` に固定し、`expected_effects.followup_input_kind=\"camera_observation\"`、`expected_effects.followup_trigger_reason=\"post_action_followup\"` を持たせてよい
 - `parameters.task_id`、`parameters.query`、`parameters.target_channel` は、`enqueue_browse_task` を実行する命令だけに付ける
+- current の `enqueue_browse_task` では、伴走メッセージを出す場合だけ `parameters.message_id` と `parameters.text` を持たせてよい
 - `parameters.query` は、`execute_browse_task` と `abandon_browse_task` を実行する命令だけに付けてよい
 - `related_task_id` は、`execute_browse_task` と `abandon_browse_task` のように task 再開を処理する命令だけに付けてよい
 - `hold` と `reject` では、`message_id` と `role` を付けず、`event_types` は `status` だけでもよい
@@ -1790,6 +1797,7 @@
 - `action_candidate_score` は、`action validator` の最小比較結果を残したいときに付ける
 - `hold` と `reject` では、`message_id` を付けず、`final_message_emitted=false` にする
 - `enqueue_browse_task` を実行した場合は、`queued_task_id`、`queued_task_kind`、`queued_task_status` を付けてよい
+- current の `enqueue_browse_task` では、伴走メッセージを出した場合だけ `final_message_emitted` と `message_id` を付けてよい
 - `complete_browse_task` を実行した場合は、`related_task_id`、`task_status_after`、`summary_text` を付けてよい
 - `abandon_browse_task` を実行した場合は、`related_task_id`、`task_status_after`、`error_message` を付けてよい
 - `complete_browse_task` を実行した場合は、`followup_input_kind=\"network_result\"` を付けてよい

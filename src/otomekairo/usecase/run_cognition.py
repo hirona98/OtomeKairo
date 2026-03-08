@@ -283,15 +283,30 @@ def _compose_cognition_result(
 
 # Block: 応答文レンダリング要否
 def _requires_reply_render(cognition_plan: dict[str, Any]) -> bool:
+    reply_policy = cognition_plan.get("reply_policy")
+    if not isinstance(reply_policy, dict):
+        raise RuntimeError("cognition_plan.reply_policy must be an object")
+    reply_mode = reply_policy.get("mode")
+    if reply_mode not in {"render", "none"}:
+        raise RuntimeError("cognition_plan.reply_policy.mode must be render or none")
     action_proposals = cognition_plan.get("action_proposals")
     if not isinstance(action_proposals, list):
         raise RuntimeError("cognition_plan.action_proposals must be a list")
+    visible_action_types = set()
     for proposal in action_proposals:
         if not isinstance(proposal, dict):
             raise RuntimeError("cognition_plan.action_proposals must contain only objects")
         action_type = proposal.get("action_type")
-        if action_type in {"speak", "notify", "look"}:
-            return True
+        if not isinstance(action_type, str) or not action_type:
+            raise RuntimeError("cognition_plan.action_proposals.action_type must be a non-empty string")
+        if action_type in {"speak", "notify", "look", "browse"}:
+            visible_action_types.add(action_type)
+    if reply_mode == "render":
+        if not visible_action_types:
+            raise RuntimeError("cognition_plan.reply_policy.mode=render requires visible action proposals")
+        return True
+    if {"speak", "notify"} & visible_action_types:
+        raise RuntimeError("cognition_plan.reply_policy.mode=none is invalid for speak or notify")
     return False
 
 

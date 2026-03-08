@@ -35,6 +35,7 @@ def _validated_cognition_plan(cognition_plan: dict[str, Any]) -> dict[str, Any]:
         "decision_reason",
         "action_proposals",
         "step_hints",
+        "reply_policy",
         "memory_focus",
         "reflection_seed",
     )
@@ -45,6 +46,7 @@ def _validated_cognition_plan(cognition_plan: dict[str, Any]) -> dict[str, Any]:
     decision_reason = cognition_plan["decision_reason"]
     action_proposals = cognition_plan["action_proposals"]
     step_hints = cognition_plan["step_hints"]
+    reply_policy = cognition_plan["reply_policy"]
     memory_focus = cognition_plan["memory_focus"]
     reflection_seed = cognition_plan["reflection_seed"]
     if not isinstance(intention_summary, str) or not intention_summary.strip():
@@ -55,10 +57,18 @@ def _validated_cognition_plan(cognition_plan: dict[str, Any]) -> dict[str, Any]:
         raise RuntimeError("cognition_plan.action_proposals must be a list")
     if not isinstance(step_hints, list):
         raise RuntimeError("cognition_plan.step_hints must be a list")
+    if not isinstance(reply_policy, dict):
+        raise RuntimeError("cognition_plan.reply_policy must be an object")
     if not isinstance(memory_focus, dict):
         raise RuntimeError("cognition_plan.memory_focus must be an object")
     if not isinstance(reflection_seed, dict):
         raise RuntimeError("cognition_plan.reflection_seed must be an object")
+    reply_mode = reply_policy.get("mode")
+    reply_reason = reply_policy.get("reason")
+    if reply_mode not in {"render", "none"}:
+        raise RuntimeError("cognition_plan.reply_policy.mode must be render or none")
+    if not isinstance(reply_reason, str) or not reply_reason.strip():
+        raise RuntimeError("cognition_plan.reply_policy.reason must be a non-empty string")
     message_id = reflection_seed.get("message_id")
     if not isinstance(message_id, str):
         raise RuntimeError("cognition_plan.reflection_seed.message_id must be a string")
