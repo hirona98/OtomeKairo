@@ -17,6 +17,13 @@ DRIVE_RELIEF_WEIGHT = 0.10
 EXPECTED_STABILITY_WEIGHT = 0.08
 
 
+# Block: Hold thresholds
+LOW_PERSONALITY_FIT_THRESHOLD = 0.30
+HIGH_AVERSION_PENALTY_THRESHOLD = 0.70
+LOW_RELATIONSHIP_FIT_THRESHOLD = 0.35
+URGENT_PRIORITY_THRESHOLD = 0.80
+
+
 # Block: Validation result
 @dataclass(frozen=True, slots=True)
 class ValidatedChatAction:
@@ -58,6 +65,7 @@ def validate_chat_response_action(
     executable_candidates = [
         candidate for candidate in scored_candidates if bool(candidate["hard_gate_passed"])
     ]
+    executable_candidates = _suppress_redundant_speak_when_look_available(executable_candidates)
     if not executable_candidates:
         best_candidate = max(
             scored_candidates,
@@ -85,18 +93,26 @@ def validate_chat_response_action(
         proposal=best_candidate["proposal"],
         message_id=message_id,
     )
-    if float(best_candidate["personality_fit_score"]) < 0.30:
-        return ValidatedChatAction(
-            decision="hold",
-            decision_reason="personality_fit_below_threshold",
-            proposal=selected_proposal,
-            action_command=None,
-            action_candidate_score=_candidate_payload(best_candidate),
-        )
     if action_type == "wait":
         return ValidatedChatAction(
             decision="hold",
             decision_reason="wait_selected",
+            proposal=selected_proposal,
+            action_command=None,
+            action_candidate_score=_candidate_payload(best_candidate),
+        )
+    if _should_hold_for_aversion_relationship_conflict(best_candidate):
+        return ValidatedChatAction(
+            decision="hold",
+            decision_reason="aversion_relationship_conflict",
+            proposal=selected_proposal,
+            action_command=None,
+            action_candidate_score=_candidate_payload(best_candidate),
+        )
+    if _should_hold_for_low_personality_fit(best_candidate):
+        return ValidatedChatAction(
+            decision="hold",
+            decision_reason="personality_fit_below_threshold",
             proposal=selected_proposal,
             action_command=None,
             action_candidate_score=_candidate_payload(best_candidate),
@@ -128,6 +144,8 @@ def _validated_action_proposals(cognition_result: dict[str, Any]) -> list[dict[s
         action_type = _validated_action_type(proposal)
         if action_type == "browse":
             _browse_query_text(proposal)
+        if action_type == "look":
+            _validated_look_target(proposal)
         validated_proposals.append(proposal)
     return validated_proposals
 
@@ -147,11 +165,13 @@ def _score_candidate(
     memory_bundle = cognition_input["memory_bundle"]
     current_observation = cognition_input["current_observation"]
     learned_aversions = selection_profile["learned_aversions"]
+    habit_biases = selection_profile["habit_biases"]
     hard_gate_passed = _passes_hard_gate(
         proposal=proposal,
         pending_channel=pending_channel,
         cognition_input=cognition_input,
         learned_aversions=learned_aversions,
+        habit_biases=habit_biases,
     )
     priority_hint_score = _proposal_priority_score(proposal)
     persona_consistency = _persona_consistency_score(
@@ -165,7 +185,13 @@ def _score_candidate(
     personality_fit_score = _personality_fit_score(persona_consistency=persona_consistency)
     relationship_fit_score = persona_consistency["relationship_alignment"]
     experience_fit_score = _experience_fit_score(
+        action_type=action_type,
         persona_consistency=persona_consistency,
+        self_snapshot=_required_object(
+            cognition_input,
+            "self_snapshot",
+            "cognition_input.self_snapshot",
+        ),
     )
     drive_relief_score = _drive_relief_score(
         action_type=action_type,
@@ -212,20 +238,21 @@ def _passes_hard_gate(
     pending_channel: str,
     cognition_input: dict[str, Any],
     learned_aversions: list[dict[str, Any]],
+    habit_biases: dict[str, Any],
 ) -> bool:
     action_type = _validated_action_type(proposal)
-    invariants = cognition_input["persona_snapshot"]["invariants"]
+    invariants = cognition_input["self_snapshot"]["invariants"]
     forbidden_action_types = _required_list(
         invariants,
         "forbidden_action_types",
-        "persona_snapshot.invariants.forbidden_action_types",
+        "self_snapshot.invariants.forbidden_action_types",
     )
     if action_type in forbidden_action_types:
         return False
     forbidden_action_styles = _required_list(
         invariants,
         "forbidden_action_styles",
-        "persona_snapshot.invariants.forbidden_action_styles",
+        "self_snapshot.invariants.forbidden_action_styles",
     )
     if _proposal_action_style(action_type) in forbidden_action_styles:
         return False
@@ -237,9 +264,27 @@ def _passes_hard_gate(
         task_snapshot=cognition_input["task_snapshot"],
     ):
         return False
+    if action_type == "look":
+        policy_snapshot = _required_object(
+            cognition_input,
+            "policy_snapshot",
+            "cognition_input.policy_snapshot",
+        )
+        runtime_policy = _required_object(
+            policy_snapshot,
+            "runtime_policy",
+            "cognition_input.policy_snapshot.runtime_policy",
+        )
+        if not bool(runtime_policy.get("camera_enabled")):
+            return False
+        if not bool(runtime_policy.get("camera_available")):
+            return False
+        if _look_camera_candidate(proposal, cognition_input) is None:
+            return False
     return not _has_strong_aversion(
         action_type=action_type,
         learned_aversions=learned_aversions,
+        habit_biases=habit_biases,
     )
 
 
@@ -301,6 +346,11 @@ def _persona_consistency_score(
             "learned_aversions",
             "selection_profile.learned_aversions",
         ),
+        habit_biases=_required_object(
+            selection_profile,
+            "habit_biases",
+            "selection_profile.habit_biases",
+        ),
     )
     emotion_alignment = _emotion_alignment(
         action_type=action_type,
@@ -346,12 +396,54 @@ def _personality_fit_score(
 ) -> float:
     trait_alignment = _normalized_score(persona_consistency["trait_alignment"])
     style_alignment = _normalized_score(persona_consistency["style_alignment"])
-    overall_score = _normalized_score(persona_consistency["overall_score"])
-    return _normalized_score(
-        trait_alignment * 0.35
-        + style_alignment * 0.35
-        + overall_score * 0.30
+    return _normalized_score(trait_alignment * 0.50 + style_alignment * 0.50)
+
+
+# Block: Hold decision helpers
+def _should_hold_for_aversion_relationship_conflict(candidate: dict[str, Any]) -> bool:
+    if _is_urgent_candidate(candidate):
+        return False
+    persona_consistency = candidate["persona_consistency"]
+    aversion_penalty = _normalized_score(persona_consistency["aversion_penalty"])
+    relationship_fit_score = _normalized_score(candidate["relationship_fit_score"])
+    return (
+        aversion_penalty >= HIGH_AVERSION_PENALTY_THRESHOLD
+        and relationship_fit_score <= LOW_RELATIONSHIP_FIT_THRESHOLD
     )
+
+
+def _should_hold_for_low_personality_fit(candidate: dict[str, Any]) -> bool:
+    if _is_urgent_candidate(candidate):
+        return False
+    return (
+        _normalized_score(candidate["personality_fit_score"])
+        < LOW_PERSONALITY_FIT_THRESHOLD
+    )
+
+
+def _is_urgent_candidate(candidate: dict[str, Any]) -> bool:
+    priority_hint_score = _normalized_score(candidate["priority_hint_score"])
+    return priority_hint_score >= URGENT_PRIORITY_THRESHOLD
+
+
+# Block: Look-first conflict resolution
+def _suppress_redundant_speak_when_look_available(
+    executable_candidates: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    has_look_candidate = any(
+        _validated_action_type(candidate["proposal"]) == "look"
+        for candidate in executable_candidates
+    )
+    if not has_look_candidate:
+        return executable_candidates
+    filtered_candidates = [
+        candidate
+        for candidate in executable_candidates
+        if _validated_action_type(candidate["proposal"]) != "speak"
+    ]
+    if not filtered_candidates:
+        return executable_candidates
+    return filtered_candidates
 
 
 # Block: Style alignment
@@ -384,6 +476,15 @@ def _style_alignment(
         if speech_tone in {"direct", "firm"}:
             return 0.60
         raise RuntimeError("selection_profile.interaction_style.speech_tone is invalid")
+    if action_type == "look":
+        confirmation_style = interaction_style["confirmation_style"]
+        if confirmation_style == "careful":
+            return 0.85
+        if confirmation_style == "balanced":
+            return 0.75
+        if confirmation_style == "light":
+            return 0.60
+        raise RuntimeError("selection_profile.interaction_style.confirmation_style is invalid")
     if action_type == "wait":
         confirmation_style = interaction_style["confirmation_style"]
         if confirmation_style == "careful":
@@ -450,6 +551,13 @@ def _trait_alignment(
             + 0.35 * assertiveness
             + 0.20 * sociability
         )
+    if action_type == "look":
+        return _normalized_score(
+            0.45 * curiosity
+            + 0.25 * novelty_preference
+            + 0.20 * assertiveness
+            + 0.10 * (1.0 - caution)
+        )
     if action_type == "wait":
         return _normalized_score(
             0.70 * caution
@@ -482,6 +590,8 @@ def _relationship_alignment(
         if has_pending_relation:
             return 0.40
         return _normalized_score(0.45 + strongest_weight * 0.20)
+    if action_type == "look":
+        return _normalized_score(0.55 + strongest_weight * 0.15)
     if action_type == "wait":
         has_pending_relation = any(
             relationship["reason_tag"] == "pending_relation"
@@ -508,16 +618,30 @@ def _preference_alignment(
         "preferred_action_types",
         "selection_profile.habit_biases.preferred_action_types",
     )
+    preferred_observation_kinds = _required_list(
+        habit_biases,
+        "preferred_observation_kinds",
+        "selection_profile.habit_biases.preferred_observation_kinds",
+    )
     base_score = 0.50
     if action_type in preferred_action_types:
-        base_score += 0.20
-    for preference in learned_preferences:
-        if not isinstance(preference, dict):
-            raise RuntimeError("selection_profile.learned_preferences must contain only objects")
-        if preference.get("target_action_type") != action_type:
-            continue
-        base_score += _normalized_score(preference["weight"]) * 0.20
-        break
+        base_score += 0.18
+    observation_kind = _observation_kind_for_action(action_type)
+    if observation_kind is not None and observation_kind in preferred_observation_kinds:
+        base_score += 0.10
+    base_score += _matched_preference_weight(
+        entries=learned_preferences,
+        domain="action_type",
+        target_key=action_type,
+        field_name="selection_profile.learned_preferences",
+    ) * 0.20
+    if observation_kind is not None:
+        base_score += _matched_preference_weight(
+            entries=learned_preferences,
+            domain="observation_kind",
+            target_key=observation_kind,
+            field_name="selection_profile.learned_preferences",
+        ) * 0.12
     base_score += _memory_support_score(
         action_type=action_type,
         proposal=proposal,
@@ -540,10 +664,30 @@ def _memory_support_score(
         "working_memory_items",
         "cognition_input.memory_bundle.working_memory_items",
     )
+    episodic_items = _required_list(
+        memory_bundle,
+        "episodic_items",
+        "cognition_input.memory_bundle.episodic_items",
+    )
     semantic_items = _required_list(
         memory_bundle,
         "semantic_items",
         "cognition_input.memory_bundle.semantic_items",
+    )
+    affective_items = _required_list(
+        memory_bundle,
+        "affective_items",
+        "cognition_input.memory_bundle.affective_items",
+    )
+    relationship_items = _required_list(
+        memory_bundle,
+        "relationship_items",
+        "cognition_input.memory_bundle.relationship_items",
+    )
+    reflection_items = _required_list(
+        memory_bundle,
+        "reflection_items",
+        "cognition_input.memory_bundle.reflection_items",
     )
     recent_event_window = _required_list(
         memory_bundle,
@@ -562,18 +706,98 @@ def _memory_support_score(
             )
             if payload.get("query") == query_hint:
                 return 0.20
+        if _has_reflection_caution(
+            reflection_items=reflection_items,
+            current_observation=current_observation,
+            query_hint=query_hint,
+        ):
+            return 0.30
+        if _negative_affect_support(affective_items=affective_items) >= 0.70:
+            return 0.35
+        if episodic_items or recent_event_window:
+            return 0.65
         return 0.75
     if action_type in {"speak", "notify"}:
-        if current_observation["input_kind"] == "network_result" and semantic_items:
+        if current_observation["input_kind"] == "network_result" and (semantic_items or episodic_items):
             return 0.95
+        if relationship_items:
+            return 0.85
+        if affective_items:
+            return 0.78
         if working_memory_items or recent_event_window:
             return 0.70
         return 0.45
+    if action_type == "look":
+        if relationship_items or affective_items:
+            return 0.80
+        if working_memory_items or recent_event_window:
+            return 0.70
+        if episodic_items:
+            return 0.65
+        return 0.55
     if action_type == "wait":
+        if _has_reflection_caution(
+            reflection_items=reflection_items,
+            current_observation=current_observation,
+            query_hint=None,
+        ):
+            return 0.90
+        if _negative_affect_support(affective_items=affective_items) >= 0.60:
+            return 0.80
         if current_observation["input_kind"] == "network_result" and semantic_items:
             return 0.30
         return 0.60
     raise RuntimeError("unsupported action_type for memory support scoring")
+
+
+# Block: Reflection and affect helpers
+def _has_reflection_caution(
+    *,
+    reflection_items: list[dict[str, Any]],
+    current_observation: dict[str, Any],
+    query_hint: str | None,
+) -> bool:
+    caution_tokens = {"失敗", "回避", "避け", "注意", "保留", "待機"}
+    observation_text = str(current_observation["observation_text"])
+    for reflection_item in reflection_items:
+        if not isinstance(reflection_item, dict):
+            raise RuntimeError("memory_bundle.reflection_items must contain only objects")
+        body_text = reflection_item.get("body_text")
+        if not isinstance(body_text, str):
+            continue
+        if query_hint is not None and query_hint in body_text:
+            return True
+        if observation_text and observation_text in body_text:
+            return True
+        if any(token in body_text for token in caution_tokens):
+            return True
+    return False
+
+
+def _negative_affect_support(
+    *,
+    affective_items: list[dict[str, Any]],
+) -> float:
+    strongest_signal = 0.0
+    for affective_item in affective_items:
+        if not isinstance(affective_item, dict):
+            raise RuntimeError("memory_bundle.affective_items must contain only objects")
+        payload = affective_item.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        vad = payload.get("vad")
+        if isinstance(vad, dict):
+            valence = vad.get("v")
+            arousal = vad.get("a")
+            if isinstance(valence, (int, float)) and isinstance(arousal, (int, float)):
+                strongest_signal = max(
+                    strongest_signal,
+                    _normalized_score((1.0 - float(valence)) * 0.50 + float(arousal) * 0.30),
+                )
+        labels = payload.get("labels")
+        if isinstance(labels, list) and any(str(label) in {"tense", "guarded", "frustrated"} for label in labels):
+            strongest_signal = max(strongest_signal, 0.75)
+    return strongest_signal
 
 
 # Block: Aversion penalty
@@ -581,14 +805,33 @@ def _aversion_penalty(
     *,
     action_type: str,
     learned_aversions: list[dict[str, Any]],
+    habit_biases: dict[str, Any],
 ) -> float:
-    for aversion in learned_aversions:
-        if not isinstance(aversion, dict):
-            raise RuntimeError("selection_profile.learned_aversions must contain only objects")
-        if aversion.get("target_action_type") != action_type:
-            continue
-        return _normalized_score(aversion["weight"])
-    return 0.0
+    penalty = _matched_preference_weight(
+        entries=learned_aversions,
+        domain="action_type",
+        target_key=action_type,
+        field_name="selection_profile.learned_aversions",
+    )
+    observation_kind = _observation_kind_for_action(action_type)
+    if observation_kind is not None:
+        penalty = max(
+            penalty,
+            _matched_preference_weight(
+                entries=learned_aversions,
+                domain="observation_kind",
+                target_key=observation_kind,
+                field_name="selection_profile.learned_aversions",
+            ) * 0.85,
+        )
+    avoided_action_styles = _required_list(
+        habit_biases,
+        "avoided_action_styles",
+        "selection_profile.habit_biases.avoided_action_styles",
+    )
+    if _proposal_action_style(action_type) in avoided_action_styles:
+        penalty = max(penalty, 0.35)
+    return _normalized_score(penalty)
 
 
 # Block: Emotion alignment
@@ -606,6 +849,14 @@ def _emotion_alignment(
             )
         )
     if action_type == "browse":
+        return _signed_bias_to_score(
+            _required_signed_score(
+                emotion_bias,
+                "approach_bias",
+                "selection_profile.emotion_bias.approach_bias",
+            )
+        )
+    if action_type == "look":
         return _signed_bias_to_score(
             _required_signed_score(
                 emotion_bias,
@@ -645,6 +896,14 @@ def _drive_alignment(
                 "selection_profile.drive_bias.exploration_bias",
             )
         )
+    if action_type == "look":
+        return _signed_bias_to_score(
+            _required_signed_score(
+                drive_bias,
+                "exploration_bias",
+                "selection_profile.drive_bias.exploration_bias",
+            )
+        )
     if action_type in {"speak", "notify"}:
         return _signed_bias_to_score(
             _required_signed_score(
@@ -667,31 +926,143 @@ def _drive_alignment(
 # Block: Experience score
 def _experience_fit_score(
     *,
+    action_type: str,
     persona_consistency: dict[str, Any],
+    self_snapshot: dict[str, Any],
 ) -> float:
     preference_alignment = _normalized_score(persona_consistency["preference_alignment"])
     aversion_penalty = _normalized_score(persona_consistency["aversion_penalty"])
-    return _normalized_score(
-        preference_alignment * 0.65
-        + (1.0 - aversion_penalty) * 0.35
+    persona_update_support = _persona_update_support_score(
+        action_type=action_type,
+        self_snapshot=self_snapshot,
     )
+    return _normalized_score(
+        preference_alignment * 0.55
+        + (1.0 - aversion_penalty) * 0.25
+        + persona_update_support * 0.20
+    )
+
+
+def _persona_update_support_score(
+    *,
+    action_type: str,
+    self_snapshot: dict[str, Any],
+) -> float:
+    last_persona_update = self_snapshot.get("last_persona_update")
+    if not isinstance(last_persona_update, dict):
+        return 0.50
+    updated_traits = last_persona_update.get("updated_traits")
+    if not isinstance(updated_traits, list):
+        return 0.50
+    support_score = 0.50
+    for trait_entry in updated_traits:
+        if not isinstance(trait_entry, dict):
+            continue
+        trait_name = trait_entry.get("trait_name")
+        delta = trait_entry.get("delta")
+        if not isinstance(trait_name, str) or not isinstance(delta, (int, float)):
+            continue
+        if action_type == "browse":
+            if trait_name in {"curiosity", "novelty_preference"}:
+                support_score += float(delta) * 0.60
+            if trait_name == "caution":
+                support_score -= float(delta) * 0.70
+        if action_type == "look":
+            if trait_name in {"curiosity", "novelty_preference"}:
+                support_score += float(delta) * 0.55
+            if trait_name == "caution":
+                support_score -= float(delta) * 0.50
+        if action_type == "wait" and trait_name == "caution":
+            support_score += float(delta) * 0.80
+        if action_type in {"speak", "notify"} and trait_name in {"warmth", "sociability", "assertiveness"}:
+            support_score += float(delta) * 0.50
+    return _normalized_score(support_score)
 
 
 def _has_strong_aversion(
     *,
     action_type: str,
     learned_aversions: list[dict[str, Any]],
+    habit_biases: dict[str, Any],
 ) -> bool:
-    for aversion in learned_aversions:
-        if not isinstance(aversion, dict):
-            raise RuntimeError("selection_profile.learned_aversions must contain only objects")
-        if (
-            aversion.get("target_action_type") == action_type
-            and _normalized_score(aversion.get("weight", 0.0)) >= 0.80
-            and int(aversion.get("evidence_count", 0)) >= 4
-        ):
-            return True
+    del habit_biases
+    strong_action_type_aversion = _matched_preference_entry(
+        entries=learned_aversions,
+        domain="action_type",
+        target_key=action_type,
+        field_name="selection_profile.learned_aversions",
+    )
+    if (
+        strong_action_type_aversion is not None
+        and _normalized_score(strong_action_type_aversion["weight"]) >= 0.80
+        and int(strong_action_type_aversion["evidence_count"]) >= 4
+    ):
+        return True
+    observation_kind = _observation_kind_for_action(action_type)
+    strong_observation_aversion = None
+    if observation_kind is not None:
+        strong_observation_aversion = _matched_preference_entry(
+            entries=learned_aversions,
+            domain="observation_kind",
+            target_key=observation_kind,
+            field_name="selection_profile.learned_aversions",
+        )
+    if (
+        strong_observation_aversion is not None
+        and _normalized_score(strong_observation_aversion["weight"]) >= 0.80
+        and int(strong_observation_aversion["evidence_count"]) >= 4
+    ):
+        return True
     return False
+
+
+# Block: Preference match weight
+def _matched_preference_weight(
+    *,
+    entries: list[dict[str, Any]],
+    domain: str,
+    target_key: str,
+    field_name: str,
+) -> float:
+    matched_entry = _matched_preference_entry(
+        entries=entries,
+        domain=domain,
+        target_key=target_key,
+        field_name=field_name,
+    )
+    if matched_entry is None:
+        return 0.0
+    return _normalized_score(matched_entry["weight"])
+
+
+# Block: Preference match entry
+def _matched_preference_entry(
+    *,
+    entries: list[dict[str, Any]],
+    domain: str,
+    target_key: str,
+    field_name: str,
+) -> dict[str, Any] | None:
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise RuntimeError(f"{field_name} must contain only objects")
+        if entry.get("domain") != domain:
+            continue
+        if entry.get("target_key") != target_key:
+            continue
+        evidence_count = entry.get("evidence_count")
+        if not isinstance(evidence_count, int) or evidence_count < 1:
+            raise RuntimeError(f"{field_name}.evidence_count must be integer >= 1")
+        return entry
+    return None
+
+
+# Block: Observation kind helper
+def _observation_kind_for_action(action_type: str) -> str | None:
+    return {
+        "browse": "web_search",
+        "look": "camera_scene",
+    }.get(action_type)
 
 
 # Block: Drive score
@@ -704,6 +1075,7 @@ def _drive_relief_score(
         "speak": "social_bias",
         "notify": "social_bias",
         "browse": "exploration_bias",
+        "look": "exploration_bias",
         "wait": "maintenance_bias",
     }.get(action_type)
     if bias_key is None:
@@ -743,6 +1115,10 @@ def _task_fit_score(
         if current_observation["input_kind"] == "network_result":
             return 0.25
         return 0.65
+    if action_type == "look":
+        if current_observation["input_kind"] == "network_result":
+            return 0.30
+        return 0.70
     if action_type == "wait":
         if waiting_external_tasks:
             return 0.75
@@ -771,6 +1147,10 @@ def _expected_stability_score(
         if waiting_external_tasks:
             return 0.35
         return 0.55
+    if action_type == "look":
+        if waiting_external_tasks:
+            return 0.50
+        return 0.68
     raise RuntimeError("unsupported action_type for stability scoring")
 
 
@@ -816,7 +1196,7 @@ def _build_action_command(
             "timeout_ms": 30_000,
             "requires_reobserve": False,
             "expected_effects": {
-                "emitted_event_types": ["status", "token", "message", "status"],
+                "emitted_event_types": ["status", "token", "message", "message_end", "status"],
                 "status_code_after": "idle",
             },
             "proposal_ref": str(proposal["proposal_id"]),
@@ -875,6 +1255,35 @@ def _build_action_command(
             },
             "proposal_ref": str(proposal["proposal_id"]),
         }
+    if action_type == "look":
+        return {
+            "command_id": opaque_action_id("cmd"),
+            "command_type": "control_camera_look",
+            "actuator_port": "wifi_camera",
+            "target": {
+                "device": str(proposal["camera_connection_id"]),
+            },
+            "parameters": {
+                "message_id": str(proposal["message_id"]),
+                "text": response_text,
+                **_look_command_parameters(proposal),
+            },
+            "preconditions": {
+                "runtime_allows_camera_look": True,
+            },
+            "stop_conditions": {
+                "kind": "camera_move_completed",
+            },
+            "timeout_ms": 10_000,
+            "requires_reobserve": True,
+            "expected_effects": {
+                "emitted_event_types": ["status", "message", "status"],
+                "status_code_after": "idle",
+                "followup_input_kind": "camera_observation",
+                "followup_trigger_reason": "post_action_followup",
+            },
+            "proposal_ref": str(proposal["proposal_id"]),
+        }
     raise RuntimeError("unsupported action_type for execute command")
 
 
@@ -884,6 +1293,102 @@ def _browse_query_text(proposal: dict[str, Any]) -> str:
     if not isinstance(query, str) or not query.strip():
         raise RuntimeError("browse action requires non-empty query")
     return query.strip()
+
+
+# Block: Look target helpers
+def _validated_look_target(proposal: dict[str, Any]) -> dict[str, str]:
+    camera_connection_id = proposal.get("camera_connection_id")
+    if not isinstance(camera_connection_id, str) or not camera_connection_id.strip():
+        raise RuntimeError("look action requires camera_connection_id")
+    direction = proposal.get("direction")
+    if isinstance(direction, str) and direction.strip():
+        normalized_direction = direction.strip()
+        if normalized_direction not in {"left", "right", "up", "down"}:
+            raise RuntimeError("look action direction must be left/right/up/down")
+        if proposal.get("preset_id") is not None or proposal.get("preset_name") is not None:
+            raise RuntimeError("look action must not mix direction and preset")
+        return {
+            "camera_connection_id": camera_connection_id.strip(),
+            "direction": normalized_direction,
+        }
+    preset_id = proposal.get("preset_id")
+    if isinstance(preset_id, str) and preset_id.strip():
+        if proposal.get("preset_name") is not None:
+            raise RuntimeError("look action must specify only one preset field")
+        return {
+            "camera_connection_id": camera_connection_id.strip(),
+            "preset_id": preset_id.strip(),
+        }
+    preset_name = proposal.get("preset_name")
+    if isinstance(preset_name, str) and preset_name.strip():
+        return {
+            "camera_connection_id": camera_connection_id.strip(),
+            "preset_name": preset_name.strip(),
+        }
+    raise RuntimeError("look action requires direction or preset")
+
+
+def _look_command_parameters(proposal: dict[str, Any]) -> dict[str, Any]:
+    return _validated_look_target(proposal)
+
+
+# Block: Camera candidate helper
+def _look_camera_candidate(
+    proposal: dict[str, Any],
+    cognition_input: dict[str, Any],
+) -> dict[str, Any] | None:
+    look_target = _validated_look_target(proposal)
+    camera_candidates = cognition_input.get("camera_candidates")
+    if not isinstance(camera_candidates, list):
+        raise RuntimeError("cognition_input.camera_candidates must be a list")
+    for candidate in camera_candidates:
+        if not isinstance(candidate, dict):
+            raise RuntimeError("cognition_input.camera_candidates must contain only objects")
+        if candidate.get("camera_connection_id") != look_target["camera_connection_id"]:
+            continue
+        if not bool(candidate.get("can_look")):
+            return None
+        if _camera_candidate_supports_look_target(candidate, look_target):
+            return candidate
+    return None
+
+
+# Block: Look target candidate matching
+def _camera_candidate_supports_look_target(
+    candidate: dict[str, Any],
+    look_target: dict[str, str],
+) -> bool:
+    if "direction" in look_target:
+        return True
+    presets = candidate.get("presets")
+    if not isinstance(presets, list):
+        raise RuntimeError("cognition_input.camera_candidates.presets must be a list")
+    if "preset_id" in look_target:
+        expected_preset_id = look_target["preset_id"]
+        return any(_camera_candidate_preset_id(preset) == expected_preset_id for preset in presets)
+    if "preset_name" in look_target:
+        expected_preset_name = look_target["preset_name"]
+        return any(_camera_candidate_preset_name(preset) == expected_preset_name for preset in presets)
+    raise RuntimeError("look_target must contain direction, preset_id, or preset_name")
+
+
+# Block: Camera preset candidate fields
+def _camera_candidate_preset_id(preset: Any) -> str:
+    if not isinstance(preset, dict):
+        raise RuntimeError("cognition_input.camera_candidates.presets must contain only objects")
+    preset_id = preset.get("preset_id")
+    if not isinstance(preset_id, str) or not preset_id:
+        raise RuntimeError("cognition_input.camera_candidates.presets.preset_id must be non-empty string")
+    return preset_id
+
+
+def _camera_candidate_preset_name(preset: Any) -> str:
+    if not isinstance(preset, dict):
+        raise RuntimeError("cognition_input.camera_candidates.presets must contain only objects")
+    preset_name = preset.get("preset_name")
+    if not isinstance(preset_name, str) or not preset_name:
+        raise RuntimeError("cognition_input.camera_candidates.presets.preset_name must be non-empty string")
+    return preset_name
 
 
 # Block: Candidate payload
@@ -924,7 +1429,7 @@ def _validated_action_type(proposal: dict[str, Any]) -> str:
     action_type = proposal.get("action_type")
     if not isinstance(action_type, str) or not action_type:
         raise RuntimeError("cognition_result.action_proposals.action_type must be a non-empty string")
-    if action_type not in {"speak", "browse", "notify", "wait"}:
+    if action_type not in {"speak", "browse", "notify", "look", "wait"}:
         raise RuntimeError("unsupported action_type in chat validator")
     return action_type
 
@@ -976,6 +1481,7 @@ def _proposal_action_style(action_type: str) -> str:
         "speak": "conversational_response",
         "notify": "push_notice",
         "browse": "external_lookup",
+        "look": "viewpoint_adjustment",
         "wait": "defer_action",
     }[action_type]
 

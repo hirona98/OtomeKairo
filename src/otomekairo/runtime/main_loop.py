@@ -8,10 +8,12 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable
 
+from otomekairo.gateway.camera_controller import CameraController
+from otomekairo.gateway.camera_sensor import CameraSensor
 from otomekairo import __version__
 from otomekairo.gateway.cognition_client import CognitionClient
-from otomekairo.gateway.notification_client import NotificationClient
 from otomekairo.gateway.search_client import SearchClient
+from otomekairo.gateway.speech_synthesizer import SpeechSynthesizer
 from otomekairo.infra.sqlite_state_store import SqliteStateStore
 from otomekairo.schema.runtime_types import (
     ActionHistoryRecord,
@@ -24,6 +26,7 @@ from otomekairo.schema.runtime_types import (
 )
 from otomekairo.schema.settings import SettingsValidationError, build_default_settings, decode_requested_value, get_setting_definition
 from otomekairo.usecase.build_cognition_input import build_cognition_input
+from otomekairo.usecase.observation_normalization import normalize_trigger_reason
 from otomekairo.usecase.run_browse_task import run_browse_task
 from otomekairo.usecase.run_cognition import run_cognition_for_browser_chat_input
 
@@ -32,6 +35,7 @@ from otomekairo.usecase.run_cognition import run_cognition_for_browser_chat_inpu
 DEFAULT_LEASE_HEARTBEAT_MS = 5_000
 MINIMUM_LEASE_TTL_MS = 15_000
 DEFAULT_LEASE_TTL_MS = 60_000
+DEFAULT_RUNTIME_WAIT_POLL_MS = 100
 MAX_MEMORY_JOB_TRIES = 3
 PENDING_INPUT_FAILURE_REASON = "processing_failed"
 SETTINGS_OVERRIDE_FAILURE_REASON = "settings_processing_failed"
@@ -53,7 +57,9 @@ class RuntimeLoop:
         default_settings: dict[str, Any],
         cognition_client: CognitionClient,
         search_client: SearchClient,
-        notification_client: NotificationClient,
+        camera_controller: CameraController,
+        camera_sensor: CameraSensor,
+        speech_synthesizer: SpeechSynthesizer,
         lease_heartbeat_ms: int = DEFAULT_LEASE_HEARTBEAT_MS,
         lease_ttl_ms: int = DEFAULT_LEASE_TTL_MS,
     ) -> None:
@@ -69,12 +75,16 @@ class RuntimeLoop:
         self._default_settings = default_settings
         self._cognition_client = cognition_client
         self._search_client = search_client
-        self._notification_client = notification_client
+        self._camera_controller = camera_controller
+        self._camera_sensor = camera_sensor
+        self._speech_synthesizer = speech_synthesizer
         self._lease_heartbeat_ms = lease_heartbeat_ms
         self._lease_ttl_ms = lease_ttl_ms
         self._boot_reconciled = False
         self._prefer_long_cycle = False
         self._last_long_cycle_at_ms = 0
+        self._last_activity_at_ms = _now_ms()
+        self._last_lease_refresh_at_ms = 0
         self._stop_requested = False
         logger.info(
             "runtime loop initialized",
@@ -92,18 +102,29 @@ class RuntimeLoop:
             self._store.materialize_next_boot_settings()
             self._boot_reconciled = True
             logger.info("runtime boot settings materialized")
+        replayed_commit_logs = self._store.sync_pending_commit_logs(max_commits=4)
+        did_replay_commit_logs = replayed_commit_logs > 0
+        if replayed_commit_logs > 0:
+            self._mark_runtime_activity()
+            logger.debug(
+                "commit logs replayed",
+                extra={"replayed_commit_logs": replayed_commit_logs},
+            )
         if self._prefer_long_cycle:
             processed_memory = self._process_memory_job_once()
             if processed_memory:
                 self._prefer_long_cycle = False
+                self._mark_runtime_activity()
                 return True
         processed_editor_settings = self._process_settings_change_set_once()
         if processed_editor_settings:
             self._prefer_long_cycle = True
+            self._mark_runtime_activity()
             return True
         processed_settings = self._process_settings_override_once()
         if processed_settings:
             self._prefer_long_cycle = True
+            self._mark_runtime_activity()
             return True
         pending_input = self._store.claim_next_pending_input()
         if pending_input is not None:
@@ -117,6 +138,7 @@ class RuntimeLoop:
             )
             self._process_claimed_pending_input(pending_input)
             self._prefer_long_cycle = True
+            self._mark_runtime_activity()
             return True
         waiting_task = self._store.claim_next_waiting_browse_task()
         if waiting_task is not None:
@@ -130,9 +152,27 @@ class RuntimeLoop:
             )
             self._process_claimed_waiting_task(waiting_task)
             self._prefer_long_cycle = True
+            self._mark_runtime_activity()
             return True
         processed_memory = self._process_memory_job_once()
         if processed_memory:
+            self._mark_runtime_activity()
+            return True
+        pending_input = self._claim_idle_tick_pending_input_if_due()
+        if pending_input is not None:
+            logger.info(
+                "claimed pending input",
+                extra={
+                    "input_id": pending_input.input_id,
+                    "input_kind": pending_input.payload["input_kind"],
+                    "channel": pending_input.channel,
+                },
+            )
+            self._process_claimed_pending_input(pending_input)
+            self._prefer_long_cycle = True
+            self._mark_runtime_activity()
+            return True
+        if did_replay_commit_logs:
             return True
         return False
 
@@ -149,8 +189,11 @@ class RuntimeLoop:
                 ui_events,
                 action_results,
                 task_mutations,
+                pending_input_mutations,
                 resolution_status,
                 discard_reason,
+                retrieval_run,
+                attention_snapshot,
             ) = self._resolve_pending_input(
                 pending_input=pending_input,
                 cycle_id=cycle_id,
@@ -164,6 +207,11 @@ class RuntimeLoop:
                 "emitted_event_types": [ui_event["event_type"] for ui_event in ui_events],
                 "executed_action_types": [action_result.action_type for action_result in action_results],
                 "resolution_status": resolution_status,
+                **(
+                    {"attention_primary_focus": attention_snapshot["primary_focus"]["summary"]}
+                    if attention_snapshot is not None
+                    else {}
+                ),
             }
             self._store.finalize_pending_input_cycle(
                 pending_input=pending_input,
@@ -171,9 +219,13 @@ class RuntimeLoop:
                 resolution_status=resolution_status,
                 action_results=action_results,
                 task_mutations=task_mutations,
+                pending_input_mutations=pending_input_mutations,
                 discard_reason=discard_reason,
                 ui_events=ui_events,
+                retrieval_run=retrieval_run,
+                attention_snapshot=attention_snapshot,
                 commit_payload=commit_payload,
+                camera_available=self._camera_available(),
             )
             logger.info(
                 "pending input finalized",
@@ -186,6 +238,7 @@ class RuntimeLoop:
                         action_result.action_type for action_result in action_results
                     ],
                     "emitted_event_types": [ui_event["event_type"] for ui_event in ui_events],
+                    "followup_input_count": len(pending_input_mutations),
                 },
             )
         except Exception as error:
@@ -200,8 +253,10 @@ class RuntimeLoop:
                 resolution_status="discarded",
                 action_results=[],
                 task_mutations=[],
+                pending_input_mutations=[],
                 discard_reason=PENDING_INPUT_FAILURE_REASON,
                 ui_events=ui_events,
+                attention_snapshot=None,
                 commit_payload={
                     "cycle_kind": "short",
                     "trigger_reason": _pending_input_trigger_reason(pending_input),
@@ -213,6 +268,7 @@ class RuntimeLoop:
                     "error_kind": type(error).__name__,
                     "error_message": _error_message_text(error),
                 },
+                camera_available=self._camera_available(),
             )
 
     # Block: Claimed waiting task processing
@@ -244,6 +300,7 @@ class RuntimeLoop:
                     ],
                     "final_task_status": execution.final_status,
                 },
+                camera_available=self._camera_available(),
             )
             logger.info(
                 "waiting task finalized",
@@ -284,6 +341,7 @@ class RuntimeLoop:
                     "error_kind": type(error).__name__,
                     "error_message": _error_message_text(error),
                 },
+                camera_available=self._camera_available(),
             )
 
     # Block: Pending input resolution
@@ -297,29 +355,38 @@ class RuntimeLoop:
         list[dict[str, Any]],
         list[ActionHistoryRecord],
         list[TaskStateMutationRecord],
+        list[PendingInputMutationRecord],
         str,
         str | None,
+        dict[str, Any] | None,
+        dict[str, Any] | None,
     ]:
         input_kind = pending_input.payload["input_kind"]
-        if input_kind in {"chat_message", "network_result"}:
+        if input_kind in {"chat_message", "microphone_message", "camera_observation", "network_result", "idle_tick"}:
             state_snapshot = self._store.read_cognition_state(
                 self._default_settings,
                 observation_hint_text=_pending_input_observation_hint(pending_input),
             )
-            cognition_input = build_cognition_input(
+            # Block: Camera candidate resolution
+            camera_candidates = self._camera_candidates_for_state(state_snapshot.effective_settings)
+            built_input = build_cognition_input(
                 pending_input=pending_input,
                 cycle_id=cycle_id,
                 resolved_at=resolved_at,
                 state_snapshot=state_snapshot,
+                camera_candidates=camera_candidates,
+                camera_available=bool(camera_candidates) and self._camera_sensor.is_available(),
             )
             cognition_execution = run_cognition_for_browser_chat_input(
                 pending_input=pending_input,
                 cycle_id=cycle_id,
                 resolved_at=resolved_at,
-                cognition_input=cognition_input,
+                cognition_input=built_input.cognition_input,
                 effective_settings=state_snapshot.effective_settings,
                 cognition_client=self._cognition_client,
-                notification_client=self._notification_client,
+                camera_controller=self._camera_controller,
+                camera_sensor=self._camera_sensor,
+                speech_synthesizer=self._speech_synthesizer,
                 emit_ui_event=lambda ui_event: self._append_ui_event(cycle_id=cycle_id, ui_event=ui_event),
                 consume_cancel=lambda message_id: self._consume_matching_cancel(
                     channel=pending_input.channel,
@@ -330,19 +397,25 @@ class RuntimeLoop:
                 cognition_execution.ui_events,
                 cognition_execution.action_results,
                 cognition_execution.task_mutations,
+                cognition_execution.pending_input_mutations,
                 "consumed",
                 None,
+                built_input.retrieval_run,
+                built_input.cognition_input["attention_snapshot"],
             )
         if input_kind == "cancel":
-            return ([], [], [], "discarded", "cancel_target_not_found")
+            return ([], [], [], [], "discarded", "cancel_target_not_found", None, None)
         ui_events, action_results = _unsupported_input_events(pending_input, resolved_at)
         self._append_ui_events(cycle_id=cycle_id, ui_events=ui_events)
         return (
             ui_events,
             action_results,
             [],
+            [],
             "discarded",
             "unsupported_input_kind",
+            None,
+            None,
         )
 
     # Block: UI event append
@@ -401,6 +474,7 @@ class RuntimeLoop:
                 resolution_status="consumed",
                 action_results=[action_result],
                 task_mutations=[],
+                pending_input_mutations=[],
                 discard_reason=None,
                 ui_events=[],
                 commit_payload={
@@ -412,6 +486,7 @@ class RuntimeLoop:
                     "executed_action_types": ["stop_active_message"],
                     "resolution_status": "consumed",
                 },
+                camera_available=self._camera_available(),
             )
             return True
         except Exception as error:
@@ -422,6 +497,7 @@ class RuntimeLoop:
                 resolution_status="discarded",
                 action_results=[],
                 task_mutations=[],
+                pending_input_mutations=[],
                 discard_reason=CANCEL_FAILURE_REASON,
                 ui_events=[],
                 commit_payload={
@@ -435,6 +511,7 @@ class RuntimeLoop:
                     "error_kind": type(error).__name__,
                     "error_message": _error_message_text(error),
                 },
+                camera_available=self._camera_available(),
             )
             return False
 
@@ -452,6 +529,7 @@ class RuntimeLoop:
                 change_set=settings_change_set,
                 default_settings=self._default_settings,
                 final_status="applied",
+                camera_available=self._camera_available(),
             )
             logger.info(
                 "settings change set applied",
@@ -467,6 +545,7 @@ class RuntimeLoop:
                 default_settings=self._default_settings,
                 final_status="rejected",
                 reject_reason=f"{SETTINGS_CHANGE_SET_FAILURE_REASON}:{type(error).__name__}",
+                camera_available=self._camera_available(),
             )
             logger.warning(
                 "settings change set rejected",
@@ -506,6 +585,7 @@ class RuntimeLoop:
                 cycle_id=cycle_id,
                 final_status=final_status,
                 reject_reason=reject_reason,
+                camera_available=self._camera_available(),
             )
             logger.info(
                 "settings override finalized",
@@ -530,6 +610,7 @@ class RuntimeLoop:
                 cycle_id=cycle_id,
                 final_status="rejected",
                 reject_reason=f"{SETTINGS_OVERRIDE_FAILURE_REASON}:{type(error).__name__}",
+                camera_available=self._camera_available(),
             )
             logger.warning(
                 "settings override rejected after failure",
@@ -644,7 +725,7 @@ class RuntimeLoop:
             while not self._stop_requested:
                 processed = self.run_once()
                 if not processed:
-                    self._sleep_until_next_idle_tick()
+                    self._wait_for_next_runnable_cycle()
         finally:
             logger.info("runtime loop stopping")
             self._store.release_runtime_lease(owner_token=self._owner_token)
@@ -652,6 +733,10 @@ class RuntimeLoop:
     # Block: Runtime stop request
     def request_stop(self) -> None:
         self._stop_requested = True
+
+    # Block: Runtime activity tracking
+    def _mark_runtime_activity(self) -> None:
+        self._last_activity_at_ms = _now_ms()
 
     # Block: Idle timing
     def _idle_tick_ms(self) -> int:
@@ -663,22 +748,100 @@ class RuntimeLoop:
             raise RuntimeError("runtime.idle_tick_ms must be positive")
         return idle_tick_ms
 
-    # Block: Idle wait with heartbeat
-    def _sleep_until_next_idle_tick(self) -> None:
-        remaining_ms = self._idle_tick_ms()
-        while remaining_ms > 0 and not self._stop_requested:
-            sleep_ms = min(remaining_ms, self._lease_heartbeat_ms)
-            time.sleep(sleep_ms / 1000.0)
-            remaining_ms -= sleep_ms
-            if remaining_ms > 0 and not self._stop_requested:
+    # Block: Idle trigger state
+    def _idle_duration_ms(self) -> int:
+        return max(0, _now_ms() - self._last_activity_at_ms)
+
+    def _idle_tick_due(self) -> bool:
+        return self._idle_duration_ms() >= self._idle_tick_ms()
+
+    # Block: Idle trigger claim
+    def _claim_idle_tick_pending_input_if_due(self) -> PendingInputRecord | None:
+        if not self._idle_tick_due():
+            return None
+        idle_duration_ms = self._idle_duration_ms()
+        enqueue_result = self._store.enqueue_idle_tick(idle_duration_ms=idle_duration_ms)
+        idle_input_id = str(enqueue_result["input_id"])
+        logger.info(
+            "idle tick enqueued",
+            extra={
+                "input_id": idle_input_id,
+                "idle_duration_ms": idle_duration_ms,
+            },
+        )
+        pending_input = self._store.claim_next_pending_input()
+        if pending_input is None:
+            raise RuntimeError("idle_tick must be claimable immediately after enqueue")
+        if pending_input.input_id == idle_input_id:
+            return pending_input
+        self._store.discard_queued_pending_input(
+            input_id=idle_input_id,
+            discard_reason="idle_tick_superseded",
+        )
+        logger.info(
+            "idle tick superseded by higher priority input",
+            extra={
+                "idle_input_id": idle_input_id,
+                "claimed_input_id": pending_input.input_id,
+                "claimed_input_kind": pending_input.payload["input_kind"],
+            },
+        )
+        return pending_input
+
+    # Block: Idle wait with queue polling
+    def _wait_for_next_runnable_cycle(self) -> None:
+        idle_due_at_ms = self._last_activity_at_ms + self._idle_tick_ms()
+        while not self._stop_requested:
+            work_state = self._store.read_runtime_work_state()
+            if bool(work_state["has_short_cycle_work"]):
+                return
+            if bool(work_state["has_memory_job"]) and self._is_long_cycle_due():
+                return
+            now_ms = _now_ms()
+            if now_ms >= idle_due_at_ms:
+                return
+            lease_refresh_due_at_ms = self._next_lease_refresh_due_at_ms()
+            if now_ms >= lease_refresh_due_at_ms:
                 self._refresh_runtime_lease()
+                continue
+            sleep_ms = min(
+                idle_due_at_ms - now_ms,
+                lease_refresh_due_at_ms - now_ms,
+                DEFAULT_RUNTIME_WAIT_POLL_MS,
+            )
+            time.sleep(sleep_ms / 1000.0)
 
     # Block: Lease refresh
     def _refresh_runtime_lease(self) -> None:
+        now_ms = _now_ms()
+        if self._last_lease_refresh_at_ms != 0:
+            elapsed_ms = now_ms - self._last_lease_refresh_at_ms
+            if elapsed_ms < self._lease_heartbeat_ms:
+                return
         self._store.acquire_runtime_lease(
             owner_token=self._owner_token,
             lease_ttl_ms=self._lease_ttl_ms,
         )
+        self._last_lease_refresh_at_ms = now_ms
+
+    # Block: Lease refresh deadline
+    def _next_lease_refresh_due_at_ms(self) -> int:
+        if self._last_lease_refresh_at_ms == 0:
+            return 0
+        return self._last_lease_refresh_at_ms + self._lease_heartbeat_ms
+
+    # Block: Camera candidate helper
+    def _camera_candidates_for_state(
+        self,
+        effective_settings: dict[str, Any],
+    ) -> list[Any]:
+        if not bool(effective_settings["sensors.camera.enabled"]):
+            return []
+        return self._camera_controller.list_candidates()
+
+    # Block: Camera availability helper
+    def _camera_available(self) -> bool:
+        return self._camera_controller.is_available() and self._camera_sensor.is_available()
 
 
 # Block: Runtime construction
@@ -690,13 +853,16 @@ def build_runtime_loop(*, db_path: Path | None = None) -> RuntimeLoop:
         initializer_version=__version__,
     )
     store.initialize()
+    default_settings = build_default_settings()
     return RuntimeLoop(
         store=store,
         owner_token=_runtime_owner_token(),
-        default_settings=build_default_settings(),
+        default_settings=default_settings,
         cognition_client=_build_default_cognition_client(),
         search_client=_build_default_search_client(),
-        notification_client=_build_default_notification_client(),
+        camera_controller=_build_default_camera_controller(store=store),
+        camera_sensor=_build_default_camera_sensor(store=store),
+        speech_synthesizer=_build_default_speech_synthesizer(),
         lease_heartbeat_ms=_lease_heartbeat_ms(),
         lease_ttl_ms=_lease_ttl_ms(),
     )
@@ -727,10 +893,10 @@ def _error_message_text(error: Exception) -> str:
 
 # Block: Pending input trigger reason
 def _pending_input_trigger_reason(pending_input: PendingInputRecord) -> str:
-    input_kind = str(pending_input.payload["input_kind"])
-    if input_kind == "network_result":
-        return "external_result"
-    return "external_input"
+    return normalize_trigger_reason(
+        source=pending_input.source,
+        payload=pending_input.payload,
+    )
 
 
 # Block: Pending input observation hint
@@ -738,9 +904,44 @@ def _pending_input_observation_hint(pending_input: PendingInputRecord) -> str:
     input_kind = str(pending_input.payload["input_kind"])
     if input_kind == "chat_message":
         text = pending_input.payload.get("text")
+        attachments = pending_input.payload.get("attachments")
+        normalized_text = text.strip() if isinstance(text, str) else ""
+        if attachments is not None and not isinstance(attachments, list):
+            raise RuntimeError("chat_message.attachments must be a list")
+        attachment_count = len(attachments) if isinstance(attachments, list) else 0
+        if normalized_text and attachment_count > 0:
+            return f"{normalized_text} カメラ画像 {attachment_count} 枚"
+        if normalized_text:
+            return normalized_text
+        if attachment_count > 0:
+            return f"カメラ画像 {attachment_count} 枚"
+        raise RuntimeError("chat_message requires text or attachments")
+    if input_kind == "microphone_message":
+        text = pending_input.payload.get("text")
         if not isinstance(text, str) or not text.strip():
-            raise RuntimeError("chat_message.text must be non-empty string")
-        return text.strip()
+            raise RuntimeError("microphone_message.text must be non-empty string")
+        return f"音声入力: {text.strip()}"
+    if input_kind == "camera_observation":
+        attachments = pending_input.payload.get("attachments")
+        if not isinstance(attachments, list):
+            raise RuntimeError("camera_observation.attachments must be a list")
+        attachment_count = len(attachments)
+        if attachment_count <= 0:
+            raise RuntimeError("camera_observation.attachments must not be empty")
+        camera_names = [
+            str(attachment["camera_display_name"])
+            for attachment in attachments
+            if isinstance(attachment, dict)
+            and isinstance(attachment.get("camera_display_name"), str)
+            and attachment["camera_display_name"]
+        ]
+        camera_label = ""
+        if camera_names:
+            camera_label = f" ({' / '.join(dict.fromkeys(camera_names[:3]))})"
+        trigger_reason = pending_input.payload.get("trigger_reason")
+        if trigger_reason == "post_action_followup":
+            return f"カメラ画像 {attachment_count} 枚{camera_label}を追跡観測"
+        return f"カメラ画像 {attachment_count} 枚{camera_label}を自発観測"
     if input_kind == "network_result":
         summary_text = pending_input.payload.get("summary_text")
         query = pending_input.payload.get("query")
@@ -749,6 +950,13 @@ def _pending_input_observation_hint(pending_input: PendingInputRecord) -> str:
         if not isinstance(query, str) or not query.strip():
             raise RuntimeError("network_result.query must be non-empty string")
         return f"{query.strip()} {summary_text.strip()}"
+    if input_kind == "idle_tick":
+        idle_duration_ms = pending_input.payload.get("idle_duration_ms")
+        if isinstance(idle_duration_ms, bool) or not isinstance(idle_duration_ms, int):
+            raise RuntimeError("idle_tick.idle_duration_ms must be integer")
+        if idle_duration_ms <= 0:
+            raise RuntimeError("idle_tick.idle_duration_ms must be positive")
+        return f"{idle_duration_ms}ms の idle_tick が到来した"
     raise RuntimeError("unsupported input_kind for cognition observation hint")
 
 
@@ -842,13 +1050,57 @@ def _build_default_search_client() -> SearchClient:
     return DuckDuckGoSearchClient()
 
 
-# Block: Notification client factory
-def _build_default_notification_client() -> NotificationClient:
-    from otomekairo.infra.line_notification_client import LineNotificationClient
+# Block: Speech synthesizer factory
+def _build_default_speech_synthesizer() -> SpeechSynthesizer:
+    from otomekairo.infra.aivis_cloud_speech_synthesizer import (
+        AivisCloudSpeechSynthesizer,
+    )
+    from otomekairo.infra.speech_synthesis_common import default_tts_audio_dir
+    from otomekairo.infra.style_bert_vits2_speech_synthesizer import (
+        StyleBertVits2SpeechSynthesizer,
+    )
+    from otomekairo.infra.switching_speech_synthesizer import (
+        SwitchingSpeechSynthesizer,
+    )
+    from otomekairo.infra.voicevox_speech_synthesizer import (
+        VoicevoxSpeechSynthesizer,
+    )
 
-    return LineNotificationClient()
+    audio_output_dir = default_tts_audio_dir()
+    return SwitchingSpeechSynthesizer(
+        provider_synthesizers={
+            "aivis-cloud": AivisCloudSpeechSynthesizer(
+                audio_output_dir=audio_output_dir,
+            ),
+            "voicevox": VoicevoxSpeechSynthesizer(
+                audio_output_dir=audio_output_dir,
+            ),
+            "style-bert-vits2": StyleBertVits2SpeechSynthesizer(
+                audio_output_dir=audio_output_dir,
+            ),
+        }
+    )
 
 
+# Block: Camera controller factory
+def _build_default_camera_controller(*, store: SqliteStateStore) -> CameraController:
+    from otomekairo.infra.wifi_camera_controller import WiFiCameraController
+
+    return WiFiCameraController(
+        camera_connections_loader=store.read_enabled_camera_connections,
+    )
+
+
+# Block: Camera sensor factory
+def _build_default_camera_sensor(*, store: SqliteStateStore) -> CameraSensor:
+    from otomekairo.infra.wifi_camera_sensor import WiFiCameraSensor
+
+    return WiFiCameraSensor(
+        camera_connections_loader=store.read_enabled_camera_connections,
+    )
+
+
+# Block: Runtime helper ids
 def _opaque_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex}"
 

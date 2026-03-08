@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, StrictBool, StrictFloat, StrictInt, StrictStr
+from pydantic import BaseModel, ConfigDict, StrictBool, StrictFloat, StrictInt, StrictStr
 from fastapi import APIRouter, Response, status
 
 from otomekairo.schema.settings import normalize_requested_value
@@ -11,6 +11,8 @@ from otomekairo.web.dependencies import AppServices
 
 # Block: Request models
 class SettingsOverrideRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     key: str
     requested_value: StrictStr | StrictInt | StrictFloat | StrictBool
     apply_scope: str

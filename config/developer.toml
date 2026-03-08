@@ -1,0 +1,57 @@
+# Block: Schema version
+schema_version = 1
+
+# Block: Launcher logging
+[process.launcher.logging]
+root_level = "DEBUG"
+console_level = "INFO"
+file_level = "DEBUG"
+
+# Block: Launcher library loggers
+[process.launcher.logging.loggers]
+uvicorn = "INFO"
+"uvicorn.error" = "INFO"
+"uvicorn.access" = "INFO"
+"py.warnings" = "WARNING"
+asyncio = "INFO"
+httpcore = "WARNING"
+httpx = "WARNING"
+openai = "INFO"
+
+# Block: Web logging
+[process.web.logging]
+root_level = "DEBUG"
+console_level = "INFO"
+file_level = "DEBUG"
+
+# Block: Web library loggers
+[process.web.logging.loggers]
+uvicorn = "INFO"
+"uvicorn.error" = "INFO"
+"uvicorn.access" = "INFO"
+"py.warnings" = "WARNING"
+asyncio = "INFO"
+httpcore = "WARNING"
+httpx = "WARNING"
+openai = "INFO"
+
+# Block: Runtime logging
+[process.runtime.logging]
+root_level = "DEBUG"
+console_level = "INFO"
+file_level = "DEBUG"
+
+# Block: Runtime library loggers
+[process.runtime.logging.loggers]
+uvicorn = "INFO"
+"uvicorn.error" = "INFO"
+"uvicorn.access" = "INFO"
+"py.warnings" = "WARNING"
+asyncio = "INFO"
+httpcore = "WARNING"
+httpx = "WARNING"
+openai = "INFO"
+
+# Block: LiteLLM integration logging
+[integrations.litellm]
+log_level = "DEBUG"

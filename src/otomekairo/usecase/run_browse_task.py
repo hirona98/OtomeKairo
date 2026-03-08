@@ -135,6 +135,7 @@ def run_browse_task(
         channel=target_channel,
         payload={
             "input_kind": "network_result",
+            "trigger_reason": "external_result",
             "query": query,
             "summary_text": search_response.summary_text,
             "source_task_id": task.task_id,

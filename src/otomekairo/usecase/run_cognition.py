@@ -8,9 +8,16 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from otomekairo.gateway.camera_controller import CameraController
+from otomekairo.gateway.camera_sensor import CameraSensor
 from otomekairo.gateway.cognition_client import CognitionClient, CognitionRequest
-from otomekairo.gateway.notification_client import NotificationClient
-from otomekairo.schema.runtime_types import ActionHistoryRecord, PendingInputRecord, TaskStateMutationRecord
+from otomekairo.gateway.speech_synthesizer import SpeechSynthesizer
+from otomekairo.schema.runtime_types import (
+    ActionHistoryRecord,
+    PendingInputMutationRecord,
+    PendingInputRecord,
+    TaskStateMutationRecord,
+)
 from otomekairo.usecase.dispatch_action_command import ActionDispatchResult, dispatch_chat_action_command
 from otomekairo.usecase.validate_action import validate_chat_response_action
 
@@ -27,6 +34,7 @@ class CognitionExecution:
     ui_events: list[dict[str, Any]]
     action_results: list[ActionHistoryRecord]
     task_mutations: list[TaskStateMutationRecord]
+    pending_input_mutations: list[PendingInputMutationRecord]
 
 
 # Block: Browser chat cognition execution
@@ -38,7 +46,9 @@ def run_cognition_for_browser_chat_input(
     cognition_input: dict[str, Any],
     effective_settings: dict[str, Any],
     cognition_client: CognitionClient,
-    notification_client: NotificationClient,
+    camera_controller: CameraController,
+    camera_sensor: CameraSensor,
+    speech_synthesizer: SpeechSynthesizer,
     emit_ui_event: Callable[[dict[str, Any]], None],
     consume_cancel: Callable[[str], bool],
 ) -> CognitionExecution:
@@ -131,10 +141,10 @@ def run_cognition_for_browser_chat_input(
         decision=validated_action.decision,
         emit_ui_event=emit_event,
         consume_cancel=lambda: consume_cancel(active_message_id),
-        notification_client=notification_client,
-        line_enabled=bool(effective_settings["integrations.line.enabled"]),
-        line_channel_access_token=str(effective_settings["integrations.line.channel_access_token"]),
-        line_to_user_id=str(effective_settings["integrations.line.to_user_id"]),
+        camera_controller=camera_controller,
+        camera_sensor=camera_sensor,
+        speech_synthesizer=speech_synthesizer,
+        effective_settings=effective_settings,
     )
     cognition_result["reflection_seed"]["token_count"] = int(
         dispatch_result.observed_effects.get("token_count", 0)
@@ -150,6 +160,7 @@ def run_cognition_for_browser_chat_input(
             "action_type": dispatch_result.action_type,
             "dispatch_status": dispatch_result.status,
             "emitted_event_types": dispatch_result.emitted_event_types,
+            "followup_input_count": len(dispatch_result.pending_input_mutations),
         },
     )
 
@@ -199,6 +210,7 @@ def run_cognition_for_browser_chat_input(
         ui_events=ui_events,
         action_results=action_results,
         task_mutations=dispatch_result.task_mutations,
+        pending_input_mutations=dispatch_result.pending_input_mutations,
     )
 
 
@@ -223,8 +235,14 @@ def _initial_status_label(pending_input: PendingInputRecord) -> str:
     input_kind = str(pending_input.payload["input_kind"])
     if input_kind == "chat_message":
         return "入力を処理しています"
+    if input_kind == "microphone_message":
+        return "音声入力を処理しています"
+    if input_kind == "camera_observation":
+        return "カメラ画像を観測しています"
     if input_kind == "network_result":
         return "検索結果をもとに応答を準備しています"
+    if input_kind == "idle_tick":
+        return "アイドル状態を点検しています"
     raise RuntimeError("unsupported input_kind for cognition status")
 
 
@@ -256,6 +274,8 @@ def _action_history_type(*, decision: str, command_type: str | None) -> str:
         return "enqueue_browse_task"
     if command_type == "dispatch_notice":
         return "dispatch_notice"
+    if command_type == "control_camera_look":
+        return "control_camera_look"
     return "emit_chat_response"
 
 
@@ -269,10 +289,10 @@ def _dispatch_result_for_decision(
     decision: str,
     emit_ui_event: Callable[[str, dict[str, Any]], None],
     consume_cancel: Callable[[], bool],
-    notification_client: NotificationClient,
-    line_enabled: bool,
-    line_channel_access_token: str,
-    line_to_user_id: str,
+    camera_controller: CameraController,
+    camera_sensor: CameraSensor,
+    speech_synthesizer: SpeechSynthesizer,
+    effective_settings: dict[str, Any],
 ) -> ActionDispatchResult:
     if decision != "execute":
         emit_ui_event(
@@ -298,6 +318,7 @@ def _dispatch_result_for_decision(
                 "status_code_after": "idle",
             },
             task_mutations=[],
+            pending_input_mutations=[],
             finished_at=_now_ms(),
             status="succeeded",
             failure_mode=None,
@@ -316,10 +337,10 @@ def _dispatch_result_for_decision(
         action_command=action_command,
         emit_ui_event=lambda ui_event: emit_ui_event(ui_event["event_type"], ui_event["payload"]),
         consume_cancel=lambda _: consume_cancel(),
-        notification_client=notification_client,
-        line_enabled=line_enabled,
-        line_channel_access_token=line_channel_access_token,
-        line_to_user_id=line_to_user_id,
+        camera_controller=camera_controller,
+        camera_sensor=camera_sensor,
+        speech_synthesizer=speech_synthesizer,
+        effective_settings=effective_settings,
     )
 
 

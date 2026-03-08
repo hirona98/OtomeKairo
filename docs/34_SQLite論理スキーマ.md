@@ -23,7 +23,7 @@
 - `events.jsonl` は外部派生ログなので、このドキュメントの直接管理対象にしない
 - `config/` 配下の設定ファイルは SQLite に入れない
 - ただし、現在有効な設定の反映結果は `runtime_settings` に保持してよい
-- 設定UIの編集正本は `settings_editor_state` と `settings_presets` に保持してよい
+- 設定UIの編集正本は `settings_editor_state`、`character_presets`、`behavior_presets`、`conversation_presets`、`memory_presets`、`motion_presets`、`camera_connections` に保持する
 
 <!-- Block: Common Rules -->
 ## 共通ルール
@@ -42,7 +42,7 @@
 ### テーブルの分類
 
 - append-only の正本ログは、`ui_outbound_events`、`input_journal`、`events`、`action_history`、`retrieval_runs`、`revisions`、`commit_records` とする
-- 更新で育つテーブルは、`db_meta`、`runtime_leases`、`self_state`、`runtime_settings`、`settings_editor_state`、`settings_presets`、`attention_state`、`body_state`、`world_state`、`drive_state`、`task_state`、`working_memory_items`、`recent_event_window_items`、`skill_registry`、`pending_inputs`、`settings_overrides`、`settings_change_sets`、`memory_states`、`preference_memory`、`event_affects`、`event_links`、`event_threads`、`state_links`、`event_entities`、`state_entities`、`event_preview_cache`、`memory_jobs`、`memory_job_payloads`、`vec_items` とする
+- 更新で育つテーブルは、`db_meta`、`runtime_leases`、`self_state`、`runtime_settings`、`settings_editor_state`、`character_presets`、`behavior_presets`、`conversation_presets`、`memory_presets`、`motion_presets`、`camera_connections`、`attention_state`、`body_state`、`world_state`、`drive_state`、`task_state`、`working_memory_items`、`recent_event_window_items`、`skill_registry`、`pending_inputs`、`settings_overrides`、`settings_change_sets`、`memory_states`、`preference_memory`、`event_affects`、`event_links`、`event_threads`、`state_links`、`event_entities`、`state_entities`、`event_preview_cache`、`memory_jobs`、`memory_job_payloads`、`vec_items` とする
 - append-only テーブルは、論理削除でなく追記を基本とし、通常更新を前提にしない
 - 例外として `event_preview_cache`、`memory_jobs`、`pending_inputs`、`settings_overrides`、`settings_change_sets` は更新を前提とする
 
@@ -52,7 +52,7 @@
 flowchart TD
     meta["起動メタ\n db_meta / runtime_leases"]
     runtime["ランタイム状態\n self_state / runtime_settings ... skill_registry"]
-    editor["設定UI正本\n settings_editor_state / settings_presets"]
+    editor["設定UI正本\n settings_editor_state / 5 preset tables / camera_connections"]
     control["制御面\n pending_inputs / settings_overrides / settings_change_sets / ui_outbound_events"]
     eventlog["観測・行動\n input_journal / action_history / events / commit_records"]
     memory["記憶本体\n memory_states ... retrieval_runs"]
@@ -134,20 +134,51 @@ flowchart TD
 - `settings_editor_state`
   - 役割: 設定UIが扱う全体編集状態の正本を 1 件で保持する
   - 主キー: `row_id INTEGER PRIMARY KEY CHECK(row_id = 1)`
-  - 必須列: `active_behavior_preset_id`, `active_llm_preset_id`, `active_memory_preset_id`, `active_output_preset_id`, `direct_values_json`, `revision`, `updated_at`
-  - 任意列: `last_applied_change_set_id`
-  - `direct_values_json` は、設定UIの direct 値を全キーぶん持つ完全オブジェクトとする
-  - `direct_values_json` の JSON 形は、`docs/36_JSONデータ仕様.md` を正本とする
-  - `revision` は、`PUT /api/settings/editor` の楽観ロック用に単調増加の `INTEGER` で持つ
+  - 必須列: `active_character_preset_id`, `active_behavior_preset_id`, `active_conversation_preset_id`, `active_memory_preset_id`, `active_motion_preset_id`, `system_values_json`, `revision`, `updated_at`
+  - `system_values_json` はシステム設定の完全オブジェクトを保持する
+  - `revision` は `PUT /api/settings/editor` の楽観ロック用に単調増加の `INTEGER` で持つ
 
-- `settings_presets`
-  - 役割: 設定UIで複数保持するプリセット群の正本を保持する
+- `character_presets`
+  - 役割: キャラクター表示・TTS・STT のプリセット正本を保持する
   - 主キー: `preset_id TEXT PRIMARY KEY`
-  - 必須列: `preset_kind`, `preset_name`, `payload_json`, `archived`, `sort_order`, `created_at`, `updated_at`
-  - `preset_kind` は、少なくとも `behavior`、`llm`、`memory`、`output` を区別する
-  - `payload_json` は、`preset_kind` ごとの固定形を持つ
-  - `payload_json` の JSON 形は、`docs/36_JSONデータ仕様.md` を正本とする
-  - 主要索引: `(preset_kind, archived, sort_order ASC, updated_at DESC)`
+  - 必須列: `preset_name`, `payload_json`, `archived`, `sort_order`, `created_at`, `updated_at`
+  - `payload_json` は `character.*`、`speech.tts.*`、`speech.stt.*` の固定形を持つ
+  - 主要索引: `(archived, sort_order ASC, updated_at DESC)`
+
+- `behavior_presets`
+  - 役割: 振る舞いプロンプトと行動傾向のプリセット正本を保持する
+  - 主キー: `preset_id TEXT PRIMARY KEY`
+  - 必須列: `preset_name`, `payload_json`, `archived`, `sort_order`, `created_at`, `updated_at`
+  - `payload_json` は `behavior.*` の固定形を持つ
+  - 主要索引: `(archived, sort_order ASC, updated_at DESC)`
+
+- `conversation_presets`
+  - 役割: 会話 LLM と画像認識 LLM のプリセット正本を保持する
+  - 主キー: `preset_id TEXT PRIMARY KEY`
+  - 必須列: `preset_name`, `payload_json`, `archived`, `sort_order`, `created_at`, `updated_at`
+  - `payload_json` は `llm.model`、`llm.image_model` など会話系キーの固定形を持つ
+  - 主要索引: `(archived, sort_order ASC, updated_at DESC)`
+
+- `memory_presets`
+  - 役割: 埋め込みと記憶検索のプリセット正本を保持する
+  - 主キー: `preset_id TEXT PRIMARY KEY`
+  - 必須列: `preset_name`, `payload_json`, `archived`, `sort_order`, `created_at`, `updated_at`
+  - `payload_json` は `llm.embedding_*`、`memory.*`、`retrieval_profile` の固定形を持つ
+  - 主要索引: `(archived, sort_order ASC, updated_at DESC)`
+
+- `motion_presets`
+  - 役割: モーション設定とアニメーション一覧のプリセット正本を保持する
+  - 主キー: `preset_id TEXT PRIMARY KEY`
+  - 必須列: `preset_name`, `payload_json`, `archived`, `sort_order`, `created_at`, `updated_at`
+  - `payload_json` は `motion.posture_change_loop_count_*` と `animations[]` の固定形を持つ
+  - 主要索引: `(archived, sort_order ASC, updated_at DESC)`
+
+- `camera_connections`
+  - 役割: 設定UIで保持するカメラ接続先の正本を保持する
+  - 主キー: `camera_connection_id TEXT PRIMARY KEY`
+  - 必須列: `is_enabled`, `display_name`, `host`, `username`, `password`, `sort_order`, `created_at`, `updated_at`
+  - `is_enabled=1` の行が AI 利用候補であり、複数件を許可する
+  - 主要索引: `(sort_order ASC, updated_at DESC)`
 
 - `attention_state`
   - 役割: 現在の注意断面を 1 件で保持する
@@ -176,7 +207,8 @@ flowchart TD
 - 主キー: `task_id TEXT PRIMARY KEY`
 - 必須列: `task_kind`, `task_status`, `goal_hint`, `completion_hint_json`, `resume_condition_json`, `interruptible`, `priority`, `created_at`, `updated_at`
 - 任意列: `title`, `step_hints_json`, `deadline_at`, `abandon_reason`
-- `task_status` は、少なくとも `idle`、`active`、`waiting_external`、`paused`、`completed`、`abandoned` を区別する
+- `task_status` は、少なくとも `active`、`waiting_external`、`paused`、`completed`、`abandoned` を区別する
+- タスク不在は `task_state` に未完了行がないこととして表し、`idle` 行は持たない
 - 主要索引: `(task_status, priority DESC, updated_at DESC)`
 
 <!-- Block: Working Memory -->
@@ -244,6 +276,7 @@ flowchart TD
 - 任意列: `claimed_at`, `resolved_at`, `reject_reason`
 - `status` は、少なくとも `queued`、`claimed`、`applied`、`rejected` を区別する
 - `payload_json` は、`PUT /api/settings/editor` の canonical な保存結果を 1 件ぶん持つ
+- `applied` / `rejected` は queue 側の処理結果であり、設定UI正本の列へ書き戻さない
 - `payload_json` の JSON 形は、`docs/36_JSONデータ仕様.md` を正本とする
 - 主要索引: `(status, created_at ASC)`
 
@@ -254,7 +287,7 @@ flowchart TD
 - 主キー: `ui_event_id INTEGER PRIMARY KEY AUTOINCREMENT`
 - 必須列: `channel`, `event_type`, `payload_json`, `created_at`
 - 任意列: `source_cycle_id`
-- `event_type` は、少なくとも `token`、`message`、`status`、`notice`、`error` を区別する
+- `event_type` は、少なくとも `token`、`message`、`message_end`、`status`、`notice`、`error` を区別する
 - `ui_event_id` は、`SSE` の `Last-Event-ID` にそのまま使える単調増加値とする
 - 古い行の削除は append-only 運用の例外として、`docs/38_入力ストリーム運用仕様.md` の保持条件に従って stream janitor だけが行ってよい
 - 主要索引: `(channel, ui_event_id ASC)`
@@ -305,6 +338,7 @@ flowchart TD
 - `cycle_id` は一意とし、同じ短周期の二重 commit を許さない
 - `log_sync_status` は、少なくとも `pending`、`synced`、`needs_replay` を区別する
 - `commit_payload_json` には、`events.jsonl` 再生成に必要な確定差分の要点だけを保持する
+- 初期実装では、少なくとも `cycle_kind`、`trigger_reason`、`event_ids`、UI/行動の要約、必要なら `retrieval_run_id` を保持する
 - 主要制約: `UNIQUE(cycle_id)`
 - 主要索引: `(log_sync_status, committed_at ASC)`
 
@@ -328,6 +362,8 @@ flowchart TD
 - 主キー: `preference_id TEXT PRIMARY KEY`
 - 必須列: `owner_scope`, `target_entity_ref_json`, `domain`, `polarity`, `status`, `confidence`, `evidence_event_ids_json`, `created_at`, `updated_at`
 - `owner_scope` は、少なくとも `self`、`other_entity` を区別する
+- `target_entity_ref_json` は、少なくとも `target_kind`、`target_key` を持つ JSON とする
+- 初期実装の `target_entity_ref_json.target_kind` は、少なくとも `action_type`、`observation_kind` を区別する
 - `polarity` は、`like`、`dislike` に固定する
 - `status` は、`candidate`、`confirmed`、`revoked` に固定する
 - 主要索引: `(owner_scope, status, updated_at DESC)`, `(domain, polarity, status)`
@@ -339,6 +375,7 @@ flowchart TD
 - 主キー: `event_affect_id TEXT PRIMARY KEY`
 - 必須列: `event_id`, `moment_affect_text`, `moment_affect_labels_json`, `vad_json`, `confidence`, `created_at`
 - `event_id` は一意とし、1 イベント 1 件を基本とする
+- `moment_affect_labels_json` は、短い感情ラベルの順序付き配列を持つ JSON とする
 - `vad_json` は、`v`、`a`、`d` の 3 軸を持つ JSON とする
 - 主要制約: `UNIQUE(event_id)`
 - 主要索引: `(created_at DESC)`
@@ -361,6 +398,7 @@ flowchart TD
 - 主キー: `event_thread_id TEXT PRIMARY KEY`
 - 必須列: `event_id`, `thread_key`, `confidence`, `created_at`, `updated_at`
 - 任意列: `thread_role`
+- 初期実装では、`thread_key` に `cycle:<cycle_id>` を使って同一短周期のイベント束を表してよい
 - 同一イベント・同一スレッドの重複を許さない
 - 主要制約: `UNIQUE(event_id, thread_key)`
 - 主要索引: `(event_id)`, `(thread_key)`
@@ -372,6 +410,7 @@ flowchart TD
 - 主キー: `state_link_id TEXT PRIMARY KEY`
 - 必須列: `from_state_id`, `to_state_id`, `label`, `confidence`, `evidence_event_ids_json`, `created_at`, `updated_at`
 - `label` は、少なくとも `relates_to`、`derived_from`、`supports`、`contradicts` を区別する
+- 初期実装では、外部確認済み `fact` から同周期の `summary` へ `supports` を張ってよい
 - 同一向き・同一ラベルの重複を許さない
 - 主要制約: `UNIQUE(from_state_id, to_state_id, label)`
 - 主要索引: `(from_state_id)`, `(to_state_id)`, `(label)`
@@ -484,14 +523,15 @@ flowchart TD
 <!-- Block: Boot Boundary -->
 ### 起動初期化の保存境界
 
-- 同じ起動 transaction に含めるのは、`db_meta`、`self_state`、`runtime_settings`、`settings_editor_state`、必要なら初期の `settings_presets`、`attention_state`、`body_state`、`world_state`、`drive_state` とする
+- 同じ起動 transaction に含めるのは、`db_meta`、`self_state`、`runtime_settings`、`settings_editor_state`、初期の 5 プリセットテーブル、`camera_connections`、`attention_state`、`body_state`、`world_state`、`drive_state` とする
 - `runtime_leases` の取得と更新は、seed 用 transaction と分けてよい
 - スキーマ版不一致や seed 失敗時は、起動を中断し、短周期や長周期を開始しない
 
 <!-- Block: Short Cycle Boundary -->
 ### 短周期の保存境界
 
-- 同じ短周期 transaction に含めるのは、`pending_inputs`、`settings_overrides`、`settings_change_sets`、必要なら `runtime_settings`、`settings_editor_state`、`settings_presets`、`self_state`、`attention_state`、`body_state`、`world_state`、`drive_state`、`task_state`、`working_memory_items`、`recent_event_window_items`、`action_history`、`events`、`memory_jobs`、`memory_job_payloads`、`retrieval_runs`、`commit_records` とする
+- 同じ短周期 transaction に含めるのは、`pending_inputs`、`settings_overrides`、`settings_change_sets`、必要なら `runtime_settings`、`self_state`、`attention_state`、`body_state`、`world_state`、`drive_state`、`task_state`、`working_memory_items`、`recent_event_window_items`、`action_history`、`events`、`memory_jobs`、`memory_job_payloads`、`retrieval_runs`、`commit_records` とする
+- `settings_change_sets` を適用するときは、`settings_editor_state`、5 プリセットテーブル、`camera_connections` を同一 transaction 内で read-only に参照してよいが、mutation 対象には含めない
 - `input_journal` は、短周期 transaction の前に先行追記してよい
 - `ui_outbound_events` は、短周期 transaction と分離した append-only 追記を許す
 - `events.jsonl` は、`commit_records` をもとに後段で派生同期する
@@ -512,6 +552,6 @@ flowchart TD
 - コア状態の短周期保存と、ブラウザ向け `ui_outbound_events` は保存境界を分ける
 - `commit_records` が、短周期確定と `events.jsonl` 再生成の主な起点になる
 - `memory_jobs` と `memory_job_payloads` を分け、`payload_ref` は JSON 参照として保持する
-- 設定UIの全体編集正本は `settings_editor_state` と `settings_presets` に分け、ランタイム反映キューは `settings_change_sets` として分離する
+- 設定UIの全体編集正本は `settings_editor_state`、5 プリセットテーブル、`camera_connections` に分け、ランタイム反映キューは `settings_change_sets` として分離する
 - `events` テーブルのエピソード正本と、`events.jsonl` の外部追跡ログは別物として扱う
 - このドキュメントを基準に、`sql/core_schema.sql` を更新するか、次は ORM モデルを作る

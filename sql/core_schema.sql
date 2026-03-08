@@ -42,21 +42,18 @@ CREATE TABLE runtime_settings (
 
 CREATE TABLE settings_editor_state (
     row_id INTEGER PRIMARY KEY CHECK (row_id = 1),
+    active_character_preset_id TEXT NOT NULL,
     active_behavior_preset_id TEXT NOT NULL,
-    active_llm_preset_id TEXT NOT NULL,
+    active_conversation_preset_id TEXT NOT NULL,
     active_memory_preset_id TEXT NOT NULL,
-    active_output_preset_id TEXT NOT NULL,
-    direct_values_json TEXT NOT NULL,
+    active_motion_preset_id TEXT NOT NULL,
+    system_values_json TEXT NOT NULL,
     revision INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL,
-    last_applied_change_set_id TEXT
+    updated_at INTEGER NOT NULL
 );
 
-CREATE TABLE settings_presets (
+CREATE TABLE character_presets (
     preset_id TEXT PRIMARY KEY,
-    preset_kind TEXT NOT NULL CHECK (
-        preset_kind IN ('behavior', 'llm', 'memory', 'output')
-    ),
     preset_name TEXT NOT NULL,
     payload_json TEXT NOT NULL,
     archived INTEGER NOT NULL CHECK (archived IN (0, 1)),
@@ -65,8 +62,75 @@ CREATE TABLE settings_presets (
     updated_at INTEGER NOT NULL
 );
 
-CREATE INDEX idx_settings_presets_kind_archived_sort
-    ON settings_presets (preset_kind, archived, sort_order ASC, updated_at DESC);
+CREATE INDEX idx_character_presets_archived_sort
+    ON character_presets (archived, sort_order ASC, updated_at DESC);
+
+CREATE TABLE behavior_presets (
+    preset_id TEXT PRIMARY KEY,
+    preset_name TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    archived INTEGER NOT NULL CHECK (archived IN (0, 1)),
+    sort_order INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX idx_behavior_presets_archived_sort
+    ON behavior_presets (archived, sort_order ASC, updated_at DESC);
+
+CREATE TABLE conversation_presets (
+    preset_id TEXT PRIMARY KEY,
+    preset_name TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    archived INTEGER NOT NULL CHECK (archived IN (0, 1)),
+    sort_order INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX idx_conversation_presets_archived_sort
+    ON conversation_presets (archived, sort_order ASC, updated_at DESC);
+
+CREATE TABLE memory_presets (
+    preset_id TEXT PRIMARY KEY,
+    preset_name TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    archived INTEGER NOT NULL CHECK (archived IN (0, 1)),
+    sort_order INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX idx_memory_presets_archived_sort
+    ON memory_presets (archived, sort_order ASC, updated_at DESC);
+
+CREATE TABLE motion_presets (
+    preset_id TEXT PRIMARY KEY,
+    preset_name TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    archived INTEGER NOT NULL CHECK (archived IN (0, 1)),
+    sort_order INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX idx_motion_presets_archived_sort
+    ON motion_presets (archived, sort_order ASC, updated_at DESC);
+
+CREATE TABLE camera_connections (
+    camera_connection_id TEXT PRIMARY KEY,
+    is_enabled INTEGER NOT NULL CHECK (is_enabled IN (0, 1)),
+    display_name TEXT NOT NULL,
+    host TEXT NOT NULL,
+    username TEXT NOT NULL,
+    password TEXT NOT NULL,
+    sort_order INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX idx_camera_connections_sort
+    ON camera_connections (sort_order ASC, updated_at DESC);
 
 CREATE TABLE attention_state (
     row_id INTEGER PRIMARY KEY CHECK (row_id = 1),
@@ -112,7 +176,6 @@ CREATE TABLE task_state (
     task_kind TEXT NOT NULL,
     task_status TEXT NOT NULL CHECK (
         task_status IN (
-            'idle',
             'active',
             'waiting_external',
             'paused',
@@ -231,7 +294,7 @@ CREATE TABLE ui_outbound_events (
     ui_event_id INTEGER PRIMARY KEY AUTOINCREMENT,
     channel TEXT NOT NULL CHECK (channel = 'browser_chat'),
     event_type TEXT NOT NULL CHECK (
-        event_type IN ('token', 'message', 'status', 'notice', 'error')
+        event_type IN ('token', 'message', 'message_end', 'status', 'notice', 'error')
     ),
     payload_json TEXT NOT NULL,
     created_at INTEGER NOT NULL,

@@ -12,6 +12,7 @@ requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115.0,<1.0.0",
     "litellm>=1.62.0,<2.0.0",
+    "onvif-zeep>=0.2.12,<1.0.0",
     "sqlite-vec>=0.1.6,<1.0.0",
     "uvicorn>=0.30.0,<1.0.0",
 ]

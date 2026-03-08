@@ -20,14 +20,6 @@
         <div class="topbar-title">CocoroAI</div>
       </div>
       <div class="topbar-right">
-        <button class="icon-btn" id="btn-mic" type="button" title="音声入力" aria-label="音声入力">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path
-              d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z">
-            </path>
-            <path class="mic-slash" d="M4 4l16 16" stroke="currentColor" stroke-width="2" fill="none"></path>
-          </svg>
-        </button>
         <button class="icon-btn" id="btn-settings" type="button" title="設定" aria-label="設定">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path
@@ -45,55 +37,64 @@
       </section>
 
       <section id="settings-panel" class="settings hidden" aria-live="polite">
-        <!-- Block: Settings toolbar -->
-        <div class="settings-toolbar">
-          <button id="btn-settings-close" class="settings-btn settings-btn-back" type="button">チャットに戻る</button>
-          <div class="settings-toolbar-right">
-            <button id="btn-settings-reload" class="settings-btn" type="button">再読込</button>
-            <button id="btn-settings-save" class="settings-btn primary" type="button">保存</button>
+        <!-- Block: Settings window -->
+        <div class="settings-window">
+          <!-- Block: Settings header -->
+          <div class="settings-window-header">
+            <div>
+              <div class="settings-window-title">設定</div>
+              <div class="settings-window-subtitle">プリセット単位で編集し、保存時にまとめて反映します。</div>
+            </div>
           </div>
-          <button id="btn-settings-dummy" class="settings-btn danger settings-btn-logout" type="button">ダミー</button>
-        </div>
+          <!-- Block: Settings tabs -->
+          <div class="settings-tabs" role="tablist" aria-label="設定タブ">
+            <button class="settings-tab active" data-settings-tab="character" type="button">キャラクター</button>
+            <button class="settings-tab" data-settings-tab="behavior" type="button">振る舞い</button>
+            <button class="settings-tab" data-settings-tab="conversation" type="button">会話</button>
+            <button class="settings-tab" data-settings-tab="memory" type="button">記憶</button>
+            <button class="settings-tab" data-settings-tab="motion" type="button">モーション</button>
+            <button class="settings-tab" data-settings-tab="system" type="button">システム</button>
+          </div>
 
-        <!-- Block: Settings note -->
-        <div class="settings-desc">CocoroGhost 風の画面構成を保ちつつ、プリセットを含む設定全体をこの画面で編集します。</div>
+          <!-- Block: Settings content -->
+          <div class="settings-body">
+            <div class="settings-pages">
+              <section class="settings-page" data-settings-page="character">
+                <div id="settings-character-card" class="settings-card"></div>
+              </section>
 
-        <!-- Block: Settings tabs -->
-        <div class="settings-tabs" role="tablist" aria-label="設定タブ">
-          <button class="settings-tab active" data-settings-tab="behavior" type="button">振る舞い</button>
-          <button class="settings-tab" data-settings-tab="llm" type="button">会話</button>
-          <button class="settings-tab" data-settings-tab="memory" type="button">記憶</button>
-          <button class="settings-tab" data-settings-tab="system" type="button">システム</button>
-        </div>
+              <section class="settings-page hidden" data-settings-page="behavior">
+                <div id="settings-behavior-card" class="settings-card"></div>
+              </section>
 
-        <div id="settings-status" class="status"></div>
+              <section class="settings-page hidden" data-settings-page="conversation">
+                <div id="settings-conversation-card" class="settings-card"></div>
+              </section>
 
-        <!-- Block: Settings content -->
-        <div class="settings-pages">
-          <section class="settings-page" data-settings-page="behavior">
-            <div id="settings-behavior-card" class="settings-card"></div>
-          </section>
+              <section class="settings-page hidden" data-settings-page="memory">
+                <div id="settings-memory-card" class="settings-card"></div>
+              </section>
 
-          <section class="settings-page hidden" data-settings-page="llm">
-            <div id="settings-llm-card" class="settings-card"></div>
-          </section>
+              <section class="settings-page hidden" data-settings-page="motion">
+                <div id="settings-motion-card" class="settings-card"></div>
+              </section>
 
-          <section class="settings-page hidden" data-settings-page="memory">
-            <div id="settings-memory-card" class="settings-card"></div>
-          </section>
-
-          <section class="settings-page hidden" data-settings-page="system">
-            <div id="settings-output-card" class="settings-card"></div>
-            <div id="settings-direct-card" class="settings-card"></div>
-            <div class="settings-card">
-              <div class="settings-card-title">現在状態</div>
-              <pre id="status-json" class="settings-json-view">{}</pre>
+              <section class="settings-page hidden" data-settings-page="system">
+                <div id="settings-system-card" class="settings-card"></div>
+                <div id="settings-camera-card" class="settings-card"></div>
+              </section>
             </div>
-            <div class="settings-card">
-              <div class="settings-card-title">有効設定</div>
-              <pre id="settings-json" class="settings-json-view">{}</pre>
+          </div>
+
+          <!-- Block: Settings footer -->
+          <div class="settings-footer">
+            <div id="settings-status" class="settings-footer-status">保存済み</div>
+            <div class="settings-footer-right">
+              <button id="btn-settings-ok" class="settings-btn" type="button">OK</button>
+              <button id="btn-settings-cancel" class="settings-btn" type="button">キャンセル</button>
+              <button id="btn-settings-apply" class="settings-btn" type="button">適用</button>
             </div>
-          </section>
+          </div>
         </div>
       </section>
     </main>
@@ -102,6 +103,17 @@
     <form id="chat-form" class="composer" autocomplete="off">
       <div id="attachments" class="attachments" aria-label="添付ファイル一覧"></div>
       <div class="composer-row">
+        <button class="composer-icon" id="btn-microphone" type="button" title="マイク" aria-label="マイク">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 15a3 3 0 0 0 3-3V7a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3z"
+              fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+            <path d="M19 11a7 7 0 0 1-14 0"
+              fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+            <path d="M12 18v3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+            <path d="M8 21h8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+          </svg>
+        </button>
+
         <button class="composer-icon" id="btn-camera" type="button" title="カメラ" aria-label="カメラ">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M4 8a2 2 0 0 1 2-2h3l1.6-1.6h2.8L15 6h3a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8z"
@@ -109,6 +121,13 @@
             <circle cx="12" cy="12.5" r="3.2" fill="none" stroke="currentColor" stroke-width="2"></circle>
           </svg>
         </button>
+
+        <div class="composer-select-wrap">
+          <label class="sr-only" for="camera-select">撮影するカメラ</label>
+          <select id="camera-select" class="composer-select" aria-label="撮影するカメラ">
+            <option value="">カメラを選択</option>
+          </select>
+        </div>
 
         <div class="composer-field">
           <label class="sr-only" for="chat-input">メッセージ入力</label>
@@ -128,8 +147,26 @@
 
     <!-- Block: Status bar -->
     <footer class="statusbar">
-      <div id="connection-text" class="statusbar-left">状態: 接続中...</div>
-      <div id="runtime-text" class="statusbar-right">状態を確認中...</div>
+      <!-- Block: Status bar primary row -->
+      <div class="statusbar-main">
+        <div id="connection-text" class="statusbar-left">状態: 接続中...</div>
+        <div id="runtime-text" class="statusbar-right">状態を確認中...</div>
+      </div>
+      <!-- Block: Status monitor -->
+      <div class="statusbar-monitor">
+        <div class="statusbar-monitor-row">
+          <div class="statusbar-monitor-label">稼働</div>
+          <div id="runtime-summary-text" class="statusbar-monitor-value">確認中...</div>
+        </div>
+        <div class="statusbar-monitor-row">
+          <div class="statusbar-monitor-label">直近の想起</div>
+          <div id="retrieval-summary-text" class="statusbar-monitor-value">まだありません</div>
+        </div>
+        <div class="statusbar-monitor-row">
+          <div class="statusbar-monitor-label">人格更新</div>
+          <div id="persona-update-summary-text" class="statusbar-monitor-value">まだありません</div>
+        </div>
+      </div>
     </footer>
   </div>
 

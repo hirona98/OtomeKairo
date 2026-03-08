@@ -6,9 +6,12 @@ import ast
 import json
 import logging
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+from otomekairo.infra.developer_config import DeveloperConfig
 
 
 # Block: Constant definitions
@@ -16,6 +19,14 @@ SUPPRESSED_ACCESS_PATHS = (
     "\"GET /api/status ",
     "\"GET /api/chat/stream ",
 )
+LOG_LEVEL_NAME_TO_VALUE = {
+    "CRITICAL": logging.CRITICAL,
+    "ERROR": logging.ERROR,
+    "WARNING": logging.WARNING,
+    "INFO": logging.INFO,
+    "DEBUG": logging.DEBUG,
+    "NOTSET": logging.NOTSET,
+}
 _STANDARD_LOG_RECORD_KEYS = {
     "args",
     "asctime",
@@ -41,6 +52,18 @@ _STANDARD_LOG_RECORD_KEYS = {
     "threadName",
     "taskName",
 }
+_SECRET_KEY_NAMES = {
+    "api_key",
+    "authorization",
+    "bot_token",
+    "password",
+    "token",
+}
+_SECRET_PATTERNS = (
+    re.compile(r"(?i)(api_key\s*=\s*')([^']*)(')"),
+    re.compile(r'(?i)("api_key"\s*:\s*")([^"]*)(")'),
+    re.compile(r"(?i)(authorization\s*:\s*bearer\s+)([^\s'\"\\]+)"),
+)
 
 
 # Block: Empty message filter
@@ -63,7 +86,7 @@ class SuppressFrequentAccessLogFilter(logging.Filter):
 # Block: Console formatter
 class ConsoleLogFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
-        message = record.getMessage()
+        message = _sanitize_message(record.getMessage())
         formatted = (
             f"{self.formatTime(record)} "
             f"{record.levelname} "
@@ -94,7 +117,7 @@ class ConsoleLogFormatter(logging.Formatter):
 # Block: File formatter
 class FileLogFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
-        message = record.getMessage()
+        message = _sanitize_message(record.getMessage())
         formatted = (
             f"{self.formatTime(record)} "
             f"{record.levelname} "
@@ -125,19 +148,23 @@ class FileLogFormatter(logging.Formatter):
 
 
 # Block: Public logging setup
-def configure_process_logging(*, process_name: str) -> None:
+def configure_process_logging(*, process_name: str, developer_config: DeveloperConfig) -> None:
     if not process_name:
         raise RuntimeError("process_name must be non-empty")
-    os.environ["LITELLM_LOG"] = "DEBUG"
+    process_logging = _process_logging_config(
+        process_name=process_name,
+        developer_config=developer_config,
+    )
+    os.environ["LITELLM_LOG"] = developer_config.litellm.log_level
     log_dir = _repo_root() / "log"
     log_dir.mkdir(parents=True, exist_ok=True)
     root_logger = logging.getLogger()
     _reset_root_handlers(root_logger)
-    root_logger.setLevel(logging.DEBUG)
+    root_logger.setLevel(_log_level_value(process_logging.root_level))
 
     # Block: Console handler setup
     console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)
+    console_handler.setLevel(_log_level_value(process_logging.console_level))
     console_handler.setFormatter(
         ConsoleLogFormatter("%(asctime)s %(levelname)s %(name)s - %(message)s")
     )
@@ -148,19 +175,21 @@ def configure_process_logging(*, process_name: str) -> None:
         mode="a",
         encoding="utf-8",
     )
-    file_handler.setLevel(logging.DEBUG)
+    file_handler.setLevel(_log_level_value(process_logging.file_level))
     file_handler.setFormatter(FileLogFormatter())
 
     root_logger.addHandler(console_handler)
     root_logger.addHandler(file_handler)
     logging.captureWarnings(True)
-    _configure_library_loggers()
+    _configure_library_loggers(
+        logger_levels=process_logging.logger_levels,
+        litellm_log_level=developer_config.litellm.log_level,
+    )
 
 
 # Block: Access logger filter setup
 def configure_access_logger_filter() -> None:
     access_logger = logging.getLogger("uvicorn.access")
-    access_logger.setLevel(logging.INFO)
     if not any(
         isinstance(current_filter, SuppressFrequentAccessLogFilter)
         for current_filter in access_logger.filters
@@ -176,20 +205,11 @@ def _reset_root_handlers(root_logger: logging.Logger) -> None:
 
 
 # Block: Library logger configuration
-def _configure_library_loggers() -> None:
-    for logger_name, level in (
-        ("uvicorn", logging.INFO),
-        ("uvicorn.error", logging.INFO),
-        ("uvicorn.access", logging.INFO),
-        ("LiteLLM", logging.DEBUG),
-        ("litellm", logging.DEBUG),
-        ("py.warnings", logging.WARNING),
-        ("asyncio", logging.INFO),
-        ("httpcore", logging.WARNING),
-        ("httpx", logging.WARNING),
-        ("openai", logging.INFO),
-    ):
-        logging.getLogger(logger_name).setLevel(level)
+def _configure_library_loggers(*, logger_levels: dict[str, str], litellm_log_level: str) -> None:
+    for logger_name, level_name in logger_levels.items():
+        logging.getLogger(logger_name).setLevel(_log_level_value(level_name))
+    logging.getLogger("LiteLLM").setLevel(_log_level_value(litellm_log_level))
+    logging.getLogger("litellm").setLevel(_log_level_value(litellm_log_level))
     _attach_empty_filter("LiteLLM")
     _attach_empty_filter("litellm")
     _attach_empty_filter("py.warnings")
@@ -207,28 +227,75 @@ def _attach_empty_filter(logger_name: str) -> None:
     _attach_filter(logger_name, EmptyMessageFilter)
 
 
+# Block: Process config helpers
+def _process_logging_config(*, process_name: str, developer_config: DeveloperConfig):
+    process_logging = developer_config.process_logging.get(process_name)
+    if process_logging is None:
+        raise RuntimeError(f"developer_config.process.{process_name} is missing")
+    return process_logging
+
+
+def _log_level_value(level_name: str) -> int:
+    level_value = LOG_LEVEL_NAME_TO_VALUE.get(level_name)
+    if level_value is None:
+        raise RuntimeError(f"unsupported log level: {level_name}")
+    return level_value
+
+
 # Block: Extra extraction
 def _record_extras(record: logging.LogRecord) -> dict[str, Any]:
     extras: dict[str, Any] = {}
     for key, value in record.__dict__.items():
         if key in _STANDARD_LOG_RECORD_KEYS or key.startswith("_"):
             continue
-        extras[key] = _json_safe_value(value)
+        extras[key] = _json_safe_value(value, parent_key=key)
     return extras
 
 
 # Block: JSON conversion helper
-def _json_safe_value(value: Any) -> Any:
+def _json_safe_value(value: Any, *, parent_key: str | None = None) -> Any:
     if value is None or isinstance(value, (bool, int, float, str)):
+        if isinstance(value, str):
+            return _sanitize_scalar(parent_key=parent_key, value=value)
         return value
     if isinstance(value, dict):
         return {
-            str(key): _json_safe_value(item)
+            str(key): _json_safe_value(item, parent_key=str(key))
             for key, item in value.items()
         }
     if isinstance(value, (list, tuple)):
-        return [_json_safe_value(item) for item in value]
+        return [_json_safe_value(item, parent_key=parent_key) for item in value]
     return repr(value)
+
+
+# Block: Secret sanitizers
+def _sanitize_message(message: str) -> str:
+    sanitized = message
+    for pattern in _SECRET_PATTERNS:
+        sanitized = pattern.sub(_mask_secret_match, sanitized)
+    return sanitized
+
+
+def _mask_secret_match(match: re.Match[str]) -> str:
+    suffix = match.group(3) if match.lastindex is not None and match.lastindex >= 3 else ""
+    return f"{match.group(1)}{_mask_secret_text(match.group(2))}{suffix}"
+
+
+def _sanitize_scalar(*, parent_key: str | None, value: str) -> str:
+    if parent_key is None:
+        return _sanitize_message(value)
+    normalized_key = parent_key.lower()
+    if normalized_key in _SECRET_KEY_NAMES:
+        return _mask_secret_text(value)
+    return _sanitize_message(value)
+
+
+def _mask_secret_text(value: str) -> str:
+    if not value:
+        return value
+    if len(value) <= 4:
+        return "*" * len(value)
+    return f"{value[:2]}***{value[-2:]}"
 
 
 # Block: Message helpers

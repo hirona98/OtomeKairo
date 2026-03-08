@@ -14,11 +14,18 @@
 <!-- Block: Scope -->
 ## このドキュメントで固定する範囲
 
-- 固定するのは、初期実装で使う JSON オブジェクトのキー、型、必須項目、固定語彙である
-- 固定するのは、`pending_inputs.payload_json`、`settings_overrides.requested_value_json`、`settings_editor_state.direct_values_json`、`settings_presets.payload_json`、`settings_change_sets.payload_json`、`ui_outbound_events.payload_json`、`action_history.command_json`、`action_history.observed_effects_json`、`memory_jobs.payload_ref_json`、`memory_job_payloads.payload_json`、主要な Web API 本文である
-- 固定するのは、`self_state.personality_json`、`self_state.current_emotion_json`、`self_state.long_term_goals_json`、`self_state.relationship_overview_json`、`self_state.invariants_json`、短周期の内部で使う `selection_profile`、`persona_consistency_score`、`attention_score_breakdown`、`self_initiated_score_breakdown`、`action_candidate_score`、`cognition_result`、長周期の内部で使う `personality_change_proposal`、`persona_updates` の形である
+- 固定するのは、current 実装で使う JSON オブジェクトのキー、型、必須項目、固定語彙である
+- 固定するのは、`pending_inputs.payload_json`、`settings_overrides.requested_value_json`、`settings_editor_state.system_values_json`、5 種のプリセットテーブルの `payload_json`、`settings_change_sets.payload_json`、`ui_outbound_events.payload_json`、`action_history.command_json`、`action_history.observed_effects_json`、`memory_jobs.payload_ref_json`、`memory_job_payloads.payload_json`、`preference_memory.target_entity_ref_json`、`event_affects.moment_affect_labels_json`、`event_affects.vad_json`、主要な Web API 本文である
+- 固定するのは、`self_state.personality_json`、`self_state.current_emotion_json`、`self_state.long_term_goals_json`、`self_state.relationship_overview_json`、`self_state.invariants_json`、短周期の内部で使う `selection_profile`、`memory_bundle`、`retrieval_context`、`last_persona_update_summary`、`persona_consistency_score`、`attention_score_breakdown`、`self_initiated_score_breakdown`、`action_candidate_score`、`cognition_result`、長周期の内部で使う `MemoryWritePlan`、`personality_change_proposal`、`persona_updates` の形である
 - 固定しないのは、Python のクラス名、Pydantic モデル名、OpenAPI の自動生成細部である
 - 固定しないのは、将来追加する未使用フィールドや後段の拡張イベント種別である
+
+<!-- Block: Read Guide -->
+## target と current の読み分け
+
+- JSON キー名と shape の固定は target/current 共通の正本として読む
+- `current`、`browser_chat`、`status api`、`settings UI` に紐づく補足は、現在の実装で実際に出入りする shape を示す
+- 後続の `初期実装` 補足は、特に断りがない限り current の `browser_chat` 実装を指す
 
 <!-- Block: Common Rules -->
 ## 共通ルール
@@ -86,6 +93,42 @@
 - `weight` は、`0.0..1.0` の `number` に固定する
 - `evidence_count` は、昇格根拠件数を示す `integer` であり、`1` 未満を許可しない
 
+<!-- Block: Preference Target Ref -->
+### `preference_target_entity_ref`
+
+```json
+{
+  "target_kind": "action_type",
+  "target_key": "browse"
+}
+```
+
+- `preference_target_entity_ref` は、`preference_memory.target_entity_ref_json` と `MemoryWritePlan.preference_updates.target_entity_ref` で共通に使う
+- 必須項目は `target_kind`、`target_key` である
+- `target_kind` は、少なくとも `action_type`、`observation_kind` を区別する
+- `target_key` は、対象を表す非空の `string` である
+
+<!-- Block: Pending Input Payload -->
+### `pending_inputs.payload_json`
+
+```json
+{
+  "input_kind": "idle_tick",
+  "trigger_reason": "idle_tick",
+  "idle_duration_ms": 1000
+}
+```
+
+- `pending_inputs.payload_json` は、current の受理入力本文である
+- 必須項目は `input_kind` である
+- current の `input_kind` は `chat_message`、`microphone_message`、`camera_observation`、`network_result`、`idle_tick`、`cancel` に固定する
+- `chat_message` は、`message_kind="dialogue_turn"`、`trigger_reason="external_input"` を持ち、必要なら `text`、`attachments`、`client_message_id` を持ってよい
+- `microphone_message` は、`message_kind="dialogue_turn"`、`trigger_reason="external_input"`、非空の `text`、`stt_provider`、`stt_language` を必須とする
+- `camera_observation` は、`trigger_reason` と `attachments` を必須とし、`attachments` は `camera_still_image` を 1 件以上持つ配列に固定し、各添付は `camera_connection_id` と `camera_display_name` を持つ
+- `network_result` は、`trigger_reason="external_result"`、`query`、`summary_text`、`source_task_id` を必須とする
+- `idle_tick` は、`trigger_reason="idle_tick"` と正の `idle_duration_ms` を必須とし、`text` や `attachments` を持たない
+- `cancel` は、`trigger_reason="external_input"` を必須とし、必要なら `target_message_id` を持ってよい
+
 <!-- Block: Error Body -->
 ### エラー応答 JSON
 
@@ -138,10 +181,10 @@
 - `trait_values` は、`sociability`、`caution`、`curiosity`、`persistence`、`warmth`、`assertiveness`、`novelty_preference` を必須キーとして持つ
 - `trait_values` の各値は、`-1.0..+1.0` の `number` に固定する
 - `preferred_interaction_style` は、`speech_tone`、`distance_style`、`confirmation_style`、`response_pace` を必須キーとして持つ
-- `speech_tone` は、少なくとも `soft`、`neutral`、`direct` を区別する
+- `speech_tone` は、少なくとも `gentle`、`neutral`、`firm` を区別する
 - `distance_style` は、少なくとも `reserved`、`balanced`、`close` を区別する
-- `confirmation_style` は、少なくとも `minimal`、`balanced`、`careful` を区別する
-- `response_pace` は、少なくとも `slow`、`balanced`、`quick` を区別する
+- `confirmation_style` は、少なくとも `light`、`balanced`、`careful` を区別する
+- `response_pace` は、少なくとも `careful`、`balanced`、`quick` を区別する
 - `learned_preferences` と `learned_aversions` は、`personality_preference_entry` の配列に固定する
 - `habit_biases.preferred_action_types` は、行動種別の順序付き配列である
 - `habit_biases.preferred_observation_kinds` は、観測種別の順序付き配列である
@@ -344,6 +387,7 @@
 - 必須項目は `trait_values`、`interaction_style`、`relationship_priorities`、`learned_preferences`、`learned_aversions`、`habit_biases`、`emotion_bias`、`drive_bias` である
 - `trait_values` は、`self_state.personality_json.trait_values` と同じ固定キーを持つ
 - `interaction_style` は、`self_state.personality_json.preferred_interaction_style` と同じ固定キーを持つ
+- `interaction_style.speech_tone` と `interaction_style.response_pace` は、その短周期の `behavior_settings.speech_style` / `behavior_settings.response_pace` を上書きした短期補正済み値を入れてよい
 - `relationship_priorities` は、`relationship_priority_entry` の配列である
 - `learned_preferences` と `learned_aversions` は、`personality_preference_entry` の配列である
 - `habit_biases` は、`self_state.personality_json.habit_biases` と同じ固定キーを持つ
@@ -367,6 +411,128 @@
 - `context assembler` は、各要素に人間可読な `created_at_*`、`updated_at_*`、`relative_time_text` を付与してよい
 - 初期実装では、`active_tasks` と `waiting_external_tasks` に優先度上位 `3` 件までを入れてよい
 
+<!-- Block: Current Observation -->
+### `current_observation`
+
+```json
+{
+  "source": "idle_tick",
+  "kind": "internal_trigger",
+  "trigger_reason": "idle_tick",
+  "input_kind": "idle_tick",
+  "captured_at": 1760000000000,
+  "observation_text": "1000ms の idle_tick が到来した",
+  "idle_duration_ms": 1000
+}
+```
+
+- `current_observation` は、その短周期で主材料として扱う観測断面である
+- 必須項目は `source`、`kind`、`trigger_reason`、`input_kind`、`captured_at`、`observation_text` である
+- current の `input_kind` は `chat_message`、`microphone_message`、`camera_observation`、`network_result`、`idle_tick` に固定する
+- `chat_message` は、必要なら `attachment_count`、`attachment_summary_text`、`attachments` を持ってよい
+- `microphone_message` は、`text`、`stt_provider`、`stt_language` を必須とする
+- `camera_observation` は、`attachment_count`、`attachment_summary_text`、`attachments` を必須とし、`trigger_reason=post_action_followup` の場合は追跡観測として扱い、`attachment_summary_text` と `observation_text` に `camera_display_name` を使ってよい
+- `network_result` は、`query`、`summary_text`、`source_task_id` を必須とする
+- `idle_tick` は、正の `idle_duration_ms` を必須とする
+
+<!-- Block: Attention Focus Entry -->
+### `attention_focus_entry`
+
+```json
+{
+  "focus_ref": "observation:network_result",
+  "focus_kind": "observation",
+  "summary": "検索結果の要約",
+  "score_hint": 0.72,
+  "reason_codes": ["input_kind:network_result", "external_result"]
+}
+```
+
+- `attention_focus_entry` は、`attention_snapshot` の主注意候補や再確認候補で共通に使う短周期用オブジェクトである
+- 必須項目は `focus_ref`、`focus_kind`、`summary`、`score_hint`、`reason_codes` である
+- `focus_ref` は、`observation:*`、`task:*`、`relationship:*` などの短い参照 `string` である
+- `focus_kind` は、少なくとも `observation`、`task`、`relationship`、`idle` を区別する
+- `summary` は、`LLM` に渡してよい短い説明文 `string` である
+- `score_hint` は、`0.0..1.0` の `number` に固定する
+- `reason_codes` は、主注意になった理由を表す `string` 配列である
+
+<!-- Block: Attention Snapshot -->
+### `attention_snapshot`
+
+```json
+{
+  "primary_focus": {
+    "focus_ref": "observation:network_result",
+    "focus_kind": "observation",
+    "summary": "検索結果の要約",
+    "score_hint": 0.72,
+    "reason_codes": ["input_kind:network_result", "external_result"]
+  },
+  "secondary_focuses": [],
+  "suppressed_items": [],
+  "revisit_queue": [],
+  "updated_at": 1760000000000
+}
+```
+
+- `attention_snapshot` は、`LLM` へ渡す主注意断面である
+- 必須項目は `primary_focus`、`secondary_focuses`、`suppressed_items`、`revisit_queue`、`updated_at` である
+- `primary_focus` は、`attention_focus_entry` に固定する
+- `secondary_focuses` は、`attention_focus_entry` の配列に固定する
+- `suppressed_items` は、`focus_ref`、`focus_kind`、`summary`、`reason_codes` を持つ配列に固定する
+- `revisit_queue` は、`attention_focus_entry` に `delta_from_primary` を追加した配列に固定する
+- `updated_at` は、その断面の基準時刻を示す `unix ms` の `integer` である
+
+<!-- Block: Skill Candidate Entry -->
+### `skill_candidate_entry`
+
+```json
+{
+  "skill_id": "inspect_unresolved_observation",
+  "initiative_kind": "unexplored_check",
+  "fit_score": 0.40,
+  "suggested_action_types": ["browse", "look"],
+  "reason_codes": ["curiosity_fit", "novelty_fit"]
+}
+```
+
+- `skill_candidate_entry` は、`cognition_input.skill_candidates` で使う短周期用のスキル候補である
+- 必須項目は `skill_id`、`initiative_kind`、`fit_score`、`suggested_action_types`、`reason_codes` である
+- `skill_id` は、その候補スキルを表す固定語彙 `string` である
+- `initiative_kind` は、`self_initiated_score_breakdown.initiative_kind` と同じ語彙を使う
+- `fit_score` は、`0.0..1.0` の `number` に固定する
+- `suggested_action_types` は、候補化してよい `action_type` の配列である
+- `reason_codes` は、候補化の根拠を表す `string` 配列である
+
+<!-- Block: Camera Candidate Entry -->
+### `camera_candidate_entry`
+
+```json
+{
+  "camera_connection_id": "cam_living",
+  "display_name": "リビング",
+  "can_look": true,
+  "can_capture": true,
+  "presets": [
+    {
+      "preset_id": "1",
+      "preset_name": "正面"
+    },
+    {
+      "preset_id": "2",
+      "preset_name": "後方"
+    }
+  ]
+}
+```
+
+- `camera_candidate_entry` は、`cognition_input.camera_candidates` で使う短周期用のカメラ候補である
+- 必須項目は `camera_connection_id`、`display_name`、`can_look`、`can_capture`、`presets` である
+- `camera_connection_id` は、`look` 提案と `control_camera_look` の対象指定に使う
+- `display_name` は、`LLM` が候補を見分けるための短い表示名である
+- `presets[]` の各要素は、少なくとも `preset_id` と `preset_name` を持つ
+- current 実装では、`camera_candidates` は `camera_connections[].is_enabled=true` の順序付き一覧を camera adapter が live に解決して構成する
+
 <!-- Block: Memory Bundle -->
 ### `memory_bundle`
 
@@ -387,8 +553,209 @@
 - `working_memory_items`、`episodic_items`、`semantic_items`、`affective_items`、`relationship_items`、`reflection_items` の各要素は、少なくとも `memory_state_id`、`memory_kind`、`body_text`、`payload`、`confidence`、`importance`、`memory_strength`、`created_at`、`updated_at`、`last_confirmed_at` を持つ
 - `recent_event_window` の各要素は、少なくとも `event_id`、`source`、`kind`、`summary_text`、`created_at` を持つ
 - `context assembler` は、`memory_bundle` の各要素に人間可読な `*_utc_text`、`*_local_text`、`relative_time_text` を付与してよい
-- 初期実装では、`working_memory_items` に `memory_kind=summary`、`semantic_items` に `memory_kind=fact`、`recent_event_window` に直近 `5` 件の `searchable` な `events` を入れてよい
+- 初期実装では、`working_memory_items` に `memory_kind=summary`、`semantic_items` に `memory_kind=fact`、`recent_event_window` に active memory preset の `retrieval_profile.recent_window_limit` 件までの `searchable` な `events` を入れてよい
+- 初期実装では、`episodic_items.memory_kind` に `episodic_event`、`affective_items.memory_kind` に `long_mood_state` または `event_affect`、`relationship_items.memory_kind` に `relation` または `preference`、`reflection_items.memory_kind` に `reflection_note` を使ってよい
 - 初期実装では、`current_observation.observation_text` と、必要なら `query` / `source_task_id` への一致を使い、関連しない要素を `memory_bundle` から落としてよい
+- 初期実装の `reflection_items[].payload` は、少なくとも `what_happened` と `event_summaries` を持ち、必要なら `what_worked`、`what_failed`、`retry_hint`、`avoid_pattern`、`reflection_seed_ref`、`reflection_seed`、`action_outcomes` を持ってよい
+
+### `reflection_note.payload`
+
+```json
+{
+  "source_job_id": "job_...",
+  "job_kind": "write_memory",
+  "source_cycle_id": "cycle_...",
+  "primary_event_id": "evt_001",
+  "source_event_ids": ["evt_001", "evt_002"],
+  "reflection_seed_ref": {
+    "ref_kind": "event",
+    "ref_id": "evt_001"
+  },
+  "reflection_seed": {
+    "cycle_id": "cycle_...",
+    "input_kind": "chat_message",
+    "message_id": "msg_...",
+    "token_count": 12,
+    "was_cancelled": false
+  },
+  "event_summaries": [
+    "検索したいと依頼された",
+    "検索タスクが失敗した"
+  ],
+  "action_outcomes": [
+    {
+      "action_type": "enqueue_browse_task",
+      "status": "failed",
+      "failure_mode": "network_unavailable",
+      "decision_reason": "browse_selected",
+      "validator_reason": "browse_selected",
+      "selected_action_type": "browse"
+    }
+  ],
+  "what_happened": "検索したいと依頼された / 検索タスクが失敗した / browseは失敗した",
+  "what_failed": "browse が失敗した: network_unavailable",
+  "retry_hint": "query と source_task_id を確認してから browse をやり直す",
+  "avoid_pattern": "同じ query を条件未確認のまま連打しない"
+}
+```
+
+- `reflection_note.payload` は、`memory_kind=\"reflection_note\"` の `payload` に入る初期実装の固定形である
+- 必須項目は `source_job_id`、`job_kind`、`source_cycle_id`、`primary_event_id`、`source_event_ids`、`reflection_seed_ref`、`event_summaries`、`action_outcomes`、`what_happened` である
+- `reflection_seed`、`what_worked`、`what_failed`、`retry_hint`、`avoid_pattern` は、材料があるときだけ持ってよい
+
+### `retrieval_context`
+
+```json
+{
+  "plan": {
+    "mode": "associative_recent",
+    "queries": ["最近の会話"],
+    "time_hint": {
+      "explicit_years": [],
+      "has_explicit_time_hint": false
+    },
+    "profile": {
+      "semantic_top_k": 8,
+      "recent_window_limit": 5,
+      "fact_bias": 0.7,
+      "summary_bias": 0.6,
+      "event_bias": 0.4
+    },
+    "limits": {
+      "semantic_candidate_top_k": 8,
+      "working_memory_items": 3,
+      "episodic_items": 3,
+      "semantic_items": 3,
+      "affective_items": 2,
+      "relationship_items": 2,
+      "reflection_items": 2,
+      "recent_event_window": 5
+    }
+  },
+  "selected": {
+    "selected_counts": {
+      "working_memory_items": 2,
+      "episodic_items": 1,
+      "semantic_items": 1,
+      "affective_items": 0,
+      "relationship_items": 1,
+      "reflection_items": 0,
+      "recent_event_window": 3
+    },
+    "selected_refs": {
+      "working_memory_item_ids": ["mem_001"],
+      "episodic_item_ids": ["evt_001"],
+      "semantic_item_ids": ["mem_010"],
+      "affective_item_ids": [],
+      "relationship_item_ids": ["pref_001"],
+      "reflection_item_ids": [],
+      "recent_event_ids": ["evt_001", "evt_002"]
+    },
+    "selection_trace": [
+      {
+        "slot": "semantic_items",
+        "item_ref": "memory_state:mem_010",
+        "score": 1.8,
+        "reason_codes": ["matched_query", "mode_priority", "profile_bias"]
+      }
+    ]
+  }
+}
+```
+
+- `retrieval_context` は、短周期の内部でだけ使う `RetrievalPlan` と選別結果の要約である
+- 必須項目は `plan` と `selected` である
+- `plan` は、少なくとも `mode`、`queries`、`time_hint`、`profile`、`limits` を持つ
+- `profile` は、active memory preset の `retrieval_profile` をそのまま持つ
+- `limits.semantic_candidate_top_k` は、意味検索候補の上限である
+- `selected` は、少なくとも `selected_counts`、`selected_refs`、`selection_trace` を持つ
+
+### `retrieval_candidates_json`
+
+```json
+{
+  "total_candidate_count": 7,
+  "category_counts": {
+    "working_memory_items": 2,
+    "episodic_items": 2,
+    "semantic_items": 1,
+    "affective_items": 0,
+    "relationship_items": 1,
+    "reflection_items": 0,
+    "recent_event_window": 1
+  },
+  "non_empty_categories": [
+    "working_memory_items",
+    "episodic_items",
+    "semantic_items",
+    "relationship_items",
+    "recent_event_window"
+  ]
+}
+```
+
+- `retrieval_candidates_json` は、`retrieval_runs.candidates_json` に保存する候補統計の最小形である
+- 必須項目は `total_candidate_count`、`category_counts`、`non_empty_categories` である
+- `category_counts` は、`memory_bundle` と同じ slot 名をキーにした件数マップである
+
+### `retrieval_selected_json`
+
+```json
+{
+  "selected_counts": {
+    "working_memory_items": 2,
+    "episodic_items": 1,
+    "semantic_items": 1,
+    "affective_items": 0,
+    "relationship_items": 1,
+    "reflection_items": 0,
+    "recent_event_window": 3
+  },
+  "selected_refs": {
+    "working_memory_item_ids": ["mem_001"],
+    "episodic_item_ids": ["evt_001"],
+    "semantic_item_ids": ["mem_010"],
+    "affective_item_ids": [],
+    "relationship_item_ids": ["pref_001"],
+    "reflection_item_ids": [],
+    "recent_event_ids": ["evt_001", "evt_002"]
+  },
+  "selection_trace": [
+    {
+      "slot": "semantic_items",
+      "item_ref": "memory_state:mem_010",
+      "score": 1.8,
+      "reason_codes": ["matched_query", "mode_priority", "profile_bias"]
+    }
+  ]
+}
+```
+
+- `retrieval_selected_json` は、`retrieval_runs.selected_json` に保存する最終選別結果の最小形である
+- 必須項目は `selected_counts`、`selected_refs`、`selection_trace` である
+- `selection_trace` の各要素は、少なくとも `slot`、`item_ref`、`score`、`reason_codes` を持つ
+
+### `last_persona_update_summary`
+
+```json
+{
+  "created_at": 1760000000000,
+  "reason": "persona update applied",
+  "evidence_event_ids": ["evt_001"],
+  "updated_traits": [
+    {
+      "trait_name": "caution",
+      "before": 0.10,
+      "after": 0.18,
+      "delta": 0.08
+    }
+  ]
+}
+```
+
+- `last_persona_update_summary` は、直近の `self_state.personality` 更新を短周期や `status` で参照するための要約である
+- 必須項目は `created_at`、`reason`、`evidence_event_ids`、`updated_traits` である
+- `updated_traits` の各要素は、少なくとも `trait_name`、`before`、`after`、`delta` を持つ
 
 <!-- Block: Persona Consistency Score -->
 ### `persona_consistency_score`
@@ -440,6 +807,7 @@
 - 各 `*_score` と `total_score` は、`0.0..1.0` の `number` に固定する
 - `personality_fit_score` は、必要なら候補ごとの `persona_consistency_score` を元に計算してよい
 - 各 `*_score` は、比較前に同じ `0.0..1.0` 尺度へ正規化済みでなければならない
+- 初期実装では、`attention_score_breakdown` の比較結果を `attention_snapshot.primary_focus`、`secondary_focuses`、`revisit_queue` へ写してよい
 - `attention_score_breakdown` は永続化前提の正本ではなく、その短周期の候補比較ごとに再計算する
 
 <!-- Block: Self Initiated Score Breakdown -->
@@ -465,6 +833,8 @@
 - `hard_gate_passed` は、`boolean` に固定する
 - 各 `*_fit` と `total_score` は、`0.0..1.0` の `number` に固定する
 - 各 `*_fit` は、比較前に同じ `0.0..1.0` 尺度へ正規化済みでなければならない
+- 初期実装では、`self_initiated_score_breakdown` のうち `hard_gate_passed=true` かつ `total_score >= 0.30` の候補を `skill_candidate_entry` へ写してよい
+- 初期実装では、自発起動そのものの閾値は `total_score >= 0.55` を維持してよい
 - `self_initiated_score_breakdown` は永続化前提の正本ではなく、その短周期の比較ごとに再計算する
 
 <!-- Block: Action Candidate Score -->
@@ -490,7 +860,7 @@
 - `proposal_id` は、比較対象の `action_proposal.proposal_id` と同じ `string` である
 - `hard_gate_passed` は、`boolean` に固定する
 - 各 `*_score` と `total_score` は、`0.0..1.0` の `number` に固定する
-- `personality_fit_score` は、必要なら `persona_consistency_score` の `trait_alignment`、`style_alignment`、`overall_score` を使って計算してよい
+- `personality_fit_score` は、初期実装では `persona_consistency_score` の `trait_alignment` と `style_alignment` を `0.50 : 0.50` で合成してよい
 - `priority_hint_score` は、`proposal.priority` をそのまま信じるためではなく、同程度候補の補助比較にだけ使う
 - 各 `*_score` は、比較前に同じ `0.0..1.0` 尺度へ正規化済みでなければならない
 - `action_candidate_score` は永続化前提の正本ではなく、その短周期の候補比較ごとに再計算する
@@ -516,7 +886,7 @@
     "delivery_mode": "stream"
   },
   "memory_focus": {
-    "focus_kind": "current_input_only",
+    "focus_kind": "observation",
     "summary": "直近のチャット入力を主材料として判断した"
   },
   "reflection_seed": {
@@ -532,12 +902,15 @@
 - `cognition_result` は、短周期の内部で使う構造化された認知結果である
 - `cognition_result` は、認知層が一度に返す JSON オブジェクトであり、後から補完前提で分割しない
 - 必須項目は `intention_summary`、`decision_reason`、`action_proposals`、`step_hints`、`speech_draft`、`memory_focus`、`reflection_seed` である
+- current 実装では、`LiteLLM` への `response_format` を strict な `json_schema` に固定し、この節の shape を provider 呼び出し時点でも拘束する
 - `action_proposals` と `step_hints` は配列に固定し、候補がない場合も空配列 `[]` を使う
-- 初期実装の `browser_chat` では、`action_proposals` の各要素は少なくとも `action_type` と `priority` を持つ
-- 初期実装の `browser_chat` では、`action_type` は `speak`、`browse`、`notify`、`wait` のいずれかだけを許可する
-- 初期実装の `browser_chat` では、`priority` は `0.0..1.0` の `number` に固定する
-- 初期実装の `browser_chat` では、`speak` と `notify` のとき `target_channel=\"browser_chat\"` を必須とする
-- 初期実装の `browser_chat` では、`browse` のとき `query` に非空の検索文字列を必須とする
+- current の `browser_chat` では、`action_proposals` の各要素は少なくとも `action_type` と `priority` を持つ
+- current の `browser_chat` では、`action_type` は `speak`、`browse`、`notify`、`look`、`wait` のいずれかだけを許可する
+- current の `browser_chat` では、`priority` は `0.0..1.0` の `number` に固定する
+- current の `action validator` では、`priority >= 0.80` を緊急ヒントとして使ってよい
+- current の `browser_chat` では、`speak` と `notify` のとき `target_channel=\"browser_chat\"` を必須とする
+- current の `browser_chat` では、`browse` のとき `query` に非空の検索文字列を必須とする
+- current の `browser_chat` では、`look` のとき `camera_connection_id` と、`direction` / `preset_id` / `preset_name` のいずれかを必須とする
 - `speech_draft` は、少なくとも `text`、`language`、`delivery_mode` を持つ
 - `memory_focus` は、少なくとも `focus_kind`、`summary` を持つ
 - `reflection_seed` は、少なくとも `cycle_id`、`input_kind`、`message_id`、`token_count`、`was_cancelled` を持つ
@@ -569,12 +942,13 @@
   "habit_updates": {
     "preferred_action_types": ["look", "browse"]
   },
+  "evidence_event_ids": ["evt_001", "evt_002", "evt_010"],
   "evidence_summary": "探索寄りの行動選択が複数周期で安定した"
 }
 ```
 
 - `personality_change_proposal` は、長周期の `write_memory` 内部で作る未適用の提案オブジェクトである
-- 必須項目は `base_personality_updated_at`、`trait_deltas`、`preference_promotions`、`aversion_promotions`、`habit_updates`、`evidence_summary` である
+- 必須項目は `base_personality_updated_at`、`trait_deltas`、`preference_promotions`、`aversion_promotions`、`habit_updates`、`evidence_event_ids`、`evidence_summary` である
 - `style_updates` は任意で、変化がある場合だけ持つ
 - `trait_deltas` の各要素は、`trait_name`、`delta`、`reason`、`evidence_count`、`source_cycle_ids` を必須とする
 - `trait_name` は、`self_state.personality_json.trait_values` に存在するキーだけを許可する
@@ -582,8 +956,11 @@
 - `source_cycle_ids` は空配列を許可しない
 - `base_personality_updated_at` は、提案生成時に読んだ `self_state.personality_updated_at` の値である
 - `source_cycle_ids` は、証拠に使った `events` を生んだ短周期の `cycle_id` だけを数える
+- `evidence_event_ids` は、その提案の根拠に採用した `event_id` を重複なしで集約した配列であり、`revisions.evidence_event_ids_json` の入力に使う
 - `preference_promotions` と `aversion_promotions` は、`personality_preference_entry` の配列である
 - `habit_updates` は、`preferred_action_types`、`preferred_observation_kinds`、`avoided_action_styles` のうち変更対象だけを持つ部分オブジェクトでよい
+- 初期実装の `preference_promotions` / `aversion_promotions` では、少なくとも `domain=action_type` と `domain=observation_kind` を使ってよい
+- 閾値未満のときは、`trait_deltas=[]`、`preference_promotions=[]`、`aversion_promotions=[]`、`habit_updates={}`、`evidence_event_ids=[]` の empty proposal を返してよい
 
 <!-- Block: Persona Updates -->
 ### `persona_updates`
@@ -602,21 +979,175 @@
   "habit_updates": {
     "preferred_action_types": ["look", "browse"]
   },
+  "evidence_event_ids": ["evt_001", "evt_002", "evt_010"],
   "evidence_summary": "探索寄りの行動選択が複数周期で安定した"
 }
 ```
 
 - `persona_updates` は、`bounded apply` 後に `self_state.personality_json` へ反映可能な差分オブジェクトである
-- 必須項目は `base_personality_updated_at`、`updated_trait_values`、`preference_promotions`、`aversion_promotions`、`habit_updates`、`evidence_summary` である
+- 必須項目は `base_personality_updated_at`、`updated_trait_values`、`preference_promotions`、`aversion_promotions`、`habit_updates`、`evidence_event_ids`、`evidence_summary` である
 - `style_updates` は任意で、変化がある場合だけ持つ
 - `updated_trait_values` は、`trait_name -> absolute_value` の部分オブジェクトである
 - `updated_trait_values` に含めてよいキーは、`self_state.personality_json.trait_values` の固定キーだけである
 - `updated_trait_values` の各値は、`-1.0..+1.0` の `number` に clamp 済みでなければならない
 - `preference_promotions` と `aversion_promotions` は、`personality_preference_entry` の配列である
 - `habit_updates` は、`self_state.personality_json.habit_biases` に上書きする部分オブジェクトである
+- `evidence_event_ids` は、適用する差分を正当化した `event_id` の集約であり、`self_state.personality` の `revisions.evidence_event_ids_json` にそのまま保存する
 - `evidence_summary` は、監査と `revisions` の理由づけに使う短い要約である
 - `base_personality_updated_at` は、適用開始時の `self_state.personality_updated_at` と一致しなければならない
 - 適用時に `base_personality_updated_at` が現在の `self_state.personality_updated_at` と一致しない場合、その `persona_updates` は stale として棄却し、後続の `write_memory` で再生成する
+- 初期実装では、`preference_promotions` と `aversion_promotions` の各 `weight` を現在値から `0.15` 以内だけ動かした値として返してよい
+
+<!-- Block: Memory Write Group -->
+## 記憶更新の内部 JSON
+
+<!-- Block: Memory Write Plan -->
+### `MemoryWritePlan`
+
+```json
+{
+  "event_annotations": [
+    {
+      "event_id": "evt_001",
+      "about_time": null,
+      "entities": [],
+      "thread_hints": ["cycle:cycle_001"]
+    },
+    {
+      "event_id": "evt_002",
+      "about_time": null,
+      "entities": [],
+      "thread_hints": ["cycle:cycle_001"]
+    }
+  ],
+  "state_updates": [
+    {
+      "state_ref": "summary_primary",
+      "operation": "upsert",
+      "memory_kind": "summary",
+      "body_text": "中心:ユーザーが外部確認を求めた",
+      "payload": {
+        "source_job_id": "job_001",
+        "job_kind": "write_memory",
+        "source_cycle_id": "cycle_001",
+        "primary_event_id": "evt_001",
+        "source_event_ids": ["evt_001", "evt_002"],
+        "summary_kind": "minimal_write_memory"
+      },
+      "confidence": 0.5,
+      "importance": 0.5,
+      "memory_strength": 0.5,
+      "last_confirmed_at": 1760000000000,
+      "evidence_event_ids": ["evt_001"],
+      "revision_reason": "write_memory created summary"
+    },
+    {
+      "state_ref": "fact_external_1",
+      "operation": "upsert",
+      "memory_kind": "fact",
+      "body_text": "外部確認: 東京の天気 => 晴れで風は弱い",
+      "payload": {
+        "source_job_id": "job_001",
+        "job_kind": "write_memory",
+        "source_cycle_id": "cycle_001",
+        "source_event_ids": ["evt_001", "evt_002"],
+        "fact_kind": "external_search_result",
+        "query": "東京の天気",
+        "summary_text": "晴れで風は弱い",
+        "source_task_id": "task_001"
+      },
+      "confidence": 0.85,
+      "importance": 0.75,
+      "memory_strength": 0.75,
+      "last_confirmed_at": 1760000000000,
+      "evidence_event_ids": ["evt_001", "evt_002"],
+      "revision_reason": "write_memory created external fact"
+    }
+  ],
+  "preference_updates": [
+    {
+      "owner_scope": "self",
+      "target_entity_ref": {
+        "target_kind": "action_type",
+        "target_key": "browse"
+      },
+      "domain": "action_type",
+      "polarity": "like",
+      "status": "candidate",
+      "confidence": 0.59,
+      "evidence_event_ids": ["evt_001", "evt_002"],
+      "revision_reason": "write_memory observed browse leaning like"
+    }
+  ],
+  "event_affect": [
+    {
+      "event_id": "evt_001",
+      "moment_affect_text": "新しい観測に触れて、好奇心が少し動いた",
+      "moment_affect_labels": ["curious"],
+      "vad": {
+        "v": 0.16,
+        "a": 0.24,
+        "d": 0.08
+      },
+      "confidence": 0.6,
+      "evidence_event_ids": ["evt_001"],
+      "revision_reason": "write_memory inferred event affect"
+    }
+  ],
+  "context_updates": {
+    "event_links": [
+      {
+        "from_event_id": "evt_002",
+        "to_event_id": "evt_001",
+        "label": "continuation",
+        "confidence": 0.6,
+        "evidence_event_ids": ["evt_001", "evt_002"],
+        "revision_reason": "write_memory linked ordered source events"
+      }
+    ],
+    "event_threads": [
+      {
+        "event_id": "evt_001",
+        "thread_key": "cycle:cycle_001",
+        "confidence": 0.68,
+        "thread_role": "primary",
+        "evidence_event_ids": ["evt_001", "evt_002"],
+        "revision_reason": "write_memory grouped source events into cycle thread"
+      }
+    ],
+    "state_links": [
+      {
+        "from_state_ref": "fact_external_1",
+        "to_state_ref": "summary_primary",
+        "label": "supports",
+        "confidence": 0.72,
+        "evidence_event_ids": ["evt_001", "evt_002"],
+        "revision_reason": "write_memory linked external fact to summary"
+      }
+    ]
+  },
+  "revision_reasons": [
+    "write_memory created summary",
+    "write_memory created external fact"
+  ]
+}
+```
+
+- `MemoryWritePlan` は、長周期の `write_memory` 内部で生成・検証してから適用する固定 shape のオブジェクトである
+- 必須項目は `event_annotations`、`state_updates`、`preference_updates`、`event_affect`、`context_updates`、`revision_reasons` である
+- `event_annotations` は、`memory_job_payloads.payload_json.source_event_ids` と同じ件数・同じ順序で並ばなければならない
+- `state_updates` の各要素は、少なくとも `state_ref`、`operation`、`memory_kind`、`evidence_event_ids`、`revision_reason` を持つ
+- `state_ref` は、`context_updates.state_links` から参照するための内部別名であり、同一 `MemoryWritePlan` 内で一意でなければならない
+- `operation = upsert` のときは、追加で `body_text`、`payload`、`confidence`、`importance`、`memory_strength`、`last_confirmed_at` を必須とする
+- `operation = close` のときは、追加で `target_state_id`、`valid_to_ts` を必須とする
+- `operation = mark_done` のときは、追加で `target_state_id`、`done_at`、`done_reason` を必須とし、`memory_kind` は `task` に固定する
+- `operation = revise_confidence` のときは、追加で `target_state_id`、`confidence`、`importance`、`memory_strength`、`last_confirmed_at` を必須とする
+- `close` と `mark_done` は、現在の実装では `memory_states.searchable=0` への切替まで同時に適用する
+- `preference_updates.target_entity_ref` は `preference_target_entity_ref` を使う
+- `event_affect.vad` は、`v`、`a`、`d` の 3 キーを必須とし、各値は `-1.0..+1.0` の `number` とする
+- `context_updates` は、`event_links`、`event_threads`、`state_links` の 3 キーを必須とする
+- `context_updates.state_links` は、永続 ID ではなく同一 `MemoryWritePlan.state_updates` 内の `state_ref` を参照する
+- `revision_reasons` は、`state_updates` と同じ件数を持ち、各要素は対応する `state_updates.revision_reason` と一致しなければならない
 
 <!-- Block: Runtime Settings Group -->
 ## ランタイム設定テーブルの JSON
@@ -626,23 +1157,23 @@
 
 ```json
 {
-  "llm.model": "openrouter/default-model",
-  "llm.api_key": "sk-example",
-  "llm.embedding_model": "openrouter/default-embedding",
-  "llm.embedding_api_key": "emb-example",
-  "llm.temperature": 0.7,
-  "llm.max_output_tokens": 2048,
+  "llm.model": "openai/gpt-5-mini",
+  "llm.image_model": "openai/gpt-5-mini",
+  "llm.embedding_model": "openai/text-embedding-3-large",
   "runtime.idle_tick_ms": 1000,
-  "integrations.line.channel_access_token": "line-token",
-  "integrations.line.to_user_id": "Uxxxx"
+  "behavior.second_person_label": "マスター",
+  "character.vrm_file_path": "",
+  "speech.tts.provider": "voicevox",
+  "speech.stt.provider": "amivoice",
+  "motion.posture_change_loop_count_standing": 30,
+  "integrations.notify_route": "ui_only"
 }
 ```
 
-- `runtime_settings.values_json` は、現在有効な設定値を全設定キーぶん持つ完全オブジェクトである
-- キーは、`docs/39_設定キー運用仕様.md` に登録されたドット区切り設定キーだけを許可する
-- 値の型は、各キーの登録 `value_type` と一致しなければならない
-- `apply_scope="runtime"` の `applied` は、このオブジェクトを同じ短周期で更新する
-- `apply_scope="next_boot"` の `applied` は、このオブジェクトを即時更新せず、次回ランタイム起動時の materialize で更新する
+- `runtime_settings.values_json` は、現在有効な scalar 設定値を全設定キーぶん持つ完全オブジェクトである
+- キーは `docs/39_設定キー運用仕様.md` に登録された設定キーだけを許可する
+- 値の型は各キーの登録 `value_type` と一致しなければならない
+- `motion.animations` や `retrieval_profile` のような構造化値はこのオブジェクトへ直接入れない
 
 <!-- Block: Runtime Settings Updated At -->
 ### `runtime_settings.value_updated_at_json`
@@ -650,23 +1181,21 @@
 ```json
 {
   "llm.model": 1760000000000,
-  "llm.embedding_model": 1760000000000,
-  "llm.temperature": 1760000000000,
-  "llm.max_output_tokens": 1760000000000,
-  "runtime.idle_tick_ms": 1760000000000
+  "behavior.second_person_label": 1760000000000,
+  "speech.tts.provider": 1760000000000,
+  "motion.posture_change_loop_count_standing": 1760000000000,
+  "integrations.notify_route": 1760000000000
 }
 ```
 
 - `runtime_settings.value_updated_at_json` は、各設定キーの最終反映時刻を `key -> unix_ms` で持つ完全オブジェクトである
-- キー集合は、`runtime_settings.values_json` と同一に固定する
-- 各値は、UTC unix milliseconds の `integer` に固定する
-- `next_boot` の materialize は、この時刻が既存値より新しいキーだけを更新する
+- キー集合は `runtime_settings.values_json` と同一に固定する
 
 <!-- Block: Settings Editor Group -->
 ## 設定UIテーブルの JSON
 
-<!-- Block: Settings Editor Direct Values -->
-### `settings_editor_state.direct_values_json`
+<!-- Block: Settings Editor System Values -->
+### `settings_editor_state.system_values_json`
 
 ```json
 {
@@ -674,63 +1203,113 @@
   "runtime.long_cycle_min_interval_ms": 10000,
   "sensors.microphone.enabled": true,
   "sensors.camera.enabled": true,
-  "output.tts.enabled": true,
   "integrations.sns.enabled": false,
-  "integrations.line.enabled": false
+  "integrations.notify_route": "ui_only",
+  "integrations.discord.bot_token": "",
+  "integrations.discord.channel_id": ""
 }
 ```
 
-- `settings_editor_state.direct_values_json` は、設定UIで即時反映したい運用値だけを持つ完全オブジェクトである
-- キーは、`docs/42_設定UI仕様.md` で direct 値とされた設定キーだけを許可する
-- キー名は、`docs/39_設定キー運用仕様.md` と同じドット区切り設定キーをそのまま使う
-- 値の型は、各キーの登録 `value_type` と一致しなければならない
-- `settings_editor_state` の `revision` が更新される保存では、このオブジェクト全体を canonical な形で保持する
+- `settings_editor_state.system_values_json` は、設定UIで保持するシステム設定だけを持つ完全オブジェクトである
+- キーは `runtime.idle_tick_ms`、`runtime.long_cycle_min_interval_ms`、`sensors.microphone.enabled`、`sensors.camera.enabled`、`integrations.sns.enabled`、`integrations.notify_route`、`integrations.discord.bot_token`、`integrations.discord.channel_id` に固定する
+- current の `browser_chat` 実装で直接使っているのは主に `runtime.*`、`sensors.camera.enabled`、`sensors.microphone.enabled`、`camera_connections` であり、`integrations.*` は保存対象だが未接続の項目を含む
 
-<!-- Block: Settings Preset Payload -->
-### `settings_presets.payload_json`
-
-- `settings_presets.payload_json` は、`preset_kind` ごとに固定形を持つ
-- すべての `preset_kind` で、未定義キーは受け付けない
-
-#### `preset_kind = behavior`
+<!-- Block: Settings Editor State -->
+### `settings editor api.editor_state`
 
 ```json
 {
-  "response_pace": "normal",
-  "proactivity_level": "medium",
-  "browse_preference": "balanced",
-  "notify_preference": "balanced",
-  "speech_style": "neutral",
-  "verbosity_bias": "balanced"
+  "revision": 12,
+  "active_character_preset_id": "preset_character_default",
+  "active_behavior_preset_id": "preset_behavior_default",
+  "active_conversation_preset_id": "preset_conversation_default",
+  "active_memory_preset_id": "preset_memory_default",
+  "active_motion_preset_id": "preset_motion_default",
+  "system_values": {
+    "runtime.idle_tick_ms": 1000,
+    "integrations.notify_route": "ui_only"
+  }
 }
 ```
 
-- 各項目は、`docs/42_設定UI仕様.md` に定義した固定列挙だけを取る
+- `settings editor api.editor_state` は、設定UI保存対象の singleton state を API 用に展開した形である
+- `system_values` の shape は `settings_editor_state.system_values_json` と同一である
 
-#### `preset_kind = llm`
+<!-- Block: Character Preset Payload -->
+### `character_presets.payload_json`
 
 ```json
 {
-  "llm.model": "openrouter/default-model",
+  "character.vrm_file_path": "",
+  "character.material.convert_unlit_to_mtoon": false,
+  "character.material.enable_shadow_off": true,
+  "character.material.shadow_off_meshes": "Face, U_Char_1",
+  "speech.tts.enabled": false,
+  "speech.tts.provider": "voicevox",
+  "speech.stt.enabled": false,
+  "speech.stt.provider": "amivoice",
+  "speech.stt.language": "ja"
+}
+```
+
+- `character_presets.payload_json` は `character.*`、`speech.tts.*`、`speech.stt.*` の固定形を持つ
+- 通知経路と Discord 認証情報は含めない
+- `speech.stt.*` は設定UIと `runtime_settings` に反映し、current の `browser_chat` では `POST /api/microphone/input` の `STT` 実行条件にも使う
+
+<!-- Block: Behavior Preset Payload -->
+### `behavior_presets.payload_json`
+
+```json
+{
+  "behavior.second_person_label": "マスター",
+  "behavior.system_prompt": "...",
+  "behavior.addon_prompt": "...",
+  "behavior.response_pace": "balanced",
+  "behavior.proactivity_level": "medium",
+  "behavior.browse_preference": "balanced",
+  "behavior.notify_preference": "balanced",
+  "behavior.speech_style": "neutral",
+  "behavior.verbosity_bias": "balanced"
+}
+```
+
+- `behavior_presets.payload_json` は `behavior.*` の固定形を持つ
+
+<!-- Block: Conversation Preset Payload -->
+### `conversation_presets.payload_json`
+
+```json
+{
+  "llm.model": "openai/gpt-5-mini",
+  "llm.api_key": "",
+  "llm.base_url": "",
   "llm.temperature": 0.7,
-  "llm.max_output_tokens": 2048,
-  "llm.api_key": "sk-example",
-  "llm.base_url": ""
+  "llm.max_output_tokens": 4096,
+  "llm.reasoning_effort": "",
+  "llm.reply_web_search_enabled": true,
+  "llm.max_turns_window": 50,
+  "llm.image_model": "openai/gpt-5-mini",
+  "llm.image_api_key": "",
+  "llm.image_base_url": "",
+  "llm.max_output_tokens_vision": 4096,
+  "llm.image_timeout_seconds": 60
 }
 ```
 
-- 必須項目は `llm.model`、`llm.temperature`、`llm.max_output_tokens`、`llm.api_key` である
-- `llm.model` は `provider/model` 形式の単一文字列に固定する
-- `llm.base_url` は任意で、空文字は未指定を表す
+- `conversation_presets.payload_json` は会話生成と画像認識に使う `llm.*` の固定形を持つ
 
-#### `preset_kind = memory`
+<!-- Block: Memory Preset Payload -->
+### `memory_presets.payload_json`
 
 ```json
 {
-  "llm.embedding_model": "openrouter/default-embedding",
-  "llm.embedding_api_key": "emb-example",
+  "llm.embedding_model": "openai/text-embedding-3-large",
+  "llm.embedding_api_key": "",
   "llm.embedding_base_url": "",
   "runtime.context_budget_tokens": 8192,
+  "memory.embedding_dimension": 3072,
+  "memory.similar_episodes_limit": 60,
+  "memory.max_inject_tokens": 1200,
   "retrieval_profile": {
     "semantic_top_k": 8,
     "recent_window_limit": 5,
@@ -741,31 +1320,28 @@
 }
 ```
 
-- 必須項目は `llm.embedding_model`、`llm.embedding_api_key`、`runtime.context_budget_tokens`、`retrieval_profile` である
-- `llm.embedding_model` は `provider/model` 形式の単一文字列に固定する
-- `llm.embedding_base_url` は任意で、空文字は未指定を表す
-- `retrieval_profile` の各 bias は `0.0..1.0` の `number` に固定する
-- `semantic_top_k` は `1..64` の `integer`、`recent_window_limit` は `1..20` の `integer` に固定する
+- `memory_presets.payload_json` は `llm.embedding_*`、`runtime.context_budget_tokens`、`memory.*`、`retrieval_profile` の固定形を持つ
 
-#### `preset_kind = output`
+<!-- Block: Motion Preset Payload -->
+### `motion_presets.payload_json`
 
 ```json
 {
-  "output.tts.voice": "default",
-  "output.mode": "ui_and_tts",
-  "integrations.notify_route": "discord",
-  "integrations.line.channel_access_token": "line-token",
-  "integrations.line.to_user_id": "Uxxxx",
-  "integrations.discord.bot_token": "discord-token",
-  "integrations.discord.channel_id": "1234567890"
+  "motion.posture_change_loop_count_standing": 30,
+  "motion.posture_change_loop_count_sitting_floor": 30,
+  "animations": [
+    {
+      "display_name": "待機",
+      "animation_type": 0,
+      "animation_name": "idle",
+      "is_enabled": true
+    }
+  ]
 }
 ```
 
-- 必須項目は `output.tts.voice`、`output.mode`、`integrations.notify_route` である
-- `output.mode` は、`ui_only` または `ui_and_tts` の `string` に固定する
-- `integrations.notify_route` は、`ui_only`、`line`、`discord` のいずれかに固定する
-- `integrations.notify_route="line"` のときは `integrations.line.channel_access_token` と `integrations.line.to_user_id` を必須にする
-- `integrations.notify_route="discord"` のときは `integrations.discord.bot_token` と `integrations.discord.channel_id` を必須にする
+- `motion_presets.payload_json` は 2 つの scalar 設定と `animations[]` の固定形を持つ
+- `animation_type` は `0`、`1`、`2` の整数に固定する
 
 <!-- Block: Settings Change Set Payload -->
 ### `settings_change_sets.payload_json`
@@ -773,34 +1349,35 @@
 ```json
 {
   "editor_revision": 12,
-  "active_behavior_preset_id": "preset_beh_001",
-  "active_llm_preset_id": "preset_llm_001",
-  "active_memory_preset_id": "preset_mem_001",
-  "active_output_preset_id": "preset_out_001",
-  "direct_values": {
-    "runtime.idle_tick_ms": 1000
+  "active_character_preset_id": "preset_character_default",
+  "active_behavior_preset_id": "preset_behavior_default",
+  "active_conversation_preset_id": "preset_conversation_default",
+  "active_memory_preset_id": "preset_memory_default",
+  "active_motion_preset_id": "preset_motion_default",
+  "system_values": {
+    "runtime.idle_tick_ms": 1000,
+    "integrations.notify_route": "ui_only"
   },
   "preset_versions": {
+    "character": 1760000000000,
     "behavior": 1760000000000,
-    "llm": 1760000000000,
+    "conversation": 1760000000000,
     "memory": 1760000000000,
-    "output": 1760000000000
+    "motion": 1760000000000
   }
 }
 ```
 
 - `settings_change_sets.payload_json` は、設定UI保存の canonical 結果をランタイムへ渡すオブジェクトである
-- 必須項目は `editor_revision`、`active_behavior_preset_id`、`active_llm_preset_id`、`active_memory_preset_id`、`active_output_preset_id`、`direct_values`、`preset_versions` である
-- `direct_values` は、`settings_editor_state.direct_values_json` と同じ形に固定する
-- `preset_versions` は、各アクティブプリセットの `updated_at` を `preset_kind -> unix_ms` で持つ
+- `preset_versions` は `character`、`behavior`、`conversation`、`memory`、`motion` の 5 キーに固定する
 
 <!-- Block: Settings Preset Entry -->
 ### `settings_preset_entry`
 
 ```json
 {
-  "preset_id": "preset_llm_001",
-  "preset_name": "default",
+  "preset_id": "preset_conversation_default",
+  "preset_name": "標準",
   "archived": false,
   "sort_order": 10,
   "updated_at": 1760000000000,
@@ -808,151 +1385,29 @@
 }
 ```
 
-- `settings_preset_entry` は、設定UI API が返すプリセット一覧の共通要素である
-- 必須項目は `preset_id`、`preset_name`、`archived`、`sort_order`、`updated_at`、`payload` である
-- `payload` は、その `preset_kind` に対応する `settings_presets.payload_json` の固定形に一致しなければならない
+- `settings_preset_entry` は、設定UI API が返すプリセット配列の共通要素である
+- `payload` は、その配列に対応するテーブルの `payload_json` 固定形に一致しなければならない
 
-<!-- Block: Event Group -->
-## イベントテーブルの JSON
-
-<!-- Block: Event Input Journal Refs -->
-### `events.input_journal_refs_json`
-
-```json
-[
-  "obs_inp_..."
-]
-```
-
-- `events.input_journal_refs_json` は、その `events` 行の根拠になった `input_journal.observation_id` の順序付き配列である
-- 各要素は、不透明な `string` に固定する
-- 空配列は許可するが、外部入力や観測に由来する `events` では根拠がある限り省略しない
-
-<!-- Block: Control Plane Group -->
-## 制御面テーブルの JSON
-
-<!-- Block: Pending Inputs -->
-### `pending_inputs.payload_json`
-
-- `pending_inputs.payload_json` は、少なくとも `input_kind` を持つ
-- Web API が受け付ける初期段階の `browser_chat` 入力は、`chat_message` と `cancel` の 2 種だけである
-- ランタイム内部では、外部検索結果を戻すために `network_result` を enqueue してよい
-
-<!-- Block: Pending Chat Message -->
-#### `chat_message`
+<!-- Block: Camera Connection Entry -->
+### `camera_connection_entry`
 
 ```json
 {
-  "input_kind": "chat_message",
-  "text": "おはよう",
-  "client_message_id": "cli_msg_001"
+  "camera_connection_id": "cam_001",
+  "is_enabled": true,
+  "display_name": "リビング",
+  "host": "192.168.10.20",
+  "username": "alice",
+  "password": "secret",
+  "sort_order": 10,
+  "updated_at": 1760000000000
 }
 ```
 
-- 必須項目は `input_kind`、`text` である
-- `input_kind` は `chat_message` に固定する
-- `text` は、空文字列や空白のみを許可しない
-- `text` は、`4000` 文字を超えてはならない
-- `client_message_id` は任意で、同一クライアントからの再送判定に使う
-- `client_message_id` がある場合、Web サーバは `pending_inputs.client_message_id` にも同じ値を書き込む
-
-<!-- Block: Pending Cancel -->
-#### `cancel`
-
-```json
-{
-  "input_kind": "cancel",
-  "target_message_id": "msg_..."
-}
-```
-
-- 必須項目は `input_kind` である
-- `input_kind` は `cancel` に固定する
-- `target_message_id` は任意で、省略時は現在の `browser_chat` 応答全体を対象にしてよい
-
-<!-- Block: Pending Network Result -->
-#### `network_result`
-
-```json
-{
-  "input_kind": "network_result",
-  "query": "OpenAI",
-  "summary_text": "検索結果の要約",
-  "source_task_id": "task_..."
-}
-```
-
-- 必須項目は `input_kind`、`query`、`summary_text`、`source_task_id` である
-- `input_kind` は `network_result` に固定する
-- `query` は、外部検索に使った非空の文字列を持つ
-- `summary_text` は、外部検索アダプタが返した非空の要約文字列を持つ
-- `source_task_id` は、この結果を作った `browse` タスクを追跡するための ID を持つ
-
-<!-- Block: Settings Requested Value -->
-### `settings_overrides.requested_value_json`
-
-- `settings_overrides.requested_value_json` は、要求値そのものではなく、型付きの正規化オブジェクトで保持する
-- `POST /api/settings/overrides` の `requested_value` は、Web サーバでこの形へ正規化してから保存する
-- `value_type` は、対象 `key` の登録定義と一致しなければならない
-
-```json
-{
-  "value_type": "string",
-  "value": "openrouter/.../model"
-}
-```
-
-- 必須項目は `value_type`、`value` である
-- `value_type` は、少なくとも `string`、`integer`、`number`、`boolean`、`object`、`array` を区別する
-- `value` は、`value_type` と整合する JSON 値をそのまま持つ
-- 初期段階での主要ユースケースは `string` だが、型変換の推測は行わない
-
-<!-- Block: Settings Editor Response -->
-### `GET /api/settings/editor` の本文
-
-```json
-{
-  "editor_state": {
-    "revision": 12,
-    "active_behavior_preset_id": "preset_beh_001",
-    "active_llm_preset_id": "preset_llm_001",
-    "active_memory_preset_id": "preset_mem_001",
-    "active_output_preset_id": "preset_out_001",
-    "direct_values": {
-      "runtime.idle_tick_ms": 1000
-    }
-  },
-  "preset_catalogs": {
-    "behavior": [],
-    "llm": [],
-    "memory": [],
-    "output": []
-  },
-  "constraints": {
-    "editable_direct_keys": [
-      "runtime.idle_tick_ms"
-    ]
-  },
-  "runtime_projection": {
-    "llm.model": "openrouter/default-model"
-  }
-}
-```
-
-- `editor_state`、`preset_catalogs`、`constraints`、`runtime_projection` を必須にする
-- `editor_state.direct_values` は、`settings_editor_state.direct_values_json` と同じ形に固定する
-- `preset_catalogs` は、`preset_kind -> settings_preset_entry[]` の object に固定する
-- `preset_catalogs.*.payload` には、API キーやトークンの生値をそのまま含めてよい
-- `runtime_projection` は、現在アクティブな構成から導出された現在有効値の要約であり、ドット区切り設定キーをキー名に使ってよい
-
-<!-- Block: Settings Editor Put -->
-### `PUT /api/settings/editor` の本文
-
-- リクエスト本文と成功応答本文は、`GET /api/settings/editor` と同じ canonical 形に固定する
-- 保存時は、サーバ側で次の整合を必須にする
-  - `editor_state.active_*_preset_id` は、それぞれ対応する `preset_catalogs` 内に存在しなければならない
-  - `preset_catalogs` の各要素は、対応する `settings_presets.payload_json` の固定形に一致しなければならない
-  - `editor_state.revision` は、保存前の `settings_editor_state.revision` と一致しなければならない
+- `camera_connection_entry` は、設定UI API が返すカメラ接続一覧の共通要素である
+- `is_enabled=true` の行が AI 利用候補であり、複数件を許可する
+- current の runtime は `is_enabled=true` の一覧を camera adapter へ渡して `camera_candidates` を組み、`look` では `camera_connection_id` を必須にして候補から 1 台を選ぶ
+- current の `camera_candidates[].presets[]` がある場合、`look` は `preset_name` / `preset_id` にその候補の値だけを使ってよい
 
 <!-- Block: UI Outbound -->
 ### `ui_outbound_events.payload_json`
@@ -986,13 +1441,32 @@
   "text": "おはようございます。",
   "created_at": 1760000000000,
   "source_cycle_id": "cycle_...",
-  "related_input_id": "inp_..."
+  "related_input_id": "inp_...",
+  "audio_url": "/audio/tts_msg_....wav",
+  "audio_mime_type": "audio/wav"
 }
 ```
 
 - 必須項目は `message_id`、`role`、`text`、`created_at` である
-- `role` は、少なくとも `assistant`、`system_notice` を区別する
-- `source_cycle_id`、`related_input_id` は任意である
+- current 実装の `role` は `assistant` を使う
+- `source_cycle_id`、`related_input_id`、`audio_url`、`audio_mime_type` は任意である
+
+<!-- Block: UI Message End -->
+#### `event_type = message_end`
+
+```json
+{
+  "message_id": "msg_...",
+  "finish_reason": "completed",
+  "final_message_emitted": true,
+  "token_count": 3
+}
+```
+
+- 必須項目は `message_id`、`finish_reason`、`final_message_emitted`、`token_count` である
+- `finish_reason` は `completed` または `cancelled` を使う
+- `final_message_emitted` は、同じ `message_id` に対して確定 `message` を出したかどうかを持つ
+- `token_count` は、その応答で実際に流した `token` 件数を持つ
 
 <!-- Block: UI Status -->
 #### `event_type = status`
@@ -1006,7 +1480,7 @@
 ```
 
 - 必須項目は `status_code`、`label` である
-- `status_code` は、少なくとも `idle`、`thinking`、`speaking`、`waiting_external`、`browsing`、`processing_external_result` を区別する
+- `status_code` は、少なくとも `idle`、`thinking`、`speaking`、`camera_moving`、`waiting_external`、`browsing`、`processing_external_result` を区別する
 - `cycle_id` は任意で、特定サイクルに紐づく更新だけに付ける
 
 <!-- Block: UI Notice -->
@@ -1014,14 +1488,15 @@
 
 ```json
 {
-  "notice_code": "self_initiated_action",
-  "text": "周囲の確認を開始します"
+  "notice_code": "browse_queued",
+  "text": "検索タスクを追加しました: 今日の天気"
 }
 ```
 
 - 必須項目は `notice_code`、`text` である
 - `notice_code` は、UI 側で分類できる固定語彙 `string` にする
-- 初期実装では、`browse_queued`、`browse_completed`、`cancel_requested` を使ってよい
+- current 実装では、DB に保存される `notice` として `browse_queued`、`browse_completed` を使ってよい
+- 保持範囲外からの `SSE` 再開時は、保存しない合成 `notice` として `stream_reset` を使ってよい
 
 <!-- Block: UI Error -->
 #### `event_type = error`
@@ -1045,12 +1520,12 @@
 ### `action_history.command_json`
 
 - `action_history.command_json` は、その行動で実行しようとした命令の最小記録である
-- 初期実装では、ブラウザ向けの UI 応答命令と、`browse` の task 再開命令をこの形で保持する
+- current 実装では、ブラウザ向けの UI 応答命令と、`browse` の task 再開命令をこの形で保持する
 
 ```json
 {
   "target_channel": "browser_chat",
-  "event_types": ["status", "status", "token", "message", "status"],
+  "event_types": ["status", "status", "token", "message", "message_end", "status"],
   "decision": "execute",
   "decision_reason": "speak_selected",
   "related_input_id": "inp_...",
@@ -1069,9 +1544,10 @@
 - `role` は、`message_id` を伴うメッセージ応答だけに付ける
 - `related_input_id` は、入力に対する応答行動だけに付ける
 - `proposal_ref` は、`cognition_result.action_proposals` から確定した候補を追跡したいときに付ける
-- `command_type` は、初期実装では `speak_ui_message`、`dispatch_notice`、`enqueue_browse_task`、`execute_browse_task`、`abandon_browse_task` を使ってよい
+- `command_type` は、current 実装では `speak_ui_message`、`dispatch_notice`、`enqueue_browse_task`、`control_camera_look`、`execute_browse_task`、`abandon_browse_task` を使ってよい
 - `notice_code` と `text` は、`dispatch_notice` を実行する命令だけに付ける
 - `target`、`parameters`、`preconditions`、`stop_conditions`、`timeout_ms`、`requires_reobserve`、`expected_effects` は、`execute` のとき `action_command` をそのまま残したい場合に付けてよい
+- current の `control_camera_look` では、`parameters.camera_connection_id` を必須とし、`requires_reobserve=true` に固定し、`expected_effects.followup_input_kind=\"camera_observation\"`、`expected_effects.followup_trigger_reason=\"post_action_followup\"` を持たせてよい
 - `parameters.task_id`、`parameters.query`、`parameters.target_channel` は、`enqueue_browse_task` を実行する命令だけに付ける
 - `parameters.query` は、`execute_browse_task` と `abandon_browse_task` を実行する命令だけに付けてよい
 - `related_task_id` は、`execute_browse_task` と `abandon_browse_task` のように task 再開を処理する命令だけに付けてよい
@@ -1083,11 +1559,11 @@
 ### `action_history.observed_effects_json`
 
 - `action_history.observed_effects_json` は、その行動の直後に観測した最小結果である
-- 初期実装では、実際に UI へ流したイベント種別と主要 ID だけを保持する
+- current 実装では、実際に UI へ流したイベント種別と主要 ID だけを保持する
 
 ```json
 {
-  "emitted_event_types": ["status", "status", "token", "message", "status"],
+  "emitted_event_types": ["status", "status", "token", "message", "message_end", "status"],
   "status_code_after": "idle",
   "was_cancelled": false,
   "token_count": 3,
@@ -1119,6 +1595,7 @@
 - `was_cancelled` は、途中停止が起きた応答だけに付ける
 - `token_count` は、`token` を流した応答だけに付ける
 - `final_message_emitted` は、最後に `message` を確定したかどうかを持つ
+- `message_end` は、`speak` 応答の完了または中断を外向きに確定した場合だけ `emitted_event_types` に現れる
 - `validator_decision` は、`action validator` の決定結果を持つ
 - `validator_reason` は、`action validator` の決定理由コードを持つ
 - `selected_action_type` は、比較で最上位になった候補の `action_type` を残したいときに付ける
@@ -1128,7 +1605,8 @@
 - `complete_browse_task` を実行した場合は、`related_task_id`、`task_status_after`、`summary_text` を付けてよい
 - `abandon_browse_task` を実行した場合は、`related_task_id`、`task_status_after`、`error_message` を付けてよい
 - `complete_browse_task` を実行した場合は、`followup_input_kind=\"network_result\"` を付けてよい
-- `dispatch_notice` を実行した場合は、`line_delivery` を `delivered`、`skipped`、`failed` のいずれかで付けてよい
+- `control_camera_look` を実行した場合は、`camera_connection_id`、`camera_display_name`、`followup_required`、`followup_input_kind=\"camera_observation\"`、`followup_input_source=\"post_action_followup\"`、`followup_trigger_reason=\"post_action_followup\"`、`followup_capture` を付けてよい
+- `dispatch_notice` を実行した場合は、`notice_code` を付けてよい
 
 <!-- Block: Memory Job Group -->
 ## 記憶ジョブの JSON
@@ -1177,6 +1655,10 @@
     {
       "event_id": "evt_001",
       "event_updated_at": 1760000000000
+    },
+    {
+      "event_id": "evt_002",
+      "event_updated_at": 1760000000500
     }
   ]
 }
@@ -1187,6 +1669,7 @@
 - `reflection_seed_ref` は、少なくとも `ref_kind`、`ref_id` を持つ
 - `event_snapshot_refs` の各要素は、少なくとも `event_id`、`event_updated_at` を持つ
 - `event_snapshot_refs` は空配列を許可しない
+- `event_snapshot_refs` は、`source_event_ids` と同じ順序で全件を並べなければならない
 - `write_memory` は、この payload 自体に `persona_updates` を含めない
 - `persona_updates` は、`write_memory` 実行中に生成される内部差分としてだけ扱う
 
@@ -1235,6 +1718,7 @@
 - `targets` は空配列を許可しない
 - `targets` の各要素は、少なくとも `entity_type`、`entity_id` を持つ
 - `entity_type` は、初期実装では `event`、`memory_state` を区別する
+- 同じ `(entity_type, entity_id)` が重複していても、payload 正規化で 1 件に畳み込んでよい
 
 <!-- Block: Embedding Sync -->
 #### `job_kind = embedding_sync`
@@ -1283,6 +1767,7 @@
 - 追加の必須項目は `maintenance_scope`、`retention_cutoff_at` である
 - `maintenance_scope` は、少なくとも `completed_jobs_gc`、`stale_preview_gc`、`stale_vector_gc` を区別する
 - `target_refs` は任意で、指定する場合は各要素が少なくとも `entity_type`、`entity_id` を持つ
+- `target_refs` に同じ `(entity_type, entity_id)` が重複していても、payload 正規化で 1 件に畳み込んでよい
 
 <!-- Block: Web Api Group -->
 ## Web API の JSON
@@ -1303,6 +1788,7 @@
 - `requested_value` は、対象 `key` に登録された型だけを許可する
 - 初期公開キーでは `string`、`integer`、`number`、`boolean` だけを受け付ける
 - `apply_scope` は、対象 `key` に登録された許可値だけを受け付ける
+- Web サーバは、受け取った `requested_value` を `settings_overrides.requested_value_json` の正規化形へ変換して保存する
 
 <!-- Block: Settings Override Response -->
 ### `POST /api/settings/overrides` の成功応答 JSON
@@ -1325,14 +1811,24 @@
 ```json
 {
   "text": "おはよう",
-  "client_message_id": "cli_msg_001"
+  "client_message_id": "cli_msg_001",
+  "attachments": [
+    {
+      "attachment_kind": "camera_still_image",
+      "camera_connection_id": "cam_living",
+      "camera_display_name": "リビング",
+      "capture_id": "cap_0123456789abcdef0123456789abcdef"
+    }
+  ]
 }
 ```
 
-- 必須項目は `text` である
-- `text` は、空文字列や空白のみを許可しない
+- `text` は任意だが、ある場合は空文字列や空白のみを許可しない
 - `client_message_id` は任意で、クライアント側の再送判定に使う
 - `client_message_id` がある場合、同じ `channel` での再利用は許可しない
+- `attachments` は任意で、ある場合は `camera_still_image` の配列にする
+- 各添付は `attachment_kind`、`camera_connection_id`、`camera_display_name`、`capture_id` を必須とする
+- `text` と `attachments` は、少なくともどちらか一方が必要である
 
 <!-- Block: Chat Input Response -->
 ### `POST /api/chat/input` の成功応答 JSON
@@ -1377,6 +1873,101 @@
 - `accepted` は `true` に固定する
 - `status` は `queued` に固定する
 
+<!-- Block: Microphone Input Response -->
+### `POST /api/microphone/input` の成功応答 JSON
+
+```json
+{
+  "accepted": true,
+  "input_id": "inp_...",
+  "status": "queued",
+  "channel": "browser_chat",
+  "transcript_text": "おはよう",
+  "provider": "amivoice",
+  "language": "ja"
+}
+```
+
+- 必須項目は `accepted`、`input_id`、`status`、`channel`、`transcript_text`、`provider`、`language` である
+- `accepted` は `true` に固定する
+- `status` は `queued` に固定する
+- `channel` は `browser_chat` に固定する
+- `transcript_text` は空文字列を許可しない
+- `provider` は current 実装では `amivoice` に固定する
+- `language` は `speech.stt.language` の設定値を返す
+
+<!-- Block: Camera Capture Request -->
+### `POST /api/camera/capture` の入力 JSON
+
+```json
+{
+  "camera_connection_id": "cam_living"
+}
+```
+
+- 必須項目は `camera_connection_id` である
+- `camera_connection_id` は、enabled camera connection の 1 件を指す
+
+<!-- Block: Camera Observe Request -->
+### `POST /api/camera/observe` の入力 JSON
+
+```json
+{
+  "camera_connection_id": "cam_living"
+}
+```
+
+- 必須項目は `camera_connection_id` である
+- `camera_connection_id` は、enabled camera connection の 1 件を指す
+
+<!-- Block: Camera Capture Response -->
+### `POST /api/camera/capture` の成功応答 JSON
+
+```json
+{
+  "camera_connection_id": "cam_living",
+  "camera_display_name": "リビング",
+  "capture_id": "cap_...",
+  "image_path": "data/camera/cap_....jpg",
+  "image_url": "/captures/cap_....jpg",
+  "captured_at": 1760000000000
+}
+```
+
+- 必須項目は `camera_connection_id`、`camera_display_name`、`capture_id`、`image_path`、`image_url`、`captured_at` である
+- `camera_connection_id` は、撮影に使った enabled camera connection を表す
+- `camera_display_name` は、その接続の表示名である
+- `capture_id` は、不透明な capture 識別子である
+- `image_path` は、サーバ作業ディレクトリ基準の保存先相対パスである
+- `image_url` は、同一オリジンで静止画を再取得する URL path である
+- `captured_at` は、静止画保存完了時点の UTC unix milliseconds である
+
+<!-- Block: Camera Observe Response -->
+### `POST /api/camera/observe` の成功応答 JSON
+
+```json
+{
+  "accepted": true,
+  "input_id": "inp_...",
+  "status": "queued",
+  "channel": "browser_chat",
+  "camera_connection_id": "cam_living",
+  "camera_display_name": "リビング",
+  "capture_id": "cap_...",
+  "image_path": "data/camera/cap_....jpg",
+  "image_url": "/captures/cap_....jpg",
+  "captured_at": 1760000000000
+}
+```
+
+- 必須項目は `accepted`、`input_id`、`status`、`channel`、`camera_connection_id`、`camera_display_name`、`capture_id`、`image_path`、`image_url`、`captured_at` である
+- `accepted` は `true` に固定する
+- `status` は `queued` に固定する
+- `channel` は `browser_chat` に固定する
+- `input_id` は、生成した自発観測入力の ID である
+- `camera_connection_id` と `camera_display_name` は、観測に使った enabled camera connection を表す
+- `capture_id`、`image_path`、`image_url`、`captured_at` は、同時に取得した静止画の情報である
+
 <!-- Block: Status Response -->
 ### `GET /api/status` の成功応答 JSON
 
@@ -1384,7 +1975,22 @@
 {
   "server_time": 1760000000000,
   "runtime": {
-    "is_running": false
+    "is_running": false,
+    "last_retrieval": {
+      "cycle_id": "cycle_...",
+      "created_at": 1760000000000,
+      "mode": "associative_recent",
+      "queries": ["最近の会話"],
+      "selected_counts": {
+        "working_memory_items": 2,
+        "episodic_items": 1,
+        "semantic_items": 1,
+        "affective_items": 0,
+        "relationship_items": 1,
+        "reflection_items": 0,
+        "recent_event_window": 3
+      }
+    }
   },
   "self_state": {
     "current_emotion": {
@@ -1392,24 +1998,61 @@
       "a": 0.18,
       "d": 0.03,
       "labels": ["calm"]
+    },
+    "last_persona_update": {
+      "created_at": 1760000000000,
+      "reason": "persona update applied",
+      "evidence_event_ids": ["evt_001"],
+      "updated_traits": []
     }
   },
   "attention_state": {
-    "primary_focus": "browser_chat"
+    "primary_focus": "待機中"
+  },
+  "body_state": {
+    "posture_mode": "awaiting_external",
+    "sensor_availability": {
+      "camera": true,
+      "microphone": false
+    },
+    "load": {
+      "task_queue_pressure": 0.35,
+      "interaction_load": 0.0
+    }
+  },
+  "world_state": {
+    "situation_summary": "外部結果待ち: 近所のイベント",
+    "external_wait_count": 1
+  },
+  "drive_state": {
+    "priority_effects": {
+      "task_progress_bias": 0.35,
+      "exploration_bias": 0.15,
+      "maintenance_bias": 0.25,
+      "social_bias": 0.0
+    }
   },
   "task_state": {
-    "active_task_count": 1,
-    "waiting_task_count": 0
+    "active_task_count": 0,
+    "waiting_task_count": 1
   }
 }
 ```
 
-- 必須項目は `server_time`、`runtime`、`self_state`、`attention_state`、`task_state` である
+- 必須項目は `server_time`、`runtime`、`self_state`、`attention_state`、`body_state`、`world_state`、`drive_state`、`task_state` である
 - `runtime` は、少なくとも `is_running` を持つ
 - `runtime.last_cycle_id` は、短周期が 1 回以上完了している場合だけ持つ
 - `runtime.last_commit_id` は、`commit_records` が 1 件以上ある場合だけ持つ
+- `runtime.last_retrieval` は、`retrieval_runs` が 1 件以上ある場合だけ持つ
 - `self_state.current_emotion` は、少なくとも `v`、`a`、`d`、`labels` を持つ
-- `attention_state.primary_focus` は、表示用の短い `string` とする
+- `self_state.last_persona_update` は、`revisions.entity_type=self_state.personality` が 1 件以上ある場合だけ持つ
+- `attention_state.primary_focus` は、current 実装では `attention_state.primary_focus_json.summary` をそのまま返す短い `string` とする
+- `body_state.posture_mode` は `string` に固定する
+- `body_state.sensor_availability.camera` と `body_state.sensor_availability.microphone` は `boolean` に固定する
+- `body_state.load.task_queue_pressure` と `body_state.load.interaction_load` は `number` に固定する
+- `world_state.situation_summary` は `string` に固定する
+- `world_state.external_wait_count` は `integer` に固定する
+- `drive_state.priority_effects` は `task_progress_bias`、`exploration_bias`、`maintenance_bias`、`social_bias` を持つ `object` に固定する
 - `task_state.active_task_count`、`task_state.waiting_task_count` は `integer` に固定する
 
 <!-- Block: Stream Data -->

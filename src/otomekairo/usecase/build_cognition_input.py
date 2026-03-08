@@ -2,10 +2,26 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from otomekairo.gateway.camera_controller import CameraCandidate, CameraPresetCandidate
 from otomekairo.schema.runtime_types import CognitionStateSnapshot, PendingInputRecord
+from otomekairo.usecase.observation_normalization import (
+    normalize_observation_kind,
+    normalize_observation_source,
+    normalize_trigger_reason,
+)
+from otomekairo.usecase.persona_projection import build_attention_snapshot, build_skill_candidates
+from otomekairo.usecase.retrieval_flow import build_retrieval_artifacts
+
+
+# Block: Build result
+@dataclass(frozen=True, slots=True)
+class BuiltCognitionInput:
+    cognition_input: dict[str, Any]
+    retrieval_run: dict[str, Any]
 
 
 # Block: Public builder
@@ -15,71 +31,112 @@ def build_cognition_input(
     cycle_id: str,
     resolved_at: int,
     state_snapshot: CognitionStateSnapshot,
-) -> dict[str, Any]:
+    camera_candidates: list[CameraCandidate],
+    camera_available: bool,
+) -> BuiltCognitionInput:
     input_kind = str(pending_input.payload["input_kind"])
-    if input_kind not in {"chat_message", "network_result"}:
-        raise ValueError("cognition_input is only supported for browser_chat text and network_result")
-    selection_profile = _build_selection_profile(state_snapshot)
+    if input_kind not in {"chat_message", "microphone_message", "camera_observation", "network_result", "idle_tick"}:
+        raise ValueError(
+            "cognition_input is only supported for chat_message, microphone_message, camera_observation, network_result, and idle_tick"
+        )
+    camera_candidates_payload = _build_camera_candidates(camera_candidates)
+    behavior_settings = _build_behavior_settings(state_snapshot.effective_settings)
+    selection_profile = _build_selection_profile(
+        state_snapshot=state_snapshot,
+        behavior_settings=behavior_settings,
+    )
     current_observation = _build_current_observation(
         pending_input=pending_input,
         resolved_at=resolved_at,
     )
-    return {
-        "cycle_meta": {
-            "cycle_id": cycle_id,
-            "trigger_reason": (
-                "external_result"
-                if input_kind == "network_result"
-                else "external_input"
-            ),
-            "input_id": pending_input.input_id,
-            "input_kind": input_kind,
-        },
-        "time_context": _build_time_context(resolved_at),
-        "persona_snapshot": {
-            "personality": state_snapshot.self_state["personality"],
-            "current_emotion": state_snapshot.self_state["current_emotion"],
-            "long_term_goals": state_snapshot.self_state["long_term_goals"],
-            "relationship_overview": state_snapshot.self_state["relationship_overview"],
-            "invariants": state_snapshot.self_state["invariants"],
-        },
-        "selection_profile": selection_profile,
-        "body_snapshot": state_snapshot.body_state,
-        "world_snapshot": state_snapshot.world_state,
-        "drive_snapshot": state_snapshot.drive_state,
-        "task_snapshot": _build_task_snapshot(
-            task_snapshot=state_snapshot.task_snapshot,
-            resolved_at=resolved_at,
-        ),
-        "attention_snapshot": state_snapshot.attention_state,
-        "memory_bundle": _build_memory_bundle(
-            memory_snapshot=state_snapshot.memory_snapshot,
-            current_observation=current_observation,
-            resolved_at=resolved_at,
-        ),
-        "policy_snapshot": {
-            "system_policy": {
-                "respect_invariants": True,
-                "allow_direct_state_write": False,
-            },
-            "runtime_policy": {
-                "camera_enabled": bool(state_snapshot.effective_settings["sensors.camera.enabled"]),
-                "microphone_enabled": bool(state_snapshot.effective_settings["sensors.microphone.enabled"]),
-                "tts_enabled": bool(state_snapshot.effective_settings["output.tts.enabled"]),
-                "line_enabled": bool(state_snapshot.effective_settings["integrations.line.enabled"]),
-            },
-        },
-        "skill_candidates": [],
-        "current_observation": current_observation,
-        "context_budget": {
-            "max_tokens": int(state_snapshot.effective_settings["runtime.context_budget_tokens"]),
-            "model": str(state_snapshot.effective_settings["llm.model"]),
-            "api_key": str(state_snapshot.effective_settings["llm.api_key"]),
-            "base_url": str(state_snapshot.effective_settings["llm.base_url"]),
-            "temperature": float(state_snapshot.effective_settings["llm.temperature"]),
-            "max_output_tokens": int(state_snapshot.effective_settings["llm.max_output_tokens"]),
-        },
+    retrieval_artifacts = build_retrieval_artifacts(
+        memory_snapshot=state_snapshot.memory_snapshot,
+        retrieval_profile=state_snapshot.retrieval_profile,
+        current_observation=current_observation,
+        task_snapshot=state_snapshot.task_snapshot,
+        resolved_at=resolved_at,
+    )
+    self_snapshot = {
+        "personality": state_snapshot.self_state["personality"],
+        "current_emotion": state_snapshot.self_state["current_emotion"],
+        "long_term_goals": state_snapshot.self_state["long_term_goals"],
+        "relationship_overview": state_snapshot.self_state["relationship_overview"],
+        "invariants": state_snapshot.self_state["invariants"],
     }
+    latest_persona_update = state_snapshot.self_state.get("latest_persona_update")
+    if isinstance(latest_persona_update, dict):
+        self_snapshot["last_persona_update"] = latest_persona_update
+    attention_snapshot = build_attention_snapshot(
+        current_observation=current_observation,
+        selection_profile=selection_profile,
+        task_snapshot=state_snapshot.task_snapshot,
+        resolved_at=resolved_at,
+    )
+    skill_candidates = build_skill_candidates(
+        current_observation=current_observation,
+        selection_profile=selection_profile,
+        behavior_settings=behavior_settings,
+        body_state=state_snapshot.body_state,
+        task_snapshot=state_snapshot.task_snapshot,
+    )
+    return BuiltCognitionInput(
+        cognition_input={
+            "cycle_meta": {
+                "cycle_id": cycle_id,
+                "trigger_reason": normalize_trigger_reason(
+                    source=pending_input.source,
+                    payload=pending_input.payload,
+                ),
+                "input_id": pending_input.input_id,
+                "input_kind": input_kind,
+            },
+            "time_context": _build_time_context(resolved_at),
+            "self_snapshot": self_snapshot,
+            "behavior_settings": behavior_settings,
+            "selection_profile": selection_profile,
+            "body_snapshot": state_snapshot.body_state,
+            "world_snapshot": state_snapshot.world_state,
+            "drive_snapshot": state_snapshot.drive_state,
+            "task_snapshot": _build_task_snapshot(
+                task_snapshot=state_snapshot.task_snapshot,
+                resolved_at=resolved_at,
+            ),
+            "attention_snapshot": attention_snapshot,
+            "memory_bundle": retrieval_artifacts.memory_bundle,
+            "retrieval_context": {
+                "plan": retrieval_artifacts.retrieval_plan,
+                "selected": retrieval_artifacts.selected_json,
+            },
+            "policy_snapshot": {
+                "system_policy": {
+                    "respect_invariants": True,
+                    "allow_direct_state_write": False,
+                },
+                "runtime_policy": {
+                    "camera_enabled": bool(state_snapshot.effective_settings["sensors.camera.enabled"]),
+                    "camera_available": bool(camera_available),
+                    "camera_candidate_count": len(camera_candidates_payload),
+                    "microphone_enabled": bool(state_snapshot.effective_settings["sensors.microphone.enabled"]),
+                },
+            },
+            "camera_candidates": camera_candidates_payload,
+            "skill_candidates": skill_candidates,
+            "current_observation": current_observation,
+            "context_budget": {
+                "max_tokens": int(state_snapshot.effective_settings["runtime.context_budget_tokens"]),
+                "model": str(state_snapshot.effective_settings["llm.model"]),
+                "api_key": str(state_snapshot.effective_settings["llm.api_key"]),
+                "base_url": str(state_snapshot.effective_settings["llm.base_url"]),
+                "temperature": float(state_snapshot.effective_settings["llm.temperature"]),
+                "max_output_tokens": int(state_snapshot.effective_settings["llm.max_output_tokens"]),
+            },
+        },
+        retrieval_run={
+            "plan_json": retrieval_artifacts.retrieval_plan,
+            "candidates_json": retrieval_artifacts.candidates_json,
+            "selected_json": retrieval_artifacts.selected_json,
+        },
+    )
 
 
 # Block: Current observation builder
@@ -91,6 +148,11 @@ def _build_current_observation(
     input_kind = str(pending_input.payload["input_kind"])
     base_observation = {
         "source": pending_input.source,
+        "kind": normalize_observation_kind(payload=pending_input.payload),
+        "trigger_reason": normalize_trigger_reason(
+            source=pending_input.source,
+            payload=pending_input.payload,
+        ),
         "channel": pending_input.channel,
         "input_kind": input_kind,
         "captured_at": pending_input.created_at,
@@ -98,14 +160,64 @@ def _build_current_observation(
         "captured_at_local_text": _local_text(pending_input.created_at),
         "relative_time_text": _relative_time_text(resolved_at, pending_input.created_at),
     }
+    base_observation["source"] = normalize_observation_source(
+        source=str(base_observation["source"]),
+        payload=pending_input.payload,
+    )
     if input_kind == "chat_message":
-        text = pending_input.payload.get("text")
-        if not isinstance(text, str) or not text:
-            raise ValueError("chat_message.text must be non-empty string")
+        text = _validated_message_text(
+            pending_input.payload.get("text"),
+            input_kind="chat_message",
+        )
+        attachments = _validated_camera_attachments(
+            pending_input.payload.get("attachments"),
+            input_kind="chat_message",
+        )
+        return {
+            **base_observation,
+            "observation_text": _chat_observation_text(text=text, attachments=attachments),
+            "attachment_count": len(attachments),
+            "attachment_summary_text": _camera_attachment_summary_text(attachments),
+            "attachments": attachments,
+            **({"text": text} if text is not None else {}),
+        }
+    if input_kind == "microphone_message":
+        text = _validated_message_text(
+            pending_input.payload.get("text"),
+            input_kind="microphone_message",
+        )
+        if text is None:
+            raise ValueError("microphone_message.text is required")
+        stt_provider = pending_input.payload.get("stt_provider")
+        stt_language = pending_input.payload.get("stt_language")
+        if not isinstance(stt_provider, str) or not stt_provider:
+            raise ValueError("microphone_message.stt_provider must be non-empty string")
+        if not isinstance(stt_language, str) or not stt_language:
+            raise ValueError("microphone_message.stt_language must be non-empty string")
         return {
             **base_observation,
             "observation_text": text,
             "text": text,
+            "stt_provider": stt_provider,
+            "stt_language": stt_language,
+        }
+    if input_kind == "camera_observation":
+        attachments = _validated_camera_attachments(
+            pending_input.payload.get("attachments"),
+            input_kind="camera_observation",
+        )
+        if not attachments:
+            raise ValueError("camera_observation requires attachments")
+        trigger_reason = pending_input.payload.get("trigger_reason")
+        return {
+            **base_observation,
+            "observation_text": _camera_observation_text(
+                attachments,
+                trigger_reason=trigger_reason,
+            ),
+            "attachment_count": len(attachments),
+            "attachment_summary_text": _camera_attachment_summary_text(attachments),
+            "attachments": attachments,
         }
     if input_kind == "network_result":
         summary_text = pending_input.payload.get("summary_text")
@@ -124,7 +236,166 @@ def _build_current_observation(
             "summary_text": summary_text,
             "source_task_id": source_task_id,
         }
+    if input_kind == "idle_tick":
+        idle_duration_ms = pending_input.payload.get("idle_duration_ms")
+        if isinstance(idle_duration_ms, bool) or not isinstance(idle_duration_ms, int):
+            raise ValueError("idle_tick.idle_duration_ms must be integer")
+        if idle_duration_ms <= 0:
+            raise ValueError("idle_tick.idle_duration_ms must be positive")
+        return {
+            **base_observation,
+            "observation_text": _idle_tick_observation_text(idle_duration_ms),
+            "idle_duration_ms": idle_duration_ms,
+        }
     raise ValueError("unsupported current_observation input_kind")
+
+
+# Block: Message text validation
+def _validated_message_text(raw_text: Any, *, input_kind: str) -> str | None:
+    if raw_text is None:
+        return None
+    if not isinstance(raw_text, str):
+        raise ValueError(f"{input_kind}.text must be string when present")
+    if not raw_text:
+        raise ValueError(f"{input_kind}.text must not be empty string")
+    return raw_text
+
+
+# Block: Camera attachment helpers
+def _validated_camera_attachments(
+    raw_attachments: Any,
+    *,
+    input_kind: str,
+) -> list[dict[str, Any]]:
+    if raw_attachments is None:
+        return []
+    if not isinstance(raw_attachments, list):
+        raise ValueError(f"{input_kind}.attachments must be a list")
+    attachments: list[dict[str, Any]] = []
+    for attachment in raw_attachments:
+        if not isinstance(attachment, dict):
+            raise ValueError(f"{input_kind}.attachments must contain only objects")
+        attachment_kind = attachment.get("attachment_kind")
+        media_kind = attachment.get("media_kind")
+        camera_connection_id = attachment.get("camera_connection_id")
+        camera_display_name = attachment.get("camera_display_name")
+        capture_id = attachment.get("capture_id")
+        mime_type = attachment.get("mime_type")
+        storage_path = attachment.get("storage_path")
+        content_url = attachment.get("content_url")
+        captured_at = attachment.get("captured_at")
+        if attachment_kind != "camera_still_image":
+            raise ValueError(f"{input_kind}.attachments.attachment_kind is invalid")
+        if media_kind != "image":
+            raise ValueError(f"{input_kind}.attachments.media_kind is invalid")
+        if not isinstance(capture_id, str) or not capture_id:
+            raise ValueError(f"{input_kind}.attachments.capture_id must be non-empty string")
+        if not isinstance(mime_type, str) or not mime_type:
+            raise ValueError(f"{input_kind}.attachments.mime_type must be non-empty string")
+        if not isinstance(storage_path, str) or not storage_path:
+            raise ValueError(f"{input_kind}.attachments.storage_path must be non-empty string")
+        if not isinstance(content_url, str) or not content_url:
+            raise ValueError(f"{input_kind}.attachments.content_url must be non-empty string")
+        if isinstance(captured_at, bool) or not isinstance(captured_at, int):
+            raise ValueError(f"{input_kind}.attachments.captured_at must be integer")
+        validated_attachment = {
+            "attachment_kind": attachment_kind,
+            "media_kind": media_kind,
+            "capture_id": capture_id,
+            "mime_type": mime_type,
+            "storage_path": storage_path,
+            "content_url": content_url,
+            "captured_at": captured_at,
+        }
+        if camera_connection_id is not None:
+            if not isinstance(camera_connection_id, str) or not camera_connection_id:
+                raise ValueError(f"{input_kind}.attachments.camera_connection_id must be non-empty string")
+            validated_attachment["camera_connection_id"] = camera_connection_id
+        if camera_display_name is not None:
+            if not isinstance(camera_display_name, str) or not camera_display_name:
+                raise ValueError(f"{input_kind}.attachments.camera_display_name must be non-empty string")
+            validated_attachment["camera_display_name"] = camera_display_name
+        attachments.append(validated_attachment)
+    return attachments
+
+
+# Block: Chat observation text
+def _chat_observation_text(*, text: str | None, attachments: list[dict[str, Any]]) -> str:
+    if text is not None and attachments:
+        return f"{text}\n（{_camera_attachment_summary_text(attachments)}付き）"
+    if text is not None:
+        return text
+    if attachments:
+        return f"{_camera_attachment_summary_text(attachments)}が添付された入力"
+    raise ValueError("chat_message requires text or attachments")
+
+
+# Block: Camera observation text
+def _camera_observation_text(
+    attachments: list[dict[str, Any]],
+    *,
+    trigger_reason: Any,
+) -> str:
+    attachment_summary = _camera_attachment_summary_text(attachments)
+    if trigger_reason == "post_action_followup":
+        return f"{attachment_summary}を追跡観測した"
+    return f"{attachment_summary}を自発観測した"
+
+
+# Block: Camera attachment summary
+def _camera_attachment_summary_text(attachments: list[dict[str, Any]]) -> str:
+    if not attachments:
+        return "添付なし"
+    camera_names = [
+        str(attachment["camera_display_name"])
+        for attachment in attachments
+        if isinstance(attachment.get("camera_display_name"), str) and attachment["camera_display_name"]
+    ]
+    if not camera_names:
+        return f"カメラ画像 {len(attachments)} 枚"
+    unique_names = list(dict.fromkeys(camera_names))
+    joined_names = " / ".join(unique_names[:3])
+    return f"{joined_names} のカメラ画像 {len(attachments)} 枚"
+
+
+# Block: Camera candidate builder
+def _build_camera_candidates(camera_candidates: list[CameraCandidate]) -> list[dict[str, Any]]:
+    built_candidates: list[dict[str, Any]] = []
+    for camera_candidate in camera_candidates:
+        if not isinstance(camera_candidate, CameraCandidate):
+            raise ValueError("camera_candidates must contain only CameraCandidate entries")
+        built_candidates.append(
+            {
+                "camera_connection_id": camera_candidate.camera_connection_id,
+                "display_name": camera_candidate.display_name,
+                "can_look": bool(camera_candidate.can_look),
+                "can_capture": bool(camera_candidate.can_capture),
+                "presets": _build_camera_preset_candidates(camera_candidate.presets),
+            }
+        )
+    return built_candidates
+
+
+# Block: Camera preset candidate builder
+def _build_camera_preset_candidates(
+    preset_candidates: tuple[CameraPresetCandidate, ...],
+) -> list[dict[str, Any]]:
+    built_presets: list[dict[str, Any]] = []
+    for preset_candidate in preset_candidates:
+        if not isinstance(preset_candidate, CameraPresetCandidate):
+            raise ValueError("camera_candidates.presets must contain only CameraPresetCandidate entries")
+        built_presets.append(
+            {
+                "preset_id": preset_candidate.preset_id,
+                "preset_name": preset_candidate.preset_name,
+            }
+        )
+    return built_presets
+
+
+# Block: Idle tick observation text
+def _idle_tick_observation_text(idle_duration_ms: int) -> str:
+    return f"{idle_duration_ms}ms の idle_tick が到来した"
 
 
 # Block: Task snapshot builder
@@ -162,251 +433,22 @@ def _task_snapshot_entry_for_cognition(
     }
 
 
-# Block: Memory bundle builder
-def _build_memory_bundle(
-    *,
-    memory_snapshot: dict[str, Any],
-    current_observation: dict[str, Any],
-    resolved_at: int,
-) -> dict[str, Any]:
-    selected_working_memory = _select_memory_entries(
-        memory_entries=memory_snapshot["working_memory_items"],
-        current_observation=current_observation,
-        limit=3,
-    )
-    selected_semantic_memory = _select_memory_entries(
-        memory_entries=memory_snapshot["semantic_items"],
-        current_observation=current_observation,
-        limit=3,
-    )
-    selected_recent_events = _select_recent_events(
-        event_entries=memory_snapshot["recent_event_window"],
-        current_observation=current_observation,
-        limit=5,
-    )
-    return {
-        "working_memory_items": [
-            _memory_entry_for_cognition(memory_entry, resolved_at=resolved_at)
-            for memory_entry in selected_working_memory
-        ],
-        "episodic_items": [
-            _memory_entry_for_cognition(memory_entry, resolved_at=resolved_at)
-            for memory_entry in memory_snapshot["episodic_items"]
-        ],
-        "semantic_items": [
-            _memory_entry_for_cognition(memory_entry, resolved_at=resolved_at)
-            for memory_entry in selected_semantic_memory
-        ],
-        "affective_items": [
-            _memory_entry_for_cognition(memory_entry, resolved_at=resolved_at)
-            for memory_entry in memory_snapshot["affective_items"]
-        ],
-        "relationship_items": [
-            _memory_entry_for_cognition(memory_entry, resolved_at=resolved_at)
-            for memory_entry in memory_snapshot["relationship_items"]
-        ],
-        "reflection_items": [
-            _memory_entry_for_cognition(memory_entry, resolved_at=resolved_at)
-            for memory_entry in memory_snapshot["reflection_items"]
-        ],
-        "recent_event_window": [
-            _recent_event_for_cognition(event_entry, resolved_at=resolved_at)
-            for event_entry in selected_recent_events
-        ],
-    }
-
-
-def _select_memory_entries(
-    *,
-    memory_entries: list[dict[str, Any]],
-    current_observation: dict[str, Any],
-    limit: int,
-) -> list[dict[str, Any]]:
-    if limit <= 0:
-        raise ValueError("memory selection limit must be positive")
-    scored_entries: list[tuple[float, int, dict[str, Any]]] = []
-    for memory_entry in memory_entries:
-        score = _memory_relevance_score(
-            memory_entry=memory_entry,
-            current_observation=current_observation,
-        )
-        if score <= 0.0:
-            continue
-        scored_entries.append(
-            (
-                score,
-                int(memory_entry["updated_at"]),
-                memory_entry,
-            )
-        )
-    scored_entries.sort(key=lambda item: (item[0], item[1]), reverse=True)
-    return [
-        memory_entry
-        for _, _, memory_entry in scored_entries[:limit]
-    ]
-
-
-def _select_recent_events(
-    *,
-    event_entries: list[dict[str, Any]],
-    current_observation: dict[str, Any],
-    limit: int,
-) -> list[dict[str, Any]]:
-    if limit <= 0:
-        raise ValueError("recent event selection limit must be positive")
-    scored_entries: list[tuple[float, int, dict[str, Any]]] = []
-    for event_entry in event_entries:
-        score = _event_relevance_score(
-            event_entry=event_entry,
-            current_observation=current_observation,
-        )
-        if score <= 0.0:
-            continue
-        scored_entries.append(
-            (
-                score,
-                int(event_entry["created_at"]),
-                event_entry,
-            )
-        )
-    scored_entries.sort(key=lambda item: (item[0], item[1]), reverse=True)
-    return [
-        event_entry
-        for _, _, event_entry in scored_entries[:limit]
-    ]
-
-
-def _memory_relevance_score(
-    *,
-    memory_entry: dict[str, Any],
-    current_observation: dict[str, Any],
-) -> float:
-    body_text = memory_entry["body_text"]
-    if not isinstance(body_text, str) or not body_text:
-        raise ValueError("memory entry body_text must be non-empty string")
-    payload = memory_entry["payload"]
-    if not isinstance(payload, dict):
-        raise ValueError("memory entry payload must be object")
-    score = 0.0
-    for text_hint in _observation_text_hints(current_observation):
-        if text_hint in body_text:
-            score += 1.0
-    query_hint = _observation_query_hint(current_observation)
-    if query_hint is not None:
-        payload_query = payload.get("query")
-        if payload_query == query_hint:
-            score += 1.5
-    source_task_id = current_observation.get("source_task_id")
-    if isinstance(source_task_id, str) and source_task_id:
-        payload_source_task_id = payload.get("source_task_id")
-        if payload_source_task_id == source_task_id:
-            score += 2.0
-    score += min(1.0, float(memory_entry["importance"])) * 0.2
-    score += min(1.0, float(memory_entry["memory_strength"])) * 0.2
-    return score
-
-
-def _event_relevance_score(
-    *,
-    event_entry: dict[str, Any],
-    current_observation: dict[str, Any],
-) -> float:
-    summary_text = event_entry["summary_text"]
-    if not isinstance(summary_text, str) or not summary_text:
-        raise ValueError("recent event summary_text must be non-empty string")
-    score = 0.0
-    for text_hint in _observation_text_hints(current_observation):
-        if text_hint in summary_text:
-            score += 1.0
-    if current_observation["input_kind"] == "network_result":
-        if event_entry["source"] == "network_result":
-            score += 1.0
-    return score
-
-
-def _observation_text_hints(current_observation: dict[str, Any]) -> list[str]:
-    observation_text = current_observation["observation_text"]
-    if not isinstance(observation_text, str) or not observation_text:
-        raise ValueError("current_observation.observation_text must be non-empty string")
-    hints: list[str] = [observation_text]
-    for token in _text_hint_tokens(observation_text):
-        if token not in hints:
-            hints.append(token)
-    query_hint = _observation_query_hint(current_observation)
-    if query_hint is not None and query_hint not in hints:
-        hints.append(query_hint)
-    return hints
-
-
-def _observation_query_hint(current_observation: dict[str, Any]) -> str | None:
-    if current_observation["input_kind"] == "network_result":
-        query = current_observation.get("query")
-        if not isinstance(query, str) or not query:
-            raise ValueError("network_result query must be non-empty string")
-        return query
-    text = current_observation.get("text")
-    if not isinstance(text, str) or not text:
-        raise ValueError("chat_message text must be non-empty string")
-    return None
-
-
-def _text_hint_tokens(text: str) -> list[str]:
-    normalized_text = text
-    for separator in ("　", "\n", "\t", ",", "、", ".", "。", "!", "！", "?", "？", ":", "：", ";", "；", "(", ")", "（", "）", "[", "]", "「", "」", "『", "』", "/", "／"):
-        normalized_text = normalized_text.replace(separator, " ")
-    tokens: list[str] = []
-    for raw_token in normalized_text.split(" "):
-        token = raw_token.strip()
-        if len(token) < 2:
-            continue
-        if token not in tokens:
-            tokens.append(token)
-    return tokens
-
-
-def _memory_entry_for_cognition(
-    memory_entry: dict[str, Any],
-    *,
-    resolved_at: int,
-) -> dict[str, Any]:
-    updated_at = int(memory_entry["updated_at"])
-    created_at = int(memory_entry["created_at"])
-    last_confirmed_at = int(memory_entry["last_confirmed_at"])
-    return {
-        **memory_entry,
-        "created_at_utc_text": _utc_text(created_at),
-        "created_at_local_text": _local_text(created_at),
-        "updated_at_utc_text": _utc_text(updated_at),
-        "updated_at_local_text": _local_text(updated_at),
-        "last_confirmed_at_utc_text": _utc_text(last_confirmed_at),
-        "last_confirmed_at_local_text": _local_text(last_confirmed_at),
-        "relative_time_text": _relative_time_text(resolved_at, updated_at),
-    }
-
-
-def _recent_event_for_cognition(
-    event_entry: dict[str, Any],
-    *,
-    resolved_at: int,
-) -> dict[str, Any]:
-    created_at = int(event_entry["created_at"])
-    return {
-        **event_entry,
-        "created_at_utc_text": _utc_text(created_at),
-        "created_at_local_text": _local_text(created_at),
-        "relative_time_text": _relative_time_text(resolved_at, created_at),
-    }
-
-
 # Block: Selection profile
-def _build_selection_profile(state_snapshot: CognitionStateSnapshot) -> dict[str, Any]:
+def _build_selection_profile(
+    state_snapshot: CognitionStateSnapshot,
+    *,
+    behavior_settings: dict[str, str],
+) -> dict[str, Any]:
     personality = state_snapshot.self_state["personality"]
     current_emotion = state_snapshot.self_state["current_emotion"]
     relationship_overview = state_snapshot.self_state["relationship_overview"]
     priority_effects = state_snapshot.drive_state["priority_effects"]
+    interaction_style = dict(personality["preferred_interaction_style"])
+    interaction_style["speech_tone"] = behavior_settings["speech_style"]
+    interaction_style["response_pace"] = behavior_settings["response_pace"]
     return {
         "trait_values": dict(personality["trait_values"]),
-        "interaction_style": dict(personality["preferred_interaction_style"]),
+        "interaction_style": interaction_style,
         "relationship_priorities": _build_relationship_priorities(relationship_overview),
         "learned_preferences": list(personality["learned_preferences"]),
         "learned_aversions": list(personality["learned_aversions"]),
@@ -430,6 +472,21 @@ def _build_selection_profile(state_snapshot: CognitionStateSnapshot) -> dict[str
                 field_name="drive_state.priority_effects.social_bias",
             ),
         },
+    }
+
+
+# Block: Behavior settings
+def _build_behavior_settings(effective_settings: dict[str, Any]) -> dict[str, str]:
+    return {
+        "second_person_label": _required_string_setting(effective_settings, "behavior.second_person_label"),
+        "system_prompt": _required_string_setting(effective_settings, "behavior.system_prompt"),
+        "addon_prompt": _required_string_setting(effective_settings, "behavior.addon_prompt"),
+        "response_pace": _required_string_setting(effective_settings, "behavior.response_pace"),
+        "proactivity_level": _required_string_setting(effective_settings, "behavior.proactivity_level"),
+        "browse_preference": _required_string_setting(effective_settings, "behavior.browse_preference"),
+        "notify_preference": _required_string_setting(effective_settings, "behavior.notify_preference"),
+        "speech_style": _required_string_setting(effective_settings, "behavior.speech_style"),
+        "verbosity_bias": _required_string_setting(effective_settings, "behavior.verbosity_bias"),
     }
 
 
@@ -504,6 +561,14 @@ def _local_text(unix_ms: int) -> str:
     local_dt = datetime.fromtimestamp(unix_ms / 1000, tz=timezone.utc).astimezone()
     timezone_name = local_dt.tzname() or "UTC"
     return local_dt.strftime(f"%Y-%m-%d %H:%M:%S {timezone_name}")
+
+
+# Block: Required setting helpers
+def _required_string_setting(effective_settings: dict[str, Any], key: str) -> str:
+    value = effective_settings.get(key)
+    if not isinstance(value, str):
+        raise ValueError(f"{key} must be string")
+    return value
 
 
 def _relative_time_text(now_ms: int, past_ms: int) -> str:
