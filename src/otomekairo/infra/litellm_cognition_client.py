@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from otomekairo.gateway.cognition_client import CognitionRequest, CognitionResponse
+from otomekairo.usecase.persona_prompt_projection import build_persona_prompt_projection
 
 
 # Block: Supported chat action types
@@ -68,6 +69,7 @@ def _build_messages(request: CognitionRequest) -> list[dict[str, Any]]:
     camera_candidates = cognition_input["camera_candidates"]
     skill_candidates = cognition_input["skill_candidates"]
     policy_snapshot = cognition_input["policy_snapshot"]
+    persona_projection = build_persona_prompt_projection(selection_profile=selection_profile)
     runtime_policy = policy_snapshot["runtime_policy"]
     input_evaluation = policy_snapshot["input_evaluation"]
     system_prompt = "\n".join(
@@ -95,6 +97,25 @@ def _build_messages(request: CognitionRequest) -> list[dict[str, Any]]:
             f"現在の感情ラベル: {self_snapshot['current_emotion']['primary_label']}",
             _second_person_label_prompt_line(behavior_settings),
             f"話し方: {selection_profile['interaction_style']['speech_tone']}",
+            _persona_traits_prompt_line(persona_projection),
+            _persona_interaction_prompt_line(persona_projection),
+            _persona_preferences_prompt_line(
+                title="学習済みの好み",
+                preferences=persona_projection["learned_preferences"],
+            ),
+            _persona_preferences_prompt_line(
+                title="学習済みの回避",
+                preferences=persona_projection["learned_aversions"],
+            ),
+            _persona_habits_prompt_line(persona_projection),
+            _persona_bias_prompt_line(
+                title="感情補正",
+                biases=persona_projection["emotion_bias"],
+            ),
+            _persona_bias_prompt_line(
+                title="内部欲求補正",
+                biases=persona_projection["drive_bias"],
+            ),
             _behavior_hint_prompt_line(behavior_settings),
             _optional_behavior_prompt_line(title="振る舞い指示", text=behavior_settings["system_prompt"]),
             _optional_behavior_prompt_line(title="追加指示", text=behavior_settings["addon_prompt"]),
@@ -453,6 +474,149 @@ def _format_goals(long_term_goals: dict[str, Any]) -> str:
     if not goals:
         return "未設定"
     return ",".join(str(goal.get("title", "goal")) for goal in goals[:3] if isinstance(goal, dict))
+
+
+# Block: Persona projection formatting
+def _persona_traits_prompt_line(persona_projection: dict[str, Any]) -> str:
+    salient_traits = persona_projection.get("salient_traits")
+    if not isinstance(salient_traits, list):
+        raise RuntimeError("persona_projection.salient_traits must be a list")
+    if not salient_traits:
+        return "人格傾向: 中立寄り"
+    trait_texts: list[str] = []
+    for entry in salient_traits:
+        if not isinstance(entry, dict):
+            raise RuntimeError("persona_projection.salient_traits must contain only objects")
+        trait_name = entry.get("trait_name")
+        direction_label = entry.get("direction_label")
+        value = entry.get("value")
+        if (
+            not isinstance(trait_name, str)
+            or not isinstance(direction_label, str)
+            or isinstance(value, bool)
+            or not isinstance(value, (int, float))
+        ):
+            raise RuntimeError("persona_projection.salient_traits entry is invalid")
+        trait_texts.append(f"{trait_name}={_signed_number_text(float(value))}({direction_label})")
+    return "人格傾向: " + ", ".join(trait_texts)
+
+
+def _persona_interaction_prompt_line(persona_projection: dict[str, Any]) -> str:
+    interaction_style = persona_projection.get("interaction_style")
+    if not isinstance(interaction_style, dict):
+        raise RuntimeError("persona_projection.interaction_style must be an object")
+    speech_tone = interaction_style.get("speech_tone")
+    distance_style = interaction_style.get("distance_style")
+    confirmation_style = interaction_style.get("confirmation_style")
+    response_pace = interaction_style.get("response_pace")
+    if (
+        not isinstance(speech_tone, str)
+        or not isinstance(distance_style, str)
+        or not isinstance(confirmation_style, str)
+        or not isinstance(response_pace, str)
+    ):
+        raise RuntimeError("persona_projection.interaction_style is invalid")
+    return (
+        "対人スタイル: "
+        f"speech={speech_tone} "
+        f"distance={distance_style} "
+        f"confirmation={confirmation_style} "
+        f"pace={response_pace}"
+    )
+
+
+def _persona_preferences_prompt_line(*, title: str, preferences: Any) -> str:
+    if not isinstance(preferences, list):
+        raise RuntimeError("persona_projection preferences must be a list")
+    if not preferences:
+        return f"{title}: なし"
+    parts: list[str] = []
+    for entry in preferences:
+        if not isinstance(entry, dict):
+            raise RuntimeError("persona_projection preferences must contain only objects")
+        domain = entry.get("domain")
+        target_key = entry.get("target_key")
+        weight = entry.get("weight")
+        evidence_count = entry.get("evidence_count")
+        if (
+            not isinstance(domain, str)
+            or not isinstance(target_key, str)
+            or isinstance(weight, bool)
+            or not isinstance(weight, (int, float))
+            or not isinstance(evidence_count, int)
+            or isinstance(evidence_count, bool)
+        ):
+            raise RuntimeError("persona_projection preference entry is invalid")
+        parts.append(
+            f"{domain}:{target_key}({_signed_number_text(float(weight))}/e{evidence_count})"
+        )
+    return f"{title}: " + ", ".join(parts)
+
+
+def _persona_habits_prompt_line(persona_projection: dict[str, Any]) -> str:
+    habit_biases = persona_projection.get("habit_biases")
+    if not isinstance(habit_biases, dict):
+        raise RuntimeError("persona_projection.habit_biases must be an object")
+    preferred_action_types = _persona_string_list(
+        habit_biases.get("preferred_action_types"),
+        field_name="persona_projection.habit_biases.preferred_action_types",
+    )
+    preferred_observation_kinds = _persona_string_list(
+        habit_biases.get("preferred_observation_kinds"),
+        field_name="persona_projection.habit_biases.preferred_observation_kinds",
+    )
+    avoided_action_styles = _persona_string_list(
+        habit_biases.get("avoided_action_styles"),
+        field_name="persona_projection.habit_biases.avoided_action_styles",
+    )
+    return (
+        "習慣傾向: "
+        f"actions={_joined_or_none(preferred_action_types)} "
+        f"observations={_joined_or_none(preferred_observation_kinds)} "
+        f"avoid={_joined_or_none(avoided_action_styles)}"
+    )
+
+
+def _persona_bias_prompt_line(*, title: str, biases: Any) -> str:
+    if not isinstance(biases, list):
+        raise RuntimeError("persona_projection biases must be a list")
+    if not biases:
+        return f"{title}: 中立"
+    parts: list[str] = []
+    for entry in biases:
+        if not isinstance(entry, dict):
+            raise RuntimeError("persona_projection biases must contain only objects")
+        label = entry.get("label")
+        value = entry.get("value")
+        if (
+            not isinstance(label, str)
+            or isinstance(value, bool)
+            or not isinstance(value, (int, float))
+        ):
+            raise RuntimeError("persona_projection bias entry is invalid")
+        parts.append(f"{label}{_signed_number_text(float(value))}")
+    return f"{title}: " + ", ".join(parts)
+
+
+def _signed_number_text(value: float) -> str:
+    return f"{value:+.2f}"
+
+
+def _joined_or_none(items: list[str]) -> str:
+    if not items:
+        return "なし"
+    return ",".join(items)
+
+
+def _persona_string_list(value: Any, *, field_name: str) -> list[str]:
+    if not isinstance(value, list):
+        raise RuntimeError(f"{field_name} must be a list")
+    projected: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            raise RuntimeError(f"{field_name} must contain only strings")
+        projected.append(item)
+    return projected
 
 
 def _retrieval_prompt_line(retrieval_context: dict[str, Any]) -> str:

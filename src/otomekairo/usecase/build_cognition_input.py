@@ -14,6 +14,7 @@ from otomekairo.usecase.observation_normalization import (
     normalize_observation_source,
     normalize_trigger_reason,
 )
+from otomekairo.usecase.persona_prompt_projection import build_persona_prompt_projection
 from otomekairo.usecase.persona_projection import build_attention_snapshot, build_skill_candidates
 from otomekairo.usecase.retrieval_flow import build_retrieval_artifacts
 
@@ -1019,9 +1020,10 @@ def _self_layer_budget_projection(
 ) -> dict[str, Any]:
     goals = self_snapshot["long_term_goals"].get("goals", [])
     invariants = self_snapshot["invariants"]
+    persona_projection = build_persona_prompt_projection(selection_profile=selection_profile)
     return {
         "current_emotion_label": str(self_snapshot["current_emotion"].get("primary_label", "")),
-        "speech_tone": str(selection_profile["interaction_style"].get("speech_tone", "")),
+        "persona_projection": persona_projection,
         "goal_titles": [
             str(goal.get("title"))
             for goal in goals[:3]
