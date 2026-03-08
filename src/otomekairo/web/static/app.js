@@ -681,6 +681,10 @@
         stopMicrophoneRecording();
         return;
       }
+      const unavailableReason = getMicrophoneInputUnavailableReason();
+      if (unavailableReason !== null) {
+        throw new Error(unavailableReason);
+      }
       await startMicrophoneRecording();
     } catch (error) {
       appendError(`音声入力に失敗しました: ${error.message}`);
@@ -689,8 +693,9 @@
   }
 
   async function startMicrophoneRecording() {
-    if (!isMicrophoneInputReady()) {
-      throw new Error("マイク入力または STT が無効です");
+    const unavailableReason = getMicrophoneInputUnavailableReason();
+    if (unavailableReason !== null) {
+      throw new Error(unavailableReason);
     }
     if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== "function") {
       throw new Error("ブラウザが録音に対応していません");
@@ -964,22 +969,40 @@
 
   function updateMicrophoneControls() {
     const isRecording = activeMicrophoneRecorder !== null;
+    const unavailableReason = isRecording ? null : getMicrophoneInputUnavailableReason();
     microphoneButton.classList.toggle("recording", isRecording);
-    microphoneButton.disabled = microphoneUploadInFlight || (!isRecording && !isMicrophoneInputReady());
-    microphoneButton.title = isRecording ? "録音停止" : "マイク";
-    microphoneButton.setAttribute("aria-label", isRecording ? "録音停止" : "マイク");
+    microphoneButton.disabled = microphoneUploadInFlight;
+    microphoneButton.title = isRecording
+      ? "録音停止"
+      : unavailableReason === null
+        ? "マイク"
+        : `マイク: ${unavailableReason}`;
+    microphoneButton.setAttribute(
+      "aria-label",
+      isRecording
+        ? "録音停止"
+        : unavailableReason === null
+          ? "マイク"
+          : `マイク: ${unavailableReason}`,
+    );
   }
 
-  function isMicrophoneInputReady() {
+  // Block: Microphone availability
+  function getMicrophoneInputUnavailableReason() {
     if (!isObject(latestEditorSnapshot) || !isObject(latestEditorSnapshot.runtime_projection)) {
-      return false;
+      return "設定読込前です";
     }
     const effectiveSettings = latestEditorSnapshot.runtime_projection.effective_settings;
     if (!isObject(effectiveSettings)) {
-      return false;
+      return "設定投影が不正です";
     }
-    return effectiveSettings["sensors.microphone.enabled"] === true
-      && effectiveSettings["speech.stt.enabled"] === true;
+    if (effectiveSettings["sensors.microphone.enabled"] !== true) {
+      return "設定でマイク入力が無効です";
+    }
+    if (effectiveSettings["speech.stt.enabled"] !== true) {
+      return "設定で音声認識が無効です";
+    }
+    return null;
   }
 
   // Block: Settings editor rendering

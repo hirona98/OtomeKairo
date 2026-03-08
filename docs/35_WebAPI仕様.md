@@ -136,6 +136,7 @@ flowchart LR
 - current の設定画面は `tmp/CocoroConsole` の設定ウインドウをベースにしてよい
 - ブラウザUIの入力手段は、テキスト入力、録音ボタンによる音声転写、`Cam` による静止画添付に固定する
 - current の録音ボタンは開始/停止の明示操作で音声を取り、`POST /api/microphone/input` へ raw audio body を送り、そのまま `microphone_message` として runtime に enqueue してよい
+- current の録音ボタンは、`sensors.microphone.enabled` や `speech.stt.enabled` が不足している場合でも黙って無効化せず、押下時に不足条件を UI へ明示する
 - `Cam` は enabled な `camera_connections` から 1 台を明示選択し、`POST /api/camera/capture` へ `camera_connection_id` を送って静止画を取得し、返った画像をサムネイル表示し、次の `POST /api/chat/input` へ添付してよい
 - current の `Cam` ボタンは `POST /api/camera/observe` ではなく `POST /api/camera/capture` だけを呼ぶ
 - `message` に `audio_url` がある場合は、`GET /audio/{audio_filename}` で取得した音声を再生してよい
