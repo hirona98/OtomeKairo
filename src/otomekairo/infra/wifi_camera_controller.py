@@ -21,7 +21,7 @@ from otomekairo.infra.wifi_camera_common import (
 
 
 # Block: PTZ constants
-MOVE_DURATION_SECONDS = 0.35
+MOVE_DURATION_SECONDS = 0.70
 MOVE_SPEED = 0.6
 
 
