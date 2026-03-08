@@ -20,12 +20,22 @@
 - 固定しないのは、Python のクラス名、Pydantic モデル名、OpenAPI の自動生成細部である
 - 固定しないのは、将来追加する未使用フィールドや後段の拡張イベント種別である
 
+<!-- Block: Out Of Scope -->
+## このドキュメントに書かないこと
+
+- HTTP path、method、主要ステータス、`SSE` 接続方式は `docs/35_WebAPI仕様.md` を正本とする
+- ランタイムの処理順、保存順、判断規則は `docs/31_ランタイム処理仕様.md` を正本とする
+- SQLite のテーブル名、カラム名、制約は `docs/34_SQLite論理スキーマ.md` を正本とする
+- 入力重複、`cancel`、`SSE` 保持運用は `docs/38_入力ストリーム運用仕様.md` を正本とする
+- JSON shape に影響しない一時メモや current 実装の細かな経路説明は、このドキュメントへ入れない
+
 <!-- Block: Read Guide -->
 ## target と current の読み分け
 
 - JSON キー名と shape の固定は target/current 共通の正本として読む
 - `current`、`browser_chat`、`status api`、`settings UI` に紐づく補足は、現在の実装で実際に出入りする shape を示す
 - 後続の `初期実装` 補足は、特に断りがない限り current の `browser_chat` 実装を指す
+- current 補足は shape や固定語彙に効くものだけを残し、処理意味そのものは他の正本へ逃がす
 
 <!-- Block: Common Rules -->
 ## 共通ルール
@@ -566,7 +576,6 @@
 - `camera_connection_id` は、`look` 提案と `control_camera_look` の対象指定に使う
 - `display_name` は、`LLM` が候補を見分けるための短い表示名である
 - `presets[]` の各要素は、少なくとも `preset_id` と `preset_name` を持つ
-- current 実装では、`camera_candidates` は `camera_connections[].is_enabled=true` の順序付き一覧を camera adapter が live に解決して構成する
 
 <!-- Block: Memory Bundle -->
 ### `memory_bundle`
@@ -590,7 +599,6 @@
 - `context assembler` は、`memory_bundle` の各要素に人間可読な `*_utc_text`、`*_local_text`、`relative_time_text` を付与してよい
 - 初期実装では、`working_memory_items` に `memory_kind=summary`、`semantic_items` に `memory_kind=fact`、`recent_event_window` に active memory preset の `retrieval_profile.recent_window_limit` 件までの `searchable` な `events` を入れてよい
 - 初期実装では、`episodic_items.memory_kind` に `episodic_event`、`affective_items.memory_kind` に `long_mood_state` または `event_affect`、`relationship_items.memory_kind` に `relation` または `preference`、`reflection_items.memory_kind` に `reflection_note` を使ってよい
-- 初期実装では、`current_observation.observation_text` と、必要なら `query` / `source_task_id` への一致を使い、関連しない要素を `memory_bundle` から落としてよい
 - 初期実装の `reflection_items[].payload` は、少なくとも `what_happened` と `event_summaries` を持ち、必要なら `what_worked`、`what_failed`、`retry_hint`、`avoid_pattern`、`reflection_seed_ref`、`reflection_seed`、`action_outcomes` を持ってよい
 
 ### `reflection_note.payload`
@@ -737,8 +745,6 @@
 - `estimated_layer_tokens` は、同じ固定キーを持つ `integer` マップである
 - `estimated_total_tokens` は、`estimated_layer_tokens` の合計である `integer` に固定する
 - `trimmed_memory_item_refs` は、文脈予算に収めるために落とした `memory_state:*` / `event:*` / `event_affect:*` / `preference:*` の参照配列である
-- current 実装では、`memory` 層の上限は `memory.max_inject_tokens` と `runtime.context_budget_tokens` の両方で拘束する
-- current 実装では、`output_contract` は prompt 側に予約する予算であり、その本文自体は `cognition_input` の JSON へ入れない
 
 ### `retrieval_candidates_json`
 
@@ -896,7 +902,6 @@
 - 各 `*_score` と `total_score` は、`0.0..1.0` の `number` に固定する
 - `personality_fit_score` は、必要なら候補ごとの `persona_consistency_score` を元に計算してよい
 - 各 `*_score` は、比較前に同じ `0.0..1.0` 尺度へ正規化済みでなければならない
-- 初期実装では、`attention_score_breakdown` の比較結果を `attention_snapshot.primary_focus`、`secondary_focuses`、`revisit_queue` へ写してよい
 - `attention_score_breakdown` は永続化前提の正本ではなく、その短周期の候補比較ごとに再計算する
 
 <!-- Block: Self Initiated Score Breakdown -->
@@ -922,8 +927,6 @@
 - `hard_gate_passed` は、`boolean` に固定する
 - 各 `*_fit` と `total_score` は、`0.0..1.0` の `number` に固定する
 - 各 `*_fit` は、比較前に同じ `0.0..1.0` 尺度へ正規化済みでなければならない
-- 初期実装では、`self_initiated_score_breakdown` のうち `hard_gate_passed=true` かつ `total_score >= 0.30` の候補を `skill_candidate_entry` へ写してよい
-- 初期実装では、自発起動そのものの閾値は `total_score >= 0.55` を維持してよい
 - `self_initiated_score_breakdown` は永続化前提の正本ではなく、その短周期の比較ごとに再計算する
 
 <!-- Block: Action Candidate Score -->
@@ -949,7 +952,6 @@
 - `proposal_id` は、比較対象の `action_proposal.proposal_id` と同じ `string` である
 - `hard_gate_passed` は、`boolean` に固定する
 - 各 `*_score` と `total_score` は、`0.0..1.0` の `number` に固定する
-- `personality_fit_score` は、初期実装では `persona_consistency_score` の `trait_alignment` と `style_alignment` を `0.50 : 0.50` で合成してよい
 - `priority_hint_score` は、`proposal.priority` をそのまま信じるためではなく、同程度候補の補助比較にだけ使う
 - 各 `*_score` は、比較前に同じ `0.0..1.0` 尺度へ正規化済みでなければならない
 - `action_candidate_score` は永続化前提の正本ではなく、その短周期の候補比較ごとに再計算する
@@ -991,12 +993,10 @@
 - `cognition_result` は、短周期の内部で使う構造化された認知結果である
 - `cognition_result` は、認知層が一度に返す JSON オブジェクトであり、後から補完前提で分割しない
 - 必須項目は `intention_summary`、`decision_reason`、`action_proposals`、`step_hints`、`speech_draft`、`memory_focus`、`reflection_seed` である
-- current 実装では、`LiteLLM` への `response_format` を strict な `json_schema` に固定し、この節の shape を provider 呼び出し時点でも拘束する
 - `action_proposals` と `step_hints` は配列に固定し、候補がない場合も空配列 `[]` を使う
 - current の `browser_chat` では、`action_proposals` の各要素は少なくとも `action_type` と `priority` を持つ
 - current の `browser_chat` では、`action_type` は `speak`、`browse`、`notify`、`look`、`wait` のいずれかだけを許可する
 - current の `browser_chat` では、`priority` は `0.0..1.0` の `number` に固定する
-- current の `action validator` では、`priority >= 0.80` を緊急ヒントとして使ってよい
 - current の `browser_chat` では、`speak` と `notify` のとき `target_channel=\"browser_chat\"` を必須とする
 - current の `browser_chat` では、`browse` のとき `query` に非空の検索文字列を必須とする
 - current の `browser_chat` では、`look` のとき `camera_connection_id` と、`direction` / `preset_id` / `preset_name` のいずれかを必須とする
@@ -1048,7 +1048,6 @@
 - `evidence_event_ids` は、その提案の根拠に採用した `event_id` を重複なしで集約した配列であり、`revisions.evidence_event_ids_json` の入力に使う
 - `preference_promotions` と `aversion_promotions` は、`personality_preference_entry` の配列である
 - `habit_updates` は、`preferred_action_types`、`preferred_observation_kinds`、`avoided_action_styles` のうち変更対象だけを持つ部分オブジェクトでよい
-- 初期実装の `preference_promotions` / `aversion_promotions` では、少なくとも `domain=action_type` と `domain=observation_kind` を使ってよい
 - 閾値未満のときは、`trait_deltas=[]`、`preference_promotions=[]`、`aversion_promotions=[]`、`habit_updates={}`、`evidence_event_ids=[]` の empty proposal を返してよい
 
 <!-- Block: Persona Updates -->
@@ -1085,7 +1084,6 @@
 - `evidence_summary` は、監査と `revisions` の理由づけに使う短い要約である
 - `base_personality_updated_at` は、適用開始時の `self_state.personality_updated_at` と一致しなければならない
 - 適用時に `base_personality_updated_at` が現在の `self_state.personality_updated_at` と一致しない場合、その `persona_updates` は stale として棄却し、後続の `write_memory` で再生成する
-- 初期実装では、`preference_promotions` と `aversion_promotions` の各 `weight` を現在値から `0.15` 以内だけ動かした値として返してよい
 
 <!-- Block: Memory Write Group -->
 ## 記憶更新の内部 JSON
@@ -1301,7 +1299,6 @@
 
 - `settings_editor_state.system_values_json` は、設定UIで保持するシステム設定だけを持つ完全オブジェクトである
 - キーは `runtime.idle_tick_ms`、`runtime.long_cycle_min_interval_ms`、`sensors.microphone.enabled`、`sensors.camera.enabled`、`integrations.sns.enabled`、`integrations.notify_route`、`integrations.discord.bot_token`、`integrations.discord.channel_id` に固定する
-- current の `browser_chat` 実装で直接使っているのは主に `runtime.*`、`sensors.camera.enabled`、`sensors.microphone.enabled`、`camera_connections` であり、`integrations.*` は保存対象だが未接続の項目を含む
 
 <!-- Block: Settings Editor State -->
 ### `settings editor api.editor_state`
@@ -1343,7 +1340,6 @@
 
 - `character_presets.payload_json` は `character.*`、`speech.tts.*`、`speech.stt.*` の固定形を持つ
 - 通知経路と Discord 認証情報は含めない
-- `speech.stt.*` は設定UIと `runtime_settings` に反映し、current の `browser_chat` では `POST /api/microphone/input` の `STT` 実行条件にも使う
 
 <!-- Block: Behavior Preset Payload -->
 ### `behavior_presets.payload_json`
@@ -1495,8 +1491,6 @@
 
 - `camera_connection_entry` は、設定UI API が返すカメラ接続一覧の共通要素である
 - `is_enabled=true` の行が AI 利用候補であり、複数件を許可する
-- current の runtime は `is_enabled=true` の一覧を camera adapter へ渡して `camera_candidates` を組み、`look` では `camera_connection_id` を必須にして候補から 1 台を選ぶ
-- current の `camera_candidates[].presets[]` がある場合、`look` は `preset_name` / `preset_id` にその候補の値だけを使ってよい
 
 <!-- Block: UI Outbound -->
 ### `ui_outbound_events.payload_json`
@@ -1609,7 +1603,6 @@
 ### `action_history.command_json`
 
 - `action_history.command_json` は、その行動で実行しようとした命令の最小記録である
-- current 実装では、ブラウザ向けの UI 応答命令と、`browse` の task 再開命令をこの形で保持する
 
 ```json
 {
@@ -1648,7 +1641,6 @@
 ### `action_history.observed_effects_json`
 
 - `action_history.observed_effects_json` は、その行動の直後に観測した最小結果である
-- current 実装では、実際に UI へ流したイベント種別と主要 ID だけを保持する
 
 ```json
 {
