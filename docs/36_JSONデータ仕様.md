@@ -483,6 +483,41 @@
 - `revisit_queue` は、`attention_focus_entry` に `delta_from_primary` を追加した配列に固定する
 - `updated_at` は、その断面の基準時刻を示す `unix ms` の `integer` である
 
+<!-- Block: Policy Snapshot -->
+### `policy_snapshot`
+
+```json
+{
+  "system_policy": {
+    "respect_invariants": true,
+    "allow_direct_state_write": false
+  },
+  "runtime_policy": {
+    "camera_enabled": true,
+    "camera_available": true,
+    "camera_candidate_count": 2,
+    "microphone_enabled": true
+  },
+  "input_evaluation": {
+    "input_role": "dialogue",
+    "attention_priority": "high",
+    "factuality": "unverified_user_report",
+    "should_reply_in_channel": true,
+    "can_override_persona": false,
+    "must_preserve_invariants": true
+  }
+}
+```
+
+- `policy_snapshot` は、短周期の hard gate と入力評価で使う断面である
+- 必須項目は `system_policy`、`runtime_policy`、`input_evaluation` である
+- `system_policy.respect_invariants` と `system_policy.allow_direct_state_write` は `boolean` に固定する
+- `runtime_policy.camera_enabled`、`runtime_policy.camera_available`、`runtime_policy.microphone_enabled` は `boolean`、`runtime_policy.camera_candidate_count` は `integer` に固定する
+- `input_evaluation.input_role` は、少なくとも `dialogue`、`instruction`、`task_result`、`observation`、`followup_observation`、`self_maintenance` を区別する
+- `input_evaluation.attention_priority` は、少なくとも `high`、`medium`、`low` を区別する
+- `input_evaluation.factuality` は、少なくとも `unverified_user_report`、`external_tool_result`、`runtime_observation`、`internal_signal` を区別する
+- `input_evaluation.should_reply_in_channel`、`input_evaluation.can_override_persona`、`input_evaluation.must_preserve_invariants` は `boolean` に固定する
+
 <!-- Block: Skill Candidate Entry -->
 ### `skill_candidate_entry`
 
@@ -670,6 +705,41 @@
 - `limits.semantic_candidate_top_k` は、意味検索候補の上限である
 - `selected` は、少なくとも `selected_counts`、`selected_refs`、`selection_trace` を持つ
 
+<!-- Block: Context Budget -->
+### `context_budget`
+
+```json
+{
+  "total_limit": 8192,
+  "layer_limits": {
+    "self": 2305,
+    "behavior": 1268,
+    "situation": 2190,
+    "memory": 1200,
+    "output_contract": 1229
+  },
+  "estimated_layer_tokens": {
+    "self": 1480,
+    "behavior": 420,
+    "situation": 1730,
+    "memory": 980,
+    "output_contract": 1229
+  },
+  "estimated_total_tokens": 5839,
+  "trimmed_memory_item_refs": ["event:evt_002"]
+}
+```
+
+- `context_budget` は、短周期の `context assembler` が使う文脈予算の実績断面である
+- 必須項目は `total_limit`、`layer_limits`、`estimated_layer_tokens`、`estimated_total_tokens`、`trimmed_memory_item_refs` である
+- `total_limit` は、`runtime.context_budget_tokens` に由来する `integer` である
+- `layer_limits` は、`self`、`behavior`、`situation`、`memory`、`output_contract` を持つ `integer` マップである
+- `estimated_layer_tokens` は、同じ固定キーを持つ `integer` マップである
+- `estimated_total_tokens` は、`estimated_layer_tokens` の合計である `integer` に固定する
+- `trimmed_memory_item_refs` は、文脈予算に収めるために落とした `memory_state:*` / `event:*` / `event_affect:*` / `preference:*` の参照配列である
+- current 実装では、`memory` 層の上限は `memory.max_inject_tokens` と `runtime.context_budget_tokens` の両方で拘束する
+- current 実装では、`output_contract` は prompt 側に予約する予算であり、その本文自体は `cognition_input` の JSON へ入れない
+
 ### `retrieval_candidates_json`
 
 ```json
@@ -734,6 +804,25 @@
 - `retrieval_selected_json` は、`retrieval_runs.selected_json` に保存する最終選別結果の最小形である
 - 必須項目は `selected_counts`、`selected_refs`、`selection_trace` である
 - `selection_trace` の各要素は、少なくとも `slot`、`item_ref`、`score`、`reason_codes` を持つ
+
+<!-- Block: Completion Settings -->
+### `completion_settings`
+
+```json
+{
+  "model": "openai/gpt-5-mini",
+  "api_key": "",
+  "base_url": "",
+  "temperature": 0.7,
+  "max_output_tokens": 4096
+}
+```
+
+- `completion_settings` は、`CognitionRequest` が `LLM` クライアントへ渡す runtime-only の設定断面である
+- 必須項目は `model`、`api_key`、`base_url`、`temperature`、`max_output_tokens` である
+- `model`、`api_key`、`base_url` は `string`、`temperature` は `number`、`max_output_tokens` は `integer` に固定する
+- `completion_settings` は `effective_settings` から再構成する内部オブジェクトであり、`cognition_input` の JSON shape へ混ぜない
+- `api_key` と `base_url` は prompt 材料ではなく、`LLM` adapter の transport 設定としてだけ使う
 
 ### `last_persona_update_summary`
 

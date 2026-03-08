@@ -22,19 +22,19 @@ class LiteLLMCognitionClient:
 
     # Block: Structured completion call
     def generate_result(self, request: CognitionRequest) -> CognitionResponse:
-        context_budget = request.cognition_input["context_budget"]
+        completion_settings = request.completion_settings
         completion_arguments = {
-            "model": str(context_budget["model"]),
-            "base_model": str(context_budget["model"]),
+            "model": str(completion_settings["model"]),
+            "base_model": str(completion_settings["model"]),
             "messages": _build_messages(request),
-            "temperature": float(context_budget["temperature"]),
-            "max_tokens": int(context_budget["max_output_tokens"]),
+            "temperature": float(completion_settings["temperature"]),
+            "max_tokens": int(completion_settings["max_output_tokens"]),
             "response_format": _cognition_response_format(),
         }
-        api_key = str(context_budget["api_key"])
+        api_key = str(completion_settings["api_key"])
         if api_key:
             completion_arguments["api_key"] = api_key
-        api_base = str(context_budget["base_url"])
+        api_base = str(completion_settings["base_url"])
         if api_base:
             completion_arguments["api_base"] = api_base
         response = self._litellm.completion(
@@ -53,17 +53,23 @@ def _import_litellm_module() -> Any:
 # Block: Prompt construction
 def _build_messages(request: CognitionRequest) -> list[dict[str, Any]]:
     cognition_input = request.cognition_input
+    time_context = cognition_input["time_context"]
     self_snapshot = cognition_input["self_snapshot"]
     behavior_settings = cognition_input["behavior_settings"]
     selection_profile = cognition_input["selection_profile"]
+    body_snapshot = cognition_input["body_snapshot"]
     current_observation = cognition_input["current_observation"]
+    drive_snapshot = cognition_input["drive_snapshot"]
     memory_bundle = cognition_input["memory_bundle"]
     retrieval_context = cognition_input["retrieval_context"]
+    task_snapshot = cognition_input["task_snapshot"]
     world_snapshot = cognition_input["world_snapshot"]
     attention_snapshot = cognition_input["attention_snapshot"]
     camera_candidates = cognition_input["camera_candidates"]
     skill_candidates = cognition_input["skill_candidates"]
-    runtime_policy = cognition_input["policy_snapshot"]["runtime_policy"]
+    policy_snapshot = cognition_input["policy_snapshot"]
+    runtime_policy = policy_snapshot["runtime_policy"]
+    input_evaluation = policy_snapshot["input_evaluation"]
     system_prompt = "\n".join(
         [
             "あなたは OtomeKairo の人格中枢として振る舞う。",
@@ -98,6 +104,8 @@ def _build_messages(request: CognitionRequest) -> list[dict[str, Any]]:
             "camera_candidates にない camera_connection_id は使わない。",
             "preset_name を返す場合は camera_candidates[].presets に列挙された名前をそのまま使う。",
             "カメラ状態の enabled または available が false のときは、look を提案せず speak で状態を伝える。",
+            "入力評価が dialogue 以外のときは、ユーザーへの即時発話を義務とみなさず、必要がなければ wait を選んでよい。",
+            "入力評価が unverified_user_report のときは、入力内容を確定事実として扱わず、人格・記憶・観測と整合させて判断する。",
             f"不変条件: {_format_invariants(self_snapshot['invariants'])}",
             _persona_update_prompt_line(self_snapshot),
         ]
@@ -107,11 +115,16 @@ def _build_messages(request: CognitionRequest) -> list[dict[str, Any]]:
             f"入力種別: {request.input_kind}",
             f"受け取った内容: {current_observation['observation_text']}",
             f"受信時刻: {current_observation['captured_at_local_text']} ({current_observation['relative_time_text']})",
+            _time_context_prompt_line(time_context),
             _attachment_prompt_line(current_observation),
             _network_result_prompt_line(current_observation),
+            _body_snapshot_prompt_line(body_snapshot),
+            _task_snapshot_prompt_line(task_snapshot),
+            _drive_snapshot_prompt_line(drive_snapshot),
             f"関係性の優先対象: {_format_relationship_priorities(selection_profile['relationship_priorities'])}",
             f"長期目標: {_format_goals(self_snapshot['long_term_goals'])}",
             _attention_prompt_line(attention_snapshot),
+            _input_evaluation_prompt_line(input_evaluation),
             _skill_candidates_prompt_line(skill_candidates),
             _retrieval_prompt_line(retrieval_context),
             _memory_bundle_prompt_line(memory_bundle),
@@ -482,8 +495,35 @@ def _memory_bundle_prompt_line(memory_bundle: dict[str, Any]) -> str:
         value = memory_bundle.get(key)
         if not isinstance(value, list):
             raise RuntimeError(f"memory_bundle.{key} must be a list")
-        parts.append(f"{key}={len(value)}")
-    return "想起断面: " + " ".join(parts)
+        parts.append(f"{key}={_memory_slot_prompt_text(key, value)}")
+    return "想起断面: " + " | ".join(parts)
+
+
+def _memory_slot_prompt_text(slot_name: str, entries: list[dict[str, Any]]) -> str:
+    if not entries:
+        return "なし"
+    texts: list[str] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise RuntimeError(f"memory_bundle.{slot_name} must contain only objects")
+        if slot_name == "recent_event_window":
+            texts.append(_memory_prompt_text(str(entry["summary_text"])))
+            continue
+        payload = entry.get("payload")
+        if slot_name == "reflection_items" and isinstance(payload, dict):
+            what_happened = payload.get("what_happened")
+            if isinstance(what_happened, str) and what_happened:
+                texts.append(_memory_prompt_text(what_happened))
+                continue
+        texts.append(_memory_prompt_text(str(entry["body_text"])))
+    return " / ".join(texts)
+
+
+def _memory_prompt_text(text: str) -> str:
+    normalized = " ".join(text.split())
+    if len(normalized) <= 120:
+        return normalized
+    return normalized[:119] + "…"
 
 
 def _attention_prompt_line(attention_snapshot: dict[str, Any]) -> str:
@@ -527,6 +567,135 @@ def _skill_candidates_prompt_line(skill_candidates: list[dict[str, Any]]) -> str
             f"{skill_id}:{initiative_kind}:{float(fit_score):.2f}:{action_text}"
         )
     return "自然な次行動候補: " + " / ".join(formatted_candidates)
+
+
+# Block: Time context formatting
+def _time_context_prompt_line(time_context: dict[str, Any]) -> str:
+    current_time_local_text = time_context.get("current_time_local_text")
+    timezone_name = time_context.get("timezone_name")
+    if not isinstance(current_time_local_text, str) or not current_time_local_text:
+        raise RuntimeError("cognition_input.time_context.current_time_local_text is invalid")
+    if not isinstance(timezone_name, str) or not timezone_name:
+        raise RuntimeError("cognition_input.time_context.timezone_name is invalid")
+    return f"現在時刻: {current_time_local_text} ({timezone_name})"
+
+
+# Block: Body snapshot formatting
+def _body_snapshot_prompt_line(body_snapshot: dict[str, Any]) -> str:
+    posture = body_snapshot.get("posture")
+    sensor_availability = body_snapshot.get("sensor_availability")
+    load = body_snapshot.get("load")
+    if not isinstance(posture, dict) or not isinstance(sensor_availability, dict) or not isinstance(load, dict):
+        raise RuntimeError("cognition_input.body_snapshot is invalid")
+    posture_mode = posture.get("mode")
+    camera_available = sensor_availability.get("camera")
+    microphone_available = sensor_availability.get("microphone")
+    task_queue_pressure = load.get("task_queue_pressure")
+    interaction_load = load.get("interaction_load")
+    if (
+        not isinstance(posture_mode, str)
+        or not posture_mode
+        or not isinstance(camera_available, bool)
+        or not isinstance(microphone_available, bool)
+        or isinstance(task_queue_pressure, bool)
+        or not isinstance(task_queue_pressure, (int, float))
+        or isinstance(interaction_load, bool)
+        or not isinstance(interaction_load, (int, float))
+    ):
+        raise RuntimeError("cognition_input.body_snapshot is invalid")
+    return (
+        "身体状態: "
+        f"posture={posture_mode} "
+        f"camera={camera_available} "
+        f"microphone={microphone_available} "
+        f"task_queue_pressure={float(task_queue_pressure):.2f} "
+        f"interaction_load={float(interaction_load):.2f}"
+    )
+
+
+# Block: Task snapshot formatting
+def _task_snapshot_prompt_line(task_snapshot: dict[str, Any]) -> str:
+    active_tasks = task_snapshot.get("active_tasks")
+    waiting_external_tasks = task_snapshot.get("waiting_external_tasks")
+    if not isinstance(active_tasks, list) or not isinstance(waiting_external_tasks, list):
+        raise RuntimeError("cognition_input.task_snapshot is invalid")
+    active_summary = _task_entries_prompt_text(active_tasks)
+    waiting_summary = _task_entries_prompt_text(waiting_external_tasks)
+    return f"タスク状態: active={active_summary} waiting={waiting_summary}"
+
+
+def _task_entries_prompt_text(task_entries: list[dict[str, Any]]) -> str:
+    if not task_entries:
+        return "なし"
+    summaries: list[str] = []
+    for task_entry in task_entries[:3]:
+        if not isinstance(task_entry, dict):
+            raise RuntimeError("cognition_input.task_snapshot must contain only objects")
+        task_kind = task_entry.get("task_kind")
+        goal_hint = task_entry.get("goal_hint")
+        relative_time_text = task_entry.get("relative_time_text")
+        if (
+            not isinstance(task_kind, str)
+            or not task_kind
+            or not isinstance(goal_hint, str)
+            or not isinstance(relative_time_text, str)
+        ):
+            raise RuntimeError("cognition_input.task_snapshot entry is invalid")
+        summaries.append(
+            f"{task_kind}:{_memory_prompt_text(goal_hint)}({relative_time_text})"
+        )
+    return " / ".join(summaries)
+
+
+# Block: Drive snapshot formatting
+def _drive_snapshot_prompt_line(drive_snapshot: dict[str, Any]) -> str:
+    priority_effects = drive_snapshot.get("priority_effects")
+    if not isinstance(priority_effects, dict):
+        raise RuntimeError("cognition_input.drive_snapshot.priority_effects is invalid")
+    task_progress_bias = priority_effects.get("task_progress_bias")
+    exploration_bias = priority_effects.get("exploration_bias")
+    maintenance_bias = priority_effects.get("maintenance_bias")
+    social_bias = priority_effects.get("social_bias")
+    if (
+        isinstance(task_progress_bias, bool)
+        or not isinstance(task_progress_bias, (int, float))
+        or isinstance(exploration_bias, bool)
+        or not isinstance(exploration_bias, (int, float))
+        or isinstance(maintenance_bias, bool)
+        or not isinstance(maintenance_bias, (int, float))
+        or isinstance(social_bias, bool)
+        or not isinstance(social_bias, (int, float))
+    ):
+        raise RuntimeError("cognition_input.drive_snapshot.priority_effects is invalid")
+    return (
+        "内部駆動: "
+        f"task={float(task_progress_bias):.2f} "
+        f"explore={float(exploration_bias):.2f} "
+        f"maintain={float(maintenance_bias):.2f} "
+        f"social={float(social_bias):.2f}"
+    )
+
+
+# Block: Input evaluation formatting
+def _input_evaluation_prompt_line(input_evaluation: dict[str, Any]) -> str:
+    input_role = input_evaluation.get("input_role")
+    attention_priority = input_evaluation.get("attention_priority")
+    factuality = input_evaluation.get("factuality")
+    should_reply_in_channel = input_evaluation.get("should_reply_in_channel")
+    if (
+        not isinstance(input_role, str)
+        or not isinstance(attention_priority, str)
+        or not isinstance(factuality, str)
+        or not isinstance(should_reply_in_channel, bool)
+    ):
+        raise RuntimeError("cognition_input.policy_snapshot.input_evaluation is invalid")
+    return (
+        "入力評価: "
+        f"role={input_role} "
+        f"priority={attention_priority} "
+        f"factuality={factuality} "
+        f"reply_required={should_reply_in_channel}"
+    )
 
 
 def _persona_update_prompt_line(self_snapshot: dict[str, Any]) -> str:
