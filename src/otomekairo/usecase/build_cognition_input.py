@@ -143,7 +143,8 @@ def build_cognition_input(
     )
     retrieval_selected_json = _build_retrieval_selected_json(
         memory_bundle=trimmed_memory_bundle,
-        selection_trace=_required_selection_trace(retrieval_artifacts.selected_json),
+        source_selected_json=retrieval_artifacts.selected_json,
+        trimmed_memory_item_refs=trimmed_memory_item_refs,
     )
     retrieval_context = {
         "plan": retrieval_artifacts.retrieval_plan,
@@ -925,9 +926,21 @@ def _pop_low_priority_memory_item(memory_bundle: dict[str, Any]) -> str | None:
 def _build_retrieval_selected_json(
     *,
     memory_bundle: dict[str, Any],
-    selection_trace: list[dict[str, Any]],
+    source_selected_json: dict[str, Any],
+    trimmed_memory_item_refs: list[str],
 ) -> dict[str, Any]:
     kept_refs = _selected_item_refs(memory_bundle=memory_bundle)
+    filtered_selection_trace = [
+        trace_entry
+        for trace_entry in _required_selection_trace(source_selected_json)
+        if isinstance(trace_entry, dict) and trace_entry.get("item_ref") in kept_refs
+    ]
+    collector_counts = _selection_trace_collector_counts(filtered_selection_trace)
+    selector_summary = _build_selector_summary(
+        source_selected_json=source_selected_json,
+        selected_count=len(filtered_selection_trace),
+        trimmed_memory_item_refs=trimmed_memory_item_refs,
+    )
     return {
         "selected_counts": {
             "working_memory_items": len(memory_bundle["working_memory_items"]),
@@ -968,11 +981,10 @@ def _build_retrieval_selected_json(
                 for item in memory_bundle["recent_event_window"]
             ],
         },
-        "selection_trace": [
-            trace_entry
-            for trace_entry in selection_trace
-            if isinstance(trace_entry, dict) and trace_entry.get("item_ref") in kept_refs
-        ],
+        "selection_trace": filtered_selection_trace,
+        **({"collector_counts": collector_counts} if collector_counts else {}),
+        **({"selector_summary": selector_summary} if selector_summary else {}),
+        **({"trimmed_item_refs": trimmed_memory_item_refs} if trimmed_memory_item_refs else {}),
     }
 
 
@@ -1011,6 +1023,49 @@ def _required_selection_trace(selected_json: dict[str, Any]) -> list[dict[str, A
     if not isinstance(selection_trace, list):
         raise RuntimeError("retrieval selected_json.selection_trace must be list")
     return selection_trace
+
+
+def _selection_trace_collector_counts(selection_trace: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for trace_entry in selection_trace:
+        collector_names = trace_entry.get("collector_names")
+        if not isinstance(collector_names, list):
+            continue
+        for collector_name in collector_names:
+            if not isinstance(collector_name, str) or not collector_name:
+                continue
+            counts[collector_name] = counts.get(collector_name, 0) + 1
+    return counts
+
+
+def _build_selector_summary(
+    *,
+    source_selected_json: dict[str, Any],
+    selected_count: int,
+    trimmed_memory_item_refs: list[str],
+) -> dict[str, Any]:
+    raw_summary = source_selected_json.get("selector_summary")
+    if not isinstance(raw_summary, dict):
+        if not trimmed_memory_item_refs:
+            return {}
+        return {
+            "selected_candidate_count": selected_count,
+            "trimmed_candidate_count": len(trimmed_memory_item_refs),
+        }
+    summary: dict[str, Any] = {}
+    for key in (
+        "raw_candidate_count",
+        "merged_candidate_count",
+        "duplicate_hit_count",
+        "reserve_candidate_count",
+    ):
+        value = raw_summary.get(key)
+        if isinstance(value, int) and not isinstance(value, bool):
+            summary[key] = value
+    summary["selected_candidate_count"] = selected_count
+    if trimmed_memory_item_refs:
+        summary["trimmed_candidate_count"] = len(trimmed_memory_item_refs)
+    return summary
 
 
 def _self_layer_budget_projection(

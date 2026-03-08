@@ -657,6 +657,19 @@
       "explicit_years": [],
       "has_explicit_time_hint": false
     },
+    "focus_refs": {
+      "source_task_id": null,
+      "query": null,
+      "active_task_ids": [],
+      "active_goal_hints": [],
+      "waiting_goal_hints": []
+    },
+    "collector_names": [
+      "recent_event_window",
+      "associative_memory",
+      "episodic_memory",
+      "relationship_focus"
+    ],
     "profile": {
       "semantic_top_k": 8,
       "recent_window_limit": 5,
@@ -701,7 +714,18 @@
         "score": 1.8,
         "reason_codes": ["matched_query", "mode_priority", "profile_bias"]
       }
-    ]
+    ],
+    "collector_counts": {
+      "associative_memory": 1,
+      "task_focus": 1
+    },
+    "selector_summary": {
+      "raw_candidate_count": 9,
+      "merged_candidate_count": 7,
+      "selected_candidate_count": 4,
+      "duplicate_hit_count": 2,
+      "reserve_candidate_count": 1
+    }
   }
 }
 ```
@@ -709,9 +733,11 @@
 - `retrieval_context` は、短周期の内部でだけ使う `RetrievalPlan` と選別結果の要約である
 - 必須項目は `plan` と `selected` である
 - `plan` は、少なくとも `mode`、`queries`、`time_hint`、`profile`、`limits` を持つ
+- `plan.focus_refs` と `plan.collector_names` は、current 実装では追加で持ってよい
 - `profile` は、active memory preset の `retrieval_profile` をそのまま持つ
 - `limits.semantic_candidate_top_k` は、意味検索候補の上限である
 - `selected` は、少なくとも `selected_counts`、`selected_refs`、`selection_trace` を持つ
+- `selected.collector_counts` と `selected.selector_summary` は、current 実装では追加で持ってよい
 
 <!-- Block: Context Budget -->
 ### `context_budget`
@@ -750,7 +776,8 @@
 
 ```json
 {
-  "total_candidate_count": 7,
+  "total_candidate_count": 9,
+  "unique_candidate_count": 7,
   "category_counts": {
     "working_memory_items": 2,
     "episodic_items": 2,
@@ -766,6 +793,16 @@
     "semantic_items",
     "relationship_items",
     "recent_event_window"
+  ],
+  "collector_runs": [
+    {
+      "collector": "recent_event_window",
+      "candidate_count": 3,
+      "truncated_count": 0,
+      "slot_counts": {
+        "recent_event_window": 3
+      }
+    }
   ]
 }
 ```
@@ -773,6 +810,7 @@
 - `retrieval_candidates_json` は、`retrieval_runs.candidates_json` に保存する候補統計の最小形である
 - 必須項目は `total_candidate_count`、`category_counts`、`non_empty_categories` である
 - `category_counts` は、`memory_bundle` と同じ slot 名をキーにした件数マップである
+- `unique_candidate_count` と `collector_runs` は、current 実装では追加で持ってよい
 
 ### `retrieval_selected_json`
 
@@ -801,15 +839,30 @@
       "slot": "semantic_items",
       "item_ref": "memory_state:mem_010",
       "score": 1.8,
-      "reason_codes": ["matched_query", "mode_priority", "profile_bias"]
+      "reason_codes": ["matched_query", "mode_priority", "profile_bias"],
+      "collector_names": ["associative_memory", "task_focus"],
+      "duplicate_hits": 1
     }
-  ]
+  ],
+  "collector_counts": {
+    "associative_memory": 1,
+    "task_focus": 1
+  },
+  "selector_summary": {
+    "raw_candidate_count": 9,
+    "merged_candidate_count": 7,
+    "selected_candidate_count": 4,
+    "duplicate_hit_count": 2,
+    "reserve_candidate_count": 1
+  },
+  "trimmed_item_refs": ["event:evt_002"]
 }
 ```
 
 - `retrieval_selected_json` は、`retrieval_runs.selected_json` に保存する最終選別結果の最小形である
 - 必須項目は `selected_counts`、`selected_refs`、`selection_trace` である
 - `selection_trace` の各要素は、少なくとも `slot`、`item_ref`、`score`、`reason_codes` を持つ
+- current 実装では、`selection_trace[].collector_names`、`selection_trace[].duplicate_hits`、`collector_counts`、`selector_summary`、`trimmed_item_refs` を追加で持ってよい
 
 <!-- Block: Completion Settings -->
 ### `completion_settings`
@@ -2062,6 +2115,22 @@
       "created_at": 1760000000000,
       "mode": "associative_recent",
       "queries": ["最近の会話"],
+      "collector_names": [
+        "recent_event_window",
+        "associative_memory",
+        "episodic_memory"
+      ],
+      "collector_counts": {
+        "recent_event_window": 2,
+        "associative_memory": 1
+      },
+      "selector_summary": {
+        "raw_candidate_count": 9,
+        "merged_candidate_count": 7,
+        "selected_candidate_count": 4,
+        "duplicate_hit_count": 2
+      },
+      "trimmed_item_refs": ["event:evt_002"],
       "selected_counts": {
         "working_memory_items": 2,
         "episodic_items": 1,
@@ -2125,6 +2194,7 @@
 - `runtime.last_cycle_id` は、短周期が 1 回以上完了している場合だけ持つ
 - `runtime.last_commit_id` は、`commit_records` が 1 件以上ある場合だけ持つ
 - `runtime.last_retrieval` は、`retrieval_runs` が 1 件以上ある場合だけ持つ
+- `runtime.last_retrieval.collector_names`、`collector_counts`、`selector_summary`、`trimmed_item_refs` は、current 実装では追加で持ってよい
 - `self_state.current_emotion` は、少なくとも `v`、`a`、`d`、`labels` を持つ
 - `self_state.last_persona_update` は、`revisions.entity_type=self_state.personality` が 1 件以上ある場合だけ持つ
 - `attention_state.primary_focus` は、current 実装では `attention_state.primary_focus_json.summary` をそのまま返す短い `string` とする

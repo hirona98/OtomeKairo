@@ -2379,13 +2379,30 @@
     const cycleId = requireString(lastRetrieval.cycle_id, "runtime.last_retrieval.cycle_id");
     const queries = readStringArray(lastRetrieval.queries, "runtime.last_retrieval.queries");
     const selectedCounts = requireCountMap(lastRetrieval.selected_counts, "runtime.last_retrieval.selected_counts");
+    const collectorNames = readOptionalStringArray(lastRetrieval.collector_names, "runtime.last_retrieval.collector_names");
+    const collectorCounts = readOptionalCountMap(lastRetrieval.collector_counts, "runtime.last_retrieval.collector_counts");
+    const selectorSummary = readOptionalIntegerMap(lastRetrieval.selector_summary, "runtime.last_retrieval.selector_summary");
+    const trimmedItemRefs = readOptionalStringArray(lastRetrieval.trimmed_item_refs, "runtime.last_retrieval.trimmed_item_refs");
     const totalCount = Object.values(selectedCounts).reduce((total, count) => total + count, 0);
+    const textParts = [
+      formatStatusTimestamp(createdAt),
+      mode,
+      summarizeQueries(queries),
+      `合計 ${String(totalCount)} 件（${summarizeSelectedCounts(selectedCounts)}）`,
+    ];
+    if (Object.keys(collectorCounts).length > 0) {
+      textParts.push(`collector ${summarizeCollectorCounts(collectorCounts)}`);
+    }
     return {
-      text: `${formatStatusTimestamp(createdAt)} / ${mode} / ${summarizeQueries(queries)} / 合計 ${String(totalCount)} 件（${summarizeSelectedCounts(selectedCounts)}）`,
+      text: textParts.join(" / "),
       title: [
         `cycle: ${cycleId}`,
         `queries: ${queries.length > 0 ? queries.join(" / ") : "なし"}`,
         `selected: ${formatSelectedCounts(selectedCounts)}`,
+        `collectors: ${collectorNames.length > 0 ? collectorNames.join(", ") : "なし"}`,
+        `collector_counts: ${Object.keys(collectorCounts).length > 0 ? formatSelectedCounts(collectorCounts) : "なし"}`,
+        `selector: ${formatSelectorSummary(selectorSummary)}`,
+        `trimmed: ${trimmedItemRefs.length > 0 ? trimmedItemRefs.join(", ") : "なし"}`,
       ].join("\n"),
     };
   }
@@ -2458,6 +2475,22 @@
       .join(" / ");
   }
 
+  function summarizeCollectorCounts(collectorCounts) {
+    return Object.entries(collectorCounts)
+      .slice(0, 3)
+      .map(([key, value]) => `${clipText(key, 12)}:${String(value)}`)
+      .join(", ");
+  }
+
+  function formatSelectorSummary(selectorSummary) {
+    if (Object.keys(selectorSummary).length === 0) {
+      return "なし";
+    }
+    return Object.entries(selectorSummary)
+      .map(([key, value]) => `${key}=${String(value)}`)
+      .join(", ");
+  }
+
   function formatTraitUpdates(updatedTraits) {
     return updatedTraits
       .map((trait) => {
@@ -2518,6 +2551,35 @@
       }
       return item;
     });
+  }
+
+  function readOptionalStringArray(value, label) {
+    if (value === undefined) {
+      return [];
+    }
+    return readStringArray(value, label);
+  }
+
+  function readOptionalCountMap(value, label) {
+    if (value === undefined) {
+      return {};
+    }
+    return requireCountMap(value, label);
+  }
+
+  function readOptionalIntegerMap(value, label) {
+    if (value === undefined) {
+      return {};
+    }
+    if (!isObject(value)) {
+      throw new Error(`${label} がオブジェクトではありません`);
+    }
+    return Object.fromEntries(Object.entries(value).map(([key, entryValue]) => {
+      if (!Number.isInteger(entryValue)) {
+        throw new Error(`${label}.${key} が整数ではありません`);
+      }
+      return [key, entryValue];
+    }));
   }
 
   function autoResizeComposer() {

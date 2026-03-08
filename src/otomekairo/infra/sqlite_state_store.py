@@ -8006,6 +8006,34 @@ def _public_retrieval_summary(row: sqlite3.Row) -> dict[str, Any]:
         "queries": list(plan_json["queries"]),
         "selected_counts": dict(selected_json["selected_counts"]),
     }
+    collector_names = plan_json.get("collector_names")
+    if isinstance(collector_names, list):
+        payload["collector_names"] = [
+            str(collector_name)
+            for collector_name in collector_names
+            if isinstance(collector_name, str) and collector_name
+        ]
+    collector_counts = selected_json.get("collector_counts")
+    if isinstance(collector_counts, dict):
+        payload["collector_counts"] = {
+            str(key): int(value)
+            for key, value in collector_counts.items()
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0
+        }
+    selector_summary = selected_json.get("selector_summary")
+    if isinstance(selector_summary, dict):
+        payload["selector_summary"] = {
+            str(key): int(value)
+            for key, value in selector_summary.items()
+            if isinstance(value, int) and not isinstance(value, bool)
+        }
+    trimmed_item_refs = selected_json.get("trimmed_item_refs")
+    if isinstance(trimmed_item_refs, list):
+        payload["trimmed_item_refs"] = [
+            str(item_ref)
+            for item_ref in trimmed_item_refs
+            if isinstance(item_ref, str) and item_ref
+        ]
     if isinstance(row["resolved_event_ids_json"], str) and row["resolved_event_ids_json"]:
         payload["resolved_event_ids"] = json.loads(row["resolved_event_ids_json"])
     return payload
