@@ -8,6 +8,7 @@ from otomekairo.schema.settings import normalize_retrieval_profile
 from otomekairo.usecase.retrieval_common import (
     append_unique_text,
     explicit_years_from_observation,
+    life_stage_hints_from_observation,
     observation_query_hint,
 )
 
@@ -30,9 +31,11 @@ def build_retrieval_plan(
 ) -> dict[str, Any]:
     normalized_retrieval_profile = normalize_retrieval_profile(retrieval_profile)
     explicit_years = explicit_years_from_observation(current_observation)
+    life_stage_hints = life_stage_hints_from_observation(current_observation)
     mode = _retrieval_mode(
         current_observation=current_observation,
         explicit_years=explicit_years,
+        life_stage_hints=life_stage_hints,
     )
     return {
         "mode": mode,
@@ -42,7 +45,8 @@ def build_retrieval_plan(
         ),
         "time_hint": {
             "explicit_years": explicit_years,
-            "has_explicit_time_hint": bool(explicit_years),
+            "life_stage_hints": life_stage_hints,
+            "has_explicit_time_hint": bool(explicit_years or life_stage_hints),
         },
         "focus_refs": _build_focus_refs(
             current_observation=current_observation,
@@ -52,6 +56,7 @@ def build_retrieval_plan(
             mode=mode,
             current_observation=current_observation,
             explicit_years=explicit_years,
+            life_stage_hints=life_stage_hints,
         ),
         "profile": dict(normalized_retrieval_profile),
         "limits": _build_selection_limits(
@@ -121,8 +126,9 @@ def _retrieval_mode(
     *,
     current_observation: dict[str, Any],
     explicit_years: list[int],
+    life_stage_hints: list[str],
 ) -> str:
-    if explicit_years:
+    if explicit_years or life_stage_hints:
         return "explicit_about_time"
     observation_text = str(current_observation["observation_text"])
     if any(token in observation_text for token in ("失敗", "原因", "再発", "避けたい", "反省", "注意")):
@@ -139,6 +145,7 @@ def _build_collector_names(
     mode: str,
     current_observation: dict[str, Any],
     explicit_years: list[int],
+    life_stage_hints: list[str],
 ) -> list[str]:
     collector_names = [
         "recent_event_window",
@@ -155,7 +162,7 @@ def _build_collector_names(
         collector_names.append("task_focus")
     if mode == "reflection_recall":
         collector_names.append("reflection_focus")
-    if explicit_years:
+    if explicit_years or life_stage_hints:
         collector_names.append("explicit_time")
     deduplicated: list[str] = []
     for collector_name in collector_names:

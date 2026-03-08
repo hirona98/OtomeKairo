@@ -543,9 +543,15 @@ def _collect_explicit_time_candidates(
     retrieval_plan: dict[str, Any],
 ) -> list[dict[str, Any]]:
     explicit_years = retrieval_plan["time_hint"]["explicit_years"]
-    if not explicit_years:
+    life_stage_hints = retrieval_plan["time_hint"].get("life_stage_hints", [])
+    if not explicit_years and not life_stage_hints:
         return []
     explicit_year_texts = {str(year) for year in explicit_years}
+    life_stage_hint_set = {
+        str(life_stage_hint)
+        for life_stage_hint in life_stage_hints
+        if isinstance(life_stage_hint, str) and life_stage_hint
+    }
     collected: list[dict[str, Any]] = []
     event_items = _event_items_by_id(memory_snapshot=memory_snapshot)
     state_items = _state_items_by_id(memory_snapshot=memory_snapshot)
@@ -590,12 +596,49 @@ def _collect_explicit_time_candidates(
                 sort_timestamp=int(event_entry["created_at"]),
             )
         )
+    for state_entity in memory_snapshot.get("state_entities", []):
+        if not isinstance(state_entity, dict):
+            raise ValueError("memory_snapshot.state_entities must contain only objects")
+        entity_type_norm = str(state_entity["entity_type_norm"])
+        if entity_type_norm != "about_year":
+            if entity_type_norm != "life_stage":
+                continue
+            if str(state_entity["entity_name_raw"]) not in life_stage_hint_set:
+                continue
+        elif str(state_entity["entity_name_raw"]) not in explicit_year_texts:
+            continue
+        candidate_info = state_items.get(str(state_entity["memory_state_id"]))
+        if candidate_info is None:
+            continue
+        slot_name, item = candidate_info
+        score, reason_codes = _memory_relevance_score(
+            memory_entry=item,
+            current_observation=current_observation,
+            retrieval_plan=retrieval_plan,
+        )
+        append_reason(reason_codes, "collector_explicit_time")
+        if entity_type_norm == "life_stage":
+            append_reason(reason_codes, "matched_life_stage")
+        else:
+            append_reason(reason_codes, "matched_explicit_year")
+        collected.append(
+            _candidate_entry(
+                collector="explicit_time",
+                slot_name=slot_name,
+                item=item,
+                score=score + 1.05,
+                reason_codes=reason_codes,
+                sort_timestamp=int(item["updated_at"]),
+            )
+        )
     for event_entity in memory_snapshot.get("event_entities", []):
         if not isinstance(event_entity, dict):
             raise ValueError("memory_snapshot.event_entities must contain only objects")
-        if str(event_entity["entity_type_norm"]) != "about_year":
-            continue
-        if str(event_entity["entity_name_raw"]) not in explicit_year_texts:
+        entity_type_norm = str(event_entity["entity_type_norm"])
+        if entity_type_norm == "life_stage":
+            if str(event_entity["entity_name_raw"]) not in life_stage_hint_set:
+                continue
+        elif entity_type_norm != "about_year" or str(event_entity["entity_name_raw"]) not in explicit_year_texts:
             continue
         candidate_info = event_items.get(str(event_entity["event_id"]))
         if candidate_info is None:
@@ -615,8 +658,11 @@ def _collect_explicit_time_candidates(
                 retrieval_plan=retrieval_plan,
             )
             sort_timestamp = int(item["updated_at"])
-        append_reason(reason_codes, "matched_explicit_year")
         append_reason(reason_codes, "collector_explicit_time")
+        if entity_type_norm == "life_stage":
+            append_reason(reason_codes, "matched_life_stage")
+        else:
+            append_reason(reason_codes, "matched_explicit_year")
         collected.append(
             _candidate_entry(
                 collector="explicit_time",
@@ -625,34 +671,6 @@ def _collect_explicit_time_candidates(
                 score=score + 1.05,
                 reason_codes=reason_codes,
                 sort_timestamp=sort_timestamp,
-            )
-        )
-    for state_entity in memory_snapshot.get("state_entities", []):
-        if not isinstance(state_entity, dict):
-            raise ValueError("memory_snapshot.state_entities must contain only objects")
-        if str(state_entity["entity_type_norm"]) != "about_year":
-            continue
-        if str(state_entity["entity_name_raw"]) not in explicit_year_texts:
-            continue
-        candidate_info = state_items.get(str(state_entity["memory_state_id"]))
-        if candidate_info is None:
-            continue
-        slot_name, item = candidate_info
-        score, reason_codes = _memory_relevance_score(
-            memory_entry=item,
-            current_observation=current_observation,
-            retrieval_plan=retrieval_plan,
-        )
-        append_reason(reason_codes, "matched_explicit_year")
-        append_reason(reason_codes, "collector_explicit_time")
-        collected.append(
-            _candidate_entry(
-                collector="explicit_time",
-                slot_name=slot_name,
-                item=item,
-                score=score + 1.05,
-                reason_codes=reason_codes,
-                sort_timestamp=int(item["updated_at"]),
             )
         )
     return collected

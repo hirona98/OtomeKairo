@@ -91,6 +91,25 @@ def explicit_years_from_observation(current_observation: dict[str, Any]) -> list
     return years
 
 
+def life_stage_hints_from_observation(current_observation: dict[str, Any]) -> list[str]:
+    observation_text = str(current_observation["observation_text"])
+    life_stage_hints: list[str] = []
+    for cue, life_stage in (
+        ("幼少期", "childhood"),
+        ("子ども時代", "childhood"),
+        ("小学生", "primary_school"),
+        ("中学生", "junior_high"),
+        ("高校時代", "high_school"),
+        ("高校生", "high_school"),
+        ("大学時代", "college"),
+        ("大学生", "college"),
+        ("社会人", "working_adult"),
+    ):
+        if cue in observation_text and life_stage not in life_stage_hints:
+            life_stage_hints.append(life_stage)
+    return life_stage_hints
+
+
 # Block: Payload helpers
 def payload_contains_text_hint(*, payload: dict[str, Any], text_hint: str) -> bool:
     return any(text_hint in text_part for text_part in payload_text_values(payload))
