@@ -833,6 +833,10 @@ class SqliteStateStore:
                 connection=connection,
                 event_ids=recent_event_ids,
             )
+            event_entity_rows = _fetch_event_entities_for_memory_snapshot(
+                connection=connection,
+                event_ids=recent_event_ids,
+            )
             state_link_rows = _fetch_state_links_for_memory_snapshot(
                 connection=connection,
                 memory_state_ids=memory_state_ids,
@@ -897,6 +901,7 @@ class SqliteStateStore:
                 preference_rows=preference_rows,
                 event_link_rows=event_link_rows,
                 event_thread_rows=event_thread_rows,
+                event_entity_rows=event_entity_rows,
                 state_link_rows=state_link_rows,
                 state_entity_rows=state_entity_rows,
             ),
@@ -2411,6 +2416,11 @@ class SqliteStateStore:
             event_affect_updates=list(memory_write_plan["event_affect"]),
             created_at=created_at,
         )
+        self._apply_event_entities(
+            connection=connection,
+            event_annotations=list(memory_write_plan["event_annotations"]),
+            created_at=created_at,
+        )
         self._apply_context_updates(
             connection=connection,
             context_updates=dict(memory_write_plan["context_updates"]),
@@ -2748,6 +2758,63 @@ class SqliteStateStore:
                 to_state_id=to_state_id,
                 state_link_update=state_link_update,
                 created_at=created_at,
+            )
+
+    # Block: イベントエンティティ反映
+    def _apply_event_entities(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        event_annotations: list[dict[str, Any]],
+        created_at: int,
+    ) -> None:
+        for event_annotation in event_annotations:
+            self._replace_event_entities(
+                connection=connection,
+                event_id=str(event_annotation["event_id"]),
+                entities=list(event_annotation["entities"]),
+                created_at=created_at,
+            )
+
+    # Block: イベントエンティティ置換
+    def _replace_event_entities(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        event_id: str,
+        entities: list[dict[str, Any]],
+        created_at: int,
+    ) -> None:
+        connection.execute(
+            """
+            DELETE FROM event_entities
+            WHERE event_id = ?
+            """,
+            (event_id,),
+        )
+        for entity_entry in entities:
+            connection.execute(
+                """
+                INSERT INTO event_entities (
+                    event_entity_id,
+                    event_id,
+                    entity_type_norm,
+                    entity_name_raw,
+                    entity_name_norm,
+                    confidence,
+                    created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    _opaque_id("een"),
+                    event_id,
+                    str(entity_entry["entity_type_norm"]),
+                    str(entity_entry["entity_name_raw"]),
+                    _normalized_entity_name(str(entity_entry["entity_name_raw"])),
+                    float(entity_entry["confidence"]),
+                    created_at,
+                ),
             )
 
     # Block: 状態エンティティ反映
@@ -8632,6 +8699,33 @@ def _fetch_event_links_for_memory_snapshot(
     ).fetchall()
 
 
+def _fetch_event_entities_for_memory_snapshot(
+    *,
+    connection: sqlite3.Connection,
+    event_ids: list[str],
+) -> list[sqlite3.Row]:
+    if not event_ids:
+        return []
+    placeholders = ",".join("?" for _ in event_ids)
+    return connection.execute(
+        f"""
+        SELECT
+            event_entity_id,
+            event_id,
+            entity_type_norm,
+            entity_name_raw,
+            entity_name_norm,
+            confidence,
+            created_at
+        FROM event_entities
+        WHERE event_id IN ({placeholders})
+        ORDER BY created_at DESC
+        LIMIT 64
+        """,
+        tuple(event_ids),
+    ).fetchall()
+
+
 def _fetch_event_threads_for_memory_snapshot(
     *,
     connection: sqlite3.Connection,
@@ -9759,6 +9853,7 @@ def _build_memory_snapshot_rows(
     preference_rows: list[sqlite3.Row],
     event_link_rows: list[sqlite3.Row],
     event_thread_rows: list[sqlite3.Row],
+    event_entity_rows: list[sqlite3.Row],
     state_link_rows: list[sqlite3.Row],
     state_entity_rows: list[sqlite3.Row],
 ) -> dict[str, Any]:
@@ -9804,6 +9899,7 @@ def _build_memory_snapshot_rows(
         ],
         "event_links": [_event_link_snapshot_entry(row) for row in event_link_rows],
         "event_threads": [_event_thread_snapshot_entry(row) for row in event_thread_rows],
+        "event_entities": [_event_entity_snapshot_entry(row) for row in event_entity_rows],
         "state_links": [_state_link_snapshot_entry(row) for row in state_link_rows],
         "state_entities": [_state_entity_snapshot_entry(row) for row in state_entity_rows],
     }
@@ -9891,6 +9987,18 @@ def _event_thread_snapshot_entry(row: sqlite3.Row) -> dict[str, Any]:
         "confidence": float(row["confidence"]),
         "created_at": int(row["created_at"]),
         "updated_at": int(row["updated_at"]),
+    }
+
+
+def _event_entity_snapshot_entry(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "event_entity_id": str(row["event_entity_id"]),
+        "event_id": str(row["event_id"]),
+        "entity_type_norm": str(row["entity_type_norm"]),
+        "entity_name_raw": str(row["entity_name_raw"]),
+        "entity_name_norm": str(row["entity_name_norm"]),
+        "confidence": float(row["confidence"]),
+        "created_at": int(row["created_at"]),
     }
 
 

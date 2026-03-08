@@ -355,11 +355,52 @@ def _collect_entity_expand_candidates(
     current_observation: dict[str, Any],
     retrieval_plan: dict[str, Any],
 ) -> list[dict[str, Any]]:
+    event_items = _event_items_by_id(memory_snapshot=memory_snapshot)
     state_items = _state_items_by_id(memory_snapshot=memory_snapshot)
     normalized_hints = _normalized_observation_hints(current_observation=current_observation)
     if not normalized_hints:
         return []
     collected: list[dict[str, Any]] = []
+    for event_entity in memory_snapshot.get("event_entities", []):
+        if not isinstance(event_entity, dict):
+            raise ValueError("memory_snapshot.event_entities must contain only objects")
+        entity_name_norm = str(event_entity["entity_name_norm"])
+        if not any(
+            hint == entity_name_norm or hint in entity_name_norm or entity_name_norm in hint
+            for hint in normalized_hints
+        ):
+            continue
+        candidate_info = event_items.get(str(event_entity["event_id"]))
+        if candidate_info is None:
+            continue
+        slot_name, item = candidate_info
+        if slot_name == "recent_event_window":
+            score, reason_codes = _event_relevance_score(
+                event_entry=item,
+                current_observation=current_observation,
+                retrieval_plan=retrieval_plan,
+            )
+            sort_timestamp = int(item["created_at"])
+        else:
+            score, reason_codes = _memory_relevance_score(
+                memory_entry=item,
+                current_observation=current_observation,
+                retrieval_plan=retrieval_plan,
+            )
+            sort_timestamp = int(item["updated_at"])
+        score += 0.74 + float(event_entity["confidence"]) * 0.28
+        append_reason(reason_codes, "collector_entity_expand")
+        append_reason(reason_codes, f"entity:{event_entity['entity_type_norm']}")
+        collected.append(
+            _candidate_entry(
+                collector="entity_expand",
+                slot_name=slot_name,
+                item=item,
+                score=score,
+                reason_codes=reason_codes,
+                sort_timestamp=sort_timestamp,
+            )
+        )
     for state_entity in memory_snapshot.get("state_entities", []):
         if not isinstance(state_entity, dict):
             raise ValueError("memory_snapshot.state_entities must contain only objects")

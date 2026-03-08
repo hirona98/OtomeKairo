@@ -1215,13 +1215,35 @@
     {
       "event_id": "evt_001",
       "about_time": null,
-      "entities": [],
+      "entities": [
+        {
+          "entity_type_norm": "topic",
+          "entity_name_raw": "近所 イベント",
+          "confidence": 0.84
+        },
+        {
+          "entity_type_norm": "summary_phrase",
+          "entity_name_raw": "来週の祭り",
+          "confidence": 0.6
+        }
+      ],
       "thread_hints": ["cycle:cycle_001"]
     },
     {
       "event_id": "evt_002",
       "about_time": null,
-      "entities": [],
+      "entities": [
+        {
+          "entity_type_norm": "action_type",
+          "entity_name_raw": "enqueue_browse_task",
+          "confidence": 0.72
+        },
+        {
+          "entity_type_norm": "failure_mode",
+          "entity_name_raw": "network_unavailable",
+          "confidence": 0.52
+        }
+      ],
       "thread_hints": ["cycle:cycle_001"]
     }
   ],
@@ -1341,6 +1363,8 @@
 - `MemoryWritePlan` は、長周期の `write_memory` 内部で生成・検証してから適用する固定 shape のオブジェクトである
 - 必須項目は `event_annotations`、`state_updates`、`preference_updates`、`event_affect`、`context_updates`、`revision_reasons` である
 - `event_annotations` は、`memory_job_payloads.payload_json.source_event_ids` と同じ件数・同じ順序で並ばなければならない
+- `event_annotations[].entities[]` は、`entity_type_norm`、`entity_name_raw`、`confidence` の 3 キーを必須とする fixed shape object とする
+- `event_annotations[].entities[].confidence` は、`0.0..1.0` の `number` に固定する
 - `state_updates` の各要素は、少なくとも `state_ref`、`operation`、`memory_kind`、`evidence_event_ids`、`revision_reason` を持つ
 - `state_ref` は、`context_updates.state_links` から参照するための内部別名であり、同一 `MemoryWritePlan` 内で一意でなければならない
 - `operation = upsert` のときは、追加で `body_text`、`payload`、`confidence`、`importance`、`memory_strength`、`last_confirmed_at` を必須とする
@@ -1352,6 +1376,7 @@
 - `event_affect.vad` は、`v`、`a`、`d` の 3 キーを必須とし、各値は `-1.0..+1.0` の `number` とする
 - `context_updates` は、`event_links`、`event_threads`、`state_links` の 3 キーを必須とする
 - `context_updates.state_links` は、永続 ID ではなく同一 `MemoryWritePlan.state_updates` 内の `state_ref` を参照する
+- current 実装では、`event_entities` は `MemoryWritePlan.event_annotations[].entities[]` を正本にして置換してよい
 - current 実装では、`state_entities` は `MemoryWritePlan` に直接含めず、適用後の `memory_states.payload_json` から再構成してよい
 - `revision_reasons` は、`state_updates` と同じ件数を持ち、各要素は対応する `state_updates.revision_reason` と一致しなければならない
 
