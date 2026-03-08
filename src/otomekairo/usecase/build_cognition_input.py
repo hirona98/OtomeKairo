@@ -956,6 +956,7 @@ def _build_retrieval_selected_json(
         selected_count=len(filtered_selection_trace),
         trimmed_memory_item_refs=trimmed_memory_item_refs,
     )
+    reserve_trace = _build_reserve_trace(source_selected_json)
     return {
         "selected_counts": {
             "working_memory_items": len(memory_bundle["working_memory_items"]),
@@ -999,6 +1000,7 @@ def _build_retrieval_selected_json(
         "selection_trace": filtered_selection_trace,
         **({"collector_counts": collector_counts} if collector_counts else {}),
         **({"selector_summary": selector_summary} if selector_summary else {}),
+        **({"reserve_trace": reserve_trace} if reserve_trace else {}),
         **({"trimmed_item_refs": trimmed_memory_item_refs} if trimmed_memory_item_refs else {}),
     }
 
@@ -1069,10 +1071,19 @@ def _build_selector_summary(
         }
     summary: dict[str, Any] = {}
     for key in (
+        "selector_mode",
+        "selection_reason",
+    ):
+        value = raw_summary.get(key)
+        if isinstance(value, str) and value:
+            summary[key] = value
+    for key in (
         "raw_candidate_count",
         "merged_candidate_count",
+        "llm_selected_ref_count",
         "duplicate_hit_count",
         "reserve_candidate_count",
+        "slot_skipped_count",
     ):
         value = raw_summary.get(key)
         if isinstance(value, int) and not isinstance(value, bool):
@@ -1081,6 +1092,17 @@ def _build_selector_summary(
     if trimmed_memory_item_refs:
         summary["trimmed_candidate_count"] = len(trimmed_memory_item_refs)
     return summary
+
+
+def _build_reserve_trace(source_selected_json: dict[str, Any]) -> list[dict[str, Any]]:
+    reserve_trace = source_selected_json.get("reserve_trace")
+    if not isinstance(reserve_trace, list):
+        return []
+    return [
+        trace_entry
+        for trace_entry in reserve_trace
+        if isinstance(trace_entry, dict)
+    ]
 
 
 def _self_layer_budget_projection(
