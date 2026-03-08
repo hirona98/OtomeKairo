@@ -770,6 +770,7 @@
       "selection_reason": "直近会話の継続と明示日付の一致を優先した",
       "raw_candidate_count": 9,
       "merged_candidate_count": 7,
+      "selector_input_candidate_count": 7,
       "llm_selected_ref_count": 5,
       "selected_candidate_count": 4,
       "duplicate_hit_count": 2,
@@ -802,7 +803,7 @@
 - `selected` は、少なくとも `selected_counts`、`selected_refs`、`selection_trace` を持つ
 - current 実装では、`selected.selection_trace[].selection_rank` を追加し、`LLM` selector が返した優先順を残してよい
 - current 実装では、`selected.collector_counts`、`selected.selector_summary`、`selected.reserve_trace` を追加で持ってよい
-- current 実装の `selected.selector_summary` には、少なくとも `selector_mode`、`selection_reason`、`raw_candidate_count`、`merged_candidate_count`、`llm_selected_ref_count`、`selected_candidate_count`、`duplicate_hit_count`、`reserve_candidate_count`、`slot_skipped_count` を持ってよい
+- current 実装の `selected.selector_summary` には、少なくとも `selector_mode`、`selection_reason`、`raw_candidate_count`、`merged_candidate_count`、`selector_input_candidate_count`、`llm_selected_ref_count`、`selected_candidate_count`、`duplicate_hit_count`、`reserve_candidate_count`、`slot_skipped_count` を持ってよい
 
 <!-- Block: Context Budget -->
 ### `context_budget`
@@ -919,6 +920,7 @@
     "selection_reason": "直近会話の継続と明示日付の一致を優先した",
     "raw_candidate_count": 9,
     "merged_candidate_count": 7,
+    "selector_input_candidate_count": 7,
     "llm_selected_ref_count": 5,
     "selected_candidate_count": 4,
     "duplicate_hit_count": 2,
@@ -2313,6 +2315,7 @@
         "selection_reason": "直近会話の継続と明示日付の一致を優先した",
         "raw_candidate_count": 9,
         "merged_candidate_count": 7,
+        "selector_input_candidate_count": 7,
         "llm_selected_ref_count": 5,
         "selected_candidate_count": 4,
         "duplicate_hit_count": 2,

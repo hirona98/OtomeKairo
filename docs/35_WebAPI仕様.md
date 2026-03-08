@@ -219,6 +219,7 @@ flowchart LR
         "selection_reason": "直近会話の継続と明示日付の一致を優先した",
         "raw_candidate_count": 9,
         "merged_candidate_count": 7,
+        "selector_input_candidate_count": 7,
         "llm_selected_ref_count": 5,
         "selected_candidate_count": 4,
         "duplicate_hit_count": 2,

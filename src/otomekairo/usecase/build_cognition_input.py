@@ -1080,6 +1080,7 @@ def _build_selector_summary(
     for key in (
         "raw_candidate_count",
         "merged_candidate_count",
+        "selector_input_candidate_count",
         "llm_selected_ref_count",
         "duplicate_hit_count",
         "reserve_candidate_count",

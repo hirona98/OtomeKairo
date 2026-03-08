@@ -195,6 +195,7 @@ def _select_with_llm(
                     "selection_reason": "候補なし",
                     "raw_candidate_count": raw_candidate_count,
                     "merged_candidate_count": 0,
+                    "selector_input_candidate_count": 0,
                     "llm_selected_ref_count": 0,
                     "selected_candidate_count": 0,
                     "duplicate_hit_count": 0,
@@ -222,6 +223,7 @@ def _select_with_llm(
     return select_retrieval_candidates(
         merged_candidates=merged_candidates,
         raw_candidate_count=raw_candidate_count,
+        selector_input_candidate_count=len(candidate_pack["candidate_entries"]),
         retrieval_plan=retrieval_plan,
         ordered_item_refs=list(retrieval_selection["selected_item_refs"]),
         selection_reason=str(retrieval_selection["selection_reason"]),
