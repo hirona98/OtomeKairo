@@ -68,6 +68,9 @@ def _collector_for_name(
         "recent_event_window": _collect_recent_event_window_candidates,
         "associative_memory": _collect_associative_memory_candidates,
         "episodic_memory": _collect_episodic_memory_candidates,
+        "reply_chain": _collect_reply_chain_candidates,
+        "context_threads": _collect_context_thread_candidates,
+        "state_link_expand": _collect_state_link_candidates,
         "relationship_focus": _collect_relationship_focus_candidates,
         "task_focus": _collect_task_focus_candidates,
         "reflection_focus": _collect_reflection_focus_candidates,
@@ -164,6 +167,182 @@ def _collect_episodic_memory_candidates(
                 score=score,
                 reason_codes=reason_codes,
                 sort_timestamp=int(memory_entry["updated_at"]),
+            )
+        )
+    return collected
+
+
+def _collect_reply_chain_candidates(
+    *,
+    memory_snapshot: dict[str, Any],
+    current_observation: dict[str, Any],
+    retrieval_plan: dict[str, Any],
+) -> list[dict[str, Any]]:
+    event_items = _event_items_by_id(memory_snapshot=memory_snapshot)
+    anchor_event_ids = _matched_event_anchor_ids(
+        event_items=event_items,
+        current_observation=current_observation,
+        retrieval_plan=retrieval_plan,
+    )
+    if not anchor_event_ids:
+        return []
+    collected: list[dict[str, Any]] = []
+    for event_link in memory_snapshot.get("event_links", []):
+        if not isinstance(event_link, dict):
+            raise ValueError("memory_snapshot.event_links must contain only objects")
+        from_event_id = str(event_link["from_event_id"])
+        to_event_id = str(event_link["to_event_id"])
+        if from_event_id in anchor_event_ids:
+            candidate_event_id = to_event_id
+        elif to_event_id in anchor_event_ids:
+            candidate_event_id = from_event_id
+        else:
+            continue
+        candidate_info = event_items.get(candidate_event_id)
+        if candidate_info is None:
+            continue
+        slot_name, item = candidate_info
+        if slot_name == "recent_event_window":
+            score, reason_codes = _event_relevance_score(
+                event_entry=item,
+                current_observation=current_observation,
+                retrieval_plan=retrieval_plan,
+            )
+            sort_timestamp = int(item["created_at"])
+        else:
+            score, reason_codes = _memory_relevance_score(
+                memory_entry=item,
+                current_observation=current_observation,
+                retrieval_plan=retrieval_plan,
+            )
+            sort_timestamp = int(item["updated_at"])
+        score += 0.85 + float(event_link["confidence"]) * 0.35
+        append_reason(reason_codes, "collector_reply_chain")
+        append_reason(reason_codes, f"event_link:{event_link['label']}")
+        collected.append(
+            _candidate_entry(
+                collector="reply_chain",
+                slot_name=slot_name,
+                item=item,
+                score=score,
+                reason_codes=reason_codes,
+                sort_timestamp=sort_timestamp,
+            )
+        )
+    return collected
+
+
+def _collect_context_thread_candidates(
+    *,
+    memory_snapshot: dict[str, Any],
+    current_observation: dict[str, Any],
+    retrieval_plan: dict[str, Any],
+) -> list[dict[str, Any]]:
+    event_items = _event_items_by_id(memory_snapshot=memory_snapshot)
+    anchor_event_ids = _matched_event_anchor_ids(
+        event_items=event_items,
+        current_observation=current_observation,
+        retrieval_plan=retrieval_plan,
+    )
+    if not anchor_event_ids:
+        return []
+    thread_keys = {
+        str(event_thread["thread_key"])
+        for event_thread in memory_snapshot.get("event_threads", [])
+        if isinstance(event_thread, dict)
+        and str(event_thread["event_id"]) in anchor_event_ids
+    }
+    if not thread_keys:
+        return []
+    collected: list[dict[str, Any]] = []
+    for event_thread in memory_snapshot.get("event_threads", []):
+        if not isinstance(event_thread, dict):
+            raise ValueError("memory_snapshot.event_threads must contain only objects")
+        if str(event_thread["thread_key"]) not in thread_keys:
+            continue
+        event_id = str(event_thread["event_id"])
+        if event_id in anchor_event_ids:
+            continue
+        candidate_info = event_items.get(event_id)
+        if candidate_info is None:
+            continue
+        slot_name, item = candidate_info
+        if slot_name == "recent_event_window":
+            score, reason_codes = _event_relevance_score(
+                event_entry=item,
+                current_observation=current_observation,
+                retrieval_plan=retrieval_plan,
+            )
+            sort_timestamp = int(item["created_at"])
+        else:
+            score, reason_codes = _memory_relevance_score(
+                memory_entry=item,
+                current_observation=current_observation,
+                retrieval_plan=retrieval_plan,
+            )
+            sort_timestamp = int(item["updated_at"])
+        score += 0.70 + float(event_thread["confidence"]) * 0.30
+        append_reason(reason_codes, "collector_context_threads")
+        append_reason(reason_codes, f"thread_role:{event_thread.get('thread_role') or 'unknown'}")
+        collected.append(
+            _candidate_entry(
+                collector="context_threads",
+                slot_name=slot_name,
+                item=item,
+                score=score,
+                reason_codes=reason_codes,
+                sort_timestamp=sort_timestamp,
+            )
+        )
+    return collected
+
+
+def _collect_state_link_candidates(
+    *,
+    memory_snapshot: dict[str, Any],
+    current_observation: dict[str, Any],
+    retrieval_plan: dict[str, Any],
+) -> list[dict[str, Any]]:
+    state_items = _state_items_by_id(memory_snapshot=memory_snapshot)
+    anchor_state_ids = _matched_state_anchor_ids(
+        state_items=state_items,
+        current_observation=current_observation,
+        retrieval_plan=retrieval_plan,
+    )
+    if not anchor_state_ids:
+        return []
+    collected: list[dict[str, Any]] = []
+    for state_link in memory_snapshot.get("state_links", []):
+        if not isinstance(state_link, dict):
+            raise ValueError("memory_snapshot.state_links must contain only objects")
+        from_state_id = str(state_link["from_state_id"])
+        to_state_id = str(state_link["to_state_id"])
+        if from_state_id in anchor_state_ids:
+            candidate_state_id = to_state_id
+        elif to_state_id in anchor_state_ids:
+            candidate_state_id = from_state_id
+        else:
+            continue
+        candidate_info = state_items.get(candidate_state_id)
+        if candidate_info is None:
+            continue
+        slot_name, item = candidate_info
+        score, reason_codes = _memory_relevance_score(
+            memory_entry=item,
+            current_observation=current_observation,
+            retrieval_plan=retrieval_plan,
+        )
+        score += 0.78 + float(state_link["confidence"]) * 0.32
+        append_reason(reason_codes, "collector_state_link_expand")
+        append_reason(reason_codes, f"state_link:{state_link['label']}")
+        collected.append(
+            _candidate_entry(
+                collector="state_link_expand",
+                slot_name=slot_name,
+                item=item,
+                score=score,
+                reason_codes=reason_codes,
+                sort_timestamp=int(item["updated_at"]),
             )
         )
     return collected
@@ -383,6 +562,83 @@ def _candidate_entry(
         "sort_timestamp": sort_timestamp,
         "item": item,
     }
+
+
+def _event_items_by_id(
+    *,
+    memory_snapshot: dict[str, Any],
+) -> dict[str, tuple[str, dict[str, Any]]]:
+    event_items: dict[str, tuple[str, dict[str, Any]]] = {}
+    for event_entry in memory_snapshot["recent_event_window"]:
+        event_items[str(event_entry["event_id"])] = ("recent_event_window", event_entry)
+    for memory_entry in memory_snapshot["episodic_items"]:
+        payload = memory_entry.get("payload")
+        if not isinstance(payload, dict):
+            raise ValueError("episodic memory entry payload must be object")
+        event_id = payload.get("event_id")
+        if isinstance(event_id, str) and event_id:
+            event_items[event_id] = ("episodic_items", memory_entry)
+    return event_items
+
+
+def _state_items_by_id(
+    *,
+    memory_snapshot: dict[str, Any],
+) -> dict[str, tuple[str, dict[str, Any]]]:
+    state_items: dict[str, tuple[str, dict[str, Any]]] = {}
+    for slot_name in (
+        "working_memory_items",
+        "semantic_items",
+        "affective_items",
+        "relationship_items",
+        "reflection_items",
+    ):
+        for memory_entry in memory_snapshot[slot_name]:
+            state_items[str(memory_entry["memory_state_id"])] = (slot_name, memory_entry)
+    return state_items
+
+
+def _matched_event_anchor_ids(
+    *,
+    event_items: dict[str, tuple[str, dict[str, Any]]],
+    current_observation: dict[str, Any],
+    retrieval_plan: dict[str, Any],
+) -> set[str]:
+    anchor_event_ids: set[str] = set()
+    for event_id, (slot_name, item) in event_items.items():
+        if slot_name == "recent_event_window":
+            score, _ = _event_relevance_score(
+                event_entry=item,
+                current_observation=current_observation,
+                retrieval_plan=retrieval_plan,
+            )
+        else:
+            score, _ = _memory_relevance_score(
+                memory_entry=item,
+                current_observation=current_observation,
+                retrieval_plan=retrieval_plan,
+            )
+        if score > 0.0:
+            anchor_event_ids.add(event_id)
+    return anchor_event_ids
+
+
+def _matched_state_anchor_ids(
+    *,
+    state_items: dict[str, tuple[str, dict[str, Any]]],
+    current_observation: dict[str, Any],
+    retrieval_plan: dict[str, Any],
+) -> set[str]:
+    anchor_state_ids: set[str] = set()
+    for state_id, (_, item) in state_items.items():
+        score, _ = _memory_relevance_score(
+            memory_entry=item,
+            current_observation=current_observation,
+            retrieval_plan=retrieval_plan,
+        )
+        if score > 0.0:
+            anchor_state_ids.add(state_id)
+    return anchor_state_ids
 
 
 # Block: Scoring helpers

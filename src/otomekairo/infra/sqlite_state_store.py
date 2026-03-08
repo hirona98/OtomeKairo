@@ -823,6 +823,20 @@ class SqliteStateStore:
                     ranked_hits=similarity_hits,
                     fallback_rows=memory_rows,
                 )
+            recent_event_ids = [str(row["event_id"]) for row in recent_event_rows]
+            memory_state_ids = [str(row["memory_state_id"]) for row in memory_rows]
+            event_link_rows = _fetch_event_links_for_memory_snapshot(
+                connection=connection,
+                event_ids=recent_event_ids,
+            )
+            event_thread_rows = _fetch_event_threads_for_memory_snapshot(
+                connection=connection,
+                event_ids=recent_event_ids,
+            )
+            state_link_rows = _fetch_state_links_for_memory_snapshot(
+                connection=connection,
+                memory_state_ids=memory_state_ids,
+            )
         return CognitionStateSnapshot(
             self_state={
                 "personality": json.loads(self_row["personality_json"]),
@@ -877,6 +891,9 @@ class SqliteStateStore:
                 memory_rows=memory_rows,
                 affect_rows=affect_rows,
                 preference_rows=preference_rows,
+                event_link_rows=event_link_rows,
+                event_thread_rows=event_thread_rows,
+                state_link_rows=state_link_rows,
             ),
             retrieval_profile=retrieval_profile,
             effective_settings=effective_settings,
@@ -8505,6 +8522,89 @@ def _fetch_events_for_ids(
     return ordered_rows
 
 
+def _fetch_event_links_for_memory_snapshot(
+    *,
+    connection: sqlite3.Connection,
+    event_ids: list[str],
+) -> list[sqlite3.Row]:
+    if not event_ids:
+        return []
+    placeholders = ",".join("?" for _ in event_ids)
+    return connection.execute(
+        f"""
+        SELECT
+            event_link_id,
+            from_event_id,
+            to_event_id,
+            label,
+            confidence,
+            created_at,
+            updated_at
+        FROM event_links
+        WHERE from_event_id IN ({placeholders})
+           OR to_event_id IN ({placeholders})
+        ORDER BY updated_at DESC
+        LIMIT 48
+        """,
+        tuple(event_ids + event_ids),
+    ).fetchall()
+
+
+def _fetch_event_threads_for_memory_snapshot(
+    *,
+    connection: sqlite3.Connection,
+    event_ids: list[str],
+) -> list[sqlite3.Row]:
+    if not event_ids:
+        return []
+    placeholders = ",".join("?" for _ in event_ids)
+    return connection.execute(
+        f"""
+        SELECT
+            event_thread_id,
+            event_id,
+            thread_key,
+            thread_role,
+            confidence,
+            created_at,
+            updated_at
+        FROM event_threads
+        WHERE event_id IN ({placeholders})
+        ORDER BY updated_at DESC
+        LIMIT 48
+        """,
+        tuple(event_ids),
+    ).fetchall()
+
+
+def _fetch_state_links_for_memory_snapshot(
+    *,
+    connection: sqlite3.Connection,
+    memory_state_ids: list[str],
+) -> list[sqlite3.Row]:
+    if not memory_state_ids:
+        return []
+    placeholders = ",".join("?" for _ in memory_state_ids)
+    return connection.execute(
+        f"""
+        SELECT
+            state_link_id,
+            from_state_id,
+            to_state_id,
+            label,
+            confidence,
+            created_at,
+            updated_at
+        FROM state_links
+        WHERE from_state_id IN ({placeholders})
+           OR to_state_id IN ({placeholders})
+        ORDER BY updated_at DESC
+        LIMIT 48
+        """,
+        tuple(memory_state_ids + memory_state_ids),
+    ).fetchall()
+
+
 # Block: Write memory event snapshot refs
 def _event_snapshot_refs_for_write_memory_job(
     *,
@@ -9548,6 +9648,9 @@ def _build_memory_snapshot_rows(
     memory_rows: list[sqlite3.Row],
     affect_rows: list[sqlite3.Row],
     preference_rows: list[sqlite3.Row],
+    event_link_rows: list[sqlite3.Row],
+    event_thread_rows: list[sqlite3.Row],
+    state_link_rows: list[sqlite3.Row],
 ) -> dict[str, Any]:
     working_memory_items: list[dict[str, Any]] = []
     episodic_items: list[dict[str, Any]] = []
@@ -9589,6 +9692,9 @@ def _build_memory_snapshot_rows(
             _recent_event_entry(row)
             for row in recent_event_rows
         ],
+        "event_links": [_event_link_snapshot_entry(row) for row in event_link_rows],
+        "event_threads": [_event_thread_snapshot_entry(row) for row in event_thread_rows],
+        "state_links": [_state_link_snapshot_entry(row) for row in state_link_rows],
     }
 
 
@@ -9650,6 +9756,42 @@ def _event_affect_snapshot_entry(row: sqlite3.Row) -> dict[str, Any]:
         "created_at": created_at,
         "updated_at": created_at,
         "last_confirmed_at": created_at,
+    }
+
+
+def _event_link_snapshot_entry(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "event_link_id": str(row["event_link_id"]),
+        "from_event_id": str(row["from_event_id"]),
+        "to_event_id": str(row["to_event_id"]),
+        "label": str(row["label"]),
+        "confidence": float(row["confidence"]),
+        "created_at": int(row["created_at"]),
+        "updated_at": int(row["updated_at"]),
+    }
+
+
+def _event_thread_snapshot_entry(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "event_thread_id": str(row["event_thread_id"]),
+        "event_id": str(row["event_id"]),
+        "thread_key": str(row["thread_key"]),
+        "thread_role": str(row["thread_role"]) if row["thread_role"] is not None else None,
+        "confidence": float(row["confidence"]),
+        "created_at": int(row["created_at"]),
+        "updated_at": int(row["updated_at"]),
+    }
+
+
+def _state_link_snapshot_entry(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "state_link_id": str(row["state_link_id"]),
+        "from_state_id": str(row["from_state_id"]),
+        "to_state_id": str(row["to_state_id"]),
+        "label": str(row["label"]),
+        "confidence": float(row["confidence"]),
+        "created_at": int(row["created_at"]),
+        "updated_at": int(row["updated_at"]),
     }
 
 

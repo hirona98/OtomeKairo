@@ -668,6 +668,9 @@
       "recent_event_window",
       "associative_memory",
       "episodic_memory",
+      "reply_chain",
+      "context_threads",
+      "state_link_expand",
       "relationship_focus"
     ],
     "profile": {
@@ -734,6 +737,7 @@
 - 必須項目は `plan` と `selected` である
 - `plan` は、少なくとも `mode`、`queries`、`time_hint`、`profile`、`limits` を持つ
 - `plan.focus_refs` と `plan.collector_names` は、current 実装では追加で持ってよい
+- current 実装の `plan.collector_names` には、`reply_chain`、`context_threads`、`state_link_expand` を含めてよい
 - `profile` は、active memory preset の `retrieval_profile` をそのまま持つ
 - `limits.semantic_candidate_top_k` は、意味検索候補の上限である
 - `selected` は、少なくとも `selected_counts`、`selected_refs`、`selection_trace` を持つ
