@@ -21,6 +21,7 @@ from otomekairo.usecase.run_retrieval_selection import run_retrieval_selection
 
 # Block: Selector candidate limit
 SELECTOR_CANDIDATE_LIMIT = 24
+SELECTOR_TEXT_LIMIT = 120
 
 
 # Block: Retrieval artifacts
@@ -271,7 +272,7 @@ def _selector_candidate_entry(
             "score": round(float(merged_candidate["score"]), 3),
             "collector_names": list(merged_candidate["collector_names"]),
             "reason_codes": list(merged_candidate["reason_codes"]),
-            "text": _prompt_text(str(item["summary_text"])),
+            "text": _selector_recent_event_text(item),
             "relative_time_text": relative_time,
             **(
                 {"about_time_hint_text": about_time_hint_text}
@@ -305,12 +306,32 @@ def _selector_candidate_entry(
 
 # Block: Selector memory text
 def _selector_memory_text(memory_entry: dict[str, Any]) -> str:
+    memory_kind = str(memory_entry["memory_kind"])
     payload = memory_entry.get("payload")
     if isinstance(payload, dict):
+        preview_text = payload.get("preview_text")
+        if memory_kind == "episodic_event" and isinstance(preview_text, str) and preview_text:
+            return _selector_prompt_text(preview_text)
         what_happened = payload.get("what_happened")
         if isinstance(what_happened, str) and what_happened:
-            return _prompt_text(what_happened)
-    return _prompt_text(str(memory_entry["body_text"]))
+            return _selector_prompt_text(what_happened)
+    return _selector_prompt_text(str(memory_entry["body_text"]))
+
+
+# Block: Selector recent event text
+def _selector_recent_event_text(event_entry: dict[str, Any]) -> str:
+    preview_text = event_entry.get("preview_text")
+    if isinstance(preview_text, str) and preview_text:
+        return _selector_prompt_text(preview_text)
+    return _selector_prompt_text(str(event_entry["summary_text"]))
+
+
+# Block: Selector prompt text
+def _selector_prompt_text(text: str) -> str:
+    normalized = " ".join(text.split())
+    if len(normalized) <= SELECTOR_TEXT_LIMIT:
+        return normalized
+    return normalized[: SELECTOR_TEXT_LIMIT - 1] + "…"
 
 
 # Block: Candidate builders

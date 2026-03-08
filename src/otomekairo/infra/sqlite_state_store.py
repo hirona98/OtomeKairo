@@ -167,7 +167,7 @@ class SqliteStateStore:
                 """
                 SELECT cycle_id, created_at, plan_json, selected_json, resolved_event_ids_json
                 FROM retrieval_runs
-                ORDER BY created_at DESC
+                ORDER BY events.created_at DESC
                 LIMIT 1
                 """
             ).fetchone()
@@ -731,15 +731,18 @@ class SqliteStateStore:
             recent_event_rows = connection.execute(
                 """
                 SELECT
-                    event_id,
-                    source,
-                    kind,
-                    observation_summary,
-                    action_summary,
-                    result_summary,
-                    created_at
+                    events.event_id,
+                    events.source,
+                    events.kind,
+                    events.observation_summary,
+                    events.action_summary,
+                    events.result_summary,
+                    events.created_at,
+                    event_preview_cache.preview_text
                 FROM events
-                WHERE searchable = 1
+                LEFT JOIN event_preview_cache
+                       ON event_preview_cache.event_id = events.event_id
+                WHERE events.searchable = 1
                 ORDER BY created_at DESC
                 LIMIT ?
                 """,
@@ -9878,16 +9881,19 @@ def _fetch_event_rows_by_ids(
     rows = connection.execute(
         f"""
         SELECT
-            event_id,
-            source,
-            kind,
-            observation_summary,
-            action_summary,
-            result_summary,
-            created_at
+            events.event_id,
+            events.source,
+            events.kind,
+            events.observation_summary,
+            events.action_summary,
+            events.result_summary,
+            events.created_at,
+            event_preview_cache.preview_text
         FROM events
-        WHERE searchable = 1
-          AND event_id IN ({placeholder_sql})
+        LEFT JOIN event_preview_cache
+               ON event_preview_cache.event_id = events.event_id
+        WHERE events.searchable = 1
+          AND events.event_id IN ({placeholder_sql})
         """,
         tuple(event_ids),
     ).fetchall()
@@ -10588,7 +10594,7 @@ def _memory_snapshot_entry(row: sqlite3.Row) -> dict[str, Any]:
 def _event_memory_snapshot_entry(row: sqlite3.Row) -> dict[str, Any]:
     summary_text = _event_summary_text(row)
     created_at = int(row["created_at"])
-    return {
+    entry = {
         "memory_state_id": str(row["event_id"]),
         "memory_kind": "episodic_event",
         "body_text": summary_text,
@@ -10605,6 +10611,10 @@ def _event_memory_snapshot_entry(row: sqlite3.Row) -> dict[str, Any]:
         "updated_at": created_at,
         "last_confirmed_at": created_at,
     }
+    preview_text = row["preview_text"]
+    if isinstance(preview_text, str) and preview_text.strip():
+        entry["payload"]["preview_text"] = preview_text.strip()
+    return entry
 
 
 def _event_affect_snapshot_entry(row: sqlite3.Row) -> dict[str, Any]:
@@ -10977,13 +10987,17 @@ def _normalized_entity_name(text: str) -> str:
 
 
 def _recent_event_entry(row: sqlite3.Row) -> dict[str, Any]:
-    return {
+    entry = {
         "event_id": str(row["event_id"]),
         "source": str(row["source"]),
         "kind": str(row["kind"]),
         "summary_text": _event_summary_text(row),
         "created_at": int(row["created_at"]),
     }
+    preview_text = row["preview_text"]
+    if isinstance(preview_text, str) and preview_text.strip():
+        entry["preview_text"] = preview_text.strip()
+    return entry
 
 
 def _event_summary_text(row: sqlite3.Row) -> str:

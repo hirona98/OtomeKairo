@@ -601,6 +601,7 @@
 - 初期実装では、`episodic_items.memory_kind` に `episodic_event`、`affective_items.memory_kind` に `long_mood_state` または `event_affect`、`relationship_items.memory_kind` に `relation` または `preference`、`reflection_items.memory_kind` に `reflection_note` を使ってよい
 - 初期実装の `reflection_items[].payload` は、少なくとも `what_happened` と `event_summaries` を持ち、必要なら `what_worked`、`what_failed`、`retry_hint`、`avoid_pattern`、`reflection_seed_ref`、`reflection_seed`、`action_outcomes` を持ってよい
 - current 実装では、`event_about_time` または `state_about_time` に対応する要素へ `about_time_hint_text` を追加してよい
+- current 実装では、`recent_event_window[].preview_text` と `episodic_items[].payload.preview_text` を追加で持ってよい
 
 <!-- Block: Conversation Context -->
 ### `conversation_context`
