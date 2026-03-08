@@ -131,7 +131,7 @@ def _build_plan_messages(request: CognitionPlanRequest) -> list[dict[str, Any]]:
             "reply_policy.mode は render か none のいずれかにする。",
             "speak または notify を返す場合は reply_policy.mode を render にする。",
             "browse だけを返す場合でも、ユーザーへ一言伝えるべきなら reply_policy.mode を render にしてよい。",
-            "wait だけを返す場合は reply_policy.mode を none にする。",
+            "wait だけを返す場合でも、見送る理由を一言返すなら reply_policy.mode を render にしてよい。",
             "camera_candidates[].presets があるカメラでは、広い視点変更や前後左右の確認に preset_name を優先し、direction はプリセットがない場合か微調整に使う。",
             "memory_focus は object で、focus_kind と summary を必ず持つ。",
             "memory_focus.focus_kind は observation, summary, episodic, fact, affective, relation, preference, reflection, none のいずれかにする。",

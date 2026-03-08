@@ -159,6 +159,8 @@ def run_cognition_for_browser_chat_input(
         resolved_at=resolved_at,
         action_command=action_command,
         decision=validated_action.decision,
+        response_text=response_text,
+        message_id=active_message_id,
         emit_ui_event=emit_event,
         consume_cancel=lambda: consume_cancel(active_message_id),
         camera_controller=camera_controller,
@@ -299,7 +301,7 @@ def _requires_reply_render(cognition_plan: dict[str, Any]) -> bool:
         action_type = proposal.get("action_type")
         if not isinstance(action_type, str) or not action_type:
             raise RuntimeError("cognition_plan.action_proposals.action_type must be a non-empty string")
-        if action_type in {"speak", "notify", "look", "browse"}:
+        if action_type in {"speak", "notify", "look", "browse", "wait"}:
             visible_action_types.add(action_type)
     if reply_mode == "render":
         if not visible_action_types:
@@ -367,6 +369,8 @@ def _dispatch_result_for_decision(
     resolved_at: int,
     action_command: dict[str, Any] | None,
     decision: str,
+    response_text: str,
+    message_id: str,
     emit_ui_event: Callable[[str, dict[str, Any]], None],
     consume_cancel: Callable[[], bool],
     camera_controller: CameraController,
@@ -375,6 +379,22 @@ def _dispatch_result_for_decision(
     effective_settings: dict[str, Any],
 ) -> ActionDispatchResult:
     if decision != "execute":
+        emitted_event_types: list[str] = []
+        final_message_emitted = False
+        if decision == "hold" and response_text:
+            emit_ui_event(
+                "message",
+                {
+                    "message_id": message_id,
+                    "role": "assistant",
+                    "text": response_text,
+                    "created_at": _now_ms(),
+                    "source_cycle_id": cycle_id,
+                    "related_input_id": pending_input.input_id,
+                },
+            )
+            emitted_event_types.append("message")
+            final_message_emitted = True
         emit_ui_event(
             "status",
             {
@@ -383,6 +403,7 @@ def _dispatch_result_for_decision(
                 "cycle_id": cycle_id,
             },
         )
+        emitted_event_types.append("status")
         command_type = (
             str(action_command["command_type"])
             if action_command is not None
@@ -393,9 +414,11 @@ def _dispatch_result_for_decision(
                 decision=decision,
                 command_type=command_type,
             ),
-            emitted_event_types=["status"],
+            emitted_event_types=emitted_event_types,
             observed_effects={
                 "status_code_after": "idle",
+                "final_message_emitted": final_message_emitted,
+                **({"message_id": message_id} if final_message_emitted else {}),
             },
             task_mutations=[],
             pending_input_mutations=[],
@@ -442,6 +465,9 @@ def _action_history_command(
         }
         if validated_action.proposal is not None:
             command_payload["proposal_ref"] = str(validated_action.proposal["proposal_id"])
+            if "message" in emitted_event_types:
+                command_payload["message_id"] = str(validated_action.proposal["message_id"])
+                command_payload["role"] = "assistant"
         return command_payload
     return {
         **action_command,

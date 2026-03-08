@@ -1112,7 +1112,7 @@
 - current の `browser_chat` では、`speak` と `notify` のとき `target_channel=\"browser_chat\"` を必須とする
 - current の `browser_chat` では、`browse` のとき `query` に非空の検索文字列を必須とする
 - current の `browser_chat` では、`look` のとき `camera_connection_id` と、`direction` / `preset_id` / `preset_name` のいずれかを必須とする
-- current の `browser_chat` では、`cognition_result.speech_draft` は `speak`、`notify`、`look` のいずれかを候補に含むときだけ持つ
+- current の `browser_chat` では、`cognition_result.speech_draft` は `reply_policy.mode="render"` のときに持つ
 - `speech_draft` を持つ場合は、少なくとも `text`、`language`、`delivery_mode` を持つ
 - `memory_focus` は、少なくとも `focus_kind`、`summary` を持つ
 - `reflection_seed` は、少なくとも `cycle_id`、`input_kind`、`message_id`、`token_count`、`was_cancelled` を持つ
@@ -1747,7 +1747,8 @@
 - current の `enqueue_browse_task` では、伴走メッセージを出す場合だけ `parameters.message_id` と `parameters.text` を持たせてよい
 - `parameters.query` は、`execute_browse_task` と `abandon_browse_task` を実行する命令だけに付けてよい
 - `related_task_id` は、`execute_browse_task` と `abandon_browse_task` のように task 再開を処理する命令だけに付けてよい
-- `hold` と `reject` では、`message_id` と `role` を付けず、`event_types` は `status` だけでもよい
+- `hold` と `reject` では、`event_types` は `status` だけでもよい
+- current の `hold` では、伴走メッセージを出す場合だけ `message_id` と `role` を付けてよい
 - `target_message_id` は、`cancel` のように既存メッセージを対象化する行動だけに付ける
 - `input_kind` は、未対応入力のエラー応答のように、原因となる入力種別を残したいときだけ付ける
 
@@ -1795,7 +1796,8 @@
 - `validator_reason` は、`action validator` の決定理由コードを持つ
 - `selected_action_type` は、比較で最上位になった候補の `action_type` を残したいときに付ける
 - `action_candidate_score` は、`action validator` の最小比較結果を残したいときに付ける
-- `hold` と `reject` では、`message_id` を付けず、`final_message_emitted=false` にする
+- `reject` では、`message_id` を付けず、`final_message_emitted=false` にする
+- current の `hold` では、伴走メッセージを出した場合だけ `message_id` を付け、`final_message_emitted=true` にしてよい
 - `enqueue_browse_task` を実行した場合は、`queued_task_id`、`queued_task_kind`、`queued_task_status` を付けてよい
 - current の `enqueue_browse_task` では、伴走メッセージを出した場合だけ `final_message_emitted` と `message_id` を付けてよい
 - `complete_browse_task` を実行した場合は、`related_task_id`、`task_status_after`、`summary_text` を付けてよい
