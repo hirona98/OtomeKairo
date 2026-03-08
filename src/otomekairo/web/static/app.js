@@ -755,8 +755,13 @@
       if (!response.ok) {
         throw new Error(readErrorMessage(payload));
       }
-      insertTranscribedText(requireString(payload.transcript_text, "microphone.transcript_text"));
-      appendNotice("microphone_transcribed", "音声をテキスト化しました");
+      const transcriptText = requireString(payload.transcript_text, "microphone.transcript_text");
+      appendMessage({
+        role: "user",
+        text: transcriptText,
+        messageId: requireString(payload.input_id, "microphone.input_id"),
+        isDraft: false,
+      });
     } catch (error) {
       appendError(`音声入力に失敗しました: ${error.message}`);
     } finally {
@@ -780,20 +785,6 @@
       }
     }
     return "";
-  }
-
-  function insertTranscribedText(transcriptText) {
-    const normalizedTranscriptText = String(transcriptText).trim();
-    if (!normalizedTranscriptText) {
-      throw new Error("transcript_text が空です");
-    }
-    const previousText = chatInput.value.trim();
-    chatInput.value = previousText
-      ? `${previousText}\n${normalizedTranscriptText}`
-      : normalizedTranscriptText;
-    autoResizeComposer();
-    updateSendEnabledState();
-    chatInput.focus();
   }
 
   // Block: Camera capture

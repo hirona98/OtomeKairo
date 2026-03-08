@@ -13,7 +13,7 @@ def build_microphone_router(services: AppServices) -> APIRouter:
     router = APIRouter()
 
     # Block: Microphone transcription endpoint
-    @router.post("/api/microphone/input", status_code=status.HTTP_200_OK)
+    @router.post("/api/microphone/input", status_code=status.HTTP_202_ACCEPTED)
     async def post_microphone_input(request: Request) -> dict[str, object]:
         effective_settings = services.store.read_settings(services.default_settings)["effective_settings"]
         recognition_request = await _build_recognition_request(
@@ -21,7 +21,13 @@ def build_microphone_router(services: AppServices) -> APIRouter:
             effective_settings=effective_settings,
         )
         recognition_response = services.speech_recognizer.recognize(recognition_request)
+        enqueue_result = services.store.enqueue_microphone_message(
+            transcript_text=recognition_response.transcript_text,
+            stt_provider=recognition_response.provider,
+            stt_language=recognition_response.language,
+        )
         return {
+            **enqueue_result,
             "transcript_text": recognition_response.transcript_text,
             "provider": recognition_response.provider,
             "language": recognition_response.language,

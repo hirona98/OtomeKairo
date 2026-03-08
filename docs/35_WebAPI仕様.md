@@ -135,7 +135,7 @@ flowchart LR
 - ログイン画面は持たず、起動直後にそのままチャット UI を表示する
 - current の設定画面は `tmp/CocoroConsole` の設定ウインドウをベースにしてよい
 - ブラウザUIの入力手段は、テキスト入力、録音ボタンによる音声転写、`Cam` による静止画添付に固定する
-- current の録音ボタンは開始/停止の明示操作で音声を取り、`POST /api/microphone/input` へ raw audio body を送り、返った `transcript_text` を composer へ追記してよい
+- current の録音ボタンは開始/停止の明示操作で音声を取り、`POST /api/microphone/input` へ raw audio body を送り、そのまま `microphone_message` として runtime に enqueue してよい
 - `Cam` は enabled な `camera_connections` から 1 台を明示選択し、`POST /api/camera/capture` へ `camera_connection_id` を送って静止画を取得し、返った画像をサムネイル表示し、次の `POST /api/chat/input` へ添付してよい
 - current の `Cam` ボタンは `POST /api/camera/observe` ではなく `POST /api/camera/capture` だけを呼ぶ
 - `message` に `audio_url` がある場合は、`GET /audio/{audio_filename}` で取得した音声を再生してよい
@@ -498,7 +498,7 @@ flowchart LR
 ### 役割
 
 - ブラウザ録音の raw audio body を受け取り、現在の `speech.stt.*` 設定に従って同期 `STT` を実行する
-- current 実装では、ここでは `pending_inputs` に積まず、転写文だけをブラウザへ返す
+- current 実装では、転写文を `source=microphone` の `microphone_message` として `pending_inputs` に積む
 
 <!-- Block: Microphone Input Request -->
 ### 入力本文
@@ -509,18 +509,37 @@ flowchart LR
 - `speech.stt.enabled=false`、`speech.stt.provider` 未設定、`speech.stt.amivoice.api_key` 未設定、`speech.stt.language` 未設定のいずれかでも `409 Conflict` を返す
 - current 実装で受け付ける `speech.stt.provider` は `amivoice` だけである
 
+<!-- Block: Microphone Input Write -->
+### DB への写像
+
+- まず同期 `STT` を実行して `transcript_text` を得る
+- その後 `pending_inputs` に 1 件追加する
+- `source` は `microphone` に固定する
+- `channel` は `browser_chat` に固定する
+- `client_message_id` は `null` に固定する
+- `payload_json` には `input_kind="microphone_message"`、`message_kind="dialogue_turn"`、`trigger_reason="external_input"`、`text`、`stt_provider`、`stt_language` を入れる
+- 追加時の `status` は `queued` に固定する
+
 <!-- Block: Microphone Input Response -->
 ### 成功応答
 
 ```json
 {
+  "accepted": true,
+  "input_id": "inp_...",
+  "status": "queued",
+  "channel": "browser_chat",
   "transcript_text": "おはよう",
   "provider": "amivoice",
   "language": "ja"
 }
 ```
 
-- 成功時は `200 OK` を返す
+- 成功時は `202 Accepted` を返す
+- `accepted` は `true` に固定する
+- `input_id` は、生成した `microphone_message` の ID である
+- `status` は `queued` に固定する
+- `channel` は `browser_chat` に固定する
 - `transcript_text` は、`STT` が返した空でない転写文である
 - `provider` は current 実装では `amivoice` に固定する
 - `language` は current 実装では `speech.stt.language` の設定値を返す

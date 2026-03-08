@@ -1283,6 +1283,39 @@ class SqliteStateStore:
             priority=100,
         )
 
+    # Block: Microphone message write
+    def enqueue_microphone_message(
+        self,
+        *,
+        transcript_text: str,
+        stt_provider: str,
+        stt_language: str,
+    ) -> dict[str, Any]:
+        stripped_text = transcript_text.strip()
+        stripped_provider = stt_provider.strip()
+        stripped_language = stt_language.strip()
+        if not stripped_text:
+            raise StoreValidationError("transcript_text must be non-empty")
+        if len(stripped_text) > 4000:
+            raise StoreValidationError("transcript_text is too long")
+        if not stripped_provider:
+            raise StoreValidationError("stt_provider must be non-empty")
+        if not stripped_language:
+            raise StoreValidationError("stt_language must be non-empty")
+        return self._enqueue_pending_input(
+            source="microphone",
+            client_message_id=None,
+            payload={
+                "input_kind": "microphone_message",
+                "message_kind": "dialogue_turn",
+                "trigger_reason": "external_input",
+                "text": stripped_text,
+                "stt_provider": stripped_provider,
+                "stt_language": stripped_language,
+            },
+            priority=100,
+        )
+
     # Block: Camera observation write
     def enqueue_camera_observation(
         self,
@@ -7560,6 +7593,21 @@ def _pending_input_situation_summary(
         if "control_camera_look" in action_types:
             return "カメラ視点を調整した"
         return "チャット入力を処理した" if resolution_status == "consumed" else "チャット入力を棄却した"
+    if input_kind == "microphone_message":
+        if "enqueue_browse_task" in action_types:
+            query = _queued_browse_query(action_results)
+            if query is not None:
+                return f"音声入力をもとに検索タスクを登録した: {query}"
+            return "音声入力をもとに検索タスクを登録した"
+        if "control_camera_look" in action_types and has_followup_camera_observation:
+            return "音声入力をもとにカメラ視点を調整し、追跡観測を登録した"
+        if "emit_chat_response" in action_types:
+            return "音声入力に応答した"
+        if "dispatch_notice" in action_types:
+            return "音声入力に対して通知した"
+        if "control_camera_look" in action_types:
+            return "音声入力をもとにカメラ視点を調整した"
+        return "音声入力を処理した" if resolution_status == "consumed" else "音声入力を棄却した"
     if input_kind == "camera_observation":
         trigger_reason = pending_input.payload.get("trigger_reason")
         is_followup_observation = trigger_reason == "post_action_followup"
@@ -7881,6 +7929,11 @@ def _pending_input_receipt_summary(pending_input: PendingInputRecord) -> str:
         if isinstance(attachments, list) and attachments:
             return f"chat_message:camera_images:{len(attachments)}"
         return "chat_message"
+    if input_kind == "microphone_message":
+        text = pending_input.payload.get("text")
+        if isinstance(text, str) and text:
+            return f"microphone_message:{text[:60]}"
+        return "microphone_message"
     if input_kind == "camera_observation":
         attachments = pending_input.payload.get("attachments")
         if pending_input.source == "post_action_followup":

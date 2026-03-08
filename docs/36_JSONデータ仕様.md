@@ -121,8 +121,9 @@
 
 - `pending_inputs.payload_json` は、current の受理入力本文である
 - 必須項目は `input_kind` である
-- current の `input_kind` は `chat_message`、`camera_observation`、`network_result`、`idle_tick`、`cancel` に固定する
+- current の `input_kind` は `chat_message`、`microphone_message`、`camera_observation`、`network_result`、`idle_tick`、`cancel` に固定する
 - `chat_message` は、`message_kind="dialogue_turn"`、`trigger_reason="external_input"` を持ち、必要なら `text`、`attachments`、`client_message_id` を持ってよい
+- `microphone_message` は、`message_kind="dialogue_turn"`、`trigger_reason="external_input"`、非空の `text`、`stt_provider`、`stt_language` を必須とする
 - `camera_observation` は、`trigger_reason` と `attachments` を必須とし、`attachments` は `camera_still_image` を 1 件以上持つ配列に固定し、各添付は `camera_connection_id` と `camera_display_name` を持つ
 - `network_result` は、`trigger_reason="external_result"`、`query`、`summary_text`、`source_task_id` を必須とする
 - `idle_tick` は、`trigger_reason="idle_tick"` と正の `idle_duration_ms` を必須とし、`text` や `attachments` を持たない
@@ -427,8 +428,9 @@
 
 - `current_observation` は、その短周期で主材料として扱う観測断面である
 - 必須項目は `source`、`kind`、`trigger_reason`、`input_kind`、`captured_at`、`observation_text` である
-- current の `input_kind` は `chat_message`、`camera_observation`、`network_result`、`idle_tick` に固定する
+- current の `input_kind` は `chat_message`、`microphone_message`、`camera_observation`、`network_result`、`idle_tick` に固定する
 - `chat_message` は、必要なら `attachment_count`、`attachment_summary_text`、`attachments` を持ってよい
+- `microphone_message` は、`text`、`stt_provider`、`stt_language` を必須とする
 - `camera_observation` は、`attachment_count`、`attachment_summary_text`、`attachments` を必須とし、`trigger_reason=post_action_followup` の場合は追跡観測として扱い、`attachment_summary_text` と `observation_text` に `camera_display_name` を使ってよい
 - `network_result` は、`query`、`summary_text`、`source_task_id` を必須とする
 - `idle_tick` は、正の `idle_duration_ms` を必須とする
@@ -1864,13 +1866,20 @@
 
 ```json
 {
+  "accepted": true,
+  "input_id": "inp_...",
+  "status": "queued",
+  "channel": "browser_chat",
   "transcript_text": "おはよう",
   "provider": "amivoice",
   "language": "ja"
 }
 ```
 
-- 必須項目は `transcript_text`、`provider`、`language` である
+- 必須項目は `accepted`、`input_id`、`status`、`channel`、`transcript_text`、`provider`、`language` である
+- `accepted` は `true` に固定する
+- `status` は `queued` に固定する
+- `channel` は `browser_chat` に固定する
 - `transcript_text` は空文字列を許可しない
 - `provider` は current 実装では `amivoice` に固定する
 - `language` は `speech.stt.language` の設定値を返す

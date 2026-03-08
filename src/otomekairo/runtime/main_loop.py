@@ -362,7 +362,7 @@ class RuntimeLoop:
         dict[str, Any] | None,
     ]:
         input_kind = pending_input.payload["input_kind"]
-        if input_kind in {"chat_message", "camera_observation", "network_result", "idle_tick"}:
+        if input_kind in {"chat_message", "microphone_message", "camera_observation", "network_result", "idle_tick"}:
             state_snapshot = self._store.read_cognition_state(
                 self._default_settings,
                 observation_hint_text=_pending_input_observation_hint(pending_input),
@@ -905,6 +905,11 @@ def _pending_input_observation_hint(pending_input: PendingInputRecord) -> str:
         if attachment_count > 0:
             return f"カメラ画像 {attachment_count} 枚"
         raise RuntimeError("chat_message requires text or attachments")
+    if input_kind == "microphone_message":
+        text = pending_input.payload.get("text")
+        if not isinstance(text, str) or not text.strip():
+            raise RuntimeError("microphone_message.text must be non-empty string")
+        return f"音声入力: {text.strip()}"
     if input_kind == "camera_observation":
         attachments = pending_input.payload.get("attachments")
         if not isinstance(attachments, list):

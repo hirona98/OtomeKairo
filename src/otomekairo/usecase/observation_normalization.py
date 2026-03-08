@@ -18,8 +18,8 @@ def normalize_observation_source(*, source: str, payload: dict[str, Any]) -> str
 # Block: Public kind normalization
 def normalize_observation_kind(*, payload: dict[str, Any]) -> str:
     input_kind = _input_kind(payload)
-    if input_kind == "chat_message":
-        return _chat_observation_kind(payload)
+    if input_kind in {"chat_message", "microphone_message"}:
+        return _message_observation_kind(payload)
     if input_kind == "camera_observation":
         return "scene_change"
     if input_kind == "network_result":
@@ -54,11 +54,11 @@ def _input_kind(payload: dict[str, Any]) -> str:
     return input_kind
 
 
-# Block: Chat kind reader
-def _chat_observation_kind(payload: dict[str, Any]) -> str:
+# Block: Message kind reader
+def _message_observation_kind(payload: dict[str, Any]) -> str:
     message_kind = payload.get("message_kind")
     if message_kind is None:
         return "dialogue_turn"
     if not isinstance(message_kind, str) or message_kind not in {"dialogue_turn", "instruction"}:
-        raise RuntimeError("chat_message.message_kind must be dialogue_turn or instruction")
+        raise RuntimeError("message_kind must be dialogue_turn or instruction")
     return message_kind

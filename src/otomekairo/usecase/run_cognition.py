@@ -235,6 +235,8 @@ def _initial_status_label(pending_input: PendingInputRecord) -> str:
     input_kind = str(pending_input.payload["input_kind"])
     if input_kind == "chat_message":
         return "入力を処理しています"
+    if input_kind == "microphone_message":
+        return "音声入力を処理しています"
     if input_kind == "camera_observation":
         return "カメラ画像を観測しています"
     if input_kind == "network_result":

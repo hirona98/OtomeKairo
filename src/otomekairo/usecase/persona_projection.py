@@ -163,12 +163,13 @@ def _attention_candidates(
 
 def _observation_attention_candidate(current_observation: dict[str, Any]) -> dict[str, Any]:
     input_kind = str(current_observation["input_kind"])
+    scoring_input_kind = _attention_input_kind(current_observation=current_observation)
     reason_codes = [f"input_kind:{input_kind}"]
-    if input_kind == "chat_message":
+    if scoring_input_kind == "chat_message":
         attachments = current_observation.get("attachments")
         if isinstance(attachments, list) and attachments:
             reason_codes.append("camera_attachment")
-    if input_kind == "network_result":
+    if scoring_input_kind == "network_result":
         reason_codes.append("external_result")
     return {
         "candidate_type": "observation",
@@ -176,7 +177,7 @@ def _observation_attention_candidate(current_observation: dict[str, Any]) -> dic
         "focus_kind": "observation",
         "summary": str(current_observation["observation_text"]),
         "reason_codes": reason_codes,
-        "observation_kind": input_kind,
+        "observation_kind": scoring_input_kind,
     }
 
 
@@ -327,9 +328,10 @@ def _observation_attention_task_continuity(
     *,
     current_observation: dict[str, Any],
 ) -> float:
-    if current_observation["input_kind"] == "network_result":
+    input_kind = _attention_input_kind(current_observation=current_observation)
+    if input_kind == "network_result":
         return 0.88
-    if current_observation["input_kind"] == "chat_message":
+    if input_kind == "chat_message":
         return 0.58
     return 0.42
 
@@ -340,9 +342,10 @@ def _observation_attention_relationship_salience(
     selection_profile: dict[str, Any],
 ) -> float:
     strongest_priority = _strongest_relationship_priority(selection_profile)
-    if current_observation["input_kind"] == "chat_message":
+    input_kind = _attention_input_kind(current_observation=current_observation)
+    if input_kind == "chat_message":
         return _clamp_unit(0.32 + strongest_priority * 0.48)
-    if current_observation["input_kind"] == "network_result":
+    if input_kind == "network_result":
         return _clamp_unit(0.22 + strongest_priority * 0.25)
     return _clamp_unit(0.18 + strongest_priority * 0.18)
 
@@ -385,9 +388,10 @@ def _observation_attention_explicitness(
     *,
     current_observation: dict[str, Any],
 ) -> float:
-    if current_observation["input_kind"] == "network_result":
+    input_kind = _attention_input_kind(current_observation=current_observation)
+    if input_kind == "network_result":
         return 0.92
-    if current_observation["input_kind"] == "chat_message":
+    if input_kind == "chat_message":
         text = current_observation.get("text")
         return 0.96 if isinstance(text, str) and text else 0.68
     return 0.54
@@ -576,7 +580,7 @@ def _unexplored_check_breakdown(
         + 0.22 * novelty_preference
         + 0.30 * _positive_drive_bias(selection_profile, "exploration_bias")
     )
-    observation_kind = str(current_observation["input_kind"])
+    observation_kind = _attention_input_kind(current_observation=current_observation)
     habit_match = _action_habit_match(
         selection_profile=selection_profile,
         action_types=["look", "browse"],
@@ -726,6 +730,14 @@ def _skill_candidate_from_breakdown(
         "suggested_action_types": suggested_action_types,
         "reason_codes": reason_codes,
     }
+
+
+# Block: Observation kind helpers
+def _attention_input_kind(*, current_observation: dict[str, Any]) -> str:
+    input_kind = str(current_observation["input_kind"])
+    if input_kind == "microphone_message":
+        return "chat_message"
+    return input_kind
 
 
 def _task_progress_action_types(task_snapshot: dict[str, Any]) -> list[str]:

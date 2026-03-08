@@ -34,9 +34,9 @@ def build_cognition_input(
     camera_available: bool,
 ) -> BuiltCognitionInput:
     input_kind = str(pending_input.payload["input_kind"])
-    if input_kind not in {"chat_message", "camera_observation", "network_result", "idle_tick"}:
+    if input_kind not in {"chat_message", "microphone_message", "camera_observation", "network_result", "idle_tick"}:
         raise ValueError(
-            "cognition_input is only supported for chat_message, camera_observation, network_result, and idle_tick"
+            "cognition_input is only supported for chat_message, microphone_message, camera_observation, network_result, and idle_tick"
         )
     camera_candidates = _build_camera_candidates(enabled_camera_connections)
     behavior_settings = _build_behavior_settings(state_snapshot.effective_settings)
@@ -164,7 +164,10 @@ def _build_current_observation(
         payload=pending_input.payload,
     )
     if input_kind == "chat_message":
-        text = _validated_chat_text(pending_input.payload.get("text"))
+        text = _validated_message_text(
+            pending_input.payload.get("text"),
+            input_kind="chat_message",
+        )
         attachments = _validated_camera_attachments(
             pending_input.payload.get("attachments"),
             input_kind="chat_message",
@@ -176,6 +179,26 @@ def _build_current_observation(
             "attachment_summary_text": _camera_attachment_summary_text(attachments),
             "attachments": attachments,
             **({"text": text} if text is not None else {}),
+        }
+    if input_kind == "microphone_message":
+        text = _validated_message_text(
+            pending_input.payload.get("text"),
+            input_kind="microphone_message",
+        )
+        if text is None:
+            raise ValueError("microphone_message.text is required")
+        stt_provider = pending_input.payload.get("stt_provider")
+        stt_language = pending_input.payload.get("stt_language")
+        if not isinstance(stt_provider, str) or not stt_provider:
+            raise ValueError("microphone_message.stt_provider must be non-empty string")
+        if not isinstance(stt_language, str) or not stt_language:
+            raise ValueError("microphone_message.stt_language must be non-empty string")
+        return {
+            **base_observation,
+            "observation_text": text,
+            "text": text,
+            "stt_provider": stt_provider,
+            "stt_language": stt_language,
         }
     if input_kind == "camera_observation":
         attachments = _validated_camera_attachments(
@@ -226,14 +249,14 @@ def _build_current_observation(
     raise ValueError("unsupported current_observation input_kind")
 
 
-# Block: Chat message text validation
-def _validated_chat_text(raw_text: Any) -> str | None:
+# Block: Message text validation
+def _validated_message_text(raw_text: Any, *, input_kind: str) -> str | None:
     if raw_text is None:
         return None
     if not isinstance(raw_text, str):
-        raise ValueError("chat_message.text must be string when present")
+        raise ValueError(f"{input_kind}.text must be string when present")
     if not raw_text:
-        raise ValueError("chat_message.text must not be empty string")
+        raise ValueError(f"{input_kind}.text must not be empty string")
     return raw_text
 
 
