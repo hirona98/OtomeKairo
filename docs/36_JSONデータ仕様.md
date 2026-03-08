@@ -16,7 +16,7 @@
 
 - 固定するのは、current 実装で使う JSON オブジェクトのキー、型、必須項目、固定語彙である
 - 固定するのは、`pending_inputs.payload_json`、`settings_overrides.requested_value_json`、`settings_editor_state.system_values_json`、5 種のプリセットテーブルの `payload_json`、`settings_change_sets.payload_json`、`ui_outbound_events.payload_json`、`action_history.command_json`、`action_history.observed_effects_json`、`memory_jobs.payload_ref_json`、`memory_job_payloads.payload_json`、`preference_memory.target_entity_ref_json`、`event_affects.moment_affect_labels_json`、`event_affects.vad_json`、主要な Web API 本文である
-- 固定するのは、`self_state.personality_json`、`self_state.current_emotion_json`、`self_state.long_term_goals_json`、`self_state.relationship_overview_json`、`self_state.invariants_json`、短周期の内部で使う `selection_profile`、`memory_bundle`、`retrieval_context`、`last_persona_update_summary`、`persona_consistency_score`、`attention_score_breakdown`、`self_initiated_score_breakdown`、`action_candidate_score`、`cognition_result`、長周期の内部で使う `MemoryWritePlan`、`personality_change_proposal`、`persona_updates` の形である
+- 固定するのは、`self_state.personality_json`、`self_state.current_emotion_json`、`self_state.long_term_goals_json`、`self_state.relationship_overview_json`、`self_state.invariants_json`、短周期の内部で使う `selection_profile`、`memory_bundle`、`retrieval_context`、`last_persona_update_summary`、`persona_consistency_score`、`attention_score_breakdown`、`self_initiated_score_breakdown`、`action_candidate_score`、`cognition_plan`、`speech_draft`、`cognition_result`、長周期の内部で使う `MemoryWritePlan`、`personality_change_proposal`、`persona_updates` の形である
 - 固定しないのは、Python のクラス名、Pydantic モデル名、OpenAPI の自動生成細部である
 - 固定しないのは、将来追加する未使用フィールドや後段の拡張イベント種別である
 
@@ -1009,6 +1009,59 @@
 - 各 `*_score` は、比較前に同じ `0.0..1.0` 尺度へ正規化済みでなければならない
 - `action_candidate_score` は永続化前提の正本ではなく、その短周期の候補比較ごとに再計算する
 
+<!-- Block: Cognition Plan -->
+### `cognition_plan`
+
+```json
+{
+  "intention_summary": "browser_chat に対して人格として応答する",
+  "decision_reason": "最新のテキスト入力を受け取り、現在の人格断面に基づいて返答方針を決める",
+  "action_proposals": [
+    {
+      "action_type": "speak",
+      "target_channel": "browser_chat",
+      "priority": 1.0
+    }
+  ],
+  "step_hints": [],
+  "memory_focus": {
+    "focus_kind": "observation",
+    "summary": "直近のチャット入力を主材料として判断した"
+  },
+  "reflection_seed": {
+    "message_id": ""
+  }
+}
+```
+
+- `cognition_plan` は、短周期の内部で使う認知計画オブジェクトである
+- 必須項目は `intention_summary`、`decision_reason`、`action_proposals`、`step_hints`、`memory_focus`、`reflection_seed` である
+- `action_proposals` と `step_hints` は配列に固定し、候補がない場合も空配列 `[]` を使う
+- current の `browser_chat` では、`action_proposals` の各要素は少なくとも `action_type` と `priority` を持つ
+- current の `browser_chat` では、`action_type` は `speak`、`browse`、`notify`、`look`、`wait` のいずれかだけを許可する
+- current の `browser_chat` では、`priority` は `0.0..1.0` の `number` に固定する
+- current の `browser_chat` では、`speak` と `notify` のとき `target_channel="browser_chat"` を必須とする
+- current の `browser_chat` では、`browse` のとき `query` に非空の検索文字列を必須とする
+- current の `browser_chat` では、`look` のとき `camera_connection_id` と、`direction` / `preset_id` / `preset_name` のいずれかを必須とする
+- `memory_focus` は、少なくとも `focus_kind`、`summary` を持つ
+- current の `browser_chat` では、`reflection_seed.message_id` は `string` を必須とし、計画段では空文字列を許可する
+
+<!-- Block: Speech Draft -->
+### `speech_draft`
+
+```json
+{
+  "text": "こんにちは。",
+  "language": "ja",
+  "delivery_mode": "stream"
+}
+```
+
+- `speech_draft` は、短周期の内部で使うユーザー向け応答本文オブジェクトである
+- 必須項目は `text`、`language`、`delivery_mode` である
+- current の `browser_chat` では、`language` は `ja` に固定する
+- current の `browser_chat` では、`delivery_mode` は `stream` に固定する
+
 <!-- Block: Cognition Result -->
 ### `cognition_result`
 
@@ -1044,7 +1097,7 @@
 ```
 
 - `cognition_result` は、短周期の内部で使う構造化された認知結果である
-- `cognition_result` は、認知層が一度に返す JSON オブジェクトであり、後から補完前提で分割しない
+- current の `browser_chat` では、`cognition_result` は `cognition_plan` と `speech_draft` を合成して作る
 - 必須項目は `intention_summary`、`decision_reason`、`action_proposals`、`step_hints`、`speech_draft`、`memory_focus`、`reflection_seed` である
 - `action_proposals` と `step_hints` は配列に固定し、候補がない場合も空配列 `[]` を使う
 - current の `browser_chat` では、`action_proposals` の各要素は少なくとも `action_type` と `priority` を持つ
