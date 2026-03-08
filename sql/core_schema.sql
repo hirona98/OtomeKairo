@@ -543,6 +543,38 @@ CREATE INDEX idx_state_links_to
 CREATE INDEX idx_state_links_label
     ON state_links (label);
 
+CREATE TABLE event_about_time (
+    event_about_time_id TEXT PRIMARY KEY,
+    event_id TEXT NOT NULL UNIQUE,
+    about_start_ts INTEGER,
+    about_end_ts INTEGER,
+    about_year_start INTEGER,
+    about_year_end INTEGER,
+    life_stage TEXT,
+    confidence REAL NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    CHECK (
+        about_start_ts IS NOT NULL
+        OR about_end_ts IS NOT NULL
+        OR about_year_start IS NOT NULL
+        OR about_year_end IS NOT NULL
+        OR life_stage IS NOT NULL
+    ),
+    FOREIGN KEY (event_id) REFERENCES events (event_id)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT
+);
+
+CREATE INDEX idx_event_about_time_event
+    ON event_about_time (event_id);
+
+CREATE INDEX idx_event_about_time_year
+    ON event_about_time (about_year_start, about_year_end);
+
+CREATE INDEX idx_event_about_time_life_stage
+    ON event_about_time (life_stage);
+
 CREATE TABLE event_entities (
     event_entity_id TEXT PRIMARY KEY,
     event_id TEXT NOT NULL,

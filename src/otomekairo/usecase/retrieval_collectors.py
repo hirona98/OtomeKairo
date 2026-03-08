@@ -631,16 +631,26 @@ def _collect_explicit_time_candidates(
                 sort_timestamp=int(item["updated_at"]),
             )
         )
-    for event_entity in memory_snapshot.get("event_entities", []):
-        if not isinstance(event_entity, dict):
-            raise ValueError("memory_snapshot.event_entities must contain only objects")
-        entity_type_norm = str(event_entity["entity_type_norm"])
-        if entity_type_norm == "life_stage":
-            if str(event_entity["entity_name_raw"]) not in life_stage_hint_set:
+    for event_about_time in memory_snapshot.get("event_about_time", []):
+        if not isinstance(event_about_time, dict):
+            raise ValueError("memory_snapshot.event_about_time must contain only objects")
+        about_year_start = event_about_time.get("about_year_start")
+        about_year_end = event_about_time.get("about_year_end")
+        life_stage = event_about_time.get("life_stage")
+        if isinstance(life_stage, str) and life_stage:
+            if life_stage not in life_stage_hint_set:
                 continue
-        elif entity_type_norm != "about_year" or str(event_entity["entity_name_raw"]) not in explicit_year_texts:
-            continue
-        candidate_info = event_items.get(str(event_entity["event_id"]))
+            matched_reason_code = "matched_life_stage"
+        else:
+            matched_year_values = {
+                str(about_year)
+                for about_year in (about_year_start, about_year_end)
+                if isinstance(about_year, int)
+            }
+            if not matched_year_values.intersection(explicit_year_texts):
+                continue
+            matched_reason_code = "matched_explicit_year"
+        candidate_info = event_items.get(str(event_about_time["event_id"]))
         if candidate_info is None:
             continue
         slot_name, item = candidate_info
@@ -659,10 +669,7 @@ def _collect_explicit_time_candidates(
             )
             sort_timestamp = int(item["updated_at"])
         append_reason(reason_codes, "collector_explicit_time")
-        if entity_type_norm == "life_stage":
-            append_reason(reason_codes, "matched_life_stage")
-        else:
-            append_reason(reason_codes, "matched_explicit_year")
+        append_reason(reason_codes, matched_reason_code)
         collected.append(
             _candidate_entry(
                 collector="explicit_time",

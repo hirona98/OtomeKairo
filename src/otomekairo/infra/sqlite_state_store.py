@@ -52,7 +52,7 @@ from otomekairo.usecase.write_memory_plan import (
 
 # Block: Schema constants
 SCHEMA_NAME = "core_schema"
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 EMBEDDING_VECTOR_DIMENSION = 32
 LEGACY_SETTING_KEY_ALIASES = {
     "llm.model": "llm.default_model",
@@ -833,6 +833,10 @@ class SqliteStateStore:
                 connection=connection,
                 event_ids=recent_event_ids,
             )
+            event_about_time_rows = _fetch_event_about_time_for_memory_snapshot(
+                connection=connection,
+                event_ids=recent_event_ids,
+            )
             event_entity_rows = _fetch_event_entities_for_memory_snapshot(
                 connection=connection,
                 event_ids=recent_event_ids,
@@ -901,6 +905,7 @@ class SqliteStateStore:
                 preference_rows=preference_rows,
                 event_link_rows=event_link_rows,
                 event_thread_rows=event_thread_rows,
+                event_about_time_rows=event_about_time_rows,
                 event_entity_rows=event_entity_rows,
                 state_link_rows=state_link_rows,
                 state_entity_rows=state_entity_rows,
@@ -2416,6 +2421,11 @@ class SqliteStateStore:
             event_affect_updates=list(memory_write_plan["event_affect"]),
             created_at=created_at,
         )
+        self._apply_event_about_time(
+            connection=connection,
+            event_annotations=list(memory_write_plan["event_annotations"]),
+            created_at=created_at,
+        )
         self._apply_event_entities(
             connection=connection,
             event_annotations=list(memory_write_plan["event_annotations"]),
@@ -2759,6 +2769,70 @@ class SqliteStateStore:
                 state_link_update=state_link_update,
                 created_at=created_at,
             )
+
+    # Block: イベント時制反映
+    def _apply_event_about_time(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        event_annotations: list[dict[str, Any]],
+        created_at: int,
+    ) -> None:
+        for event_annotation in event_annotations:
+            self._replace_event_about_time(
+                connection=connection,
+                event_annotation=event_annotation,
+                created_at=created_at,
+            )
+
+    # Block: イベント時制置換
+    def _replace_event_about_time(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        event_annotation: dict[str, Any],
+        created_at: int,
+    ) -> None:
+        event_id = str(event_annotation["event_id"])
+        connection.execute(
+            """
+            DELETE FROM event_about_time
+            WHERE event_id = ?
+            """,
+            (event_id,),
+        )
+        about_time = event_annotation.get("about_time")
+        if not isinstance(about_time, dict):
+            return
+        connection.execute(
+            """
+            INSERT INTO event_about_time (
+                event_about_time_id,
+                event_id,
+                about_start_ts,
+                about_end_ts,
+                about_year_start,
+                about_year_end,
+                life_stage,
+                confidence,
+                created_at,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                _opaque_id("eat"),
+                event_id,
+                about_time.get("about_start_ts"),
+                about_time.get("about_end_ts"),
+                about_time.get("about_year_start"),
+                about_time.get("about_year_end"),
+                about_time.get("life_stage"),
+                float(about_time["about_time_confidence"]),
+                created_at,
+                created_at,
+            ),
+        )
 
     # Block: イベントエンティティ反映
     def _apply_event_entities(
@@ -3483,6 +3557,10 @@ class SqliteStateStore:
                 connection=connection,
                 event_ids=[target_event_id],
             )
+            event_about_time_row = _fetch_event_about_time_for_preview(
+                connection=connection,
+                event_id=target_event_id,
+            )
             event_affect_row = _fetch_event_affect_for_preview(
                 connection=connection,
                 event_id=target_event_id,
@@ -3491,6 +3569,7 @@ class SqliteStateStore:
                 event_row=event_row,
                 event_entity_rows=event_entity_rows,
                 event_thread_rows=event_thread_rows,
+                event_about_time_row=event_about_time_row,
                 event_affect_row=event_affect_row,
             )
             preview_id = self._upsert_event_preview_cache(
@@ -5935,7 +6014,7 @@ class SqliteStateStore:
             return
         if current_version > SCHEMA_VERSION:
             raise RuntimeError("schema_version is newer than this initializer")
-        if current_version not in {2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}:
+        if current_version not in {2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13}:
             raise RuntimeError("unsupported schema_version for migration")
         while current_version < SCHEMA_VERSION:
             if current_version == 2:
@@ -5981,6 +6060,10 @@ class SqliteStateStore:
             if current_version == 12:
                 self._migrate_schema_12_to_13(connection=connection, now_ms=now_ms)
                 current_version = 13
+                continue
+            if current_version == 13:
+                self._migrate_schema_13_to_14(connection=connection, now_ms=now_ms)
+                current_version = 14
                 continue
             raise RuntimeError("unsupported schema_version for migration")
 
@@ -7174,6 +7257,126 @@ class SqliteStateStore:
             WHERE meta_key = 'schema_version'
             """,
             (_json_text(13), now_ms),
+        )
+
+    # Block: Schema migration 13->14
+    def _migrate_schema_13_to_14(self, *, connection: sqlite3.Connection, now_ms: int) -> None:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS event_about_time (
+                event_about_time_id TEXT PRIMARY KEY,
+                event_id TEXT NOT NULL UNIQUE,
+                about_start_ts INTEGER,
+                about_end_ts INTEGER,
+                about_year_start INTEGER,
+                about_year_end INTEGER,
+                life_stage TEXT,
+                confidence REAL NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                CHECK (
+                    about_start_ts IS NOT NULL
+                    OR about_end_ts IS NOT NULL
+                    OR about_year_start IS NOT NULL
+                    OR about_year_end IS NOT NULL
+                    OR life_stage IS NOT NULL
+                ),
+                FOREIGN KEY (event_id) REFERENCES events (event_id)
+                    ON UPDATE CASCADE
+                    ON DELETE RESTRICT
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_event_about_time_event
+                ON event_about_time (event_id)
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_event_about_time_year
+                ON event_about_time (about_year_start, about_year_end)
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_event_about_time_life_stage
+                ON event_about_time (life_stage)
+            """
+        )
+        event_ids = [
+            str(row["event_id"])
+            for row in connection.execute(
+                """
+                SELECT DISTINCT event_id
+                FROM event_entities
+                WHERE entity_type_norm IN ('about_year', 'life_stage')
+                ORDER BY event_id ASC
+                """
+            ).fetchall()
+        ]
+        for event_id in event_ids:
+            entity_rows = connection.execute(
+                """
+                SELECT entity_type_norm, entity_name_raw, confidence
+                FROM event_entities
+                WHERE event_id = ?
+                  AND entity_type_norm IN ('about_year', 'life_stage')
+                ORDER BY created_at ASC
+                """,
+                (event_id,),
+            ).fetchall()
+            about_years: list[int] = []
+            life_stage: str | None = None
+            confidence = 0.0
+            for row in entity_rows:
+                entity_type_norm = str(row["entity_type_norm"])
+                confidence = max(confidence, float(row["confidence"]))
+                if entity_type_norm == "about_year":
+                    about_year = int(str(row["entity_name_raw"]))
+                    if about_year not in about_years:
+                        about_years.append(about_year)
+                    continue
+                if life_stage is None:
+                    life_stage = str(row["entity_name_raw"])
+            if not about_years and life_stage is None:
+                continue
+            connection.execute(
+                """
+                INSERT INTO event_about_time (
+                    event_about_time_id,
+                    event_id,
+                    about_start_ts,
+                    about_end_ts,
+                    about_year_start,
+                    about_year_end,
+                    life_stage,
+                    confidence,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    _opaque_id("eat"),
+                    event_id,
+                    min(about_years) if about_years else None,
+                    max(about_years) if about_years else None,
+                    life_stage,
+                    confidence if confidence > 0.0 else 0.5,
+                    now_ms,
+                    now_ms,
+                ),
+            )
+        connection.execute(
+            """
+            UPDATE db_meta
+            SET meta_value_json = ?,
+                updated_at = ?
+            WHERE meta_key = 'schema_version'
+            """,
+            (_json_text(14), now_ms),
         )
 
     # Block: sqlite-vec schema ensure
@@ -8742,6 +8945,61 @@ def _fetch_event_entities_for_memory_snapshot(
     ).fetchall()
 
 
+def _fetch_event_about_time_for_memory_snapshot(
+    *,
+    connection: sqlite3.Connection,
+    event_ids: list[str],
+) -> list[sqlite3.Row]:
+    if not event_ids:
+        return []
+    placeholders = ",".join("?" for _ in event_ids)
+    return connection.execute(
+        f"""
+        SELECT
+            event_about_time_id,
+            event_id,
+            about_start_ts,
+            about_end_ts,
+            about_year_start,
+            about_year_end,
+            life_stage,
+            confidence,
+            created_at,
+            updated_at
+        FROM event_about_time
+        WHERE event_id IN ({placeholders})
+        ORDER BY updated_at DESC
+        LIMIT 32
+        """,
+        tuple(event_ids),
+    ).fetchall()
+
+
+def _fetch_event_about_time_for_preview(
+    *,
+    connection: sqlite3.Connection,
+    event_id: str,
+) -> sqlite3.Row | None:
+    return connection.execute(
+        """
+        SELECT
+            event_about_time_id,
+            event_id,
+            about_start_ts,
+            about_end_ts,
+            about_year_start,
+            about_year_end,
+            life_stage,
+            confidence,
+            created_at,
+            updated_at
+        FROM event_about_time
+        WHERE event_id = ?
+        """,
+        (event_id,),
+    ).fetchone()
+
+
 def _fetch_event_affect_for_preview(
     *,
     connection: sqlite3.Connection,
@@ -9003,6 +9261,7 @@ def _build_event_preview_text(
     event_row: sqlite3.Row,
     event_entity_rows: list[sqlite3.Row],
     event_thread_rows: list[sqlite3.Row],
+    event_about_time_row: sqlite3.Row | None,
     event_affect_row: sqlite3.Row | None,
 ) -> str:
     summary_text = _event_summary_text(event_row).strip()
@@ -9017,6 +9276,9 @@ def _build_event_preview_text(
     thread_terms = _event_preview_thread_terms(event_thread_rows)
     if thread_terms:
         preview_parts.append("threads=" + ", ".join(thread_terms))
+    about_time_term = _event_preview_about_time_term(event_about_time_row)
+    if about_time_term is not None:
+        preview_parts.append(about_time_term)
     affect_term = _event_preview_affect_term(event_affect_row)
     if affect_term is not None:
         preview_parts.append(affect_term)
@@ -9062,6 +9324,25 @@ def _event_preview_affect_term(event_affect_row: sqlite3.Row | None) -> str | No
     if not affect_text:
         return None
     return "affect_text=" + affect_text[:80]
+
+
+def _event_preview_about_time_term(event_about_time_row: sqlite3.Row | None) -> str | None:
+    if event_about_time_row is None:
+        return None
+    about_terms: list[str] = []
+    about_year_start = event_about_time_row["about_year_start"]
+    about_year_end = event_about_time_row["about_year_end"]
+    if isinstance(about_year_start, int):
+        if isinstance(about_year_end, int) and about_year_end != about_year_start:
+            about_terms.append(f"{about_year_start}-{about_year_end}")
+        else:
+            about_terms.append(str(about_year_start))
+    life_stage = event_about_time_row["life_stage"]
+    if isinstance(life_stage, str) and life_stage:
+        about_terms.append(life_stage)
+    if not about_terms:
+        return None
+    return "about_time=" + ", ".join(about_terms)
 
 
 # Block: vec_items upsert
@@ -9943,6 +10224,7 @@ def _build_memory_snapshot_rows(
     preference_rows: list[sqlite3.Row],
     event_link_rows: list[sqlite3.Row],
     event_thread_rows: list[sqlite3.Row],
+    event_about_time_rows: list[sqlite3.Row],
     event_entity_rows: list[sqlite3.Row],
     state_link_rows: list[sqlite3.Row],
     state_entity_rows: list[sqlite3.Row],
@@ -9989,6 +10271,7 @@ def _build_memory_snapshot_rows(
         ],
         "event_links": [_event_link_snapshot_entry(row) for row in event_link_rows],
         "event_threads": [_event_thread_snapshot_entry(row) for row in event_thread_rows],
+        "event_about_time": [_event_about_time_snapshot_entry(row) for row in event_about_time_rows],
         "event_entities": [_event_entity_snapshot_entry(row) for row in event_entity_rows],
         "state_links": [_state_link_snapshot_entry(row) for row in state_link_rows],
         "state_entities": [_state_entity_snapshot_entry(row) for row in state_entity_rows],
@@ -10089,6 +10372,29 @@ def _event_entity_snapshot_entry(row: sqlite3.Row) -> dict[str, Any]:
         "entity_name_norm": str(row["entity_name_norm"]),
         "confidence": float(row["confidence"]),
         "created_at": int(row["created_at"]),
+    }
+
+
+def _event_about_time_snapshot_entry(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "event_about_time_id": str(row["event_about_time_id"]),
+        "event_id": str(row["event_id"]),
+        "about_start_ts": int(row["about_start_ts"]) if row["about_start_ts"] is not None else None,
+        "about_end_ts": int(row["about_end_ts"]) if row["about_end_ts"] is not None else None,
+        "about_year_start": (
+            int(row["about_year_start"])
+            if row["about_year_start"] is not None
+            else None
+        ),
+        "about_year_end": (
+            int(row["about_year_end"])
+            if row["about_year_end"] is not None
+            else None
+        ),
+        "life_stage": str(row["life_stage"]) if row["life_stage"] is not None else None,
+        "confidence": float(row["confidence"]),
+        "created_at": int(row["created_at"]),
+        "updated_at": int(row["updated_at"]),
     }
 
 
@@ -10250,35 +10556,6 @@ def _event_entity_entries_from_annotation(event_annotation: dict[str, Any]) -> l
             entity_name_raw=str(entity_entry["entity_name_raw"]),
             confidence=float(entity_entry["confidence"]),
         )
-    about_time = event_annotation.get("about_time")
-    if isinstance(about_time, dict):
-        about_year_start = about_time.get("about_year_start")
-        if isinstance(about_year_start, int):
-            _append_state_entity_entry(
-                entries=entries,
-                seen_keys=seen_keys,
-                entity_type_norm="about_year",
-                entity_name_raw=str(about_year_start),
-                confidence=float(about_time["about_time_confidence"]),
-            )
-        about_year_end = about_time.get("about_year_end")
-        if isinstance(about_year_end, int) and about_year_end != about_year_start:
-            _append_state_entity_entry(
-                entries=entries,
-                seen_keys=seen_keys,
-                entity_type_norm="about_year",
-                entity_name_raw=str(about_year_end),
-                confidence=float(about_time["about_time_confidence"]),
-            )
-        life_stage = about_time.get("life_stage")
-        if isinstance(life_stage, str) and life_stage:
-            _append_state_entity_entry(
-                entries=entries,
-                seen_keys=seen_keys,
-                entity_type_norm="life_stage",
-                entity_name_raw=life_stage,
-                confidence=float(about_time["about_time_confidence"]),
-            )
     return entries
 
 
