@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any
+
+from otomekairo.usecase.about_time_text import about_years_from_text, life_stage_from_text
 
 
 # Block: Plan constants
@@ -430,8 +431,8 @@ def _build_event_about_time(*, event_entry: dict[str, Any]) -> dict[str, Any] | 
     summary_text = str(event_entry["summary_text"]).strip()
     if not summary_text:
         return None
-    about_years = _about_years_from_text(summary_text)
-    life_stage = _life_stage_from_text(summary_text)
+    about_years = about_years_from_text(summary_text)
+    life_stage = life_stage_from_text(summary_text)
     if not about_years and life_stage is None:
         return None
     return {
@@ -470,32 +471,6 @@ def _append_event_entity(
 
 def _normalize_event_entity_name(text: str) -> str:
     return "".join(text.strip().lower().split())
-
-
-def _about_years_from_text(text: str) -> list[int]:
-    years: list[int] = []
-    for matched_text in re.findall(r"(19\d{2}|20\d{2}|2100)", text):
-        year = int(matched_text)
-        if year not in years:
-            years.append(year)
-    return years
-
-
-def _life_stage_from_text(text: str) -> str | None:
-    for cue, life_stage in (
-        ("幼少期", "childhood"),
-        ("子ども時代", "childhood"),
-        ("小学生", "primary_school"),
-        ("中学生", "junior_high"),
-        ("高校時代", "high_school"),
-        ("高校生", "high_school"),
-        ("大学時代", "college"),
-        ("大学生", "college"),
-        ("社会人", "working_adult"),
-    ):
-        if cue in text:
-            return life_stage
-    return None
 
 
 # Block: Plan validation

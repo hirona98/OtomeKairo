@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import Any
 
+from otomekairo.usecase.about_time_text import life_stage_label
 from otomekairo.usecase.retrieval_collectors import collect_retrieval_candidates
 from otomekairo.usecase.retrieval_common import local_text, relative_time_text, utc_text
 from otomekairo.usecase.retrieval_plan import build_retrieval_plan
@@ -31,6 +32,7 @@ def build_retrieval_artifacts(
     resolved_at: int,
 ) -> RetrievalArtifacts:
     event_about_time_by_id = _event_about_time_by_id(memory_snapshot)
+    state_about_time_by_id = _state_about_time_by_id(memory_snapshot)
     retrieval_plan = build_retrieval_plan(
         retrieval_profile=retrieval_profile,
         current_observation=current_observation,
@@ -51,6 +53,7 @@ def build_retrieval_artifacts(
                 memory_entry,
                 resolved_at=resolved_at,
                 event_about_time_by_id=event_about_time_by_id,
+                state_about_time_by_id=state_about_time_by_id,
             )
             for memory_entry in selection_artifacts.memory_bundle["working_memory_items"]
         ],
@@ -59,6 +62,7 @@ def build_retrieval_artifacts(
                 memory_entry,
                 resolved_at=resolved_at,
                 event_about_time_by_id=event_about_time_by_id,
+                state_about_time_by_id=state_about_time_by_id,
             )
             for memory_entry in selection_artifacts.memory_bundle["episodic_items"]
         ],
@@ -67,6 +71,7 @@ def build_retrieval_artifacts(
                 memory_entry,
                 resolved_at=resolved_at,
                 event_about_time_by_id=event_about_time_by_id,
+                state_about_time_by_id=state_about_time_by_id,
             )
             for memory_entry in selection_artifacts.memory_bundle["semantic_items"]
         ],
@@ -75,6 +80,7 @@ def build_retrieval_artifacts(
                 memory_entry,
                 resolved_at=resolved_at,
                 event_about_time_by_id=event_about_time_by_id,
+                state_about_time_by_id=state_about_time_by_id,
             )
             for memory_entry in selection_artifacts.memory_bundle["affective_items"]
         ],
@@ -83,6 +89,7 @@ def build_retrieval_artifacts(
                 memory_entry,
                 resolved_at=resolved_at,
                 event_about_time_by_id=event_about_time_by_id,
+                state_about_time_by_id=state_about_time_by_id,
             )
             for memory_entry in selection_artifacts.memory_bundle["relationship_items"]
         ],
@@ -91,6 +98,7 @@ def build_retrieval_artifacts(
                 memory_entry,
                 resolved_at=resolved_at,
                 event_about_time_by_id=event_about_time_by_id,
+                state_about_time_by_id=state_about_time_by_id,
             )
             for memory_entry in selection_artifacts.memory_bundle["reflection_items"]
         ],
@@ -145,6 +153,7 @@ def _memory_entry_for_cognition(
     *,
     resolved_at: int,
     event_about_time_by_id: dict[str, dict[str, Any]],
+    state_about_time_by_id: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
     updated_at = int(memory_entry["updated_at"])
     created_at = int(memory_entry["created_at"])
@@ -159,13 +168,13 @@ def _memory_entry_for_cognition(
         "last_confirmed_at_local_text": _local_text(last_confirmed_at),
         "relative_time_text": _relative_time_text(resolved_at, updated_at),
     }
-    related_event_id = _related_event_id(memory_entry)
-    if related_event_id is not None:
-        about_time_hint_text = _event_about_time_hint_text(
-            event_about_time_by_id.get(related_event_id)
-        )
-        if about_time_hint_text is not None:
-            projected_entry["about_time_hint_text"] = about_time_hint_text
+    about_time_hint_text = _state_or_event_about_time_hint_text(
+        memory_entry=memory_entry,
+        event_about_time_by_id=event_about_time_by_id,
+        state_about_time_by_id=state_about_time_by_id,
+    )
+    if about_time_hint_text is not None:
+        projected_entry["about_time_hint_text"] = about_time_hint_text
     return projected_entry
 
 
@@ -206,6 +215,36 @@ def _event_about_time_by_id(memory_snapshot: dict[str, Any]) -> dict[str, dict[s
         if event_id not in indexed_rows:
             indexed_rows[event_id] = event_about_time
     return indexed_rows
+
+
+# Block: 状態時制索引
+def _state_about_time_by_id(memory_snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    indexed_rows: dict[str, dict[str, Any]] = {}
+    for state_about_time in memory_snapshot.get("state_about_time", []):
+        if not isinstance(state_about_time, dict):
+            raise ValueError("memory_snapshot.state_about_time must contain only objects")
+        memory_state_id = state_about_time.get("memory_state_id")
+        if not isinstance(memory_state_id, str) or not memory_state_id:
+            raise ValueError("memory_snapshot.state_about_time.memory_state_id must be non-empty string")
+        if memory_state_id not in indexed_rows:
+            indexed_rows[memory_state_id] = state_about_time
+    return indexed_rows
+
+
+# Block: 状態またはイベントの時制ヒント
+def _state_or_event_about_time_hint_text(
+    *,
+    memory_entry: dict[str, Any],
+    event_about_time_by_id: dict[str, dict[str, Any]],
+    state_about_time_by_id: dict[str, dict[str, Any]],
+) -> str | None:
+    state_about_time = state_about_time_by_id.get(str(memory_entry["memory_state_id"]))
+    if state_about_time is not None:
+        return _event_about_time_hint_text(state_about_time)
+    related_event_id = _related_event_id(memory_entry)
+    if related_event_id is None:
+        return None
+    return _event_about_time_hint_text(event_about_time_by_id.get(related_event_id))
 
 
 # Block: 関連 event id 解決
@@ -272,7 +311,7 @@ def _event_about_time_hint_text(event_about_time: dict[str, Any] | None) -> str 
             hint_parts.append(date_range_text)
     life_stage = event_about_time.get("life_stage")
     if isinstance(life_stage, str) and life_stage:
-        hint_parts.append(_life_stage_label(life_stage))
+        hint_parts.append(life_stage_label(life_stage))
     if not hint_parts:
         return None
     return " / ".join(hint_parts)
@@ -290,19 +329,6 @@ def _event_about_time_date_range_text(event_about_time: dict[str, Any]) -> str |
     if isinstance(about_end_ts, int):
         return _date_text(about_end_ts)
     return None
-
-
-# Block: ライフステージ表示名
-def _life_stage_label(life_stage: str) -> str:
-    return {
-        "childhood": "幼少期",
-        "primary_school": "小学生",
-        "junior_high": "中学生",
-        "high_school": "高校時代",
-        "college": "大学時代",
-        "working_adult": "社会人",
-    }.get(life_stage, life_stage)
-
 
 # Block: 日付テキスト
 def _date_text(unix_ms: int) -> str:

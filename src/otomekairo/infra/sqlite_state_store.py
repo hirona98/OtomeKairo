@@ -43,6 +43,7 @@ from otomekairo.usecase.observation_normalization import (
 from otomekairo.usecase.camera_observation_payload import build_camera_observation_payload
 from otomekairo.usecase.persona_change import evaluate_persona_change
 from otomekairo.usecase.runtime_live_state import build_runtime_live_state
+from otomekairo.usecase.about_time_text import about_years_from_text, life_stage_from_text
 from otomekairo.usecase.write_memory_plan import (
     build_write_memory_plan,
     validate_write_memory_event_snapshots,
@@ -53,7 +54,7 @@ from otomekairo.usecase.write_memory_plan import (
 
 # Block: Schema constants
 SCHEMA_NAME = "core_schema"
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 EMBEDDING_VECTOR_DIMENSION = 32
 LEGACY_SETTING_KEY_ALIASES = {
     "llm.model": "llm.default_model",
@@ -846,6 +847,10 @@ class SqliteStateStore:
                 connection=connection,
                 memory_state_ids=memory_state_ids,
             )
+            state_about_time_rows = _fetch_state_about_time_for_memory_snapshot(
+                connection=connection,
+                memory_state_ids=memory_state_ids,
+            )
             state_entity_rows = _fetch_state_entities_for_memory_snapshot(
                 connection=connection,
                 memory_state_ids=memory_state_ids,
@@ -909,6 +914,7 @@ class SqliteStateStore:
                 event_about_time_rows=event_about_time_rows,
                 event_entity_rows=event_entity_rows,
                 state_link_rows=state_link_rows,
+                state_about_time_rows=state_about_time_rows,
                 state_entity_rows=state_entity_rows,
             ),
             retrieval_profile=retrieval_profile,
@@ -2438,6 +2444,12 @@ class SqliteStateStore:
             state_id_by_ref=state_id_by_ref,
             created_at=created_at,
         )
+        self._apply_state_about_time(
+            connection=connection,
+            state_updates=list(memory_write_plan["state_updates"]),
+            state_id_by_ref=state_id_by_ref,
+            created_at=created_at,
+        )
         self._apply_state_entities(
             connection=connection,
             state_updates=list(memory_write_plan["state_updates"]),
@@ -2920,6 +2932,85 @@ class SqliteStateStore:
                 created_at=created_at,
             )
             applied_state_ids.add(state_id)
+
+    # Block: 状態時制反映
+    def _apply_state_about_time(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        state_updates: list[dict[str, Any]],
+        state_id_by_ref: dict[str, str],
+        created_at: int,
+    ) -> None:
+        applied_state_ids: set[str] = set()
+        for state_update in state_updates:
+            operation = str(state_update["operation"])
+            state_id = (
+                state_id_by_ref.get(str(state_update["state_ref"]))
+                if operation == "upsert"
+                else str(state_update["target_state_id"])
+            )
+            if not isinstance(state_id, str) or not state_id or state_id in applied_state_ids:
+                continue
+            state_row = self._fetch_memory_state_row_for_update(
+                connection=connection,
+                memory_state_id=state_id,
+            )
+            self._replace_state_about_time(
+                connection=connection,
+                state_row=state_row,
+                created_at=created_at,
+            )
+            applied_state_ids.add(state_id)
+
+    # Block: 状態時制置換
+    def _replace_state_about_time(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        state_row: sqlite3.Row,
+        created_at: int,
+    ) -> None:
+        memory_state_id = str(state_row["memory_state_id"])
+        connection.execute(
+            """
+            DELETE FROM state_about_time
+            WHERE memory_state_id = ?
+            """,
+            (memory_state_id,),
+        )
+        about_time = _state_about_time_from_row(state_row)
+        if about_time is None:
+            return
+        connection.execute(
+            """
+            INSERT INTO state_about_time (
+                state_about_time_id,
+                memory_state_id,
+                about_start_ts,
+                about_end_ts,
+                about_year_start,
+                about_year_end,
+                life_stage,
+                confidence,
+                created_at,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                _opaque_id("sat"),
+                memory_state_id,
+                about_time["about_start_ts"],
+                about_time["about_end_ts"],
+                about_time["about_year_start"],
+                about_time["about_year_end"],
+                about_time["life_stage"],
+                about_time["confidence"],
+                created_at,
+                created_at,
+            ),
+        )
 
     # Block: 状態エンティティ置換
     def _replace_state_entities(
@@ -6015,7 +6106,7 @@ class SqliteStateStore:
             return
         if current_version > SCHEMA_VERSION:
             raise RuntimeError("schema_version is newer than this initializer")
-        if current_version not in {2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13}:
+        if current_version not in {2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14}:
             raise RuntimeError("unsupported schema_version for migration")
         while current_version < SCHEMA_VERSION:
             if current_version == 2:
@@ -6065,6 +6156,10 @@ class SqliteStateStore:
             if current_version == 13:
                 self._migrate_schema_13_to_14(connection=connection, now_ms=now_ms)
                 current_version = 14
+                continue
+            if current_version == 14:
+                self._migrate_schema_14_to_15(connection=connection, now_ms=now_ms)
+                current_version = 15
                 continue
             raise RuntimeError("unsupported schema_version for migration")
 
@@ -7378,6 +7473,141 @@ class SqliteStateStore:
             WHERE meta_key = 'schema_version'
             """,
             (_json_text(14), now_ms),
+        )
+
+    # Block: Schema migration 14->15
+    def _migrate_schema_14_to_15(self, *, connection: sqlite3.Connection, now_ms: int) -> None:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS state_about_time (
+                state_about_time_id TEXT PRIMARY KEY,
+                memory_state_id TEXT NOT NULL UNIQUE,
+                about_start_ts INTEGER,
+                about_end_ts INTEGER,
+                about_year_start INTEGER,
+                about_year_end INTEGER,
+                life_stage TEXT,
+                confidence REAL NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                CHECK (
+                    about_start_ts IS NOT NULL
+                    OR about_end_ts IS NOT NULL
+                    OR about_year_start IS NOT NULL
+                    OR about_year_end IS NOT NULL
+                    OR life_stage IS NOT NULL
+                ),
+                FOREIGN KEY (memory_state_id) REFERENCES memory_states (memory_state_id)
+                    ON UPDATE CASCADE
+                    ON DELETE RESTRICT
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_state_about_time_state
+                ON state_about_time (memory_state_id)
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_state_about_time_year
+                ON state_about_time (about_year_start, about_year_end)
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_state_about_time_life_stage
+                ON state_about_time (life_stage)
+            """
+        )
+        legacy_state_about_time_by_id: dict[str, dict[str, Any]] = {}
+        for row in connection.execute(
+            """
+            SELECT memory_state_id, entity_type_norm, entity_name_raw, confidence
+            FROM state_entities
+            WHERE entity_type_norm IN ('about_year', 'life_stage')
+            ORDER BY created_at ASC
+            """
+        ).fetchall():
+            memory_state_id = str(row["memory_state_id"])
+            legacy_entry = legacy_state_about_time_by_id.get(memory_state_id)
+            if legacy_entry is None:
+                legacy_entry = {
+                    "about_start_ts": None,
+                    "about_end_ts": None,
+                    "about_year_start": None,
+                    "about_year_end": None,
+                    "life_stage": None,
+                    "confidence": 0.0,
+                }
+                legacy_state_about_time_by_id[memory_state_id] = legacy_entry
+            legacy_entry["confidence"] = max(legacy_entry["confidence"], float(row["confidence"]))
+            entity_type_norm = str(row["entity_type_norm"])
+            if entity_type_norm == "about_year":
+                about_year = int(str(row["entity_name_raw"]))
+                if legacy_entry["about_year_start"] is None or about_year < legacy_entry["about_year_start"]:
+                    legacy_entry["about_year_start"] = about_year
+                if legacy_entry["about_year_end"] is None or about_year > legacy_entry["about_year_end"]:
+                    legacy_entry["about_year_end"] = about_year
+                continue
+            if legacy_entry["life_stage"] is None:
+                legacy_entry["life_stage"] = str(row["entity_name_raw"])
+        for state_row in connection.execute(
+            """
+            SELECT
+                memory_state_id,
+                body_text,
+                payload_json,
+                created_at,
+                updated_at
+            FROM memory_states
+            ORDER BY updated_at DESC
+            """
+        ).fetchall():
+            memory_state_id = str(state_row["memory_state_id"])
+            about_time = _state_about_time_from_row(state_row)
+            if about_time is None:
+                about_time = legacy_state_about_time_by_id.get(memory_state_id)
+            if not isinstance(about_time, dict):
+                continue
+            connection.execute(
+                """
+                INSERT INTO state_about_time (
+                    state_about_time_id,
+                    memory_state_id,
+                    about_start_ts,
+                    about_end_ts,
+                    about_year_start,
+                    about_year_end,
+                    life_stage,
+                    confidence,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    _opaque_id("sat"),
+                    memory_state_id,
+                    about_time["about_start_ts"],
+                    about_time["about_end_ts"],
+                    about_time["about_year_start"],
+                    about_time["about_year_end"],
+                    about_time["life_stage"],
+                    float(about_time["confidence"]),
+                    int(state_row["created_at"]),
+                    int(state_row["updated_at"]),
+                ),
+            )
+        connection.execute(
+            """
+            UPDATE db_meta
+            SET meta_value_json = ?,
+                updated_at = ?
+            WHERE meta_key = 'schema_version'
+            """,
+            (_json_text(15), now_ms),
         )
 
     # Block: sqlite-vec schema ensure
@@ -9071,6 +9301,36 @@ def _fetch_state_links_for_memory_snapshot(
     ).fetchall()
 
 
+def _fetch_state_about_time_for_memory_snapshot(
+    *,
+    connection: sqlite3.Connection,
+    memory_state_ids: list[str],
+) -> list[sqlite3.Row]:
+    if not memory_state_ids:
+        return []
+    placeholders = ",".join("?" for _ in memory_state_ids)
+    return connection.execute(
+        f"""
+        SELECT
+            state_about_time_id,
+            memory_state_id,
+            about_start_ts,
+            about_end_ts,
+            about_year_start,
+            about_year_end,
+            life_stage,
+            confidence,
+            created_at,
+            updated_at
+        FROM state_about_time
+        WHERE memory_state_id IN ({placeholders})
+        ORDER BY updated_at DESC
+        LIMIT 32
+        """,
+        tuple(memory_state_ids),
+    ).fetchall()
+
+
 def _fetch_state_entities_for_memory_snapshot(
     *,
     connection: sqlite3.Connection,
@@ -10250,6 +10510,7 @@ def _build_memory_snapshot_rows(
     event_about_time_rows: list[sqlite3.Row],
     event_entity_rows: list[sqlite3.Row],
     state_link_rows: list[sqlite3.Row],
+    state_about_time_rows: list[sqlite3.Row],
     state_entity_rows: list[sqlite3.Row],
 ) -> dict[str, Any]:
     working_memory_items: list[dict[str, Any]] = []
@@ -10297,6 +10558,7 @@ def _build_memory_snapshot_rows(
         "event_about_time": [_event_about_time_snapshot_entry(row) for row in event_about_time_rows],
         "event_entities": [_event_entity_snapshot_entry(row) for row in event_entity_rows],
         "state_links": [_state_link_snapshot_entry(row) for row in state_link_rows],
+        "state_about_time": [_state_about_time_snapshot_entry(row) for row in state_about_time_rows],
         "state_entities": [_state_entity_snapshot_entry(row) for row in state_entity_rows],
     }
 
@@ -10402,6 +10664,29 @@ def _event_about_time_snapshot_entry(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "event_about_time_id": str(row["event_about_time_id"]),
         "event_id": str(row["event_id"]),
+        "about_start_ts": int(row["about_start_ts"]) if row["about_start_ts"] is not None else None,
+        "about_end_ts": int(row["about_end_ts"]) if row["about_end_ts"] is not None else None,
+        "about_year_start": (
+            int(row["about_year_start"])
+            if row["about_year_start"] is not None
+            else None
+        ),
+        "about_year_end": (
+            int(row["about_year_end"])
+            if row["about_year_end"] is not None
+            else None
+        ),
+        "life_stage": str(row["life_stage"]) if row["life_stage"] is not None else None,
+        "confidence": float(row["confidence"]),
+        "created_at": int(row["created_at"]),
+        "updated_at": int(row["updated_at"]),
+    }
+
+
+def _state_about_time_snapshot_entry(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "state_about_time_id": str(row["state_about_time_id"]),
+        "memory_state_id": str(row["memory_state_id"]),
         "about_start_ts": int(row["about_start_ts"]) if row["about_start_ts"] is not None else None,
         "about_end_ts": int(row["about_end_ts"]) if row["about_end_ts"] is not None else None,
         "about_year_start": (
@@ -10580,6 +10865,34 @@ def _event_entity_entries_from_annotation(event_annotation: dict[str, Any]) -> l
             confidence=float(entity_entry["confidence"]),
         )
     return entries
+
+
+def _state_about_time_from_row(row: sqlite3.Row) -> dict[str, Any] | None:
+    payload = json.loads(row["payload_json"])
+    if not isinstance(payload, dict):
+        raise RuntimeError("memory_states.payload_json must decode to object")
+    source_texts = [str(row["body_text"]).strip()]
+    summary_text = payload.get("summary_text")
+    if isinstance(summary_text, str) and summary_text.strip():
+        source_texts.append(summary_text.strip())
+    about_years: list[int] = []
+    life_stage: str | None = None
+    for source_text in source_texts:
+        for about_year in about_years_from_text(source_text):
+            if about_year not in about_years:
+                about_years.append(about_year)
+        if life_stage is None:
+            life_stage = life_stage_from_text(source_text)
+    if not about_years and life_stage is None:
+        return None
+    return {
+        "about_start_ts": None,
+        "about_end_ts": None,
+        "about_year_start": about_years[0] if about_years else None,
+        "about_year_end": about_years[-1] if about_years else None,
+        "life_stage": life_stage,
+        "confidence": 0.82 if about_years else 0.58,
+    }
 
 
 def _state_entity_entries_from_row(row: sqlite3.Row) -> list[dict[str, Any]]:

@@ -575,6 +575,38 @@ CREATE INDEX idx_event_about_time_year
 CREATE INDEX idx_event_about_time_life_stage
     ON event_about_time (life_stage);
 
+CREATE TABLE state_about_time (
+    state_about_time_id TEXT PRIMARY KEY,
+    memory_state_id TEXT NOT NULL UNIQUE,
+    about_start_ts INTEGER,
+    about_end_ts INTEGER,
+    about_year_start INTEGER,
+    about_year_end INTEGER,
+    life_stage TEXT,
+    confidence REAL NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    CHECK (
+        about_start_ts IS NOT NULL
+        OR about_end_ts IS NOT NULL
+        OR about_year_start IS NOT NULL
+        OR about_year_end IS NOT NULL
+        OR life_stage IS NOT NULL
+    ),
+    FOREIGN KEY (memory_state_id) REFERENCES memory_states (memory_state_id)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT
+);
+
+CREATE INDEX idx_state_about_time_state
+    ON state_about_time (memory_state_id);
+
+CREATE INDEX idx_state_about_time_year
+    ON state_about_time (about_year_start, about_year_end);
+
+CREATE INDEX idx_state_about_time_life_stage
+    ON state_about_time (life_stage);
+
 CREATE TABLE event_entities (
     event_entity_id TEXT PRIMARY KEY,
     event_id TEXT NOT NULL,

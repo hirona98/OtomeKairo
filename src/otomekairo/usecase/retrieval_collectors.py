@@ -603,18 +603,31 @@ def _collect_explicit_time_candidates(
                 sort_timestamp=int(event_entry["created_at"]),
             )
         )
-    for state_entity in memory_snapshot.get("state_entities", []):
-        if not isinstance(state_entity, dict):
-            raise ValueError("memory_snapshot.state_entities must contain only objects")
-        entity_type_norm = str(state_entity["entity_type_norm"])
-        if entity_type_norm != "about_year":
-            if entity_type_norm != "life_stage":
-                continue
-            if str(state_entity["entity_name_raw"]) not in life_stage_hint_set:
-                continue
-        elif str(state_entity["entity_name_raw"]) not in explicit_year_texts:
+    for state_about_time in memory_snapshot.get("state_about_time", []):
+        if not isinstance(state_about_time, dict):
+            raise ValueError("memory_snapshot.state_about_time must contain only objects")
+        about_year_start = state_about_time.get("about_year_start")
+        about_year_end = state_about_time.get("about_year_end")
+        life_stage = state_about_time.get("life_stage")
+        matched_reason_code: str | None = None
+        if isinstance(life_stage, str) and life_stage and life_stage in life_stage_hint_set:
+            matched_reason_code = "matched_life_stage"
+        if matched_reason_code is None:
+            if _matches_event_about_time_explicit_date(
+                event_about_time=state_about_time,
+                explicit_date_set=explicit_date_set,
+            ):
+                matched_reason_code = "matched_explicit_date"
+            elif _matches_event_about_time_explicit_year(
+                event_about_time=state_about_time,
+                explicit_year_texts=explicit_year_texts,
+                about_year_start=about_year_start,
+                about_year_end=about_year_end,
+            ):
+                matched_reason_code = "matched_explicit_year"
+        if matched_reason_code is None:
             continue
-        candidate_info = state_items.get(str(state_entity["memory_state_id"]))
+        candidate_info = state_items.get(str(state_about_time["memory_state_id"]))
         if candidate_info is None:
             continue
         slot_name, item = candidate_info
@@ -624,10 +637,7 @@ def _collect_explicit_time_candidates(
             retrieval_plan=retrieval_plan,
         )
         append_reason(reason_codes, "collector_explicit_time")
-        if entity_type_norm == "life_stage":
-            append_reason(reason_codes, "matched_life_stage")
-        else:
-            append_reason(reason_codes, "matched_explicit_year")
+        append_reason(reason_codes, matched_reason_code)
         collected.append(
             _candidate_entry(
                 collector="explicit_time",
