@@ -6,11 +6,21 @@ from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import Any
 
+from otomekairo.gateway.cognition_client import CognitionClient
 from otomekairo.usecase.about_time_text import life_stage_label
 from otomekairo.usecase.retrieval_collectors import collect_retrieval_candidates
 from otomekairo.usecase.retrieval_common import local_text, relative_time_text, utc_text
 from otomekairo.usecase.retrieval_plan import build_retrieval_plan
-from otomekairo.usecase.retrieval_selector import select_retrieval_candidates
+from otomekairo.usecase.retrieval_selector import (
+    SelectionArtifacts,
+    merge_retrieval_candidates,
+    select_retrieval_candidates,
+)
+from otomekairo.usecase.run_retrieval_selection import run_retrieval_selection
+
+
+# Block: Selector candidate limit
+SELECTOR_CANDIDATE_LIMIT = 24
 
 
 # Block: Retrieval artifacts
@@ -25,11 +35,14 @@ class RetrievalArtifacts:
 # Block: Public builder
 def build_retrieval_artifacts(
     *,
+    cycle_id: str,
     memory_snapshot: dict[str, Any],
     retrieval_profile: dict[str, Any],
     current_observation: dict[str, Any],
     task_snapshot: dict[str, Any],
     resolved_at: int,
+    completion_settings: dict[str, Any],
+    cognition_client: CognitionClient,
 ) -> RetrievalArtifacts:
     event_about_time_by_id = _event_about_time_by_id(memory_snapshot)
     state_about_time_by_id = _state_about_time_by_id(memory_snapshot)
@@ -43,9 +56,18 @@ def build_retrieval_artifacts(
         current_observation=current_observation,
         retrieval_plan=retrieval_plan,
     )
-    selection_artifacts = select_retrieval_candidates(
-        candidates=candidate_collection.candidates,
+    merged_candidates = merge_retrieval_candidates(candidate_collection.candidates)
+    selection_artifacts = _select_with_llm(
+        cycle_id=cycle_id,
+        merged_candidates=merged_candidates,
+        raw_candidate_count=len(candidate_collection.candidates),
+        current_observation=current_observation,
         retrieval_plan=retrieval_plan,
+        resolved_at=resolved_at,
+        completion_settings=completion_settings,
+        cognition_client=cognition_client,
+        event_about_time_by_id=event_about_time_by_id,
+        state_about_time_by_id=state_about_time_by_id,
     )
     memory_bundle = {
         "working_memory_items": [
@@ -120,6 +142,175 @@ def build_retrieval_artifacts(
         ),
         selected_json=selection_artifacts.selected_json,
     )
+
+
+# Block: LLM 選別
+def _select_with_llm(
+    *,
+    cycle_id: str,
+    merged_candidates: list[dict[str, Any]],
+    raw_candidate_count: int,
+    current_observation: dict[str, Any],
+    retrieval_plan: dict[str, Any],
+    resolved_at: int,
+    completion_settings: dict[str, Any],
+    cognition_client: CognitionClient,
+    event_about_time_by_id: dict[str, dict[str, Any]],
+    state_about_time_by_id: dict[str, dict[str, Any]],
+) -> SelectionArtifacts:
+    if not merged_candidates:
+        return SelectionArtifacts(
+            memory_bundle={slot_name: [] for slot_name in (
+                "working_memory_items",
+                "episodic_items",
+                "semantic_items",
+                "affective_items",
+                "relationship_items",
+                "reflection_items",
+                "recent_event_window",
+            )},
+            selected_json={
+                "selected_counts": {
+                    "working_memory_items": 0,
+                    "episodic_items": 0,
+                    "semantic_items": 0,
+                    "affective_items": 0,
+                    "relationship_items": 0,
+                    "reflection_items": 0,
+                    "recent_event_window": 0,
+                },
+                "selected_refs": {
+                    "working_memory_item_ids": [],
+                    "episodic_item_ids": [],
+                    "semantic_item_ids": [],
+                    "affective_item_ids": [],
+                    "relationship_item_ids": [],
+                    "reflection_item_ids": [],
+                    "recent_event_ids": [],
+                },
+                "selection_trace": [],
+                "selector_summary": {
+                    "selector_mode": "llm_ranked",
+                    "selection_reason": "候補なし",
+                    "raw_candidate_count": raw_candidate_count,
+                    "merged_candidate_count": 0,
+                    "llm_selected_ref_count": 0,
+                    "selected_candidate_count": 0,
+                    "duplicate_hit_count": 0,
+                    "reserve_candidate_count": 0,
+                    "slot_skipped_count": 0,
+                },
+                "reserve_trace": [],
+            },
+        )
+    candidate_pack = _build_selector_candidate_pack(
+        merged_candidates=merged_candidates,
+        retrieval_plan=retrieval_plan,
+        resolved_at=resolved_at,
+        event_about_time_by_id=event_about_time_by_id,
+        state_about_time_by_id=state_about_time_by_id,
+    )
+    retrieval_selection = run_retrieval_selection(
+        cycle_id=cycle_id,
+        current_observation=current_observation,
+        retrieval_plan=retrieval_plan,
+        candidate_pack=candidate_pack,
+        completion_settings=completion_settings,
+        cognition_client=cognition_client,
+    )
+    return select_retrieval_candidates(
+        merged_candidates=merged_candidates,
+        raw_candidate_count=raw_candidate_count,
+        retrieval_plan=retrieval_plan,
+        ordered_item_refs=list(retrieval_selection["selected_item_refs"]),
+        selection_reason=str(retrieval_selection["selection_reason"]),
+    )
+
+
+# Block: Selector candidate pack
+def _build_selector_candidate_pack(
+    *,
+    merged_candidates: list[dict[str, Any]],
+    retrieval_plan: dict[str, Any],
+    resolved_at: int,
+    event_about_time_by_id: dict[str, dict[str, Any]],
+    state_about_time_by_id: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "slot_limits": dict(retrieval_plan["limits"]),
+        "candidate_entries": [
+            _selector_candidate_entry(
+                merged_candidate=merged_candidate,
+                resolved_at=resolved_at,
+                event_about_time_by_id=event_about_time_by_id,
+                state_about_time_by_id=state_about_time_by_id,
+            )
+            for merged_candidate in merged_candidates[:SELECTOR_CANDIDATE_LIMIT]
+        ],
+    }
+
+
+# Block: Selector candidate entry
+def _selector_candidate_entry(
+    *,
+    merged_candidate: dict[str, Any],
+    resolved_at: int,
+    event_about_time_by_id: dict[str, dict[str, Any]],
+    state_about_time_by_id: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    slot_name = str(merged_candidate["slot"])
+    item = merged_candidate["item"]
+    if slot_name == "recent_event_window":
+        relative_time = _relative_time_text(resolved_at, int(item["created_at"]))
+        about_time_hint_text = _event_about_time_hint_text(
+            event_about_time_by_id.get(str(item["event_id"]))
+        )
+        return {
+            "item_ref": str(merged_candidate["item_ref"]),
+            "slot": slot_name,
+            "score": round(float(merged_candidate["score"]), 3),
+            "collector_names": list(merged_candidate["collector_names"]),
+            "reason_codes": list(merged_candidate["reason_codes"]),
+            "text": _prompt_text(str(item["summary_text"])),
+            "relative_time_text": relative_time,
+            **(
+                {"about_time_hint_text": about_time_hint_text}
+                if about_time_hint_text is not None
+                else {}
+            ),
+        }
+    memory_kind = str(item["memory_kind"])
+    relative_time = _relative_time_text(resolved_at, int(item["updated_at"]))
+    about_time_hint_text = _state_or_event_about_time_hint_text(
+        memory_entry=item,
+        event_about_time_by_id=event_about_time_by_id,
+        state_about_time_by_id=state_about_time_by_id,
+    )
+    return {
+        "item_ref": str(merged_candidate["item_ref"]),
+        "slot": slot_name,
+        "memory_kind": memory_kind,
+        "score": round(float(merged_candidate["score"]), 3),
+        "collector_names": list(merged_candidate["collector_names"]),
+        "reason_codes": list(merged_candidate["reason_codes"]),
+        "text": _selector_memory_text(item),
+        "relative_time_text": relative_time,
+        **(
+            {"about_time_hint_text": about_time_hint_text}
+            if about_time_hint_text is not None
+            else {}
+        ),
+    }
+
+
+# Block: Selector memory text
+def _selector_memory_text(memory_entry: dict[str, Any]) -> str:
+    payload = memory_entry.get("payload")
+    if isinstance(payload, dict):
+        what_happened = payload.get("what_happened")
+        if isinstance(what_happened, str) and what_happened:
+            return _prompt_text(what_happened)
+    return _prompt_text(str(memory_entry["body_text"]))
 
 
 # Block: Candidate builders

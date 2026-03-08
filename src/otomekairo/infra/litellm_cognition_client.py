@@ -11,6 +11,8 @@ from typing import Any
 from otomekairo.gateway.cognition_client import (
     CognitionPlanRequest,
     CognitionPlanResponse,
+    RetrievalSelectionRequest,
+    RetrievalSelectionResponse,
     ReplyRenderRequest,
     ReplyRenderResponse,
 )
@@ -27,6 +29,23 @@ class LiteLLMCognitionClient:
     def __init__(self) -> None:
         self._litellm = _import_litellm_module()
         self._litellm.enable_json_schema_validation = True
+
+    # Block: 想起候補選別の structured completion
+    def select_retrieval_candidates(
+        self,
+        request: RetrievalSelectionRequest,
+    ) -> RetrievalSelectionResponse:
+        parsed_json = _run_structured_completion(
+            litellm_module=self._litellm,
+            completion_settings=request.completion_settings,
+            messages=_build_retrieval_selection_messages(request),
+            response_format=_retrieval_selection_response_format(),
+        )
+        _validate_retrieval_selection_result(
+            retrieval_selection_result=parsed_json,
+            candidate_pack=request.candidate_pack,
+        )
+        return RetrievalSelectionResponse(retrieval_selection=parsed_json)
 
     # Block: 認知計画の structured completion
     def generate_plan(self, request: CognitionPlanRequest) -> CognitionPlanResponse:
@@ -205,6 +224,42 @@ def _build_plan_messages(request: CognitionPlanRequest) -> list[dict[str, Any]]:
     ]
 
 
+# Block: 想起候補選別 prompt 構築
+def _build_retrieval_selection_messages(request: RetrievalSelectionRequest) -> list[dict[str, Any]]:
+    current_observation = request.current_observation
+    candidate_pack = request.candidate_pack
+    system_prompt = "\n".join(
+        [
+            "あなたは OtomeKairo の retrieval selector として振る舞う。",
+            "返答は必ず JSON オブジェクト 1 個だけを返し、Markdown や補足文を絶対に混ぜない。",
+            "JSON の必須キーは selected_item_refs, selection_reason である。",
+            "selected_item_refs は candidate_pack.candidate_entries[].item_ref に存在する値だけを、重要順に並べた配列にすること。",
+            "selected_item_refs には重複を入れないこと。",
+            "current_observation と retrieval_plan を見て、今の反応に本当に効く候補だけを上位から選ぶこと。",
+            "recent_event_window と長期記憶の両方を見比べ、直近会話の継続性、事実の再利用性、関係性、感情、時間一致を総合して優先順位を付けること。",
+            "slot_limits を意識し、同じ slot に偏らせすぎず、必要な slot を埋めやすい順序を返すこと。",
+            "selection_reason には、何を優先して並べたかを短い日本語 1 文で書くこと。",
+        ]
+    )
+    user_prompt = "\n".join(
+        [
+            f"cycle_id: {request.cycle_id}",
+            f"入力種別: {current_observation['input_kind']}",
+            f"入力内容: {current_observation['observation_text']}",
+            f"入力時刻: {current_observation['captured_at_local_text']} ({current_observation['relative_time_text']})",
+            "retrieval_plan:",
+            _json_text(request.retrieval_plan),
+            "candidate_pack:",
+            _json_text(_prompt_candidate_pack(candidate_pack)),
+            "今の応答に使う優先順位だけを決めること。",
+        ]
+    )
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+
+
 # Block: 応答文レンダリング prompt 構築
 def _build_reply_render_messages(request: ReplyRenderRequest) -> list[dict[str, Any]]:
     cognition_input = request.cognition_input
@@ -257,6 +312,18 @@ def _build_reply_render_messages(request: ReplyRenderRequest) -> list[dict[str, 
     ]
 
 
+# Block: 想起候補選別 response_format
+def _retrieval_selection_response_format() -> dict[str, Any]:
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "otomekairo_retrieval_selection",
+            "strict": True,
+            "schema": _retrieval_selection_schema(),
+        },
+    }
+
+
 # Block: 認知計画 response_format
 def _cognition_plan_response_format() -> dict[str, Any]:
     return {
@@ -277,6 +344,29 @@ def _reply_render_response_format() -> dict[str, Any]:
             "name": "otomekairo_reply_render",
             "strict": True,
             "schema": _reply_render_schema(),
+        },
+    }
+
+
+# Block: 想起候補選別スキーマ
+def _retrieval_selection_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["selected_item_refs", "selection_reason"],
+        "properties": {
+            "selected_item_refs": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                    "type": "string",
+                    "minLength": 1,
+                },
+            },
+            "selection_reason": {
+                "type": "string",
+                "minLength": 1,
+            },
         },
     }
 
@@ -571,6 +661,37 @@ def _validate_reply_render_result(reply_render_result: dict[str, Any]) -> None:
         raise RuntimeError("LiteLLM reply_render_result.speech_draft.delivery_mode must be stream")
 
 
+# Block: 想起候補選別結果バリデーション
+def _validate_retrieval_selection_result(
+    *,
+    retrieval_selection_result: dict[str, Any],
+    candidate_pack: dict[str, Any],
+) -> None:
+    selected_item_refs = retrieval_selection_result.get("selected_item_refs")
+    selection_reason = retrieval_selection_result.get("selection_reason")
+    if not isinstance(selected_item_refs, list) or not selected_item_refs:
+        raise RuntimeError("LiteLLM retrieval_selection_result.selected_item_refs must be a non-empty list")
+    if not isinstance(selection_reason, str) or not selection_reason.strip():
+        raise RuntimeError("LiteLLM retrieval_selection_result.selection_reason must be a non-empty string")
+    candidate_entries = candidate_pack.get("candidate_entries")
+    if not isinstance(candidate_entries, list) or not candidate_entries:
+        raise RuntimeError("candidate_pack.candidate_entries must be a non-empty list")
+    known_refs = {
+        str(candidate_entry["item_ref"])
+        for candidate_entry in candidate_entries
+        if isinstance(candidate_entry, dict)
+    }
+    seen_refs: set[str] = set()
+    for selected_item_ref in selected_item_refs:
+        if not isinstance(selected_item_ref, str) or not selected_item_ref:
+            raise RuntimeError("LiteLLM retrieval_selection_result.selected_item_refs must contain non-empty strings")
+        if selected_item_ref not in known_refs:
+            raise RuntimeError("LiteLLM retrieval_selection_result.selected_item_refs must reference known candidates")
+        if selected_item_ref in seen_refs:
+            raise RuntimeError("LiteLLM retrieval_selection_result.selected_item_refs must not contain duplicates")
+        seen_refs.add(selected_item_ref)
+
+
 # Block: 行動候補バリデーション
 def _validate_action_proposals(action_proposals: list[Any]) -> None:
     for proposal in action_proposals:
@@ -624,6 +745,26 @@ def _format_goals(long_term_goals: dict[str, Any]) -> str:
     if not goals:
         return "未設定"
     return ",".join(str(goal.get("title", "goal")) for goal in goals[:3] if isinstance(goal, dict))
+
+
+# Block: 想起 prompt 用 JSON 整形
+def _json_text(value: Any) -> str:
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _prompt_candidate_pack(candidate_pack: dict[str, Any]) -> dict[str, Any]:
+    candidate_entries = candidate_pack.get("candidate_entries")
+    if not isinstance(candidate_entries, list):
+        raise RuntimeError("candidate_pack.candidate_entries must be a list")
+    return {
+        "slot_limits": candidate_pack["slot_limits"],
+        "candidate_entries": candidate_entries,
+    }
 
 
 # Block: Persona projection 整形

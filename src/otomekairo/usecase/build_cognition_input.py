@@ -8,7 +8,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 from otomekairo.gateway.camera_controller import CameraCandidate, CameraPresetCandidate
+from otomekairo.gateway.cognition_client import CognitionClient
 from otomekairo.schema.runtime_types import CognitionStateSnapshot, PendingInputRecord
+from otomekairo.usecase.completion_settings import build_completion_settings
 from otomekairo.usecase.observation_normalization import (
     normalize_observation_kind,
     normalize_observation_source,
@@ -52,6 +54,7 @@ def build_cognition_input(
     cycle_id: str,
     resolved_at: int,
     state_snapshot: CognitionStateSnapshot,
+    cognition_client: CognitionClient,
     camera_candidates: list[CameraCandidate],
     camera_available: bool,
 ) -> BuiltCognitionInput:
@@ -70,12 +73,16 @@ def build_cognition_input(
         pending_input=pending_input,
         resolved_at=resolved_at,
     )
+    completion_settings = build_completion_settings(state_snapshot.effective_settings)
     retrieval_artifacts = build_retrieval_artifacts(
+        cycle_id=cycle_id,
         memory_snapshot=state_snapshot.memory_snapshot,
         retrieval_profile=state_snapshot.retrieval_profile,
         current_observation=current_observation,
         task_snapshot=state_snapshot.task_snapshot,
         resolved_at=resolved_at,
+        completion_settings=completion_settings,
+        cognition_client=cognition_client,
     )
     self_snapshot = {
         "personality": state_snapshot.self_state["personality"],

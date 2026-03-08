@@ -374,6 +374,7 @@ class RuntimeLoop:
                 cycle_id=cycle_id,
                 resolved_at=resolved_at,
                 state_snapshot=state_snapshot,
+                cognition_client=self._cognition_client,
                 camera_candidates=camera_candidates,
                 camera_available=bool(camera_candidates) and self._camera_sensor.is_available(),
             )

@@ -765,12 +765,26 @@
       "task_focus": 1
     },
     "selector_summary": {
+      "selector_mode": "llm_ranked",
+      "selection_reason": "直近会話の継続と明示日付の一致を優先した",
       "raw_candidate_count": 9,
       "merged_candidate_count": 7,
+      "llm_selected_ref_count": 5,
       "selected_candidate_count": 4,
       "duplicate_hit_count": 2,
-      "reserve_candidate_count": 1
-    }
+      "reserve_candidate_count": 1,
+      "slot_skipped_count": 1
+    },
+    "reserve_trace": [
+      {
+        "slot": "episodic_items",
+        "item_ref": "event:evt_010",
+        "score": 0.8,
+        "reason_codes": ["about_time"],
+        "collector_names": ["explicit_time"],
+        "duplicate_hits": 0
+      }
+    ]
   }
 }
 ```
@@ -785,7 +799,9 @@
 - `profile` は、active memory preset の `retrieval_profile` をそのまま持つ
 - `limits.semantic_candidate_top_k` は、意味検索候補の上限である
 - `selected` は、少なくとも `selected_counts`、`selected_refs`、`selection_trace` を持つ
-- `selected.collector_counts` と `selected.selector_summary` は、current 実装では追加で持ってよい
+- current 実装では、`selected.selection_trace[].selection_rank` を追加し、`LLM` selector が返した優先順を残してよい
+- current 実装では、`selected.collector_counts`、`selected.selector_summary`、`selected.reserve_trace` を追加で持ってよい
+- current 実装の `selected.selector_summary` には、少なくとも `selector_mode`、`selection_reason`、`raw_candidate_count`、`merged_candidate_count`、`llm_selected_ref_count`、`selected_candidate_count`、`duplicate_hit_count`、`reserve_candidate_count`、`slot_skipped_count` を持ってよい
 
 <!-- Block: Context Budget -->
 ### `context_budget`
@@ -889,7 +905,8 @@
       "score": 1.8,
       "reason_codes": ["matched_query", "mode_priority", "profile_bias"],
       "collector_names": ["associative_memory", "task_focus"],
-      "duplicate_hits": 1
+      "duplicate_hits": 1,
+      "selection_rank": 2
     }
   ],
   "collector_counts": {
@@ -897,12 +914,26 @@
     "task_focus": 1
   },
   "selector_summary": {
+    "selector_mode": "llm_ranked",
+    "selection_reason": "直近会話の継続と明示日付の一致を優先した",
     "raw_candidate_count": 9,
     "merged_candidate_count": 7,
+    "llm_selected_ref_count": 5,
     "selected_candidate_count": 4,
     "duplicate_hit_count": 2,
-    "reserve_candidate_count": 1
+    "reserve_candidate_count": 1,
+    "slot_skipped_count": 1
   },
+  "reserve_trace": [
+    {
+      "slot": "episodic_items",
+      "item_ref": "event:evt_010",
+      "score": 0.8,
+      "reason_codes": ["about_time"],
+      "collector_names": ["explicit_time"],
+      "duplicate_hits": 0
+    }
+  ],
   "trimmed_item_refs": ["event:evt_002"]
 }
 ```
@@ -910,7 +941,7 @@
 - `retrieval_selected_json` は、`retrieval_runs.selected_json` に保存する最終選別結果の最小形である
 - 必須項目は `selected_counts`、`selected_refs`、`selection_trace` である
 - `selection_trace` の各要素は、少なくとも `slot`、`item_ref`、`score`、`reason_codes` を持つ
-- current 実装では、`selection_trace[].collector_names`、`selection_trace[].duplicate_hits`、`collector_counts`、`selector_summary`、`trimmed_item_refs` を追加で持ってよい
+- current 実装では、`selection_trace[].collector_names`、`selection_trace[].duplicate_hits`、`selection_trace[].selection_rank`、`collector_counts`、`selector_summary`、`reserve_trace`、`trimmed_item_refs` を追加で持ってよい
 
 <!-- Block: Completion Settings -->
 ### `completion_settings`
@@ -2277,10 +2308,15 @@
         "associative_memory": 1
       },
       "selector_summary": {
+        "selector_mode": "llm_ranked",
+        "selection_reason": "直近会話の継続と明示日付の一致を優先した",
         "raw_candidate_count": 9,
         "merged_candidate_count": 7,
+        "llm_selected_ref_count": 5,
         "selected_candidate_count": 4,
-        "duplicate_hit_count": 2
+        "duplicate_hit_count": 2,
+        "reserve_candidate_count": 1,
+        "slot_skipped_count": 1
       },
       "trimmed_item_refs": ["event:evt_002"],
       "selected_counts": {

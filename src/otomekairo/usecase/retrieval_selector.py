@@ -1,4 +1,4 @@
-"""Select final memory bundle from collected retrieval candidates."""
+"""Select final memory bundle from merged retrieval candidates."""
 
 from __future__ import annotations
 
@@ -35,54 +35,8 @@ class SelectionArtifacts:
     selected_json: dict[str, Any]
 
 
-# Block: Public selector
-def select_retrieval_candidates(
-    *,
-    candidates: list[dict[str, Any]],
-    retrieval_plan: dict[str, Any],
-) -> SelectionArtifacts:
-    merged_candidates = _merge_candidates(candidates)
-    selected_bundle = {slot_name: [] for slot_name in SLOT_ORDER}
-    selected_trace: list[dict[str, Any]] = []
-    reserve_trace: list[dict[str, Any]] = []
-    slot_limits = _slot_limits(retrieval_plan=retrieval_plan)
-    for merged_candidate in sorted(
-        merged_candidates,
-        key=lambda candidate: (
-            float(candidate["score"]),
-            -SLOT_PRIORITY.get(str(candidate["slot"]), 99),
-            int(candidate["sort_timestamp"]),
-        ),
-        reverse=True,
-    ):
-        slot_name = str(merged_candidate["slot"])
-        if len(selected_bundle[slot_name]) >= slot_limits[slot_name]:
-            if len(reserve_trace) < 8:
-                reserve_trace.append(_trace_entry(merged_candidate))
-            continue
-        selected_bundle[slot_name].append(merged_candidate["item"])
-        selected_trace.append(_trace_entry(merged_candidate))
-    return SelectionArtifacts(
-        memory_bundle=selected_bundle,
-        selected_json={
-            "selected_counts": _selected_counts(memory_bundle=selected_bundle),
-            "selected_refs": _selected_refs(memory_bundle=selected_bundle),
-            "selection_trace": selected_trace,
-            "collector_counts": _collector_counts(selected_trace),
-            "selector_summary": {
-                "raw_candidate_count": len(candidates),
-                "merged_candidate_count": len(merged_candidates),
-                "selected_candidate_count": len(selected_trace),
-                "duplicate_hit_count": max(0, len(candidates) - len(merged_candidates)),
-                "reserve_candidate_count": len(reserve_trace),
-            },
-            "reserve_trace": reserve_trace,
-        },
-    )
-
-
-# Block: Merge helpers
-def _merge_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+# Block: 候補 merge
+def merge_retrieval_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
     merged_by_ref: dict[str, dict[str, Any]] = {}
     for candidate in candidates:
         item_ref = str(candidate["item_ref"])
@@ -118,15 +72,98 @@ def _merge_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if preferred_slot != existing["slot"]:
             existing["slot"] = preferred_slot
             existing["item"] = candidate["item"]
-    return list(merged_by_ref.values())
+    return _sorted_merged_candidates(list(merged_by_ref.values()))
 
 
+# Block: LLM 順序から最終選別
+def select_retrieval_candidates(
+    *,
+    merged_candidates: list[dict[str, Any]],
+    raw_candidate_count: int,
+    retrieval_plan: dict[str, Any],
+    ordered_item_refs: list[str],
+    selection_reason: str,
+) -> SelectionArtifacts:
+    selected_bundle = {slot_name: [] for slot_name in SLOT_ORDER}
+    selected_trace: list[dict[str, Any]] = []
+    slot_limits = _slot_limits(retrieval_plan=retrieval_plan)
+    candidate_by_ref = {
+        str(candidate["item_ref"]): candidate
+        for candidate in merged_candidates
+    }
+    used_refs: set[str] = set()
+    skipped_by_slot_limit = 0
+    for selection_rank, item_ref in enumerate(ordered_item_refs, start=1):
+        candidate = candidate_by_ref.get(item_ref)
+        if candidate is None:
+            raise RuntimeError("retrieval selection returned unknown item_ref")
+        slot_name = str(candidate["slot"])
+        if len(selected_bundle[slot_name]) >= slot_limits[slot_name]:
+            skipped_by_slot_limit += 1
+            continue
+        if item_ref in used_refs:
+            raise RuntimeError("retrieval selection returned duplicate item_ref")
+        selected_bundle[slot_name].append(candidate["item"])
+        used_refs.add(item_ref)
+        selected_trace.append(
+            _trace_entry(
+                candidate,
+                selection_rank=selection_rank,
+            )
+        )
+    if merged_candidates and not selected_trace:
+        raise RuntimeError("retrieval selection produced no usable candidates")
+    reserve_trace: list[dict[str, Any]] = []
+    for merged_candidate in merged_candidates:
+        if str(merged_candidate["item_ref"]) in used_refs:
+            continue
+        if len(reserve_trace) >= 8:
+            break
+        reserve_trace.append(_trace_entry(merged_candidate))
+    return SelectionArtifacts(
+        memory_bundle=selected_bundle,
+        selected_json={
+            "selected_counts": _selected_counts(memory_bundle=selected_bundle),
+            "selected_refs": _selected_refs(memory_bundle=selected_bundle),
+            "selection_trace": selected_trace,
+            "collector_counts": _collector_counts(selected_trace),
+            "selector_summary": {
+                "selector_mode": "llm_ranked",
+                "selection_reason": selection_reason,
+                "raw_candidate_count": raw_candidate_count,
+                "merged_candidate_count": len(merged_candidates),
+                "llm_selected_ref_count": len(ordered_item_refs),
+                "selected_candidate_count": len(selected_trace),
+                "duplicate_hit_count": max(0, raw_candidate_count - len(merged_candidates)),
+                "reserve_candidate_count": len(reserve_trace),
+                "slot_skipped_count": skipped_by_slot_limit,
+            },
+            "reserve_trace": reserve_trace,
+        },
+    )
+
+
+# Block: ソート済み候補列
+def _sorted_merged_candidates(merged_candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(
+        merged_candidates,
+        key=lambda candidate: (
+            float(candidate["score"]),
+            -SLOT_PRIORITY.get(str(candidate["slot"]), 99),
+            int(candidate["sort_timestamp"]),
+        ),
+        reverse=True,
+    )
+
+
+# Block: 優先 slot
 def _preferred_slot(*, current_slot: str, new_slot: str) -> str:
     if SLOT_PRIORITY.get(new_slot, 99) < SLOT_PRIORITY.get(current_slot, 99):
         return new_slot
     return current_slot
 
 
+# Block: Slot 上限
 def _slot_limits(*, retrieval_plan: dict[str, Any]) -> dict[str, int]:
     limits = retrieval_plan["limits"]
     return {
@@ -140,9 +177,13 @@ def _slot_limits(*, retrieval_plan: dict[str, Any]) -> dict[str, int]:
     }
 
 
-# Block: Trace builders
-def _trace_entry(candidate: dict[str, Any]) -> dict[str, Any]:
-    return {
+# Block: Trace 変換
+def _trace_entry(
+    candidate: dict[str, Any],
+    *,
+    selection_rank: int | None = None,
+) -> dict[str, Any]:
+    trace_entry = {
         "slot": str(candidate["slot"]),
         "item_ref": str(candidate["item_ref"]),
         "score": round(float(candidate["score"]), 3),
@@ -150,8 +191,12 @@ def _trace_entry(candidate: dict[str, Any]) -> dict[str, Any]:
         "collector_names": list(candidate["collector_names"]),
         "duplicate_hits": int(candidate["duplicate_hits"]),
     }
+    if selection_rank is not None:
+        trace_entry["selection_rank"] = selection_rank
+    return trace_entry
 
 
+# Block: Collector 件数
 def _collector_counts(selection_trace: list[dict[str, Any]]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for trace_entry in selection_trace:
@@ -161,7 +206,7 @@ def _collector_counts(selection_trace: list[dict[str, Any]]) -> dict[str, int]:
     return counts
 
 
-# Block: Selected json builders
+# Block: 件数要約
 def _selected_counts(*, memory_bundle: dict[str, Any]) -> dict[str, int]:
     return {
         "working_memory_items": len(memory_bundle["working_memory_items"]),
@@ -174,6 +219,7 @@ def _selected_counts(*, memory_bundle: dict[str, Any]) -> dict[str, int]:
     }
 
 
+# Block: 参照要約
 def _selected_refs(*, memory_bundle: dict[str, Any]) -> dict[str, Any]:
     return {
         "working_memory_item_ids": [
