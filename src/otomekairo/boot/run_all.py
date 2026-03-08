@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 
 from otomekairo import __version__
+from otomekairo.infra.developer_config import load_developer_config
 from otomekairo.infra.logging_setup import configure_process_logging
 from otomekairo.infra.sqlite_state_store import SqliteStateStore
 
@@ -26,8 +27,12 @@ logger = logging.getLogger(__name__)
 
 # Block: Combined entrypoint
 def main() -> None:
-    configure_process_logging(process_name="launcher")
     repo_root = _repo_root()
+    developer_config = load_developer_config(repo_root)
+    configure_process_logging(
+        process_name="launcher",
+        developer_config=developer_config,
+    )
     runtime_already_running = _runtime_already_running(repo_root)
     shutdown_state = {"requested": False}
     child_env = _child_environment(repo_root)

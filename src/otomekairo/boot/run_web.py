@@ -5,9 +5,11 @@ from __future__ import annotations
 import logging
 import os
 import signal
+from pathlib import Path
 
 import uvicorn
 
+from otomekairo.infra.developer_config import load_developer_config
 from otomekairo.infra.logging_setup import configure_access_logger_filter, configure_process_logging
 
 
@@ -23,7 +25,11 @@ class ManagedSignalUvicornServer(uvicorn.Server):
 
 # Block: Uvicorn launcher
 def main() -> None:
-    configure_process_logging(process_name="web")
+    developer_config = load_developer_config(_repo_root())
+    configure_process_logging(
+        process_name="web",
+        developer_config=developer_config,
+    )
     configure_access_logger_filter()
     host = os.environ.get("OTOMEKAIRO_HOST", "0.0.0.0")
     port = int(os.environ.get("OTOMEKAIRO_PORT", "8000"))
@@ -49,6 +55,11 @@ def _install_signal_handlers(server: ManagedSignalUvicornServer) -> None:
 
     signal.signal(signal.SIGINT, handle_signal)
     signal.signal(signal.SIGTERM, handle_signal)
+
+
+# Block: Repository root helper
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[3]
 
 
 # Block: Module entrypoint

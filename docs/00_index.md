@@ -41,9 +41,11 @@
 - 入力ストリーム運用を詰めるとき: `docs/38_入力ストリーム運用仕様.md`
 - 設定キー運用を詰めるとき: `docs/39_設定キー運用仕様.md`
 - 設定UIを詰めるとき: `docs/42_設定UI仕様.md`
+- 開発者設定を詰めるとき: `docs/43_開発者設定仕様.md`
 - 人格変化を詰めるとき: `docs/40_人格変化仕様.md`
 - 人格に基づく選択を詰めるとき: `docs/41_人格選択仕様.md`
 - 設定既定値を見るとき: `config/default_settings.json`
+- 開発者用起動設定を見るとき: `config/developer.toml`
 - 実際の初期 SQL を見るとき: `sql/core_schema.sql`
 - 最短で起動するとき: `./run_otomekairo.sh`
 - VSCode の `F5` で起動するとき: `.vscode/launch.json` の `OtomeKairo`
@@ -84,5 +86,6 @@
 - 人格の可変傾向、経験からの人格変化が変わったら `docs/40_人格変化仕様.md` を更新する
 - 人格に基づく選択、hard gate、soft score、行動種別ごとの選び方が変わったら `docs/41_人格選択仕様.md` を更新する
 - 設定UIの保存モデル、プリセット、編集フローが変わったら `docs/42_設定UI仕様.md` を更新する
+- 開発者用起動設定の schema や適用先が変わったら `config/developer.toml` と `docs/43_開発者設定仕様.md` と `docs/37_起動初期化仕様.md` を更新する
 - 初期 SQL 実装を変更したら `sql/core_schema.sql` と `docs/34_SQLite論理スキーマ.md` を両方更新する
 - 参考メモや一時資料を追加するときは `docs/note/` に置く

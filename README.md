@@ -22,7 +22,9 @@
 - 人格変化仕様: `docs/40_人格変化仕様.md`
 - 人格選択仕様: `docs/41_人格選択仕様.md`
 - 設定UI仕様: `docs/42_設定UI仕様.md`
+- 開発者設定仕様: `docs/43_開発者設定仕様.md`
 - 設定既定値: `config/default_settings.json`
+- 開発者用起動設定: `config/developer.toml`
 - 初期 SQL 実装: `sql/core_schema.sql`
 - 参考メモ: `docs/note/記憶設計に関する先行研究のメモ.md`
 
@@ -34,7 +36,7 @@
 - `src/otomekairo/boot/run_web.py`: `uvicorn` で Web サーバを起動し、既定では `0.0.0.0:8000` に bind する
 - `src/otomekairo/boot/run_runtime.py`: 人格ランタイムの常時ループを起動する
 - `src/otomekairo/boot/run_all.py`: Web サーバと人格ランタイムを同じ親プロセスで起動し、既存のランタイム lease が生きていればそれを再利用し、終了シグナル時はまず `SIGINT` で子プロセスを graceful shutdown させる
-- `src/otomekairo/infra/logging_setup.py`: `launcher / web / runtime` の全ログを `log/otomekairo.log` へ `DEBUG` の通常テキストログとしてまとめ、端末には `INFO` 以上だけを出しつつ、JSON や `extra` の辞書は端末・ファイルの両方で読みやすく整形する共通ロギング設定を持つ
+- `src/otomekairo/infra/logging_setup.py`: `config/developer.toml` を前提に、`launcher / web / runtime` の root / handler / library logger level を起動時に決め、`log/otomekairo.log` への通常テキストログ整形と秘密情報マスクを行う共通ロギング設定を持つ
 - `src/otomekairo/web/app.py`: FastAPI アプリを構成し、API ルータ、静止画配信用の `/captures`、最小ブラウザ UI (`GET /`)、例外処理を束ねる
 - `src/otomekairo/web/camera_api.py`: `POST /api/camera/capture` でカメラ静止画を取得し、`POST /api/camera/observe` でその画像を自発観測入力として認知キューへ積む
 - `src/otomekairo/web/static/`: `tmp/CocoroConsole` ベースの設定ウインドウを持つ最小チャット UI を持ち、同一オリジンで `POST /api/chat/input`、`POST /api/camera/capture`、`GET /api/chat/stream` を使い、`message` 到着時はチャット表示へ反映し、`audio_url` があればサーバ生成の TTS 音声を再生し、`Cam` は静止画をサムネイル表示して次のチャット入力へ添付し、設定パネルでは `キャラクター / 振る舞い / 会話 / 記憶 / モーション / システム` の 6 タブで 5 種のプリセットとシステム設定・カメラ接続をまとめて編集し、カメラ接続は表内で `使用` の有効化、行追加、行削除、接続情報編集を行う
@@ -43,7 +45,7 @@
 - `src/otomekairo/usecase/run_cognition.py`: 認知クライアントが返す `cognition_result` を受け取り、`action_command` を使って `speak` は `token` / `message`、`notify` はユーザー通知イベント (`notice`)、`look` は ONVIF 経由のカメラ視点操作、`browse` は `waiting_external` の検索タスクとして実行し、`action_history` へ変換する
 - `src/otomekairo/usecase/run_browse_task.py`: `task_state(waiting_external)` の `browse` タスクを外部検索へ通し、検索結果を内部入力 `network_result` として次周期へ戻し、`action_history` へ変換する
 - `src/otomekairo/usecase/validate_action.py`: `cognition_result.action_proposals` から `speak` / `browse` / `notify` / `look` / `wait` を比較し、`selection_profile` の trait / style / relationship / emotion / drive、`memory_bundle`、`task_snapshot`、カメラ可用性を使って `execute / hold / reject` と構造化した `action_command` を確定する
-- `src/otomekairo/infra/litellm_cognition_client.py`: `LiteLLM` を使って人格断面つきの認知呼び出しを行い、`response_format={"type":"json_object"}` と厳密な shape 指示で `cognition_result` を構造化させ、`action_proposals` の最小形も厳密に検証しつつ、`LiteLLM` 自身の `DEBUG` ログもランタイムの `.log` ファイルへ残す
+- `src/otomekairo/infra/litellm_cognition_client.py`: `LiteLLM` を使って人格断面つきの認知呼び出しを行い、`response_format={"type":"json_object"}` と厳密な shape 指示で `cognition_result` を構造化させ、`action_proposals` の最小形も厳密に検証する
 - `src/otomekairo/gateway/search_client.py`: 外部検索の境界を表す抽象を定義する
 - `src/otomekairo/gateway/camera_controller.py`: カメラ視点操作の外部境界を定義する
 - `src/otomekairo/gateway/camera_sensor.py`: カメラ静止画取得の外部境界を定義する
@@ -56,6 +58,7 @@
 - `src/otomekairo/schema/runtime_types.py`: ランタイムの共通データ形を `infra` から切り離して持つ
 - `src/otomekairo/schema/settings.py`: 設定キーの検証と `config/default_settings.json` からの既定値読み込みを持つ
 - `config/default_settings.json`: `runtime_settings` seed と Web の `effective_settings` に使う設定既定値の正本を持つ
+- `config/developer.toml`: `launcher / web / runtime` のログ level と `LiteLLM` の開発者向けログ出力を起動時に固定する正本を持つ
 
 <!-- Block: Startup Guide -->
 ## 起動と確認
@@ -79,6 +82,8 @@
 - `./run_otomekairo.sh` は、通常は `Ctrl+C` 1 回で Web とランタイムを順に停止し、ランタイム lease も解放する
 - 通常終了では、signal handler が例外を投げず、Web も `SSE` 切断を専用レスポンスで閉じるため、想定内の `KeyboardInterrupt` や `CancelledError` がエラートレースとして出ない構成にしている
 - 初期実装では、端末には `INFO` 以上だけを表示しつつ、単体の JSON だけでなく複数行メッセージ内や行末に埋め込まれた JSON / Python 辞書形式の構造化データや `context` の辞書も見やすく整形して出し、`log/otomekairo.log` に `DEBUG` の通常テキストログをまとめて残す
+- `config/developer.toml` を編集すると、`launcher / web / runtime` ごとの root / handler / library logger level をコード変更なしで切り替えられる
 - 初期実装では、Uvicorn のアクセスログは基本的に表示しつつ、`/api/status` と `/api/chat/stream` の定期アクセスだけ抑止する
-- 初期実装では、`LiteLLM` の詳細な `DEBUG` ログも `log/otomekairo.log` に出る
+- `LiteLLM` の log level は `config/developer.toml` の `integrations.litellm.log_level` で切り替える
+- ログ内の `api_key`、`Authorization: Bearer ...`、`token`、`password`、`bot_token` は常に mask する
 - `browse` は、UI 上では `検索タスク` と `検索結果` の通知を経てから最終応答へ進む
