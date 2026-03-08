@@ -147,6 +147,8 @@ flowchart LR
 - `Cam` は enabled な `camera_connections` から 1 台を明示選択し、`POST /api/camera/capture` へ `camera_connection_id` を送って静止画を取得し、返った画像をサムネイル表示し、次の `POST /api/chat/input` へ添付してよい
 - current の `Cam` ボタンは `POST /api/camera/observe` ではなく `POST /api/camera/capture` だけを呼ぶ
 - `message` に `audio_url` がある場合は、`GET /audio/{audio_filename}` で取得した音声を再生してよい
+- current のチャット吹き出しのメタ表示は `label` を出さず、`HH:MM` 形式の時刻だけを出してよい
+- current のチャット吹き出しメタ表示は、assistant / notice / error を吹き出し右、user を吹き出し左に置いてよい
 - `設定保存` は、current では `GET /api/settings/editor` と `PUT /api/settings/editor` を使って、設定全体を保存する
 - 設定画面は左端に `キャラクター` タブを置き、続けて `振る舞い`、`会話`、`記憶`、`モーション`、`システム` を並べる
 - `振る舞い` タブには `振る舞いプロンプト`、`追加プロンプト（任意）`、`行動傾向` を置き、`CocoroConsole` 相当の会話指示と OtomeKairo 独自の傾向設定をまとめて編集する

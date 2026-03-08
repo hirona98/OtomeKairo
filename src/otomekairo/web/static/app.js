@@ -599,6 +599,7 @@
       }),
       messageId: requireString(payload.input_id, "chat.input_id"),
       isDraft: false,
+      createdAt: Date.now(),
     });
     clearPendingCameraAttachments();
   }
@@ -766,6 +767,7 @@
         text: transcriptText,
         messageId: requireString(payload.input_id, "microphone.input_id"),
         isDraft: false,
+        createdAt: Date.now(),
       });
     } catch (error) {
       appendError(`音声入力に失敗しました: ${error.message}`);
@@ -2021,6 +2023,7 @@
         text: "",
         messageId,
         isDraft: true,
+        createdAt: Date.now(),
       });
       draftMessages.set(messageId, messageNode);
     }
@@ -2036,6 +2039,7 @@
     const messageId = requireString(payload.message_id, "message.message_id");
     const role = requireString(payload.role, "message.role");
     const text = requireString(payload.text, "message.text");
+    const createdAt = requireInteger(payload.created_at, "message.created_at");
     const audioUrl = readOptionalString(payload.audio_url);
     let messageNode = draftMessages.get(messageId);
     if (messageNode === undefined) {
@@ -2044,6 +2048,7 @@
         text,
         messageId,
         isDraft: false,
+        createdAt,
       });
     } else {
       const bubbleText = messageNode.querySelector(".bubble-text");
@@ -2052,8 +2057,8 @@
         throw new Error("message node が不正です");
       }
       bubbleText.textContent = text;
-      meta.textContent = buildMetaLabel(role);
-      meta.classList.remove("empty");
+      messageNode.dataset.createdAt = String(createdAt);
+      meta.textContent = formatBubbleTimestamp(createdAt);
       draftMessages.delete(messageId);
     }
     if (audioUrl !== null) {
@@ -2077,8 +2082,7 @@
       throw new Error("message_end meta が見つかりません");
     }
     if (finishReason === "cancelled") {
-      meta.textContent = `${buildMetaLabel("assistant")} / 中断`;
-      meta.classList.remove("empty");
+      meta.textContent = `${formatBubbleTimestamp(readBubbleTimestamp(messageNode))} / 中断`;
     }
     draftMessages.delete(messageId);
   }
@@ -2099,11 +2103,13 @@
   }
 
   // Block: Message rendering
-  function appendMessage({ role, text, messageId, isDraft }) {
+  function appendMessage({ role, text, messageId, isDraft, createdAt }) {
     const normalizedRole = role === "user" ? "user" : "assistant";
+    const normalizedCreatedAt = normalizeBubbleTimestamp(createdAt);
     const row = document.createElement("div");
     row.className = `bubble-row ${normalizedRole === "user" ? "user" : "ai"}`;
     row.dataset.messageId = messageId;
+    row.dataset.createdAt = String(normalizedCreatedAt);
 
     const bubble = document.createElement("div");
     bubble.className = `bubble ${normalizedRole === "user" ? "user" : "ai"}`;
@@ -2115,13 +2121,16 @@
 
     const meta = document.createElement("div");
     meta.className = "bubble-time";
-    meta.textContent = buildMetaLabel(normalizedRole);
-    if (isDraft === true) {
-      meta.classList.add("empty");
+    meta.textContent = formatBubbleTimestamp(normalizedCreatedAt);
+
+    if (normalizedRole === "user") {
+      row.appendChild(meta);
+      row.appendChild(bubble);
+    } else {
+      row.appendChild(bubble);
+      row.appendChild(meta);
     }
 
-    row.appendChild(bubble);
-    row.appendChild(meta);
     chatScroll.appendChild(row);
     scrollToBottom();
     return row;
@@ -2141,7 +2150,7 @@
 
     const meta = document.createElement("div");
     meta.className = "bubble-time";
-    meta.textContent = buildMetaLabel(`notice:${code}`);
+    meta.textContent = formatBubbleTimestamp(Date.now());
 
     row.appendChild(bubble);
     row.appendChild(meta);
@@ -2168,7 +2177,7 @@
 
     const meta = document.createElement("div");
     meta.className = "bubble-time";
-    meta.textContent = buildMetaLabel("error");
+    meta.textContent = formatBubbleTimestamp(Date.now());
 
     row.appendChild(bubble);
     row.appendChild(meta);
@@ -2262,17 +2271,26 @@
     return `[画像 ${normalizedAttachmentCount} 枚]`;
   }
 
-  function buildMetaLabel(role) {
-    if (role === "user") {
-      return "user";
+  function normalizeBubbleTimestamp(timestampMs) {
+    if (Number.isInteger(timestampMs) && timestampMs > 0) {
+      return timestampMs;
     }
-    if (role === "assistant") {
-      return "assistant";
+    return Date.now();
+  }
+
+  function readBubbleTimestamp(messageNode) {
+    if (!(messageNode instanceof HTMLElement)) {
+      throw new Error("messageNode が不正です");
     }
-    if (role.startsWith("notice:")) {
-      return role.slice("notice:".length);
-    }
-    return role;
+    const rawTimestamp = Number(messageNode.dataset.createdAt || "");
+    return normalizeBubbleTimestamp(rawTimestamp);
+  }
+
+  function formatBubbleTimestamp(timestampMs) {
+    return new Date(normalizeBubbleTimestamp(timestampMs)).toLocaleTimeString("ja-JP", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
   }
 
   function updateRuntimeChip(statusPayload) {
