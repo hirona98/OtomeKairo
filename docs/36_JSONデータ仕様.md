@@ -16,7 +16,7 @@
 
 - 固定するのは、current 実装で使う JSON オブジェクトのキー、型、必須項目、固定語彙である
 - 固定するのは、`pending_inputs.payload_json`、`settings_overrides.requested_value_json`、`settings_editor_state.system_values_json`、5 種のプリセットテーブルの `payload_json`、`settings_change_sets.payload_json`、`ui_outbound_events.payload_json`、`action_history.command_json`、`action_history.observed_effects_json`、`memory_jobs.payload_ref_json`、`memory_job_payloads.payload_json`、`preference_memory.target_entity_ref_json`、`event_affects.moment_affect_labels_json`、`event_affects.vad_json`、主要な Web API 本文である
-- 固定するのは、`self_state.personality_json`、`self_state.current_emotion_json`、`self_state.long_term_goals_json`、`self_state.relationship_overview_json`、`self_state.invariants_json`、短周期の内部で使う `selection_profile`、`memory_bundle`、`retrieval_context`、`last_persona_update_summary`、`persona_consistency_score`、`attention_score_breakdown`、`self_initiated_score_breakdown`、`action_candidate_score`、`cognition_plan`、`speech_draft`、`cognition_result`、長周期の内部で使う `MemoryWritePlan`、`personality_change_proposal`、`persona_updates` の形である
+- 固定するのは、`self_state.personality_json`、`self_state.current_emotion_json`、`self_state.long_term_goals_json`、`self_state.relationship_overview_json`、`self_state.invariants_json`、短周期の内部で使う `selection_profile`、`memory_bundle`、`conversation_context`、`retrieval_context`、`last_persona_update_summary`、`persona_consistency_score`、`attention_score_breakdown`、`self_initiated_score_breakdown`、`action_candidate_score`、`cognition_plan`、`speech_draft`、`cognition_result`、長周期の内部で使う `MemoryWritePlan`、`personality_change_proposal`、`persona_updates` の形である
 - 固定しないのは、Python のクラス名、Pydantic モデル名、OpenAPI の自動生成細部である
 - 固定しないのは、将来追加する未使用フィールドや後段の拡張イベント種別である
 
@@ -600,6 +600,45 @@
 - 初期実装では、`working_memory_items` に `memory_kind=summary`、`semantic_items` に `memory_kind=fact`、`recent_event_window` に active memory preset の `retrieval_profile.recent_window_limit` 件までの `searchable` な `events` を入れてよい
 - 初期実装では、`episodic_items.memory_kind` に `episodic_event`、`affective_items.memory_kind` に `long_mood_state` または `event_affect`、`relationship_items.memory_kind` に `relation` または `preference`、`reflection_items.memory_kind` に `reflection_note` を使ってよい
 - 初期実装の `reflection_items[].payload` は、少なくとも `what_happened` と `event_summaries` を持ち、必要なら `what_worked`、`what_failed`、`retry_hint`、`avoid_pattern`、`reflection_seed_ref`、`reflection_seed`、`action_outcomes` を持ってよい
+- current 実装では、`event_about_time` に対応する event を参照する要素へ `about_time_hint_text` を追加してよい
+
+<!-- Block: Conversation Context -->
+### `conversation_context`
+
+```json
+{
+  "recent_dialog": [
+    {
+      "role": "user",
+      "text": "高校時代の話を覚えてる？",
+      "relative_time_text": "2分前"
+    },
+    {
+      "role": "assistant",
+      "text": "高校時代の記憶をたどってみるね",
+      "relative_time_text": "2分前"
+    }
+  ],
+  "selected_memory_pack": {
+    "recent_context": ["検索タスクを開始した"],
+    "working_memory": ["いまは会話の流れを優先している"],
+    "episodic": ["文化祭の帰りに一緒に寄り道した [時期: 2019年 / 高校時代]"],
+    "facts": ["文化祭は秋開催だった"],
+    "affective": ["その日の高揚感が強かった"],
+    "relationship": ["あなたは高校時代の思い出話を好む"],
+    "reflection": ["昔話に入る前に年次の手がかりを確認する"]
+  }
+}
+```
+
+- `conversation_context` は、短周期の内部でだけ使う prompt 向けの会話断面である
+- 必須項目は `recent_dialog` と `selected_memory_pack` である
+- `recent_dialog` の各要素は、少なくとも `role`、`text`、`relative_time_text` を持つ
+- `recent_dialog.role` は `user` または `assistant` の固定語彙である
+- `selected_memory_pack` は、少なくとも `recent_context`、`working_memory`、`episodic`、`facts`、`affective`、`relationship`、`reflection` を持つ
+- `selected_memory_pack` の各値は string の配列である
+- current 実装では、`recent_dialog` は `memory_bundle.recent_event_window` のうち `chat_message` / `microphone_message` / `external_response` だけから再構成してよい
+- current 実装では、`selected_memory_pack` の各要素へ `about_time_hint_text` を `[時期: ...]` 形式で織り込んでよい
 
 ### `reflection_note.payload`
 

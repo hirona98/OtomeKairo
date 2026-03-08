@@ -102,7 +102,7 @@ def _build_plan_messages(request: CognitionPlanRequest) -> list[dict[str, Any]]:
     body_snapshot = cognition_input["body_snapshot"]
     current_observation = cognition_input["current_observation"]
     drive_snapshot = cognition_input["drive_snapshot"]
-    memory_bundle = cognition_input["memory_bundle"]
+    conversation_context = cognition_input["conversation_context"]
     retrieval_context = cognition_input["retrieval_context"]
     task_snapshot = cognition_input["task_snapshot"]
     world_snapshot = cognition_input["world_snapshot"]
@@ -190,7 +190,8 @@ def _build_plan_messages(request: CognitionPlanRequest) -> list[dict[str, Any]]:
             _input_evaluation_prompt_line(input_evaluation),
             _skill_candidates_prompt_line(skill_candidates),
             _retrieval_prompt_line(retrieval_context),
-            _memory_bundle_prompt_line(memory_bundle),
+            _recent_dialog_prompt_line(conversation_context),
+            _selected_memory_pack_prompt_line(conversation_context),
             f"cycle_id: {request.cycle_id}",
             "この人格として、今の反応計画だけを構造化して決めること。",
             "この段階では speech_draft を返さず、意図、行動候補、重視記憶、反省種を決めること。",
@@ -212,7 +213,7 @@ def _build_reply_render_messages(request: ReplyRenderRequest) -> list[dict[str, 
     time_context = cognition_input["time_context"]
     self_snapshot = cognition_input["self_snapshot"]
     selection_profile = cognition_input["selection_profile"]
-    memory_bundle = cognition_input["memory_bundle"]
+    conversation_context = cognition_input["conversation_context"]
     retrieval_context = cognition_input["retrieval_context"]
     attention_snapshot = cognition_input["attention_snapshot"]
     system_prompt = "\n".join(
@@ -238,7 +239,8 @@ def _build_reply_render_messages(request: ReplyRenderRequest) -> list[dict[str, 
             _time_context_prompt_line(time_context),
             _attention_prompt_line(attention_snapshot),
             _retrieval_prompt_line(retrieval_context),
-            _memory_bundle_prompt_line(memory_bundle),
+            _recent_dialog_prompt_line(conversation_context),
+            _selected_memory_pack_prompt_line(conversation_context),
             f"意図: {cognition_plan['intention_summary']}",
             f"判断理由: {cognition_plan['decision_reason']}",
             f"応答方針: {cognition_plan['reply_policy']['mode']} ({cognition_plan['reply_policy']['reason']})",
@@ -792,43 +794,68 @@ def _retrieval_prompt_line(retrieval_context: dict[str, Any]) -> str:
     return f"想起計画: mode={mode} queries={query_text} selected={selected_text}"
 
 
-def _memory_bundle_prompt_line(memory_bundle: dict[str, Any]) -> str:
-    required_keys = (
-        "working_memory_items",
-        "episodic_items",
-        "semantic_items",
-        "affective_items",
-        "relationship_items",
-        "reflection_items",
-        "recent_event_window",
-    )
+# Block: 最近会話 prompt
+def _recent_dialog_prompt_line(conversation_context: dict[str, Any]) -> str:
+    recent_dialog = conversation_context.get("recent_dialog")
+    if not isinstance(recent_dialog, list):
+        raise RuntimeError("conversation_context.recent_dialog must be a list")
+    if not recent_dialog:
+        return "最近会話: なし"
     parts: list[str] = []
-    for key in required_keys:
-        value = memory_bundle.get(key)
-        if not isinstance(value, list):
-            raise RuntimeError(f"memory_bundle.{key} must be a list")
-        parts.append(f"{key}={_memory_slot_prompt_text(key, value)}")
-    return "想起断面: " + " | ".join(parts)
+    for dialog_entry in recent_dialog:
+        if not isinstance(dialog_entry, dict):
+            raise RuntimeError("conversation_context.recent_dialog must contain only objects")
+        role = dialog_entry.get("role")
+        text = dialog_entry.get("text")
+        if not isinstance(role, str) or role not in {"user", "assistant"}:
+            raise RuntimeError("conversation_context.recent_dialog.role must be user or assistant")
+        if not isinstance(text, str) or not text:
+            raise RuntimeError("conversation_context.recent_dialog.text must be non-empty string")
+        relative_time_text = dialog_entry.get("relative_time_text")
+        line = f"{_dialog_role_label(role)}: {_memory_prompt_text(text)}"
+        if isinstance(relative_time_text, str) and relative_time_text:
+            line += f" ({relative_time_text})"
+        parts.append(line)
+    return "最近会話: " + " / ".join(parts)
 
 
-def _memory_slot_prompt_text(slot_name: str, entries: list[dict[str, Any]]) -> str:
-    if not entries:
-        return "なし"
-    texts: list[str] = []
-    for entry in entries:
-        if not isinstance(entry, dict):
-            raise RuntimeError(f"memory_bundle.{slot_name} must contain only objects")
-        if slot_name == "recent_event_window":
-            texts.append(_memory_prompt_text(str(entry["summary_text"])))
-            continue
-        payload = entry.get("payload")
-        if slot_name == "reflection_items" and isinstance(payload, dict):
-            what_happened = payload.get("what_happened")
-            if isinstance(what_happened, str) and what_happened:
-                texts.append(_memory_prompt_text(what_happened))
-                continue
-        texts.append(_memory_prompt_text(str(entry["body_text"])))
-    return " / ".join(texts)
+# Block: 選別記憶 prompt
+def _selected_memory_pack_prompt_line(conversation_context: dict[str, Any]) -> str:
+    selected_memory_pack = conversation_context.get("selected_memory_pack")
+    if not isinstance(selected_memory_pack, dict):
+        raise RuntimeError("conversation_context.selected_memory_pack must be an object")
+    parts: list[str] = []
+    for label, key in (
+        ("直近文脈", "recent_context"),
+        ("作業記憶", "working_memory"),
+        ("エピソード", "episodic"),
+        ("事実", "facts"),
+        ("感情", "affective"),
+        ("関係", "relationship"),
+        ("反省", "reflection"),
+    ):
+        values = selected_memory_pack.get(key)
+        if not isinstance(values, list):
+            raise RuntimeError(f"conversation_context.selected_memory_pack.{key} must be a list")
+        normalized_values = [
+            _memory_prompt_text(value)
+            for value in values
+            if isinstance(value, str) and value
+        ]
+        if normalized_values:
+            parts.append(f"{label}=" + " / ".join(normalized_values))
+    if not parts:
+        return "選別記憶: なし"
+    return "選別記憶: " + " | ".join(parts)
+
+
+# Block: 会話 role 表示名
+def _dialog_role_label(role: str) -> str:
+    if role == "user":
+        return "ユーザー"
+    if role == "assistant":
+        return "あなた"
+    raise RuntimeError("dialog role must be user or assistant")
 
 
 def _memory_prompt_text(text: str) -> str:
