@@ -25,6 +25,7 @@ class LiteLLMCognitionClient:
         context_budget = request.cognition_input["context_budget"]
         completion_arguments = {
             "model": str(context_budget["model"]),
+            "base_model": str(context_budget["model"]),
             "messages": _build_messages(request),
             "temperature": float(context_budget["temperature"]),
             "max_tokens": int(context_budget["max_output_tokens"]),
