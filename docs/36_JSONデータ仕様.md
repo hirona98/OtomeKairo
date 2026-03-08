@@ -771,6 +771,7 @@
       "raw_candidate_count": 9,
       "merged_candidate_count": 7,
       "selector_input_candidate_count": 7,
+      "selector_candidate_limit": 24,
       "llm_selected_ref_count": 5,
       "selected_candidate_count": 4,
       "duplicate_hit_count": 2,
@@ -803,7 +804,7 @@
 - `selected` は、少なくとも `selected_counts`、`selected_refs`、`selection_trace` を持つ
 - current 実装では、`selected.selection_trace[].selection_rank` を追加し、`LLM` selector が返した優先順を残してよい
 - current 実装では、`selected.collector_counts`、`selected.selector_summary`、`selected.reserve_trace` を追加で持ってよい
-- current 実装の `selected.selector_summary` には、少なくとも `selector_mode`、`selection_reason`、`raw_candidate_count`、`merged_candidate_count`、`selector_input_candidate_count`、`llm_selected_ref_count`、`selected_candidate_count`、`duplicate_hit_count`、`reserve_candidate_count`、`slot_skipped_count` を持ってよい
+- current 実装の `selected.selector_summary` には、少なくとも `selector_mode`、`selection_reason`、`raw_candidate_count`、`merged_candidate_count`、`selector_input_candidate_count`、`selector_candidate_limit`、`llm_selected_ref_count`、`selected_candidate_count`、`duplicate_hit_count`、`reserve_candidate_count`、`slot_skipped_count` を持ってよい
 
 <!-- Block: Context Budget -->
 ### `context_budget`
@@ -844,6 +845,8 @@
 {
   "total_candidate_count": 9,
   "unique_candidate_count": 7,
+  "selector_input_candidate_count": 7,
+  "selector_candidate_limit": 24,
   "category_counts": {
     "working_memory_items": 2,
     "episodic_items": 2,
@@ -876,7 +879,7 @@
 - `retrieval_candidates_json` は、`retrieval_runs.candidates_json` に保存する候補統計の最小形である
 - 必須項目は `total_candidate_count`、`category_counts`、`non_empty_categories` である
 - `category_counts` は、`memory_bundle` と同じ slot 名をキーにした件数マップである
-- `unique_candidate_count` と `collector_runs` は、current 実装では追加で持ってよい
+- `unique_candidate_count`、`selector_input_candidate_count`、`selector_candidate_limit`、`collector_runs` は、current 実装では追加で持ってよい
 
 ### `retrieval_selected_json`
 
@@ -921,6 +924,7 @@
     "raw_candidate_count": 9,
     "merged_candidate_count": 7,
     "selector_input_candidate_count": 7,
+    "selector_candidate_limit": 24,
     "llm_selected_ref_count": 5,
     "selected_candidate_count": 4,
     "duplicate_hit_count": 2,
@@ -2316,6 +2320,7 @@
         "raw_candidate_count": 9,
         "merged_candidate_count": 7,
         "selector_input_candidate_count": 7,
+        "selector_candidate_limit": 24,
         "llm_selected_ref_count": 5,
         "selected_candidate_count": 4,
         "duplicate_hit_count": 2,

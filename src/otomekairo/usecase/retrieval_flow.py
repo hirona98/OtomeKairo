@@ -140,6 +140,8 @@ def build_retrieval_artifacts(
         candidates_json=_build_candidates_json(
             candidates=candidate_collection.candidates,
             collector_runs=candidate_collection.collector_runs,
+            selector_input_candidate_count=min(len(merged_candidates), SELECTOR_CANDIDATE_LIMIT),
+            selector_candidate_limit=SELECTOR_CANDIDATE_LIMIT,
         ),
         selected_json=selection_artifacts.selected_json,
     )
@@ -196,6 +198,7 @@ def _select_with_llm(
                     "raw_candidate_count": raw_candidate_count,
                     "merged_candidate_count": 0,
                     "selector_input_candidate_count": 0,
+                    "selector_candidate_limit": SELECTOR_CANDIDATE_LIMIT,
                     "llm_selected_ref_count": 0,
                     "selected_candidate_count": 0,
                     "duplicate_hit_count": 0,
@@ -224,6 +227,7 @@ def _select_with_llm(
         merged_candidates=merged_candidates,
         raw_candidate_count=raw_candidate_count,
         selector_input_candidate_count=len(candidate_pack["candidate_entries"]),
+        selector_candidate_limit=SELECTOR_CANDIDATE_LIMIT,
         retrieval_plan=retrieval_plan,
         ordered_item_refs=list(retrieval_selection["selected_item_refs"]),
         selection_reason=str(retrieval_selection["selection_reason"]),
@@ -341,6 +345,8 @@ def _build_candidates_json(
     *,
     candidates: list[dict[str, Any]],
     collector_runs: list[dict[str, Any]],
+    selector_input_candidate_count: int,
+    selector_candidate_limit: int,
 ) -> dict[str, Any]:
     category_counts: dict[str, int] = {}
     unique_refs: set[str] = set()
@@ -357,6 +363,8 @@ def _build_candidates_json(
             for category_name, count in category_counts.items()
             if count > 0
         ],
+        "selector_input_candidate_count": selector_input_candidate_count,
+        "selector_candidate_limit": selector_candidate_limit,
         "collector_runs": collector_runs,
     }
 

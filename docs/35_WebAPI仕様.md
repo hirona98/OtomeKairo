@@ -220,6 +220,7 @@ flowchart LR
         "raw_candidate_count": 9,
         "merged_candidate_count": 7,
         "selector_input_candidate_count": 7,
+        "selector_candidate_limit": 24,
         "llm_selected_ref_count": 5,
         "selected_candidate_count": 4,
         "duplicate_hit_count": 2,
