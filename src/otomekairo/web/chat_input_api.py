@@ -23,6 +23,8 @@ class ChatAttachmentRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     attachment_kind: str
+    camera_connection_id: str
+    camera_display_name: str
     capture_id: str
 
 
@@ -84,6 +86,14 @@ def _normalize_chat_attachments(
                 error_code="invalid_request",
                 message=str(error),
             ) from error
+        camera_connection_id = attachment.camera_connection_id.strip()
+        camera_display_name = attachment.camera_display_name.strip()
+        if not camera_connection_id or not camera_display_name:
+            raise ApiError(
+                status_code=400,
+                error_code="invalid_request",
+                message="camera attachment metadata が不正です",
+            )
         file_path = camera_capture_file_path(capture_id)
         if not file_path.is_file():
             raise ApiError(
@@ -95,6 +105,8 @@ def _normalize_chat_attachments(
             {
                 "attachment_kind": SUPPORTED_CHAT_ATTACHMENT_KIND,
                 "media_kind": "image",
+                "camera_connection_id": camera_connection_id,
+                "camera_display_name": camera_display_name,
                 "capture_id": capture_id,
                 "mime_type": "image/jpeg",
                 "storage_path": str(camera_capture_relative_path(capture_id)),

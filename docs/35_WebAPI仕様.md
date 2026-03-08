@@ -134,7 +134,7 @@ flowchart LR
 - ログイン画面は持たず、起動直後にそのままチャット UI を表示する
 - current の設定画面は `tmp/CocoroConsole` の設定ウインドウをベースにしてよい
 - ブラウザUIの入力手段は、テキスト入力と `Cam` による静止画添付に固定する
-- `Cam` は `POST /api/camera/capture` で静止画を取得し、返った画像をサムネイル表示し、次の `POST /api/chat/input` へ添付してよい
+- `Cam` は enabled な `camera_connections` から 1 台を明示選択し、`POST /api/camera/capture` へ `camera_connection_id` を送って静止画を取得し、返った画像をサムネイル表示し、次の `POST /api/chat/input` へ添付してよい
 - current の `Cam` ボタンは `POST /api/camera/observe` ではなく `POST /api/camera/capture` だけを呼ぶ
 - `message` に `audio_url` がある場合は、`GET /audio/{audio_filename}` で取得した音声を再生してよい
 - `設定保存` は、current では `GET /api/settings/editor` と `PUT /api/settings/editor` を使って、設定全体を保存する
@@ -407,6 +407,8 @@ flowchart LR
   "attachments": [
     {
       "attachment_kind": "camera_still_image",
+      "camera_connection_id": "cam_living",
+      "camera_display_name": "リビング",
       "capture_id": "cap_0123456789abcdef0123456789abcdef"
     }
   ]
@@ -417,7 +419,7 @@ flowchart LR
 - `client_message_id` は任意だが、送る場合はクライアント側の再送判定に使える安定値とする
 - `text` を送る場合、空文字列、空白のみ、`4000` 文字超は `400` とする
 - `attachments` は任意で、送る場合は `camera_still_image` の配列とする
-- 各添付は `capture_id` を必須とし、`POST /api/camera/capture` で作った画像だけを受け付ける
+- 各添付は `camera_connection_id`、`camera_display_name`、`capture_id` を必須とし、`POST /api/camera/capture` で作った画像だけを受け付ける
 
 <!-- Block: Chat Input Write -->
 ### DB への写像
@@ -500,7 +502,14 @@ flowchart LR
 <!-- Block: Camera Capture Request -->
 ### 入力 JSON
 
-- リクエスト本文は不要である
+```json
+{
+  "camera_connection_id": "cam_living"
+}
+```
+
+- `camera_connection_id` を必須とし、`camera_connections[].is_enabled=true` の 1 件を指定する
+- 空文字列や enabled でない `camera_connection_id` は `400 Bad Request` にする
 
 <!-- Block: Camera Capture Response -->
 ### 成功応答
@@ -538,7 +547,14 @@ flowchart LR
 <!-- Block: Camera Observe Request -->
 ### 入力 JSON
 
-- リクエスト本文は不要である
+```json
+{
+  "camera_connection_id": "cam_living"
+}
+```
+
+- `camera_connection_id` を必須とし、`camera_connections[].is_enabled=true` の 1 件を指定する
+- 空文字列や enabled でない `camera_connection_id` は `400 Bad Request` にする
 
 <!-- Block: Camera Observe Write -->
 ### DB への写像

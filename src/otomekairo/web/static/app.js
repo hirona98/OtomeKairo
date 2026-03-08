@@ -9,6 +9,7 @@
   const sendButton = document.getElementById("btn-send");
   const cancelButton = document.getElementById("btn-cancel");
   const cameraButton = document.getElementById("btn-camera");
+  const cameraSelect = document.getElementById("camera-select");
   const attachments = document.getElementById("attachments");
   const settingsButton = document.getElementById("btn-settings");
   const settingsPanel = document.getElementById("settings-panel");
@@ -388,12 +389,15 @@
   let localDraftIdCounter = 0;
   const draftMessages = new Map();
   let activeSpeechAudio = null;
+  let cameraCaptureInFlight = false;
 
   // Block: Application startup
   async function start() {
     installEventHandlers();
+    updateCameraCaptureControls();
     updateSendEnabledState();
     connectStream();
+    await loadSettingsEditorSnapshot();
     await refreshStatusSnapshot();
     statusTimerId = window.setInterval(() => {
       void refreshStatusSnapshot();
@@ -430,6 +434,7 @@
     cameraButton.addEventListener("click", () => {
       void handleCameraCapture();
     });
+    cameraSelect.addEventListener("change", updateCameraCaptureControls);
     window.addEventListener("beforeunload", stopStream);
   }
 
@@ -558,6 +563,8 @@
     const normalizedText = String(text).trim();
     const outgoingAttachments = pendingCameraAttachments.map((attachment) => ({
       attachment_kind: attachment.attachmentKind,
+      camera_connection_id: attachment.cameraConnectionId,
+      camera_display_name: attachment.cameraDisplayName,
       capture_id: attachment.captureId,
     }));
     if (!normalizedText && outgoingAttachments.length === 0) {
@@ -662,10 +669,18 @@
 
   // Block: Camera capture
   async function handleCameraCapture() {
-    cameraButton.disabled = true;
+    const selectedCameraConnectionId = readSelectedCameraConnectionId();
+    cameraCaptureInFlight = true;
+    updateCameraCaptureControls();
     try {
       const response = await fetch("/api/camera/capture", {
         method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          camera_connection_id: selectedCameraConnectionId,
+        }),
       });
       const payload = await readJson(response);
       if (!response.ok) {
@@ -676,7 +691,8 @@
     } catch (error) {
       appendError(`カメラ画像の取得に失敗しました: ${error.message}`);
     } finally {
-      cameraButton.disabled = false;
+      cameraCaptureInFlight = false;
+      updateCameraCaptureControls();
     }
   }
 
@@ -720,6 +736,7 @@
     editorDraft = buildEditorDraft(snapshot);
     settingsStatus.textContent = "サーバ正本を読込済み";
     renderSettingsEditor();
+    renderCameraSelectionInput();
   }
 
   function validateEditorSnapshot(snapshot) {
@@ -762,6 +779,66 @@
       motion_presets: cloneJson(snapshot.motion_presets),
       camera_connections: cloneJson(snapshot.camera_connections),
     };
+  }
+
+  // Block: Camera selector rendering
+  function renderCameraSelectionInput() {
+    if (!(cameraSelect instanceof HTMLSelectElement)) {
+      throw new Error("camera-select が見つかりません");
+    }
+    const previousValue = cameraSelect.value;
+    const enabledCameraConnections = readCameraConnections()
+      .filter((cameraConnection) => isObject(cameraConnection) && cameraConnection.is_enabled === true);
+    cameraSelect.replaceChildren();
+    if (enabledCameraConnections.length === 0) {
+      cameraSelect.appendChild(buildCameraSelectionOption("", "有効なカメラがありません"));
+      cameraSelect.value = "";
+      updateCameraCaptureControls();
+      return;
+    }
+    cameraSelect.appendChild(buildCameraSelectionOption("", "カメラを選択"));
+    for (const cameraConnection of enabledCameraConnections) {
+      const cameraConnectionId = requireString(
+        cameraConnection.camera_connection_id,
+        "camera_connection.camera_connection_id",
+      );
+      const displayName = requireString(cameraConnection.display_name, "camera_connection.display_name");
+      cameraSelect.appendChild(buildCameraSelectionOption(cameraConnectionId, displayName));
+    }
+    if (enabledCameraConnections.some((cameraConnection) => cameraConnection.camera_connection_id === previousValue)) {
+      cameraSelect.value = previousValue;
+    } else {
+      cameraSelect.value = "";
+    }
+    updateCameraCaptureControls();
+  }
+
+  function buildCameraSelectionOption(value, label) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    return option;
+  }
+
+  function readSelectedCameraConnectionId() {
+    if (!(cameraSelect instanceof HTMLSelectElement)) {
+      throw new Error("camera-select が見つかりません");
+    }
+    const selectedCameraConnectionId = cameraSelect.value.trim();
+    if (!selectedCameraConnectionId) {
+      throw new Error("撮影するカメラを選択してください");
+    }
+    return selectedCameraConnectionId;
+  }
+
+  function updateCameraCaptureControls() {
+    const selectedCameraConnectionId = cameraSelect instanceof HTMLSelectElement
+      ? cameraSelect.value.trim()
+      : "";
+    if (cameraSelect instanceof HTMLSelectElement) {
+      cameraSelect.disabled = cameraCaptureInFlight || cameraSelect.options.length <= 1;
+    }
+    cameraButton.disabled = cameraCaptureInFlight || !selectedCameraConnectionId;
   }
 
   // Block: Settings editor rendering
@@ -1941,6 +2018,7 @@
     const item = document.createElement("div");
     item.className = "attachment";
     item.dataset.captureId = attachment.captureId;
+    item.title = attachment.cameraDisplayName;
 
     const thumbWrap = document.createElement("a");
     thumbWrap.className = "attachment-thumb-wrap";
@@ -1972,13 +2050,21 @@
   }
 
   function buildPendingCameraAttachment(payload) {
+    const cameraConnectionId = payload && typeof payload.camera_connection_id === "string"
+      ? payload.camera_connection_id.trim()
+      : "";
+    const cameraDisplayName = payload && typeof payload.camera_display_name === "string"
+      ? payload.camera_display_name.trim()
+      : "";
     const captureId = payload && typeof payload.capture_id === "string" ? payload.capture_id.trim() : "";
     const imageUrl = payload && typeof payload.image_url === "string" ? payload.image_url.trim() : "";
-    if (!captureId || !imageUrl) {
+    if (!cameraConnectionId || !cameraDisplayName || !captureId || !imageUrl) {
       throw new Error("カメラ応答が不正です");
     }
     return {
       attachmentKind: "camera_still_image",
+      cameraConnectionId,
+      cameraDisplayName,
       captureId,
       imageUrl,
     };

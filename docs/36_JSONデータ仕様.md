@@ -1801,6 +1801,8 @@
   "attachments": [
     {
       "attachment_kind": "camera_still_image",
+      "camera_connection_id": "cam_living",
+      "camera_display_name": "リビング",
       "capture_id": "cap_0123456789abcdef0123456789abcdef"
     }
   ]
@@ -1811,7 +1813,7 @@
 - `client_message_id` は任意で、クライアント側の再送判定に使う
 - `client_message_id` がある場合、同じ `channel` での再利用は許可しない
 - `attachments` は任意で、ある場合は `camera_still_image` の配列にする
-- 各添付は `attachment_kind` と `capture_id` を必須とする
+- 各添付は `attachment_kind`、`camera_connection_id`、`camera_display_name`、`capture_id` を必須とする
 - `text` と `attachments` は、少なくともどちらか一方が必要である
 
 <!-- Block: Chat Input Response -->
@@ -1856,6 +1858,30 @@
 - 必須項目は `accepted`、`status` である
 - `accepted` は `true` に固定する
 - `status` は `queued` に固定する
+
+<!-- Block: Camera Capture Request -->
+### `POST /api/camera/capture` の入力 JSON
+
+```json
+{
+  "camera_connection_id": "cam_living"
+}
+```
+
+- 必須項目は `camera_connection_id` である
+- `camera_connection_id` は、enabled camera connection の 1 件を指す
+
+<!-- Block: Camera Observe Request -->
+### `POST /api/camera/observe` の入力 JSON
+
+```json
+{
+  "camera_connection_id": "cam_living"
+}
+```
+
+- 必須項目は `camera_connection_id` である
+- `camera_connection_id` は、enabled camera connection の 1 件を指す
 
 <!-- Block: Camera Capture Response -->
 ### `POST /api/camera/capture` の成功応答 JSON
