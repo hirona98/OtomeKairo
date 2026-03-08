@@ -294,7 +294,7 @@ CREATE TABLE ui_outbound_events (
     ui_event_id INTEGER PRIMARY KEY AUTOINCREMENT,
     channel TEXT NOT NULL CHECK (channel = 'browser_chat'),
     event_type TEXT NOT NULL CHECK (
-        event_type IN ('token', 'message', 'status', 'notice', 'error')
+        event_type IN ('token', 'message', 'message_end', 'status', 'notice', 'error')
     ),
     payload_json TEXT NOT NULL,
     created_at INTEGER NOT NULL,

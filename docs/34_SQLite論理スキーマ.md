@@ -287,7 +287,7 @@ flowchart TD
 - 主キー: `ui_event_id INTEGER PRIMARY KEY AUTOINCREMENT`
 - 必須列: `channel`, `event_type`, `payload_json`, `created_at`
 - 任意列: `source_cycle_id`
-- `event_type` は、少なくとも `token`、`message`、`status`、`notice`、`error` を区別する
+- `event_type` は、少なくとも `token`、`message`、`message_end`、`status`、`notice`、`error` を区別する
 - `ui_event_id` は、`SSE` の `Last-Event-ID` にそのまま使える単調増加値とする
 - 古い行の削除は append-only 運用の例外として、`docs/38_入力ストリーム運用仕様.md` の保持条件に従って stream janitor だけが行ってよい
 - 主要索引: `(channel, ui_event_id ASC)`

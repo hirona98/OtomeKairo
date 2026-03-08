@@ -52,7 +52,7 @@ from otomekairo.usecase.write_memory_plan import (
 
 # Block: Schema constants
 SCHEMA_NAME = "core_schema"
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 EMBEDDING_VECTOR_DIMENSION = 32
 LEGACY_SETTING_KEY_ALIASES = {
     "llm.model": "llm.default_model",
@@ -5637,7 +5637,7 @@ class SqliteStateStore:
             return
         if current_version > SCHEMA_VERSION:
             raise RuntimeError("schema_version is newer than this initializer")
-        if current_version not in {2, 3, 4, 5, 6, 7, 8, 9, 10, 11}:
+        if current_version not in {2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}:
             raise RuntimeError("unsupported schema_version for migration")
         while current_version < SCHEMA_VERSION:
             if current_version == 2:
@@ -5679,6 +5679,10 @@ class SqliteStateStore:
             if current_version == 11:
                 self._migrate_schema_11_to_12(connection=connection, now_ms=now_ms)
                 current_version = 12
+                continue
+            if current_version == 12:
+                self._migrate_schema_12_to_13(connection=connection, now_ms=now_ms)
+                current_version = 13
                 continue
             raise RuntimeError("unsupported schema_version for migration")
 
@@ -6816,6 +6820,62 @@ class SqliteStateStore:
             WHERE meta_key = 'schema_version'
             """,
             (_json_text(12), now_ms),
+        )
+
+    # Block: Schema migration 12->13
+    def _migrate_schema_12_to_13(self, *, connection: sqlite3.Connection, now_ms: int) -> None:
+        temporary_ui_event_table = f"ui_outbound_events_v12_{uuid.uuid4().hex}"
+        connection.execute("DROP INDEX IF EXISTS idx_ui_outbound_events_channel_event")
+        connection.execute(f"ALTER TABLE ui_outbound_events RENAME TO {temporary_ui_event_table}")
+        connection.execute(
+            """
+            CREATE TABLE ui_outbound_events (
+                ui_event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                channel TEXT NOT NULL CHECK (channel = 'browser_chat'),
+                event_type TEXT NOT NULL CHECK (
+                    event_type IN ('token', 'message', 'message_end', 'status', 'notice', 'error')
+                ),
+                payload_json TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                source_cycle_id TEXT
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX idx_ui_outbound_events_channel_event
+                ON ui_outbound_events (channel, ui_event_id ASC)
+            """
+        )
+        connection.execute(
+            f"""
+            INSERT INTO ui_outbound_events (
+                ui_event_id,
+                channel,
+                event_type,
+                payload_json,
+                created_at,
+                source_cycle_id
+            )
+            SELECT
+                ui_event_id,
+                channel,
+                event_type,
+                payload_json,
+                created_at,
+                source_cycle_id
+            FROM {temporary_ui_event_table}
+            """
+        )
+        connection.execute(f"DROP TABLE {temporary_ui_event_table}")
+        connection.execute(
+            """
+            UPDATE db_meta
+            SET meta_value_json = ?,
+                updated_at = ?
+            WHERE meta_key = 'schema_version'
+            """,
+            (_json_text(13), now_ms),
         )
 
     # Block: sqlite-vec schema ensure
