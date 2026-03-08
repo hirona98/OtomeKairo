@@ -8639,9 +8639,16 @@ def _public_retrieval_summary(row: sqlite3.Row) -> dict[str, Any]:
     selector_summary = selected_json.get("selector_summary")
     if isinstance(selector_summary, dict):
         payload["selector_summary"] = {
-            str(key): int(value)
+            str(key): (
+                int(value)
+                if isinstance(value, int) and not isinstance(value, bool)
+                else str(value)
+            )
             for key, value in selector_summary.items()
-            if isinstance(value, int) and not isinstance(value, bool)
+            if (
+                (isinstance(value, int) and not isinstance(value, bool))
+                or (isinstance(value, str) and value)
+            )
         }
     trimmed_item_refs = selected_json.get("trimmed_item_refs")
     if isinstance(trimmed_item_refs, list):

@@ -2381,7 +2381,10 @@
     const selectedCounts = requireCountMap(lastRetrieval.selected_counts, "runtime.last_retrieval.selected_counts");
     const collectorNames = readOptionalStringArray(lastRetrieval.collector_names, "runtime.last_retrieval.collector_names");
     const collectorCounts = readOptionalCountMap(lastRetrieval.collector_counts, "runtime.last_retrieval.collector_counts");
-    const selectorSummary = readOptionalIntegerMap(lastRetrieval.selector_summary, "runtime.last_retrieval.selector_summary");
+    const selectorSummary = readOptionalSelectorSummary(
+      lastRetrieval.selector_summary,
+      "runtime.last_retrieval.selector_summary",
+    );
     const trimmedItemRefs = readOptionalStringArray(lastRetrieval.trimmed_item_refs, "runtime.last_retrieval.trimmed_item_refs");
     const totalCount = Object.values(selectedCounts).reduce((total, count) => total + count, 0);
     const textParts = [
@@ -2567,7 +2570,8 @@
     return requireCountMap(value, label);
   }
 
-  function readOptionalIntegerMap(value, label) {
+  // Block: Selector summary 読み取り
+  function readOptionalSelectorSummary(value, label) {
     if (value === undefined) {
       return {};
     }
@@ -2575,10 +2579,16 @@
       throw new Error(`${label} がオブジェクトではありません`);
     }
     return Object.fromEntries(Object.entries(value).map(([key, entryValue]) => {
-      if (!Number.isInteger(entryValue)) {
-        throw new Error(`${label}.${key} が整数ではありません`);
+      if (typeof entryValue === "string") {
+        if (entryValue.length === 0) {
+          throw new Error(`${label}.${key} が空文字列です`);
+        }
+        return [key, entryValue];
       }
-      return [key, entryValue];
+      if (Number.isInteger(entryValue)) {
+        return [key, entryValue];
+      }
+      throw new Error(`${label}.${key} が文字列または整数ではありません`);
     }));
   }
 
