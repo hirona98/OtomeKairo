@@ -285,7 +285,7 @@ def _event_about_time_date_range_text(event_about_time: dict[str, Any]) -> str |
     if isinstance(about_start_ts, int):
         start_text = _date_text(about_start_ts)
         if isinstance(about_end_ts, int) and about_end_ts != about_start_ts:
-            return f"{start_text}-{_date_text(about_end_ts)}"
+            return f"{start_text}..{_date_text(about_end_ts)}"
         return start_text
     if isinstance(about_end_ts, int):
         return _date_text(about_end_ts)

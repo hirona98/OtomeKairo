@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date, datetime, timezone
 from typing import Any, Callable
 
 from otomekairo.usecase.retrieval_common import (
@@ -542,11 +543,17 @@ def _collect_explicit_time_candidates(
     current_observation: dict[str, Any],
     retrieval_plan: dict[str, Any],
 ) -> list[dict[str, Any]]:
+    explicit_dates = retrieval_plan["time_hint"].get("explicit_dates", [])
     explicit_years = retrieval_plan["time_hint"]["explicit_years"]
     life_stage_hints = retrieval_plan["time_hint"].get("life_stage_hints", [])
-    if not explicit_years and not life_stage_hints:
+    if not explicit_dates and not explicit_years and not life_stage_hints:
         return []
     explicit_year_texts = {str(year) for year in explicit_years}
+    explicit_date_set = {
+        str(explicit_date)
+        for explicit_date in explicit_dates
+        if isinstance(explicit_date, str) and explicit_date
+    }
     life_stage_hint_set = {
         str(life_stage_hint)
         for life_stage_hint in life_stage_hints
@@ -637,19 +644,24 @@ def _collect_explicit_time_candidates(
         about_year_start = event_about_time.get("about_year_start")
         about_year_end = event_about_time.get("about_year_end")
         life_stage = event_about_time.get("life_stage")
-        if isinstance(life_stage, str) and life_stage:
-            if life_stage not in life_stage_hint_set:
-                continue
+        matched_reason_code: str | None = None
+        if isinstance(life_stage, str) and life_stage and life_stage in life_stage_hint_set:
             matched_reason_code = "matched_life_stage"
-        else:
-            matched_year_values = {
-                str(about_year)
-                for about_year in (about_year_start, about_year_end)
-                if isinstance(about_year, int)
-            }
-            if not matched_year_values.intersection(explicit_year_texts):
-                continue
-            matched_reason_code = "matched_explicit_year"
+        if matched_reason_code is None:
+            if _matches_event_about_time_explicit_date(
+                event_about_time=event_about_time,
+                explicit_date_set=explicit_date_set,
+            ):
+                matched_reason_code = "matched_explicit_date"
+            elif _matches_event_about_time_explicit_year(
+                event_about_time=event_about_time,
+                explicit_year_texts=explicit_year_texts,
+                about_year_start=about_year_start,
+                about_year_end=about_year_end,
+            ):
+                matched_reason_code = "matched_explicit_year"
+        if matched_reason_code is None:
+            continue
         candidate_info = event_items.get(str(event_about_time["event_id"]))
         if candidate_info is None:
             continue
@@ -681,6 +693,93 @@ def _collect_explicit_time_candidates(
             )
         )
     return collected
+
+
+# Block: about time 年一致
+def _matches_event_about_time_explicit_year(
+    *,
+    event_about_time: dict[str, Any],
+    explicit_year_texts: set[str],
+    about_year_start: Any,
+    about_year_end: Any,
+) -> bool:
+    if not explicit_year_texts:
+        return False
+    year_range = _event_about_time_year_range(
+        event_about_time=event_about_time,
+        about_year_start=about_year_start,
+        about_year_end=about_year_end,
+    )
+    if year_range is None:
+        return False
+    range_start, range_end = year_range
+    for explicit_year_text in explicit_year_texts:
+        explicit_year = int(explicit_year_text)
+        if range_start <= explicit_year <= range_end:
+            return True
+    return False
+
+
+# Block: about time 日付一致
+def _matches_event_about_time_explicit_date(
+    *,
+    event_about_time: dict[str, Any],
+    explicit_date_set: set[str],
+) -> bool:
+    if not explicit_date_set:
+        return False
+    date_range = _event_about_time_date_range(event_about_time=event_about_time)
+    if date_range is None:
+        return False
+    range_start, range_end = date_range
+    for explicit_date_text in explicit_date_set:
+        explicit_date = date.fromisoformat(explicit_date_text)
+        if range_start <= explicit_date <= range_end:
+            return True
+    return False
+
+
+# Block: about time 年範囲
+def _event_about_time_year_range(
+    *,
+    event_about_time: dict[str, Any],
+    about_year_start: Any,
+    about_year_end: Any,
+) -> tuple[int, int] | None:
+    if isinstance(about_year_start, int):
+        range_end = about_year_end if isinstance(about_year_end, int) else about_year_start
+        return min(about_year_start, range_end), max(about_year_start, range_end)
+    if isinstance(about_year_end, int):
+        return about_year_end, about_year_end
+    date_range = _event_about_time_date_range(event_about_time=event_about_time)
+    if date_range is None:
+        return None
+    return date_range[0].year, date_range[1].year
+
+
+# Block: about time 日付範囲
+def _event_about_time_date_range(
+    *,
+    event_about_time: dict[str, Any],
+) -> tuple[date, date] | None:
+    about_start_ts = event_about_time.get("about_start_ts")
+    about_end_ts = event_about_time.get("about_end_ts")
+    if not isinstance(about_start_ts, int) and not isinstance(about_end_ts, int):
+        return None
+    start_date = _local_date_from_unix_ms(about_start_ts) if isinstance(about_start_ts, int) else None
+    end_date = _local_date_from_unix_ms(about_end_ts) if isinstance(about_end_ts, int) else None
+    if start_date is None:
+        if end_date is None:
+            return None
+        return end_date, end_date
+    if end_date is None:
+        return start_date, start_date
+    return min(start_date, end_date), max(start_date, end_date)
+
+
+# Block: ローカル日付変換
+def _local_date_from_unix_ms(unix_ms: int) -> date:
+    return datetime.fromtimestamp(unix_ms / 1000, tz=timezone.utc).astimezone().date()
 
 
 # Block: Candidate sort helpers

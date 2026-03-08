@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import re
 from typing import Any
 
 
@@ -91,6 +92,26 @@ def explicit_years_from_observation(current_observation: dict[str, Any]) -> list
     return years
 
 
+def explicit_dates_from_observation(current_observation: dict[str, Any]) -> list[str]:
+    observation_text = str(current_observation["observation_text"])
+    explicit_dates: list[str] = []
+    for pattern in (
+        r"(?P<year>\d{4})[/-](?P<month>\d{1,2})[/-](?P<day>\d{1,2})",
+        r"(?P<year>\d{4})年(?P<month>\d{1,2})月(?P<day>\d{1,2})日",
+    ):
+        for match in re.finditer(pattern, observation_text):
+            explicit_date = _validated_explicit_date(
+                year_text=match.group("year"),
+                month_text=match.group("month"),
+                day_text=match.group("day"),
+            )
+            if explicit_date is None:
+                continue
+            if explicit_date not in explicit_dates:
+                explicit_dates.append(explicit_date)
+    return explicit_dates
+
+
 def life_stage_hints_from_observation(current_observation: dict[str, Any]) -> list[str]:
     observation_text = str(current_observation["observation_text"])
     life_stage_hints: list[str] = []
@@ -108,6 +129,20 @@ def life_stage_hints_from_observation(current_observation: dict[str, Any]) -> li
         if cue in observation_text and life_stage not in life_stage_hints:
             life_stage_hints.append(life_stage)
     return life_stage_hints
+
+
+# Block: Explicit date normalization
+def _validated_explicit_date(*, year_text: str, month_text: str, day_text: str) -> str | None:
+    year = int(year_text)
+    month = int(month_text)
+    day = int(day_text)
+    if year < 1900 or year > 2100:
+        return None
+    try:
+        explicit_date = datetime(year, month, day, tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    return explicit_date.strftime("%Y-%m-%d")
 
 
 # Block: Payload helpers

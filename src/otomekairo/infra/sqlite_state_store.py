@@ -8,6 +8,7 @@ import sqlite3
 import time
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -9330,6 +9331,9 @@ def _event_preview_about_time_term(event_about_time_row: sqlite3.Row | None) -> 
     if event_about_time_row is None:
         return None
     about_terms: list[str] = []
+    date_range_text = _event_preview_about_time_date_range(event_about_time_row)
+    if date_range_text is not None:
+        about_terms.append(date_range_text)
     about_year_start = event_about_time_row["about_year_start"]
     about_year_end = event_about_time_row["about_year_end"]
     if isinstance(about_year_start, int):
@@ -9343,6 +9347,25 @@ def _event_preview_about_time_term(event_about_time_row: sqlite3.Row | None) -> 
     if not about_terms:
         return None
     return "about_time=" + ", ".join(about_terms)
+
+
+# Block: プレビュー用時制日付範囲
+def _event_preview_about_time_date_range(event_about_time_row: sqlite3.Row) -> str | None:
+    about_start_ts = event_about_time_row["about_start_ts"]
+    about_end_ts = event_about_time_row["about_end_ts"]
+    if isinstance(about_start_ts, int):
+        start_text = _event_preview_local_date_text(about_start_ts)
+        if isinstance(about_end_ts, int) and about_end_ts != about_start_ts:
+            return f"{start_text}..{_event_preview_local_date_text(about_end_ts)}"
+        return start_text
+    if isinstance(about_end_ts, int):
+        return _event_preview_local_date_text(about_end_ts)
+    return None
+
+
+# Block: プレビュー用ローカル日付
+def _event_preview_local_date_text(unix_ms: int) -> str:
+    return datetime.fromtimestamp(unix_ms / 1000, tz=timezone.utc).astimezone().strftime("%Y-%m-%d")
 
 
 # Block: vec_items upsert
