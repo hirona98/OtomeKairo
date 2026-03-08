@@ -1563,6 +1563,54 @@ class SqliteStateStore:
             return (None, None)
         return (row["min_id"], row["max_id"])
 
+    # Block: Runtime work state read
+    def read_runtime_work_state(self) -> dict[str, bool]:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT
+                    CASE
+                        WHEN EXISTS(
+                            SELECT 1
+                            FROM settings_change_sets
+                            WHERE status = 'queued'
+                        )
+                        OR EXISTS(
+                            SELECT 1
+                            FROM settings_overrides
+                            WHERE status = 'queued'
+                        )
+                        OR EXISTS(
+                            SELECT 1
+                            FROM pending_inputs
+                            WHERE status = 'queued'
+                        )
+                        OR EXISTS(
+                            SELECT 1
+                            FROM task_state
+                            WHERE task_kind = 'browse'
+                              AND task_status = 'waiting_external'
+                        )
+                        THEN 1
+                        ELSE 0
+                    END AS has_short_cycle_work,
+                    EXISTS(
+                        SELECT 1
+                        FROM memory_jobs
+                        WHERE status = 'queued'
+                    ) AS has_memory_job
+                """
+            ).fetchone()
+        if row is None:
+            return {
+                "has_short_cycle_work": False,
+                "has_memory_job": False,
+            }
+        return {
+            "has_short_cycle_work": bool(row["has_short_cycle_work"]),
+            "has_memory_job": bool(row["has_memory_job"]),
+        }
+
     # Block: Stream retention prune
     def prune_ui_outbound_events(
         self,

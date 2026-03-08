@@ -35,6 +35,7 @@ from otomekairo.usecase.run_cognition import run_cognition_for_browser_chat_inpu
 DEFAULT_LEASE_HEARTBEAT_MS = 5_000
 MINIMUM_LEASE_TTL_MS = 15_000
 DEFAULT_LEASE_TTL_MS = 60_000
+DEFAULT_RUNTIME_WAIT_POLL_MS = 100
 MAX_MEMORY_JOB_TRIES = 3
 PENDING_INPUT_FAILURE_REASON = "processing_failed"
 SETTINGS_OVERRIDE_FAILURE_REASON = "settings_processing_failed"
@@ -83,6 +84,7 @@ class RuntimeLoop:
         self._prefer_long_cycle = False
         self._last_long_cycle_at_ms = 0
         self._last_activity_at_ms = _now_ms()
+        self._last_lease_refresh_at_ms = 0
         self._stop_requested = False
         logger.info(
             "runtime loop initialized",
@@ -720,7 +722,7 @@ class RuntimeLoop:
             while not self._stop_requested:
                 processed = self.run_once()
                 if not processed:
-                    self._sleep_until_next_idle_tick()
+                    self._wait_for_next_runnable_cycle()
         finally:
             logger.info("runtime loop stopping")
             self._store.release_runtime_lease(owner_token=self._owner_token)
@@ -783,22 +785,47 @@ class RuntimeLoop:
         )
         return pending_input
 
-    # Block: Idle wait with heartbeat
-    def _sleep_until_next_idle_tick(self) -> None:
-        remaining_ms = max(0, self._idle_tick_ms() - self._idle_duration_ms())
-        while remaining_ms > 0 and not self._stop_requested:
-            sleep_ms = min(remaining_ms, self._lease_heartbeat_ms)
-            time.sleep(sleep_ms / 1000.0)
-            remaining_ms -= sleep_ms
-            if remaining_ms > 0 and not self._stop_requested:
+    # Block: Idle wait with queue polling
+    def _wait_for_next_runnable_cycle(self) -> None:
+        idle_due_at_ms = self._last_activity_at_ms + self._idle_tick_ms()
+        while not self._stop_requested:
+            work_state = self._store.read_runtime_work_state()
+            if bool(work_state["has_short_cycle_work"]):
+                return
+            if bool(work_state["has_memory_job"]) and self._is_long_cycle_due():
+                return
+            now_ms = _now_ms()
+            if now_ms >= idle_due_at_ms:
+                return
+            lease_refresh_due_at_ms = self._next_lease_refresh_due_at_ms()
+            if now_ms >= lease_refresh_due_at_ms:
                 self._refresh_runtime_lease()
+                continue
+            sleep_ms = min(
+                idle_due_at_ms - now_ms,
+                lease_refresh_due_at_ms - now_ms,
+                DEFAULT_RUNTIME_WAIT_POLL_MS,
+            )
+            time.sleep(sleep_ms / 1000.0)
 
     # Block: Lease refresh
     def _refresh_runtime_lease(self) -> None:
+        now_ms = _now_ms()
+        if self._last_lease_refresh_at_ms != 0:
+            elapsed_ms = now_ms - self._last_lease_refresh_at_ms
+            if elapsed_ms < self._lease_heartbeat_ms:
+                return
         self._store.acquire_runtime_lease(
             owner_token=self._owner_token,
             lease_ttl_ms=self._lease_ttl_ms,
         )
+        self._last_lease_refresh_at_ms = now_ms
+
+    # Block: Lease refresh deadline
+    def _next_lease_refresh_due_at_ms(self) -> int:
+        if self._last_lease_refresh_at_ms == 0:
+            return 0
+        return self._last_lease_refresh_at_ms + self._lease_heartbeat_ms
 
     # Block: Camera availability helper
     def _camera_available(self) -> bool:
