@@ -80,6 +80,7 @@
 - 記憶設計の研究メモ: `docs/note/記憶設計に関する先行研究のメモ.md`
 - 自律行動システムの研究メモ: `docs/note/自律行動システムの先行研究メモ.md`
 - 類似システムの参考フロー図: `docs/note/ココロゴースト_システムフロー図.md`
+- CocoroGhost の強みを OtomeKairo へ取り込む統合案: `docs/note/CocoroGhost統合設計案.md`
 
 <!-- Block: Maintenance -->
 ## 更新ルール（重要）
