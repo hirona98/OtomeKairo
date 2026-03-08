@@ -1397,6 +1397,23 @@
 - current 実装の `role` は `assistant` を使う
 - `source_cycle_id`、`related_input_id`、`audio_url`、`audio_mime_type` は任意である
 
+<!-- Block: UI Message End -->
+#### `event_type = message_end`
+
+```json
+{
+  "message_id": "msg_...",
+  "finish_reason": "completed",
+  "final_message_emitted": true,
+  "token_count": 3
+}
+```
+
+- 必須項目は `message_id`、`finish_reason`、`final_message_emitted`、`token_count` である
+- `finish_reason` は `completed` または `cancelled` を使う
+- `final_message_emitted` は、同じ `message_id` に対して確定 `message` を出したかどうかを持つ
+- `token_count` は、その応答で実際に流した `token` 件数を持つ
+
 <!-- Block: UI Status -->
 #### `event_type = status`
 
@@ -1454,7 +1471,7 @@
 ```json
 {
   "target_channel": "browser_chat",
-  "event_types": ["status", "status", "token", "message", "status"],
+  "event_types": ["status", "status", "token", "message", "message_end", "status"],
   "decision": "execute",
   "decision_reason": "speak_selected",
   "related_input_id": "inp_...",
@@ -1492,7 +1509,7 @@
 
 ```json
 {
-  "emitted_event_types": ["status", "status", "token", "message", "status"],
+  "emitted_event_types": ["status", "status", "token", "message", "message_end", "status"],
   "status_code_after": "idle",
   "was_cancelled": false,
   "token_count": 3,
@@ -1524,6 +1541,7 @@
 - `was_cancelled` は、途中停止が起きた応答だけに付ける
 - `token_count` は、`token` を流した応答だけに付ける
 - `final_message_emitted` は、最後に `message` を確定したかどうかを持つ
+- `message_end` は、`speak` 応答の完了または中断を外向きに確定した場合だけ `emitted_event_types` に現れる
 - `validator_decision` は、`action validator` の決定結果を持つ
 - `validator_reason` は、`action validator` の決定理由コードを持つ
 - `selected_action_type` は、比較で最上位になった候補の `action_type` を残したいときに付ける

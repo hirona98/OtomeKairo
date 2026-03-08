@@ -1173,7 +1173,7 @@ def _build_action_command(
             "timeout_ms": 30_000,
             "requires_reobserve": False,
             "expected_effects": {
-                "emitted_event_types": ["status", "token", "message", "status"],
+                "emitted_event_types": ["status", "token", "message", "message_end", "status"],
                 "status_code_after": "idle",
             },
             "proposal_ref": str(proposal["proposal_id"]),

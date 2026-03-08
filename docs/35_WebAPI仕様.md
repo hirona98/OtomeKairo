@@ -641,6 +641,11 @@ data: {"message_id":"msg_...","text":"お","chunk_index":0}
   - 任意項目: `source_cycle_id`, `related_input_id`, `audio_url`, `audio_mime_type`
   - current 実装の `role` は `assistant` を使う
 
+- `message_end`
+  - 役割: `message_id` 単位の出力終端
+  - 必須項目: `message_id`, `finish_reason`, `final_message_emitted`, `token_count`
+  - `finish_reason` は `completed` または `cancelled` を使う
+
 - `status`
   - 役割: UI に見せる状態変化
   - 必須項目: `status_code`, `label`
@@ -664,7 +669,7 @@ data: {"message_id":"msg_...","text":"お","chunk_index":0}
 - 再接続時は、ブラウザが保持する `Last-Event-ID` で続きから読む
 - `ui_outbound_events` の保持期間外まで古い `Last-Event-ID` が指定された場合は、利用可能な最古のイベントから再開する
 - 必要なら、再開前に一時的な `stream_reset` の `notice` を返してよい
-- ストリーム完了を意味する専用の HTTP close は定義せず、接続継続中に `message` や `status` で区切りを表現する
+- ストリーム完了を意味する専用の HTTP close は定義せず、接続継続中に `message_end` や `status` で区切りを表現する
 
 <!-- Block: Status Codes -->
 ## 主要な HTTP ステータス

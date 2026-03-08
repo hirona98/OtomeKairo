@@ -220,6 +220,20 @@ def _dispatch_speak_command(
         )
         final_message_emitted = True
 
+    # Block: Message end
+    _emit_browser_event(
+        pending_input=pending_input,
+        event_type="message_end",
+        payload={
+            "message_id": message_id,
+            "finish_reason": "cancelled" if was_cancelled else "completed",
+            "final_message_emitted": final_message_emitted,
+            "token_count": emitted_chunk_count,
+        },
+        emit_ui_event=emit_ui_event,
+        emitted_event_types=emitted_event_types,
+    )
+
     # Block: Idle status
     _emit_browser_event(
         pending_input=pending_input,

@@ -479,6 +479,13 @@
       }
       handleMessageEvent(payload);
     });
+    stream.addEventListener("message_end", (event) => {
+      const payload = parsePayload(event.data);
+      if (payload === null) {
+        return;
+      }
+      handleMessageEndEvent(payload);
+    });
     stream.addEventListener("notice", (event) => {
       const payload = parsePayload(event.data);
       if (payload === null) {
@@ -1794,6 +1801,28 @@
     if (audioUrl !== null) {
       playRemoteSpeechAudio(audioUrl);
     }
+  }
+
+  // Block: Message end handler
+  function handleMessageEndEvent(payload) {
+    const messageId = requireString(payload.message_id, "message_end.message_id");
+    const finishReason = requireString(payload.finish_reason, "message_end.finish_reason");
+    if (!["completed", "cancelled"].includes(finishReason)) {
+      throw new Error("message_end.finish_reason が不正です");
+    }
+    const messageNode = draftMessages.get(messageId);
+    if (messageNode === undefined) {
+      return;
+    }
+    const meta = messageNode.querySelector(".bubble-time");
+    if (!(meta instanceof HTMLElement)) {
+      throw new Error("message_end meta が見つかりません");
+    }
+    if (finishReason === "cancelled") {
+      meta.textContent = `${buildMetaLabel("assistant")} / 中断`;
+      meta.classList.remove("empty");
+    }
+    draftMessages.delete(messageId);
   }
 
   function handleNoticeEvent(payload) {
