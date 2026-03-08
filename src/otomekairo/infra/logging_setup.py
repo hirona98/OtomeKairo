@@ -7,11 +7,19 @@ import json
 import logging
 import os
 import re
+from contextlib import contextmanager
 from datetime import datetime
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
 
 from otomekairo.infra.developer_config import DeveloperConfig
+
+# Block: Platform file locking
+if os.name == "nt":
+    import msvcrt
+else:
+    import fcntl
 
 
 # Block: Constant definitions
@@ -19,6 +27,8 @@ SUPPRESSED_ACCESS_PATHS = (
     "\"GET /api/status ",
     "\"GET /api/chat/stream ",
 )
+LOG_FILE_MAX_BYTES = 1024 * 1024
+LOG_FILE_BACKUP_COUNT = 5
 LOG_LEVEL_NAME_TO_VALUE = {
     "CRITICAL": logging.CRITICAL,
     "ERROR": logging.ERROR,
@@ -147,6 +157,61 @@ class FileLogFormatter(logging.Formatter):
         return datetime.fromtimestamp(record.created).strftime("%Y-%m-%d %H:%M:%S")
 
 
+# Block: Shared rotating file handler
+class SharedRotatingFileHandler(RotatingFileHandler):
+    def __init__(
+        self,
+        filename: str | Path,
+        *,
+        max_bytes: int,
+        backup_count: int,
+        encoding: str,
+    ) -> None:
+        super().__init__(
+            filename=filename,
+            mode="a",
+            maxBytes=max_bytes,
+            backupCount=backup_count,
+            encoding=encoding,
+            delay=True,
+        )
+        self._lock_stream = Path(f"{self.baseFilename}.lock").open("a+b")
+        if self._lock_stream.tell() == 0:
+            self._lock_stream.write(b"0")
+            self._lock_stream.flush()
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            with _interprocess_lock(self._lock_stream):
+                try:
+                    if self.stream is None:
+                        self.stream = self._open()
+                    if self.shouldRollover(record):
+                        self.doRollover()
+                    logging.FileHandler.emit(self, record)
+                finally:
+                    self._close_stream_after_emit()
+        except Exception:
+            self.handleError(record)
+
+    def close(self) -> None:
+        try:
+            self._close_stream_after_emit()
+        finally:
+            if not self._lock_stream.closed:
+                self._lock_stream.close()
+            super().close()
+
+    def _close_stream_after_emit(self) -> None:
+        if self.stream is None:
+            return
+        try:
+            self.stream.flush()
+        finally:
+            self.stream.close()
+            self.stream = None
+
+
 # Block: Public logging setup
 def configure_process_logging(*, process_name: str, developer_config: DeveloperConfig) -> None:
     if not process_name:
@@ -170,9 +235,10 @@ def configure_process_logging(*, process_name: str, developer_config: DeveloperC
     )
 
     # Block: File handler setup
-    file_handler = logging.FileHandler(
+    file_handler = SharedRotatingFileHandler(
         log_dir / "otomekairo.log",
-        mode="a",
+        max_bytes=LOG_FILE_MAX_BYTES,
+        backup_count=LOG_FILE_BACKUP_COUNT,
         encoding="utf-8",
     )
     file_handler.setLevel(_log_level_value(process_logging.file_level))
@@ -225,6 +291,26 @@ def _attach_filter(logger_name: str, filter_type: type[logging.Filter]) -> None:
 
 def _attach_empty_filter(logger_name: str) -> None:
     _attach_filter(logger_name, EmptyMessageFilter)
+
+
+# Block: Interprocess lock helper
+@contextmanager
+def _interprocess_lock(lock_stream: Any):
+    if os.name == "nt":
+        lock_stream.seek(0)
+        msvcrt.locking(lock_stream.fileno(), msvcrt.LK_LOCK, 1)
+        try:
+            yield
+        finally:
+            lock_stream.seek(0)
+            msvcrt.locking(lock_stream.fileno(), msvcrt.LK_UNLCK, 1)
+        return
+
+    fcntl.flock(lock_stream.fileno(), fcntl.LOCK_EX)
+    try:
+        yield
+    finally:
+        fcntl.flock(lock_stream.fileno(), fcntl.LOCK_UN)
 
 
 # Block: Process config helpers
