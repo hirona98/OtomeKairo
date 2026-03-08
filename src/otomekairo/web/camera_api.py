@@ -6,6 +6,7 @@ import asyncio
 
 from fastapi import APIRouter, Response, status
 
+from otomekairo.gateway.camera_sensor import CameraCaptureRequest
 from otomekairo.web.dependencies import ApiError, AppServices
 
 
@@ -19,6 +20,8 @@ def build_camera_router(services: AppServices) -> APIRouter:
         capture = await _capture_still_image(services)
         response.status_code = status.HTTP_201_CREATED
         return {
+            "camera_connection_id": capture.camera_connection_id,
+            "camera_display_name": capture.camera_display_name,
             "capture_id": capture.capture_id,
             "image_path": capture.image_path,
             "image_url": capture.image_url,
@@ -31,6 +34,8 @@ def build_camera_router(services: AppServices) -> APIRouter:
         capture = await _capture_still_image(services)
         response.status_code = status.HTTP_202_ACCEPTED
         return services.store.enqueue_camera_observation(
+            camera_connection_id=capture.camera_connection_id,
+            camera_display_name=capture.camera_display_name,
             capture_id=capture.capture_id,
             image_path=capture.image_path,
             image_url=capture.image_url,
@@ -49,7 +54,10 @@ async def _capture_still_image(services: AppServices):
             message="カメラの接続設定が不足しています",
         )
     try:
-        return await asyncio.to_thread(services.camera_sensor.capture_still_image)
+        return await asyncio.to_thread(
+            services.camera_sensor.capture_still_image,
+            CameraCaptureRequest(camera_connection_id=None),
+        )
     except Exception as error:
         raise ApiError(
             status_code=500,

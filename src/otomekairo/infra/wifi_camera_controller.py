@@ -34,20 +34,20 @@ DIRECTION_VECTORS = {
 
 # Block: Wi-Fi camera controller
 class WiFiCameraController(CameraController):
-    def __init__(self, *, camera_connection_loader: Callable[[], dict[str, Any] | None]) -> None:
-        self._camera_connection_loader = camera_connection_loader
+    def __init__(self, *, camera_connections_loader: Callable[[], list[dict[str, Any]]]) -> None:
+        self._camera_connections_loader = camera_connections_loader
         self._cached_settings_key: tuple[str, str, str] | None = None
         self._ptz_service: Any | None = None
         self._profile_token: str | None = None
 
     def is_available(self) -> bool:
         try:
-            return self._resolve_settings() is not None
+            return bool(self._resolved_enabled_settings())
         except RuntimeError:
             return False
 
     def move_view(self, request: CameraLookRequest) -> CameraLookResponse:
-        settings = self._require_settings()
+        settings = self._require_settings(camera_connection_id=request.camera_connection_id)
         ptz_service = self._ptz_service_for(settings)
         profile_token = self._profile_token_for(settings)
         if request.preset_id is not None or request.preset_name is not None:
@@ -64,9 +64,13 @@ class WiFiCameraController(CameraController):
             direction=direction,
         )
         return CameraLookResponse(
+            camera_connection_id=settings.camera_connection_id,
+            camera_display_name=settings.display_name,
             movement_label=_direction_label(direction),
             raw_result_ref=_raw_result_payload(raw_result),
             adapter_trace_ref={
+                "camera_connection_id": settings.camera_connection_id,
+                "camera_display_name": settings.display_name,
                 "camera_host": settings.host,
                 "movement_mode": "direction",
                 "direction": direction,
@@ -74,13 +78,28 @@ class WiFiCameraController(CameraController):
         )
 
     # Block: Settings helpers
-    def _resolve_settings(self) -> CameraConnectionSettings | None:
-        return read_camera_connection_settings(self._camera_connection_loader())
+    def _resolved_enabled_settings(self) -> list[CameraConnectionSettings]:
+        raw_camera_connections = self._camera_connections_loader()
+        return [
+            settings
+            for settings in (
+                read_camera_connection_settings(camera_connection)
+                for camera_connection in raw_camera_connections
+            )
+            if settings is not None
+        ]
 
-    def _require_settings(self) -> CameraConnectionSettings:
-        settings = self._resolve_settings()
+    def _resolve_settings(self, *, camera_connection_id: str) -> CameraConnectionSettings | None:
+        enabled_settings = self._resolved_enabled_settings()
+        for settings in enabled_settings:
+            if settings.camera_connection_id == camera_connection_id:
+                return settings
+        return None
+
+    def _require_settings(self, *, camera_connection_id: str) -> CameraConnectionSettings:
+        settings = self._resolve_settings(camera_connection_id=camera_connection_id)
         if settings is None:
-            raise RuntimeError("カメラ接続が未設定です")
+            raise RuntimeError("requested enabled camera connection is missing")
         return settings
 
     # Block: Client helpers
@@ -143,9 +162,13 @@ class WiFiCameraController(CameraController):
             }
         )
         return CameraLookResponse(
+            camera_connection_id=settings.camera_connection_id,
+            camera_display_name=settings.display_name,
             movement_label=f"プリセット {resolved_preset_name}",
             raw_result_ref=_raw_result_payload(raw_result),
             adapter_trace_ref={
+                "camera_connection_id": settings.camera_connection_id,
+                "camera_display_name": settings.display_name,
                 "camera_host": settings.host,
                 "movement_mode": "preset",
                 "preset_id": resolved_preset_token,

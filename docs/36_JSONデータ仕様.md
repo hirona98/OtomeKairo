@@ -123,7 +123,7 @@
 - 必須項目は `input_kind` である
 - current の `input_kind` は `chat_message`、`camera_observation`、`network_result`、`idle_tick`、`cancel` に固定する
 - `chat_message` は、`message_kind="dialogue_turn"`、`trigger_reason="external_input"` を持ち、必要なら `text`、`attachments`、`client_message_id` を持ってよい
-- `camera_observation` は、`trigger_reason` と `attachments` を必須とし、`attachments` は `camera_still_image` を 1 件以上持つ配列に固定する
+- `camera_observation` は、`trigger_reason` と `attachments` を必須とし、`attachments` は `camera_still_image` を 1 件以上持つ配列に固定し、各添付は `camera_connection_id` と `camera_display_name` を持つ
 - `network_result` は、`trigger_reason="external_result"`、`query`、`summary_text`、`source_task_id` を必須とする
 - `idle_tick` は、`trigger_reason="idle_tick"` と正の `idle_duration_ms` を必須とし、`text` や `attachments` を持たない
 - `cancel` は、`trigger_reason="external_input"` を必須とし、必要なら `target_message_id` を持ってよい
@@ -429,7 +429,7 @@
 - 必須項目は `source`、`kind`、`trigger_reason`、`input_kind`、`captured_at`、`observation_text` である
 - current の `input_kind` は `chat_message`、`camera_observation`、`network_result`、`idle_tick` に固定する
 - `chat_message` は、必要なら `attachment_count`、`attachment_summary_text`、`attachments` を持ってよい
-- `camera_observation` は、`attachment_count`、`attachment_summary_text`、`attachments` を必須とし、`trigger_reason=post_action_followup` の場合は追跡観測として扱う
+- `camera_observation` は、`attachment_count`、`attachment_summary_text`、`attachments` を必須とし、`trigger_reason=post_action_followup` の場合は追跡観測として扱い、`attachment_summary_text` と `observation_text` に `camera_display_name` を使ってよい
 - `network_result` は、`query`、`summary_text`、`source_task_id` を必須とする
 - `idle_tick` は、正の `idle_duration_ms` を必須とする
 
@@ -501,6 +501,24 @@
 - `fit_score` は、`0.0..1.0` の `number` に固定する
 - `suggested_action_types` は、候補化してよい `action_type` の配列である
 - `reason_codes` は、候補化の根拠を表す `string` 配列である
+
+<!-- Block: Camera Candidate Entry -->
+### `camera_candidate_entry`
+
+```json
+{
+  "camera_connection_id": "cam_living",
+  "display_name": "リビング",
+  "can_look": true,
+  "can_capture": true
+}
+```
+
+- `camera_candidate_entry` は、`cognition_input.camera_candidates` で使う短周期用のカメラ候補である
+- 必須項目は `camera_connection_id`、`display_name`、`can_look`、`can_capture` である
+- `camera_connection_id` は、`look` 提案と `control_camera_look` の対象指定に使う
+- `display_name` は、`LLM` が候補を見分けるための短い表示名である
+- current 実装では、`camera_candidates` は `camera_connections[].is_enabled=true` の順序付き一覧から構成する
 
 <!-- Block: Memory Bundle -->
 ### `memory_bundle`
@@ -879,6 +897,7 @@
 - current の `action validator` では、`priority >= 0.80` を緊急ヒントとして使ってよい
 - current の `browser_chat` では、`speak` と `notify` のとき `target_channel=\"browser_chat\"` を必須とする
 - current の `browser_chat` では、`browse` のとき `query` に非空の検索文字列を必須とする
+- current の `browser_chat` では、`look` のとき `camera_connection_id` と、`direction` / `preset_id` / `preset_name` のいずれかを必須とする
 - `speech_draft` は、少なくとも `text`、`language`、`delivery_mode` を持つ
 - `memory_focus` は、少なくとも `focus_kind`、`summary` を持つ
 - `reflection_seed` は、少なくとも `cycle_id`、`input_kind`、`message_id`、`token_count`、`was_cancelled` を持つ
@@ -1374,7 +1393,7 @@
 
 - `camera_connection_entry` は、設定UI API が返すカメラ接続一覧の共通要素である
 - `is_enabled=true` の行が AI 利用候補であり、複数件を許可する
-- current の single-camera ONVIF 実装は `is_enabled=true` がちょうど 1 件のときだけ利用可能である
+- current の runtime は `is_enabled=true` の一覧を `camera_candidates` として認知入力へ渡し、`look` では `camera_connection_id` を必須にして候補から 1 台を選ぶ
 
 <!-- Block: UI Outbound -->
 ### `ui_outbound_events.payload_json`
@@ -1514,7 +1533,7 @@
 - `command_type` は、current 実装では `speak_ui_message`、`dispatch_notice`、`enqueue_browse_task`、`control_camera_look`、`execute_browse_task`、`abandon_browse_task` を使ってよい
 - `notice_code` と `text` は、`dispatch_notice` を実行する命令だけに付ける
 - `target`、`parameters`、`preconditions`、`stop_conditions`、`timeout_ms`、`requires_reobserve`、`expected_effects` は、`execute` のとき `action_command` をそのまま残したい場合に付けてよい
-- current の `control_camera_look` では、`requires_reobserve=true` に固定し、`expected_effects.followup_input_kind=\"camera_observation\"`、`expected_effects.followup_trigger_reason=\"post_action_followup\"` を持たせてよい
+- current の `control_camera_look` では、`parameters.camera_connection_id` を必須とし、`requires_reobserve=true` に固定し、`expected_effects.followup_input_kind=\"camera_observation\"`、`expected_effects.followup_trigger_reason=\"post_action_followup\"` を持たせてよい
 - `parameters.task_id`、`parameters.query`、`parameters.target_channel` は、`enqueue_browse_task` を実行する命令だけに付ける
 - `parameters.query` は、`execute_browse_task` と `abandon_browse_task` を実行する命令だけに付けてよい
 - `related_task_id` は、`execute_browse_task` と `abandon_browse_task` のように task 再開を処理する命令だけに付けてよい
@@ -1572,7 +1591,7 @@
 - `complete_browse_task` を実行した場合は、`related_task_id`、`task_status_after`、`summary_text` を付けてよい
 - `abandon_browse_task` を実行した場合は、`related_task_id`、`task_status_after`、`error_message` を付けてよい
 - `complete_browse_task` を実行した場合は、`followup_input_kind=\"network_result\"` を付けてよい
-- `control_camera_look` を実行した場合は、`followup_required`、`followup_input_kind=\"camera_observation\"`、`followup_input_source=\"post_action_followup\"`、`followup_trigger_reason=\"post_action_followup\"`、`followup_capture` を付けてよい
+- `control_camera_look` を実行した場合は、`camera_connection_id`、`camera_display_name`、`followup_required`、`followup_input_kind=\"camera_observation\"`、`followup_input_source=\"post_action_followup\"`、`followup_trigger_reason=\"post_action_followup\"`、`followup_capture` を付けてよい
 - `dispatch_notice` を実行した場合は、`notice_code` を付けてよい
 
 <!-- Block: Memory Job Group -->
@@ -1843,6 +1862,8 @@
 
 ```json
 {
+  "camera_connection_id": "cam_living",
+  "camera_display_name": "リビング",
   "capture_id": "cap_...",
   "image_path": "data/camera/cap_....jpg",
   "image_url": "/captures/cap_....jpg",
@@ -1850,7 +1871,9 @@
 }
 ```
 
-- 必須項目は `capture_id`、`image_path`、`image_url`、`captured_at` である
+- 必須項目は `camera_connection_id`、`camera_display_name`、`capture_id`、`image_path`、`image_url`、`captured_at` である
+- `camera_connection_id` は、撮影に使った enabled camera connection を表す
+- `camera_display_name` は、その接続の表示名である
 - `capture_id` は、不透明な capture 識別子である
 - `image_path` は、サーバ作業ディレクトリ基準の保存先相対パスである
 - `image_url` は、同一オリジンで静止画を再取得する URL path である
@@ -1865,6 +1888,8 @@
   "input_id": "inp_...",
   "status": "queued",
   "channel": "browser_chat",
+  "camera_connection_id": "cam_living",
+  "camera_display_name": "リビング",
   "capture_id": "cap_...",
   "image_path": "data/camera/cap_....jpg",
   "image_url": "/captures/cap_....jpg",
@@ -1872,11 +1897,12 @@
 }
 ```
 
-- 必須項目は `accepted`、`input_id`、`status`、`channel`、`capture_id`、`image_path`、`image_url`、`captured_at` である
+- 必須項目は `accepted`、`input_id`、`status`、`channel`、`camera_connection_id`、`camera_display_name`、`capture_id`、`image_path`、`image_url`、`captured_at` である
 - `accepted` は `true` に固定する
 - `status` は `queued` に固定する
 - `channel` は `browser_chat` に固定する
 - `input_id` は、生成した自発観測入力の ID である
+- `camera_connection_id` と `camera_display_name` は、観測に使った enabled camera connection を表す
 - `capture_id`、`image_path`、`image_url`、`captured_at` は、同時に取得した静止画の情報である
 
 <!-- Block: Status Response -->

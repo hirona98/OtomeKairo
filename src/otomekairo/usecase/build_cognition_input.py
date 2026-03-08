@@ -30,6 +30,7 @@ def build_cognition_input(
     cycle_id: str,
     resolved_at: int,
     state_snapshot: CognitionStateSnapshot,
+    enabled_camera_connections: list[dict[str, Any]],
     camera_available: bool,
 ) -> BuiltCognitionInput:
     input_kind = str(pending_input.payload["input_kind"])
@@ -37,6 +38,7 @@ def build_cognition_input(
         raise ValueError(
             "cognition_input is only supported for chat_message, camera_observation, network_result, and idle_tick"
         )
+    camera_candidates = _build_camera_candidates(enabled_camera_connections)
     behavior_settings = _build_behavior_settings(state_snapshot.effective_settings)
     selection_profile = _build_selection_profile(
         state_snapshot=state_snapshot,
@@ -112,9 +114,11 @@ def build_cognition_input(
                 "runtime_policy": {
                     "camera_enabled": bool(state_snapshot.effective_settings["sensors.camera.enabled"]),
                     "camera_available": bool(camera_available),
+                    "camera_candidate_count": len(camera_candidates),
                     "microphone_enabled": bool(state_snapshot.effective_settings["sensors.microphone.enabled"]),
                 },
             },
+            "camera_candidates": camera_candidates,
             "skill_candidates": skill_candidates,
             "current_observation": current_observation,
             "context_budget": {
@@ -249,6 +253,8 @@ def _validated_camera_attachments(
             raise ValueError(f"{input_kind}.attachments must contain only objects")
         attachment_kind = attachment.get("attachment_kind")
         media_kind = attachment.get("media_kind")
+        camera_connection_id = attachment.get("camera_connection_id")
+        camera_display_name = attachment.get("camera_display_name")
         capture_id = attachment.get("capture_id")
         mime_type = attachment.get("mime_type")
         storage_path = attachment.get("storage_path")
@@ -268,28 +274,35 @@ def _validated_camera_attachments(
             raise ValueError(f"{input_kind}.attachments.content_url must be non-empty string")
         if isinstance(captured_at, bool) or not isinstance(captured_at, int):
             raise ValueError(f"{input_kind}.attachments.captured_at must be integer")
-        attachments.append(
-            {
-                "attachment_kind": attachment_kind,
-                "media_kind": media_kind,
-                "capture_id": capture_id,
-                "mime_type": mime_type,
-                "storage_path": storage_path,
-                "content_url": content_url,
-                "captured_at": captured_at,
-            }
-        )
+        validated_attachment = {
+            "attachment_kind": attachment_kind,
+            "media_kind": media_kind,
+            "capture_id": capture_id,
+            "mime_type": mime_type,
+            "storage_path": storage_path,
+            "content_url": content_url,
+            "captured_at": captured_at,
+        }
+        if camera_connection_id is not None:
+            if not isinstance(camera_connection_id, str) or not camera_connection_id:
+                raise ValueError(f"{input_kind}.attachments.camera_connection_id must be non-empty string")
+            validated_attachment["camera_connection_id"] = camera_connection_id
+        if camera_display_name is not None:
+            if not isinstance(camera_display_name, str) or not camera_display_name:
+                raise ValueError(f"{input_kind}.attachments.camera_display_name must be non-empty string")
+            validated_attachment["camera_display_name"] = camera_display_name
+        attachments.append(validated_attachment)
     return attachments
 
 
 # Block: Chat observation text
 def _chat_observation_text(*, text: str | None, attachments: list[dict[str, Any]]) -> str:
     if text is not None and attachments:
-        return f"{text}\n（カメラ画像 {len(attachments)} 枚付き）"
+        return f"{text}\n（{_camera_attachment_summary_text(attachments)}付き）"
     if text is not None:
         return text
     if attachments:
-        return f"カメラ画像 {len(attachments)} 枚が添付された入力"
+        return f"{_camera_attachment_summary_text(attachments)}が添付された入力"
     raise ValueError("chat_message requires text or attachments")
 
 
@@ -299,16 +312,49 @@ def _camera_observation_text(
     *,
     trigger_reason: Any,
 ) -> str:
+    attachment_summary = _camera_attachment_summary_text(attachments)
     if trigger_reason == "post_action_followup":
-        return f"カメラ画像 {len(attachments)} 枚を追跡観測した"
-    return f"カメラ画像 {len(attachments)} 枚を自発観測した"
+        return f"{attachment_summary}を追跡観測した"
+    return f"{attachment_summary}を自発観測した"
 
 
 # Block: Camera attachment summary
 def _camera_attachment_summary_text(attachments: list[dict[str, Any]]) -> str:
     if not attachments:
         return "添付なし"
-    return f"カメラ画像 {len(attachments)} 枚"
+    camera_names = [
+        str(attachment["camera_display_name"])
+        for attachment in attachments
+        if isinstance(attachment.get("camera_display_name"), str) and attachment["camera_display_name"]
+    ]
+    if not camera_names:
+        return f"カメラ画像 {len(attachments)} 枚"
+    unique_names = list(dict.fromkeys(camera_names))
+    joined_names = " / ".join(unique_names[:3])
+    return f"{joined_names} のカメラ画像 {len(attachments)} 枚"
+
+
+# Block: Camera candidate builder
+def _build_camera_candidates(enabled_camera_connections: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    camera_candidates: list[dict[str, Any]] = []
+    for camera_connection in enabled_camera_connections:
+        if not isinstance(camera_connection, dict):
+            raise ValueError("enabled_camera_connections must contain only objects")
+        camera_connection_id = camera_connection.get("camera_connection_id")
+        display_name = camera_connection.get("display_name")
+        if not isinstance(camera_connection_id, str) or not camera_connection_id:
+            raise ValueError("enabled_camera_connections.camera_connection_id must be non-empty string")
+        if not isinstance(display_name, str) or not display_name:
+            raise ValueError("enabled_camera_connections.display_name must be non-empty string")
+        camera_candidates.append(
+            {
+                "camera_connection_id": camera_connection_id,
+                "display_name": display_name,
+                "can_look": True,
+                "can_capture": True,
+            }
+        )
+    return camera_candidates
 
 
 # Block: Idle tick observation text

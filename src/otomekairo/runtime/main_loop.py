@@ -372,6 +372,7 @@ class RuntimeLoop:
                 cycle_id=cycle_id,
                 resolved_at=resolved_at,
                 state_snapshot=state_snapshot,
+                enabled_camera_connections=self._store.read_enabled_camera_connections(),
                 camera_available=self._camera_available(),
             )
             cognition_execution = run_cognition_for_browser_chat_input(
@@ -911,10 +912,20 @@ def _pending_input_observation_hint(pending_input: PendingInputRecord) -> str:
         attachment_count = len(attachments)
         if attachment_count <= 0:
             raise RuntimeError("camera_observation.attachments must not be empty")
+        camera_names = [
+            str(attachment["camera_display_name"])
+            for attachment in attachments
+            if isinstance(attachment, dict)
+            and isinstance(attachment.get("camera_display_name"), str)
+            and attachment["camera_display_name"]
+        ]
+        camera_label = ""
+        if camera_names:
+            camera_label = f" ({' / '.join(dict.fromkeys(camera_names[:3]))})"
         trigger_reason = pending_input.payload.get("trigger_reason")
         if trigger_reason == "post_action_followup":
-            return f"カメラ画像 {attachment_count} 枚を追跡観測"
-        return f"カメラ画像 {attachment_count} 枚を自発観測"
+            return f"カメラ画像 {attachment_count} 枚{camera_label}を追跡観測"
+        return f"カメラ画像 {attachment_count} 枚{camera_label}を自発観測"
     if input_kind == "network_result":
         summary_text = pending_input.payload.get("summary_text")
         query = pending_input.payload.get("query")
@@ -1060,7 +1071,7 @@ def _build_default_camera_controller(*, store: SqliteStateStore) -> CameraContro
     from otomekairo.infra.wifi_camera_controller import WiFiCameraController
 
     return WiFiCameraController(
-        camera_connection_loader=store.read_enabled_camera_connection,
+        camera_connections_loader=store.read_enabled_camera_connections,
     )
 
 
@@ -1069,7 +1080,7 @@ def _build_default_camera_sensor(*, store: SqliteStateStore) -> CameraSensor:
     from otomekairo.infra.wifi_camera_sensor import WiFiCameraSensor
 
     return WiFiCameraSensor(
-        camera_connection_loader=store.read_enabled_camera_connection,
+        camera_connections_loader=store.read_enabled_camera_connections,
     )
 
 

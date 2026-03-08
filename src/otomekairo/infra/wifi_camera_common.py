@@ -18,6 +18,8 @@ CAMERA_ONVIF_PORT = 2020
 # Block: Camera connection settings
 @dataclass(frozen=True, slots=True)
 class CameraConnectionSettings:
+    camera_connection_id: str
+    display_name: str
     host: str
     username: str
     password: str
@@ -27,12 +29,16 @@ class CameraConnectionSettings:
 def read_camera_connection_settings(camera_connection: dict[str, Any] | None) -> CameraConnectionSettings | None:
     if camera_connection is None:
         return None
+    camera_connection_id = normalized_optional_text(camera_connection.get("camera_connection_id"))
+    display_name = normalized_optional_text(camera_connection.get("display_name"))
     host = normalized_optional_text(camera_connection.get("host"))
     username = normalized_optional_text(camera_connection.get("username"))
     password = normalized_optional_text(camera_connection.get("password"))
-    if host is None or username is None or password is None:
+    if camera_connection_id is None or display_name is None or host is None or username is None or password is None:
         return None
     return CameraConnectionSettings(
+        camera_connection_id=camera_connection_id,
+        display_name=display_name,
         host=host,
         username=username,
         password=password,

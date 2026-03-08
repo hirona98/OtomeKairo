@@ -10,6 +10,7 @@ from typing import Any, Protocol
 @dataclass(frozen=True, slots=True)
 class CameraLookRequest:
     cycle_id: str
+    camera_connection_id: str
     direction: str | None
     preset_id: str | None
     preset_name: str | None
@@ -18,6 +19,8 @@ class CameraLookRequest:
 # Block: Camera look response
 @dataclass(frozen=True, slots=True)
 class CameraLookResponse:
+    camera_connection_id: str
+    camera_display_name: str
     movement_label: str
     raw_result_ref: dict[str, Any] | None
     adapter_trace_ref: dict[str, Any] | None

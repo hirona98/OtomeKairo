@@ -61,6 +61,7 @@ def _build_messages(request: CognitionRequest) -> list[dict[str, Any]]:
     retrieval_context = cognition_input["retrieval_context"]
     world_snapshot = cognition_input["world_snapshot"]
     attention_snapshot = cognition_input["attention_snapshot"]
+    camera_candidates = cognition_input["camera_candidates"]
     skill_candidates = cognition_input["skill_candidates"]
     runtime_policy = cognition_input["policy_snapshot"]["runtime_policy"]
     system_prompt = "\n".join(
@@ -77,7 +78,7 @@ def _build_messages(request: CognitionRequest) -> list[dict[str, Any]]:
             "action_type は speak, browse, notify, look, wait のいずれかだけを使う。",
             "speak と notify を返す場合は target_channel に browser_chat を必ず入れる。",
             "browse を返す場合は query に非空の検索文字列を必ず入れる。",
-            "look を返す場合は direction(left/right/up/down) か preset_id か preset_name を必ず入れる。",
+            "look を返す場合は camera_connection_id と、direction(left/right/up/down) か preset_id か preset_name を必ず入れる。",
             "memory_focus は object で、focus_kind と summary を必ず持つ。",
             "memory_focus.focus_kind は observation, summary, episodic, fact, affective, relation, preference, reflection, none のいずれかにする。",
             "reflection_seed は object で、message_id を必ず持つ。",
@@ -89,8 +90,9 @@ def _build_messages(request: CognitionRequest) -> list[dict[str, Any]]:
             _optional_behavior_prompt_line(title="振る舞い指示", text=behavior_settings["system_prompt"]),
             _optional_behavior_prompt_line(title="追加指示", text=behavior_settings["addon_prompt"]),
             f"現在の状況: {world_snapshot['situation_summary']}",
-            _camera_runtime_prompt_line(runtime_policy),
+            _camera_runtime_prompt_line(runtime_policy, camera_candidates),
             "添付画像がある場合は、画像とテキストの両方を使って判断する。",
+            "camera_candidates にない camera_connection_id は使わない。",
             "カメラ状態の enabled または available が false のときは、look を提案せず speak で状態を伝える。",
             f"不変条件: {_format_invariants(self_snapshot['invariants'])}",
             _persona_update_prompt_line(self_snapshot),
@@ -235,6 +237,10 @@ def _action_proposal_schema() -> dict[str, Any]:
                 "type": "string",
                 "enum": ["left", "right", "up", "down"],
             },
+            "camera_connection_id": {
+                "type": "string",
+                "minLength": 1,
+            },
             "preset_id": {
                 "type": "string",
                 "minLength": 1,
@@ -281,6 +287,7 @@ def _action_proposal_schema() -> dict[str, Any]:
                     "required": ["action_type"],
                 },
                 "then": {
+                    "required": ["camera_connection_id"],
                     "anyOf": [
                         {"required": ["direction"]},
                         {"required": ["preset_id"]},
@@ -561,11 +568,31 @@ def _optional_behavior_prompt_line(*, title: str, text: Any) -> str:
 
 
 # Block: Camera runtime formatting
-def _camera_runtime_prompt_line(runtime_policy: dict[str, Any]) -> str:
+def _camera_runtime_prompt_line(
+    runtime_policy: dict[str, Any],
+    camera_candidates: list[dict[str, Any]],
+) -> str:
+    if not isinstance(camera_candidates, list):
+        raise RuntimeError("cognition_input.camera_candidates must be a list")
+    candidate_labels = []
+    for candidate in camera_candidates:
+        if not isinstance(candidate, dict):
+            raise RuntimeError("cognition_input.camera_candidates must contain only objects")
+        camera_connection_id = candidate.get("camera_connection_id")
+        display_name = candidate.get("display_name")
+        if not isinstance(camera_connection_id, str) or not camera_connection_id:
+            raise RuntimeError("camera_candidates.camera_connection_id must be string")
+        if not isinstance(display_name, str) or not display_name:
+            raise RuntimeError("camera_candidates.display_name must be string")
+        candidate_labels.append(f"{display_name}({camera_connection_id})")
+    candidate_text = "なし"
+    if candidate_labels:
+        candidate_text = " / ".join(candidate_labels[:5])
     return (
         "カメラ状態: "
         f"enabled={bool(runtime_policy.get('camera_enabled'))} "
-        f"available={bool(runtime_policy.get('camera_available'))}"
+        f"available={bool(runtime_policy.get('camera_available'))} "
+        f"candidates={candidate_text}"
     )
 
 
@@ -589,7 +616,15 @@ def _attachment_prompt_line(current_observation: dict[str, Any]) -> str:
         raise RuntimeError("current_observation.attachments must be a list")
     if not attachments:
         return "添付画像: なし"
-    return f"添付画像: {len(attachments)} 枚"
+    camera_names = [
+        str(attachment["camera_display_name"])
+        for attachment in attachments
+        if isinstance(attachment.get("camera_display_name"), str) and attachment["camera_display_name"]
+    ]
+    if not camera_names:
+        return f"添付画像: {len(attachments)} 枚"
+    unique_names = " / ".join(dict.fromkeys(camera_names))
+    return f"添付画像: {len(attachments)} 枚 ({unique_names})"
 
 
 def _build_user_message_content(
@@ -643,6 +678,9 @@ def _repo_path(path_text: str) -> Path:
 
 # Block: Look action validation
 def _validate_look_action(proposal: dict[str, Any]) -> None:
+    camera_connection_id = proposal.get("camera_connection_id")
+    if not isinstance(camera_connection_id, str) or not camera_connection_id.strip():
+        raise RuntimeError("LiteLLM cognition_result.action_proposals.look.camera_connection_id is required")
     direction = proposal.get("direction")
     preset_id = proposal.get("preset_id")
     preset_name = proposal.get("preset_name")

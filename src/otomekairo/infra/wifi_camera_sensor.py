@@ -10,7 +10,11 @@ import urllib.parse
 import uuid
 from typing import Any, Callable
 
-from otomekairo.gateway.camera_sensor import CameraCaptureResponse, CameraSensor
+from otomekairo.gateway.camera_sensor import (
+    CameraCaptureRequest,
+    CameraCaptureResponse,
+    CameraSensor,
+)
 from otomekairo.infra.wifi_camera_common import (
     CameraConnectionSettings,
     camera_capture_file_path,
@@ -29,8 +33,8 @@ FFMPEG_IMAGE_QUALITY = 2
 
 # Block: Wi-Fi camera sensor
 class WiFiCameraSensor(CameraSensor):
-    def __init__(self, *, camera_connection_loader: Callable[[], dict[str, Any] | None]) -> None:
-        self._camera_connection_loader = camera_connection_loader
+    def __init__(self, *, camera_connections_loader: Callable[[], list[dict[str, Any]]]) -> None:
+        self._camera_connections_loader = camera_connections_loader
         self._capture_dir = default_camera_capture_dir()
         self._cached_settings_key: tuple[str, str, str] | None = None
         self._media_service: Any | None = None
@@ -38,12 +42,12 @@ class WiFiCameraSensor(CameraSensor):
 
     def is_available(self) -> bool:
         try:
-            return self._resolve_settings() is not None
+            return bool(self._resolved_enabled_settings())
         except RuntimeError:
             return False
 
-    def capture_still_image(self) -> CameraCaptureResponse:
-        settings = self._require_settings()
+    def capture_still_image(self, request: CameraCaptureRequest) -> CameraCaptureResponse:
+        settings = self._require_settings(camera_connection_id=request.camera_connection_id)
         media_service = self._media_service_for(settings)
         profile_token = self._capture_profile_token_for(settings)
         stream_uri = _read_stream_uri(
@@ -60,6 +64,8 @@ class WiFiCameraSensor(CameraSensor):
             output_path=file_path,
         )
         return CameraCaptureResponse(
+            camera_connection_id=settings.camera_connection_id,
+            camera_display_name=settings.display_name,
             capture_id=capture_id,
             image_path=str(camera_capture_relative_path(capture_id)),
             image_url=camera_capture_public_url(capture_id),
@@ -67,11 +73,32 @@ class WiFiCameraSensor(CameraSensor):
         )
 
     # Block: Settings helpers
-    def _resolve_settings(self) -> CameraConnectionSettings | None:
-        return read_camera_connection_settings(self._camera_connection_loader())
+    def _resolved_enabled_settings(self) -> list[CameraConnectionSettings]:
+        raw_camera_connections = self._camera_connections_loader()
+        return [
+            settings
+            for settings in (
+                read_camera_connection_settings(camera_connection)
+                for camera_connection in raw_camera_connections
+            )
+            if settings is not None
+        ]
 
-    def _require_settings(self) -> CameraConnectionSettings:
-        settings = self._resolve_settings()
+    def _resolve_settings(self, *, camera_connection_id: str | None) -> CameraConnectionSettings | None:
+        enabled_settings = self._resolved_enabled_settings()
+        if camera_connection_id is None:
+            if not enabled_settings:
+                return None
+            if len(enabled_settings) != 1:
+                raise RuntimeError("camera_connection_id is required when multiple enabled cameras exist")
+            return enabled_settings[0]
+        for settings in enabled_settings:
+            if settings.camera_connection_id == camera_connection_id:
+                return settings
+        raise RuntimeError("requested enabled camera connection is missing")
+
+    def _require_settings(self, *, camera_connection_id: str | None) -> CameraConnectionSettings:
+        settings = self._resolve_settings(camera_connection_id=camera_connection_id)
         if settings is None:
             raise RuntimeError("カメラ接続が未設定です")
         return settings

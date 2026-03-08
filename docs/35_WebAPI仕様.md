@@ -507,6 +507,8 @@ flowchart LR
 
 ```json
 {
+  "camera_connection_id": "cam_living",
+  "camera_display_name": "リビング",
   "capture_id": "cap_...",
   "image_path": "data/camera/cap_....jpg",
   "image_url": "/captures/cap_....jpg",
@@ -515,6 +517,8 @@ flowchart LR
 ```
 
 - 成功時は `201 Created` を返す
+- `camera_connection_id` は、その静止画を取得した enabled camera connection を表す
+- `camera_display_name` は、設定UIで管理している表示名を表す
 - `capture_id` は、不透明な capture 識別子である
 - `image_path` は、サーバ作業ディレクトリ基準の保存先相対パスである
 - `image_url` は、その静止画をブラウザが再取得するための同一オリジン URL である
@@ -543,7 +547,7 @@ flowchart LR
 - `source` は `camera` に固定する
 - `channel` は `browser_chat` に固定する
 - `client_message_id` は `null` に固定する
-- `payload_json` には、`input_kind="camera_observation"`、`trigger_reason="self_initiated"`、`camera_still_image` 添付 1 件を入れる
+- `payload_json` には、`input_kind="camera_observation"`、`trigger_reason="self_initiated"`、`camera_connection_id` と `camera_display_name` を含む `camera_still_image` 添付 1 件を入れる
 - 追加時の `status` は `queued` に固定する
 
 <!-- Block: Camera Observe Response -->
@@ -555,6 +559,8 @@ flowchart LR
   "input_id": "inp_...",
   "status": "queued",
   "channel": "browser_chat",
+  "camera_connection_id": "cam_living",
+  "camera_display_name": "リビング",
   "capture_id": "cap_...",
   "image_path": "data/camera/cap_....jpg",
   "image_url": "/captures/cap_....jpg",
@@ -566,6 +572,7 @@ flowchart LR
 - `input_id` は、生成された自発観測入力の ID である
 - `status` は `queued` に固定する
 - `channel` は `browser_chat` に固定する
+- `camera_connection_id` と `camera_display_name` は、観測に使った enabled camera connection を表す
 - `capture_id`、`image_path`、`image_url`、`captured_at` は、同時に取得した静止画の情報である
 - `POST /api/camera/observe` は `source=post_action_followup` の追跡観測入力を作らない。`post_action_followup` は runtime 内の `look` 行動成功時だけが enqueue する
 - カメラ接続設定が不足している場合は `409 Conflict` を返す

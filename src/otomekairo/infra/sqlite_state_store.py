@@ -434,15 +434,6 @@ class SqliteStateStore:
             ).fetchall()
         return _decode_camera_connection_rows(camera_connection_rows)
 
-    # Block: Single enabled camera connection snapshot
-    def read_enabled_camera_connection(self) -> dict[str, Any] | None:
-        enabled_camera_connections = self.read_enabled_camera_connections()
-        if not enabled_camera_connections:
-            return None
-        if len(enabled_camera_connections) != 1:
-            raise RuntimeError("single-camera runtime requires exactly one enabled camera connection")
-        return enabled_camera_connections[0]
-
     # Block: Settings editor save
     def save_settings_editor(
         self,
@@ -1296,11 +1287,17 @@ class SqliteStateStore:
     def enqueue_camera_observation(
         self,
         *,
+        camera_connection_id: str,
+        camera_display_name: str,
         capture_id: str,
         image_path: str,
         image_url: str,
         captured_at: int,
     ) -> dict[str, Any]:
+        if not isinstance(camera_connection_id, str) or not camera_connection_id:
+            raise StoreValidationError("camera_connection_id must be non-empty string")
+        if not isinstance(camera_display_name, str) or not camera_display_name:
+            raise StoreValidationError("camera_display_name must be non-empty string")
         if not isinstance(capture_id, str) or not capture_id:
             raise StoreValidationError("capture_id must be non-empty string")
         if not isinstance(image_path, str) or not image_path:
@@ -1310,6 +1307,8 @@ class SqliteStateStore:
         if isinstance(captured_at, bool) or not isinstance(captured_at, int):
             raise StoreValidationError("captured_at must be integer")
         payload = build_camera_observation_payload(
+            camera_connection_id=camera_connection_id,
+            camera_display_name=camera_display_name,
             capture_id=capture_id,
             image_path=image_path,
             image_url=image_url,
@@ -1324,6 +1323,8 @@ class SqliteStateStore:
         )
         return {
             **enqueue_result,
+            "camera_connection_id": camera_connection_id,
+            "camera_display_name": camera_display_name,
             "capture_id": capture_id,
             "image_path": image_path,
             "image_url": image_url,

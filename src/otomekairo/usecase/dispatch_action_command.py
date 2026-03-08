@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Iterable
 
 from otomekairo.gateway.camera_controller import CameraController, CameraLookRequest
-from otomekairo.gateway.camera_sensor import CameraSensor
+from otomekairo.gateway.camera_sensor import CameraCaptureRequest, CameraSensor
 from otomekairo.gateway.speech_synthesizer import (
     SpeechSynthesisRequest,
     SpeechSynthesisResponse,
@@ -359,6 +359,7 @@ def _dispatch_camera_look_command(
         look_response = camera_controller.move_view(
             CameraLookRequest(
                 cycle_id=cycle_id,
+                camera_connection_id=str(action_command["parameters"]["camera_connection_id"]),
                 direction=_optional_action_text(action_command["parameters"], "direction"),
                 preset_id=_optional_action_text(action_command["parameters"], "preset_id"),
                 preset_name=_optional_action_text(action_command["parameters"], "preset_name"),
@@ -421,6 +422,7 @@ def _dispatch_camera_look_command(
                 _build_followup_camera_observation_mutation(
                     channel=str(pending_input["channel"]),
                     camera_sensor=camera_sensor,
+                    camera_connection_id=look_response.camera_connection_id,
                 )
             ]
         except Exception as error:
@@ -455,6 +457,8 @@ def _dispatch_camera_look_command(
                 observed_effects={
                     "status_code_after": "idle",
                     "camera_move": "succeeded",
+                    "camera_connection_id": look_response.camera_connection_id,
+                    "camera_display_name": look_response.camera_display_name,
                     "movement_label": look_response.movement_label,
                     "message_id": message_id,
                     "followup_required": True,
@@ -514,6 +518,8 @@ def _dispatch_camera_look_command(
         observed_effects={
             "status_code_after": "idle",
             "camera_move": "succeeded",
+            "camera_connection_id": look_response.camera_connection_id,
+            "camera_display_name": look_response.camera_display_name,
             "movement_label": look_response.movement_label,
             "message_id": message_id,
             "final_message_emitted": final_message_emitted,
@@ -540,6 +546,9 @@ def _dispatch_camera_look_command(
             **(
                 {
                     "camera_followup_capture": {
+                        "camera_connection_id": str(
+                            followup_pending_input_mutations[0].payload["attachments"][0]["camera_connection_id"]
+                        ),
                         "capture_id": str(
                             followup_pending_input_mutations[0].payload["attachments"][0]["capture_id"]
                         ),
@@ -650,14 +659,21 @@ def _build_followup_camera_observation_mutation(
     *,
     channel: str,
     camera_sensor: CameraSensor,
+    camera_connection_id: str,
 ) -> PendingInputMutationRecord:
     if not camera_sensor.is_available():
         raise RuntimeError("カメラの接続設定が不足しています")
-    capture = camera_sensor.capture_still_image()
+    capture = camera_sensor.capture_still_image(
+        CameraCaptureRequest(
+            camera_connection_id=camera_connection_id,
+        )
+    )
     return PendingInputMutationRecord(
         source="post_action_followup",
         channel=channel,
         payload=build_camera_observation_payload(
+            camera_connection_id=capture.camera_connection_id,
+            camera_display_name=capture.camera_display_name,
             capture_id=capture.capture_id,
             image_path=capture.image_path,
             image_url=capture.image_url,

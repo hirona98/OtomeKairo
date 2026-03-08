@@ -278,6 +278,8 @@ def _passes_hard_gate(
             return False
         if not bool(runtime_policy.get("camera_available")):
             return False
+        if _look_camera_candidate(proposal, cognition_input) is None:
+            return False
     return not _has_strong_aversion(
         action_type=action_type,
         learned_aversions=learned_aversions,
@@ -1238,7 +1240,7 @@ def _build_action_command(
             "command_type": "control_camera_look",
             "actuator_port": "wifi_camera",
             "target": {
-                "device": "primary_camera",
+                "device": str(proposal["camera_connection_id"]),
             },
             "parameters": {
                 "message_id": str(proposal["message_id"]),
@@ -1274,6 +1276,9 @@ def _browse_query_text(proposal: dict[str, Any]) -> str:
 
 # Block: Look target helpers
 def _validated_look_target(proposal: dict[str, Any]) -> dict[str, str]:
+    camera_connection_id = proposal.get("camera_connection_id")
+    if not isinstance(camera_connection_id, str) or not camera_connection_id.strip():
+        raise RuntimeError("look action requires camera_connection_id")
     direction = proposal.get("direction")
     if isinstance(direction, str) and direction.strip():
         normalized_direction = direction.strip()
@@ -1281,20 +1286,46 @@ def _validated_look_target(proposal: dict[str, Any]) -> dict[str, str]:
             raise RuntimeError("look action direction must be left/right/up/down")
         if proposal.get("preset_id") is not None or proposal.get("preset_name") is not None:
             raise RuntimeError("look action must not mix direction and preset")
-        return {"direction": normalized_direction}
+        return {
+            "camera_connection_id": camera_connection_id.strip(),
+            "direction": normalized_direction,
+        }
     preset_id = proposal.get("preset_id")
     if isinstance(preset_id, str) and preset_id.strip():
         if proposal.get("preset_name") is not None:
             raise RuntimeError("look action must specify only one preset field")
-        return {"preset_id": preset_id.strip()}
+        return {
+            "camera_connection_id": camera_connection_id.strip(),
+            "preset_id": preset_id.strip(),
+        }
     preset_name = proposal.get("preset_name")
     if isinstance(preset_name, str) and preset_name.strip():
-        return {"preset_name": preset_name.strip()}
+        return {
+            "camera_connection_id": camera_connection_id.strip(),
+            "preset_name": preset_name.strip(),
+        }
     raise RuntimeError("look action requires direction or preset")
 
 
 def _look_command_parameters(proposal: dict[str, Any]) -> dict[str, Any]:
     return _validated_look_target(proposal)
+
+
+# Block: Camera candidate helper
+def _look_camera_candidate(
+    proposal: dict[str, Any],
+    cognition_input: dict[str, Any],
+) -> dict[str, Any] | None:
+    look_target = _validated_look_target(proposal)
+    camera_candidates = cognition_input.get("camera_candidates")
+    if not isinstance(camera_candidates, list):
+        raise RuntimeError("cognition_input.camera_candidates must be a list")
+    for candidate in camera_candidates:
+        if not isinstance(candidate, dict):
+            raise RuntimeError("cognition_input.camera_candidates must contain only objects")
+        if candidate.get("camera_connection_id") == look_target["camera_connection_id"]:
+            return candidate
+    return None
 
 
 # Block: Candidate payload
