@@ -1531,7 +1531,7 @@
 ```
 
 - 必須項目は `message_id`、`role`、`text`、`created_at` である
-- current 実装の `role` は `assistant` を使う
+- current 実装の `role` は `user` または `assistant` を使う
 - `source_cycle_id`、`related_input_id`、`audio_url`、`audio_mime_type` は任意である
 
 <!-- Block: UI Message End -->
@@ -2142,6 +2142,35 @@
 - `GET /api/chat/stream` の `data:` は、`ui_outbound_events.payload_json` と同一の JSON をそのまま使う
 - `event_type` ごとの payload は、このドキュメントの `ui_outbound_events.payload_json` に従う
 - Web サーバは、`data:` 用に別形式へ変換しない
+
+<!-- Block: Chat History Response -->
+### `GET /api/chat/history` の応答 JSON
+
+```json
+{
+  "channel": "browser_chat",
+  "messages": [
+    {
+      "message_id": "inp_...",
+      "role": "user",
+      "text": "おはよう",
+      "created_at": 1760000000000
+    },
+    {
+      "message_id": "msg_...",
+      "role": "assistant",
+      "text": "おはようございます。",
+      "created_at": 1760000001000
+    }
+  ],
+  "stream_cursor": 321
+}
+```
+
+- 必須項目は `channel`、`messages` である
+- `channel` は current 実装では `browser_chat` に固定する
+- `messages` は、`event_type = message` と同じ JSON 形の配列に固定する
+- `stream_cursor` は任意で、次に `GET /api/chat/stream` を開く初期カーソルとして使ってよい `integer` である
 
 <!-- Block: Fixed Decisions -->
 ## このドキュメントで確定したこと

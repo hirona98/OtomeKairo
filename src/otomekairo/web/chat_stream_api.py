@@ -37,11 +37,15 @@ def build_chat_stream_router(services: AppServices) -> APIRouter:
     @router.get("/api/chat/stream")
     async def get_chat_stream(
         channel: str = Query(default="browser_chat"),
+        after_event_id: int | None = Query(default=None, ge=0),
         last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
     ) -> StreamingResponse:
         if channel != "browser_chat":
             raise ApiError(status_code=400, error_code="invalid_request", message="channel must be browser_chat")
-        parsed_last_event_id = _parse_last_event_id(last_event_id)
+        parsed_last_event_id = _parse_stream_cursor(
+            last_event_id=last_event_id,
+            after_event_id=after_event_id,
+        )
         stream_window = services.store.read_stream_window(channel=channel)
         event_stream = _stream_events(
             services=services,
@@ -54,10 +58,10 @@ def build_chat_stream_router(services: AppServices) -> APIRouter:
     return router
 
 
-# Block: Header parsing
-def _parse_last_event_id(last_event_id: str | None) -> int | None:
+# Block: Cursor parsing
+def _parse_stream_cursor(*, last_event_id: str | None, after_event_id: int | None) -> int | None:
     if last_event_id is None:
-        return None
+        return after_event_id
     try:
         parsed_value = int(last_event_id)
     except ValueError as error:

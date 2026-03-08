@@ -133,7 +133,7 @@ flowchart LR
 ### 役割
 
 - 最小のブラウザチャット UI を返す
-- 同一オリジンで `POST /api/chat/input`、`POST /api/chat/cancel`、`POST /api/microphone/input`、`POST /api/camera/capture`、`GET /api/chat/stream`、`GET /api/status`、`GET /api/settings/editor`、`PUT /api/settings/editor`、`GET /captures/{capture_filename}`、`GET /audio/{audio_filename}` を使う
+- 同一オリジンで `POST /api/chat/input`、`GET /api/chat/history`、`POST /api/chat/cancel`、`POST /api/microphone/input`、`POST /api/camera/capture`、`GET /api/chat/stream`、`GET /api/status`、`GET /api/settings/editor`、`PUT /api/settings/editor`、`GET /captures/{capture_filename}`、`GET /audio/{audio_filename}` を使う
 - `src/otomekairo/web/static/` に置く HTML / CSS / JavaScript を返す
 
 <!-- Block: Browser UI Rules -->
@@ -443,6 +443,7 @@ flowchart LR
 - `payload_json` には、`input_kind="chat_message"` を入れ、`text`、`attachments`、`client_message_id` は必要なものだけを入れる
 - 追加時の `status` は `queued` に固定する
 - 同じ `(channel, client_message_id)` が既にある場合は、追加せず `409 Conflict` を返す
+- current 実装では、受理した `chat_message` を UI 表示用の `message(role=user)` として `ui_outbound_events` にも同じ transaction で追記してよい
 
 <!-- Block: Chat Input Response -->
 ### 成功応答
@@ -458,6 +459,59 @@ flowchart LR
 
 - 成功時は `202 Accepted` を返す
 - ここでは人格応答本文を返さない
+
+<!-- Block: Chat History -->
+## `GET /api/chat/history`
+
+<!-- Block: Chat History Purpose -->
+### 役割
+
+- ブラウザチャットの初期表示用に、直近の会話バブル列を backend から復元して返す
+- current 実装では、`pending_inputs` と `action_history` の正本から `user` / `assistant` のメッセージ列を作り、`ui_outbound_events` だけには依存しない
+
+<!-- Block: Chat History Query -->
+### クエリ
+
+- `channel` クエリは任意とし、省略時は `browser_chat` を使う
+- `limit` クエリは任意とし、省略時は `200` を使う
+- current 実装では、`channel` に `browser_chat` 以外を指定すると `400 Bad Request` にする
+- current 実装では、`limit` は `1..500` の整数だけを受け付ける
+
+<!-- Block: Chat History Read -->
+### DB の読み出し
+
+- `user` 側は `pending_inputs.payload_json.input_kind in (chat_message, microphone_message)` から復元する
+- `assistant` 側は `action_history` のうち `observed_effects_json.final_message_emitted=true` かつ `command_json.parameters.text` を持つ行から復元する
+- 返す `messages` は、`created_at` 昇順の会話列に整列する
+- `stream_cursor` には、その時点の `ui_outbound_events` の最新 `ui_event_id` を返してよい
+
+<!-- Block: Chat History Response -->
+### 成功応答
+
+```json
+{
+  "channel": "browser_chat",
+  "messages": [
+    {
+      "message_id": "inp_...",
+      "role": "user",
+      "text": "おはよう",
+      "created_at": 1760000000000
+    },
+    {
+      "message_id": "msg_...",
+      "role": "assistant",
+      "text": "おはようございます。",
+      "created_at": 1760000001000
+    }
+  ],
+  "stream_cursor": 321
+}
+```
+
+- 成功時は `200 OK` を返す
+- `messages` の各要素の JSON 形は `docs/36_JSONデータ仕様.md` を正本とする
+- `stream_cursor` は、次に `GET /api/chat/stream` を開く初期カーソルとして使ってよい
 
 <!-- Block: Chat Cancel -->
 ## `POST /api/chat/cancel`
@@ -529,6 +583,7 @@ flowchart LR
 - `client_message_id` は `null` に固定する
 - `payload_json` には `input_kind="microphone_message"`、`message_kind="dialogue_turn"`、`trigger_reason="external_input"`、`text`、`stt_provider`、`stt_language` を入れる
 - 追加時の `status` は `queued` に固定する
+- current 実装では、受理した `microphone_message` を UI 表示用の `message(role=user)` として `ui_outbound_events` にも同じ transaction で追記してよい
 
 <!-- Block: Microphone Input Response -->
 ### 成功応答
@@ -691,8 +746,10 @@ flowchart LR
 
 - `channel` クエリは任意とし、省略時は `browser_chat` を使う
 - current 実装では、`channel` に `browser_chat` 以外を指定すると `400 Bad Request` にする
+- `after_event_id` クエリは任意とし、初回接続時の開始位置ヒントとして使ってよい
 - `Last-Event-ID` ヘッダがあれば、その値より大きい `ui_event_id` から再開する
 - `Last-Event-ID` が無効な整数なら `400` とする
+- current 実装では、`Last-Event-ID` がない場合だけ `after_event_id` を使ってよい
 
 <!-- Block: Chat Stream Read -->
 ### DB の読み出し
@@ -729,7 +786,7 @@ data: {"message_id":"msg_...","text":"お","chunk_index":0}
   - 役割: 完成した 1 メッセージ
   - 必須項目: `message_id`, `role`, `text`, `created_at`
   - 任意項目: `source_cycle_id`, `related_input_id`, `audio_url`, `audio_mime_type`
-  - current 実装の `role` は `assistant` を使う
+  - current 実装の `role` は `user` または `assistant` を使う
 
 - `message_end`
   - 役割: `message_id` 単位の出力終端
@@ -775,7 +832,7 @@ data: {"message_id":"msg_...","text":"お","chunk_index":0}
 ## このドキュメントで確定したこと
 
 - ブラウザチャットの入力は `POST /api/chat/input`、継続出力は `GET /api/chat/stream` の `SSE` で分離する
-- Web サーバは応答本文を生成せず、`pending_inputs` と `ui_outbound_events` の橋渡し、および保持期限切れストリーム行の削除だけを行う
+- Web サーバは応答本文を生成せず、`pending_inputs` / `action_history` からの履歴復元、`pending_inputs` と `ui_outbound_events` の橋渡し、および保持期限切れストリーム行の削除だけを行う
 - `SSE` の再開位置は `ui_outbound_events.ui_event_id` と `Last-Event-ID` で管理する
 - `POST /api/chat/cancel` も即時中断ではなく、通常の入力要求としてランタイムへ渡す
 - 初期のブラウザチャット用チャネルは `browser_chat` に固定する

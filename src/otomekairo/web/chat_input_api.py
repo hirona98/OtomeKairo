@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
-from fastapi import APIRouter, Response, status
+from fastapi import APIRouter, Query, Response, status
 
 from otomekairo.infra.wifi_camera_common import (
     camera_capture_file_path,
@@ -56,6 +56,16 @@ def build_chat_input_router(services: AppServices) -> APIRouter:
             client_message_id=payload.client_message_id,
             attachments=normalized_attachments,
         )
+
+    # Block: Chat history endpoint
+    @router.get("/api/chat/history")
+    async def get_chat_history(
+        channel: str = Query(default="browser_chat"),
+        limit: int = Query(default=200, ge=1, le=500),
+    ) -> dict[str, object]:
+        if channel != "browser_chat":
+            raise ApiError(status_code=400, error_code="invalid_request", message="channel must be browser_chat")
+        return services.store.read_chat_history(channel=channel, limit=limit)
 
     # Block: Chat cancel endpoint
     @router.post("/api/chat/cancel", status_code=status.HTTP_202_ACCEPTED)
