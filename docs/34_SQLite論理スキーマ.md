@@ -208,7 +208,8 @@ flowchart TD
 - 主キー: `task_id TEXT PRIMARY KEY`
 - 必須列: `task_kind`, `task_status`, `goal_hint`, `completion_hint_json`, `resume_condition_json`, `interruptible`, `priority`, `created_at`, `updated_at`
 - 任意列: `title`, `step_hints_json`, `deadline_at`, `abandon_reason`
-- `task_status` は、少なくとも `idle`、`active`、`waiting_external`、`paused`、`completed`、`abandoned` を区別する
+- `task_status` は、少なくとも `active`、`waiting_external`、`paused`、`completed`、`abandoned` を区別する
+- タスク不在は `task_state` に未完了行がないこととして表し、`idle` 行は持たない
 - 主要索引: `(task_status, priority DESC, updated_at DESC)`
 
 <!-- Block: Working Memory -->

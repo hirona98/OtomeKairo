@@ -177,7 +177,6 @@ CREATE TABLE task_state (
     task_kind TEXT NOT NULL,
     task_status TEXT NOT NULL CHECK (
         task_status IN (
-            'idle',
             'active',
             'waiting_external',
             'paused',

@@ -52,7 +52,7 @@ from otomekairo.usecase.write_memory_plan import (
 
 # Block: Schema constants
 SCHEMA_NAME = "core_schema"
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 EMBEDDING_VECTOR_DIMENSION = 32
 LEGACY_SETTING_KEY_ALIASES = {
     "llm.model": "llm.default_model",
@@ -5632,7 +5632,7 @@ class SqliteStateStore:
             return
         if current_version > SCHEMA_VERSION:
             raise RuntimeError("schema_version is newer than this initializer")
-        if current_version not in {2, 3, 4, 5, 6, 7, 8}:
+        if current_version not in {2, 3, 4, 5, 6, 7, 8, 9}:
             raise RuntimeError("unsupported schema_version for migration")
         while current_version < SCHEMA_VERSION:
             if current_version == 2:
@@ -5662,6 +5662,10 @@ class SqliteStateStore:
             if current_version == 8:
                 self._migrate_schema_8_to_9(connection=connection, now_ms=now_ms)
                 current_version = 9
+                continue
+            if current_version == 9:
+                self._migrate_schema_9_to_10(connection=connection, now_ms=now_ms)
+                current_version = 10
                 continue
             raise RuntimeError("unsupported schema_version for migration")
 
@@ -6366,6 +6370,102 @@ class SqliteStateStore:
             WHERE meta_key = 'schema_version'
             """,
             (_json_text(9), now_ms),
+        )
+
+    # Block: Schema migration 9->10
+    def _migrate_schema_9_to_10(self, *, connection: sqlite3.Connection, now_ms: int) -> None:
+        idle_task_row = connection.execute(
+            """
+            SELECT task_id
+            FROM task_state
+            WHERE task_status = 'idle'
+            LIMIT 1
+            """
+        ).fetchone()
+        if idle_task_row is not None:
+            raise RuntimeError("task_state rows with task_status=idle are not supported in schema v10")
+        temporary_task_table = f"task_state_v10_{uuid.uuid4().hex}"
+        connection.execute("DROP INDEX IF EXISTS idx_task_state_status_priority_updated")
+        connection.execute(f"ALTER TABLE task_state RENAME TO {temporary_task_table}")
+        connection.execute(
+            """
+            CREATE TABLE task_state (
+                task_id TEXT PRIMARY KEY,
+                task_kind TEXT NOT NULL,
+                task_status TEXT NOT NULL CHECK (
+                    task_status IN (
+                        'active',
+                        'waiting_external',
+                        'paused',
+                        'completed',
+                        'abandoned'
+                    )
+                ),
+                goal_hint TEXT NOT NULL,
+                completion_hint_json TEXT NOT NULL,
+                resume_condition_json TEXT NOT NULL,
+                interruptible INTEGER NOT NULL CHECK (interruptible IN (0, 1)),
+                priority INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                title TEXT,
+                step_hints_json TEXT,
+                deadline_at INTEGER,
+                abandon_reason TEXT
+            )
+            """
+        )
+        connection.execute(
+            f"""
+            INSERT INTO task_state (
+                task_id,
+                task_kind,
+                task_status,
+                goal_hint,
+                completion_hint_json,
+                resume_condition_json,
+                interruptible,
+                priority,
+                created_at,
+                updated_at,
+                title,
+                step_hints_json,
+                deadline_at,
+                abandon_reason
+            )
+            SELECT
+                task_id,
+                task_kind,
+                task_status,
+                goal_hint,
+                completion_hint_json,
+                resume_condition_json,
+                interruptible,
+                priority,
+                created_at,
+                updated_at,
+                title,
+                step_hints_json,
+                deadline_at,
+                abandon_reason
+            FROM {temporary_task_table}
+            """
+        )
+        connection.execute(f"DROP TABLE {temporary_task_table}")
+        connection.execute(
+            """
+            CREATE INDEX idx_task_state_status_priority_updated
+                ON task_state (task_status, priority DESC, updated_at DESC)
+            """
+        )
+        connection.execute(
+            """
+            UPDATE db_meta
+            SET meta_value_json = ?,
+                updated_at = ?
+            WHERE meta_key = 'schema_version'
+            """,
+            (_json_text(10), now_ms),
         )
 
     # Block: sqlite-vec schema ensure
