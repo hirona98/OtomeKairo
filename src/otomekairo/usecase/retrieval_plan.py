@@ -147,6 +147,7 @@ def _build_collector_names(
         "reply_chain",
         "context_threads",
         "state_link_expand",
+        "entity_expand",
     ]
     if current_observation["input_kind"] in {"chat_message", "microphone_message"}:
         collector_names.append("relationship_focus")

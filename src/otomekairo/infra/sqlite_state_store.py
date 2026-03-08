@@ -837,6 +837,10 @@ class SqliteStateStore:
                 connection=connection,
                 memory_state_ids=memory_state_ids,
             )
+            state_entity_rows = _fetch_state_entities_for_memory_snapshot(
+                connection=connection,
+                memory_state_ids=memory_state_ids,
+            )
         return CognitionStateSnapshot(
             self_state={
                 "personality": json.loads(self_row["personality_json"]),
@@ -894,6 +898,7 @@ class SqliteStateStore:
                 event_link_rows=event_link_rows,
                 event_thread_rows=event_thread_rows,
                 state_link_rows=state_link_rows,
+                state_entity_rows=state_entity_rows,
             ),
             retrieval_profile=retrieval_profile,
             effective_settings=effective_settings,
@@ -2412,6 +2417,12 @@ class SqliteStateStore:
             state_id_by_ref=state_id_by_ref,
             created_at=created_at,
         )
+        self._apply_state_entities(
+            connection=connection,
+            state_updates=list(memory_write_plan["state_updates"]),
+            state_id_by_ref=state_id_by_ref,
+            created_at=created_at,
+        )
         return {
             "memory_state_targets": memory_state_targets,
             "embedding_targets": [
@@ -2737,6 +2748,77 @@ class SqliteStateStore:
                 to_state_id=to_state_id,
                 state_link_update=state_link_update,
                 created_at=created_at,
+            )
+
+    # Block: 状態エンティティ反映
+    def _apply_state_entities(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        state_updates: list[dict[str, Any]],
+        state_id_by_ref: dict[str, str],
+        created_at: int,
+    ) -> None:
+        applied_state_ids: set[str] = set()
+        for state_update in state_updates:
+            operation = str(state_update["operation"])
+            state_id = (
+                state_id_by_ref.get(str(state_update["state_ref"]))
+                if operation == "upsert"
+                else str(state_update["target_state_id"])
+            )
+            if not isinstance(state_id, str) or not state_id or state_id in applied_state_ids:
+                continue
+            state_row = self._fetch_memory_state_row_for_update(
+                connection=connection,
+                memory_state_id=state_id,
+            )
+            self._replace_state_entities(
+                connection=connection,
+                state_row=state_row,
+                created_at=created_at,
+            )
+            applied_state_ids.add(state_id)
+
+    # Block: 状態エンティティ置換
+    def _replace_state_entities(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        state_row: sqlite3.Row,
+        created_at: int,
+    ) -> None:
+        memory_state_id = str(state_row["memory_state_id"])
+        connection.execute(
+            """
+            DELETE FROM state_entities
+            WHERE memory_state_id = ?
+            """,
+            (memory_state_id,),
+        )
+        for entity_entry in _state_entity_entries_from_row(state_row):
+            connection.execute(
+                """
+                INSERT INTO state_entities (
+                    state_entity_id,
+                    memory_state_id,
+                    entity_type_norm,
+                    entity_name_raw,
+                    entity_name_norm,
+                    confidence,
+                    created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    _opaque_id("sen"),
+                    memory_state_id,
+                    entity_entry["entity_type_norm"],
+                    entity_entry["entity_name_raw"],
+                    entity_entry["entity_name_norm"],
+                    entity_entry["confidence"],
+                    created_at,
+                ),
             )
 
     # Block: Preference memory upsert
@@ -8605,6 +8687,33 @@ def _fetch_state_links_for_memory_snapshot(
     ).fetchall()
 
 
+def _fetch_state_entities_for_memory_snapshot(
+    *,
+    connection: sqlite3.Connection,
+    memory_state_ids: list[str],
+) -> list[sqlite3.Row]:
+    if not memory_state_ids:
+        return []
+    placeholders = ",".join("?" for _ in memory_state_ids)
+    return connection.execute(
+        f"""
+        SELECT
+            state_entity_id,
+            memory_state_id,
+            entity_type_norm,
+            entity_name_raw,
+            entity_name_norm,
+            confidence,
+            created_at
+        FROM state_entities
+        WHERE memory_state_id IN ({placeholders})
+        ORDER BY created_at DESC
+        LIMIT 64
+        """,
+        tuple(memory_state_ids),
+    ).fetchall()
+
+
 # Block: Write memory event snapshot refs
 def _event_snapshot_refs_for_write_memory_job(
     *,
@@ -9651,6 +9760,7 @@ def _build_memory_snapshot_rows(
     event_link_rows: list[sqlite3.Row],
     event_thread_rows: list[sqlite3.Row],
     state_link_rows: list[sqlite3.Row],
+    state_entity_rows: list[sqlite3.Row],
 ) -> dict[str, Any]:
     working_memory_items: list[dict[str, Any]] = []
     episodic_items: list[dict[str, Any]] = []
@@ -9695,6 +9805,7 @@ def _build_memory_snapshot_rows(
         "event_links": [_event_link_snapshot_entry(row) for row in event_link_rows],
         "event_threads": [_event_thread_snapshot_entry(row) for row in event_thread_rows],
         "state_links": [_state_link_snapshot_entry(row) for row in state_link_rows],
+        "state_entities": [_state_entity_snapshot_entry(row) for row in state_entity_rows],
     }
 
 
@@ -9792,6 +9903,18 @@ def _state_link_snapshot_entry(row: sqlite3.Row) -> dict[str, Any]:
         "confidence": float(row["confidence"]),
         "created_at": int(row["created_at"]),
         "updated_at": int(row["updated_at"]),
+    }
+
+
+def _state_entity_snapshot_entry(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "state_entity_id": str(row["state_entity_id"]),
+        "memory_state_id": str(row["memory_state_id"]),
+        "entity_type_norm": str(row["entity_type_norm"]),
+        "entity_name_raw": str(row["entity_name_raw"]),
+        "entity_name_norm": str(row["entity_name_norm"]),
+        "confidence": float(row["confidence"]),
+        "created_at": int(row["created_at"]),
     }
 
 
@@ -9916,6 +10039,80 @@ def _memory_state_target(
         "source_updated_at": source_updated_at,
         "current_searchable": current_searchable,
     }
+
+
+def _state_entity_entries_from_row(row: sqlite3.Row) -> list[dict[str, Any]]:
+    payload = json.loads(row["payload_json"])
+    if not isinstance(payload, dict):
+        raise RuntimeError("memory_states.payload_json must decode to object")
+    entries: list[dict[str, Any]] = []
+    seen_keys: set[tuple[str, str]] = set()
+    query = payload.get("query")
+    if isinstance(query, str) and query.strip():
+        _append_state_entity_entry(
+            entries=entries,
+            seen_keys=seen_keys,
+            entity_type_norm="topic",
+            entity_name_raw=query,
+            confidence=0.86,
+        )
+    source_task_id = payload.get("source_task_id")
+    if isinstance(source_task_id, str) and source_task_id.strip():
+        _append_state_entity_entry(
+            entries=entries,
+            seen_keys=seen_keys,
+            entity_type_norm="task",
+            entity_name_raw=source_task_id,
+            confidence=0.72,
+        )
+    fact_kind = payload.get("fact_kind")
+    if isinstance(fact_kind, str) and fact_kind.strip():
+        _append_state_entity_entry(
+            entries=entries,
+            seen_keys=seen_keys,
+            entity_type_norm="fact_kind",
+            entity_name_raw=fact_kind,
+            confidence=0.58,
+        )
+    summary_text = payload.get("summary_text")
+    if isinstance(summary_text, str) and summary_text.strip():
+        _append_state_entity_entry(
+            entries=entries,
+            seen_keys=seen_keys,
+            entity_type_norm="summary_phrase",
+            entity_name_raw=summary_text,
+            confidence=0.48,
+        )
+    return entries
+
+
+def _append_state_entity_entry(
+    *,
+    entries: list[dict[str, Any]],
+    seen_keys: set[tuple[str, str]],
+    entity_type_norm: str,
+    entity_name_raw: str,
+    confidence: float,
+) -> None:
+    entity_name_norm = _normalized_entity_name(entity_name_raw)
+    if not entity_name_norm:
+        return
+    entity_key = (entity_type_norm, entity_name_norm)
+    if entity_key in seen_keys:
+        return
+    seen_keys.add(entity_key)
+    entries.append(
+        {
+            "entity_type_norm": entity_type_norm,
+            "entity_name_raw": entity_name_raw.strip(),
+            "entity_name_norm": entity_name_norm,
+            "confidence": confidence,
+        }
+    )
+
+
+def _normalized_entity_name(text: str) -> str:
+    return "".join(text.strip().lower().split())
 
 
 def _recent_event_entry(row: sqlite3.Row) -> dict[str, Any]:

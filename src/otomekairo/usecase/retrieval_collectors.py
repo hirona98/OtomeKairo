@@ -71,6 +71,7 @@ def _collector_for_name(
         "reply_chain": _collect_reply_chain_candidates,
         "context_threads": _collect_context_thread_candidates,
         "state_link_expand": _collect_state_link_candidates,
+        "entity_expand": _collect_entity_expand_candidates,
         "relationship_focus": _collect_relationship_focus_candidates,
         "task_focus": _collect_task_focus_candidates,
         "reflection_focus": _collect_reflection_focus_candidates,
@@ -338,6 +339,51 @@ def _collect_state_link_candidates(
         collected.append(
             _candidate_entry(
                 collector="state_link_expand",
+                slot_name=slot_name,
+                item=item,
+                score=score,
+                reason_codes=reason_codes,
+                sort_timestamp=int(item["updated_at"]),
+            )
+        )
+    return collected
+
+
+def _collect_entity_expand_candidates(
+    *,
+    memory_snapshot: dict[str, Any],
+    current_observation: dict[str, Any],
+    retrieval_plan: dict[str, Any],
+) -> list[dict[str, Any]]:
+    state_items = _state_items_by_id(memory_snapshot=memory_snapshot)
+    normalized_hints = _normalized_observation_hints(current_observation=current_observation)
+    if not normalized_hints:
+        return []
+    collected: list[dict[str, Any]] = []
+    for state_entity in memory_snapshot.get("state_entities", []):
+        if not isinstance(state_entity, dict):
+            raise ValueError("memory_snapshot.state_entities must contain only objects")
+        entity_name_norm = str(state_entity["entity_name_norm"])
+        if not any(
+            hint == entity_name_norm or hint in entity_name_norm or entity_name_norm in hint
+            for hint in normalized_hints
+        ):
+            continue
+        candidate_info = state_items.get(str(state_entity["memory_state_id"]))
+        if candidate_info is None:
+            continue
+        slot_name, item = candidate_info
+        score, reason_codes = _memory_relevance_score(
+            memory_entry=item,
+            current_observation=current_observation,
+            retrieval_plan=retrieval_plan,
+        )
+        score += 0.68 + float(state_entity["confidence"]) * 0.30
+        append_reason(reason_codes, "collector_entity_expand")
+        append_reason(reason_codes, f"entity:{state_entity['entity_type_norm']}")
+        collected.append(
+            _candidate_entry(
+                collector="entity_expand",
                 slot_name=slot_name,
                 item=item,
                 score=score,
@@ -639,6 +685,17 @@ def _matched_state_anchor_ids(
         if score > 0.0:
             anchor_state_ids.add(state_id)
     return anchor_state_ids
+
+
+def _normalized_observation_hints(
+    *,
+    current_observation: dict[str, Any],
+) -> list[str]:
+    return [
+        "".join(text_hint.strip().lower().split())
+        for text_hint in observation_text_hints(current_observation)
+        if text_hint.strip()
+    ]
 
 
 # Block: Scoring helpers
