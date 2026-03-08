@@ -436,6 +436,7 @@ flowchart TD
 - 役割: 想起時の LLM 選別に使う派生プレビューを保持する
 - 主キー: `preview_id TEXT PRIMARY KEY`
 - 必須列: `event_id`, `preview_text`, `source_event_updated_at`, `created_at`, `updated_at`
+- current 実装では、`preview_text` に event summary だけでなく `event_entities`、`event_threads`、`event_affect` の圧縮情報を含めてよい
 - `event_id` は一意とし、1 イベント 1 プレビューを基本とする
 - 主要制約: `UNIQUE(event_id)`
 - 主要索引: `(source_event_updated_at DESC)`

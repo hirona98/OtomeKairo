@@ -3476,7 +3476,24 @@ class SqliteStateStore:
                 connection=connection,
                 event_ids=[target_event_id],
             )[0]
-            preview_text = _build_event_preview_text(event_row)
+            event_entity_rows = _fetch_event_entities_for_memory_snapshot(
+                connection=connection,
+                event_ids=[target_event_id],
+            )
+            event_thread_rows = _fetch_event_threads_for_memory_snapshot(
+                connection=connection,
+                event_ids=[target_event_id],
+            )
+            event_affect_row = _fetch_event_affect_for_preview(
+                connection=connection,
+                event_id=target_event_id,
+            )
+            preview_text = _build_event_preview_text(
+                event_row=event_row,
+                event_entity_rows=event_entity_rows,
+                event_thread_rows=event_thread_rows,
+                event_affect_row=event_affect_row,
+            )
             preview_id = self._upsert_event_preview_cache(
                 connection=connection,
                 event_id=target_event_id,
@@ -8726,6 +8743,21 @@ def _fetch_event_entities_for_memory_snapshot(
     ).fetchall()
 
 
+def _fetch_event_affect_for_preview(
+    *,
+    connection: sqlite3.Connection,
+    event_id: str,
+) -> sqlite3.Row | None:
+    return connection.execute(
+        """
+        SELECT moment_affect_text, moment_affect_labels_json
+        FROM event_affects
+        WHERE event_id = ?
+        """,
+        (event_id,),
+    ).fetchone()
+
+
 def _fetch_event_threads_for_memory_snapshot(
     *,
     connection: sqlite3.Connection,
@@ -8967,11 +8999,70 @@ def _browse_fact_entries_for_write_memory_plan(
     return browse_fact_entries
 
 
-def _build_event_preview_text(row: sqlite3.Row) -> str:
-    preview_text = _event_summary_text(row).strip()
-    if preview_text:
-        return preview_text[:240]
-    return "イベントのプレビューを生成できませんでした"
+def _build_event_preview_text(
+    *,
+    event_row: sqlite3.Row,
+    event_entity_rows: list[sqlite3.Row],
+    event_thread_rows: list[sqlite3.Row],
+    event_affect_row: sqlite3.Row | None,
+) -> str:
+    summary_text = _event_summary_text(event_row).strip()
+    preview_parts = [
+        summary_text if summary_text else str(event_row["kind"]),
+        f"source={event_row['source']}",
+        f"kind={event_row['kind']}",
+    ]
+    entity_terms = _event_preview_entity_terms(event_entity_rows)
+    if entity_terms:
+        preview_parts.append("entities=" + ", ".join(entity_terms))
+    thread_terms = _event_preview_thread_terms(event_thread_rows)
+    if thread_terms:
+        preview_parts.append("threads=" + ", ".join(thread_terms))
+    affect_term = _event_preview_affect_term(event_affect_row)
+    if affect_term is not None:
+        preview_parts.append(affect_term)
+    return " / ".join(preview_parts)[:320]
+
+
+def _event_preview_entity_terms(event_entity_rows: list[sqlite3.Row]) -> list[str]:
+    entity_terms: list[str] = []
+    for row in event_entity_rows:
+        entity_name_raw = str(row["entity_name_raw"]).strip()
+        if entity_name_raw and entity_name_raw not in entity_terms:
+            entity_terms.append(entity_name_raw)
+        if len(entity_terms) >= 4:
+            break
+    return entity_terms
+
+
+def _event_preview_thread_terms(event_thread_rows: list[sqlite3.Row]) -> list[str]:
+    thread_terms: list[str] = []
+    for row in event_thread_rows:
+        thread_key = str(row["thread_key"]).strip()
+        if thread_key and thread_key not in thread_terms:
+            thread_terms.append(thread_key)
+        if len(thread_terms) >= 3:
+            break
+    return thread_terms
+
+
+def _event_preview_affect_term(event_affect_row: sqlite3.Row | None) -> str | None:
+    if event_affect_row is None:
+        return None
+    affect_labels = json.loads(event_affect_row["moment_affect_labels_json"])
+    if not isinstance(affect_labels, list):
+        raise RuntimeError("event_affects.moment_affect_labels_json must decode to list")
+    normalized_labels = [
+        str(label)
+        for label in affect_labels
+        if isinstance(label, str) and label
+    ]
+    if normalized_labels:
+        return "affect=" + ", ".join(normalized_labels[:3])
+    affect_text = str(event_affect_row["moment_affect_text"]).strip()
+    if not affect_text:
+        return None
+    return "affect_text=" + affect_text[:80]
 
 
 # Block: vec_items upsert
