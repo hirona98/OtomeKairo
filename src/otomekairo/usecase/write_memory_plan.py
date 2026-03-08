@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 
@@ -18,6 +19,14 @@ WRITE_MEMORY_PLAN_CONTEXT_KEYS = (
     "event_links",
     "event_threads",
     "state_links",
+)
+WRITE_MEMORY_ABOUT_TIME_KEYS = (
+    "about_start_ts",
+    "about_end_ts",
+    "about_year_start",
+    "about_year_end",
+    "life_stage",
+    "about_time_confidence",
 )
 WRITE_MEMORY_EVENT_ENTITY_KEYS = (
     "entity_type_norm",
@@ -325,7 +334,7 @@ def _build_event_annotations(
     return [
         {
             "event_id": str(event_entry["event_id"]),
-            "about_time": None,
+            "about_time": _build_event_about_time(event_entry=event_entry),
             "entities": _build_event_entities(event_entry=event_entry),
             "thread_hints": [cycle_thread_key],
         }
@@ -417,6 +426,24 @@ def _build_event_entities(*, event_entry: dict[str, Any]) -> list[dict[str, Any]
     return entries
 
 
+def _build_event_about_time(*, event_entry: dict[str, Any]) -> dict[str, Any] | None:
+    summary_text = str(event_entry["summary_text"]).strip()
+    if not summary_text:
+        return None
+    about_years = _about_years_from_text(summary_text)
+    life_stage = _life_stage_from_text(summary_text)
+    if not about_years and life_stage is None:
+        return None
+    return {
+        "about_start_ts": None,
+        "about_end_ts": None,
+        "about_year_start": about_years[0] if about_years else None,
+        "about_year_end": about_years[-1] if about_years else None,
+        "life_stage": life_stage,
+        "about_time_confidence": 0.82 if about_years else 0.58,
+    }
+
+
 def _append_event_entity(
     *,
     entries: list[dict[str, Any]],
@@ -443,6 +470,32 @@ def _append_event_entity(
 
 def _normalize_event_entity_name(text: str) -> str:
     return "".join(text.strip().lower().split())
+
+
+def _about_years_from_text(text: str) -> list[int]:
+    years: list[int] = []
+    for matched_text in re.findall(r"(19\d{2}|20\d{2}|2100)", text):
+        year = int(matched_text)
+        if year not in years:
+            years.append(year)
+    return years
+
+
+def _life_stage_from_text(text: str) -> str | None:
+    for cue, life_stage in (
+        ("幼少期", "childhood"),
+        ("子ども時代", "childhood"),
+        ("小学生", "primary_school"),
+        ("中学生", "junior_high"),
+        ("高校時代", "high_school"),
+        ("高校生", "high_school"),
+        ("大学時代", "college"),
+        ("大学生", "college"),
+        ("社会人", "working_adult"),
+    ):
+        if cue in text:
+            return life_stage
+    return None
 
 
 # Block: Plan validation
@@ -582,12 +635,66 @@ def _validate_event_annotations(
         normalized_entries.append(
             {
                 "event_id": event_id,
-                "about_time": annotation_entry.get("about_time"),
+                "about_time": _validate_about_time(
+                    value=annotation_entry.get("about_time"),
+                ),
                 "entities": normalized_entities,
                 "thread_hints": thread_hints,
             }
         )
     return normalized_entries
+
+
+def _validate_about_time(*, value: Any) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    normalized_about_time = _required_object(
+        value,
+        "write_memory plan.event_annotations.about_time must be object or null",
+    )
+    if tuple(normalized_about_time.keys()) != WRITE_MEMORY_ABOUT_TIME_KEYS:
+        raise RuntimeError("write_memory plan.event_annotations.about_time keys must match fixed shape")
+    about_start_ts = _optional_positive_integer(
+        normalized_about_time.get("about_start_ts"),
+        "write_memory plan.event_annotations.about_time.about_start_ts must be positive integer when present",
+    )
+    about_end_ts = _optional_positive_integer(
+        normalized_about_time.get("about_end_ts"),
+        "write_memory plan.event_annotations.about_time.about_end_ts must be positive integer when present",
+    )
+    about_year_start = _optional_year_integer(
+        normalized_about_time.get("about_year_start"),
+        "write_memory plan.event_annotations.about_time.about_year_start must be year integer when present",
+    )
+    about_year_end = _optional_year_integer(
+        normalized_about_time.get("about_year_end"),
+        "write_memory plan.event_annotations.about_time.about_year_end must be year integer when present",
+    )
+    if about_year_start is not None and about_year_end is not None and about_year_start > about_year_end:
+        raise RuntimeError("write_memory plan.event_annotations.about_time about_year range is invalid")
+    life_stage = _optional_non_empty_string(
+        normalized_about_time.get("life_stage"),
+        "write_memory plan.event_annotations.about_time.life_stage must be non-empty string when present",
+    )
+    if (
+        about_start_ts is None
+        and about_end_ts is None
+        and about_year_start is None
+        and about_year_end is None
+        and life_stage is None
+    ):
+        raise RuntimeError("write_memory plan.event_annotations.about_time must contain at least one hint")
+    return {
+        "about_start_ts": about_start_ts,
+        "about_end_ts": about_end_ts,
+        "about_year_start": about_year_start,
+        "about_year_end": about_year_end,
+        "life_stage": life_stage,
+        "about_time_confidence": _required_score(
+            normalized_about_time.get("about_time_confidence"),
+            "write_memory plan.event_annotations.about_time.about_time_confidence must be numeric within 0.0..1.0",
+        ),
+    }
 
 
 def _validate_event_entity(*, entity: Any) -> dict[str, Any]:
@@ -1799,10 +1906,22 @@ def _required_positive_integer(value: Any, message: str) -> int:
     return integer_value
 
 
+def _optional_positive_integer(value: Any, message: str) -> int | None:
+    if value is None:
+        return None
+    return _required_positive_integer(value, message)
+
+
 def _required_non_empty_string(value: Any, message: str) -> str:
     if not isinstance(value, str) or not value:
         raise RuntimeError(message)
     return value
+
+
+def _optional_non_empty_string(value: Any, message: str) -> str | None:
+    if value is None:
+        return None
+    return _required_non_empty_string(value, message)
 
 
 def _required_non_empty_string_list(value: Any, message: str) -> list[str]:
@@ -1832,6 +1951,15 @@ def _required_score(value: Any, message: str) -> float:
     if numeric_value < 0.0 or numeric_value > 1.0:
         raise RuntimeError(message)
     return numeric_value
+
+
+def _optional_year_integer(value: Any, message: str) -> int | None:
+    if value is None:
+        return None
+    year_value = _required_integer(value, message)
+    if year_value < 1900 or year_value > 2100:
+        raise RuntimeError(message)
+    return year_value
 
 
 def _required_signed_score(value: Any, message: str) -> float:

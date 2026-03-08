@@ -1214,7 +1214,14 @@
   "event_annotations": [
     {
       "event_id": "evt_001",
-      "about_time": null,
+      "about_time": {
+        "about_start_ts": null,
+        "about_end_ts": null,
+        "about_year_start": 2024,
+        "about_year_end": 2024,
+        "life_stage": "high_school",
+        "about_time_confidence": 0.82
+      },
       "entities": [
         {
           "entity_type_norm": "topic",
@@ -1363,6 +1370,11 @@
 - `MemoryWritePlan` は、長周期の `write_memory` 内部で生成・検証してから適用する固定 shape のオブジェクトである
 - 必須項目は `event_annotations`、`state_updates`、`preference_updates`、`event_affect`、`context_updates`、`revision_reasons` である
 - `event_annotations` は、`memory_job_payloads.payload_json.source_event_ids` と同じ件数・同じ順序で並ばなければならない
+- `event_annotations[].about_time` は、`null` または `about_start_ts`、`about_end_ts`、`about_year_start`、`about_year_end`、`life_stage`、`about_time_confidence` の 6 キーを持つ fixed shape object とする
+- `event_annotations[].about_time.about_start_ts` と `about_end_ts` は、値があるとき `positive integer` に固定する
+- `event_annotations[].about_time.about_year_start` と `about_year_end` は、値があるとき `1900..2100` の `integer` に固定する
+- `event_annotations[].about_time.life_stage` は、値があるとき非空 `string` に固定する
+- `event_annotations[].about_time.about_time_confidence` は、`0.0..1.0` の `number` に固定する
 - `event_annotations[].entities[]` は、`entity_type_norm`、`entity_name_raw`、`confidence` の 3 キーを必須とする fixed shape object とする
 - `event_annotations[].entities[].confidence` は、`0.0..1.0` の `number` に固定する
 - `state_updates` の各要素は、少なくとも `state_ref`、`operation`、`memory_kind`、`evidence_event_ids`、`revision_reason` を持つ
@@ -1377,6 +1389,7 @@
 - `context_updates` は、`event_links`、`event_threads`、`state_links` の 3 キーを必須とする
 - `context_updates.state_links` は、永続 ID ではなく同一 `MemoryWritePlan.state_updates` 内の `state_ref` を参照する
 - current 実装では、`event_entities` は `MemoryWritePlan.event_annotations[].entities[]` を正本にして置換してよい
+- current 実装では、`event_annotations[].about_time` の年ヒントと `life_stage` を `event_entities` の補助索引へ落としてよい
 - current 実装では、`state_entities` は `MemoryWritePlan` に直接含めず、適用後の `memory_states.payload_json` から再構成してよい
 - `revision_reasons` は、`state_updates` と同じ件数を持ち、各要素は対応する `state_updates.revision_reason` と一致しなければならない
 

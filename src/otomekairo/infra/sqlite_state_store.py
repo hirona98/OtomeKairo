@@ -2771,8 +2771,7 @@ class SqliteStateStore:
         for event_annotation in event_annotations:
             self._replace_event_entities(
                 connection=connection,
-                event_id=str(event_annotation["event_id"]),
-                entities=list(event_annotation["entities"]),
+                event_annotation=event_annotation,
                 created_at=created_at,
             )
 
@@ -2781,10 +2780,10 @@ class SqliteStateStore:
         self,
         *,
         connection: sqlite3.Connection,
-        event_id: str,
-        entities: list[dict[str, Any]],
+        event_annotation: dict[str, Any],
         created_at: int,
     ) -> None:
+        event_id = str(event_annotation["event_id"])
         connection.execute(
             """
             DELETE FROM event_entities
@@ -2792,7 +2791,7 @@ class SqliteStateStore:
             """,
             (event_id,),
         )
-        for entity_entry in entities:
+        for entity_entry in _event_entity_entries_from_annotation(event_annotation):
             connection.execute(
                 """
                 INSERT INTO event_entities (
@@ -10238,6 +10237,49 @@ def _memory_state_target(
         "source_updated_at": source_updated_at,
         "current_searchable": current_searchable,
     }
+
+
+def _event_entity_entries_from_annotation(event_annotation: dict[str, Any]) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    seen_keys: set[tuple[str, str]] = set()
+    for entity_entry in event_annotation["entities"]:
+        _append_state_entity_entry(
+            entries=entries,
+            seen_keys=seen_keys,
+            entity_type_norm=str(entity_entry["entity_type_norm"]),
+            entity_name_raw=str(entity_entry["entity_name_raw"]),
+            confidence=float(entity_entry["confidence"]),
+        )
+    about_time = event_annotation.get("about_time")
+    if isinstance(about_time, dict):
+        about_year_start = about_time.get("about_year_start")
+        if isinstance(about_year_start, int):
+            _append_state_entity_entry(
+                entries=entries,
+                seen_keys=seen_keys,
+                entity_type_norm="about_year",
+                entity_name_raw=str(about_year_start),
+                confidence=float(about_time["about_time_confidence"]),
+            )
+        about_year_end = about_time.get("about_year_end")
+        if isinstance(about_year_end, int) and about_year_end != about_year_start:
+            _append_state_entity_entry(
+                entries=entries,
+                seen_keys=seen_keys,
+                entity_type_norm="about_year",
+                entity_name_raw=str(about_year_end),
+                confidence=float(about_time["about_time_confidence"]),
+            )
+        life_stage = about_time.get("life_stage")
+        if isinstance(life_stage, str) and life_stage:
+            _append_state_entity_entry(
+                entries=entries,
+                seen_keys=seen_keys,
+                entity_type_norm="life_stage",
+                entity_name_raw=life_stage,
+                confidence=float(about_time["about_time_confidence"]),
+            )
+    return entries
 
 
 def _state_entity_entries_from_row(row: sqlite3.Row) -> list[dict[str, Any]]:

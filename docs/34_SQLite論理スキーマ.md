@@ -422,6 +422,7 @@ flowchart TD
   - 役割: `events` に付いたエンティティ索引を保持する
   - 主キー: `event_entity_id TEXT PRIMARY KEY`
   - 必須列: `event_id`, `entity_type_norm`, `entity_name_raw`, `entity_name_norm`, `confidence`, `created_at`
+  - current 実装では、`about_year` と `life_stage` も `entity_type_norm` に含めてよい
   - 主要索引: `(event_id)`, `(entity_type_norm, entity_name_norm)`
 
 - `state_entities`
