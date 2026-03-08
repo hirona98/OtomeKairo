@@ -17,6 +17,7 @@ asyncio = "INFO"
 httpcore = "WARNING"
 httpx = "WARNING"
 openai = "INFO"
+zeep = "WARNING"
 
 # Block: Web logging
 [process.web.logging]
@@ -34,6 +35,7 @@ asyncio = "INFO"
 httpcore = "WARNING"
 httpx = "WARNING"
 openai = "INFO"
+zeep = "WARNING"
 
 # Block: Runtime logging
 [process.runtime.logging]
@@ -51,6 +53,7 @@ asyncio = "INFO"
 httpcore = "WARNING"
 httpx = "WARNING"
 openai = "INFO"
+zeep = "WARNING"
 
 # Block: LiteLLM integration logging
 [integrations.litellm]

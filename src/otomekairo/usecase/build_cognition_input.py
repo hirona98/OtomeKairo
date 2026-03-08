@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -13,8 +14,28 @@ from otomekairo.usecase.observation_normalization import (
     normalize_observation_source,
     normalize_trigger_reason,
 )
+from otomekairo.usecase.persona_prompt_projection import build_persona_prompt_projection
 from otomekairo.usecase.persona_projection import build_attention_snapshot, build_skill_candidates
 from otomekairo.usecase.retrieval_flow import build_retrieval_artifacts
+
+
+# Block: Context budget constants
+CONTEXT_OUTPUT_CONTRACT_WEIGHT = 15
+CONTEXT_MEMORY_WEIGHT = 35
+CONTEXT_SELF_WEIGHT = 40
+CONTEXT_BEHAVIOR_WEIGHT = 22
+CONTEXT_SITUATION_WEIGHT = 38
+ESTIMATED_TOKEN_CHAR_RATIO = 4
+MEMORY_PROMPT_TEXT_LIMIT = 120
+MEMORY_TRIM_SLOT_ORDER = (
+    "recent_event_window",
+    "reflection_items",
+    "episodic_items",
+    "semantic_items",
+    "affective_items",
+    "relationship_items",
+    "working_memory_items",
+)
 
 
 # Block: Build result
@@ -66,6 +87,20 @@ def build_cognition_input(
     latest_persona_update = state_snapshot.self_state.get("latest_persona_update")
     if isinstance(latest_persona_update, dict):
         self_snapshot["last_persona_update"] = latest_persona_update
+    cycle_meta = {
+        "cycle_id": cycle_id,
+        "trigger_reason": normalize_trigger_reason(
+            source=pending_input.source,
+            payload=pending_input.payload,
+        ),
+        "input_id": pending_input.input_id,
+        "input_kind": input_kind,
+    }
+    time_context = _build_time_context(resolved_at)
+    task_snapshot = _build_task_snapshot(
+        task_snapshot=state_snapshot.task_snapshot,
+        resolved_at=resolved_at,
+    )
     attention_snapshot = build_attention_snapshot(
         current_observation=current_observation,
         selection_profile=selection_profile,
@@ -79,62 +114,85 @@ def build_cognition_input(
         body_state=state_snapshot.body_state,
         task_snapshot=state_snapshot.task_snapshot,
     )
+    policy_snapshot = {
+        "system_policy": _build_system_policy(),
+        "runtime_policy": _build_runtime_policy(
+            effective_settings=state_snapshot.effective_settings,
+            camera_candidates=camera_candidates_payload,
+            camera_available=camera_available,
+        ),
+        "input_evaluation": _build_input_evaluation(current_observation=current_observation),
+    }
+    trimmed_memory_bundle, trimmed_memory_item_refs = _trim_memory_bundle_for_context_budget(
+        effective_settings=state_snapshot.effective_settings,
+        cycle_meta=cycle_meta,
+        time_context=time_context,
+        self_snapshot=self_snapshot,
+        behavior_settings=behavior_settings,
+        selection_profile=selection_profile,
+        body_snapshot=state_snapshot.body_state,
+        world_snapshot=state_snapshot.world_state,
+        drive_snapshot=state_snapshot.drive_state,
+        task_snapshot=task_snapshot,
+        attention_snapshot=attention_snapshot,
+        policy_snapshot=policy_snapshot,
+        skill_candidates=skill_candidates,
+        current_observation=current_observation,
+        camera_candidates=camera_candidates_payload,
+        memory_bundle=retrieval_artifacts.memory_bundle,
+    )
+    retrieval_selected_json = _build_retrieval_selected_json(
+        memory_bundle=trimmed_memory_bundle,
+        selection_trace=_required_selection_trace(retrieval_artifacts.selected_json),
+    )
+    retrieval_context = {
+        "plan": retrieval_artifacts.retrieval_plan,
+        "selected": retrieval_selected_json,
+    }
+    context_budget = _build_context_budget(
+        effective_settings=state_snapshot.effective_settings,
+        cycle_meta=cycle_meta,
+        time_context=time_context,
+        self_snapshot=self_snapshot,
+        behavior_settings=behavior_settings,
+        selection_profile=selection_profile,
+        body_snapshot=state_snapshot.body_state,
+        world_snapshot=state_snapshot.world_state,
+        drive_snapshot=state_snapshot.drive_state,
+        task_snapshot=task_snapshot,
+        attention_snapshot=attention_snapshot,
+        retrieval_context=retrieval_context,
+        policy_snapshot=policy_snapshot,
+        skill_candidates=skill_candidates,
+        current_observation=current_observation,
+        camera_candidates=camera_candidates_payload,
+        memory_bundle=trimmed_memory_bundle,
+        trimmed_memory_item_refs=trimmed_memory_item_refs,
+    )
     return BuiltCognitionInput(
         cognition_input={
-            "cycle_meta": {
-                "cycle_id": cycle_id,
-                "trigger_reason": normalize_trigger_reason(
-                    source=pending_input.source,
-                    payload=pending_input.payload,
-                ),
-                "input_id": pending_input.input_id,
-                "input_kind": input_kind,
-            },
-            "time_context": _build_time_context(resolved_at),
+            "cycle_meta": cycle_meta,
+            "time_context": time_context,
             "self_snapshot": self_snapshot,
             "behavior_settings": behavior_settings,
             "selection_profile": selection_profile,
             "body_snapshot": state_snapshot.body_state,
             "world_snapshot": state_snapshot.world_state,
             "drive_snapshot": state_snapshot.drive_state,
-            "task_snapshot": _build_task_snapshot(
-                task_snapshot=state_snapshot.task_snapshot,
-                resolved_at=resolved_at,
-            ),
+            "task_snapshot": task_snapshot,
             "attention_snapshot": attention_snapshot,
-            "memory_bundle": retrieval_artifacts.memory_bundle,
-            "retrieval_context": {
-                "plan": retrieval_artifacts.retrieval_plan,
-                "selected": retrieval_artifacts.selected_json,
-            },
-            "policy_snapshot": {
-                "system_policy": {
-                    "respect_invariants": True,
-                    "allow_direct_state_write": False,
-                },
-                "runtime_policy": {
-                    "camera_enabled": bool(state_snapshot.effective_settings["sensors.camera.enabled"]),
-                    "camera_available": bool(camera_available),
-                    "camera_candidate_count": len(camera_candidates_payload),
-                    "microphone_enabled": bool(state_snapshot.effective_settings["sensors.microphone.enabled"]),
-                },
-            },
+            "memory_bundle": trimmed_memory_bundle,
+            "retrieval_context": retrieval_context,
+            "policy_snapshot": policy_snapshot,
             "camera_candidates": camera_candidates_payload,
             "skill_candidates": skill_candidates,
             "current_observation": current_observation,
-            "context_budget": {
-                "max_tokens": int(state_snapshot.effective_settings["runtime.context_budget_tokens"]),
-                "model": str(state_snapshot.effective_settings["llm.model"]),
-                "api_key": str(state_snapshot.effective_settings["llm.api_key"]),
-                "base_url": str(state_snapshot.effective_settings["llm.base_url"]),
-                "temperature": float(state_snapshot.effective_settings["llm.temperature"]),
-                "max_output_tokens": int(state_snapshot.effective_settings["llm.max_output_tokens"]),
-            },
+            "context_budget": context_budget,
         },
         retrieval_run={
             "plan_json": retrieval_artifacts.retrieval_plan,
             "candidates_json": retrieval_artifacts.candidates_json,
-            "selected_json": retrieval_artifacts.selected_json,
+            "selected_json": retrieval_selected_json,
         },
     )
 
@@ -475,6 +533,794 @@ def _build_selection_profile(
     }
 
 
+# Block: Policy snapshot builders
+def _build_system_policy() -> dict[str, Any]:
+    return {
+        "respect_invariants": True,
+        "allow_direct_state_write": False,
+    }
+
+
+def _build_runtime_policy(
+    *,
+    effective_settings: dict[str, Any],
+    camera_candidates: list[dict[str, Any]],
+    camera_available: bool,
+) -> dict[str, Any]:
+    return {
+        "camera_enabled": bool(effective_settings["sensors.camera.enabled"]),
+        "camera_available": bool(camera_available),
+        "camera_candidate_count": len(camera_candidates),
+        "microphone_enabled": bool(effective_settings["sensors.microphone.enabled"]),
+    }
+
+
+def _build_input_evaluation(*, current_observation: dict[str, Any]) -> dict[str, Any]:
+    input_kind = str(current_observation["input_kind"])
+    observation_kind = str(current_observation["kind"])
+    if input_kind in {"chat_message", "microphone_message"}:
+        return {
+            "input_role": "instruction" if observation_kind == "instruction" else "dialogue",
+            "attention_priority": "high",
+            "factuality": "unverified_user_report",
+            "should_reply_in_channel": True,
+            "can_override_persona": False,
+            "must_preserve_invariants": True,
+        }
+    if input_kind == "network_result":
+        return {
+            "input_role": "task_result",
+            "attention_priority": "high",
+            "factuality": "external_tool_result",
+            "should_reply_in_channel": True,
+            "can_override_persona": False,
+            "must_preserve_invariants": True,
+        }
+    if input_kind == "camera_observation":
+        trigger_reason = str(current_observation["trigger_reason"])
+        return {
+            "input_role": "followup_observation" if trigger_reason == "post_action_followup" else "observation",
+            "attention_priority": "medium",
+            "factuality": "runtime_observation",
+            "should_reply_in_channel": False,
+            "can_override_persona": False,
+            "must_preserve_invariants": True,
+        }
+    if input_kind == "idle_tick":
+        return {
+            "input_role": "self_maintenance",
+            "attention_priority": "low",
+            "factuality": "internal_signal",
+            "should_reply_in_channel": False,
+            "can_override_persona": False,
+            "must_preserve_invariants": True,
+        }
+    raise ValueError("unsupported input_kind for input_evaluation")
+
+
+# Block: Context budget builders
+def _trim_memory_bundle_for_context_budget(
+    *,
+    effective_settings: dict[str, Any],
+    cycle_meta: dict[str, Any],
+    time_context: dict[str, Any],
+    self_snapshot: dict[str, Any],
+    behavior_settings: dict[str, Any],
+    selection_profile: dict[str, Any],
+    body_snapshot: dict[str, Any],
+    world_snapshot: dict[str, Any],
+    drive_snapshot: dict[str, Any],
+    task_snapshot: dict[str, Any],
+    attention_snapshot: dict[str, Any],
+    policy_snapshot: dict[str, Any],
+    skill_candidates: list[dict[str, Any]],
+    current_observation: dict[str, Any],
+    camera_candidates: list[dict[str, Any]],
+    memory_bundle: dict[str, Any],
+) -> tuple[dict[str, Any], list[str]]:
+    total_limit = _required_positive_integer_setting(
+        effective_settings=effective_settings,
+        key="runtime.context_budget_tokens",
+    )
+    preferred_memory_limit = _required_positive_integer_setting(
+        effective_settings=effective_settings,
+        key="memory.max_inject_tokens",
+    )
+    layer_limits = _build_context_layer_limits(
+        total_limit=total_limit,
+        preferred_memory_limit=preferred_memory_limit,
+    )
+    self_tokens = _estimate_self_layer_tokens(
+        self_snapshot=self_snapshot,
+        selection_profile=selection_profile,
+    )
+    behavior_tokens = _estimate_behavior_layer_tokens(behavior_settings=behavior_settings)
+    situation_tokens = _estimate_situation_layer_tokens(
+        cycle_meta=cycle_meta,
+        time_context=time_context,
+        body_snapshot=body_snapshot,
+        world_snapshot=world_snapshot,
+        drive_snapshot=drive_snapshot,
+        task_snapshot=task_snapshot,
+        attention_snapshot=attention_snapshot,
+        policy_snapshot=policy_snapshot,
+        skill_candidates=skill_candidates,
+        current_observation=current_observation,
+        camera_candidates=camera_candidates,
+    )
+    _validate_fixed_layer_budget(
+        layer_name="self",
+        estimated_tokens=self_tokens,
+        layer_limit=layer_limits["self"],
+    )
+    _validate_fixed_layer_budget(
+        layer_name="behavior",
+        estimated_tokens=behavior_tokens,
+        layer_limit=layer_limits["behavior"],
+    )
+    _validate_fixed_layer_budget(
+        layer_name="situation",
+        estimated_tokens=situation_tokens,
+        layer_limit=layer_limits["situation"],
+    )
+    remaining_memory_budget = (
+        total_limit
+        - self_tokens
+        - behavior_tokens
+        - situation_tokens
+        - layer_limits["output_contract"]
+    )
+    if remaining_memory_budget <= 0:
+        raise RuntimeError("fixed cognition layers exceed runtime.context_budget_tokens")
+    return _trim_memory_bundle_to_token_limit(
+        memory_bundle=memory_bundle,
+        token_limit=min(layer_limits["memory"], remaining_memory_budget),
+    )
+
+
+def _build_context_budget(
+    *,
+    effective_settings: dict[str, Any],
+    cycle_meta: dict[str, Any],
+    time_context: dict[str, Any],
+    self_snapshot: dict[str, Any],
+    behavior_settings: dict[str, Any],
+    selection_profile: dict[str, Any],
+    body_snapshot: dict[str, Any],
+    world_snapshot: dict[str, Any],
+    drive_snapshot: dict[str, Any],
+    task_snapshot: dict[str, Any],
+    attention_snapshot: dict[str, Any],
+    retrieval_context: dict[str, Any],
+    policy_snapshot: dict[str, Any],
+    skill_candidates: list[dict[str, Any]],
+    current_observation: dict[str, Any],
+    camera_candidates: list[dict[str, Any]],
+    memory_bundle: dict[str, Any],
+    trimmed_memory_item_refs: list[str],
+) -> dict[str, Any]:
+    total_limit = _required_positive_integer_setting(
+        effective_settings=effective_settings,
+        key="runtime.context_budget_tokens",
+    )
+    preferred_memory_limit = _required_positive_integer_setting(
+        effective_settings=effective_settings,
+        key="memory.max_inject_tokens",
+    )
+    layer_limits = _build_context_layer_limits(
+        total_limit=total_limit,
+        preferred_memory_limit=preferred_memory_limit,
+    )
+    estimated_layer_tokens = {
+        "self": _estimate_self_layer_tokens(
+            self_snapshot=self_snapshot,
+            selection_profile=selection_profile,
+        ),
+        "behavior": _estimate_behavior_layer_tokens(
+            behavior_settings=behavior_settings,
+        ),
+        "situation": _estimate_situation_layer_tokens(
+            cycle_meta=cycle_meta,
+            time_context=time_context,
+            body_snapshot=body_snapshot,
+            world_snapshot=world_snapshot,
+            drive_snapshot=drive_snapshot,
+            task_snapshot=task_snapshot,
+            attention_snapshot=attention_snapshot,
+            retrieval_context=retrieval_context,
+            policy_snapshot=policy_snapshot,
+            skill_candidates=skill_candidates,
+            current_observation=current_observation,
+            camera_candidates=camera_candidates,
+        ),
+        "memory": _estimate_memory_layer_tokens(memory_bundle=memory_bundle),
+        "output_contract": layer_limits["output_contract"],
+    }
+    for layer_name in ("self", "behavior", "situation", "memory"):
+        _validate_fixed_layer_budget(
+            layer_name=layer_name,
+            estimated_tokens=estimated_layer_tokens[layer_name],
+            layer_limit=layer_limits[layer_name],
+        )
+    estimated_total_tokens = sum(estimated_layer_tokens.values())
+    if estimated_total_tokens > total_limit:
+        raise RuntimeError("cognition_input exceeds runtime.context_budget_tokens after trimming")
+    return {
+        "total_limit": total_limit,
+        "layer_limits": layer_limits,
+        "estimated_layer_tokens": estimated_layer_tokens,
+        "estimated_total_tokens": estimated_total_tokens,
+        "trimmed_memory_item_refs": trimmed_memory_item_refs,
+    }
+
+
+def _build_context_layer_limits(
+    *,
+    total_limit: int,
+    preferred_memory_limit: int,
+) -> dict[str, int]:
+    output_contract_limit = max(
+        1,
+        int(total_limit * CONTEXT_OUTPUT_CONTRACT_WEIGHT / 100),
+    )
+    memory_limit = min(
+        preferred_memory_limit,
+        max(1, int(total_limit * CONTEXT_MEMORY_WEIGHT / 100)),
+    )
+    remaining_limit = total_limit - output_contract_limit - memory_limit
+    if remaining_limit <= 0:
+        raise RuntimeError("runtime.context_budget_tokens is too small for fixed layer allocation")
+    fixed_layer_limits = _split_weighted_budget(
+        total_budget=remaining_limit,
+        weights=(
+            ("self", CONTEXT_SELF_WEIGHT),
+            ("behavior", CONTEXT_BEHAVIOR_WEIGHT),
+            ("situation", CONTEXT_SITUATION_WEIGHT),
+        ),
+    )
+    return {
+        **fixed_layer_limits,
+        "memory": memory_limit,
+        "output_contract": output_contract_limit,
+    }
+
+
+def _split_weighted_budget(
+    *,
+    total_budget: int,
+    weights: tuple[tuple[str, int], ...],
+) -> dict[str, int]:
+    total_weight = sum(weight for _, weight in weights)
+    raw_allocations: list[tuple[str, int, float]] = []
+    assigned_total = 0
+    for name, weight in weights:
+        raw_value = total_budget * weight / total_weight
+        base_value = int(raw_value)
+        raw_allocations.append((name, base_value, raw_value - base_value))
+        assigned_total += base_value
+    remaining = total_budget - assigned_total
+    allocations = {name: base_value for name, base_value, _ in raw_allocations}
+    for name, _, _ in sorted(raw_allocations, key=lambda item: item[2], reverse=True):
+        if remaining <= 0:
+            break
+        allocations[name] += 1
+        remaining -= 1
+    return allocations
+
+
+def _estimate_self_layer_tokens(
+    *,
+    self_snapshot: dict[str, Any],
+    selection_profile: dict[str, Any],
+) -> int:
+    return _estimate_token_count(
+        _self_layer_budget_projection(
+            self_snapshot=self_snapshot,
+            selection_profile=selection_profile,
+        )
+    )
+
+
+def _estimate_behavior_layer_tokens(*, behavior_settings: dict[str, Any]) -> int:
+    return _estimate_token_count({"behavior_settings": behavior_settings})
+
+
+def _estimate_situation_layer_tokens(
+    *,
+    cycle_meta: dict[str, Any],
+    time_context: dict[str, Any],
+    body_snapshot: dict[str, Any],
+    world_snapshot: dict[str, Any],
+    drive_snapshot: dict[str, Any],
+    task_snapshot: dict[str, Any],
+    attention_snapshot: dict[str, Any],
+    retrieval_context: dict[str, Any] | None = None,
+    policy_snapshot: dict[str, Any],
+    skill_candidates: list[dict[str, Any]],
+    current_observation: dict[str, Any],
+    camera_candidates: list[dict[str, Any]],
+) -> int:
+    return _estimate_token_count(
+        _situation_layer_budget_projection(
+            cycle_meta=cycle_meta,
+            time_context=time_context,
+            body_snapshot=body_snapshot,
+            world_snapshot=world_snapshot,
+            drive_snapshot=drive_snapshot,
+            task_snapshot=task_snapshot,
+            attention_snapshot=attention_snapshot,
+            retrieval_context=retrieval_context,
+            policy_snapshot=policy_snapshot,
+            skill_candidates=skill_candidates,
+            current_observation=current_observation,
+            camera_candidates=camera_candidates,
+        )
+    )
+
+
+def _estimate_memory_layer_tokens(*, memory_bundle: dict[str, Any]) -> int:
+    return _estimate_token_count(_memory_layer_budget_projection(memory_bundle=memory_bundle))
+
+
+def _estimate_token_count(value: Any) -> int:
+    serialized = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    if not serialized:
+        return 0
+    return max(1, (len(serialized) + ESTIMATED_TOKEN_CHAR_RATIO - 1) // ESTIMATED_TOKEN_CHAR_RATIO)
+
+
+def _validate_fixed_layer_budget(
+    *,
+    layer_name: str,
+    estimated_tokens: int,
+    layer_limit: int,
+) -> None:
+    if estimated_tokens > layer_limit:
+        raise RuntimeError(f"{layer_name} layer exceeds context budget")
+
+
+def _trim_memory_bundle_to_token_limit(
+    *,
+    memory_bundle: dict[str, Any],
+    token_limit: int,
+) -> tuple[dict[str, Any], list[str]]:
+    trimmed_bundle = {
+        slot_name: list(memory_bundle[slot_name])
+        for slot_name in (
+            "working_memory_items",
+            "episodic_items",
+            "semantic_items",
+            "affective_items",
+            "relationship_items",
+            "reflection_items",
+            "recent_event_window",
+        )
+    }
+    trimmed_refs: list[str] = []
+    while _estimate_memory_layer_tokens(memory_bundle=trimmed_bundle) > token_limit:
+        removed_ref = _pop_low_priority_memory_item(trimmed_bundle)
+        if removed_ref is None:
+            break
+        trimmed_refs.append(removed_ref)
+    if _estimate_memory_layer_tokens(memory_bundle=trimmed_bundle) > token_limit:
+        raise RuntimeError("memory layer exceeds context budget even after trimming")
+    return trimmed_bundle, trimmed_refs
+
+
+def _pop_low_priority_memory_item(memory_bundle: dict[str, Any]) -> str | None:
+    for slot_name in MEMORY_TRIM_SLOT_ORDER:
+        slot_items = memory_bundle[slot_name]
+        if not slot_items:
+            continue
+        removed_item = slot_items.pop()
+        return _memory_bundle_item_ref(slot_name=slot_name, item=removed_item)
+    return None
+
+
+def _build_retrieval_selected_json(
+    *,
+    memory_bundle: dict[str, Any],
+    selection_trace: list[dict[str, Any]],
+) -> dict[str, Any]:
+    kept_refs = _selected_item_refs(memory_bundle=memory_bundle)
+    return {
+        "selected_counts": {
+            "working_memory_items": len(memory_bundle["working_memory_items"]),
+            "episodic_items": len(memory_bundle["episodic_items"]),
+            "semantic_items": len(memory_bundle["semantic_items"]),
+            "affective_items": len(memory_bundle["affective_items"]),
+            "relationship_items": len(memory_bundle["relationship_items"]),
+            "reflection_items": len(memory_bundle["reflection_items"]),
+            "recent_event_window": len(memory_bundle["recent_event_window"]),
+        },
+        "selected_refs": {
+            "working_memory_item_ids": [
+                str(item["memory_state_id"])
+                for item in memory_bundle["working_memory_items"]
+            ],
+            "episodic_item_ids": [
+                str(item["memory_state_id"])
+                for item in memory_bundle["episodic_items"]
+            ],
+            "semantic_item_ids": [
+                str(item["memory_state_id"])
+                for item in memory_bundle["semantic_items"]
+            ],
+            "affective_item_ids": [
+                str(item["memory_state_id"])
+                for item in memory_bundle["affective_items"]
+            ],
+            "relationship_item_ids": [
+                str(item["memory_state_id"])
+                for item in memory_bundle["relationship_items"]
+            ],
+            "reflection_item_ids": [
+                str(item["memory_state_id"])
+                for item in memory_bundle["reflection_items"]
+            ],
+            "recent_event_ids": [
+                str(item["event_id"])
+                for item in memory_bundle["recent_event_window"]
+            ],
+        },
+        "selection_trace": [
+            trace_entry
+            for trace_entry in selection_trace
+            if isinstance(trace_entry, dict) and trace_entry.get("item_ref") in kept_refs
+        ],
+    }
+
+
+def _selected_item_refs(*, memory_bundle: dict[str, Any]) -> set[str]:
+    refs: set[str] = set()
+    for slot_name in (
+        "working_memory_items",
+        "episodic_items",
+        "semantic_items",
+        "affective_items",
+        "relationship_items",
+        "reflection_items",
+        "recent_event_window",
+    ):
+        for item in memory_bundle[slot_name]:
+            refs.add(_memory_bundle_item_ref(slot_name=slot_name, item=item))
+    return refs
+
+
+def _memory_bundle_item_ref(*, slot_name: str, item: dict[str, Any]) -> str:
+    if slot_name == "recent_event_window":
+        return f"event:{item['event_id']}"
+    memory_kind = str(item["memory_kind"])
+    memory_state_id = str(item["memory_state_id"])
+    if memory_kind == "episodic_event":
+        return f"event:{memory_state_id}"
+    if memory_kind == "event_affect":
+        return f"event_affect:{memory_state_id}"
+    if memory_kind == "preference":
+        return f"preference:{memory_state_id}"
+    return f"memory_state:{memory_state_id}"
+
+
+def _required_selection_trace(selected_json: dict[str, Any]) -> list[dict[str, Any]]:
+    selection_trace = selected_json.get("selection_trace")
+    if not isinstance(selection_trace, list):
+        raise RuntimeError("retrieval selected_json.selection_trace must be list")
+    return selection_trace
+
+
+def _self_layer_budget_projection(
+    *,
+    self_snapshot: dict[str, Any],
+    selection_profile: dict[str, Any],
+) -> dict[str, Any]:
+    goals = self_snapshot["long_term_goals"].get("goals", [])
+    invariants = self_snapshot["invariants"]
+    persona_projection = build_persona_prompt_projection(selection_profile=selection_profile)
+    return {
+        "current_emotion_label": str(self_snapshot["current_emotion"].get("primary_label", "")),
+        "persona_projection": persona_projection,
+        "goal_titles": [
+            str(goal.get("title"))
+            for goal in goals[:3]
+            if isinstance(goal, dict) and isinstance(goal.get("title"), str)
+        ],
+        "relationship_priorities": [
+            {
+                "target_ref": str(item.get("target_ref", "")),
+                "reason_tag": str(item.get("reason_tag", "")),
+            }
+            for item in selection_profile["relationship_priorities"][:3]
+            if isinstance(item, dict)
+        ],
+        "forbidden_action_types": [
+            str(action_type)
+            for action_type in invariants.get("forbidden_action_types", [])[:8]
+        ],
+        "forbidden_action_styles": [
+            str(action_style)
+            for action_style in invariants.get("forbidden_action_styles", [])[:8]
+        ],
+        "last_persona_update": _persona_update_budget_projection(self_snapshot=self_snapshot),
+    }
+
+
+def _persona_update_budget_projection(*, self_snapshot: dict[str, Any]) -> dict[str, Any] | None:
+    last_persona_update = self_snapshot.get("last_persona_update")
+    if not isinstance(last_persona_update, dict):
+        return None
+    updated_traits = last_persona_update.get("updated_traits")
+    if not isinstance(updated_traits, list):
+        return None
+    return {
+        "reason": str(last_persona_update.get("reason", "")),
+        "updated_traits": [
+            str(trait_entry.get("trait_name"))
+            for trait_entry in updated_traits[:4]
+            if isinstance(trait_entry, dict) and isinstance(trait_entry.get("trait_name"), str)
+        ],
+    }
+
+
+def _situation_layer_budget_projection(
+    *,
+    cycle_meta: dict[str, Any],
+    time_context: dict[str, Any],
+    body_snapshot: dict[str, Any],
+    world_snapshot: dict[str, Any],
+    drive_snapshot: dict[str, Any],
+    task_snapshot: dict[str, Any],
+    attention_snapshot: dict[str, Any],
+    retrieval_context: dict[str, Any] | None,
+    policy_snapshot: dict[str, Any],
+    skill_candidates: list[dict[str, Any]],
+    current_observation: dict[str, Any],
+    camera_candidates: list[dict[str, Any]],
+) -> dict[str, Any]:
+    projection = {
+        "cycle_id": str(cycle_meta["cycle_id"]),
+        "current_time_local_text": str(time_context.get("current_time_local_text", "")),
+        "body_snapshot": _body_snapshot_budget_projection(body_snapshot=body_snapshot),
+        "world_summary": str(world_snapshot.get("situation_summary", "")),
+        "drive_snapshot": _drive_snapshot_budget_projection(drive_snapshot=drive_snapshot),
+        "task_snapshot": _task_snapshot_budget_projection(task_snapshot=task_snapshot),
+        "attention": _attention_budget_projection(attention_snapshot=attention_snapshot),
+        "input_evaluation": dict(policy_snapshot["input_evaluation"]),
+        "skill_candidates": _skill_candidate_budget_projection(skill_candidates=skill_candidates),
+        "current_observation": _current_observation_budget_projection(current_observation=current_observation),
+        "camera_candidates": _camera_candidate_budget_projection(camera_candidates=camera_candidates),
+    }
+    if retrieval_context is not None:
+        projection["retrieval_context"] = _retrieval_context_budget_projection(retrieval_context=retrieval_context)
+    return projection
+
+
+def _attention_budget_projection(*, attention_snapshot: dict[str, Any]) -> dict[str, Any]:
+    primary_focus = attention_snapshot.get("primary_focus")
+    if not isinstance(primary_focus, dict):
+        return {"summary": "", "reason_codes": []}
+    return {
+        "summary": str(primary_focus.get("summary", "")),
+        "reason_codes": [
+            str(reason_code)
+            for reason_code in primary_focus.get("reason_codes", [])[:3]
+        ],
+    }
+
+
+# Block: Situation sub projections
+def _body_snapshot_budget_projection(*, body_snapshot: dict[str, Any]) -> dict[str, Any]:
+    posture = body_snapshot.get("posture")
+    sensor_availability = body_snapshot.get("sensor_availability")
+    load = body_snapshot.get("load")
+    if not isinstance(posture, dict) or not isinstance(sensor_availability, dict) or not isinstance(load, dict):
+        return {}
+    return {
+        "posture_mode": str(posture.get("mode", "")),
+        "sensor_availability": {
+            "camera": bool(sensor_availability.get("camera")),
+            "microphone": bool(sensor_availability.get("microphone")),
+        },
+        "load": {
+            "task_queue_pressure": _safe_numeric_projection(load.get("task_queue_pressure")),
+            "interaction_load": _safe_numeric_projection(load.get("interaction_load")),
+        },
+    }
+
+
+def _drive_snapshot_budget_projection(*, drive_snapshot: dict[str, Any]) -> dict[str, Any]:
+    priority_effects = drive_snapshot.get("priority_effects")
+    if not isinstance(priority_effects, dict):
+        return {}
+    return {
+        "task_progress_bias": _safe_numeric_projection(priority_effects.get("task_progress_bias")),
+        "exploration_bias": _safe_numeric_projection(priority_effects.get("exploration_bias")),
+        "maintenance_bias": _safe_numeric_projection(priority_effects.get("maintenance_bias")),
+        "social_bias": _safe_numeric_projection(priority_effects.get("social_bias")),
+    }
+
+
+def _task_snapshot_budget_projection(*, task_snapshot: dict[str, Any]) -> dict[str, Any]:
+    active_tasks = task_snapshot.get("active_tasks")
+    waiting_external_tasks = task_snapshot.get("waiting_external_tasks")
+    return {
+        "active_tasks": _task_entries_budget_projection(active_tasks),
+        "waiting_external_tasks": _task_entries_budget_projection(waiting_external_tasks),
+    }
+
+
+def _task_entries_budget_projection(task_entries: Any) -> list[dict[str, Any]]:
+    if not isinstance(task_entries, list):
+        return []
+    projected_entries: list[dict[str, Any]] = []
+    for task_entry in task_entries[:3]:
+        if not isinstance(task_entry, dict):
+            continue
+        projected_entries.append(
+            {
+                "task_kind": str(task_entry.get("task_kind", "")),
+                "goal_hint": _prompt_text(str(task_entry.get("goal_hint", ""))),
+                "relative_time_text": str(task_entry.get("relative_time_text", "")),
+            }
+        )
+    return projected_entries
+
+
+def _skill_candidate_budget_projection(*, skill_candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    projected_candidates: list[dict[str, Any]] = []
+    for candidate in skill_candidates[:3]:
+        if not isinstance(candidate, dict):
+            continue
+        projected_candidates.append(
+            {
+                "skill_id": str(candidate.get("skill_id", "")),
+                "initiative_kind": str(candidate.get("initiative_kind", "")),
+                "fit_score": float(candidate.get("fit_score", 0.0)),
+                "suggested_action_types": [
+                    str(action_type)
+                    for action_type in candidate.get("suggested_action_types", [])[:2]
+                ],
+            }
+        )
+    return projected_candidates
+
+
+def _current_observation_budget_projection(*, current_observation: dict[str, Any]) -> dict[str, Any]:
+    projected_observation = {
+        "input_kind": str(current_observation["input_kind"]),
+        "observation_text": _prompt_text(str(current_observation["observation_text"])),
+        "captured_at_local_text": str(current_observation.get("captured_at_local_text", "")),
+        "relative_time_text": str(current_observation.get("relative_time_text", "")),
+    }
+    attachment_summary_text = current_observation.get("attachment_summary_text")
+    if isinstance(attachment_summary_text, str) and attachment_summary_text:
+        projected_observation["attachment_summary_text"] = attachment_summary_text
+    query = current_observation.get("query")
+    if isinstance(query, str) and query:
+        projected_observation["query"] = query
+    source_task_id = current_observation.get("source_task_id")
+    if isinstance(source_task_id, str) and source_task_id:
+        projected_observation["source_task_id"] = source_task_id
+    return projected_observation
+
+
+def _camera_candidate_budget_projection(*, camera_candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    projected_candidates: list[dict[str, Any]] = []
+    for candidate in camera_candidates[:5]:
+        if not isinstance(candidate, dict):
+            continue
+        projected_candidates.append(
+            {
+                "camera_connection_id": str(candidate.get("camera_connection_id", "")),
+                "display_name": str(candidate.get("display_name", "")),
+                "presets": [
+                    str(preset.get("preset_name", ""))
+                    for preset in candidate.get("presets", [])[:4]
+                    if isinstance(preset, dict)
+                ],
+            }
+        )
+    return projected_candidates
+
+
+def _retrieval_context_budget_projection(*, retrieval_context: dict[str, Any]) -> dict[str, Any]:
+    plan = retrieval_context.get("plan")
+    selected = retrieval_context.get("selected")
+    projected_context = {
+        "mode": "",
+        "queries": [],
+        "selected_counts": {},
+    }
+    if isinstance(plan, dict):
+        projected_context["mode"] = str(plan.get("mode", ""))
+        projected_context["queries"] = [
+            str(query)
+            for query in plan.get("queries", [])[:3]
+        ]
+    if isinstance(selected, dict) and isinstance(selected.get("selected_counts"), dict):
+        projected_context["selected_counts"] = {
+            str(key): int(value)
+            for key, value in selected["selected_counts"].items()
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0
+        }
+    return projected_context
+
+
+def _memory_layer_budget_projection(*, memory_bundle: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "working_memory_items": _memory_bundle_slot_projection(
+            memory_bundle["working_memory_items"],
+            text_getter=_memory_body_text,
+        ),
+        "episodic_items": _memory_bundle_slot_projection(
+            memory_bundle["episodic_items"],
+            text_getter=_memory_body_text,
+        ),
+        "semantic_items": _memory_bundle_slot_projection(
+            memory_bundle["semantic_items"],
+            text_getter=_memory_body_text,
+        ),
+        "affective_items": _memory_bundle_slot_projection(
+            memory_bundle["affective_items"],
+            text_getter=_memory_body_text,
+        ),
+        "relationship_items": _memory_bundle_slot_projection(
+            memory_bundle["relationship_items"],
+            text_getter=_memory_body_text,
+        ),
+        "reflection_items": _memory_bundle_slot_projection(
+            memory_bundle["reflection_items"],
+            text_getter=_reflection_memory_text,
+        ),
+        "recent_event_window": [
+            _prompt_text(str(event_entry["summary_text"]))
+            for event_entry in memory_bundle["recent_event_window"]
+        ],
+    }
+
+
+def _memory_bundle_slot_projection(
+    entries: list[dict[str, Any]],
+    *,
+    text_getter: Any,
+) -> list[str]:
+    return [
+        _prompt_text(text_getter(entry))
+        for entry in entries
+        if isinstance(entry, dict)
+    ]
+
+
+def _memory_body_text(memory_entry: dict[str, Any]) -> str:
+    return str(memory_entry["body_text"])
+
+
+def _reflection_memory_text(memory_entry: dict[str, Any]) -> str:
+    payload = memory_entry.get("payload")
+    if isinstance(payload, dict):
+        what_happened = payload.get("what_happened")
+        if isinstance(what_happened, str) and what_happened:
+            return what_happened
+    return str(memory_entry["body_text"])
+
+
+def _prompt_text(text: str) -> str:
+    normalized = " ".join(text.split())
+    if len(normalized) <= MEMORY_PROMPT_TEXT_LIMIT:
+        return normalized
+    return normalized[: MEMORY_PROMPT_TEXT_LIMIT - 1] + "…"
+
+
+def _safe_numeric_projection(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return round(float(value), 4)
+
+
 # Block: Behavior settings
 def _build_behavior_settings(effective_settings: dict[str, Any]) -> dict[str, str]:
     return {
@@ -568,6 +1414,15 @@ def _required_string_setting(effective_settings: dict[str, Any], key: str) -> st
     value = effective_settings.get(key)
     if not isinstance(value, str):
         raise ValueError(f"{key} must be string")
+    return value
+
+
+def _required_positive_integer_setting(effective_settings: dict[str, Any], key: str) -> int:
+    value = effective_settings.get(key)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise RuntimeError(f"{key} must be integer")
+    if value <= 0:
+        raise RuntimeError(f"{key} must be positive")
     return value
 
 

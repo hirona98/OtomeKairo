@@ -25,36 +25,51 @@
 - `docs/30_システム設計.md`: 実装単位まで分解したシステム設計
 
 <!-- Block: Next Reads -->
-## 作業タイプ別: 次に開く
+## 正本の役割分担
 
-- 構成設計を考えるとき: `docs/10_目標アーキテクチャ.md`
-- 外部接続や採用技術を考えるとき: `docs/20_外部インタフェース.md`
-- システム設計を詰めるとき: `docs/30_システム設計.md`
-- ランタイム処理仕様を詰めるとき: `docs/31_ランタイム処理仕様.md`
-- 記憶設計を詰めるとき: `docs/32_記憶設計.md`
-- `memory_jobs` の payload 仕様を詰めるとき: `docs/33_記憶ジョブ仕様.md`
-- SQLite の保存設計を詰めるとき: `docs/34_SQLite論理スキーマ.md`
-- Web API 仕様を詰めるとき: `docs/35_WebAPI仕様.md`
-- ブラウザUIを直すとき: `src/otomekairo/web/static/` と `docs/35_WebAPI仕様.md`
-- JSON データ仕様を詰めるとき: `docs/36_JSONデータ仕様.md`
-- 起動初期化を詰めるとき: `docs/37_起動初期化仕様.md`
-- 入力ストリーム運用を詰めるとき: `docs/38_入力ストリーム運用仕様.md`
-- 設定キー運用を詰めるとき: `docs/39_設定キー運用仕様.md`
-- 設定UIを詰めるとき: `docs/42_設定UI仕様.md`
-- 開発者設定を詰めるとき: `docs/43_開発者設定仕様.md`
-- 人格変化を詰めるとき: `docs/40_人格変化仕様.md`
-- 人格に基づく選択を詰めるとき: `docs/41_人格選択仕様.md`
+- `docs/10_目標アーキテクチャ.md`: 何を目指すか、どの責務に分けるか
+- `docs/20_外部インタフェース.md`: どの外部面と接続するか、採用技術は何か
+- `docs/30_システム設計.md`: どのモジュールが何を担当するか
+- `docs/31_ランタイム処理仕様.md`: ランタイムがどの順で何を受け渡し、どう保存するか
+- `docs/32_記憶設計.md`: 記憶をどう想起し、どう更新し、どう意味づけるか
+- `docs/33_記憶ジョブ仕様.md`: `memory_jobs` の payload と job ごとの責務
+- `docs/34_SQLite論理スキーマ.md`: 何をどの保存単位で持つか
+- `docs/35_WebAPI仕様.md`: HTTP path、method、受付条件、主要応答
+- `docs/36_JSONデータ仕様.md`: JSON のキー、型、必須項目、固定語彙
+- `docs/37_起動初期化仕様.md`: seed、schema version、起動前提、排他起動
+- `docs/38_入力ストリーム運用仕様.md`: 入力重複、`cancel`、`SSE` 再接続、保持期間
+- `docs/39_設定キー運用仕様.md`: scalar 設定キーの一覧、型、`apply_scope`
+- `docs/40_人格変化仕様.md`: 経験から人格がどう変わるか
+- `docs/41_人格選択仕様.md`: 人格に基づいて何を選ぶか
+- `docs/42_設定UI仕様.md`: 設定 UI の保存モデルと編集フロー
+- `docs/43_開発者設定仕様.md`: `config/developer.toml` の固定 schema
+
+<!-- Block: Reading Paths -->
+## 作業タイプ別の最短導線
+
+- 構成設計を考えるとき: `docs/10_目標アーキテクチャ.md` -> `docs/30_システム設計.md`
+- ランタイム処理を直すとき: `docs/31_ランタイム処理仕様.md` -> `docs/36_JSONデータ仕様.md`
+- 記憶を直すとき: `docs/32_記憶設計.md` -> `docs/33_記憶ジョブ仕様.md` -> `docs/34_SQLite論理スキーマ.md`
+- API を直すとき: `docs/35_WebAPI仕様.md` -> `docs/36_JSONデータ仕様.md` -> `docs/38_入力ストリーム運用仕様.md`
+- 設定を直すとき: `docs/39_設定キー運用仕様.md` -> `docs/42_設定UI仕様.md` -> `docs/43_開発者設定仕様.md`
+- 人格を直すとき: `docs/40_人格変化仕様.md` -> `docs/41_人格選択仕様.md` -> `docs/31_ランタイム処理仕様.md`
+- 起動や DB 初期化を直すとき: `docs/37_起動初期化仕様.md` -> `docs/34_SQLite論理スキーマ.md`
+- ブラウザUIを直すとき: `src/otomekairo/web/static/` -> `docs/35_WebAPI仕様.md` -> `docs/42_設定UI仕様.md`
 - 設定既定値を見るとき: `config/default_settings.json`
 - 開発者用起動設定を見るとき: `config/developer.toml`
 - 実際の初期 SQL を見るとき: `sql/core_schema.sql`
 - 最短で起動するとき: `./run_otomekairo.sh`
 - VSCode の `F5` で起動するとき: `.vscode/launch.json` の `OtomeKairo`
-- 自律行動設計を詰めるとき: `docs/10_目標アーキテクチャ.md` と `docs/30_システム設計.md` と `docs/31_ランタイム処理仕様.md`
-- 採用済みの設計原則を確認するとき: `docs/10_目標アーキテクチャ.md` と `docs/30_システム設計.md` と `docs/31_ランタイム処理仕様.md` と `docs/32_記憶設計.md` と `docs/33_記憶ジョブ仕様.md` と `docs/34_SQLite論理スキーマ.md` と `docs/35_WebAPI仕様.md` と `docs/36_JSONデータ仕様.md` と `docs/37_起動初期化仕様.md` と `docs/38_入力ストリーム運用仕様.md` と `docs/39_設定キー運用仕様.md` と `docs/40_人格変化仕様.md` と `docs/41_人格選択仕様.md`
-- 記憶設計の背景判断を確認するとき: `docs/note/記憶設計に関する先行研究のメモ.md`
-- 自律行動設計の背景判断を確認するとき: `docs/note/自律行動システムの先行研究メモ.md`
-- 実装を始めるとき: `docs/10_目標アーキテクチャ.md` と `docs/30_システム設計.md` と `docs/31_ランタイム処理仕様.md` と `docs/32_記憶設計.md` と `docs/33_記憶ジョブ仕様.md` と `docs/34_SQLite論理スキーマ.md` と `docs/35_WebAPI仕様.md` と `docs/36_JSONデータ仕様.md` と `docs/37_起動初期化仕様.md` と `docs/38_入力ストリーム運用仕様.md` と `docs/39_設定キー運用仕様.md` と `docs/40_人格変化仕様.md` と `docs/41_人格選択仕様.md` と `docs/42_設定UI仕様.md`
-- ドキュメントを直すとき: この `docs/00_index.md` と `docs/10_目標アーキテクチャ.md` と `docs/20_外部インタフェース.md` と `docs/30_システム設計.md` と `docs/31_ランタイム処理仕様.md` と `docs/32_記憶設計.md` と `docs/33_記憶ジョブ仕様.md` と `docs/34_SQLite論理スキーマ.md` と `docs/35_WebAPI仕様.md` と `docs/36_JSONデータ仕様.md` と `docs/37_起動初期化仕様.md` と `docs/38_入力ストリーム運用仕様.md` と `docs/39_設定キー運用仕様.md` と `docs/40_人格変化仕様.md` と `docs/41_人格選択仕様.md` と `docs/42_設定UI仕様.md`
+
+<!-- Block: Documentation Rules -->
+## ドキュメント整理ルール
+
+- 1 つの事実は 1 つの正本だけで固定し、他の文書では意味だけを書いて shape や path を重複させない
+- API の意味と HTTP 挙動は `docs/35_WebAPI仕様.md` に書き、JSON のキーや型は `docs/36_JSONデータ仕様.md` に書く
+- ランタイムの処理順、保存順、判断材料の意味は `docs/31_ランタイム処理仕様.md` に書き、テーブルやカラムの物理名は `docs/34_SQLite論理スキーマ.md` に書く
+- 入力重複、`cancel`、`SSE` の保持と再接続は `docs/38_入力ストリーム運用仕様.md` に書き、個別 API 節へ同じ規則を重ね書きしない
+- 設定キーの一覧と型は `docs/39_設定キー運用仕様.md` に書き、設定 UI の画面都合は `docs/42_設定UI仕様.md` に分ける
+- 実装済みでも、将来の判断に効かない一時的な補足、比較検討、運用メモは `docs/note/` へ逃がし、正本へ残しすぎない
 
 <!-- Block: Notes -->
 ## 参考メモ

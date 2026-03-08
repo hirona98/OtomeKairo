@@ -389,6 +389,7 @@
   let activeSettingsTab = "character";
   let localDraftIdCounter = 0;
   const draftMessages = new Map();
+  let streamCursor = null;
   let activeSpeechAudio = null;
   let activeMicrophoneRecorder = null;
   let microphoneUploadInFlight = false;
@@ -400,6 +401,7 @@
     updateMicrophoneControls();
     updateCameraCaptureControls();
     updateSendEnabledState();
+    await loadChatHistory();
     connectStream();
     await loadSettingsEditorSnapshot();
     await refreshStatusSnapshot();
@@ -466,11 +468,17 @@
   function connectStream() {
     stopStream();
     connectionText.textContent = "接続中...";
-    stream = new EventSource("/api/chat/stream?channel=browser_chat");
+    const streamUrl = new URL("/api/chat/stream", window.location.origin);
+    streamUrl.searchParams.set("channel", "browser_chat");
+    if (Number.isInteger(streamCursor) && streamCursor >= 0) {
+      streamUrl.searchParams.set("after_event_id", String(streamCursor));
+    }
+    stream = new EventSource(streamUrl.toString());
     stream.addEventListener("open", () => {
       connectionText.textContent = "SSE 接続中";
     });
     stream.addEventListener("status", (event) => {
+      updateStreamCursor(event);
       const payload = parsePayload(event.data);
       if (payload === null) {
         return;
@@ -478,6 +486,7 @@
       handleStatusEvent(payload);
     });
     stream.addEventListener("token", (event) => {
+      updateStreamCursor(event);
       const payload = parsePayload(event.data);
       if (payload === null) {
         return;
@@ -485,6 +494,7 @@
       handleTokenEvent(payload);
     });
     stream.addEventListener("message", (event) => {
+      updateStreamCursor(event);
       const payload = parsePayload(event.data);
       if (payload === null) {
         return;
@@ -492,6 +502,7 @@
       handleMessageEvent(payload);
     });
     stream.addEventListener("message_end", (event) => {
+      updateStreamCursor(event);
       const payload = parsePayload(event.data);
       if (payload === null) {
         return;
@@ -499,6 +510,7 @@
       handleMessageEndEvent(payload);
     });
     stream.addEventListener("notice", (event) => {
+      updateStreamCursor(event);
       const payload = parsePayload(event.data);
       if (payload === null) {
         return;
@@ -591,15 +603,6 @@
     if (!response.ok) {
       throw new Error(readErrorMessage(payload));
     }
-    appendMessage({
-      role: "user",
-      text: buildUserMessageEchoText({
-        text: normalizedText,
-        attachmentCount: outgoingAttachments.length,
-      }),
-      messageId: requireString(payload.input_id, "chat.input_id"),
-      isDraft: false,
-    });
     clearPendingCameraAttachments();
   }
 
@@ -760,13 +763,6 @@
       if (!response.ok) {
         throw new Error(readErrorMessage(payload));
       }
-      const transcriptText = requireString(payload.transcript_text, "microphone.transcript_text");
-      appendMessage({
-        role: "user",
-        text: transcriptText,
-        messageId: requireString(payload.input_id, "microphone.input_id"),
-        isDraft: false,
-      });
     } catch (error) {
       appendError(`音声入力に失敗しました: ${error.message}`);
     } finally {
@@ -839,6 +835,35 @@
       personaUpdateSummaryText.textContent = "状態未取得";
       personaUpdateSummaryText.title = "";
     }
+  }
+
+  // Block: Chat history loading
+  async function loadChatHistory() {
+    try {
+      const response = await fetch("/api/chat/history?channel=browser_chat&limit=200");
+      const payload = await readJson(response);
+      if (!response.ok) {
+        throw new Error(readErrorMessage(payload));
+      }
+      applyChatHistory(payload);
+    } catch (error) {
+      appendError(`会話履歴の読込に失敗しました: ${error.message}`);
+    }
+  }
+
+  function applyChatHistory(payload) {
+    if (!isObject(payload)) {
+      throw new Error("chat history payload が不正です");
+    }
+    if (!Array.isArray(payload.messages)) {
+      throw new Error("chat history messages が不正です");
+    }
+    chatScroll.replaceChildren();
+    draftMessages.clear();
+    for (const message of payload.messages) {
+      appendMessage(validateHistoryMessage(message));
+    }
+    streamCursor = readOptionalInteger(payload.stream_cursor);
   }
 
   async function loadSettingsEditorSnapshot() {
@@ -2021,6 +2046,7 @@
         text: "",
         messageId,
         isDraft: true,
+        createdAt: Date.now(),
       });
       draftMessages.set(messageId, messageNode);
     }
@@ -2036,6 +2062,7 @@
     const messageId = requireString(payload.message_id, "message.message_id");
     const role = requireString(payload.role, "message.role");
     const text = requireString(payload.text, "message.text");
+    const createdAt = requireInteger(payload.created_at, "message.created_at");
     const audioUrl = readOptionalString(payload.audio_url);
     let messageNode = draftMessages.get(messageId);
     if (messageNode === undefined) {
@@ -2044,6 +2071,7 @@
         text,
         messageId,
         isDraft: false,
+        createdAt,
       });
     } else {
       const bubbleText = messageNode.querySelector(".bubble-text");
@@ -2052,8 +2080,8 @@
         throw new Error("message node が不正です");
       }
       bubbleText.textContent = text;
-      meta.textContent = buildMetaLabel(role);
-      meta.classList.remove("empty");
+      messageNode.dataset.createdAt = String(createdAt);
+      meta.textContent = formatBubbleTimestamp(createdAt);
       draftMessages.delete(messageId);
     }
     if (audioUrl !== null) {
@@ -2077,8 +2105,7 @@
       throw new Error("message_end meta が見つかりません");
     }
     if (finishReason === "cancelled") {
-      meta.textContent = `${buildMetaLabel("assistant")} / 中断`;
-      meta.classList.remove("empty");
+      meta.textContent = `${formatBubbleTimestamp(readBubbleTimestamp(messageNode))} / 中断`;
     }
     draftMessages.delete(messageId);
   }
@@ -2099,11 +2126,13 @@
   }
 
   // Block: Message rendering
-  function appendMessage({ role, text, messageId, isDraft }) {
+  function appendMessage({ role, text, messageId, isDraft, createdAt }) {
     const normalizedRole = role === "user" ? "user" : "assistant";
+    const normalizedCreatedAt = normalizeBubbleTimestamp(createdAt);
     const row = document.createElement("div");
     row.className = `bubble-row ${normalizedRole === "user" ? "user" : "ai"}`;
     row.dataset.messageId = messageId;
+    row.dataset.createdAt = String(normalizedCreatedAt);
 
     const bubble = document.createElement("div");
     bubble.className = `bubble ${normalizedRole === "user" ? "user" : "ai"}`;
@@ -2115,16 +2144,32 @@
 
     const meta = document.createElement("div");
     meta.className = "bubble-time";
-    meta.textContent = buildMetaLabel(normalizedRole);
-    if (isDraft === true) {
-      meta.classList.add("empty");
+    meta.textContent = formatBubbleTimestamp(normalizedCreatedAt);
+
+    if (normalizedRole === "user") {
+      row.appendChild(meta);
+      row.appendChild(bubble);
+    } else {
+      row.appendChild(bubble);
+      row.appendChild(meta);
     }
 
-    row.appendChild(bubble);
-    row.appendChild(meta);
     chatScroll.appendChild(row);
     scrollToBottom();
     return row;
+  }
+
+  function validateHistoryMessage(message) {
+    if (!isObject(message)) {
+      throw new Error("history message が不正です");
+    }
+    return {
+      role: requireString(message.role, "history.message.role"),
+      text: requireString(message.text, "history.message.text"),
+      messageId: requireString(message.message_id, "history.message.message_id"),
+      isDraft: false,
+      createdAt: requireInteger(message.created_at, "history.message.created_at"),
+    };
   }
 
   function appendNotice(code, text) {
@@ -2141,7 +2186,7 @@
 
     const meta = document.createElement("div");
     meta.className = "bubble-time";
-    meta.textContent = buildMetaLabel(`notice:${code}`);
+    meta.textContent = formatBubbleTimestamp(Date.now());
 
     row.appendChild(bubble);
     row.appendChild(meta);
@@ -2168,7 +2213,7 @@
 
     const meta = document.createElement("div");
     meta.className = "bubble-time";
-    meta.textContent = buildMetaLabel("error");
+    meta.textContent = formatBubbleTimestamp(Date.now());
 
     row.appendChild(bubble);
     row.appendChild(meta);
@@ -2249,30 +2294,41 @@
     updateSendEnabledState();
   }
 
-  // Block: Chat UI helpers
-  function buildUserMessageEchoText({ text, attachmentCount }) {
-    const normalizedText = String(text || "").trim();
-    const normalizedAttachmentCount = Number(attachmentCount || 0);
-    if (normalizedText && normalizedAttachmentCount > 0) {
-      return `${normalizedText}\n[画像 ${normalizedAttachmentCount} 枚]`;
+  function normalizeBubbleTimestamp(timestampMs) {
+    if (Number.isInteger(timestampMs) && timestampMs > 0) {
+      return timestampMs;
     }
-    if (normalizedText) {
-      return normalizedText;
-    }
-    return `[画像 ${normalizedAttachmentCount} 枚]`;
+    return Date.now();
   }
 
-  function buildMetaLabel(role) {
-    if (role === "user") {
-      return "user";
+  function updateStreamCursor(event) {
+    if (!(event instanceof MessageEvent)) {
+      return;
     }
-    if (role === "assistant") {
-      return "assistant";
+    const rawLastEventId = String(event.lastEventId || "");
+    if (!rawLastEventId) {
+      return;
     }
-    if (role.startsWith("notice:")) {
-      return role.slice("notice:".length);
+    const parsedLastEventId = Number(rawLastEventId);
+    if (!Number.isInteger(parsedLastEventId) || parsedLastEventId < 0) {
+      return;
     }
-    return role;
+    streamCursor = parsedLastEventId;
+  }
+
+  function readBubbleTimestamp(messageNode) {
+    if (!(messageNode instanceof HTMLElement)) {
+      throw new Error("messageNode が不正です");
+    }
+    const rawTimestamp = Number(messageNode.dataset.createdAt || "");
+    return normalizeBubbleTimestamp(rawTimestamp);
+  }
+
+  function formatBubbleTimestamp(timestampMs) {
+    return new Date(normalizeBubbleTimestamp(timestampMs)).toLocaleTimeString("ja-JP", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
   }
 
   function updateRuntimeChip(statusPayload) {
@@ -2836,6 +2892,13 @@
 
   function readOptionalString(value) {
     if (typeof value !== "string" || value.length === 0) {
+      return null;
+    }
+    return value;
+  }
+
+  function readOptionalInteger(value) {
+    if (!Number.isInteger(value)) {
       return null;
     }
     return value;

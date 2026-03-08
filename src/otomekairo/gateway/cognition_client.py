@@ -12,6 +12,7 @@ class CognitionRequest:
     cycle_id: str
     input_kind: str
     cognition_input: dict[str, Any]
+    completion_settings: dict[str, Any]
 
 
 # Block: Cognition response

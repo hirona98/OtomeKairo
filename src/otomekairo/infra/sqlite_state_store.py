@@ -1281,6 +1281,7 @@ class SqliteStateStore:
             client_message_id=client_message_id,
             payload=payload,
             priority=100,
+            emit_user_message_event=True,
         )
 
     # Block: Microphone message write
@@ -1314,6 +1315,7 @@ class SqliteStateStore:
                 "stt_language": stripped_language,
             },
             priority=100,
+            emit_user_message_event=True,
         )
 
     # Block: Camera observation write
@@ -1393,6 +1395,7 @@ class SqliteStateStore:
         client_message_id: str | None,
         payload: dict[str, Any],
         priority: int,
+        emit_user_message_event: bool = False,
     ) -> dict[str, Any]:
         if not isinstance(source, str) or not source:
             raise StoreValidationError("source must be non-empty string")
@@ -1425,6 +1428,19 @@ class SqliteStateStore:
                         priority,
                     ),
                 )
+                if emit_user_message_event:
+                    self._insert_ui_outbound_event(
+                        connection=connection,
+                        channel="browser_chat",
+                        event_type="message",
+                        payload=_pending_input_user_message_payload(
+                            input_id=input_id,
+                            created_at=now_ms,
+                            payload=payload,
+                        ),
+                        source_cycle_id=None,
+                        created_at=now_ms,
+                    )
         except sqlite3.IntegrityError as error:
             raise StoreConflictError(
                 "既に受け付けた入力です",
@@ -1570,6 +1586,86 @@ class SqliteStateStore:
             return (None, None)
         return (row["min_id"], row["max_id"])
 
+    # Block: Chat history read
+    def read_chat_history(self, *, channel: str, limit: int = 200) -> dict[str, Any]:
+        if not isinstance(channel, str) or not channel:
+            raise StoreValidationError("channel must be non-empty string")
+        if isinstance(limit, bool) or not isinstance(limit, int):
+            raise StoreValidationError("limit must be integer")
+        if limit <= 0 or limit > 500:
+            raise StoreValidationError("limit must be within 1..500")
+        with self._connect() as connection:
+            user_rows = connection.execute(
+                """
+                SELECT input_id, created_at, payload_json
+                FROM pending_inputs
+                WHERE channel = ?
+                  AND json_extract(payload_json, '$.input_kind') IN ('chat_message', 'microphone_message')
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (channel, limit),
+            ).fetchall()
+            assistant_rows = connection.execute(
+                """
+                SELECT result_id, finished_at, command_json, observed_effects_json
+                FROM action_history
+                WHERE json_extract(observed_effects_json, '$.final_message_emitted') = 1
+                  AND json_type(command_json, '$.parameters.text') = 'text'
+                ORDER BY finished_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+            stream_window_row = connection.execute(
+                """
+                SELECT MAX(ui_event_id) AS max_id
+                FROM ui_outbound_events
+                WHERE channel = ?
+                """,
+                (channel,),
+            ).fetchone()
+        messages: list[dict[str, Any]] = []
+        for row in user_rows:
+            payload = _decode_required_json_text(
+                raw_value=row["payload_json"],
+                field_name="pending_inputs.payload_json",
+            )
+            messages.append(
+                _history_user_message(
+                    input_id=str(row["input_id"]),
+                    created_at=int(row["created_at"]),
+                    payload=payload,
+                )
+            )
+        for row in assistant_rows:
+            command_json = _decode_required_json_text(
+                raw_value=row["command_json"],
+                field_name="action_history.command_json",
+            )
+            observed_effects_json = _decode_optional_json_text(
+                raw_value=row["observed_effects_json"],
+                field_name="action_history.observed_effects_json",
+            )
+            history_message = _history_assistant_message(
+                finished_at=int(row["finished_at"]),
+                command_json=command_json,
+                observed_effects_json=observed_effects_json,
+            )
+            if history_message is not None:
+                messages.append(history_message)
+        messages.sort(key=lambda item: (int(item["created_at"]), str(item["message_id"])))
+        if len(messages) > limit:
+            messages = messages[-limit:]
+        stream_cursor = None
+        if stream_window_row is not None and stream_window_row["max_id"] is not None:
+            stream_cursor = int(stream_window_row["max_id"])
+        return {
+            "channel": channel,
+            "messages": messages,
+            "stream_cursor": stream_cursor,
+        }
+
     # Block: Runtime work state read
     def read_runtime_work_state(self) -> dict[str, bool]:
         with self._connect() as connection:
@@ -1699,25 +1795,45 @@ class SqliteStateStore:
     ) -> int:
         created_at = _now_ms()
         with self._connect() as connection:
-            cursor = connection.execute(
-                """
-                INSERT INTO ui_outbound_events (
-                    channel,
-                    event_type,
-                    payload_json,
-                    created_at,
-                    source_cycle_id
-                )
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (
-                    channel,
-                    event_type,
-                    _json_text(payload),
-                    created_at,
-                    source_cycle_id,
-                ),
+            return self._insert_ui_outbound_event(
+                connection=connection,
+                channel=channel,
+                event_type=event_type,
+                payload=payload,
+                source_cycle_id=source_cycle_id,
+                created_at=created_at,
             )
+
+    # Block: Stream event insert
+    def _insert_ui_outbound_event(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        channel: str,
+        event_type: str,
+        payload: dict[str, Any],
+        source_cycle_id: str | None,
+        created_at: int,
+    ) -> int:
+        cursor = connection.execute(
+            """
+            INSERT INTO ui_outbound_events (
+                channel,
+                event_type,
+                payload_json,
+                created_at,
+                source_cycle_id
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                channel,
+                event_type,
+                _json_text(payload),
+                created_at,
+                source_cycle_id,
+            ),
+        )
         return int(cursor.lastrowid)
 
     # Block: Runtime lease
@@ -8013,6 +8129,114 @@ def _pending_input_receipt_summary(pending_input: PendingInputRecord) -> str:
     if input_kind == "cancel":
         return "cancel request"
     return f"input:{input_kind}"
+
+
+# Block: Pending input user message payload
+def _pending_input_user_message_payload(
+    *,
+    input_id: str,
+    created_at: int,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "message_id": input_id,
+        "role": "user",
+        "text": _pending_input_user_message_text(payload=payload),
+        "created_at": created_at,
+    }
+
+
+# Block: Pending input user message text
+def _pending_input_user_message_text(*, payload: dict[str, Any]) -> str:
+    input_kind = str(payload.get("input_kind"))
+    if input_kind == "chat_message":
+        text = payload.get("text")
+        attachments = payload.get("attachments")
+        normalized_text = text.strip() if isinstance(text, str) else ""
+        attachment_count = len(attachments) if isinstance(attachments, list) else 0
+        return _chat_message_echo_text(
+            text=normalized_text,
+            attachment_count=attachment_count,
+        )
+    if input_kind == "microphone_message":
+        text = payload.get("text")
+        if not isinstance(text, str) or not text.strip():
+            raise RuntimeError("microphone_message.text is required for user message payload")
+        return text.strip()
+    raise RuntimeError("user message payload is only supported for chat_message and microphone_message")
+
+
+# Block: Chat message echo text
+def _chat_message_echo_text(*, text: str, attachment_count: int) -> str:
+    if attachment_count < 0:
+        raise RuntimeError("attachment_count must not be negative")
+    normalized_text = text.strip()
+    if normalized_text and attachment_count > 0:
+        return f"{normalized_text}\n[画像 {attachment_count} 枚]"
+    if normalized_text:
+        return normalized_text
+    return f"[画像 {attachment_count} 枚]"
+
+
+# Block: History user message builder
+def _history_user_message(
+    *,
+    input_id: str,
+    created_at: int,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    return _pending_input_user_message_payload(
+        input_id=input_id,
+        created_at=created_at,
+        payload=payload,
+    )
+
+
+# Block: History assistant message builder
+def _history_assistant_message(
+    *,
+    finished_at: int,
+    command_json: dict[str, Any],
+    observed_effects_json: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not isinstance(observed_effects_json, dict):
+        return None
+    if bool(observed_effects_json.get("final_message_emitted")) is not True:
+        return None
+    parameters = command_json.get("parameters")
+    if not isinstance(parameters, dict):
+        raise RuntimeError("action_history.command_json.parameters must be object")
+    text = parameters.get("text")
+    message_id = parameters.get("message_id")
+    if not isinstance(text, str) or not text.strip():
+        return None
+    if not isinstance(message_id, str) or not message_id:
+        raise RuntimeError("action_history.command_json.parameters.message_id must be non-empty string")
+    return {
+        "message_id": message_id,
+        "role": "assistant",
+        "text": text,
+        "created_at": finished_at,
+    }
+
+
+# Block: JSON decode helpers
+def _decode_required_json_text(*, raw_value: Any, field_name: str) -> dict[str, Any]:
+    if not isinstance(raw_value, str) or not raw_value:
+        raise RuntimeError(f"{field_name} must be non-empty string")
+    try:
+        decoded_value = json.loads(raw_value)
+    except json.JSONDecodeError as error:
+        raise RuntimeError(f"{field_name} must be valid JSON") from error
+    if not isinstance(decoded_value, dict):
+        raise RuntimeError(f"{field_name} must decode to object")
+    return decoded_value
+
+
+def _decode_optional_json_text(*, raw_value: Any, field_name: str) -> dict[str, Any] | None:
+    if raw_value is None:
+        return None
+    return _decode_required_json_text(raw_value=raw_value, field_name=field_name)
 
 
 def _runtime_response_summary(ui_events: list[dict[str, Any]]) -> str | None:

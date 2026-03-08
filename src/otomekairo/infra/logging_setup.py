@@ -3,15 +3,25 @@
 from __future__ import annotations
 
 import ast
+import base64
+import binascii
 import json
 import logging
 import os
 import re
+from contextlib import contextmanager
 from datetime import datetime
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
 
 from otomekairo.infra.developer_config import DeveloperConfig
+
+# Block: Platform file locking
+if os.name == "nt":
+    import msvcrt
+else:
+    import fcntl
 
 
 # Block: Constant definitions
@@ -19,6 +29,8 @@ SUPPRESSED_ACCESS_PATHS = (
     "\"GET /api/status ",
     "\"GET /api/chat/stream ",
 )
+LOG_FILE_MAX_BYTES = 1024 * 1024
+LOG_FILE_BACKUP_COUNT = 5
 LOG_LEVEL_NAME_TO_VALUE = {
     "CRITICAL": logging.CRITICAL,
     "ERROR": logging.ERROR,
@@ -63,6 +75,20 @@ _SECRET_PATTERNS = (
     re.compile(r"(?i)(api_key\s*=\s*')([^']*)(')"),
     re.compile(r'(?i)("api_key"\s*:\s*")([^"]*)(")'),
     re.compile(r"(?i)(authorization\s*:\s*bearer\s+)([^\s'\"\\]+)"),
+)
+BASE64_MIN_TEXT_LENGTH = 128
+_BASE64_TEXT_PATTERN = re.compile(r"[A-Za-z0-9+/=_-]+")
+_BASE64_BLOB_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9+/_-])([A-Za-z0-9+/_-]{128,}={0,2})(?![A-Za-z0-9+/_-])"
+)
+_DATA_URL_BASE64_PATTERN = re.compile(
+    r"(data:[A-Za-z0-9.+-]+/[A-Za-z0-9.+-]+;base64,)([A-Za-z0-9+/=_-]+)"
+)
+LITELLM_LOGGER_NAMES = (
+    "LiteLLM",
+    "LiteLLM Proxy",
+    "LiteLLM Router",
+    "litellm",
 )
 
 
@@ -147,6 +173,61 @@ class FileLogFormatter(logging.Formatter):
         return datetime.fromtimestamp(record.created).strftime("%Y-%m-%d %H:%M:%S")
 
 
+# Block: Shared rotating file handler
+class SharedRotatingFileHandler(RotatingFileHandler):
+    def __init__(
+        self,
+        filename: str | Path,
+        *,
+        max_bytes: int,
+        backup_count: int,
+        encoding: str,
+    ) -> None:
+        super().__init__(
+            filename=filename,
+            mode="a",
+            maxBytes=max_bytes,
+            backupCount=backup_count,
+            encoding=encoding,
+            delay=True,
+        )
+        self._lock_stream = Path(f"{self.baseFilename}.lock").open("a+b")
+        if self._lock_stream.tell() == 0:
+            self._lock_stream.write(b"0")
+            self._lock_stream.flush()
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            with _interprocess_lock(self._lock_stream):
+                try:
+                    if self.stream is None:
+                        self.stream = self._open()
+                    if self.shouldRollover(record):
+                        self.doRollover()
+                    logging.FileHandler.emit(self, record)
+                finally:
+                    self._close_stream_after_emit()
+        except Exception:
+            self.handleError(record)
+
+    def close(self) -> None:
+        try:
+            self._close_stream_after_emit()
+        finally:
+            if not self._lock_stream.closed:
+                self._lock_stream.close()
+            super().close()
+
+    def _close_stream_after_emit(self) -> None:
+        if self.stream is None:
+            return
+        try:
+            self.stream.flush()
+        finally:
+            self.stream.close()
+            self.stream = None
+
+
 # Block: Public logging setup
 def configure_process_logging(*, process_name: str, developer_config: DeveloperConfig) -> None:
     if not process_name:
@@ -170,9 +251,10 @@ def configure_process_logging(*, process_name: str, developer_config: DeveloperC
     )
 
     # Block: File handler setup
-    file_handler = logging.FileHandler(
+    file_handler = SharedRotatingFileHandler(
         log_dir / "otomekairo.log",
-        mode="a",
+        max_bytes=LOG_FILE_MAX_BYTES,
+        backup_count=LOG_FILE_BACKUP_COUNT,
         encoding="utf-8",
     )
     file_handler.setLevel(_log_level_value(process_logging.file_level))
@@ -208,10 +290,7 @@ def _reset_root_handlers(root_logger: logging.Logger) -> None:
 def _configure_library_loggers(*, logger_levels: dict[str, str], litellm_log_level: str) -> None:
     for logger_name, level_name in logger_levels.items():
         logging.getLogger(logger_name).setLevel(_log_level_value(level_name))
-    logging.getLogger("LiteLLM").setLevel(_log_level_value(litellm_log_level))
-    logging.getLogger("litellm").setLevel(_log_level_value(litellm_log_level))
-    _attach_empty_filter("LiteLLM")
-    _attach_empty_filter("litellm")
+    configure_litellm_logger_bridge(litellm_log_level=litellm_log_level)
     _attach_empty_filter("py.warnings")
 
 
@@ -227,12 +306,50 @@ def _attach_empty_filter(logger_name: str) -> None:
     _attach_filter(logger_name, EmptyMessageFilter)
 
 
+# Block: LiteLLM logger bridge
+def configure_litellm_logger_bridge(*, litellm_log_level: str) -> None:
+    for logger_name in LITELLM_LOGGER_NAMES:
+        target_logger = logging.getLogger(logger_name)
+        _reset_named_logger_handlers(target_logger)
+        target_logger.disabled = False
+        target_logger.propagate = True
+        target_logger.setLevel(_log_level_value(litellm_log_level))
+        _attach_empty_filter(logger_name)
+
+
+# Block: Interprocess lock helper
+@contextmanager
+def _interprocess_lock(lock_stream: Any):
+    if os.name == "nt":
+        lock_stream.seek(0)
+        msvcrt.locking(lock_stream.fileno(), msvcrt.LK_LOCK, 1)
+        try:
+            yield
+        finally:
+            lock_stream.seek(0)
+            msvcrt.locking(lock_stream.fileno(), msvcrt.LK_UNLCK, 1)
+        return
+
+    fcntl.flock(lock_stream.fileno(), fcntl.LOCK_EX)
+    try:
+        yield
+    finally:
+        fcntl.flock(lock_stream.fileno(), fcntl.LOCK_UN)
+
+
 # Block: Process config helpers
 def _process_logging_config(*, process_name: str, developer_config: DeveloperConfig):
     process_logging = developer_config.process_logging.get(process_name)
     if process_logging is None:
         raise RuntimeError(f"developer_config.process.{process_name} is missing")
     return process_logging
+
+
+# Block: Named logger handler reset
+def _reset_named_logger_handlers(target_logger: logging.Logger) -> None:
+    for handler in list(target_logger.handlers):
+        target_logger.removeHandler(handler)
+        handler.close()
 
 
 def _log_level_value(level_name: str) -> int:
@@ -270,7 +387,7 @@ def _json_safe_value(value: Any, *, parent_key: str | None = None) -> Any:
 
 # Block: Secret sanitizers
 def _sanitize_message(message: str) -> str:
-    sanitized = message
+    sanitized = _omit_base64_text(message)
     for pattern in _SECRET_PATTERNS:
         sanitized = pattern.sub(_mask_secret_match, sanitized)
     return sanitized
@@ -296,6 +413,51 @@ def _mask_secret_text(value: str) -> str:
     if len(value) <= 4:
         return "*" * len(value)
     return f"{value[:2]}***{value[-2:]}"
+
+
+# Block: Base64 sanitizers
+def _omit_base64_text(text: str) -> str:
+    sanitized = _DATA_URL_BASE64_PATTERN.sub(_replace_data_url_base64_match, text)
+    return _BASE64_BLOB_PATTERN.sub(_replace_base64_blob_match, sanitized)
+
+
+def _replace_data_url_base64_match(match: re.Match[str]) -> str:
+    payload = match.group(2)
+    if not _looks_like_base64_blob(payload):
+        return match.group(0)
+    return f"{match.group(1)}{_omitted_base64_marker(payload)}"
+
+
+def _replace_base64_blob_match(match: re.Match[str]) -> str:
+    payload = match.group(1)
+    if not _looks_like_base64_blob(payload):
+        return payload
+    return _omitted_base64_marker(payload)
+
+
+def _looks_like_base64_blob(text: str) -> bool:
+    if len(text) < BASE64_MIN_TEXT_LENGTH:
+        return False
+    if _BASE64_TEXT_PATTERN.fullmatch(text) is None:
+        return False
+    padding_index = text.find("=")
+    if padding_index != -1 and text[padding_index:] != "=" * (len(text) - padding_index):
+        return False
+    normalized = text.replace("-", "+").replace("_", "/")
+    remainder = len(normalized) % 4
+    if remainder == 1:
+        return False
+    if remainder != 0:
+        normalized += "=" * (4 - remainder)
+    try:
+        decoded = base64.b64decode(normalized, validate=True)
+    except (binascii.Error, ValueError):
+        return False
+    return len(decoded) > 0
+
+
+def _omitted_base64_marker(text: str) -> str:
+    return f"[BASE64 omitted length={len(text)}]"
 
 
 # Block: Message helpers
