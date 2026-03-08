@@ -1199,7 +1199,7 @@
 
 - `settings_editor_state.system_values_json` は、設定UIで保持するシステム設定だけを持つ完全オブジェクトである
 - キーは `runtime.idle_tick_ms`、`runtime.long_cycle_min_interval_ms`、`sensors.microphone.enabled`、`sensors.camera.enabled`、`integrations.sns.enabled`、`integrations.notify_route`、`integrations.discord.bot_token`、`integrations.discord.channel_id` に固定する
-- current の `browser_chat` 実装で直接使っているのは主に `runtime.*`、`sensors.camera.enabled`、`camera_connections` であり、`sensors.microphone.enabled` と `integrations.*` は保存対象だが未接続の項目を含む
+- current の `browser_chat` 実装で直接使っているのは主に `runtime.*`、`sensors.camera.enabled`、`sensors.microphone.enabled`、`camera_connections` であり、`integrations.*` は保存対象だが未接続の項目を含む
 
 <!-- Block: Settings Editor State -->
 ### `settings editor api.editor_state`
@@ -1241,7 +1241,7 @@
 
 - `character_presets.payload_json` は `character.*`、`speech.tts.*`、`speech.stt.*` の固定形を持つ
 - 通知経路と Discord 認証情報は含めない
-- `speech.stt.*` は設定UIと `runtime_settings` には反映するが、current のランタイムはまだ live microphone input を開始しない
+- `speech.stt.*` は設定UIと `runtime_settings` に反映し、current の `browser_chat` では `POST /api/microphone/input` の `STT` 実行条件にも使う
 
 <!-- Block: Behavior Preset Payload -->
 ### `behavior_presets.payload_json`
@@ -1858,6 +1858,22 @@
 - 必須項目は `accepted`、`status` である
 - `accepted` は `true` に固定する
 - `status` は `queued` に固定する
+
+<!-- Block: Microphone Input Response -->
+### `POST /api/microphone/input` の成功応答 JSON
+
+```json
+{
+  "transcript_text": "おはよう",
+  "provider": "amivoice",
+  "language": "ja"
+}
+```
+
+- 必須項目は `transcript_text`、`provider`、`language` である
+- `transcript_text` は空文字列を許可しない
+- `provider` は current 実装では `amivoice` に固定する
+- `language` は `speech.stt.language` の設定値を返す
 
 <!-- Block: Camera Capture Request -->
 ### `POST /api/camera/capture` の入力 JSON

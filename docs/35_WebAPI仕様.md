@@ -34,7 +34,7 @@
 <!-- Block: Current Surface -->
 ## current `browser_chat` 公開面
 
-- current の組み込みブラウザ UI が実際に使うのは `GET /`、`GET /api/status`、`GET /api/settings/editor`、`PUT /api/settings/editor`、`POST /api/chat/input`、`POST /api/chat/cancel`、`POST /api/camera/capture`、`GET /api/chat/stream`、`GET /captures/{capture_filename}`、`GET /audio/{audio_filename}` である
+- current の組み込みブラウザ UI が実際に使うのは `GET /`、`GET /api/status`、`GET /api/settings/editor`、`PUT /api/settings/editor`、`POST /api/chat/input`、`POST /api/chat/cancel`、`POST /api/microphone/input`、`POST /api/camera/capture`、`GET /api/chat/stream`、`GET /captures/{capture_filename}`、`GET /audio/{audio_filename}` である
 - `POST /api/camera/observe` は公開 API として実装済みだが、current の組み込み UI からは呼ばれない
 - `idle_tick` は公開 API を持たず、ランタイムが `pending_inputs` へ内部 enqueue する
 - current の `GET /api/status` は、runtime 全断面ではなく、runtime 要約、感情要約、主注意 summary、`body_state` 要約、`world_state` 要約、`drive_state` 要約、task 件数だけを返す
@@ -101,6 +101,7 @@
 - `PUT /api/settings/editor`
 - `POST /api/chat/input`
 - `POST /api/chat/cancel`
+- `POST /api/microphone/input`
 - `POST /api/camera/capture`
 - `POST /api/camera/observe`
 - `GET /api/chat/stream`
@@ -112,7 +113,7 @@
 ```mermaid
 flowchart LR
     browser["ブラウザ"] -->|"GET /\nGET /api/health\nGET /api/status\nGET /api/settings/editor\nGET /captures/{capture_filename}\nGET /audio/{audio_filename}"| web["設定 Web サーバ"]
-    browser -->|"POST /api/chat/input\nPOST /api/chat/cancel\nPOST /api/camera/capture\nPOST /api/camera/observe\nPUT /api/settings/editor"| web
+    browser -->|"POST /api/chat/input\nPOST /api/chat/cancel\nPOST /api/microphone/input\nPOST /api/camera/capture\nPOST /api/camera/observe\nPUT /api/settings/editor"| web
     web <-->|read / write| db["SQLite"]
     runtime["人格ランタイム"] -->|"append ui_outbound_events"| db
     web -->|"SSE: GET /api/chat/stream"| browser
@@ -125,7 +126,7 @@ flowchart LR
 ### 役割
 
 - 最小のブラウザチャット UI を返す
-- 同一オリジンで `POST /api/chat/input`、`POST /api/chat/cancel`、`POST /api/camera/capture`、`GET /api/chat/stream`、`GET /api/status`、`GET /api/settings/editor`、`PUT /api/settings/editor`、`GET /captures/{capture_filename}`、`GET /audio/{audio_filename}` を使う
+- 同一オリジンで `POST /api/chat/input`、`POST /api/chat/cancel`、`POST /api/microphone/input`、`POST /api/camera/capture`、`GET /api/chat/stream`、`GET /api/status`、`GET /api/settings/editor`、`PUT /api/settings/editor`、`GET /captures/{capture_filename}`、`GET /audio/{audio_filename}` を使う
 - `src/otomekairo/web/static/` に置く HTML / CSS / JavaScript を返す
 
 <!-- Block: Browser UI Rules -->
@@ -133,7 +134,8 @@ flowchart LR
 
 - ログイン画面は持たず、起動直後にそのままチャット UI を表示する
 - current の設定画面は `tmp/CocoroConsole` の設定ウインドウをベースにしてよい
-- ブラウザUIの入力手段は、テキスト入力と `Cam` による静止画添付に固定する
+- ブラウザUIの入力手段は、テキスト入力、録音ボタンによる音声転写、`Cam` による静止画添付に固定する
+- current の録音ボタンは開始/停止の明示操作で音声を取り、`POST /api/microphone/input` へ raw audio body を送り、返った `transcript_text` を composer へ追記してよい
 - `Cam` は enabled な `camera_connections` から 1 台を明示選択し、`POST /api/camera/capture` へ `camera_connection_id` を送って静止画を取得し、返った画像をサムネイル表示し、次の `POST /api/chat/input` へ添付してよい
 - current の `Cam` ボタンは `POST /api/camera/observe` ではなく `POST /api/camera/capture` だけを呼ぶ
 - `message` に `audio_url` がある場合は、`GET /audio/{audio_filename}` で取得した音声を再生してよい
@@ -488,6 +490,40 @@ flowchart LR
 ```
 
 - 成功時は `202 Accepted` を返す
+
+<!-- Block: Microphone Input -->
+## `POST /api/microphone/input`
+
+<!-- Block: Microphone Input Purpose -->
+### 役割
+
+- ブラウザ録音の raw audio body を受け取り、現在の `speech.stt.*` 設定に従って同期 `STT` を実行する
+- current 実装では、ここでは `pending_inputs` に積まず、転写文だけをブラウザへ返す
+
+<!-- Block: Microphone Input Request -->
+### 入力本文
+
+- リクエスト本文は JSON ではなく音声バイト列そのものに固定する
+- `Content-Type` は録音 blob の MIME type をそのまま送り、少なくとも空であってはならない
+- `sensors.microphone.enabled=false` の場合は `409 Conflict` を返す
+- `speech.stt.enabled=false`、`speech.stt.provider` 未設定、`speech.stt.amivoice.api_key` 未設定、`speech.stt.language` 未設定のいずれかでも `409 Conflict` を返す
+- current 実装で受け付ける `speech.stt.provider` は `amivoice` だけである
+
+<!-- Block: Microphone Input Response -->
+### 成功応答
+
+```json
+{
+  "transcript_text": "おはよう",
+  "provider": "amivoice",
+  "language": "ja"
+}
+```
+
+- 成功時は `200 OK` を返す
+- `transcript_text` は、`STT` が返した空でない転写文である
+- `provider` は current 実装では `amivoice` に固定する
+- `language` は current 実装では `speech.stt.language` の設定値を返す
 
 <!-- Block: Camera Capture -->
 ## `POST /api/camera/capture`

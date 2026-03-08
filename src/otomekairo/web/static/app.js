@@ -8,6 +8,7 @@
   const chatInput = document.getElementById("chat-input");
   const sendButton = document.getElementById("btn-send");
   const cancelButton = document.getElementById("btn-cancel");
+  const microphoneButton = document.getElementById("btn-microphone");
   const cameraButton = document.getElementById("btn-camera");
   const cameraSelect = document.getElementById("camera-select");
   const attachments = document.getElementById("attachments");
@@ -389,11 +390,14 @@
   let localDraftIdCounter = 0;
   const draftMessages = new Map();
   let activeSpeechAudio = null;
+  let activeMicrophoneRecorder = null;
+  let microphoneUploadInFlight = false;
   let cameraCaptureInFlight = false;
 
   // Block: Application startup
   async function start() {
     installEventHandlers();
+    updateMicrophoneControls();
     updateCameraCaptureControls();
     updateSendEnabledState();
     connectStream();
@@ -431,6 +435,9 @@
         applySettingsTabState();
       });
     }
+    microphoneButton.addEventListener("click", () => {
+      void handleMicrophoneToggle();
+    });
     cameraButton.addEventListener("click", () => {
       void handleCameraCapture();
     });
@@ -667,6 +674,128 @@
     }
   }
 
+  // Block: Microphone capture
+  async function handleMicrophoneToggle() {
+    try {
+      if (activeMicrophoneRecorder !== null) {
+        stopMicrophoneRecording();
+        return;
+      }
+      await startMicrophoneRecording();
+    } catch (error) {
+      appendError(`音声入力に失敗しました: ${error.message}`);
+      updateMicrophoneControls();
+    }
+  }
+
+  async function startMicrophoneRecording() {
+    if (!isMicrophoneInputReady()) {
+      throw new Error("マイク入力または STT が無効です");
+    }
+    if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== "function") {
+      throw new Error("ブラウザが録音に対応していません");
+    }
+    const mimeType = preferredMicrophoneMimeType();
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const chunks = [];
+    let recorder;
+    try {
+      recorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
+    } catch (error) {
+      for (const track of stream.getTracks()) {
+        track.stop();
+      }
+      throw error;
+    }
+    recorder.addEventListener("dataavailable", (event) => {
+      if (event.data && event.data.size > 0) {
+        chunks.push(event.data);
+      }
+    });
+    recorder.addEventListener("stop", () => {
+      const audioBlob = new Blob(chunks, { type: recorder.mimeType || mimeType || "application/octet-stream" });
+      for (const track of stream.getTracks()) {
+        track.stop();
+      }
+      void uploadMicrophoneRecording(audioBlob);
+    });
+    activeMicrophoneRecorder = recorder;
+    recorder.start();
+    updateMicrophoneControls();
+  }
+
+  function stopMicrophoneRecording() {
+    if (activeMicrophoneRecorder === null) {
+      return;
+    }
+    const recorder = activeMicrophoneRecorder;
+    activeMicrophoneRecorder = null;
+    updateMicrophoneControls();
+    recorder.stop();
+  }
+
+  async function uploadMicrophoneRecording(audioBlob) {
+    if (!(audioBlob instanceof Blob) || audioBlob.size <= 0) {
+      appendError("録音データが空です");
+      return;
+    }
+    microphoneUploadInFlight = true;
+    updateMicrophoneControls();
+    try {
+      const response = await fetch("/api/microphone/input", {
+        method: "POST",
+        headers: {
+          "Content-Type": audioBlob.type || "application/octet-stream",
+        },
+        body: audioBlob,
+      });
+      const payload = await readJson(response);
+      if (!response.ok) {
+        throw new Error(readErrorMessage(payload));
+      }
+      insertTranscribedText(requireString(payload.transcript_text, "microphone.transcript_text"));
+      appendNotice("microphone_transcribed", "音声をテキスト化しました");
+    } catch (error) {
+      appendError(`音声入力に失敗しました: ${error.message}`);
+    } finally {
+      microphoneUploadInFlight = false;
+      updateMicrophoneControls();
+    }
+  }
+
+  function preferredMicrophoneMimeType() {
+    if (typeof MediaRecorder === "undefined" || typeof MediaRecorder.isTypeSupported !== "function") {
+      return "";
+    }
+    const candidates = [
+      "audio/webm;codecs=opus",
+      "audio/webm",
+      "audio/ogg;codecs=opus",
+    ];
+    for (const candidate of candidates) {
+      if (MediaRecorder.isTypeSupported(candidate)) {
+        return candidate;
+      }
+    }
+    return "";
+  }
+
+  function insertTranscribedText(transcriptText) {
+    const normalizedTranscriptText = String(transcriptText).trim();
+    if (!normalizedTranscriptText) {
+      throw new Error("transcript_text が空です");
+    }
+    const previousText = chatInput.value.trim();
+    chatInput.value = previousText
+      ? `${previousText}\n${normalizedTranscriptText}`
+      : normalizedTranscriptText;
+    autoResizeComposer();
+    updateSendEnabledState();
+    chatInput.focus();
+  }
+
   // Block: Camera capture
   async function handleCameraCapture() {
     const selectedCameraConnectionId = readSelectedCameraConnectionId();
@@ -736,6 +865,7 @@
     editorDraft = buildEditorDraft(snapshot);
     settingsStatus.textContent = "サーバ正本を読込済み";
     renderSettingsEditor();
+    updateMicrophoneControls();
     renderCameraSelectionInput();
   }
 
@@ -839,6 +969,26 @@
       cameraSelect.disabled = cameraCaptureInFlight || cameraSelect.options.length <= 1;
     }
     cameraButton.disabled = cameraCaptureInFlight || !selectedCameraConnectionId;
+  }
+
+  function updateMicrophoneControls() {
+    const isRecording = activeMicrophoneRecorder !== null;
+    microphoneButton.classList.toggle("recording", isRecording);
+    microphoneButton.disabled = microphoneUploadInFlight || (!isRecording && !isMicrophoneInputReady());
+    microphoneButton.title = isRecording ? "録音停止" : "マイク";
+    microphoneButton.setAttribute("aria-label", isRecording ? "録音停止" : "マイク");
+  }
+
+  function isMicrophoneInputReady() {
+    if (!isObject(latestEditorSnapshot) || !isObject(latestEditorSnapshot.runtime_projection)) {
+      return false;
+    }
+    const effectiveSettings = latestEditorSnapshot.runtime_projection.effective_settings;
+    if (!isObject(effectiveSettings)) {
+      return false;
+    }
+    return effectiveSettings["sensors.microphone.enabled"] === true
+      && effectiveSettings["speech.stt.enabled"] === true;
   }
 
   // Block: Settings editor rendering

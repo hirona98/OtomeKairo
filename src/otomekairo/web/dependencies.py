@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from otomekairo.gateway.camera_sensor import CameraSensor
+from otomekairo.gateway.speech_recognizer import SpeechRecognizer
 from otomekairo.infra.sqlite_state_store import SqliteStateStore
 
 
@@ -23,3 +24,4 @@ class AppServices:
     store: SqliteStateStore
     default_settings: dict[str, object]
     camera_sensor: CameraSensor
+    speech_recognizer: SpeechRecognizer

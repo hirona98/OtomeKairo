@@ -15,6 +15,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from otomekairo import __version__
 from otomekairo.infra.speech_synthesis_common import default_tts_audio_dir
+from otomekairo.infra.amivoice_speech_recognizer import AmivoiceSpeechRecognizer
 from otomekairo.infra.wifi_camera_common import default_camera_capture_dir
 from otomekairo.infra.wifi_camera_sensor import WiFiCameraSensor
 from otomekairo.infra.sqlite_state_store import StoreConflictError, StoreValidationError, SqliteStateStore
@@ -23,6 +24,7 @@ from otomekairo.web.camera_api import build_camera_router
 from otomekairo.web.dependencies import ApiError, AppServices
 from otomekairo.web.chat_input_api import build_chat_input_router
 from otomekairo.web.chat_stream_api import build_chat_stream_router
+from otomekairo.web.microphone_api import build_microphone_router
 from otomekairo.web.settings_api import build_settings_router
 from otomekairo.web.status_api import build_status_router
 
@@ -65,6 +67,7 @@ def create_app() -> FastAPI:
         store=store,
         default_settings=default_settings,
         camera_sensor=camera_sensor,
+        speech_recognizer=AmivoiceSpeechRecognizer(),
     )
     static_dir = _static_dir()
     capture_dir = _camera_capture_dir()
@@ -169,6 +172,7 @@ def create_app() -> FastAPI:
     app.include_router(build_chat_input_router(services))
     app.include_router(build_chat_stream_router(services))
     app.include_router(build_camera_router(services))
+    app.include_router(build_microphone_router(services))
 
     # Block: Browser UI entrypoint
     @app.get("/", include_in_schema=False)

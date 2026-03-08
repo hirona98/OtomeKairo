@@ -758,6 +758,12 @@ body {
   height: 18px;
 }
 
+.composer-icon.recording {
+  background: #ffe2e2;
+  border-color: #d84a5a;
+  color: #9b1c2a;
+}
+
 .composer-select-wrap {
   flex: 0 0 168px;
 }
