@@ -1098,7 +1098,7 @@
 
 - `cognition_result` は、短周期の内部で使う構造化された認知結果である
 - current の `browser_chat` では、`cognition_result` は `cognition_plan` と `speech_draft` を合成して作る
-- 必須項目は `intention_summary`、`decision_reason`、`action_proposals`、`step_hints`、`speech_draft`、`memory_focus`、`reflection_seed` である
+- 必須項目は `intention_summary`、`decision_reason`、`action_proposals`、`step_hints`、`memory_focus`、`reflection_seed` である
 - `action_proposals` と `step_hints` は配列に固定し、候補がない場合も空配列 `[]` を使う
 - current の `browser_chat` では、`action_proposals` の各要素は少なくとも `action_type` と `priority` を持つ
 - current の `browser_chat` では、`action_type` は `speak`、`browse`、`notify`、`look`、`wait` のいずれかだけを許可する
@@ -1106,7 +1106,8 @@
 - current の `browser_chat` では、`speak` と `notify` のとき `target_channel=\"browser_chat\"` を必須とする
 - current の `browser_chat` では、`browse` のとき `query` に非空の検索文字列を必須とする
 - current の `browser_chat` では、`look` のとき `camera_connection_id` と、`direction` / `preset_id` / `preset_name` のいずれかを必須とする
-- `speech_draft` は、少なくとも `text`、`language`、`delivery_mode` を持つ
+- current の `browser_chat` では、`cognition_result.speech_draft` は `speak`、`notify`、`look` のいずれかを候補に含むときだけ持つ
+- `speech_draft` を持つ場合は、少なくとも `text`、`language`、`delivery_mode` を持つ
 - `memory_focus` は、少なくとも `focus_kind`、`summary` を持つ
 - `reflection_seed` は、少なくとも `cycle_id`、`input_kind`、`message_id`、`token_count`、`was_cancelled` を持つ
 - `cognition_result` は永続化前提の正本ではなく、その短周期の認知実行ごとに再構成する

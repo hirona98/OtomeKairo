@@ -99,15 +99,18 @@ def run_cognition_for_browser_chat_input(
         },
     )
     # Block: 応答文レンダリング
-    speech_draft = run_reply_render_for_browser_chat_input(
-        cycle_id=cycle_id,
-        input_kind=input_kind,
-        cognition_input=cognition_input,
-        cognition_plan=cognition_plan,
-        completion_settings=completion_settings,
-        cognition_client=cognition_client,
-    )
-    response_text = str(speech_draft["text"]).strip()
+    speech_draft: dict[str, Any] | None = None
+    response_text = ""
+    if _requires_reply_render(cognition_plan):
+        speech_draft = run_reply_render_for_browser_chat_input(
+            cycle_id=cycle_id,
+            input_kind=input_kind,
+            cognition_input=cognition_input,
+            cognition_plan=cognition_plan,
+            completion_settings=completion_settings,
+            cognition_client=cognition_client,
+        )
+        response_text = str(speech_draft["text"]).strip()
     cognition_result = _compose_cognition_result(
         cognition_plan=cognition_plan,
         speech_draft=speech_draft,
@@ -215,11 +218,11 @@ def run_cognition_for_browser_chat_input(
             raw_result_ref=dispatch_result.raw_result_ref,
             adapter_trace_ref={
                 "cognition_plan": cognition_plan,
-                "speech_draft": speech_draft,
                 "cognition_result": cognition_result,
                 "action_command": action_command,
                 "action_candidate_score": validated_action.action_candidate_score,
                 "dispatch_trace": dispatch_result.adapter_trace_ref,
+                **({"speech_draft": speech_draft} if speech_draft is not None else {}),
             },
         )
     ]
@@ -268,12 +271,28 @@ def _build_completion_settings(effective_settings: dict[str, Any]) -> dict[str, 
 def _compose_cognition_result(
     *,
     cognition_plan: dict[str, Any],
-    speech_draft: dict[str, Any],
+    speech_draft: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    return {
+    cognition_result = {
         **cognition_plan,
-        "speech_draft": speech_draft,
     }
+    if speech_draft is not None:
+        cognition_result["speech_draft"] = speech_draft
+    return cognition_result
+
+
+# Block: 応答文レンダリング要否
+def _requires_reply_render(cognition_plan: dict[str, Any]) -> bool:
+    action_proposals = cognition_plan.get("action_proposals")
+    if not isinstance(action_proposals, list):
+        raise RuntimeError("cognition_plan.action_proposals must be a list")
+    for proposal in action_proposals:
+        if not isinstance(proposal, dict):
+            raise RuntimeError("cognition_plan.action_proposals must contain only objects")
+        action_type = proposal.get("action_type")
+        if action_type in {"speak", "notify", "look"}:
+            return True
+    return False
 
 
 # Block: 初期ステータス文言
