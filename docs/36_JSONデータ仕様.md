@@ -1193,7 +1193,6 @@
   "active_conversation_preset_id": "preset_conversation_default",
   "active_memory_preset_id": "preset_memory_default",
   "active_motion_preset_id": "preset_motion_default",
-  "active_camera_connection_id": "cam_001",
   "system_values": {
     "runtime.idle_tick_ms": 1000,
     "integrations.notify_route": "ui_only"
@@ -1202,7 +1201,6 @@
 ```
 
 - `settings editor api.editor_state` は、設定UI保存対象の singleton state を API 用に展開した形である
-- `active_camera_connection_id` は `camera_connection_id` を 1 件だけ指すか、未選択なら `null` を使う
 - `system_values` の shape は `settings_editor_state.system_values_json` と同一である
 
 <!-- Block: Character Preset Payload -->
@@ -1324,7 +1322,6 @@
   "active_conversation_preset_id": "preset_conversation_default",
   "active_memory_preset_id": "preset_memory_default",
   "active_motion_preset_id": "preset_motion_default",
-  "active_camera_connection_id": "cam_001",
   "system_values": {
     "runtime.idle_tick_ms": 1000,
     "integrations.notify_route": "ui_only"
@@ -1365,6 +1362,7 @@
 ```json
 {
   "camera_connection_id": "cam_001",
+  "is_enabled": true,
   "display_name": "リビング",
   "host": "192.168.10.20",
   "username": "alice",
@@ -1375,7 +1373,8 @@
 ```
 
 - `camera_connection_entry` は、設定UI API が返すカメラ接続一覧の共通要素である
-- AI が使う接続は `settings editor api.editor_state.active_camera_connection_id` で 1 件だけ選ぶ
+- `is_enabled=true` の行が AI 利用候補であり、複数件を許可する
+- current の single-camera ONVIF 実装は `is_enabled=true` がちょうど 1 件のときだけ利用可能である
 
 <!-- Block: UI Outbound -->
 ### `ui_outbound_events.payload_json`

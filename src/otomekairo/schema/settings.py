@@ -295,7 +295,6 @@ def build_default_settings_editor_state(default_settings: dict[str, Any]) -> dic
         "active_conversation_preset_id": DEFAULT_SETTINGS_EDITOR_PRESET_IDS["conversation"],
         "active_memory_preset_id": DEFAULT_SETTINGS_EDITOR_PRESET_IDS["memory"],
         "active_motion_preset_id": DEFAULT_SETTINGS_EDITOR_PRESET_IDS["motion"],
-        "active_camera_connection_id": None,
         "system_values_json": {
             key: default_settings[key]
             for key in SETTINGS_EDITOR_SYSTEM_KEYS
@@ -493,8 +492,7 @@ def normalize_settings_editor_document(document: Any) -> dict[str, Any]:
         memory_presets=memory_presets,
         motion_presets=motion_presets,
     )
-    _validate_active_camera_connection(
-        editor_state=editor_state,
+    _validate_enabled_camera_connections(
         camera_connections=camera_connections,
     )
     return {
@@ -603,7 +601,6 @@ def _normalize_editor_state(editor_state: Any) -> dict[str, Any]:
         "active_conversation_preset_id",
         "active_memory_preset_id",
         "active_motion_preset_id",
-        "active_camera_connection_id",
         "system_values",
     }
     if set(editor_state) != expected_keys:
@@ -633,10 +630,6 @@ def _normalize_editor_state(editor_state: Any) -> dict[str, Any]:
         "active_motion_preset_id": _required_string(
             editor_state.get("active_motion_preset_id"),
             "editor_state.active_motion_preset_id",
-        ),
-        "active_camera_connection_id": _optional_string(
-            editor_state.get("active_camera_connection_id"),
-            "editor_state.active_camera_connection_id",
         ),
         "system_values": system_values,
     }
@@ -676,6 +669,7 @@ def _normalize_camera_connections(camera_connections: Any) -> list[dict[str, Any
             raise SettingsValidationError("invalid_settings_editor_document", "camera_connections entries must be objects")
         expected_keys = {
             "camera_connection_id",
+            "is_enabled",
             "display_name",
             "host",
             "username",
@@ -698,9 +692,13 @@ def _normalize_camera_connections(camera_connections: Any) -> list[dict[str, Any
             raise SettingsValidationError("invalid_settings_editor_document", "camera_connections.sort_order must be integer")
         if isinstance(updated_at, bool) or not isinstance(updated_at, int):
             raise SettingsValidationError("invalid_settings_editor_document", "camera_connections.updated_at must be integer")
+        is_enabled = camera_connection.get("is_enabled")
+        if not isinstance(is_enabled, bool):
+            raise SettingsValidationError("invalid_settings_editor_document", "camera_connections.is_enabled must be boolean")
         normalized_connections.append(
             {
                 "camera_connection_id": camera_connection_id,
+                "is_enabled": is_enabled,
                 "display_name": _required_string(
                     camera_connection.get("display_name"),
                     "camera_connections.display_name",
@@ -1069,42 +1067,24 @@ def _required_string(value: Any, field_name: str) -> str:
     return value
 
 
-# Block: Optional string helper
-def _optional_string(value: Any, field_name: str) -> str | None:
-    if value is None:
-        return None
-    if not isinstance(value, str) or not value:
-        raise SettingsValidationError("invalid_settings_editor_document", f"{field_name} must be string or null")
-    return value
-
-
-# Block: Active camera connection validation
-def _validate_active_camera_connection(
+# Block: Enabled camera connection validation
+def _validate_enabled_camera_connections(
     *,
-    editor_state: dict[str, Any],
     camera_connections: list[dict[str, Any]],
 ) -> None:
-    active_camera_connection_id = editor_state["active_camera_connection_id"]
-    if active_camera_connection_id is None:
-        return
-    selected_camera_connection = next(
-        (
-            camera_connection
-            for camera_connection in camera_connections
-            if str(camera_connection["camera_connection_id"]) == active_camera_connection_id
-        ),
-        None,
-    )
-    if selected_camera_connection is None:
-        raise SettingsValidationError(
-            "invalid_settings_editor_document",
-            "editor_state.active_camera_connection_id must reference camera_connections",
-        )
-    for field_name in ("host", "username", "password"):
-        if not selected_camera_connection[field_name]:
+    for camera_connection in camera_connections:
+        if bool(camera_connection["is_enabled"]) is not True:
+            continue
+        for field_name in ("host", "username", "password"):
+            if not camera_connection[field_name]:
+                raise SettingsValidationError(
+                    "invalid_settings_editor_document",
+                    f"enabled camera_connections.{field_name} must be non-empty string",
+                )
+        if not camera_connection["display_name"]:
             raise SettingsValidationError(
                 "invalid_settings_editor_document",
-                f"selected camera_connections.{field_name} must be non-empty string",
+                "enabled camera_connections.display_name must be non-empty string",
             )
 
 

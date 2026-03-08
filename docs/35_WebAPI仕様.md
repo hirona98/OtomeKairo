@@ -144,7 +144,7 @@ flowchart LR
 - チャット画面下部の管理表示は、`GET /api/status` の `runtime.last_retrieval` と `self_state.last_persona_update` を、直近の要約として表示してよい
 - `runtime.last_retrieval` は、時刻、mode、query 要約、合計件数に加えて、`selected_counts` のカテゴリ別内訳も `合計 17 件（作業2 / エピ1 / ...）` 形式で本文表示してよい
 - `システム` タブのカメラ接続追加は、一覧下部の `追加` で空行を末尾へ足して行う
-- 既存のカメラ接続は一覧テーブル上で直接編集し、`使用` は 0 件または 1 件だけ選べる
+- 既存のカメラ接続は一覧テーブル上で直接編集し、`有効` は複数件を同時に選べる
 - current の `browse` では、UI は少なくとも `browse_queued` と `browse_completed` の `notice` を見分けられるようにしてよい
 - UI 側で永続ストレージを前提にしない
 - UI は `browser_chat` チャネル専用として扱う
@@ -364,7 +364,7 @@ flowchart LR
 
 - 本文の JSON 形は `docs/36_JSONデータ仕様.md` を正本とする
 - 応答の top-level は `editor_state`、`character_presets`、`behavior_presets`、`conversation_presets`、`memory_presets`、`motion_presets`、`camera_connections`、`constraints`、`runtime_projection` に固定する
-- `editor_state` には `active_camera_connection_id` を含め、`camera_connections` は接続定義だけの配列として返す
+- `editor_state` はプリセット選択と `system_values` を返し、カメラ有効状態は `camera_connections[].is_enabled` に含める
 - `runtime_projection` は `effective_settings` と `active_motion_preset` を持つ
 - 設定UIは、このレスポンスだけで現在のフォームを描画できなければならない
 - API キー、トークン、パスワードもマスキングせずそのまま返してよい
@@ -382,7 +382,7 @@ flowchart LR
 ### 成功応答の考え方
 
 - リクエスト本文は `editor_state`、`character_presets`、`behavior_presets`、`conversation_presets`、`memory_presets`、`motion_presets`、`camera_connections` を持つ保存用の固定形にする
-- `editor_state.active_camera_connection_id` で AI 利用対象のカメラ接続を 1 件だけ選び、`camera_connections` 側には選択フラグを持たせない
+- AI 利用対象のカメラ接続は `camera_connections[].is_enabled` で表し、複数件を許可する
 - 成功応答本文は `GET /api/settings/editor` と同じ canonical 形に固定する
 - `constraints` と `runtime_projection` は読み取り専用のため、`PUT` のリクエスト本文へ含めない
 - サーバは `editor_state.revision` 一致を必須にし、不一致なら `409 Conflict` を返す

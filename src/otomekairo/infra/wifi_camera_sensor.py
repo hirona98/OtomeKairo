@@ -37,7 +37,10 @@ class WiFiCameraSensor(CameraSensor):
         self._capture_profile_token: str | None = None
 
     def is_available(self) -> bool:
-        return self._resolve_settings() is not None
+        try:
+            return self._resolve_settings() is not None
+        except RuntimeError:
+            return False
 
     def capture_still_image(self) -> CameraCaptureResponse:
         settings = self._require_settings()

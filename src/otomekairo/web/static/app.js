@@ -1343,7 +1343,7 @@
                 class="settings-table-check"
                 type="checkbox"
                 data-camera-select-id="${escapeHtml(cameraConnection.camera_connection_id)}"
-                ${isActiveCameraConnection(cameraConnection.camera_connection_id) ? "checked" : ""}
+                ${isEnabledCameraConnection(cameraConnection.camera_connection_id) ? "checked" : ""}
               />
             </td>
             <td>
@@ -1374,13 +1374,13 @@
       <div class="settings-card-title">カメラ接続</div>
       ${renderSettingsGroup(
       "接続一覧",
-      "AI に使わせる接続を 1 件だけ「使用」にしてください。追加は一覧の末尾へ行を足します。",
+      "AI が候補に使える接続を「有効」で複数選べます。追加は一覧の末尾へ行を足します。",
       `
           <div class="settings-table-wrap">
             <table class="settings-table">
               <thead>
                 <tr>
-                  <th>使用</th>
+                  <th>有効</th>
                   <th>表示名</th>
                   <th>IP アドレス</th>
                   <th>アカウント</th>
@@ -1683,8 +1683,7 @@
     const cameraConnectionId = String(element.dataset.cameraSelectId || "");
     try {
       requireCameraConnection(cameraConnectionId);
-      writeActiveCameraConnectionId(element.checked === true ? cameraConnectionId : null);
-      renderSettingsEditor();
+      writeCameraConnectionEnabled(cameraConnectionId, element.checked === true);
     } catch (error) {
       appendError(`カメラ選択の更新に失敗しました: ${error.message}`);
     }
@@ -2424,31 +2423,6 @@
     return editorDraft.camera_connections;
   }
 
-  function readActiveCameraConnectionId() {
-    if (editorDraft === null || !isObject(editorDraft.editor_state)) {
-      throw new Error("editor_state が不正です");
-    }
-    const activeCameraConnectionId = editorDraft.editor_state.active_camera_connection_id;
-    if (activeCameraConnectionId === null) {
-      return null;
-    }
-    return requireString(activeCameraConnectionId, "editor_state.active_camera_connection_id");
-  }
-
-  function writeActiveCameraConnectionId(cameraConnectionId) {
-    if (editorDraft === null || !isObject(editorDraft.editor_state)) {
-      throw new Error("editor_state が不正です");
-    }
-    editorDraft.editor_state.active_camera_connection_id = cameraConnectionId === null
-      ? null
-      : requireString(cameraConnectionId, "editor_state.active_camera_connection_id");
-    updateSettingsDirtyState();
-  }
-
-  function isActiveCameraConnection(cameraConnectionId) {
-    return readActiveCameraConnectionId() === requireString(cameraConnectionId, "camera_connection_id");
-  }
-
   function requireCameraConnection(cameraConnectionId) {
     const requiredCameraConnectionId = requireString(cameraConnectionId, "camera_connection_id");
     const cameraConnection = readCameraConnections()
@@ -2457,6 +2431,17 @@
       throw new Error("カメラ接続が見つかりません");
     }
     return cameraConnection;
+  }
+
+  function isEnabledCameraConnection(cameraConnectionId) {
+    return requireCameraConnection(cameraConnectionId).is_enabled === true;
+  }
+
+  function writeCameraConnectionEnabled(cameraConnectionId, isEnabled) {
+    const cameraConnection = requireCameraConnection(cameraConnectionId);
+    cameraConnection.is_enabled = isEnabled === true;
+    cameraConnection.updated_at = Date.now();
+    updateSettingsDirtyState();
   }
 
   function addCameraConnection() {
@@ -2469,6 +2454,7 @@
     const nowMs = Date.now();
     cameraConnections.push({
       camera_connection_id: cameraConnectionId,
+      is_enabled: false,
       display_name: `カメラ ${nextIndex}`,
       host: "",
       username: "",
@@ -2482,9 +2468,6 @@
   function removeCameraConnection(cameraConnectionId) {
     const requiredCameraConnectionId = requireString(cameraConnectionId, "camera_connection_id");
     requireCameraConnection(requiredCameraConnectionId);
-    if (readActiveCameraConnectionId() === requiredCameraConnectionId) {
-      writeActiveCameraConnectionId(null);
-    }
     editorDraft.camera_connections = readCameraConnections()
       .filter((cameraConnection) => String(cameraConnection.camera_connection_id) !== requiredCameraConnectionId);
     updateSettingsDirtyState();

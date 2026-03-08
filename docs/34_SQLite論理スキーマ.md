@@ -135,8 +135,6 @@ flowchart TD
   - 役割: 設定UIが扱う全体編集状態の正本を 1 件で保持する
   - 主キー: `row_id INTEGER PRIMARY KEY CHECK(row_id = 1)`
   - 必須列: `active_character_preset_id`, `active_behavior_preset_id`, `active_conversation_preset_id`, `active_memory_preset_id`, `active_motion_preset_id`, `system_values_json`, `revision`, `updated_at`
-  - 任意列: `active_camera_connection_id`
-  - `active_camera_connection_id` は AI が現在使うカメラ接続 1 件の ID を持ち、未選択なら `NULL` を許す
   - `system_values_json` はシステム設定の完全オブジェクトを保持する
   - `revision` は `PUT /api/settings/editor` の楽観ロック用に単調増加の `INTEGER` で持つ
 
@@ -178,8 +176,8 @@ flowchart TD
 - `camera_connections`
   - 役割: 設定UIで保持するカメラ接続先の正本を保持する
   - 主キー: `camera_connection_id TEXT PRIMARY KEY`
-  - 必須列: `display_name`, `host`, `username`, `password`, `sort_order`, `created_at`, `updated_at`
-  - どの接続を AI 利用対象にするかは `settings_editor_state.active_camera_connection_id` で選ぶ
+  - 必須列: `is_enabled`, `display_name`, `host`, `username`, `password`, `sort_order`, `created_at`, `updated_at`
+  - `is_enabled=1` の行が AI 利用候補であり、複数件を許可する
   - 主要索引: `(sort_order ASC, updated_at DESC)`
 
 - `attention_state`
