@@ -84,6 +84,12 @@ _BASE64_BLOB_PATTERN = re.compile(
 _DATA_URL_BASE64_PATTERN = re.compile(
     r"(data:[A-Za-z0-9.+-]+/[A-Za-z0-9.+-]+;base64,)([A-Za-z0-9+/=_-]+)"
 )
+LITELLM_LOGGER_NAMES = (
+    "LiteLLM",
+    "LiteLLM Proxy",
+    "LiteLLM Router",
+    "litellm",
+)
 
 
 # Block: Empty message filter
@@ -284,10 +290,7 @@ def _reset_root_handlers(root_logger: logging.Logger) -> None:
 def _configure_library_loggers(*, logger_levels: dict[str, str], litellm_log_level: str) -> None:
     for logger_name, level_name in logger_levels.items():
         logging.getLogger(logger_name).setLevel(_log_level_value(level_name))
-    logging.getLogger("LiteLLM").setLevel(_log_level_value(litellm_log_level))
-    logging.getLogger("litellm").setLevel(_log_level_value(litellm_log_level))
-    _attach_empty_filter("LiteLLM")
-    _attach_empty_filter("litellm")
+    configure_litellm_logger_bridge(litellm_log_level=litellm_log_level)
     _attach_empty_filter("py.warnings")
 
 
@@ -301,6 +304,17 @@ def _attach_filter(logger_name: str, filter_type: type[logging.Filter]) -> None:
 
 def _attach_empty_filter(logger_name: str) -> None:
     _attach_filter(logger_name, EmptyMessageFilter)
+
+
+# Block: LiteLLM logger bridge
+def configure_litellm_logger_bridge(*, litellm_log_level: str) -> None:
+    for logger_name in LITELLM_LOGGER_NAMES:
+        target_logger = logging.getLogger(logger_name)
+        _reset_named_logger_handlers(target_logger)
+        target_logger.disabled = False
+        target_logger.propagate = True
+        target_logger.setLevel(_log_level_value(litellm_log_level))
+        _attach_empty_filter(logger_name)
 
 
 # Block: Interprocess lock helper
@@ -329,6 +343,13 @@ def _process_logging_config(*, process_name: str, developer_config: DeveloperCon
     if process_logging is None:
         raise RuntimeError(f"developer_config.process.{process_name} is missing")
     return process_logging
+
+
+# Block: Named logger handler reset
+def _reset_named_logger_handlers(target_logger: logging.Logger) -> None:
+    for handler in list(target_logger.handlers):
+        target_logger.removeHandler(handler)
+        handler.close()
 
 
 def _log_level_value(level_name: str) -> int:

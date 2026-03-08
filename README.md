@@ -36,7 +36,7 @@
 - `src/otomekairo/boot/run_web.py`: `uvicorn` で Web サーバを起動し、既定では `0.0.0.0:8000` に bind する
 - `src/otomekairo/boot/run_runtime.py`: 人格ランタイムの常時ループを起動する
 - `src/otomekairo/boot/run_all.py`: Web サーバと人格ランタイムを同じ親プロセスで起動し、既存のランタイム lease が生きていればそれを再利用し、終了シグナル時はまず `SIGINT` で子プロセスを graceful shutdown させる
-- `src/otomekairo/infra/logging_setup.py`: `config/developer.toml` を前提に、`launcher / web / runtime` の root / handler / library logger level を起動時に決め、`log/otomekairo.log` への通常テキストログ整形と秘密情報マスクと BASE64 本文の省略を行い、共有ロックつきで約 1MiB ごとにローテーションする共通ロギング設定を持つ
+- `src/otomekairo/infra/logging_setup.py`: `config/developer.toml` を前提に、`launcher / web / runtime` の root / handler / library logger level を起動時に決め、`log/otomekairo.log` への通常テキストログ整形と秘密情報マスクと BASE64 本文の省略を行い、`LiteLLM` の自前コンソール handler も共通ログ経路へ統一し、共有ロックつきで約 1MiB ごとにローテーションする共通ロギング設定を持つ
 - `src/otomekairo/web/app.py`: FastAPI アプリを構成し、API ルータ、静止画配信用の `/captures`、最小ブラウザ UI (`GET /`)、例外処理を束ねる
 - `src/otomekairo/web/camera_api.py`: `POST /api/camera/capture` でカメラ静止画を取得し、`POST /api/camera/observe` でその画像を自発観測入力として認知キューへ積む
 - `src/otomekairo/web/static/`: `tmp/CocoroConsole` ベースの設定ウインドウを持つ最小チャット UI を持ち、同一オリジンで `POST /api/chat/input`、`POST /api/camera/capture`、`GET /api/chat/stream` を使い、`message` 到着時はチャット表示へ反映し、`audio_url` があればサーバ生成の TTS 音声を再生し、`Cam` は静止画をサムネイル表示して次のチャット入力へ添付し、設定パネルでは `キャラクター / 振る舞い / 会話 / 記憶 / モーション / システム` の 6 タブで 5 種のプリセットとシステム設定・カメラ接続をまとめて編集し、カメラ接続は表内で `使用` の有効化、行追加、行削除、接続情報編集を行う

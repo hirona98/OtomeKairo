@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 from pathlib import Path
 from typing import Any
 
 from otomekairo.gateway.cognition_client import CognitionRequest, CognitionResponse
+from otomekairo.infra.logging_setup import configure_litellm_logger_bridge
 from otomekairo.usecase.persona_prompt_projection import build_persona_prompt_projection
 
 
@@ -46,8 +48,14 @@ class LiteLLMCognitionClient:
 
 # Block: LiteLLM import
 def _import_litellm_module() -> Any:
+    litellm_log_level = os.environ["LITELLM_LOG"]
+    os.environ["LITELLM_LOG"] = "WARNING"
     import litellm
+    os.environ["LITELLM_LOG"] = litellm_log_level
 
+    configure_litellm_logger_bridge(
+        litellm_log_level=litellm_log_level,
+    )
     return litellm
 
 
