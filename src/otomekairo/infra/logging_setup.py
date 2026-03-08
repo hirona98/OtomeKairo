@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import ast
+import base64
+import binascii
 import json
 import logging
 import os
@@ -73,6 +75,14 @@ _SECRET_PATTERNS = (
     re.compile(r"(?i)(api_key\s*=\s*')([^']*)(')"),
     re.compile(r'(?i)("api_key"\s*:\s*")([^"]*)(")'),
     re.compile(r"(?i)(authorization\s*:\s*bearer\s+)([^\s'\"\\]+)"),
+)
+BASE64_MIN_TEXT_LENGTH = 128
+_BASE64_TEXT_PATTERN = re.compile(r"[A-Za-z0-9+/=_-]+")
+_BASE64_BLOB_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9+/_-])([A-Za-z0-9+/_-]{128,}={0,2})(?![A-Za-z0-9+/_-])"
+)
+_DATA_URL_BASE64_PATTERN = re.compile(
+    r"(data:[A-Za-z0-9.+-]+/[A-Za-z0-9.+-]+;base64,)([A-Za-z0-9+/=_-]+)"
 )
 
 
@@ -356,7 +366,7 @@ def _json_safe_value(value: Any, *, parent_key: str | None = None) -> Any:
 
 # Block: Secret sanitizers
 def _sanitize_message(message: str) -> str:
-    sanitized = message
+    sanitized = _omit_base64_text(message)
     for pattern in _SECRET_PATTERNS:
         sanitized = pattern.sub(_mask_secret_match, sanitized)
     return sanitized
@@ -382,6 +392,51 @@ def _mask_secret_text(value: str) -> str:
     if len(value) <= 4:
         return "*" * len(value)
     return f"{value[:2]}***{value[-2:]}"
+
+
+# Block: Base64 sanitizers
+def _omit_base64_text(text: str) -> str:
+    sanitized = _DATA_URL_BASE64_PATTERN.sub(_replace_data_url_base64_match, text)
+    return _BASE64_BLOB_PATTERN.sub(_replace_base64_blob_match, sanitized)
+
+
+def _replace_data_url_base64_match(match: re.Match[str]) -> str:
+    payload = match.group(2)
+    if not _looks_like_base64_blob(payload):
+        return match.group(0)
+    return f"{match.group(1)}{_omitted_base64_marker(payload)}"
+
+
+def _replace_base64_blob_match(match: re.Match[str]) -> str:
+    payload = match.group(1)
+    if not _looks_like_base64_blob(payload):
+        return payload
+    return _omitted_base64_marker(payload)
+
+
+def _looks_like_base64_blob(text: str) -> bool:
+    if len(text) < BASE64_MIN_TEXT_LENGTH:
+        return False
+    if _BASE64_TEXT_PATTERN.fullmatch(text) is None:
+        return False
+    padding_index = text.find("=")
+    if padding_index != -1 and text[padding_index:] != "=" * (len(text) - padding_index):
+        return False
+    normalized = text.replace("-", "+").replace("_", "/")
+    remainder = len(normalized) % 4
+    if remainder == 1:
+        return False
+    if remainder != 0:
+        normalized += "=" * (4 - remainder)
+    try:
+        decoded = base64.b64decode(normalized, validate=True)
+    except (binascii.Error, ValueError):
+        return False
+    return len(decoded) > 0
+
+
+def _omitted_base64_marker(text: str) -> str:
+    return f"[BASE64 omitted length={len(text)}]"
 
 
 # Block: Message helpers
