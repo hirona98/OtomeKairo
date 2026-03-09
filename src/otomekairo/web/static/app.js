@@ -2381,6 +2381,10 @@
     const selectedCounts = requireCountMap(lastRetrieval.selected_counts, "runtime.last_retrieval.selected_counts");
     const collectorNames = readOptionalStringArray(lastRetrieval.collector_names, "runtime.last_retrieval.collector_names");
     const collectorCounts = readOptionalCountMap(lastRetrieval.collector_counts, "runtime.last_retrieval.collector_counts");
+    const selectorInputCollectorCounts = readOptionalCountMap(
+      lastRetrieval.selector_input_collector_counts,
+      "runtime.last_retrieval.selector_input_collector_counts",
+    );
     const selectorSummary = readOptionalSelectorSummary(
       lastRetrieval.selector_summary,
       "runtime.last_retrieval.selector_summary",
@@ -2404,6 +2408,7 @@
         `selected: ${formatSelectedCounts(selectedCounts)}`,
         `collectors: ${collectorNames.length > 0 ? collectorNames.join(", ") : "なし"}`,
         `collector_counts: ${Object.keys(collectorCounts).length > 0 ? formatSelectedCounts(collectorCounts) : "なし"}`,
+        `selector_input_collectors: ${Object.keys(selectorInputCollectorCounts).length > 0 ? formatSelectedCounts(selectorInputCollectorCounts) : "なし"}`,
         `selector: ${formatSelectorSummary(selectorSummary)}`,
         `trimmed: ${trimmedItemRefs.length > 0 ? trimmedItemRefs.join(", ") : "なし"}`,
       ].join("\n"),

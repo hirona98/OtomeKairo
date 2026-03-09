@@ -165,9 +165,9 @@ class SqliteStateStore:
             ).fetchone()
             retrieval_row = connection.execute(
                 """
-                SELECT cycle_id, created_at, plan_json, selected_json, resolved_event_ids_json
+                SELECT cycle_id, created_at, plan_json, candidates_json, selected_json, resolved_event_ids_json
                 FROM retrieval_runs
-                ORDER BY events.created_at DESC
+                ORDER BY created_at DESC
                 LIMIT 1
                 """
             ).fetchone()
@@ -8617,6 +8617,7 @@ def _public_emotion_summary(current_emotion_json: dict[str, Any]) -> dict[str, A
 
 def _public_retrieval_summary(row: sqlite3.Row) -> dict[str, Any]:
     plan_json = json.loads(row["plan_json"])
+    candidates_json = json.loads(row["candidates_json"])
     selected_json = json.loads(row["selected_json"])
     payload = {
         "cycle_id": str(row["cycle_id"]),
@@ -8637,6 +8638,13 @@ def _public_retrieval_summary(row: sqlite3.Row) -> dict[str, Any]:
         payload["collector_counts"] = {
             str(key): int(value)
             for key, value in collector_counts.items()
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0
+        }
+    selector_input_collector_counts = candidates_json.get("selector_input_collector_counts")
+    if isinstance(selector_input_collector_counts, dict):
+        payload["selector_input_collector_counts"] = {
+            str(key): int(value)
+            for key, value in selector_input_collector_counts.items()
             if isinstance(value, int) and not isinstance(value, bool) and value > 0
         }
     selector_summary = selected_json.get("selector_summary")
