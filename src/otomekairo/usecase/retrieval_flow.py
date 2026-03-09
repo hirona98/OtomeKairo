@@ -140,7 +140,7 @@ def build_retrieval_artifacts(
         candidates_json=_build_candidates_json(
             candidates=candidate_collection.candidates,
             collector_runs=candidate_collection.collector_runs,
-            selector_input_candidate_count=min(len(merged_candidates), SELECTOR_CANDIDATE_LIMIT),
+            selector_input_candidates=merged_candidates[:SELECTOR_CANDIDATE_LIMIT],
             selector_candidate_limit=SELECTOR_CANDIDATE_LIMIT,
         ),
         selected_json=selection_artifacts.selected_json,
@@ -345,7 +345,7 @@ def _build_candidates_json(
     *,
     candidates: list[dict[str, Any]],
     collector_runs: list[dict[str, Any]],
-    selector_input_candidate_count: int,
+    selector_input_candidates: list[dict[str, Any]],
     selector_candidate_limit: int,
 ) -> dict[str, Any]:
     category_counts: dict[str, int] = {}
@@ -363,10 +363,27 @@ def _build_candidates_json(
             for category_name, count in category_counts.items()
             if count > 0
         ],
-        "selector_input_candidate_count": selector_input_candidate_count,
+        "selector_input_candidate_count": len(selector_input_candidates),
         "selector_candidate_limit": selector_candidate_limit,
+        "selector_input_collector_counts": _selector_input_collector_counts(selector_input_candidates),
         "collector_runs": collector_runs,
     }
+
+
+# Block: Selector input collector counts
+def _selector_input_collector_counts(
+    selector_input_candidates: list[dict[str, Any]],
+) -> dict[str, int]:
+    collector_counts: dict[str, int] = {}
+    for candidate in selector_input_candidates:
+        collector_names = candidate.get("collector_names")
+        if not isinstance(collector_names, list):
+            continue
+        for collector_name in collector_names:
+            if not isinstance(collector_name, str) or not collector_name:
+                continue
+            collector_counts[collector_name] = collector_counts.get(collector_name, 0) + 1
+    return collector_counts
 
 
 # Block: Cognition formatting
