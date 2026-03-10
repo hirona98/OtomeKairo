@@ -8626,6 +8626,7 @@ def _public_retrieval_summary(row: sqlite3.Row) -> dict[str, Any]:
         "queries": list(plan_json["queries"]),
         "selected_counts": dict(selected_json["selected_counts"]),
     }
+    selector_input_trace_by_item_ref: dict[str, dict[str, Any]] = {}
     collector_names = plan_json.get("collector_names")
     if isinstance(collector_names, list):
         payload["collector_names"] = [
@@ -8647,12 +8648,24 @@ def _public_retrieval_summary(row: sqlite3.Row) -> dict[str, Any]:
             for key, value in selected_reason_counts.items()
             if isinstance(value, int) and not isinstance(value, bool) and value > 0
         }
+    selector_input_trace = candidates_json.get("selector_input_trace")
+    if isinstance(selector_input_trace, list):
+        payload["selector_input_trace"] = _public_selector_input_trace(selector_input_trace)
+        selector_input_trace_by_item_ref = _selector_input_trace_by_item_ref(
+            payload["selector_input_trace"]
+        )
     selection_trace = selected_json.get("selection_trace")
     if isinstance(selection_trace, list):
-        payload["selection_trace"] = _public_selected_trace(selection_trace)
+        payload["selection_trace"] = _public_selected_trace(
+            selection_trace,
+            selector_input_trace_by_item_ref=selector_input_trace_by_item_ref,
+        )
     reserve_trace = selected_json.get("reserve_trace")
     if isinstance(reserve_trace, list):
-        payload["reserve_trace"] = _public_reserve_trace(reserve_trace)
+        payload["reserve_trace"] = _public_reserve_trace(
+            reserve_trace,
+            selector_input_trace_by_item_ref=selector_input_trace_by_item_ref,
+        )
     selector_input_collector_counts = candidates_json.get("selector_input_collector_counts")
     if isinstance(selector_input_collector_counts, dict):
         payload["selector_input_collector_counts"] = {
@@ -8674,9 +8687,6 @@ def _public_retrieval_summary(row: sqlite3.Row) -> dict[str, Any]:
             for key, value in selector_input_reason_counts.items()
             if isinstance(value, int) and not isinstance(value, bool) and value > 0
         }
-    selector_input_trace = candidates_json.get("selector_input_trace")
-    if isinstance(selector_input_trace, list):
-        payload["selector_input_trace"] = _public_selector_input_trace(selector_input_trace)
     selector_summary = selected_json.get("selector_summary")
     if isinstance(selector_summary, dict):
         payload["selector_summary"] = {
@@ -8769,7 +8779,11 @@ def _public_selector_input_trace(selector_input_trace: list[Any]) -> list[dict[s
 
 
 # Block: Selection trace 公開整形
-def _public_selected_trace(selection_trace: list[Any]) -> list[dict[str, Any]]:
+def _public_selected_trace(
+    selection_trace: list[Any],
+    *,
+    selector_input_trace_by_item_ref: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
     public_trace: list[dict[str, Any]] = []
     for index, trace_entry in enumerate(selection_trace):
         if not isinstance(trace_entry, dict):
@@ -8795,30 +8809,38 @@ def _public_selected_trace(selection_trace: list[Any]) -> list[dict[str, Any]]:
             raise RuntimeError(f"selection_trace[{index}].duplicate_hits must be integer")
         if not isinstance(selection_rank, int) or isinstance(selection_rank, bool) or selection_rank <= 0:
             raise RuntimeError(f"selection_trace[{index}].selection_rank must be positive integer")
-        public_trace.append(
-            {
-                "item_ref": item_ref,
-                "slot": slot_name,
-                "score": round(float(score), 3),
-                "collector_names": [
-                    str(collector_name)
-                    for collector_name in collector_names
-                    if isinstance(collector_name, str) and collector_name
-                ],
-                "reason_codes": [
-                    str(reason_code)
-                    for reason_code in reason_codes
-                    if isinstance(reason_code, str) and reason_code
-                ],
-                "duplicate_hits": duplicate_hits,
-                "selection_rank": selection_rank,
-            }
+        public_entry = {
+            "item_ref": item_ref,
+            "slot": slot_name,
+            "score": round(float(score), 3),
+            "collector_names": [
+                str(collector_name)
+                for collector_name in collector_names
+                if isinstance(collector_name, str) and collector_name
+            ],
+            "reason_codes": [
+                str(reason_code)
+                for reason_code in reason_codes
+                if isinstance(reason_code, str) and reason_code
+            ],
+            "duplicate_hits": duplicate_hits,
+            "selection_rank": selection_rank,
+        }
+        _merge_selector_input_context(
+            public_entry=public_entry,
+            selector_input_trace_by_item_ref=selector_input_trace_by_item_ref,
+            item_ref=item_ref,
         )
+        public_trace.append(public_entry)
     return public_trace
 
 
 # Block: Reserve trace 公開整形
-def _public_reserve_trace(reserve_trace: list[Any]) -> list[dict[str, Any]]:
+def _public_reserve_trace(
+    reserve_trace: list[Any],
+    *,
+    selector_input_trace_by_item_ref: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
     public_trace: list[dict[str, Any]] = []
     for index, trace_entry in enumerate(reserve_trace):
         if not isinstance(trace_entry, dict):
@@ -8841,25 +8863,55 @@ def _public_reserve_trace(reserve_trace: list[Any]) -> list[dict[str, Any]]:
             raise RuntimeError(f"reserve_trace[{index}].reason_codes must be list")
         if not isinstance(duplicate_hits, int) or isinstance(duplicate_hits, bool):
             raise RuntimeError(f"reserve_trace[{index}].duplicate_hits must be integer")
-        public_trace.append(
-            {
-                "item_ref": item_ref,
-                "slot": slot_name,
-                "score": round(float(score), 3),
-                "collector_names": [
-                    str(collector_name)
-                    for collector_name in collector_names
-                    if isinstance(collector_name, str) and collector_name
-                ],
-                "reason_codes": [
-                    str(reason_code)
-                    for reason_code in reason_codes
-                    if isinstance(reason_code, str) and reason_code
-                ],
-                "duplicate_hits": duplicate_hits,
-            }
+        public_entry = {
+            "item_ref": item_ref,
+            "slot": slot_name,
+            "score": round(float(score), 3),
+            "collector_names": [
+                str(collector_name)
+                for collector_name in collector_names
+                if isinstance(collector_name, str) and collector_name
+            ],
+            "reason_codes": [
+                str(reason_code)
+                for reason_code in reason_codes
+                if isinstance(reason_code, str) and reason_code
+            ],
+            "duplicate_hits": duplicate_hits,
+        }
+        _merge_selector_input_context(
+            public_entry=public_entry,
+            selector_input_trace_by_item_ref=selector_input_trace_by_item_ref,
+            item_ref=item_ref,
         )
+        public_trace.append(public_entry)
     return public_trace
+
+
+# Block: Selector input trace 索引
+def _selector_input_trace_by_item_ref(
+    selector_input_trace: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    return {
+        str(trace_entry["item_ref"]): trace_entry
+        for trace_entry in selector_input_trace
+    }
+
+
+# Block: Trace 文面情報の合成
+def _merge_selector_input_context(
+    *,
+    public_entry: dict[str, Any],
+    selector_input_trace_by_item_ref: dict[str, dict[str, Any]],
+    item_ref: str,
+) -> None:
+    selector_input_trace = selector_input_trace_by_item_ref.get(item_ref)
+    if selector_input_trace is None:
+        return
+    for field_name in ("memory_kind", "text", "relative_time_text", "about_time_hint_text"):
+        field_value = selector_input_trace.get(field_name)
+        if isinstance(field_value, str) and field_value:
+            public_entry[field_name] = field_value
 
 
 # Block: Event log entry

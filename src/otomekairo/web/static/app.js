@@ -2561,7 +2561,13 @@
       const collectors = traceEntry.collector_names.length > 0 ? traceEntry.collector_names.join("+") : "-";
       const reasons = traceEntry.reason_codes.length > 0 ? traceEntry.reason_codes.join("+") : "-";
       const rankText = showSelectionRank ? `rank=${String(traceEntry.selection_rank)}/` : "";
-      return `${String(index + 1)}:${rankText}${traceEntry.slot}/${traceEntry.item_ref}/${traceEntry.score.toFixed(3)}/dup=${String(traceEntry.duplicate_hits)}/${collectors}/${reasons}`;
+      const detailText = typeof traceEntry.relative_time_text === "string" && traceEntry.relative_time_text.length > 0
+        ? `/${traceEntry.relative_time_text}`
+        : "";
+      const summaryText = typeof traceEntry.text === "string" && traceEntry.text.length > 0
+        ? `/${clipText(traceEntry.text, 36)}`
+        : "";
+      return `${String(index + 1)}:${rankText}${traceEntry.slot}/${traceEntry.item_ref}/${traceEntry.score.toFixed(3)}/dup=${String(traceEntry.duplicate_hits)}${detailText}/${collectors}/${reasons}${summaryText}`;
     });
     if (selectionTrace.length > 6) {
       visibleEntries.push(`...他 ${String(selectionTrace.length - 6)} 件`);
@@ -2707,6 +2713,18 @@
           `${label}[${String(index)}].duplicate_hits`,
         ),
       };
+      if (typeof entry.text === "string" && entry.text.length > 0) {
+        traceEntry.text = entry.text;
+      }
+      if (typeof entry.relative_time_text === "string" && entry.relative_time_text.length > 0) {
+        traceEntry.relative_time_text = entry.relative_time_text;
+      }
+      if (typeof entry.memory_kind === "string" && entry.memory_kind.length > 0) {
+        traceEntry.memory_kind = entry.memory_kind;
+      }
+      if (typeof entry.about_time_hint_text === "string" && entry.about_time_hint_text.length > 0) {
+        traceEntry.about_time_hint_text = entry.about_time_hint_text;
+      }
       if (requireSelectionRank) {
         traceEntry.selection_rank = requireInteger(
           entry.selection_rank,

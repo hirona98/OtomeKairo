@@ -2356,11 +2356,15 @@
         {
           "slot": "semantic_items",
           "item_ref": "memory_state:mem_010",
+          "memory_kind": "semantic_fact",
           "score": 1.8,
           "reason_codes": ["matched_query", "mode_priority", "profile_bias"],
           "collector_names": ["associative_memory", "task_focus"],
           "duplicate_hits": 1,
-          "selection_rank": 2
+          "selection_rank": 2,
+          "text": "次の約束は 3 月 15 日の昼に変更された",
+          "relative_time_text": "2時間前",
+          "about_time_hint_text": "2026-03-15"
         }
       ],
       "reserve_trace": [
@@ -2370,7 +2374,10 @@
           "score": 0.8,
           "reason_codes": ["about_time"],
           "collector_names": ["explicit_time"],
-          "duplicate_hits": 0
+          "duplicate_hits": 0,
+          "text": "3 月 15 日の昼に会う予定だった",
+          "relative_time_text": "昨日",
+          "about_time_hint_text": "2026-03-15"
         }
       ],
       "selector_input_collector_counts": {
@@ -2479,6 +2486,7 @@
 - `runtime.last_commit_id` は、`commit_records` が 1 件以上ある場合だけ持つ
 - `runtime.last_retrieval` は、`retrieval_runs` が 1 件以上ある場合だけ持つ
 - `runtime.last_retrieval.collector_names`、`collector_counts`、`selected_reason_counts`、`selection_trace`、`reserve_trace`、`selector_input_collector_counts`、`selector_input_slot_counts`、`selector_input_reason_counts`、`selector_input_trace`、`selector_summary`、`trimmed_item_refs` は、current 実装では追加で持ってよい
+- current 実装では、`runtime.last_retrieval.selection_trace[]` と `reserve_trace[]` に `selector_input_trace` 由来の `memory_kind`、`text`、`relative_time_text`、`about_time_hint_text` を追加で持ってよい
 - `self_state.current_emotion` は、少なくとも `v`、`a`、`d`、`labels` を持つ
 - `self_state.last_persona_update` は、`revisions.entity_type=self_state.personality` が 1 件以上ある場合だけ持つ
 - `attention_state.primary_focus` は、current 実装では `attention_state.primary_focus_json.summary` をそのまま返す短い `string` とする
