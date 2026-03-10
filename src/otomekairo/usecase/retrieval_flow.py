@@ -366,6 +366,7 @@ def _build_candidates_json(
         "selector_input_candidate_count": len(selector_input_candidates),
         "selector_candidate_limit": selector_candidate_limit,
         "selector_input_collector_counts": _selector_input_collector_counts(selector_input_candidates),
+        "selector_input_slot_counts": _selector_input_slot_counts(selector_input_candidates),
         "collector_runs": collector_runs,
     }
 
@@ -384,6 +385,19 @@ def _selector_input_collector_counts(
                 continue
             collector_counts[collector_name] = collector_counts.get(collector_name, 0) + 1
     return collector_counts
+
+
+# Block: Selector input slot counts
+def _selector_input_slot_counts(
+    selector_input_candidates: list[dict[str, Any]],
+) -> dict[str, int]:
+    slot_counts: dict[str, int] = {}
+    for candidate in selector_input_candidates:
+        slot_name = candidate.get("slot")
+        if not isinstance(slot_name, str) or not slot_name:
+            continue
+        slot_counts[slot_name] = slot_counts.get(slot_name, 0) + 1
+    return slot_counts
 
 
 # Block: Cognition formatting

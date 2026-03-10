@@ -852,6 +852,11 @@
     "associative_memory": 3,
     "reply_chain": 1
   },
+  "selector_input_slot_counts": {
+    "recent_event_window": 2,
+    "episodic_items": 3,
+    "semantic_items": 2
+  },
   "category_counts": {
     "working_memory_items": 2,
     "episodic_items": 2,
@@ -884,7 +889,7 @@
 - `retrieval_candidates_json` は、`retrieval_runs.candidates_json` に保存する候補統計の最小形である
 - 必須項目は `total_candidate_count`、`category_counts`、`non_empty_categories` である
 - `category_counts` は、`memory_bundle` と同じ slot 名をキーにした件数マップである
-- `unique_candidate_count`、`selector_input_candidate_count`、`selector_candidate_limit`、`selector_input_collector_counts`、`collector_runs` は、current 実装では追加で持ってよい
+- `unique_candidate_count`、`selector_input_candidate_count`、`selector_candidate_limit`、`selector_input_collector_counts`、`selector_input_slot_counts`、`collector_runs` は、current 実装では追加で持ってよい
 
 ### `retrieval_selected_json`
 
@@ -2324,6 +2329,11 @@
         "associative_memory": 3,
         "reply_chain": 1
       },
+      "selector_input_slot_counts": {
+        "recent_event_window": 2,
+        "episodic_items": 3,
+        "semantic_items": 2
+      },
       "selector_summary": {
         "selector_mode": "llm_ranked",
         "selection_reason": "直近会話の継続と明示日付の一致を優先した",
@@ -2401,7 +2411,7 @@
 - `runtime.last_cycle_id` は、短周期が 1 回以上完了している場合だけ持つ
 - `runtime.last_commit_id` は、`commit_records` が 1 件以上ある場合だけ持つ
 - `runtime.last_retrieval` は、`retrieval_runs` が 1 件以上ある場合だけ持つ
-- `runtime.last_retrieval.collector_names`、`collector_counts`、`selector_input_collector_counts`、`selector_summary`、`trimmed_item_refs` は、current 実装では追加で持ってよい
+- `runtime.last_retrieval.collector_names`、`collector_counts`、`selector_input_collector_counts`、`selector_input_slot_counts`、`selector_summary`、`trimmed_item_refs` は、current 実装では追加で持ってよい
 - `self_state.current_emotion` は、少なくとも `v`、`a`、`d`、`labels` を持つ
 - `self_state.last_persona_update` は、`revisions.entity_type=self_state.personality` が 1 件以上ある場合だけ持つ
 - `attention_state.primary_focus` は、current 実装では `attention_state.primary_focus_json.summary` をそのまま返す短い `string` とする

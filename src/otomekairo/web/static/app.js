@@ -2385,6 +2385,10 @@
       lastRetrieval.selector_input_collector_counts,
       "runtime.last_retrieval.selector_input_collector_counts",
     );
+    const selectorInputSlotCounts = readOptionalCountMap(
+      lastRetrieval.selector_input_slot_counts,
+      "runtime.last_retrieval.selector_input_slot_counts",
+    );
     const selectorSummary = readOptionalSelectorSummary(
       lastRetrieval.selector_summary,
       "runtime.last_retrieval.selector_summary",
@@ -2409,6 +2413,7 @@
         `collectors: ${collectorNames.length > 0 ? collectorNames.join(", ") : "なし"}`,
         `collector_counts: ${Object.keys(collectorCounts).length > 0 ? formatSelectedCounts(collectorCounts) : "なし"}`,
         `selector_input_collectors: ${Object.keys(selectorInputCollectorCounts).length > 0 ? formatSelectedCounts(selectorInputCollectorCounts) : "なし"}`,
+        `selector_input_slots: ${Object.keys(selectorInputSlotCounts).length > 0 ? formatSelectedCounts(selectorInputSlotCounts) : "なし"}`,
         `selector: ${formatSelectorSummary(selectorSummary)}`,
         `trimmed: ${trimmedItemRefs.length > 0 ? trimmedItemRefs.join(", ") : "なし"}`,
       ].join("\n"),
