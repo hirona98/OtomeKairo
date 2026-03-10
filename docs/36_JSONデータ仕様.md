@@ -225,6 +225,7 @@
 - `stability` は、`0.0..1.0` の `number` に固定する
 - `active_biases` は、`selection_profile.emotion_bias` と同じ固定キーを持ち、各値は `-1.0..+1.0` の `number` に固定する
 - `active_biases` は、短周期での `selection_profile.emotion_bias` を作る直接入力として使う
+- current 実装では、`write_memory` の `long_mood_state.payload.current` と `active_biases` から同期更新してよい
 
 <!-- Block: Long Term Goal Entry -->
 ### `long_term_goal_entry`
@@ -1585,6 +1586,60 @@
       "last_confirmed_at": 1760000000000,
       "evidence_event_ids": ["evt_001", "evt_002"],
       "revision_reason": "write_memory created external fact"
+    },
+    {
+      "state_ref": "long_mood_primary",
+      "operation": "upsert",
+      "memory_kind": "long_mood_state",
+      "body_text": "基調は calm だが、curious の余韻を含みつつ 現在は curious に寄っている",
+      "payload": {
+        "source_job_id": "job_001",
+        "job_kind": "write_memory",
+        "source_cycle_id": "cycle_001",
+        "primary_event_id": "evt_001",
+        "source_event_ids": ["evt_001", "evt_002"],
+        "primary_label": "curious",
+        "labels": ["curious", "calm", "warm"],
+        "summary_text": "基調は calm だが、curious の余韻を含みつつ 現在は curious に寄っている",
+        "baseline": {
+          "v": 0.08,
+          "a": 0.05,
+          "d": 0.06,
+          "primary_label": "calm",
+          "labels": ["calm"],
+          "alpha": 0.12
+        },
+        "shock": {
+          "v": 0.10,
+          "a": 0.18,
+          "d": 0.05,
+          "primary_label": "curious",
+          "labels": ["curious"],
+          "magnitude": 0.21,
+          "half_life_ms": 2700000,
+          "updated_at": 1760000000000
+        },
+        "current": {
+          "v": 0.18,
+          "a": 0.23,
+          "d": 0.11
+        },
+        "stability": 0.82,
+        "active_biases": {
+          "caution_bias": 0.05,
+          "approach_bias": 0.07,
+          "avoidance_bias": 0.04,
+          "speech_intensity_bias": 0.09
+        },
+        "source_affect_labels": ["curious", "warm"],
+        "updated_at": 1760000000000
+      },
+      "confidence": 0.72,
+      "importance": 0.59,
+      "memory_strength": 0.71,
+      "last_confirmed_at": 1760000000000,
+      "evidence_event_ids": ["evt_001", "evt_002"],
+      "revision_reason": "write_memory created long mood state"
     }
   ],
   "preference_updates": [
@@ -1596,10 +1651,23 @@
       },
       "domain": "action_type",
       "polarity": "like",
-      "status": "candidate",
-      "confidence": 0.59,
+      "status": "confirmed",
+      "confidence": 0.78,
       "evidence_event_ids": ["evt_001", "evt_002"],
-      "revision_reason": "write_memory observed browse leaning like"
+      "revision_reason": "write_memory confirmed browse like preference"
+    },
+    {
+      "owner_scope": "self",
+      "target_entity_ref": {
+        "target_kind": "observation_kind",
+        "target_key": "web_search"
+      },
+      "domain": "observation_kind",
+      "polarity": "dislike",
+      "status": "revoked",
+      "confidence": 0.66,
+      "evidence_event_ids": ["evt_001", "evt_002"],
+      "revision_reason": "write_memory revoked web_search dislike preference"
     }
   ],
   "event_affect": [
@@ -1669,11 +1737,14 @@
 - `state_updates` の各要素は、少なくとも `state_ref`、`operation`、`memory_kind`、`evidence_event_ids`、`revision_reason` を持つ
 - `state_ref` は、`context_updates.state_links` から参照するための内部別名であり、同一 `MemoryWritePlan` 内で一意でなければならない
 - `operation = upsert` のときは、追加で `body_text`、`payload`、`confidence`、`importance`、`memory_strength`、`last_confirmed_at` を必須とする
+- current 実装では、`memory_kind = \"long_mood_state\"` の `payload` に `primary_label`、`labels`、`baseline`、`shock`、`current`、`stability`、`active_biases`、`updated_at` を持ってよい
 - `operation = close` のときは、追加で `target_state_id`、`valid_to_ts` を必須とする
 - `operation = mark_done` のときは、追加で `target_state_id`、`done_at`、`done_reason` を必須とし、`memory_kind` は `task` に固定する
 - `operation = revise_confidence` のときは、追加で `target_state_id`、`confidence`、`importance`、`memory_strength`、`last_confirmed_at` を必須とする
 - `close` と `mark_done` は、現在の実装では `memory_states.searchable=0` への切替まで同時に適用する
 - `preference_updates.target_entity_ref` は `preference_target_entity_ref` を使う
+- `preference_updates.status` は、`candidate`、`confirmed`、`revoked` のいずれかに固定する
+- current 実装では、`preference_updates` は既存 row を見て `candidate -> confirmed` の昇格と反対極性の `revoked` を同じ plan で出してよい
 - `event_affect.vad` は、`v`、`a`、`d` の 3 キーを必須とし、各値は `-1.0..+1.0` の `number` とする
 - `context_updates` は、`event_links`、`event_threads`、`state_links` の 3 キーを必須とする
 - `context_updates.state_links` は、永続 ID ではなく同一 `MemoryWritePlan.state_updates` 内の `state_ref` を参照する
@@ -1681,6 +1752,7 @@
 - current 実装では、`event_entities` は `MemoryWritePlan.event_annotations[].entities[]` を正本にして置換してよい
 - current 実装では、`state_about_time` は `MemoryWritePlan` に直接含めず、適用後の `memory_states.body_text` と `payload_json.summary_text` から再構成してよい
 - current 実装では、`state_entities` は `MemoryWritePlan` に直接含めず、適用後の `memory_states.payload_json` から再構成してよい
+- current 実装では、`write_memory` 適用時に最新 `long_mood_state` から `self_state.current_emotion_json` を同期してよい
 - `revision_reasons` は、`state_updates` と同じ件数を持ち、各要素は対応する `state_updates.revision_reason` と一致しなければならない
 
 <!-- Block: Runtime Settings Group -->

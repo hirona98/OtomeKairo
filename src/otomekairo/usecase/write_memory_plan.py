@@ -78,6 +78,18 @@ WRITE_MEMORY_ACTION_TYPE_ALIASES = {
     "emit_chat_response": "speak",
     "speak_ui_message": "speak",
 }
+LONG_MOOD_BASELINE_LERP = 0.12
+LONG_MOOD_SHOCK_BLEND = 0.65
+LONG_MOOD_SHOCK_HALF_LIFE_MS = 45 * 60 * 1000
+LONG_MOOD_MAX_DELTA_PER_CYCLE = 0.24
+LONG_MOOD_LABEL_PROTOTYPES = {
+    "calm": {"v": 0.10, "a": 0.02, "d": 0.10},
+    "curious": {"v": 0.18, "a": 0.26, "d": 0.10},
+    "warm": {"v": 0.24, "a": 0.08, "d": 0.14},
+    "guarded": {"v": -0.12, "a": 0.18, "d": -0.08},
+    "tense": {"v": -0.28, "a": 0.34, "d": -0.18},
+    "frustrated": {"v": -0.40, "a": 0.42, "d": -0.28},
+}
 
 
 # Block: Payload validation
@@ -198,6 +210,9 @@ def build_write_memory_plan(
     event_entries: list[dict[str, Any]],
     action_entries: list[dict[str, Any]],
     browse_fact_entries: list[dict[str, Any]],
+    current_emotion: dict[str, Any],
+    existing_long_mood_state: dict[str, Any] | None,
+    existing_preference_entries: list[dict[str, Any]],
     applied_at: int,
 ) -> dict[str, Any]:
     cycle_id = str(payload["cycle_id"])
@@ -205,6 +220,13 @@ def build_write_memory_plan(
     source_event_ids = list(payload["source_event_ids"])
     cycle_thread_key = _cycle_thread_key(cycle_id)
     summary_state_ref = "summary_primary"
+    event_affect_updates = [
+        _build_event_affect_update(
+            event_entry=event_entry,
+            primary_event_id=primary_event_id,
+        )
+        for event_entry in event_entries
+    ]
     state_updates = [
         {
             "state_ref": summary_state_ref,
@@ -288,6 +310,26 @@ def build_write_memory_plan(
                 "revision_reason": "write_memory linked reflection note to summary",
             }
         )
+    long_mood_state_update = _build_long_mood_state_update(
+        source_job_id=source_job_id,
+        payload=payload,
+        current_emotion=current_emotion,
+        existing_long_mood_state=existing_long_mood_state,
+        event_affect_updates=event_affect_updates,
+        applied_at=applied_at,
+    )
+    if long_mood_state_update is not None:
+        state_updates.append(long_mood_state_update)
+        state_links.append(
+            {
+                "from_state_ref": str(long_mood_state_update["state_ref"]),
+                "to_state_ref": summary_state_ref,
+                "label": "derived_from",
+                "confidence": 0.66,
+                "evidence_event_ids": source_event_ids,
+                "revision_reason": "write_memory linked long mood state to summary",
+            }
+        )
     return {
         "event_annotations": _build_event_annotations(
             event_entries=event_entries,
@@ -296,15 +338,10 @@ def build_write_memory_plan(
         "state_updates": state_updates,
         "preference_updates": _build_preference_updates(
             action_entries=action_entries,
+            existing_preference_entries=existing_preference_entries,
             source_event_ids=source_event_ids,
         ),
-        "event_affect": [
-            _build_event_affect_update(
-                event_entry=event_entry,
-                primary_event_id=primary_event_id,
-            )
-            for event_entry in event_entries
-        ],
+        "event_affect": event_affect_updates,
         "context_updates": {
             "event_links": _build_event_links(
                 event_entries=event_entries,
@@ -1530,6 +1567,7 @@ def _failed_avoid_pattern(*, action_type: str) -> str:
 def _build_preference_updates(
     *,
     action_entries: list[dict[str, Any]],
+    existing_preference_entries: list[dict[str, Any]],
     source_event_ids: list[str],
 ) -> list[dict[str, Any]]:
     aggregates: dict[tuple[str, str], dict[str, float]] = {}
@@ -1564,6 +1602,9 @@ def _build_preference_updates(
             target_key=observation_kind,
             signal=signal,
         )
+    preference_index = _existing_preference_index(
+        existing_preference_entries=existing_preference_entries,
+    )
     preference_updates: list[dict[str, Any]] = []
     for domain, target_key in sorted(aggregates.keys()):
         aggregate = aggregates[(domain, target_key)]
@@ -1572,8 +1613,15 @@ def _build_preference_updates(
         if like_score == dislike_score:
             continue
         polarity = "like" if like_score > dislike_score else "dislike"
+        opposite_polarity = "dislike" if polarity == "like" else "like"
         dominant_score = like_score if polarity == "like" else dislike_score
-        confidence = round(min(0.85, 0.45 + dominant_score * 0.14), 2)
+        opposite_score = dislike_score if polarity == "like" else like_score
+        existing_same_entry = preference_index.get((domain, target_key, polarity))
+        existing_opposite_entry = preference_index.get((domain, target_key, opposite_polarity))
+        status, confidence = _resolved_preference_status(
+            dominant_score=dominant_score,
+            existing_entry=existing_same_entry,
+        )
         preference_updates.append(
             {
                 "owner_scope": "self",
@@ -1583,15 +1631,194 @@ def _build_preference_updates(
                 },
                 "domain": domain,
                 "polarity": polarity,
-                "status": "candidate",
+                "status": status,
                 "confidence": confidence,
                 "evidence_event_ids": source_event_ids,
                 "revision_reason": (
-                    f"write_memory observed {target_key} leaning {polarity}"
+                    _preference_revision_reason(
+                        target_key=target_key,
+                        polarity=polarity,
+                        status=status,
+                        existing_entry=existing_same_entry,
+                    )
                 ),
             }
         )
+        if _should_revoke_preference(
+            dominant_score=dominant_score,
+            opposite_score=opposite_score,
+            existing_entry=existing_opposite_entry,
+        ):
+            preference_updates.append(
+                {
+                    "owner_scope": "self",
+                    "target_entity_ref": {
+                        "target_kind": domain,
+                        "target_key": target_key,
+                    },
+                    "domain": domain,
+                    "polarity": opposite_polarity,
+                    "status": "revoked",
+                    "confidence": _revoked_preference_confidence(
+                        dominant_score=dominant_score,
+                        existing_entry=existing_opposite_entry,
+                    ),
+                    "evidence_event_ids": source_event_ids,
+                    "revision_reason": (
+                        f"write_memory revoked {target_key} {opposite_polarity} preference"
+                    ),
+                }
+            )
     return preference_updates
+
+
+# Block: Long mood state build
+def _build_long_mood_state_update(
+    *,
+    source_job_id: str,
+    payload: dict[str, Any],
+    current_emotion: dict[str, Any],
+    existing_long_mood_state: dict[str, Any] | None,
+    event_affect_updates: list[dict[str, Any]],
+    applied_at: int,
+) -> dict[str, Any] | None:
+    if not event_affect_updates:
+        return None
+    source_event_ids = list(payload["source_event_ids"])
+    cycle_vad = _cycle_affect_vad(
+        event_affect_updates=event_affect_updates,
+        primary_event_id=str(payload["primary_event_id"]),
+    )
+    baseline_before = _long_mood_seed_vad(
+        existing_long_mood_state=existing_long_mood_state,
+        current_emotion=current_emotion,
+        key="baseline",
+    )
+    current_before = _long_mood_seed_vad(
+        existing_long_mood_state=existing_long_mood_state,
+        current_emotion=current_emotion,
+        key="current",
+    )
+    shock_before = _long_mood_seed_shock(
+        existing_long_mood_state=existing_long_mood_state,
+    )
+    elapsed_ms = _long_mood_elapsed_ms(
+        existing_long_mood_state=existing_long_mood_state,
+        applied_at=applied_at,
+    )
+    decay_factor = 0.5 ** (elapsed_ms / LONG_MOOD_SHOCK_HALF_LIFE_MS)
+    baseline_after = _lerp_vad(
+        start_vad=baseline_before,
+        target_vad=cycle_vad,
+        alpha=LONG_MOOD_BASELINE_LERP,
+    )
+    shock_target = _subtract_vad(cycle_vad, baseline_after)
+    shock_after = _clamp_vad(
+        _add_vad(
+            _scale_vad(shock_before, decay_factor),
+            _scale_vad(shock_target, LONG_MOOD_SHOCK_BLEND),
+        )
+    )
+    current_target = _clamp_vad(
+        _add_vad(baseline_after, shock_after)
+    )
+    current_after = _clamp_delta_vad(
+        previous_vad=current_before,
+        target_vad=current_target,
+        max_delta=LONG_MOOD_MAX_DELTA_PER_CYCLE,
+    )
+    primary_label = _mood_label_from_vad(current_after)
+    baseline_label = _mood_label_from_vad(baseline_after)
+    shock_label = _mood_label_from_vad(shock_after)
+    shock_magnitude = _vad_magnitude(shock_after)
+    stability = round(max(0.0, min(1.0, 1.0 - shock_magnitude * 0.85)), 2)
+    biases = _emotion_biases_from_vad(current_after)
+    source_affect_labels = _unique_non_empty_strings(
+        [
+            str(event_affect_update["moment_affect_labels"][0])
+            for event_affect_update in event_affect_updates
+            if list(event_affect_update["moment_affect_labels"])
+        ]
+    )
+    labels = _unique_non_empty_strings(
+        [
+            primary_label,
+            baseline_label,
+            shock_label if shock_magnitude >= 0.12 else "",
+            *source_affect_labels,
+        ]
+    )
+    revision_reason = (
+        "write_memory updated long mood state"
+        if existing_long_mood_state is not None
+        else "write_memory created long mood state"
+    )
+    confidence = round(
+        min(
+            0.92,
+            0.58
+            + _average_affect_confidence(event_affect_updates) * 0.18
+            + shock_magnitude * 0.12,
+        ),
+        2,
+    )
+    importance = round(min(0.90, 0.54 + shock_magnitude * 0.20), 2)
+    memory_strength = round(min(0.90, 0.56 + stability * 0.18), 2)
+    body_text = _build_long_mood_body_text(
+        baseline_label=baseline_label,
+        shock_label=shock_label,
+        primary_label=primary_label,
+        shock_magnitude=shock_magnitude,
+    )
+    return {
+        "state_ref": "long_mood_primary",
+        "operation": "upsert",
+        "memory_kind": "long_mood_state",
+        "body_text": body_text,
+        "payload": {
+            "source_job_id": source_job_id,
+            "job_kind": "write_memory",
+            "source_cycle_id": str(payload["cycle_id"]),
+            "primary_event_id": str(payload["primary_event_id"]),
+            "source_event_ids": source_event_ids,
+            "primary_label": primary_label,
+            "labels": labels,
+            "summary_text": body_text,
+            "baseline": {
+                "v": baseline_after["v"],
+                "a": baseline_after["a"],
+                "d": baseline_after["d"],
+                "primary_label": baseline_label,
+                "labels": [baseline_label],
+                "alpha": LONG_MOOD_BASELINE_LERP,
+            },
+            "shock": {
+                "v": shock_after["v"],
+                "a": shock_after["a"],
+                "d": shock_after["d"],
+                "primary_label": shock_label,
+                "labels": [shock_label],
+                "magnitude": round(shock_magnitude, 2),
+                "half_life_ms": LONG_MOOD_SHOCK_HALF_LIFE_MS,
+                "updated_at": applied_at,
+            },
+            "current": {
+                "v": current_after["v"],
+                "a": current_after["a"],
+                "d": current_after["d"],
+            },
+            "stability": stability,
+            "active_biases": biases,
+            "source_affect_labels": source_affect_labels,
+            "updated_at": applied_at,
+        },
+        "confidence": confidence,
+        "importance": importance,
+        "memory_strength": memory_strength,
+        "last_confirmed_at": applied_at,
+        "evidence_event_ids": source_event_ids,
+        "revision_reason": revision_reason,
+    }
 
 
 # Block: Event affect build
@@ -1736,6 +1963,118 @@ def _accumulate_preference_signal(
     aggregates[aggregate_key][score_key] += weight
 
 
+# Block: Preference existing index
+def _existing_preference_index(
+    *,
+    existing_preference_entries: list[dict[str, Any]],
+) -> dict[tuple[str, str, str], dict[str, Any]]:
+    index: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for preference_entry in existing_preference_entries:
+        target_entity_ref = _required_object(
+            preference_entry.get("target_entity_ref"),
+            "write_memory existing preference target_entity_ref must be object",
+        )
+        target_key = _required_non_empty_string(
+            target_entity_ref.get("target_key"),
+            "write_memory existing preference target_entity_ref.target_key must be non-empty string",
+        )
+        polarity = _required_non_empty_string(
+            preference_entry.get("polarity"),
+            "write_memory existing preference polarity must be non-empty string",
+        )
+        if polarity not in WRITE_MEMORY_PREFERENCE_POLARITIES:
+            raise RuntimeError("write_memory existing preference polarity is invalid")
+        index[
+            (
+                _required_non_empty_string(
+                    preference_entry.get("domain"),
+                    "write_memory existing preference domain must be non-empty string",
+                ),
+                target_key,
+                polarity,
+            )
+        ] = preference_entry
+    return index
+
+
+# Block: Preference status resolve
+def _resolved_preference_status(
+    *,
+    dominant_score: float,
+    existing_entry: dict[str, Any] | None,
+) -> tuple[str, float]:
+    prior_status = None
+    prior_support = 0.0
+    if existing_entry is not None:
+        prior_status = _required_non_empty_string(
+            existing_entry.get("status"),
+            "write_memory existing preference status must be non-empty string",
+        )
+        if prior_status == "candidate":
+            prior_support = 0.45 + float(existing_entry["confidence"]) * 0.30
+        elif prior_status == "confirmed":
+            prior_support = 0.85 + float(existing_entry["confidence"]) * 0.35
+        elif prior_status == "revoked":
+            prior_support = 0.0
+    support_score = dominant_score + prior_support
+    if prior_status == "confirmed" or support_score >= 1.55 or dominant_score >= 2.0:
+        return (
+            "confirmed",
+            round(min(0.95, 0.62 + dominant_score * 0.12 + prior_support * 0.06), 2),
+        )
+    return (
+        "candidate",
+        round(min(0.86, 0.44 + dominant_score * 0.16 + prior_support * 0.08), 2),
+    )
+
+
+# Block: Preference revoke decision
+def _should_revoke_preference(
+    *,
+    dominant_score: float,
+    opposite_score: float,
+    existing_entry: dict[str, Any] | None,
+) -> bool:
+    if existing_entry is None:
+        return False
+    existing_status = _required_non_empty_string(
+        existing_entry.get("status"),
+        "write_memory existing preference status must be non-empty string",
+    )
+    if existing_status not in {"candidate", "confirmed"}:
+        return False
+    return dominant_score >= 1.0 and (dominant_score - opposite_score) >= 0.40
+
+
+# Block: Preference revoke confidence
+def _revoked_preference_confidence(
+    *,
+    dominant_score: float,
+    existing_entry: dict[str, Any] | None,
+) -> float:
+    prior_confidence = 0.0
+    if existing_entry is not None:
+        prior_confidence = float(existing_entry["confidence"])
+    return round(min(0.90, 0.46 + dominant_score * 0.14 + prior_confidence * 0.08), 2)
+
+
+# Block: Preference revision reason
+def _preference_revision_reason(
+    *,
+    target_key: str,
+    polarity: str,
+    status: str,
+    existing_entry: dict[str, Any] | None,
+) -> str:
+    if status == "confirmed":
+        if existing_entry is not None and str(existing_entry.get("status")) == "candidate":
+            return f"write_memory confirmed {target_key} {polarity} preference"
+        if existing_entry is not None and str(existing_entry.get("status")) == "revoked":
+            return f"write_memory restored {target_key} {polarity} preference"
+        return f"write_memory reinforced {target_key} {polarity} preference"
+    return f"write_memory observed {target_key} leaning {polarity}"
+
+
 # Block: Action type normalize
 def _normalized_action_type(*, action_type: str) -> str | None:
     if action_type in {"browse", "look", "notify", "speak"}:
@@ -1793,6 +2132,266 @@ def _event_affect_profile(
         vad,
         round(confidence, 2),
     )
+
+
+# Block: Cycle affect average
+def _cycle_affect_vad(
+    *,
+    event_affect_updates: list[dict[str, Any]],
+    primary_event_id: str,
+) -> dict[str, float]:
+    totals = {"v": 0.0, "a": 0.0, "d": 0.0}
+    total_weight = 0.0
+    for event_affect_update in event_affect_updates:
+        weight = 1.35 if str(event_affect_update["event_id"]) == primary_event_id else 1.0
+        total_weight += weight
+        vad = dict(event_affect_update["vad"])
+        totals["v"] += float(vad["v"]) * weight
+        totals["a"] += float(vad["a"]) * weight
+        totals["d"] += float(vad["d"]) * weight
+    return {
+        axis: round(totals[axis] / total_weight, 2)
+        for axis in ("v", "a", "d")
+    }
+
+
+# Block: Long mood seed vad
+def _long_mood_seed_vad(
+    *,
+    existing_long_mood_state: dict[str, Any] | None,
+    current_emotion: dict[str, Any],
+    key: str,
+) -> dict[str, float]:
+    if existing_long_mood_state is not None:
+        payload = _required_object(
+            existing_long_mood_state.get("payload"),
+            "write_memory existing long mood payload must be object",
+        )
+        payload_entry = payload.get(key)
+        if isinstance(payload_entry, dict):
+            return _vad_from_mapping(
+                payload_entry,
+                field_name=f"write_memory existing long mood payload.{key}",
+            )
+    return _vad_from_current_emotion(current_emotion=current_emotion)
+
+
+# Block: Long mood seed shock
+def _long_mood_seed_shock(
+    *,
+    existing_long_mood_state: dict[str, Any] | None,
+) -> dict[str, float]:
+    if existing_long_mood_state is None:
+        return {"v": 0.0, "a": 0.0, "d": 0.0}
+    payload = _required_object(
+        existing_long_mood_state.get("payload"),
+        "write_memory existing long mood payload must be object",
+    )
+    shock_entry = payload.get("shock")
+    if isinstance(shock_entry, dict):
+        return _vad_from_mapping(
+            shock_entry,
+            field_name="write_memory existing long mood payload.shock",
+        )
+    return {"v": 0.0, "a": 0.0, "d": 0.0}
+
+
+# Block: Long mood elapsed helper
+def _long_mood_elapsed_ms(
+    *,
+    existing_long_mood_state: dict[str, Any] | None,
+    applied_at: int,
+) -> int:
+    if existing_long_mood_state is None:
+        return 0
+    payload = existing_long_mood_state.get("payload")
+    if isinstance(payload, dict):
+        payload_updated_at = payload.get("updated_at")
+        if isinstance(payload_updated_at, int):
+            return max(0, applied_at - payload_updated_at)
+    updated_at = existing_long_mood_state.get("updated_at")
+    if isinstance(updated_at, int):
+        return max(0, applied_at - updated_at)
+    return 0
+
+
+# Block: Current emotion vad
+def _vad_from_current_emotion(*, current_emotion: dict[str, Any]) -> dict[str, float]:
+    return {
+        "v": _required_float_like(
+            current_emotion.get("valence"),
+            "write_memory current_emotion.valence must be numeric",
+        ),
+        "a": _required_float_like(
+            current_emotion.get("arousal"),
+            "write_memory current_emotion.arousal must be numeric",
+        ),
+        "d": _required_float_like(
+            current_emotion.get("dominance"),
+            "write_memory current_emotion.dominance must be numeric",
+        ),
+    }
+
+
+# Block: Mapping vad
+def _vad_from_mapping(
+    value: dict[str, Any],
+    *,
+    field_name: str,
+) -> dict[str, float]:
+    return {
+        "v": _required_float_like(value.get("v"), f"{field_name}.v must be numeric"),
+        "a": _required_float_like(value.get("a"), f"{field_name}.a must be numeric"),
+        "d": _required_float_like(value.get("d"), f"{field_name}.d must be numeric"),
+    }
+
+
+# Block: Float like helper
+def _required_float_like(value: Any, error_message: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise RuntimeError(error_message)
+    return round(float(value), 2)
+
+
+# Block: Vad math
+def _lerp_vad(
+    *,
+    start_vad: dict[str, float],
+    target_vad: dict[str, float],
+    alpha: float,
+) -> dict[str, float]:
+    return _clamp_vad(
+        {
+            axis: round(
+                float(start_vad[axis]) + (float(target_vad[axis]) - float(start_vad[axis])) * alpha,
+                2,
+            )
+            for axis in ("v", "a", "d")
+        }
+    )
+
+
+def _subtract_vad(left_vad: dict[str, float], right_vad: dict[str, float]) -> dict[str, float]:
+    return {
+        axis: round(float(left_vad[axis]) - float(right_vad[axis]), 2)
+        for axis in ("v", "a", "d")
+    }
+
+
+def _add_vad(left_vad: dict[str, float], right_vad: dict[str, float]) -> dict[str, float]:
+    return {
+        axis: round(float(left_vad[axis]) + float(right_vad[axis]), 2)
+        for axis in ("v", "a", "d")
+    }
+
+
+def _scale_vad(vad: dict[str, float], factor: float) -> dict[str, float]:
+    return {
+        axis: round(float(vad[axis]) * factor, 2)
+        for axis in ("v", "a", "d")
+    }
+
+
+def _clamp_vad(vad: dict[str, float]) -> dict[str, float]:
+    return {
+        axis: round(max(-1.0, min(1.0, float(vad[axis]))), 2)
+        for axis in ("v", "a", "d")
+    }
+
+
+def _clamp_delta_vad(
+    *,
+    previous_vad: dict[str, float],
+    target_vad: dict[str, float],
+    max_delta: float,
+) -> dict[str, float]:
+    clamped: dict[str, float] = {}
+    for axis in ("v", "a", "d"):
+        delta = float(target_vad[axis]) - float(previous_vad[axis])
+        if delta > max_delta:
+            delta = max_delta
+        if delta < -max_delta:
+            delta = -max_delta
+        clamped[axis] = round(float(previous_vad[axis]) + delta, 2)
+    return _clamp_vad(clamped)
+
+
+def _vad_magnitude(vad: dict[str, float]) -> float:
+    return round(
+        (
+            float(vad["v"]) * float(vad["v"])
+            + float(vad["a"]) * float(vad["a"])
+            + float(vad["d"]) * float(vad["d"])
+        )
+        ** 0.5,
+        2,
+    )
+
+
+# Block: Mood labels
+def _mood_label_from_vad(vad: dict[str, float]) -> str:
+    best_label = "calm"
+    best_distance = float("inf")
+    for label, prototype in LONG_MOOD_LABEL_PROTOTYPES.items():
+        distance = (
+            (float(vad["v"]) - float(prototype["v"])) ** 2
+            + (float(vad["a"]) - float(prototype["a"])) ** 2
+            + (float(vad["d"]) - float(prototype["d"])) ** 2
+        )
+        if distance < best_distance:
+            best_distance = distance
+            best_label = label
+    return best_label
+
+
+def _build_long_mood_body_text(
+    *,
+    baseline_label: str,
+    shock_label: str,
+    primary_label: str,
+    shock_magnitude: float,
+) -> str:
+    if shock_magnitude < 0.12:
+        return f"基調は {baseline_label} で、現在も {primary_label} に近い"
+    return (
+        f"基調は {baseline_label} だが、{shock_label} の余韻を含みつつ "
+        f"現在は {primary_label} に寄っている"
+    )[:240]
+
+
+# Block: Emotion bias build
+def _emotion_biases_from_vad(vad: dict[str, float]) -> dict[str, float]:
+    valence = float(vad["v"])
+    arousal = float(vad["a"])
+    dominance = float(vad["d"])
+    return {
+        "caution_bias": round(max(0.0, -valence) * 0.28 + max(0.0, arousal) * 0.22, 2),
+        "approach_bias": round(max(0.0, valence) * 0.30 + max(0.0, dominance) * 0.18, 2),
+        "avoidance_bias": round(max(0.0, -valence) * 0.30 + max(0.0, arousal) * 0.18, 2),
+        "speech_intensity_bias": round(max(0.0, arousal) * 0.34 + abs(valence) * 0.08, 2),
+    }
+
+
+# Block: Average affect confidence
+def _average_affect_confidence(event_affect_updates: list[dict[str, Any]]) -> float:
+    if not event_affect_updates:
+        return 0.0
+    return round(
+        sum(float(event_affect_update["confidence"]) for event_affect_update in event_affect_updates)
+        / len(event_affect_updates),
+        2,
+    )
+
+
+# Block: Unique string helper
+def _unique_non_empty_strings(values: list[str]) -> list[str]:
+    unique_values: list[str] = []
+    for value in values:
+        if not value:
+            continue
+        if value not in unique_values:
+            unique_values.append(value)
+    return unique_values
 
 
 # Block: Event link label helper
