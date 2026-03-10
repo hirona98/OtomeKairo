@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from collections.abc import Iterable
+from datetime import datetime, timezone
 from typing import Any
+import unicodedata
+
+from otomekairo.usecase.retrieval_public_view import build_public_retrieval_detail
 
 
 # Block: Eval constants
-REPORT_SCHEMA_VERSION = 2
+REPORT_SCHEMA_VERSION = 3
 THREAD_COLLECTORS = frozenset({"reply_chain", "context_threads"})
 EXPLICIT_TIME_COLLECTORS = frozenset({"explicit_time"})
 EXPLICIT_TIME_REASON_CODES = frozenset(
@@ -21,6 +24,8 @@ MODE_ORDER = (
     "associative_recent",
 )
 TOP_COUNT_LIMIT = 8
+TEXT_OVERLAP_MIN_LENGTH = 8
+TEXT_CONTAIN_MIN_LENGTH = 12
 
 
 # Block: Eval report builder
@@ -159,6 +164,37 @@ def _build_eval_slice(retrieval_runs: list[dict[str, Any]]) -> dict[str, Any]:
                 total_runs,
             ),
         },
+        "preference": {
+            "preference_input_run_count": totals["preference_input_run_count"],
+            "preference_input_run_rate_percent": _ratio_percent(
+                totals["preference_input_run_count"],
+                total_runs,
+            ),
+            "preference_selected_run_count": totals["preference_selected_run_count"],
+            "preference_selected_run_rate_percent": _ratio_percent(
+                totals["preference_selected_run_count"],
+                total_runs,
+            ),
+            "preference_carryover_rate_percent": _ratio_percent(
+                totals["preference_selected_run_count"],
+                totals["preference_input_run_count"],
+            ),
+            "avg_selected_preference_item_count": _average(
+                totals["sum_selected_preference_item_count"],
+                total_runs,
+            ),
+        },
+        "redundancy": {
+            "redundant_selected_run_count": totals["redundant_selected_run_count"],
+            "redundant_selected_run_rate_percent": _ratio_percent(
+                totals["redundant_selected_run_count"],
+                total_runs,
+            ),
+            "avg_redundant_selected_item_count": _average(
+                totals["sum_redundant_selected_item_count"],
+                total_runs,
+            ),
+        },
         "top_selected_collectors": _top_counts(totals["total_selected_collectors"]),
         "top_selected_reasons": _top_counts(totals["total_selected_reasons"]),
         "top_selected_slots": _top_counts(totals["total_selected_slots"]),
@@ -174,6 +210,8 @@ def _format_eval_slice(*, title: str, slice_report: dict[str, Any]) -> list[str]
     overview = _require_object(slice_report, "overview")
     selector = _require_object(slice_report, "selector")
     coverage = _require_object(slice_report, "coverage")
+    preference = _require_object(slice_report, "preference")
+    redundancy = _require_object(slice_report, "redundancy")
     run_count = int(slice_report["run_count"])
     return [
         title,
@@ -212,6 +250,21 @@ def _format_eval_slice(*, title: str, slice_report: dict[str, Any]) -> list[str]
             f"({coverage['thread_input_run_count']}), "
             f"relationship {coverage['relationship_selected_run_rate_percent']}% "
             f"({coverage['relationship_selected_run_count']})"
+        ),
+        (
+            "preference: "
+            f"input {preference['preference_input_run_rate_percent']}% "
+            f"({preference['preference_input_run_count']}), "
+            f"selected {preference['preference_selected_run_rate_percent']}% "
+            f"({preference['preference_selected_run_count']}), "
+            f"carryover {preference['preference_carryover_rate_percent']}%, "
+            f"selected_items {preference['avg_selected_preference_item_count']}"
+        ),
+        (
+            "redundancy: "
+            f"runs {redundancy['redundant_selected_run_rate_percent']}% "
+            f"({redundancy['redundant_selected_run_count']}), "
+            f"selected_items {redundancy['avg_redundant_selected_item_count']}"
         ),
         (
             "top selected collectors: "
@@ -255,12 +308,17 @@ def _empty_eval_totals() -> dict[str, Any]:
         "thread_selected_run_count": 0,
         "thread_input_run_count": 0,
         "relationship_selected_run_count": 0,
+        "preference_input_run_count": 0,
+        "preference_selected_run_count": 0,
+        "redundant_selected_run_count": 0,
         "sum_raw_candidate_count": 0,
         "sum_merged_candidate_count": 0,
         "sum_selector_input_candidate_count": 0,
         "sum_llm_selected_ref_count": 0,
         "sum_selected_candidate_count": 0,
         "sum_selected_item_count": 0,
+        "sum_selected_preference_item_count": 0,
+        "sum_redundant_selected_item_count": 0,
         "sum_llm_return_ratio_percent": 0,
         "sum_selected_candidate_ratio_percent": 0,
         "sum_duplicate_hit_count": 0,
@@ -281,10 +339,13 @@ def _accumulate_eval_totals(
 ) -> None:
     selected_json = _require_object(retrieval_run, "selected")
     candidates_json = _require_object(retrieval_run, "candidates")
+    public_detail = build_public_retrieval_detail(retrieval_run)
     selector_summary = _countable_object(selected_json.get("selector_summary"))
     selected_counts = _require_non_negative_int_map(selected_json, "selected_counts")
     selected_collector_counts = _count_map(selected_json.get("collector_counts"))
     selected_reason_counts = _count_map(selected_json.get("selected_reason_counts"))
+    selector_input_trace = _optional_trace_entries(public_detail.get("selector_input_trace"))
+    selection_trace = _optional_trace_entries(public_detail.get("selection_trace"))
     selected_item_total = sum(selected_counts.values())
     if selected_item_total == 0:
         totals["empty_run_count"] += 1
@@ -304,6 +365,16 @@ def _accumulate_eval_totals(
         totals["thread_selected_run_count"] += 1
     if _contains_any_key(selector_input_collectors, THREAD_COLLECTORS):
         totals["thread_input_run_count"] += 1
+    if _trace_has_memory_kind(selector_input_trace, "preference"):
+        totals["preference_input_run_count"] += 1
+    selected_preference_item_count = _trace_memory_kind_count(selection_trace, "preference")
+    if selected_preference_item_count > 0:
+        totals["preference_selected_run_count"] += 1
+    totals["sum_selected_preference_item_count"] += selected_preference_item_count
+    redundant_selected_item_count = _redundant_selected_item_count(selection_trace)
+    if redundant_selected_item_count > 0:
+        totals["redundant_selected_run_count"] += 1
+    totals["sum_redundant_selected_item_count"] += redundant_selected_item_count
     totals["sum_raw_candidate_count"] += _int_metric(selector_summary, "raw_candidate_count")
     totals["sum_merged_candidate_count"] += _int_metric(
         selector_summary,
@@ -380,6 +451,19 @@ def _empty_eval_slice() -> dict[str, Any]:
             "thread_input_run_rate_percent": 0,
             "relationship_selected_run_count": 0,
             "relationship_selected_run_rate_percent": 0,
+        },
+        "preference": {
+            "preference_input_run_count": 0,
+            "preference_input_run_rate_percent": 0,
+            "preference_selected_run_count": 0,
+            "preference_selected_run_rate_percent": 0,
+            "preference_carryover_rate_percent": 0,
+            "avg_selected_preference_item_count": 0.0,
+        },
+        "redundancy": {
+            "redundant_selected_run_count": 0,
+            "redundant_selected_run_rate_percent": 0,
+            "avg_redundant_selected_item_count": 0.0,
         },
         "top_selected_collectors": {},
         "top_selected_reasons": {},
@@ -466,6 +550,92 @@ def _format_count_map(counts: dict[str, int]) -> str:
 # Block: Membership helper
 def _contains_any_key(counts: dict[str, int], expected_keys: frozenset[str]) -> bool:
     return any(key in counts for key in expected_keys)
+
+
+# Block: Optional trace entries
+def _optional_trace_entries(value: Any) -> list[dict[str, Any]]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise RuntimeError("trace entries must be list")
+    trace_entries: list[dict[str, Any]] = []
+    for trace_entry in value:
+        if not isinstance(trace_entry, dict):
+            raise RuntimeError("trace entry must be object")
+        trace_entries.append(trace_entry)
+    return trace_entries
+
+
+# Block: Trace memory kind 判定
+def _trace_has_memory_kind(trace_entries: list[dict[str, Any]], memory_kind: str) -> bool:
+    return any(
+        trace_entry.get("memory_kind") == memory_kind
+        for trace_entry in trace_entries
+    )
+
+
+# Block: Trace memory kind 件数
+def _trace_memory_kind_count(trace_entries: list[dict[str, Any]], memory_kind: str) -> int:
+    return sum(
+        1
+        for trace_entry in trace_entries
+        if trace_entry.get("memory_kind") == memory_kind
+    )
+
+
+# Block: 冗長 selected item 件数
+def _redundant_selected_item_count(selection_trace: list[dict[str, Any]]) -> int:
+    if not selection_trace:
+        return 0
+    recent_texts = [
+        normalized_text
+        for normalized_text in (
+            _normalized_trace_text(trace_entry)
+            for trace_entry in selection_trace
+            if trace_entry.get("slot") == "recent_event_window"
+        )
+        if normalized_text
+    ]
+    long_term_texts: list[str] = []
+    redundant_item_count = 0
+    for trace_entry in selection_trace:
+        if trace_entry.get("slot") == "recent_event_window":
+            continue
+        normalized_text = _normalized_trace_text(trace_entry)
+        if not normalized_text:
+            continue
+        if any(_texts_overlap(normalized_text, recent_text) for recent_text in recent_texts):
+            redundant_item_count += 1
+            continue
+        if any(_texts_overlap(normalized_text, existing_text) for existing_text in long_term_texts):
+            redundant_item_count += 1
+            continue
+        long_term_texts.append(normalized_text)
+    return redundant_item_count
+
+
+# Block: Trace text 正規化
+def _normalized_trace_text(trace_entry: dict[str, Any]) -> str:
+    text = trace_entry.get("text")
+    if not isinstance(text, str) or not text:
+        return ""
+    return "".join(
+        character.lower()
+        for character in text
+        if unicodedata.category(character)[0] in {"L", "N"}
+    )
+
+
+# Block: Text overlap 判定
+def _texts_overlap(left: str, right: str) -> bool:
+    if not left or not right:
+        return False
+    if left == right and min(len(left), len(right)) >= TEXT_OVERLAP_MIN_LENGTH:
+        return True
+    shorter_text, longer_text = sorted((left, right), key=len)
+    if len(shorter_text) < TEXT_CONTAIN_MIN_LENGTH:
+        return False
+    return shorter_text in longer_text
 
 
 # Block: Countable object read

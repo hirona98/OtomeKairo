@@ -82,6 +82,8 @@
 - 類似システムの参考フロー図: `docs/note/ココロゴースト_システムフロー図.md`
 - CocoroGhost の強みを OtomeKairo へ取り込む統合案: `docs/note/CocoroGhost統合設計案.md`
 - retrieval_runs から直近傾向を確認する運用メモ: `docs/note/retrieval_eval運用メモ.md`
+- retrieval_runs の review packet を確認する運用メモ: `docs/note/retrieval_triage運用メモ.md`
+- review 済み triage report を quarantine_memory へ取り込む運用メモ: `docs/note/retrieval_review_import運用メモ.md`
 
 <!-- Block: Maintenance -->
 ## 更新ルール（重要）

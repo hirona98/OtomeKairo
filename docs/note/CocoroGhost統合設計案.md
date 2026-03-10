@@ -264,6 +264,13 @@ flowchart TD
 - retrieval hit、thread 継続率、嗜好再現率、冗長注入率を観測する
 - 不要な暫定コードを削除し、正本 docs へ昇格する
 
+#### Phase 6 close 条件
+
+- `retrieval_eval` が、global と `mode_breakdown` の両方で `preference carryover` と `redundant injection` を観測できる
+- `retrieval_triage` が、flag 付き review packet と `annotation_template` を返せる
+- review 済み `retrieval_triage_report` を import して、`quarantine_memory` を enqueue できる
+- `docs/32`、`docs/33`、`docs/36` が current 実装の観測と review 導線を正本として説明している
+
 <!-- Block: Priority -->
 ## 最初に着手すべき順序
 
