@@ -138,7 +138,23 @@ def select_retrieval_candidates(
                 "selector_input_candidate_count": selector_input_candidate_count,
                 "selector_candidate_limit": selector_candidate_limit,
                 "llm_selected_ref_count": len(ordered_item_refs),
+                "llm_unselected_count": max(
+                    0,
+                    selector_input_candidate_count - len(ordered_item_refs),
+                ),
+                "llm_return_ratio_percent": _ratio_percent(
+                    numerator=len(ordered_item_refs),
+                    denominator=selector_input_candidate_count,
+                ),
                 "selected_candidate_count": len(selected_trace),
+                "selector_input_unused_count": max(
+                    0,
+                    selector_input_candidate_count - len(selected_trace),
+                ),
+                "selected_candidate_ratio_percent": _ratio_percent(
+                    numerator=len(selected_trace),
+                    denominator=selector_input_candidate_count,
+                ),
                 "duplicate_hit_count": max(0, raw_candidate_count - len(merged_candidates)),
                 "reserve_candidate_count": len(reserve_trace),
                 "slot_skipped_count": skipped_by_slot_limit,
@@ -219,6 +235,13 @@ def _reason_counts(selection_trace: list[dict[str, Any]]) -> dict[str, int]:
             reason_key = str(reason_code)
             counts[reason_key] = counts.get(reason_key, 0) + 1
     return counts
+
+
+# Block: 比率パーセント
+def _ratio_percent(*, numerator: int, denominator: int) -> int:
+    if denominator <= 0:
+        return 0
+    return round((numerator / denominator) * 100)
 
 
 # Block: 件数要約

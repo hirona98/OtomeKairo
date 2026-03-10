@@ -283,7 +283,11 @@ flowchart LR
         "selector_input_candidate_count": 7,
         "selector_candidate_limit": 24,
         "llm_selected_ref_count": 5,
+        "llm_unselected_count": 2,
+        "llm_return_ratio_percent": 71,
         "selected_candidate_count": 4,
+        "selector_input_unused_count": 3,
+        "selected_candidate_ratio_percent": 57,
         "duplicate_hit_count": 2,
         "reserve_candidate_count": 1,
         "slot_skipped_count": 1
