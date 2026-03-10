@@ -2385,6 +2385,18 @@
       lastRetrieval.selected_reason_counts,
       "runtime.last_retrieval.selected_reason_counts",
     );
+    const slotSkippedCollectorCounts = readOptionalCountMap(
+      lastRetrieval.slot_skipped_collector_counts,
+      "runtime.last_retrieval.slot_skipped_collector_counts",
+    );
+    const slotSkippedSlotCounts = readOptionalCountMap(
+      lastRetrieval.slot_skipped_slot_counts,
+      "runtime.last_retrieval.slot_skipped_slot_counts",
+    );
+    const slotSkippedReasonCounts = readOptionalCountMap(
+      lastRetrieval.slot_skipped_reason_counts,
+      "runtime.last_retrieval.slot_skipped_reason_counts",
+    );
     const reserveCollectorCounts = readOptionalCountMap(
       lastRetrieval.reserve_collector_counts,
       "runtime.last_retrieval.reserve_collector_counts",
@@ -2446,6 +2458,12 @@
     if (Object.keys(collectorCounts).length > 0) {
       textParts.push(`collector ${summarizeCollectorCounts(collectorCounts)}`);
     }
+    if (Object.keys(slotSkippedSlotCounts).length > 0) {
+      textParts.push(`skip ${summarizeSlotCounts(slotSkippedSlotCounts)}`);
+    }
+    if (Object.keys(reserveSlotCounts).length > 0) {
+      textParts.push(`reserve ${summarizeSlotCounts(reserveSlotCounts)}`);
+    }
     return {
       text: textParts.join(" / "),
       title: [
@@ -2455,6 +2473,9 @@
         `collectors: ${collectorNames.length > 0 ? collectorNames.join(", ") : "なし"}`,
         `collector_counts: ${Object.keys(collectorCounts).length > 0 ? formatSelectedCounts(collectorCounts) : "なし"}`,
         `selected_reasons: ${Object.keys(selectedReasonCounts).length > 0 ? formatSelectedCounts(selectedReasonCounts) : "なし"}`,
+        `slot_skipped_collectors: ${Object.keys(slotSkippedCollectorCounts).length > 0 ? formatSelectedCounts(slotSkippedCollectorCounts) : "なし"}`,
+        `slot_skipped_slots: ${Object.keys(slotSkippedSlotCounts).length > 0 ? formatSelectedCounts(slotSkippedSlotCounts) : "なし"}`,
+        `slot_skipped_reasons: ${Object.keys(slotSkippedReasonCounts).length > 0 ? formatSelectedCounts(slotSkippedReasonCounts) : "なし"}`,
         `reserve_collectors: ${Object.keys(reserveCollectorCounts).length > 0 ? formatSelectedCounts(reserveCollectorCounts) : "なし"}`,
         `reserve_slots: ${Object.keys(reserveSlotCounts).length > 0 ? formatSelectedCounts(reserveSlotCounts) : "なし"}`,
         `reserve_reasons: ${Object.keys(reserveReasonCounts).length > 0 ? formatSelectedCounts(reserveReasonCounts) : "なし"}`,
@@ -2543,6 +2564,22 @@
     return Object.entries(collectorCounts)
       .slice(0, 3)
       .map(([key, value]) => `${clipText(key, 12)}:${String(value)}`)
+      .join(", ");
+  }
+
+  function summarizeSlotCounts(slotCounts) {
+    const slotLabels = {
+      working_memory_items: "作業",
+      episodic_items: "エピ",
+      semantic_items: "意味",
+      affective_items: "感情",
+      relationship_items: "関係",
+      reflection_items: "反省",
+      recent_event_window: "直近",
+    };
+    return Object.entries(slotCounts)
+      .slice(0, 3)
+      .map(([key, value]) => `${slotLabels[key] || clipText(key, 12)}:${String(value)}`)
       .join(", ");
   }
 

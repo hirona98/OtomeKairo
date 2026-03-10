@@ -8648,6 +8648,27 @@ def _public_retrieval_summary(row: sqlite3.Row) -> dict[str, Any]:
             for key, value in selected_reason_counts.items()
             if isinstance(value, int) and not isinstance(value, bool) and value > 0
         }
+    slot_skipped_collector_counts = selected_json.get("slot_skipped_collector_counts")
+    if isinstance(slot_skipped_collector_counts, dict):
+        payload["slot_skipped_collector_counts"] = {
+            str(key): int(value)
+            for key, value in slot_skipped_collector_counts.items()
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0
+        }
+    slot_skipped_slot_counts = selected_json.get("slot_skipped_slot_counts")
+    if isinstance(slot_skipped_slot_counts, dict):
+        payload["slot_skipped_slot_counts"] = {
+            str(key): int(value)
+            for key, value in slot_skipped_slot_counts.items()
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0
+        }
+    slot_skipped_reason_counts = selected_json.get("slot_skipped_reason_counts")
+    if isinstance(slot_skipped_reason_counts, dict):
+        payload["slot_skipped_reason_counts"] = {
+            str(key): int(value)
+            for key, value in slot_skipped_reason_counts.items()
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0
+        }
     reserve_collector_counts = selected_json.get("reserve_collector_counts")
     if isinstance(reserve_collector_counts, dict):
         payload["reserve_collector_counts"] = {

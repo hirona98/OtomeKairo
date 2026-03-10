@@ -89,6 +89,7 @@ def select_retrieval_candidates(
     selected_bundle = {slot_name: [] for slot_name in SLOT_ORDER}
     selected_trace: list[dict[str, Any]] = []
     slot_skipped_trace: list[dict[str, Any]] = []
+    slot_skipped_all_trace: list[dict[str, Any]] = []
     slot_limits = _slot_limits(retrieval_plan=retrieval_plan)
     candidate_by_ref = {
         str(candidate["item_ref"]): candidate
@@ -103,13 +104,13 @@ def select_retrieval_candidates(
         slot_name = str(candidate["slot"])
         if len(selected_bundle[slot_name]) >= slot_limits[slot_name]:
             skipped_by_slot_limit += 1
+            skipped_trace_entry = _trace_entry(
+                candidate,
+                selection_rank=selection_rank,
+            )
+            slot_skipped_all_trace.append(skipped_trace_entry)
             if len(slot_skipped_trace) < 8:
-                slot_skipped_trace.append(
-                    _trace_entry(
-                        candidate,
-                        selection_rank=selection_rank,
-                    )
-                )
+                slot_skipped_trace.append(skipped_trace_entry)
             continue
         if item_ref in used_refs:
             raise RuntimeError("retrieval selection returned duplicate item_ref")
@@ -124,12 +125,14 @@ def select_retrieval_candidates(
     if merged_candidates and not selected_trace:
         raise RuntimeError("retrieval selection produced no usable candidates")
     reserve_trace: list[dict[str, Any]] = []
+    reserve_all_trace: list[dict[str, Any]] = []
     for merged_candidate in merged_candidates:
         if str(merged_candidate["item_ref"]) in used_refs:
             continue
-        if len(reserve_trace) >= 8:
-            break
-        reserve_trace.append(_trace_entry(merged_candidate))
+        reserve_trace_entry = _trace_entry(merged_candidate)
+        reserve_all_trace.append(reserve_trace_entry)
+        if len(reserve_trace) < 8:
+            reserve_trace.append(reserve_trace_entry)
     return SelectionArtifacts(
         memory_bundle=selected_bundle,
         selected_json={
@@ -139,9 +142,12 @@ def select_retrieval_candidates(
             "slot_skipped_trace": slot_skipped_trace,
             "collector_counts": _collector_counts(selected_trace),
             "selected_reason_counts": _reason_counts(selected_trace),
-            "reserve_collector_counts": _collector_counts(reserve_trace),
-            "reserve_slot_counts": _slot_counts(reserve_trace),
-            "reserve_reason_counts": _reason_counts(reserve_trace),
+            "slot_skipped_collector_counts": _collector_counts(slot_skipped_all_trace),
+            "slot_skipped_slot_counts": _slot_counts(slot_skipped_all_trace),
+            "slot_skipped_reason_counts": _reason_counts(slot_skipped_all_trace),
+            "reserve_collector_counts": _collector_counts(reserve_all_trace),
+            "reserve_slot_counts": _slot_counts(reserve_all_trace),
+            "reserve_reason_counts": _reason_counts(reserve_all_trace),
             "selector_summary": {
                 "selector_mode": "llm_ranked",
                 "selection_reason": selection_reason,
@@ -168,8 +174,8 @@ def select_retrieval_candidates(
                     denominator=selector_input_candidate_count,
                 ),
                 "duplicate_hit_count": max(0, raw_candidate_count - len(merged_candidates)),
-                "reserve_candidate_count": len(reserve_trace),
-                "slot_skipped_count": skipped_by_slot_limit,
+                "reserve_candidate_count": len(reserve_all_trace),
+                "slot_skipped_count": len(slot_skipped_all_trace),
             },
             "reserve_trace": reserve_trace,
         },

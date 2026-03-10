@@ -219,6 +219,15 @@ flowchart LR
         "mode_priority": 1,
         "profile_bias": 1
       },
+      "slot_skipped_collector_counts": {
+        "explicit_time": 1
+      },
+      "slot_skipped_slot_counts": {
+        "episodic_items": 1
+      },
+      "slot_skipped_reason_counts": {
+        "about_time": 1
+      },
       "reserve_collector_counts": {
         "explicit_time": 1
       },
@@ -385,7 +394,8 @@ flowchart LR
 - `runtime.last_cycle_id` は、短周期が 1 回以上完了している場合だけ返す
 - `last_commit_id` は、`commit_records.commit_id` の最新値がある場合だけ返す
 - `runtime.last_retrieval` は、`retrieval_runs` が 1 件以上ある場合だけ返し、直近の `RetrievalPlan` と選別件数を要約する
-- `runtime.last_retrieval.collector_names`、`collector_counts`、`selected_reason_counts`、`reserve_collector_counts`、`reserve_slot_counts`、`reserve_reason_counts`、`selection_trace`、`slot_skipped_trace`、`reserve_trace`、`selector_input_collector_counts`、`selector_input_slot_counts`、`selector_input_reason_counts`、`selector_input_trace`、`selector_summary`、`trimmed_item_refs` は、current 実装では追加で返してよい
+- `runtime.last_retrieval.collector_names`、`collector_counts`、`selected_reason_counts`、`slot_skipped_collector_counts`、`slot_skipped_slot_counts`、`slot_skipped_reason_counts`、`reserve_collector_counts`、`reserve_slot_counts`、`reserve_reason_counts`、`selection_trace`、`slot_skipped_trace`、`reserve_trace`、`selector_input_collector_counts`、`selector_input_slot_counts`、`selector_input_reason_counts`、`selector_input_trace`、`selector_summary`、`trimmed_item_refs` は、current 実装では追加で返してよい
+- current 実装では、`slot_skipped_trace` と `reserve_trace` は表示用 preview として最大 8 件まで返し、件数系 summary は全候補を集計してよい
 - current 実装では、`runtime.last_retrieval.selection_trace[]` と `reserve_trace[]` に `selector_input_trace` 由来の `memory_kind`、`text`、`relative_time_text`、`about_time_hint_text` を追加で返してよい
 - current 実装の `runtime.last_retrieval.selector_summary` は、`selector_mode` と `selection_reason` の文字列、および件数系の整数を同じ object に入れて返してよい
 - `self_state.last_persona_update` は、`revisions.entity_type=self_state.personality` が 1 件以上ある場合だけ返す

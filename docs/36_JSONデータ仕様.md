@@ -962,6 +962,15 @@
     "mode_priority": 1,
     "profile_bias": 1
   },
+  "slot_skipped_collector_counts": {
+    "explicit_time": 1
+  },
+  "slot_skipped_slot_counts": {
+    "episodic_items": 1
+  },
+  "slot_skipped_reason_counts": {
+    "about_time": 1
+  },
   "reserve_collector_counts": {
     "explicit_time": 1
   },
@@ -1005,7 +1014,8 @@
 - `retrieval_selected_json` は、`retrieval_runs.selected_json` に保存する最終選別結果の最小形である
 - 必須項目は `selected_counts`、`selected_refs`、`selection_trace` である
 - `selection_trace` の各要素は、少なくとも `slot`、`item_ref`、`score`、`reason_codes` を持つ
-- current 実装では、`selection_trace[].collector_names`、`selection_trace[].duplicate_hits`、`selection_trace[].selection_rank`、`slot_skipped_trace`、`collector_counts`、`selected_reason_counts`、`reserve_collector_counts`、`reserve_slot_counts`、`reserve_reason_counts`、`selector_summary`、`reserve_trace`、`trimmed_item_refs` を追加で持ってよい
+- current 実装では、`selection_trace[].collector_names`、`selection_trace[].duplicate_hits`、`selection_trace[].selection_rank`、`slot_skipped_trace`、`collector_counts`、`selected_reason_counts`、`slot_skipped_collector_counts`、`slot_skipped_slot_counts`、`slot_skipped_reason_counts`、`reserve_collector_counts`、`reserve_slot_counts`、`reserve_reason_counts`、`selector_summary`、`reserve_trace`、`trimmed_item_refs` を追加で持ってよい
+- current 実装では、`slot_skipped_trace` と `reserve_trace` は表示用 preview として最大 8 件まで保持し、件数系 summary は全候補を集計してよい
 
 <!-- Block: Completion Settings -->
 ### `completion_settings`
@@ -2376,6 +2386,15 @@
         "mode_priority": 1,
         "profile_bias": 1
       },
+      "slot_skipped_collector_counts": {
+        "explicit_time": 1
+      },
+      "slot_skipped_slot_counts": {
+        "episodic_items": 1
+      },
+      "slot_skipped_reason_counts": {
+        "about_time": 1
+      },
       "reserve_collector_counts": {
         "explicit_time": 1
       },
@@ -2536,7 +2555,7 @@
 - `runtime.last_cycle_id` は、短周期が 1 回以上完了している場合だけ持つ
 - `runtime.last_commit_id` は、`commit_records` が 1 件以上ある場合だけ持つ
 - `runtime.last_retrieval` は、`retrieval_runs` が 1 件以上ある場合だけ持つ
-- `runtime.last_retrieval.collector_names`、`collector_counts`、`selected_reason_counts`、`reserve_collector_counts`、`reserve_slot_counts`、`reserve_reason_counts`、`selection_trace`、`slot_skipped_trace`、`reserve_trace`、`selector_input_collector_counts`、`selector_input_slot_counts`、`selector_input_reason_counts`、`selector_input_trace`、`selector_summary`、`trimmed_item_refs` は、current 実装では追加で持ってよい
+- `runtime.last_retrieval.collector_names`、`collector_counts`、`selected_reason_counts`、`slot_skipped_collector_counts`、`slot_skipped_slot_counts`、`slot_skipped_reason_counts`、`reserve_collector_counts`、`reserve_slot_counts`、`reserve_reason_counts`、`selection_trace`、`slot_skipped_trace`、`reserve_trace`、`selector_input_collector_counts`、`selector_input_slot_counts`、`selector_input_reason_counts`、`selector_input_trace`、`selector_summary`、`trimmed_item_refs` は、current 実装では追加で持ってよい
 - current 実装では、`runtime.last_retrieval.selection_trace[]` と `reserve_trace[]` に `selector_input_trace` 由来の `memory_kind`、`text`、`relative_time_text`、`about_time_hint_text` を追加で持ってよい
 - `self_state.current_emotion` は、少なくとも `v`、`a`、`d`、`labels` を持つ
 - `self_state.last_persona_update` は、`revisions.entity_type=self_state.personality` が 1 件以上ある場合だけ持つ
