@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from otomekairo.usecase.retrieval_trace_stats import collector_counts, reason_counts, slot_counts
+
 
 # Block: Slot order
 SLOT_ORDER = (
@@ -26,6 +28,8 @@ SLOT_PRIORITY = {
     "affective_items": 5,
     "episodic_items": 6,
 }
+
+TRACE_PREVIEW_LIMIT = 8
 
 
 # Block: Selection result
@@ -75,6 +79,33 @@ def merge_retrieval_candidates(candidates: list[dict[str, Any]]) -> list[dict[st
     return _sorted_merged_candidates(list(merged_by_ref.values()))
 
 
+# Block: Empty selection artifacts
+def empty_selection_artifacts(
+    *,
+    raw_candidate_count: int,
+    selector_candidate_limit: int,
+    selection_reason: str = "候補なし",
+) -> SelectionArtifacts:
+    memory_bundle = _empty_memory_bundle()
+    return SelectionArtifacts(
+        memory_bundle=memory_bundle,
+        selected_json=_build_selected_json(
+            memory_bundle=memory_bundle,
+            raw_candidate_count=raw_candidate_count,
+            merged_candidate_count=0,
+            selector_input_candidate_count=0,
+            selector_candidate_limit=selector_candidate_limit,
+            llm_selected_ref_count=0,
+            selection_reason=selection_reason,
+            selected_trace=[],
+            slot_skipped_trace=[],
+            slot_skipped_all_trace=[],
+            reserve_trace=[],
+            reserve_all_trace=[],
+        ),
+    )
+
+
 # Block: LLM 順序から最終選別
 def select_retrieval_candidates(
     *,
@@ -86,7 +117,7 @@ def select_retrieval_candidates(
     ordered_item_refs: list[str],
     selection_reason: str,
 ) -> SelectionArtifacts:
-    selected_bundle = {slot_name: [] for slot_name in SLOT_ORDER}
+    selected_bundle = _empty_memory_bundle()
     selected_trace: list[dict[str, Any]] = []
     slot_skipped_trace: list[dict[str, Any]] = []
     slot_skipped_all_trace: list[dict[str, Any]] = []
@@ -96,20 +127,18 @@ def select_retrieval_candidates(
         for candidate in merged_candidates
     }
     used_refs: set[str] = set()
-    skipped_by_slot_limit = 0
     for selection_rank, item_ref in enumerate(ordered_item_refs, start=1):
         candidate = candidate_by_ref.get(item_ref)
         if candidate is None:
             raise RuntimeError("retrieval selection returned unknown item_ref")
         slot_name = str(candidate["slot"])
         if len(selected_bundle[slot_name]) >= slot_limits[slot_name]:
-            skipped_by_slot_limit += 1
             skipped_trace_entry = _trace_entry(
                 candidate,
                 selection_rank=selection_rank,
             )
             slot_skipped_all_trace.append(skipped_trace_entry)
-            if len(slot_skipped_trace) < 8:
+            if len(slot_skipped_trace) < TRACE_PREVIEW_LIMIT:
                 slot_skipped_trace.append(skipped_trace_entry)
             continue
         if item_ref in used_refs:
@@ -131,54 +160,24 @@ def select_retrieval_candidates(
             continue
         reserve_trace_entry = _trace_entry(merged_candidate)
         reserve_all_trace.append(reserve_trace_entry)
-        if len(reserve_trace) < 8:
+        if len(reserve_trace) < TRACE_PREVIEW_LIMIT:
             reserve_trace.append(reserve_trace_entry)
     return SelectionArtifacts(
         memory_bundle=selected_bundle,
-        selected_json={
-            "selected_counts": _selected_counts(memory_bundle=selected_bundle),
-            "selected_refs": _selected_refs(memory_bundle=selected_bundle),
-            "selection_trace": selected_trace,
-            "slot_skipped_trace": slot_skipped_trace,
-            "collector_counts": _collector_counts(selected_trace),
-            "selected_reason_counts": _reason_counts(selected_trace),
-            "slot_skipped_collector_counts": _collector_counts(slot_skipped_all_trace),
-            "slot_skipped_slot_counts": _slot_counts(slot_skipped_all_trace),
-            "slot_skipped_reason_counts": _reason_counts(slot_skipped_all_trace),
-            "reserve_collector_counts": _collector_counts(reserve_all_trace),
-            "reserve_slot_counts": _slot_counts(reserve_all_trace),
-            "reserve_reason_counts": _reason_counts(reserve_all_trace),
-            "selector_summary": {
-                "selector_mode": "llm_ranked",
-                "selection_reason": selection_reason,
-                "raw_candidate_count": raw_candidate_count,
-                "merged_candidate_count": len(merged_candidates),
-                "selector_input_candidate_count": selector_input_candidate_count,
-                "selector_candidate_limit": selector_candidate_limit,
-                "llm_selected_ref_count": len(ordered_item_refs),
-                "llm_unselected_count": max(
-                    0,
-                    selector_input_candidate_count - len(ordered_item_refs),
-                ),
-                "llm_return_ratio_percent": _ratio_percent(
-                    numerator=len(ordered_item_refs),
-                    denominator=selector_input_candidate_count,
-                ),
-                "selected_candidate_count": len(selected_trace),
-                "selector_input_unused_count": max(
-                    0,
-                    selector_input_candidate_count - len(selected_trace),
-                ),
-                "selected_candidate_ratio_percent": _ratio_percent(
-                    numerator=len(selected_trace),
-                    denominator=selector_input_candidate_count,
-                ),
-                "duplicate_hit_count": max(0, raw_candidate_count - len(merged_candidates)),
-                "reserve_candidate_count": len(reserve_all_trace),
-                "slot_skipped_count": len(slot_skipped_all_trace),
-            },
-            "reserve_trace": reserve_trace,
-        },
+        selected_json=_build_selected_json(
+            memory_bundle=selected_bundle,
+            raw_candidate_count=raw_candidate_count,
+            merged_candidate_count=len(merged_candidates),
+            selector_input_candidate_count=selector_input_candidate_count,
+            selector_candidate_limit=selector_candidate_limit,
+            llm_selected_ref_count=len(ordered_item_refs),
+            selection_reason=selection_reason,
+            selected_trace=selected_trace,
+            slot_skipped_trace=slot_skipped_trace,
+            slot_skipped_all_trace=slot_skipped_all_trace,
+            reserve_trace=reserve_trace,
+            reserve_all_trace=reserve_all_trace,
+        ),
     )
 
 
@@ -216,6 +215,99 @@ def _slot_limits(*, retrieval_plan: dict[str, Any]) -> dict[str, int]:
     }
 
 
+# Block: Empty memory bundle
+def _empty_memory_bundle() -> dict[str, list[Any]]:
+    return {slot_name: [] for slot_name in SLOT_ORDER}
+
+
+# Block: Selected json builder
+def _build_selected_json(
+    *,
+    memory_bundle: dict[str, Any],
+    raw_candidate_count: int,
+    merged_candidate_count: int,
+    selector_input_candidate_count: int,
+    selector_candidate_limit: int,
+    llm_selected_ref_count: int,
+    selection_reason: str,
+    selected_trace: list[dict[str, Any]],
+    slot_skipped_trace: list[dict[str, Any]],
+    slot_skipped_all_trace: list[dict[str, Any]],
+    reserve_trace: list[dict[str, Any]],
+    reserve_all_trace: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "selected_counts": _selected_counts(memory_bundle=memory_bundle),
+        "selected_refs": _selected_refs(memory_bundle=memory_bundle),
+        "selection_trace": selected_trace,
+        "slot_skipped_trace": slot_skipped_trace,
+        "collector_counts": collector_counts(selected_trace),
+        "selected_reason_counts": reason_counts(selected_trace),
+        "slot_skipped_collector_counts": collector_counts(slot_skipped_all_trace),
+        "slot_skipped_slot_counts": slot_counts(slot_skipped_all_trace),
+        "slot_skipped_reason_counts": reason_counts(slot_skipped_all_trace),
+        "reserve_collector_counts": collector_counts(reserve_all_trace),
+        "reserve_slot_counts": slot_counts(reserve_all_trace),
+        "reserve_reason_counts": reason_counts(reserve_all_trace),
+        "selector_summary": _selector_summary(
+            raw_candidate_count=raw_candidate_count,
+            merged_candidate_count=merged_candidate_count,
+            selector_input_candidate_count=selector_input_candidate_count,
+            selector_candidate_limit=selector_candidate_limit,
+            llm_selected_ref_count=llm_selected_ref_count,
+            selected_candidate_count=len(selected_trace),
+            reserve_candidate_count=len(reserve_all_trace),
+            slot_skipped_count=len(slot_skipped_all_trace),
+            selection_reason=selection_reason,
+        ),
+        "reserve_trace": reserve_trace,
+    }
+
+
+# Block: Selector summary
+def _selector_summary(
+    *,
+    raw_candidate_count: int,
+    merged_candidate_count: int,
+    selector_input_candidate_count: int,
+    selector_candidate_limit: int,
+    llm_selected_ref_count: int,
+    selected_candidate_count: int,
+    reserve_candidate_count: int,
+    slot_skipped_count: int,
+    selection_reason: str,
+) -> dict[str, int | str]:
+    return {
+        "selector_mode": "llm_ranked",
+        "selection_reason": selection_reason,
+        "raw_candidate_count": raw_candidate_count,
+        "merged_candidate_count": merged_candidate_count,
+        "selector_input_candidate_count": selector_input_candidate_count,
+        "selector_candidate_limit": selector_candidate_limit,
+        "llm_selected_ref_count": llm_selected_ref_count,
+        "llm_unselected_count": max(
+            0,
+            selector_input_candidate_count - llm_selected_ref_count,
+        ),
+        "llm_return_ratio_percent": _ratio_percent(
+            numerator=llm_selected_ref_count,
+            denominator=selector_input_candidate_count,
+        ),
+        "selected_candidate_count": selected_candidate_count,
+        "selector_input_unused_count": max(
+            0,
+            selector_input_candidate_count - selected_candidate_count,
+        ),
+        "selected_candidate_ratio_percent": _ratio_percent(
+            numerator=selected_candidate_count,
+            denominator=selector_input_candidate_count,
+        ),
+        "duplicate_hit_count": max(0, raw_candidate_count - merged_candidate_count),
+        "reserve_candidate_count": reserve_candidate_count,
+        "slot_skipped_count": slot_skipped_count,
+    }
+
+
 # Block: Trace 変換
 def _trace_entry(
     candidate: dict[str, Any],
@@ -233,35 +325,6 @@ def _trace_entry(
     if selection_rank is not None:
         trace_entry["selection_rank"] = selection_rank
     return trace_entry
-
-
-# Block: Collector 件数
-def _collector_counts(selection_trace: list[dict[str, Any]]) -> dict[str, int]:
-    counts: dict[str, int] = {}
-    for trace_entry in selection_trace:
-        for collector_name in trace_entry["collector_names"]:
-            collector_key = str(collector_name)
-            counts[collector_key] = counts.get(collector_key, 0) + 1
-    return counts
-
-
-# Block: Reason 件数
-def _reason_counts(selection_trace: list[dict[str, Any]]) -> dict[str, int]:
-    counts: dict[str, int] = {}
-    for trace_entry in selection_trace:
-        for reason_code in trace_entry["reason_codes"]:
-            reason_key = str(reason_code)
-            counts[reason_key] = counts.get(reason_key, 0) + 1
-    return counts
-
-
-# Block: Slot 件数
-def _slot_counts(selection_trace: list[dict[str, Any]]) -> dict[str, int]:
-    counts: dict[str, int] = {}
-    for trace_entry in selection_trace:
-        slot_name = str(trace_entry["slot"])
-        counts[slot_name] = counts.get(slot_name, 0) + 1
-    return counts
 
 
 # Block: 比率パーセント
