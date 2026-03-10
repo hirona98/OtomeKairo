@@ -2386,94 +2386,12 @@
         "mode_priority": 1,
         "profile_bias": 1
       },
-      "slot_skipped_collector_counts": {
-        "explicit_time": 1
-      },
       "slot_skipped_slot_counts": {
         "episodic_items": 1
-      },
-      "slot_skipped_reason_counts": {
-        "about_time": 1
-      },
-      "reserve_collector_counts": {
-        "explicit_time": 1
       },
       "reserve_slot_counts": {
         "episodic_items": 1
       },
-      "reserve_reason_counts": {
-        "about_time": 1
-      },
-      "selection_trace": [
-        {
-          "slot": "semantic_items",
-          "item_ref": "memory_state:mem_010",
-          "memory_kind": "semantic_fact",
-          "score": 1.8,
-          "reason_codes": ["matched_query", "mode_priority", "profile_bias"],
-          "collector_names": ["associative_memory", "task_focus"],
-          "duplicate_hits": 1,
-          "selection_rank": 2,
-          "text": "次の約束は 3 月 15 日の昼に変更された",
-          "relative_time_text": "2時間前",
-          "about_time_hint_text": "2026-03-15"
-        }
-      ],
-      "slot_skipped_trace": [
-        {
-          "slot": "episodic_items",
-          "item_ref": "event:evt_011",
-          "score": 0.75,
-          "reason_codes": ["about_time"],
-          "collector_names": ["explicit_time"],
-          "duplicate_hits": 0,
-          "selection_rank": 3,
-          "text": "3 月 15 日の昼に話す約束だった",
-          "relative_time_text": "昨日",
-          "about_time_hint_text": "2026-03-15"
-        }
-      ],
-      "reserve_trace": [
-        {
-          "slot": "episodic_items",
-          "item_ref": "event:evt_010",
-          "score": 0.8,
-          "reason_codes": ["about_time"],
-          "collector_names": ["explicit_time"],
-          "duplicate_hits": 0,
-          "text": "3 月 15 日の昼に会う予定だった",
-          "relative_time_text": "昨日",
-          "about_time_hint_text": "2026-03-15"
-        }
-      ],
-      "selector_input_collector_counts": {
-        "recent_event_window": 2,
-        "associative_memory": 3,
-        "reply_chain": 1
-      },
-      "selector_input_slot_counts": {
-        "recent_event_window": 2,
-        "episodic_items": 3,
-        "semantic_items": 2
-      },
-      "selector_input_reason_counts": {
-        "matched_query": 3,
-        "about_time": 2,
-        "reply_chain": 1
-      },
-      "selector_input_trace": [
-        {
-          "item_ref": "memory_state:mem_010",
-          "slot": "semantic_items",
-          "memory_kind": "semantic_fact",
-          "score": 1.8,
-          "collector_names": ["associative_memory", "task_focus"],
-          "reason_codes": ["matched_query", "mode_priority", "profile_bias"],
-          "text": "次の約束は 3 月 15 日の昼に変更された",
-          "relative_time_text": "2時間前",
-          "about_time_hint_text": "2026-03-15"
-        }
-      ],
       "selector_summary": {
         "selector_mode": "llm_ranked",
         "selection_reason": "直近会話の継続と明示日付の一致を優先した",
@@ -2491,7 +2409,6 @@
         "reserve_candidate_count": 1,
         "slot_skipped_count": 1
       },
-      "trimmed_item_refs": ["event:evt_002"],
       "selected_counts": {
         "working_memory_items": 2,
         "episodic_items": 1,
@@ -2555,8 +2472,7 @@
 - `runtime.last_cycle_id` は、短周期が 1 回以上完了している場合だけ持つ
 - `runtime.last_commit_id` は、`commit_records` が 1 件以上ある場合だけ持つ
 - `runtime.last_retrieval` は、`retrieval_runs` が 1 件以上ある場合だけ持つ
-- `runtime.last_retrieval.collector_names`、`collector_counts`、`selected_reason_counts`、`slot_skipped_collector_counts`、`slot_skipped_slot_counts`、`slot_skipped_reason_counts`、`reserve_collector_counts`、`reserve_slot_counts`、`reserve_reason_counts`、`selection_trace`、`slot_skipped_trace`、`reserve_trace`、`selector_input_collector_counts`、`selector_input_slot_counts`、`selector_input_reason_counts`、`selector_input_trace`、`selector_summary`、`trimmed_item_refs` は、current 実装では追加で持ってよい
-- current 実装では、`runtime.last_retrieval.selection_trace[]` と `reserve_trace[]` に `selector_input_trace` 由来の `memory_kind`、`text`、`relative_time_text`、`about_time_hint_text` を追加で持ってよい
+- `runtime.last_retrieval` は、current 実装では `collector_names`、`collector_counts`、`selected_reason_counts`、`slot_skipped_slot_counts`、`reserve_slot_counts`、`selector_summary` を追加で持ってよい
 - `self_state.current_emotion` は、少なくとも `v`、`a`、`d`、`labels` を持つ
 - `self_state.last_persona_update` は、`revisions.entity_type=self_state.personality` が 1 件以上ある場合だけ持つ
 - `attention_state.primary_focus` は、current 実装では `attention_state.primary_focus_json.summary` をそのまま返す短い `string` とする
@@ -2567,6 +2483,152 @@
 - `world_state.external_wait_count` は `integer` に固定する
 - `drive_state.priority_effects` は `task_progress_bias`、`exploration_bias`、`maintenance_bias`、`social_bias` を持つ `object` に固定する
 - `task_state.active_task_count`、`task_state.waiting_task_count` は `integer` に固定する
+
+<!-- Block: Latest Retrieval Run -->
+### `GET /api/retrieval-runs/latest` の成功応答 JSON
+
+```json
+{
+  "cycle_id": "cycle_...",
+  "created_at": 1760000000000,
+  "mode": "associative_recent",
+  "queries": ["最近の会話"],
+  "collector_names": [
+    "recent_event_window",
+    "associative_memory",
+    "episodic_memory"
+  ],
+  "collector_counts": {
+    "recent_event_window": 2,
+    "associative_memory": 1
+  },
+  "selected_reason_counts": {
+    "matched_query": 1,
+    "mode_priority": 1,
+    "profile_bias": 1
+  },
+  "slot_skipped_collector_counts": {
+    "explicit_time": 1
+  },
+  "slot_skipped_slot_counts": {
+    "episodic_items": 1
+  },
+  "slot_skipped_reason_counts": {
+    "about_time": 1
+  },
+  "reserve_collector_counts": {
+    "explicit_time": 1
+  },
+  "reserve_slot_counts": {
+    "episodic_items": 1
+  },
+  "reserve_reason_counts": {
+    "about_time": 1
+  },
+  "selection_trace": [
+    {
+      "slot": "semantic_items",
+      "item_ref": "memory_state:mem_010",
+      "memory_kind": "semantic_fact",
+      "score": 1.8,
+      "reason_codes": ["matched_query", "mode_priority", "profile_bias"],
+      "collector_names": ["associative_memory", "task_focus"],
+      "duplicate_hits": 1,
+      "selection_rank": 2,
+      "text": "次の約束は 3 月 15 日の昼に変更された",
+      "relative_time_text": "2時間前",
+      "about_time_hint_text": "2026-03-15"
+    }
+  ],
+  "slot_skipped_trace": [
+    {
+      "slot": "episodic_items",
+      "item_ref": "event:evt_011",
+      "score": 0.75,
+      "reason_codes": ["about_time"],
+      "collector_names": ["explicit_time"],
+      "duplicate_hits": 0,
+      "selection_rank": 3,
+      "text": "3 月 15 日の昼に話す約束だった",
+      "relative_time_text": "昨日",
+      "about_time_hint_text": "2026-03-15"
+    }
+  ],
+  "reserve_trace": [
+    {
+      "slot": "episodic_items",
+      "item_ref": "event:evt_010",
+      "score": 0.8,
+      "reason_codes": ["about_time"],
+      "collector_names": ["explicit_time"],
+      "duplicate_hits": 0,
+      "text": "3 月 15 日の昼に会う予定だった",
+      "relative_time_text": "昨日",
+      "about_time_hint_text": "2026-03-15"
+    }
+  ],
+  "selector_input_collector_counts": {
+    "recent_event_window": 2,
+    "associative_memory": 3,
+    "reply_chain": 1
+  },
+  "selector_input_slot_counts": {
+    "recent_event_window": 2,
+    "episodic_items": 3,
+    "semantic_items": 2
+  },
+  "selector_input_reason_counts": {
+    "matched_query": 3,
+    "about_time": 2,
+    "reply_chain": 1
+  },
+  "selector_input_trace": [
+    {
+      "item_ref": "memory_state:mem_010",
+      "slot": "semantic_items",
+      "memory_kind": "semantic_fact",
+      "score": 1.8,
+      "collector_names": ["associative_memory", "task_focus"],
+      "reason_codes": ["matched_query", "mode_priority", "profile_bias"],
+      "text": "次の約束は 3 月 15 日の昼に変更された",
+      "relative_time_text": "2時間前",
+      "about_time_hint_text": "2026-03-15"
+    }
+  ],
+  "selector_summary": {
+    "selector_mode": "llm_ranked",
+    "selection_reason": "直近会話の継続と明示日付の一致を優先した",
+    "raw_candidate_count": 9,
+    "merged_candidate_count": 7,
+    "selector_input_candidate_count": 7,
+    "selector_candidate_limit": 24,
+    "llm_selected_ref_count": 5,
+    "llm_unselected_count": 2,
+    "llm_return_ratio_percent": 71,
+    "selected_candidate_count": 4,
+    "selector_input_unused_count": 3,
+    "selected_candidate_ratio_percent": 57,
+    "duplicate_hit_count": 2,
+    "reserve_candidate_count": 1,
+    "slot_skipped_count": 1
+  },
+  "trimmed_item_refs": ["event:evt_002"],
+  "selected_counts": {
+    "working_memory_items": 2,
+    "episodic_items": 1,
+    "semantic_items": 1,
+    "affective_items": 0,
+    "relationship_items": 1,
+    "reflection_items": 0,
+    "recent_event_window": 3
+  },
+  "resolved_event_ids": ["evt_001", "evt_002"]
+}
+```
+
+- `retrieval_runs` が 1 件もない場合は `404 not_found` を返す
+- current 実装では、`selection_trace`、`slot_skipped_trace`、`reserve_trace` は表示用 preview として最大 8 件まで返し、件数系 summary は全候補を集計してよい
+- current 実装では、`selection_trace[]` と `reserve_trace[]` に `selector_input_trace` 由来の `memory_kind`、`text`、`relative_time_text`、`about_time_hint_text` を追加で持ってよい
 
 <!-- Block: Stream Data -->
 ### `GET /api/chat/stream` の `data:` JSON

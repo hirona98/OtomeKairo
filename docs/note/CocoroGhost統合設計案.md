@@ -232,6 +232,12 @@ flowchart TD
 - 先に collector 群と selector を導入し、`browser_chat` の retrieval を全面的に差し替える
 - この段階で `retrieval_runs` を必須化する
 
+#### Phase 1 close 条件
+
+- collector 群、`LLM selector`、`about_time`、`event_preview_cache`、`retrieval_runs` の監査線が current 実装で常時動作する
+- `GET /api/status` は summary だけを返し、trace や selector 入力の詳細監査は `GET /api/retrieval-runs/latest` へ分離する
+- 以後の retrieval 改修は、`Phase 6` の eval で blind spot が見つかった場合に限って再開する
+
 ### Phase 2: context assembly の再設計
 
 - `build_cognition_input` を置き換え、`recent_dialog`、`selected_memory_pack`、`confirmed_preferences`、`long_mood_state` を別断面にする
