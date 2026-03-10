@@ -155,6 +155,7 @@ flowchart LR
 - `キャラクター` タブには `キャラクター選択`、`基本設定`、`マテリアル・影設定`、`音声合成`、`音声認識` を含める
 - チャット画面下部の管理表示は、`GET /api/status` の `runtime.last_retrieval` と `self_state.last_persona_update` を、直近の要約として表示してよい
 - `runtime.last_retrieval` は、時刻、mode、query 要約、合計件数に加えて、`selected_counts` のカテゴリ別内訳も `合計 17 件（作業2 / エピ1 / ...）` 形式で本文表示してよい
+- current の本文要約は、`selector_summary.llm_return_ratio_percent` / `selected_candidate_ratio_percent` と `slot_skipped_slot_counts` / `reserve_slot_counts` を使って、`selector 返却71% / 採用57% / skip エピ1 / reserve 直近1` のような短い監査文を追加してよい
 - `システム` タブのカメラ接続追加は、一覧下部の `追加` で空行を末尾へ足して行う
 - 既存のカメラ接続は一覧テーブル上で直接編集し、`有効` は複数件を同時に選べる
 - current の `browse` では、UI は少なくとも `browse_queued` と `browse_completed` の `notice` を見分けられるようにしてよい

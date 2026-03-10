@@ -2458,6 +2458,10 @@
     if (Object.keys(collectorCounts).length > 0) {
       textParts.push(`collector ${summarizeCollectorCounts(collectorCounts)}`);
     }
+    const selectorRatioSummary = summarizeSelectorRatios(selectorSummary);
+    if (selectorRatioSummary.length > 0) {
+      textParts.push(selectorRatioSummary);
+    }
     if (Object.keys(slotSkippedSlotCounts).length > 0) {
       textParts.push(`skip ${summarizeSlotCounts(slotSkippedSlotCounts)}`);
     }
@@ -2565,6 +2569,23 @@
       .slice(0, 3)
       .map(([key, value]) => `${clipText(key, 12)}:${String(value)}`)
       .join(", ");
+  }
+
+  function summarizeSelectorRatios(selectorSummary) {
+    if (Object.keys(selectorSummary).length === 0) {
+      return "";
+    }
+    const parts = [];
+    if (Number.isInteger(selectorSummary.llm_return_ratio_percent)) {
+      parts.push(`返却${String(selectorSummary.llm_return_ratio_percent)}%`);
+    }
+    if (Number.isInteger(selectorSummary.selected_candidate_ratio_percent)) {
+      parts.push(`採用${String(selectorSummary.selected_candidate_ratio_percent)}%`);
+    }
+    if (parts.length === 0) {
+      return "";
+    }
+    return `selector ${parts.join(" / ")}`;
   }
 
   function summarizeSlotCounts(slotCounts) {
