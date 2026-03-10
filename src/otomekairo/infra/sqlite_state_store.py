@@ -163,14 +163,7 @@ class SqliteStateStore:
                 LIMIT 1
                 """
             ).fetchone()
-            retrieval_row = connection.execute(
-                """
-                SELECT cycle_id, created_at, plan_json, candidates_json, selected_json, resolved_event_ids_json
-                FROM retrieval_runs
-                ORDER BY created_at DESC
-                LIMIT 1
-                """
-            ).fetchone()
+            retrieval_row = _read_latest_retrieval_row(connection)
             self_row = connection.execute(
                 """
                 SELECT current_emotion_json
@@ -273,6 +266,14 @@ class SqliteStateStore:
                 "waiting_task_count": waiting_count,
             },
         }
+
+    # Block: Latest retrieval run read
+    def read_latest_retrieval_run(self) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            retrieval_row = _read_latest_retrieval_row(connection)
+        if retrieval_row is None:
+            return None
+        return _public_retrieval_detail(retrieval_row)
 
     # Block: Effective settings read
     def read_effective_settings(self, default_settings: dict[str, Any]) -> dict[str, Any]:
@@ -8615,9 +8616,21 @@ def _public_emotion_summary(current_emotion_json: dict[str, Any]) -> dict[str, A
     }
 
 
+# Block: Latest retrieval row read
+def _read_latest_retrieval_row(connection: sqlite3.Connection) -> sqlite3.Row | None:
+    return connection.execute(
+        """
+        SELECT cycle_id, created_at, plan_json, candidates_json, selected_json, resolved_event_ids_json
+        FROM retrieval_runs
+        ORDER BY created_at DESC
+        LIMIT 1
+        """
+    ).fetchone()
+
+
+# Block: Public retrieval summary
 def _public_retrieval_summary(row: sqlite3.Row) -> dict[str, Any]:
     plan_json = json.loads(row["plan_json"])
-    candidates_json = json.loads(row["candidates_json"])
     selected_json = json.loads(row["selected_json"])
     payload = {
         "cycle_id": str(row["cycle_id"]),
@@ -8626,70 +8639,36 @@ def _public_retrieval_summary(row: sqlite3.Row) -> dict[str, Any]:
         "queries": list(plan_json["queries"]),
         "selected_counts": dict(selected_json["selected_counts"]),
     }
-    selector_input_trace_by_item_ref: dict[str, dict[str, Any]] = {}
     collector_names = plan_json.get("collector_names")
     if isinstance(collector_names, list):
-        payload["collector_names"] = [
+        public_collector_names = [
             str(collector_name)
             for collector_name in collector_names
             if isinstance(collector_name, str) and collector_name
         ]
-    collector_counts = selected_json.get("collector_counts")
-    if isinstance(collector_counts, dict):
-        payload["collector_counts"] = {
-            str(key): int(value)
-            for key, value in collector_counts.items()
-            if isinstance(value, int) and not isinstance(value, bool) and value > 0
-        }
-    selected_reason_counts = selected_json.get("selected_reason_counts")
-    if isinstance(selected_reason_counts, dict):
-        payload["selected_reason_counts"] = {
-            str(key): int(value)
-            for key, value in selected_reason_counts.items()
-            if isinstance(value, int) and not isinstance(value, bool) and value > 0
-        }
-    slot_skipped_collector_counts = selected_json.get("slot_skipped_collector_counts")
-    if isinstance(slot_skipped_collector_counts, dict):
-        payload["slot_skipped_collector_counts"] = {
-            str(key): int(value)
-            for key, value in slot_skipped_collector_counts.items()
-            if isinstance(value, int) and not isinstance(value, bool) and value > 0
-        }
-    slot_skipped_slot_counts = selected_json.get("slot_skipped_slot_counts")
-    if isinstance(slot_skipped_slot_counts, dict):
-        payload["slot_skipped_slot_counts"] = {
-            str(key): int(value)
-            for key, value in slot_skipped_slot_counts.items()
-            if isinstance(value, int) and not isinstance(value, bool) and value > 0
-        }
-    slot_skipped_reason_counts = selected_json.get("slot_skipped_reason_counts")
-    if isinstance(slot_skipped_reason_counts, dict):
-        payload["slot_skipped_reason_counts"] = {
-            str(key): int(value)
-            for key, value in slot_skipped_reason_counts.items()
-            if isinstance(value, int) and not isinstance(value, bool) and value > 0
-        }
-    reserve_collector_counts = selected_json.get("reserve_collector_counts")
-    if isinstance(reserve_collector_counts, dict):
-        payload["reserve_collector_counts"] = {
-            str(key): int(value)
-            for key, value in reserve_collector_counts.items()
-            if isinstance(value, int) and not isinstance(value, bool) and value > 0
-        }
-    reserve_slot_counts = selected_json.get("reserve_slot_counts")
-    if isinstance(reserve_slot_counts, dict):
-        payload["reserve_slot_counts"] = {
-            str(key): int(value)
-            for key, value in reserve_slot_counts.items()
-            if isinstance(value, int) and not isinstance(value, bool) and value > 0
-        }
-    reserve_reason_counts = selected_json.get("reserve_reason_counts")
-    if isinstance(reserve_reason_counts, dict):
-        payload["reserve_reason_counts"] = {
-            str(key): int(value)
-            for key, value in reserve_reason_counts.items()
-            if isinstance(value, int) and not isinstance(value, bool) and value > 0
-        }
+        if public_collector_names:
+            payload["collector_names"] = public_collector_names
+    for field_name in (
+        "collector_counts",
+        "selected_reason_counts",
+        "slot_skipped_slot_counts",
+        "reserve_slot_counts",
+    ):
+        public_counts = _public_positive_int_map(selected_json.get(field_name))
+        if public_counts:
+            payload[field_name] = public_counts
+    selector_summary = _public_selector_summary(selected_json.get("selector_summary"))
+    if selector_summary:
+        payload["selector_summary"] = selector_summary
+    return payload
+
+
+# Block: Public retrieval detail
+def _public_retrieval_detail(row: sqlite3.Row) -> dict[str, Any]:
+    candidates_json = json.loads(row["candidates_json"])
+    selected_json = json.loads(row["selected_json"])
+    payload = _public_retrieval_summary(row)
+    selector_input_trace_by_item_ref: dict[str, dict[str, Any]] = {}
     selector_input_trace = candidates_json.get("selector_input_trace")
     if isinstance(selector_input_trace, list):
         payload["selector_input_trace"] = _public_selector_input_trace(selector_input_trace)
@@ -8714,41 +8693,23 @@ def _public_retrieval_summary(row: sqlite3.Row) -> dict[str, Any]:
             reserve_trace,
             selector_input_trace_by_item_ref=selector_input_trace_by_item_ref,
         )
-    selector_input_collector_counts = candidates_json.get("selector_input_collector_counts")
-    if isinstance(selector_input_collector_counts, dict):
-        payload["selector_input_collector_counts"] = {
-            str(key): int(value)
-            for key, value in selector_input_collector_counts.items()
-            if isinstance(value, int) and not isinstance(value, bool) and value > 0
-        }
-    selector_input_slot_counts = candidates_json.get("selector_input_slot_counts")
-    if isinstance(selector_input_slot_counts, dict):
-        payload["selector_input_slot_counts"] = {
-            str(key): int(value)
-            for key, value in selector_input_slot_counts.items()
-            if isinstance(value, int) and not isinstance(value, bool) and value > 0
-        }
-    selector_input_reason_counts = candidates_json.get("selector_input_reason_counts")
-    if isinstance(selector_input_reason_counts, dict):
-        payload["selector_input_reason_counts"] = {
-            str(key): int(value)
-            for key, value in selector_input_reason_counts.items()
-            if isinstance(value, int) and not isinstance(value, bool) and value > 0
-        }
-    selector_summary = selected_json.get("selector_summary")
-    if isinstance(selector_summary, dict):
-        payload["selector_summary"] = {
-            str(key): (
-                int(value)
-                if isinstance(value, int) and not isinstance(value, bool)
-                else str(value)
-            )
-            for key, value in selector_summary.items()
-            if (
-                (isinstance(value, int) and not isinstance(value, bool))
-                or (isinstance(value, str) and value)
-            )
-        }
+    for field_name in (
+        "slot_skipped_collector_counts",
+        "slot_skipped_reason_counts",
+        "reserve_collector_counts",
+        "reserve_reason_counts",
+    ):
+        public_counts = _public_positive_int_map(selected_json.get(field_name))
+        if public_counts:
+            payload[field_name] = public_counts
+    for field_name in (
+        "selector_input_collector_counts",
+        "selector_input_slot_counts",
+        "selector_input_reason_counts",
+    ):
+        public_counts = _public_positive_int_map(candidates_json.get(field_name))
+        if public_counts:
+            payload[field_name] = public_counts
     trimmed_item_refs = selected_json.get("trimmed_item_refs")
     if isinstance(trimmed_item_refs, list):
         payload["trimmed_item_refs"] = [
@@ -8759,6 +8720,35 @@ def _public_retrieval_summary(row: sqlite3.Row) -> dict[str, Any]:
     if isinstance(row["resolved_event_ids_json"], str) and row["resolved_event_ids_json"]:
         payload["resolved_event_ids"] = json.loads(row["resolved_event_ids_json"])
     return payload
+
+
+# Block: Public positive int map
+def _public_positive_int_map(value: Any) -> dict[str, int]:
+    if not isinstance(value, dict):
+        return {}
+    return {
+        str(key): int(entry_value)
+        for key, entry_value in value.items()
+        if isinstance(entry_value, int) and not isinstance(entry_value, bool) and entry_value > 0
+    }
+
+
+# Block: Public selector summary
+def _public_selector_summary(value: Any) -> dict[str, int | str]:
+    if not isinstance(value, dict):
+        return {}
+    return {
+        str(key): (
+            int(entry_value)
+            if isinstance(entry_value, int) and not isinstance(entry_value, bool)
+            else str(entry_value)
+        )
+        for key, entry_value in value.items()
+        if (
+            (isinstance(entry_value, int) and not isinstance(entry_value, bool))
+            or (isinstance(entry_value, str) and entry_value)
+        )
+    }
 
 
 def _public_persona_update(row: sqlite3.Row) -> dict[str, Any]:

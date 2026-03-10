@@ -2385,69 +2385,18 @@
       lastRetrieval.selected_reason_counts,
       "runtime.last_retrieval.selected_reason_counts",
     );
-    const slotSkippedCollectorCounts = readOptionalCountMap(
-      lastRetrieval.slot_skipped_collector_counts,
-      "runtime.last_retrieval.slot_skipped_collector_counts",
-    );
     const slotSkippedSlotCounts = readOptionalCountMap(
       lastRetrieval.slot_skipped_slot_counts,
       "runtime.last_retrieval.slot_skipped_slot_counts",
-    );
-    const slotSkippedReasonCounts = readOptionalCountMap(
-      lastRetrieval.slot_skipped_reason_counts,
-      "runtime.last_retrieval.slot_skipped_reason_counts",
-    );
-    const reserveCollectorCounts = readOptionalCountMap(
-      lastRetrieval.reserve_collector_counts,
-      "runtime.last_retrieval.reserve_collector_counts",
     );
     const reserveSlotCounts = readOptionalCountMap(
       lastRetrieval.reserve_slot_counts,
       "runtime.last_retrieval.reserve_slot_counts",
     );
-    const reserveReasonCounts = readOptionalCountMap(
-      lastRetrieval.reserve_reason_counts,
-      "runtime.last_retrieval.reserve_reason_counts",
-    );
-    const selectionTrace = readOptionalSelectionTrace(
-      lastRetrieval.selection_trace,
-      "runtime.last_retrieval.selection_trace",
-      true,
-    );
-    const slotSkippedTrace = readOptionalSelectionTrace(
-      lastRetrieval.slot_skipped_trace,
-      "runtime.last_retrieval.slot_skipped_trace",
-      true,
-    );
-    const reserveTrace = readOptionalSelectionTrace(
-      lastRetrieval.reserve_trace,
-      "runtime.last_retrieval.reserve_trace",
-      false,
-    );
-    const selectorInputCollectorCounts = readOptionalCountMap(
-      lastRetrieval.selector_input_collector_counts,
-      "runtime.last_retrieval.selector_input_collector_counts",
-    );
-    const selectorInputSlotCounts = readOptionalCountMap(
-      lastRetrieval.selector_input_slot_counts,
-      "runtime.last_retrieval.selector_input_slot_counts",
-    );
-    const selectorInputReasonCounts = readOptionalCountMap(
-      lastRetrieval.selector_input_reason_counts,
-      "runtime.last_retrieval.selector_input_reason_counts",
-    );
-    const selectorInputTrace = readOptionalSelectorInputTrace(
-      lastRetrieval.selector_input_trace,
-      "runtime.last_retrieval.selector_input_trace",
-    );
     const selectorSummary = readOptionalSelectorSummary(
       lastRetrieval.selector_summary,
       "runtime.last_retrieval.selector_summary",
     );
-    const trimmedItemRefs = readOptionalStringArray(lastRetrieval.trimmed_item_refs, "runtime.last_retrieval.trimmed_item_refs");
-    const selectedItemRefs = new Set(selectionTrace.map((traceEntry) => traceEntry.item_ref));
-    const slotSkippedItemRefs = new Set(slotSkippedTrace.map((traceEntry) => traceEntry.item_ref));
-    const reserveItemRefs = new Set(reserveTrace.map((traceEntry) => traceEntry.item_ref));
     const totalCount = Object.values(selectedCounts).reduce((total, count) => total + count, 0);
     const textParts = [
       formatStatusTimestamp(createdAt),
@@ -2477,21 +2426,10 @@
         `collectors: ${collectorNames.length > 0 ? collectorNames.join(", ") : "なし"}`,
         `collector_counts: ${Object.keys(collectorCounts).length > 0 ? formatSelectedCounts(collectorCounts) : "なし"}`,
         `selected_reasons: ${Object.keys(selectedReasonCounts).length > 0 ? formatSelectedCounts(selectedReasonCounts) : "なし"}`,
-        `slot_skipped_collectors: ${Object.keys(slotSkippedCollectorCounts).length > 0 ? formatSelectedCounts(slotSkippedCollectorCounts) : "なし"}`,
         `slot_skipped_slots: ${Object.keys(slotSkippedSlotCounts).length > 0 ? formatSelectedCounts(slotSkippedSlotCounts) : "なし"}`,
-        `slot_skipped_reasons: ${Object.keys(slotSkippedReasonCounts).length > 0 ? formatSelectedCounts(slotSkippedReasonCounts) : "なし"}`,
-        `reserve_collectors: ${Object.keys(reserveCollectorCounts).length > 0 ? formatSelectedCounts(reserveCollectorCounts) : "なし"}`,
         `reserve_slots: ${Object.keys(reserveSlotCounts).length > 0 ? formatSelectedCounts(reserveSlotCounts) : "なし"}`,
-        `reserve_reasons: ${Object.keys(reserveReasonCounts).length > 0 ? formatSelectedCounts(reserveReasonCounts) : "なし"}`,
-        `selection_trace: ${formatSelectionTrace(selectionTrace, true)}`,
-        `slot_skipped_trace: ${formatSelectionTrace(slotSkippedTrace, true)}`,
-        `reserve_trace: ${formatSelectionTrace(reserveTrace, false)}`,
-        `selector_input_collectors: ${Object.keys(selectorInputCollectorCounts).length > 0 ? formatSelectedCounts(selectorInputCollectorCounts) : "なし"}`,
-        `selector_input_slots: ${Object.keys(selectorInputSlotCounts).length > 0 ? formatSelectedCounts(selectorInputSlotCounts) : "なし"}`,
-        `selector_input_reasons: ${Object.keys(selectorInputReasonCounts).length > 0 ? formatSelectedCounts(selectorInputReasonCounts) : "なし"}`,
-        `selector_input_trace: ${formatSelectorInputTrace(selectorInputTrace, selectedItemRefs, slotSkippedItemRefs, reserveItemRefs)}`,
         `selector: ${formatSelectorSummary(selectorSummary)}`,
-        `trimmed: ${trimmedItemRefs.length > 0 ? trimmedItemRefs.join(", ") : "なし"}`,
+        "detail: /api/retrieval-runs/latest",
       ].join("\n"),
     };
   }
@@ -2613,50 +2551,6 @@
       .join(", ");
   }
 
-  function formatSelectorInputTrace(selectorInputTrace, selectedItemRefs, slotSkippedItemRefs, reserveItemRefs) {
-    if (selectorInputTrace.length === 0) {
-      return "なし";
-    }
-    const visibleEntries = selectorInputTrace.slice(0, 6).map((traceEntry, index) => {
-      const collectors = traceEntry.collector_names.length > 0 ? traceEntry.collector_names.join("+") : "-";
-      const reasons = traceEntry.reason_codes.length > 0 ? traceEntry.reason_codes.join("+") : "-";
-      const selectionMark = selectedItemRefs.has(traceEntry.item_ref)
-        ? "selected"
-        : slotSkippedItemRefs.has(traceEntry.item_ref)
-          ? "skipped"
-        : reserveItemRefs.has(traceEntry.item_ref)
-          ? "reserve"
-          : "input";
-      return `${String(index + 1)}:${selectionMark}/${traceEntry.slot}/${traceEntry.item_ref}/${traceEntry.score.toFixed(3)}/${traceEntry.relative_time_text}/${collectors}/${reasons}/${clipText(traceEntry.text, 36)}`;
-    });
-    if (selectorInputTrace.length > 6) {
-      visibleEntries.push(`...他 ${String(selectorInputTrace.length - 6)} 件`);
-    }
-    return visibleEntries.join("\n");
-  }
-
-  function formatSelectionTrace(selectionTrace, showSelectionRank) {
-    if (selectionTrace.length === 0) {
-      return "なし";
-    }
-    const visibleEntries = selectionTrace.slice(0, 6).map((traceEntry, index) => {
-      const collectors = traceEntry.collector_names.length > 0 ? traceEntry.collector_names.join("+") : "-";
-      const reasons = traceEntry.reason_codes.length > 0 ? traceEntry.reason_codes.join("+") : "-";
-      const rankText = showSelectionRank ? `rank=${String(traceEntry.selection_rank)}/` : "";
-      const detailText = typeof traceEntry.relative_time_text === "string" && traceEntry.relative_time_text.length > 0
-        ? `/${traceEntry.relative_time_text}`
-        : "";
-      const summaryText = typeof traceEntry.text === "string" && traceEntry.text.length > 0
-        ? `/${clipText(traceEntry.text, 36)}`
-        : "";
-      return `${String(index + 1)}:${rankText}${traceEntry.slot}/${traceEntry.item_ref}/${traceEntry.score.toFixed(3)}/dup=${String(traceEntry.duplicate_hits)}${detailText}/${collectors}/${reasons}${summaryText}`;
-    });
-    if (selectionTrace.length > 6) {
-      visibleEntries.push(`...他 ${String(selectionTrace.length - 6)} 件`);
-    }
-    return visibleEntries.join("\n");
-  }
-
   function formatTraitUpdates(updatedTraits) {
     return updatedTraits
       .map((trait) => {
@@ -2731,90 +2625,6 @@
       return {};
     }
     return requireCountMap(value, label);
-  }
-
-  // Block: Selector input trace 読み取り
-  function readOptionalSelectorInputTrace(value, label) {
-    if (value === undefined) {
-      return [];
-    }
-    if (!Array.isArray(value)) {
-      throw new Error(`${label} が配列ではありません`);
-    }
-    return value.map((entry, index) => {
-      if (!isObject(entry)) {
-        throw new Error(`${label}[${String(index)}] が object ではありません`);
-      }
-      return {
-        item_ref: requireString(entry.item_ref, `${label}[${String(index)}].item_ref`),
-        slot: requireString(entry.slot, `${label}[${String(index)}].slot`),
-        score: requireNumber(entry.score, `${label}[${String(index)}].score`),
-        collector_names: readStringArray(
-          entry.collector_names,
-          `${label}[${String(index)}].collector_names`,
-        ),
-        reason_codes: readStringArray(
-          entry.reason_codes,
-          `${label}[${String(index)}].reason_codes`,
-        ),
-        text: requireString(entry.text, `${label}[${String(index)}].text`),
-        relative_time_text: requireString(
-          entry.relative_time_text,
-          `${label}[${String(index)}].relative_time_text`,
-        ),
-      };
-    });
-  }
-
-  // Block: Selection trace 読み取り
-  function readOptionalSelectionTrace(value, label, requireSelectionRank) {
-    if (value === undefined) {
-      return [];
-    }
-    if (!Array.isArray(value)) {
-      throw new Error(`${label} が配列ではありません`);
-    }
-    return value.map((entry, index) => {
-      if (!isObject(entry)) {
-        throw new Error(`${label}[${String(index)}] が object ではありません`);
-      }
-      const traceEntry = {
-        item_ref: requireString(entry.item_ref, `${label}[${String(index)}].item_ref`),
-        slot: requireString(entry.slot, `${label}[${String(index)}].slot`),
-        score: requireNumber(entry.score, `${label}[${String(index)}].score`),
-        collector_names: readStringArray(
-          entry.collector_names,
-          `${label}[${String(index)}].collector_names`,
-        ),
-        reason_codes: readStringArray(
-          entry.reason_codes,
-          `${label}[${String(index)}].reason_codes`,
-        ),
-        duplicate_hits: requireInteger(
-          entry.duplicate_hits,
-          `${label}[${String(index)}].duplicate_hits`,
-        ),
-      };
-      if (typeof entry.text === "string" && entry.text.length > 0) {
-        traceEntry.text = entry.text;
-      }
-      if (typeof entry.relative_time_text === "string" && entry.relative_time_text.length > 0) {
-        traceEntry.relative_time_text = entry.relative_time_text;
-      }
-      if (typeof entry.memory_kind === "string" && entry.memory_kind.length > 0) {
-        traceEntry.memory_kind = entry.memory_kind;
-      }
-      if (typeof entry.about_time_hint_text === "string" && entry.about_time_hint_text.length > 0) {
-        traceEntry.about_time_hint_text = entry.about_time_hint_text;
-      }
-      if (requireSelectionRank) {
-        traceEntry.selection_rank = requireInteger(
-          entry.selection_rank,
-          `${label}[${String(index)}].selection_rank`,
-        );
-      }
-      return traceEntry;
-    });
   }
 
   // Block: Selector summary 読み取り
