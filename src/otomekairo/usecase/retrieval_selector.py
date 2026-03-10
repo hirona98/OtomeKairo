@@ -129,6 +129,7 @@ def select_retrieval_candidates(
             "selected_refs": _selected_refs(memory_bundle=selected_bundle),
             "selection_trace": selected_trace,
             "collector_counts": _collector_counts(selected_trace),
+            "selected_reason_counts": _reason_counts(selected_trace),
             "selector_summary": {
                 "selector_mode": "llm_ranked",
                 "selection_reason": selection_reason,
@@ -207,6 +208,16 @@ def _collector_counts(selection_trace: list[dict[str, Any]]) -> dict[str, int]:
         for collector_name in trace_entry["collector_names"]:
             collector_key = str(collector_name)
             counts[collector_key] = counts.get(collector_key, 0) + 1
+    return counts
+
+
+# Block: Reason 件数
+def _reason_counts(selection_trace: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for trace_entry in selection_trace:
+        for reason_code in trace_entry["reason_codes"]:
+            reason_key = str(reason_code)
+            counts[reason_key] = counts.get(reason_key, 0) + 1
     return counts
 
 

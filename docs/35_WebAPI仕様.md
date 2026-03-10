@@ -214,6 +214,11 @@ flowchart LR
         "recent_event_window": 2,
         "associative_memory": 1
       },
+      "selected_reason_counts": {
+        "matched_query": 1,
+        "mode_priority": 1,
+        "profile_bias": 1
+      },
       "selector_input_collector_counts": {
         "recent_event_window": 2,
         "associative_memory": 3,
@@ -312,7 +317,7 @@ flowchart LR
 - `runtime.last_cycle_id` は、短周期が 1 回以上完了している場合だけ返す
 - `last_commit_id` は、`commit_records.commit_id` の最新値がある場合だけ返す
 - `runtime.last_retrieval` は、`retrieval_runs` が 1 件以上ある場合だけ返し、直近の `RetrievalPlan` と選別件数を要約する
-- `runtime.last_retrieval.collector_names`、`collector_counts`、`selector_input_collector_counts`、`selector_input_slot_counts`、`selector_input_reason_counts`、`selector_summary`、`trimmed_item_refs` は、current 実装では追加で返してよい
+- `runtime.last_retrieval.collector_names`、`collector_counts`、`selected_reason_counts`、`selector_input_collector_counts`、`selector_input_slot_counts`、`selector_input_reason_counts`、`selector_summary`、`trimmed_item_refs` は、current 実装では追加で返してよい
 - current 実装の `runtime.last_retrieval.selector_summary` は、`selector_mode` と `selection_reason` の文字列、および件数系の整数を同じ object に入れて返してよい
 - `self_state.last_persona_update` は、`revisions.entity_type=self_state.personality` が 1 件以上ある場合だけ返す
 - `attention_state.primary_focus` は、`attention_state.primary_focus_json.summary` から取り出した表示用文字列を返す

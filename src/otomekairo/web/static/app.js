@@ -2381,6 +2381,10 @@
     const selectedCounts = requireCountMap(lastRetrieval.selected_counts, "runtime.last_retrieval.selected_counts");
     const collectorNames = readOptionalStringArray(lastRetrieval.collector_names, "runtime.last_retrieval.collector_names");
     const collectorCounts = readOptionalCountMap(lastRetrieval.collector_counts, "runtime.last_retrieval.collector_counts");
+    const selectedReasonCounts = readOptionalCountMap(
+      lastRetrieval.selected_reason_counts,
+      "runtime.last_retrieval.selected_reason_counts",
+    );
     const selectorInputCollectorCounts = readOptionalCountMap(
       lastRetrieval.selector_input_collector_counts,
       "runtime.last_retrieval.selector_input_collector_counts",
@@ -2416,6 +2420,7 @@
         `selected: ${formatSelectedCounts(selectedCounts)}`,
         `collectors: ${collectorNames.length > 0 ? collectorNames.join(", ") : "なし"}`,
         `collector_counts: ${Object.keys(collectorCounts).length > 0 ? formatSelectedCounts(collectorCounts) : "なし"}`,
+        `selected_reasons: ${Object.keys(selectedReasonCounts).length > 0 ? formatSelectedCounts(selectedReasonCounts) : "なし"}`,
         `selector_input_collectors: ${Object.keys(selectorInputCollectorCounts).length > 0 ? formatSelectedCounts(selectorInputCollectorCounts) : "なし"}`,
         `selector_input_slots: ${Object.keys(selectorInputSlotCounts).length > 0 ? formatSelectedCounts(selectorInputSlotCounts) : "なし"}`,
         `selector_input_reasons: ${Object.keys(selectorInputReasonCounts).length > 0 ? formatSelectedCounts(selectorInputReasonCounts) : "なし"}`,

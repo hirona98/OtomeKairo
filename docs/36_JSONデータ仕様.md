@@ -933,6 +933,11 @@
     "associative_memory": 1,
     "task_focus": 1
   },
+  "selected_reason_counts": {
+    "matched_query": 1,
+    "mode_priority": 1,
+    "profile_bias": 1
+  },
   "selector_summary": {
     "selector_mode": "llm_ranked",
     "selection_reason": "直近会話の継続と明示日付の一致を優先した",
@@ -963,7 +968,7 @@
 - `retrieval_selected_json` は、`retrieval_runs.selected_json` に保存する最終選別結果の最小形である
 - 必須項目は `selected_counts`、`selected_refs`、`selection_trace` である
 - `selection_trace` の各要素は、少なくとも `slot`、`item_ref`、`score`、`reason_codes` を持つ
-- current 実装では、`selection_trace[].collector_names`、`selection_trace[].duplicate_hits`、`selection_trace[].selection_rank`、`collector_counts`、`selector_summary`、`reserve_trace`、`trimmed_item_refs` を追加で持ってよい
+- current 実装では、`selection_trace[].collector_names`、`selection_trace[].duplicate_hits`、`selection_trace[].selection_rank`、`collector_counts`、`selected_reason_counts`、`selector_summary`、`reserve_trace`、`trimmed_item_refs` を追加で持ってよい
 
 <!-- Block: Completion Settings -->
 ### `completion_settings`
@@ -2329,6 +2334,11 @@
         "recent_event_window": 2,
         "associative_memory": 1
       },
+      "selected_reason_counts": {
+        "matched_query": 1,
+        "mode_priority": 1,
+        "profile_bias": 1
+      },
       "selector_input_collector_counts": {
         "recent_event_window": 2,
         "associative_memory": 3,
@@ -2421,7 +2431,7 @@
 - `runtime.last_cycle_id` は、短周期が 1 回以上完了している場合だけ持つ
 - `runtime.last_commit_id` は、`commit_records` が 1 件以上ある場合だけ持つ
 - `runtime.last_retrieval` は、`retrieval_runs` が 1 件以上ある場合だけ持つ
-- `runtime.last_retrieval.collector_names`、`collector_counts`、`selector_input_collector_counts`、`selector_input_slot_counts`、`selector_input_reason_counts`、`selector_summary`、`trimmed_item_refs` は、current 実装では追加で持ってよい
+- `runtime.last_retrieval.collector_names`、`collector_counts`、`selected_reason_counts`、`selector_input_collector_counts`、`selector_input_slot_counts`、`selector_input_reason_counts`、`selector_summary`、`trimmed_item_refs` は、current 実装では追加で持ってよい
 - `self_state.current_emotion` は、少なくとも `v`、`a`、`d`、`labels` を持つ
 - `self_state.last_persona_update` は、`revisions.entity_type=self_state.personality` が 1 件以上ある場合だけ持つ
 - `attention_state.primary_focus` は、current 実装では `attention_state.primary_focus_json.summary` をそのまま返す短い `string` とする

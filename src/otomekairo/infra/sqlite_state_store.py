@@ -8640,6 +8640,13 @@ def _public_retrieval_summary(row: sqlite3.Row) -> dict[str, Any]:
             for key, value in collector_counts.items()
             if isinstance(value, int) and not isinstance(value, bool) and value > 0
         }
+    selected_reason_counts = selected_json.get("selected_reason_counts")
+    if isinstance(selected_reason_counts, dict):
+        payload["selected_reason_counts"] = {
+            str(key): int(value)
+            for key, value in selected_reason_counts.items()
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0
+        }
     selector_input_collector_counts = candidates_json.get("selector_input_collector_counts")
     if isinstance(selector_input_collector_counts, dict):
         payload["selector_input_collector_counts"] = {
