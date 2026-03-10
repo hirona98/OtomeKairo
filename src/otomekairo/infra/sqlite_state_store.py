@@ -2189,6 +2189,17 @@ class SqliteStateStore:
                 connection=connection,
                 cycle_id=str(validated_payload["cycle_id"]),
             )
+            self_state_row = connection.execute(
+                """
+                SELECT personality_json,
+                       personality_updated_at,
+                       current_emotion_json
+                FROM self_state
+                WHERE row_id = 1
+                """
+            ).fetchone()
+            if self_state_row is None:
+                raise RuntimeError("self_state row is missing")
             memory_write_plan = validate_write_memory_plan(
                 plan=build_write_memory_plan(
                     source_job_id=memory_job.job_id,
@@ -2196,6 +2207,13 @@ class SqliteStateStore:
                     event_entries=event_entries,
                     action_entries=action_entries,
                     browse_fact_entries=browse_fact_entries,
+                    current_emotion=_decoded_object_json(self_state_row["current_emotion_json"]),
+                    existing_long_mood_state=_write_memory_plan_long_mood_entry(
+                        connection=connection,
+                    ),
+                    existing_preference_entries=_write_memory_plan_preference_entries(
+                        connection=connection,
+                    ),
                     applied_at=now_ms,
                 ),
                 payload=validated_payload,
@@ -2205,15 +2223,6 @@ class SqliteStateStore:
                 memory_write_plan=memory_write_plan,
                 created_at=now_ms,
             )
-            self_state_row = connection.execute(
-                """
-                SELECT personality_json, personality_updated_at
-                FROM self_state
-                WHERE row_id = 1
-                """
-            ).fetchone()
-            if self_state_row is None:
-                raise RuntimeError("self_state row is missing")
             persona_change = evaluate_persona_change(
                 connection=connection,
                 now_ms=now_ms,
@@ -2445,6 +2454,12 @@ class SqliteStateStore:
             state_updates=list(memory_write_plan["state_updates"]),
             created_at=created_at,
         )
+        self._sync_current_emotion_from_long_mood_state(
+            connection=connection,
+            state_updates=list(memory_write_plan["state_updates"]),
+            state_id_by_ref=state_id_by_ref,
+            created_at=created_at,
+        )
         self._apply_preference_updates(
             connection=connection,
             preference_updates=list(memory_write_plan["preference_updates"]),
@@ -2505,19 +2520,26 @@ class SqliteStateStore:
         for state_update in state_updates:
             operation = str(state_update["operation"])
             if operation == "upsert":
-                memory_state_target = self._insert_memory_state_with_revision(
-                    connection=connection,
-                    memory_kind=str(state_update["memory_kind"]),
-                    body_text=str(state_update["body_text"]),
-                    payload_json=dict(state_update["payload"]),
-                    confidence=float(state_update["confidence"]),
-                    importance=float(state_update["importance"]),
-                    memory_strength=float(state_update["memory_strength"]),
-                    last_confirmed_at=int(state_update["last_confirmed_at"]),
-                    evidence_event_ids=list(state_update["evidence_event_ids"]),
-                    created_at=created_at,
-                    revision_reason=str(state_update["revision_reason"]),
-                )
+                if str(state_update["memory_kind"]) == "long_mood_state":
+                    memory_state_target = self._upsert_long_mood_state_with_revision(
+                        connection=connection,
+                        state_update=state_update,
+                        created_at=created_at,
+                    )
+                else:
+                    memory_state_target = self._insert_memory_state_with_revision(
+                        connection=connection,
+                        memory_kind=str(state_update["memory_kind"]),
+                        body_text=str(state_update["body_text"]),
+                        payload_json=dict(state_update["payload"]),
+                        confidence=float(state_update["confidence"]),
+                        importance=float(state_update["importance"]),
+                        memory_strength=float(state_update["memory_strength"]),
+                        last_confirmed_at=int(state_update["last_confirmed_at"]),
+                        evidence_event_ids=list(state_update["evidence_event_ids"]),
+                        created_at=created_at,
+                        revision_reason=str(state_update["revision_reason"]),
+                    )
                 embedding_targets.append(dict(memory_state_target))
             else:
                 memory_state_target, embedding_target = self._apply_existing_memory_state_update(
@@ -2530,6 +2552,200 @@ class SqliteStateStore:
             memory_state_targets.append(memory_state_target)
             state_id_by_ref[str(state_update["state_ref"])] = str(memory_state_target["entity_id"])
         return (memory_state_targets, embedding_targets, state_id_by_ref)
+
+    # Block: Long mood state upsert
+    def _upsert_long_mood_state_with_revision(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        state_update: dict[str, Any],
+        created_at: int,
+    ) -> dict[str, Any]:
+        existing_row = connection.execute(
+            """
+            SELECT
+                memory_state_id,
+                memory_kind,
+                body_text,
+                payload_json,
+                confidence,
+                importance,
+                memory_strength,
+                searchable,
+                last_confirmed_at,
+                evidence_event_ids_json,
+                created_at,
+                updated_at,
+                valid_from_ts,
+                valid_to_ts,
+                last_accessed_at
+            FROM memory_states
+            WHERE memory_kind = 'long_mood_state'
+            ORDER BY searchable DESC, updated_at DESC, created_at DESC, memory_state_id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        if existing_row is None:
+            return self._insert_memory_state_with_revision(
+                connection=connection,
+                memory_kind=str(state_update["memory_kind"]),
+                body_text=str(state_update["body_text"]),
+                payload_json=dict(state_update["payload"]),
+                confidence=float(state_update["confidence"]),
+                importance=float(state_update["importance"]),
+                memory_strength=float(state_update["memory_strength"]),
+                last_confirmed_at=int(state_update["last_confirmed_at"]),
+                evidence_event_ids=list(state_update["evidence_event_ids"]),
+                created_at=created_at,
+                revision_reason=str(state_update["revision_reason"]),
+            )
+        before_json = _memory_state_revision_json_from_row(existing_row)
+        after_json = _memory_state_revision_json(
+            memory_kind="long_mood_state",
+            body_text=str(state_update["body_text"]),
+            payload_json=dict(state_update["payload"]),
+            confidence=float(state_update["confidence"]),
+            importance=float(state_update["importance"]),
+            memory_strength=float(state_update["memory_strength"]),
+            searchable=True,
+            last_confirmed_at=int(state_update["last_confirmed_at"]),
+            evidence_event_ids=_merged_unique_strings(
+                _decoded_string_array_json(existing_row["evidence_event_ids_json"]),
+                list(state_update["evidence_event_ids"]),
+            ),
+            created_at=int(existing_row["created_at"]),
+            updated_at=created_at,
+            valid_from_ts=existing_row["valid_from_ts"],
+            valid_to_ts=None,
+            last_accessed_at=existing_row["last_accessed_at"],
+        )
+        if after_json != before_json:
+            connection.execute(
+                """
+                UPDATE memory_states
+                SET body_text = ?,
+                    payload_json = ?,
+                    confidence = ?,
+                    importance = ?,
+                    memory_strength = ?,
+                    searchable = 1,
+                    last_confirmed_at = ?,
+                    evidence_event_ids_json = ?,
+                    updated_at = ?,
+                    valid_to_ts = NULL
+                WHERE memory_state_id = ?
+                """,
+                (
+                    str(state_update["body_text"]),
+                    _json_text(dict(state_update["payload"])),
+                    float(state_update["confidence"]),
+                    float(state_update["importance"]),
+                    float(state_update["memory_strength"]),
+                    int(state_update["last_confirmed_at"]),
+                    _json_text(list(after_json["evidence_event_ids"])),
+                    created_at,
+                    str(existing_row["memory_state_id"]),
+                ),
+            )
+            self._insert_revision(
+                connection=connection,
+                entity_type="memory_states",
+                entity_id=str(existing_row["memory_state_id"]),
+                before_json=before_json,
+                after_json=after_json,
+                revision_reason=str(state_update["revision_reason"]),
+                evidence_event_ids=list(after_json["evidence_event_ids"]),
+                created_at=created_at,
+            )
+        return _memory_state_target(
+            entity_id=str(existing_row["memory_state_id"]),
+            source_updated_at=created_at if after_json != before_json else int(existing_row["updated_at"]),
+            current_searchable=True,
+        )
+
+    # Block: Current emotion sync
+    def _sync_current_emotion_from_long_mood_state(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        state_updates: list[dict[str, Any]],
+        state_id_by_ref: dict[str, str],
+        created_at: int,
+    ) -> None:
+        long_mood_state_update = next(
+            (
+                state_update
+                for state_update in state_updates
+                if str(state_update["operation"]) == "upsert"
+                and str(state_update["memory_kind"]) == "long_mood_state"
+            ),
+            None,
+        )
+        if long_mood_state_update is None:
+            return
+        target_state_id = state_id_by_ref.get(str(long_mood_state_update["state_ref"]))
+        if target_state_id is None:
+            raise RuntimeError("long_mood_state state_ref must resolve to memory_state_id")
+        state_row = self._fetch_memory_state_row_for_update(
+            connection=connection,
+            memory_state_id=target_state_id,
+        )
+        mood_payload = _decoded_object_json(state_row["payload_json"])
+        next_current_emotion = _current_emotion_json_from_long_mood_payload(
+            payload=mood_payload,
+        )
+        self._update_self_state_current_emotion(
+            connection=connection,
+            current_emotion_json=next_current_emotion,
+            revision_reason="write_memory synced current emotion from long mood state",
+            evidence_event_ids=list(long_mood_state_update["evidence_event_ids"]),
+            created_at=created_at,
+        )
+
+    # Block: Current emotion update
+    def _update_self_state_current_emotion(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        current_emotion_json: dict[str, Any],
+        revision_reason: str,
+        evidence_event_ids: list[str],
+        created_at: int,
+    ) -> None:
+        self_state_row = connection.execute(
+            """
+            SELECT current_emotion_json
+            FROM self_state
+            WHERE row_id = 1
+            """
+        ).fetchone()
+        if self_state_row is None:
+            raise RuntimeError("self_state row is missing")
+        before_json = _decoded_object_json(self_state_row["current_emotion_json"])
+        if before_json == current_emotion_json:
+            return
+        connection.execute(
+            """
+            UPDATE self_state
+            SET current_emotion_json = ?,
+                updated_at = ?
+            WHERE row_id = 1
+            """,
+            (
+                _json_text(current_emotion_json),
+                created_at,
+            ),
+        )
+        self._insert_revision(
+            connection=connection,
+            entity_type="self_state.current_emotion",
+            entity_id="self_state",
+            before_json=before_json,
+            after_json=current_emotion_json,
+            revision_reason=revision_reason,
+            evidence_event_ids=evidence_event_ids,
+            created_at=created_at,
+        )
 
     # Block: Existing state update apply
     def _apply_existing_memory_state_update(
@@ -9540,6 +9756,131 @@ def _browse_fact_entries_for_write_memory_plan(
     return browse_fact_entries
 
 
+# Block: Write memory plan long mood
+def _write_memory_plan_long_mood_entry(
+    *,
+    connection: sqlite3.Connection,
+) -> dict[str, Any] | None:
+    row = connection.execute(
+        """
+        SELECT
+            memory_state_id,
+            body_text,
+            payload_json,
+            confidence,
+            importance,
+            memory_strength,
+            last_confirmed_at,
+            evidence_event_ids_json,
+            created_at,
+            updated_at
+        FROM memory_states
+        WHERE memory_kind = 'long_mood_state'
+        ORDER BY searchable DESC, updated_at DESC, created_at DESC, memory_state_id DESC
+        LIMIT 1
+        """
+    ).fetchone()
+    if row is None:
+        return None
+    return {
+        "memory_state_id": str(row["memory_state_id"]),
+        "body_text": str(row["body_text"]),
+        "payload": _decoded_object_json(row["payload_json"]),
+        "confidence": float(row["confidence"]),
+        "importance": float(row["importance"]),
+        "memory_strength": float(row["memory_strength"]),
+        "last_confirmed_at": int(row["last_confirmed_at"]),
+        "evidence_event_ids": _decoded_string_array_json(row["evidence_event_ids_json"]),
+        "created_at": int(row["created_at"]),
+        "updated_at": int(row["updated_at"]),
+    }
+
+
+# Block: Write memory plan preferences
+def _write_memory_plan_preference_entries(
+    *,
+    connection: sqlite3.Connection,
+) -> list[dict[str, Any]]:
+    rows = connection.execute(
+        """
+        SELECT
+            owner_scope,
+            target_entity_ref_json,
+            domain,
+            polarity,
+            status,
+            confidence,
+            evidence_event_ids_json,
+            created_at,
+            updated_at
+        FROM preference_memory
+        WHERE owner_scope = 'self'
+        ORDER BY updated_at DESC, created_at DESC, preference_id DESC
+        """
+    ).fetchall()
+    entries: list[dict[str, Any]] = []
+    seen_keys: set[tuple[str, str, str]] = set()
+    for row in rows:
+        target_entity_ref = _decoded_object_json(row["target_entity_ref_json"])
+        target_key = target_entity_ref.get("target_key")
+        if not isinstance(target_key, str) or not target_key:
+            continue
+        entry_key = (
+            str(row["domain"]),
+            target_key,
+            str(row["polarity"]),
+        )
+        if entry_key in seen_keys:
+            continue
+        seen_keys.add(entry_key)
+        entries.append(
+            {
+                "owner_scope": str(row["owner_scope"]),
+                "target_entity_ref": target_entity_ref,
+                "domain": str(row["domain"]),
+                "polarity": str(row["polarity"]),
+                "status": str(row["status"]),
+                "confidence": float(row["confidence"]),
+                "evidence_event_ids": _decoded_string_array_json(row["evidence_event_ids_json"]),
+                "created_at": int(row["created_at"]),
+                "updated_at": int(row["updated_at"]),
+            }
+        )
+    return entries
+
+
+# Block: Long mood to current emotion
+def _current_emotion_json_from_long_mood_payload(
+    *,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    current_vad = payload.get("current")
+    if not isinstance(current_vad, dict):
+        raise RuntimeError("long_mood_state.payload.current must be an object")
+    active_biases = payload.get("active_biases")
+    if not isinstance(active_biases, dict):
+        raise RuntimeError("long_mood_state.payload.active_biases must be an object")
+    primary_label = payload.get("primary_label")
+    if not isinstance(primary_label, str) or not primary_label:
+        raise RuntimeError("long_mood_state.payload.primary_label must be non-empty string")
+    stability = payload.get("stability")
+    if isinstance(stability, bool) or not isinstance(stability, (int, float)):
+        raise RuntimeError("long_mood_state.payload.stability must be numeric")
+    return {
+        "primary_label": primary_label,
+        "valence": _bounded_float(current_vad.get("v")),
+        "arousal": _bounded_float(current_vad.get("a")),
+        "dominance": _bounded_float(current_vad.get("d")),
+        "stability": round(max(0.0, min(1.0, float(stability))), 2),
+        "active_biases": {
+            "caution_bias": _bounded_float(active_biases.get("caution_bias")),
+            "approach_bias": _bounded_float(active_biases.get("approach_bias")),
+            "avoidance_bias": _bounded_float(active_biases.get("avoidance_bias")),
+            "speech_intensity_bias": _bounded_float(active_biases.get("speech_intensity_bias")),
+        },
+    }
+
+
 def _build_event_preview_text(
     *,
     event_row: sqlite3.Row,
@@ -11588,6 +11929,13 @@ def _decoded_object_json(value: Any) -> dict[str, Any]:
     if not isinstance(decoded, dict):
         raise RuntimeError("decoded JSON must be an object")
     return decoded
+
+
+# Block: Bounded float helper
+def _bounded_float(value: Any) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise RuntimeError("numeric value is required")
+    return round(max(-1.0, min(1.0, float(value))), 2)
 
 
 # Block: JSON string array decode
