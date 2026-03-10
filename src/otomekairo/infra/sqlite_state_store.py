@@ -8647,6 +8647,12 @@ def _public_retrieval_summary(row: sqlite3.Row) -> dict[str, Any]:
             for key, value in selected_reason_counts.items()
             if isinstance(value, int) and not isinstance(value, bool) and value > 0
         }
+    selection_trace = selected_json.get("selection_trace")
+    if isinstance(selection_trace, list):
+        payload["selection_trace"] = _public_selected_trace(selection_trace)
+    reserve_trace = selected_json.get("reserve_trace")
+    if isinstance(reserve_trace, list):
+        payload["reserve_trace"] = _public_reserve_trace(reserve_trace)
     selector_input_collector_counts = candidates_json.get("selector_input_collector_counts")
     if isinstance(selector_input_collector_counts, dict):
         payload["selector_input_collector_counts"] = {
@@ -8759,6 +8765,100 @@ def _public_selector_input_trace(selector_input_trace: list[Any]) -> list[dict[s
         if isinstance(about_time_hint_text, str) and about_time_hint_text:
             public_entry["about_time_hint_text"] = about_time_hint_text
         public_trace.append(public_entry)
+    return public_trace
+
+
+# Block: Selection trace 公開整形
+def _public_selected_trace(selection_trace: list[Any]) -> list[dict[str, Any]]:
+    public_trace: list[dict[str, Any]] = []
+    for index, trace_entry in enumerate(selection_trace):
+        if not isinstance(trace_entry, dict):
+            raise RuntimeError(f"selection_trace[{index}] must be object")
+        item_ref = trace_entry.get("item_ref")
+        slot_name = trace_entry.get("slot")
+        score = trace_entry.get("score")
+        collector_names = trace_entry.get("collector_names")
+        reason_codes = trace_entry.get("reason_codes")
+        duplicate_hits = trace_entry.get("duplicate_hits")
+        selection_rank = trace_entry.get("selection_rank")
+        if not isinstance(item_ref, str) or not item_ref:
+            raise RuntimeError(f"selection_trace[{index}].item_ref must be non-empty string")
+        if not isinstance(slot_name, str) or not slot_name:
+            raise RuntimeError(f"selection_trace[{index}].slot must be non-empty string")
+        if not isinstance(score, (int, float)) or isinstance(score, bool):
+            raise RuntimeError(f"selection_trace[{index}].score must be number")
+        if not isinstance(collector_names, list):
+            raise RuntimeError(f"selection_trace[{index}].collector_names must be list")
+        if not isinstance(reason_codes, list):
+            raise RuntimeError(f"selection_trace[{index}].reason_codes must be list")
+        if not isinstance(duplicate_hits, int) or isinstance(duplicate_hits, bool):
+            raise RuntimeError(f"selection_trace[{index}].duplicate_hits must be integer")
+        if not isinstance(selection_rank, int) or isinstance(selection_rank, bool) or selection_rank <= 0:
+            raise RuntimeError(f"selection_trace[{index}].selection_rank must be positive integer")
+        public_trace.append(
+            {
+                "item_ref": item_ref,
+                "slot": slot_name,
+                "score": round(float(score), 3),
+                "collector_names": [
+                    str(collector_name)
+                    for collector_name in collector_names
+                    if isinstance(collector_name, str) and collector_name
+                ],
+                "reason_codes": [
+                    str(reason_code)
+                    for reason_code in reason_codes
+                    if isinstance(reason_code, str) and reason_code
+                ],
+                "duplicate_hits": duplicate_hits,
+                "selection_rank": selection_rank,
+            }
+        )
+    return public_trace
+
+
+# Block: Reserve trace 公開整形
+def _public_reserve_trace(reserve_trace: list[Any]) -> list[dict[str, Any]]:
+    public_trace: list[dict[str, Any]] = []
+    for index, trace_entry in enumerate(reserve_trace):
+        if not isinstance(trace_entry, dict):
+            raise RuntimeError(f"reserve_trace[{index}] must be object")
+        item_ref = trace_entry.get("item_ref")
+        slot_name = trace_entry.get("slot")
+        score = trace_entry.get("score")
+        collector_names = trace_entry.get("collector_names")
+        reason_codes = trace_entry.get("reason_codes")
+        duplicate_hits = trace_entry.get("duplicate_hits")
+        if not isinstance(item_ref, str) or not item_ref:
+            raise RuntimeError(f"reserve_trace[{index}].item_ref must be non-empty string")
+        if not isinstance(slot_name, str) or not slot_name:
+            raise RuntimeError(f"reserve_trace[{index}].slot must be non-empty string")
+        if not isinstance(score, (int, float)) or isinstance(score, bool):
+            raise RuntimeError(f"reserve_trace[{index}].score must be number")
+        if not isinstance(collector_names, list):
+            raise RuntimeError(f"reserve_trace[{index}].collector_names must be list")
+        if not isinstance(reason_codes, list):
+            raise RuntimeError(f"reserve_trace[{index}].reason_codes must be list")
+        if not isinstance(duplicate_hits, int) or isinstance(duplicate_hits, bool):
+            raise RuntimeError(f"reserve_trace[{index}].duplicate_hits must be integer")
+        public_trace.append(
+            {
+                "item_ref": item_ref,
+                "slot": slot_name,
+                "score": round(float(score), 3),
+                "collector_names": [
+                    str(collector_name)
+                    for collector_name in collector_names
+                    if isinstance(collector_name, str) and collector_name
+                ],
+                "reason_codes": [
+                    str(reason_code)
+                    for reason_code in reason_codes
+                    if isinstance(reason_code, str) and reason_code
+                ],
+                "duplicate_hits": duplicate_hits,
+            }
+        )
     return public_trace
 
 

@@ -2352,6 +2352,27 @@
         "mode_priority": 1,
         "profile_bias": 1
       },
+      "selection_trace": [
+        {
+          "slot": "semantic_items",
+          "item_ref": "memory_state:mem_010",
+          "score": 1.8,
+          "reason_codes": ["matched_query", "mode_priority", "profile_bias"],
+          "collector_names": ["associative_memory", "task_focus"],
+          "duplicate_hits": 1,
+          "selection_rank": 2
+        }
+      ],
+      "reserve_trace": [
+        {
+          "slot": "episodic_items",
+          "item_ref": "event:evt_010",
+          "score": 0.8,
+          "reason_codes": ["about_time"],
+          "collector_names": ["explicit_time"],
+          "duplicate_hits": 0
+        }
+      ],
       "selector_input_collector_counts": {
         "recent_event_window": 2,
         "associative_memory": 3,
@@ -2457,7 +2478,7 @@
 - `runtime.last_cycle_id` は、短周期が 1 回以上完了している場合だけ持つ
 - `runtime.last_commit_id` は、`commit_records` が 1 件以上ある場合だけ持つ
 - `runtime.last_retrieval` は、`retrieval_runs` が 1 件以上ある場合だけ持つ
-- `runtime.last_retrieval.collector_names`、`collector_counts`、`selected_reason_counts`、`selector_input_collector_counts`、`selector_input_slot_counts`、`selector_input_reason_counts`、`selector_input_trace`、`selector_summary`、`trimmed_item_refs` は、current 実装では追加で持ってよい
+- `runtime.last_retrieval.collector_names`、`collector_counts`、`selected_reason_counts`、`selection_trace`、`reserve_trace`、`selector_input_collector_counts`、`selector_input_slot_counts`、`selector_input_reason_counts`、`selector_input_trace`、`selector_summary`、`trimmed_item_refs` は、current 実装では追加で持ってよい
 - `self_state.current_emotion` は、少なくとも `v`、`a`、`d`、`labels` を持つ
 - `self_state.last_persona_update` は、`revisions.entity_type=self_state.personality` が 1 件以上ある場合だけ持つ
 - `attention_state.primary_focus` は、current 実装では `attention_state.primary_focus_json.summary` をそのまま返す短い `string` とする

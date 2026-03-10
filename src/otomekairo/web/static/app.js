@@ -2385,6 +2385,16 @@
       lastRetrieval.selected_reason_counts,
       "runtime.last_retrieval.selected_reason_counts",
     );
+    const selectionTrace = readOptionalSelectionTrace(
+      lastRetrieval.selection_trace,
+      "runtime.last_retrieval.selection_trace",
+      true,
+    );
+    const reserveTrace = readOptionalSelectionTrace(
+      lastRetrieval.reserve_trace,
+      "runtime.last_retrieval.reserve_trace",
+      false,
+    );
     const selectorInputCollectorCounts = readOptionalCountMap(
       lastRetrieval.selector_input_collector_counts,
       "runtime.last_retrieval.selector_input_collector_counts",
@@ -2406,6 +2416,8 @@
       "runtime.last_retrieval.selector_summary",
     );
     const trimmedItemRefs = readOptionalStringArray(lastRetrieval.trimmed_item_refs, "runtime.last_retrieval.trimmed_item_refs");
+    const selectedItemRefs = new Set(selectionTrace.map((traceEntry) => traceEntry.item_ref));
+    const reserveItemRefs = new Set(reserveTrace.map((traceEntry) => traceEntry.item_ref));
     const totalCount = Object.values(selectedCounts).reduce((total, count) => total + count, 0);
     const textParts = [
       formatStatusTimestamp(createdAt),
@@ -2425,10 +2437,12 @@
         `collectors: ${collectorNames.length > 0 ? collectorNames.join(", ") : "なし"}`,
         `collector_counts: ${Object.keys(collectorCounts).length > 0 ? formatSelectedCounts(collectorCounts) : "なし"}`,
         `selected_reasons: ${Object.keys(selectedReasonCounts).length > 0 ? formatSelectedCounts(selectedReasonCounts) : "なし"}`,
+        `selection_trace: ${formatSelectionTrace(selectionTrace, true)}`,
+        `reserve_trace: ${formatSelectionTrace(reserveTrace, false)}`,
         `selector_input_collectors: ${Object.keys(selectorInputCollectorCounts).length > 0 ? formatSelectedCounts(selectorInputCollectorCounts) : "なし"}`,
         `selector_input_slots: ${Object.keys(selectorInputSlotCounts).length > 0 ? formatSelectedCounts(selectorInputSlotCounts) : "なし"}`,
         `selector_input_reasons: ${Object.keys(selectorInputReasonCounts).length > 0 ? formatSelectedCounts(selectorInputReasonCounts) : "なし"}`,
-        `selector_input_trace: ${formatSelectorInputTrace(selectorInputTrace)}`,
+        `selector_input_trace: ${formatSelectorInputTrace(selectorInputTrace, selectedItemRefs, reserveItemRefs)}`,
         `selector: ${formatSelectorSummary(selectorSummary)}`,
         `trimmed: ${trimmedItemRefs.length > 0 ? trimmedItemRefs.join(", ") : "なし"}`,
       ].join("\n"),
@@ -2519,17 +2533,38 @@
       .join(", ");
   }
 
-  function formatSelectorInputTrace(selectorInputTrace) {
+  function formatSelectorInputTrace(selectorInputTrace, selectedItemRefs, reserveItemRefs) {
     if (selectorInputTrace.length === 0) {
       return "なし";
     }
     const visibleEntries = selectorInputTrace.slice(0, 6).map((traceEntry, index) => {
       const collectors = traceEntry.collector_names.length > 0 ? traceEntry.collector_names.join("+") : "-";
       const reasons = traceEntry.reason_codes.length > 0 ? traceEntry.reason_codes.join("+") : "-";
-      return `${String(index + 1)}:${traceEntry.slot}/${traceEntry.item_ref}/${traceEntry.score.toFixed(3)}/${traceEntry.relative_time_text}/${collectors}/${reasons}/${clipText(traceEntry.text, 36)}`;
+      const selectionMark = selectedItemRefs.has(traceEntry.item_ref)
+        ? "selected"
+        : reserveItemRefs.has(traceEntry.item_ref)
+          ? "reserve"
+          : "input";
+      return `${String(index + 1)}:${selectionMark}/${traceEntry.slot}/${traceEntry.item_ref}/${traceEntry.score.toFixed(3)}/${traceEntry.relative_time_text}/${collectors}/${reasons}/${clipText(traceEntry.text, 36)}`;
     });
     if (selectorInputTrace.length > 6) {
       visibleEntries.push(`...他 ${String(selectorInputTrace.length - 6)} 件`);
+    }
+    return visibleEntries.join("\n");
+  }
+
+  function formatSelectionTrace(selectionTrace, showSelectionRank) {
+    if (selectionTrace.length === 0) {
+      return "なし";
+    }
+    const visibleEntries = selectionTrace.slice(0, 6).map((traceEntry, index) => {
+      const collectors = traceEntry.collector_names.length > 0 ? traceEntry.collector_names.join("+") : "-";
+      const reasons = traceEntry.reason_codes.length > 0 ? traceEntry.reason_codes.join("+") : "-";
+      const rankText = showSelectionRank ? `rank=${String(traceEntry.selection_rank)}/` : "";
+      return `${String(index + 1)}:${rankText}${traceEntry.slot}/${traceEntry.item_ref}/${traceEntry.score.toFixed(3)}/dup=${String(traceEntry.duplicate_hits)}/${collectors}/${reasons}`;
+    });
+    if (selectionTrace.length > 6) {
+      visibleEntries.push(`...他 ${String(selectionTrace.length - 6)} 件`);
     }
     return visibleEntries.join("\n");
   }
@@ -2640,6 +2675,45 @@
           `${label}[${String(index)}].relative_time_text`,
         ),
       };
+    });
+  }
+
+  // Block: Selection trace 読み取り
+  function readOptionalSelectionTrace(value, label, requireSelectionRank) {
+    if (value === undefined) {
+      return [];
+    }
+    if (!Array.isArray(value)) {
+      throw new Error(`${label} が配列ではありません`);
+    }
+    return value.map((entry, index) => {
+      if (!isObject(entry)) {
+        throw new Error(`${label}[${String(index)}] が object ではありません`);
+      }
+      const traceEntry = {
+        item_ref: requireString(entry.item_ref, `${label}[${String(index)}].item_ref`),
+        slot: requireString(entry.slot, `${label}[${String(index)}].slot`),
+        score: requireNumber(entry.score, `${label}[${String(index)}].score`),
+        collector_names: readStringArray(
+          entry.collector_names,
+          `${label}[${String(index)}].collector_names`,
+        ),
+        reason_codes: readStringArray(
+          entry.reason_codes,
+          `${label}[${String(index)}].reason_codes`,
+        ),
+        duplicate_hits: requireInteger(
+          entry.duplicate_hits,
+          `${label}[${String(index)}].duplicate_hits`,
+        ),
+      };
+      if (requireSelectionRank) {
+        traceEntry.selection_rank = requireInteger(
+          entry.selection_rank,
+          `${label}[${String(index)}].selection_rank`,
+        );
+      }
+      return traceEntry;
     });
   }
 
