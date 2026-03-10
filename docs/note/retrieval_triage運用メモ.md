@@ -26,6 +26,8 @@ PYTHONPATH=src python3 -m otomekairo.boot.run_retrieval_triage --limit 200 --max
 - `triage_flag_counts`: flag ごとの件数
 - `mode_counts`: `mode` ごとの run 件数
 - `review_packets[]`: `cycle_id`、`queries`、flag、summary、selected / skipped / reserve の trace preview
+- `review_packets[].annotation_template`: 次段の annotation へ持ち込むための固定 shape
+- `annotation_template.candidate_targets[]`: `event` / `memory_state` と `source_trace` を持つ review 候補
 
 <!-- Block: Flag Meaning -->
 ## flag の意味
@@ -45,6 +47,7 @@ PYTHONPATH=src python3 -m otomekairo.boot.run_retrieval_triage --limit 200 --max
 - まず `retrieval_eval` で `mode` 単位の偏りを見る
 - 次に `retrieval_triage` で、偏っている `mode` の review packet を読む
 - `selected_items` と `reserve_items` を見比べて、「本来選ばれるべきだった候補」があるかを確認する
+- `annotation_template.candidate_targets` は、その run を `quarantine_memory` へ繋ぐときの候補一覧として使う
 - `explicit_time_dropped` や `thread_dropped` が多い run は、collector 不足ではなく selector 圧縮や slot 設計を疑う
 - `duplicate_heavy` が多い run は、collector の重複寄与が大きすぎないかを見る
 

@@ -26,6 +26,11 @@ FLAG_PRIORITY = {
     "reserve_heavy": 20,
     "duplicate_heavy": 10,
 }
+QUARANTINE_REASON_CODES = (
+    "misretrieval_confirmed",
+    "stale_linkage",
+    "manual_quarantine",
+)
 FLAG_NOTE = {
     "empty_selection": "最終採用が 0 件",
     "explicit_time_dropped": "explicit_time が selector input にあるのに最終採用へ残っていない",
@@ -130,6 +135,9 @@ def _build_review_packet(retrieval_run: dict[str, Any]) -> dict[str, Any]:
     selected_collectors = _count_map(public_detail.get("collector_counts"))
     selected_reason_counts = _count_map(public_detail.get("selected_reason_counts"))
     selected_item_count = sum(selected_counts.values())
+    selected_items = _trace_preview(public_detail.get("selection_trace"))
+    slot_skipped_items = _trace_preview(public_detail.get("slot_skipped_trace"))
+    reserve_items = _trace_preview(public_detail.get("reserve_trace"))
     flag_codes = _flag_codes(
         selected_item_count=selected_item_count,
         selector_summary=selector_summary,
@@ -147,6 +155,7 @@ def _build_review_packet(retrieval_run: dict[str, Any]) -> dict[str, Any]:
         "flag_codes": flag_codes,
         "focus_notes": [FLAG_NOTE[flag_code] for flag_code in flag_codes],
         "review_priority": sum(FLAG_PRIORITY[flag_code] for flag_code in flag_codes),
+        "resolved_event_ids": _optional_string_list(public_detail.get("resolved_event_ids")),
         "summary": {
             "selected_item_count": selected_item_count,
             "selector_input_candidate_count": _int_metric(
@@ -169,9 +178,20 @@ def _build_review_packet(retrieval_run: dict[str, Any]) -> dict[str, Any]:
             ),
             "duplicate_hit_count": _int_metric(selector_summary, "duplicate_hit_count"),
         },
-        "selected_items": _trace_preview(public_detail.get("selection_trace")),
-        "slot_skipped_items": _trace_preview(public_detail.get("slot_skipped_trace")),
-        "reserve_items": _trace_preview(public_detail.get("reserve_trace")),
+        "selected_items": selected_items,
+        "slot_skipped_items": slot_skipped_items,
+        "reserve_items": reserve_items,
+        "annotation_template": {
+            "review_status": "pending",
+            "reason_code": "",
+            "reason_note": "",
+            "allowed_reason_codes": list(QUARANTINE_REASON_CODES),
+            "candidate_targets": _annotation_candidate_targets(
+                selected_items=selected_items,
+                slot_skipped_items=slot_skipped_items,
+                reserve_items=reserve_items,
+            ),
+        },
     }
 
 
@@ -291,6 +311,13 @@ def _format_review_packet(review_packet: dict[str, Any]) -> list[str]:
     focus_notes = _required_string_list(review_packet, "focus_notes")
     if focus_notes:
         lines.append(f"  notes: {' / '.join(focus_notes)}")
+    resolved_event_ids = _optional_string_list(review_packet.get("resolved_event_ids"))
+    if resolved_event_ids:
+        lines.append(f"  resolved_events: {', '.join(resolved_event_ids)}")
+    annotation_template = _required_object(review_packet, "annotation_template")
+    candidate_targets = _required_target_candidates(annotation_template, "candidate_targets")
+    if candidate_targets:
+        lines.append(f"  targets: {_format_target_candidates(candidate_targets)}")
     for label, field_name in (
         ("selected", "selected_items"),
         ("skipped", "slot_skipped_items"),
@@ -327,6 +354,58 @@ def _format_trace_entry(trace_entry: dict[str, Any]) -> str:
         f"[{reason_text}] "
         f"{text} "
         f"({trace_entry['relative_time_text']})"
+    )
+
+
+# Block: Annotation target 候補
+def _annotation_candidate_targets(
+    *,
+    selected_items: list[dict[str, Any]],
+    slot_skipped_items: list[dict[str, Any]],
+    reserve_items: list[dict[str, Any]],
+) -> list[dict[str, str]]:
+    candidate_targets: list[dict[str, str]] = []
+    seen_targets: set[tuple[str, str]] = set()
+    for source_trace, trace_entries in (
+        ("selected", selected_items),
+        ("skipped", slot_skipped_items),
+        ("reserve", reserve_items),
+    ):
+        for trace_entry in trace_entries:
+            entity_id = _required_str(trace_entry, "item_ref")
+            entity_type = _target_entity_type(trace_entry)
+            target_key = (entity_type, entity_id)
+            if target_key in seen_targets:
+                continue
+            seen_targets.add(target_key)
+            candidate_targets.append(
+                {
+                    "entity_type": entity_type,
+                    "entity_id": entity_id,
+                    "source_trace": source_trace,
+                    "slot": _required_str(trace_entry, "slot"),
+                }
+            )
+    return candidate_targets
+
+
+# Block: Target entity type
+def _target_entity_type(trace_entry: dict[str, Any]) -> str:
+    item_ref = _required_str(trace_entry, "item_ref")
+    slot_name = _required_str(trace_entry, "slot")
+    if slot_name == "recent_event_window" or item_ref.startswith("evt_"):
+        return "event"
+    return "memory_state"
+
+
+# Block: Target candidate formatting
+def _format_target_candidates(candidate_targets: list[dict[str, str]]) -> str:
+    return " | ".join(
+        (
+            f"{candidate_target['entity_type']}:{candidate_target['entity_id']}"
+            f"({candidate_target['source_trace']})"
+        )
+        for candidate_target in candidate_targets[:TRACE_ITEM_LIMIT]
     )
 
 
@@ -431,6 +510,42 @@ def _required_string_list(payload: dict[str, Any], key: str) -> list[str]:
     if len(string_list) != len(value):
         raise RuntimeError(f"{key} must contain non-empty strings only")
     return string_list
+
+
+# Block: Optional string list
+def _optional_string_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise RuntimeError("optional string list must be list")
+    string_list = [
+        str(entry_value)
+        for entry_value in value
+        if isinstance(entry_value, str) and entry_value
+    ]
+    if len(string_list) != len(value):
+        raise RuntimeError("optional string list must contain non-empty strings only")
+    return string_list
+
+
+# Block: Required target candidates
+def _required_target_candidates(payload: dict[str, Any], key: str) -> list[dict[str, str]]:
+    value = payload.get(key)
+    if not isinstance(value, list):
+        raise RuntimeError(f"{key} must be list")
+    candidate_targets: list[dict[str, str]] = []
+    for candidate_target in value:
+        if not isinstance(candidate_target, dict):
+            raise RuntimeError(f"{key} entries must be objects")
+        candidate_targets.append(
+            {
+                "entity_type": _required_str(candidate_target, "entity_type"),
+                "entity_id": _required_str(candidate_target, "entity_id"),
+                "source_trace": _required_str(candidate_target, "source_trace"),
+                "slot": _required_str(candidate_target, "slot"),
+            }
+        )
+    return candidate_targets
 
 
 # Block: Int metric
