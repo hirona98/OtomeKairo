@@ -13,9 +13,11 @@ from otomekairo.usecase.retrieval_common import local_text, relative_time_text, 
 from otomekairo.usecase.retrieval_plan import build_retrieval_plan
 from otomekairo.usecase.retrieval_selector import (
     SelectionArtifacts,
+    empty_selection_artifacts,
     merge_retrieval_candidates,
     select_retrieval_candidates,
 )
+from otomekairo.usecase.retrieval_trace_stats import collector_counts, reason_counts, slot_counts
 from otomekairo.usecase.run_retrieval_selection import run_retrieval_selection
 
 
@@ -169,55 +171,9 @@ def _select_with_llm(
     state_about_time_by_id: dict[str, dict[str, Any]],
 ) -> SelectionArtifacts:
     if not merged_candidates:
-        return SelectionArtifacts(
-            memory_bundle={slot_name: [] for slot_name in (
-                "working_memory_items",
-                "episodic_items",
-                "semantic_items",
-                "affective_items",
-                "relationship_items",
-                "reflection_items",
-                "recent_event_window",
-            )},
-            selected_json={
-                "selected_counts": {
-                    "working_memory_items": 0,
-                    "episodic_items": 0,
-                    "semantic_items": 0,
-                    "affective_items": 0,
-                    "relationship_items": 0,
-                    "reflection_items": 0,
-                    "recent_event_window": 0,
-                },
-                "selected_refs": {
-                    "working_memory_item_ids": [],
-                    "episodic_item_ids": [],
-                    "semantic_item_ids": [],
-                    "affective_item_ids": [],
-                    "relationship_item_ids": [],
-                    "reflection_item_ids": [],
-                    "recent_event_ids": [],
-                },
-                "selection_trace": [],
-                "selector_summary": {
-                    "selector_mode": "llm_ranked",
-                    "selection_reason": "候補なし",
-                    "raw_candidate_count": raw_candidate_count,
-                    "merged_candidate_count": 0,
-                    "selector_input_candidate_count": 0,
-                    "selector_candidate_limit": SELECTOR_CANDIDATE_LIMIT,
-                    "llm_selected_ref_count": 0,
-                    "llm_unselected_count": 0,
-                    "llm_return_ratio_percent": 0,
-                    "selected_candidate_count": 0,
-                    "selector_input_unused_count": 0,
-                    "selected_candidate_ratio_percent": 0,
-                    "duplicate_hit_count": 0,
-                    "reserve_candidate_count": 0,
-                    "slot_skipped_count": 0,
-                },
-                "reserve_trace": [],
-            },
+        return empty_selection_artifacts(
+            raw_candidate_count=raw_candidate_count,
+            selector_candidate_limit=SELECTOR_CANDIDATE_LIMIT,
         )
     candidate_pack = _build_selector_candidate_pack(
         merged_candidates=merged_candidates,
@@ -393,57 +349,12 @@ def _build_candidates_json(
         ],
         "selector_input_candidate_count": len(selector_input_candidates),
         "selector_candidate_limit": selector_candidate_limit,
-        "selector_input_collector_counts": _selector_input_collector_counts(selector_input_candidates),
-        "selector_input_slot_counts": _selector_input_slot_counts(selector_input_candidates),
-        "selector_input_reason_counts": _selector_input_reason_counts(selector_input_candidates),
+        "selector_input_collector_counts": collector_counts(selector_input_candidates),
+        "selector_input_slot_counts": slot_counts(selector_input_candidates),
+        "selector_input_reason_counts": reason_counts(selector_input_candidates),
         "selector_input_trace": selector_input_trace,
         "collector_runs": collector_runs,
     }
-
-
-# Block: Selector input collector counts
-def _selector_input_collector_counts(
-    selector_input_candidates: list[dict[str, Any]],
-) -> dict[str, int]:
-    collector_counts: dict[str, int] = {}
-    for candidate in selector_input_candidates:
-        collector_names = candidate.get("collector_names")
-        if not isinstance(collector_names, list):
-            continue
-        for collector_name in collector_names:
-            if not isinstance(collector_name, str) or not collector_name:
-                continue
-            collector_counts[collector_name] = collector_counts.get(collector_name, 0) + 1
-    return collector_counts
-
-
-# Block: Selector input slot counts
-def _selector_input_slot_counts(
-    selector_input_candidates: list[dict[str, Any]],
-) -> dict[str, int]:
-    slot_counts: dict[str, int] = {}
-    for candidate in selector_input_candidates:
-        slot_name = candidate.get("slot")
-        if not isinstance(slot_name, str) or not slot_name:
-            continue
-        slot_counts[slot_name] = slot_counts.get(slot_name, 0) + 1
-    return slot_counts
-
-
-# Block: Selector input reason counts
-def _selector_input_reason_counts(
-    selector_input_candidates: list[dict[str, Any]],
-) -> dict[str, int]:
-    reason_counts: dict[str, int] = {}
-    for candidate in selector_input_candidates:
-        reason_codes = candidate.get("reason_codes")
-        if not isinstance(reason_codes, list):
-            continue
-        for reason_code in reason_codes:
-            if not isinstance(reason_code, str) or not reason_code:
-                continue
-            reason_counts[reason_code] = reason_counts.get(reason_code, 0) + 1
-    return reason_counts
 
 
 # Block: Cognition formatting
