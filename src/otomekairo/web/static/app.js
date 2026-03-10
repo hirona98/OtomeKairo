@@ -2402,6 +2402,11 @@
       "runtime.last_retrieval.selection_trace",
       true,
     );
+    const slotSkippedTrace = readOptionalSelectionTrace(
+      lastRetrieval.slot_skipped_trace,
+      "runtime.last_retrieval.slot_skipped_trace",
+      true,
+    );
     const reserveTrace = readOptionalSelectionTrace(
       lastRetrieval.reserve_trace,
       "runtime.last_retrieval.reserve_trace",
@@ -2429,6 +2434,7 @@
     );
     const trimmedItemRefs = readOptionalStringArray(lastRetrieval.trimmed_item_refs, "runtime.last_retrieval.trimmed_item_refs");
     const selectedItemRefs = new Set(selectionTrace.map((traceEntry) => traceEntry.item_ref));
+    const slotSkippedItemRefs = new Set(slotSkippedTrace.map((traceEntry) => traceEntry.item_ref));
     const reserveItemRefs = new Set(reserveTrace.map((traceEntry) => traceEntry.item_ref));
     const totalCount = Object.values(selectedCounts).reduce((total, count) => total + count, 0);
     const textParts = [
@@ -2453,11 +2459,12 @@
         `reserve_slots: ${Object.keys(reserveSlotCounts).length > 0 ? formatSelectedCounts(reserveSlotCounts) : "なし"}`,
         `reserve_reasons: ${Object.keys(reserveReasonCounts).length > 0 ? formatSelectedCounts(reserveReasonCounts) : "なし"}`,
         `selection_trace: ${formatSelectionTrace(selectionTrace, true)}`,
+        `slot_skipped_trace: ${formatSelectionTrace(slotSkippedTrace, true)}`,
         `reserve_trace: ${formatSelectionTrace(reserveTrace, false)}`,
         `selector_input_collectors: ${Object.keys(selectorInputCollectorCounts).length > 0 ? formatSelectedCounts(selectorInputCollectorCounts) : "なし"}`,
         `selector_input_slots: ${Object.keys(selectorInputSlotCounts).length > 0 ? formatSelectedCounts(selectorInputSlotCounts) : "なし"}`,
         `selector_input_reasons: ${Object.keys(selectorInputReasonCounts).length > 0 ? formatSelectedCounts(selectorInputReasonCounts) : "なし"}`,
-        `selector_input_trace: ${formatSelectorInputTrace(selectorInputTrace, selectedItemRefs, reserveItemRefs)}`,
+        `selector_input_trace: ${formatSelectorInputTrace(selectorInputTrace, selectedItemRefs, slotSkippedItemRefs, reserveItemRefs)}`,
         `selector: ${formatSelectorSummary(selectorSummary)}`,
         `trimmed: ${trimmedItemRefs.length > 0 ? trimmedItemRefs.join(", ") : "なし"}`,
       ].join("\n"),
@@ -2548,7 +2555,7 @@
       .join(", ");
   }
 
-  function formatSelectorInputTrace(selectorInputTrace, selectedItemRefs, reserveItemRefs) {
+  function formatSelectorInputTrace(selectorInputTrace, selectedItemRefs, slotSkippedItemRefs, reserveItemRefs) {
     if (selectorInputTrace.length === 0) {
       return "なし";
     }
@@ -2557,6 +2564,8 @@
       const reasons = traceEntry.reason_codes.length > 0 ? traceEntry.reason_codes.join("+") : "-";
       const selectionMark = selectedItemRefs.has(traceEntry.item_ref)
         ? "selected"
+        : slotSkippedItemRefs.has(traceEntry.item_ref)
+          ? "skipped"
         : reserveItemRefs.has(traceEntry.item_ref)
           ? "reserve"
           : "input";

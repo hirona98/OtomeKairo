@@ -8681,6 +8681,12 @@ def _public_retrieval_summary(row: sqlite3.Row) -> dict[str, Any]:
             selection_trace,
             selector_input_trace_by_item_ref=selector_input_trace_by_item_ref,
         )
+    slot_skipped_trace = selected_json.get("slot_skipped_trace")
+    if isinstance(slot_skipped_trace, list):
+        payload["slot_skipped_trace"] = _public_selected_trace(
+            slot_skipped_trace,
+            selector_input_trace_by_item_ref=selector_input_trace_by_item_ref,
+        )
     reserve_trace = selected_json.get("reserve_trace")
     if isinstance(reserve_trace, list):
         payload["reserve_trace"] = _public_reserve_trace(

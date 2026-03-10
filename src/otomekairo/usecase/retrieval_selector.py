@@ -88,6 +88,7 @@ def select_retrieval_candidates(
 ) -> SelectionArtifacts:
     selected_bundle = {slot_name: [] for slot_name in SLOT_ORDER}
     selected_trace: list[dict[str, Any]] = []
+    slot_skipped_trace: list[dict[str, Any]] = []
     slot_limits = _slot_limits(retrieval_plan=retrieval_plan)
     candidate_by_ref = {
         str(candidate["item_ref"]): candidate
@@ -102,6 +103,13 @@ def select_retrieval_candidates(
         slot_name = str(candidate["slot"])
         if len(selected_bundle[slot_name]) >= slot_limits[slot_name]:
             skipped_by_slot_limit += 1
+            if len(slot_skipped_trace) < 8:
+                slot_skipped_trace.append(
+                    _trace_entry(
+                        candidate,
+                        selection_rank=selection_rank,
+                    )
+                )
             continue
         if item_ref in used_refs:
             raise RuntimeError("retrieval selection returned duplicate item_ref")
@@ -128,6 +136,7 @@ def select_retrieval_candidates(
             "selected_counts": _selected_counts(memory_bundle=selected_bundle),
             "selected_refs": _selected_refs(memory_bundle=selected_bundle),
             "selection_trace": selected_trace,
+            "slot_skipped_trace": slot_skipped_trace,
             "collector_counts": _collector_counts(selected_trace),
             "selected_reason_counts": _reason_counts(selected_trace),
             "reserve_collector_counts": _collector_counts(reserve_trace),
