@@ -130,6 +130,9 @@ def select_retrieval_candidates(
             "selection_trace": selected_trace,
             "collector_counts": _collector_counts(selected_trace),
             "selected_reason_counts": _reason_counts(selected_trace),
+            "reserve_collector_counts": _collector_counts(reserve_trace),
+            "reserve_slot_counts": _slot_counts(reserve_trace),
+            "reserve_reason_counts": _reason_counts(reserve_trace),
             "selector_summary": {
                 "selector_mode": "llm_ranked",
                 "selection_reason": selection_reason,
@@ -234,6 +237,15 @@ def _reason_counts(selection_trace: list[dict[str, Any]]) -> dict[str, int]:
         for reason_code in trace_entry["reason_codes"]:
             reason_key = str(reason_code)
             counts[reason_key] = counts.get(reason_key, 0) + 1
+    return counts
+
+
+# Block: Slot 件数
+def _slot_counts(selection_trace: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for trace_entry in selection_trace:
+        slot_name = str(trace_entry["slot"])
+        counts[slot_name] = counts.get(slot_name, 0) + 1
     return counts
 
 

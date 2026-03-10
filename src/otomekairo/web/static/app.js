@@ -2385,6 +2385,18 @@
       lastRetrieval.selected_reason_counts,
       "runtime.last_retrieval.selected_reason_counts",
     );
+    const reserveCollectorCounts = readOptionalCountMap(
+      lastRetrieval.reserve_collector_counts,
+      "runtime.last_retrieval.reserve_collector_counts",
+    );
+    const reserveSlotCounts = readOptionalCountMap(
+      lastRetrieval.reserve_slot_counts,
+      "runtime.last_retrieval.reserve_slot_counts",
+    );
+    const reserveReasonCounts = readOptionalCountMap(
+      lastRetrieval.reserve_reason_counts,
+      "runtime.last_retrieval.reserve_reason_counts",
+    );
     const selectionTrace = readOptionalSelectionTrace(
       lastRetrieval.selection_trace,
       "runtime.last_retrieval.selection_trace",
@@ -2437,6 +2449,9 @@
         `collectors: ${collectorNames.length > 0 ? collectorNames.join(", ") : "なし"}`,
         `collector_counts: ${Object.keys(collectorCounts).length > 0 ? formatSelectedCounts(collectorCounts) : "なし"}`,
         `selected_reasons: ${Object.keys(selectedReasonCounts).length > 0 ? formatSelectedCounts(selectedReasonCounts) : "なし"}`,
+        `reserve_collectors: ${Object.keys(reserveCollectorCounts).length > 0 ? formatSelectedCounts(reserveCollectorCounts) : "なし"}`,
+        `reserve_slots: ${Object.keys(reserveSlotCounts).length > 0 ? formatSelectedCounts(reserveSlotCounts) : "なし"}`,
+        `reserve_reasons: ${Object.keys(reserveReasonCounts).length > 0 ? formatSelectedCounts(reserveReasonCounts) : "なし"}`,
         `selection_trace: ${formatSelectionTrace(selectionTrace, true)}`,
         `reserve_trace: ${formatSelectionTrace(reserveTrace, false)}`,
         `selector_input_collectors: ${Object.keys(selectorInputCollectorCounts).length > 0 ? formatSelectedCounts(selectorInputCollectorCounts) : "なし"}`,

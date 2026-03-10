@@ -8648,6 +8648,27 @@ def _public_retrieval_summary(row: sqlite3.Row) -> dict[str, Any]:
             for key, value in selected_reason_counts.items()
             if isinstance(value, int) and not isinstance(value, bool) and value > 0
         }
+    reserve_collector_counts = selected_json.get("reserve_collector_counts")
+    if isinstance(reserve_collector_counts, dict):
+        payload["reserve_collector_counts"] = {
+            str(key): int(value)
+            for key, value in reserve_collector_counts.items()
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0
+        }
+    reserve_slot_counts = selected_json.get("reserve_slot_counts")
+    if isinstance(reserve_slot_counts, dict):
+        payload["reserve_slot_counts"] = {
+            str(key): int(value)
+            for key, value in reserve_slot_counts.items()
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0
+        }
+    reserve_reason_counts = selected_json.get("reserve_reason_counts")
+    if isinstance(reserve_reason_counts, dict):
+        payload["reserve_reason_counts"] = {
+            str(key): int(value)
+            for key, value in reserve_reason_counts.items()
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0
+        }
     selector_input_trace = candidates_json.get("selector_input_trace")
     if isinstance(selector_input_trace, list):
         payload["selector_input_trace"] = _public_selector_input_trace(selector_input_trace)
