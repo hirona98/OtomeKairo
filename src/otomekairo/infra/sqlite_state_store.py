@@ -279,6 +279,25 @@ class SqliteStateStore:
             return None
         return build_public_retrieval_detail(retrieval_record)
 
+    # Block: Recent retrieval runs read
+    def read_recent_retrieval_runs(self, *, limit: int) -> list[dict[str, Any]]:
+        if limit <= 0:
+            raise StoreValidationError("retrieval limit must be positive")
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT cycle_id, created_at, plan_json, candidates_json, selected_json, resolved_event_ids_json
+                FROM retrieval_runs
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [
+            _retrieval_record_from_row(row)
+            for row in rows
+        ]
+
     # Block: Effective settings read
     def read_effective_settings(self, default_settings: dict[str, Any]) -> dict[str, Any]:
         with self._connect() as connection:
@@ -8632,11 +8651,8 @@ def _read_latest_retrieval_row(connection: sqlite3.Connection) -> sqlite3.Row | 
     ).fetchone()
 
 
-# Block: Latest retrieval record read
-def _read_latest_retrieval_record(connection: sqlite3.Connection) -> dict[str, Any] | None:
-    retrieval_row = _read_latest_retrieval_row(connection)
-    if retrieval_row is None:
-        return None
+# Block: Retrieval record row conversion
+def _retrieval_record_from_row(retrieval_row: sqlite3.Row) -> dict[str, Any]:
     retrieval_record: dict[str, Any] = {
         "cycle_id": str(retrieval_row["cycle_id"]),
         "created_at": int(retrieval_row["created_at"]),
@@ -8652,6 +8668,14 @@ def _read_latest_retrieval_record(connection: sqlite3.Connection) -> dict[str, A
             retrieval_row["resolved_event_ids_json"]
         )
     return retrieval_record
+
+
+# Block: Latest retrieval record read
+def _read_latest_retrieval_record(connection: sqlite3.Connection) -> dict[str, Any] | None:
+    retrieval_row = _read_latest_retrieval_row(connection)
+    if retrieval_row is None:
+        return None
+    return _retrieval_record_from_row(retrieval_row)
 
 
 def _public_persona_update(row: sqlite3.Row) -> dict[str, Any]:
