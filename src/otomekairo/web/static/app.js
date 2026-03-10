@@ -2379,13 +2379,57 @@
     const cycleId = requireString(lastRetrieval.cycle_id, "runtime.last_retrieval.cycle_id");
     const queries = readStringArray(lastRetrieval.queries, "runtime.last_retrieval.queries");
     const selectedCounts = requireCountMap(lastRetrieval.selected_counts, "runtime.last_retrieval.selected_counts");
+    const collectorNames = readOptionalStringArray(lastRetrieval.collector_names, "runtime.last_retrieval.collector_names");
+    const collectorCounts = readOptionalCountMap(lastRetrieval.collector_counts, "runtime.last_retrieval.collector_counts");
+    const selectedReasonCounts = readOptionalCountMap(
+      lastRetrieval.selected_reason_counts,
+      "runtime.last_retrieval.selected_reason_counts",
+    );
+    const slotSkippedSlotCounts = readOptionalCountMap(
+      lastRetrieval.slot_skipped_slot_counts,
+      "runtime.last_retrieval.slot_skipped_slot_counts",
+    );
+    const reserveSlotCounts = readOptionalCountMap(
+      lastRetrieval.reserve_slot_counts,
+      "runtime.last_retrieval.reserve_slot_counts",
+    );
+    const selectorSummary = readOptionalSelectorSummary(
+      lastRetrieval.selector_summary,
+      "runtime.last_retrieval.selector_summary",
+    );
     const totalCount = Object.values(selectedCounts).reduce((total, count) => total + count, 0);
+    const textParts = [
+      formatStatusTimestamp(createdAt),
+      mode,
+      summarizeQueries(queries),
+      `合計 ${String(totalCount)} 件（${summarizeSelectedCounts(selectedCounts)}）`,
+    ];
+    if (Object.keys(collectorCounts).length > 0) {
+      textParts.push(`collector ${summarizeCollectorCounts(collectorCounts)}`);
+    }
+    const selectorRatioSummary = summarizeSelectorRatios(selectorSummary);
+    if (selectorRatioSummary.length > 0) {
+      textParts.push(selectorRatioSummary);
+    }
+    if (Object.keys(slotSkippedSlotCounts).length > 0) {
+      textParts.push(`skip ${summarizeSlotCounts(slotSkippedSlotCounts)}`);
+    }
+    if (Object.keys(reserveSlotCounts).length > 0) {
+      textParts.push(`reserve ${summarizeSlotCounts(reserveSlotCounts)}`);
+    }
     return {
-      text: `${formatStatusTimestamp(createdAt)} / ${mode} / ${summarizeQueries(queries)} / 合計 ${String(totalCount)} 件（${summarizeSelectedCounts(selectedCounts)}）`,
+      text: textParts.join(" / "),
       title: [
         `cycle: ${cycleId}`,
         `queries: ${queries.length > 0 ? queries.join(" / ") : "なし"}`,
         `selected: ${formatSelectedCounts(selectedCounts)}`,
+        `collectors: ${collectorNames.length > 0 ? collectorNames.join(", ") : "なし"}`,
+        `collector_counts: ${Object.keys(collectorCounts).length > 0 ? formatSelectedCounts(collectorCounts) : "なし"}`,
+        `selected_reasons: ${Object.keys(selectedReasonCounts).length > 0 ? formatSelectedCounts(selectedReasonCounts) : "なし"}`,
+        `slot_skipped_slots: ${Object.keys(slotSkippedSlotCounts).length > 0 ? formatSelectedCounts(slotSkippedSlotCounts) : "なし"}`,
+        `reserve_slots: ${Object.keys(reserveSlotCounts).length > 0 ? formatSelectedCounts(reserveSlotCounts) : "なし"}`,
+        `selector: ${formatSelectorSummary(selectorSummary)}`,
+        "detail: /api/retrieval-runs/latest",
       ].join("\n"),
     };
   }
@@ -2458,6 +2502,55 @@
       .join(" / ");
   }
 
+  function summarizeCollectorCounts(collectorCounts) {
+    return Object.entries(collectorCounts)
+      .slice(0, 3)
+      .map(([key, value]) => `${clipText(key, 12)}:${String(value)}`)
+      .join(", ");
+  }
+
+  function summarizeSelectorRatios(selectorSummary) {
+    if (Object.keys(selectorSummary).length === 0) {
+      return "";
+    }
+    const parts = [];
+    if (Number.isInteger(selectorSummary.llm_return_ratio_percent)) {
+      parts.push(`返却${String(selectorSummary.llm_return_ratio_percent)}%`);
+    }
+    if (Number.isInteger(selectorSummary.selected_candidate_ratio_percent)) {
+      parts.push(`採用${String(selectorSummary.selected_candidate_ratio_percent)}%`);
+    }
+    if (parts.length === 0) {
+      return "";
+    }
+    return `selector ${parts.join(" / ")}`;
+  }
+
+  function summarizeSlotCounts(slotCounts) {
+    const slotLabels = {
+      working_memory_items: "作業",
+      episodic_items: "エピ",
+      semantic_items: "意味",
+      affective_items: "感情",
+      relationship_items: "関係",
+      reflection_items: "反省",
+      recent_event_window: "直近",
+    };
+    return Object.entries(slotCounts)
+      .slice(0, 3)
+      .map(([key, value]) => `${slotLabels[key] || clipText(key, 12)}:${String(value)}`)
+      .join(", ");
+  }
+
+  function formatSelectorSummary(selectorSummary) {
+    if (Object.keys(selectorSummary).length === 0) {
+      return "なし";
+    }
+    return Object.entries(selectorSummary)
+      .map(([key, value]) => `${key}=${String(value)}`)
+      .join(", ");
+  }
+
   function formatTraitUpdates(updatedTraits) {
     return updatedTraits
       .map((trait) => {
@@ -2518,6 +2611,42 @@
       }
       return item;
     });
+  }
+
+  function readOptionalStringArray(value, label) {
+    if (value === undefined) {
+      return [];
+    }
+    return readStringArray(value, label);
+  }
+
+  function readOptionalCountMap(value, label) {
+    if (value === undefined) {
+      return {};
+    }
+    return requireCountMap(value, label);
+  }
+
+  // Block: Selector summary 読み取り
+  function readOptionalSelectorSummary(value, label) {
+    if (value === undefined) {
+      return {};
+    }
+    if (!isObject(value)) {
+      throw new Error(`${label} がオブジェクトではありません`);
+    }
+    return Object.fromEntries(Object.entries(value).map(([key, entryValue]) => {
+      if (typeof entryValue === "string") {
+        if (entryValue.length === 0) {
+          throw new Error(`${label}.${key} が空文字列です`);
+        }
+        return [key, entryValue];
+      }
+      if (Number.isInteger(entryValue)) {
+        return [key, entryValue];
+      }
+      throw new Error(`${label}.${key} が文字列または整数ではありません`);
+    }));
   }
 
   function autoResizeComposer() {

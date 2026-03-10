@@ -573,6 +573,8 @@ def _dispatch_browse_task_command(
     emitted_event_types: list[str] = []
     query = str(action_command["parameters"]["query"])
     task_id = str(action_command["parameters"]["task_id"])
+    message_id = _optional_action_text(action_command["parameters"], "message_id")
+    response_text = _optional_action_text(action_command["parameters"], "text")
 
     # Block: Waiting status
     _emit_browser_event(
@@ -587,17 +589,35 @@ def _dispatch_browse_task_command(
         emitted_event_types=emitted_event_types,
     )
 
-    # Block: Queue notice
-    _emit_browser_event(
-        pending_input=pending_input,
-        event_type="notice",
-        payload={
-            "notice_code": "browse_queued",
-            "text": f"検索タスクを追加しました: {query}",
-        },
-        emit_ui_event=emit_ui_event,
-        emitted_event_types=emitted_event_types,
-    )
+    # Block: Queue companion message or notice
+    final_message_emitted = False
+    if response_text:
+        _emit_browser_event(
+            pending_input=pending_input,
+            event_type="message",
+            payload={
+                "message_id": message_id,
+                "role": "assistant",
+                "text": response_text,
+                "created_at": _now_ms(),
+                "source_cycle_id": cycle_id,
+                "related_input_id": str(pending_input["input_id"]),
+            },
+            emit_ui_event=emit_ui_event,
+            emitted_event_types=emitted_event_types,
+        )
+        final_message_emitted = True
+    else:
+        _emit_browser_event(
+            pending_input=pending_input,
+            event_type="notice",
+            payload={
+                "notice_code": "browse_queued",
+                "text": f"検索タスクを追加しました: {query}",
+            },
+            emit_ui_event=emit_ui_event,
+            emitted_event_types=emitted_event_types,
+        )
 
     # Block: Idle status
     _emit_browser_event(
@@ -621,6 +641,8 @@ def _dispatch_browse_task_command(
             "queued_task_kind": "browse",
             "queued_task_status": "waiting_external",
             "query": query,
+            "final_message_emitted": final_message_emitted,
+            **({"message_id": message_id} if message_id is not None else {}),
         },
         task_mutations=[
             TaskStateMutationRecord(

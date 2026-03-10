@@ -8,7 +8,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 from otomekairo.gateway.camera_controller import CameraCandidate, CameraPresetCandidate
+from otomekairo.gateway.cognition_client import CognitionClient
 from otomekairo.schema.runtime_types import CognitionStateSnapshot, PendingInputRecord
+from otomekairo.usecase.completion_settings import build_completion_settings
 from otomekairo.usecase.observation_normalization import (
     normalize_observation_kind,
     normalize_observation_source,
@@ -52,6 +54,7 @@ def build_cognition_input(
     cycle_id: str,
     resolved_at: int,
     state_snapshot: CognitionStateSnapshot,
+    cognition_client: CognitionClient,
     camera_candidates: list[CameraCandidate],
     camera_available: bool,
 ) -> BuiltCognitionInput:
@@ -70,12 +73,16 @@ def build_cognition_input(
         pending_input=pending_input,
         resolved_at=resolved_at,
     )
+    completion_settings = build_completion_settings(state_snapshot.effective_settings)
     retrieval_artifacts = build_retrieval_artifacts(
+        cycle_id=cycle_id,
         memory_snapshot=state_snapshot.memory_snapshot,
         retrieval_profile=state_snapshot.retrieval_profile,
         current_observation=current_observation,
         task_snapshot=state_snapshot.task_snapshot,
         resolved_at=resolved_at,
+        completion_settings=completion_settings,
+        cognition_client=cognition_client,
     )
     self_snapshot = {
         "personality": state_snapshot.self_state["personality"],
@@ -143,7 +150,11 @@ def build_cognition_input(
     )
     retrieval_selected_json = _build_retrieval_selected_json(
         memory_bundle=trimmed_memory_bundle,
-        selection_trace=_required_selection_trace(retrieval_artifacts.selected_json),
+        source_selected_json=retrieval_artifacts.selected_json,
+        trimmed_memory_item_refs=trimmed_memory_item_refs,
+    )
+    conversation_context = _build_conversation_context(
+        memory_bundle=trimmed_memory_bundle,
     )
     retrieval_context = {
         "plan": retrieval_artifacts.retrieval_plan,
@@ -182,6 +193,7 @@ def build_cognition_input(
             "task_snapshot": task_snapshot,
             "attention_snapshot": attention_snapshot,
             "memory_bundle": trimmed_memory_bundle,
+            "conversation_context": conversation_context,
             "retrieval_context": retrieval_context,
             "policy_snapshot": policy_snapshot,
             "camera_candidates": camera_candidates_payload,
@@ -859,7 +871,11 @@ def _estimate_situation_layer_tokens(
 
 
 def _estimate_memory_layer_tokens(*, memory_bundle: dict[str, Any]) -> int:
-    return _estimate_token_count(_memory_layer_budget_projection(memory_bundle=memory_bundle))
+    return _estimate_token_count(
+        _memory_layer_budget_projection(
+            conversation_context=_build_conversation_context(memory_bundle=memory_bundle)
+        )
+    )
 
 
 def _estimate_token_count(value: Any) -> int:
@@ -925,9 +941,22 @@ def _pop_low_priority_memory_item(memory_bundle: dict[str, Any]) -> str | None:
 def _build_retrieval_selected_json(
     *,
     memory_bundle: dict[str, Any],
-    selection_trace: list[dict[str, Any]],
+    source_selected_json: dict[str, Any],
+    trimmed_memory_item_refs: list[str],
 ) -> dict[str, Any]:
     kept_refs = _selected_item_refs(memory_bundle=memory_bundle)
+    filtered_selection_trace = [
+        trace_entry
+        for trace_entry in _required_selection_trace(source_selected_json)
+        if isinstance(trace_entry, dict) and trace_entry.get("item_ref") in kept_refs
+    ]
+    collector_counts = _selection_trace_collector_counts(filtered_selection_trace)
+    selector_summary = _build_selector_summary(
+        source_selected_json=source_selected_json,
+        selected_count=len(filtered_selection_trace),
+        trimmed_memory_item_refs=trimmed_memory_item_refs,
+    )
+    reserve_trace = _build_reserve_trace(source_selected_json)
     return {
         "selected_counts": {
             "working_memory_items": len(memory_bundle["working_memory_items"]),
@@ -968,11 +997,11 @@ def _build_retrieval_selected_json(
                 for item in memory_bundle["recent_event_window"]
             ],
         },
-        "selection_trace": [
-            trace_entry
-            for trace_entry in selection_trace
-            if isinstance(trace_entry, dict) and trace_entry.get("item_ref") in kept_refs
-        ],
+        "selection_trace": filtered_selection_trace,
+        **({"collector_counts": collector_counts} if collector_counts else {}),
+        **({"selector_summary": selector_summary} if selector_summary else {}),
+        **({"reserve_trace": reserve_trace} if reserve_trace else {}),
+        **({"trimmed_item_refs": trimmed_memory_item_refs} if trimmed_memory_item_refs else {}),
     }
 
 
@@ -1011,6 +1040,71 @@ def _required_selection_trace(selected_json: dict[str, Any]) -> list[dict[str, A
     if not isinstance(selection_trace, list):
         raise RuntimeError("retrieval selected_json.selection_trace must be list")
     return selection_trace
+
+
+def _selection_trace_collector_counts(selection_trace: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for trace_entry in selection_trace:
+        collector_names = trace_entry.get("collector_names")
+        if not isinstance(collector_names, list):
+            continue
+        for collector_name in collector_names:
+            if not isinstance(collector_name, str) or not collector_name:
+                continue
+            counts[collector_name] = counts.get(collector_name, 0) + 1
+    return counts
+
+
+def _build_selector_summary(
+    *,
+    source_selected_json: dict[str, Any],
+    selected_count: int,
+    trimmed_memory_item_refs: list[str],
+) -> dict[str, Any]:
+    raw_summary = source_selected_json.get("selector_summary")
+    if not isinstance(raw_summary, dict):
+        if not trimmed_memory_item_refs:
+            return {}
+        return {
+            "selected_candidate_count": selected_count,
+            "trimmed_candidate_count": len(trimmed_memory_item_refs),
+        }
+    summary: dict[str, Any] = {}
+    for key in (
+        "selector_mode",
+        "selection_reason",
+    ):
+        value = raw_summary.get(key)
+        if isinstance(value, str) and value:
+            summary[key] = value
+    for key in (
+        "raw_candidate_count",
+        "merged_candidate_count",
+        "selector_input_candidate_count",
+        "selector_candidate_limit",
+        "llm_selected_ref_count",
+        "duplicate_hit_count",
+        "reserve_candidate_count",
+        "slot_skipped_count",
+    ):
+        value = raw_summary.get(key)
+        if isinstance(value, int) and not isinstance(value, bool):
+            summary[key] = value
+    summary["selected_candidate_count"] = selected_count
+    if trimmed_memory_item_refs:
+        summary["trimmed_candidate_count"] = len(trimmed_memory_item_refs)
+    return summary
+
+
+def _build_reserve_trace(source_selected_json: dict[str, Any]) -> list[dict[str, Any]]:
+    reserve_trace = source_selected_json.get("reserve_trace")
+    if not isinstance(reserve_trace, list):
+        return []
+    return [
+        trace_entry
+        for trace_entry in reserve_trace
+        if isinstance(trace_entry, dict)
+    ]
 
 
 def _self_layer_budget_projection(
@@ -1250,49 +1344,140 @@ def _retrieval_context_budget_projection(*, retrieval_context: dict[str, Any]) -
     return projected_context
 
 
-def _memory_layer_budget_projection(*, memory_bundle: dict[str, Any]) -> dict[str, Any]:
+def _memory_layer_budget_projection(*, conversation_context: dict[str, Any]) -> dict[str, Any]:
+    recent_dialog = conversation_context.get("recent_dialog")
+    selected_memory_pack = conversation_context.get("selected_memory_pack")
+    if not isinstance(recent_dialog, list):
+        raise RuntimeError("conversation_context.recent_dialog must be a list")
+    if not isinstance(selected_memory_pack, dict):
+        raise RuntimeError("conversation_context.selected_memory_pack must be an object")
     return {
-        "working_memory_items": _memory_bundle_slot_projection(
-            memory_bundle["working_memory_items"],
-            text_getter=_memory_body_text,
-        ),
-        "episodic_items": _memory_bundle_slot_projection(
-            memory_bundle["episodic_items"],
-            text_getter=_memory_body_text,
-        ),
-        "semantic_items": _memory_bundle_slot_projection(
-            memory_bundle["semantic_items"],
-            text_getter=_memory_body_text,
-        ),
-        "affective_items": _memory_bundle_slot_projection(
-            memory_bundle["affective_items"],
-            text_getter=_memory_body_text,
-        ),
-        "relationship_items": _memory_bundle_slot_projection(
-            memory_bundle["relationship_items"],
-            text_getter=_memory_body_text,
-        ),
-        "reflection_items": _memory_bundle_slot_projection(
-            memory_bundle["reflection_items"],
-            text_getter=_reflection_memory_text,
-        ),
-        "recent_event_window": [
-            _prompt_text(str(event_entry["summary_text"]))
-            for event_entry in memory_bundle["recent_event_window"]
+        "recent_dialog": [
+            {
+                "role": str(dialog_entry.get("role", "")),
+                "text": _prompt_text(str(dialog_entry.get("text", ""))),
+                "relative_time_text": str(dialog_entry.get("relative_time_text", "")),
+            }
+            for dialog_entry in recent_dialog
+            if isinstance(dialog_entry, dict)
         ],
+        "selected_memory_pack": {
+            str(key): [
+                _prompt_text(str(value))
+                for value in values
+                if isinstance(value, str) and value
+            ]
+            for key, values in selected_memory_pack.items()
+            if isinstance(values, list)
+        },
     }
 
 
-def _memory_bundle_slot_projection(
-    entries: list[dict[str, Any]],
+# Block: 会話コンテキスト
+def _build_conversation_context(*, memory_bundle: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "recent_dialog": _recent_dialog_entries(
+            recent_event_window=memory_bundle["recent_event_window"],
+        ),
+        "selected_memory_pack": {
+            "recent_context": _recent_context_texts(
+                recent_event_window=memory_bundle["recent_event_window"],
+            ),
+            "working_memory": _memory_pack_texts(
+                entries=memory_bundle["working_memory_items"],
+                text_getter=_memory_body_text,
+            ),
+            "episodic": _memory_pack_texts(
+                entries=memory_bundle["episodic_items"],
+                text_getter=_memory_body_text,
+            ),
+            "facts": _memory_pack_texts(
+                entries=memory_bundle["semantic_items"],
+                text_getter=_memory_body_text,
+            ),
+            "affective": _memory_pack_texts(
+                entries=memory_bundle["affective_items"],
+                text_getter=_memory_body_text,
+            ),
+            "relationship": _memory_pack_texts(
+                entries=memory_bundle["relationship_items"],
+                text_getter=_memory_body_text,
+            ),
+            "reflection": _memory_pack_texts(
+                entries=memory_bundle["reflection_items"],
+                text_getter=_reflection_memory_text,
+            ),
+        },
+    }
+
+
+# Block: 最近会話抽出
+def _recent_dialog_entries(*, recent_event_window: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized_events: list[dict[str, Any]] = []
+    for event_entry in recent_event_window:
+        if not isinstance(event_entry, dict):
+            raise RuntimeError("memory_bundle.recent_event_window must contain only objects")
+        normalized_events.append(event_entry)
+    dialog_entries: list[dict[str, Any]] = []
+    for event_entry in sorted(
+        normalized_events,
+        key=lambda item: int(item["created_at"]),
+    ):
+        dialog_role = event_entry.get("dialog_role")
+        dialog_text = event_entry.get("dialog_text")
+        if not isinstance(dialog_role, str) or not dialog_role:
+            continue
+        if not isinstance(dialog_text, str) or not dialog_text:
+            continue
+        dialog_entry = {
+            "role": dialog_role,
+            "text": _prompt_text(dialog_text),
+            "relative_time_text": str(event_entry.get("relative_time_text", "")),
+        }
+        dialog_entries.append(dialog_entry)
+    return dialog_entries[-6:]
+
+
+# Block: 直近文脈抽出
+def _recent_context_texts(*, recent_event_window: list[dict[str, Any]]) -> list[str]:
+    context_texts: list[str] = []
+    for event_entry in recent_event_window:
+        if not isinstance(event_entry, dict):
+            raise RuntimeError("memory_bundle.recent_event_window must contain only objects")
+        if isinstance(event_entry.get("dialog_role"), str):
+            continue
+        context_texts.append(_memory_pack_text(event_entry, text_getter=_recent_event_text))
+    return context_texts
+
+
+# Block: 記憶パック本文抽出
+def _memory_pack_texts(
     *,
+    entries: list[dict[str, Any]],
     text_getter: Any,
 ) -> list[str]:
     return [
-        _prompt_text(text_getter(entry))
+        _memory_pack_text(entry, text_getter=text_getter)
         for entry in entries
         if isinstance(entry, dict)
     ]
+
+
+# Block: 記憶パック本文
+def _memory_pack_text(memory_entry: dict[str, Any], *, text_getter: Any) -> str:
+    base_text = _prompt_text(text_getter(memory_entry))
+    about_time_hint_text = memory_entry.get("about_time_hint_text")
+    if isinstance(about_time_hint_text, str) and about_time_hint_text:
+        return f"{base_text} [時期: {about_time_hint_text}]"
+    return base_text
+
+
+# Block: 直近イベント本文
+def _recent_event_text(event_entry: dict[str, Any]) -> str:
+    summary_text = event_entry.get("summary_text")
+    if not isinstance(summary_text, str) or not summary_text:
+        raise RuntimeError("recent_event_window.summary_text must be non-empty string")
+    return summary_text
 
 
 def _memory_body_text(memory_entry: dict[str, Any]) -> str:

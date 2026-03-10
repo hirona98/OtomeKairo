@@ -46,7 +46,7 @@
 - current の組み込みブラウザ UI が実際に使う path の正確な集合は、後続の各エンドポイント節にある current 補足を正本とし、この節では大きな差分だけを要約する
 - `POST /api/camera/observe` は公開 API として実装済みだが、current の組み込み UI からは呼ばれない
 - `idle_tick` は公開 API を持たず、ランタイムが `pending_inputs` へ内部 enqueue する
-- current の `GET /api/status`、`GET /api/chat/stream`、`notice` の current 差分は各エンドポイント節でだけ扱う
+- current の `GET /api/status`、`GET /api/retrieval-runs/latest`、`GET /api/chat/stream`、`notice` の current 差分は各エンドポイント節でだけ扱う
 
 <!-- Block: Common Rules -->
 ## 共通ルール
@@ -155,6 +155,8 @@ flowchart LR
 - `キャラクター` タブには `キャラクター選択`、`基本設定`、`マテリアル・影設定`、`音声合成`、`音声認識` を含める
 - チャット画面下部の管理表示は、`GET /api/status` の `runtime.last_retrieval` と `self_state.last_persona_update` を、直近の要約として表示してよい
 - `runtime.last_retrieval` は、時刻、mode、query 要約、合計件数に加えて、`selected_counts` のカテゴリ別内訳も `合計 17 件（作業2 / エピ1 / ...）` 形式で本文表示してよい
+- current の本文要約は、`selector_summary.llm_return_ratio_percent` / `selected_candidate_ratio_percent` と `slot_skipped_slot_counts` / `reserve_slot_counts` を使って、`selector 返却71% / 採用57% / skip エピ1 / reserve 直近1` のような短い監査文を追加してよい
+- retrieval の trace、selector 入力、skip / reserve preview は `GET /api/status` に載せず、`GET /api/retrieval-runs/latest` の詳細監査断面で参照する
 - `システム` タブのカメラ接続追加は、一覧下部の `追加` で空行を末尾へ足して行う
 - 既存のカメラ接続は一覧テーブル上で直接編集し、`有効` は複数件を同時に選べる
 - current の `browse` では、UI は少なくとも `browse_queued` と `browse_completed` の `notice` を見分けられるようにしてよい
@@ -205,6 +207,43 @@ flowchart LR
       "created_at": 1760000000000,
       "mode": "associative_recent",
       "queries": ["最近の会話"],
+      "collector_names": [
+        "recent_event_window",
+        "associative_memory",
+        "episodic_memory"
+      ],
+      "collector_counts": {
+        "recent_event_window": 2,
+        "associative_memory": 1
+      },
+      "selected_reason_counts": {
+        "matched_query": 1,
+        "mode_priority": 1,
+        "profile_bias": 1
+      },
+      "slot_skipped_slot_counts": {
+        "episodic_items": 1
+      },
+      "reserve_slot_counts": {
+        "episodic_items": 1
+      },
+      "selector_summary": {
+        "selector_mode": "llm_ranked",
+        "selection_reason": "直近会話の継続と明示日付の一致を優先した",
+        "raw_candidate_count": 9,
+        "merged_candidate_count": 7,
+        "selector_input_candidate_count": 7,
+        "selector_candidate_limit": 24,
+        "llm_selected_ref_count": 5,
+        "llm_unselected_count": 2,
+        "llm_return_ratio_percent": 71,
+        "selected_candidate_count": 4,
+        "selector_input_unused_count": 3,
+        "selected_candidate_ratio_percent": 57,
+        "duplicate_hit_count": 2,
+        "reserve_candidate_count": 1,
+        "slot_skipped_count": 1
+      },
       "selected_counts": {
         "working_memory_items": 2,
         "episodic_items": 1,
@@ -273,7 +312,9 @@ flowchart LR
 - `runtime.is_running` は Web サーバ観点の観測値であり、心拍監視や最終更新時刻から決める
 - `runtime.last_cycle_id` は、短周期が 1 回以上完了している場合だけ返す
 - `last_commit_id` は、`commit_records.commit_id` の最新値がある場合だけ返す
-- `runtime.last_retrieval` は、`retrieval_runs` が 1 件以上ある場合だけ返し、直近の `RetrievalPlan` と選別件数を要約する
+- `runtime.last_retrieval` は、`retrieval_runs` が 1 件以上ある場合だけ返し、直近の `RetrievalPlan` と選別件数の summary を返す
+- `runtime.last_retrieval` は、current 実装では `collector_names`、`collector_counts`、`selected_reason_counts`、`slot_skipped_slot_counts`、`reserve_slot_counts`、`selector_summary` を追加で返してよい
+- current 実装の `runtime.last_retrieval.selector_summary` は、`selector_mode` と `selection_reason` の文字列、および件数系の整数を同じ object に入れて返してよい
 - `self_state.last_persona_update` は、`revisions.entity_type=self_state.personality` が 1 件以上ある場合だけ返す
 - `attention_state.primary_focus` は、`attention_state.primary_focus_json.summary` から取り出した表示用文字列を返す
 - `body_state.posture_mode` は、`body_state.posture_json.mode` を返す
@@ -283,6 +324,161 @@ flowchart LR
 - `drive_state.priority_effects` は、`drive_state.priority_effects_json` の 4 つの bias をそのまま返す
 - 初回起動直後で短周期未実行のときは、`runtime.is_running=false` とし、`last_cycle_id` と `last_commit_id` は省略する
 - 全状態を丸ごと返さず、UI 表示に必要な要点だけを返す
+
+<!-- Block: Latest Retrieval -->
+## `GET /api/retrieval-runs/latest`
+
+<!-- Block: Latest Retrieval Purpose -->
+### 役割
+
+- 直近の `retrieval_runs` 1 件を、監査向け detail 断面として返す
+- `GET /api/status` に載せない trace、selector 入力、skip / reserve preview はこの endpoint で参照する
+
+<!-- Block: Latest Retrieval Response -->
+### 成功応答
+
+```json
+{
+  "cycle_id": "cycle_...",
+  "created_at": 1760000000000,
+  "mode": "associative_recent",
+  "queries": ["最近の会話"],
+  "collector_names": [
+    "recent_event_window",
+    "associative_memory",
+    "episodic_memory"
+  ],
+  "collector_counts": {
+    "recent_event_window": 2,
+    "associative_memory": 1
+  },
+  "selected_reason_counts": {
+    "matched_query": 1,
+    "mode_priority": 1,
+    "profile_bias": 1
+  },
+  "slot_skipped_collector_counts": {
+    "explicit_time": 1
+  },
+  "slot_skipped_slot_counts": {
+    "episodic_items": 1
+  },
+  "slot_skipped_reason_counts": {
+    "about_time": 1
+  },
+  "reserve_collector_counts": {
+    "explicit_time": 1
+  },
+  "reserve_slot_counts": {
+    "episodic_items": 1
+  },
+  "reserve_reason_counts": {
+    "about_time": 1
+  },
+  "selection_trace": [
+    {
+      "slot": "semantic_items",
+      "item_ref": "memory_state:mem_010",
+      "memory_kind": "semantic_fact",
+      "score": 1.8,
+      "reason_codes": ["matched_query", "mode_priority", "profile_bias"],
+      "collector_names": ["associative_memory", "task_focus"],
+      "duplicate_hits": 1,
+      "selection_rank": 2,
+      "text": "次の約束は 3 月 15 日の昼に変更された",
+      "relative_time_text": "2時間前",
+      "about_time_hint_text": "2026-03-15"
+    }
+  ],
+  "slot_skipped_trace": [
+    {
+      "slot": "episodic_items",
+      "item_ref": "event:evt_011",
+      "score": 0.75,
+      "reason_codes": ["about_time"],
+      "collector_names": ["explicit_time"],
+      "duplicate_hits": 0,
+      "selection_rank": 3,
+      "text": "3 月 15 日の昼に話す約束だった",
+      "relative_time_text": "昨日",
+      "about_time_hint_text": "2026-03-15"
+    }
+  ],
+  "reserve_trace": [
+    {
+      "slot": "episodic_items",
+      "item_ref": "event:evt_010",
+      "score": 0.8,
+      "reason_codes": ["about_time"],
+      "collector_names": ["explicit_time"],
+      "duplicate_hits": 0,
+      "text": "3 月 15 日の昼に会う予定だった",
+      "relative_time_text": "昨日",
+      "about_time_hint_text": "2026-03-15"
+    }
+  ],
+  "selector_input_collector_counts": {
+    "recent_event_window": 2,
+    "associative_memory": 3,
+    "reply_chain": 1
+  },
+  "selector_input_slot_counts": {
+    "recent_event_window": 2,
+    "episodic_items": 3,
+    "semantic_items": 2
+  },
+  "selector_input_reason_counts": {
+    "matched_query": 3,
+    "about_time": 2,
+    "reply_chain": 1
+  },
+  "selector_input_trace": [
+    {
+      "item_ref": "memory_state:mem_010",
+      "slot": "semantic_items",
+      "memory_kind": "semantic_fact",
+      "score": 1.8,
+      "collector_names": ["associative_memory", "task_focus"],
+      "reason_codes": ["matched_query", "mode_priority", "profile_bias"],
+      "text": "次の約束は 3 月 15 日の昼に変更された",
+      "relative_time_text": "2時間前",
+      "about_time_hint_text": "2026-03-15"
+    }
+  ],
+  "selector_summary": {
+    "selector_mode": "llm_ranked",
+    "selection_reason": "直近会話の継続と明示日付の一致を優先した",
+    "raw_candidate_count": 9,
+    "merged_candidate_count": 7,
+    "selector_input_candidate_count": 7,
+    "selector_candidate_limit": 24,
+    "llm_selected_ref_count": 5,
+    "llm_unselected_count": 2,
+    "llm_return_ratio_percent": 71,
+    "selected_candidate_count": 4,
+    "selector_input_unused_count": 3,
+    "selected_candidate_ratio_percent": 57,
+    "duplicate_hit_count": 2,
+    "reserve_candidate_count": 1,
+    "slot_skipped_count": 1
+  },
+  "trimmed_item_refs": ["event:evt_002"],
+  "selected_counts": {
+    "working_memory_items": 2,
+    "episodic_items": 1,
+    "semantic_items": 1,
+    "affective_items": 0,
+    "relationship_items": 1,
+    "reflection_items": 0,
+    "recent_event_window": 3
+  },
+  "resolved_event_ids": ["evt_001", "evt_002"]
+}
+```
+
+- `retrieval_runs` が 1 件もない場合は `404 not_found` を返す
+- current 実装では、`selection_trace`、`slot_skipped_trace`、`reserve_trace` は表示用 preview として最大 8 件まで返し、件数系 summary は全候補を集計してよい
+- current 実装では、`selection_trace[]` と `reserve_trace[]` に `selector_input_trace` 由来の `memory_kind`、`text`、`relative_time_text`、`about_time_hint_text` を追加で返してよい
 
 <!-- Block: Settings Get -->
 ## `GET /api/settings`

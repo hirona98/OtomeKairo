@@ -10,7 +10,7 @@ from typing import Any, Callable
 
 from otomekairo.gateway.camera_controller import CameraController
 from otomekairo.gateway.camera_sensor import CameraSensor
-from otomekairo.gateway.cognition_client import CognitionClient, CognitionRequest
+from otomekairo.gateway.cognition_client import CognitionClient
 from otomekairo.gateway.speech_synthesizer import SpeechSynthesizer
 from otomekairo.schema.runtime_types import (
     ActionHistoryRecord,
@@ -19,14 +19,17 @@ from otomekairo.schema.runtime_types import (
     TaskStateMutationRecord,
 )
 from otomekairo.usecase.dispatch_action_command import ActionDispatchResult, dispatch_chat_action_command
+from otomekairo.usecase.completion_settings import build_completion_settings
+from otomekairo.usecase.run_cognition_plan import run_cognition_plan_for_browser_chat_input
+from otomekairo.usecase.run_reply_render import run_reply_render_for_browser_chat_input
 from otomekairo.usecase.validate_action import validate_chat_response_action
 
 
-# Block: Module logger
+# Block: モジュールロガー
 logger = logging.getLogger(__name__)
 
 
-# Block: Cognition execution
+# Block: 認知実行結果
 @dataclass(frozen=True, slots=True)
 class CognitionExecution:
     cognition_input: dict[str, Any]
@@ -37,7 +40,7 @@ class CognitionExecution:
     pending_input_mutations: list[PendingInputMutationRecord]
 
 
-# Block: Browser chat cognition execution
+# Block: ブラウザチャット向け認知実行
 def run_cognition_for_browser_chat_input(
     *,
     pending_input: PendingInputRecord,
@@ -52,16 +55,12 @@ def run_cognition_for_browser_chat_input(
     emit_ui_event: Callable[[dict[str, Any]], None],
     consume_cancel: Callable[[str], bool],
 ) -> CognitionExecution:
-    request = CognitionRequest(
-        cycle_id=cycle_id,
-        input_kind=str(pending_input.payload["input_kind"]),
-        cognition_input=cognition_input,
-        completion_settings=_build_completion_settings(effective_settings),
-    )
+    completion_settings = build_completion_settings(effective_settings)
+    input_kind = str(pending_input.payload["input_kind"])
     message_id = _opaque_id("msg")
     ui_events: list[dict[str, Any]] = []
 
-    # Block: Immediate event emitter
+    # Block: 即時 UI イベント送信
     def emit_event(event_type: str, payload: dict[str, Any]) -> None:
         ui_event = {
             "channel": pending_input.channel,
@@ -71,7 +70,7 @@ def run_cognition_for_browser_chat_input(
         ui_events.append(ui_event)
         emit_ui_event(ui_event)
 
-    # Block: Initial status
+    # Block: 初期ステータス送信
     emit_event(
         "status",
         {
@@ -81,21 +80,42 @@ def run_cognition_for_browser_chat_input(
         },
     )
 
-    # Block: Structured cognition result
-    cognition_result = cognition_client.generate_result(request).cognition_result
+    # Block: 構造化された認知計画
+    cognition_plan = run_cognition_plan_for_browser_chat_input(
+        cycle_id=cycle_id,
+        input_kind=input_kind,
+        cognition_input=cognition_input,
+        completion_settings=completion_settings,
+        cognition_client=cognition_client,
+    )
     logger.debug(
-        "cognition result generated",
+        "cognition plan generated",
         extra={
             "cycle_id": cycle_id,
             "input_id": pending_input.input_id,
-            "input_kind": pending_input.payload["input_kind"],
-            "intention_summary": cognition_result["intention_summary"],
-            "memory_focus_kind": cognition_result["memory_focus"]["focus_kind"],
-            "action_proposal_count": len(cognition_result["action_proposals"]),
+            "input_kind": input_kind,
+            "intention_summary": cognition_plan["intention_summary"],
+            "memory_focus_kind": cognition_plan["memory_focus"]["focus_kind"],
+            "action_proposal_count": len(cognition_plan["action_proposals"]),
         },
     )
-    speech_draft = _validated_speech_draft(cognition_result)
-    response_text = str(speech_draft["text"]).strip()
+    # Block: 応答文レンダリング
+    speech_draft: dict[str, Any] | None = None
+    response_text = ""
+    if _requires_reply_render(cognition_plan):
+        speech_draft = run_reply_render_for_browser_chat_input(
+            cycle_id=cycle_id,
+            input_kind=input_kind,
+            cognition_input=cognition_input,
+            cognition_plan=cognition_plan,
+            completion_settings=completion_settings,
+            cognition_client=cognition_client,
+        )
+        response_text = str(speech_draft["text"]).strip()
+    cognition_result = _compose_cognition_result(
+        cognition_plan=cognition_plan,
+        speech_draft=speech_draft,
+    )
     _merge_reflection_seed(
         cognition_result=cognition_result,
         pending_input=pending_input,
@@ -140,6 +160,8 @@ def run_cognition_for_browser_chat_input(
         resolved_at=resolved_at,
         action_command=action_command,
         decision=validated_action.decision,
+        response_text=response_text,
+        message_id=active_message_id,
         emit_ui_event=emit_event,
         consume_cancel=lambda: consume_cancel(active_message_id),
         camera_controller=camera_controller,
@@ -165,7 +187,7 @@ def run_cognition_for_browser_chat_input(
         },
     )
 
-    # Block: Action history
+    # Block: 行動履歴の組み立て
     emitted_event_types = dispatch_result.emitted_event_types
     command_payload = _action_history_command(
         pending_input=pending_input,
@@ -198,10 +220,12 @@ def run_cognition_for_browser_chat_input(
             observed_effects=observed_effects,
             raw_result_ref=dispatch_result.raw_result_ref,
             adapter_trace_ref={
+                "cognition_plan": cognition_plan,
                 "cognition_result": cognition_result,
                 "action_command": action_command,
                 "action_candidate_score": validated_action.action_candidate_score,
                 "dispatch_trace": dispatch_result.adapter_trace_ref,
+                **({"speech_draft": speech_draft} if speech_draft is not None else {}),
             },
         )
     ]
@@ -215,49 +239,54 @@ def run_cognition_for_browser_chat_input(
     )
 
 
-# Block: Id helper
+# Block: ID 生成
 def _opaque_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex}"
 
-
-# Block: Completion settings builder
-def _build_completion_settings(effective_settings: dict[str, Any]) -> dict[str, Any]:
-    model = effective_settings.get("llm.model")
-    api_key = effective_settings.get("llm.api_key")
-    base_url = effective_settings.get("llm.base_url")
-    temperature = effective_settings.get("llm.temperature")
-    max_output_tokens = effective_settings.get("llm.max_output_tokens")
-    if not isinstance(model, str) or not model:
-        raise RuntimeError("llm.model must be a non-empty string")
-    if not isinstance(api_key, str):
-        raise RuntimeError("llm.api_key must be a string")
-    if not isinstance(base_url, str):
-        raise RuntimeError("llm.base_url must be a string")
-    if isinstance(temperature, bool) or not isinstance(temperature, (int, float)):
-        raise RuntimeError("llm.temperature must be numeric")
-    if isinstance(max_output_tokens, bool) or not isinstance(max_output_tokens, int):
-        raise RuntimeError("llm.max_output_tokens must be integer")
-    return {
-        "model": model,
-        "api_key": api_key,
-        "base_url": base_url,
-        "temperature": float(temperature),
-        "max_output_tokens": max_output_tokens,
+# Block: 認知結果の合成
+def _compose_cognition_result(
+    *,
+    cognition_plan: dict[str, Any],
+    speech_draft: dict[str, Any] | None,
+) -> dict[str, Any]:
+    cognition_result = {
+        **cognition_plan,
     }
+    if speech_draft is not None:
+        cognition_result["speech_draft"] = speech_draft
+    return cognition_result
 
 
-# Block: Speech draft validation
-def _validated_speech_draft(cognition_result: dict[str, Any]) -> dict[str, Any]:
-    speech_draft = cognition_result.get("speech_draft")
-    if not isinstance(speech_draft, dict):
-        raise RuntimeError("cognition_result.speech_draft must be an object")
-    speech_text = speech_draft.get("text")
-    if not isinstance(speech_text, str) or not speech_text.strip():
-        raise RuntimeError("cognition_result.speech_draft.text must be a non-empty string")
-    return speech_draft
+# Block: 応答文レンダリング要否
+def _requires_reply_render(cognition_plan: dict[str, Any]) -> bool:
+    reply_policy = cognition_plan.get("reply_policy")
+    if not isinstance(reply_policy, dict):
+        raise RuntimeError("cognition_plan.reply_policy must be an object")
+    reply_mode = reply_policy.get("mode")
+    if reply_mode not in {"render", "none"}:
+        raise RuntimeError("cognition_plan.reply_policy.mode must be render or none")
+    action_proposals = cognition_plan.get("action_proposals")
+    if not isinstance(action_proposals, list):
+        raise RuntimeError("cognition_plan.action_proposals must be a list")
+    visible_action_types = set()
+    for proposal in action_proposals:
+        if not isinstance(proposal, dict):
+            raise RuntimeError("cognition_plan.action_proposals must contain only objects")
+        action_type = proposal.get("action_type")
+        if not isinstance(action_type, str) or not action_type:
+            raise RuntimeError("cognition_plan.action_proposals.action_type must be a non-empty string")
+        if action_type in {"speak", "notify", "look", "browse", "wait"}:
+            visible_action_types.add(action_type)
+    if reply_mode == "render":
+        if not visible_action_types:
+            raise RuntimeError("cognition_plan.reply_policy.mode=render requires visible action proposals")
+        return True
+    if {"speak", "notify"} & visible_action_types:
+        raise RuntimeError("cognition_plan.reply_policy.mode=none is invalid for speak or notify")
+    return False
 
 
-# Block: Initial status label
+# Block: 初期ステータス文言
 def _initial_status_label(pending_input: PendingInputRecord) -> str:
     input_kind = str(pending_input.payload["input_kind"])
     if input_kind == "chat_message":
@@ -273,7 +302,7 @@ def _initial_status_label(pending_input: PendingInputRecord) -> str:
     raise RuntimeError("unsupported input_kind for cognition status")
 
 
-# Block: Reflection seed merge
+# Block: Reflection seed マージ
 def _merge_reflection_seed(
     *,
     cognition_result: dict[str, Any],
@@ -291,7 +320,7 @@ def _merge_reflection_seed(
     cognition_result["reflection_seed"] = merged_seed
 
 
-# Block: Action history type helper
+# Block: 行動履歴種別の決定
 def _action_history_type(*, decision: str, command_type: str | None) -> str:
     if decision == "hold":
         return "hold_chat_response"
@@ -306,7 +335,7 @@ def _action_history_type(*, decision: str, command_type: str | None) -> str:
     return "emit_chat_response"
 
 
-# Block: Dispatch selector
+# Block: Dispatch 振り分け
 def _dispatch_result_for_decision(
     *,
     pending_input: PendingInputRecord,
@@ -314,6 +343,8 @@ def _dispatch_result_for_decision(
     resolved_at: int,
     action_command: dict[str, Any] | None,
     decision: str,
+    response_text: str,
+    message_id: str,
     emit_ui_event: Callable[[str, dict[str, Any]], None],
     consume_cancel: Callable[[], bool],
     camera_controller: CameraController,
@@ -322,6 +353,22 @@ def _dispatch_result_for_decision(
     effective_settings: dict[str, Any],
 ) -> ActionDispatchResult:
     if decision != "execute":
+        emitted_event_types: list[str] = []
+        final_message_emitted = False
+        if decision == "hold" and response_text:
+            emit_ui_event(
+                "message",
+                {
+                    "message_id": message_id,
+                    "role": "assistant",
+                    "text": response_text,
+                    "created_at": _now_ms(),
+                    "source_cycle_id": cycle_id,
+                    "related_input_id": pending_input.input_id,
+                },
+            )
+            emitted_event_types.append("message")
+            final_message_emitted = True
         emit_ui_event(
             "status",
             {
@@ -330,6 +377,7 @@ def _dispatch_result_for_decision(
                 "cycle_id": cycle_id,
             },
         )
+        emitted_event_types.append("status")
         command_type = (
             str(action_command["command_type"])
             if action_command is not None
@@ -340,9 +388,11 @@ def _dispatch_result_for_decision(
                 decision=decision,
                 command_type=command_type,
             ),
-            emitted_event_types=["status"],
+            emitted_event_types=emitted_event_types,
             observed_effects={
                 "status_code_after": "idle",
+                "final_message_emitted": final_message_emitted,
+                **({"message_id": message_id} if final_message_emitted else {}),
             },
             task_mutations=[],
             pending_input_mutations=[],
@@ -371,7 +421,7 @@ def _dispatch_result_for_decision(
     )
 
 
-# Block: Action history command
+# Block: 行動履歴コマンド生成
 def _action_history_command(
     *,
     pending_input: PendingInputRecord,
@@ -389,6 +439,9 @@ def _action_history_command(
         }
         if validated_action.proposal is not None:
             command_payload["proposal_ref"] = str(validated_action.proposal["proposal_id"])
+            if "message" in emitted_event_types:
+                command_payload["message_id"] = str(validated_action.proposal["message_id"])
+                command_payload["role"] = "assistant"
         return command_payload
     return {
         **action_command,
@@ -399,7 +452,7 @@ def _action_history_command(
     }
 
 
-# Block: Action command id
+# Block: 行動コマンド ID
 def _action_command_id(*, decision: str, action_command: dict[str, Any] | None) -> str:
     if decision == "execute":
         if action_command is None:
@@ -408,6 +461,6 @@ def _action_command_id(*, decision: str, action_command: dict[str, Any] | None) 
     return _opaque_id("cmd")
 
 
-# Block: Time helper
+# Block: 現在時刻ヘルパー
 def _now_ms() -> int:
     return int(time.time() * 1000)

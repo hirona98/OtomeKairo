@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from otomekairo.usecase.about_time_text import about_years_from_text, life_stage_from_text
+
 
 # Block: Plan constants
 WRITE_MEMORY_PLAN_KEYS = (
@@ -18,6 +20,19 @@ WRITE_MEMORY_PLAN_CONTEXT_KEYS = (
     "event_links",
     "event_threads",
     "state_links",
+)
+WRITE_MEMORY_ABOUT_TIME_KEYS = (
+    "about_start_ts",
+    "about_end_ts",
+    "about_year_start",
+    "about_year_end",
+    "life_stage",
+    "about_time_confidence",
+)
+WRITE_MEMORY_EVENT_ENTITY_KEYS = (
+    "entity_type_norm",
+    "entity_name_raw",
+    "confidence",
 )
 WRITE_MEMORY_STATE_UPDATE_OPERATIONS = (
     "upsert",
@@ -274,15 +289,10 @@ def build_write_memory_plan(
             }
         )
     return {
-        "event_annotations": [
-            {
-                "event_id": str(event_entry["event_id"]),
-                "about_time": None,
-                "entities": [],
-                "thread_hints": [cycle_thread_key],
-            }
-            for event_entry in event_entries
-        ],
+        "event_annotations": _build_event_annotations(
+            event_entries=event_entries,
+            cycle_thread_key=cycle_thread_key,
+        ),
         "state_updates": state_updates,
         "preference_updates": _build_preference_updates(
             action_entries=action_entries,
@@ -314,6 +324,153 @@ def build_write_memory_plan(
             for state_update in state_updates
         ],
     }
+
+
+# Block: イベント注釈構築
+def _build_event_annotations(
+    *,
+    event_entries: list[dict[str, Any]],
+    cycle_thread_key: str,
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "event_id": str(event_entry["event_id"]),
+            "about_time": _build_event_about_time(event_entry=event_entry),
+            "entities": _build_event_entities(event_entry=event_entry),
+            "thread_hints": [cycle_thread_key],
+        }
+        for event_entry in event_entries
+    ]
+
+
+def _build_event_entities(*, event_entry: dict[str, Any]) -> list[dict[str, Any]]:
+    summary_text = str(event_entry["summary_text"]).strip()
+    if not summary_text:
+        return []
+    entries: list[dict[str, Any]] = []
+    seen_keys: set[tuple[str, str]] = set()
+    if summary_text.startswith("chat_message:"):
+        _append_event_entity(
+            entries=entries,
+            seen_keys=seen_keys,
+            entity_type_norm="utterance_excerpt",
+            entity_name_raw=summary_text.removeprefix("chat_message:"),
+            confidence=0.66,
+        )
+    elif summary_text.startswith("microphone_message:"):
+        _append_event_entity(
+            entries=entries,
+            seen_keys=seen_keys,
+            entity_type_norm="utterance_excerpt",
+            entity_name_raw=summary_text.removeprefix("microphone_message:"),
+            confidence=0.68,
+        )
+    elif summary_text.startswith("network_result:"):
+        network_result_parts = summary_text.split(":", 2)
+        if len(network_result_parts) == 3:
+            _append_event_entity(
+                entries=entries,
+                seen_keys=seen_keys,
+                entity_type_norm="topic",
+                entity_name_raw=network_result_parts[1],
+                confidence=0.84,
+            )
+            _append_event_entity(
+                entries=entries,
+                seen_keys=seen_keys,
+                entity_type_norm="summary_phrase",
+                entity_name_raw=network_result_parts[2],
+                confidence=0.60,
+            )
+    kind = str(event_entry["kind"])
+    if kind == "action":
+        _append_event_entity(
+            entries=entries,
+            seen_keys=seen_keys,
+            entity_type_norm="action_type",
+            entity_name_raw=summary_text.split(" -> ", 1)[0],
+            confidence=0.74,
+        )
+    elif kind == "action_result":
+        action_result_parts = summary_text.split(" ", 2)
+        _append_event_entity(
+            entries=entries,
+            seen_keys=seen_keys,
+            entity_type_norm="action_type",
+            entity_name_raw=action_result_parts[0],
+            confidence=0.72,
+        )
+        if len(action_result_parts) >= 2:
+            _append_event_entity(
+                entries=entries,
+                seen_keys=seen_keys,
+                entity_type_norm="result_status",
+                entity_name_raw=action_result_parts[1].rstrip(":"),
+                confidence=0.56,
+            )
+        if ":" in summary_text:
+            _append_event_entity(
+                entries=entries,
+                seen_keys=seen_keys,
+                entity_type_norm="failure_mode",
+                entity_name_raw=summary_text.split(":", 1)[1],
+                confidence=0.52,
+            )
+    elif kind == "external_response":
+        _append_event_entity(
+            entries=entries,
+            seen_keys=seen_keys,
+            entity_type_norm="summary_phrase",
+            entity_name_raw=summary_text,
+            confidence=0.40,
+        )
+    return entries
+
+
+def _build_event_about_time(*, event_entry: dict[str, Any]) -> dict[str, Any] | None:
+    summary_text = str(event_entry["summary_text"]).strip()
+    if not summary_text:
+        return None
+    about_years = about_years_from_text(summary_text)
+    life_stage = life_stage_from_text(summary_text)
+    if not about_years and life_stage is None:
+        return None
+    return {
+        "about_start_ts": None,
+        "about_end_ts": None,
+        "about_year_start": about_years[0] if about_years else None,
+        "about_year_end": about_years[-1] if about_years else None,
+        "life_stage": life_stage,
+        "about_time_confidence": 0.82 if about_years else 0.58,
+    }
+
+
+def _append_event_entity(
+    *,
+    entries: list[dict[str, Any]],
+    seen_keys: set[tuple[str, str]],
+    entity_type_norm: str,
+    entity_name_raw: str,
+    confidence: float,
+) -> None:
+    normalized_name = _normalize_event_entity_name(entity_name_raw)
+    if not normalized_name:
+        return
+    entity_key = (entity_type_norm, normalized_name)
+    if entity_key in seen_keys:
+        return
+    seen_keys.add(entity_key)
+    entries.append(
+        {
+            "entity_type_norm": entity_type_norm,
+            "entity_name_raw": entity_name_raw.strip()[:120],
+            "confidence": confidence,
+        }
+    )
+
+
+def _normalize_event_entity_name(text: str) -> str:
+    return "".join(text.strip().lower().split())
 
 
 # Block: Plan validation
@@ -432,6 +589,20 @@ def _validate_event_annotations(
             annotation_entry.get("entities"),
             "write_memory plan.event_annotations.entities must be a list",
         )
+        normalized_entities: list[dict[str, Any]] = []
+        seen_entity_keys: set[tuple[str, str]] = set()
+        for entity in entities:
+            normalized_entity = _validate_event_entity(
+                entity=entity,
+            )
+            entity_key = (
+                str(normalized_entity["entity_type_norm"]),
+                _normalize_event_entity_name(str(normalized_entity["entity_name_raw"])),
+            )
+            if entity_key in seen_entity_keys:
+                raise RuntimeError("write_memory plan.event_annotations.entities must not contain duplicates")
+            seen_entity_keys.add(entity_key)
+            normalized_entities.append(normalized_entity)
         thread_hints = _required_string_list(
             annotation_entry.get("thread_hints"),
             "write_memory plan.event_annotations.thread_hints must be a list of non-empty strings",
@@ -439,12 +610,89 @@ def _validate_event_annotations(
         normalized_entries.append(
             {
                 "event_id": event_id,
-                "about_time": annotation_entry.get("about_time"),
-                "entities": entities,
+                "about_time": _validate_about_time(
+                    value=annotation_entry.get("about_time"),
+                ),
+                "entities": normalized_entities,
                 "thread_hints": thread_hints,
             }
         )
     return normalized_entries
+
+
+def _validate_about_time(*, value: Any) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    normalized_about_time = _required_object(
+        value,
+        "write_memory plan.event_annotations.about_time must be object or null",
+    )
+    if tuple(normalized_about_time.keys()) != WRITE_MEMORY_ABOUT_TIME_KEYS:
+        raise RuntimeError("write_memory plan.event_annotations.about_time keys must match fixed shape")
+    about_start_ts = _optional_positive_integer(
+        normalized_about_time.get("about_start_ts"),
+        "write_memory plan.event_annotations.about_time.about_start_ts must be positive integer when present",
+    )
+    about_end_ts = _optional_positive_integer(
+        normalized_about_time.get("about_end_ts"),
+        "write_memory plan.event_annotations.about_time.about_end_ts must be positive integer when present",
+    )
+    about_year_start = _optional_year_integer(
+        normalized_about_time.get("about_year_start"),
+        "write_memory plan.event_annotations.about_time.about_year_start must be year integer when present",
+    )
+    about_year_end = _optional_year_integer(
+        normalized_about_time.get("about_year_end"),
+        "write_memory plan.event_annotations.about_time.about_year_end must be year integer when present",
+    )
+    if about_year_start is not None and about_year_end is not None and about_year_start > about_year_end:
+        raise RuntimeError("write_memory plan.event_annotations.about_time about_year range is invalid")
+    life_stage = _optional_non_empty_string(
+        normalized_about_time.get("life_stage"),
+        "write_memory plan.event_annotations.about_time.life_stage must be non-empty string when present",
+    )
+    if (
+        about_start_ts is None
+        and about_end_ts is None
+        and about_year_start is None
+        and about_year_end is None
+        and life_stage is None
+    ):
+        raise RuntimeError("write_memory plan.event_annotations.about_time must contain at least one hint")
+    return {
+        "about_start_ts": about_start_ts,
+        "about_end_ts": about_end_ts,
+        "about_year_start": about_year_start,
+        "about_year_end": about_year_end,
+        "life_stage": life_stage,
+        "about_time_confidence": _required_score(
+            normalized_about_time.get("about_time_confidence"),
+            "write_memory plan.event_annotations.about_time.about_time_confidence must be numeric within 0.0..1.0",
+        ),
+    }
+
+
+def _validate_event_entity(*, entity: Any) -> dict[str, Any]:
+    normalized_entity = _required_object(
+        entity,
+        "write_memory plan.event_annotations.entities entries must be objects",
+    )
+    if tuple(normalized_entity.keys()) != WRITE_MEMORY_EVENT_ENTITY_KEYS:
+        raise RuntimeError("write_memory plan.event_annotations.entities keys must match fixed shape")
+    return {
+        "entity_type_norm": _required_non_empty_string(
+            normalized_entity.get("entity_type_norm"),
+            "write_memory plan.event_annotations.entities.entity_type_norm must be non-empty string",
+        ),
+        "entity_name_raw": _required_non_empty_string(
+            normalized_entity.get("entity_name_raw"),
+            "write_memory plan.event_annotations.entities.entity_name_raw must be non-empty string",
+        ),
+        "confidence": _required_score(
+            normalized_entity.get("confidence"),
+            "write_memory plan.event_annotations.entities.confidence must be numeric within 0.0..1.0",
+        ),
+    }
 
 
 # Block: State update validation
@@ -1633,10 +1881,22 @@ def _required_positive_integer(value: Any, message: str) -> int:
     return integer_value
 
 
+def _optional_positive_integer(value: Any, message: str) -> int | None:
+    if value is None:
+        return None
+    return _required_positive_integer(value, message)
+
+
 def _required_non_empty_string(value: Any, message: str) -> str:
     if not isinstance(value, str) or not value:
         raise RuntimeError(message)
     return value
+
+
+def _optional_non_empty_string(value: Any, message: str) -> str | None:
+    if value is None:
+        return None
+    return _required_non_empty_string(value, message)
 
 
 def _required_non_empty_string_list(value: Any, message: str) -> list[str]:
@@ -1666,6 +1926,15 @@ def _required_score(value: Any, message: str) -> float:
     if numeric_value < 0.0 or numeric_value > 1.0:
         raise RuntimeError(message)
     return numeric_value
+
+
+def _optional_year_integer(value: Any, message: str) -> int | None:
+    if value is None:
+        return None
+    year_value = _required_integer(value, message)
+    if year_value < 1900 or year_value > 2100:
+        raise RuntimeError(message)
+    return year_value
 
 
 def _required_signed_score(value: Any, message: str) -> float:

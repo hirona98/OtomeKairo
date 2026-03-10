@@ -16,7 +16,7 @@
 
 - 固定するのは、current 実装で使う JSON オブジェクトのキー、型、必須項目、固定語彙である
 - 固定するのは、`pending_inputs.payload_json`、`settings_overrides.requested_value_json`、`settings_editor_state.system_values_json`、5 種のプリセットテーブルの `payload_json`、`settings_change_sets.payload_json`、`ui_outbound_events.payload_json`、`action_history.command_json`、`action_history.observed_effects_json`、`memory_jobs.payload_ref_json`、`memory_job_payloads.payload_json`、`preference_memory.target_entity_ref_json`、`event_affects.moment_affect_labels_json`、`event_affects.vad_json`、主要な Web API 本文である
-- 固定するのは、`self_state.personality_json`、`self_state.current_emotion_json`、`self_state.long_term_goals_json`、`self_state.relationship_overview_json`、`self_state.invariants_json`、短周期の内部で使う `selection_profile`、`memory_bundle`、`retrieval_context`、`last_persona_update_summary`、`persona_consistency_score`、`attention_score_breakdown`、`self_initiated_score_breakdown`、`action_candidate_score`、`cognition_result`、長周期の内部で使う `MemoryWritePlan`、`personality_change_proposal`、`persona_updates` の形である
+- 固定するのは、`self_state.personality_json`、`self_state.current_emotion_json`、`self_state.long_term_goals_json`、`self_state.relationship_overview_json`、`self_state.invariants_json`、短周期の内部で使う `selection_profile`、`memory_bundle`、`conversation_context`、`retrieval_context`、`last_persona_update_summary`、`persona_consistency_score`、`attention_score_breakdown`、`self_initiated_score_breakdown`、`action_candidate_score`、`cognition_plan`、`speech_draft`、`cognition_result`、長周期の内部で使う `MemoryWritePlan`、`personality_change_proposal`、`persona_updates` の形である
 - 固定しないのは、Python のクラス名、Pydantic モデル名、OpenAPI の自動生成細部である
 - 固定しないのは、将来追加する未使用フィールドや後段の拡張イベント種別である
 
@@ -600,6 +600,46 @@
 - 初期実装では、`working_memory_items` に `memory_kind=summary`、`semantic_items` に `memory_kind=fact`、`recent_event_window` に active memory preset の `retrieval_profile.recent_window_limit` 件までの `searchable` な `events` を入れてよい
 - 初期実装では、`episodic_items.memory_kind` に `episodic_event`、`affective_items.memory_kind` に `long_mood_state` または `event_affect`、`relationship_items.memory_kind` に `relation` または `preference`、`reflection_items.memory_kind` に `reflection_note` を使ってよい
 - 初期実装の `reflection_items[].payload` は、少なくとも `what_happened` と `event_summaries` を持ち、必要なら `what_worked`、`what_failed`、`retry_hint`、`avoid_pattern`、`reflection_seed_ref`、`reflection_seed`、`action_outcomes` を持ってよい
+- current 実装では、`event_about_time` または `state_about_time` に対応する要素へ `about_time_hint_text` を追加してよい
+- current 実装では、`recent_event_window[].preview_text` と `episodic_items[].payload.preview_text` を追加で持ってよい
+
+<!-- Block: Conversation Context -->
+### `conversation_context`
+
+```json
+{
+  "recent_dialog": [
+    {
+      "role": "user",
+      "text": "高校時代の話を覚えてる？",
+      "relative_time_text": "2分前"
+    },
+    {
+      "role": "assistant",
+      "text": "高校時代の記憶をたどってみるね",
+      "relative_time_text": "2分前"
+    }
+  ],
+  "selected_memory_pack": {
+    "recent_context": ["検索タスクを開始した"],
+    "working_memory": ["いまは会話の流れを優先している"],
+    "episodic": ["文化祭の帰りに一緒に寄り道した [時期: 2019年 / 高校時代]"],
+    "facts": ["文化祭は秋開催だった"],
+    "affective": ["その日の高揚感が強かった"],
+    "relationship": ["あなたは高校時代の思い出話を好む"],
+    "reflection": ["昔話に入る前に年次の手がかりを確認する"]
+  }
+}
+```
+
+- `conversation_context` は、短周期の内部でだけ使う prompt 向けの会話断面である
+- 必須項目は `recent_dialog` と `selected_memory_pack` である
+- `recent_dialog` の各要素は、少なくとも `role`、`text`、`relative_time_text` を持つ
+- `recent_dialog.role` は `user` または `assistant` の固定語彙である
+- `selected_memory_pack` は、少なくとも `recent_context`、`working_memory`、`episodic`、`facts`、`affective`、`relationship`、`reflection` を持つ
+- `selected_memory_pack` の各値は string の配列である
+- current 実装では、`recent_dialog` は `memory_bundle.recent_event_window` のうち `chat_message` / `microphone_message` / `external_response` だけから再構成してよい
+- current 実装では、`selected_memory_pack` の各要素へ `about_time_hint_text` を `[時期: ...]` 形式で織り込んでよい
 
 ### `reflection_note.payload`
 
@@ -654,9 +694,28 @@
     "mode": "associative_recent",
     "queries": ["最近の会話"],
     "time_hint": {
+      "explicit_dates": [],
       "explicit_years": [],
+      "life_stage_hints": [],
       "has_explicit_time_hint": false
     },
+    "focus_refs": {
+      "source_task_id": null,
+      "query": null,
+      "active_task_ids": [],
+      "active_goal_hints": [],
+      "waiting_goal_hints": []
+    },
+    "collector_names": [
+      "recent_event_window",
+      "associative_memory",
+      "episodic_memory",
+      "reply_chain",
+      "context_threads",
+      "state_link_expand",
+      "entity_expand",
+      "relationship_focus"
+    ],
     "profile": {
       "semantic_top_k": 8,
       "recent_window_limit": 5,
@@ -701,6 +760,33 @@
         "score": 1.8,
         "reason_codes": ["matched_query", "mode_priority", "profile_bias"]
       }
+    ],
+    "collector_counts": {
+      "associative_memory": 1,
+      "task_focus": 1
+    },
+    "selector_summary": {
+      "selector_mode": "llm_ranked",
+      "selection_reason": "直近会話の継続と明示日付の一致を優先した",
+      "raw_candidate_count": 9,
+      "merged_candidate_count": 7,
+      "selector_input_candidate_count": 7,
+      "selector_candidate_limit": 24,
+      "llm_selected_ref_count": 5,
+      "selected_candidate_count": 4,
+      "duplicate_hit_count": 2,
+      "reserve_candidate_count": 1,
+      "slot_skipped_count": 1
+    },
+    "reserve_trace": [
+      {
+        "slot": "episodic_items",
+        "item_ref": "event:evt_010",
+        "score": 0.8,
+        "reason_codes": ["about_time"],
+        "collector_names": ["explicit_time"],
+        "duplicate_hits": 0
+      }
     ]
   }
 }
@@ -709,9 +795,16 @@
 - `retrieval_context` は、短周期の内部でだけ使う `RetrievalPlan` と選別結果の要約である
 - 必須項目は `plan` と `selected` である
 - `plan` は、少なくとも `mode`、`queries`、`time_hint`、`profile`、`limits` を持つ
+- `plan.focus_refs` と `plan.collector_names` は、current 実装では追加で持ってよい
+- current 実装の `plan.collector_names` には、`reply_chain`、`context_threads`、`state_link_expand`、`entity_expand` を含めてよい
+- current 実装では、`plan.time_hint` に `explicit_dates` を追加で持ってよい
+- current 実装では、`plan.time_hint` に `life_stage_hints` を追加で持ってよい
 - `profile` は、active memory preset の `retrieval_profile` をそのまま持つ
 - `limits.semantic_candidate_top_k` は、意味検索候補の上限である
 - `selected` は、少なくとも `selected_counts`、`selected_refs`、`selection_trace` を持つ
+- current 実装では、`selected.selection_trace[].selection_rank` を追加し、`LLM` selector が返した優先順を残してよい
+- current 実装では、`selected.collector_counts`、`selected.selector_summary`、`selected.reserve_trace` を追加で持ってよい
+- current 実装の `selected.selector_summary` には、少なくとも `selector_mode`、`selection_reason`、`raw_candidate_count`、`merged_candidate_count`、`selector_input_candidate_count`、`selector_candidate_limit`、`llm_selected_ref_count`、`selected_candidate_count`、`duplicate_hit_count`、`reserve_candidate_count`、`slot_skipped_count` を持ってよい
 
 <!-- Block: Context Budget -->
 ### `context_budget`
@@ -750,7 +843,38 @@
 
 ```json
 {
-  "total_candidate_count": 7,
+  "total_candidate_count": 9,
+  "unique_candidate_count": 7,
+  "selector_input_candidate_count": 7,
+  "selector_candidate_limit": 24,
+  "selector_input_collector_counts": {
+    "recent_event_window": 2,
+    "associative_memory": 3,
+    "reply_chain": 1
+  },
+  "selector_input_slot_counts": {
+    "recent_event_window": 2,
+    "episodic_items": 3,
+    "semantic_items": 2
+  },
+  "selector_input_reason_counts": {
+    "matched_query": 3,
+    "about_time": 2,
+    "reply_chain": 1
+  },
+  "selector_input_trace": [
+    {
+      "item_ref": "memory_state:mem_010",
+      "slot": "semantic_items",
+      "memory_kind": "semantic_fact",
+      "score": 1.8,
+      "collector_names": ["associative_memory", "task_focus"],
+      "reason_codes": ["matched_query", "mode_priority", "profile_bias"],
+      "text": "次の約束は 3 月 15 日の昼に変更された",
+      "relative_time_text": "2時間前",
+      "about_time_hint_text": "2026-03-15"
+    }
+  ],
   "category_counts": {
     "working_memory_items": 2,
     "episodic_items": 2,
@@ -766,6 +890,16 @@
     "semantic_items",
     "relationship_items",
     "recent_event_window"
+  ],
+  "collector_runs": [
+    {
+      "collector": "recent_event_window",
+      "candidate_count": 3,
+      "truncated_count": 0,
+      "slot_counts": {
+        "recent_event_window": 3
+      }
+    }
   ]
 }
 ```
@@ -773,6 +907,7 @@
 - `retrieval_candidates_json` は、`retrieval_runs.candidates_json` に保存する候補統計の最小形である
 - 必須項目は `total_candidate_count`、`category_counts`、`non_empty_categories` である
 - `category_counts` は、`memory_bundle` と同じ slot 名をキーにした件数マップである
+- `unique_candidate_count`、`selector_input_candidate_count`、`selector_candidate_limit`、`selector_input_collector_counts`、`selector_input_slot_counts`、`selector_input_reason_counts`、`selector_input_trace`、`collector_runs` は、current 実装では追加で持ってよい
 
 ### `retrieval_selected_json`
 
@@ -801,15 +936,86 @@
       "slot": "semantic_items",
       "item_ref": "memory_state:mem_010",
       "score": 1.8,
-      "reason_codes": ["matched_query", "mode_priority", "profile_bias"]
+      "reason_codes": ["matched_query", "mode_priority", "profile_bias"],
+      "collector_names": ["associative_memory", "task_focus"],
+      "duplicate_hits": 1,
+      "selection_rank": 2
     }
-  ]
+  ],
+  "slot_skipped_trace": [
+    {
+      "slot": "episodic_items",
+      "item_ref": "event:evt_011",
+      "score": 0.75,
+      "reason_codes": ["about_time"],
+      "collector_names": ["explicit_time"],
+      "duplicate_hits": 0,
+      "selection_rank": 3
+    }
+  ],
+  "collector_counts": {
+    "associative_memory": 1,
+    "task_focus": 1
+  },
+  "selected_reason_counts": {
+    "matched_query": 1,
+    "mode_priority": 1,
+    "profile_bias": 1
+  },
+  "slot_skipped_collector_counts": {
+    "explicit_time": 1
+  },
+  "slot_skipped_slot_counts": {
+    "episodic_items": 1
+  },
+  "slot_skipped_reason_counts": {
+    "about_time": 1
+  },
+  "reserve_collector_counts": {
+    "explicit_time": 1
+  },
+  "reserve_slot_counts": {
+    "episodic_items": 1
+  },
+  "reserve_reason_counts": {
+    "about_time": 1
+  },
+  "selector_summary": {
+    "selector_mode": "llm_ranked",
+    "selection_reason": "直近会話の継続と明示日付の一致を優先した",
+    "raw_candidate_count": 9,
+    "merged_candidate_count": 7,
+    "selector_input_candidate_count": 7,
+    "selector_candidate_limit": 24,
+    "llm_selected_ref_count": 5,
+    "llm_unselected_count": 2,
+    "llm_return_ratio_percent": 71,
+    "selected_candidate_count": 4,
+    "selector_input_unused_count": 3,
+    "selected_candidate_ratio_percent": 57,
+    "duplicate_hit_count": 2,
+    "reserve_candidate_count": 1,
+    "slot_skipped_count": 1
+  },
+  "reserve_trace": [
+    {
+      "slot": "episodic_items",
+      "item_ref": "event:evt_010",
+      "score": 0.8,
+      "reason_codes": ["about_time"],
+      "collector_names": ["explicit_time"],
+      "duplicate_hits": 0
+    }
+  ],
+  "trimmed_item_refs": ["event:evt_002"]
 }
 ```
 
 - `retrieval_selected_json` は、`retrieval_runs.selected_json` に保存する最終選別結果の最小形である
 - 必須項目は `selected_counts`、`selected_refs`、`selection_trace` である
 - `selection_trace` の各要素は、少なくとも `slot`、`item_ref`、`score`、`reason_codes` を持つ
+- current 実装では、`selection_trace[].collector_names`、`selection_trace[].duplicate_hits`、`selection_trace[].selection_rank`、`slot_skipped_trace`、`collector_counts`、`selected_reason_counts`、`slot_skipped_collector_counts`、`slot_skipped_slot_counts`、`slot_skipped_reason_counts`、`reserve_collector_counts`、`reserve_slot_counts`、`reserve_reason_counts`、`selector_summary`、`reserve_trace`、`trimmed_item_refs` を追加で持ってよい
+- current 実装では、`slot_skipped_trace` と `reserve_trace` は表示用 preview として最大 8 件まで保持し、件数系 summary は全候補を集計してよい
 
 <!-- Block: Completion Settings -->
 ### `completion_settings`
@@ -956,6 +1162,65 @@
 - 各 `*_score` は、比較前に同じ `0.0..1.0` 尺度へ正規化済みでなければならない
 - `action_candidate_score` は永続化前提の正本ではなく、その短周期の候補比較ごとに再計算する
 
+<!-- Block: Cognition Plan -->
+### `cognition_plan`
+
+```json
+{
+  "intention_summary": "browser_chat に対して人格として応答する",
+  "decision_reason": "最新のテキスト入力を受け取り、現在の人格断面に基づいて返答方針を決める",
+  "action_proposals": [
+    {
+      "action_type": "speak",
+      "target_channel": "browser_chat",
+      "priority": 1.0
+    }
+  ],
+  "step_hints": [],
+  "reply_policy": {
+    "mode": "render",
+    "reason": "ユーザーへ直接応答する"
+  },
+  "memory_focus": {
+    "focus_kind": "observation",
+    "summary": "直近のチャット入力を主材料として判断した"
+  },
+  "reflection_seed": {
+    "message_id": ""
+  }
+}
+```
+
+- `cognition_plan` は、短周期の内部で使う認知計画オブジェクトである
+- 必須項目は `intention_summary`、`decision_reason`、`action_proposals`、`step_hints`、`reply_policy`、`memory_focus`、`reflection_seed` である
+- `action_proposals` と `step_hints` は配列に固定し、候補がない場合も空配列 `[]` を使う
+- current の `browser_chat` では、`action_proposals` の各要素は少なくとも `action_type` と `priority` を持つ
+- current の `browser_chat` では、`action_type` は `speak`、`browse`、`notify`、`look`、`wait` のいずれかだけを許可する
+- current の `browser_chat` では、`priority` は `0.0..1.0` の `number` に固定する
+- current の `browser_chat` では、`speak` と `notify` のとき `target_channel="browser_chat"` を必須とする
+- current の `browser_chat` では、`browse` のとき `query` に非空の検索文字列を必須とする
+- current の `browser_chat` では、`look` のとき `camera_connection_id` と、`direction` / `preset_id` / `preset_name` のいずれかを必須とする
+- `reply_policy` は、少なくとも `mode` と `reason` を持つ
+- current の `browser_chat` では、`reply_policy.mode` は `render` または `none` を使う
+- `memory_focus` は、少なくとも `focus_kind`、`summary` を持つ
+- current の `browser_chat` では、`reflection_seed.message_id` は `string` を必須とし、計画段では空文字列を許可する
+
+<!-- Block: Speech Draft -->
+### `speech_draft`
+
+```json
+{
+  "text": "こんにちは。",
+  "language": "ja",
+  "delivery_mode": "stream"
+}
+```
+
+- `speech_draft` は、短周期の内部で使うユーザー向け応答本文オブジェクトである
+- 必須項目は `text`、`language`、`delivery_mode` である
+- current の `browser_chat` では、`language` は `ja` に固定する
+- current の `browser_chat` では、`delivery_mode` は `stream` に固定する
+
 <!-- Block: Cognition Result -->
 ### `cognition_result`
 
@@ -991,8 +1256,8 @@
 ```
 
 - `cognition_result` は、短周期の内部で使う構造化された認知結果である
-- `cognition_result` は、認知層が一度に返す JSON オブジェクトであり、後から補完前提で分割しない
-- 必須項目は `intention_summary`、`decision_reason`、`action_proposals`、`step_hints`、`speech_draft`、`memory_focus`、`reflection_seed` である
+- current の `browser_chat` では、`cognition_result` は `cognition_plan` と `speech_draft` を合成して作る
+- 必須項目は `intention_summary`、`decision_reason`、`action_proposals`、`step_hints`、`memory_focus`、`reflection_seed` である
 - `action_proposals` と `step_hints` は配列に固定し、候補がない場合も空配列 `[]` を使う
 - current の `browser_chat` では、`action_proposals` の各要素は少なくとも `action_type` と `priority` を持つ
 - current の `browser_chat` では、`action_type` は `speak`、`browse`、`notify`、`look`、`wait` のいずれかだけを許可する
@@ -1000,7 +1265,8 @@
 - current の `browser_chat` では、`speak` と `notify` のとき `target_channel=\"browser_chat\"` を必須とする
 - current の `browser_chat` では、`browse` のとき `query` に非空の検索文字列を必須とする
 - current の `browser_chat` では、`look` のとき `camera_connection_id` と、`direction` / `preset_id` / `preset_name` のいずれかを必須とする
-- `speech_draft` は、少なくとも `text`、`language`、`delivery_mode` を持つ
+- current の `browser_chat` では、`cognition_result.speech_draft` は `reply_policy.mode="render"` のときに持つ
+- `speech_draft` を持つ場合は、少なくとも `text`、`language`、`delivery_mode` を持つ
 - `memory_focus` は、少なくとも `focus_kind`、`summary` を持つ
 - `reflection_seed` は、少なくとも `cycle_id`、`input_kind`、`message_id`、`token_count`、`was_cancelled` を持つ
 - `cognition_result` は永続化前提の正本ではなく、その短周期の認知実行ごとに再構成する
@@ -1096,14 +1362,43 @@
   "event_annotations": [
     {
       "event_id": "evt_001",
-      "about_time": null,
-      "entities": [],
+      "about_time": {
+        "about_start_ts": null,
+        "about_end_ts": null,
+        "about_year_start": 2024,
+        "about_year_end": 2024,
+        "life_stage": "high_school",
+        "about_time_confidence": 0.82
+      },
+      "entities": [
+        {
+          "entity_type_norm": "topic",
+          "entity_name_raw": "近所 イベント",
+          "confidence": 0.84
+        },
+        {
+          "entity_type_norm": "summary_phrase",
+          "entity_name_raw": "来週の祭り",
+          "confidence": 0.6
+        }
+      ],
       "thread_hints": ["cycle:cycle_001"]
     },
     {
       "event_id": "evt_002",
       "about_time": null,
-      "entities": [],
+      "entities": [
+        {
+          "entity_type_norm": "action_type",
+          "entity_name_raw": "enqueue_browse_task",
+          "confidence": 0.72
+        },
+        {
+          "entity_type_norm": "failure_mode",
+          "entity_name_raw": "network_unavailable",
+          "confidence": 0.52
+        }
+      ],
       "thread_hints": ["cycle:cycle_001"]
     }
   ],
@@ -1223,6 +1518,13 @@
 - `MemoryWritePlan` は、長周期の `write_memory` 内部で生成・検証してから適用する固定 shape のオブジェクトである
 - 必須項目は `event_annotations`、`state_updates`、`preference_updates`、`event_affect`、`context_updates`、`revision_reasons` である
 - `event_annotations` は、`memory_job_payloads.payload_json.source_event_ids` と同じ件数・同じ順序で並ばなければならない
+- `event_annotations[].about_time` は、`null` または `about_start_ts`、`about_end_ts`、`about_year_start`、`about_year_end`、`life_stage`、`about_time_confidence` の 6 キーを持つ fixed shape object とする
+- `event_annotations[].about_time.about_start_ts` と `about_end_ts` は、値があるとき `positive integer` に固定する
+- `event_annotations[].about_time.about_year_start` と `about_year_end` は、値があるとき `1900..2100` の `integer` に固定する
+- `event_annotations[].about_time.life_stage` は、値があるとき非空 `string` に固定する
+- `event_annotations[].about_time.about_time_confidence` は、`0.0..1.0` の `number` に固定する
+- `event_annotations[].entities[]` は、`entity_type_norm`、`entity_name_raw`、`confidence` の 3 キーを必須とする fixed shape object とする
+- `event_annotations[].entities[].confidence` は、`0.0..1.0` の `number` に固定する
 - `state_updates` の各要素は、少なくとも `state_ref`、`operation`、`memory_kind`、`evidence_event_ids`、`revision_reason` を持つ
 - `state_ref` は、`context_updates.state_links` から参照するための内部別名であり、同一 `MemoryWritePlan` 内で一意でなければならない
 - `operation = upsert` のときは、追加で `body_text`、`payload`、`confidence`、`importance`、`memory_strength`、`last_confirmed_at` を必須とする
@@ -1234,6 +1536,10 @@
 - `event_affect.vad` は、`v`、`a`、`d` の 3 キーを必須とし、各値は `-1.0..+1.0` の `number` とする
 - `context_updates` は、`event_links`、`event_threads`、`state_links` の 3 キーを必須とする
 - `context_updates.state_links` は、永続 ID ではなく同一 `MemoryWritePlan.state_updates` 内の `state_ref` を参照する
+- current 実装では、`event_about_time` は `MemoryWritePlan.event_annotations[].about_time` を正本にして置換してよい
+- current 実装では、`event_entities` は `MemoryWritePlan.event_annotations[].entities[]` を正本にして置換してよい
+- current 実装では、`state_about_time` は `MemoryWritePlan` に直接含めず、適用後の `memory_states.body_text` と `payload_json.summary_text` から再構成してよい
+- current 実装では、`state_entities` は `MemoryWritePlan` に直接含めず、適用後の `memory_states.payload_json` から再構成してよい
 - `revision_reasons` は、`state_updates` と同じ件数を持ち、各要素は対応する `state_updates.revision_reason` と一致しなければならない
 
 <!-- Block: Runtime Settings Group -->
@@ -1631,9 +1937,11 @@
 - `target`、`parameters`、`preconditions`、`stop_conditions`、`timeout_ms`、`requires_reobserve`、`expected_effects` は、`execute` のとき `action_command` をそのまま残したい場合に付けてよい
 - current の `control_camera_look` では、`parameters.camera_connection_id` を必須とし、`requires_reobserve=true` に固定し、`expected_effects.followup_input_kind=\"camera_observation\"`、`expected_effects.followup_trigger_reason=\"post_action_followup\"` を持たせてよい
 - `parameters.task_id`、`parameters.query`、`parameters.target_channel` は、`enqueue_browse_task` を実行する命令だけに付ける
+- current の `enqueue_browse_task` では、伴走メッセージを出す場合だけ `parameters.message_id` と `parameters.text` を持たせてよい
 - `parameters.query` は、`execute_browse_task` と `abandon_browse_task` を実行する命令だけに付けてよい
 - `related_task_id` は、`execute_browse_task` と `abandon_browse_task` のように task 再開を処理する命令だけに付けてよい
-- `hold` と `reject` では、`message_id` と `role` を付けず、`event_types` は `status` だけでもよい
+- `hold` と `reject` では、`event_types` は `status` だけでもよい
+- current の `hold` では、伴走メッセージを出す場合だけ `message_id` と `role` を付けてよい
 - `target_message_id` は、`cancel` のように既存メッセージを対象化する行動だけに付ける
 - `input_kind` は、未対応入力のエラー応答のように、原因となる入力種別を残したいときだけ付ける
 
@@ -1681,8 +1989,10 @@
 - `validator_reason` は、`action validator` の決定理由コードを持つ
 - `selected_action_type` は、比較で最上位になった候補の `action_type` を残したいときに付ける
 - `action_candidate_score` は、`action validator` の最小比較結果を残したいときに付ける
-- `hold` と `reject` では、`message_id` を付けず、`final_message_emitted=false` にする
+- `reject` では、`message_id` を付けず、`final_message_emitted=false` にする
+- current の `hold` では、伴走メッセージを出した場合だけ `message_id` を付け、`final_message_emitted=true` にしてよい
 - `enqueue_browse_task` を実行した場合は、`queued_task_id`、`queued_task_kind`、`queued_task_status` を付けてよい
+- current の `enqueue_browse_task` では、伴走メッセージを出した場合だけ `final_message_emitted` と `message_id` を付けてよい
 - `complete_browse_task` を実行した場合は、`related_task_id`、`task_status_after`、`summary_text` を付けてよい
 - `abandon_browse_task` を実行した場合は、`related_task_id`、`task_status_after`、`error_message` を付けてよい
 - `complete_browse_task` を実行した場合は、`followup_input_kind=\"network_result\"` を付けてよい
@@ -2062,6 +2372,43 @@
       "created_at": 1760000000000,
       "mode": "associative_recent",
       "queries": ["最近の会話"],
+      "collector_names": [
+        "recent_event_window",
+        "associative_memory",
+        "episodic_memory"
+      ],
+      "collector_counts": {
+        "recent_event_window": 2,
+        "associative_memory": 1
+      },
+      "selected_reason_counts": {
+        "matched_query": 1,
+        "mode_priority": 1,
+        "profile_bias": 1
+      },
+      "slot_skipped_slot_counts": {
+        "episodic_items": 1
+      },
+      "reserve_slot_counts": {
+        "episodic_items": 1
+      },
+      "selector_summary": {
+        "selector_mode": "llm_ranked",
+        "selection_reason": "直近会話の継続と明示日付の一致を優先した",
+        "raw_candidate_count": 9,
+        "merged_candidate_count": 7,
+        "selector_input_candidate_count": 7,
+        "selector_candidate_limit": 24,
+        "llm_selected_ref_count": 5,
+        "llm_unselected_count": 2,
+        "llm_return_ratio_percent": 71,
+        "selected_candidate_count": 4,
+        "selector_input_unused_count": 3,
+        "selected_candidate_ratio_percent": 57,
+        "duplicate_hit_count": 2,
+        "reserve_candidate_count": 1,
+        "slot_skipped_count": 1
+      },
       "selected_counts": {
         "working_memory_items": 2,
         "episodic_items": 1,
@@ -2125,6 +2472,7 @@
 - `runtime.last_cycle_id` は、短周期が 1 回以上完了している場合だけ持つ
 - `runtime.last_commit_id` は、`commit_records` が 1 件以上ある場合だけ持つ
 - `runtime.last_retrieval` は、`retrieval_runs` が 1 件以上ある場合だけ持つ
+- `runtime.last_retrieval` は、current 実装では `collector_names`、`collector_counts`、`selected_reason_counts`、`slot_skipped_slot_counts`、`reserve_slot_counts`、`selector_summary` を追加で持ってよい
 - `self_state.current_emotion` は、少なくとも `v`、`a`、`d`、`labels` を持つ
 - `self_state.last_persona_update` は、`revisions.entity_type=self_state.personality` が 1 件以上ある場合だけ持つ
 - `attention_state.primary_focus` は、current 実装では `attention_state.primary_focus_json.summary` をそのまま返す短い `string` とする
@@ -2135,6 +2483,152 @@
 - `world_state.external_wait_count` は `integer` に固定する
 - `drive_state.priority_effects` は `task_progress_bias`、`exploration_bias`、`maintenance_bias`、`social_bias` を持つ `object` に固定する
 - `task_state.active_task_count`、`task_state.waiting_task_count` は `integer` に固定する
+
+<!-- Block: Latest Retrieval Run -->
+### `GET /api/retrieval-runs/latest` の成功応答 JSON
+
+```json
+{
+  "cycle_id": "cycle_...",
+  "created_at": 1760000000000,
+  "mode": "associative_recent",
+  "queries": ["最近の会話"],
+  "collector_names": [
+    "recent_event_window",
+    "associative_memory",
+    "episodic_memory"
+  ],
+  "collector_counts": {
+    "recent_event_window": 2,
+    "associative_memory": 1
+  },
+  "selected_reason_counts": {
+    "matched_query": 1,
+    "mode_priority": 1,
+    "profile_bias": 1
+  },
+  "slot_skipped_collector_counts": {
+    "explicit_time": 1
+  },
+  "slot_skipped_slot_counts": {
+    "episodic_items": 1
+  },
+  "slot_skipped_reason_counts": {
+    "about_time": 1
+  },
+  "reserve_collector_counts": {
+    "explicit_time": 1
+  },
+  "reserve_slot_counts": {
+    "episodic_items": 1
+  },
+  "reserve_reason_counts": {
+    "about_time": 1
+  },
+  "selection_trace": [
+    {
+      "slot": "semantic_items",
+      "item_ref": "memory_state:mem_010",
+      "memory_kind": "semantic_fact",
+      "score": 1.8,
+      "reason_codes": ["matched_query", "mode_priority", "profile_bias"],
+      "collector_names": ["associative_memory", "task_focus"],
+      "duplicate_hits": 1,
+      "selection_rank": 2,
+      "text": "次の約束は 3 月 15 日の昼に変更された",
+      "relative_time_text": "2時間前",
+      "about_time_hint_text": "2026-03-15"
+    }
+  ],
+  "slot_skipped_trace": [
+    {
+      "slot": "episodic_items",
+      "item_ref": "event:evt_011",
+      "score": 0.75,
+      "reason_codes": ["about_time"],
+      "collector_names": ["explicit_time"],
+      "duplicate_hits": 0,
+      "selection_rank": 3,
+      "text": "3 月 15 日の昼に話す約束だった",
+      "relative_time_text": "昨日",
+      "about_time_hint_text": "2026-03-15"
+    }
+  ],
+  "reserve_trace": [
+    {
+      "slot": "episodic_items",
+      "item_ref": "event:evt_010",
+      "score": 0.8,
+      "reason_codes": ["about_time"],
+      "collector_names": ["explicit_time"],
+      "duplicate_hits": 0,
+      "text": "3 月 15 日の昼に会う予定だった",
+      "relative_time_text": "昨日",
+      "about_time_hint_text": "2026-03-15"
+    }
+  ],
+  "selector_input_collector_counts": {
+    "recent_event_window": 2,
+    "associative_memory": 3,
+    "reply_chain": 1
+  },
+  "selector_input_slot_counts": {
+    "recent_event_window": 2,
+    "episodic_items": 3,
+    "semantic_items": 2
+  },
+  "selector_input_reason_counts": {
+    "matched_query": 3,
+    "about_time": 2,
+    "reply_chain": 1
+  },
+  "selector_input_trace": [
+    {
+      "item_ref": "memory_state:mem_010",
+      "slot": "semantic_items",
+      "memory_kind": "semantic_fact",
+      "score": 1.8,
+      "collector_names": ["associative_memory", "task_focus"],
+      "reason_codes": ["matched_query", "mode_priority", "profile_bias"],
+      "text": "次の約束は 3 月 15 日の昼に変更された",
+      "relative_time_text": "2時間前",
+      "about_time_hint_text": "2026-03-15"
+    }
+  ],
+  "selector_summary": {
+    "selector_mode": "llm_ranked",
+    "selection_reason": "直近会話の継続と明示日付の一致を優先した",
+    "raw_candidate_count": 9,
+    "merged_candidate_count": 7,
+    "selector_input_candidate_count": 7,
+    "selector_candidate_limit": 24,
+    "llm_selected_ref_count": 5,
+    "llm_unselected_count": 2,
+    "llm_return_ratio_percent": 71,
+    "selected_candidate_count": 4,
+    "selector_input_unused_count": 3,
+    "selected_candidate_ratio_percent": 57,
+    "duplicate_hit_count": 2,
+    "reserve_candidate_count": 1,
+    "slot_skipped_count": 1
+  },
+  "trimmed_item_refs": ["event:evt_002"],
+  "selected_counts": {
+    "working_memory_items": 2,
+    "episodic_items": 1,
+    "semantic_items": 1,
+    "affective_items": 0,
+    "relationship_items": 1,
+    "reflection_items": 0,
+    "recent_event_window": 3
+  },
+  "resolved_event_ids": ["evt_001", "evt_002"]
+}
+```
+
+- `retrieval_runs` が 1 件もない場合は `404 not_found` を返す
+- current 実装では、`selection_trace`、`slot_skipped_trace`、`reserve_trace` は表示用 preview として最大 8 件まで返し、件数系 summary は全候補を集計してよい
+- current 実装では、`selection_trace[]` と `reserve_trace[]` に `selector_input_trace` 由来の `memory_kind`、`text`、`relative_time_text`、`about_time_hint_text` を追加で持ってよい
 
 <!-- Block: Stream Data -->
 ### `GET /api/chat/stream` の `data:` JSON

@@ -42,7 +42,7 @@
 ### テーブルの分類
 
 - append-only の正本ログは、`ui_outbound_events`、`input_journal`、`events`、`action_history`、`retrieval_runs`、`revisions`、`commit_records` とする
-- 更新で育つテーブルは、`db_meta`、`runtime_leases`、`self_state`、`runtime_settings`、`settings_editor_state`、`character_presets`、`behavior_presets`、`conversation_presets`、`memory_presets`、`motion_presets`、`camera_connections`、`attention_state`、`body_state`、`world_state`、`drive_state`、`task_state`、`working_memory_items`、`recent_event_window_items`、`skill_registry`、`pending_inputs`、`settings_overrides`、`settings_change_sets`、`memory_states`、`preference_memory`、`event_affects`、`event_links`、`event_threads`、`state_links`、`event_entities`、`state_entities`、`event_preview_cache`、`memory_jobs`、`memory_job_payloads`、`vec_items` とする
+- 更新で育つテーブルは、`db_meta`、`runtime_leases`、`self_state`、`runtime_settings`、`settings_editor_state`、`character_presets`、`behavior_presets`、`conversation_presets`、`memory_presets`、`motion_presets`、`camera_connections`、`attention_state`、`body_state`、`world_state`、`drive_state`、`task_state`、`working_memory_items`、`recent_event_window_items`、`skill_registry`、`pending_inputs`、`settings_overrides`、`settings_change_sets`、`memory_states`、`preference_memory`、`event_affects`、`event_links`、`event_threads`、`event_about_time`、`state_about_time`、`state_links`、`event_entities`、`state_entities`、`event_preview_cache`、`memory_jobs`、`memory_job_payloads`、`vec_items` とする
 - append-only テーブルは、論理削除でなく追記を基本とし、通常更新を前提にしない
 - 例外として `event_preview_cache`、`memory_jobs`、`pending_inputs`、`settings_overrides`、`settings_change_sets` は更新を前提とする
 
@@ -416,13 +416,29 @@ flowchart TD
 - 主要索引: `(from_state_id)`, `(to_state_id)`, `(label)`
 
 <!-- Block: Entity Tables -->
-### `event_entities` と `state_entities`
+### `event_about_time` と `state_about_time` と `event_entities` と `state_entities`
+
+- `event_about_time`
+  - 役割: `events` に付いた `about_time` を保持する
+  - 主キー: `event_about_time_id TEXT PRIMARY KEY`
+  - 必須列: `event_id`, `confidence`, `created_at`, `updated_at`
+  - 任意列: `about_start_ts`, `about_end_ts`, `about_year_start`, `about_year_end`, `life_stage`
+  - 主要制約: `UNIQUE(event_id)`
+  - 主要索引: `(event_id)`, `(about_year_start, about_year_end)`, `(life_stage)`
 
 - `event_entities`
   - 役割: `events` に付いたエンティティ索引を保持する
   - 主キー: `event_entity_id TEXT PRIMARY KEY`
   - 必須列: `event_id`, `entity_type_norm`, `entity_name_raw`, `entity_name_norm`, `confidence`, `created_at`
   - 主要索引: `(event_id)`, `(entity_type_norm, entity_name_norm)`
+
+- `state_about_time`
+  - 役割: `memory_states` に付いた `about_time` を保持する
+  - 主キー: `state_about_time_id TEXT PRIMARY KEY`
+  - 必須列: `memory_state_id`, `confidence`, `created_at`, `updated_at`
+  - 任意列: `about_start_ts`, `about_end_ts`, `about_year_start`, `about_year_end`, `life_stage`
+  - 主要制約: `UNIQUE(memory_state_id)`
+  - 主要索引: `(memory_state_id)`, `(about_year_start, about_year_end)`, `(life_stage)`
 
 - `state_entities`
   - 役割: `memory_states` に付いたエンティティ索引を保持する
@@ -436,6 +452,7 @@ flowchart TD
 - 役割: 想起時の LLM 選別に使う派生プレビューを保持する
 - 主キー: `preview_id TEXT PRIMARY KEY`
 - 必須列: `event_id`, `preview_text`, `source_event_updated_at`, `created_at`, `updated_at`
+- current 実装では、`preview_text` に event summary だけでなく `event_entities`、`event_threads`、`event_about_time`、`event_affect` の圧縮情報を含めてよい
 - `event_id` は一意とし、1 イベント 1 プレビューを基本とする
 - 主要制約: `UNIQUE(event_id)`
 - 主要索引: `(source_event_updated_at DESC)`
@@ -539,7 +556,7 @@ flowchart TD
 <!-- Block: Long Cycle Boundary -->
 ### 長周期の保存境界
 
-- 同じ長周期 transaction に含めるのは、`memory_jobs`、`memory_states`、`preference_memory`、`event_affects`、`event_links`、`event_threads`、`state_links`、`event_entities`、`state_entities`、`event_preview_cache`、`revisions`、`vec_items`、`vec_items_index`、必要なら `self_state` と `skill_registry` とする
+- 同じ長周期 transaction に含めるのは、`memory_jobs`、`memory_states`、`preference_memory`、`event_affects`、`event_links`、`event_threads`、`event_about_time`、`state_about_time`、`state_links`、`event_entities`、`state_entities`、`event_preview_cache`、`revisions`、`vec_items`、`vec_items_index`、必要なら `self_state` と `skill_registry` とする
 - `write_memory` は、必要なら同じ長周期 transaction 内で followup の `memory_jobs` と `memory_job_payloads` を追加してよい
 - `refresh_preview` は、`event_preview_cache` と必要な followup の `memory_jobs` / `memory_job_payloads` 以外を更新してはならない
 - `quarantine_memory` は、`searchable` 系の更新と監査痕跡だけを確定する

@@ -1,21 +1,27 @@
-"""Build deterministic retrieval plan and memory bundle."""
+"""Build retrieval plan, candidate traces, and final memory bundle."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import datetime, timezone
+from dataclasses import dataclass
 from typing import Any
 
-from otomekairo.schema.settings import normalize_retrieval_profile
+from otomekairo.gateway.cognition_client import CognitionClient
+from otomekairo.usecase.about_time_text import life_stage_label
+from otomekairo.usecase.retrieval_collectors import collect_retrieval_candidates
+from otomekairo.usecase.retrieval_common import local_text, relative_time_text, utc_text
+from otomekairo.usecase.retrieval_plan import build_retrieval_plan
+from otomekairo.usecase.retrieval_selector import (
+    SelectionArtifacts,
+    merge_retrieval_candidates,
+    select_retrieval_candidates,
+)
+from otomekairo.usecase.run_retrieval_selection import run_retrieval_selection
 
 
-# Block: Retrieval selection limits
-WORKING_MEMORY_LIMIT = 3
-EPISODIC_LIMIT = 3
-SEMANTIC_LIMIT = 3
-AFFECTIVE_LIMIT = 2
-RELATIONSHIP_LIMIT = 2
-REFLECTION_LIMIT = 2
+# Block: Selector candidate limit
+SELECTOR_CANDIDATE_LIMIT = 24
+SELECTOR_TEXT_LIMIT = 120
 
 
 # Block: Retrieval artifacts
@@ -30,613 +36,414 @@ class RetrievalArtifacts:
 # Block: Public builder
 def build_retrieval_artifacts(
     *,
+    cycle_id: str,
     memory_snapshot: dict[str, Any],
     retrieval_profile: dict[str, Any],
     current_observation: dict[str, Any],
     task_snapshot: dict[str, Any],
     resolved_at: int,
+    completion_settings: dict[str, Any],
+    cognition_client: CognitionClient,
 ) -> RetrievalArtifacts:
-    normalized_retrieval_profile = normalize_retrieval_profile(retrieval_profile)
-    retrieval_plan = _build_retrieval_plan(
-        retrieval_profile=normalized_retrieval_profile,
+    event_about_time_by_id = _event_about_time_by_id(memory_snapshot)
+    state_about_time_by_id = _state_about_time_by_id(memory_snapshot)
+    retrieval_plan = build_retrieval_plan(
+        retrieval_profile=retrieval_profile,
         current_observation=current_observation,
         task_snapshot=task_snapshot,
     )
-    selected_working_memory, working_traces = _select_memory_entries(
-        slot_name="working_memory_items",
-        memory_entries=memory_snapshot["working_memory_items"],
+    candidate_collection = collect_retrieval_candidates(
+        memory_snapshot=memory_snapshot,
         current_observation=current_observation,
         retrieval_plan=retrieval_plan,
-        limit=WORKING_MEMORY_LIMIT,
     )
-    selected_episodic_items, episodic_traces = _select_memory_entries(
-        slot_name="episodic_items",
-        memory_entries=memory_snapshot["episodic_items"],
+    merged_candidates = merge_retrieval_candidates(candidate_collection.candidates)
+    selection_artifacts = _select_with_llm(
+        cycle_id=cycle_id,
+        merged_candidates=merged_candidates,
+        raw_candidate_count=len(candidate_collection.candidates),
         current_observation=current_observation,
         retrieval_plan=retrieval_plan,
-        limit=EPISODIC_LIMIT,
+        resolved_at=resolved_at,
+        completion_settings=completion_settings,
+        cognition_client=cognition_client,
+        event_about_time_by_id=event_about_time_by_id,
+        state_about_time_by_id=state_about_time_by_id,
     )
-    selected_semantic_items, semantic_traces = _select_memory_entries(
-        slot_name="semantic_items",
-        memory_entries=memory_snapshot["semantic_items"],
-        current_observation=current_observation,
-        retrieval_plan=retrieval_plan,
-        limit=SEMANTIC_LIMIT,
-    )
-    selected_affective_items, affective_traces = _select_memory_entries(
-        slot_name="affective_items",
-        memory_entries=memory_snapshot["affective_items"],
-        current_observation=current_observation,
-        retrieval_plan=retrieval_plan,
-        limit=AFFECTIVE_LIMIT,
-    )
-    selected_relationship_items, relationship_traces = _select_memory_entries(
-        slot_name="relationship_items",
-        memory_entries=memory_snapshot["relationship_items"],
-        current_observation=current_observation,
-        retrieval_plan=retrieval_plan,
-        limit=RELATIONSHIP_LIMIT,
-    )
-    selected_reflection_items, reflection_traces = _select_memory_entries(
-        slot_name="reflection_items",
-        memory_entries=memory_snapshot["reflection_items"],
-        current_observation=current_observation,
-        retrieval_plan=retrieval_plan,
-        limit=REFLECTION_LIMIT,
-    )
-    selected_recent_events, recent_event_traces = _select_recent_events(
-        event_entries=memory_snapshot["recent_event_window"],
-        current_observation=current_observation,
-        retrieval_plan=retrieval_plan,
-        limit=int(retrieval_plan["limits"]["recent_event_window"]),
-    )
-    selection_trace = [
-        *working_traces,
-        *episodic_traces,
-        *semantic_traces,
-        *affective_traces,
-        *relationship_traces,
-        *reflection_traces,
-        *recent_event_traces,
-    ]
     memory_bundle = {
         "working_memory_items": [
-            _memory_entry_for_cognition(memory_entry, resolved_at=resolved_at)
-            for memory_entry in selected_working_memory
+            _memory_entry_for_cognition(
+                memory_entry,
+                resolved_at=resolved_at,
+                event_about_time_by_id=event_about_time_by_id,
+                state_about_time_by_id=state_about_time_by_id,
+            )
+            for memory_entry in selection_artifacts.memory_bundle["working_memory_items"]
         ],
         "episodic_items": [
-            _memory_entry_for_cognition(memory_entry, resolved_at=resolved_at)
-            for memory_entry in selected_episodic_items
+            _memory_entry_for_cognition(
+                memory_entry,
+                resolved_at=resolved_at,
+                event_about_time_by_id=event_about_time_by_id,
+                state_about_time_by_id=state_about_time_by_id,
+            )
+            for memory_entry in selection_artifacts.memory_bundle["episodic_items"]
         ],
         "semantic_items": [
-            _memory_entry_for_cognition(memory_entry, resolved_at=resolved_at)
-            for memory_entry in selected_semantic_items
+            _memory_entry_for_cognition(
+                memory_entry,
+                resolved_at=resolved_at,
+                event_about_time_by_id=event_about_time_by_id,
+                state_about_time_by_id=state_about_time_by_id,
+            )
+            for memory_entry in selection_artifacts.memory_bundle["semantic_items"]
         ],
         "affective_items": [
-            _memory_entry_for_cognition(memory_entry, resolved_at=resolved_at)
-            for memory_entry in selected_affective_items
+            _memory_entry_for_cognition(
+                memory_entry,
+                resolved_at=resolved_at,
+                event_about_time_by_id=event_about_time_by_id,
+                state_about_time_by_id=state_about_time_by_id,
+            )
+            for memory_entry in selection_artifacts.memory_bundle["affective_items"]
         ],
         "relationship_items": [
-            _memory_entry_for_cognition(memory_entry, resolved_at=resolved_at)
-            for memory_entry in selected_relationship_items
+            _memory_entry_for_cognition(
+                memory_entry,
+                resolved_at=resolved_at,
+                event_about_time_by_id=event_about_time_by_id,
+                state_about_time_by_id=state_about_time_by_id,
+            )
+            for memory_entry in selection_artifacts.memory_bundle["relationship_items"]
         ],
         "reflection_items": [
-            _memory_entry_for_cognition(memory_entry, resolved_at=resolved_at)
-            for memory_entry in selected_reflection_items
+            _memory_entry_for_cognition(
+                memory_entry,
+                resolved_at=resolved_at,
+                event_about_time_by_id=event_about_time_by_id,
+                state_about_time_by_id=state_about_time_by_id,
+            )
+            for memory_entry in selection_artifacts.memory_bundle["reflection_items"]
         ],
         "recent_event_window": [
-            _recent_event_for_cognition(event_entry, resolved_at=resolved_at)
-            for event_entry in selected_recent_events
+            _recent_event_for_cognition(
+                event_entry,
+                resolved_at=resolved_at,
+                event_about_time_by_id=event_about_time_by_id,
+            )
+            for event_entry in selection_artifacts.memory_bundle["recent_event_window"]
         ],
     }
+    selector_input_trace = _build_selector_input_trace(
+        merged_candidates=merged_candidates,
+        resolved_at=resolved_at,
+        event_about_time_by_id=event_about_time_by_id,
+        state_about_time_by_id=state_about_time_by_id,
+    )
     return RetrievalArtifacts(
         memory_bundle=memory_bundle,
         retrieval_plan=retrieval_plan,
-        candidates_json=_build_candidates_json(memory_snapshot=memory_snapshot),
-        selected_json=_build_selected_json(
-            memory_bundle=memory_bundle,
-            selection_trace=selection_trace,
+        candidates_json=_build_candidates_json(
+            candidates=candidate_collection.candidates,
+            collector_runs=candidate_collection.collector_runs,
+            selector_input_candidates=merged_candidates[:SELECTOR_CANDIDATE_LIMIT],
+            selector_input_trace=selector_input_trace,
+            selector_candidate_limit=SELECTOR_CANDIDATE_LIMIT,
         ),
+        selected_json=selection_artifacts.selected_json,
     )
 
 
-# Block: Retrieval plan
-def _build_retrieval_plan(
+# Block: LLM 選別
+def _select_with_llm(
     *,
-    retrieval_profile: dict[str, Any],
+    cycle_id: str,
+    merged_candidates: list[dict[str, Any]],
+    raw_candidate_count: int,
     current_observation: dict[str, Any],
-    task_snapshot: dict[str, Any],
+    retrieval_plan: dict[str, Any],
+    resolved_at: int,
+    completion_settings: dict[str, Any],
+    cognition_client: CognitionClient,
+    event_about_time_by_id: dict[str, dict[str, Any]],
+    state_about_time_by_id: dict[str, dict[str, Any]],
+) -> SelectionArtifacts:
+    if not merged_candidates:
+        return SelectionArtifacts(
+            memory_bundle={slot_name: [] for slot_name in (
+                "working_memory_items",
+                "episodic_items",
+                "semantic_items",
+                "affective_items",
+                "relationship_items",
+                "reflection_items",
+                "recent_event_window",
+            )},
+            selected_json={
+                "selected_counts": {
+                    "working_memory_items": 0,
+                    "episodic_items": 0,
+                    "semantic_items": 0,
+                    "affective_items": 0,
+                    "relationship_items": 0,
+                    "reflection_items": 0,
+                    "recent_event_window": 0,
+                },
+                "selected_refs": {
+                    "working_memory_item_ids": [],
+                    "episodic_item_ids": [],
+                    "semantic_item_ids": [],
+                    "affective_item_ids": [],
+                    "relationship_item_ids": [],
+                    "reflection_item_ids": [],
+                    "recent_event_ids": [],
+                },
+                "selection_trace": [],
+                "selector_summary": {
+                    "selector_mode": "llm_ranked",
+                    "selection_reason": "候補なし",
+                    "raw_candidate_count": raw_candidate_count,
+                    "merged_candidate_count": 0,
+                    "selector_input_candidate_count": 0,
+                    "selector_candidate_limit": SELECTOR_CANDIDATE_LIMIT,
+                    "llm_selected_ref_count": 0,
+                    "llm_unselected_count": 0,
+                    "llm_return_ratio_percent": 0,
+                    "selected_candidate_count": 0,
+                    "selector_input_unused_count": 0,
+                    "selected_candidate_ratio_percent": 0,
+                    "duplicate_hit_count": 0,
+                    "reserve_candidate_count": 0,
+                    "slot_skipped_count": 0,
+                },
+                "reserve_trace": [],
+            },
+        )
+    candidate_pack = _build_selector_candidate_pack(
+        merged_candidates=merged_candidates,
+        retrieval_plan=retrieval_plan,
+        resolved_at=resolved_at,
+        event_about_time_by_id=event_about_time_by_id,
+        state_about_time_by_id=state_about_time_by_id,
+    )
+    retrieval_selection = run_retrieval_selection(
+        cycle_id=cycle_id,
+        current_observation=current_observation,
+        retrieval_plan=retrieval_plan,
+        candidate_pack=candidate_pack,
+        completion_settings=completion_settings,
+        cognition_client=cognition_client,
+    )
+    return select_retrieval_candidates(
+        merged_candidates=merged_candidates,
+        raw_candidate_count=raw_candidate_count,
+        selector_input_candidate_count=len(candidate_pack["candidate_entries"]),
+        selector_candidate_limit=SELECTOR_CANDIDATE_LIMIT,
+        retrieval_plan=retrieval_plan,
+        ordered_item_refs=list(retrieval_selection["selected_item_refs"]),
+        selection_reason=str(retrieval_selection["selection_reason"]),
+    )
+
+
+# Block: Selector candidate pack
+def _build_selector_candidate_pack(
+    *,
+    merged_candidates: list[dict[str, Any]],
+    retrieval_plan: dict[str, Any],
+    resolved_at: int,
+    event_about_time_by_id: dict[str, dict[str, Any]],
+    state_about_time_by_id: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
-    explicit_years = _explicit_years(current_observation=current_observation)
-    limits = _build_selection_limits(retrieval_profile=retrieval_profile)
     return {
-        "mode": _retrieval_mode(
-            current_observation=current_observation,
-            explicit_years=explicit_years,
+        "slot_limits": dict(retrieval_plan["limits"]),
+        "candidate_entries": _build_selector_input_trace(
+            merged_candidates=merged_candidates,
+            resolved_at=resolved_at,
+            event_about_time_by_id=event_about_time_by_id,
+            state_about_time_by_id=state_about_time_by_id,
         ),
-        "queries": _build_queries(
-            current_observation=current_observation,
-            task_snapshot=task_snapshot,
-        ),
-        "time_hint": {
-            "explicit_years": explicit_years,
-            "has_explicit_time_hint": bool(explicit_years),
-        },
-        "profile": dict(retrieval_profile),
-        "limits": limits,
     }
 
 
-# Block: Query helpers
-def _build_queries(
+# Block: Selector input trace
+def _build_selector_input_trace(
     *,
-    current_observation: dict[str, Any],
-    task_snapshot: dict[str, Any],
-) -> list[str]:
-    queries: list[str] = []
-    observation_text = current_observation["observation_text"]
-    if not isinstance(observation_text, str) or not observation_text:
-        raise ValueError("current_observation.observation_text must be non-empty string")
-    _append_unique_text(queries, observation_text)
-    query_hint = _observation_query_hint(current_observation)
-    if query_hint is not None:
-        _append_unique_text(queries, query_hint)
-    for task_entry in task_snapshot["active_tasks"][:2]:
-        goal_hint = task_entry.get("goal_hint")
-        if isinstance(goal_hint, str) and goal_hint:
-            _append_unique_text(queries, goal_hint)
-    for task_entry in task_snapshot["waiting_external_tasks"][:1]:
-        goal_hint = task_entry.get("goal_hint")
-        if isinstance(goal_hint, str) and goal_hint:
-            _append_unique_text(queries, goal_hint)
-    return queries
+    merged_candidates: list[dict[str, Any]],
+    resolved_at: int,
+    event_about_time_by_id: dict[str, dict[str, Any]],
+    state_about_time_by_id: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    return [
+        _selector_candidate_entry(
+            merged_candidate=merged_candidate,
+            resolved_at=resolved_at,
+            event_about_time_by_id=event_about_time_by_id,
+            state_about_time_by_id=state_about_time_by_id,
+        )
+        for merged_candidate in merged_candidates[:SELECTOR_CANDIDATE_LIMIT]
+    ]
 
 
-def _append_unique_text(target: list[str], text: str) -> None:
-    normalized = text.strip()
-    if not normalized:
-        return
-    if normalized not in target:
-        target.append(normalized)
-
-
-# Block: Selection limit helpers
-def _build_selection_limits(*, retrieval_profile: dict[str, Any]) -> dict[str, int]:
+# Block: Selector candidate entry
+def _selector_candidate_entry(
+    *,
+    merged_candidate: dict[str, Any],
+    resolved_at: int,
+    event_about_time_by_id: dict[str, dict[str, Any]],
+    state_about_time_by_id: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    slot_name = str(merged_candidate["slot"])
+    item = merged_candidate["item"]
+    if slot_name == "recent_event_window":
+        relative_time = _relative_time_text(resolved_at, int(item["created_at"]))
+        about_time_hint_text = _event_about_time_hint_text(
+            event_about_time_by_id.get(str(item["event_id"]))
+        )
+        return {
+            "item_ref": str(merged_candidate["item_ref"]),
+            "slot": slot_name,
+            "score": round(float(merged_candidate["score"]), 3),
+            "collector_names": list(merged_candidate["collector_names"]),
+            "reason_codes": list(merged_candidate["reason_codes"]),
+            "text": _selector_recent_event_text(item),
+            "relative_time_text": relative_time,
+            **(
+                {"about_time_hint_text": about_time_hint_text}
+                if about_time_hint_text is not None
+                else {}
+            ),
+        }
+    memory_kind = str(item["memory_kind"])
+    relative_time = _relative_time_text(resolved_at, int(item["updated_at"]))
+    about_time_hint_text = _state_or_event_about_time_hint_text(
+        memory_entry=item,
+        event_about_time_by_id=event_about_time_by_id,
+        state_about_time_by_id=state_about_time_by_id,
+    )
     return {
-        "working_memory_items": WORKING_MEMORY_LIMIT,
-        "episodic_items": EPISODIC_LIMIT,
-        "semantic_items": SEMANTIC_LIMIT,
-        "affective_items": AFFECTIVE_LIMIT,
-        "relationship_items": RELATIONSHIP_LIMIT,
-        "reflection_items": REFLECTION_LIMIT,
-        "recent_event_window": int(retrieval_profile["recent_window_limit"]),
-        "semantic_candidate_top_k": int(retrieval_profile["semantic_top_k"]),
+        "item_ref": str(merged_candidate["item_ref"]),
+        "slot": slot_name,
+        "memory_kind": memory_kind,
+        "score": round(float(merged_candidate["score"]), 3),
+        "collector_names": list(merged_candidate["collector_names"]),
+        "reason_codes": list(merged_candidate["reason_codes"]),
+        "text": _selector_memory_text(item),
+        "relative_time_text": relative_time,
+        **(
+            {"about_time_hint_text": about_time_hint_text}
+            if about_time_hint_text is not None
+            else {}
+        ),
     }
 
 
-# Block: Mode helpers
-def _retrieval_mode(
-    *,
-    current_observation: dict[str, Any],
-    explicit_years: list[int],
-) -> str:
-    if explicit_years:
-        return "explicit_about_time"
-    observation_text = str(current_observation["observation_text"])
-    if any(token in observation_text for token in ("失敗", "原因", "再発", "避けたい", "反省", "注意")):
-        return "reflection_recall"
-    if current_observation["input_kind"] == "network_result":
-        return "task_targeted"
-    if isinstance(current_observation.get("source_task_id"), str):
-        return "task_targeted"
-    return "associative_recent"
+# Block: Selector memory text
+def _selector_memory_text(memory_entry: dict[str, Any]) -> str:
+    memory_kind = str(memory_entry["memory_kind"])
+    payload = memory_entry.get("payload")
+    if isinstance(payload, dict):
+        preview_text = payload.get("preview_text")
+        if memory_kind == "episodic_event" and isinstance(preview_text, str) and preview_text:
+            return _selector_prompt_text(preview_text)
+        what_happened = payload.get("what_happened")
+        if isinstance(what_happened, str) and what_happened:
+            return _selector_prompt_text(what_happened)
+    return _selector_prompt_text(str(memory_entry["body_text"]))
 
 
-def _explicit_years(
-    *,
-    current_observation: dict[str, Any],
-) -> list[int]:
-    years: list[int] = []
-    for token in _text_hint_tokens(str(current_observation["observation_text"])):
-        if len(token) != 4 or not token.isdigit():
-            continue
-        year = int(token)
-        if 1900 <= year <= 2100 and year not in years:
-            years.append(year)
-    return years
+# Block: Selector recent event text
+def _selector_recent_event_text(event_entry: dict[str, Any]) -> str:
+    preview_text = event_entry.get("preview_text")
+    if isinstance(preview_text, str) and preview_text:
+        return _selector_prompt_text(preview_text)
+    return _selector_prompt_text(str(event_entry["summary_text"]))
+
+
+# Block: Selector prompt text
+def _selector_prompt_text(text: str) -> str:
+    normalized = " ".join(text.split())
+    if len(normalized) <= SELECTOR_TEXT_LIMIT:
+        return normalized
+    return normalized[: SELECTOR_TEXT_LIMIT - 1] + "…"
 
 
 # Block: Candidate builders
 def _build_candidates_json(
     *,
-    memory_snapshot: dict[str, Any],
+    candidates: list[dict[str, Any]],
+    collector_runs: list[dict[str, Any]],
+    selector_input_candidates: list[dict[str, Any]],
+    selector_input_trace: list[dict[str, Any]],
+    selector_candidate_limit: int,
 ) -> dict[str, Any]:
-    category_counts = {
-        "working_memory_items": len(memory_snapshot["working_memory_items"]),
-        "episodic_items": len(memory_snapshot["episodic_items"]),
-        "semantic_items": len(memory_snapshot["semantic_items"]),
-        "affective_items": len(memory_snapshot["affective_items"]),
-        "relationship_items": len(memory_snapshot["relationship_items"]),
-        "reflection_items": len(memory_snapshot["reflection_items"]),
-        "recent_event_window": len(memory_snapshot["recent_event_window"]),
-    }
+    category_counts: dict[str, int] = {}
+    unique_refs: set[str] = set()
+    for candidate in candidates:
+        slot_name = str(candidate["slot"])
+        category_counts[slot_name] = category_counts.get(slot_name, 0) + 1
+        unique_refs.add(str(candidate["item_ref"]))
     return {
-        "total_candidate_count": sum(category_counts.values()),
+        "total_candidate_count": len(candidates),
+        "unique_candidate_count": len(unique_refs),
         "category_counts": category_counts,
         "non_empty_categories": [
             category_name
             for category_name, count in category_counts.items()
             if count > 0
         ],
+        "selector_input_candidate_count": len(selector_input_candidates),
+        "selector_candidate_limit": selector_candidate_limit,
+        "selector_input_collector_counts": _selector_input_collector_counts(selector_input_candidates),
+        "selector_input_slot_counts": _selector_input_slot_counts(selector_input_candidates),
+        "selector_input_reason_counts": _selector_input_reason_counts(selector_input_candidates),
+        "selector_input_trace": selector_input_trace,
+        "collector_runs": collector_runs,
     }
 
 
-def _build_selected_json(
-    *,
-    memory_bundle: dict[str, Any],
-    selection_trace: list[dict[str, Any]],
-) -> dict[str, Any]:
-    return {
-        "selected_counts": {
-            "working_memory_items": len(memory_bundle["working_memory_items"]),
-            "episodic_items": len(memory_bundle["episodic_items"]),
-            "semantic_items": len(memory_bundle["semantic_items"]),
-            "affective_items": len(memory_bundle["affective_items"]),
-            "relationship_items": len(memory_bundle["relationship_items"]),
-            "reflection_items": len(memory_bundle["reflection_items"]),
-            "recent_event_window": len(memory_bundle["recent_event_window"]),
-        },
-        "selected_refs": {
-            "working_memory_item_ids": [
-                str(item["memory_state_id"])
-                for item in memory_bundle["working_memory_items"]
-            ],
-            "episodic_item_ids": [
-                str(item["memory_state_id"])
-                for item in memory_bundle["episodic_items"]
-            ],
-            "semantic_item_ids": [
-                str(item["memory_state_id"])
-                for item in memory_bundle["semantic_items"]
-            ],
-            "affective_item_ids": [
-                str(item["memory_state_id"])
-                for item in memory_bundle["affective_items"]
-            ],
-            "relationship_item_ids": [
-                str(item["memory_state_id"])
-                for item in memory_bundle["relationship_items"]
-            ],
-            "reflection_item_ids": [
-                str(item["memory_state_id"])
-                for item in memory_bundle["reflection_items"]
-            ],
-            "recent_event_ids": [
-                str(item["event_id"])
-                for item in memory_bundle["recent_event_window"]
-            ],
-        },
-        "selection_trace": selection_trace,
-    }
-
-
-# Block: Memory selection
-def _select_memory_entries(
-    *,
-    slot_name: str,
-    memory_entries: list[dict[str, Any]],
-    current_observation: dict[str, Any],
-    retrieval_plan: dict[str, Any],
-    limit: int,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    if limit <= 0:
-        raise ValueError("memory selection limit must be positive")
-    scored_entries: list[tuple[float, int, dict[str, Any], list[str]]] = []
-    for memory_entry in memory_entries:
-        score, reason_codes = _memory_relevance_score(
-            memory_entry=memory_entry,
-            current_observation=current_observation,
-            retrieval_plan=retrieval_plan,
-        )
-        if score <= 0.0:
+# Block: Selector input collector counts
+def _selector_input_collector_counts(
+    selector_input_candidates: list[dict[str, Any]],
+) -> dict[str, int]:
+    collector_counts: dict[str, int] = {}
+    for candidate in selector_input_candidates:
+        collector_names = candidate.get("collector_names")
+        if not isinstance(collector_names, list):
             continue
-        scored_entries.append(
-            (
-                score,
-                int(memory_entry["updated_at"]),
-                memory_entry,
-                reason_codes,
-            )
-        )
-    scored_entries.sort(key=lambda item: (item[0], item[1]), reverse=True)
-    selected_rows = scored_entries[:limit]
-    return (
-        [memory_entry for _, _, memory_entry, _ in selected_rows],
-        [
-            {
-                "slot": slot_name,
-                "item_ref": _memory_item_ref(memory_entry),
-                "score": round(score, 3),
-                "reason_codes": reason_codes,
-            }
-            for score, _, memory_entry, reason_codes in selected_rows
-        ],
-    )
+        for collector_name in collector_names:
+            if not isinstance(collector_name, str) or not collector_name:
+                continue
+            collector_counts[collector_name] = collector_counts.get(collector_name, 0) + 1
+    return collector_counts
 
 
-def _select_recent_events(
-    *,
-    event_entries: list[dict[str, Any]],
-    current_observation: dict[str, Any],
-    retrieval_plan: dict[str, Any],
-    limit: int,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    if limit <= 0:
-        raise ValueError("recent event selection limit must be positive")
-    scored_entries: list[tuple[float, int, dict[str, Any], list[str]]] = []
-    for event_entry in event_entries:
-        score, reason_codes = _event_relevance_score(
-            event_entry=event_entry,
-            current_observation=current_observation,
-            retrieval_plan=retrieval_plan,
-        )
-        if score <= 0.0:
+# Block: Selector input slot counts
+def _selector_input_slot_counts(
+    selector_input_candidates: list[dict[str, Any]],
+) -> dict[str, int]:
+    slot_counts: dict[str, int] = {}
+    for candidate in selector_input_candidates:
+        slot_name = candidate.get("slot")
+        if not isinstance(slot_name, str) or not slot_name:
             continue
-        scored_entries.append(
-            (
-                score,
-                int(event_entry["created_at"]),
-                event_entry,
-                reason_codes,
-            )
-        )
-    scored_entries.sort(key=lambda item: (item[0], item[1]), reverse=True)
-    selected_rows = scored_entries[:limit]
-    return (
-        [event_entry for _, _, event_entry, _ in selected_rows],
-        [
-            {
-                "slot": "recent_event_window",
-                "item_ref": f"event:{event_entry['event_id']}",
-                "score": round(score, 3),
-                "reason_codes": reason_codes,
-            }
-            for score, _, event_entry, reason_codes in selected_rows
-        ],
-    )
+        slot_counts[slot_name] = slot_counts.get(slot_name, 0) + 1
+    return slot_counts
 
 
-# Block: Scoring helpers
-def _memory_relevance_score(
-    *,
-    memory_entry: dict[str, Any],
-    current_observation: dict[str, Any],
-    retrieval_plan: dict[str, Any],
-) -> tuple[float, list[str]]:
-    body_text = memory_entry["body_text"]
-    if not isinstance(body_text, str) or not body_text:
-        raise ValueError("memory entry body_text must be non-empty string")
-    payload = memory_entry["payload"]
-    if not isinstance(payload, dict):
-        raise ValueError("memory entry payload must be object")
-    reason_codes: list[str] = []
-    score = 0.0
-    for text_hint in _observation_text_hints(current_observation):
-        if text_hint in body_text:
-            score += 1.0
-            _append_reason(reason_codes, "matched_observation_text")
-        if _payload_contains_text_hint(payload=payload, text_hint=text_hint):
-            score += 0.6
-            _append_reason(reason_codes, "matched_payload_text")
-    query_hint = _observation_query_hint(current_observation)
-    if query_hint is not None and payload.get("query") == query_hint:
-        score += 1.5
-        _append_reason(reason_codes, "matched_query")
-    source_task_id = current_observation.get("source_task_id")
-    if isinstance(source_task_id, str) and source_task_id:
-        if payload.get("source_task_id") == source_task_id:
-            score += 2.0
-            _append_reason(reason_codes, "matched_source_task")
-    mode_bonus = _mode_bonus(
-        retrieval_plan=retrieval_plan,
-        memory_kind=str(memory_entry["memory_kind"]),
-    )
-    if mode_bonus > 0.0:
-        score += mode_bonus
-        _append_reason(reason_codes, "mode_priority")
-    profile_bias = _memory_profile_bias(
-        memory_kind=str(memory_entry["memory_kind"]),
-        retrieval_plan=retrieval_plan,
-    )
-    if profile_bias > 0.0:
-        score += profile_bias
-        _append_reason(reason_codes, "profile_bias")
-    importance = min(1.0, float(memory_entry["importance"]))
-    memory_strength = min(1.0, float(memory_entry["memory_strength"]))
-    if importance > 0.0:
-        score += importance * 0.2
-        _append_reason(reason_codes, "importance_bias")
-    if memory_strength > 0.0:
-        score += memory_strength * 0.2
-        _append_reason(reason_codes, "memory_strength_bias")
-    return (score, reason_codes)
-
-
-def _event_relevance_score(
-    *,
-    event_entry: dict[str, Any],
-    current_observation: dict[str, Any],
-    retrieval_plan: dict[str, Any],
-) -> tuple[float, list[str]]:
-    summary_text = event_entry["summary_text"]
-    if not isinstance(summary_text, str) or not summary_text:
-        raise ValueError("recent event summary_text must be non-empty string")
-    reason_codes: list[str] = []
-    score = 0.0
-    for text_hint in _observation_text_hints(current_observation):
-        if text_hint in summary_text:
-            score += 1.0
-            _append_reason(reason_codes, "matched_observation_text")
-    if current_observation["input_kind"] == "network_result" and event_entry["source"] == "network_result":
-        score += 1.0
-        _append_reason(reason_codes, "same_input_kind")
-    if retrieval_plan["mode"] == "associative_recent":
-        score += 0.4
-        _append_reason(reason_codes, "mode_priority")
-    profile_bias = _event_profile_bias(retrieval_plan=retrieval_plan)
-    if profile_bias > 0.0:
-        score += profile_bias
-        _append_reason(reason_codes, "profile_bias")
-    return (score, reason_codes)
-
-
-def _mode_bonus(
-    *,
-    retrieval_plan: dict[str, Any],
-    memory_kind: str,
-) -> float:
-    mode = str(retrieval_plan["mode"])
-    if mode == "task_targeted" and memory_kind in {"summary", "fact", "relation", "preference"}:
-        return 0.40
-    if mode == "reflection_recall" and memory_kind in {"reflection_note", "event_affect"}:
-        return 0.60
-    if mode == "explicit_about_time" and memory_kind in {"summary", "episodic_event"}:
-        return 0.30
-    if mode == "associative_recent" and memory_kind in {"summary", "episodic_event"}:
-        return 0.25
-    return 0.0
-
-
-# Block: Profile bias helpers
-def _memory_profile_bias(
-    *,
-    memory_kind: str,
-    retrieval_plan: dict[str, Any],
-) -> float:
-    profile = retrieval_plan.get("profile")
-    if not isinstance(profile, dict):
-        raise ValueError("retrieval_plan.profile must be object")
-    if memory_kind == "summary":
-        return float(profile["summary_bias"]) * 0.35
-    if memory_kind in {"fact", "relation", "preference"}:
-        return float(profile["fact_bias"]) * 0.35
-    if memory_kind == "episodic_event":
-        return float(profile["event_bias"]) * 0.35
-    return 0.0
-
-
-def _event_profile_bias(*, retrieval_plan: dict[str, Any]) -> float:
-    profile = retrieval_plan.get("profile")
-    if not isinstance(profile, dict):
-        raise ValueError("retrieval_plan.profile must be object")
-    return float(profile["event_bias"]) * 0.35
-
-
-def _payload_contains_text_hint(
-    *,
-    payload: dict[str, Any],
-    text_hint: str,
-) -> bool:
-    return any(text_hint in text_part for text_part in _payload_text_values(payload))
-
-
-def _payload_text_values(value: Any) -> list[str]:
-    if isinstance(value, str):
-        return [value]
-    if isinstance(value, dict):
-        text_values: list[str] = []
-        for nested_value in value.values():
-            text_values.extend(_payload_text_values(nested_value))
-        return text_values
-    if isinstance(value, list):
-        text_values = []
-        for nested_value in value:
-            text_values.extend(_payload_text_values(nested_value))
-        return text_values
-    return []
-
-
-def _append_reason(reason_codes: list[str], reason_code: str) -> None:
-    if reason_code not in reason_codes:
-        reason_codes.append(reason_code)
-
-
-def _memory_item_ref(memory_entry: dict[str, Any]) -> str:
-    memory_kind = str(memory_entry["memory_kind"])
-    memory_state_id = str(memory_entry["memory_state_id"])
-    if memory_kind == "episodic_event":
-        return f"event:{memory_state_id}"
-    if memory_kind == "event_affect":
-        return f"event_affect:{memory_state_id}"
-    if memory_kind == "preference":
-        return f"preference:{memory_state_id}"
-    return f"memory_state:{memory_state_id}"
-
-
-# Block: Observation hints
-def _observation_text_hints(current_observation: dict[str, Any]) -> list[str]:
-    observation_text = current_observation["observation_text"]
-    if not isinstance(observation_text, str) or not observation_text:
-        raise ValueError("current_observation.observation_text must be non-empty string")
-    hints: list[str] = [observation_text]
-    for token in _text_hint_tokens(observation_text):
-        if token not in hints:
-            hints.append(token)
-    query_hint = _observation_query_hint(current_observation)
-    if query_hint is not None and query_hint not in hints:
-        hints.append(query_hint)
-    return hints
-
-
-def _observation_query_hint(current_observation: dict[str, Any]) -> str | None:
-    if current_observation["input_kind"] != "network_result":
-        return None
-    query = current_observation.get("query")
-    if not isinstance(query, str) or not query:
-        raise ValueError("network_result query must be non-empty string")
-    return query
-
-
-def _text_hint_tokens(text: str) -> list[str]:
-    normalized_text = text
-    for separator in (
-        "　",
-        "\n",
-        "\t",
-        ",",
-        "、",
-        ".",
-        "。",
-        "!",
-        "！",
-        "?",
-        "？",
-        ":",
-        "：",
-        ";",
-        "；",
-        "(",
-        ")",
-        "（",
-        "）",
-        "[",
-        "]",
-        "「",
-        "」",
-        "『",
-        "』",
-        "/",
-        "／",
-    ):
-        normalized_text = normalized_text.replace(separator, " ")
-    tokens: list[str] = []
-    for raw_token in normalized_text.split(" "):
-        token = raw_token.strip()
-        if len(token) < 2:
+# Block: Selector input reason counts
+def _selector_input_reason_counts(
+    selector_input_candidates: list[dict[str, Any]],
+) -> dict[str, int]:
+    reason_counts: dict[str, int] = {}
+    for candidate in selector_input_candidates:
+        reason_codes = candidate.get("reason_codes")
+        if not isinstance(reason_codes, list):
             continue
-        if token not in tokens:
-            tokens.append(token)
-    return tokens
+        for reason_code in reason_codes:
+            if not isinstance(reason_code, str) or not reason_code:
+                continue
+            reason_counts[reason_code] = reason_counts.get(reason_code, 0) + 1
+    return reason_counts
 
 
 # Block: Cognition formatting
@@ -644,11 +451,13 @@ def _memory_entry_for_cognition(
     memory_entry: dict[str, Any],
     *,
     resolved_at: int,
+    event_about_time_by_id: dict[str, dict[str, Any]],
+    state_about_time_by_id: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
     updated_at = int(memory_entry["updated_at"])
     created_at = int(memory_entry["created_at"])
     last_confirmed_at = int(memory_entry["last_confirmed_at"])
-    return {
+    projected_entry = {
         **memory_entry,
         "created_at_utc_text": _utc_text(created_at),
         "created_at_local_text": _local_text(created_at),
@@ -658,42 +467,181 @@ def _memory_entry_for_cognition(
         "last_confirmed_at_local_text": _local_text(last_confirmed_at),
         "relative_time_text": _relative_time_text(resolved_at, updated_at),
     }
+    about_time_hint_text = _state_or_event_about_time_hint_text(
+        memory_entry=memory_entry,
+        event_about_time_by_id=event_about_time_by_id,
+        state_about_time_by_id=state_about_time_by_id,
+    )
+    if about_time_hint_text is not None:
+        projected_entry["about_time_hint_text"] = about_time_hint_text
+    return projected_entry
 
 
 def _recent_event_for_cognition(
     event_entry: dict[str, Any],
     *,
     resolved_at: int,
+    event_about_time_by_id: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
     created_at = int(event_entry["created_at"])
-    return {
+    projected_event = {
         **event_entry,
         "created_at_utc_text": _utc_text(created_at),
         "created_at_local_text": _local_text(created_at),
         "relative_time_text": _relative_time_text(resolved_at, created_at),
     }
+    about_time_hint_text = _event_about_time_hint_text(
+        event_about_time_by_id.get(str(event_entry["event_id"]))
+    )
+    if about_time_hint_text is not None:
+        projected_event["about_time_hint_text"] = about_time_hint_text
+    dialog_role = _recent_dialog_role(event_entry)
+    if dialog_role is not None:
+        projected_event["dialog_role"] = dialog_role
+        projected_event["dialog_text"] = _recent_dialog_text(event_entry)
+    return projected_event
+
+
+# Block: イベント時制索引
+def _event_about_time_by_id(memory_snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    indexed_rows: dict[str, dict[str, Any]] = {}
+    for event_about_time in memory_snapshot.get("event_about_time", []):
+        if not isinstance(event_about_time, dict):
+            raise ValueError("memory_snapshot.event_about_time must contain only objects")
+        event_id = event_about_time.get("event_id")
+        if not isinstance(event_id, str) or not event_id:
+            raise ValueError("memory_snapshot.event_about_time.event_id must be non-empty string")
+        if event_id not in indexed_rows:
+            indexed_rows[event_id] = event_about_time
+    return indexed_rows
+
+
+# Block: 状態時制索引
+def _state_about_time_by_id(memory_snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    indexed_rows: dict[str, dict[str, Any]] = {}
+    for state_about_time in memory_snapshot.get("state_about_time", []):
+        if not isinstance(state_about_time, dict):
+            raise ValueError("memory_snapshot.state_about_time must contain only objects")
+        memory_state_id = state_about_time.get("memory_state_id")
+        if not isinstance(memory_state_id, str) or not memory_state_id:
+            raise ValueError("memory_snapshot.state_about_time.memory_state_id must be non-empty string")
+        if memory_state_id not in indexed_rows:
+            indexed_rows[memory_state_id] = state_about_time
+    return indexed_rows
+
+
+# Block: 状態またはイベントの時制ヒント
+def _state_or_event_about_time_hint_text(
+    *,
+    memory_entry: dict[str, Any],
+    event_about_time_by_id: dict[str, dict[str, Any]],
+    state_about_time_by_id: dict[str, dict[str, Any]],
+) -> str | None:
+    state_about_time = state_about_time_by_id.get(str(memory_entry["memory_state_id"]))
+    if state_about_time is not None:
+        return _event_about_time_hint_text(state_about_time)
+    related_event_id = _related_event_id(memory_entry)
+    if related_event_id is None:
+        return None
+    return _event_about_time_hint_text(event_about_time_by_id.get(related_event_id))
+
+
+# Block: 関連 event id 解決
+def _related_event_id(memory_entry: dict[str, Any]) -> str | None:
+    payload = memory_entry.get("payload")
+    if isinstance(payload, dict):
+        event_id = payload.get("event_id")
+        if isinstance(event_id, str) and event_id:
+            return event_id
+    if str(memory_entry.get("memory_kind")) == "episodic_event":
+        return str(memory_entry["memory_state_id"])
+    return None
+
+
+# Block: 会話イベント判定
+def _recent_dialog_role(event_entry: dict[str, Any]) -> str | None:
+    kind = str(event_entry["kind"])
+    summary_text = str(event_entry["summary_text"])
+    if kind == "external_response":
+        return "assistant"
+    if kind == "observation" and summary_text.startswith(("chat_message:", "microphone_message:")):
+        return "user"
+    return None
+
+
+# Block: 会話イベント本文
+def _recent_dialog_text(event_entry: dict[str, Any]) -> str:
+    kind = str(event_entry["kind"])
+    summary_text = str(event_entry["summary_text"]).strip()
+    if kind == "external_response":
+        return summary_text
+    if summary_text.startswith("chat_message:"):
+        chat_text = summary_text.removeprefix("chat_message:").strip()
+        if chat_text.startswith("camera_images:"):
+            image_count = chat_text.removeprefix("camera_images:").strip()
+            if image_count.isdigit():
+                return f"[画像 {image_count} 枚]"
+            return "[画像付き入力]"
+        if chat_text:
+            return chat_text
+        return "[空入力]"
+    if summary_text.startswith("microphone_message:"):
+        speech_text = summary_text.removeprefix("microphone_message:").strip()
+        if speech_text:
+            return speech_text
+    raise RuntimeError("recent dialog text is only supported for user observation or external_response")
+
+
+# Block: イベント時制ヒント整形
+def _event_about_time_hint_text(event_about_time: dict[str, Any] | None) -> str | None:
+    if not isinstance(event_about_time, dict):
+        return None
+    hint_parts: list[str] = []
+    about_year_start = event_about_time.get("about_year_start")
+    about_year_end = event_about_time.get("about_year_end")
+    if isinstance(about_year_start, int):
+        if isinstance(about_year_end, int) and about_year_end != about_year_start:
+            hint_parts.append(f"{about_year_start}-{about_year_end}年")
+        else:
+            hint_parts.append(f"{about_year_start}年")
+    else:
+        date_range_text = _event_about_time_date_range_text(event_about_time)
+        if date_range_text is not None:
+            hint_parts.append(date_range_text)
+    life_stage = event_about_time.get("life_stage")
+    if isinstance(life_stage, str) and life_stage:
+        hint_parts.append(life_stage_label(life_stage))
+    if not hint_parts:
+        return None
+    return " / ".join(hint_parts)
+
+
+# Block: イベント時制日付範囲
+def _event_about_time_date_range_text(event_about_time: dict[str, Any]) -> str | None:
+    about_start_ts = event_about_time.get("about_start_ts")
+    about_end_ts = event_about_time.get("about_end_ts")
+    if isinstance(about_start_ts, int):
+        start_text = _date_text(about_start_ts)
+        if isinstance(about_end_ts, int) and about_end_ts != about_start_ts:
+            return f"{start_text}..{_date_text(about_end_ts)}"
+        return start_text
+    if isinstance(about_end_ts, int):
+        return _date_text(about_end_ts)
+    return None
+
+# Block: 日付テキスト
+def _date_text(unix_ms: int) -> str:
+    return datetime.fromtimestamp(unix_ms / 1000, tz=timezone.utc).astimezone().strftime("%Y-%m-%d")
 
 
 # Block: Time helpers
 def _utc_text(unix_ms: int) -> str:
-    return datetime.fromtimestamp(unix_ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    return utc_text(unix_ms)
 
 
 def _local_text(unix_ms: int) -> str:
-    local_dt = datetime.fromtimestamp(unix_ms / 1000, tz=timezone.utc).astimezone()
-    timezone_name = local_dt.tzname() or "UTC"
-    return local_dt.strftime(f"%Y-%m-%d %H:%M:%S {timezone_name}")
+    return local_text(unix_ms)
 
 
 def _relative_time_text(now_ms: int, past_ms: int) -> str:
-    delta_seconds = max(0, (now_ms - past_ms) // 1000)
-    if delta_seconds < 60:
-        return f"{delta_seconds}秒前"
-    delta_minutes = delta_seconds // 60
-    if delta_minutes < 60:
-        return f"{delta_minutes}分前"
-    delta_hours = delta_minutes // 60
-    if delta_hours < 24:
-        return f"{delta_hours}時間前"
-    delta_days = delta_hours // 24
-    return f"{delta_days}日前"
+    return relative_time_text(now_ms, past_ms)

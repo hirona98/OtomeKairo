@@ -8,6 +8,7 @@ import sqlite3
 import time
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -42,6 +43,7 @@ from otomekairo.usecase.observation_normalization import (
 from otomekairo.usecase.camera_observation_payload import build_camera_observation_payload
 from otomekairo.usecase.persona_change import evaluate_persona_change
 from otomekairo.usecase.runtime_live_state import build_runtime_live_state
+from otomekairo.usecase.about_time_text import about_years_from_text, life_stage_from_text
 from otomekairo.usecase.write_memory_plan import (
     build_write_memory_plan,
     validate_write_memory_event_snapshots,
@@ -52,7 +54,7 @@ from otomekairo.usecase.write_memory_plan import (
 
 # Block: Schema constants
 SCHEMA_NAME = "core_schema"
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 15
 EMBEDDING_VECTOR_DIMENSION = 32
 LEGACY_SETTING_KEY_ALIASES = {
     "llm.model": "llm.default_model",
@@ -161,14 +163,7 @@ class SqliteStateStore:
                 LIMIT 1
                 """
             ).fetchone()
-            retrieval_row = connection.execute(
-                """
-                SELECT cycle_id, created_at, plan_json, selected_json, resolved_event_ids_json
-                FROM retrieval_runs
-                ORDER BY created_at DESC
-                LIMIT 1
-                """
-            ).fetchone()
+            retrieval_row = _read_latest_retrieval_row(connection)
             self_row = connection.execute(
                 """
                 SELECT current_emotion_json
@@ -271,6 +266,14 @@ class SqliteStateStore:
                 "waiting_task_count": waiting_count,
             },
         }
+
+    # Block: Latest retrieval run read
+    def read_latest_retrieval_run(self) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            retrieval_row = _read_latest_retrieval_row(connection)
+        if retrieval_row is None:
+            return None
+        return _public_retrieval_detail(retrieval_row)
 
     # Block: Effective settings read
     def read_effective_settings(self, default_settings: dict[str, Any]) -> dict[str, Any]:
@@ -729,15 +732,18 @@ class SqliteStateStore:
             recent_event_rows = connection.execute(
                 """
                 SELECT
-                    event_id,
-                    source,
-                    kind,
-                    observation_summary,
-                    action_summary,
-                    result_summary,
-                    created_at
+                    events.event_id,
+                    events.source,
+                    events.kind,
+                    events.observation_summary,
+                    events.action_summary,
+                    events.result_summary,
+                    events.created_at,
+                    event_preview_cache.preview_text
                 FROM events
-                WHERE searchable = 1
+                LEFT JOIN event_preview_cache
+                       ON event_preview_cache.event_id = events.event_id
+                WHERE events.searchable = 1
                 ORDER BY created_at DESC
                 LIMIT ?
                 """,
@@ -823,6 +829,36 @@ class SqliteStateStore:
                     ranked_hits=similarity_hits,
                     fallback_rows=memory_rows,
                 )
+            recent_event_ids = [str(row["event_id"]) for row in recent_event_rows]
+            memory_state_ids = [str(row["memory_state_id"]) for row in memory_rows]
+            event_link_rows = _fetch_event_links_for_memory_snapshot(
+                connection=connection,
+                event_ids=recent_event_ids,
+            )
+            event_thread_rows = _fetch_event_threads_for_memory_snapshot(
+                connection=connection,
+                event_ids=recent_event_ids,
+            )
+            event_about_time_rows = _fetch_event_about_time_for_memory_snapshot(
+                connection=connection,
+                event_ids=recent_event_ids,
+            )
+            event_entity_rows = _fetch_event_entities_for_memory_snapshot(
+                connection=connection,
+                event_ids=recent_event_ids,
+            )
+            state_link_rows = _fetch_state_links_for_memory_snapshot(
+                connection=connection,
+                memory_state_ids=memory_state_ids,
+            )
+            state_about_time_rows = _fetch_state_about_time_for_memory_snapshot(
+                connection=connection,
+                memory_state_ids=memory_state_ids,
+            )
+            state_entity_rows = _fetch_state_entities_for_memory_snapshot(
+                connection=connection,
+                memory_state_ids=memory_state_ids,
+            )
         return CognitionStateSnapshot(
             self_state={
                 "personality": json.loads(self_row["personality_json"]),
@@ -877,6 +913,13 @@ class SqliteStateStore:
                 memory_rows=memory_rows,
                 affect_rows=affect_rows,
                 preference_rows=preference_rows,
+                event_link_rows=event_link_rows,
+                event_thread_rows=event_thread_rows,
+                event_about_time_rows=event_about_time_rows,
+                event_entity_rows=event_entity_rows,
+                state_link_rows=state_link_rows,
+                state_about_time_rows=state_about_time_rows,
+                state_entity_rows=state_entity_rows,
             ),
             retrieval_profile=retrieval_profile,
             effective_settings=effective_settings,
@@ -2389,9 +2432,31 @@ class SqliteStateStore:
             event_affect_updates=list(memory_write_plan["event_affect"]),
             created_at=created_at,
         )
+        self._apply_event_about_time(
+            connection=connection,
+            event_annotations=list(memory_write_plan["event_annotations"]),
+            created_at=created_at,
+        )
+        self._apply_event_entities(
+            connection=connection,
+            event_annotations=list(memory_write_plan["event_annotations"]),
+            created_at=created_at,
+        )
         self._apply_context_updates(
             connection=connection,
             context_updates=dict(memory_write_plan["context_updates"]),
+            state_id_by_ref=state_id_by_ref,
+            created_at=created_at,
+        )
+        self._apply_state_about_time(
+            connection=connection,
+            state_updates=list(memory_write_plan["state_updates"]),
+            state_id_by_ref=state_id_by_ref,
+            created_at=created_at,
+        )
+        self._apply_state_entities(
+            connection=connection,
+            state_updates=list(memory_write_plan["state_updates"]),
             state_id_by_ref=state_id_by_ref,
             created_at=created_at,
         )
@@ -2720,6 +2785,276 @@ class SqliteStateStore:
                 to_state_id=to_state_id,
                 state_link_update=state_link_update,
                 created_at=created_at,
+            )
+
+    # Block: イベント時制反映
+    def _apply_event_about_time(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        event_annotations: list[dict[str, Any]],
+        created_at: int,
+    ) -> None:
+        for event_annotation in event_annotations:
+            self._replace_event_about_time(
+                connection=connection,
+                event_annotation=event_annotation,
+                created_at=created_at,
+            )
+
+    # Block: イベント時制置換
+    def _replace_event_about_time(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        event_annotation: dict[str, Any],
+        created_at: int,
+    ) -> None:
+        event_id = str(event_annotation["event_id"])
+        connection.execute(
+            """
+            DELETE FROM event_about_time
+            WHERE event_id = ?
+            """,
+            (event_id,),
+        )
+        about_time = event_annotation.get("about_time")
+        if not isinstance(about_time, dict):
+            return
+        connection.execute(
+            """
+            INSERT INTO event_about_time (
+                event_about_time_id,
+                event_id,
+                about_start_ts,
+                about_end_ts,
+                about_year_start,
+                about_year_end,
+                life_stage,
+                confidence,
+                created_at,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                _opaque_id("eat"),
+                event_id,
+                about_time.get("about_start_ts"),
+                about_time.get("about_end_ts"),
+                about_time.get("about_year_start"),
+                about_time.get("about_year_end"),
+                about_time.get("life_stage"),
+                float(about_time["about_time_confidence"]),
+                created_at,
+                created_at,
+            ),
+        )
+
+    # Block: イベントエンティティ反映
+    def _apply_event_entities(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        event_annotations: list[dict[str, Any]],
+        created_at: int,
+    ) -> None:
+        for event_annotation in event_annotations:
+            self._replace_event_entities(
+                connection=connection,
+                event_annotation=event_annotation,
+                created_at=created_at,
+            )
+
+    # Block: イベントエンティティ置換
+    def _replace_event_entities(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        event_annotation: dict[str, Any],
+        created_at: int,
+    ) -> None:
+        event_id = str(event_annotation["event_id"])
+        connection.execute(
+            """
+            DELETE FROM event_entities
+            WHERE event_id = ?
+            """,
+            (event_id,),
+        )
+        for entity_entry in _event_entity_entries_from_annotation(event_annotation):
+            connection.execute(
+                """
+                INSERT INTO event_entities (
+                    event_entity_id,
+                    event_id,
+                    entity_type_norm,
+                    entity_name_raw,
+                    entity_name_norm,
+                    confidence,
+                    created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    _opaque_id("een"),
+                    event_id,
+                    str(entity_entry["entity_type_norm"]),
+                    str(entity_entry["entity_name_raw"]),
+                    _normalized_entity_name(str(entity_entry["entity_name_raw"])),
+                    float(entity_entry["confidence"]),
+                    created_at,
+                ),
+            )
+
+    # Block: 状態エンティティ反映
+    def _apply_state_entities(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        state_updates: list[dict[str, Any]],
+        state_id_by_ref: dict[str, str],
+        created_at: int,
+    ) -> None:
+        applied_state_ids: set[str] = set()
+        for state_update in state_updates:
+            operation = str(state_update["operation"])
+            state_id = (
+                state_id_by_ref.get(str(state_update["state_ref"]))
+                if operation == "upsert"
+                else str(state_update["target_state_id"])
+            )
+            if not isinstance(state_id, str) or not state_id or state_id in applied_state_ids:
+                continue
+            state_row = self._fetch_memory_state_row_for_update(
+                connection=connection,
+                memory_state_id=state_id,
+            )
+            self._replace_state_entities(
+                connection=connection,
+                state_row=state_row,
+                created_at=created_at,
+            )
+            applied_state_ids.add(state_id)
+
+    # Block: 状態時制反映
+    def _apply_state_about_time(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        state_updates: list[dict[str, Any]],
+        state_id_by_ref: dict[str, str],
+        created_at: int,
+    ) -> None:
+        applied_state_ids: set[str] = set()
+        for state_update in state_updates:
+            operation = str(state_update["operation"])
+            state_id = (
+                state_id_by_ref.get(str(state_update["state_ref"]))
+                if operation == "upsert"
+                else str(state_update["target_state_id"])
+            )
+            if not isinstance(state_id, str) or not state_id or state_id in applied_state_ids:
+                continue
+            state_row = self._fetch_memory_state_row_for_update(
+                connection=connection,
+                memory_state_id=state_id,
+            )
+            self._replace_state_about_time(
+                connection=connection,
+                state_row=state_row,
+                created_at=created_at,
+            )
+            applied_state_ids.add(state_id)
+
+    # Block: 状態時制置換
+    def _replace_state_about_time(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        state_row: sqlite3.Row,
+        created_at: int,
+    ) -> None:
+        memory_state_id = str(state_row["memory_state_id"])
+        connection.execute(
+            """
+            DELETE FROM state_about_time
+            WHERE memory_state_id = ?
+            """,
+            (memory_state_id,),
+        )
+        about_time = _state_about_time_from_row(state_row)
+        if about_time is None:
+            return
+        connection.execute(
+            """
+            INSERT INTO state_about_time (
+                state_about_time_id,
+                memory_state_id,
+                about_start_ts,
+                about_end_ts,
+                about_year_start,
+                about_year_end,
+                life_stage,
+                confidence,
+                created_at,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                _opaque_id("sat"),
+                memory_state_id,
+                about_time["about_start_ts"],
+                about_time["about_end_ts"],
+                about_time["about_year_start"],
+                about_time["about_year_end"],
+                about_time["life_stage"],
+                about_time["confidence"],
+                created_at,
+                created_at,
+            ),
+        )
+
+    # Block: 状態エンティティ置換
+    def _replace_state_entities(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        state_row: sqlite3.Row,
+        created_at: int,
+    ) -> None:
+        memory_state_id = str(state_row["memory_state_id"])
+        connection.execute(
+            """
+            DELETE FROM state_entities
+            WHERE memory_state_id = ?
+            """,
+            (memory_state_id,),
+        )
+        for entity_entry in _state_entity_entries_from_row(state_row):
+            connection.execute(
+                """
+                INSERT INTO state_entities (
+                    state_entity_id,
+                    memory_state_id,
+                    entity_type_norm,
+                    entity_name_raw,
+                    entity_name_norm,
+                    confidence,
+                    created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    _opaque_id("sen"),
+                    memory_state_id,
+                    entity_entry["entity_type_norm"],
+                    entity_entry["entity_name_raw"],
+                    entity_entry["entity_name_norm"],
+                    entity_entry["confidence"],
+                    created_at,
+                ),
             )
 
     # Block: Preference memory upsert
@@ -3310,7 +3645,29 @@ class SqliteStateStore:
                 connection=connection,
                 event_ids=[target_event_id],
             )[0]
-            preview_text = _build_event_preview_text(event_row)
+            event_entity_rows = _fetch_event_entities_for_memory_snapshot(
+                connection=connection,
+                event_ids=[target_event_id],
+            )
+            event_thread_rows = _fetch_event_threads_for_memory_snapshot(
+                connection=connection,
+                event_ids=[target_event_id],
+            )
+            event_about_time_row = _fetch_event_about_time_for_preview(
+                connection=connection,
+                event_id=target_event_id,
+            )
+            event_affect_row = _fetch_event_affect_for_preview(
+                connection=connection,
+                event_id=target_event_id,
+            )
+            preview_text = _build_event_preview_text(
+                event_row=event_row,
+                event_entity_rows=event_entity_rows,
+                event_thread_rows=event_thread_rows,
+                event_about_time_row=event_about_time_row,
+                event_affect_row=event_affect_row,
+            )
             preview_id = self._upsert_event_preview_cache(
                 connection=connection,
                 event_id=target_event_id,
@@ -5753,7 +6110,7 @@ class SqliteStateStore:
             return
         if current_version > SCHEMA_VERSION:
             raise RuntimeError("schema_version is newer than this initializer")
-        if current_version not in {2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}:
+        if current_version not in {2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14}:
             raise RuntimeError("unsupported schema_version for migration")
         while current_version < SCHEMA_VERSION:
             if current_version == 2:
@@ -5799,6 +6156,14 @@ class SqliteStateStore:
             if current_version == 12:
                 self._migrate_schema_12_to_13(connection=connection, now_ms=now_ms)
                 current_version = 13
+                continue
+            if current_version == 13:
+                self._migrate_schema_13_to_14(connection=connection, now_ms=now_ms)
+                current_version = 14
+                continue
+            if current_version == 14:
+                self._migrate_schema_14_to_15(connection=connection, now_ms=now_ms)
+                current_version = 15
                 continue
             raise RuntimeError("unsupported schema_version for migration")
 
@@ -6994,6 +7359,261 @@ class SqliteStateStore:
             (_json_text(13), now_ms),
         )
 
+    # Block: Schema migration 13->14
+    def _migrate_schema_13_to_14(self, *, connection: sqlite3.Connection, now_ms: int) -> None:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS event_about_time (
+                event_about_time_id TEXT PRIMARY KEY,
+                event_id TEXT NOT NULL UNIQUE,
+                about_start_ts INTEGER,
+                about_end_ts INTEGER,
+                about_year_start INTEGER,
+                about_year_end INTEGER,
+                life_stage TEXT,
+                confidence REAL NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                CHECK (
+                    about_start_ts IS NOT NULL
+                    OR about_end_ts IS NOT NULL
+                    OR about_year_start IS NOT NULL
+                    OR about_year_end IS NOT NULL
+                    OR life_stage IS NOT NULL
+                ),
+                FOREIGN KEY (event_id) REFERENCES events (event_id)
+                    ON UPDATE CASCADE
+                    ON DELETE RESTRICT
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_event_about_time_event
+                ON event_about_time (event_id)
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_event_about_time_year
+                ON event_about_time (about_year_start, about_year_end)
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_event_about_time_life_stage
+                ON event_about_time (life_stage)
+            """
+        )
+        event_ids = [
+            str(row["event_id"])
+            for row in connection.execute(
+                """
+                SELECT DISTINCT event_id
+                FROM event_entities
+                WHERE entity_type_norm IN ('about_year', 'life_stage')
+                ORDER BY event_id ASC
+                """
+            ).fetchall()
+        ]
+        for event_id in event_ids:
+            entity_rows = connection.execute(
+                """
+                SELECT entity_type_norm, entity_name_raw, confidence
+                FROM event_entities
+                WHERE event_id = ?
+                  AND entity_type_norm IN ('about_year', 'life_stage')
+                ORDER BY created_at ASC
+                """,
+                (event_id,),
+            ).fetchall()
+            about_years: list[int] = []
+            life_stage: str | None = None
+            confidence = 0.0
+            for row in entity_rows:
+                entity_type_norm = str(row["entity_type_norm"])
+                confidence = max(confidence, float(row["confidence"]))
+                if entity_type_norm == "about_year":
+                    about_year = int(str(row["entity_name_raw"]))
+                    if about_year not in about_years:
+                        about_years.append(about_year)
+                    continue
+                if life_stage is None:
+                    life_stage = str(row["entity_name_raw"])
+            if not about_years and life_stage is None:
+                continue
+            connection.execute(
+                """
+                INSERT INTO event_about_time (
+                    event_about_time_id,
+                    event_id,
+                    about_start_ts,
+                    about_end_ts,
+                    about_year_start,
+                    about_year_end,
+                    life_stage,
+                    confidence,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    _opaque_id("eat"),
+                    event_id,
+                    min(about_years) if about_years else None,
+                    max(about_years) if about_years else None,
+                    life_stage,
+                    confidence if confidence > 0.0 else 0.5,
+                    now_ms,
+                    now_ms,
+                ),
+            )
+        connection.execute(
+            """
+            UPDATE db_meta
+            SET meta_value_json = ?,
+                updated_at = ?
+            WHERE meta_key = 'schema_version'
+            """,
+            (_json_text(14), now_ms),
+        )
+
+    # Block: Schema migration 14->15
+    def _migrate_schema_14_to_15(self, *, connection: sqlite3.Connection, now_ms: int) -> None:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS state_about_time (
+                state_about_time_id TEXT PRIMARY KEY,
+                memory_state_id TEXT NOT NULL UNIQUE,
+                about_start_ts INTEGER,
+                about_end_ts INTEGER,
+                about_year_start INTEGER,
+                about_year_end INTEGER,
+                life_stage TEXT,
+                confidence REAL NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                CHECK (
+                    about_start_ts IS NOT NULL
+                    OR about_end_ts IS NOT NULL
+                    OR about_year_start IS NOT NULL
+                    OR about_year_end IS NOT NULL
+                    OR life_stage IS NOT NULL
+                ),
+                FOREIGN KEY (memory_state_id) REFERENCES memory_states (memory_state_id)
+                    ON UPDATE CASCADE
+                    ON DELETE RESTRICT
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_state_about_time_state
+                ON state_about_time (memory_state_id)
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_state_about_time_year
+                ON state_about_time (about_year_start, about_year_end)
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_state_about_time_life_stage
+                ON state_about_time (life_stage)
+            """
+        )
+        legacy_state_about_time_by_id: dict[str, dict[str, Any]] = {}
+        for row in connection.execute(
+            """
+            SELECT memory_state_id, entity_type_norm, entity_name_raw, confidence
+            FROM state_entities
+            WHERE entity_type_norm IN ('about_year', 'life_stage')
+            ORDER BY created_at ASC
+            """
+        ).fetchall():
+            memory_state_id = str(row["memory_state_id"])
+            legacy_entry = legacy_state_about_time_by_id.get(memory_state_id)
+            if legacy_entry is None:
+                legacy_entry = {
+                    "about_start_ts": None,
+                    "about_end_ts": None,
+                    "about_year_start": None,
+                    "about_year_end": None,
+                    "life_stage": None,
+                    "confidence": 0.0,
+                }
+                legacy_state_about_time_by_id[memory_state_id] = legacy_entry
+            legacy_entry["confidence"] = max(legacy_entry["confidence"], float(row["confidence"]))
+            entity_type_norm = str(row["entity_type_norm"])
+            if entity_type_norm == "about_year":
+                about_year = int(str(row["entity_name_raw"]))
+                if legacy_entry["about_year_start"] is None or about_year < legacy_entry["about_year_start"]:
+                    legacy_entry["about_year_start"] = about_year
+                if legacy_entry["about_year_end"] is None or about_year > legacy_entry["about_year_end"]:
+                    legacy_entry["about_year_end"] = about_year
+                continue
+            if legacy_entry["life_stage"] is None:
+                legacy_entry["life_stage"] = str(row["entity_name_raw"])
+        for state_row in connection.execute(
+            """
+            SELECT
+                memory_state_id,
+                body_text,
+                payload_json,
+                created_at,
+                updated_at
+            FROM memory_states
+            ORDER BY updated_at DESC
+            """
+        ).fetchall():
+            memory_state_id = str(state_row["memory_state_id"])
+            about_time = _state_about_time_from_row(state_row)
+            if about_time is None:
+                about_time = legacy_state_about_time_by_id.get(memory_state_id)
+            if not isinstance(about_time, dict):
+                continue
+            connection.execute(
+                """
+                INSERT INTO state_about_time (
+                    state_about_time_id,
+                    memory_state_id,
+                    about_start_ts,
+                    about_end_ts,
+                    about_year_start,
+                    about_year_end,
+                    life_stage,
+                    confidence,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    _opaque_id("sat"),
+                    memory_state_id,
+                    about_time["about_start_ts"],
+                    about_time["about_end_ts"],
+                    about_time["about_year_start"],
+                    about_time["about_year_end"],
+                    about_time["life_stage"],
+                    float(about_time["confidence"]),
+                    int(state_row["created_at"]),
+                    int(state_row["updated_at"]),
+                ),
+            )
+        connection.execute(
+            """
+            UPDATE db_meta
+            SET meta_value_json = ?,
+                updated_at = ?
+            WHERE meta_key = 'schema_version'
+            """,
+            (_json_text(15), now_ms),
+        )
+
     # Block: sqlite-vec schema ensure
     def _ensure_vec_index_schema(self, *, connection: sqlite3.Connection) -> None:
         connection.execute(
@@ -7996,6 +8616,19 @@ def _public_emotion_summary(current_emotion_json: dict[str, Any]) -> dict[str, A
     }
 
 
+# Block: Latest retrieval row read
+def _read_latest_retrieval_row(connection: sqlite3.Connection) -> sqlite3.Row | None:
+    return connection.execute(
+        """
+        SELECT cycle_id, created_at, plan_json, candidates_json, selected_json, resolved_event_ids_json
+        FROM retrieval_runs
+        ORDER BY created_at DESC
+        LIMIT 1
+        """
+    ).fetchone()
+
+
+# Block: Public retrieval summary
 def _public_retrieval_summary(row: sqlite3.Row) -> dict[str, Any]:
     plan_json = json.loads(row["plan_json"])
     selected_json = json.loads(row["selected_json"])
@@ -8006,9 +8639,116 @@ def _public_retrieval_summary(row: sqlite3.Row) -> dict[str, Any]:
         "queries": list(plan_json["queries"]),
         "selected_counts": dict(selected_json["selected_counts"]),
     }
+    collector_names = plan_json.get("collector_names")
+    if isinstance(collector_names, list):
+        public_collector_names = [
+            str(collector_name)
+            for collector_name in collector_names
+            if isinstance(collector_name, str) and collector_name
+        ]
+        if public_collector_names:
+            payload["collector_names"] = public_collector_names
+    for field_name in (
+        "collector_counts",
+        "selected_reason_counts",
+        "slot_skipped_slot_counts",
+        "reserve_slot_counts",
+    ):
+        public_counts = _public_positive_int_map(selected_json.get(field_name))
+        if public_counts:
+            payload[field_name] = public_counts
+    selector_summary = _public_selector_summary(selected_json.get("selector_summary"))
+    if selector_summary:
+        payload["selector_summary"] = selector_summary
+    return payload
+
+
+# Block: Public retrieval detail
+def _public_retrieval_detail(row: sqlite3.Row) -> dict[str, Any]:
+    candidates_json = json.loads(row["candidates_json"])
+    selected_json = json.loads(row["selected_json"])
+    payload = _public_retrieval_summary(row)
+    selector_input_trace_by_item_ref: dict[str, dict[str, Any]] = {}
+    selector_input_trace = candidates_json.get("selector_input_trace")
+    if isinstance(selector_input_trace, list):
+        payload["selector_input_trace"] = _public_selector_input_trace(selector_input_trace)
+        selector_input_trace_by_item_ref = _selector_input_trace_by_item_ref(
+            payload["selector_input_trace"]
+        )
+    selection_trace = selected_json.get("selection_trace")
+    if isinstance(selection_trace, list):
+        payload["selection_trace"] = _public_selected_trace(
+            selection_trace,
+            selector_input_trace_by_item_ref=selector_input_trace_by_item_ref,
+        )
+    slot_skipped_trace = selected_json.get("slot_skipped_trace")
+    if isinstance(slot_skipped_trace, list):
+        payload["slot_skipped_trace"] = _public_selected_trace(
+            slot_skipped_trace,
+            selector_input_trace_by_item_ref=selector_input_trace_by_item_ref,
+        )
+    reserve_trace = selected_json.get("reserve_trace")
+    if isinstance(reserve_trace, list):
+        payload["reserve_trace"] = _public_reserve_trace(
+            reserve_trace,
+            selector_input_trace_by_item_ref=selector_input_trace_by_item_ref,
+        )
+    for field_name in (
+        "slot_skipped_collector_counts",
+        "slot_skipped_reason_counts",
+        "reserve_collector_counts",
+        "reserve_reason_counts",
+    ):
+        public_counts = _public_positive_int_map(selected_json.get(field_name))
+        if public_counts:
+            payload[field_name] = public_counts
+    for field_name in (
+        "selector_input_collector_counts",
+        "selector_input_slot_counts",
+        "selector_input_reason_counts",
+    ):
+        public_counts = _public_positive_int_map(candidates_json.get(field_name))
+        if public_counts:
+            payload[field_name] = public_counts
+    trimmed_item_refs = selected_json.get("trimmed_item_refs")
+    if isinstance(trimmed_item_refs, list):
+        payload["trimmed_item_refs"] = [
+            str(item_ref)
+            for item_ref in trimmed_item_refs
+            if isinstance(item_ref, str) and item_ref
+        ]
     if isinstance(row["resolved_event_ids_json"], str) and row["resolved_event_ids_json"]:
         payload["resolved_event_ids"] = json.loads(row["resolved_event_ids_json"])
     return payload
+
+
+# Block: Public positive int map
+def _public_positive_int_map(value: Any) -> dict[str, int]:
+    if not isinstance(value, dict):
+        return {}
+    return {
+        str(key): int(entry_value)
+        for key, entry_value in value.items()
+        if isinstance(entry_value, int) and not isinstance(entry_value, bool) and entry_value > 0
+    }
+
+
+# Block: Public selector summary
+def _public_selector_summary(value: Any) -> dict[str, int | str]:
+    if not isinstance(value, dict):
+        return {}
+    return {
+        str(key): (
+            int(entry_value)
+            if isinstance(entry_value, int) and not isinstance(entry_value, bool)
+            else str(entry_value)
+        )
+        for key, entry_value in value.items()
+        if (
+            (isinstance(entry_value, int) and not isinstance(entry_value, bool))
+            or (isinstance(entry_value, str) and entry_value)
+        )
+    }
 
 
 def _public_persona_update(row: sqlite3.Row) -> dict[str, Any]:
@@ -8020,6 +8760,196 @@ def _public_persona_update(row: sqlite3.Row) -> dict[str, Any]:
         "evidence_event_ids": json.loads(row["evidence_event_ids_json"]),
         "updated_traits": _trait_update_entries(before_json=before_json, after_json=after_json),
     }
+
+
+# Block: Selector input trace 公開整形
+def _public_selector_input_trace(selector_input_trace: list[Any]) -> list[dict[str, Any]]:
+    public_trace: list[dict[str, Any]] = []
+    for index, trace_entry in enumerate(selector_input_trace):
+        if not isinstance(trace_entry, dict):
+            raise RuntimeError(f"selector_input_trace[{index}] must be object")
+        item_ref = trace_entry.get("item_ref")
+        slot_name = trace_entry.get("slot")
+        score = trace_entry.get("score")
+        collector_names = trace_entry.get("collector_names")
+        reason_codes = trace_entry.get("reason_codes")
+        text = trace_entry.get("text")
+        relative_time_text = trace_entry.get("relative_time_text")
+        if not isinstance(item_ref, str) or not item_ref:
+            raise RuntimeError(f"selector_input_trace[{index}].item_ref must be non-empty string")
+        if not isinstance(slot_name, str) or not slot_name:
+            raise RuntimeError(f"selector_input_trace[{index}].slot must be non-empty string")
+        if not isinstance(score, (int, float)) or isinstance(score, bool):
+            raise RuntimeError(f"selector_input_trace[{index}].score must be number")
+        if not isinstance(collector_names, list):
+            raise RuntimeError(f"selector_input_trace[{index}].collector_names must be list")
+        if not isinstance(reason_codes, list):
+            raise RuntimeError(f"selector_input_trace[{index}].reason_codes must be list")
+        if not isinstance(text, str) or not text:
+            raise RuntimeError(f"selector_input_trace[{index}].text must be non-empty string")
+        if not isinstance(relative_time_text, str) or not relative_time_text:
+            raise RuntimeError(f"selector_input_trace[{index}].relative_time_text must be non-empty string")
+        public_entry: dict[str, Any] = {
+            "item_ref": item_ref,
+            "slot": slot_name,
+            "score": round(float(score), 3),
+            "collector_names": [
+                str(collector_name)
+                for collector_name in collector_names
+                if isinstance(collector_name, str) and collector_name
+            ],
+            "reason_codes": [
+                str(reason_code)
+                for reason_code in reason_codes
+                if isinstance(reason_code, str) and reason_code
+            ],
+            "text": text,
+            "relative_time_text": relative_time_text,
+        }
+        memory_kind = trace_entry.get("memory_kind")
+        if isinstance(memory_kind, str) and memory_kind:
+            public_entry["memory_kind"] = memory_kind
+        about_time_hint_text = trace_entry.get("about_time_hint_text")
+        if isinstance(about_time_hint_text, str) and about_time_hint_text:
+            public_entry["about_time_hint_text"] = about_time_hint_text
+        public_trace.append(public_entry)
+    return public_trace
+
+
+# Block: Selection trace 公開整形
+def _public_selected_trace(
+    selection_trace: list[Any],
+    *,
+    selector_input_trace_by_item_ref: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    public_trace: list[dict[str, Any]] = []
+    for index, trace_entry in enumerate(selection_trace):
+        if not isinstance(trace_entry, dict):
+            raise RuntimeError(f"selection_trace[{index}] must be object")
+        item_ref = trace_entry.get("item_ref")
+        slot_name = trace_entry.get("slot")
+        score = trace_entry.get("score")
+        collector_names = trace_entry.get("collector_names")
+        reason_codes = trace_entry.get("reason_codes")
+        duplicate_hits = trace_entry.get("duplicate_hits")
+        selection_rank = trace_entry.get("selection_rank")
+        if not isinstance(item_ref, str) or not item_ref:
+            raise RuntimeError(f"selection_trace[{index}].item_ref must be non-empty string")
+        if not isinstance(slot_name, str) or not slot_name:
+            raise RuntimeError(f"selection_trace[{index}].slot must be non-empty string")
+        if not isinstance(score, (int, float)) or isinstance(score, bool):
+            raise RuntimeError(f"selection_trace[{index}].score must be number")
+        if not isinstance(collector_names, list):
+            raise RuntimeError(f"selection_trace[{index}].collector_names must be list")
+        if not isinstance(reason_codes, list):
+            raise RuntimeError(f"selection_trace[{index}].reason_codes must be list")
+        if not isinstance(duplicate_hits, int) or isinstance(duplicate_hits, bool):
+            raise RuntimeError(f"selection_trace[{index}].duplicate_hits must be integer")
+        if not isinstance(selection_rank, int) or isinstance(selection_rank, bool) or selection_rank <= 0:
+            raise RuntimeError(f"selection_trace[{index}].selection_rank must be positive integer")
+        public_entry = {
+            "item_ref": item_ref,
+            "slot": slot_name,
+            "score": round(float(score), 3),
+            "collector_names": [
+                str(collector_name)
+                for collector_name in collector_names
+                if isinstance(collector_name, str) and collector_name
+            ],
+            "reason_codes": [
+                str(reason_code)
+                for reason_code in reason_codes
+                if isinstance(reason_code, str) and reason_code
+            ],
+            "duplicate_hits": duplicate_hits,
+            "selection_rank": selection_rank,
+        }
+        _merge_selector_input_context(
+            public_entry=public_entry,
+            selector_input_trace_by_item_ref=selector_input_trace_by_item_ref,
+            item_ref=item_ref,
+        )
+        public_trace.append(public_entry)
+    return public_trace
+
+
+# Block: Reserve trace 公開整形
+def _public_reserve_trace(
+    reserve_trace: list[Any],
+    *,
+    selector_input_trace_by_item_ref: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    public_trace: list[dict[str, Any]] = []
+    for index, trace_entry in enumerate(reserve_trace):
+        if not isinstance(trace_entry, dict):
+            raise RuntimeError(f"reserve_trace[{index}] must be object")
+        item_ref = trace_entry.get("item_ref")
+        slot_name = trace_entry.get("slot")
+        score = trace_entry.get("score")
+        collector_names = trace_entry.get("collector_names")
+        reason_codes = trace_entry.get("reason_codes")
+        duplicate_hits = trace_entry.get("duplicate_hits")
+        if not isinstance(item_ref, str) or not item_ref:
+            raise RuntimeError(f"reserve_trace[{index}].item_ref must be non-empty string")
+        if not isinstance(slot_name, str) or not slot_name:
+            raise RuntimeError(f"reserve_trace[{index}].slot must be non-empty string")
+        if not isinstance(score, (int, float)) or isinstance(score, bool):
+            raise RuntimeError(f"reserve_trace[{index}].score must be number")
+        if not isinstance(collector_names, list):
+            raise RuntimeError(f"reserve_trace[{index}].collector_names must be list")
+        if not isinstance(reason_codes, list):
+            raise RuntimeError(f"reserve_trace[{index}].reason_codes must be list")
+        if not isinstance(duplicate_hits, int) or isinstance(duplicate_hits, bool):
+            raise RuntimeError(f"reserve_trace[{index}].duplicate_hits must be integer")
+        public_entry = {
+            "item_ref": item_ref,
+            "slot": slot_name,
+            "score": round(float(score), 3),
+            "collector_names": [
+                str(collector_name)
+                for collector_name in collector_names
+                if isinstance(collector_name, str) and collector_name
+            ],
+            "reason_codes": [
+                str(reason_code)
+                for reason_code in reason_codes
+                if isinstance(reason_code, str) and reason_code
+            ],
+            "duplicate_hits": duplicate_hits,
+        }
+        _merge_selector_input_context(
+            public_entry=public_entry,
+            selector_input_trace_by_item_ref=selector_input_trace_by_item_ref,
+            item_ref=item_ref,
+        )
+        public_trace.append(public_entry)
+    return public_trace
+
+
+# Block: Selector input trace 索引
+def _selector_input_trace_by_item_ref(
+    selector_input_trace: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    return {
+        str(trace_entry["item_ref"]): trace_entry
+        for trace_entry in selector_input_trace
+    }
+
+
+# Block: Trace 文面情報の合成
+def _merge_selector_input_context(
+    *,
+    public_entry: dict[str, Any],
+    selector_input_trace_by_item_ref: dict[str, dict[str, Any]],
+    item_ref: str,
+) -> None:
+    selector_input_trace = selector_input_trace_by_item_ref.get(item_ref)
+    if selector_input_trace is None:
+        return
+    for field_name in ("memory_kind", "text", "relative_time_text", "about_time_hint_text"):
+        field_value = selector_input_trace.get(field_name)
+        if isinstance(field_value, str) and field_value:
+            public_entry[field_name] = field_value
 
 
 # Block: Event log entry
@@ -8477,6 +9407,243 @@ def _fetch_events_for_ids(
     return ordered_rows
 
 
+def _fetch_event_links_for_memory_snapshot(
+    *,
+    connection: sqlite3.Connection,
+    event_ids: list[str],
+) -> list[sqlite3.Row]:
+    if not event_ids:
+        return []
+    placeholders = ",".join("?" for _ in event_ids)
+    return connection.execute(
+        f"""
+        SELECT
+            event_link_id,
+            from_event_id,
+            to_event_id,
+            label,
+            confidence,
+            created_at,
+            updated_at
+        FROM event_links
+        WHERE from_event_id IN ({placeholders})
+           OR to_event_id IN ({placeholders})
+        ORDER BY updated_at DESC
+        LIMIT 48
+        """,
+        tuple(event_ids + event_ids),
+    ).fetchall()
+
+
+def _fetch_event_entities_for_memory_snapshot(
+    *,
+    connection: sqlite3.Connection,
+    event_ids: list[str],
+) -> list[sqlite3.Row]:
+    if not event_ids:
+        return []
+    placeholders = ",".join("?" for _ in event_ids)
+    return connection.execute(
+        f"""
+        SELECT
+            event_entity_id,
+            event_id,
+            entity_type_norm,
+            entity_name_raw,
+            entity_name_norm,
+            confidence,
+            created_at
+        FROM event_entities
+        WHERE event_id IN ({placeholders})
+        ORDER BY created_at DESC
+        LIMIT 64
+        """,
+        tuple(event_ids),
+    ).fetchall()
+
+
+def _fetch_event_about_time_for_memory_snapshot(
+    *,
+    connection: sqlite3.Connection,
+    event_ids: list[str],
+) -> list[sqlite3.Row]:
+    if not event_ids:
+        return []
+    placeholders = ",".join("?" for _ in event_ids)
+    return connection.execute(
+        f"""
+        SELECT
+            event_about_time_id,
+            event_id,
+            about_start_ts,
+            about_end_ts,
+            about_year_start,
+            about_year_end,
+            life_stage,
+            confidence,
+            created_at,
+            updated_at
+        FROM event_about_time
+        WHERE event_id IN ({placeholders})
+        ORDER BY updated_at DESC
+        LIMIT 32
+        """,
+        tuple(event_ids),
+    ).fetchall()
+
+
+def _fetch_event_about_time_for_preview(
+    *,
+    connection: sqlite3.Connection,
+    event_id: str,
+) -> sqlite3.Row | None:
+    return connection.execute(
+        """
+        SELECT
+            event_about_time_id,
+            event_id,
+            about_start_ts,
+            about_end_ts,
+            about_year_start,
+            about_year_end,
+            life_stage,
+            confidence,
+            created_at,
+            updated_at
+        FROM event_about_time
+        WHERE event_id = ?
+        """,
+        (event_id,),
+    ).fetchone()
+
+
+def _fetch_event_affect_for_preview(
+    *,
+    connection: sqlite3.Connection,
+    event_id: str,
+) -> sqlite3.Row | None:
+    return connection.execute(
+        """
+        SELECT moment_affect_text, moment_affect_labels_json
+        FROM event_affects
+        WHERE event_id = ?
+        """,
+        (event_id,),
+    ).fetchone()
+
+
+def _fetch_event_threads_for_memory_snapshot(
+    *,
+    connection: sqlite3.Connection,
+    event_ids: list[str],
+) -> list[sqlite3.Row]:
+    if not event_ids:
+        return []
+    placeholders = ",".join("?" for _ in event_ids)
+    return connection.execute(
+        f"""
+        SELECT
+            event_thread_id,
+            event_id,
+            thread_key,
+            thread_role,
+            confidence,
+            created_at,
+            updated_at
+        FROM event_threads
+        WHERE event_id IN ({placeholders})
+        ORDER BY updated_at DESC
+        LIMIT 48
+        """,
+        tuple(event_ids),
+    ).fetchall()
+
+
+def _fetch_state_links_for_memory_snapshot(
+    *,
+    connection: sqlite3.Connection,
+    memory_state_ids: list[str],
+) -> list[sqlite3.Row]:
+    if not memory_state_ids:
+        return []
+    placeholders = ",".join("?" for _ in memory_state_ids)
+    return connection.execute(
+        f"""
+        SELECT
+            state_link_id,
+            from_state_id,
+            to_state_id,
+            label,
+            confidence,
+            created_at,
+            updated_at
+        FROM state_links
+        WHERE from_state_id IN ({placeholders})
+           OR to_state_id IN ({placeholders})
+        ORDER BY updated_at DESC
+        LIMIT 48
+        """,
+        tuple(memory_state_ids + memory_state_ids),
+    ).fetchall()
+
+
+def _fetch_state_about_time_for_memory_snapshot(
+    *,
+    connection: sqlite3.Connection,
+    memory_state_ids: list[str],
+) -> list[sqlite3.Row]:
+    if not memory_state_ids:
+        return []
+    placeholders = ",".join("?" for _ in memory_state_ids)
+    return connection.execute(
+        f"""
+        SELECT
+            state_about_time_id,
+            memory_state_id,
+            about_start_ts,
+            about_end_ts,
+            about_year_start,
+            about_year_end,
+            life_stage,
+            confidence,
+            created_at,
+            updated_at
+        FROM state_about_time
+        WHERE memory_state_id IN ({placeholders})
+        ORDER BY updated_at DESC
+        LIMIT 32
+        """,
+        tuple(memory_state_ids),
+    ).fetchall()
+
+
+def _fetch_state_entities_for_memory_snapshot(
+    *,
+    connection: sqlite3.Connection,
+    memory_state_ids: list[str],
+) -> list[sqlite3.Row]:
+    if not memory_state_ids:
+        return []
+    placeholders = ",".join("?" for _ in memory_state_ids)
+    return connection.execute(
+        f"""
+        SELECT
+            state_entity_id,
+            memory_state_id,
+            entity_type_norm,
+            entity_name_raw,
+            entity_name_norm,
+            confidence,
+            created_at
+        FROM state_entities
+        WHERE memory_state_id IN ({placeholders})
+        ORDER BY created_at DESC
+        LIMIT 64
+        """,
+        tuple(memory_state_ids),
+    ).fetchall()
+
+
 # Block: Write memory event snapshot refs
 def _event_snapshot_refs_for_write_memory_job(
     *,
@@ -8636,11 +9803,115 @@ def _browse_fact_entries_for_write_memory_plan(
     return browse_fact_entries
 
 
-def _build_event_preview_text(row: sqlite3.Row) -> str:
-    preview_text = _event_summary_text(row).strip()
-    if preview_text:
-        return preview_text[:240]
-    return "イベントのプレビューを生成できませんでした"
+def _build_event_preview_text(
+    *,
+    event_row: sqlite3.Row,
+    event_entity_rows: list[sqlite3.Row],
+    event_thread_rows: list[sqlite3.Row],
+    event_about_time_row: sqlite3.Row | None,
+    event_affect_row: sqlite3.Row | None,
+) -> str:
+    summary_text = _event_summary_text(event_row).strip()
+    preview_parts = [
+        summary_text if summary_text else str(event_row["kind"]),
+        f"source={event_row['source']}",
+        f"kind={event_row['kind']}",
+    ]
+    entity_terms = _event_preview_entity_terms(event_entity_rows)
+    if entity_terms:
+        preview_parts.append("entities=" + ", ".join(entity_terms))
+    thread_terms = _event_preview_thread_terms(event_thread_rows)
+    if thread_terms:
+        preview_parts.append("threads=" + ", ".join(thread_terms))
+    about_time_term = _event_preview_about_time_term(event_about_time_row)
+    if about_time_term is not None:
+        preview_parts.append(about_time_term)
+    affect_term = _event_preview_affect_term(event_affect_row)
+    if affect_term is not None:
+        preview_parts.append(affect_term)
+    return " / ".join(preview_parts)[:320]
+
+
+def _event_preview_entity_terms(event_entity_rows: list[sqlite3.Row]) -> list[str]:
+    entity_terms: list[str] = []
+    for row in event_entity_rows:
+        entity_name_raw = str(row["entity_name_raw"]).strip()
+        if entity_name_raw and entity_name_raw not in entity_terms:
+            entity_terms.append(entity_name_raw)
+        if len(entity_terms) >= 4:
+            break
+    return entity_terms
+
+
+def _event_preview_thread_terms(event_thread_rows: list[sqlite3.Row]) -> list[str]:
+    thread_terms: list[str] = []
+    for row in event_thread_rows:
+        thread_key = str(row["thread_key"]).strip()
+        if thread_key and thread_key not in thread_terms:
+            thread_terms.append(thread_key)
+        if len(thread_terms) >= 3:
+            break
+    return thread_terms
+
+
+def _event_preview_affect_term(event_affect_row: sqlite3.Row | None) -> str | None:
+    if event_affect_row is None:
+        return None
+    affect_labels = json.loads(event_affect_row["moment_affect_labels_json"])
+    if not isinstance(affect_labels, list):
+        raise RuntimeError("event_affects.moment_affect_labels_json must decode to list")
+    normalized_labels = [
+        str(label)
+        for label in affect_labels
+        if isinstance(label, str) and label
+    ]
+    if normalized_labels:
+        return "affect=" + ", ".join(normalized_labels[:3])
+    affect_text = str(event_affect_row["moment_affect_text"]).strip()
+    if not affect_text:
+        return None
+    return "affect_text=" + affect_text[:80]
+
+
+def _event_preview_about_time_term(event_about_time_row: sqlite3.Row | None) -> str | None:
+    if event_about_time_row is None:
+        return None
+    about_terms: list[str] = []
+    date_range_text = _event_preview_about_time_date_range(event_about_time_row)
+    if date_range_text is not None:
+        about_terms.append(date_range_text)
+    about_year_start = event_about_time_row["about_year_start"]
+    about_year_end = event_about_time_row["about_year_end"]
+    if isinstance(about_year_start, int):
+        if isinstance(about_year_end, int) and about_year_end != about_year_start:
+            about_terms.append(f"{about_year_start}-{about_year_end}")
+        else:
+            about_terms.append(str(about_year_start))
+    life_stage = event_about_time_row["life_stage"]
+    if isinstance(life_stage, str) and life_stage:
+        about_terms.append(life_stage)
+    if not about_terms:
+        return None
+    return "about_time=" + ", ".join(about_terms)
+
+
+# Block: プレビュー用時制日付範囲
+def _event_preview_about_time_date_range(event_about_time_row: sqlite3.Row) -> str | None:
+    about_start_ts = event_about_time_row["about_start_ts"]
+    about_end_ts = event_about_time_row["about_end_ts"]
+    if isinstance(about_start_ts, int):
+        start_text = _event_preview_local_date_text(about_start_ts)
+        if isinstance(about_end_ts, int) and about_end_ts != about_start_ts:
+            return f"{start_text}..{_event_preview_local_date_text(about_end_ts)}"
+        return start_text
+    if isinstance(about_end_ts, int):
+        return _event_preview_local_date_text(about_end_ts)
+    return None
+
+
+# Block: プレビュー用ローカル日付
+def _event_preview_local_date_text(unix_ms: int) -> str:
+    return datetime.fromtimestamp(unix_ms / 1000, tz=timezone.utc).astimezone().strftime("%Y-%m-%d")
 
 
 # Block: vec_items upsert
@@ -8886,16 +10157,19 @@ def _fetch_event_rows_by_ids(
     rows = connection.execute(
         f"""
         SELECT
-            event_id,
-            source,
-            kind,
-            observation_summary,
-            action_summary,
-            result_summary,
-            created_at
+            events.event_id,
+            events.source,
+            events.kind,
+            events.observation_summary,
+            events.action_summary,
+            events.result_summary,
+            events.created_at,
+            event_preview_cache.preview_text
         FROM events
-        WHERE searchable = 1
-          AND event_id IN ({placeholder_sql})
+        LEFT JOIN event_preview_cache
+               ON event_preview_cache.event_id = events.event_id
+        WHERE events.searchable = 1
+          AND events.event_id IN ({placeholder_sql})
         """,
         tuple(event_ids),
     ).fetchall()
@@ -9520,6 +10794,13 @@ def _build_memory_snapshot_rows(
     memory_rows: list[sqlite3.Row],
     affect_rows: list[sqlite3.Row],
     preference_rows: list[sqlite3.Row],
+    event_link_rows: list[sqlite3.Row],
+    event_thread_rows: list[sqlite3.Row],
+    event_about_time_rows: list[sqlite3.Row],
+    event_entity_rows: list[sqlite3.Row],
+    state_link_rows: list[sqlite3.Row],
+    state_about_time_rows: list[sqlite3.Row],
+    state_entity_rows: list[sqlite3.Row],
 ) -> dict[str, Any]:
     working_memory_items: list[dict[str, Any]] = []
     episodic_items: list[dict[str, Any]] = []
@@ -9561,6 +10842,13 @@ def _build_memory_snapshot_rows(
             _recent_event_entry(row)
             for row in recent_event_rows
         ],
+        "event_links": [_event_link_snapshot_entry(row) for row in event_link_rows],
+        "event_threads": [_event_thread_snapshot_entry(row) for row in event_thread_rows],
+        "event_about_time": [_event_about_time_snapshot_entry(row) for row in event_about_time_rows],
+        "event_entities": [_event_entity_snapshot_entry(row) for row in event_entity_rows],
+        "state_links": [_state_link_snapshot_entry(row) for row in state_link_rows],
+        "state_about_time": [_state_about_time_snapshot_entry(row) for row in state_about_time_rows],
+        "state_entities": [_state_entity_snapshot_entry(row) for row in state_entity_rows],
     }
 
 
@@ -9582,7 +10870,7 @@ def _memory_snapshot_entry(row: sqlite3.Row) -> dict[str, Any]:
 def _event_memory_snapshot_entry(row: sqlite3.Row) -> dict[str, Any]:
     summary_text = _event_summary_text(row)
     created_at = int(row["created_at"])
-    return {
+    entry = {
         "memory_state_id": str(row["event_id"]),
         "memory_kind": "episodic_event",
         "body_text": summary_text,
@@ -9599,6 +10887,10 @@ def _event_memory_snapshot_entry(row: sqlite3.Row) -> dict[str, Any]:
         "updated_at": created_at,
         "last_confirmed_at": created_at,
     }
+    preview_text = row["preview_text"]
+    if isinstance(preview_text, str) and preview_text.strip():
+        entry["payload"]["preview_text"] = preview_text.strip()
+    return entry
 
 
 def _event_affect_snapshot_entry(row: sqlite3.Row) -> dict[str, Any]:
@@ -9622,6 +10914,112 @@ def _event_affect_snapshot_entry(row: sqlite3.Row) -> dict[str, Any]:
         "created_at": created_at,
         "updated_at": created_at,
         "last_confirmed_at": created_at,
+    }
+
+
+def _event_link_snapshot_entry(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "event_link_id": str(row["event_link_id"]),
+        "from_event_id": str(row["from_event_id"]),
+        "to_event_id": str(row["to_event_id"]),
+        "label": str(row["label"]),
+        "confidence": float(row["confidence"]),
+        "created_at": int(row["created_at"]),
+        "updated_at": int(row["updated_at"]),
+    }
+
+
+def _event_thread_snapshot_entry(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "event_thread_id": str(row["event_thread_id"]),
+        "event_id": str(row["event_id"]),
+        "thread_key": str(row["thread_key"]),
+        "thread_role": str(row["thread_role"]) if row["thread_role"] is not None else None,
+        "confidence": float(row["confidence"]),
+        "created_at": int(row["created_at"]),
+        "updated_at": int(row["updated_at"]),
+    }
+
+
+def _event_entity_snapshot_entry(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "event_entity_id": str(row["event_entity_id"]),
+        "event_id": str(row["event_id"]),
+        "entity_type_norm": str(row["entity_type_norm"]),
+        "entity_name_raw": str(row["entity_name_raw"]),
+        "entity_name_norm": str(row["entity_name_norm"]),
+        "confidence": float(row["confidence"]),
+        "created_at": int(row["created_at"]),
+    }
+
+
+def _event_about_time_snapshot_entry(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "event_about_time_id": str(row["event_about_time_id"]),
+        "event_id": str(row["event_id"]),
+        "about_start_ts": int(row["about_start_ts"]) if row["about_start_ts"] is not None else None,
+        "about_end_ts": int(row["about_end_ts"]) if row["about_end_ts"] is not None else None,
+        "about_year_start": (
+            int(row["about_year_start"])
+            if row["about_year_start"] is not None
+            else None
+        ),
+        "about_year_end": (
+            int(row["about_year_end"])
+            if row["about_year_end"] is not None
+            else None
+        ),
+        "life_stage": str(row["life_stage"]) if row["life_stage"] is not None else None,
+        "confidence": float(row["confidence"]),
+        "created_at": int(row["created_at"]),
+        "updated_at": int(row["updated_at"]),
+    }
+
+
+def _state_about_time_snapshot_entry(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "state_about_time_id": str(row["state_about_time_id"]),
+        "memory_state_id": str(row["memory_state_id"]),
+        "about_start_ts": int(row["about_start_ts"]) if row["about_start_ts"] is not None else None,
+        "about_end_ts": int(row["about_end_ts"]) if row["about_end_ts"] is not None else None,
+        "about_year_start": (
+            int(row["about_year_start"])
+            if row["about_year_start"] is not None
+            else None
+        ),
+        "about_year_end": (
+            int(row["about_year_end"])
+            if row["about_year_end"] is not None
+            else None
+        ),
+        "life_stage": str(row["life_stage"]) if row["life_stage"] is not None else None,
+        "confidence": float(row["confidence"]),
+        "created_at": int(row["created_at"]),
+        "updated_at": int(row["updated_at"]),
+    }
+
+
+def _state_link_snapshot_entry(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "state_link_id": str(row["state_link_id"]),
+        "from_state_id": str(row["from_state_id"]),
+        "to_state_id": str(row["to_state_id"]),
+        "label": str(row["label"]),
+        "confidence": float(row["confidence"]),
+        "created_at": int(row["created_at"]),
+        "updated_at": int(row["updated_at"]),
+    }
+
+
+def _state_entity_snapshot_entry(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "state_entity_id": str(row["state_entity_id"]),
+        "memory_state_id": str(row["memory_state_id"]),
+        "entity_type_norm": str(row["entity_type_norm"]),
+        "entity_name_raw": str(row["entity_name_raw"]),
+        "entity_name_norm": str(row["entity_name_norm"]),
+        "confidence": float(row["confidence"]),
+        "created_at": int(row["created_at"]),
     }
 
 
@@ -9748,14 +11146,134 @@ def _memory_state_target(
     }
 
 
-def _recent_event_entry(row: sqlite3.Row) -> dict[str, Any]:
+def _event_entity_entries_from_annotation(event_annotation: dict[str, Any]) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    seen_keys: set[tuple[str, str]] = set()
+    for entity_entry in event_annotation["entities"]:
+        _append_state_entity_entry(
+            entries=entries,
+            seen_keys=seen_keys,
+            entity_type_norm=str(entity_entry["entity_type_norm"]),
+            entity_name_raw=str(entity_entry["entity_name_raw"]),
+            confidence=float(entity_entry["confidence"]),
+        )
+    return entries
+
+
+def _state_about_time_from_row(row: sqlite3.Row) -> dict[str, Any] | None:
+    payload = json.loads(row["payload_json"])
+    if not isinstance(payload, dict):
+        raise RuntimeError("memory_states.payload_json must decode to object")
+    source_texts = [str(row["body_text"]).strip()]
+    summary_text = payload.get("summary_text")
+    if isinstance(summary_text, str) and summary_text.strip():
+        source_texts.append(summary_text.strip())
+    about_years: list[int] = []
+    life_stage: str | None = None
+    for source_text in source_texts:
+        for about_year in about_years_from_text(source_text):
+            if about_year not in about_years:
+                about_years.append(about_year)
+        if life_stage is None:
+            life_stage = life_stage_from_text(source_text)
+    if not about_years and life_stage is None:
+        return None
     return {
+        "about_start_ts": None,
+        "about_end_ts": None,
+        "about_year_start": about_years[0] if about_years else None,
+        "about_year_end": about_years[-1] if about_years else None,
+        "life_stage": life_stage,
+        "confidence": 0.82 if about_years else 0.58,
+    }
+
+
+def _state_entity_entries_from_row(row: sqlite3.Row) -> list[dict[str, Any]]:
+    payload = json.loads(row["payload_json"])
+    if not isinstance(payload, dict):
+        raise RuntimeError("memory_states.payload_json must decode to object")
+    entries: list[dict[str, Any]] = []
+    seen_keys: set[tuple[str, str]] = set()
+    query = payload.get("query")
+    if isinstance(query, str) and query.strip():
+        _append_state_entity_entry(
+            entries=entries,
+            seen_keys=seen_keys,
+            entity_type_norm="topic",
+            entity_name_raw=query,
+            confidence=0.86,
+        )
+    source_task_id = payload.get("source_task_id")
+    if isinstance(source_task_id, str) and source_task_id.strip():
+        _append_state_entity_entry(
+            entries=entries,
+            seen_keys=seen_keys,
+            entity_type_norm="task",
+            entity_name_raw=source_task_id,
+            confidence=0.72,
+        )
+    fact_kind = payload.get("fact_kind")
+    if isinstance(fact_kind, str) and fact_kind.strip():
+        _append_state_entity_entry(
+            entries=entries,
+            seen_keys=seen_keys,
+            entity_type_norm="fact_kind",
+            entity_name_raw=fact_kind,
+            confidence=0.58,
+        )
+    summary_text = payload.get("summary_text")
+    if isinstance(summary_text, str) and summary_text.strip():
+        _append_state_entity_entry(
+            entries=entries,
+            seen_keys=seen_keys,
+            entity_type_norm="summary_phrase",
+            entity_name_raw=summary_text,
+            confidence=0.48,
+        )
+    return entries
+
+
+def _append_state_entity_entry(
+    *,
+    entries: list[dict[str, Any]],
+    seen_keys: set[tuple[str, str]],
+    entity_type_norm: str,
+    entity_name_raw: str,
+    confidence: float,
+) -> None:
+    entity_name_norm = _normalized_entity_name(entity_name_raw)
+    if not entity_name_norm:
+        return
+    entity_key = (entity_type_norm, entity_name_norm)
+    if entity_key in seen_keys:
+        return
+    seen_keys.add(entity_key)
+    entries.append(
+        {
+            "entity_type_norm": entity_type_norm,
+            "entity_name_raw": entity_name_raw.strip(),
+            "entity_name_norm": entity_name_norm,
+            "confidence": confidence,
+        }
+    )
+
+
+def _normalized_entity_name(text: str) -> str:
+    return "".join(text.strip().lower().split())
+
+
+def _recent_event_entry(row: sqlite3.Row) -> dict[str, Any]:
+    entry = {
         "event_id": str(row["event_id"]),
         "source": str(row["source"]),
         "kind": str(row["kind"]),
         "summary_text": _event_summary_text(row),
         "created_at": int(row["created_at"]),
     }
+    preview_text = row["preview_text"]
+    if isinstance(preview_text, str) and preview_text.strip():
+        entry["preview_text"] = preview_text.strip()
+    return entry
 
 
 def _event_summary_text(row: sqlite3.Row) -> str:
