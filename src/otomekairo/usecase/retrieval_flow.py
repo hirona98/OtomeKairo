@@ -134,6 +134,12 @@ def build_retrieval_artifacts(
             for event_entry in selection_artifacts.memory_bundle["recent_event_window"]
         ],
     }
+    selector_input_trace = _build_selector_input_trace(
+        merged_candidates=merged_candidates,
+        resolved_at=resolved_at,
+        event_about_time_by_id=event_about_time_by_id,
+        state_about_time_by_id=state_about_time_by_id,
+    )
     return RetrievalArtifacts(
         memory_bundle=memory_bundle,
         retrieval_plan=retrieval_plan,
@@ -141,6 +147,7 @@ def build_retrieval_artifacts(
             candidates=candidate_collection.candidates,
             collector_runs=candidate_collection.collector_runs,
             selector_input_candidates=merged_candidates[:SELECTOR_CANDIDATE_LIMIT],
+            selector_input_trace=selector_input_trace,
             selector_candidate_limit=SELECTOR_CANDIDATE_LIMIT,
         ),
         selected_json=selection_artifacts.selected_json,
@@ -245,16 +252,32 @@ def _build_selector_candidate_pack(
 ) -> dict[str, Any]:
     return {
         "slot_limits": dict(retrieval_plan["limits"]),
-        "candidate_entries": [
-            _selector_candidate_entry(
-                merged_candidate=merged_candidate,
-                resolved_at=resolved_at,
-                event_about_time_by_id=event_about_time_by_id,
-                state_about_time_by_id=state_about_time_by_id,
-            )
-            for merged_candidate in merged_candidates[:SELECTOR_CANDIDATE_LIMIT]
-        ],
+        "candidate_entries": _build_selector_input_trace(
+            merged_candidates=merged_candidates,
+            resolved_at=resolved_at,
+            event_about_time_by_id=event_about_time_by_id,
+            state_about_time_by_id=state_about_time_by_id,
+        ),
     }
+
+
+# Block: Selector input trace
+def _build_selector_input_trace(
+    *,
+    merged_candidates: list[dict[str, Any]],
+    resolved_at: int,
+    event_about_time_by_id: dict[str, dict[str, Any]],
+    state_about_time_by_id: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    return [
+        _selector_candidate_entry(
+            merged_candidate=merged_candidate,
+            resolved_at=resolved_at,
+            event_about_time_by_id=event_about_time_by_id,
+            state_about_time_by_id=state_about_time_by_id,
+        )
+        for merged_candidate in merged_candidates[:SELECTOR_CANDIDATE_LIMIT]
+    ]
 
 
 # Block: Selector candidate entry
@@ -346,6 +369,7 @@ def _build_candidates_json(
     candidates: list[dict[str, Any]],
     collector_runs: list[dict[str, Any]],
     selector_input_candidates: list[dict[str, Any]],
+    selector_input_trace: list[dict[str, Any]],
     selector_candidate_limit: int,
 ) -> dict[str, Any]:
     category_counts: dict[str, int] = {}
@@ -368,6 +392,7 @@ def _build_candidates_json(
         "selector_input_collector_counts": _selector_input_collector_counts(selector_input_candidates),
         "selector_input_slot_counts": _selector_input_slot_counts(selector_input_candidates),
         "selector_input_reason_counts": _selector_input_reason_counts(selector_input_candidates),
+        "selector_input_trace": selector_input_trace,
         "collector_runs": collector_runs,
     }
 

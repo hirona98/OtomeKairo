@@ -2397,6 +2397,10 @@
       lastRetrieval.selector_input_reason_counts,
       "runtime.last_retrieval.selector_input_reason_counts",
     );
+    const selectorInputTrace = readOptionalSelectorInputTrace(
+      lastRetrieval.selector_input_trace,
+      "runtime.last_retrieval.selector_input_trace",
+    );
     const selectorSummary = readOptionalSelectorSummary(
       lastRetrieval.selector_summary,
       "runtime.last_retrieval.selector_summary",
@@ -2424,6 +2428,7 @@
         `selector_input_collectors: ${Object.keys(selectorInputCollectorCounts).length > 0 ? formatSelectedCounts(selectorInputCollectorCounts) : "なし"}`,
         `selector_input_slots: ${Object.keys(selectorInputSlotCounts).length > 0 ? formatSelectedCounts(selectorInputSlotCounts) : "なし"}`,
         `selector_input_reasons: ${Object.keys(selectorInputReasonCounts).length > 0 ? formatSelectedCounts(selectorInputReasonCounts) : "なし"}`,
+        `selector_input_trace: ${formatSelectorInputTrace(selectorInputTrace)}`,
         `selector: ${formatSelectorSummary(selectorSummary)}`,
         `trimmed: ${trimmedItemRefs.length > 0 ? trimmedItemRefs.join(", ") : "なし"}`,
       ].join("\n"),
@@ -2514,6 +2519,21 @@
       .join(", ");
   }
 
+  function formatSelectorInputTrace(selectorInputTrace) {
+    if (selectorInputTrace.length === 0) {
+      return "なし";
+    }
+    const visibleEntries = selectorInputTrace.slice(0, 6).map((traceEntry, index) => {
+      const collectors = traceEntry.collector_names.length > 0 ? traceEntry.collector_names.join("+") : "-";
+      const reasons = traceEntry.reason_codes.length > 0 ? traceEntry.reason_codes.join("+") : "-";
+      return `${String(index + 1)}:${traceEntry.slot}/${traceEntry.item_ref}/${traceEntry.score.toFixed(3)}/${traceEntry.relative_time_text}/${collectors}/${reasons}/${clipText(traceEntry.text, 36)}`;
+    });
+    if (selectorInputTrace.length > 6) {
+      visibleEntries.push(`...他 ${String(selectorInputTrace.length - 6)} 件`);
+    }
+    return visibleEntries.join("\n");
+  }
+
   function formatTraitUpdates(updatedTraits) {
     return updatedTraits
       .map((trait) => {
@@ -2588,6 +2608,39 @@
       return {};
     }
     return requireCountMap(value, label);
+  }
+
+  // Block: Selector input trace 読み取り
+  function readOptionalSelectorInputTrace(value, label) {
+    if (value === undefined) {
+      return [];
+    }
+    if (!Array.isArray(value)) {
+      throw new Error(`${label} が配列ではありません`);
+    }
+    return value.map((entry, index) => {
+      if (!isObject(entry)) {
+        throw new Error(`${label}[${String(index)}] が object ではありません`);
+      }
+      return {
+        item_ref: requireString(entry.item_ref, `${label}[${String(index)}].item_ref`),
+        slot: requireString(entry.slot, `${label}[${String(index)}].slot`),
+        score: requireNumber(entry.score, `${label}[${String(index)}].score`),
+        collector_names: readStringArray(
+          entry.collector_names,
+          `${label}[${String(index)}].collector_names`,
+        ),
+        reason_codes: readStringArray(
+          entry.reason_codes,
+          `${label}[${String(index)}].reason_codes`,
+        ),
+        text: requireString(entry.text, `${label}[${String(index)}].text`),
+        relative_time_text: requireString(
+          entry.relative_time_text,
+          `${label}[${String(index)}].relative_time_text`,
+        ),
+      };
+    });
   }
 
   // Block: Selector summary 読み取り

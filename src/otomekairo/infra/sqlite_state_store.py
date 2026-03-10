@@ -8668,6 +8668,9 @@ def _public_retrieval_summary(row: sqlite3.Row) -> dict[str, Any]:
             for key, value in selector_input_reason_counts.items()
             if isinstance(value, int) and not isinstance(value, bool) and value > 0
         }
+    selector_input_trace = candidates_json.get("selector_input_trace")
+    if isinstance(selector_input_trace, list):
+        payload["selector_input_trace"] = _public_selector_input_trace(selector_input_trace)
     selector_summary = selected_json.get("selector_summary")
     if isinstance(selector_summary, dict):
         payload["selector_summary"] = {
@@ -8703,6 +8706,60 @@ def _public_persona_update(row: sqlite3.Row) -> dict[str, Any]:
         "evidence_event_ids": json.loads(row["evidence_event_ids_json"]),
         "updated_traits": _trait_update_entries(before_json=before_json, after_json=after_json),
     }
+
+
+# Block: Selector input trace 公開整形
+def _public_selector_input_trace(selector_input_trace: list[Any]) -> list[dict[str, Any]]:
+    public_trace: list[dict[str, Any]] = []
+    for index, trace_entry in enumerate(selector_input_trace):
+        if not isinstance(trace_entry, dict):
+            raise RuntimeError(f"selector_input_trace[{index}] must be object")
+        item_ref = trace_entry.get("item_ref")
+        slot_name = trace_entry.get("slot")
+        score = trace_entry.get("score")
+        collector_names = trace_entry.get("collector_names")
+        reason_codes = trace_entry.get("reason_codes")
+        text = trace_entry.get("text")
+        relative_time_text = trace_entry.get("relative_time_text")
+        if not isinstance(item_ref, str) or not item_ref:
+            raise RuntimeError(f"selector_input_trace[{index}].item_ref must be non-empty string")
+        if not isinstance(slot_name, str) or not slot_name:
+            raise RuntimeError(f"selector_input_trace[{index}].slot must be non-empty string")
+        if not isinstance(score, (int, float)) or isinstance(score, bool):
+            raise RuntimeError(f"selector_input_trace[{index}].score must be number")
+        if not isinstance(collector_names, list):
+            raise RuntimeError(f"selector_input_trace[{index}].collector_names must be list")
+        if not isinstance(reason_codes, list):
+            raise RuntimeError(f"selector_input_trace[{index}].reason_codes must be list")
+        if not isinstance(text, str) or not text:
+            raise RuntimeError(f"selector_input_trace[{index}].text must be non-empty string")
+        if not isinstance(relative_time_text, str) or not relative_time_text:
+            raise RuntimeError(f"selector_input_trace[{index}].relative_time_text must be non-empty string")
+        public_entry: dict[str, Any] = {
+            "item_ref": item_ref,
+            "slot": slot_name,
+            "score": round(float(score), 3),
+            "collector_names": [
+                str(collector_name)
+                for collector_name in collector_names
+                if isinstance(collector_name, str) and collector_name
+            ],
+            "reason_codes": [
+                str(reason_code)
+                for reason_code in reason_codes
+                if isinstance(reason_code, str) and reason_code
+            ],
+            "text": text,
+            "relative_time_text": relative_time_text,
+        }
+        memory_kind = trace_entry.get("memory_kind")
+        if isinstance(memory_kind, str) and memory_kind:
+            public_entry["memory_kind"] = memory_kind
+        about_time_hint_text = trace_entry.get("about_time_hint_text")
+        if isinstance(about_time_hint_text, str) and about_time_hint_text:
+            public_entry["about_time_hint_text"] = about_time_hint_text
+        public_trace.append(public_entry)
+    return public_trace
 
 
 # Block: Event log entry
