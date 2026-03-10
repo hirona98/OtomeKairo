@@ -9,13 +9,14 @@ from otomekairo.usecase.retrieval_public_view import build_public_retrieval_deta
 
 
 # Block: 定数
-TRIAGE_REPORT_SCHEMA_VERSION = 1
+TRIAGE_REPORT_SCHEMA_VERSION = 2
 TRACE_ITEM_LIMIT = 3
 THREAD_COLLECTORS = frozenset({"reply_chain", "context_threads"})
 EXPLICIT_TIME_COLLECTORS = frozenset({"explicit_time"})
 EXPLICIT_TIME_REASON_CODES = frozenset(
     {"matched_explicit_date", "matched_explicit_year", "matched_life_stage"}
 )
+REVIEW_STATUS_VALUES = ("pending", "confirmed", "ignored")
 FLAG_PRIORITY = {
     "empty_selection": 100,
     "explicit_time_dropped": 90,
@@ -185,12 +186,14 @@ def _build_review_packet(retrieval_run: dict[str, Any]) -> dict[str, Any]:
             "review_status": "pending",
             "reason_code": "",
             "reason_note": "",
+            "allowed_review_status": list(REVIEW_STATUS_VALUES),
             "allowed_reason_codes": list(QUARANTINE_REASON_CODES),
             "candidate_targets": _annotation_candidate_targets(
                 selected_items=selected_items,
                 slot_skipped_items=slot_skipped_items,
                 reserve_items=reserve_items,
             ),
+            "selected_targets": [],
         },
     }
 
