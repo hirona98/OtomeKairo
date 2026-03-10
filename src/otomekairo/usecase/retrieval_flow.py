@@ -367,6 +367,7 @@ def _build_candidates_json(
         "selector_candidate_limit": selector_candidate_limit,
         "selector_input_collector_counts": _selector_input_collector_counts(selector_input_candidates),
         "selector_input_slot_counts": _selector_input_slot_counts(selector_input_candidates),
+        "selector_input_reason_counts": _selector_input_reason_counts(selector_input_candidates),
         "collector_runs": collector_runs,
     }
 
@@ -398,6 +399,22 @@ def _selector_input_slot_counts(
             continue
         slot_counts[slot_name] = slot_counts.get(slot_name, 0) + 1
     return slot_counts
+
+
+# Block: Selector input reason counts
+def _selector_input_reason_counts(
+    selector_input_candidates: list[dict[str, Any]],
+) -> dict[str, int]:
+    reason_counts: dict[str, int] = {}
+    for candidate in selector_input_candidates:
+        reason_codes = candidate.get("reason_codes")
+        if not isinstance(reason_codes, list):
+            continue
+        for reason_code in reason_codes:
+            if not isinstance(reason_code, str) or not reason_code:
+                continue
+            reason_counts[reason_code] = reason_counts.get(reason_code, 0) + 1
+    return reason_counts
 
 
 # Block: Cognition formatting
