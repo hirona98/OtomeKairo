@@ -1017,6 +1017,147 @@
 - current 実装では、`selection_trace[].collector_names`、`selection_trace[].duplicate_hits`、`selection_trace[].selection_rank`、`slot_skipped_trace`、`collector_counts`、`selected_reason_counts`、`slot_skipped_collector_counts`、`slot_skipped_slot_counts`、`slot_skipped_reason_counts`、`reserve_collector_counts`、`reserve_slot_counts`、`reserve_reason_counts`、`selector_summary`、`reserve_trace`、`trimmed_item_refs` を追加で持ってよい
 - current 実装では、`slot_skipped_trace` と `reserve_trace` は表示用 preview として最大 8 件まで保持し、件数系 summary は全候補を集計してよい
 
+<!-- Block: Retrieval Eval Report -->
+### `retrieval_eval_report`
+
+```json
+{
+  "report_schema_version": 3,
+  "run_count": 120,
+  "window": {
+    "latest_created_at": 1760000000000,
+    "latest_created_at_utc_text": "2026-03-10 03:00:00 UTC",
+    "oldest_created_at": 1759990000000,
+    "oldest_created_at_utc_text": "2026-03-09 00:13:20 UTC"
+  },
+  "overview": {
+    "empty_run_count": 8,
+    "empty_run_rate_percent": 7,
+    "avg_raw_candidate_count": 9.8,
+    "avg_merged_candidate_count": 7.2,
+    "avg_selector_input_candidate_count": 6.5,
+    "avg_selected_item_count": 4.1
+  },
+  "selector": {
+    "avg_llm_selected_ref_count": 4.8,
+    "avg_selected_candidate_count": 4.1,
+    "avg_llm_return_ratio_percent": 74.0,
+    "avg_selected_candidate_ratio_percent": 63.0,
+    "avg_duplicate_hit_count": 1.7,
+    "avg_slot_skipped_count": 0.6,
+    "avg_reserve_candidate_count": 1.1
+  },
+  "coverage": {
+    "explicit_time_selected_run_count": 18,
+    "explicit_time_selected_run_rate_percent": 15,
+    "explicit_time_input_run_count": 24,
+    "explicit_time_input_run_rate_percent": 20,
+    "thread_selected_run_count": 36,
+    "thread_selected_run_rate_percent": 30,
+    "thread_input_run_count": 44,
+    "thread_input_run_rate_percent": 37,
+    "relationship_selected_run_count": 29,
+    "relationship_selected_run_rate_percent": 24
+  },
+  "preference": {
+    "preference_input_run_count": 22,
+    "preference_input_run_rate_percent": 18,
+    "preference_selected_run_count": 16,
+    "preference_selected_run_rate_percent": 13,
+    "preference_carryover_rate_percent": 73,
+    "avg_selected_preference_item_count": 0.21
+  },
+  "redundancy": {
+    "redundant_selected_run_count": 9,
+    "redundant_selected_run_rate_percent": 8,
+    "avg_redundant_selected_item_count": 0.12
+  },
+  "mode_names": ["explicit_about_time", "associative_recent"],
+  "mode_breakdown": {
+    "explicit_about_time": {
+      "run_count": 30
+    }
+  }
+}
+```
+
+- `retrieval_eval_report` は、`retrieval_runs` を集計して傾向を見る CLI 用 report である
+- 必須項目は、`report_schema_version`、`run_count`、`window`、`overview`、`selector`、`coverage`、`preference`、`redundancy`、`mode_names`、`mode_breakdown` である
+- `preference` は、preference 候補が selector input に入り、最終採用へ carry over された割合を要約する
+- `redundancy` は、`recent_event_window` と長期記憶の text overlap による冗長注入の疑い件数を要約する
+- `mode_breakdown` の各要素は、top-level と同じ `window`、`overview`、`selector`、`coverage`、`preference`、`redundancy`、`top_*` shape を持つ
+
+<!-- Block: Retrieval Triage Report -->
+### `retrieval_triage_report`
+
+```json
+{
+  "report_schema_version": 2,
+  "run_count": 40,
+  "flagged_run_count": 8,
+  "returned_packet_count": 8,
+  "only_flagged": true,
+  "max_packets": 20,
+  "triage_flag_counts": {
+    "explicit_time_dropped": 3,
+    "slot_pressure": 2
+  },
+  "mode_counts": {
+    "explicit_about_time": 10,
+    "associative_recent": 30
+  },
+  "review_packets": [
+    {
+      "cycle_id": "cycle_...",
+      "created_at": 1760000000000,
+      "created_at_utc_text": "2026-03-10 03:00:00 UTC",
+      "mode": "explicit_about_time",
+      "queries": ["2024年の旅行の話"],
+      "flag_codes": ["explicit_time_dropped"],
+      "focus_notes": ["explicit_time が selector input にあるのに最終採用へ残っていない"],
+      "review_priority": 90,
+      "resolved_event_ids": ["evt_001"],
+      "summary": {
+        "selected_item_count": 0,
+        "selector_input_candidate_count": 5,
+        "selected_candidate_count": 0,
+        "llm_selected_ref_count": 2,
+        "selected_candidate_ratio_percent": 0,
+        "slot_skipped_count": 2,
+        "reserve_candidate_count": 5,
+        "duplicate_hit_count": 4
+      },
+      "annotation_template": {
+        "review_status": "pending",
+        "reason_code": "",
+        "reason_note": "",
+        "allowed_review_status": ["pending", "confirmed", "ignored"],
+        "allowed_reason_codes": [
+          "misretrieval_confirmed",
+          "stale_linkage",
+          "manual_quarantine"
+        ],
+        "candidate_targets": [
+          {
+            "entity_type": "memory_state",
+            "entity_id": "ms_001",
+            "source_trace": "skipped",
+            "slot": "episodic_items"
+          }
+        ],
+        "selected_targets": []
+      }
+    }
+  ]
+}
+```
+
+- `retrieval_triage_report` は、manual review 用に suspicious run を抜き出した CLI 用 report である
+- 必須項目は、`report_schema_version`、`run_count`、`flagged_run_count`、`returned_packet_count`、`only_flagged`、`max_packets`、`triage_flag_counts`、`mode_counts`、`review_packets` である
+- `review_packets[]` は、`cycle_id`、`queries`、`flag_codes`、`summary`、`selected_items`、`slot_skipped_items`、`reserve_items`、`annotation_template` を持ってよい
+- `annotation_template.review_status` は、`pending`、`confirmed`、`ignored` の 3 つに固定する
+- `annotation_template.selected_targets` は、`confirmed` にした packet を `quarantine_memory` へ import するときの対象列である
+
 <!-- Block: Completion Settings -->
 ### `completion_settings`
 
