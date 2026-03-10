@@ -106,7 +106,7 @@ def run_cognition_for_browser_chat_input(
         speech_draft = run_reply_render_for_browser_chat_input(
             cycle_id=cycle_id,
             input_kind=input_kind,
-            cognition_input=cognition_input,
+            reply_render_input=cognition_input["reply_render_input"],
             cognition_plan=cognition_plan,
             completion_settings=completion_settings,
             cognition_client=cognition_client,
