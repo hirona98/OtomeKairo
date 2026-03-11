@@ -43,7 +43,7 @@ class ReplyRenderRequest:
     cycle_id: str
     input_kind: str
     reply_render_input: dict[str, Any]
-    cognition_plan: dict[str, Any]
+    reply_render_plan: dict[str, Any]
     completion_settings: dict[str, Any]
 
 

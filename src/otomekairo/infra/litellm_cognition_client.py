@@ -270,16 +270,16 @@ def _build_retrieval_selection_messages(request: RetrievalSelectionRequest) -> l
 # Block: 応答文レンダリング prompt 構築
 def _build_reply_render_messages(request: ReplyRenderRequest) -> list[dict[str, Any]]:
     reply_render_input = request.reply_render_input
-    cognition_plan = request.cognition_plan
-    current_observation = reply_render_input["current_observation"]
-    time_context = reply_render_input["time_context"]
+    reply_render_plan = request.reply_render_plan
+    observation_text = reply_render_input["observation_text"]
+    time_reference_text = reply_render_input["time_reference_text"]
+    attention_summary_text = reply_render_input["attention_summary_text"]
+    retrieval_summary_text = reply_render_input["retrieval_summary_text"]
     stable_self_state = reply_render_input["stable_self_state"]
     confirmed_preferences = reply_render_input["confirmed_preferences"]
     long_mood_state = reply_render_input["long_mood_state"]
     recent_dialog = reply_render_input["recent_dialog"]
     selected_memory_pack = reply_render_input["selected_memory_pack"]
-    retrieval_context = reply_render_input["retrieval_context"]
-    attention_snapshot = reply_render_input["attention_snapshot"]
     reply_style = reply_render_input["reply_style"]
     system_prompt = "\n".join(
         [
@@ -296,25 +296,24 @@ def _build_reply_render_messages(request: ReplyRenderRequest) -> list[dict[str, 
             f"話し方: {reply_style['speech_tone']}",
         ]
     )
-    action_proposals = cognition_plan.get("action_proposals", [])
     user_prompt = "\n".join(
         [
             f"入力種別: {request.input_kind}",
-            f"受け取った内容: {current_observation['observation_text']}",
-            _time_context_prompt_line(time_context),
-            _attention_prompt_line(attention_snapshot),
-            _retrieval_prompt_line(retrieval_context),
+            f"受け取った内容: {observation_text}",
+            f"現在時刻: {time_reference_text}",
+            f"注意要約: {attention_summary_text}",
+            f"想起要約: {retrieval_summary_text}",
             _stable_self_state_prompt_line(stable_self_state),
             _confirmed_preferences_prompt_line(confirmed_preferences),
             _long_mood_state_prompt_line(long_mood_state),
             _recent_dialog_prompt_line(recent_dialog),
             _selected_memory_pack_prompt_line(selected_memory_pack),
             _reply_style_prompt_line(reply_style),
-            f"意図: {cognition_plan['intention_summary']}",
-            f"判断理由: {cognition_plan['decision_reason']}",
-            f"応答方針: {cognition_plan['reply_policy']['mode']} ({cognition_plan['reply_policy']['reason']})",
-            f"重視記憶: {cognition_plan['memory_focus']['summary']}",
-            f"行動候補: {_action_proposals_prompt_line(action_proposals)}",
+            f"意図: {reply_render_plan['intention_summary']}",
+            f"判断理由: {reply_render_plan['decision_reason']}",
+            f"応答方針: {reply_render_plan['reply_mode']} ({reply_render_plan['reply_reason']})",
+            f"重視記憶: {reply_render_plan['memory_focus_summary']} ({reply_render_plan['memory_focus_kind']})",
+            f"行動候補: {_reply_action_summaries_prompt_line(reply_render_plan['action_summaries'])}",
             f"cycle_id: {request.cycle_id}",
             "この計画に沿う自然な speech_draft を 1 つだけ返すこと。",
             "language は ja、delivery_mode は stream に固定すること。",
@@ -1154,37 +1153,16 @@ def _joined_prompt_text(values: list[str]) -> str:
     return " / ".join(values)
 
 
-def _action_proposals_prompt_line(action_proposals: list[dict[str, Any]]) -> str:
-    if not isinstance(action_proposals, list):
-        raise RuntimeError("cognition_plan.action_proposals must be a list")
-    if not action_proposals:
+def _reply_action_summaries_prompt_line(action_summaries: list[str]) -> str:
+    if not isinstance(action_summaries, list):
+        raise RuntimeError("reply_render_plan.action_summaries must be a list")
+    if not action_summaries:
         return "なし"
     parts: list[str] = []
-    for proposal in action_proposals[:5]:
-        if not isinstance(proposal, dict):
-            raise RuntimeError("cognition_plan.action_proposals must contain only objects")
-        action_type = proposal.get("action_type")
-        priority = proposal.get("priority")
-        if (
-            not isinstance(action_type, str)
-            or isinstance(priority, bool)
-            or not isinstance(priority, (int, float))
-        ):
-            raise RuntimeError("cognition_plan.action_proposals entry is invalid")
-        detail_parts = [f"{action_type}:{float(priority):.2f}"]
-        query = proposal.get("query")
-        if isinstance(query, str) and query.strip():
-            detail_parts.append(f"query={_memory_prompt_text(query)}")
-        camera_connection_id = proposal.get("camera_connection_id")
-        if isinstance(camera_connection_id, str) and camera_connection_id.strip():
-            detail_parts.append(f"camera={camera_connection_id}")
-        preset_name = proposal.get("preset_name")
-        if isinstance(preset_name, str) and preset_name.strip():
-            detail_parts.append(f"preset={preset_name}")
-        direction = proposal.get("direction")
-        if isinstance(direction, str) and direction.strip():
-            detail_parts.append(f"direction={direction}")
-        parts.append(" ".join(detail_parts))
+    for action_summary in action_summaries[:5]:
+        if not isinstance(action_summary, str) or not action_summary:
+            raise RuntimeError("reply_render_plan.action_summaries must contain only non-empty strings")
+        parts.append(action_summary)
     return " / ".join(parts)
 
 

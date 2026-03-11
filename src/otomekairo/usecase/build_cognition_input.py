@@ -1645,10 +1645,18 @@ def _build_reply_render_input(
     selection_profile: dict[str, Any],
 ) -> dict[str, Any]:
     return {
-        "current_observation": current_observation,
-        "time_context": time_context,
-        "attention_snapshot": attention_snapshot,
-        "retrieval_context": retrieval_context,
+        "observation_text": _build_reply_render_observation_text(
+            current_observation=current_observation,
+        ),
+        "time_reference_text": _build_reply_render_time_reference_text(
+            time_context=time_context,
+        ),
+        "attention_summary_text": _build_reply_render_attention_summary_text(
+            attention_snapshot=attention_snapshot,
+        ),
+        "retrieval_summary_text": _build_reply_render_retrieval_summary_text(
+            retrieval_context=retrieval_context,
+        ),
         "stable_self_state": stable_self_state,
         "confirmed_preferences": confirmed_preferences,
         "long_mood_state": long_mood_state,
@@ -1659,6 +1667,79 @@ def _build_reply_render_input(
             "response_pace": str(selection_profile["interaction_style"]["response_pace"]),
         },
     }
+
+
+# Block: Reply render observation text
+def _build_reply_render_observation_text(*, current_observation: dict[str, Any]) -> str:
+    observation_text = current_observation.get("observation_text")
+    if not isinstance(observation_text, str) or not observation_text:
+        raise RuntimeError("current_observation.observation_text must be non-empty string")
+    return _prompt_text(observation_text)
+
+
+# Block: Reply render time reference text
+def _build_reply_render_time_reference_text(*, time_context: dict[str, Any]) -> str:
+    current_time_local_text = time_context.get("current_time_local_text")
+    relative_reference_text = time_context.get("relative_reference_text")
+    if not isinstance(current_time_local_text, str) or not current_time_local_text:
+        raise RuntimeError("time_context.current_time_local_text must be non-empty string")
+    if not isinstance(relative_reference_text, str) or not relative_reference_text:
+        raise RuntimeError("time_context.relative_reference_text must be non-empty string")
+    return f"{current_time_local_text} ({relative_reference_text})"
+
+
+# Block: Reply render attention summary text
+def _build_reply_render_attention_summary_text(*, attention_snapshot: dict[str, Any]) -> str:
+    primary_focus = attention_snapshot.get("primary_focus")
+    if not isinstance(primary_focus, dict):
+        raise RuntimeError("attention_snapshot.primary_focus must be an object")
+    focus_kind = primary_focus.get("focus_kind")
+    summary = primary_focus.get("summary")
+    reason_codes = primary_focus.get("reason_codes")
+    if not isinstance(focus_kind, str) or not focus_kind:
+        raise RuntimeError("attention_snapshot.primary_focus.focus_kind must be non-empty string")
+    if not isinstance(summary, str) or not summary:
+        raise RuntimeError("attention_snapshot.primary_focus.summary must be non-empty string")
+    if not isinstance(reason_codes, list):
+        raise RuntimeError("attention_snapshot.primary_focus.reason_codes must be a list")
+    normalized_reasons = [
+        str(reason_code)
+        for reason_code in reason_codes[:3]
+        if isinstance(reason_code, str) and reason_code
+    ]
+    reason_text = ",".join(normalized_reasons) if normalized_reasons else "none"
+    return f"kind={focus_kind} summary={_prompt_text(summary)} reasons={reason_text}"
+
+
+# Block: Reply render retrieval summary text
+def _build_reply_render_retrieval_summary_text(*, retrieval_context: dict[str, Any]) -> str:
+    plan = retrieval_context.get("plan")
+    selected = retrieval_context.get("selected")
+    if not isinstance(plan, dict) or not isinstance(selected, dict):
+        raise RuntimeError("retrieval_context must contain plan and selected")
+    mode = plan.get("mode")
+    queries = plan.get("queries")
+    selected_counts = selected.get("selected_counts")
+    if not isinstance(mode, str) or not mode:
+        raise RuntimeError("retrieval_context.plan.mode must be non-empty string")
+    if not isinstance(queries, list):
+        raise RuntimeError("retrieval_context.plan.queries must be a list")
+    if not isinstance(selected_counts, dict):
+        raise RuntimeError("retrieval_context.selected.selected_counts must be an object")
+    query_text = ",".join(
+        _prompt_text(query_text)
+        for query_text in queries[:3]
+        if isinstance(query_text, str) and query_text
+    )
+    if not query_text:
+        query_text = "なし"
+    selected_text_parts = [
+        f"{key}={value}"
+        for key, value in selected_counts.items()
+        if isinstance(key, str) and isinstance(value, int) and value > 0
+    ]
+    selected_text = ",".join(selected_text_parts) if selected_text_parts else "なし"
+    return f"mode={mode} queries={query_text} selected={selected_text}"
 
 
 # Block: Recent dialog
