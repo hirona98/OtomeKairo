@@ -16,7 +16,7 @@
 
 - 固定するのは、current 実装で使う JSON オブジェクトのキー、型、必須項目、固定語彙である
 - 固定するのは、`pending_inputs.payload_json`、`settings_overrides.requested_value_json`、`settings_editor_state.system_values_json`、5 種のプリセットテーブルの `payload_json`、`settings_change_sets.payload_json`、`ui_outbound_events.payload_json`、`action_history.command_json`、`action_history.observed_effects_json`、`memory_jobs.payload_ref_json`、`memory_job_payloads.payload_json`、`preference_memory.target_entity_ref_json`、`event_affects.moment_affect_labels_json`、`event_affects.vad_json`、主要な Web API 本文である
-- 固定するのは、`self_state.personality_json`、`self_state.current_emotion_json`、`self_state.long_term_goals_json`、`self_state.relationship_overview_json`、`self_state.invariants_json`、短周期の内部で使う `selection_profile`、`memory_bundle`、`stable_self_state`、`confirmed_preferences`、`long_mood_state`、`recent_dialog`、`selected_memory_pack`、`reply_render_input`、`retrieval_context`、`last_persona_update_summary`、`persona_consistency_score`、`attention_score_breakdown`、`self_initiated_score_breakdown`、`action_candidate_score`、`cognition_plan`、`speech_draft`、`cognition_result`、長周期の内部で使う `MemoryWritePlan`、`personality_change_proposal`、`persona_updates` の形である
+- 固定するのは、`self_state.personality_json`、`self_state.current_emotion_json`、`self_state.long_term_goals_json`、`self_state.relationship_overview_json`、`self_state.invariants_json`、短周期の内部で使う `selection_profile`、`memory_bundle`、`stable_self_state`、`confirmed_preferences`、`long_mood_state`、`recent_dialog`、`selected_memory_pack`、`reply_render_input`、`reply_render_plan`、`retrieval_context`、`last_persona_update_summary`、`persona_consistency_score`、`attention_score_breakdown`、`self_initiated_score_breakdown`、`action_candidate_score`、`cognition_plan`、`speech_draft`、`cognition_result`、長周期の内部で使う `MemoryWritePlan`、`personality_change_proposal`、`persona_updates` の形である
 - 固定しないのは、Python のクラス名、Pydantic モデル名、OpenAPI の自動生成細部である
 - 固定しないのは、将来追加する未使用フィールドや後段の拡張イベント種別である
 
@@ -717,10 +717,10 @@
 
 ```json
 {
-  "current_observation": {},
-  "time_context": {},
-  "attention_snapshot": {},
-  "retrieval_context": {},
+  "observation_text": "高校時代の話を覚えてる？",
+  "time_reference_text": "2026-03-11 12:00:00 JST (0秒前)",
+  "attention_summary_text": "kind=dialogue summary=昔話の継続 reasons=user_turn",
+  "retrieval_summary_text": "mode=associative_recent queries=高校時代 selected=episodic_items=1",
   "stable_self_state": {},
   "confirmed_preferences": {
     "likes": [],
@@ -745,9 +745,31 @@
 ```
 
 - `reply_render_input` は、`reply_render` 専用の派生入力である
-- 必須項目は `current_observation`、`time_context`、`attention_snapshot`、`retrieval_context`、`stable_self_state`、`confirmed_preferences`、`long_mood_state`、`recent_dialog`、`selected_memory_pack`、`reply_style` である
+- 必須項目は `observation_text`、`time_reference_text`、`attention_summary_text`、`retrieval_summary_text`、`stable_self_state`、`confirmed_preferences`、`long_mood_state`、`recent_dialog`、`selected_memory_pack`、`reply_style` である
+- `observation_text`、`time_reference_text`、`attention_summary_text`、`retrieval_summary_text` は非空の `string` に固定する
 - `long_mood_state` は、背景感情がない場合だけ `null` を許可する
 - `reply_style.speech_tone` と `reply_style.response_pace` は非空の `string` に固定する
+
+<!-- Block: Reply Render Plan -->
+### `reply_render_plan`
+
+```json
+{
+  "intention_summary": "昔話に応じる",
+  "decision_reason": "会話継続が適切",
+  "reply_mode": "render",
+  "reply_reason": "会話応答",
+  "memory_focus_kind": "episodic",
+  "memory_focus_summary": "高校時代の思い出",
+  "action_summaries": ["speak"]
+}
+```
+
+- `reply_render_plan` は、`cognition_plan` から抽出する render 専用計画断面である
+- 必須項目は `intention_summary`、`decision_reason`、`reply_mode`、`reply_reason`、`memory_focus_kind`、`memory_focus_summary`、`action_summaries` である
+- `reply_mode` と `reply_reason` は、`cognition_plan.reply_policy` からそのまま引き継ぐ
+- `memory_focus_kind` と `memory_focus_summary` は、`cognition_plan.memory_focus` からそのまま引き継ぐ
+- `action_summaries` は string の配列であり、current 実装では `action_proposals[].action_type` の上位 `5` 件までを入れてよい
 
 ### `reflection_note.payload`
 
