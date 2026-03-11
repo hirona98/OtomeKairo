@@ -10,7 +10,7 @@ from typing import Any
 
 
 # Block: Report constants
-REPORT_SCHEMA_VERSION = 1
+REPORT_SCHEMA_VERSION = 2
 ACTION_TYPE_ALIASES = {
     "enqueue_browse_task": "browse",
     "complete_browse_task": "browse",
@@ -19,6 +19,35 @@ ACTION_TYPE_ALIASES = {
     "emit_chat_response": "speak",
     "speak_ui_message": "speak",
 }
+ACTION_RESPONSE_CUES = {
+    "browse": ("調べ", "検索", "確認", "再検索"),
+    "look": ("見る", "視点", "カメラ", "確認"),
+    "notify": ("知らせ", "通知", "伝え"),
+    "speak": ("話", "返答", "伝え"),
+}
+FAILURE_RESPONSE_CUES = {
+    "timeout": ("timeout", "タイムアウト", "待", "やり直", "再試行"),
+    "network_unavailable": ("通信", "接続", "ネットワーク", "届かない"),
+}
+GENTLE_TONE_CUES = (
+    "したよ",
+    "するね",
+    "だよ",
+    "整理した",
+    "教える",
+    "確認したよ",
+)
+CAUTIOUS_TONE_CUES = (
+    "まだ",
+    "止まった",
+    "待って",
+    "やり直",
+    "再試行",
+    "できない",
+    "必要",
+    "timeout",
+    "タイムアウト",
+)
 
 
 # Block: Report build
@@ -89,11 +118,32 @@ def format_chat_replay_eval_report(report: dict[str, Any]) -> str:
             f"({overview['long_mood_same_label_rate_percent']}%), "
             f"top_transition {overview['top_long_mood_transition']}"
         ),
+            (
+                "response: "
+                f"assistant_messages {overview['assistant_response_cycle_count']}, "
+                f"date_recall {overview['response_date_recall_cycle_count']} "
+                f"({overview['response_date_recall_rate_percent']}%)"
+            ),
         (
-            "response: "
-            f"assistant_messages {overview['assistant_response_cycle_count']}, "
-            f"date_recall {overview['response_date_recall_cycle_count']} "
-            f"({overview['response_date_recall_rate_percent']}%)"
+            "behavior: "
+            f"action_transparency {overview['response_action_transparency_cycle_count']}/"
+            f"{overview['response_action_transparency_eligible_cycle_count']} "
+            f"({overview['response_action_transparency_rate_percent']}%), "
+            f"failure_explanation {overview['response_failure_explanation_cycle_count']}/"
+            f"{overview['response_failure_explanation_eligible_cycle_count']} "
+            f"({overview['response_failure_explanation_rate_percent']}%)"
+        ),
+        (
+            "behavior2: "
+            f"preference_reference {overview['response_preference_reference_cycle_count']}/"
+            f"{overview['response_preference_reference_eligible_cycle_count']} "
+            f"({overview['response_preference_reference_rate_percent']}%), "
+            f"preference_violation {overview['response_preference_violation_cycle_count']}/"
+            f"{overview['response_preference_violation_eligible_cycle_count']} "
+            f"({overview['response_preference_violation_rate_percent']}%), "
+            f"mood_tone_hint {overview['response_mood_tone_hint_cycle_count']}/"
+            f"{overview['response_mood_tone_hint_eligible_cycle_count']} "
+            f"({overview['response_mood_tone_hint_rate_percent']}%)"
         ),
     ]
     return "\n".join(lines)
@@ -136,7 +186,7 @@ def _read_chat_cycles(
         ).fetchall()
         action_rows = connection.execute(
             """
-            SELECT action_type, status
+            SELECT action_type, status, failure_mode
             FROM action_history
             WHERE cycle_id = ?
             ORDER BY started_at ASC
@@ -165,6 +215,19 @@ def _read_chat_cycles(
                     for action_row in action_rows
                     if _normalized_action_type(str(action_row["action_type"])) is not None
                 ],
+                "failed_action_types": [
+                    _normalized_action_type(str(action_row["action_type"]))
+                    for action_row in action_rows
+                    if str(action_row["status"]) == "failed"
+                    and _normalized_action_type(str(action_row["action_type"])) is not None
+                ],
+                "failure_modes": _unique_non_empty_strings(
+                    [
+                        str(action_row["failure_mode"])
+                        for action_row in action_rows
+                        if action_row["failure_mode"] is not None
+                    ]
+                ),
                 "dialogue_thread_keys": _unique_non_empty_strings(
                     [str(dialogue_thread_row["thread_key"]) for dialogue_thread_row in dialogue_thread_rows]
                 ),
@@ -234,6 +297,20 @@ def _build_cycle_packets(
         )
         long_mood_before = _long_mood_summary(before_snapshot["long_mood"])
         long_mood_after = _long_mood_summary(after_snapshot["long_mood"])
+        assistant_text = (
+            str(chat_cycle["assistant_text"])
+            if chat_cycle["assistant_text"] is not None
+            else ""
+        )
+        response_behavior = _build_response_behavior_signals(
+            action_types=list(chat_cycle["action_types"]),
+            failed_action_types=list(chat_cycle["failed_action_types"]),
+            failure_modes=list(chat_cycle["failure_modes"]),
+            assistant_text=assistant_text,
+            confirmed_preferences_before=before_snapshot["confirmed_entries"],
+            revoked_preferences_before=before_snapshot["revoked_entries"],
+            long_mood_before=long_mood_before,
+        )
         committed_at = int(chat_cycle["committed_at"])
         cycle_packet = {
             "cycle_id": str(chat_cycle["cycle_id"]),
@@ -241,8 +318,10 @@ def _build_cycle_packets(
             "committed_at": committed_at,
             "committed_at_utc_text": _utc_text(committed_at),
             "user_text": str(chat_cycle["user_text"]),
-            "assistant_text": str(chat_cycle["assistant_text"]) if chat_cycle["assistant_text"] else None,
+            "assistant_text": assistant_text if assistant_text else None,
             "action_types": list(chat_cycle["action_types"]),
+            "failed_action_types": list(chat_cycle["failed_action_types"]),
+            "failure_modes": list(chat_cycle["failure_modes"]),
             "dialogue_thread_keys": dialogue_thread_keys,
             "reused_dialogue_thread_keys": reused_dialogue_thread_keys,
             "confirmed_preferences_before": sorted(confirmed_keys_before),
@@ -251,6 +330,7 @@ def _build_cycle_packets(
             "revoked_preferences_after": sorted(revoked_keys_after),
             "long_mood_before": long_mood_before,
             "long_mood_after": long_mood_after,
+            "response_behavior_signals": response_behavior,
             "checks": {
                 "dialogue_thread_reused": bool(reused_dialogue_thread_keys),
                 "preference_aligned_action": bool(preference_alignment_keys),
@@ -263,12 +343,13 @@ def _build_cycle_packets(
                 ),
                 "response_date_recalled": _response_date_recalled(
                     user_text=str(chat_cycle["user_text"]),
-                    assistant_text=(
-                        str(chat_cycle["assistant_text"])
-                        if chat_cycle["assistant_text"] is not None
-                        else ""
-                    ),
+                    assistant_text=assistant_text,
                 ),
+                "response_action_transparent": bool(response_behavior["matched_action_cues"]),
+                "response_failure_explained": bool(response_behavior["explained_failure_modes"]),
+                "response_preference_referenced": bool(response_behavior["referenced_preference_keys"]),
+                "response_preference_violated": bool(response_behavior["violated_preference_keys"]),
+                "response_mood_tone_hinted": bool(response_behavior["matched_tone_hint"]),
             },
             "preference_alignment_keys": preference_alignment_keys,
             "restored_preference_keys": restored_preference_keys,
@@ -311,11 +392,19 @@ def _replay_state_snapshots(
                         status="confirmed",
                     )
                 ),
+                "confirmed_entries": _preference_entries_for_status(
+                    preferences=current_preferences.values(),
+                    status="confirmed",
+                ),
                 "revoked_keys": sorted(
                     _preference_keys_for_status(
                         preferences=current_preferences.values(),
                         status="revoked",
                     )
+                ),
+                "revoked_entries": _preference_entries_for_status(
+                    preferences=current_preferences.values(),
+                    status="revoked",
                 ),
                 "long_mood": dict(current_long_mood) if current_long_mood is not None else None,
             }
@@ -355,6 +444,54 @@ def _build_overview(*, cycle_packets: list[dict[str, Any]]) -> dict[str, Any]:
         cycle_packets=cycle_packets,
         check_name="response_date_recalled",
     )
+    response_action_transparency_eligible_cycle_count = sum(
+        1
+        for cycle_packet in cycle_packets
+        if bool(cycle_packet["action_types"]) and cycle_packet["assistant_text"] is not None
+    )
+    response_action_transparency_cycle_count = _count_cycle_checks(
+        cycle_packets=cycle_packets,
+        check_name="response_action_transparent",
+    )
+    response_failure_explanation_eligible_cycle_count = sum(
+        1
+        for cycle_packet in cycle_packets
+        if bool(cycle_packet["failed_action_types"]) and cycle_packet["assistant_text"] is not None
+    )
+    response_failure_explanation_cycle_count = _count_cycle_checks(
+        cycle_packets=cycle_packets,
+        check_name="response_failure_explained",
+    )
+    response_preference_reference_eligible_cycle_count = sum(
+        1
+        for cycle_packet in cycle_packets
+        if bool(cycle_packet["response_behavior_signals"]["reference_candidates"])
+        and cycle_packet["assistant_text"] is not None
+    )
+    response_preference_reference_cycle_count = _count_cycle_checks(
+        cycle_packets=cycle_packets,
+        check_name="response_preference_referenced",
+    )
+    response_preference_violation_eligible_cycle_count = sum(
+        1
+        for cycle_packet in cycle_packets
+        if bool(cycle_packet["response_behavior_signals"]["violation_candidates"])
+        and cycle_packet["assistant_text"] is not None
+    )
+    response_preference_violation_cycle_count = _count_cycle_checks(
+        cycle_packets=cycle_packets,
+        check_name="response_preference_violated",
+    )
+    response_mood_tone_hint_eligible_cycle_count = sum(
+        1
+        for cycle_packet in cycle_packets
+        if cycle_packet["response_behavior_signals"]["tone_hint_label"] is not None
+        and cycle_packet["assistant_text"] is not None
+    )
+    response_mood_tone_hint_cycle_count = _count_cycle_checks(
+        cycle_packets=cycle_packets,
+        check_name="response_mood_tone_hinted",
+    )
     return {
         "dialogue_thread_reuse_cycle_count": dialogue_thread_reuse_cycle_count,
         "dialogue_thread_reuse_rate_percent": _ratio_percent(
@@ -386,6 +523,36 @@ def _build_overview(*, cycle_packets: list[dict[str, Any]]) -> dict[str, Any]:
         "response_date_recall_rate_percent": _ratio_percent(
             response_date_recall_cycle_count,
             cycle_count,
+        ),
+        "response_action_transparency_cycle_count": response_action_transparency_cycle_count,
+        "response_action_transparency_eligible_cycle_count": response_action_transparency_eligible_cycle_count,
+        "response_action_transparency_rate_percent": _ratio_percent(
+            response_action_transparency_cycle_count,
+            response_action_transparency_eligible_cycle_count,
+        ),
+        "response_failure_explanation_cycle_count": response_failure_explanation_cycle_count,
+        "response_failure_explanation_eligible_cycle_count": response_failure_explanation_eligible_cycle_count,
+        "response_failure_explanation_rate_percent": _ratio_percent(
+            response_failure_explanation_cycle_count,
+            response_failure_explanation_eligible_cycle_count,
+        ),
+        "response_preference_reference_cycle_count": response_preference_reference_cycle_count,
+        "response_preference_reference_eligible_cycle_count": response_preference_reference_eligible_cycle_count,
+        "response_preference_reference_rate_percent": _ratio_percent(
+            response_preference_reference_cycle_count,
+            response_preference_reference_eligible_cycle_count,
+        ),
+        "response_preference_violation_cycle_count": response_preference_violation_cycle_count,
+        "response_preference_violation_eligible_cycle_count": response_preference_violation_eligible_cycle_count,
+        "response_preference_violation_rate_percent": _ratio_percent(
+            response_preference_violation_cycle_count,
+            response_preference_violation_eligible_cycle_count,
+        ),
+        "response_mood_tone_hint_cycle_count": response_mood_tone_hint_cycle_count,
+        "response_mood_tone_hint_eligible_cycle_count": response_mood_tone_hint_eligible_cycle_count,
+        "response_mood_tone_hint_rate_percent": _ratio_percent(
+            response_mood_tone_hint_cycle_count,
+            response_mood_tone_hint_eligible_cycle_count,
         ),
         "top_long_mood_transition": _top_long_mood_transition(cycle_packets),
     }
@@ -494,6 +661,46 @@ def _preference_keys_for_status(
     return keys
 
 
+# Block: Preference entries for status
+def _preference_entries_for_status(
+    *,
+    preferences: Any,
+    status: str,
+) -> list[dict[str, str]]:
+    normalized_entries: list[dict[str, str]] = []
+    for preference in preferences:
+        if not isinstance(preference, dict):
+            raise RuntimeError("preference replay state must contain only objects")
+        if str(preference.get("status")) != status:
+            continue
+        target_entity_ref = _require_object(
+            preference.get("target_entity_ref"),
+            "preference target_entity_ref must be object",
+        )
+        domain = _required_non_empty_string(
+            preference.get("domain"),
+            "preference domain must be string",
+        )
+        target_key = _required_non_empty_string(
+            target_entity_ref.get("target_key"),
+            "preference target_key must be string",
+        )
+        polarity = _required_non_empty_string(
+            preference.get("polarity"),
+            "preference polarity must be string",
+        )
+        normalized_entries.append(
+            {
+                "domain": domain,
+                "target_key": target_key,
+                "polarity": polarity,
+                "key": f"{domain}:{target_key}:{polarity}",
+            }
+        )
+    normalized_entries.sort(key=lambda entry: (entry["domain"], entry["target_key"], entry["polarity"]))
+    return normalized_entries
+
+
 # Block: Long mood summary
 def _long_mood_summary(long_mood_state: dict[str, Any] | None) -> dict[str, Any] | None:
     if long_mood_state is None:
@@ -569,6 +776,179 @@ def _response_date_recalled(
     return bool(user_dates and assistant_dates and user_dates.intersection(assistant_dates))
 
 
+# Block: Response behavior signals
+def _build_response_behavior_signals(
+    *,
+    action_types: list[str],
+    failed_action_types: list[str],
+    failure_modes: list[str],
+    assistant_text: str,
+    confirmed_preferences_before: list[dict[str, str]],
+    revoked_preferences_before: list[dict[str, str]],
+    long_mood_before: dict[str, Any] | None,
+) -> dict[str, Any]:
+    matched_action_cues = _matched_action_cues(
+        action_types=action_types,
+        assistant_text=assistant_text,
+    )
+    explained_failure_modes = _explained_failure_modes(
+        failed_action_types=failed_action_types,
+        failure_modes=failure_modes,
+        assistant_text=assistant_text,
+    )
+    reference_candidates = [
+        entry["key"]
+        for entry in confirmed_preferences_before
+        if str(entry["polarity"]) == "like"
+    ]
+    referenced_preference_keys = _matched_preference_keys(
+        preferences=confirmed_preferences_before,
+        assistant_text=assistant_text,
+        action_types=action_types,
+        allowed_polarity="like",
+    )
+    violation_candidates = [
+        entry["key"]
+        for entry in confirmed_preferences_before
+        if str(entry["polarity"]) == "dislike"
+    ] + [entry["key"] for entry in revoked_preferences_before]
+    violated_preference_keys = _matched_preference_keys(
+        preferences=confirmed_preferences_before + revoked_preferences_before,
+        assistant_text=assistant_text,
+        action_types=action_types,
+        allowed_polarity=None,
+    )
+    if reference_candidates:
+        violated_preference_keys = [
+            entry_key for entry_key in violated_preference_keys if entry_key in violation_candidates
+        ]
+    else:
+        violated_preference_keys = [
+            entry_key for entry_key in violated_preference_keys if entry_key in violation_candidates
+        ]
+    tone_hint_label = _tone_hint_label(long_mood_before=long_mood_before)
+    return {
+        "matched_action_cues": matched_action_cues,
+        "explained_failure_modes": explained_failure_modes,
+        "reference_candidates": reference_candidates,
+        "referenced_preference_keys": referenced_preference_keys,
+        "violation_candidates": violation_candidates,
+        "violated_preference_keys": violated_preference_keys,
+        "tone_hint_label": tone_hint_label,
+        "matched_tone_hint": _matched_tone_hint(
+            assistant_text=assistant_text,
+            tone_hint_label=tone_hint_label,
+        ),
+    }
+
+
+# Block: Action cue match
+def _matched_action_cues(
+    *,
+    action_types: list[str],
+    assistant_text: str,
+) -> list[str]:
+    matched: list[str] = []
+    for action_type in action_types:
+        for cue in ACTION_RESPONSE_CUES.get(action_type, ()):
+            if cue in assistant_text:
+                matched.append(action_type)
+                break
+    return _unique_non_empty_strings(matched)
+
+
+# Block: Failure explanation match
+def _explained_failure_modes(
+    *,
+    failed_action_types: list[str],
+    failure_modes: list[str],
+    assistant_text: str,
+) -> list[str]:
+    matched_modes: list[str] = []
+    if not failed_action_types:
+        return matched_modes
+    for failure_mode in failure_modes:
+        cues = FAILURE_RESPONSE_CUES.get(failure_mode)
+        if cues is not None and _contains_any(assistant_text, cues):
+            matched_modes.append(failure_mode)
+    if matched_modes:
+        return _unique_non_empty_strings(matched_modes)
+    for action_type in failed_action_types:
+        if _contains_any(assistant_text, ACTION_RESPONSE_CUES.get(action_type, ())):
+            matched_modes.append(f"action:{action_type}")
+    return _unique_non_empty_strings(matched_modes)
+
+
+# Block: Preference match
+def _matched_preference_keys(
+    *,
+    preferences: list[dict[str, str]],
+    assistant_text: str,
+    action_types: list[str],
+    allowed_polarity: str | None,
+) -> list[str]:
+    matched_keys: list[str] = []
+    for preference in preferences:
+        polarity = str(preference["polarity"])
+        if allowed_polarity is not None and polarity != allowed_polarity:
+            continue
+        if _preference_matches_response(
+            domain=str(preference["domain"]),
+            target_key=str(preference["target_key"]),
+            assistant_text=assistant_text,
+            action_types=action_types,
+        ):
+            matched_keys.append(str(preference["key"]))
+    return sorted(_unique_non_empty_strings(matched_keys))
+
+
+# Block: Preference response match
+def _preference_matches_response(
+    *,
+    domain: str,
+    target_key: str,
+    assistant_text: str,
+    action_types: list[str],
+) -> bool:
+    if domain == "action_type":
+        return target_key in action_types or _contains_any(
+            assistant_text,
+            ACTION_RESPONSE_CUES.get(target_key, ()),
+        )
+    if domain == "topic_keyword":
+        return target_key in assistant_text
+    if domain == "observation_kind":
+        if target_key == "date_reference":
+            return bool(_iso_date_tokens(assistant_text))
+        return target_key in assistant_text
+    return False
+
+
+# Block: Tone hint label
+def _tone_hint_label(*, long_mood_before: dict[str, Any] | None) -> str | None:
+    if long_mood_before is None:
+        return None
+    primary_label = str(long_mood_before["primary_label"])
+    if primary_label in {"calm", "warm", "curious"}:
+        return "gentle"
+    if primary_label in {"guarded", "tense", "frustrated"}:
+        return "cautious"
+    return None
+
+
+# Block: Tone hint match
+def _matched_tone_hint(
+    *,
+    assistant_text: str,
+    tone_hint_label: str | None,
+) -> bool:
+    if tone_hint_label == "gentle":
+        return _contains_any(assistant_text, GENTLE_TONE_CUES)
+    if tone_hint_label == "cautious":
+        return _contains_any(assistant_text, CAUTIOUS_TONE_CUES)
+    return False
+
+
 # Block: Mood transition summary
 def _top_long_mood_transition(cycle_packets: list[dict[str, Any]]) -> str | None:
     transition_counts: dict[str, int] = {}
@@ -587,6 +967,11 @@ def _top_long_mood_transition(cycle_packets: list[dict[str, Any]]) -> str | None
         transition_counts.items(),
         key=lambda entry: (-entry[1], entry[0]),
     )[0][0]
+
+
+# Block: Cue contains helper
+def _contains_any(text: str, cues: tuple[str, ...]) -> bool:
+    return any(cue in text for cue in cues if cue)
 
 
 # Block: Normalized action type
