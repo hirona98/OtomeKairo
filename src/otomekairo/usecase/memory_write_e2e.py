@@ -15,7 +15,7 @@ from otomekairo.schema.settings import build_default_settings
 
 
 # Block: Report constants
-REPORT_SCHEMA_VERSION = 1
+REPORT_SCHEMA_VERSION = 2
 
 
 # Block: Scripted cycle types
@@ -367,8 +367,17 @@ def _build_report_checks(report: dict[str, Any]) -> dict[str, bool]:
     database_counts = report["database_counts"]
     job_totals = report["job_totals"]
     snapshot_summary = report["snapshot_summary"]
+    cycle_count = int(report["cycle_count"])
+    confirmed_preference_keys = {
+        (
+            f"{preference_entry['domain']}:"
+            f"{preference_entry['target_key']}:"
+            f"{preference_entry['polarity']}"
+        )
+        for preference_entry in snapshot_summary["confirmed_preferences"]
+    }
     checks = {
-        "write_memory_jobs_completed": int(job_totals.get("write_memory", 0)) == 4,
+        "write_memory_jobs_completed": int(job_totals.get("write_memory", 0)) == cycle_count,
         "refresh_preview_jobs_completed": (
             int(job_totals.get("refresh_preview", 0))
             == int(database_counts["event_count"])
@@ -377,10 +386,12 @@ def _build_report_checks(report: dict[str, Any]) -> dict[str, bool]:
             int(job_totals.get("embedding_sync", 0))
             == int(job_totals.get("write_memory", 0)) + int(job_totals.get("refresh_preview", 0))
         ),
-        "summary_memory_created": int(database_counts["memory_state_kind_counts"].get("summary", 0)) >= 4,
+        "summary_memory_created": (
+            int(database_counts["memory_state_kind_counts"].get("summary", 0)) >= cycle_count
+        ),
         "fact_memory_created": int(database_counts["memory_state_kind_counts"].get("fact", 0)) >= 4,
         "reflection_memory_created": (
-            int(database_counts["memory_state_kind_counts"].get("reflection_note", 0)) >= 4
+            int(database_counts["memory_state_kind_counts"].get("reflection_note", 0)) >= cycle_count
         ),
         "long_mood_state_upserted": (
             int(database_counts["memory_state_kind_counts"].get("long_mood_state", 0)) == 1
@@ -403,15 +414,25 @@ def _build_report_checks(report: dict[str, Any]) -> dict[str, bool]:
             bool(database_counts["dialogue_threads"])
             and int(database_counts["dialogue_threads"][0]["cycle_count"]) >= 4
         ),
+        "semantic_event_links_materialized": (
+            int(database_counts["event_link_label_counts"].get("reply_to", 0)) > 0
+            and int(database_counts["event_link_label_counts"].get("same_topic", 0)) > 0
+            and int(database_counts["event_link_label_counts"].get("caused_by", 0)) > 0
+            and int(database_counts["event_link_label_counts"].get("continuation", 0)) > 0
+        ),
         "about_time_materialized": (
             int(database_counts["event_about_time_count"]) > 0
             and int(database_counts["state_about_time_count"]) > 0
         ),
         "preference_lifecycle_materialized": (
-            int(database_counts["preference_status_counts"].get("confirmed", 0)) == 2
-            and int(database_counts["preference_status_counts"].get("revoked", 0)) == 2
+            int(database_counts["preference_status_counts"].get("confirmed", 0)) >= 4
+            and int(database_counts["preference_status_counts"].get("revoked", 0)) >= 2
         ),
-        "confirmed_preferences_visible": len(snapshot_summary["confirmed_preferences"]) == 2,
+        "confirmed_preferences_visible": len(snapshot_summary["confirmed_preferences"]) >= 4,
+        "topic_keyword_preferences_visible": {
+            "topic_keyword:展示:like",
+            "topic_keyword:ホラー映画:dislike",
+        }.issubset(confirmed_preference_keys),
     }
     return checks
 
@@ -451,6 +472,13 @@ def format_memory_write_e2e_report(report: dict[str, Any]) -> str:
             f"event_links {database_counts['event_link_count']}, "
             f"state_links {database_counts['state_link_count']}, "
             f"dialogue_threads {len(database_counts['dialogue_threads'])}"
+        ),
+        (
+            "event_links: "
+            f"reply_to {database_counts['event_link_label_counts'].get('reply_to', 0)}, "
+            f"same_topic {database_counts['event_link_label_counts'].get('same_topic', 0)}, "
+            f"continuation {database_counts['event_link_label_counts'].get('continuation', 0)}, "
+            f"caused_by {database_counts['event_link_label_counts'].get('caused_by', 0)}"
         ),
         (
             "memory_states: "
@@ -543,6 +571,15 @@ def _read_database_counts(*, db_path: Path) -> dict[str, Any]:
             """,
             key_name="entity_type",
         )
+        event_link_label_counts = _read_group_counts(
+            connection=connection,
+            sql="""
+            SELECT label, COUNT(*) AS item_count
+            FROM event_links
+            GROUP BY label
+            """,
+            key_name="label",
+        )
         dialogue_threads = [
             {
                 "thread_key": str(row["thread_key"]),
@@ -576,6 +613,7 @@ def _read_database_counts(*, db_path: Path) -> dict[str, Any]:
         "memory_state_kind_counts": memory_state_kind_counts,
         "preference_status_counts": preference_status_counts,
         "vec_item_counts": vec_item_counts,
+        "event_link_label_counts": event_link_label_counts,
         "dialogue_threads": dialogue_threads,
     }
 
@@ -830,6 +868,40 @@ def _scripted_cycles() -> tuple[ScriptedCycleSpec, ...]:
                     },
                     observed_effects={
                         "summary_text": "2024-05-03 の開始時刻は 11 時で案内が一致した",
+                    },
+                ),
+            ),
+        ),
+        ScriptedCycleSpec(
+            cycle_id="cycle_memory_e2e_05",
+            user_text="展示は好きです。ホラー映画は苦手です。展示中心でお願い。",
+            assistant_text="了解。展示を中心に整理するね。",
+            actions=(
+                ScriptedActionSpec(
+                    action_type="emit_chat_response",
+                    status="succeeded",
+                    command={
+                        "text": "了解。展示を中心に整理するね。",
+                    },
+                    observed_effects={
+                        "delivery": "stream",
+                    },
+                ),
+            ),
+        ),
+        ScriptedCycleSpec(
+            cycle_id="cycle_memory_e2e_06",
+            user_text="その展示の話を続けて。会場と開始時刻だけで大丈夫。",
+            assistant_text="展示の話を続けるね。会場と開始時刻だけに絞って整理するよ。",
+            actions=(
+                ScriptedActionSpec(
+                    action_type="emit_chat_response",
+                    status="succeeded",
+                    command={
+                        "text": "展示の話を続けるね。会場と開始時刻だけに絞って整理するよ。",
+                    },
+                    observed_effects={
+                        "delivery": "stream",
                     },
                 ),
             ),
