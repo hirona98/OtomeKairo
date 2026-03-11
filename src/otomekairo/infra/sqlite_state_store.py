@@ -8433,8 +8433,6 @@ def _self_state_personality_seed() -> dict[str, Any]:
             "confirmation_style": "balanced",
             "response_pace": "balanced",
         },
-        "learned_preferences": [],
-        "learned_aversions": [],
         "habit_biases": {
             "preferred_action_types": [],
             "preferred_observation_kinds": [],

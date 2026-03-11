@@ -177,8 +177,6 @@
     "confirmation_style": "balanced",
     "response_pace": "balanced"
   },
-  "learned_preferences": [],
-  "learned_aversions": [],
   "habit_biases": {
     "preferred_action_types": [],
     "preferred_observation_kinds": [],
@@ -187,7 +185,7 @@
 }
 ```
 
-- 必須項目は `trait_values`、`preferred_interaction_style`、`learned_preferences`、`learned_aversions`、`habit_biases` である
+- 必須項目は `trait_values`、`preferred_interaction_style`、`habit_biases` である
 - `trait_values` は、`sociability`、`caution`、`curiosity`、`persistence`、`warmth`、`assertiveness`、`novelty_preference` を必須キーとして持つ
 - `trait_values` の各値は、`-1.0..+1.0` の `number` に固定する
 - `preferred_interaction_style` は、`speech_tone`、`distance_style`、`confirmation_style`、`response_pace` を必須キーとして持つ
@@ -195,10 +193,10 @@
 - `distance_style` は、少なくとも `reserved`、`balanced`、`close` を区別する
 - `confirmation_style` は、少なくとも `light`、`balanced`、`careful` を区別する
 - `response_pace` は、少なくとも `careful`、`balanced`、`quick` を区別する
-- `learned_preferences` と `learned_aversions` は、`personality_preference_entry` の配列に固定する
 - `habit_biases.preferred_action_types` は、行動種別の順序付き配列である
 - `habit_biases.preferred_observation_kinds` は、観測種別の順序付き配列である
 - `habit_biases.avoided_action_styles` は、避ける行動様式の順序付き配列である
+- current 実装では、個別の好悪は `personality_json` ではなく `preference_memory` を正本として持つ
 
 <!-- Block: Current Emotion Json -->
 ### `self_state.current_emotion_json`
@@ -1612,8 +1610,6 @@
   "style_updates": {
     "response_pace": "quick"
   },
-  "preference_promotions": [],
-  "aversion_promotions": [],
   "habit_updates": {
     "preferred_action_types": ["look", "browse"]
   },
@@ -1623,7 +1619,7 @@
 ```
 
 - `personality_change_proposal` は、長周期の `write_memory` 内部で作る未適用の提案オブジェクトである
-- 必須項目は `base_personality_updated_at`、`trait_deltas`、`preference_promotions`、`aversion_promotions`、`habit_updates`、`evidence_event_ids`、`evidence_summary` である
+- 必須項目は `base_personality_updated_at`、`trait_deltas`、`habit_updates`、`evidence_event_ids`、`evidence_summary` である
 - `style_updates` は任意で、変化がある場合だけ持つ
 - `trait_deltas` の各要素は、`trait_name`、`delta`、`reason`、`evidence_count`、`source_cycle_ids` を必須とする
 - `trait_name` は、`self_state.personality_json.trait_values` に存在するキーだけを許可する
@@ -1632,9 +1628,9 @@
 - `base_personality_updated_at` は、提案生成時に読んだ `self_state.personality_updated_at` の値である
 - `source_cycle_ids` は、証拠に使った `events` を生んだ短周期の `cycle_id` だけを数える
 - `evidence_event_ids` は、その提案の根拠に採用した `event_id` を重複なしで集約した配列であり、`revisions.evidence_event_ids_json` の入力に使う
-- `preference_promotions` と `aversion_promotions` は、`personality_preference_entry` の配列である
 - `habit_updates` は、`preferred_action_types`、`preferred_observation_kinds`、`avoided_action_styles` のうち変更対象だけを持つ部分オブジェクトでよい
-- 閾値未満のときは、`trait_deltas=[]`、`preference_promotions=[]`、`aversion_promotions=[]`、`habit_updates={}`、`evidence_event_ids=[]` の empty proposal を返してよい
+- 閾値未満のときは、`trait_deltas=[]`、`habit_updates={}`、`evidence_event_ids=[]` の empty proposal を返してよい
+- current 実装では、個別の好悪は `preference_memory` を正本にし、`personality_change_proposal` は trait / style / habit だけを扱う
 
 <!-- Block: Persona Updates -->
 ### `persona_updates`
@@ -1648,8 +1644,6 @@
   "style_updates": {
     "response_pace": "quick"
   },
-  "preference_promotions": [],
-  "aversion_promotions": [],
   "habit_updates": {
     "preferred_action_types": ["look", "browse"]
   },
@@ -1659,12 +1653,11 @@
 ```
 
 - `persona_updates` は、`bounded apply` 後に `self_state.personality_json` へ反映可能な差分オブジェクトである
-- 必須項目は `base_personality_updated_at`、`updated_trait_values`、`preference_promotions`、`aversion_promotions`、`habit_updates`、`evidence_event_ids`、`evidence_summary` である
+- 必須項目は `base_personality_updated_at`、`updated_trait_values`、`habit_updates`、`evidence_event_ids`、`evidence_summary` である
 - `style_updates` は任意で、変化がある場合だけ持つ
 - `updated_trait_values` は、`trait_name -> absolute_value` の部分オブジェクトである
 - `updated_trait_values` に含めてよいキーは、`self_state.personality_json.trait_values` の固定キーだけである
 - `updated_trait_values` の各値は、`-1.0..+1.0` の `number` に clamp 済みでなければならない
-- `preference_promotions` と `aversion_promotions` は、`personality_preference_entry` の配列である
 - `habit_updates` は、`self_state.personality_json.habit_biases` に上書きする部分オブジェクトである
 - `evidence_event_ids` は、適用する差分を正当化した `event_id` の集約であり、`self_state.personality` の `revisions.evidence_event_ids_json` にそのまま保存する
 - `evidence_summary` は、監査と `revisions` の理由づけに使う短い要約である
