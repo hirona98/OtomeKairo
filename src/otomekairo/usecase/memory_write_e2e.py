@@ -148,6 +148,7 @@ def _run_scripted_cycle(
         "drained_job_counts": drained_jobs["job_counts"],
         "drained_jobs": drained_jobs["jobs"],
         "preference_status_counts": cycle_snapshot["preference_status_counts"],
+        "dialogue_thread_keys": cycle_snapshot["dialogue_thread_keys"],
         "active_preferences": cycle_snapshot["active_preferences"],
         "long_mood_primary_label": cycle_snapshot["long_mood_primary_label"],
     }
@@ -302,6 +303,10 @@ def _read_cycle_snapshot(
             rows=preference_rows,
             key_name="status",
         ),
+        "dialogue_thread_keys": _read_cycle_dialogue_thread_keys(
+            connection=connection,
+            event_ids=event_ids,
+        ),
         "active_preferences": [
             _preference_row_summary(row)
             for row in preference_rows
@@ -391,8 +396,12 @@ def _build_report_checks(report: dict[str, Any]) -> dict[str, bool]:
         ),
         "graph_context_materialized": (
             int(database_counts["event_link_count"]) > 0
-            and int(database_counts["event_thread_count"]) == int(database_counts["event_count"])
+            and int(database_counts["event_thread_count"]) >= int(database_counts["event_count"])
             and int(database_counts["state_link_count"]) > 0
+        ),
+        "dialogue_thread_continuity_materialized": (
+            bool(database_counts["dialogue_threads"])
+            and int(database_counts["dialogue_threads"][0]["cycle_count"]) >= 4
         ),
         "about_time_materialized": (
             int(database_counts["event_about_time_count"]) > 0
@@ -440,7 +449,8 @@ def format_memory_write_e2e_report(report: dict[str, Any]) -> str:
             f"previews {database_counts['event_preview_count']}, "
             f"vec_items {database_counts['vec_item_count']}, "
             f"event_links {database_counts['event_link_count']}, "
-            f"state_links {database_counts['state_link_count']}"
+            f"state_links {database_counts['state_link_count']}, "
+            f"dialogue_threads {len(database_counts['dialogue_threads'])}"
         ),
         (
             "memory_states: "
@@ -533,6 +543,27 @@ def _read_database_counts(*, db_path: Path) -> dict[str, Any]:
             """,
             key_name="entity_type",
         )
+        dialogue_threads = [
+            {
+                "thread_key": str(row["thread_key"]),
+                "cycle_count": int(row["cycle_count"]),
+                "event_count": int(row["event_count"]),
+            }
+            for row in connection.execute(
+                """
+                SELECT
+                    event_threads.thread_key,
+                    COUNT(DISTINCT events.cycle_id) AS cycle_count,
+                    COUNT(DISTINCT event_threads.event_id) AS event_count
+                FROM event_threads
+                INNER JOIN events
+                        ON events.event_id = event_threads.event_id
+                WHERE event_threads.thread_key LIKE 'dialogue:%'
+                GROUP BY event_threads.thread_key
+                ORDER BY cycle_count DESC, event_count DESC, event_threads.thread_key ASC
+                """
+            ).fetchall()
+        ]
     return {
         "event_count": event_count,
         "event_preview_count": event_preview_count,
@@ -545,6 +576,7 @@ def _read_database_counts(*, db_path: Path) -> dict[str, Any]:
         "memory_state_kind_counts": memory_state_kind_counts,
         "preference_status_counts": preference_status_counts,
         "vec_item_counts": vec_item_counts,
+        "dialogue_threads": dialogue_threads,
     }
 
 
@@ -665,6 +697,33 @@ def _read_long_mood_primary_label(payload_json: str) -> str:
         payload.get("primary_label"),
         "long_mood payload.primary_label must be non-empty string",
     )
+
+
+# Block: Cycle dialogue thread keys
+def _read_cycle_dialogue_thread_keys(
+    *,
+    connection: sqlite3.Connection,
+    event_ids: list[str],
+) -> list[str]:
+    if not event_ids:
+        return []
+    placeholders = ",".join("?" for _ in event_ids)
+    rows = connection.execute(
+        f"""
+        SELECT thread_key
+        FROM event_threads
+        WHERE event_id IN ({placeholders})
+          AND thread_key LIKE 'dialogue:%'
+        ORDER BY created_at DESC, thread_key ASC
+        """,
+        tuple(event_ids),
+    ).fetchall()
+    dialogue_thread_keys: list[str] = []
+    for row in rows:
+        thread_key = str(row["thread_key"])
+        if thread_key not in dialogue_thread_keys:
+            dialogue_thread_keys.append(thread_key)
+    return dialogue_thread_keys
 
 
 # Block: SQLite row connection
