@@ -115,7 +115,7 @@
 
 - `preference_target_entity_ref` は、`preference_memory.target_entity_ref_json` と `MemoryWritePlan.preference_updates.target_entity_ref` で共通に使う
 - 必須項目は `target_kind`、`target_key` である
-- `target_kind` は、少なくとも `action_type`、`observation_kind` を区別する
+- `target_kind` は、少なくとも `action_type`、`observation_kind`、`topic_keyword` を区別する
 - `target_key` は、対象を表す非空の `string` である
 
 <!-- Block: Pending Input Payload -->
@@ -677,8 +677,8 @@
 {
   "likes": [
     {
-      "domain": "topic",
-      "target_key": "high_school_memories",
+      "domain": "topic_keyword",
+      "target_key": "展示",
       "confidence": 0.91
     }
   ],
@@ -1775,6 +1775,19 @@
     {
       "owner_scope": "self",
       "target_entity_ref": {
+        "target_kind": "topic_keyword",
+        "target_key": "展示"
+      },
+      "domain": "topic_keyword",
+      "polarity": "like",
+      "status": "confirmed",
+      "confidence": 0.92,
+      "evidence_event_ids": ["evt_001", "evt_002"],
+      "revision_reason": "write_memory confirmed explicit 展示 like preference"
+    },
+    {
+      "owner_scope": "self",
+      "target_entity_ref": {
         "target_kind": "action_type",
         "target_key": "browse"
       },
@@ -1882,6 +1895,7 @@
 - `preference_updates.target_entity_ref` は `preference_target_entity_ref` を使う
 - `preference_updates.status` は、`candidate`、`confirmed`、`revoked` のいずれかに固定する
 - current 実装では、`preference_updates` は既存 row を見て `candidate -> confirmed` の昇格と反対極性の `revoked` を同じ plan で出してよい
+- current 実装では、`chat_message` / `microphone_message` の明示表現から `topic_keyword` の `confirmed` と反対極性の `revoked` を出してよい
 - `event_affect.vad` は、`v`、`a`、`d` の 3 キーを必須とし、各値は `-1.0..+1.0` の `number` とする
 - `context_updates` は、`event_links`、`event_threads`、`state_links` の 3 キーを必須とする
 - current 実装では、`event_annotations.thread_hints` と `context_updates.event_threads` に `cycle:*` と `dialogue:*` の両方を含めてよい
