@@ -83,6 +83,7 @@
 - CocoroGhost の強みを OtomeKairo へ取り込む統合案: `docs/note/CocoroGhost統合設計案.md`
 - `write_memory -> refresh_preview -> embedding_sync` の deterministic e2e 運用メモ: `docs/note/memory_write_e2e運用メモ.md`
 - chat cycle を replay して継続性を測る運用メモ: `docs/note/chat_replay_eval運用メモ.md`
+- deterministic な会話品質 golden pack の運用メモ: `docs/note/chat_behavior_golden運用メモ.md`
 - retrieval_runs から直近傾向を確認する運用メモ: `docs/note/retrieval_eval運用メモ.md`
 - retrieval_runs の review packet を確認する運用メモ: `docs/note/retrieval_triage運用メモ.md`
 - review 済み triage report を quarantine_memory へ取り込む運用メモ: `docs/note/retrieval_review_import運用メモ.md`
