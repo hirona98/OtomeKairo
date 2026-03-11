@@ -767,7 +767,7 @@ class SqliteStateStore:
                 LEFT JOIN event_preview_cache
                        ON event_preview_cache.event_id = events.event_id
                 WHERE events.searchable = 1
-                ORDER BY created_at DESC
+                ORDER BY events.created_at DESC
                 LIMIT ?
                 """,
                 (recent_event_fetch_limit,),
