@@ -638,14 +638,6 @@ def _build_personality_change_proposal(
         reverse=True,
     )
     trait_delta_candidates = trait_delta_candidates[:3]
-    preference_promotion_candidates = _promotion_entries(
-        vote_map=evidence["preference_votes"],
-        require_multiple_cycles=True,
-    )
-    aversion_promotion_candidates = _promotion_entries(
-        vote_map=evidence["aversion_votes"],
-        require_multiple_cycles=True,
-    )
     habit_updates, habit_evidence_event_ids = _habit_updates(evidence=evidence)
     trait_deltas = [
         {
@@ -657,53 +649,21 @@ def _build_personality_change_proposal(
         }
         for candidate in trait_delta_candidates
     ]
-    preference_promotions = [
-        {
-            "domain": str(entry["domain"]),
-            "target_key": str(entry["target_key"]),
-            "weight": float(entry["weight"]),
-            "evidence_count": int(entry["evidence_count"]),
-        }
-        for entry in preference_promotion_candidates
-    ]
-    aversion_promotions = [
-        {
-            "domain": str(entry["domain"]),
-            "target_key": str(entry["target_key"]),
-            "weight": float(entry["weight"]),
-            "evidence_count": int(entry["evidence_count"]),
-        }
-        for entry in aversion_promotion_candidates
-    ]
     evidence_event_ids = _unique_strings(
         [
             event_id
             for candidate in trait_delta_candidates
             for event_id in candidate["evidence_event_ids"]
         ]
-        + [
-            event_id
-            for entry in preference_promotion_candidates
-            for event_id in entry["evidence_event_ids"]
-        ]
-        + [
-            event_id
-            for entry in aversion_promotion_candidates
-            for event_id in entry["evidence_event_ids"]
-        ]
         + habit_evidence_event_ids
     )
     proposal = {
         "base_personality_updated_at": personality_updated_at,
         "trait_deltas": trait_deltas,
-        "preference_promotions": preference_promotions,
-        "aversion_promotions": aversion_promotions,
         "habit_updates": habit_updates,
         "evidence_event_ids": evidence_event_ids,
         "evidence_summary": _proposal_summary(
             trait_deltas=trait_deltas,
-            preference_promotions=preference_promotions,
-            aversion_promotions=aversion_promotions,
             habit_updates=habit_updates,
         ),
     }
@@ -764,51 +724,6 @@ def _trait_delta_candidate(
     }
 
 
-# Block: Promotion entry build
-def _promotion_entries(
-    *,
-    vote_map: dict[tuple[str, str], dict[str, Any]],
-    require_multiple_cycles: bool,
-) -> list[dict[str, Any]]:
-    entries: list[dict[str, Any]] = []
-    for vote in vote_map.values():
-        evidence_count = int(vote["evidence_count"])
-        if evidence_count < 3:
-            continue
-        evidence_event_ids = _unique_strings(vote["evidence_event_ids"])
-        if not evidence_event_ids:
-            continue
-        source_cycle_ids = _unique_strings(vote["source_cycle_ids"])
-        if require_multiple_cycles and len(source_cycle_ids) < 2:
-            continue
-        average_confidence = float(vote["confidence_total"]) / float(evidence_count)
-        weight = round(
-            min(
-                1.0,
-                0.35 + max(0, evidence_count - 3) * 0.10 + average_confidence * 0.35,
-            ),
-            2,
-        )
-        entries.append(
-            {
-                "domain": str(vote["domain"]),
-                "target_key": str(vote["target_key"]),
-                "weight": weight,
-                "evidence_count": evidence_count,
-                "evidence_event_ids": evidence_event_ids,
-            }
-        )
-    entries.sort(
-        key=lambda entry: (
-            -float(entry["weight"]),
-            -int(entry["evidence_count"]),
-            str(entry["domain"]),
-            str(entry["target_key"]),
-        )
-    )
-    return entries
-
-
 # Block: Habit update build
 def _habit_updates(*, evidence: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     habit_updates: dict[str, Any] = {}
@@ -865,22 +780,12 @@ def _habit_updates(*, evidence: dict[str, Any]) -> tuple[dict[str, Any], list[st
 def _proposal_summary(
     *,
     trait_deltas: list[dict[str, Any]],
-    preference_promotions: list[dict[str, Any]],
-    aversion_promotions: list[dict[str, Any]],
     habit_updates: dict[str, Any],
 ) -> str:
     summary_parts: list[str] = []
     if trait_deltas:
         summary_parts.append(
             "trait:" + ",".join(str(delta["trait_name"]) for delta in trait_deltas)
-        )
-    if preference_promotions:
-        summary_parts.append(
-            "prefer:" + ",".join(str(entry["target_key"]) for entry in preference_promotions[:2])
-        )
-    if aversion_promotions:
-        summary_parts.append(
-            "avoid:" + ",".join(str(entry["target_key"]) for entry in aversion_promotions[:2])
         )
     preferred_action_types = habit_updates.get("preferred_action_types")
     if isinstance(preferred_action_types, list) and preferred_action_types:
@@ -904,14 +809,6 @@ def _build_persona_updates(
     updated_personality = {
         "trait_values": dict(current_personality["trait_values"]),
         "preferred_interaction_style": dict(current_personality["preferred_interaction_style"]),
-        "learned_preferences": [
-            dict(entry)
-            for entry in current_personality["learned_preferences"]
-        ],
-        "learned_aversions": [
-            dict(entry)
-            for entry in current_personality["learned_aversions"]
-        ],
         "habit_biases": {
             "preferred_action_types": list(current_personality["habit_biases"]["preferred_action_types"]),
             "preferred_observation_kinds": list(current_personality["habit_biases"]["preferred_observation_kinds"]),
@@ -926,43 +823,15 @@ def _build_persona_updates(
         proposal=proposal,
         updated_personality=updated_personality,
     )
-    preference_promotions = _bounded_preference_updates(
-        proposed_entries=proposal["preference_promotions"],
-        current_entries=updated_personality["learned_preferences"],
-    )
-    aversion_promotions = _bounded_preference_updates(
-        proposed_entries=proposal["aversion_promotions"],
-        current_entries=updated_personality["learned_aversions"],
-    )
-    if preference_promotions:
-        updated_personality["learned_preferences"] = _merged_preference_entries(
-            current_entries=updated_personality["learned_preferences"],
-            changed_entries=preference_promotions,
-        )
-        updated_personality["learned_aversions"] = _remove_matching_preference_entries(
-            current_entries=updated_personality["learned_aversions"],
-            changed_entries=preference_promotions,
-        )
-    if aversion_promotions:
-        updated_personality["learned_aversions"] = _merged_preference_entries(
-            current_entries=updated_personality["learned_aversions"],
-            changed_entries=aversion_promotions,
-        )
-        updated_personality["learned_preferences"] = _remove_matching_preference_entries(
-            current_entries=updated_personality["learned_preferences"],
-            changed_entries=aversion_promotions,
-        )
     habit_updates = _bounded_habit_updates(
         proposed_updates=proposal["habit_updates"],
         current_habits=updated_personality["habit_biases"],
     )
-    if not any((updated_trait_values, style_updates, preference_promotions, aversion_promotions, habit_updates)):
+    if not any((updated_trait_values, style_updates, habit_updates)):
         return (None, None)
     persona_updates: dict[str, Any] = {
         "base_personality_updated_at": int(proposal["base_personality_updated_at"]),
         "updated_trait_values": updated_trait_values,
-        "preference_promotions": preference_promotions,
-        "aversion_promotions": aversion_promotions,
         "habit_updates": habit_updates,
         "evidence_event_ids": _unique_strings(proposal["evidence_event_ids"]),
         "evidence_summary": str(proposal["evidence_summary"]),
@@ -1020,102 +889,6 @@ def _bounded_style_updates(
     return updated_styles
 
 
-# Block: Preference update apply
-def _bounded_preference_updates(
-    *,
-    proposed_entries: list[Any],
-    current_entries: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    current_map = {
-        (str(entry["domain"]), str(entry["target_key"])): entry
-        for entry in current_entries
-    }
-    changed_entries: list[dict[str, Any]] = []
-    for raw_entry in proposed_entries:
-        if not isinstance(raw_entry, dict):
-            raise RuntimeError("personality change promotion entries must be objects")
-        domain = str(raw_entry["domain"])
-        target_key = str(raw_entry["target_key"])
-        proposed_weight = _normalized_unit_score(
-            raw_entry["weight"],
-            field_name="personality change promotion weight",
-        )
-        proposed_evidence_count = _positive_integer(
-            raw_entry["evidence_count"],
-            field_name="personality change promotion evidence_count",
-        )
-        existing_entry = current_map.get((domain, target_key))
-        current_weight = 0.0
-        current_evidence_count = 0
-        if existing_entry is not None:
-            current_weight = _normalized_unit_score(
-                existing_entry["weight"],
-                field_name="self_state.personality preference weight",
-            )
-            current_evidence_count = _positive_integer(
-                existing_entry["evidence_count"],
-                field_name="self_state.personality preference evidence_count",
-            )
-        bounded_weight = round(
-            max(
-                0.0,
-                min(1.0, current_weight + max(-0.15, min(0.15, proposed_weight - current_weight))),
-            ),
-            2,
-        )
-        next_entry = {
-            "domain": domain,
-            "target_key": target_key,
-            "weight": bounded_weight,
-            "evidence_count": max(current_evidence_count, proposed_evidence_count),
-        }
-        if existing_entry is not None and next_entry == existing_entry:
-            continue
-        changed_entries.append(next_entry)
-    return changed_entries
-
-
-# Block: Preference merge
-def _merged_preference_entries(
-    *,
-    current_entries: list[dict[str, Any]],
-    changed_entries: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    merged_map = {
-        (str(entry["domain"]), str(entry["target_key"])): dict(entry)
-        for entry in current_entries
-    }
-    for entry in changed_entries:
-        merged_map[(str(entry["domain"]), str(entry["target_key"]))] = dict(entry)
-    merged_entries = list(merged_map.values())
-    merged_entries.sort(
-        key=lambda entry: (
-            -float(entry["weight"]),
-            -int(entry["evidence_count"]),
-            str(entry["domain"]),
-            str(entry["target_key"]),
-        )
-    )
-    return merged_entries
-
-
-# Block: Preference remove
-def _remove_matching_preference_entries(
-    *,
-    current_entries: list[dict[str, Any]],
-    changed_entries: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    removed_keys = {
-        (str(entry["domain"]), str(entry["target_key"]))
-        for entry in changed_entries
-    }
-    return [
-        dict(entry)
-        for entry in current_entries
-        if (str(entry["domain"]), str(entry["target_key"])) not in removed_keys
-    ]
-
-
 # Block: Habit update apply
 def _bounded_habit_updates(
     *,
@@ -1146,8 +919,6 @@ def _bounded_habit_updates(
 def _proposal_has_updates(proposal: dict[str, Any]) -> bool:
     return bool(
         proposal["trait_deltas"]
-        or proposal["preference_promotions"]
-        or proposal["aversion_promotions"]
         or proposal["habit_updates"]
         or proposal.get("style_updates")
     )
