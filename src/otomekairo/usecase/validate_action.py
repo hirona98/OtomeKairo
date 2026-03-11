@@ -24,6 +24,55 @@ LOW_RELATIONSHIP_FIT_THRESHOLD = 0.35
 URGENT_PRIORITY_THRESHOLD = 0.80
 
 
+# Block: Long mood action scores
+LONG_MOOD_ACTION_SCORES = {
+    "browse": {
+        "calm": 0.64,
+        "curious": 0.96,
+        "warm": 0.58,
+        "guarded": 0.36,
+        "tense": 0.24,
+        "frustrated": 0.18,
+    },
+    "look": {
+        "calm": 0.60,
+        "curious": 0.88,
+        "warm": 0.48,
+        "guarded": 0.74,
+        "tense": 0.62,
+        "frustrated": 0.34,
+    },
+    "notify": {
+        "calm": 0.78,
+        "curious": 0.56,
+        "warm": 0.74,
+        "guarded": 0.58,
+        "tense": 0.44,
+        "frustrated": 0.38,
+    },
+    "speak": {
+        "calm": 0.82,
+        "curious": 0.72,
+        "warm": 0.92,
+        "guarded": 0.42,
+        "tense": 0.30,
+        "frustrated": 0.26,
+    },
+    "wait": {
+        "calm": 0.62,
+        "curious": 0.34,
+        "warm": 0.44,
+        "guarded": 0.90,
+        "tense": 0.88,
+        "frustrated": 0.76,
+    },
+}
+LONG_MOOD_LABEL_ALIASES = {
+    "relief": "calm",
+    "warmth": "warm",
+}
+
+
 # Block: Validation result
 @dataclass(frozen=True, slots=True)
 class ValidatedChatAction:
@@ -365,6 +414,10 @@ def _persona_consistency_score(
             "selection_profile.emotion_bias",
         ),
     )
+    long_mood_alignment = _long_mood_alignment(
+        action_type=action_type,
+        action_selection_context=action_selection_context,
+    )
     drive_alignment = _drive_alignment(
         action_type=action_type,
         drive_bias=_required_object(
@@ -379,8 +432,9 @@ def _persona_consistency_score(
         + relationship_alignment
         + preference_alignment
         + emotion_alignment
+        + long_mood_alignment
         + drive_alignment
-    ) / 6.0
+    ) / 7.0
     overall_score = _normalized_score(positive_average - aversion_penalty * 0.50)
     return {
         "trait_alignment": trait_alignment,
@@ -389,6 +443,7 @@ def _persona_consistency_score(
         "preference_alignment": preference_alignment,
         "aversion_penalty": aversion_penalty,
         "emotion_alignment": emotion_alignment,
+        "long_mood_alignment": long_mood_alignment,
         "drive_alignment": drive_alignment,
         "overall_score": overall_score,
     }
@@ -401,7 +456,12 @@ def _personality_fit_score(
 ) -> float:
     trait_alignment = _normalized_score(persona_consistency["trait_alignment"])
     style_alignment = _normalized_score(persona_consistency["style_alignment"])
-    return _normalized_score(trait_alignment * 0.50 + style_alignment * 0.50)
+    long_mood_alignment = _normalized_score(persona_consistency["long_mood_alignment"])
+    return _normalized_score(
+        trait_alignment * 0.40
+        + style_alignment * 0.40
+        + long_mood_alignment * 0.20
+    )
 
 
 # Block: Hold decision helpers
@@ -914,6 +974,78 @@ def _emotion_alignment(
             + (1.0 - _signed_bias_to_score(avoidance_bias)) * 0.35
         )
     raise RuntimeError("unsupported action_type for emotion alignment")
+
+
+# Block: Long mood alignment
+def _long_mood_alignment(
+    *,
+    action_type: str,
+    action_selection_context: dict[str, Any],
+) -> float:
+    if "long_mood_state" not in action_selection_context:
+        raise RuntimeError("cognition_input.action_selection_context.long_mood_state is required")
+    long_mood_state = action_selection_context["long_mood_state"]
+    if long_mood_state is None:
+        return 0.50
+    if not isinstance(long_mood_state, dict):
+        raise RuntimeError("cognition_input.action_selection_context.long_mood_state must be object or null")
+    source_affect_labels = long_mood_state.get("source_affect_labels")
+    if not isinstance(source_affect_labels, list):
+        raise RuntimeError("cognition_input.action_selection_context.long_mood_state.source_affect_labels must be a list")
+    label_scores: list[tuple[float, float]] = []
+    for label_value, weight in (
+        (long_mood_state.get("primary_label"), 0.55),
+        (long_mood_state.get("baseline_label"), 0.20),
+        (long_mood_state.get("shock_label"), 0.10),
+    ):
+        canonical_label = _canonical_long_mood_label(label_value)
+        if canonical_label is None:
+            continue
+        label_scores.append(
+            (
+                weight,
+                LONG_MOOD_ACTION_SCORES[action_type][canonical_label],
+            )
+        )
+    source_labels = [
+        _canonical_long_mood_label(label_value)
+        for label_value in source_affect_labels[:2]
+    ]
+    source_labels = [label_value for label_value in source_labels if label_value is not None]
+    if source_labels:
+        source_weight = 0.15 / len(source_labels)
+        for source_label in source_labels:
+            label_scores.append(
+                (
+                    source_weight,
+                    LONG_MOOD_ACTION_SCORES[action_type][source_label],
+                )
+            )
+    if label_scores:
+        weighted_total = sum(weight for weight, _ in label_scores)
+        raw_score = sum(weight * score for weight, score in label_scores) / weighted_total
+    else:
+        raw_score = 0.50
+    stability_value = long_mood_state.get("stability")
+    stability_score = 0.50 if stability_value is None else _normalized_score(stability_value)
+    if action_type == "wait":
+        return _normalized_score(raw_score * 0.82 + (1.0 - stability_score) * 0.18)
+    return _normalized_score(
+        0.50 + (raw_score - 0.50) * (0.60 + stability_score * 0.40)
+    )
+
+
+# Block: Long mood label normalization
+def _canonical_long_mood_label(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized_label = value.strip().lower()
+    if not normalized_label:
+        return None
+    normalized_label = LONG_MOOD_LABEL_ALIASES.get(normalized_label, normalized_label)
+    if normalized_label not in LONG_MOOD_ACTION_SCORES["wait"]:
+        return None
+    return normalized_label
 
 
 # Block: Drive alignment
