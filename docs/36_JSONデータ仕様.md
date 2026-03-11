@@ -374,6 +374,7 @@
   "relationship_priorities": [],
   "learned_preferences": [],
   "learned_aversions": [],
+  "revoked_preferences": [],
   "habit_biases": {
     "preferred_action_types": [],
     "preferred_observation_kinds": [],
@@ -395,12 +396,14 @@
 ```
 
 - `selection_profile` は、短周期の内部でだけ使う人格選択用の一時オブジェクトである
-- 必須項目は `trait_values`、`interaction_style`、`relationship_priorities`、`learned_preferences`、`learned_aversions`、`habit_biases`、`emotion_bias`、`drive_bias` である
+- 必須項目は `trait_values`、`interaction_style`、`relationship_priorities`、`learned_preferences`、`learned_aversions`、`revoked_preferences`、`habit_biases`、`emotion_bias`、`drive_bias` である
 - `trait_values` は、`self_state.personality_json.trait_values` と同じ固定キーを持つ
 - `interaction_style` は、`self_state.personality_json.preferred_interaction_style` と同じ固定キーを持つ
 - `interaction_style.speech_tone` と `interaction_style.response_pace` は、その短周期の `behavior_settings.speech_style` / `behavior_settings.response_pace` を上書きした短期補正済み値を入れてよい
 - `relationship_priorities` は、`relationship_priority_entry` の配列である
-- `learned_preferences` と `learned_aversions` は、`personality_preference_entry` の配列である
+- `learned_preferences`、`learned_aversions`、`revoked_preferences` は、`personality_preference_entry` の配列である
+- current 実装では、`learned_preferences` は `preference_memory.status = "confirmed"` かつ `polarity = "like"`、`learned_aversions` は `status = "confirmed"` かつ `polarity = "dislike"`、`revoked_preferences` は `status = "revoked"` から再構成してよい
+- current 実装では、`revoked_preferences[]` に元の極性を示す `polarity` を追加で持ってよい
 - `habit_biases` は、`self_state.personality_json.habit_biases` と同じ固定キーを持つ
 - `emotion_bias` は、現在感情から作る短期補正値であり、各値は `-1.0..+1.0` の `number` に固定する
 - `drive_bias` は、内部欲求から作る短期補正値であり、各値は `-1.0..+1.0` の `number` に固定する
