@@ -162,7 +162,7 @@ def _score_candidate(
     action_type = _validated_action_type(proposal)
     selection_profile = cognition_input["selection_profile"]
     task_snapshot = cognition_input["task_snapshot"]
-    memory_bundle = cognition_input["memory_bundle"]
+    action_selection_context = cognition_input["action_selection_context"]
     current_observation = cognition_input["current_observation"]
     learned_aversions = selection_profile["learned_aversions"]
     habit_biases = selection_profile["habit_biases"]
@@ -178,7 +178,7 @@ def _score_candidate(
         action_type=action_type,
         proposal=proposal,
         selection_profile=selection_profile,
-        memory_bundle=memory_bundle,
+        action_selection_context=action_selection_context,
         current_observation=current_observation,
         response_text=response_text,
     )
@@ -294,7 +294,7 @@ def _persona_consistency_score(
     action_type: str,
     proposal: dict[str, Any],
     selection_profile: dict[str, Any],
-    memory_bundle: dict[str, Any],
+    action_selection_context: dict[str, Any],
     current_observation: dict[str, Any],
     response_text: str,
 ) -> dict[str, Any]:
@@ -336,7 +336,7 @@ def _persona_consistency_score(
             "habit_biases",
             "selection_profile.habit_biases",
         ),
-        memory_bundle=memory_bundle,
+        action_selection_context=action_selection_context,
         current_observation=current_observation,
     )
     aversion_penalty = _aversion_penalty(
@@ -610,7 +610,7 @@ def _preference_alignment(
     proposal: dict[str, Any],
     learned_preferences: list[dict[str, Any]],
     habit_biases: dict[str, Any],
-    memory_bundle: dict[str, Any],
+    action_selection_context: dict[str, Any],
     current_observation: dict[str, Any],
 ) -> float:
     preferred_action_types = _required_list(
@@ -645,7 +645,7 @@ def _preference_alignment(
     base_score += _memory_support_score(
         action_type=action_type,
         proposal=proposal,
-        memory_bundle=memory_bundle,
+        action_selection_context=action_selection_context,
         current_observation=current_observation,
     ) * 0.20
     return _normalized_score(base_score)
@@ -656,95 +656,95 @@ def _memory_support_score(
     *,
     action_type: str,
     proposal: dict[str, Any],
-    memory_bundle: dict[str, Any],
+    action_selection_context: dict[str, Any],
     current_observation: dict[str, Any],
 ) -> float:
-    working_memory_items = _required_list(
-        memory_bundle,
-        "working_memory_items",
-        "cognition_input.memory_bundle.working_memory_items",
+    working_memory_texts = _required_list(
+        action_selection_context,
+        "working_memory_texts",
+        "cognition_input.action_selection_context.working_memory_texts",
     )
-    episodic_items = _required_list(
-        memory_bundle,
-        "episodic_items",
-        "cognition_input.memory_bundle.episodic_items",
+    episodic_texts = _required_list(
+        action_selection_context,
+        "episodic_texts",
+        "cognition_input.action_selection_context.episodic_texts",
     )
-    semantic_items = _required_list(
-        memory_bundle,
-        "semantic_items",
-        "cognition_input.memory_bundle.semantic_items",
+    fact_entries = _required_list(
+        action_selection_context,
+        "fact_entries",
+        "cognition_input.action_selection_context.fact_entries",
     )
-    affective_items = _required_list(
-        memory_bundle,
-        "affective_items",
-        "cognition_input.memory_bundle.affective_items",
+    affect_entries = _required_list(
+        action_selection_context,
+        "affect_entries",
+        "cognition_input.action_selection_context.affect_entries",
     )
-    relationship_items = _required_list(
-        memory_bundle,
-        "relationship_items",
-        "cognition_input.memory_bundle.relationship_items",
+    relationship_texts = _required_list(
+        action_selection_context,
+        "relationship_texts",
+        "cognition_input.action_selection_context.relationship_texts",
     )
-    reflection_items = _required_list(
-        memory_bundle,
-        "reflection_items",
-        "cognition_input.memory_bundle.reflection_items",
+    reflection_entries = _required_list(
+        action_selection_context,
+        "reflection_entries",
+        "cognition_input.action_selection_context.reflection_entries",
     )
-    recent_event_window = _required_list(
-        memory_bundle,
-        "recent_event_window",
-        "cognition_input.memory_bundle.recent_event_window",
+    recent_context_texts = _required_list(
+        action_selection_context,
+        "recent_context_texts",
+        "cognition_input.action_selection_context.recent_context_texts",
+    )
+    recent_dialog = _required_list(
+        action_selection_context,
+        "recent_dialog",
+        "cognition_input.action_selection_context.recent_dialog",
     )
     if action_type == "browse":
         query_hint = _browse_query_text(proposal)
-        for memory_entry in semantic_items:
-            if not isinstance(memory_entry, dict):
-                raise RuntimeError("memory_bundle.semantic_items must contain only objects")
-            payload = _required_object(
-                memory_entry,
-                "payload",
-                "memory_bundle.semantic_items.payload",
-            )
-            if payload.get("query") == query_hint:
+        for fact_entry in fact_entries:
+            if not isinstance(fact_entry, dict):
+                raise RuntimeError("action_selection_context.fact_entries must contain only objects")
+            if fact_entry.get("query") == query_hint:
                 return 0.20
         if _has_reflection_caution(
-            reflection_items=reflection_items,
+            reflection_entries=reflection_entries,
             current_observation=current_observation,
             query_hint=query_hint,
         ):
             return 0.30
-        if _negative_affect_support(affective_items=affective_items) >= 0.70:
+        if _negative_affect_support(affect_entries=affect_entries) >= 0.70:
             return 0.35
-        if episodic_items or recent_event_window:
+        if episodic_texts or recent_context_texts or recent_dialog:
             return 0.65
         return 0.75
     if action_type in {"speak", "notify"}:
-        if current_observation["input_kind"] == "network_result" and (semantic_items or episodic_items):
+        if current_observation["input_kind"] == "network_result" and (fact_entries or episodic_texts):
             return 0.95
-        if relationship_items:
+        if relationship_texts:
             return 0.85
-        if affective_items:
+        if affect_entries:
             return 0.78
-        if working_memory_items or recent_event_window:
+        if working_memory_texts or recent_context_texts or recent_dialog:
             return 0.70
         return 0.45
     if action_type == "look":
-        if relationship_items or affective_items:
+        if relationship_texts or affect_entries:
             return 0.80
-        if working_memory_items or recent_event_window:
+        if working_memory_texts or recent_context_texts or recent_dialog:
             return 0.70
-        if episodic_items:
+        if episodic_texts:
             return 0.65
         return 0.55
     if action_type == "wait":
         if _has_reflection_caution(
-            reflection_items=reflection_items,
+            reflection_entries=reflection_entries,
             current_observation=current_observation,
             query_hint=None,
         ):
             return 0.90
-        if _negative_affect_support(affective_items=affective_items) >= 0.60:
+        if _negative_affect_support(affect_entries=affect_entries) >= 0.60:
             return 0.80
-        if current_observation["input_kind"] == "network_result" and semantic_items:
+        if current_observation["input_kind"] == "network_result" and fact_entries:
             return 0.30
         return 0.60
     raise RuntimeError("unsupported action_type for memory support scoring")
@@ -753,16 +753,16 @@ def _memory_support_score(
 # Block: Reflection and affect helpers
 def _has_reflection_caution(
     *,
-    reflection_items: list[dict[str, Any]],
+    reflection_entries: list[dict[str, Any]],
     current_observation: dict[str, Any],
     query_hint: str | None,
 ) -> bool:
     caution_tokens = {"失敗", "回避", "避け", "注意", "保留", "待機"}
     observation_text = str(current_observation["observation_text"])
-    for reflection_item in reflection_items:
-        if not isinstance(reflection_item, dict):
-            raise RuntimeError("memory_bundle.reflection_items must contain only objects")
-        body_text = reflection_item.get("body_text")
+    for reflection_entry in reflection_entries:
+        if not isinstance(reflection_entry, dict):
+            raise RuntimeError("action_selection_context.reflection_entries must contain only objects")
+        body_text = reflection_entry.get("text")
         if not isinstance(body_text, str):
             continue
         if query_hint is not None and query_hint in body_text:
@@ -776,25 +776,20 @@ def _has_reflection_caution(
 
 def _negative_affect_support(
     *,
-    affective_items: list[dict[str, Any]],
+    affect_entries: list[dict[str, Any]],
 ) -> float:
     strongest_signal = 0.0
-    for affective_item in affective_items:
-        if not isinstance(affective_item, dict):
-            raise RuntimeError("memory_bundle.affective_items must contain only objects")
-        payload = affective_item.get("payload")
-        if not isinstance(payload, dict):
-            continue
-        vad = payload.get("vad")
-        if isinstance(vad, dict):
-            valence = vad.get("v")
-            arousal = vad.get("a")
-            if isinstance(valence, (int, float)) and isinstance(arousal, (int, float)):
-                strongest_signal = max(
-                    strongest_signal,
-                    _normalized_score((1.0 - float(valence)) * 0.50 + float(arousal) * 0.30),
-                )
-        labels = payload.get("labels")
+    for affect_entry in affect_entries:
+        if not isinstance(affect_entry, dict):
+            raise RuntimeError("action_selection_context.affect_entries must contain only objects")
+        valence = affect_entry.get("valence")
+        arousal = affect_entry.get("arousal")
+        if isinstance(valence, (int, float)) and isinstance(arousal, (int, float)):
+            strongest_signal = max(
+                strongest_signal,
+                _normalized_score((1.0 - float(valence)) * 0.50 + float(arousal) * 0.30),
+            )
+        labels = affect_entry.get("labels")
         if isinstance(labels, list) and any(str(label) in {"tense", "guarded", "frustrated"} for label in labels):
             strongest_signal = max(strongest_signal, 0.75)
     return strongest_signal
