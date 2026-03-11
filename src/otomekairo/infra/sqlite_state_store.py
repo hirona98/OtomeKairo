@@ -41,18 +41,18 @@ from otomekairo.usecase.observation_normalization import (
     normalize_observation_source,
 )
 from otomekairo.usecase.camera_observation_payload import build_camera_observation_payload
-from otomekairo.usecase.persona_change import evaluate_persona_change
 from otomekairo.usecase.retrieval_public_view import (
     build_public_retrieval_detail,
     build_public_retrieval_summary,
 )
+from otomekairo.usecase.run_write_memory_job import (
+    WriteMemoryJobExecutionState,
+    run_write_memory_job,
+)
 from otomekairo.usecase.runtime_live_state import build_runtime_live_state
 from otomekairo.usecase.about_time_text import about_years_from_text, life_stage_from_text
 from otomekairo.usecase.write_memory_plan import (
-    build_write_memory_plan,
     validate_write_memory_event_snapshots,
-    validate_write_memory_payload,
-    validate_write_memory_plan,
 )
 
 
@@ -2161,108 +2161,159 @@ class SqliteStateStore:
 
     # Block: Memory job apply
     def complete_write_memory_job(self, *, memory_job: MemoryJobRecord) -> str:
-        if memory_job.job_kind != "write_memory":
-            raise StoreValidationError("memory_job.job_kind must be write_memory")
-        validated_payload = validate_write_memory_payload(memory_job.payload)
-        source_event_ids = list(validated_payload["source_event_ids"])
         now_ms = _now_ms()
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            self._ensure_claimed_memory_job(
+            return run_write_memory_job(
                 connection=connection,
-                job_id=memory_job.job_id,
-            )
-            event_rows = _fetch_events_for_ids(
-                connection=connection,
-                event_ids=source_event_ids,
-            )
-            event_entries = _write_memory_plan_event_entries(event_rows)
-            validate_write_memory_event_snapshots(
-                payload=validated_payload,
-                event_entries=event_entries,
-            )
-            action_entries = _action_entries_for_write_memory_plan(
-                connection=connection,
-                cycle_id=str(validated_payload["cycle_id"]),
-            )
-            browse_fact_entries = _browse_fact_entries_for_write_memory_plan(
-                connection=connection,
-                cycle_id=str(validated_payload["cycle_id"]),
-            )
-            self_state_row = connection.execute(
-                """
-                SELECT personality_json,
-                       personality_updated_at,
-                       current_emotion_json
-                FROM self_state
-                WHERE row_id = 1
-                """
-            ).fetchone()
-            if self_state_row is None:
-                raise RuntimeError("self_state row is missing")
-            memory_write_plan = validate_write_memory_plan(
-                plan=build_write_memory_plan(
-                    source_job_id=memory_job.job_id,
-                    payload=validated_payload,
-                    event_entries=event_entries,
-                    action_entries=action_entries,
-                    browse_fact_entries=browse_fact_entries,
-                    current_emotion=_decoded_object_json(self_state_row["current_emotion_json"]),
-                    existing_long_mood_state=_write_memory_plan_long_mood_entry(
-                        connection=connection,
-                    ),
-                    existing_preference_entries=_write_memory_plan_preference_entries(
-                        connection=connection,
-                    ),
-                    applied_at=now_ms,
-                ),
-                payload=validated_payload,
-            )
-            write_memory_apply_result = self._apply_write_memory_plan(
-                connection=connection,
-                memory_write_plan=memory_write_plan,
-                created_at=now_ms,
-            )
-            persona_change = evaluate_persona_change(
-                connection=connection,
+                store=self,
+                memory_job=memory_job,
                 now_ms=now_ms,
-                current_personality=json.loads(self_state_row["personality_json"]),
-                current_personality_updated_at=int(self_state_row["personality_updated_at"]),
             )
-            if (
-                persona_change.persona_updates is not None
-                and persona_change.updated_personality is not None
-            ):
-                self._apply_persona_updates(
-                    connection=connection,
-                    current_personality=json.loads(self_state_row["personality_json"]),
-                    updated_personality=persona_change.updated_personality,
-                    persona_updates=persona_change.persona_updates,
-                    updated_at=now_ms,
-                )
-            self._enqueue_refresh_preview_jobs(
+
+    # Block: Claimed memory job ensure
+    def ensure_claimed_memory_job_in_transaction(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        job_id: str,
+    ) -> None:
+        self._ensure_claimed_memory_job(
+            connection=connection,
+            job_id=job_id,
+        )
+
+    # Block: Write memory execution state load
+    def load_write_memory_job_execution_state(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        memory_job: MemoryJobRecord,
+        validated_payload: dict[str, Any],
+    ) -> WriteMemoryJobExecutionState:
+        source_event_ids = list(validated_payload["source_event_ids"])
+        event_rows = _fetch_events_for_ids(
+            connection=connection,
+            event_ids=source_event_ids,
+        )
+        event_entries = _write_memory_plan_event_entries(event_rows)
+        validate_write_memory_event_snapshots(
+            payload=validated_payload,
+            event_entries=event_entries,
+        )
+        cycle_id = str(validated_payload["cycle_id"])
+        action_entries = _action_entries_for_write_memory_plan(
+            connection=connection,
+            cycle_id=cycle_id,
+        )
+        browse_fact_entries = _browse_fact_entries_for_write_memory_plan(
+            connection=connection,
+            cycle_id=cycle_id,
+        )
+        self_state_row = connection.execute(
+            """
+            SELECT personality_json,
+                   personality_updated_at,
+                   current_emotion_json
+            FROM self_state
+            WHERE row_id = 1
+            """
+        ).fetchone()
+        if self_state_row is None:
+            raise RuntimeError("self_state row is missing")
+        return WriteMemoryJobExecutionState(
+            validated_payload=dict(validated_payload),
+            source_event_ids=source_event_ids,
+            cycle_id=cycle_id,
+            event_rows=event_rows,
+            event_entries=event_entries,
+            action_entries=action_entries,
+            browse_fact_entries=browse_fact_entries,
+            current_emotion=_decoded_object_json(self_state_row["current_emotion_json"]),
+            existing_long_mood_state=_write_memory_plan_long_mood_entry(
                 connection=connection,
-                cycle_id=str(validated_payload["cycle_id"]),
-                event_rows=event_rows,
-                created_at=now_ms,
-            )
-            self._enqueue_embedding_sync_jobs(
+            ),
+            existing_preference_entries=_write_memory_plan_preference_entries(
                 connection=connection,
-                cycle_id=str(validated_payload["cycle_id"]),
-                source_event_ids=source_event_ids,
-                targets=list(write_memory_apply_result["embedding_targets"]),
-                embedding_model=self._require_runtime_setting_string(
-                    connection=connection,
-                    key="llm.embedding_model",
-                ),
-                created_at=now_ms,
-            )
-            self._mark_memory_job_completed(
+            ),
+            current_personality=_decoded_object_json(self_state_row["personality_json"]),
+            current_personality_updated_at=int(self_state_row["personality_updated_at"]),
+        )
+
+    # Block: Write memory plan apply wrapper
+    def apply_write_memory_plan_in_transaction(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        memory_write_plan: dict[str, Any],
+        created_at: int,
+    ) -> dict[str, list[dict[str, Any]]]:
+        return self._apply_write_memory_plan(
+            connection=connection,
+            memory_write_plan=memory_write_plan,
+            created_at=created_at,
+        )
+
+    # Block: Persona update apply wrapper
+    def apply_persona_updates_in_transaction(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        current_personality: dict[str, Any],
+        updated_personality: dict[str, Any],
+        persona_updates: dict[str, Any],
+        updated_at: int,
+    ) -> bool:
+        return self._apply_persona_updates(
+            connection=connection,
+            current_personality=current_personality,
+            updated_personality=updated_personality,
+            persona_updates=persona_updates,
+            updated_at=updated_at,
+        )
+
+    # Block: Write memory followup enqueue
+    def enqueue_write_memory_followup_jobs_in_transaction(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        cycle_id: str,
+        event_rows: list[sqlite3.Row],
+        source_event_ids: list[str],
+        embedding_targets: list[dict[str, Any]],
+        created_at: int,
+    ) -> None:
+        self._enqueue_refresh_preview_jobs(
+            connection=connection,
+            cycle_id=cycle_id,
+            event_rows=event_rows,
+            created_at=created_at,
+        )
+        self._enqueue_embedding_sync_jobs(
+            connection=connection,
+            cycle_id=cycle_id,
+            source_event_ids=source_event_ids,
+            targets=embedding_targets,
+            embedding_model=self._require_runtime_setting_string(
                 connection=connection,
-                job_id=memory_job.job_id,
-                completed_at=now_ms,
-            )
-        return str(write_memory_apply_result["memory_state_targets"][0]["entity_id"])
+                key="llm.embedding_model",
+            ),
+            created_at=created_at,
+        )
+
+    # Block: Claimed memory job complete
+    def mark_memory_job_completed_in_transaction(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        job_id: str,
+        completed_at: int,
+    ) -> None:
+        self._mark_memory_job_completed(
+            connection=connection,
+            job_id=job_id,
+            completed_at=completed_at,
+        )
 
     # Block: Revision insert
     def _insert_revision(
