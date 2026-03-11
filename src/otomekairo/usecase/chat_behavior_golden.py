@@ -12,7 +12,7 @@ from otomekairo.usecase.memory_write_e2e import run_memory_write_e2e
 
 
 # Block: Report constants
-REPORT_SCHEMA_VERSION = 1
+REPORT_SCHEMA_VERSION = 2
 
 
 # Block: Public report build
@@ -47,6 +47,14 @@ def _build_report(
     chat_report: dict[str, Any],
 ) -> dict[str, Any]:
     overview = _required_object(chat_report.get("overview"), "chat_report.overview must be an object")
+    action_type_counts = _required_object(
+        memory_report.get("action_type_counts"),
+        "memory_report.action_type_counts must be an object",
+    )
+    failure_mode_counts = _required_object(
+        memory_report.get("failure_mode_counts"),
+        "memory_report.failure_mode_counts must be an object",
+    )
     checks = {
         "memory_chain_intact": all(
             bool(value)
@@ -55,13 +63,18 @@ def _build_report(
                 "memory_report.checks must be an object",
             ).values()
         ),
+        "scenario_action_mix_visible": (
+            int(action_type_counts.get("look", 0)) >= 1
+            and int(action_type_counts.get("notify", 0)) >= 1
+            and int(failure_mode_counts.get("network_unavailable", 0)) >= 1
+        ),
         "dialogue_thread_reuse_visible": int(overview["dialogue_thread_reuse_cycle_count"]) >= 4,
         "preference_restore_visible": int(overview["preference_restore_cycle_count"]) >= 1,
-        "action_transparency_visible": int(overview["response_action_transparency_cycle_count"]) >= 3,
-        "failure_explanation_visible": int(overview["response_failure_explanation_cycle_count"]) >= 1,
-        "preference_reference_visible": int(overview["response_preference_reference_cycle_count"]) >= 2,
+        "action_transparency_visible": int(overview["response_action_transparency_cycle_count"]) >= 5,
+        "failure_explanation_visible": int(overview["response_failure_explanation_cycle_count"]) >= 2,
+        "preference_reference_visible": int(overview["response_preference_reference_cycle_count"]) >= 4,
         "controlled_preference_violation": int(overview["response_preference_violation_cycle_count"]) <= 1,
-        "mood_tone_hint_visible": int(overview["response_mood_tone_hint_cycle_count"]) >= 3,
+        "mood_tone_hint_visible": int(overview["response_mood_tone_hint_cycle_count"]) >= 4,
     }
     report = {
         "report_schema_version": REPORT_SCHEMA_VERSION,
@@ -71,6 +84,8 @@ def _build_report(
             "report_schema_version": int(memory_report["report_schema_version"]),
             "cycle_count": int(memory_report["cycle_count"]),
             "checks": dict(memory_report["checks"]),
+            "action_type_counts": dict(action_type_counts),
+            "failure_mode_counts": dict(failure_mode_counts),
         },
         "chat_replay_eval": {
             "report_schema_version": int(chat_report["report_schema_version"]),
@@ -114,6 +129,14 @@ def format_chat_behavior_golden_report(report: dict[str, Any]) -> str:
         chat_report.get("overview"),
         "chat_behavior_golden.chat_replay_eval.overview must be an object",
     )
+    action_type_counts = _required_object(
+        memory_report.get("action_type_counts"),
+        "chat_behavior_golden.memory_write_e2e.action_type_counts must be an object",
+    )
+    failure_mode_counts = _required_object(
+        memory_report.get("failure_mode_counts"),
+        "chat_behavior_golden.memory_write_e2e.failure_mode_counts must be an object",
+    )
     lines = [
         "chat behavior golden",
         f"scenario: {report['scenario_name']}",
@@ -121,6 +144,14 @@ def format_chat_behavior_golden_report(report: dict[str, Any]) -> str:
             "cycles: "
             f"memory_write_e2e {memory_report['cycle_count']}, "
             f"chat_replay_eval {chat_report['cycle_count']}"
+        ),
+        (
+            "action_mix: "
+            f"browse {action_type_counts.get('browse', 0)}, "
+            f"look {action_type_counts.get('look', 0)}, "
+            f"notify {action_type_counts.get('notify', 0)}, "
+            f"speak {action_type_counts.get('speak', 0)}, "
+            f"network_unavailable {failure_mode_counts.get('network_unavailable', 0)}"
         ),
         (
             "behavior: "

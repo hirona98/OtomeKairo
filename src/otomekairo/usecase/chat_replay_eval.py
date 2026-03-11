@@ -810,10 +810,18 @@ def _build_response_behavior_signals(
     violation_candidates = [
         entry["key"]
         for entry in confirmed_preferences_before
-        if str(entry["polarity"]) == "dislike"
-    ] + [entry["key"] for entry in revoked_preferences_before]
+        if str(entry["polarity"]) == "dislike" and str(entry["domain"]) != "action_type"
+    ] + [
+        entry["key"]
+        for entry in revoked_preferences_before
+        if str(entry["domain"]) != "action_type"
+    ]
     violated_preference_keys = _matched_preference_keys(
-        preferences=confirmed_preferences_before + revoked_preferences_before,
+        preferences=[
+            entry
+            for entry in confirmed_preferences_before + revoked_preferences_before
+            if str(entry["domain"]) != "action_type"
+        ],
         assistant_text=assistant_text,
         action_types=action_types,
         allowed_polarity=None,

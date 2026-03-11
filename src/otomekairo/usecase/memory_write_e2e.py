@@ -15,7 +15,7 @@ from otomekairo.schema.settings import build_default_settings
 
 
 # Block: Report constants
-REPORT_SCHEMA_VERSION = 2
+REPORT_SCHEMA_VERSION = 3
 
 
 # Block: Scripted cycle types
@@ -143,6 +143,12 @@ def _run_scripted_cycle(
         "commit_id": commit_id,
         "user_text": cycle_spec.user_text,
         "assistant_text": cycle_spec.assistant_text,
+        "action_types": _normalized_action_types(
+            action_specs=cycle_spec.actions,
+        ),
+        "failure_modes": _cycle_failure_modes(
+            action_specs=cycle_spec.actions,
+        ),
         "event_count": cycle_snapshot["event_count"],
         "event_ids": cycle_snapshot["event_ids"],
         "drained_job_counts": drained_jobs["job_counts"],
@@ -328,6 +334,10 @@ def _build_memory_write_e2e_report(
     cognition_state: Any,
 ) -> dict[str, Any]:
     database_counts = _read_database_counts(db_path=db_path)
+    final_confirmed_preferences = _read_final_preferences(
+        db_path=db_path,
+        status="confirmed",
+    )
     relationship_items = cognition_state.memory_snapshot["relationship_items"]
     affective_items = cognition_state.memory_snapshot["affective_items"]
     active_preferences = [
@@ -342,7 +352,10 @@ def _build_memory_write_e2e_report(
         "cycle_count": len(cycle_reports),
         "cycle_reports": cycle_reports,
         "job_totals": _sum_cycle_job_counts(cycle_reports),
+        "action_type_counts": _sum_cycle_action_type_counts(cycle_reports),
+        "failure_mode_counts": _sum_cycle_failure_mode_counts(cycle_reports),
         "database_counts": database_counts,
+        "final_confirmed_preferences": final_confirmed_preferences,
         "snapshot_summary": {
             "working_memory_count": len(cognition_state.memory_snapshot["working_memory_items"]),
             "semantic_memory_count": len(cognition_state.memory_snapshot["semantic_items"]),
@@ -366,6 +379,9 @@ def _build_memory_write_e2e_report(
 def _build_report_checks(report: dict[str, Any]) -> dict[str, bool]:
     database_counts = report["database_counts"]
     job_totals = report["job_totals"]
+    action_type_counts = report["action_type_counts"]
+    failure_mode_counts = report["failure_mode_counts"]
+    final_confirmed_preferences = report["final_confirmed_preferences"]
     snapshot_summary = report["snapshot_summary"]
     cycle_count = int(report["cycle_count"])
     confirmed_preference_keys = {
@@ -374,7 +390,7 @@ def _build_report_checks(report: dict[str, Any]) -> dict[str, bool]:
             f"{preference_entry['target_key']}:"
             f"{preference_entry['polarity']}"
         )
-        for preference_entry in snapshot_summary["confirmed_preferences"]
+        for preference_entry in final_confirmed_preferences
     }
     checks = {
         "write_memory_jobs_completed": int(job_totals.get("write_memory", 0)) == cycle_count,
@@ -428,8 +444,18 @@ def _build_report_checks(report: dict[str, Any]) -> dict[str, bool]:
             int(database_counts["preference_status_counts"].get("confirmed", 0)) >= 4
             and int(database_counts["preference_status_counts"].get("revoked", 0)) >= 2
         ),
-        "confirmed_preferences_visible": len(snapshot_summary["confirmed_preferences"]) >= 4,
-        "topic_keyword_preferences_visible": {
+        "action_mix_materialized": (
+            int(action_type_counts.get("browse", 0)) >= 5
+            and int(action_type_counts.get("speak", 0)) >= 3
+            and int(action_type_counts.get("notify", 0)) >= 1
+            and int(action_type_counts.get("look", 0)) >= 1
+        ),
+        "failure_mix_materialized": (
+            int(failure_mode_counts.get("timeout", 0)) >= 1
+            and int(failure_mode_counts.get("network_unavailable", 0)) >= 1
+        ),
+        "confirmed_preferences_materialized": len(final_confirmed_preferences) >= 4,
+        "topic_keyword_preferences_materialized": {
             "topic_keyword:展示:like",
             "topic_keyword:ホラー映画:dislike",
         }.issubset(confirmed_preference_keys),
@@ -453,7 +479,10 @@ def _validate_memory_write_e2e_report(report: dict[str, Any]) -> None:
 # Block: Report formatting
 def format_memory_write_e2e_report(report: dict[str, Any]) -> str:
     database_counts = report["database_counts"]
+    final_confirmed_preferences = report["final_confirmed_preferences"]
     snapshot_summary = report["snapshot_summary"]
+    action_type_counts = report["action_type_counts"]
+    failure_mode_counts = report["failure_mode_counts"]
     lines = [
         "memory write e2e",
         f"db: {report['db_path']}",
@@ -472,6 +501,18 @@ def format_memory_write_e2e_report(report: dict[str, Any]) -> str:
             f"event_links {database_counts['event_link_count']}, "
             f"state_links {database_counts['state_link_count']}, "
             f"dialogue_threads {len(database_counts['dialogue_threads'])}"
+        ),
+        (
+            "actions: "
+            f"browse {action_type_counts.get('browse', 0)}, "
+            f"look {action_type_counts.get('look', 0)}, "
+            f"notify {action_type_counts.get('notify', 0)}, "
+            f"speak {action_type_counts.get('speak', 0)}"
+        ),
+        (
+            "failures: "
+            f"timeout {failure_mode_counts.get('timeout', 0)}, "
+            f"network_unavailable {failure_mode_counts.get('network_unavailable', 0)}"
         ),
         (
             "event_links: "
@@ -495,7 +536,8 @@ def format_memory_write_e2e_report(report: dict[str, Any]) -> str:
         ),
         (
             "snapshot: "
-            f"confirmed_preferences {len(snapshot_summary['confirmed_preferences'])}, "
+            f"confirmed_preferences db {len(final_confirmed_preferences)}, "
+            f"snapshot {len(snapshot_summary['confirmed_preferences'])}, "
             f"long_mood {snapshot_summary['long_mood_state']}"
         ),
         "checks: " + ", ".join(
@@ -726,6 +768,47 @@ def _sum_cycle_job_counts(cycle_reports: list[dict[str, Any]]) -> dict[str, int]
     return totals
 
 
+# Block: Action type count sum
+def _sum_cycle_action_type_counts(cycle_reports: list[dict[str, Any]]) -> dict[str, int]:
+    totals: dict[str, int] = {}
+    for cycle_report in cycle_reports:
+        for action_type in cycle_report["action_types"]:
+            totals[str(action_type)] = totals.get(str(action_type), 0) + 1
+    return totals
+
+
+# Block: Failure mode count sum
+def _sum_cycle_failure_mode_counts(cycle_reports: list[dict[str, Any]]) -> dict[str, int]:
+    totals: dict[str, int] = {}
+    for cycle_report in cycle_reports:
+        for failure_mode in cycle_report["failure_modes"]:
+            totals[str(failure_mode)] = totals.get(str(failure_mode), 0) + 1
+    return totals
+
+
+# Block: Final preference read
+def _read_final_preferences(*, db_path: Path, status: str) -> list[dict[str, Any]]:
+    with _connect_row_db(db_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT
+                domain,
+                target_entity_ref_json,
+                polarity,
+                status,
+                confidence
+            FROM preference_memory
+            WHERE status = ?
+            ORDER BY updated_at DESC, preference_id DESC
+            """,
+            (status,),
+        ).fetchall()
+    return [
+        _preference_row_summary(row)
+        for row in rows
+    ]
+
+
 # Block: Long mood label read
 def _read_long_mood_primary_label(payload_json: str) -> str:
     payload = json.loads(payload_json)
@@ -785,6 +868,43 @@ def _required_string_list(value: Any, error_text: str) -> list[str]:
     for item in value:
         normalized.append(_required_non_empty_string(item, error_text))
     return normalized
+
+
+# Block: Action type normalization
+def _normalized_action_types(*, action_specs: tuple[ScriptedActionSpec, ...]) -> list[str]:
+    normalized: list[str] = []
+    for action_spec in action_specs:
+        action_type = _normalized_action_type(action_spec.action_type)
+        if action_type is None:
+            raise RuntimeError(f"memory_write_e2e unsupported scripted action_type: {action_spec.action_type}")
+        normalized.append(action_type)
+    return normalized
+
+
+# Block: Failure mode projection
+def _cycle_failure_modes(*, action_specs: tuple[ScriptedActionSpec, ...]) -> list[str]:
+    failure_modes: list[str] = []
+    for action_spec in action_specs:
+        if action_spec.failure_mode is None:
+            continue
+        failure_modes.append(_required_non_empty_string(
+            action_spec.failure_mode,
+            "memory_write_e2e failure_mode must be non-empty string",
+        ))
+    return failure_modes
+
+
+# Block: Action type normalize
+def _normalized_action_type(action_type: str) -> str | None:
+    if action_type in {"browse", "look", "notify", "speak"}:
+        return action_type
+    return {
+        "complete_browse_task": "browse",
+        "control_camera_look": "look",
+        "dispatch_notice": "notify",
+        "emit_chat_response": "speak",
+        "enqueue_browse_task": "browse",
+    }.get(action_type)
 
 
 # Block: Scripted scenario
@@ -892,17 +1012,86 @@ def _scripted_cycles() -> tuple[ScriptedCycleSpec, ...]:
         ScriptedCycleSpec(
             cycle_id="cycle_memory_e2e_06",
             user_text="その展示の話を続けて。会場と開始時刻だけで大丈夫。",
-            assistant_text="展示の話を続けるね。会場と開始時刻だけに絞って整理するよ。",
+            assistant_text="展示の話を続けるね。会場と開始時刻だけに絞って整理したよ。",
             actions=(
                 ScriptedActionSpec(
                     action_type="emit_chat_response",
                     status="succeeded",
                     command={
-                        "text": "展示の話を続けるね。会場と開始時刻だけに絞って整理するよ。",
+                        "text": "展示の話を続けるね。会場と開始時刻だけに絞って整理したよ。",
                     },
                     observed_effects={
                         "delivery": "stream",
                     },
+                ),
+            ),
+        ),
+        ScriptedCycleSpec(
+            cycle_id="cycle_memory_e2e_07",
+            user_text="映画は苦手です。ホラー映画は避けて、展示の要点だけ通知して。",
+            assistant_text="わかったよ。避けたい話題は外して、展示の要点だけ通知で知らせるね。",
+            actions=(
+                ScriptedActionSpec(
+                    action_type="dispatch_notice",
+                    status="succeeded",
+                    command={
+                        "notice_code": "display_summary",
+                        "text": "わかったよ。避けたい話題は外して、展示の要点だけ通知で知らせるね。",
+                    },
+                    observed_effects={
+                        "delivery": "notice",
+                    },
+                ),
+            ),
+        ),
+        ScriptedCycleSpec(
+            cycle_id="cycle_memory_e2e_08",
+            user_text="さっきの会場の入口を見て。カメラで確認して。",
+            assistant_text="入口の方向を見るね。展示会場の入口だけ確認したよ。",
+            actions=(
+                ScriptedActionSpec(
+                    action_type="control_camera_look",
+                    status="succeeded",
+                    command={
+                        "direction": "entrance",
+                    },
+                    observed_effects={
+                        "summary_text": "展示会場の入口方向を camera で確認した",
+                    },
+                ),
+            ),
+        ),
+        ScriptedCycleSpec(
+            cycle_id="cycle_memory_e2e_09",
+            user_text="映画は好きです。展示か映画のどちらか近い候補を一つだけ教えて。",
+            assistant_text="わかったよ。展示を優先しつつ、近い候補を一つだけ教えるね。",
+            actions=(
+                ScriptedActionSpec(
+                    action_type="emit_chat_response",
+                    status="succeeded",
+                    command={
+                        "text": "わかったよ。展示を優先しつつ、近い候補を一つだけ教えるね。",
+                    },
+                    observed_effects={
+                        "delivery": "stream",
+                    },
+                ),
+            ),
+        ),
+        ScriptedCycleSpec(
+            cycle_id="cycle_memory_e2e_10",
+            user_text="入口を見た結果も踏まえて再検索して。ネットワークが届かなければそのまま知らせて。",
+            assistant_text="通信が届かず再検索は止まった。少し待ってからやり直すね。",
+            actions=(
+                ScriptedActionSpec(
+                    action_type="enqueue_browse_task",
+                    status="failed",
+                    command={
+                        "parameters": {"query": "下北沢 展示 2024-05-03 入口 再検索"},
+                        "related_task_id": "task_browse_e2e_10",
+                    },
+                    observed_effects={"error": "network_unavailable"},
+                    failure_mode="network_unavailable",
                 ),
             ),
         ),
