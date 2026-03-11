@@ -169,6 +169,14 @@ def build_cognition_input(
     selected_memory_pack = _build_selected_memory_pack(
         memory_bundle=trimmed_memory_bundle,
     )
+    action_selection_context = _build_action_selection_context(
+        current_observation=current_observation,
+        memory_bundle=trimmed_memory_bundle,
+        recent_dialog=recent_dialog,
+        selected_memory_pack=selected_memory_pack,
+        confirmed_preferences=confirmed_preferences,
+        long_mood_state=long_mood_state,
+    )
     retrieval_context = {
         "plan": retrieval_artifacts.retrieval_plan,
         "selected": retrieval_selected_json,
@@ -227,6 +235,7 @@ def build_cognition_input(
             "memory_bundle": trimmed_memory_bundle,
             "recent_dialog": recent_dialog,
             "selected_memory_pack": selected_memory_pack,
+            "action_selection_context": action_selection_context,
             "retrieval_context": retrieval_context,
             "policy_snapshot": policy_snapshot,
             "camera_candidates": camera_candidates_payload,
@@ -1628,6 +1637,99 @@ def _build_long_mood_state_context(*, memory_snapshot: dict[str, Any]) -> dict[s
             ],
         }
     return None
+
+
+# Block: Action selection context
+def _build_action_selection_context(
+    *,
+    current_observation: dict[str, Any],
+    memory_bundle: dict[str, Any],
+    recent_dialog: list[dict[str, Any]],
+    selected_memory_pack: dict[str, Any],
+    confirmed_preferences: dict[str, Any],
+    long_mood_state: dict[str, Any] | None,
+) -> dict[str, Any]:
+    return {
+        "current_input_kind": str(current_observation["input_kind"]),
+        "recent_dialog": list(recent_dialog[-4:]),
+        "recent_context_texts": list(selected_memory_pack["recent_context"][:4]),
+        "working_memory_texts": list(selected_memory_pack["working_memory"][:4]),
+        "episodic_texts": list(selected_memory_pack["episodic"][:4]),
+        "fact_entries": _action_selection_fact_entries(
+            semantic_items=memory_bundle["semantic_items"],
+        ),
+        "affect_entries": _action_selection_affect_entries(
+            affective_items=memory_bundle["affective_items"],
+        ),
+        "relationship_texts": list(selected_memory_pack["relationship"][:4]),
+        "reflection_entries": _action_selection_reflection_entries(
+            reflection_items=memory_bundle["reflection_items"],
+        ),
+        "confirmed_preferences": confirmed_preferences,
+        "long_mood_state": long_mood_state,
+    }
+
+
+# Block: Action selection fact entries
+def _action_selection_fact_entries(*, semantic_items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    projected_entries: list[dict[str, Any]] = []
+    for semantic_item in semantic_items[:4]:
+        if not isinstance(semantic_item, dict):
+            raise RuntimeError("memory_bundle.semantic_items must contain only objects")
+        payload = semantic_item.get("payload")
+        if not isinstance(payload, dict):
+            raise RuntimeError("memory_bundle.semantic_items.payload must be an object")
+        projected_entry = {
+            "text": _memory_pack_text(semantic_item, text_getter=_memory_body_text),
+        }
+        query = payload.get("query")
+        if isinstance(query, str) and query:
+            projected_entry["query"] = query
+        projected_entries.append(projected_entry)
+    return projected_entries
+
+
+# Block: Action selection affect entries
+def _action_selection_affect_entries(*, affective_items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    projected_entries: list[dict[str, Any]] = []
+    for affective_item in affective_items[:4]:
+        if not isinstance(affective_item, dict):
+            raise RuntimeError("memory_bundle.affective_items must contain only objects")
+        payload = affective_item.get("payload")
+        if not isinstance(payload, dict):
+            raise RuntimeError("memory_bundle.affective_items.payload must be an object")
+        projected_entry: dict[str, Any] = {
+            "text": _memory_pack_text(affective_item, text_getter=_memory_body_text),
+            "labels": [
+                str(label)
+                for label in payload.get("labels", [])[:4]
+                if isinstance(label, str) and label
+            ],
+        }
+        vad = payload.get("vad")
+        if isinstance(vad, dict):
+            valence = vad.get("v")
+            arousal = vad.get("a")
+            if isinstance(valence, (int, float)) and not isinstance(valence, bool):
+                projected_entry["valence"] = float(valence)
+            if isinstance(arousal, (int, float)) and not isinstance(arousal, bool):
+                projected_entry["arousal"] = float(arousal)
+        projected_entries.append(projected_entry)
+    return projected_entries
+
+
+# Block: Action selection reflection entries
+def _action_selection_reflection_entries(*, reflection_items: list[dict[str, Any]]) -> list[dict[str, str]]:
+    projected_entries: list[dict[str, str]] = []
+    for reflection_item in reflection_items[:4]:
+        if not isinstance(reflection_item, dict):
+            raise RuntimeError("memory_bundle.reflection_items must contain only objects")
+        projected_entries.append(
+            {
+                "text": _memory_pack_text(reflection_item, text_getter=_reflection_memory_text),
+            }
+        )
+    return projected_entries
 
 
 # Block: Reply render input

@@ -16,7 +16,7 @@
 
 - 固定するのは、current 実装で使う JSON オブジェクトのキー、型、必須項目、固定語彙である
 - 固定するのは、`pending_inputs.payload_json`、`settings_overrides.requested_value_json`、`settings_editor_state.system_values_json`、5 種のプリセットテーブルの `payload_json`、`settings_change_sets.payload_json`、`ui_outbound_events.payload_json`、`action_history.command_json`、`action_history.observed_effects_json`、`memory_jobs.payload_ref_json`、`memory_job_payloads.payload_json`、`preference_memory.target_entity_ref_json`、`event_affects.moment_affect_labels_json`、`event_affects.vad_json`、主要な Web API 本文である
-- 固定するのは、`self_state.personality_json`、`self_state.current_emotion_json`、`self_state.long_term_goals_json`、`self_state.relationship_overview_json`、`self_state.invariants_json`、短周期の内部で使う `selection_profile`、`memory_bundle`、`stable_self_state`、`confirmed_preferences`、`long_mood_state`、`recent_dialog`、`selected_memory_pack`、`reply_render_input`、`reply_render_plan`、`retrieval_context`、`last_persona_update_summary`、`persona_consistency_score`、`attention_score_breakdown`、`self_initiated_score_breakdown`、`action_candidate_score`、`cognition_plan`、`speech_draft`、`cognition_result`、長周期の内部で使う `MemoryWritePlan`、`personality_change_proposal`、`persona_updates` の形である
+- 固定するのは、`self_state.personality_json`、`self_state.current_emotion_json`、`self_state.long_term_goals_json`、`self_state.relationship_overview_json`、`self_state.invariants_json`、短周期の内部で使う `selection_profile`、`memory_bundle`、`stable_self_state`、`confirmed_preferences`、`long_mood_state`、`recent_dialog`、`selected_memory_pack`、`action_selection_context`、`reply_render_input`、`reply_render_plan`、`retrieval_context`、`last_persona_update_summary`、`persona_consistency_score`、`attention_score_breakdown`、`self_initiated_score_breakdown`、`action_candidate_score`、`cognition_plan`、`speech_draft`、`cognition_result`、長周期の内部で使う `MemoryWritePlan`、`personality_change_proposal`、`persona_updates` の形である
 - 固定しないのは、Python のクラス名、Pydantic モデル名、OpenAPI の自動生成細部である
 - 固定しないのは、将来追加する未使用フィールドや後段の拡張イベント種別である
 
@@ -645,6 +645,52 @@
 - 必須項目は `recent_context`、`working_memory`、`episodic`、`facts`、`affective`、`relationship`、`reflection` である
 - `selected_memory_pack` の各値は string の配列である
 - current 実装では、`selected_memory_pack` の各要素へ `about_time_hint_text` を `[時期: ...]` 形式で織り込んでよい
+
+<!-- Block: Action Selection Context -->
+### `action_selection_context`
+
+```json
+{
+  "current_input_kind": "chat_message",
+  "recent_dialog": [],
+  "recent_context_texts": ["展示の会場を確認した"],
+  "working_memory_texts": ["次は開始時刻だけ答える"],
+  "episodic_texts": ["前回も展示の話を続けた"],
+  "fact_entries": [
+    {
+      "text": "展示の開始時刻は10時",
+      "query": "展示 開始時刻"
+    }
+  ],
+  "affect_entries": [
+    {
+      "text": "最近は穏やかさが続いている",
+      "labels": ["calm"],
+      "valence": 0.72,
+      "arousal": 0.31
+    }
+  ],
+  "relationship_texts": ["あなたは展示の話題を好む"],
+  "reflection_entries": [
+    {
+      "text": "同じ話題を続けるときは要点だけ返す"
+    }
+  ],
+  "confirmed_preferences": {
+    "likes": [],
+    "dislikes": []
+  },
+  "long_mood_state": null
+}
+```
+
+- `action_selection_context` は、短周期の内部でだけ使う `action validator` 専用の派生断面である
+- 必須項目は `current_input_kind`、`recent_dialog`、`recent_context_texts`、`working_memory_texts`、`episodic_texts`、`fact_entries`、`affect_entries`、`relationship_texts`、`reflection_entries`、`confirmed_preferences`、`long_mood_state` である
+- `recent_context_texts`、`working_memory_texts`、`episodic_texts`、`relationship_texts` は string の配列である
+- `fact_entries[].text` と `reflection_entries[].text` は非空の `string` に固定する
+- `fact_entries[].query` は任意で、ある場合は非空の `string` に固定する
+- `affect_entries[].labels` は string の配列であり、`valence` と `arousal` はある場合だけ `number` に固定する
+- `long_mood_state` は、背景感情がない場合だけ `null` を許可する
 
 <!-- Block: Stable Self State -->
 ### `stable_self_state`
