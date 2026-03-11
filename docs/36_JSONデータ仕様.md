@@ -1653,7 +1653,7 @@
           "confidence": 0.6
         }
       ],
-      "thread_hints": ["cycle:cycle_001"]
+      "thread_hints": ["cycle:cycle_001", "dialogue:cycle_001"]
     },
     {
       "event_id": "evt_002",
@@ -1670,7 +1670,7 @@
           "confidence": 0.52
         }
       ],
-      "thread_hints": ["cycle:cycle_001"]
+      "thread_hints": ["cycle:cycle_001", "dialogue:cycle_001"]
     }
   ],
   "state_updates": [
@@ -1833,6 +1833,14 @@
         "thread_role": "primary",
         "evidence_event_ids": ["evt_001", "evt_002"],
         "revision_reason": "write_memory grouped source events into cycle thread"
+      },
+      {
+        "event_id": "evt_001",
+        "thread_key": "dialogue:cycle_001",
+        "confidence": 0.82,
+        "thread_role": "reply",
+        "evidence_event_ids": ["evt_001", "evt_002"],
+        "revision_reason": "write_memory attached source events to dialogue thread"
       }
     ],
     "state_links": [
@@ -1876,6 +1884,7 @@
 - current 実装では、`preference_updates` は既存 row を見て `candidate -> confirmed` の昇格と反対極性の `revoked` を同じ plan で出してよい
 - `event_affect.vad` は、`v`、`a`、`d` の 3 キーを必須とし、各値は `-1.0..+1.0` の `number` とする
 - `context_updates` は、`event_links`、`event_threads`、`state_links` の 3 キーを必須とする
+- current 実装では、`event_annotations.thread_hints` と `context_updates.event_threads` に `cycle:*` と `dialogue:*` の両方を含めてよい
 - `context_updates.state_links` は、永続 ID ではなく同一 `MemoryWritePlan.state_updates` 内の `state_ref` を参照する
 - current 実装では、`event_about_time` は `MemoryWritePlan.event_annotations[].about_time` を正本にして置換してよい
 - current 実装では、`event_entities` は `MemoryWritePlan.event_annotations[].entities[]` を正本にして置換してよい

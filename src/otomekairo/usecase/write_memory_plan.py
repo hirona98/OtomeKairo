@@ -90,6 +90,19 @@ LONG_MOOD_LABEL_PROTOTYPES = {
     "tense": {"v": -0.28, "a": 0.34, "d": -0.18},
     "frustrated": {"v": -0.40, "a": 0.42, "d": -0.28},
 }
+DIALOGUE_CONTINUATION_CUES = (
+    "それ",
+    "その",
+    "続き",
+    "もう一度",
+    "また",
+    "同じ",
+    "再検索",
+    "やり直",
+    "さっき",
+    "前の",
+    "この件",
+)
 
 
 # Block: Payload validation
@@ -213,12 +226,18 @@ def build_write_memory_plan(
     current_emotion: dict[str, Any],
     existing_long_mood_state: dict[str, Any] | None,
     existing_preference_entries: list[dict[str, Any]],
+    recent_dialogue_context: list[dict[str, Any]],
     applied_at: int,
 ) -> dict[str, Any]:
     cycle_id = str(payload["cycle_id"])
     primary_event_id = str(payload["primary_event_id"])
     source_event_ids = list(payload["source_event_ids"])
     cycle_thread_key = _cycle_thread_key(cycle_id)
+    dialogue_thread_key = _dialogue_thread_key(
+        cycle_id=cycle_id,
+        event_entries=event_entries,
+        recent_dialogue_context=recent_dialogue_context,
+    )
     summary_state_ref = "summary_primary"
     event_affect_updates = [
         _build_event_affect_update(
@@ -334,6 +353,7 @@ def build_write_memory_plan(
         "event_annotations": _build_event_annotations(
             event_entries=event_entries,
             cycle_thread_key=cycle_thread_key,
+            dialogue_thread_key=dialogue_thread_key,
         ),
         "state_updates": state_updates,
         "preference_updates": _build_preference_updates(
@@ -351,6 +371,7 @@ def build_write_memory_plan(
             "event_threads": _build_event_threads(
                 event_entries=event_entries,
                 cycle_thread_key=cycle_thread_key,
+                dialogue_thread_key=dialogue_thread_key,
                 primary_event_id=primary_event_id,
                 source_event_ids=source_event_ids,
             ),
@@ -368,13 +389,17 @@ def _build_event_annotations(
     *,
     event_entries: list[dict[str, Any]],
     cycle_thread_key: str,
+    dialogue_thread_key: str | None,
 ) -> list[dict[str, Any]]:
     return [
         {
             "event_id": str(event_entry["event_id"]),
             "about_time": _build_event_about_time(event_entry=event_entry),
             "entities": _build_event_entities(event_entry=event_entry),
-            "thread_hints": [cycle_thread_key],
+            "thread_hints": _thread_hints(
+                cycle_thread_key=cycle_thread_key,
+                dialogue_thread_key=dialogue_thread_key,
+            ),
         }
         for event_entry in event_entries
     ]
@@ -1890,24 +1915,46 @@ def _build_event_threads(
     *,
     event_entries: list[dict[str, Any]],
     cycle_thread_key: str,
+    dialogue_thread_key: str | None,
     primary_event_id: str,
     source_event_ids: list[str],
 ) -> list[dict[str, Any]]:
-    return [
-        {
-            "event_id": str(event_entry["event_id"]),
-            "thread_key": cycle_thread_key,
-            "confidence": 0.68 if str(event_entry["event_id"]) == primary_event_id else 0.60,
-            "thread_role": (
-                "primary"
-                if str(event_entry["event_id"]) == primary_event_id
-                else "supporting"
-            ),
-            "evidence_event_ids": source_event_ids,
-            "revision_reason": "write_memory grouped source events into cycle thread",
-        }
-        for event_entry in event_entries
-    ]
+    event_threads: list[dict[str, Any]] = []
+    for event_entry in event_entries:
+        event_id = str(event_entry["event_id"])
+        event_kind = str(event_entry["kind"])
+        primary_role = "primary" if event_id == primary_event_id else "supporting"
+        event_threads.append(
+            {
+                "event_id": event_id,
+                "thread_key": cycle_thread_key,
+                "confidence": 0.68 if event_id == primary_event_id else 0.60,
+                "thread_role": primary_role,
+                "evidence_event_ids": source_event_ids,
+                "revision_reason": "write_memory grouped source events into cycle thread",
+            }
+        )
+        if dialogue_thread_key is None:
+            continue
+        event_threads.append(
+            {
+                "event_id": event_id,
+                "thread_key": dialogue_thread_key,
+                "confidence": _dialogue_thread_confidence(
+                    event_id=event_id,
+                    primary_event_id=primary_event_id,
+                    event_kind=event_kind,
+                ),
+                "thread_role": _dialogue_thread_role(
+                    event_id=event_id,
+                    primary_event_id=primary_event_id,
+                    event_kind=event_kind,
+                ),
+                "evidence_event_ids": source_event_ids,
+                "revision_reason": "write_memory attached source events to dialogue thread",
+            }
+        )
+    return event_threads
 
 
 # Block: Summary text builder
@@ -2406,6 +2453,140 @@ def _event_link_label(*, previous_kind: str, current_kind: str) -> str:
 # Block: Cycle thread key helper
 def _cycle_thread_key(cycle_id: str) -> str:
     return f"cycle:{cycle_id}"
+
+
+# Block: Dialogue thread key helper
+def _dialogue_thread_key(
+    *,
+    cycle_id: str,
+    event_entries: list[dict[str, Any]],
+    recent_dialogue_context: list[dict[str, Any]],
+) -> str | None:
+    primary_event_entry = _primary_observation_event_entry(event_entries=event_entries)
+    if primary_event_entry is None:
+        return None
+    primary_text = _dialogue_event_text(summary_text=str(primary_event_entry["summary_text"]))
+    for context_entry in recent_dialogue_context:
+        if _is_dialogue_continuation(
+            primary_text=primary_text,
+            context_summary_text=str(context_entry["summary_text"]),
+        ):
+            for thread_key in context_entry["thread_keys"]:
+                if _is_dialogue_thread_key(thread_key):
+                    return thread_key
+            return f"dialogue:{context_entry['event_id']}"
+    return f"dialogue:{cycle_id}"
+
+
+# Block: Primary observation pick
+def _primary_observation_event_entry(
+    *,
+    event_entries: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    if not event_entries:
+        return None
+    primary_event_entry = event_entries[0]
+    if str(primary_event_entry["kind"]) != "observation":
+        return None
+    summary_text = str(primary_event_entry["summary_text"])
+    if not summary_text.startswith(("chat_message:", "microphone_message:")):
+        return None
+    return primary_event_entry
+
+
+# Block: Dialogue continuation decision
+def _is_dialogue_continuation(
+    *,
+    primary_text: str,
+    context_summary_text: str,
+) -> bool:
+    if not primary_text:
+        return False
+    for cue in DIALOGUE_CONTINUATION_CUES:
+        if cue in primary_text:
+            return True
+    primary_dates = _iso_date_tokens(primary_text)
+    context_dates = _iso_date_tokens(_dialogue_event_text(summary_text=context_summary_text))
+    return bool(primary_dates and context_dates and primary_dates.intersection(context_dates))
+
+
+# Block: Dialogue event text
+def _dialogue_event_text(*, summary_text: str) -> str:
+    normalized_summary_text = summary_text.strip()
+    for prefix in ("chat_message:", "microphone_message:"):
+        if normalized_summary_text.startswith(prefix):
+            return normalized_summary_text.removeprefix(prefix)
+    return normalized_summary_text
+
+
+# Block: Dialogue thread key predicate
+def _is_dialogue_thread_key(thread_key: str) -> bool:
+    return thread_key.startswith("dialogue:")
+
+
+# Block: ISO date token extract
+def _iso_date_tokens(text: str) -> set[str]:
+    tokens: set[str] = set()
+    candidate = ""
+    for character in text:
+        if character.isdigit() or character == "-":
+            candidate += character
+            continue
+        if _is_iso_date_token(candidate):
+            tokens.add(candidate)
+        candidate = ""
+    if _is_iso_date_token(candidate):
+        tokens.add(candidate)
+    return tokens
+
+
+# Block: ISO date token predicate
+def _is_iso_date_token(candidate: str) -> bool:
+    if len(candidate) != 10:
+        return False
+    if candidate[4] != "-" or candidate[7] != "-":
+        return False
+    return candidate[:4].isdigit() and candidate[5:7].isdigit() and candidate[8:10].isdigit()
+
+
+# Block: Thread hint list
+def _thread_hints(
+    *,
+    cycle_thread_key: str,
+    dialogue_thread_key: str | None,
+) -> list[str]:
+    hints = [cycle_thread_key]
+    if dialogue_thread_key is not None:
+        hints.append(dialogue_thread_key)
+    return hints
+
+
+# Block: Dialogue thread role
+def _dialogue_thread_role(
+    *,
+    event_id: str,
+    primary_event_id: str,
+    event_kind: str,
+) -> str:
+    if event_id == primary_event_id:
+        return "reply"
+    if event_kind == "external_response":
+        return "response"
+    return "continuation"
+
+
+# Block: Dialogue thread confidence
+def _dialogue_thread_confidence(
+    *,
+    event_id: str,
+    primary_event_id: str,
+    event_kind: str,
+) -> float:
+    if event_id == primary_event_id:
+        return 0.82
+    if event_kind == "external_response":
+        return 0.76
+    return 0.68
 
 
 # Block: Evidence event validation

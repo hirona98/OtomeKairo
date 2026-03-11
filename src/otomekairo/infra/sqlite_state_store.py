@@ -2236,6 +2236,10 @@ class SqliteStateStore:
             existing_preference_entries=_write_memory_plan_preference_entries(
                 connection=connection,
             ),
+            recent_dialogue_context=_recent_dialogue_context_for_write_memory_plan(
+                connection=connection,
+                before_created_at=min(int(event_row["created_at"]) for event_row in event_rows),
+            ),
             current_personality=_decoded_object_json(self_state_row["personality_json"]),
             current_personality_updated_at=int(self_state_row["personality_updated_at"]),
         )
@@ -9805,6 +9809,60 @@ def _browse_fact_entries_for_write_memory_plan(
             }
         )
     return browse_fact_entries
+
+
+# Block: Write memory plan recent dialogue context
+def _recent_dialogue_context_for_write_memory_plan(
+    *,
+    connection: sqlite3.Connection,
+    before_created_at: int,
+) -> list[dict[str, Any]]:
+    context_rows = connection.execute(
+        """
+        SELECT
+            event_id,
+            source,
+            kind,
+            observation_summary,
+            action_summary,
+            result_summary,
+            created_at
+        FROM events
+        WHERE searchable = 1
+          AND created_at < ?
+          AND kind IN ('observation', 'external_response')
+          AND source IN ('web_input', 'microphone', 'runtime')
+        ORDER BY created_at DESC
+        LIMIT 6
+        """,
+        (before_created_at,),
+    ).fetchall()
+    if not context_rows:
+        return []
+    event_ids = [str(context_row["event_id"]) for context_row in context_rows]
+    thread_rows = _fetch_event_threads_for_memory_snapshot(
+        connection=connection,
+        event_ids=event_ids,
+    )
+    thread_keys_by_event_id: dict[str, list[str]] = {}
+    for thread_row in thread_rows:
+        event_id = str(thread_row["event_id"])
+        thread_key = str(thread_row["thread_key"])
+        if event_id not in thread_keys_by_event_id:
+            thread_keys_by_event_id[event_id] = []
+        if thread_key not in thread_keys_by_event_id[event_id]:
+            thread_keys_by_event_id[event_id].append(thread_key)
+    return [
+        {
+            "event_id": str(context_row["event_id"]),
+            "source": str(context_row["source"]),
+            "kind": str(context_row["kind"]),
+            "summary_text": _event_summary_text(context_row),
+            "thread_keys": thread_keys_by_event_id.get(str(context_row["event_id"]), []),
+            "created_at": int(context_row["created_at"]),
+        }
+        for context_row in context_rows
+    ]
 
 
 # Block: Write memory plan long mood

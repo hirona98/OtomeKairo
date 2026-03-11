@@ -31,6 +31,7 @@ class WriteMemoryJobExecutionState:
     current_emotion: dict[str, Any]
     existing_long_mood_state: dict[str, Any] | None
     existing_preference_entries: list[dict[str, Any]]
+    recent_dialogue_context: list[dict[str, Any]]
     current_personality: dict[str, Any]
     current_personality_updated_at: int
 
@@ -104,6 +105,7 @@ def _build_validated_write_memory_plan(
             current_emotion=execution_state.current_emotion,
             existing_long_mood_state=execution_state.existing_long_mood_state,
             existing_preference_entries=execution_state.existing_preference_entries,
+            recent_dialogue_context=execution_state.recent_dialogue_context,
             applied_at=applied_at,
         ),
         payload=execution_state.validated_payload,
