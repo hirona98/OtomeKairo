@@ -80,7 +80,7 @@
 - 記憶設計の研究メモ: `docs/note/記憶設計に関する先行研究のメモ.md`
 - 自律行動システムの研究メモ: `docs/note/自律行動システムの先行研究メモ.md`
 - 類似システムの参考フロー図: `docs/note/ココロゴースト_システムフロー図.md`
-- CocoroGhost の強みを OtomeKairo へ取り込む統合案: `docs/note/CocoroGhost統合設計案.md`
+- CocoroGhost 統合の完了履歴メモ: `docs/note/CocoroGhost統合設計案.md`
 - `write_memory -> refresh_preview -> embedding_sync` の deterministic e2e 運用メモ: `docs/note/memory_write_e2e運用メモ.md`
 - chat cycle を replay して継続性を測る運用メモ: `docs/note/chat_replay_eval運用メモ.md`
 - deterministic な会話品質 golden pack の運用メモ: `docs/note/chat_behavior_golden運用メモ.md`
