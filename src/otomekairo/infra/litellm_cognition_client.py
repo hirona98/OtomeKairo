@@ -1142,8 +1142,19 @@ def _required_preference_prompt_entries(value: Any, field_name: str) -> list[str
             raise RuntimeError(f"{field_name}.domain must be non-empty string")
         if not isinstance(target_key, str) or not target_key:
             raise RuntimeError(f"{field_name}.target_key must be non-empty string")
-        entries.append(_memory_prompt_text(f"{domain}:{target_key}"))
+        entries.append(_memory_prompt_text(_preference_prompt_entry_text(domain=domain, target_key=target_key)))
     return entries
+
+
+# Block: Preference prompt text
+def _preference_prompt_entry_text(*, domain: str, target_key: str) -> str:
+    if domain == "topic_keyword":
+        return f"話題:{target_key}"
+    if domain == "action_type":
+        return f"行動:{target_key}"
+    if domain == "observation_kind":
+        return f"観測:{target_key}"
+    return f"{domain}:{target_key}"
 
 
 # Block: Prompt text join

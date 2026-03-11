@@ -103,6 +103,29 @@ DIALOGUE_CONTINUATION_CUES = (
     "前の",
     "この件",
 )
+EXPLICIT_LIKE_PREFERENCE_SUFFIXES = (
+    "が好きです",
+    "は好きです",
+    "が好き",
+    "は好き",
+    "を優先して",
+    "中心で",
+    "メインで",
+)
+EXPLICIT_DISLIKE_PREFERENCE_SUFFIXES = (
+    "が嫌いです",
+    "は嫌いです",
+    "が嫌い",
+    "は嫌い",
+    "が苦手です",
+    "は苦手です",
+    "が苦手",
+    "は苦手",
+    "を避けたい",
+    "は避けたい",
+    "は避けて",
+    "をやめて",
+)
 
 
 # Block: Payload validation
@@ -357,6 +380,7 @@ def build_write_memory_plan(
         ),
         "state_updates": state_updates,
         "preference_updates": _build_preference_updates(
+            event_entries=event_entries,
             action_entries=action_entries,
             existing_preference_entries=existing_preference_entries,
             source_event_ids=source_event_ids,
@@ -1591,6 +1615,32 @@ def _failed_avoid_pattern(*, action_type: str) -> str:
 # Block: Preference update build
 def _build_preference_updates(
     *,
+    event_entries: list[dict[str, Any]],
+    action_entries: list[dict[str, Any]],
+    existing_preference_entries: list[dict[str, Any]],
+    source_event_ids: list[str],
+) -> list[dict[str, Any]]:
+    preference_index = _existing_preference_index(
+        existing_preference_entries=existing_preference_entries,
+    )
+    preference_updates = _build_explicit_preference_updates(
+        event_entries=event_entries,
+        source_event_ids=source_event_ids,
+        preference_index=preference_index,
+    )
+    preference_updates.extend(
+        _build_action_preference_updates(
+            action_entries=action_entries,
+            existing_preference_entries=existing_preference_entries,
+            source_event_ids=source_event_ids,
+        )
+    )
+    return preference_updates
+
+
+# Block: Action preference update build
+def _build_action_preference_updates(
+    *,
     action_entries: list[dict[str, Any]],
     existing_preference_entries: list[dict[str, Any]],
     source_event_ids: list[str],
@@ -1694,6 +1744,73 @@ def _build_preference_updates(
                     ),
                 }
             )
+    return preference_updates
+
+
+# Block: Explicit preference update build
+def _build_explicit_preference_updates(
+    *,
+    event_entries: list[dict[str, Any]],
+    source_event_ids: list[str],
+    preference_index: dict[tuple[str, str, str], dict[str, Any]],
+) -> list[dict[str, Any]]:
+    preference_updates: list[dict[str, Any]] = []
+    seen_targets: set[tuple[str, str, str]] = set()
+    for preference_signal in _explicit_preference_signals(event_entries=event_entries):
+        domain = str(preference_signal["domain"])
+        target_key = str(preference_signal["target_key"])
+        polarity = str(preference_signal["polarity"])
+        signal_key = (domain, target_key, polarity)
+        if signal_key in seen_targets:
+            continue
+        seen_targets.add(signal_key)
+        existing_same_entry = preference_index.get(signal_key)
+        opposite_polarity = "dislike" if polarity == "like" else "like"
+        existing_opposite_entry = preference_index.get((domain, target_key, opposite_polarity))
+        preference_updates.append(
+            {
+                "owner_scope": "self",
+                "target_entity_ref": {
+                    "target_kind": domain,
+                    "target_key": target_key,
+                },
+                "domain": domain,
+                "polarity": polarity,
+                "status": "confirmed",
+                "confidence": 0.92,
+                "evidence_event_ids": source_event_ids,
+                "revision_reason": _explicit_preference_revision_reason(
+                    target_key=target_key,
+                    polarity=polarity,
+                    existing_entry=existing_same_entry,
+                ),
+            }
+        )
+        if existing_opposite_entry is None:
+            continue
+        existing_status = _required_non_empty_string(
+            existing_opposite_entry.get("status"),
+            "write_memory existing preference status must be non-empty string",
+        )
+        if existing_status not in {"candidate", "confirmed"}:
+            continue
+        preference_updates.append(
+            {
+                "owner_scope": "self",
+                "target_entity_ref": {
+                    "target_kind": domain,
+                    "target_key": target_key,
+                },
+                "domain": domain,
+                "polarity": opposite_polarity,
+                "status": "revoked",
+                "confidence": 0.84,
+                "evidence_event_ids": source_event_ids,
+                "revision_reason": (
+                    f"write_memory explicit preference revoked {target_key} {opposite_polarity}"
+                ),
+            }
+        )
     return preference_updates
 
 
@@ -2120,6 +2237,121 @@ def _preference_revision_reason(
             return f"write_memory restored {target_key} {polarity} preference"
         return f"write_memory reinforced {target_key} {polarity} preference"
     return f"write_memory observed {target_key} leaning {polarity}"
+
+
+# Block: Explicit preference signals
+def _explicit_preference_signals(*, event_entries: list[dict[str, Any]]) -> list[dict[str, str]]:
+    signals: list[dict[str, str]] = []
+    for event_entry in event_entries:
+        if str(event_entry.get("kind")) != "observation":
+            continue
+        observation_text = _dialogue_event_text(
+            summary_text=_required_non_empty_string(
+                event_entry.get("summary_text"),
+                "write_memory event entry.summary_text must be non-empty string",
+            )
+        )
+        if not observation_text:
+            continue
+        signals.extend(_explicit_preference_signals_from_text(text=observation_text))
+    return signals
+
+
+def _explicit_preference_signals_from_text(*, text: str) -> list[dict[str, str]]:
+    normalized_text = text.strip()
+    if not normalized_text:
+        return []
+    signals: list[dict[str, str]] = []
+    for fragment in _preference_text_fragments(normalized_text):
+        signals.extend(
+            _explicit_suffix_signals(
+                text=fragment,
+                suffixes=EXPLICIT_LIKE_PREFERENCE_SUFFIXES,
+                polarity="like",
+            )
+        )
+        signals.extend(
+            _explicit_suffix_signals(
+                text=fragment,
+                suffixes=EXPLICIT_DISLIKE_PREFERENCE_SUFFIXES,
+                polarity="dislike",
+            )
+        )
+    deduped: list[dict[str, str]] = []
+    seen_keys: set[tuple[str, str, str]] = set()
+    for signal in signals:
+        signal_key = (
+            str(signal["domain"]),
+            str(signal["target_key"]),
+            str(signal["polarity"]),
+        )
+        if signal_key in seen_keys:
+            continue
+        seen_keys.add(signal_key)
+        deduped.append(signal)
+    return deduped
+
+
+def _preference_text_fragments(text: str) -> list[str]:
+    fragments: list[str] = []
+    current = ""
+    for character in text:
+        if character in "。！？!?\\n":
+            stripped_current = current.strip(" 、,")
+            if stripped_current:
+                fragments.append(stripped_current)
+            current = ""
+            continue
+        current += character
+    stripped_current = current.strip(" 、,")
+    if stripped_current:
+        fragments.append(stripped_current)
+    return fragments
+
+
+def _explicit_suffix_signals(
+    *,
+    text: str,
+    suffixes: tuple[str, ...],
+    polarity: str,
+) -> list[dict[str, str]]:
+    signals: list[dict[str, str]] = []
+    for suffix in suffixes:
+        if suffix not in text:
+            continue
+        target_key = _normalized_topic_keyword(text.split(suffix, 1)[0])
+        if not target_key:
+            continue
+        signals.append(
+            {
+                "domain": "topic_keyword",
+                "target_key": target_key,
+                "polarity": polarity,
+            }
+        )
+    return signals
+
+
+def _normalized_topic_keyword(text: str) -> str:
+    normalized = text.strip().strip("「」『』\"'。、！？!?., ")
+    for suffix in ("のこと", "の話", "の件", "について", "とか", "って話"):
+        if normalized.endswith(suffix):
+            normalized = normalized.removesuffix(suffix).strip()
+    for suffix in ("を", "は", "が", "も", "で", "に", "って"):
+        if normalized.endswith(suffix):
+            normalized = normalized.removesuffix(suffix).strip()
+    return " ".join(normalized.lower().split())[:80]
+
+
+def _explicit_preference_revision_reason(
+    *,
+    target_key: str,
+    polarity: str,
+    existing_entry: dict[str, Any] | None,
+) -> str:
+    if existing_entry is not None and str(existing_entry.get("status")) == "revoked":
+        return f"write_memory restored explicit {target_key} {polarity} preference"
+    return f"write_memory confirmed explicit {target_key} {polarity} preference"
 
 
 # Block: Action type normalize

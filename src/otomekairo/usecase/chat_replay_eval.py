@@ -916,11 +916,11 @@ def _preference_matches_response(
             ACTION_RESPONSE_CUES.get(target_key, ()),
         )
     if domain == "topic_keyword":
-        return target_key in assistant_text
+        return _normalized_keyword_text(target_key) in _normalized_keyword_text(assistant_text)
     if domain == "observation_kind":
         if target_key == "date_reference":
             return bool(_iso_date_tokens(assistant_text))
-        return target_key in assistant_text
+        return _normalized_keyword_text(target_key) in _normalized_keyword_text(assistant_text)
     return False
 
 
@@ -972,6 +972,11 @@ def _top_long_mood_transition(cycle_packets: list[dict[str, Any]]) -> str | None
 # Block: Cue contains helper
 def _contains_any(text: str, cues: tuple[str, ...]) -> bool:
     return any(cue in text for cue in cues if cue)
+
+
+# Block: Keyword normalization
+def _normalized_keyword_text(text: str) -> str:
+    return "".join(text.strip().lower().split())
 
 
 # Block: Normalized action type
