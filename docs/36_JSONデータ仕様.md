@@ -1832,8 +1832,8 @@
       {
         "from_event_id": "evt_002",
         "to_event_id": "evt_001",
-        "label": "continuation",
-        "confidence": 0.6,
+        "label": "reply_to",
+        "confidence": 0.74,
         "evidence_event_ids": ["evt_001", "evt_002"],
         "revision_reason": "write_memory linked ordered source events"
       }
@@ -1898,6 +1898,7 @@
 - current 実装では、`chat_message` / `microphone_message` の明示表現から `topic_keyword` の `confirmed` と反対極性の `revoked` を出してよい
 - `event_affect.vad` は、`v`、`a`、`d` の 3 キーを必須とし、各値は `-1.0..+1.0` の `number` とする
 - `context_updates` は、`event_links`、`event_threads`、`state_links` の 3 キーを必須とする
+- current 実装では、`event_links.label` は順序だけでなく `dialogue continuation` と話題共有 hint から `reply_to`、`continuation`、`same_topic`、`caused_by` を使い分けてよい
 - current 実装では、`event_annotations.thread_hints` と `context_updates.event_threads` に `cycle:*` と `dialogue:*` の両方を含めてよい
 - `context_updates.state_links` は、永続 ID ではなく同一 `MemoryWritePlan.state_updates` 内の `state_ref` を参照する
 - current 実装では、`event_about_time` は `MemoryWritePlan.event_annotations[].about_time` を正本にして置換してよい

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from otomekairo.usecase.about_time_text import about_years_from_text, life_stage_from_text
@@ -390,6 +391,7 @@ def build_write_memory_plan(
             "event_links": _build_event_links(
                 event_entries=event_entries,
                 primary_event_id=primary_event_id,
+                recent_dialogue_context=recent_dialogue_context,
                 source_event_ids=source_event_ids,
             ),
             "event_threads": _build_event_threads(
@@ -1990,39 +1992,53 @@ def _build_event_links(
     *,
     event_entries: list[dict[str, Any]],
     primary_event_id: str,
+    recent_dialogue_context: list[dict[str, Any]],
     source_event_ids: list[str],
 ) -> list[dict[str, Any]]:
     event_links: list[dict[str, Any]] = []
+    seen_link_keys: set[tuple[str, str, str]] = set()
+    primary_event_entry = _primary_observation_event_entry(event_entries=event_entries)
+    dialogue_continuation = _is_primary_dialogue_continuation(
+        event_entries=event_entries,
+        recent_dialogue_context=recent_dialogue_context,
+    )
     for previous_event_entry, current_event_entry in zip(
         event_entries,
         event_entries[1:],
         strict=False,
     ):
-        event_links.append(
-            {
-                "from_event_id": str(current_event_entry["event_id"]),
-                "to_event_id": str(previous_event_entry["event_id"]),
-                "label": _event_link_label(
-                    previous_kind=str(previous_event_entry["kind"]),
-                    current_kind=str(current_event_entry["kind"]),
-                ),
-                "confidence": 0.60,
-                "evidence_event_ids": source_event_ids,
-                "revision_reason": "write_memory linked ordered source events",
-            }
+        ordered_label = _ordered_event_link_label(
+            previous_event_entry=previous_event_entry,
+            current_event_entry=current_event_entry,
+            dialogue_continuation=dialogue_continuation,
+        )
+        _append_event_link(
+            entries=event_links,
+            seen_link_keys=seen_link_keys,
+            from_event_id=str(current_event_entry["event_id"]),
+            to_event_id=str(previous_event_entry["event_id"]),
+            label=ordered_label,
+            confidence=_event_link_confidence(label=ordered_label, anchor=False),
+            evidence_event_ids=source_event_ids,
+            revision_reason="write_memory linked ordered source events",
         )
         current_event_id = str(current_event_entry["event_id"])
-        if current_event_id == primary_event_id:
+        if current_event_id == primary_event_id or primary_event_entry is None:
             continue
-        event_links.append(
-            {
-                "from_event_id": current_event_id,
-                "to_event_id": primary_event_id,
-                "label": "same_topic",
-                "confidence": 0.54,
-                "evidence_event_ids": source_event_ids,
-                "revision_reason": "write_memory linked source events by primary topic",
-            }
+        anchor_label = _primary_anchor_link_label(
+            current_event_entry=current_event_entry,
+            primary_event_entry=primary_event_entry,
+            dialogue_continuation=dialogue_continuation,
+        )
+        _append_event_link(
+            entries=event_links,
+            seen_link_keys=seen_link_keys,
+            from_event_id=current_event_id,
+            to_event_id=primary_event_id,
+            label=anchor_label,
+            confidence=_event_link_confidence(label=anchor_label, anchor=True),
+            evidence_event_ids=source_event_ids,
+            revision_reason="write_memory linked source events by primary topic",
         )
     return event_links
 
@@ -2673,13 +2689,86 @@ def _unique_non_empty_strings(values: list[str]) -> list[str]:
     return unique_values
 
 
-# Block: Event link label helper
-def _event_link_label(*, previous_kind: str, current_kind: str) -> str:
+# Block: Event link append helper
+def _append_event_link(
+    *,
+    entries: list[dict[str, Any]],
+    seen_link_keys: set[tuple[str, str, str]],
+    from_event_id: str,
+    to_event_id: str,
+    label: str,
+    confidence: float,
+    evidence_event_ids: list[str],
+    revision_reason: str,
+) -> None:
+    link_key = (from_event_id, to_event_id, label)
+    if link_key in seen_link_keys:
+        return
+    seen_link_keys.add(link_key)
+    entries.append(
+        {
+            "from_event_id": from_event_id,
+            "to_event_id": to_event_id,
+            "label": label,
+            "confidence": confidence,
+            "evidence_event_ids": evidence_event_ids,
+            "revision_reason": revision_reason,
+        }
+    )
+
+
+# Block: Ordered event link label helper
+def _ordered_event_link_label(
+    *,
+    previous_event_entry: dict[str, Any],
+    current_event_entry: dict[str, Any],
+    dialogue_continuation: bool,
+) -> str:
+    previous_kind = str(previous_event_entry["kind"])
+    current_kind = str(current_event_entry["kind"])
     if current_kind == "action_result" and previous_kind == "action":
         return "caused_by"
     if current_kind == "external_response" and previous_kind in {"observation", "action_result"}:
         return "reply_to"
+    if _event_entries_share_topic(
+        left_event_entry=previous_event_entry,
+        right_event_entry=current_event_entry,
+    ):
+        return "same_topic"
+    if dialogue_continuation:
+        return "continuation"
     return "continuation"
+
+
+# Block: Primary anchor link label helper
+def _primary_anchor_link_label(
+    *,
+    current_event_entry: dict[str, Any],
+    primary_event_entry: dict[str, Any],
+    dialogue_continuation: bool,
+) -> str:
+    current_kind = str(current_event_entry["kind"])
+    if current_kind == "external_response":
+        return "reply_to"
+    if _event_entries_share_topic(
+        left_event_entry=current_event_entry,
+        right_event_entry=primary_event_entry,
+    ):
+        return "same_topic"
+    if dialogue_continuation:
+        return "continuation"
+    return "continuation"
+
+
+# Block: Event link confidence helper
+def _event_link_confidence(*, label: str, anchor: bool) -> float:
+    if label == "caused_by":
+        return 0.78
+    if label == "reply_to":
+        return 0.74 if anchor else 0.70
+    if label == "same_topic":
+        return 0.60 if anchor else 0.56
+    return 0.64 if anchor else 0.60
 
 
 # Block: Cycle thread key helper
@@ -2740,6 +2829,57 @@ def _is_dialogue_continuation(
     primary_dates = _iso_date_tokens(primary_text)
     context_dates = _iso_date_tokens(_dialogue_event_text(summary_text=context_summary_text))
     return bool(primary_dates and context_dates and primary_dates.intersection(context_dates))
+
+
+# Block: Primary dialogue continuation helper
+def _is_primary_dialogue_continuation(
+    *,
+    event_entries: list[dict[str, Any]],
+    recent_dialogue_context: list[dict[str, Any]],
+) -> bool:
+    primary_event_entry = _primary_observation_event_entry(event_entries=event_entries)
+    if primary_event_entry is None:
+        return False
+    primary_text = _dialogue_event_text(summary_text=str(primary_event_entry["summary_text"]))
+    for context_entry in recent_dialogue_context:
+        if _is_dialogue_continuation(
+            primary_text=primary_text,
+            context_summary_text=str(context_entry["summary_text"]),
+        ):
+            return True
+    return False
+
+
+# Block: Event topic overlap helper
+def _event_entries_share_topic(
+    *,
+    left_event_entry: dict[str, Any],
+    right_event_entry: dict[str, Any],
+) -> bool:
+    left_text = _dialogue_event_text(summary_text=str(left_event_entry["summary_text"]))
+    right_text = _dialogue_event_text(summary_text=str(right_event_entry["summary_text"]))
+    left_dates = _iso_date_tokens(left_text)
+    right_dates = _iso_date_tokens(right_text)
+    if left_dates and right_dates and left_dates.intersection(right_dates):
+        return True
+    left_terms = _topic_term_candidates(left_text)
+    right_terms = _topic_term_candidates(right_text)
+    return bool(left_terms and right_terms and left_terms.intersection(right_terms))
+
+
+def _topic_term_candidates(text: str) -> set[str]:
+    normalized_text = text.strip().lower()
+    for separator in ("を", "は", "が", "に", "で", "の", "と", "へ", "も", "や", "から", "まで", "より", "って"):
+        normalized_text = normalized_text.replace(separator, " ")
+    terms = {
+        match.group(0)
+        for match in re.finditer(r"[0-9a-zぁ-んァ-ヶ一-龠ー]{2,}", normalized_text)
+    }
+    return {
+        term
+        for term in terms
+        if term not in {"また", "同じ", "もう一度", "続き", "確認", "お願い"}
+    }
 
 
 # Block: Dialogue event text
