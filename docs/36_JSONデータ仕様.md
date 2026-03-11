@@ -1387,17 +1387,19 @@
   "preference_alignment": 0.48,
   "aversion_penalty": 0.10,
   "emotion_alignment": 0.41,
+  "long_mood_alignment": 0.64,
   "drive_alignment": 0.37,
   "overall_score": 0.58
 }
 ```
 
 - `persona_consistency_score` は、候補や主注意対象が「その人格らしいか」を比較するための内部スコアである
-- 必須項目は `trait_alignment`、`style_alignment`、`relationship_alignment`、`preference_alignment`、`aversion_penalty`、`emotion_alignment`、`drive_alignment`、`overall_score` である
+- 必須項目は `trait_alignment`、`style_alignment`、`relationship_alignment`、`preference_alignment`、`aversion_penalty`、`emotion_alignment`、`long_mood_alignment`、`drive_alignment`、`overall_score` である
 - 各値は、`0.0..1.0` の `number` に固定する
 - `0.0` は強い不一致、`0.5` は中立または判断材料不足、`1.0` は強い一致に固定する
 - どの軸も負値を取らず、値が大きいほど一致度が高い単調指標として扱う
 - `aversion_penalty` は、値が高いほど避けたい度合いが高いことを示す
+- `long_mood_alignment` は、`action_selection_context.long_mood_state` を行動種別へ写像した短期の背景感情一致度である
 - `overall_score` は、正の一致軸の重み付き平均から `aversion_penalty` を減算し、`0.0..1.0` に clamp した合成値である
 - `persona_consistency_score` は永続化前提の正本ではなく、`selection_profile` と候補の組み合わせごとに再計算する
 
