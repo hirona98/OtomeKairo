@@ -16,7 +16,7 @@
 
 - 固定するのは、current 実装で使う JSON オブジェクトのキー、型、必須項目、固定語彙である
 - 固定するのは、`pending_inputs.payload_json`、`settings_overrides.requested_value_json`、`settings_editor_state.system_values_json`、5 種のプリセットテーブルの `payload_json`、`settings_change_sets.payload_json`、`ui_outbound_events.payload_json`、`action_history.command_json`、`action_history.observed_effects_json`、`memory_jobs.payload_ref_json`、`memory_job_payloads.payload_json`、`preference_memory.target_entity_ref_json`、`event_affects.moment_affect_labels_json`、`event_affects.vad_json`、主要な Web API 本文である
-- 固定するのは、`self_state.personality_json`、`self_state.current_emotion_json`、`self_state.long_term_goals_json`、`self_state.relationship_overview_json`、`self_state.invariants_json`、短周期の内部で使う `selection_profile`、`memory_bundle`、`conversation_context`、`retrieval_context`、`last_persona_update_summary`、`persona_consistency_score`、`attention_score_breakdown`、`self_initiated_score_breakdown`、`action_candidate_score`、`cognition_plan`、`speech_draft`、`cognition_result`、長周期の内部で使う `MemoryWritePlan`、`personality_change_proposal`、`persona_updates` の形である
+- 固定するのは、`self_state.personality_json`、`self_state.current_emotion_json`、`self_state.long_term_goals_json`、`self_state.relationship_overview_json`、`self_state.invariants_json`、短周期の内部で使う `selection_profile`、`memory_bundle`、`stable_self_state`、`confirmed_preferences`、`long_mood_state`、`recent_dialog`、`selected_memory_pack`、`reply_render_input`、`retrieval_context`、`last_persona_update_summary`、`persona_consistency_score`、`attention_score_breakdown`、`self_initiated_score_breakdown`、`action_candidate_score`、`cognition_plan`、`speech_draft`、`cognition_result`、長周期の内部で使う `MemoryWritePlan`、`personality_change_proposal`、`persona_updates` の形である
 - 固定しないのは、Python のクラス名、Pydantic モデル名、OpenAPI の自動生成細部である
 - 固定しないのは、将来追加する未使用フィールドや後段の拡張イベント種別である
 
@@ -604,43 +604,150 @@
 - current 実装では、`event_about_time` または `state_about_time` に対応する要素へ `about_time_hint_text` を追加してよい
 - current 実装では、`recent_event_window[].preview_text` と `episodic_items[].payload.preview_text` を追加で持ってよい
 
-<!-- Block: Conversation Context -->
-### `conversation_context`
+<!-- Block: Recent Dialog -->
+### `recent_dialog`
+
+```json
+[
+  {
+    "role": "user",
+    "text": "高校時代の話を覚えてる？",
+    "relative_time_text": "2分前"
+  },
+  {
+    "role": "assistant",
+    "text": "高校時代の記憶をたどってみるね",
+    "relative_time_text": "2分前"
+  }
+]
+```
+
+- `recent_dialog` の各要素は、少なくとも `role`、`text`、`relative_time_text` を持つ
+- `recent_dialog.role` は `user` または `assistant` の固定語彙である
+- current 実装では、`recent_dialog` は `memory_bundle.recent_event_window` のうち `chat_message` / `microphone_message` / `external_response` だけから再構成してよい
+
+<!-- Block: Selected Memory Pack -->
+### `selected_memory_pack`
 
 ```json
 {
-  "recent_dialog": [
-    {
-      "role": "user",
-      "text": "高校時代の話を覚えてる？",
-      "relative_time_text": "2分前"
-    },
-    {
-      "role": "assistant",
-      "text": "高校時代の記憶をたどってみるね",
-      "relative_time_text": "2分前"
-    }
-  ],
-  "selected_memory_pack": {
-    "recent_context": ["検索タスクを開始した"],
-    "working_memory": ["いまは会話の流れを優先している"],
-    "episodic": ["文化祭の帰りに一緒に寄り道した [時期: 2019年 / 高校時代]"],
-    "facts": ["文化祭は秋開催だった"],
-    "affective": ["その日の高揚感が強かった"],
-    "relationship": ["あなたは高校時代の思い出話を好む"],
-    "reflection": ["昔話に入る前に年次の手がかりを確認する"]
+  "recent_context": ["検索タスクを開始した"],
+  "working_memory": ["いまは会話の流れを優先している"],
+  "episodic": ["文化祭の帰りに一緒に寄り道した [時期: 2019年 / 高校時代]"],
+  "facts": ["文化祭は秋開催だった"],
+  "affective": ["その日の高揚感が強かった"],
+  "relationship": ["あなたは高校時代の思い出話を好む"],
+  "reflection": ["昔話に入る前に年次の手がかりを確認する"]
+}
+```
+
+- `selected_memory_pack` は、短周期の内部でだけ使う prompt 向けの長期記憶断面である
+- 必須項目は `recent_context`、`working_memory`、`episodic`、`facts`、`affective`、`relationship`、`reflection` である
+- `selected_memory_pack` の各値は string の配列である
+- current 実装では、`selected_memory_pack` の各要素へ `about_time_hint_text` を `[時期: ...]` 形式で織り込んでよい
+
+<!-- Block: Stable Self State -->
+### `stable_self_state`
+
+```json
+{
+  "current_emotion_label": "calm",
+  "goal_summaries": ["身近な関係対象との信頼を維持する"],
+  "relationship_summaries": ["entity:aliceとのcare関係(care_target)"],
+  "active_task_summaries": ["browse: 高校時代の文化祭を確認する (10秒前)"],
+  "waiting_task_summaries": [],
+  "invariants": {
+    "forbidden_action_types": [],
+    "forbidden_action_styles": [],
+    "required_confirmation_for": [],
+    "protected_targets": []
   }
 }
 ```
 
-- `conversation_context` は、短周期の内部でだけ使う prompt 向けの会話断面である
-- 必須項目は `recent_dialog` と `selected_memory_pack` である
-- `recent_dialog` の各要素は、少なくとも `role`、`text`、`relative_time_text` を持つ
-- `recent_dialog.role` は `user` または `assistant` の固定語彙である
-- `selected_memory_pack` は、少なくとも `recent_context`、`working_memory`、`episodic`、`facts`、`affective`、`relationship`、`reflection` を持つ
-- `selected_memory_pack` の各値は string の配列である
-- current 実装では、`recent_dialog` は `memory_bundle.recent_event_window` のうち `chat_message` / `microphone_message` / `external_response` だけから再構成してよい
-- current 実装では、`selected_memory_pack` の各要素へ `about_time_hint_text` を `[時期: ...]` 形式で織り込んでよい
+- `stable_self_state` は、短周期の人格判断で毎回必要な自己状態の固定断面である
+- 必須項目は `current_emotion_label`、`goal_summaries`、`relationship_summaries`、`active_task_summaries`、`waiting_task_summaries`、`invariants` である
+- `goal_summaries`、`relationship_summaries`、`active_task_summaries`、`waiting_task_summaries` は string の配列である
+- `invariants.forbidden_action_types`、`invariants.forbidden_action_styles`、`invariants.required_confirmation_for`、`invariants.protected_targets` は string の配列である
+
+<!-- Block: Confirmed Preferences -->
+### `confirmed_preferences`
+
+```json
+{
+  "likes": [
+    {
+      "domain": "topic",
+      "target_key": "high_school_memories",
+      "confidence": 0.91
+    }
+  ],
+  "dislikes": []
+}
+```
+
+- `confirmed_preferences` は、短周期の prompt へ必須注入する嗜好断面である
+- 必須項目は `likes` と `dislikes` である
+- `likes[]` と `dislikes[]` の各要素は、少なくとも `domain`、`target_key`、`confidence` を持つ
+- `confidence` は `0.0..1.0` の `number` に固定する
+- current 実装では、`relationship_items.memory_kind = "preference"` かつ `payload.status = "confirmed"` の行だけを含めてよい
+
+<!-- Block: Long Mood State Context -->
+### `long_mood_state`
+
+```json
+{
+  "summary_text": "最近は穏やかさが続いている",
+  "primary_label": "calm",
+  "baseline_label": "calm",
+  "shock_label": "warm",
+  "stability": 0.82,
+  "source_affect_labels": ["relief", "warmth"]
+}
+```
+
+- `long_mood_state` は、短周期の prompt へ必須注入する背景感情断面である
+- 必須項目は `summary_text`、`primary_label`、`baseline_label`、`shock_label`、`source_affect_labels` である
+- `stability` は任意で、ある場合は `0.0..1.0` の `number` に固定する
+- `source_affect_labels` は string の配列である
+- current 実装では、最新の `memory_kind = "long_mood_state"` から 1 件だけ構成してよい
+
+<!-- Block: Reply Render Input -->
+### `reply_render_input`
+
+```json
+{
+  "current_observation": {},
+  "time_context": {},
+  "attention_snapshot": {},
+  "retrieval_context": {},
+  "stable_self_state": {},
+  "confirmed_preferences": {
+    "likes": [],
+    "dislikes": []
+  },
+  "long_mood_state": null,
+  "recent_dialog": [],
+  "selected_memory_pack": {
+    "recent_context": [],
+    "working_memory": [],
+    "episodic": [],
+    "facts": [],
+    "affective": [],
+    "relationship": [],
+    "reflection": []
+  },
+  "reply_style": {
+    "speech_tone": "gentle",
+    "response_pace": "balanced"
+  }
+}
+```
+
+- `reply_render_input` は、`reply_render` 専用の派生入力である
+- 必須項目は `current_observation`、`time_context`、`attention_snapshot`、`retrieval_context`、`stable_self_state`、`confirmed_preferences`、`long_mood_state`、`recent_dialog`、`selected_memory_pack`、`reply_style` である
+- `long_mood_state` は、背景感情がない場合だけ `null` を許可する
+- `reply_style.speech_tone` と `reply_style.response_pace` は非空の `string` に固定する
 
 ### `reflection_note.payload`
 

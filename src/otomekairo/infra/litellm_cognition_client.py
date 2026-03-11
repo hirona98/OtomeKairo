@@ -116,12 +116,16 @@ def _build_plan_messages(request: CognitionPlanRequest) -> list[dict[str, Any]]:
     cognition_input = request.cognition_input
     time_context = cognition_input["time_context"]
     self_snapshot = cognition_input["self_snapshot"]
+    stable_self_state = cognition_input["stable_self_state"]
+    confirmed_preferences = cognition_input["confirmed_preferences"]
+    long_mood_state = cognition_input["long_mood_state"]
     behavior_settings = cognition_input["behavior_settings"]
     selection_profile = cognition_input["selection_profile"]
     body_snapshot = cognition_input["body_snapshot"]
     current_observation = cognition_input["current_observation"]
     drive_snapshot = cognition_input["drive_snapshot"]
-    conversation_context = cognition_input["conversation_context"]
+    recent_dialog = cognition_input["recent_dialog"]
+    selected_memory_pack = cognition_input["selected_memory_pack"]
     retrieval_context = cognition_input["retrieval_context"]
     task_snapshot = cognition_input["task_snapshot"]
     world_snapshot = cognition_input["world_snapshot"]
@@ -205,12 +209,15 @@ def _build_plan_messages(request: CognitionPlanRequest) -> list[dict[str, Any]]:
             _drive_snapshot_prompt_line(drive_snapshot),
             f"関係性の優先対象: {_format_relationship_priorities(selection_profile['relationship_priorities'])}",
             f"長期目標: {_format_goals(self_snapshot['long_term_goals'])}",
+            _stable_self_state_prompt_line(stable_self_state),
+            _confirmed_preferences_prompt_line(confirmed_preferences),
+            _long_mood_state_prompt_line(long_mood_state),
             _attention_prompt_line(attention_snapshot),
             _input_evaluation_prompt_line(input_evaluation),
             _skill_candidates_prompt_line(skill_candidates),
             _retrieval_prompt_line(retrieval_context),
-            _recent_dialog_prompt_line(conversation_context),
-            _selected_memory_pack_prompt_line(conversation_context),
+            _recent_dialog_prompt_line(recent_dialog),
+            _selected_memory_pack_prompt_line(selected_memory_pack),
             f"cycle_id: {request.cycle_id}",
             "この人格として、今の反応計画だけを構造化して決めること。",
             "この段階では speech_draft を返さず、意図、行動候補、重視記憶、反省種を決めること。",
@@ -262,15 +269,18 @@ def _build_retrieval_selection_messages(request: RetrievalSelectionRequest) -> l
 
 # Block: 応答文レンダリング prompt 構築
 def _build_reply_render_messages(request: ReplyRenderRequest) -> list[dict[str, Any]]:
-    cognition_input = request.cognition_input
+    reply_render_input = request.reply_render_input
     cognition_plan = request.cognition_plan
-    current_observation = cognition_input["current_observation"]
-    time_context = cognition_input["time_context"]
-    self_snapshot = cognition_input["self_snapshot"]
-    selection_profile = cognition_input["selection_profile"]
-    conversation_context = cognition_input["conversation_context"]
-    retrieval_context = cognition_input["retrieval_context"]
-    attention_snapshot = cognition_input["attention_snapshot"]
+    current_observation = reply_render_input["current_observation"]
+    time_context = reply_render_input["time_context"]
+    stable_self_state = reply_render_input["stable_self_state"]
+    confirmed_preferences = reply_render_input["confirmed_preferences"]
+    long_mood_state = reply_render_input["long_mood_state"]
+    recent_dialog = reply_render_input["recent_dialog"]
+    selected_memory_pack = reply_render_input["selected_memory_pack"]
+    retrieval_context = reply_render_input["retrieval_context"]
+    attention_snapshot = reply_render_input["attention_snapshot"]
+    reply_style = reply_render_input["reply_style"]
     system_prompt = "\n".join(
         [
             "あなたは OtomeKairo の reply renderer として振る舞う。",
@@ -282,8 +292,8 @@ def _build_reply_render_messages(request: ReplyRenderRequest) -> list[dict[str, 
             "delivery_mode は stream に固定する。",
             "cognition_plan の intention_summary, decision_reason, action_proposals, memory_focus と矛盾しないこと。",
             "look を含む場合は、視点変更や確認開始を伝える案内文にしてよいが、まだ観測していない内容を断定しない。",
-            f"現在の感情ラベル: {self_snapshot['current_emotion']['primary_label']}",
-            f"話し方: {selection_profile['interaction_style']['speech_tone']}",
+            f"現在の感情ラベル: {stable_self_state['current_emotion_label']}",
+            f"話し方: {reply_style['speech_tone']}",
         ]
     )
     action_proposals = cognition_plan.get("action_proposals", [])
@@ -294,8 +304,12 @@ def _build_reply_render_messages(request: ReplyRenderRequest) -> list[dict[str, 
             _time_context_prompt_line(time_context),
             _attention_prompt_line(attention_snapshot),
             _retrieval_prompt_line(retrieval_context),
-            _recent_dialog_prompt_line(conversation_context),
-            _selected_memory_pack_prompt_line(conversation_context),
+            _stable_self_state_prompt_line(stable_self_state),
+            _confirmed_preferences_prompt_line(confirmed_preferences),
+            _long_mood_state_prompt_line(long_mood_state),
+            _recent_dialog_prompt_line(recent_dialog),
+            _selected_memory_pack_prompt_line(selected_memory_pack),
+            _reply_style_prompt_line(reply_style),
             f"意図: {cognition_plan['intention_summary']}",
             f"判断理由: {cognition_plan['decision_reason']}",
             f"応答方針: {cognition_plan['reply_policy']['mode']} ({cognition_plan['reply_policy']['reason']})",
@@ -744,7 +758,15 @@ def _format_goals(long_term_goals: dict[str, Any]) -> str:
     goals = long_term_goals.get("goals", [])
     if not goals:
         return "未設定"
-    return ",".join(str(goal.get("title", "goal")) for goal in goals[:3] if isinstance(goal, dict))
+    summaries: list[str] = []
+    for goal in goals[:3]:
+        if not isinstance(goal, dict):
+            raise RuntimeError("self_snapshot.long_term_goals.goals must contain only objects")
+        summary = goal.get("summary")
+        if not isinstance(summary, str) or not summary:
+            raise RuntimeError("self_snapshot.long_term_goals.goals[].summary must be non-empty string")
+        summaries.append(summary)
+    return ",".join(summaries)
 
 
 # Block: 想起 prompt 用 JSON 整形
@@ -935,23 +957,102 @@ def _retrieval_prompt_line(retrieval_context: dict[str, Any]) -> str:
     return f"想起計画: mode={mode} queries={query_text} selected={selected_text}"
 
 
+# Block: 安定自己状態 prompt
+def _stable_self_state_prompt_line(stable_self_state: dict[str, Any]) -> str:
+    goal_summaries = _required_prompt_text_list(
+        stable_self_state.get("goal_summaries"),
+        "stable_self_state.goal_summaries",
+    )
+    relationship_summaries = _required_prompt_text_list(
+        stable_self_state.get("relationship_summaries"),
+        "stable_self_state.relationship_summaries",
+    )
+    active_task_summaries = _required_prompt_text_list(
+        stable_self_state.get("active_task_summaries"),
+        "stable_self_state.active_task_summaries",
+    )
+    waiting_task_summaries = _required_prompt_text_list(
+        stable_self_state.get("waiting_task_summaries"),
+        "stable_self_state.waiting_task_summaries",
+    )
+    current_emotion_label = stable_self_state.get("current_emotion_label")
+    if not isinstance(current_emotion_label, str):
+        raise RuntimeError("stable_self_state.current_emotion_label must be string")
+    return (
+        "安定自己状態: "
+        f"emotion={current_emotion_label or '未設定'} "
+        f"goals={_joined_prompt_text(goal_summaries)} "
+        f"relations={_joined_prompt_text(relationship_summaries)} "
+        f"active_tasks={_joined_prompt_text(active_task_summaries)} "
+        f"waiting_tasks={_joined_prompt_text(waiting_task_summaries)}"
+    )
+
+
+# Block: 確定嗜好 prompt
+def _confirmed_preferences_prompt_line(confirmed_preferences: dict[str, Any]) -> str:
+    likes = _required_preference_prompt_entries(
+        confirmed_preferences.get("likes"),
+        "confirmed_preferences.likes",
+    )
+    dislikes = _required_preference_prompt_entries(
+        confirmed_preferences.get("dislikes"),
+        "confirmed_preferences.dislikes",
+    )
+    return (
+        "確定嗜好: "
+        f"likes={_joined_prompt_text(likes)} "
+        f"dislikes={_joined_prompt_text(dislikes)}"
+    )
+
+
+# Block: 背景感情 prompt
+def _long_mood_state_prompt_line(long_mood_state: dict[str, Any] | None) -> str:
+    if long_mood_state is None:
+        return "背景感情: なし"
+    summary_text = long_mood_state.get("summary_text")
+    primary_label = long_mood_state.get("primary_label")
+    stability = long_mood_state.get("stability")
+    source_affect_labels = long_mood_state.get("source_affect_labels")
+    if not isinstance(summary_text, str) or not summary_text:
+        raise RuntimeError("long_mood_state.summary_text must be non-empty string")
+    if not isinstance(primary_label, str) or not primary_label:
+        raise RuntimeError("long_mood_state.primary_label must be non-empty string")
+    if stability is not None and (isinstance(stability, bool) or not isinstance(stability, (int, float))):
+        raise RuntimeError("long_mood_state.stability must be number or null")
+    affect_labels = _required_prompt_text_list(
+        source_affect_labels,
+        "long_mood_state.source_affect_labels",
+    )
+    stability_text = (
+        f"{float(stability):.2f}"
+        if isinstance(stability, (int, float)) and not isinstance(stability, bool)
+        else "未設定"
+    )
+    return (
+        "背景感情: "
+        f"{_memory_prompt_text(summary_text)} "
+        f"label={primary_label} "
+        f"stability={stability_text} "
+        f"sources={_joined_prompt_text(affect_labels)}"
+    )
+
+
 # Block: 最近会話 prompt
-def _recent_dialog_prompt_line(conversation_context: dict[str, Any]) -> str:
-    recent_dialog = conversation_context.get("recent_dialog")
+def _recent_dialog_prompt_line(recent_dialog: list[dict[str, Any]]) -> str:
     if not isinstance(recent_dialog, list):
-        raise RuntimeError("conversation_context.recent_dialog must be a list")
+        raise RuntimeError("recent_dialog must be a list")
     if not recent_dialog:
         return "最近会話: なし"
     parts: list[str] = []
     for dialog_entry in recent_dialog:
         if not isinstance(dialog_entry, dict):
-            raise RuntimeError("conversation_context.recent_dialog must contain only objects")
+            raise RuntimeError("recent_dialog must contain only objects")
         role = dialog_entry.get("role")
         text = dialog_entry.get("text")
         if not isinstance(role, str) or role not in {"user", "assistant"}:
-            raise RuntimeError("conversation_context.recent_dialog.role must be user or assistant")
+            raise RuntimeError("recent_dialog.role must be user or assistant")
         if not isinstance(text, str) or not text:
-            raise RuntimeError("conversation_context.recent_dialog.text must be non-empty string")
+            raise RuntimeError("recent_dialog.text must be non-empty string")
         relative_time_text = dialog_entry.get("relative_time_text")
         line = f"{_dialog_role_label(role)}: {_memory_prompt_text(text)}"
         if isinstance(relative_time_text, str) and relative_time_text:
@@ -961,10 +1062,9 @@ def _recent_dialog_prompt_line(conversation_context: dict[str, Any]) -> str:
 
 
 # Block: 選別記憶 prompt
-def _selected_memory_pack_prompt_line(conversation_context: dict[str, Any]) -> str:
-    selected_memory_pack = conversation_context.get("selected_memory_pack")
+def _selected_memory_pack_prompt_line(selected_memory_pack: dict[str, Any]) -> str:
     if not isinstance(selected_memory_pack, dict):
-        raise RuntimeError("conversation_context.selected_memory_pack must be an object")
+        raise RuntimeError("selected_memory_pack must be an object")
     parts: list[str] = []
     for label, key in (
         ("直近文脈", "recent_context"),
@@ -977,7 +1077,7 @@ def _selected_memory_pack_prompt_line(conversation_context: dict[str, Any]) -> s
     ):
         values = selected_memory_pack.get(key)
         if not isinstance(values, list):
-            raise RuntimeError(f"conversation_context.selected_memory_pack.{key} must be a list")
+            raise RuntimeError(f"selected_memory_pack.{key} must be a list")
         normalized_values = [
             _memory_prompt_text(value)
             for value in values
@@ -988,6 +1088,17 @@ def _selected_memory_pack_prompt_line(conversation_context: dict[str, Any]) -> s
     if not parts:
         return "選別記憶: なし"
     return "選別記憶: " + " | ".join(parts)
+
+
+# Block: 応答スタイル prompt
+def _reply_style_prompt_line(reply_style: dict[str, Any]) -> str:
+    speech_tone = reply_style.get("speech_tone")
+    response_pace = reply_style.get("response_pace")
+    if not isinstance(speech_tone, str) or not speech_tone:
+        raise RuntimeError("reply_render_input.reply_style.speech_tone must be non-empty string")
+    if not isinstance(response_pace, str) or not response_pace:
+        raise RuntimeError("reply_render_input.reply_style.response_pace must be non-empty string")
+    return f"応答スタイル: tone={speech_tone} pace={response_pace}"
 
 
 # Block: 会話 role 表示名
@@ -1004,6 +1115,43 @@ def _memory_prompt_text(text: str) -> str:
     if len(normalized) <= 120:
         return normalized
     return normalized[:119] + "…"
+
+
+# Block: Prompt text list validation
+def _required_prompt_text_list(value: Any, field_name: str) -> list[str]:
+    if not isinstance(value, list):
+        raise RuntimeError(f"{field_name} must be a list")
+    texts: list[str] = []
+    for entry in value:
+        if not isinstance(entry, str):
+            raise RuntimeError(f"{field_name} must contain only strings")
+        texts.append(_memory_prompt_text(entry))
+    return texts
+
+
+# Block: Preference prompt entries
+def _required_preference_prompt_entries(value: Any, field_name: str) -> list[str]:
+    if not isinstance(value, list):
+        raise RuntimeError(f"{field_name} must be a list")
+    entries: list[str] = []
+    for entry in value:
+        if not isinstance(entry, dict):
+            raise RuntimeError(f"{field_name} must contain only objects")
+        domain = entry.get("domain")
+        target_key = entry.get("target_key")
+        if not isinstance(domain, str) or not domain:
+            raise RuntimeError(f"{field_name}.domain must be non-empty string")
+        if not isinstance(target_key, str) or not target_key:
+            raise RuntimeError(f"{field_name}.target_key must be non-empty string")
+        entries.append(_memory_prompt_text(f"{domain}:{target_key}"))
+    return entries
+
+
+# Block: Prompt text join
+def _joined_prompt_text(values: list[str]) -> str:
+    if not values:
+        return "なし"
+    return " / ".join(values)
 
 
 def _action_proposals_prompt_line(action_proposals: list[dict[str, Any]]) -> str:

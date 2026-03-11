@@ -108,6 +108,16 @@ def build_cognition_input(
         task_snapshot=state_snapshot.task_snapshot,
         resolved_at=resolved_at,
     )
+    stable_self_state = _build_stable_self_state(
+        self_snapshot=self_snapshot,
+        task_snapshot=task_snapshot,
+    )
+    confirmed_preferences = _build_confirmed_preferences(
+        memory_snapshot=state_snapshot.memory_snapshot,
+    )
+    long_mood_state = _build_long_mood_state_context(
+        memory_snapshot=state_snapshot.memory_snapshot,
+    )
     attention_snapshot = build_attention_snapshot(
         current_observation=current_observation,
         selection_profile=selection_profile,
@@ -153,7 +163,10 @@ def build_cognition_input(
         source_selected_json=retrieval_artifacts.selected_json,
         trimmed_memory_item_refs=trimmed_memory_item_refs,
     )
-    conversation_context = _build_conversation_context(
+    recent_dialog = _build_recent_dialog(
+        recent_event_window=trimmed_memory_bundle["recent_event_window"],
+    )
+    selected_memory_pack = _build_selected_memory_pack(
         memory_bundle=trimmed_memory_bundle,
     )
     retrieval_context = {
@@ -165,6 +178,9 @@ def build_cognition_input(
         cycle_meta=cycle_meta,
         time_context=time_context,
         self_snapshot=self_snapshot,
+        stable_self_state=stable_self_state,
+        confirmed_preferences=confirmed_preferences,
+        long_mood_state=long_mood_state,
         behavior_settings=behavior_settings,
         selection_profile=selection_profile,
         body_snapshot=state_snapshot.body_state,
@@ -177,14 +193,30 @@ def build_cognition_input(
         skill_candidates=skill_candidates,
         current_observation=current_observation,
         camera_candidates=camera_candidates_payload,
-        memory_bundle=trimmed_memory_bundle,
+        recent_dialog=recent_dialog,
+        selected_memory_pack=selected_memory_pack,
         trimmed_memory_item_refs=trimmed_memory_item_refs,
+    )
+    reply_render_input = _build_reply_render_input(
+        current_observation=current_observation,
+        time_context=time_context,
+        attention_snapshot=attention_snapshot,
+        retrieval_context=retrieval_context,
+        stable_self_state=stable_self_state,
+        confirmed_preferences=confirmed_preferences,
+        long_mood_state=long_mood_state,
+        recent_dialog=recent_dialog,
+        selected_memory_pack=selected_memory_pack,
+        selection_profile=selection_profile,
     )
     return BuiltCognitionInput(
         cognition_input={
             "cycle_meta": cycle_meta,
             "time_context": time_context,
             "self_snapshot": self_snapshot,
+            "stable_self_state": stable_self_state,
+            "confirmed_preferences": confirmed_preferences,
+            "long_mood_state": long_mood_state,
             "behavior_settings": behavior_settings,
             "selection_profile": selection_profile,
             "body_snapshot": state_snapshot.body_state,
@@ -193,13 +225,15 @@ def build_cognition_input(
             "task_snapshot": task_snapshot,
             "attention_snapshot": attention_snapshot,
             "memory_bundle": trimmed_memory_bundle,
-            "conversation_context": conversation_context,
+            "recent_dialog": recent_dialog,
+            "selected_memory_pack": selected_memory_pack,
             "retrieval_context": retrieval_context,
             "policy_snapshot": policy_snapshot,
             "camera_candidates": camera_candidates_payload,
             "skill_candidates": skill_candidates,
             "current_observation": current_observation,
             "context_budget": context_budget,
+            "reply_render_input": reply_render_input,
         },
         retrieval_run={
             "plan_json": retrieval_artifacts.retrieval_plan,
@@ -617,6 +651,9 @@ def _trim_memory_bundle_for_context_budget(
     cycle_meta: dict[str, Any],
     time_context: dict[str, Any],
     self_snapshot: dict[str, Any],
+    stable_self_state: dict[str, Any],
+    confirmed_preferences: dict[str, Any],
+    long_mood_state: dict[str, Any] | None,
     behavior_settings: dict[str, Any],
     selection_profile: dict[str, Any],
     body_snapshot: dict[str, Any],
@@ -644,6 +681,9 @@ def _trim_memory_bundle_for_context_budget(
     )
     self_tokens = _estimate_self_layer_tokens(
         self_snapshot=self_snapshot,
+        stable_self_state=stable_self_state,
+        confirmed_preferences=confirmed_preferences,
+        long_mood_state=long_mood_state,
         selection_profile=selection_profile,
     )
     behavior_tokens = _estimate_behavior_layer_tokens(behavior_settings=behavior_settings)
@@ -696,6 +736,9 @@ def _build_context_budget(
     cycle_meta: dict[str, Any],
     time_context: dict[str, Any],
     self_snapshot: dict[str, Any],
+    stable_self_state: dict[str, Any],
+    confirmed_preferences: dict[str, Any],
+    long_mood_state: dict[str, Any] | None,
     behavior_settings: dict[str, Any],
     selection_profile: dict[str, Any],
     body_snapshot: dict[str, Any],
@@ -708,7 +751,8 @@ def _build_context_budget(
     skill_candidates: list[dict[str, Any]],
     current_observation: dict[str, Any],
     camera_candidates: list[dict[str, Any]],
-    memory_bundle: dict[str, Any],
+    recent_dialog: list[dict[str, Any]],
+    selected_memory_pack: dict[str, Any],
     trimmed_memory_item_refs: list[str],
 ) -> dict[str, Any]:
     total_limit = _required_positive_integer_setting(
@@ -726,6 +770,9 @@ def _build_context_budget(
     estimated_layer_tokens = {
         "self": _estimate_self_layer_tokens(
             self_snapshot=self_snapshot,
+            stable_self_state=stable_self_state,
+            confirmed_preferences=confirmed_preferences,
+            long_mood_state=long_mood_state,
             selection_profile=selection_profile,
         ),
         "behavior": _estimate_behavior_layer_tokens(
@@ -745,7 +792,10 @@ def _build_context_budget(
             current_observation=current_observation,
             camera_candidates=camera_candidates,
         ),
-        "memory": _estimate_memory_layer_tokens(memory_bundle=memory_bundle),
+        "memory": _estimate_memory_layer_tokens(
+            recent_dialog=recent_dialog,
+            selected_memory_pack=selected_memory_pack,
+        ),
         "output_contract": layer_limits["output_contract"],
     }
     for layer_name in ("self", "behavior", "situation", "memory"):
@@ -823,11 +873,17 @@ def _split_weighted_budget(
 def _estimate_self_layer_tokens(
     *,
     self_snapshot: dict[str, Any],
+    stable_self_state: dict[str, Any],
+    confirmed_preferences: dict[str, Any],
+    long_mood_state: dict[str, Any] | None,
     selection_profile: dict[str, Any],
 ) -> int:
     return _estimate_token_count(
         _self_layer_budget_projection(
             self_snapshot=self_snapshot,
+            stable_self_state=stable_self_state,
+            confirmed_preferences=confirmed_preferences,
+            long_mood_state=long_mood_state,
             selection_profile=selection_profile,
         )
     )
@@ -870,10 +926,15 @@ def _estimate_situation_layer_tokens(
     )
 
 
-def _estimate_memory_layer_tokens(*, memory_bundle: dict[str, Any]) -> int:
+def _estimate_memory_layer_tokens(
+    *,
+    recent_dialog: list[dict[str, Any]],
+    selected_memory_pack: dict[str, Any],
+) -> int:
     return _estimate_token_count(
         _memory_layer_budget_projection(
-            conversation_context=_build_conversation_context(memory_bundle=memory_bundle)
+            recent_dialog=recent_dialog,
+            selected_memory_pack=selected_memory_pack,
         )
     )
 
@@ -918,12 +979,22 @@ def _trim_memory_bundle_to_token_limit(
         )
     }
     trimmed_refs: list[str] = []
-    while _estimate_memory_layer_tokens(memory_bundle=trimmed_bundle) > token_limit:
+    while _estimate_memory_layer_tokens(
+        recent_dialog=_build_recent_dialog(
+            recent_event_window=trimmed_bundle["recent_event_window"],
+        ),
+        selected_memory_pack=_build_selected_memory_pack(memory_bundle=trimmed_bundle),
+    ) > token_limit:
         removed_ref = _pop_low_priority_memory_item(trimmed_bundle)
         if removed_ref is None:
             break
         trimmed_refs.append(removed_ref)
-    if _estimate_memory_layer_tokens(memory_bundle=trimmed_bundle) > token_limit:
+    if _estimate_memory_layer_tokens(
+        recent_dialog=_build_recent_dialog(
+            recent_event_window=trimmed_bundle["recent_event_window"],
+        ),
+        selected_memory_pack=_build_selected_memory_pack(memory_bundle=trimmed_bundle),
+    ) > token_limit:
         raise RuntimeError("memory layer exceeds context budget even after trimming")
     return trimmed_bundle, trimmed_refs
 
@@ -1110,19 +1181,18 @@ def _build_reserve_trace(source_selected_json: dict[str, Any]) -> list[dict[str,
 def _self_layer_budget_projection(
     *,
     self_snapshot: dict[str, Any],
+    stable_self_state: dict[str, Any],
+    confirmed_preferences: dict[str, Any],
+    long_mood_state: dict[str, Any] | None,
     selection_profile: dict[str, Any],
 ) -> dict[str, Any]:
-    goals = self_snapshot["long_term_goals"].get("goals", [])
-    invariants = self_snapshot["invariants"]
     persona_projection = build_persona_prompt_projection(selection_profile=selection_profile)
     return {
-        "current_emotion_label": str(self_snapshot["current_emotion"].get("primary_label", "")),
+        "current_emotion_label": str(stable_self_state.get("current_emotion_label", "")),
         "persona_projection": persona_projection,
-        "goal_titles": [
-            str(goal.get("title"))
-            for goal in goals[:3]
-            if isinstance(goal, dict) and isinstance(goal.get("title"), str)
-        ],
+        "stable_self_state": stable_self_state,
+        "confirmed_preferences": confirmed_preferences,
+        "long_mood_state": long_mood_state,
         "relationship_priorities": [
             {
                 "target_ref": str(item.get("target_ref", "")),
@@ -1130,14 +1200,6 @@ def _self_layer_budget_projection(
             }
             for item in selection_profile["relationship_priorities"][:3]
             if isinstance(item, dict)
-        ],
-        "forbidden_action_types": [
-            str(action_type)
-            for action_type in invariants.get("forbidden_action_types", [])[:8]
-        ],
-        "forbidden_action_styles": [
-            str(action_style)
-            for action_style in invariants.get("forbidden_action_styles", [])[:8]
         ],
         "last_persona_update": _persona_update_budget_projection(self_snapshot=self_snapshot),
     }
@@ -1344,13 +1406,11 @@ def _retrieval_context_budget_projection(*, retrieval_context: dict[str, Any]) -
     return projected_context
 
 
-def _memory_layer_budget_projection(*, conversation_context: dict[str, Any]) -> dict[str, Any]:
-    recent_dialog = conversation_context.get("recent_dialog")
-    selected_memory_pack = conversation_context.get("selected_memory_pack")
-    if not isinstance(recent_dialog, list):
-        raise RuntimeError("conversation_context.recent_dialog must be a list")
-    if not isinstance(selected_memory_pack, dict):
-        raise RuntimeError("conversation_context.selected_memory_pack must be an object")
+def _memory_layer_budget_projection(
+    *,
+    recent_dialog: list[dict[str, Any]],
+    selected_memory_pack: dict[str, Any],
+) -> dict[str, Any]:
     return {
         "recent_dialog": [
             {
@@ -1373,41 +1433,269 @@ def _memory_layer_budget_projection(*, conversation_context: dict[str, Any]) -> 
     }
 
 
-# Block: 会話コンテキスト
-def _build_conversation_context(*, memory_bundle: dict[str, Any]) -> dict[str, Any]:
+# Block: Stable self state
+def _goal_summary_texts(*, long_term_goals: dict[str, Any]) -> list[str]:
+    goals = long_term_goals.get("goals")
+    if not isinstance(goals, list):
+        raise RuntimeError("self_snapshot.long_term_goals.goals must be a list")
+    summaries: list[str] = []
+    for goal_entry in goals[:3]:
+        if not isinstance(goal_entry, dict):
+            raise RuntimeError("self_snapshot.long_term_goals.goals must contain only objects")
+        summary = goal_entry.get("summary")
+        if not isinstance(summary, str) or not summary:
+            raise RuntimeError("self_snapshot.long_term_goals.goals[].summary must be non-empty string")
+        summaries.append(_prompt_text(summary))
+    return summaries
+
+
+# Block: Relationship summaries
+def _relationship_summary_texts(*, relationship_overview: dict[str, Any]) -> list[str]:
+    relationships = relationship_overview.get("relationships")
+    if not isinstance(relationships, list):
+        raise RuntimeError("self_snapshot.relationship_overview.relationships must be a list")
+    summaries: list[str] = []
+    for relationship_entry in relationships[:3]:
+        if not isinstance(relationship_entry, dict):
+            raise RuntimeError("self_snapshot.relationship_overview.relationships must contain only objects")
+        target_ref = relationship_entry.get("target_ref")
+        relation_kind = relationship_entry.get("relation_kind")
+        if not isinstance(target_ref, str) or not target_ref:
+            raise RuntimeError("relationship_overview.target_ref must be non-empty string")
+        if not isinstance(relation_kind, str) or not relation_kind:
+            raise RuntimeError("relationship_overview.relation_kind must be non-empty string")
+        summaries.append(
+            _prompt_text(
+                f"{target_ref}との{relation_kind}関係({_relationship_reason_tag(relationship_entry)})"
+            )
+        )
+    return summaries
+
+
+# Block: Task summaries
+def _task_summary_texts(*, task_entries: list[dict[str, Any]]) -> list[str]:
+    summaries: list[str] = []
+    for task_entry in task_entries[:3]:
+        if not isinstance(task_entry, dict):
+            raise RuntimeError("task_snapshot entries must contain only objects")
+        task_kind = task_entry.get("task_kind")
+        goal_hint = task_entry.get("goal_hint")
+        relative_time_text = task_entry.get("relative_time_text")
+        if not isinstance(task_kind, str) or not task_kind:
+            raise RuntimeError("task_snapshot.task_kind must be non-empty string")
+        if not isinstance(goal_hint, str) or not goal_hint:
+            raise RuntimeError("task_snapshot.goal_hint must be non-empty string")
+        if not isinstance(relative_time_text, str):
+            raise RuntimeError("task_snapshot.relative_time_text must be string")
+        summaries.append(_prompt_text(f"{task_kind}: {goal_hint} ({relative_time_text})"))
+    return summaries
+
+
+# Block: Stable self state
+def _build_stable_self_state(
+    *,
+    self_snapshot: dict[str, Any],
+    task_snapshot: dict[str, Any],
+) -> dict[str, Any]:
+    long_term_goals = self_snapshot.get("long_term_goals")
+    relationship_overview = self_snapshot.get("relationship_overview")
+    invariants = self_snapshot.get("invariants")
+    if not isinstance(long_term_goals, dict):
+        raise RuntimeError("self_snapshot.long_term_goals must be an object")
+    if not isinstance(relationship_overview, dict):
+        raise RuntimeError("self_snapshot.relationship_overview must be an object")
+    if not isinstance(invariants, dict):
+        raise RuntimeError("self_snapshot.invariants must be an object")
     return {
-        "recent_dialog": _recent_dialog_entries(
+        "current_emotion_label": str(self_snapshot["current_emotion"].get("primary_label", "")),
+        "goal_summaries": _goal_summary_texts(long_term_goals=long_term_goals),
+        "relationship_summaries": _relationship_summary_texts(
+            relationship_overview=relationship_overview,
+        ),
+        "active_task_summaries": _task_summary_texts(
+            task_entries=task_snapshot["active_tasks"],
+        ),
+        "waiting_task_summaries": _task_summary_texts(
+            task_entries=task_snapshot["waiting_external_tasks"],
+        ),
+        "invariants": {
+            "forbidden_action_types": [
+                str(action_type)
+                for action_type in invariants.get("forbidden_action_types", [])[:8]
+                if isinstance(action_type, str) and action_type
+            ],
+            "forbidden_action_styles": [
+                str(action_style)
+                for action_style in invariants.get("forbidden_action_styles", [])[:8]
+                if isinstance(action_style, str) and action_style
+            ],
+            "required_confirmation_for": [
+                str(rule)
+                for rule in invariants.get("required_confirmation_for", [])[:6]
+                if isinstance(rule, str) and rule
+            ],
+            "protected_targets": [
+                str(target.get("target_ref", ""))
+                for target in invariants.get("protected_targets", [])[:6]
+                if isinstance(target, dict) and isinstance(target.get("target_ref"), str)
+            ],
+        },
+    }
+
+
+# Block: Confirmed preferences
+def _build_confirmed_preferences(*, memory_snapshot: dict[str, Any]) -> dict[str, Any]:
+    relationship_items = memory_snapshot.get("relationship_items")
+    if not isinstance(relationship_items, list):
+        raise RuntimeError("memory_snapshot.relationship_items must be a list")
+    likes: list[dict[str, Any]] = []
+    dislikes: list[dict[str, Any]] = []
+    for relationship_item in relationship_items:
+        if not isinstance(relationship_item, dict):
+            continue
+        if str(relationship_item.get("memory_kind")) != "preference":
+            continue
+        payload = relationship_item.get("payload")
+        if not isinstance(payload, dict):
+            raise RuntimeError("preference payload must be an object")
+        if str(payload.get("status")) != "confirmed":
+            continue
+        target_entity_ref = payload.get("target_entity_ref")
+        if not isinstance(target_entity_ref, dict):
+            raise RuntimeError("preference payload.target_entity_ref must be an object")
+        target_key = target_entity_ref.get("target_key")
+        if not isinstance(target_key, str) or not target_key:
+            raise RuntimeError("preference payload.target_entity_ref.target_key must be non-empty string")
+        projected_entry = {
+            "domain": str(payload.get("domain", "")),
+            "target_key": target_key,
+            "confidence": float(relationship_item.get("confidence", 0.0)),
+        }
+        polarity = str(payload.get("polarity", ""))
+        if polarity == "like":
+            likes.append(projected_entry)
+            continue
+        if polarity == "dislike":
+            dislikes.append(projected_entry)
+            continue
+        raise RuntimeError("preference payload.polarity must be like or dislike")
+    likes.sort(key=lambda item: float(item["confidence"]), reverse=True)
+    dislikes.sort(key=lambda item: float(item["confidence"]), reverse=True)
+    return {
+        "likes": likes[:6],
+        "dislikes": dislikes[:6],
+    }
+
+
+# Block: Long mood state context
+def _build_long_mood_state_context(*, memory_snapshot: dict[str, Any]) -> dict[str, Any] | None:
+    affective_items = memory_snapshot.get("affective_items")
+    if not isinstance(affective_items, list):
+        raise RuntimeError("memory_snapshot.affective_items must be a list")
+    for affective_item in affective_items:
+        if not isinstance(affective_item, dict):
+            continue
+        if str(affective_item.get("memory_kind")) != "long_mood_state":
+            continue
+        payload = affective_item.get("payload")
+        if not isinstance(payload, dict):
+            raise RuntimeError("long_mood_state payload must be an object")
+        baseline = payload.get("baseline")
+        shock = payload.get("shock")
+        return {
+            "summary_text": str(affective_item.get("body_text", "")),
+            "primary_label": str(payload.get("primary_label", "")),
+            "baseline_label": (
+                str(baseline.get("primary_label", ""))
+                if isinstance(baseline, dict)
+                else ""
+            ),
+            "shock_label": (
+                str(shock.get("primary_label", ""))
+                if isinstance(shock, dict)
+                else ""
+            ),
+            "stability": (
+                round(float(payload.get("stability")), 2)
+                if isinstance(payload.get("stability"), (int, float))
+                and not isinstance(payload.get("stability"), bool)
+                else None
+            ),
+            "source_affect_labels": [
+                str(label)
+                for label in payload.get("source_affect_labels", [])[:4]
+                if isinstance(label, str) and label
+            ],
+        }
+    return None
+
+
+# Block: Reply render input
+def _build_reply_render_input(
+    *,
+    current_observation: dict[str, Any],
+    time_context: dict[str, Any],
+    attention_snapshot: dict[str, Any],
+    retrieval_context: dict[str, Any],
+    stable_self_state: dict[str, Any],
+    confirmed_preferences: dict[str, Any],
+    long_mood_state: dict[str, Any] | None,
+    recent_dialog: list[dict[str, Any]],
+    selected_memory_pack: dict[str, Any],
+    selection_profile: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "current_observation": current_observation,
+        "time_context": time_context,
+        "attention_snapshot": attention_snapshot,
+        "retrieval_context": retrieval_context,
+        "stable_self_state": stable_self_state,
+        "confirmed_preferences": confirmed_preferences,
+        "long_mood_state": long_mood_state,
+        "recent_dialog": recent_dialog,
+        "selected_memory_pack": selected_memory_pack,
+        "reply_style": {
+            "speech_tone": str(selection_profile["interaction_style"]["speech_tone"]),
+            "response_pace": str(selection_profile["interaction_style"]["response_pace"]),
+        },
+    }
+
+
+# Block: Recent dialog
+def _build_recent_dialog(*, recent_event_window: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return _recent_dialog_entries(recent_event_window=recent_event_window)
+
+
+# Block: Selected memory pack
+def _build_selected_memory_pack(*, memory_bundle: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "recent_context": _recent_context_texts(
             recent_event_window=memory_bundle["recent_event_window"],
         ),
-        "selected_memory_pack": {
-            "recent_context": _recent_context_texts(
-                recent_event_window=memory_bundle["recent_event_window"],
-            ),
-            "working_memory": _memory_pack_texts(
-                entries=memory_bundle["working_memory_items"],
-                text_getter=_memory_body_text,
-            ),
-            "episodic": _memory_pack_texts(
-                entries=memory_bundle["episodic_items"],
-                text_getter=_memory_body_text,
-            ),
-            "facts": _memory_pack_texts(
-                entries=memory_bundle["semantic_items"],
-                text_getter=_memory_body_text,
-            ),
-            "affective": _memory_pack_texts(
-                entries=memory_bundle["affective_items"],
-                text_getter=_memory_body_text,
-            ),
-            "relationship": _memory_pack_texts(
-                entries=memory_bundle["relationship_items"],
-                text_getter=_memory_body_text,
-            ),
-            "reflection": _memory_pack_texts(
-                entries=memory_bundle["reflection_items"],
-                text_getter=_reflection_memory_text,
-            ),
-        },
+        "working_memory": _memory_pack_texts(
+            entries=memory_bundle["working_memory_items"],
+            text_getter=_memory_body_text,
+        ),
+        "episodic": _memory_pack_texts(
+            entries=memory_bundle["episodic_items"],
+            text_getter=_memory_body_text,
+        ),
+        "facts": _memory_pack_texts(
+            entries=memory_bundle["semantic_items"],
+            text_getter=_memory_body_text,
+        ),
+        "affective": _memory_pack_texts(
+            entries=memory_bundle["affective_items"],
+            text_getter=_memory_body_text,
+        ),
+        "relationship": _memory_pack_texts(
+            entries=memory_bundle["relationship_items"],
+            text_getter=_memory_body_text,
+        ),
+        "reflection": _memory_pack_texts(
+            entries=memory_bundle["reflection_items"],
+            text_getter=_reflection_memory_text,
+        ),
     }
 
 

@@ -12,7 +12,7 @@ def run_reply_render_for_browser_chat_input(
     *,
     cycle_id: str,
     input_kind: str,
-    cognition_input: dict[str, Any],
+    reply_render_input: dict[str, Any],
     cognition_plan: dict[str, Any],
     completion_settings: dict[str, Any],
     cognition_client: CognitionClient,
@@ -20,7 +20,7 @@ def run_reply_render_for_browser_chat_input(
     request = ReplyRenderRequest(
         cycle_id=cycle_id,
         input_kind=input_kind,
-        cognition_input=cognition_input,
+        reply_render_input=reply_render_input,
         cognition_plan=cognition_plan,
         completion_settings=completion_settings,
     )
