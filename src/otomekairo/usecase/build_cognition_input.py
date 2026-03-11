@@ -65,9 +65,13 @@ def build_cognition_input(
         )
     camera_candidates_payload = _build_camera_candidates(camera_candidates)
     behavior_settings = _build_behavior_settings(state_snapshot.effective_settings)
+    preference_selection_state = _build_preference_selection_state(
+        memory_snapshot=state_snapshot.memory_snapshot,
+    )
     selection_profile = _build_selection_profile(
         state_snapshot=state_snapshot,
         behavior_settings=behavior_settings,
+        preference_selection_state=preference_selection_state,
     )
     current_observation = _build_current_observation(
         pending_input=pending_input,
@@ -112,9 +116,7 @@ def build_cognition_input(
         self_snapshot=self_snapshot,
         task_snapshot=task_snapshot,
     )
-    confirmed_preferences = _build_confirmed_preferences(
-        memory_snapshot=state_snapshot.memory_snapshot,
-    )
+    confirmed_preferences = dict(preference_selection_state["confirmed_preferences"])
     long_mood_state = _build_long_mood_state_context(
         memory_snapshot=state_snapshot.memory_snapshot,
     )
@@ -551,6 +553,7 @@ def _build_selection_profile(
     state_snapshot: CognitionStateSnapshot,
     *,
     behavior_settings: dict[str, str],
+    preference_selection_state: dict[str, Any],
 ) -> dict[str, Any]:
     personality = state_snapshot.self_state["personality"]
     current_emotion = state_snapshot.self_state["current_emotion"]
@@ -563,8 +566,9 @@ def _build_selection_profile(
         "trait_values": dict(personality["trait_values"]),
         "interaction_style": interaction_style,
         "relationship_priorities": _build_relationship_priorities(relationship_overview),
-        "learned_preferences": list(personality["learned_preferences"]),
-        "learned_aversions": list(personality["learned_aversions"]),
+        "learned_preferences": list(preference_selection_state["learned_preferences"]),
+        "learned_aversions": list(preference_selection_state["learned_aversions"]),
+        "revoked_preferences": list(preference_selection_state["revoked_preferences"]),
         "habit_biases": dict(personality["habit_biases"]),
         "emotion_bias": dict(current_emotion["active_biases"]),
         "drive_bias": {
@@ -584,6 +588,91 @@ def _build_selection_profile(
                 priority_effects["social_bias"],
                 field_name="drive_state.priority_effects.social_bias",
             ),
+        },
+}
+
+
+# Block: Preference selection state
+def _build_preference_selection_state(*, memory_snapshot: dict[str, Any]) -> dict[str, Any]:
+    relationship_items = memory_snapshot.get("relationship_items")
+    if not isinstance(relationship_items, list):
+        raise RuntimeError("memory_snapshot.relationship_items must be a list")
+    learned_preferences: list[dict[str, Any]] = []
+    learned_aversions: list[dict[str, Any]] = []
+    revoked_preferences: list[dict[str, Any]] = []
+    confirmed_likes: list[dict[str, Any]] = []
+    confirmed_dislikes: list[dict[str, Any]] = []
+    for relationship_item in relationship_items:
+        if not isinstance(relationship_item, dict):
+            continue
+        if str(relationship_item.get("memory_kind")) != "preference":
+            continue
+        payload = relationship_item.get("payload")
+        if not isinstance(payload, dict):
+            raise RuntimeError("preference payload must be an object")
+        target_entity_ref = payload.get("target_entity_ref")
+        if not isinstance(target_entity_ref, dict):
+            raise RuntimeError("preference payload.target_entity_ref must be an object")
+        target_key = target_entity_ref.get("target_key")
+        if not isinstance(target_key, str) or not target_key:
+            raise RuntimeError("preference payload.target_entity_ref.target_key must be non-empty string")
+        domain = str(payload.get("domain", ""))
+        polarity = str(payload.get("polarity", ""))
+        status = str(payload.get("status", ""))
+        confidence = float(relationship_item.get("confidence", 0.0))
+        evidence_event_ids = payload.get("evidence_event_ids")
+        evidence_count = 1
+        if isinstance(evidence_event_ids, list):
+            evidence_count = max(
+                1,
+                len([event_id for event_id in evidence_event_ids if isinstance(event_id, str) and event_id]),
+            )
+        selection_entry = {
+            "domain": domain,
+            "target_key": target_key,
+            "weight": round(confidence, 4),
+            "evidence_count": evidence_count,
+        }
+        if status == "confirmed":
+            projected_entry = {
+                "domain": domain,
+                "target_key": target_key,
+                "confidence": confidence,
+            }
+            if polarity == "like":
+                confirmed_likes.append(projected_entry)
+                learned_preferences.append(selection_entry)
+                continue
+            if polarity == "dislike":
+                confirmed_dislikes.append(projected_entry)
+                learned_aversions.append(selection_entry)
+                continue
+            raise RuntimeError("preference payload.polarity must be like or dislike")
+        if status == "revoked":
+            if polarity not in {"like", "dislike"}:
+                raise RuntimeError("preference payload.polarity must be like or dislike")
+            revoked_preferences.append(
+                {
+                    **selection_entry,
+                    "polarity": polarity,
+                }
+            )
+            continue
+        if status == "candidate":
+            continue
+        raise RuntimeError("preference payload.status must be candidate, confirmed, or revoked")
+    learned_preferences.sort(key=lambda item: float(item["weight"]), reverse=True)
+    learned_aversions.sort(key=lambda item: float(item["weight"]), reverse=True)
+    revoked_preferences.sort(key=lambda item: float(item["weight"]), reverse=True)
+    confirmed_likes.sort(key=lambda item: float(item["confidence"]), reverse=True)
+    confirmed_dislikes.sort(key=lambda item: float(item["confidence"]), reverse=True)
+    return {
+        "learned_preferences": learned_preferences[:8],
+        "learned_aversions": learned_aversions[:8],
+        "revoked_preferences": revoked_preferences[:8],
+        "confirmed_preferences": {
+            "likes": confirmed_likes[:6],
+            "dislikes": confirmed_dislikes[:6],
         },
     }
 
@@ -1549,50 +1638,6 @@ def _build_stable_self_state(
                 if isinstance(target, dict) and isinstance(target.get("target_ref"), str)
             ],
         },
-    }
-
-
-# Block: Confirmed preferences
-def _build_confirmed_preferences(*, memory_snapshot: dict[str, Any]) -> dict[str, Any]:
-    relationship_items = memory_snapshot.get("relationship_items")
-    if not isinstance(relationship_items, list):
-        raise RuntimeError("memory_snapshot.relationship_items must be a list")
-    likes: list[dict[str, Any]] = []
-    dislikes: list[dict[str, Any]] = []
-    for relationship_item in relationship_items:
-        if not isinstance(relationship_item, dict):
-            continue
-        if str(relationship_item.get("memory_kind")) != "preference":
-            continue
-        payload = relationship_item.get("payload")
-        if not isinstance(payload, dict):
-            raise RuntimeError("preference payload must be an object")
-        if str(payload.get("status")) != "confirmed":
-            continue
-        target_entity_ref = payload.get("target_entity_ref")
-        if not isinstance(target_entity_ref, dict):
-            raise RuntimeError("preference payload.target_entity_ref must be an object")
-        target_key = target_entity_ref.get("target_key")
-        if not isinstance(target_key, str) or not target_key:
-            raise RuntimeError("preference payload.target_entity_ref.target_key must be non-empty string")
-        projected_entry = {
-            "domain": str(payload.get("domain", "")),
-            "target_key": target_key,
-            "confidence": float(relationship_item.get("confidence", 0.0)),
-        }
-        polarity = str(payload.get("polarity", ""))
-        if polarity == "like":
-            likes.append(projected_entry)
-            continue
-        if polarity == "dislike":
-            dislikes.append(projected_entry)
-            continue
-        raise RuntimeError("preference payload.polarity must be like or dislike")
-    likes.sort(key=lambda item: float(item["confidence"]), reverse=True)
-    dislikes.sort(key=lambda item: float(item["confidence"]), reverse=True)
-    return {
-        "likes": likes[:6],
-        "dislikes": dislikes[:6],
     }
 
 

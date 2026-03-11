@@ -346,6 +346,11 @@ def _persona_consistency_score(
             "learned_aversions",
             "selection_profile.learned_aversions",
         ),
+        revoked_preferences=_required_list(
+            selection_profile,
+            "revoked_preferences",
+            "selection_profile.revoked_preferences",
+        ),
         habit_biases=_required_object(
             selection_profile,
             "habit_biases",
@@ -800,6 +805,7 @@ def _aversion_penalty(
     *,
     action_type: str,
     learned_aversions: list[dict[str, Any]],
+    revoked_preferences: list[dict[str, Any]],
     habit_biases: dict[str, Any],
 ) -> float:
     penalty = _matched_preference_weight(
@@ -819,6 +825,13 @@ def _aversion_penalty(
                 field_name="selection_profile.learned_aversions",
             ) * 0.85,
         )
+    penalty = max(
+        penalty,
+        _revoked_preference_penalty(
+            action_type=action_type,
+            revoked_preferences=revoked_preferences,
+        ),
+    )
     avoided_action_styles = _required_list(
         habit_biases,
         "avoided_action_styles",
@@ -826,6 +839,32 @@ def _aversion_penalty(
     )
     if _proposal_action_style(action_type) in avoided_action_styles:
         penalty = max(penalty, 0.35)
+    return _normalized_score(penalty)
+
+
+# Block: Revoked preference penalty
+def _revoked_preference_penalty(
+    *,
+    action_type: str,
+    revoked_preferences: list[dict[str, Any]],
+) -> float:
+    penalty = _matched_preference_weight(
+        entries=revoked_preferences,
+        domain="action_type",
+        target_key=action_type,
+        field_name="selection_profile.revoked_preferences",
+    ) * 0.55
+    observation_kind = _observation_kind_for_action(action_type)
+    if observation_kind is not None:
+        penalty = max(
+            penalty,
+            _matched_preference_weight(
+                entries=revoked_preferences,
+                domain="observation_kind",
+                target_key=observation_kind,
+                field_name="selection_profile.revoked_preferences",
+            ) * 0.45,
+        )
     return _normalized_score(penalty)
 
 
