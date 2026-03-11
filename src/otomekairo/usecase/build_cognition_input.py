@@ -66,7 +66,7 @@ def build_cognition_input(
     camera_candidates_payload = _build_camera_candidates(camera_candidates)
     behavior_settings = _build_behavior_settings(state_snapshot.effective_settings)
     preference_selection_state = _build_preference_selection_state(
-        memory_snapshot=state_snapshot.memory_snapshot,
+        preference_items=state_snapshot.stable_preference_items,
     )
     selection_profile = _build_selection_profile(
         state_snapshot=state_snapshot,
@@ -118,7 +118,7 @@ def build_cognition_input(
     )
     confirmed_preferences = dict(preference_selection_state["confirmed_preferences"])
     long_mood_state = _build_long_mood_state_context(
-        memory_snapshot=state_snapshot.memory_snapshot,
+        long_mood_item=state_snapshot.stable_long_mood_item,
     )
     attention_snapshot = build_attention_snapshot(
         current_observation=current_observation,
@@ -593,21 +593,21 @@ def _build_selection_profile(
 
 
 # Block: Preference selection state
-def _build_preference_selection_state(*, memory_snapshot: dict[str, Any]) -> dict[str, Any]:
-    relationship_items = memory_snapshot.get("relationship_items")
-    if not isinstance(relationship_items, list):
-        raise RuntimeError("memory_snapshot.relationship_items must be a list")
+def _build_preference_selection_state(*, preference_items: list[dict[str, Any]]) -> dict[str, Any]:
+    if not isinstance(preference_items, list):
+        raise RuntimeError("state_snapshot.stable_preference_items must be a list")
     learned_preferences: list[dict[str, Any]] = []
     learned_aversions: list[dict[str, Any]] = []
     revoked_preferences: list[dict[str, Any]] = []
     confirmed_likes: list[dict[str, Any]] = []
     confirmed_dislikes: list[dict[str, Any]] = []
-    for relationship_item in relationship_items:
-        if not isinstance(relationship_item, dict):
+    seen_preference_keys: set[tuple[str, str, str]] = set()
+    for preference_item in preference_items:
+        if not isinstance(preference_item, dict):
             continue
-        if str(relationship_item.get("memory_kind")) != "preference":
+        if str(preference_item.get("memory_kind")) != "preference":
             continue
-        payload = relationship_item.get("payload")
+        payload = preference_item.get("payload")
         if not isinstance(payload, dict):
             raise RuntimeError("preference payload must be an object")
         target_entity_ref = payload.get("target_entity_ref")
@@ -619,7 +619,11 @@ def _build_preference_selection_state(*, memory_snapshot: dict[str, Any]) -> dic
         domain = str(payload.get("domain", ""))
         polarity = str(payload.get("polarity", ""))
         status = str(payload.get("status", ""))
-        confidence = float(relationship_item.get("confidence", 0.0))
+        confidence = float(preference_item.get("confidence", 0.0))
+        preference_key = (domain, target_key, polarity)
+        if preference_key in seen_preference_keys:
+            continue
+        seen_preference_keys.add(preference_key)
         evidence_event_ids = payload.get("evidence_event_ids")
         evidence_count = 1
         if isinstance(evidence_event_ids, list):
@@ -1642,46 +1646,43 @@ def _build_stable_self_state(
 
 
 # Block: Long mood state context
-def _build_long_mood_state_context(*, memory_snapshot: dict[str, Any]) -> dict[str, Any] | None:
-    affective_items = memory_snapshot.get("affective_items")
-    if not isinstance(affective_items, list):
-        raise RuntimeError("memory_snapshot.affective_items must be a list")
-    for affective_item in affective_items:
-        if not isinstance(affective_item, dict):
-            continue
-        if str(affective_item.get("memory_kind")) != "long_mood_state":
-            continue
-        payload = affective_item.get("payload")
-        if not isinstance(payload, dict):
-            raise RuntimeError("long_mood_state payload must be an object")
-        baseline = payload.get("baseline")
-        shock = payload.get("shock")
-        return {
-            "summary_text": str(affective_item.get("body_text", "")),
-            "primary_label": str(payload.get("primary_label", "")),
-            "baseline_label": (
-                str(baseline.get("primary_label", ""))
-                if isinstance(baseline, dict)
-                else ""
-            ),
-            "shock_label": (
-                str(shock.get("primary_label", ""))
-                if isinstance(shock, dict)
-                else ""
-            ),
-            "stability": (
-                round(float(payload.get("stability")), 2)
-                if isinstance(payload.get("stability"), (int, float))
-                and not isinstance(payload.get("stability"), bool)
-                else None
-            ),
-            "source_affect_labels": [
-                str(label)
-                for label in payload.get("source_affect_labels", [])[:4]
-                if isinstance(label, str) and label
-            ],
-        }
-    return None
+def _build_long_mood_state_context(*, long_mood_item: dict[str, Any] | None) -> dict[str, Any] | None:
+    if long_mood_item is None:
+        return None
+    if not isinstance(long_mood_item, dict):
+        raise RuntimeError("state_snapshot.stable_long_mood_item must be object or null")
+    if str(long_mood_item.get("memory_kind")) != "long_mood_state":
+        raise RuntimeError("state_snapshot.stable_long_mood_item.memory_kind must be long_mood_state")
+    payload = long_mood_item.get("payload")
+    if not isinstance(payload, dict):
+        raise RuntimeError("long_mood_state payload must be an object")
+    baseline = payload.get("baseline")
+    shock = payload.get("shock")
+    return {
+        "summary_text": str(long_mood_item.get("body_text", "")),
+        "primary_label": str(payload.get("primary_label", "")),
+        "baseline_label": (
+            str(baseline.get("primary_label", ""))
+            if isinstance(baseline, dict)
+            else ""
+        ),
+        "shock_label": (
+            str(shock.get("primary_label", ""))
+            if isinstance(shock, dict)
+            else ""
+        ),
+        "stability": (
+            round(float(payload.get("stability")), 2)
+            if isinstance(payload.get("stability"), (int, float))
+            and not isinstance(payload.get("stability"), bool)
+            else None
+        ),
+        "source_affect_labels": [
+            str(label)
+            for label in payload.get("source_affect_labels", [])[:4]
+            if isinstance(label, str) and label
+        ],
+    }
 
 
 # Block: Action selection context

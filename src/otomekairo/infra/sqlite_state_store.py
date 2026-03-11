@@ -338,6 +338,108 @@ class SqliteStateStore:
             "pending_overrides": pending_overrides,
         }
 
+    # Block: Tidy memory owner state read
+    def read_tidy_memory_owner_state(
+        self,
+        *,
+        completed_jobs_cutoff_at: int,
+        stale_preview_cutoff_at: int,
+        stale_vector_cutoff_at: int,
+    ) -> dict[str, dict[str, Any]]:
+        for cutoff_at, field_name in (
+            (completed_jobs_cutoff_at, "completed_jobs_cutoff_at"),
+            (stale_preview_cutoff_at, "stale_preview_cutoff_at"),
+            (stale_vector_cutoff_at, "stale_vector_cutoff_at"),
+        ):
+            if not isinstance(cutoff_at, int):
+                raise StoreValidationError(f"{field_name} must be integer")
+            if cutoff_at <= 0:
+                raise StoreValidationError(f"{field_name} must be positive")
+        with self._connect() as connection:
+            completed_jobs_count = int(
+                connection.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM memory_jobs
+                    WHERE status IN ('completed', 'dead_letter')
+                      AND completed_at IS NOT NULL
+                      AND completed_at < ?
+                    """,
+                    (completed_jobs_cutoff_at,),
+                ).fetchone()[0]
+            )
+            stale_preview_count = int(
+                connection.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM event_preview_cache
+                    INNER JOIN events
+                            ON events.event_id = event_preview_cache.event_id
+                    WHERE events.searchable = 0
+                      AND COALESCE(events.updated_at, events.created_at) < ?
+                    """,
+                    (stale_preview_cutoff_at,),
+                ).fetchone()[0]
+            )
+            stale_vector_count = int(
+                connection.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM vec_items
+                    WHERE searchable = 0
+                      AND source_updated_at < ?
+                    """,
+                    (stale_vector_cutoff_at,),
+                ).fetchone()[0]
+            )
+            maintenance_rows = connection.execute(
+                """
+                SELECT
+                    json_extract(memory_job_payloads.payload_json, '$.maintenance_scope') AS maintenance_scope,
+                    MAX(memory_jobs.created_at) AS last_enqueued_at,
+                    MAX(
+                        CASE
+                            WHEN memory_jobs.status IN ('queued', 'claimed') THEN 1
+                            ELSE 0
+                        END
+                    ) AS has_active_job
+                FROM memory_jobs
+                INNER JOIN memory_job_payloads
+                        ON memory_job_payloads.payload_id = json_extract(memory_jobs.payload_ref_json, '$.payload_id')
+                WHERE memory_jobs.job_kind = 'tidy_memory'
+                GROUP BY json_extract(memory_job_payloads.payload_json, '$.maintenance_scope')
+                """
+            ).fetchall()
+        owner_state = {
+            "completed_jobs_gc": {
+                "stale_count": completed_jobs_count,
+                "last_enqueued_at": None,
+                "has_active_job": False,
+            },
+            "stale_preview_gc": {
+                "stale_count": stale_preview_count,
+                "last_enqueued_at": None,
+                "has_active_job": False,
+            },
+            "stale_vector_gc": {
+                "stale_count": stale_vector_count,
+                "last_enqueued_at": None,
+                "has_active_job": False,
+            },
+        }
+        for row in maintenance_rows:
+            maintenance_scope = row["maintenance_scope"]
+            if not isinstance(maintenance_scope, str) or maintenance_scope not in owner_state:
+                continue
+            last_enqueued_at = row["last_enqueued_at"]
+            owner_state[maintenance_scope]["last_enqueued_at"] = (
+                int(last_enqueued_at)
+                if isinstance(last_enqueued_at, int)
+                else None
+            )
+            owner_state[maintenance_scope]["has_active_job"] = bool(row["has_active_job"])
+        return owner_state
+
     # Block: Settings editor snapshot
     def read_settings_editor(self, default_settings: dict[str, Any]) -> dict[str, Any]:
         with self._connect() as connection:
@@ -835,6 +937,44 @@ class SqliteStateStore:
                 LIMIT 6
                 """
             ).fetchall()
+            stable_preference_rows = connection.execute(
+                """
+                SELECT
+                    preference_id,
+                    owner_scope,
+                    target_entity_ref_json,
+                    domain,
+                    polarity,
+                    status,
+                    confidence,
+                    evidence_event_ids_json,
+                    created_at,
+                    updated_at
+                FROM preference_memory
+                WHERE owner_scope = 'self'
+                  AND status IN ('confirmed', 'revoked')
+                ORDER BY updated_at DESC, created_at DESC, preference_id DESC
+                """
+            ).fetchall()
+            stable_long_mood_row = connection.execute(
+                """
+                SELECT
+                    memory_state_id,
+                    memory_kind,
+                    body_text,
+                    payload_json,
+                    confidence,
+                    importance,
+                    memory_strength,
+                    created_at,
+                    updated_at,
+                    last_confirmed_at
+                FROM memory_states
+                WHERE memory_kind = 'long_mood_state'
+                ORDER BY updated_at DESC, created_at DESC, memory_state_id DESC
+                LIMIT 1
+                """
+            ).fetchone()
             if observation_hint_text is not None and observation_hint_text.strip():
                 similarity_hits = _search_vec_similarity_hits(
                     connection=connection,
@@ -943,6 +1083,15 @@ class SqliteStateStore:
                 state_link_rows=state_link_rows,
                 state_about_time_rows=state_about_time_rows,
                 state_entity_rows=state_entity_rows,
+            ),
+            stable_preference_items=[
+                _preference_snapshot_entry(row)
+                for row in stable_preference_rows
+            ],
+            stable_long_mood_item=(
+                _memory_snapshot_entry(stable_long_mood_row)
+                if stable_long_mood_row is not None
+                else None
             ),
             retrieval_profile=retrieval_profile,
             effective_settings=effective_settings,

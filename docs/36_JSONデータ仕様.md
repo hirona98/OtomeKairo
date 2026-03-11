@@ -400,7 +400,7 @@
 - `interaction_style.speech_tone` と `interaction_style.response_pace` は、その短周期の `behavior_settings.speech_style` / `behavior_settings.response_pace` を上書きした短期補正済み値を入れてよい
 - `relationship_priorities` は、`relationship_priority_entry` の配列である
 - `learned_preferences`、`learned_aversions`、`revoked_preferences` は、`personality_preference_entry` の配列である
-- current 実装では、`learned_preferences` は `preference_memory.status = "confirmed"` かつ `polarity = "like"`、`learned_aversions` は `status = "confirmed"` かつ `polarity = "dislike"`、`revoked_preferences` は `status = "revoked"` から再構成してよい
+- current 実装では、`learned_preferences` は `state_snapshot.stable_preference_items` のうち `status = "confirmed"` かつ `polarity = "like"`、`learned_aversions` は `status = "confirmed"` かつ `polarity = "dislike"`、`revoked_preferences` は `status = "revoked"` から再構成してよい
 - current 実装では、`revoked_preferences[]` に元の極性を示す `polarity` を追加で持ってよい
 - `habit_biases` は、`self_state.personality_json.habit_biases` と同じ固定キーを持つ
 - `emotion_bias` は、現在感情から作る短期補正値であり、各値は `-1.0..+1.0` の `number` に固定する
@@ -737,7 +737,7 @@
 - 必須項目は `likes` と `dislikes` である
 - `likes[]` と `dislikes[]` の各要素は、少なくとも `domain`、`target_key`、`confidence` を持つ
 - `confidence` は `0.0..1.0` の `number` に固定する
-- current 実装では、`relationship_items.memory_kind = "preference"` かつ `payload.status = "confirmed"` の行だけを含めてよい
+- current 実装では、`state_snapshot.stable_preference_items.memory_kind = "preference"` かつ `payload.status = "confirmed"` の行だけを含めてよい
 
 <!-- Block: Long Mood State Context -->
 ### `long_mood_state`
@@ -757,7 +757,7 @@
 - 必須項目は `summary_text`、`primary_label`、`baseline_label`、`shock_label`、`source_affect_labels` である
 - `stability` は任意で、ある場合は `0.0..1.0` の `number` に固定する
 - `source_affect_labels` は string の配列である
-- current 実装では、最新の `memory_kind = "long_mood_state"` から 1 件だけ構成してよい
+- current 実装では、`state_snapshot.stable_long_mood_item` から 1 件だけ構成してよい
 
 <!-- Block: Reply Render Input -->
 ### `reply_render_input`
@@ -2111,6 +2111,13 @@
   "memory.embedding_dimension": 3072,
   "memory.similar_episodes_limit": 60,
   "memory.max_inject_tokens": 1200,
+  "memory.tidy_min_interval_ms": 3600000,
+  "memory.tidy_completed_jobs_retention_ms": 604800000,
+  "memory.tidy_completed_jobs_trigger_count": 256,
+  "memory.tidy_preview_retention_ms": 259200000,
+  "memory.tidy_preview_trigger_count": 64,
+  "memory.tidy_vector_retention_ms": 259200000,
+  "memory.tidy_vector_trigger_count": 128,
   "retrieval_profile": {
     "semantic_top_k": 8,
     "recent_window_limit": 5,

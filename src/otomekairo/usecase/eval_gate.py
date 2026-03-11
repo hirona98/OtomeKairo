@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from otomekairo.usecase.chat_behavior_golden import build_chat_behavior_golden_report
+from otomekairo.usecase.tidy_memory_owner_smoke import run_tidy_memory_owner_smoke
 
 
 # Block: Report constants
@@ -17,6 +18,9 @@ REPORT_SCHEMA_VERSION = 1
 def run_eval_gate(*, keep_db: bool) -> dict[str, Any]:
     source_root = Path(__file__).resolve().parents[1]
     py_compile_report = _run_py_compile_gate(source_root=source_root)
+    tidy_memory_owner_report = run_tidy_memory_owner_smoke(
+        keep_db=keep_db,
+    )
     chat_behavior_report = build_chat_behavior_golden_report(
         keep_db=keep_db,
     )
@@ -24,9 +28,11 @@ def run_eval_gate(*, keep_db: bool) -> dict[str, Any]:
         "report_schema_version": REPORT_SCHEMA_VERSION,
         "checks": {
             "py_compile_ok": True,
+            "tidy_memory_owner_ok": True,
             "chat_behavior_golden_ok": True,
         },
         "py_compile": py_compile_report,
+        "tidy_memory_owner": tidy_memory_owner_report,
         "chat_behavior_golden": chat_behavior_report,
     }
     _validate_report(report)
@@ -78,9 +84,15 @@ def format_eval_gate_report(report: dict[str, Any]) -> str:
     py_compile_report = report.get("py_compile")
     if not isinstance(py_compile_report, dict):
         raise RuntimeError("eval_gate.py_compile must be an object")
+    tidy_memory_owner_report = report.get("tidy_memory_owner")
+    if not isinstance(tidy_memory_owner_report, dict):
+        raise RuntimeError("eval_gate.tidy_memory_owner must be an object")
     chat_behavior_report = report.get("chat_behavior_golden")
     if not isinstance(chat_behavior_report, dict):
         raise RuntimeError("eval_gate.chat_behavior_golden must be an object")
+    tidy_checks = tidy_memory_owner_report.get("checks")
+    if not isinstance(tidy_checks, dict):
+        raise RuntimeError("eval_gate.tidy_memory_owner.checks must be an object")
     golden_checks = chat_behavior_report.get("checks")
     if not isinstance(golden_checks, dict):
         raise RuntimeError("eval_gate.chat_behavior_golden.checks must be an object")
@@ -90,6 +102,11 @@ def format_eval_gate_report(report: dict[str, Any]) -> str:
         "checks: " + ", ".join(
             check_name
             for check_name, passed in checks.items()
+            if bool(passed)
+        ),
+        "tidy: " + ", ".join(
+            check_name
+            for check_name, passed in tidy_checks.items()
             if bool(passed)
         ),
         "golden: " + ", ".join(
