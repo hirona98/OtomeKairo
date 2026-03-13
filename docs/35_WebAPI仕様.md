@@ -249,7 +249,8 @@ flowchart LR
         "episodic_items": 1,
         "semantic_items": 1,
         "affective_items": 0,
-        "relationship_items": 1,
+        "relationship_items": 0,
+        "preference_items": 1,
         "reflection_items": 0,
         "recent_event_window": 3
       }
@@ -468,7 +469,8 @@ flowchart LR
     "episodic_items": 1,
     "semantic_items": 1,
     "affective_items": 0,
-    "relationship_items": 1,
+    "relationship_items": 0,
+    "preference_items": 1,
     "reflection_items": 0,
     "recent_event_window": 3
   },

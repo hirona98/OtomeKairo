@@ -11617,6 +11617,7 @@ def _build_memory_snapshot_rows(
     semantic_items: list[dict[str, Any]] = []
     affective_items: list[dict[str, Any]] = []
     relationship_items: list[dict[str, Any]] = []
+    preference_items: list[dict[str, Any]] = []
     reflection_items: list[dict[str, Any]] = []
     for row in recent_event_rows:
         episodic_items.append(_event_memory_snapshot_entry(row))
@@ -11640,13 +11641,14 @@ def _build_memory_snapshot_rows(
     for row in affect_rows:
         affective_items.append(_event_affect_snapshot_entry(row))
     for row in stable_preference_rows:
-        relationship_items.append(_preference_snapshot_entry(row))
+        preference_items.append(_preference_snapshot_entry(row))
     return {
         "working_memory_items": working_memory_items[:3],
         "episodic_items": episodic_items,
         "semantic_items": semantic_items,
         "affective_items": affective_items,
         "relationship_items": relationship_items,
+        "preference_items": preference_items,
         "reflection_items": reflection_items,
         "recent_event_window": [
             _recent_event_entry(row)

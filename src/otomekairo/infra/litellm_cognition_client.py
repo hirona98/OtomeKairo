@@ -117,7 +117,6 @@ def _build_plan_messages(request: CognitionPlanRequest) -> list[dict[str, Any]]:
     time_context = cognition_input["time_context"]
     self_snapshot = cognition_input["self_snapshot"]
     stable_self_state = cognition_input["stable_self_state"]
-    confirmed_preferences = cognition_input["confirmed_preferences"]
     long_mood_state = cognition_input["long_mood_state"]
     behavior_settings = cognition_input["behavior_settings"]
     selection_profile = cognition_input["selection_profile"]
@@ -136,6 +135,7 @@ def _build_plan_messages(request: CognitionPlanRequest) -> list[dict[str, Any]]:
     persona_projection = build_persona_prompt_projection(selection_profile=selection_profile)
     runtime_policy = policy_snapshot["runtime_policy"]
     input_evaluation = policy_snapshot["input_evaluation"]
+    stable_preferences = cognition_input["stable_preferences"]
     system_prompt = "\n".join(
         [
             "あなたは OtomeKairo の人格中枢として振る舞う。",
@@ -164,14 +164,6 @@ def _build_plan_messages(request: CognitionPlanRequest) -> list[dict[str, Any]]:
             f"話し方: {selection_profile['interaction_style']['speech_tone']}",
             _persona_traits_prompt_line(persona_projection),
             _persona_interaction_prompt_line(persona_projection),
-            _persona_preferences_prompt_line(
-                title="学習済みの好み",
-                preferences=persona_projection["learned_preferences"],
-            ),
-            _persona_preferences_prompt_line(
-                title="学習済みの回避",
-                preferences=persona_projection["learned_aversions"],
-            ),
             _persona_habits_prompt_line(persona_projection),
             _persona_bias_prompt_line(
                 title="感情補正",
@@ -210,7 +202,7 @@ def _build_plan_messages(request: CognitionPlanRequest) -> list[dict[str, Any]]:
             f"関係性の優先対象: {_format_relationship_priorities(selection_profile['relationship_priorities'])}",
             f"長期目標: {_format_goals(self_snapshot['long_term_goals'])}",
             _stable_self_state_prompt_line(stable_self_state),
-            _confirmed_preferences_prompt_line(confirmed_preferences),
+            *_stable_preferences_prompt_lines(stable_preferences),
             _long_mood_state_prompt_line(long_mood_state),
             _attention_prompt_line(attention_snapshot),
             _input_evaluation_prompt_line(input_evaluation),
@@ -836,35 +828,6 @@ def _persona_interaction_prompt_line(persona_projection: dict[str, Any]) -> str:
         f"pace={response_pace}"
     )
 
-
-def _persona_preferences_prompt_line(*, title: str, preferences: Any) -> str:
-    if not isinstance(preferences, list):
-        raise RuntimeError("persona_projection preferences must be a list")
-    if not preferences:
-        return f"{title}: なし"
-    parts: list[str] = []
-    for entry in preferences:
-        if not isinstance(entry, dict):
-            raise RuntimeError("persona_projection preferences must contain only objects")
-        domain = entry.get("domain")
-        target_key = entry.get("target_key")
-        weight = entry.get("weight")
-        evidence_count = entry.get("evidence_count")
-        if (
-            not isinstance(domain, str)
-            or not isinstance(target_key, str)
-            or isinstance(weight, bool)
-            or not isinstance(weight, (int, float))
-            or not isinstance(evidence_count, int)
-            or isinstance(evidence_count, bool)
-        ):
-            raise RuntimeError("persona_projection preference entry is invalid")
-        parts.append(
-            f"{domain}:{target_key}({_signed_number_text(float(weight))}/e{evidence_count})"
-        )
-    return f"{title}: " + ", ".join(parts)
-
-
 def _persona_habits_prompt_line(persona_projection: dict[str, Any]) -> str:
     habit_biases = persona_projection.get("habit_biases")
     if not isinstance(habit_biases, dict):
@@ -987,15 +950,15 @@ def _stable_self_state_prompt_line(stable_self_state: dict[str, Any]) -> str:
     )
 
 
-# Block: 確定嗜好 prompt
-def _confirmed_preferences_prompt_line(confirmed_preferences: dict[str, Any]) -> str:
+# Block: Stable confirmed preference prompt
+def _stable_confirmed_preferences_prompt_line(stable_confirmed_preferences: dict[str, Any]) -> str:
     likes = _required_preference_prompt_entries(
-        confirmed_preferences.get("likes"),
-        "confirmed_preferences.likes",
+        stable_confirmed_preferences.get("likes"),
+        "stable_preferences.likes",
     )
     dislikes = _required_preference_prompt_entries(
-        confirmed_preferences.get("dislikes"),
-        "confirmed_preferences.dislikes",
+        stable_confirmed_preferences.get("dislikes"),
+        "stable_preferences.dislikes",
     )
     return (
         "確定嗜好: "
@@ -1008,7 +971,7 @@ def _confirmed_preferences_prompt_line(confirmed_preferences: dict[str, Any]) ->
 def _revoked_preferences_prompt_line(revoked_preferences: Any) -> str:
     entries = _required_revoked_preference_prompt_entries(
         revoked_preferences,
-        "reply_render_input.revoked_preferences",
+        "stable_preferences.revoked",
     )
     return "取り消し済み嗜好: " + _joined_prompt_text(entries)
 
@@ -1017,13 +980,13 @@ def _revoked_preferences_prompt_line(revoked_preferences: Any) -> str:
 def _stable_preferences_prompt_lines(stable_preferences: Any) -> list[str]:
     if not isinstance(stable_preferences, dict):
         raise RuntimeError("stable_preferences must be an object")
-    confirmed_preferences = {
+    stable_confirmed_preferences = {
         "likes": stable_preferences.get("likes"),
         "dislikes": stable_preferences.get("dislikes"),
     }
     revoked_preferences = stable_preferences.get("revoked")
     return [
-        _confirmed_preferences_prompt_line(confirmed_preferences),
+        _stable_confirmed_preferences_prompt_line(stable_confirmed_preferences),
         _revoked_preferences_prompt_line(revoked_preferences),
     ]
 
@@ -1096,6 +1059,7 @@ def _selected_memory_pack_prompt_line(selected_memory_pack: dict[str, Any]) -> s
         ("事実", "facts"),
         ("感情", "affective"),
         ("関係", "relationship"),
+        ("嗜好", "preference"),
         ("反省", "reflection"),
     ):
         values = selected_memory_pack.get(key)

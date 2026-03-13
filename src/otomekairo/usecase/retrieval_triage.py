@@ -36,7 +36,7 @@ FLAG_NOTE = {
     "empty_selection": "最終採用が 0 件",
     "explicit_time_dropped": "explicit_time が selector input にあるのに最終採用へ残っていない",
     "thread_dropped": "thread 系候補が input にあるのに最終採用へ残っていない",
-    "relationship_dropped": "relationship_focus 候補が input にあるのに relationship_items が 0 件",
+    "relationship_dropped": "relationship_focus 候補が input にあるのに relationship/preference が最終採用へ残っていない",
     "low_adopt_ratio": "selector input に対して採用率が低い",
     "slot_pressure": "slot 上限で見送りが多い",
     "reserve_heavy": "reserve 候補が多い",
@@ -223,7 +223,7 @@ def _flag_codes(
         flag_codes.append("thread_dropped")
     if int(selector_input_collectors.get("relationship_focus", 0)) > 0 and int(
         selected_counts.get("relationship_items", 0)
-    ) == 0:
+    ) + int(selected_counts.get("preference_items", 0)) == 0:
         flag_codes.append("relationship_dropped")
     selector_input_candidate_count = _int_metric(selector_summary, "selector_input_candidate_count")
     selected_candidate_ratio_percent = _int_metric(

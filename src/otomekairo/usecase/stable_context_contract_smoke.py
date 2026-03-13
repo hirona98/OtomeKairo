@@ -10,18 +10,24 @@ from pathlib import Path
 from typing import Any
 
 from otomekairo import __version__
-from otomekairo.gateway.cognition_client import ReplyRenderRequest
-from otomekairo.infra.litellm_cognition_client import _build_reply_render_messages
+from otomekairo.gateway.cognition_client import CognitionPlanRequest, ReplyRenderRequest
+from otomekairo.infra.litellm_cognition_client import (
+    _build_plan_messages,
+    _build_reply_render_messages,
+)
 from otomekairo.infra.sqlite_state_store import SqliteStateStore
 from otomekairo.schema.settings import build_default_settings
 from otomekairo.usecase.build_cognition_input import (
-    _build_preference_selection_state,
+    _build_action_selection_context,
+    _build_stable_preferences,
+    _build_recent_dialog,
     _build_reply_render_input,
+    _build_selected_memory_pack,
 )
 
 
 # Block: Report constants
-REPORT_SCHEMA_VERSION = 2
+REPORT_SCHEMA_VERSION = 4
 
 
 # Block: Public smoke runner
@@ -38,10 +44,32 @@ def run_stable_context_contract_smoke(*, keep_db: bool) -> dict[str, Any]:
         _seed_preference_history(store=store)
         cognition_state = store.read_cognition_state(default_settings)
         stable_preference_items = list(cognition_state.stable_preference_items)
-        preference_selection_state = _build_preference_selection_state(
+        stable_preferences = _build_stable_preferences(
             preference_items=stable_preference_items,
         )
-        stable_preferences = dict(preference_selection_state["stable_preferences"])
+        recent_dialog = _build_recent_dialog(
+            recent_event_window=cognition_state.memory_snapshot["recent_event_window"],
+        )
+        selected_memory_pack = _build_selected_memory_pack(
+            memory_bundle=cognition_state.memory_snapshot,
+        )
+        action_selection_context = _build_action_selection_context(
+            current_observation={
+                "input_kind": "chat_message",
+            },
+            memory_bundle=cognition_state.memory_snapshot,
+            recent_dialog=recent_dialog,
+            selected_memory_pack=selected_memory_pack,
+            stable_preferences=stable_preferences,
+            long_mood_state={
+                "summary_text": "好奇心はあるが慎重",
+                "primary_label": "curious",
+                "baseline_label": "calm",
+                "shock_label": "",
+                "stability": 0.45,
+                "source_affect_labels": ["curious"],
+            },
+        )
         reply_render_input = _build_reply_render_input(
             current_observation={
                 "observation_text": "ホラー映画の話を続けて",
@@ -97,21 +125,27 @@ def run_stable_context_contract_smoke(*, keep_db: bool) -> dict[str, Any]:
                     "relative_time_text": "1分前",
                 },
             ],
-            selected_memory_pack={
-                "recent_context": ["最近は展示の話が多い"],
-                "working_memory": [],
-                "episodic": [],
-                "facts": [],
-                "affective": [],
-                "relationship": [],
-                "reflection": [],
-            },
+            selected_memory_pack=selected_memory_pack,
             selection_profile={
                 "interaction_style": {
                     "speech_tone": "warm",
                     "response_pace": "steady",
                 },
             },
+        )
+        cognition_plan_messages = _build_plan_messages(
+            CognitionPlanRequest(
+                cycle_id="cycle_smoke",
+                input_kind="chat_message",
+                cognition_input=_smoke_cognition_input(
+                    stable_preferences=stable_preferences,
+                    selected_memory_pack=selected_memory_pack,
+                    recent_dialog=recent_dialog,
+                ),
+                completion_settings={
+                    "temperature": 0.0,
+                },
+            )
         )
         messages = _build_reply_render_messages(
             ReplyRenderRequest(
@@ -138,6 +172,9 @@ def run_stable_context_contract_smoke(*, keep_db: bool) -> dict[str, Any]:
             memory_snapshot=cognition_state.memory_snapshot,
             stable_preference_items=stable_preference_items,
             stable_preferences=stable_preferences,
+            selected_memory_pack=selected_memory_pack,
+            action_selection_context=action_selection_context,
+            cognition_plan_prompt_messages=cognition_plan_messages,
             reply_render_input=reply_render_input,
             prompt_messages=messages,
         )
@@ -279,6 +316,9 @@ def _build_report(
     memory_snapshot: dict[str, Any],
     stable_preference_items: list[dict[str, Any]],
     stable_preferences: dict[str, Any],
+    selected_memory_pack: dict[str, Any],
+    action_selection_context: dict[str, Any],
+    cognition_plan_prompt_messages: list[dict[str, Any]],
     reply_render_input: dict[str, Any],
     prompt_messages: list[dict[str, Any]],
 ) -> dict[str, Any]:
@@ -299,10 +339,12 @@ def _build_report(
             bucket_counts["confirmed_dislike"] += 1
         elif payload["status"] == "revoked":
             bucket_counts["revoked"] += 1
-    user_prompt = str(prompt_messages[1]["content"])
-    retrieval_relationship_keys = [
+    planner_user_prompt = str(cognition_plan_prompt_messages[1]["content"])
+    planner_system_prompt = str(cognition_plan_prompt_messages[0]["content"])
+    reply_user_prompt = str(prompt_messages[1]["content"])
+    retrieval_preference_keys = [
         preference_item["payload"]["target_entity_ref"]["target_key"]
-        for preference_item in memory_snapshot["relationship_items"]
+        for preference_item in memory_snapshot["preference_items"]
         if isinstance(preference_item, dict)
         and str(preference_item.get("memory_kind")) == "preference"
         and isinstance(preference_item.get("payload"), dict)
@@ -313,6 +355,8 @@ def _build_report(
         entry["target_key"]
         for entry in stable_preferences["revoked"]
     ]
+    preference_texts = selected_memory_pack["preference"]
+    relationship_texts = selected_memory_pack["relationship"]
     checks = {
         "stable_projection_bucket_limits_respected": bucket_counts == {
             "confirmed_like": 8,
@@ -327,22 +371,39 @@ def _build_report(
         "stable_projection_other_entity_excluded": (
             all("他人好み" not in stable_key for stable_key in stable_keys)
         ),
-        "stable_preferences_flow_into_retrieval": (
-            "展示1" in retrieval_relationship_keys
-            and "展示9" in retrieval_relationship_keys
-            and "苦手話題1" in retrieval_relationship_keys
-            and "苦手話題9" in retrieval_relationship_keys
-            and "撤回話題1" in retrieval_relationship_keys
-            and "撤回話題9" in retrieval_relationship_keys
+        "stable_preferences_flow_into_retrieval_preference_slot": (
+            "展示1" in retrieval_preference_keys
+            and "展示9" in retrieval_preference_keys
+            and "苦手話題1" in retrieval_preference_keys
+            and "苦手話題9" in retrieval_preference_keys
+            and "撤回話題1" in retrieval_preference_keys
+            and "撤回話題9" in retrieval_preference_keys
         ),
         "reply_render_input_carries_stable_preferences": (
             len(reply_render_input["stable_preferences"]["likes"]) == 8
             and len(reply_render_input["stable_preferences"]["dislikes"]) == 8
             and len(reply_render_input["stable_preferences"]["revoked"]) == 8
         ),
+        "selected_memory_pack_separates_preferences": (
+            bool(preference_texts)
+            and all("撤回済みの苦手" in text or "好み:" in text or "苦手:" in text for text in preference_texts[:4])
+            and not relationship_texts
+        ),
+        "action_selection_context_carries_preference_texts": (
+            bool(action_selection_context["preference_texts"])
+            and not action_selection_context["relationship_texts"]
+        ),
+        "planner_prompt_mentions_revoked_preferences": (
+            "取り消し済み嗜好:" in planner_user_prompt
+            and all(target_key in planner_user_prompt for target_key in revoked_prompt_targets[:3])
+        ),
+        "planner_prompt_does_not_use_legacy_persona_preferences": (
+            "学習済みの好み:" not in planner_system_prompt
+            and "学習済みの回避:" not in planner_system_prompt
+        ),
         "reply_render_prompt_mentions_revoked_preferences": (
-            "取り消し済み嗜好:" in user_prompt
-            and all(target_key in user_prompt for target_key in revoked_prompt_targets[:3])
+            "取り消し済み嗜好:" in reply_user_prompt
+            and all(target_key in reply_user_prompt for target_key in revoked_prompt_targets[:3])
         ),
     }
     report = {
@@ -351,7 +412,10 @@ def _build_report(
         "stable_preference_item_count": len(stable_preference_items),
         "bucket_counts": bucket_counts,
         "stable_keys": stable_keys,
-        "retrieval_relationship_keys": retrieval_relationship_keys,
+        "retrieval_preference_keys": retrieval_preference_keys,
+        "selected_preference_texts": preference_texts,
+        "selected_relationship_texts": relationship_texts,
+        "action_selection_preference_text_count": len(action_selection_context["preference_texts"]),
         "reply_render_revoked_count": len(reply_render_input["stable_preferences"]["revoked"]),
     }
     if keep_db:
@@ -370,3 +434,186 @@ def _validate_report(report: dict[str, Any]) -> None:
         raise RuntimeError(
             "stable_context_contract_smoke failed: " + ", ".join(sorted(failed_checks))
         )
+
+
+# Block: Minimal cognition input for planner prompt smoke
+def _smoke_cognition_input(
+    *,
+    stable_preferences: dict[str, Any],
+    selected_memory_pack: dict[str, Any],
+    recent_dialog: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "time_context": {
+            "current_time_local_text": "2026-03-13 19:30",
+            "timezone_name": "Asia/Tokyo",
+            "relative_reference_text": "今",
+        },
+        "self_snapshot": {
+            "current_emotion": {
+                "primary_label": "curious",
+            },
+            "invariants": {
+                "forbidden_action_types": [],
+                "forbidden_action_styles": [],
+                "required_confirmation_for": [],
+                "protected_targets": [],
+            },
+            "long_term_goals": {
+                "goals": [
+                    {
+                        "summary": "丁寧に会話を続ける",
+                    },
+                ],
+            },
+        },
+        "stable_self_state": {
+            "current_emotion_label": "curious",
+            "goal_summaries": ["丁寧に会話を続ける"],
+            "relationship_summaries": ["userとの対話関係"],
+            "active_task_summaries": [],
+            "waiting_task_summaries": [],
+            "invariants": {
+                "forbidden_action_types": [],
+                "forbidden_action_styles": [],
+                "required_confirmation_for": [],
+                "protected_targets": [],
+            },
+        },
+        "stable_preferences": stable_preferences,
+        "long_mood_state": {
+            "summary_text": "好奇心はあるが慎重",
+            "primary_label": "curious",
+            "baseline_label": "calm",
+            "shock_label": "",
+            "stability": 0.45,
+            "source_affect_labels": ["curious"],
+        },
+        "behavior_settings": {
+            "second_person_label": "あなた",
+            "speech_style": "warm",
+            "response_pace": "steady",
+            "proactivity_level": "balanced",
+            "browse_preference": "neutral",
+            "notify_preference": "neutral",
+            "verbosity_bias": "balanced",
+            "system_prompt": "",
+            "addon_prompt": "",
+        },
+        "selection_profile": {
+            "trait_values": {
+                "sociability": 0.52,
+                "caution": 0.61,
+                "curiosity": 0.74,
+                "persistence": 0.55,
+                "warmth": 0.70,
+                "assertiveness": 0.40,
+                "novelty_preference": 0.63,
+            },
+            "interaction_style": {
+                "speech_tone": "warm",
+                "distance_style": "friendly",
+                "confirmation_style": "light",
+                "response_pace": "steady",
+            },
+            "relationship_priorities": [
+                {
+                    "target_ref": "entity:user",
+                    "reason_tag": "conversation",
+                    "priority_weight": 0.8,
+                },
+            ],
+            "habit_biases": {
+                "preferred_action_types": ["speak"],
+                "preferred_observation_kinds": ["dialogue"],
+                "avoided_action_styles": [],
+            },
+            "emotion_bias": {
+                "caution_bias": 0.1,
+                "approach_bias": 0.2,
+                "avoidance_bias": 0.0,
+                "speech_intensity_bias": 0.1,
+            },
+            "drive_bias": {
+                "task_progress_bias": 0.1,
+                "exploration_bias": 0.2,
+                "maintenance_bias": 0.0,
+                "social_bias": 0.3,
+            },
+        },
+        "body_snapshot": {
+            "posture": {
+                "mode": "idle",
+            },
+            "sensor_availability": {
+                "camera": False,
+                "microphone": True,
+            },
+            "load": {
+                "task_queue_pressure": 0.10,
+                "interaction_load": 0.20,
+            },
+        },
+        "world_snapshot": {
+            "situation_summary": "ブラウザ会話中",
+        },
+        "drive_snapshot": {
+            "priority_effects": {
+                "task_progress_bias": 0.10,
+                "exploration_bias": 0.20,
+                "maintenance_bias": 0.00,
+                "social_bias": 0.30,
+            },
+        },
+        "task_snapshot": {
+            "active_tasks": [],
+            "waiting_external_tasks": [],
+        },
+        "attention_snapshot": {
+            "primary_focus": {
+                "focus_kind": "dialogue",
+                "summary": "ユーザーの会話リクエスト",
+                "reason_codes": ["user_dialogue"],
+            },
+        },
+        "selected_memory_pack": selected_memory_pack,
+        "recent_dialog": recent_dialog,
+        "retrieval_context": {
+            "plan": {
+                "mode": "chat",
+                "queries": ["ホラー映画"],
+            },
+            "selected": {
+                "selected_counts": {
+                    "preference": 1,
+                },
+            },
+        },
+        "policy_snapshot": {
+            "runtime_policy": {
+                "camera_enabled": False,
+                "camera_available": False,
+                "camera_candidate_count": 0,
+                "microphone_enabled": True,
+            },
+            "input_evaluation": {
+                "input_role": "dialogue",
+                "attention_priority": "high",
+                "factuality": "unverified_user_report",
+                "should_reply_in_channel": True,
+                "can_override_persona": False,
+                "must_preserve_invariants": True,
+            },
+        },
+        "camera_candidates": [],
+        "skill_candidates": [],
+        "current_observation": {
+            "input_kind": "chat_message",
+            "observation_text": "ホラー映画の話を続けて",
+            "captured_at_local_text": "2026-03-13 19:30",
+            "relative_time_text": "今",
+            "attachment_count": 0,
+            "attachment_summary_text": "なし",
+            "attachments": [],
+        },
+    }

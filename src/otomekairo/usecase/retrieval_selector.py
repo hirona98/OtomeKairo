@@ -15,6 +15,7 @@ SLOT_ORDER = (
     "semantic_items",
     "affective_items",
     "relationship_items",
+    "preference_items",
     "reflection_items",
     "recent_event_window",
 )
@@ -24,9 +25,10 @@ SLOT_PRIORITY = {
     "working_memory_items": 1,
     "semantic_items": 2,
     "relationship_items": 3,
-    "reflection_items": 4,
-    "affective_items": 5,
-    "episodic_items": 6,
+    "preference_items": 4,
+    "reflection_items": 5,
+    "affective_items": 6,
+    "episodic_items": 7,
 }
 
 TRACE_PREVIEW_LIMIT = 8
@@ -210,6 +212,7 @@ def _slot_limits(*, retrieval_plan: dict[str, Any]) -> dict[str, int]:
         "semantic_items": int(limits["semantic_items"]),
         "affective_items": int(limits["affective_items"]),
         "relationship_items": int(limits["relationship_items"]),
+        "preference_items": int(limits["preference_items"]),
         "reflection_items": int(limits["reflection_items"]),
         "recent_event_window": int(limits["recent_event_window"]),
     }
@@ -342,6 +345,7 @@ def _selected_counts(*, memory_bundle: dict[str, Any]) -> dict[str, int]:
         "semantic_items": len(memory_bundle["semantic_items"]),
         "affective_items": len(memory_bundle["affective_items"]),
         "relationship_items": len(memory_bundle["relationship_items"]),
+        "preference_items": len(memory_bundle["preference_items"]),
         "reflection_items": len(memory_bundle["reflection_items"]),
         "recent_event_window": len(memory_bundle["recent_event_window"]),
     }
@@ -369,6 +373,10 @@ def _selected_refs(*, memory_bundle: dict[str, Any]) -> dict[str, Any]:
         "relationship_item_ids": [
             str(item["memory_state_id"])
             for item in memory_bundle["relationship_items"]
+        ],
+        "preference_item_ids": [
+            str(item["memory_state_id"])
+            for item in memory_bundle["preference_items"]
         ],
         "reflection_item_ids": [
             str(item["memory_state_id"])

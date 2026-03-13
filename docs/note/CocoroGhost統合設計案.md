@@ -12,7 +12,7 @@
 
 - OtomeKairo は chat-first に寄せず、runtime 中心設計を維持したまま会話記憶能力を強化した
 - 想起は `retrieval planner -> candidate collectors -> LLM selector -> context assembler` の 4 段に固定した
-- 会話入力は `recent_dialog`、`selected_memory_pack`、`confirmed_preferences`、`long_mood_state`、`reply_render_input`、`action_selection_context` の別断面で扱う
+- 会話入力は `recent_dialog`、`selected_memory_pack`、`stable_preferences`、`long_mood_state`、`reply_render_input`、`action_selection_context` の別断面で扱う
 - `cognition planner` と `reply renderer` を分離し、返答生成は render 専用断面で行う
 - `write_memory` は `generate -> validate -> apply` の orchestration を分離し、`refresh_preview`、`embedding_sync`、`quarantine_memory`、`tidy_memory` を followup job として扱う
 - retrieval の観測と review は `retrieval_runs`、`retrieval_eval`、`retrieval_triage`、`retrieval_review_import` に固定した
@@ -44,7 +44,7 @@
 - Phase 1: retrieval 全面置換
   - collector 群、`LLM selector`、`event_preview_cache`、`retrieval_runs`
 - Phase 2: context assembly 再設計
-  - `recent_dialog`、`selected_memory_pack`、`stable_self_state`、`confirmed_preferences`、`long_mood_state`
+  - `recent_dialog`、`selected_memory_pack`、`stable_self_state`、`stable_preferences`、`long_mood_state`
 - Phase 3: cognition と reply の分離
   - `reply_render_input` と `reply_render_plan`
 - Phase 4: write_memory 強化

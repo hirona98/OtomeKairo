@@ -343,6 +343,7 @@ def _build_memory_write_e2e_report(
         status="revoked",
     )
     retrieval_relationship_items = cognition_state.memory_snapshot["relationship_items"]
+    retrieval_preference_items = cognition_state.memory_snapshot["preference_items"]
     stable_preference_items = cognition_state.stable_preference_items
     active_preferences = [
         _active_preference_snapshot_entry(preference_item)
@@ -370,6 +371,7 @@ def _build_memory_write_e2e_report(
             "semantic_memory_count": len(cognition_state.memory_snapshot["semantic_items"]),
             "affective_memory_count": len(cognition_state.memory_snapshot["affective_items"]),
             "relationship_memory_count": len(retrieval_relationship_items),
+            "preference_memory_count": len(retrieval_preference_items),
             "reflection_memory_count": len(cognition_state.memory_snapshot["reflection_items"]),
             "confirmed_preferences": [
                 active_preference

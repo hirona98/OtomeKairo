@@ -16,7 +16,7 @@
 
 - 固定するのは、current 実装で使う JSON オブジェクトのキー、型、必須項目、固定語彙である
 - 固定するのは、`pending_inputs.payload_json`、`settings_overrides.requested_value_json`、`settings_editor_state.system_values_json`、5 種のプリセットテーブルの `payload_json`、`settings_change_sets.payload_json`、`ui_outbound_events.payload_json`、`action_history.command_json`、`action_history.observed_effects_json`、`memory_jobs.payload_ref_json`、`memory_job_payloads.payload_json`、`preference_memory.target_entity_ref_json`、`event_affects.moment_affect_labels_json`、`event_affects.vad_json`、主要な Web API 本文である
-- 固定するのは、`self_state.personality_json`、`self_state.current_emotion_json`、`self_state.long_term_goals_json`、`self_state.relationship_overview_json`、`self_state.invariants_json`、短周期の内部で使う `selection_profile`、`memory_bundle`、`stable_self_state`、`confirmed_preferences`、`long_mood_state`、`recent_dialog`、`selected_memory_pack`、`action_selection_context`、`reply_render_input`、`reply_render_plan`、`retrieval_context`、`last_persona_update_summary`、`persona_consistency_score`、`attention_score_breakdown`、`self_initiated_score_breakdown`、`action_candidate_score`、`cognition_plan`、`speech_draft`、`cognition_result`、長周期の内部で使う `MemoryWritePlan`、`personality_change_proposal`、`persona_updates` の形である
+- 固定するのは、`self_state.personality_json`、`self_state.current_emotion_json`、`self_state.long_term_goals_json`、`self_state.relationship_overview_json`、`self_state.invariants_json`、短周期の内部で使う `selection_profile`、`memory_bundle`、`stable_self_state`、`stable_preferences`、`long_mood_state`、`recent_dialog`、`selected_memory_pack`、`action_selection_context`、`reply_render_input`、`reply_render_plan`、`retrieval_context`、`last_persona_update_summary`、`persona_consistency_score`、`attention_score_breakdown`、`self_initiated_score_breakdown`、`action_candidate_score`、`cognition_plan`、`speech_draft`、`cognition_result`、長周期の内部で使う `MemoryWritePlan`、`personality_change_proposal`、`persona_updates` の形である
 - 固定しないのは、Python のクラス名、Pydantic モデル名、OpenAPI の自動生成細部である
 - 固定しないのは、将来追加する未使用フィールドや後段の拡張イベント種別である
 
@@ -370,9 +370,6 @@
     "response_pace": "balanced"
   },
   "relationship_priorities": [],
-  "learned_preferences": [],
-  "learned_aversions": [],
-  "revoked_preferences": [],
   "habit_biases": {
     "preferred_action_types": [],
     "preferred_observation_kinds": [],
@@ -394,19 +391,15 @@
 ```
 
 - `selection_profile` は、短周期の内部でだけ使う人格選択用の一時オブジェクトである
-- 必須項目は `trait_values`、`interaction_style`、`relationship_priorities`、`learned_preferences`、`learned_aversions`、`revoked_preferences`、`habit_biases`、`emotion_bias`、`drive_bias` である
+- 必須項目は `trait_values`、`interaction_style`、`relationship_priorities`、`habit_biases`、`emotion_bias`、`drive_bias` である
 - `trait_values` は、`self_state.personality_json.trait_values` と同じ固定キーを持つ
 - `interaction_style` は、`self_state.personality_json.preferred_interaction_style` と同じ固定キーを持つ
 - `interaction_style.speech_tone` と `interaction_style.response_pace` は、その短周期の `behavior_settings.speech_style` / `behavior_settings.response_pace` を上書きした短期補正済み値を入れてよい
 - `relationship_priorities` は、`relationship_priority_entry` の配列である
-- `learned_preferences`、`learned_aversions`、`revoked_preferences` は、`personality_preference_entry` の配列である
-- current 実装では、`learned_preferences` は `state_snapshot.stable_preference_items` のうち `status = "confirmed"` かつ `polarity = "like"`、`learned_aversions` は `status = "confirmed"` かつ `polarity = "dislike"`、`revoked_preferences` は `status = "revoked"` から再構成してよい
-- current 実装では、`state_snapshot.stable_preference_items` は `stable_preference_projection` から bucket ごとに上位件数だけ読んだ compact stable context でよい
-- current 実装では、`revoked_preferences[]` に元の極性を示す `polarity` を追加で持ってよい
 - `habit_biases` は、`self_state.personality_json.habit_biases` と同じ固定キーを持つ
 - `emotion_bias` は、現在感情から作る短期補正値であり、各値は `-1.0..+1.0` の `number` に固定する
 - `drive_bias` は、内部欲求から作る短期補正値であり、各値は `-1.0..+1.0` の `number` に固定する
-- `selection_profile` は永続化前提の正本ではなく、`self_state`、`current_emotion`、`relationship_overview`、`preference_memory`、`drive_state` から再構成する
+- `selection_profile` は永続化前提の正本ではなく、`self_state`、`current_emotion`、`relationship_overview`、`drive_state` から再構成する
 
 <!-- Block: Task Snapshot -->
 ### `task_snapshot`
@@ -590,18 +583,19 @@
   "semantic_items": [],
   "affective_items": [],
   "relationship_items": [],
+  "preference_items": [],
   "reflection_items": [],
   "recent_event_window": []
 }
 ```
 
 - `memory_bundle` は、短周期の内部でだけ使う最終的な想起断面である
-- 必須項目は `working_memory_items`、`episodic_items`、`semantic_items`、`affective_items`、`relationship_items`、`reflection_items`、`recent_event_window` である
-- `working_memory_items`、`episodic_items`、`semantic_items`、`affective_items`、`relationship_items`、`reflection_items` の各要素は、少なくとも `memory_state_id`、`memory_kind`、`body_text`、`payload`、`confidence`、`importance`、`memory_strength`、`created_at`、`updated_at`、`last_confirmed_at` を持つ
+- 必須項目は `working_memory_items`、`episodic_items`、`semantic_items`、`affective_items`、`relationship_items`、`preference_items`、`reflection_items`、`recent_event_window` である
+- `working_memory_items`、`episodic_items`、`semantic_items`、`affective_items`、`relationship_items`、`preference_items`、`reflection_items` の各要素は、少なくとも `memory_state_id`、`memory_kind`、`body_text`、`payload`、`confidence`、`importance`、`memory_strength`、`created_at`、`updated_at`、`last_confirmed_at` を持つ
 - `recent_event_window` の各要素は、少なくとも `event_id`、`source`、`kind`、`summary_text`、`created_at` を持つ
 - `context assembler` は、`memory_bundle` の各要素に人間可読な `*_utc_text`、`*_local_text`、`relative_time_text` を付与してよい
 - 初期実装では、`working_memory_items` に `memory_kind=summary`、`semantic_items` に `memory_kind=fact`、`recent_event_window` に active memory preset の `retrieval_profile.recent_window_limit` 件までの `searchable` な `events` を入れてよい
-- 初期実装では、`episodic_items.memory_kind` に `episodic_event`、`affective_items.memory_kind` に `long_mood_state` または `event_affect`、`relationship_items.memory_kind` に `relation` または `preference`、`reflection_items.memory_kind` に `reflection_note` を使ってよい
+- 初期実装では、`episodic_items.memory_kind` に `episodic_event`、`affective_items.memory_kind` に `long_mood_state` または `event_affect`、`relationship_items.memory_kind` に `relation`、`preference_items.memory_kind` に `preference`、`reflection_items.memory_kind` に `reflection_note` を使ってよい
 - 初期実装の `reflection_items[].payload` は、少なくとも `what_happened` と `event_summaries` を持ち、必要なら `what_worked`、`what_failed`、`retry_hint`、`avoid_pattern`、`reflection_seed_ref`、`reflection_seed`、`action_outcomes` を持ってよい
 - current 実装では、`event_about_time` または `state_about_time` に対応する要素へ `about_time_hint_text` を追加してよい
 - current 実装では、`recent_event_window[].preview_text` と `episodic_items[].payload.preview_text` を追加で持ってよい
@@ -638,15 +632,17 @@
   "episodic": ["文化祭の帰りに一緒に寄り道した [時期: 2019年 / 高校時代]"],
   "facts": ["文化祭は秋開催だった"],
   "affective": ["その日の高揚感が強かった"],
-  "relationship": ["あなたは高校時代の思い出話を好む"],
+  "relationship": ["userとの対話関係は安定している"],
+  "preference": ["撤回済みの苦手: topic_keyword:ホラー映画"],
   "reflection": ["昔話に入る前に年次の手がかりを確認する"]
 }
 ```
 
 - `selected_memory_pack` は、短周期の内部でだけ使う prompt 向けの長期記憶断面である
-- 必須項目は `recent_context`、`working_memory`、`episodic`、`facts`、`affective`、`relationship`、`reflection` である
+- 必須項目は `recent_context`、`working_memory`、`episodic`、`facts`、`affective`、`relationship`、`preference`、`reflection` である
 - `selected_memory_pack` の各値は string の配列である
 - current 実装では、`selected_memory_pack` の各要素へ `about_time_hint_text` を `[時期: ...]` 形式で織り込んでよい
+- current 実装では、`selected_memory_pack.relationship` は relation 系だけを持ち、`selected_memory_pack.preference` は `preference` 専用の status-aware text を持ってよい
 
 <!-- Block: Action Selection Context -->
 ### `action_selection_context`
@@ -672,7 +668,8 @@
       "arousal": 0.31
     }
   ],
-  "relationship_texts": ["あなたは展示の話題を好む"],
+  "relationship_texts": ["userとの対話関係は安定している"],
+  "preference_texts": ["苦手: topic_keyword:ホラー映画"],
   "reflection_entries": [
     {
       "text": "同じ話題を続けるときは要点だけ返す"
@@ -688,13 +685,15 @@
 ```
 
 - `action_selection_context` は、短周期の内部でだけ使う `action validator` 専用の派生断面である
-- 必須項目は `current_input_kind`、`recent_dialog`、`recent_context_texts`、`working_memory_texts`、`episodic_texts`、`fact_entries`、`affect_entries`、`relationship_texts`、`reflection_entries`、`stable_preferences`、`long_mood_state` である
-- `recent_context_texts`、`working_memory_texts`、`episodic_texts`、`relationship_texts` は string の配列である
+- 必須項目は `current_input_kind`、`recent_dialog`、`recent_context_texts`、`working_memory_texts`、`episodic_texts`、`fact_entries`、`affect_entries`、`relationship_texts`、`preference_texts`、`reflection_entries`、`stable_preferences`、`long_mood_state` である
+- `recent_context_texts`、`working_memory_texts`、`episodic_texts`、`relationship_texts`、`preference_texts` は string の配列である
 - `fact_entries[].text` と `reflection_entries[].text` は非空の `string` に固定する
 - `fact_entries[].query` は任意で、ある場合は非空の `string` に固定する
 - `affect_entries[].labels` は string の配列であり、`valence` と `arousal` はある場合だけ `number` に固定する
-- `stable_preferences.likes[]` と `stable_preferences.dislikes[]` は `personality_preference_entry`、`stable_preferences.revoked[]` は `selection_profile.revoked_preferences[]` と同じ shape に固定する
+- `stable_preferences.likes[]` と `stable_preferences.dislikes[]` は `personality_preference_entry` に固定する
+- `stable_preferences.revoked[]` は、`personality_preference_entry` に `polarity` を追加した shape に固定する
 - `long_mood_state` は、背景感情がない場合だけ `null` を許可する
+- current 実装では、`relationship_texts` と `preference_texts` を分離し、対人関係と嗜好想起を別信号で扱う
 
 <!-- Block: Stable Self State -->
 ### `stable_self_state`
@@ -719,29 +718,6 @@
 - 必須項目は `current_emotion_label`、`goal_summaries`、`relationship_summaries`、`active_task_summaries`、`waiting_task_summaries`、`invariants` である
 - `goal_summaries`、`relationship_summaries`、`active_task_summaries`、`waiting_task_summaries` は string の配列である
 - `invariants.forbidden_action_types`、`invariants.forbidden_action_styles`、`invariants.required_confirmation_for`、`invariants.protected_targets` は string の配列である
-
-<!-- Block: Confirmed Preferences -->
-### `confirmed_preferences`
-
-```json
-{
-  "likes": [
-    {
-      "domain": "topic_keyword",
-      "target_key": "展示",
-      "confidence": 0.91
-    }
-  ],
-  "dislikes": []
-}
-```
-
-- `confirmed_preferences` は、短周期の prompt へ必須注入する嗜好断面である
-- 必須項目は `likes` と `dislikes` である
-- `likes[]` と `dislikes[]` の各要素は、少なくとも `domain`、`target_key`、`confidence` を持つ
-- `confidence` は `0.0..1.0` の `number` に固定する
-- current 実装では、`state_snapshot.stable_preference_items.memory_kind = "preference"` かつ `payload.status = "confirmed"` の行だけを含めてよい
-- current 実装では、`state_snapshot.stable_preference_items` は `stable_preference_projection` から `confirmed like`、`confirmed dislike`、`revoked` を bucket ごとに最大 `8` 件ずつ読む
 
 <!-- Block: Long Mood State Context -->
 ### `long_mood_state`
@@ -789,10 +765,10 @@
 }
 ```
 
-- `stable_preferences` は、`action_selection_context` と `reply_render_input` が共有する stable preference 断面である
+- `stable_preferences` は、`cognition_input`、`action_selection_context`、`reply_render_input` が共有する stable preference 断面である
 - 必須項目は `likes`、`dislikes`、`revoked` である
 - `likes[]` と `dislikes[]` は `personality_preference_entry` の配列である
-- `revoked[]` は `selection_profile.revoked_preferences[]` と同じ entry shape の配列である
+- `revoked[]` は `personality_preference_entry` に `polarity` を追加した entry shape の配列である
 - current 実装では、`stable_preferences` は `state_snapshot.stable_preference_items` から構成し、`likes`、`dislikes`、`revoked` を各 `8` 件まで持ってよい
 
 <!-- Block: Reply Render Input -->
@@ -819,6 +795,7 @@
     "facts": [],
     "affective": [],
     "relationship": [],
+    "preference": [],
     "reflection": []
   },
   "reply_style": {
@@ -945,6 +922,7 @@
       "semantic_items": 3,
       "affective_items": 2,
       "relationship_items": 2,
+      "preference_items": 2,
       "reflection_items": 2,
       "recent_event_window": 5
     }
@@ -955,7 +933,8 @@
       "episodic_items": 1,
       "semantic_items": 1,
       "affective_items": 0,
-      "relationship_items": 1,
+      "relationship_items": 0,
+      "preference_items": 1,
       "reflection_items": 0,
       "recent_event_window": 3
     },
@@ -964,7 +943,8 @@
       "episodic_item_ids": ["evt_001"],
       "semantic_item_ids": ["mem_010"],
       "affective_item_ids": [],
-      "relationship_item_ids": ["pref_001"],
+      "relationship_item_ids": [],
+      "preference_item_ids": ["pref_001"],
       "reflection_item_ids": [],
       "recent_event_ids": ["evt_001", "evt_002"]
     },
@@ -1095,7 +1075,8 @@
     "episodic_items": 2,
     "semantic_items": 1,
     "affective_items": 0,
-    "relationship_items": 1,
+    "relationship_items": 0,
+    "preference_items": 1,
     "reflection_items": 0,
     "recent_event_window": 1
   },
@@ -1103,7 +1084,7 @@
     "working_memory_items",
     "episodic_items",
     "semantic_items",
-    "relationship_items",
+    "preference_items",
     "recent_event_window"
   ],
   "collector_runs": [
@@ -1133,7 +1114,8 @@
     "episodic_items": 1,
     "semantic_items": 1,
     "affective_items": 0,
-    "relationship_items": 1,
+    "relationship_items": 0,
+    "preference_items": 1,
     "reflection_items": 0,
     "recent_event_window": 3
   },
@@ -1142,7 +1124,8 @@
     "episodic_item_ids": ["evt_001"],
     "semantic_item_ids": ["mem_010"],
     "affective_item_ids": [],
-    "relationship_item_ids": ["pref_001"],
+    "relationship_item_ids": [],
+    "preference_item_ids": ["pref_001"],
     "reflection_item_ids": [],
     "recent_event_ids": ["evt_001", "evt_002"]
   },
@@ -2869,7 +2852,8 @@
         "episodic_items": 1,
         "semantic_items": 1,
         "affective_items": 0,
-        "relationship_items": 1,
+        "relationship_items": 0,
+        "preference_items": 1,
         "reflection_items": 0,
         "recent_event_window": 3
       }
@@ -3073,7 +3057,8 @@
     "episodic_items": 1,
     "semantic_items": 1,
     "affective_items": 0,
-    "relationship_items": 1,
+    "relationship_items": 0,
+    "preference_items": 1,
     "reflection_items": 0,
     "recent_event_window": 3
   },
