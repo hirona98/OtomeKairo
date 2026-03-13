@@ -130,6 +130,28 @@ from otomekairo.infra.sqlite_store_memory_helpers import (
     _write_memory_plan_long_mood_entry,
     _write_memory_plan_preference_entries,
 )
+from otomekairo.infra.sqlite_store_live_state_seeds import (
+    _attention_primary_focus_seed,
+    _body_state_load_seed,
+    _body_state_mobility_seed,
+    _body_state_output_locks_seed,
+    _body_state_posture_seed,
+    _body_state_sensor_availability_seed,
+    _drive_state_drive_levels_seed,
+    _drive_state_priority_effects_seed,
+    _self_state_current_emotion_seed,
+    _self_state_invariants_seed,
+    _self_state_long_term_goals_seed,
+    _self_state_personality_seed,
+    _self_state_relationship_overview_seed,
+    _world_state_affordances_seed,
+    _world_state_attention_targets_seed,
+    _world_state_constraints_seed,
+    _world_state_external_waits_seed,
+    _world_state_location_seed,
+    _world_state_situation_summary_seed,
+    _world_state_surroundings_seed,
+)
 from otomekairo.infra.sqlite_store_runtime_view import (
     _action_command_summary,
     _action_result_summary,
@@ -9290,178 +9312,6 @@ class SqliteStateStore:
                 now_ms,
             ),
         )
-
-
-# Block: Seed JSON helpers
-# Block: Attention seed
-def _attention_primary_focus_seed() -> dict[str, Any]:
-    return {
-        "focus_ref": "attention:idle",
-        "focus_kind": "idle",
-        "summary": "待機中",
-        "score_hint": 0.0,
-        "reason_codes": ["idle"],
-    }
-
-
-# Block: Body seed
-def _body_state_posture_seed() -> dict[str, Any]:
-    return {"mode": "idle"}
-
-
-def _body_state_mobility_seed() -> dict[str, Any]:
-    return {"mode": "fixed"}
-
-
-def _body_state_sensor_availability_seed() -> dict[str, Any]:
-    return {
-        "camera": False,
-        "microphone": False,
-    }
-
-
-def _body_state_output_locks_seed() -> dict[str, Any]:
-    return {
-        "speech": False,
-        "camera": False,
-        "browse": False,
-    }
-
-
-def _body_state_load_seed() -> dict[str, Any]:
-    return {
-        "task_queue_pressure": 0.0,
-        "interaction_load": 0.0,
-        "last_action_count": 0,
-    }
-
-
-# Block: World seed
-def _world_state_location_seed() -> dict[str, Any]:
-    return {
-        "state": "unknown",
-        "channel": "browser_chat",
-    }
-
-
-def _world_state_situation_summary_seed() -> str:
-    return "待機中"
-
-
-def _world_state_surroundings_seed() -> dict[str, Any]:
-    return {
-        "current_channel": "browser_chat",
-        "latest_observation_kind": "idle",
-        "latest_observation_source": "runtime",
-        "latest_action_types": [],
-    }
-
-
-def _world_state_affordances_seed() -> dict[str, Any]:
-    return {
-        "speak": True,
-        "browse": True,
-        "notify": True,
-        "look": False,
-    }
-
-
-def _world_state_constraints_seed() -> dict[str, Any]:
-    return {
-        "look_unavailable": True,
-        "live_microphone_input_unavailable": True,
-        "has_external_wait": False,
-    }
-
-
-def _world_state_attention_targets_seed() -> dict[str, Any]:
-    return {
-        "primary_focus": _attention_primary_focus_seed(),
-        "secondary_focuses": [],
-    }
-
-
-def _world_state_external_waits_seed() -> dict[str, Any]:
-    return {
-        "count": 0,
-        "items": [],
-    }
-
-
-def _self_state_personality_seed() -> dict[str, Any]:
-    return {
-        "trait_values": {
-            "sociability": 0.0,
-            "caution": 0.0,
-            "curiosity": 0.0,
-            "persistence": 0.0,
-            "warmth": 0.0,
-            "assertiveness": 0.0,
-            "novelty_preference": 0.0,
-        },
-        "preferred_interaction_style": {
-            "speech_tone": "neutral",
-            "distance_style": "balanced",
-            "confirmation_style": "balanced",
-            "response_pace": "balanced",
-        },
-        "habit_biases": {
-            "preferred_action_types": [],
-            "preferred_observation_kinds": [],
-            "avoided_action_styles": [],
-        },
-    }
-
-
-def _self_state_current_emotion_seed() -> dict[str, Any]:
-    return {
-        "primary_label": "calm",
-        "valence": 0.0,
-        "arousal": 0.0,
-        "dominance": 0.0,
-        "stability": 1.0,
-        "active_biases": {
-            "caution_bias": 0.0,
-            "approach_bias": 0.0,
-            "avoidance_bias": 0.0,
-            "speech_intensity_bias": 0.0,
-        },
-    }
-
-
-def _self_state_long_term_goals_seed() -> dict[str, Any]:
-    return {"goals": []}
-
-
-def _self_state_relationship_overview_seed() -> dict[str, Any]:
-    return {"relationships": []}
-
-
-def _self_state_invariants_seed() -> dict[str, Any]:
-    return {
-        "forbidden_action_types": [],
-        "forbidden_action_styles": [],
-        "required_confirmation_for": [],
-        "protected_targets": [],
-    }
-
-
-def _drive_state_priority_effects_seed() -> dict[str, Any]:
-    return {
-        "task_progress_bias": 0.0,
-        "exploration_bias": 0.0,
-        "maintenance_bias": 0.0,
-        "social_bias": 0.0,
-    }
-
-
-def _drive_state_drive_levels_seed() -> dict[str, Any]:
-    return {
-        "task_progress": 0.0,
-        "exploration": 0.0,
-        "maintenance": 0.0,
-        "social": 0.0,
-    }
 
 
 # Block: Shape checks
