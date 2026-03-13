@@ -18,7 +18,8 @@ from otomekairo.infra.speech_synthesis_common import default_tts_audio_dir
 from otomekairo.infra.amivoice_speech_recognizer import AmivoiceSpeechRecognizer
 from otomekairo.infra.wifi_camera_common import default_camera_capture_dir
 from otomekairo.infra.wifi_camera_sensor import WiFiCameraSensor
-from otomekairo.infra.sqlite_state_store import StoreConflictError, StoreValidationError, SqliteStateStore
+from otomekairo.infra.sqlite_state_store import SqliteStateStore
+from otomekairo.infra.sqlite_store_errors import StoreConflictError, StoreValidationError
 from otomekairo.schema.settings import SettingsValidationError, build_default_settings
 from otomekairo.web.camera_api import build_camera_router
 from otomekairo.web.dependencies import ApiError, AppServices
