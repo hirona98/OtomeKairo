@@ -434,6 +434,7 @@ CREATE TABLE preference_memory (
     preference_id TEXT PRIMARY KEY,
     owner_scope TEXT NOT NULL CHECK (owner_scope IN ('self', 'other_entity')),
     target_entity_ref_json TEXT NOT NULL,
+    target_key TEXT NOT NULL,
     domain TEXT NOT NULL,
     polarity TEXT NOT NULL CHECK (polarity IN ('like', 'dislike')),
     status TEXT NOT NULL CHECK (status IN ('candidate', 'confirmed', 'revoked')),
@@ -449,9 +450,13 @@ CREATE INDEX idx_preference_memory_scope_status_updated
 CREATE INDEX idx_preference_memory_domain_polarity_status
     ON preference_memory (domain, polarity, status);
 
+CREATE INDEX idx_preference_memory_identity_updated
+    ON preference_memory (owner_scope, domain, target_key, polarity, updated_at DESC);
+
 CREATE TABLE stable_preference_projection (
     owner_scope TEXT NOT NULL CHECK (owner_scope IN ('self', 'other_entity')),
     target_entity_ref_json TEXT NOT NULL,
+    target_key TEXT NOT NULL,
     domain TEXT NOT NULL,
     polarity TEXT NOT NULL CHECK (polarity IN ('like', 'dislike')),
     preference_id TEXT NOT NULL,
@@ -460,7 +465,7 @@ CREATE TABLE stable_preference_projection (
     evidence_event_ids_json TEXT NOT NULL,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
-    PRIMARY KEY (owner_scope, target_entity_ref_json, domain, polarity)
+    PRIMARY KEY (owner_scope, domain, target_key, polarity)
 );
 
 CREATE INDEX idx_stable_preference_projection_scope_status_updated

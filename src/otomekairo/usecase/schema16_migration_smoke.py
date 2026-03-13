@@ -1,4 +1,4 @@
-"""Deterministic smoke check for schema 15 -> 16 migration."""
+"""Deterministic smoke check for schema 15 -> 17 migration."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from otomekairo.schema.settings import build_default_settings
 
 
 # Block: Report constants
-REPORT_SCHEMA_VERSION = 1
+REPORT_SCHEMA_VERSION = 2
 
 
 # Block: Public smoke runner
@@ -168,6 +168,7 @@ def _insert_preference_row(
             preference_id,
             owner_scope,
             target_entity_ref_json,
+            target_key,
             domain,
             polarity,
             status,
@@ -176,7 +177,7 @@ def _insert_preference_row(
             created_at,
             updated_at
         )
-        VALUES (?, 'self', ?, 'topic_keyword', ?, ?, ?, ?, ?, ?)
+        VALUES (?, 'self', ?, ?, 'topic_keyword', ?, ?, ?, ?, ?, ?)
         """,
         (
             preference_id,
@@ -186,7 +187,9 @@ def _insert_preference_row(
                 },
                 ensure_ascii=True,
                 separators=(",", ":"),
+                sort_keys=True,
             ),
+            target_key,
             polarity,
             status,
             0.9,
@@ -210,11 +213,11 @@ def _build_report(
         for item in cognition_state.stable_preference_items
     )
     checks = {
-        "schema16_projection_backfilled": stable_keys == [
+        "schema17_projection_backfilled": stable_keys == [
             "confirmed:like:展示",
             "revoked:dislike:ホラー映画",
         ],
-        "schema16_housekeeping_backfilled": (
+        "schema17_housekeeping_backfilled": (
             isinstance(owner_state["completed_jobs_gc"]["last_enqueued_at"], int)
             and int(owner_state["completed_jobs_gc"]["last_enqueued_at"]) > 0
         ),
@@ -241,4 +244,3 @@ def _validate_report(report: dict[str, Any]) -> None:
         raise RuntimeError(
             "schema16_migration_smoke failed: " + ", ".join(sorted(failed_checks))
         )
-

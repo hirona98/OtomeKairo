@@ -276,8 +276,7 @@ def _build_reply_render_messages(request: ReplyRenderRequest) -> list[dict[str, 
     attention_summary_text = reply_render_input["attention_summary_text"]
     retrieval_summary_text = reply_render_input["retrieval_summary_text"]
     stable_self_state = reply_render_input["stable_self_state"]
-    confirmed_preferences = reply_render_input["confirmed_preferences"]
-    revoked_preferences = reply_render_input["revoked_preferences"]
+    stable_preferences = reply_render_input["stable_preferences"]
     long_mood_state = reply_render_input["long_mood_state"]
     recent_dialog = reply_render_input["recent_dialog"]
     selected_memory_pack = reply_render_input["selected_memory_pack"]
@@ -305,8 +304,7 @@ def _build_reply_render_messages(request: ReplyRenderRequest) -> list[dict[str, 
             f"注意要約: {attention_summary_text}",
             f"想起要約: {retrieval_summary_text}",
             _stable_self_state_prompt_line(stable_self_state),
-            _confirmed_preferences_prompt_line(confirmed_preferences),
-            _revoked_preferences_prompt_line(revoked_preferences),
+            *_stable_preferences_prompt_lines(stable_preferences),
             _long_mood_state_prompt_line(long_mood_state),
             _recent_dialog_prompt_line(recent_dialog),
             _selected_memory_pack_prompt_line(selected_memory_pack),
@@ -1013,6 +1011,21 @@ def _revoked_preferences_prompt_line(revoked_preferences: Any) -> str:
         "reply_render_input.revoked_preferences",
     )
     return "取り消し済み嗜好: " + _joined_prompt_text(entries)
+
+
+# Block: Stable preference prompt
+def _stable_preferences_prompt_lines(stable_preferences: Any) -> list[str]:
+    if not isinstance(stable_preferences, dict):
+        raise RuntimeError("stable_preferences must be an object")
+    confirmed_preferences = {
+        "likes": stable_preferences.get("likes"),
+        "dislikes": stable_preferences.get("dislikes"),
+    }
+    revoked_preferences = stable_preferences.get("revoked")
+    return [
+        _confirmed_preferences_prompt_line(confirmed_preferences),
+        _revoked_preferences_prompt_line(revoked_preferences),
+    ]
 
 
 # Block: 背景感情 prompt

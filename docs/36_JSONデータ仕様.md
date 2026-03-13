@@ -678,20 +678,22 @@
       "text": "同じ話題を続けるときは要点だけ返す"
     }
   ],
-  "confirmed_preferences": {
+  "stable_preferences": {
     "likes": [],
-    "dislikes": []
+    "dislikes": [],
+    "revoked": []
   },
   "long_mood_state": null
 }
 ```
 
 - `action_selection_context` は、短周期の内部でだけ使う `action validator` 専用の派生断面である
-- 必須項目は `current_input_kind`、`recent_dialog`、`recent_context_texts`、`working_memory_texts`、`episodic_texts`、`fact_entries`、`affect_entries`、`relationship_texts`、`reflection_entries`、`confirmed_preferences`、`long_mood_state` である
+- 必須項目は `current_input_kind`、`recent_dialog`、`recent_context_texts`、`working_memory_texts`、`episodic_texts`、`fact_entries`、`affect_entries`、`relationship_texts`、`reflection_entries`、`stable_preferences`、`long_mood_state` である
 - `recent_context_texts`、`working_memory_texts`、`episodic_texts`、`relationship_texts` は string の配列である
 - `fact_entries[].text` と `reflection_entries[].text` は非空の `string` に固定する
 - `fact_entries[].query` は任意で、ある場合は非空の `string` に固定する
 - `affect_entries[].labels` は string の配列であり、`valence` と `arousal` はある場合だけ `number` に固定する
+- `stable_preferences.likes[]` と `stable_preferences.dislikes[]` は `personality_preference_entry`、`stable_preferences.revoked[]` は `selection_profile.revoked_preferences[]` と同じ shape に固定する
 - `long_mood_state` は、背景感情がない場合だけ `null` を許可する
 
 <!-- Block: Stable Self State -->
@@ -761,6 +763,38 @@
 - `source_affect_labels` は string の配列である
 - current 実装では、`state_snapshot.stable_long_mood_item` から 1 件だけ構成してよい
 
+<!-- Block: Stable Preferences -->
+### `stable_preferences`
+
+```json
+{
+  "likes": [
+    {
+      "domain": "topic_keyword",
+      "target_key": "展示",
+      "weight": 0.91,
+      "evidence_count": 3
+    }
+  ],
+  "dislikes": [],
+  "revoked": [
+    {
+      "domain": "topic_keyword",
+      "target_key": "ホラー映画",
+      "weight": 0.72,
+      "evidence_count": 2,
+      "polarity": "dislike"
+    }
+  ]
+}
+```
+
+- `stable_preferences` は、`action_selection_context` と `reply_render_input` が共有する stable preference 断面である
+- 必須項目は `likes`、`dislikes`、`revoked` である
+- `likes[]` と `dislikes[]` は `personality_preference_entry` の配列である
+- `revoked[]` は `selection_profile.revoked_preferences[]` と同じ entry shape の配列である
+- current 実装では、`stable_preferences` は `state_snapshot.stable_preference_items` から構成し、`likes`、`dislikes`、`revoked` を各 `8` 件まで持ってよい
+
 <!-- Block: Reply Render Input -->
 ### `reply_render_input`
 
@@ -771,11 +805,11 @@
   "attention_summary_text": "kind=dialogue summary=昔話の継続 reasons=user_turn",
   "retrieval_summary_text": "mode=associative_recent queries=高校時代 selected=episodic_items=1",
   "stable_self_state": {},
-  "confirmed_preferences": {
+  "stable_preferences": {
     "likes": [],
-    "dislikes": []
+    "dislikes": [],
+    "revoked": []
   },
-  "revoked_preferences": [],
   "long_mood_state": null,
   "recent_dialog": [],
   "selected_memory_pack": {
@@ -795,9 +829,9 @@
 ```
 
 - `reply_render_input` は、`reply_render` 専用の派生入力である
-- 必須項目は `observation_text`、`time_reference_text`、`attention_summary_text`、`retrieval_summary_text`、`stable_self_state`、`confirmed_preferences`、`revoked_preferences`、`long_mood_state`、`recent_dialog`、`selected_memory_pack`、`reply_style` である
+- 必須項目は `observation_text`、`time_reference_text`、`attention_summary_text`、`retrieval_summary_text`、`stable_self_state`、`stable_preferences`、`long_mood_state`、`recent_dialog`、`selected_memory_pack`、`reply_style` である
 - `observation_text`、`time_reference_text`、`attention_summary_text`、`retrieval_summary_text` は非空の `string` に固定する
-- `revoked_preferences` は、`selection_profile.revoked_preferences` と同じ entry shape を持つ配列である
+- `stable_preferences` は、`action_selection_context.stable_preferences` と同じ shape を持つ object である
 - `long_mood_state` は、背景感情がない場合だけ `null` を許可する
 - `reply_style.speech_tone` と `reply_style.response_pace` は非空の `string` に固定する
 

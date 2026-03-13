@@ -213,7 +213,16 @@ def _score_candidate(
     task_snapshot = cognition_input["task_snapshot"]
     action_selection_context = cognition_input["action_selection_context"]
     current_observation = cognition_input["current_observation"]
-    learned_aversions = selection_profile["learned_aversions"]
+    stable_preferences = _required_object(
+        action_selection_context,
+        "stable_preferences",
+        "cognition_input.action_selection_context.stable_preferences",
+    )
+    learned_aversions = _required_list(
+        stable_preferences,
+        "dislikes",
+        "cognition_input.action_selection_context.stable_preferences.dislikes",
+    )
     habit_biases = selection_profile["habit_biases"]
     hard_gate_passed = _passes_hard_gate(
         proposal=proposal,
@@ -372,13 +381,18 @@ def _persona_consistency_score(
             "selection_profile.relationship_priorities",
         ),
     )
+    stable_preferences = _required_object(
+        action_selection_context,
+        "stable_preferences",
+        "cognition_input.action_selection_context.stable_preferences",
+    )
     preference_alignment = _preference_alignment(
         action_type=action_type,
         proposal=proposal,
         learned_preferences=_required_list(
-            selection_profile,
-            "learned_preferences",
-            "selection_profile.learned_preferences",
+            stable_preferences,
+            "likes",
+            "cognition_input.action_selection_context.stable_preferences.likes",
         ),
         habit_biases=_required_object(
             selection_profile,
@@ -391,14 +405,14 @@ def _persona_consistency_score(
     aversion_penalty = _aversion_penalty(
         action_type=action_type,
         learned_aversions=_required_list(
-            selection_profile,
-            "learned_aversions",
-            "selection_profile.learned_aversions",
+            stable_preferences,
+            "dislikes",
+            "cognition_input.action_selection_context.stable_preferences.dislikes",
         ),
         revoked_preferences=_required_list(
-            selection_profile,
-            "revoked_preferences",
-            "selection_profile.revoked_preferences",
+            stable_preferences,
+            "revoked",
+            "cognition_input.action_selection_context.stable_preferences.revoked",
         ),
         habit_biases=_required_object(
             selection_profile,

@@ -360,22 +360,24 @@ flowchart TD
 
 - 役割: 好悪のような誤断定しやすい傾向を専用管理する
 - 主キー: `preference_id TEXT PRIMARY KEY`
-- 必須列: `owner_scope`, `target_entity_ref_json`, `domain`, `polarity`, `status`, `confidence`, `evidence_event_ids_json`, `created_at`, `updated_at`
+- 必須列: `owner_scope`, `target_entity_ref_json`, `target_key`, `domain`, `polarity`, `status`, `confidence`, `evidence_event_ids_json`, `created_at`, `updated_at`
 - `owner_scope` は、少なくとも `self`、`other_entity` を区別する
 - `target_entity_ref_json` は、少なくとも `target_kind`、`target_key` を持つ JSON とする
+- `target_key` は、`target_entity_ref_json` から抽出した scalar identity とし、upsert と projection の一致判定は raw JSON 文字列ではなくこの列を正本にする
 - 初期実装の `target_entity_ref_json.target_kind` は、少なくとも `action_type`、`observation_kind` を区別する
 - `polarity` は、`like`、`dislike` に固定する
 - `status` は、`candidate`、`confirmed`、`revoked` に固定する
-- 主要索引: `(owner_scope, status, updated_at DESC)`, `(domain, polarity, status)`
+- 主要索引: `(owner_scope, status, updated_at DESC)`, `(domain, polarity, status)`, `(owner_scope, domain, target_key, polarity, updated_at DESC)`
 
 <!-- Block: Stable Preference Projection -->
 ### `stable_preference_projection`
 
 - 役割: `preference_memory` の履歴から、短周期 stable context に使う current projection だけを保持する
-- 主キー: `(owner_scope, target_entity_ref_json, domain, polarity)`
-- 必須列: `preference_id`, `status`, `confidence`, `evidence_event_ids_json`, `created_at`, `updated_at`
+- 主キー: `(owner_scope, domain, target_key, polarity)`
+- 必須列: `target_entity_ref_json`, `target_key`, `preference_id`, `status`, `confidence`, `evidence_event_ids_json`, `created_at`, `updated_at`
 - `status` は、`confirmed`、`revoked` に固定する
 - current 実装では、`owner_scope = 'self'` の行だけを stable context 読み出しに使ってよい
+- current 実装では、`target_entity_ref_json` は canonical JSON として保持するが、一意性判定は `target_key` を使う
 - 主要索引: `(owner_scope, status, confidence DESC, updated_at DESC)`
 
 <!-- Block: Event Affects -->

@@ -13,7 +13,7 @@ from otomekairo.usecase.tidy_memory_owner_smoke import run_tidy_memory_owner_smo
 
 
 # Block: Report constants
-REPORT_SCHEMA_VERSION = 1
+REPORT_SCHEMA_VERSION = 2
 
 
 # Block: Public gate runner
@@ -23,7 +23,7 @@ def run_eval_gate(*, keep_db: bool) -> dict[str, Any]:
     tidy_memory_owner_report = run_tidy_memory_owner_smoke(
         keep_db=keep_db,
     )
-    schema16_migration_report = run_schema16_migration_smoke(
+    schema17_migration_report = run_schema16_migration_smoke(
         keep_db=keep_db,
     )
     stable_context_report = run_stable_context_contract_smoke(
@@ -37,13 +37,13 @@ def run_eval_gate(*, keep_db: bool) -> dict[str, Any]:
         "checks": {
             "py_compile_ok": True,
             "tidy_memory_owner_ok": True,
-            "schema16_migration_ok": True,
+            "schema17_migration_ok": True,
             "stable_context_contract_ok": True,
             "chat_behavior_golden_ok": True,
         },
         "py_compile": py_compile_report,
         "tidy_memory_owner": tidy_memory_owner_report,
-        "schema16_migration": schema16_migration_report,
+        "schema17_migration": schema17_migration_report,
         "stable_context_contract": stable_context_report,
         "chat_behavior_golden": chat_behavior_report,
     }
@@ -99,9 +99,9 @@ def format_eval_gate_report(report: dict[str, Any]) -> str:
     tidy_memory_owner_report = report.get("tidy_memory_owner")
     if not isinstance(tidy_memory_owner_report, dict):
         raise RuntimeError("eval_gate.tidy_memory_owner must be an object")
-    schema16_migration_report = report.get("schema16_migration")
-    if not isinstance(schema16_migration_report, dict):
-        raise RuntimeError("eval_gate.schema16_migration must be an object")
+    schema17_migration_report = report.get("schema17_migration")
+    if not isinstance(schema17_migration_report, dict):
+        raise RuntimeError("eval_gate.schema17_migration must be an object")
     stable_context_report = report.get("stable_context_contract")
     if not isinstance(stable_context_report, dict):
         raise RuntimeError("eval_gate.stable_context_contract must be an object")
@@ -111,9 +111,9 @@ def format_eval_gate_report(report: dict[str, Any]) -> str:
     tidy_checks = tidy_memory_owner_report.get("checks")
     if not isinstance(tidy_checks, dict):
         raise RuntimeError("eval_gate.tidy_memory_owner.checks must be an object")
-    schema16_checks = schema16_migration_report.get("checks")
-    if not isinstance(schema16_checks, dict):
-        raise RuntimeError("eval_gate.schema16_migration.checks must be an object")
+    schema17_checks = schema17_migration_report.get("checks")
+    if not isinstance(schema17_checks, dict):
+        raise RuntimeError("eval_gate.schema17_migration.checks must be an object")
     stable_checks = stable_context_report.get("checks")
     if not isinstance(stable_checks, dict):
         raise RuntimeError("eval_gate.stable_context_contract.checks must be an object")
@@ -133,9 +133,9 @@ def format_eval_gate_report(report: dict[str, Any]) -> str:
             for check_name, passed in tidy_checks.items()
             if bool(passed)
         ),
-        "schema16: " + ", ".join(
+        "schema17: " + ", ".join(
             check_name
-            for check_name, passed in schema16_checks.items()
+            for check_name, passed in schema17_checks.items()
             if bool(passed)
         ),
         "stable_context: " + ", ".join(

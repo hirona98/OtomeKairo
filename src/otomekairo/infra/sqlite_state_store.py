@@ -58,9 +58,10 @@ from otomekairo.usecase.write_memory_plan import (
 
 # Block: Schema constants
 SCHEMA_NAME = "core_schema"
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17
 EMBEDDING_VECTOR_DIMENSION = 32
 STABLE_PREFERENCE_BUCKET_LIMIT = 8
+RETRIEVAL_STABLE_PREFERENCE_BUCKET_LIMIT = 24
 TIDY_MEMORY_SCOPES = (
     "completed_jobs_gc",
     "stale_preview_gc",
@@ -933,26 +934,10 @@ class SqliteStateStore:
                 LIMIT 6
                 """
             ).fetchall()
-            preference_rows = connection.execute(
-                """
-                SELECT
-                    preference_id,
-                    owner_scope,
-                    target_entity_ref_json,
-                    domain,
-                    polarity,
-                    status,
-                    confidence,
-                    evidence_event_ids_json,
-                    created_at,
-                    updated_at
-                FROM preference_memory
-                WHERE status IN ('candidate', 'confirmed')
-                ORDER BY updated_at DESC
-                LIMIT 6
-                """
-            ).fetchall()
             stable_preference_rows = _read_stable_preference_projection_rows(
+                connection=connection,
+            )
+            retrieval_preference_rows = _read_retrieval_preference_projection_rows(
                 connection=connection,
             )
             stable_long_mood_row = connection.execute(
@@ -1074,7 +1059,7 @@ class SqliteStateStore:
                 recent_event_rows=recent_event_rows,
                 memory_rows=memory_rows,
                 affect_rows=affect_rows,
-                preference_rows=preference_rows,
+                stable_preference_rows=retrieval_preference_rows,
                 event_link_rows=event_link_rows,
                 event_thread_rows=event_thread_rows,
                 event_about_time_rows=event_about_time_rows,
@@ -3508,12 +3493,14 @@ class SqliteStateStore:
         created_at: int,
     ) -> None:
         target_entity_ref = dict(preference_update["target_entity_ref"])
-        target_entity_ref_json = _json_text(target_entity_ref)
+        target_key = _preference_target_key(target_entity_ref=target_entity_ref)
+        target_entity_ref_json = _normalized_target_entity_ref_json(target_entity_ref)
         existing_row = connection.execute(
             """
             SELECT preference_id,
                    owner_scope,
                    target_entity_ref_json,
+                   target_key,
                    domain,
                    polarity,
                    status,
@@ -3523,16 +3510,16 @@ class SqliteStateStore:
                    updated_at
             FROM preference_memory
             WHERE owner_scope = ?
-              AND target_entity_ref_json = ?
               AND domain = ?
+              AND target_key = ?
               AND polarity = ?
             ORDER BY updated_at DESC, created_at DESC, preference_id DESC
             LIMIT 1
             """,
             (
                 str(preference_update["owner_scope"]),
-                target_entity_ref_json,
                 str(preference_update["domain"]),
+                target_key,
                 str(preference_update["polarity"]),
             ),
         ).fetchone()
@@ -3558,6 +3545,7 @@ class SqliteStateStore:
                     preference_id,
                     owner_scope,
                     target_entity_ref_json,
+                    target_key,
                     domain,
                     polarity,
                     status,
@@ -3566,12 +3554,13 @@ class SqliteStateStore:
                     created_at,
                     updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     preference_id,
                     str(preference_update["owner_scope"]),
                     target_entity_ref_json,
+                    target_key,
                     str(preference_update["domain"]),
                     str(preference_update["polarity"]),
                     str(preference_update["status"]),
@@ -3597,6 +3586,7 @@ class SqliteStateStore:
                     "preference_id": preference_id,
                     "owner_scope": str(preference_update["owner_scope"]),
                     "target_entity_ref_json": target_entity_ref_json,
+                    "target_key": target_key,
                     "domain": str(preference_update["domain"]),
                     "polarity": str(preference_update["polarity"]),
                     "status": str(preference_update["status"]),
@@ -3619,13 +3609,17 @@ class SqliteStateStore:
         connection.execute(
             """
             UPDATE preference_memory
-            SET status = ?,
+            SET target_entity_ref_json = ?,
+                target_key = ?,
+                status = ?,
                 confidence = ?,
                 evidence_event_ids_json = ?,
                 updated_at = ?
             WHERE preference_id = ?
             """,
             (
+                target_entity_ref_json,
+                target_key,
                 str(preference_update["status"]),
                 float(preference_update["confidence"]),
                 _json_text(merged_evidence_event_ids),
@@ -3648,7 +3642,8 @@ class SqliteStateStore:
             preference_row={
                 "preference_id": preference_id,
                 "owner_scope": str(existing_row["owner_scope"]),
-                "target_entity_ref_json": str(existing_row["target_entity_ref_json"]),
+                "target_entity_ref_json": target_entity_ref_json,
+                "target_key": str(existing_row["target_key"]),
                 "domain": str(existing_row["domain"]),
                 "polarity": str(existing_row["polarity"]),
                 "status": str(preference_update["status"]),
@@ -3668,6 +3663,7 @@ class SqliteStateStore:
     ) -> None:
         owner_scope = str(preference_row["owner_scope"])
         target_entity_ref_json = str(preference_row["target_entity_ref_json"])
+        target_key = str(preference_row["target_key"])
         domain = str(preference_row["domain"])
         polarity = str(preference_row["polarity"])
         status = str(preference_row["status"])
@@ -3676,11 +3672,11 @@ class SqliteStateStore:
                 """
                 DELETE FROM stable_preference_projection
                 WHERE owner_scope = ?
-                  AND target_entity_ref_json = ?
                   AND domain = ?
+                  AND target_key = ?
                   AND polarity = ?
                 """,
-                (owner_scope, target_entity_ref_json, domain, polarity),
+                (owner_scope, domain, target_key, polarity),
             )
             return
         connection.execute(
@@ -3688,6 +3684,7 @@ class SqliteStateStore:
             INSERT INTO stable_preference_projection (
                 owner_scope,
                 target_entity_ref_json,
+                target_key,
                 domain,
                 polarity,
                 preference_id,
@@ -3697,9 +3694,10 @@ class SqliteStateStore:
                 created_at,
                 updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(owner_scope, target_entity_ref_json, domain, polarity)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(owner_scope, domain, target_key, polarity)
             DO UPDATE SET
+                target_entity_ref_json = excluded.target_entity_ref_json,
                 preference_id = excluded.preference_id,
                 status = excluded.status,
                 confidence = excluded.confidence,
@@ -3710,6 +3708,7 @@ class SqliteStateStore:
             (
                 owner_scope,
                 target_entity_ref_json,
+                target_key,
                 domain,
                 polarity,
                 str(preference_row["preference_id"]),
@@ -3735,6 +3734,7 @@ class SqliteStateStore:
                 preference_id,
                 owner_scope,
                 target_entity_ref_json,
+                target_key,
                 domain,
                 polarity,
                 status,
@@ -3748,8 +3748,8 @@ class SqliteStateStore:
         ).fetchall():
             projection_key = (
                 str(row["owner_scope"]),
-                str(row["target_entity_ref_json"]),
                 str(row["domain"]),
+                str(row["target_key"]),
                 str(row["polarity"]),
             )
             if projection_key in seen_keys:
@@ -6776,7 +6776,7 @@ class SqliteStateStore:
             return
         if current_version > SCHEMA_VERSION:
             raise RuntimeError("schema_version is newer than this initializer")
-        if current_version not in {2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}:
+        if current_version not in {2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}:
             raise RuntimeError("unsupported schema_version for migration")
         while current_version < SCHEMA_VERSION:
             if current_version == 2:
@@ -6834,6 +6834,10 @@ class SqliteStateStore:
             if current_version == 15:
                 self._migrate_schema_15_to_16(connection=connection, now_ms=now_ms)
                 current_version = 16
+                continue
+            if current_version == 16:
+                self._migrate_schema_16_to_17(connection=connection, now_ms=now_ms)
+                current_version = 17
                 continue
             raise RuntimeError("unsupported schema_version for migration")
 
@@ -8286,11 +8290,36 @@ class SqliteStateStore:
 
     # Block: Schema migration 15->16
     def _migrate_schema_15_to_16(self, *, connection: sqlite3.Connection, now_ms: int) -> None:
+        preference_memory_columns = {
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(preference_memory)").fetchall()
+        }
+        if "target_key" not in preference_memory_columns:
+            connection.execute("ALTER TABLE preference_memory ADD COLUMN target_key TEXT")
+            for row in connection.execute(
+                """
+                SELECT preference_id, target_entity_ref_json
+                FROM preference_memory
+                """
+            ).fetchall():
+                target_entity_ref = _decoded_object_json(row["target_entity_ref_json"])
+                connection.execute(
+                    """
+                    UPDATE preference_memory
+                    SET target_key = ?
+                    WHERE preference_id = ?
+                    """,
+                    (
+                        _preference_target_key(target_entity_ref=target_entity_ref),
+                        str(row["preference_id"]),
+                    ),
+                )
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS stable_preference_projection (
                 owner_scope TEXT NOT NULL CHECK (owner_scope IN ('self', 'other_entity')),
                 target_entity_ref_json TEXT NOT NULL,
+                target_key TEXT NOT NULL,
                 domain TEXT NOT NULL,
                 polarity TEXT NOT NULL CHECK (polarity IN ('like', 'dislike')),
                 preference_id TEXT NOT NULL,
@@ -8299,7 +8328,7 @@ class SqliteStateStore:
                 evidence_event_ids_json TEXT NOT NULL,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
-                PRIMARY KEY (owner_scope, target_entity_ref_json, domain, polarity)
+                PRIMARY KEY (owner_scope, domain, target_key, polarity)
             )
             """
         )
@@ -8367,6 +8396,136 @@ class SqliteStateStore:
             WHERE meta_key = 'schema_version'
             """,
             (_json_text(16), now_ms),
+        )
+
+    # Block: Schema migration 16->17
+    def _migrate_schema_16_to_17(self, *, connection: sqlite3.Connection, now_ms: int) -> None:
+        connection.execute("ALTER TABLE preference_memory RENAME TO preference_memory_legacy")
+        connection.execute("DROP INDEX IF EXISTS idx_preference_memory_scope_status_updated")
+        connection.execute("DROP INDEX IF EXISTS idx_preference_memory_domain_polarity_status")
+        connection.execute("DROP INDEX IF EXISTS idx_preference_memory_identity_updated")
+        connection.execute(
+            """
+            CREATE TABLE preference_memory (
+                preference_id TEXT PRIMARY KEY,
+                owner_scope TEXT NOT NULL CHECK (owner_scope IN ('self', 'other_entity')),
+                target_entity_ref_json TEXT NOT NULL,
+                target_key TEXT NOT NULL,
+                domain TEXT NOT NULL,
+                polarity TEXT NOT NULL CHECK (polarity IN ('like', 'dislike')),
+                status TEXT NOT NULL CHECK (status IN ('candidate', 'confirmed', 'revoked')),
+                confidence REAL NOT NULL,
+                evidence_event_ids_json TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX idx_preference_memory_scope_status_updated
+                ON preference_memory (owner_scope, status, updated_at DESC)
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX idx_preference_memory_domain_polarity_status
+                ON preference_memory (domain, polarity, status)
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX idx_preference_memory_identity_updated
+                ON preference_memory (owner_scope, domain, target_key, polarity, updated_at DESC)
+            """
+        )
+        for row in connection.execute(
+            """
+            SELECT
+                preference_id,
+                owner_scope,
+                target_entity_ref_json,
+                domain,
+                polarity,
+                status,
+                confidence,
+                evidence_event_ids_json,
+                created_at,
+                updated_at
+            FROM preference_memory_legacy
+            ORDER BY created_at ASC, preference_id ASC
+            """
+        ).fetchall():
+            target_entity_ref = _decoded_object_json(row["target_entity_ref_json"])
+            connection.execute(
+                """
+                INSERT INTO preference_memory (
+                    preference_id,
+                    owner_scope,
+                    target_entity_ref_json,
+                    target_key,
+                    domain,
+                    polarity,
+                    status,
+                    confidence,
+                    evidence_event_ids_json,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(row["preference_id"]),
+                    str(row["owner_scope"]),
+                    _normalized_target_entity_ref_json(target_entity_ref),
+                    _preference_target_key(target_entity_ref=target_entity_ref),
+                    str(row["domain"]),
+                    str(row["polarity"]),
+                    str(row["status"]),
+                    float(row["confidence"]),
+                    str(row["evidence_event_ids_json"]),
+                    int(row["created_at"]),
+                    int(row["updated_at"]),
+                ),
+            )
+        connection.execute("DROP TABLE preference_memory_legacy")
+        connection.execute("DROP INDEX IF EXISTS idx_stable_preference_projection_scope_status_updated")
+        connection.execute("DROP TABLE IF EXISTS stable_preference_projection")
+        connection.execute(
+            """
+            CREATE TABLE stable_preference_projection (
+                owner_scope TEXT NOT NULL CHECK (owner_scope IN ('self', 'other_entity')),
+                target_entity_ref_json TEXT NOT NULL,
+                target_key TEXT NOT NULL,
+                domain TEXT NOT NULL,
+                polarity TEXT NOT NULL CHECK (polarity IN ('like', 'dislike')),
+                preference_id TEXT NOT NULL,
+                status TEXT NOT NULL CHECK (status IN ('confirmed', 'revoked')),
+                confidence REAL NOT NULL,
+                evidence_event_ids_json TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (owner_scope, domain, target_key, polarity)
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX idx_stable_preference_projection_scope_status_updated
+                ON stable_preference_projection (owner_scope, status, confidence DESC, updated_at DESC)
+            """
+        )
+        self._rebuild_stable_preference_projection(
+            connection=connection,
+        )
+        connection.execute(
+            """
+            UPDATE db_meta
+            SET meta_value_json = ?,
+                updated_at = ?
+            WHERE meta_key = 'schema_version'
+            """,
+            (_json_text(17), now_ms),
         )
 
     # Block: sqlite-vec schema ensure
@@ -10378,6 +10537,7 @@ def _write_memory_plan_preference_entries(
         SELECT
             owner_scope,
             target_entity_ref_json,
+            target_key,
             domain,
             polarity,
             status,
@@ -10394,7 +10554,7 @@ def _write_memory_plan_preference_entries(
     seen_keys: set[tuple[str, str, str]] = set()
     for row in rows:
         target_entity_ref = _decoded_object_json(row["target_entity_ref_json"])
-        target_key = target_entity_ref.get("target_key")
+        target_key = row["target_key"]
         if not isinstance(target_key, str) or not target_key:
             continue
         entry_key = (
@@ -11443,7 +11603,7 @@ def _build_memory_snapshot_rows(
     recent_event_rows: list[sqlite3.Row],
     memory_rows: list[sqlite3.Row],
     affect_rows: list[sqlite3.Row],
-    preference_rows: list[sqlite3.Row],
+    stable_preference_rows: list[sqlite3.Row],
     event_link_rows: list[sqlite3.Row],
     event_thread_rows: list[sqlite3.Row],
     event_about_time_rows: list[sqlite3.Row],
@@ -11479,7 +11639,7 @@ def _build_memory_snapshot_rows(
             reflection_items.append(entry)
     for row in affect_rows:
         affective_items.append(_event_affect_snapshot_entry(row))
-    for row in preference_rows:
+    for row in stable_preference_rows:
         relationship_items.append(_preference_snapshot_entry(row))
     return {
         "working_memory_items": working_memory_items[:3],
@@ -11575,6 +11735,68 @@ def _read_stable_preference_projection_rows(
                 LIMIT ?
                 """,
                 (status, polarity, STABLE_PREFERENCE_BUCKET_LIMIT),
+            ).fetchall()
+        )
+    return rows
+
+
+def _read_retrieval_preference_projection_rows(
+    *,
+    connection: sqlite3.Connection,
+) -> list[sqlite3.Row]:
+    rows: list[sqlite3.Row] = []
+    for status, polarity in (
+        ("confirmed", "like"),
+        ("confirmed", "dislike"),
+        ("revoked", None),
+    ):
+        if polarity is None:
+            rows.extend(
+                connection.execute(
+                    """
+                    SELECT
+                        preference_id,
+                        owner_scope,
+                        target_entity_ref_json,
+                        domain,
+                        polarity,
+                        status,
+                        confidence,
+                        evidence_event_ids_json,
+                        created_at,
+                        updated_at
+                    FROM stable_preference_projection
+                    WHERE owner_scope = 'self'
+                      AND status = 'revoked'
+                    ORDER BY confidence DESC, updated_at DESC, created_at DESC, preference_id DESC
+                    LIMIT ?
+                    """,
+                    (RETRIEVAL_STABLE_PREFERENCE_BUCKET_LIMIT,),
+                ).fetchall()
+            )
+            continue
+        rows.extend(
+            connection.execute(
+                """
+                SELECT
+                    preference_id,
+                    owner_scope,
+                    target_entity_ref_json,
+                    domain,
+                    polarity,
+                    status,
+                    confidence,
+                    evidence_event_ids_json,
+                    created_at,
+                    updated_at
+                FROM stable_preference_projection
+                WHERE owner_scope = 'self'
+                  AND status = ?
+                  AND polarity = ?
+                ORDER BY confidence DESC, updated_at DESC, created_at DESC, preference_id DESC
+                LIMIT ?
+                """,
+                (status, polarity, RETRIEVAL_STABLE_PREFERENCE_BUCKET_LIMIT),
             ).fetchall()
         )
     return rows
@@ -12607,6 +12829,24 @@ def _opaque_id(prefix: str) -> str:
 
 def _json_text(value: Any) -> str:
     return json.dumps(value, ensure_ascii=True, separators=(",", ":"))
+
+
+# Block: Preference target key
+def _preference_target_key(*, target_entity_ref: dict[str, Any]) -> str:
+    target_key = target_entity_ref.get("target_key")
+    if not isinstance(target_key, str) or not target_key:
+        raise RuntimeError("preference target_entity_ref.target_key must be non-empty string")
+    return target_key
+
+
+# Block: Preference target ref normalization
+def _normalized_target_entity_ref_json(target_entity_ref: dict[str, Any]) -> str:
+    return json.dumps(
+        target_entity_ref,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
 
 
 # Block: String list helper

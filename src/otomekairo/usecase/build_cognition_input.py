@@ -116,6 +116,9 @@ def build_cognition_input(
         self_snapshot=self_snapshot,
         task_snapshot=task_snapshot,
     )
+    stable_preferences = _stable_preferences_payload(
+        stable_preferences=preference_selection_state["stable_preferences"],
+    )
     confirmed_preferences = dict(preference_selection_state["confirmed_preferences"])
     long_mood_state = _build_long_mood_state_context(
         long_mood_item=state_snapshot.stable_long_mood_item,
@@ -176,7 +179,7 @@ def build_cognition_input(
         memory_bundle=trimmed_memory_bundle,
         recent_dialog=recent_dialog,
         selected_memory_pack=selected_memory_pack,
-        confirmed_preferences=confirmed_preferences,
+        stable_preferences=stable_preferences,
         long_mood_state=long_mood_state,
     )
     retrieval_context = {
@@ -213,8 +216,7 @@ def build_cognition_input(
         attention_snapshot=attention_snapshot,
         retrieval_context=retrieval_context,
         stable_self_state=stable_self_state,
-        confirmed_preferences=confirmed_preferences,
-        revoked_preferences=list(selection_profile["revoked_preferences"]),
+        stable_preferences=stable_preferences,
         long_mood_state=long_mood_state,
         recent_dialog=recent_dialog,
         selected_memory_pack=selected_memory_pack,
@@ -675,10 +677,36 @@ def _build_preference_selection_state(*, preference_items: list[dict[str, Any]])
         "learned_preferences": learned_preferences[:8],
         "learned_aversions": learned_aversions[:8],
         "revoked_preferences": revoked_preferences[:8],
-        "confirmed_preferences": {
-            "likes": confirmed_likes[:6],
-            "dislikes": confirmed_dislikes[:6],
+        "stable_preferences": {
+            "likes": [dict(item) for item in learned_preferences[:8]],
+            "dislikes": [dict(item) for item in learned_aversions[:8]],
+            "revoked": [dict(item) for item in revoked_preferences[:8]],
         },
+        "confirmed_preferences": {
+            "likes": confirmed_likes[:8],
+            "dislikes": confirmed_dislikes[:8],
+        },
+    }
+
+
+# Block: Stable preferences payload
+def _stable_preferences_payload(*, stable_preferences: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "likes": [
+            dict(entry)
+            for entry in stable_preferences.get("likes", [])
+            if isinstance(entry, dict)
+        ],
+        "dislikes": [
+            dict(entry)
+            for entry in stable_preferences.get("dislikes", [])
+            if isinstance(entry, dict)
+        ],
+        "revoked": [
+            dict(entry)
+            for entry in stable_preferences.get("revoked", [])
+            if isinstance(entry, dict)
+        ],
     }
 
 
@@ -1693,7 +1721,7 @@ def _build_action_selection_context(
     memory_bundle: dict[str, Any],
     recent_dialog: list[dict[str, Any]],
     selected_memory_pack: dict[str, Any],
-    confirmed_preferences: dict[str, Any],
+    stable_preferences: dict[str, Any],
     long_mood_state: dict[str, Any] | None,
 ) -> dict[str, Any]:
     return {
@@ -1712,7 +1740,9 @@ def _build_action_selection_context(
         "reflection_entries": _action_selection_reflection_entries(
             reflection_items=memory_bundle["reflection_items"],
         ),
-        "confirmed_preferences": confirmed_preferences,
+        "stable_preferences": _stable_preferences_payload(
+            stable_preferences=stable_preferences,
+        ),
         "long_mood_state": long_mood_state,
     }
 
@@ -1787,8 +1817,7 @@ def _build_reply_render_input(
     attention_snapshot: dict[str, Any],
     retrieval_context: dict[str, Any],
     stable_self_state: dict[str, Any],
-    confirmed_preferences: dict[str, Any],
-    revoked_preferences: list[dict[str, Any]],
+    stable_preferences: dict[str, Any],
     long_mood_state: dict[str, Any] | None,
     recent_dialog: list[dict[str, Any]],
     selected_memory_pack: dict[str, Any],
@@ -1808,12 +1837,9 @@ def _build_reply_render_input(
             retrieval_context=retrieval_context,
         ),
         "stable_self_state": stable_self_state,
-        "confirmed_preferences": confirmed_preferences,
-        "revoked_preferences": [
-            dict(revoked_preference)
-            for revoked_preference in revoked_preferences
-            if isinstance(revoked_preference, dict)
-        ],
+        "stable_preferences": _stable_preferences_payload(
+            stable_preferences=stable_preferences,
+        ),
         "long_mood_state": long_mood_state,
         "recent_dialog": recent_dialog,
         "selected_memory_pack": selected_memory_pack,

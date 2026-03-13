@@ -1,4 +1,4 @@
-"""Deterministic smoke check for stable context projection and reply-render contract."""
+"""Deterministic smoke check for stable context projection, retrieval, and reply-render contract."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ from otomekairo.usecase.build_cognition_input import (
 
 
 # Block: Report constants
-REPORT_SCHEMA_VERSION = 1
+REPORT_SCHEMA_VERSION = 2
 
 
 # Block: Public smoke runner
@@ -41,6 +41,7 @@ def run_stable_context_contract_smoke(*, keep_db: bool) -> dict[str, Any]:
         preference_selection_state = _build_preference_selection_state(
             preference_items=stable_preference_items,
         )
+        stable_preferences = dict(preference_selection_state["stable_preferences"])
         reply_render_input = _build_reply_render_input(
             current_observation={
                 "observation_text": "ホラー映画の話を続けて",
@@ -80,8 +81,7 @@ def run_stable_context_contract_smoke(*, keep_db: bool) -> dict[str, Any]:
                     "protected_targets": [],
                 },
             },
-            confirmed_preferences=dict(preference_selection_state["confirmed_preferences"]),
-            revoked_preferences=list(preference_selection_state["revoked_preferences"]),
+            stable_preferences=stable_preferences,
             long_mood_state={
                 "summary_text": "好奇心はあるが慎重",
                 "primary_label": "curious",
@@ -135,7 +135,9 @@ def run_stable_context_contract_smoke(*, keep_db: bool) -> dict[str, Any]:
         report = _build_report(
             db_path=db_path,
             keep_db=keep_db,
+            memory_snapshot=cognition_state.memory_snapshot,
             stable_preference_items=stable_preference_items,
+            stable_preferences=stable_preferences,
             reply_render_input=reply_render_input,
             prompt_messages=messages,
         )
@@ -235,6 +237,7 @@ def _insert_preference_row(
             preference_id,
             owner_scope,
             target_entity_ref_json,
+            target_key,
             domain,
             polarity,
             status,
@@ -243,7 +246,7 @@ def _insert_preference_row(
             created_at,
             updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             preference_id,
@@ -254,7 +257,9 @@ def _insert_preference_row(
                 },
                 ensure_ascii=True,
                 separators=(",", ":"),
+                sort_keys=True,
             ),
+            target_key,
             domain,
             polarity,
             status,
@@ -271,7 +276,9 @@ def _build_report(
     *,
     db_path: Path,
     keep_db: bool,
+    memory_snapshot: dict[str, Any],
     stable_preference_items: list[dict[str, Any]],
+    stable_preferences: dict[str, Any],
     reply_render_input: dict[str, Any],
     prompt_messages: list[dict[str, Any]],
 ) -> dict[str, Any]:
@@ -293,9 +300,18 @@ def _build_report(
         elif payload["status"] == "revoked":
             bucket_counts["revoked"] += 1
     user_prompt = str(prompt_messages[1]["content"])
+    retrieval_relationship_keys = [
+        preference_item["payload"]["target_entity_ref"]["target_key"]
+        for preference_item in memory_snapshot["relationship_items"]
+        if isinstance(preference_item, dict)
+        and str(preference_item.get("memory_kind")) == "preference"
+        and isinstance(preference_item.get("payload"), dict)
+        and isinstance(preference_item["payload"].get("target_entity_ref"), dict)
+        and isinstance(preference_item["payload"]["target_entity_ref"].get("target_key"), str)
+    ]
     revoked_prompt_targets = [
         entry["target_key"]
-        for entry in reply_render_input["revoked_preferences"]
+        for entry in stable_preferences["revoked"]
     ]
     checks = {
         "stable_projection_bucket_limits_respected": bucket_counts == {
@@ -311,7 +327,19 @@ def _build_report(
         "stable_projection_other_entity_excluded": (
             all("他人好み" not in stable_key for stable_key in stable_keys)
         ),
-        "reply_render_input_carries_revoked_preferences": len(reply_render_input["revoked_preferences"]) == 8,
+        "stable_preferences_flow_into_retrieval": (
+            "展示1" in retrieval_relationship_keys
+            and "展示9" in retrieval_relationship_keys
+            and "苦手話題1" in retrieval_relationship_keys
+            and "苦手話題9" in retrieval_relationship_keys
+            and "撤回話題1" in retrieval_relationship_keys
+            and "撤回話題9" in retrieval_relationship_keys
+        ),
+        "reply_render_input_carries_stable_preferences": (
+            len(reply_render_input["stable_preferences"]["likes"]) == 8
+            and len(reply_render_input["stable_preferences"]["dislikes"]) == 8
+            and len(reply_render_input["stable_preferences"]["revoked"]) == 8
+        ),
         "reply_render_prompt_mentions_revoked_preferences": (
             "取り消し済み嗜好:" in user_prompt
             and all(target_key in user_prompt for target_key in revoked_prompt_targets[:3])
@@ -323,7 +351,8 @@ def _build_report(
         "stable_preference_item_count": len(stable_preference_items),
         "bucket_counts": bucket_counts,
         "stable_keys": stable_keys,
-        "reply_render_revoked_count": len(reply_render_input["revoked_preferences"]),
+        "retrieval_relationship_keys": retrieval_relationship_keys,
+        "reply_render_revoked_count": len(reply_render_input["stable_preferences"]["revoked"]),
     }
     if keep_db:
         report["db_path"] = str(db_path)
@@ -341,4 +370,3 @@ def _validate_report(report: dict[str, Any]) -> None:
         raise RuntimeError(
             "stable_context_contract_smoke failed: " + ", ".join(sorted(failed_checks))
         )
-
