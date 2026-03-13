@@ -6,6 +6,7 @@ import py_compile
 from pathlib import Path
 from typing import Any
 
+from otomekairo.usecase.bootstrap_repair_smoke import run_bootstrap_repair_smoke
 from otomekairo.usecase.chat_behavior_golden import build_chat_behavior_golden_report
 from otomekairo.usecase.schema16_migration_smoke import run_schema16_migration_smoke
 from otomekairo.usecase.stable_context_contract_smoke import run_stable_context_contract_smoke
@@ -20,6 +21,9 @@ REPORT_SCHEMA_VERSION = 2
 def run_eval_gate(*, keep_db: bool) -> dict[str, Any]:
     source_root = Path(__file__).resolve().parents[1]
     py_compile_report = _run_py_compile_gate(source_root=source_root)
+    bootstrap_repair_report = run_bootstrap_repair_smoke(
+        keep_db=keep_db,
+    )
     tidy_memory_owner_report = run_tidy_memory_owner_smoke(
         keep_db=keep_db,
     )
@@ -36,12 +40,14 @@ def run_eval_gate(*, keep_db: bool) -> dict[str, Any]:
         "report_schema_version": REPORT_SCHEMA_VERSION,
         "checks": {
             "py_compile_ok": True,
+            "bootstrap_repair_ok": True,
             "tidy_memory_owner_ok": True,
             "schema17_migration_ok": True,
             "stable_context_contract_ok": True,
             "chat_behavior_golden_ok": True,
         },
         "py_compile": py_compile_report,
+        "bootstrap_repair": bootstrap_repair_report,
         "tidy_memory_owner": tidy_memory_owner_report,
         "schema17_migration": schema17_migration_report,
         "stable_context_contract": stable_context_report,
@@ -96,6 +102,9 @@ def format_eval_gate_report(report: dict[str, Any]) -> str:
     py_compile_report = report.get("py_compile")
     if not isinstance(py_compile_report, dict):
         raise RuntimeError("eval_gate.py_compile must be an object")
+    bootstrap_repair_report = report.get("bootstrap_repair")
+    if not isinstance(bootstrap_repair_report, dict):
+        raise RuntimeError("eval_gate.bootstrap_repair must be an object")
     tidy_memory_owner_report = report.get("tidy_memory_owner")
     if not isinstance(tidy_memory_owner_report, dict):
         raise RuntimeError("eval_gate.tidy_memory_owner must be an object")
@@ -111,6 +120,9 @@ def format_eval_gate_report(report: dict[str, Any]) -> str:
     tidy_checks = tidy_memory_owner_report.get("checks")
     if not isinstance(tidy_checks, dict):
         raise RuntimeError("eval_gate.tidy_memory_owner.checks must be an object")
+    bootstrap_repair_checks = bootstrap_repair_report.get("checks")
+    if not isinstance(bootstrap_repair_checks, dict):
+        raise RuntimeError("eval_gate.bootstrap_repair.checks must be an object")
     schema17_checks = schema17_migration_report.get("checks")
     if not isinstance(schema17_checks, dict):
         raise RuntimeError("eval_gate.schema17_migration.checks must be an object")
@@ -126,6 +138,11 @@ def format_eval_gate_report(report: dict[str, Any]) -> str:
         "checks: " + ", ".join(
             check_name
             for check_name, passed in checks.items()
+            if bool(passed)
+        ),
+        "bootstrap_repair: " + ", ".join(
+            check_name
+            for check_name, passed in bootstrap_repair_checks.items()
             if bool(passed)
         ),
         "tidy: " + ", ".join(

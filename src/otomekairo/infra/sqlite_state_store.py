@@ -140,6 +140,7 @@ class SqliteStateStore:
                 connection.executescript(self._schema_sql())
             else:
                 self._migrate_schema(connection, now_ms)
+            self._normalize_bootstrap_tables(connection=connection)
             self._ensure_vec_index_schema(connection=connection)
             self._ensure_db_meta(connection, now_ms)
             self._ensure_settings_editor_schema_v12(
@@ -5052,6 +5053,255 @@ class SqliteStateStore:
             )
 
     # Block: Settings editor schema normalization
+    def _normalize_bootstrap_tables(
+        self,
+        *,
+        connection: sqlite3.Connection,
+    ) -> None:
+        self._ensure_runtime_settings_table(connection=connection)
+        self._ensure_camera_connections_table(connection=connection)
+        self._ensure_settings_editor_state_table(connection=connection)
+
+    # Block: Runtime settings table normalization
+    def _ensure_runtime_settings_table(
+        self,
+        *,
+        connection: sqlite3.Connection,
+    ) -> None:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS runtime_settings (
+                row_id INTEGER PRIMARY KEY CHECK (row_id = 1),
+                values_json TEXT NOT NULL,
+                value_updated_at_json TEXT NOT NULL,
+                updated_at INTEGER NOT NULL
+            )
+            """
+        )
+
+    # Block: Camera connection table normalization
+    def _ensure_camera_connections_table(
+        self,
+        *,
+        connection: sqlite3.Connection,
+    ) -> None:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS camera_connections (
+                camera_connection_id TEXT PRIMARY KEY,
+                is_enabled INTEGER NOT NULL CHECK (is_enabled IN (0, 1)),
+                display_name TEXT NOT NULL,
+                host TEXT NOT NULL,
+                username TEXT NOT NULL,
+                password TEXT NOT NULL,
+                sort_order INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_camera_connections_sort
+                ON camera_connections (sort_order ASC, updated_at DESC)
+            """
+        )
+
+    # Block: Settings editor table normalization
+    def _ensure_settings_editor_state_table(
+        self,
+        *,
+        connection: sqlite3.Connection,
+    ) -> None:
+        if self._table_exists(connection, "settings_editor_state"):
+            self._drop_stale_settings_editor_state_tables(connection=connection)
+            return
+        recovered_editor_state = self._recover_settings_editor_state_row(
+            connection=connection,
+        )
+        self._create_settings_editor_state_table(connection=connection)
+        if recovered_editor_state is not None:
+            connection.execute(
+                """
+                INSERT INTO settings_editor_state (
+                    row_id,
+                    active_character_preset_id,
+                    active_behavior_preset_id,
+                    active_conversation_preset_id,
+                    active_memory_preset_id,
+                    active_motion_preset_id,
+                    system_values_json,
+                    revision,
+                    updated_at
+                )
+                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    recovered_editor_state["active_character_preset_id"],
+                    recovered_editor_state["active_behavior_preset_id"],
+                    recovered_editor_state["active_conversation_preset_id"],
+                    recovered_editor_state["active_memory_preset_id"],
+                    recovered_editor_state["active_motion_preset_id"],
+                    recovered_editor_state["system_values_json"],
+                    recovered_editor_state["revision"],
+                    recovered_editor_state["updated_at"],
+                ),
+            )
+        self._drop_stale_settings_editor_state_tables(connection=connection)
+
+    # Block: Settings editor current table creation
+    def _create_settings_editor_state_table(
+        self,
+        *,
+        connection: sqlite3.Connection,
+    ) -> None:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS settings_editor_state (
+                row_id INTEGER PRIMARY KEY CHECK (row_id = 1),
+                active_character_preset_id TEXT NOT NULL,
+                active_behavior_preset_id TEXT NOT NULL,
+                active_conversation_preset_id TEXT NOT NULL,
+                active_memory_preset_id TEXT NOT NULL,
+                active_motion_preset_id TEXT NOT NULL,
+                system_values_json TEXT NOT NULL,
+                revision INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            )
+            """
+        )
+
+    # Block: Settings editor repair row recovery
+    def _recover_settings_editor_state_row(
+        self,
+        *,
+        connection: sqlite3.Connection,
+    ) -> dict[str, Any] | None:
+        candidate_rows: list[tuple[int, int, str, dict[str, Any]]] = []
+        expected_column_names = {
+            "row_id",
+            "active_character_preset_id",
+            "active_behavior_preset_id",
+            "active_conversation_preset_id",
+            "active_memory_preset_id",
+            "active_motion_preset_id",
+            "system_values_json",
+            "revision",
+            "updated_at",
+        }
+        temp_table_rows = connection.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table'
+              AND name GLOB 'settings_editor_state_v*'
+            ORDER BY name ASC
+            """
+        ).fetchall()
+        for temp_table_row in temp_table_rows:
+            table_name = str(temp_table_row["name"])
+            if not self._table_has_columns(
+                connection=connection,
+                table_name=table_name,
+                expected_column_names=expected_column_names,
+            ):
+                continue
+            quoted_table_name = _quoted_identifier(table_name)
+            row = connection.execute(
+                f"""
+                SELECT
+                    active_character_preset_id,
+                    active_behavior_preset_id,
+                    active_conversation_preset_id,
+                    active_memory_preset_id,
+                    active_motion_preset_id,
+                    system_values_json,
+                    revision,
+                    updated_at
+                FROM {quoted_table_name}
+                WHERE row_id = 1
+                """
+            ).fetchone()
+            if row is None:
+                continue
+            recovered_row = {
+                "active_character_preset_id": str(row["active_character_preset_id"]),
+                "active_behavior_preset_id": str(row["active_behavior_preset_id"]),
+                "active_conversation_preset_id": str(row["active_conversation_preset_id"]),
+                "active_memory_preset_id": str(row["active_memory_preset_id"]),
+                "active_motion_preset_id": str(row["active_motion_preset_id"]),
+                "system_values_json": str(row["system_values_json"]),
+                "revision": int(row["revision"]),
+                "updated_at": int(row["updated_at"]),
+            }
+            candidate_rows.append(
+                (
+                    recovered_row["updated_at"],
+                    recovered_row["revision"],
+                    table_name,
+                    recovered_row,
+                )
+            )
+        if not candidate_rows:
+            return None
+        candidate_rows.sort(reverse=True)
+        return candidate_rows[0][3]
+
+    # Block: Settings editor stale residue cleanup
+    def _drop_stale_settings_editor_state_tables(
+        self,
+        *,
+        connection: sqlite3.Connection,
+    ) -> None:
+        temp_table_rows = connection.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table'
+              AND name GLOB 'settings_editor_state_v*'
+            ORDER BY name ASC
+            """
+        ).fetchall()
+        for temp_table_row in temp_table_rows:
+            table_name = str(temp_table_row["name"])
+            connection.execute(f"DROP TABLE IF EXISTS {_quoted_identifier(table_name)}")
+
+    # Block: Table existence
+    def _table_exists(
+        self,
+        connection: sqlite3.Connection,
+        table_name: str,
+    ) -> bool:
+        row = connection.execute(
+            """
+            SELECT 1
+            FROM sqlite_master
+            WHERE type = 'table'
+              AND name = ?
+            """,
+            (table_name,),
+        ).fetchone()
+        return row is not None
+
+    # Block: Table column check
+    def _table_has_columns(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        table_name: str,
+        expected_column_names: set[str],
+    ) -> bool:
+        quoted_table_name = _quoted_identifier(table_name)
+        column_rows = connection.execute(
+            f"""
+            PRAGMA table_info({quoted_table_name})
+            """
+        ).fetchall()
+        if not column_rows:
+            return False
+        column_names = {str(row["name"]) for row in column_rows}
+        return expected_column_names.issubset(column_names)
+
     def _ensure_settings_editor_schema_v12(
         self,
         *,
@@ -5064,7 +5314,7 @@ class SqliteStateStore:
             """
         ).fetchall()
         if not column_rows:
-            return
+            raise RuntimeError("settings_editor_state table is missing after bootstrap normalization")
         column_names = {str(row["name"]) for row in column_rows}
         expected_column_names = {
             "row_id",
@@ -8606,6 +8856,9 @@ class SqliteStateStore:
                     now_ms,
                 ),
             )
+        current_user_version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+        if current_user_version != SCHEMA_VERSION:
+            connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     # Block: Singleton seed
     def _seed_singletons(self, connection: sqlite3.Connection, now_ms: int) -> None:
@@ -12827,6 +13080,11 @@ def _merged_unique_strings(*groups: list[str]) -> list[str]:
 
 def _opaque_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex}"
+
+
+# Block: SQLite identifier quoting
+def _quoted_identifier(name: str) -> str:
+    return '"' + name.replace('"', '""') + '"'
 
 
 def _json_text(value: Any) -> str:
