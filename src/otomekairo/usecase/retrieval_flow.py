@@ -118,6 +118,15 @@ def build_retrieval_artifacts(
             )
             for memory_entry in selection_artifacts.memory_bundle["relationship_items"]
         ],
+        "preference_items": [
+            _memory_entry_for_cognition(
+                memory_entry,
+                resolved_at=resolved_at,
+                event_about_time_by_id=event_about_time_by_id,
+                state_about_time_by_id=state_about_time_by_id,
+            )
+            for memory_entry in selection_artifacts.memory_bundle["preference_items"]
+        ],
         "reflection_items": [
             _memory_entry_for_cognition(
                 memory_entry,

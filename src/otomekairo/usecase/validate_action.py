@@ -213,13 +213,22 @@ def _score_candidate(
     task_snapshot = cognition_input["task_snapshot"]
     action_selection_context = cognition_input["action_selection_context"]
     current_observation = cognition_input["current_observation"]
-    learned_aversions = selection_profile["learned_aversions"]
+    stable_preferences = _required_object(
+        action_selection_context,
+        "stable_preferences",
+        "cognition_input.action_selection_context.stable_preferences",
+    )
+    disliked_preferences = _required_list(
+        stable_preferences,
+        "dislikes",
+        "cognition_input.action_selection_context.stable_preferences.dislikes",
+    )
     habit_biases = selection_profile["habit_biases"]
     hard_gate_passed = _passes_hard_gate(
         proposal=proposal,
         pending_channel=pending_channel,
         cognition_input=cognition_input,
-        learned_aversions=learned_aversions,
+        disliked_preferences=disliked_preferences,
         habit_biases=habit_biases,
     )
     priority_hint_score = _proposal_priority_score(proposal)
@@ -286,7 +295,7 @@ def _passes_hard_gate(
     proposal: dict[str, Any],
     pending_channel: str,
     cognition_input: dict[str, Any],
-    learned_aversions: list[dict[str, Any]],
+    disliked_preferences: list[dict[str, Any]],
     habit_biases: dict[str, Any],
 ) -> bool:
     action_type = _validated_action_type(proposal)
@@ -332,7 +341,7 @@ def _passes_hard_gate(
             return False
     return not _has_strong_aversion(
         action_type=action_type,
-        learned_aversions=learned_aversions,
+        disliked_preferences=disliked_preferences,
         habit_biases=habit_biases,
     )
 
@@ -372,13 +381,18 @@ def _persona_consistency_score(
             "selection_profile.relationship_priorities",
         ),
     )
+    stable_preferences = _required_object(
+        action_selection_context,
+        "stable_preferences",
+        "cognition_input.action_selection_context.stable_preferences",
+    )
     preference_alignment = _preference_alignment(
         action_type=action_type,
         proposal=proposal,
-        learned_preferences=_required_list(
-            selection_profile,
-            "learned_preferences",
-            "selection_profile.learned_preferences",
+        preferred_preferences=_required_list(
+            stable_preferences,
+            "likes",
+            "cognition_input.action_selection_context.stable_preferences.likes",
         ),
         habit_biases=_required_object(
             selection_profile,
@@ -390,15 +404,15 @@ def _persona_consistency_score(
     )
     aversion_penalty = _aversion_penalty(
         action_type=action_type,
-        learned_aversions=_required_list(
-            selection_profile,
-            "learned_aversions",
-            "selection_profile.learned_aversions",
+        disliked_preferences=_required_list(
+            stable_preferences,
+            "dislikes",
+            "cognition_input.action_selection_context.stable_preferences.dislikes",
         ),
         revoked_preferences=_required_list(
-            selection_profile,
-            "revoked_preferences",
-            "selection_profile.revoked_preferences",
+            stable_preferences,
+            "revoked",
+            "cognition_input.action_selection_context.stable_preferences.revoked",
         ),
         habit_biases=_required_object(
             selection_profile,
@@ -673,7 +687,7 @@ def _preference_alignment(
     *,
     action_type: str,
     proposal: dict[str, Any],
-    learned_preferences: list[dict[str, Any]],
+    preferred_preferences: list[dict[str, Any]],
     habit_biases: dict[str, Any],
     action_selection_context: dict[str, Any],
     current_observation: dict[str, Any],
@@ -695,17 +709,17 @@ def _preference_alignment(
     if observation_kind is not None and observation_kind in preferred_observation_kinds:
         base_score += 0.10
     base_score += _matched_preference_weight(
-        entries=learned_preferences,
+        entries=preferred_preferences,
         domain="action_type",
         target_key=action_type,
-        field_name="selection_profile.learned_preferences",
+        field_name="cognition_input.action_selection_context.stable_preferences.likes",
     ) * 0.20
     if observation_kind is not None:
         base_score += _matched_preference_weight(
-            entries=learned_preferences,
+            entries=preferred_preferences,
             domain="observation_kind",
             target_key=observation_kind,
-            field_name="selection_profile.learned_preferences",
+            field_name="cognition_input.action_selection_context.stable_preferences.likes",
         ) * 0.12
     base_score += _memory_support_score(
         action_type=action_type,
@@ -749,6 +763,11 @@ def _memory_support_score(
         "relationship_texts",
         "cognition_input.action_selection_context.relationship_texts",
     )
+    preference_texts = _required_list(
+        action_selection_context,
+        "preference_texts",
+        "cognition_input.action_selection_context.preference_texts",
+    )
     reflection_entries = _required_list(
         action_selection_context,
         "reflection_entries",
@@ -779,6 +798,8 @@ def _memory_support_score(
             return 0.30
         if _negative_affect_support(affect_entries=affect_entries) >= 0.70:
             return 0.35
+        if preference_texts:
+            return 0.60
         if episodic_texts or recent_context_texts or recent_dialog:
             return 0.65
         return 0.75
@@ -787,13 +808,15 @@ def _memory_support_score(
             return 0.95
         if relationship_texts:
             return 0.85
+        if preference_texts:
+            return 0.82
         if affect_entries:
             return 0.78
         if working_memory_texts or recent_context_texts or recent_dialog:
             return 0.70
         return 0.45
     if action_type == "look":
-        if relationship_texts or affect_entries:
+        if relationship_texts or preference_texts or affect_entries:
             return 0.80
         if working_memory_texts or recent_context_texts or recent_dialog:
             return 0.70
@@ -864,25 +887,25 @@ def _negative_affect_support(
 def _aversion_penalty(
     *,
     action_type: str,
-    learned_aversions: list[dict[str, Any]],
+    disliked_preferences: list[dict[str, Any]],
     revoked_preferences: list[dict[str, Any]],
     habit_biases: dict[str, Any],
 ) -> float:
     penalty = _matched_preference_weight(
-        entries=learned_aversions,
+        entries=disliked_preferences,
         domain="action_type",
         target_key=action_type,
-        field_name="selection_profile.learned_aversions",
+        field_name="cognition_input.action_selection_context.stable_preferences.dislikes",
     )
     observation_kind = _observation_kind_for_action(action_type)
     if observation_kind is not None:
         penalty = max(
             penalty,
             _matched_preference_weight(
-                entries=learned_aversions,
+                entries=disliked_preferences,
                 domain="observation_kind",
                 target_key=observation_kind,
-                field_name="selection_profile.learned_aversions",
+                field_name="cognition_input.action_selection_context.stable_preferences.dislikes",
             ) * 0.85,
         )
     penalty = max(
@@ -912,7 +935,7 @@ def _revoked_preference_penalty(
         entries=revoked_preferences,
         domain="action_type",
         target_key=action_type,
-        field_name="selection_profile.revoked_preferences",
+        field_name="cognition_input.action_selection_context.stable_preferences.revoked",
     ) * 0.55
     observation_kind = _observation_kind_for_action(action_type)
     if observation_kind is not None:
@@ -922,7 +945,7 @@ def _revoked_preference_penalty(
                 entries=revoked_preferences,
                 domain="observation_kind",
                 target_key=observation_kind,
-                field_name="selection_profile.revoked_preferences",
+                field_name="cognition_input.action_selection_context.stable_preferences.revoked",
             ) * 0.45,
         )
     return _normalized_score(penalty)
@@ -1148,15 +1171,15 @@ def _persona_update_support_score(
 def _has_strong_aversion(
     *,
     action_type: str,
-    learned_aversions: list[dict[str, Any]],
+    disliked_preferences: list[dict[str, Any]],
     habit_biases: dict[str, Any],
 ) -> bool:
     del habit_biases
     strong_action_type_aversion = _matched_preference_entry(
-        entries=learned_aversions,
+        entries=disliked_preferences,
         domain="action_type",
         target_key=action_type,
-        field_name="selection_profile.learned_aversions",
+        field_name="cognition_input.action_selection_context.stable_preferences.dislikes",
     )
     if (
         strong_action_type_aversion is not None
@@ -1168,10 +1191,10 @@ def _has_strong_aversion(
     strong_observation_aversion = None
     if observation_kind is not None:
         strong_observation_aversion = _matched_preference_entry(
-            entries=learned_aversions,
+            entries=disliked_preferences,
             domain="observation_kind",
             target_key=observation_kind,
-            field_name="selection_profile.learned_aversions",
+            field_name="cognition_input.action_selection_context.stable_preferences.dislikes",
         )
     if (
         strong_observation_aversion is not None

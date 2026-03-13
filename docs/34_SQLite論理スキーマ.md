@@ -42,7 +42,7 @@
 ### テーブルの分類
 
 - append-only の正本ログは、`ui_outbound_events`、`input_journal`、`events`、`action_history`、`retrieval_runs`、`revisions`、`commit_records` とする
-- 更新で育つテーブルは、`db_meta`、`runtime_leases`、`self_state`、`runtime_settings`、`settings_editor_state`、`character_presets`、`behavior_presets`、`conversation_presets`、`memory_presets`、`motion_presets`、`camera_connections`、`attention_state`、`body_state`、`world_state`、`drive_state`、`task_state`、`working_memory_items`、`recent_event_window_items`、`skill_registry`、`pending_inputs`、`settings_overrides`、`settings_change_sets`、`memory_states`、`preference_memory`、`event_affects`、`event_links`、`event_threads`、`event_about_time`、`state_about_time`、`state_links`、`event_entities`、`state_entities`、`event_preview_cache`、`memory_jobs`、`memory_job_payloads`、`vec_items` とする
+- 更新で育つテーブルは、`db_meta`、`runtime_leases`、`self_state`、`runtime_settings`、`settings_editor_state`、`character_presets`、`behavior_presets`、`conversation_presets`、`memory_presets`、`motion_presets`、`camera_connections`、`attention_state`、`body_state`、`world_state`、`drive_state`、`task_state`、`working_memory_items`、`recent_event_window_items`、`skill_registry`、`pending_inputs`、`settings_overrides`、`settings_change_sets`、`memory_states`、`preference_memory`、`stable_preference_projection`、`event_affects`、`event_links`、`event_threads`、`event_about_time`、`state_about_time`、`state_links`、`event_entities`、`state_entities`、`event_preview_cache`、`memory_jobs`、`memory_job_payloads`、`runtime_housekeeping_state`、`vec_items` とする
 - append-only テーブルは、論理削除でなく追記を基本とし、通常更新を前提にしない
 - 例外として `event_preview_cache`、`memory_jobs`、`pending_inputs`、`settings_overrides`、`settings_change_sets` は更新を前提とする
 
@@ -360,13 +360,25 @@ flowchart TD
 
 - 役割: 好悪のような誤断定しやすい傾向を専用管理する
 - 主キー: `preference_id TEXT PRIMARY KEY`
-- 必須列: `owner_scope`, `target_entity_ref_json`, `domain`, `polarity`, `status`, `confidence`, `evidence_event_ids_json`, `created_at`, `updated_at`
+- 必須列: `owner_scope`, `target_entity_ref_json`, `target_key`, `domain`, `polarity`, `status`, `confidence`, `evidence_event_ids_json`, `created_at`, `updated_at`
 - `owner_scope` は、少なくとも `self`、`other_entity` を区別する
 - `target_entity_ref_json` は、少なくとも `target_kind`、`target_key` を持つ JSON とする
+- `target_key` は、`target_entity_ref_json` から抽出した scalar identity とし、upsert と projection の一致判定は raw JSON 文字列ではなくこの列を正本にする
 - 初期実装の `target_entity_ref_json.target_kind` は、少なくとも `action_type`、`observation_kind` を区別する
 - `polarity` は、`like`、`dislike` に固定する
 - `status` は、`candidate`、`confirmed`、`revoked` に固定する
-- 主要索引: `(owner_scope, status, updated_at DESC)`, `(domain, polarity, status)`
+- 主要索引: `(owner_scope, status, updated_at DESC)`, `(domain, polarity, status)`, `(owner_scope, domain, target_key, polarity, updated_at DESC)`
+
+<!-- Block: Stable Preference Projection -->
+### `stable_preference_projection`
+
+- 役割: `preference_memory` の履歴から、短周期 stable context に使う current projection だけを保持する
+- 主キー: `(owner_scope, domain, target_key, polarity)`
+- 必須列: `target_entity_ref_json`, `target_key`, `preference_id`, `status`, `confidence`, `evidence_event_ids_json`, `created_at`, `updated_at`
+- `status` は、`confirmed`、`revoked` に固定する
+- current 実装では、`owner_scope = 'self'` の行だけを stable context 読み出しに使ってよい
+- current 実装では、`target_entity_ref_json` は canonical JSON として保持するが、一意性判定は `target_key` を使う
+- 主要索引: `(owner_scope, status, confidence DESC, updated_at DESC)`
 
 <!-- Block: Event Affects -->
 ### `event_affects`
@@ -502,6 +514,15 @@ flowchart TD
 - 主要制約: `UNIQUE(idempotency_key)`
 - 主要索引: `(job_kind, created_at DESC)`
 
+<!-- Block: Runtime Housekeeping State -->
+### `runtime_housekeeping_state`
+
+- 役割: runtime owner が持つ `tidy_memory` cadence の基準時刻を永続化する
+- 主キー: `maintenance_scope TEXT PRIMARY KEY`
+- 必須列: `updated_at`
+- 任意列: `last_enqueued_at`, `last_completed_at`
+- `maintenance_scope` は、少なくとも `completed_jobs_gc`、`stale_preview_gc`、`stale_vector_gc` を区別する
+
 <!-- Block: Search Group -->
 ## 検索・派生索引テーブル
 
@@ -556,7 +577,7 @@ flowchart TD
 <!-- Block: Long Cycle Boundary -->
 ### 長周期の保存境界
 
-- 同じ長周期 transaction に含めるのは、`memory_jobs`、`memory_states`、`preference_memory`、`event_affects`、`event_links`、`event_threads`、`event_about_time`、`state_about_time`、`state_links`、`event_entities`、`state_entities`、`event_preview_cache`、`revisions`、`vec_items`、`vec_items_index`、必要なら `self_state` と `skill_registry` とする
+- 同じ長周期 transaction に含めるのは、`memory_jobs`、`memory_states`、`preference_memory`、`stable_preference_projection`、`event_affects`、`event_links`、`event_threads`、`event_about_time`、`state_about_time`、`state_links`、`event_entities`、`state_entities`、`event_preview_cache`、`revisions`、`runtime_housekeeping_state`、`vec_items`、`vec_items_index`、必要なら `self_state` と `skill_registry` とする
 - `write_memory` は、必要なら同じ長周期 transaction 内で followup の `memory_jobs` と `memory_job_payloads` を追加してよい
 - `refresh_preview` は、`event_preview_cache` と必要な followup の `memory_jobs` / `memory_job_payloads` 以外を更新してはならない
 - `quarantine_memory` は、`searchable` 系の更新と監査痕跡だけを確定する

@@ -114,5 +114,7 @@ class CognitionStateSnapshot:
     drive_state: dict[str, Any]
     task_snapshot: dict[str, Any]
     memory_snapshot: dict[str, Any]
+    stable_preference_items: list[dict[str, Any]]
+    stable_long_mood_item: dict[str, Any] | None
     retrieval_profile: dict[str, Any]
     effective_settings: dict[str, Any]

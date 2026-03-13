@@ -338,14 +338,23 @@ def _build_memory_write_e2e_report(
         db_path=db_path,
         status="confirmed",
     )
-    relationship_items = cognition_state.memory_snapshot["relationship_items"]
-    affective_items = cognition_state.memory_snapshot["affective_items"]
+    final_revoked_preferences = _read_final_preferences(
+        db_path=db_path,
+        status="revoked",
+    )
+    retrieval_relationship_items = cognition_state.memory_snapshot["relationship_items"]
+    retrieval_preference_items = cognition_state.memory_snapshot["preference_items"]
+    stable_preference_items = cognition_state.stable_preference_items
     active_preferences = [
-        _active_preference_snapshot_entry(relationship_item)
-        for relationship_item in relationship_items
-        if relationship_item["memory_kind"] == "preference"
+        _active_preference_snapshot_entry(preference_item)
+        for preference_item in stable_preference_items
+        if preference_item["memory_kind"] == "preference"
     ]
-    long_mood_state = _latest_long_mood_snapshot(affective_items)
+    long_mood_state = _latest_long_mood_snapshot(
+        [cognition_state.stable_long_mood_item]
+        if cognition_state.stable_long_mood_item is not None
+        else []
+    )
     report = {
         "report_schema_version": REPORT_SCHEMA_VERSION,
         "db_path": str(db_path),
@@ -356,16 +365,23 @@ def _build_memory_write_e2e_report(
         "failure_mode_counts": _sum_cycle_failure_mode_counts(cycle_reports),
         "database_counts": database_counts,
         "final_confirmed_preferences": final_confirmed_preferences,
+        "final_revoked_preferences": final_revoked_preferences,
         "snapshot_summary": {
             "working_memory_count": len(cognition_state.memory_snapshot["working_memory_items"]),
             "semantic_memory_count": len(cognition_state.memory_snapshot["semantic_items"]),
             "affective_memory_count": len(cognition_state.memory_snapshot["affective_items"]),
-            "relationship_memory_count": len(relationship_items),
+            "relationship_memory_count": len(retrieval_relationship_items),
+            "preference_memory_count": len(retrieval_preference_items),
             "reflection_memory_count": len(cognition_state.memory_snapshot["reflection_items"]),
             "confirmed_preferences": [
                 active_preference
                 for active_preference in active_preferences
                 if active_preference["status"] == "confirmed"
+            ],
+            "revoked_preferences": [
+                active_preference
+                for active_preference in active_preferences
+                if active_preference["status"] == "revoked"
             ],
             "long_mood_state": long_mood_state,
             "current_emotion": cognition_state.self_state["current_emotion"],
@@ -382,6 +398,7 @@ def _build_report_checks(report: dict[str, Any]) -> dict[str, bool]:
     action_type_counts = report["action_type_counts"]
     failure_mode_counts = report["failure_mode_counts"]
     final_confirmed_preferences = report["final_confirmed_preferences"]
+    final_revoked_preferences = report["final_revoked_preferences"]
     snapshot_summary = report["snapshot_summary"]
     cycle_count = int(report["cycle_count"])
     confirmed_preference_keys = {
@@ -391,6 +408,30 @@ def _build_report_checks(report: dict[str, Any]) -> dict[str, bool]:
             f"{preference_entry['polarity']}"
         )
         for preference_entry in final_confirmed_preferences
+    }
+    snapshot_confirmed_keys = {
+        (
+            f"{preference_entry['domain']}:"
+            f"{preference_entry['target_key']}:"
+            f"{preference_entry['polarity']}"
+        )
+        for preference_entry in snapshot_summary["confirmed_preferences"]
+    }
+    final_revoked_preference_keys = {
+        (
+            f"{preference_entry['domain']}:"
+            f"{preference_entry['target_key']}:"
+            f"{preference_entry['polarity']}"
+        )
+        for preference_entry in final_revoked_preferences
+    }
+    snapshot_revoked_keys = {
+        (
+            f"{preference_entry['domain']}:"
+            f"{preference_entry['target_key']}:"
+            f"{preference_entry['polarity']}"
+        )
+        for preference_entry in snapshot_summary["revoked_preferences"]
     }
     checks = {
         "write_memory_jobs_completed": int(job_totals.get("write_memory", 0)) == cycle_count,
@@ -455,6 +496,12 @@ def _build_report_checks(report: dict[str, Any]) -> dict[str, bool]:
             and int(failure_mode_counts.get("network_unavailable", 0)) >= 1
         ),
         "confirmed_preferences_materialized": len(final_confirmed_preferences) >= 4,
+        "stable_confirmed_preferences_synced": (
+            snapshot_confirmed_keys == confirmed_preference_keys
+        ),
+        "stable_revoked_preferences_synced": (
+            snapshot_revoked_keys == final_revoked_preference_keys
+        ),
         "topic_keyword_preferences_materialized": {
             "topic_keyword:展示:like",
             "topic_keyword:ホラー映画:dislike",
@@ -537,7 +584,9 @@ def format_memory_write_e2e_report(report: dict[str, Any]) -> str:
         (
             "snapshot: "
             f"confirmed_preferences db {len(final_confirmed_preferences)}, "
-            f"snapshot {len(snapshot_summary['confirmed_preferences'])}, "
+            f"stable {len(snapshot_summary['confirmed_preferences'])}, "
+            f"revoked db {len(report['final_revoked_preferences'])}, "
+            f"stable {len(snapshot_summary['revoked_preferences'])}, "
             f"long_mood {snapshot_summary['long_mood_state']}"
         ),
         "checks: " + ", ".join(
@@ -717,20 +766,20 @@ def _preference_row_summary(row: sqlite3.Row) -> dict[str, Any]:
 
 
 # Block: Active preference snapshot entry
-def _active_preference_snapshot_entry(relationship_item: dict[str, Any]) -> dict[str, Any]:
-    payload = relationship_item["payload"]
+def _active_preference_snapshot_entry(preference_item: dict[str, Any]) -> dict[str, Any]:
+    payload = preference_item["payload"]
     target_entity_ref = payload["target_entity_ref"]
     if not isinstance(target_entity_ref, dict):
-        raise RuntimeError("relationship_item.payload.target_entity_ref must be object")
+        raise RuntimeError("preference_item.payload.target_entity_ref must be object")
     return {
         "domain": str(payload["domain"]),
         "target_key": _required_non_empty_string(
             target_entity_ref.get("target_key"),
-            "relationship_item target_key must be non-empty string",
+            "preference_item target_key must be non-empty string",
         ),
         "polarity": str(payload["polarity"]),
         "status": str(payload["status"]),
-        "confidence": float(relationship_item["confidence"]),
+        "confidence": float(preference_item["confidence"]),
     }
 
 

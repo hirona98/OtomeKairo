@@ -9,7 +9,6 @@ from typing import Any
 BIAS_SALIENCE_THRESHOLD = 0.15
 BIAS_NEUTRAL_THRESHOLD = 0.05
 MAX_TRAIT_ITEMS = 7
-MAX_PREFERENCE_ITEMS = 4
 MAX_BIAS_ITEMS = 3
 MAX_HABIT_ITEMS = 3
 
@@ -41,8 +40,6 @@ def build_persona_prompt_projection(*, selection_profile: dict[str, Any]) -> dic
     return {
         "salient_traits": _project_traits(selection_profile["trait_values"]),
         "interaction_style": _project_interaction_style(selection_profile["interaction_style"]),
-        "learned_preferences": _project_preferences(selection_profile["learned_preferences"]),
-        "learned_aversions": _project_preferences(selection_profile["learned_aversions"]),
         "habit_biases": _project_habit_biases(selection_profile["habit_biases"]),
         "emotion_bias": _project_biases(selection_profile["emotion_bias"]),
         "drive_bias": _project_biases(selection_profile["drive_bias"]),
@@ -89,42 +86,6 @@ def _project_interaction_style(interaction_style: Any) -> dict[str, str]:
             raise RuntimeError(f"selection_profile.interaction_style.{field_name} must be string")
         projected[field_name] = raw_value
     return projected
-
-
-# Block: Preference projection
-def _project_preferences(preferences: Any) -> list[dict[str, Any]]:
-    if not isinstance(preferences, list):
-        raise RuntimeError("selection_profile preferences must be a list")
-    projected = []
-    for entry in preferences:
-        if not isinstance(entry, dict):
-            raise RuntimeError("selection_profile preferences must contain only objects")
-        domain = entry.get("domain")
-        target_key = entry.get("target_key")
-        weight = entry.get("weight")
-        evidence_count = entry.get("evidence_count")
-        if (
-            not isinstance(domain, str)
-            or not domain
-            or not isinstance(target_key, str)
-            or not target_key
-            or not isinstance(evidence_count, int)
-            or isinstance(evidence_count, bool)
-        ):
-            raise RuntimeError("selection_profile preference entry is invalid")
-        projected.append(
-            {
-                "domain": domain,
-                "target_key": target_key,
-                "weight": round(_normalized_number(weight, field_name=f"{domain}.{target_key}.weight"), 2),
-                "evidence_count": evidence_count,
-            }
-        )
-    projected.sort(
-        key=lambda item: (-abs(float(item["weight"])), -int(item["evidence_count"]), str(item["domain"]), str(item["target_key"]))
-    )
-    return projected[:MAX_PREFERENCE_ITEMS]
-
 
 # Block: Habit projection
 def _project_habit_biases(habit_biases: Any) -> dict[str, list[str]]:

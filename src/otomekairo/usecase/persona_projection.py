@@ -31,6 +31,7 @@ def build_attention_snapshot(
     *,
     current_observation: dict[str, Any],
     selection_profile: dict[str, Any],
+    stable_preferences: dict[str, Any],
     task_snapshot: dict[str, Any],
     resolved_at: int,
 ) -> dict[str, Any]:
@@ -58,6 +59,7 @@ def build_attention_snapshot(
             candidate=candidate,
             current_observation=current_observation,
             selection_profile=selection_profile,
+            stable_preferences=stable_preferences,
         )
         for candidate in candidates
     ]
@@ -108,6 +110,7 @@ def build_skill_candidates(
     *,
     current_observation: dict[str, Any],
     selection_profile: dict[str, Any],
+    stable_preferences: dict[str, Any],
     behavior_settings: dict[str, Any],
     body_state: dict[str, Any],
     task_snapshot: dict[str, Any],
@@ -115,6 +118,7 @@ def build_skill_candidates(
     score_breakdowns = _self_initiated_score_breakdowns(
         current_observation=current_observation,
         selection_profile=selection_profile,
+        stable_preferences=stable_preferences,
         body_state=body_state,
         task_snapshot=task_snapshot,
     )
@@ -216,6 +220,7 @@ def _score_attention_candidate(
     candidate: dict[str, Any],
     current_observation: dict[str, Any],
     selection_profile: dict[str, Any],
+    stable_preferences: dict[str, Any],
 ) -> dict[str, Any]:
     candidate_type = str(candidate["candidate_type"])
     if candidate_type == "observation":
@@ -236,6 +241,7 @@ def _score_attention_candidate(
         experience_bias_score = _observation_attention_experience_bias(
             observation_kind=str(candidate["observation_kind"]),
             selection_profile=selection_profile,
+            stable_preferences=stable_preferences,
         )
         explicitness_score = _observation_attention_explicitness(
             current_observation=current_observation,
@@ -259,6 +265,7 @@ def _score_attention_candidate(
         experience_bias_score = _task_attention_experience_bias(
             task_entry=task_entry,
             selection_profile=selection_profile,
+            stable_preferences=stable_preferences,
         )
         explicitness_score = 0.55
         novelty_score = _task_attention_novelty(selection_profile=selection_profile)
@@ -274,6 +281,7 @@ def _score_attention_candidate(
         )
         experience_bias_score = _relationship_attention_experience_bias(
             selection_profile=selection_profile,
+            stable_preferences=stable_preferences,
         )
         explicitness_score = _relationship_attention_explicitness(
             relationship_entry=relationship_entry,
@@ -376,11 +384,13 @@ def _observation_attention_experience_bias(
     *,
     observation_kind: str,
     selection_profile: dict[str, Any],
+    stable_preferences: dict[str, Any],
 ) -> float:
     return _experience_bias_from_preferences(
         action_type=None,
         observation_kind=observation_kind,
         selection_profile=selection_profile,
+        stable_preferences=stable_preferences,
     )
 
 
@@ -430,12 +440,14 @@ def _task_attention_experience_bias(
     *,
     task_entry: dict[str, Any],
     selection_profile: dict[str, Any],
+    stable_preferences: dict[str, Any],
 ) -> float:
     action_type = "browse" if str(task_entry["task_kind"]) == "browse" else None
     return _experience_bias_from_preferences(
         action_type=action_type,
         observation_kind=None,
         selection_profile=selection_profile,
+        stable_preferences=stable_preferences,
     )
 
 
@@ -478,16 +490,19 @@ def _relationship_attention_personality_fit(
 def _relationship_attention_experience_bias(
     *,
     selection_profile: dict[str, Any],
+    stable_preferences: dict[str, Any],
 ) -> float:
     speak_bias = _experience_bias_from_preferences(
         action_type="speak",
         observation_kind="chat_message",
         selection_profile=selection_profile,
+        stable_preferences=stable_preferences,
     )
     notify_bias = _experience_bias_from_preferences(
         action_type="notify",
         observation_kind="chat_message",
         selection_profile=selection_profile,
+        stable_preferences=stable_preferences,
     )
     return max(speak_bias, notify_bias)
 
@@ -509,30 +524,38 @@ def _self_initiated_score_breakdowns(
     *,
     current_observation: dict[str, Any],
     selection_profile: dict[str, Any],
+    stable_preferences: dict[str, Any],
     body_state: dict[str, Any],
     task_snapshot: dict[str, Any],
 ) -> list[dict[str, Any]]:
     return [
         _task_progress_breakdown(
             selection_profile=selection_profile,
+            stable_preferences=stable_preferences,
             task_snapshot=task_snapshot,
         ),
         _unexplored_check_breakdown(
             current_observation=current_observation,
             selection_profile=selection_profile,
+            stable_preferences=stable_preferences,
             body_state=body_state,
         ),
         _self_maintenance_breakdown(
             selection_profile=selection_profile,
+            stable_preferences=stable_preferences,
             body_state=body_state,
         ),
-        _skill_rehearsal_breakdown(selection_profile=selection_profile),
+        _skill_rehearsal_breakdown(
+            selection_profile=selection_profile,
+            stable_preferences=stable_preferences,
+        ),
     ]
 
 
 def _task_progress_breakdown(
     *,
     selection_profile: dict[str, Any],
+    stable_preferences: dict[str, Any],
     task_snapshot: dict[str, Any],
 ) -> dict[str, Any]:
     active_tasks = task_snapshot["active_tasks"]
@@ -548,6 +571,7 @@ def _task_progress_breakdown(
     curiosity_fit = _clamp_unit(0.12 + _trait_value(selection_profile["trait_values"], "curiosity") * 0.10)
     habit_match = _action_habit_match(
         selection_profile=selection_profile,
+        stable_preferences=stable_preferences,
         action_types=["browse"],
         observation_kinds=[],
     )
@@ -568,6 +592,7 @@ def _unexplored_check_breakdown(
     *,
     current_observation: dict[str, Any],
     selection_profile: dict[str, Any],
+    stable_preferences: dict[str, Any],
     body_state: dict[str, Any],
 ) -> dict[str, Any]:
     curiosity = _trait_value(selection_profile["trait_values"], "curiosity")
@@ -583,6 +608,7 @@ def _unexplored_check_breakdown(
     observation_kind = _attention_input_kind(current_observation=current_observation)
     habit_match = _action_habit_match(
         selection_profile=selection_profile,
+        stable_preferences=stable_preferences,
         action_types=["look", "browse"],
         observation_kinds=[observation_kind],
     )
@@ -604,6 +630,7 @@ def _unexplored_check_breakdown(
 def _self_maintenance_breakdown(
     *,
     selection_profile: dict[str, Any],
+    stable_preferences: dict[str, Any],
     body_state: dict[str, Any],
 ) -> dict[str, Any]:
     caution = _trait_value(selection_profile["trait_values"], "caution")
@@ -618,6 +645,7 @@ def _self_maintenance_breakdown(
     curiosity_fit = _clamp_unit(0.08 + (1.0 - caution) * 0.10)
     habit_match = _action_habit_match(
         selection_profile=selection_profile,
+        stable_preferences=stable_preferences,
         action_types=["wait"],
         observation_kinds=[],
     )
@@ -637,13 +665,18 @@ def _self_maintenance_breakdown(
 def _skill_rehearsal_breakdown(
     *,
     selection_profile: dict[str, Any],
+    stable_preferences: dict[str, Any],
 ) -> dict[str, Any]:
     preferred_actions = _required_list_of_strings(
         selection_profile["habit_biases"],
         "preferred_action_types",
         "selection_profile.habit_biases.preferred_action_types",
     )
-    has_preferences = bool(preferred_actions) or bool(selection_profile["learned_preferences"])
+    has_preferences = (
+        bool(preferred_actions)
+        or bool(_required_preference_entries(stable_preferences, "likes", "stable_preferences.likes"))
+        or bool(_required_preference_entries(stable_preferences, "dislikes", "stable_preferences.dislikes"))
+    )
     persistence = _trait_value(selection_profile["trait_values"], "persistence")
     curiosity = _trait_value(selection_profile["trait_values"], "curiosity")
     task_progress_fit = _clamp_unit(0.28 + persistence * 0.20)
@@ -652,6 +685,7 @@ def _skill_rehearsal_breakdown(
     curiosity_fit = _clamp_unit(0.24 + curiosity * 0.24)
     habit_match = _action_habit_match(
         selection_profile=selection_profile,
+        stable_preferences=stable_preferences,
         action_types=preferred_actions[:2],
         observation_kinds=[],
     )
@@ -836,6 +870,7 @@ def _experience_bias_from_preferences(
     action_type: str | None,
     observation_kind: str | None,
     selection_profile: dict[str, Any],
+    stable_preferences: dict[str, Any],
 ) -> float:
     habit_biases = selection_profile["habit_biases"]
     preferred_action_types = _required_list_of_strings(
@@ -855,29 +890,45 @@ def _experience_bias_from_preferences(
         score += 0.14
     if action_type is not None:
         score += _matched_preference_weight(
-            entries=selection_profile["learned_preferences"],
+            entries=_required_preference_entries(
+                stable_preferences,
+                "likes",
+                "stable_preferences.likes",
+            ),
             domain="action_type",
             target_key=action_type,
-            field_name="selection_profile.learned_preferences",
+            field_name="stable_preferences.likes",
         ) * 0.20
         score -= _matched_preference_weight(
-            entries=selection_profile["learned_aversions"],
+            entries=_required_preference_entries(
+                stable_preferences,
+                "dislikes",
+                "stable_preferences.dislikes",
+            ),
             domain="action_type",
             target_key=action_type,
-            field_name="selection_profile.learned_aversions",
+            field_name="stable_preferences.dislikes",
         ) * 0.32
     if observation_kind is not None:
         score += _matched_preference_weight(
-            entries=selection_profile["learned_preferences"],
+            entries=_required_preference_entries(
+                stable_preferences,
+                "likes",
+                "stable_preferences.likes",
+            ),
             domain="observation_kind",
             target_key=observation_kind,
-            field_name="selection_profile.learned_preferences",
+            field_name="stable_preferences.likes",
         ) * 0.16
         score -= _matched_preference_weight(
-            entries=selection_profile["learned_aversions"],
+            entries=_required_preference_entries(
+                stable_preferences,
+                "dislikes",
+                "stable_preferences.dislikes",
+            ),
             domain="observation_kind",
             target_key=observation_kind,
-            field_name="selection_profile.learned_aversions",
+            field_name="stable_preferences.dislikes",
         ) * 0.28
     return _clamp_unit(score)
 
@@ -885,6 +936,7 @@ def _experience_bias_from_preferences(
 def _action_habit_match(
     *,
     selection_profile: dict[str, Any],
+    stable_preferences: dict[str, Any],
     action_types: list[str],
     observation_kinds: list[str],
 ) -> float:
@@ -898,6 +950,7 @@ def _action_habit_match(
                 action_type=action_type,
                 observation_kind=None,
                 selection_profile=selection_profile,
+                stable_preferences=stable_preferences,
             ),
         )
     for observation_kind in observation_kinds:
@@ -907,9 +960,24 @@ def _action_habit_match(
                 action_type=None,
                 observation_kind=observation_kind,
                 selection_profile=selection_profile,
+                stable_preferences=stable_preferences,
             ),
         )
     return best_score
+
+
+# Block: Preference entry validator
+def _required_preference_entries(
+    stable_preferences: Any,
+    key: str,
+    field_name: str,
+) -> list[dict[str, Any]]:
+    if not isinstance(stable_preferences, dict):
+        raise ValueError("stable_preferences must be object")
+    entries = stable_preferences.get(key)
+    if not isinstance(entries, list):
+        raise ValueError(f"{field_name} must be list")
+    return entries
 
 
 def _matched_preference_weight(

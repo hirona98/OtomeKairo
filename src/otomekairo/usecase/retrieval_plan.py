@@ -20,6 +20,7 @@ EPISODIC_LIMIT = 3
 SEMANTIC_LIMIT = 3
 AFFECTIVE_LIMIT = 2
 RELATIONSHIP_LIMIT = 2
+PREFERENCE_LIMIT = 2
 REFLECTION_LIMIT = 2
 
 
@@ -186,6 +187,7 @@ def _build_selection_limits(*, retrieval_profile: dict[str, Any]) -> dict[str, i
         "semantic_items": SEMANTIC_LIMIT,
         "affective_items": AFFECTIVE_LIMIT,
         "relationship_items": RELATIONSHIP_LIMIT,
+        "preference_items": PREFERENCE_LIMIT,
         "reflection_items": REFLECTION_LIMIT,
         "recent_event_window": int(retrieval_profile["recent_window_limit"]),
         "semantic_candidate_top_k": int(retrieval_profile["semantic_top_k"]),

@@ -58,8 +58,15 @@ from otomekairo.usecase.write_memory_plan import (
 
 # Block: Schema constants
 SCHEMA_NAME = "core_schema"
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 17
 EMBEDDING_VECTOR_DIMENSION = 32
+STABLE_PREFERENCE_BUCKET_LIMIT = 8
+RETRIEVAL_STABLE_PREFERENCE_BUCKET_LIMIT = 24
+TIDY_MEMORY_SCOPES = (
+    "completed_jobs_gc",
+    "stale_preview_gc",
+    "stale_vector_gc",
+)
 LEGACY_SETTING_KEY_ALIASES = {
     "llm.model": "llm.default_model",
     "speech.tts.aivis_cloud.api_key": "speech.tts.api_key",
@@ -133,6 +140,7 @@ class SqliteStateStore:
                 connection.executescript(self._schema_sql())
             else:
                 self._migrate_schema(connection, now_ms)
+            self._normalize_bootstrap_tables(connection=connection)
             self._ensure_vec_index_schema(connection=connection)
             self._ensure_db_meta(connection, now_ms)
             self._ensure_settings_editor_schema_v12(
@@ -337,6 +345,117 @@ class SqliteStateStore:
             "effective_settings": self.read_effective_settings(default_settings),
             "pending_overrides": pending_overrides,
         }
+
+    # Block: Tidy memory owner state read
+    def read_tidy_memory_owner_state(
+        self,
+        *,
+        completed_jobs_cutoff_at: int,
+        stale_preview_cutoff_at: int,
+        stale_vector_cutoff_at: int,
+    ) -> dict[str, dict[str, Any]]:
+        for cutoff_at, field_name in (
+            (completed_jobs_cutoff_at, "completed_jobs_cutoff_at"),
+            (stale_preview_cutoff_at, "stale_preview_cutoff_at"),
+            (stale_vector_cutoff_at, "stale_vector_cutoff_at"),
+        ):
+            if not isinstance(cutoff_at, int):
+                raise StoreValidationError(f"{field_name} must be integer")
+            if cutoff_at <= 0:
+                raise StoreValidationError(f"{field_name} must be positive")
+        with self._connect() as connection:
+            completed_jobs_count = int(
+                connection.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM memory_jobs
+                    WHERE status IN ('completed', 'dead_letter')
+                      AND completed_at IS NOT NULL
+                      AND completed_at < ?
+                    """,
+                    (completed_jobs_cutoff_at,),
+                ).fetchone()[0]
+            )
+            stale_preview_count = int(
+                connection.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM event_preview_cache
+                    INNER JOIN events
+                            ON events.event_id = event_preview_cache.event_id
+                    WHERE events.searchable = 0
+                      AND COALESCE(events.updated_at, events.created_at) < ?
+                    """,
+                    (stale_preview_cutoff_at,),
+                ).fetchone()[0]
+            )
+            stale_vector_count = int(
+                connection.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM vec_items
+                    WHERE searchable = 0
+                      AND source_updated_at < ?
+                    """,
+                    (stale_vector_cutoff_at,),
+                ).fetchone()[0]
+            )
+            housekeeping_rows = connection.execute(
+                """
+                SELECT
+                    maintenance_scope,
+                    last_enqueued_at
+                FROM runtime_housekeeping_state
+                WHERE maintenance_scope IN ('completed_jobs_gc', 'stale_preview_gc', 'stale_vector_gc')
+                """
+            ).fetchall()
+            active_rows = connection.execute(
+                """
+                SELECT
+                    json_extract(memory_job_payloads.payload_json, '$.maintenance_scope') AS maintenance_scope,
+                    MAX(
+                        CASE
+                            WHEN memory_jobs.status IN ('queued', 'claimed') THEN 1
+                            ELSE 0
+                        END
+                    ) AS has_active_job
+                FROM memory_jobs
+                INNER JOIN memory_job_payloads
+                        ON memory_job_payloads.payload_id = json_extract(memory_jobs.payload_ref_json, '$.payload_id')
+                WHERE memory_jobs.job_kind = 'tidy_memory'
+                GROUP BY json_extract(memory_job_payloads.payload_json, '$.maintenance_scope')
+                """
+            ).fetchall()
+        owner_state = {
+            maintenance_scope: {
+                "stale_count": (
+                    completed_jobs_count
+                    if maintenance_scope == "completed_jobs_gc"
+                    else stale_preview_count
+                    if maintenance_scope == "stale_preview_gc"
+                    else stale_vector_count
+                ),
+                "last_enqueued_at": None,
+                "has_active_job": False,
+            }
+            for maintenance_scope in TIDY_MEMORY_SCOPES
+        }
+        for row in housekeeping_rows:
+            maintenance_scope = row["maintenance_scope"]
+            if not isinstance(maintenance_scope, str) or maintenance_scope not in owner_state:
+                continue
+            last_enqueued_at = row["last_enqueued_at"]
+            owner_state[maintenance_scope]["last_enqueued_at"] = (
+                int(last_enqueued_at)
+                if isinstance(last_enqueued_at, int)
+                else None
+            )
+        for row in active_rows:
+            maintenance_scope = row["maintenance_scope"]
+            if not isinstance(maintenance_scope, str) or maintenance_scope not in owner_state:
+                continue
+            owner_state[maintenance_scope]["has_active_job"] = bool(row["has_active_job"])
+        return owner_state
 
     # Block: Settings editor snapshot
     def read_settings_editor(self, default_settings: dict[str, Any]) -> dict[str, Any]:
@@ -816,25 +935,31 @@ class SqliteStateStore:
                 LIMIT 6
                 """
             ).fetchall()
-            preference_rows = connection.execute(
+            stable_preference_rows = _read_stable_preference_projection_rows(
+                connection=connection,
+            )
+            retrieval_preference_rows = _read_retrieval_preference_projection_rows(
+                connection=connection,
+            )
+            stable_long_mood_row = connection.execute(
                 """
                 SELECT
-                    preference_id,
-                    owner_scope,
-                    target_entity_ref_json,
-                    domain,
-                    polarity,
-                    status,
+                    memory_state_id,
+                    memory_kind,
+                    body_text,
+                    payload_json,
                     confidence,
-                    evidence_event_ids_json,
+                    importance,
+                    memory_strength,
                     created_at,
-                    updated_at
-                FROM preference_memory
-                WHERE status IN ('candidate', 'confirmed')
-                ORDER BY updated_at DESC
-                LIMIT 6
+                    updated_at,
+                    last_confirmed_at
+                FROM memory_states
+                WHERE memory_kind = 'long_mood_state'
+                ORDER BY updated_at DESC, created_at DESC, memory_state_id DESC
+                LIMIT 1
                 """
-            ).fetchall()
+            ).fetchone()
             if observation_hint_text is not None and observation_hint_text.strip():
                 similarity_hits = _search_vec_similarity_hits(
                     connection=connection,
@@ -935,7 +1060,7 @@ class SqliteStateStore:
                 recent_event_rows=recent_event_rows,
                 memory_rows=memory_rows,
                 affect_rows=affect_rows,
-                preference_rows=preference_rows,
+                stable_preference_rows=retrieval_preference_rows,
                 event_link_rows=event_link_rows,
                 event_thread_rows=event_thread_rows,
                 event_about_time_rows=event_about_time_rows,
@@ -943,6 +1068,15 @@ class SqliteStateStore:
                 state_link_rows=state_link_rows,
                 state_about_time_rows=state_about_time_rows,
                 state_entity_rows=state_entity_rows,
+            ),
+            stable_preference_items=[
+                _preference_snapshot_entry(row)
+                for row in stable_preference_rows
+            ],
+            stable_long_mood_item=(
+                _memory_snapshot_entry(stable_long_mood_row)
+                if stable_long_mood_row is not None
+                else None
             ),
             retrieval_profile=retrieval_profile,
             effective_settings=effective_settings,
@@ -1599,7 +1733,7 @@ class SqliteStateStore:
     ) -> dict[str, Any]:
         if not isinstance(maintenance_scope, str) or not maintenance_scope:
             raise StoreValidationError("maintenance_scope must be non-empty string")
-        if maintenance_scope not in {"completed_jobs_gc", "stale_preview_gc", "stale_vector_gc"}:
+        if maintenance_scope not in TIDY_MEMORY_SCOPES:
             raise StoreValidationError("maintenance_scope is invalid")
         if isinstance(retention_cutoff_at, bool) or not isinstance(retention_cutoff_at, int):
             raise StoreValidationError("retention_cutoff_at must be integer")
@@ -3360,12 +3494,14 @@ class SqliteStateStore:
         created_at: int,
     ) -> None:
         target_entity_ref = dict(preference_update["target_entity_ref"])
-        target_entity_ref_json = _json_text(target_entity_ref)
+        target_key = _preference_target_key(target_entity_ref=target_entity_ref)
+        target_entity_ref_json = _normalized_target_entity_ref_json(target_entity_ref)
         existing_row = connection.execute(
             """
             SELECT preference_id,
                    owner_scope,
                    target_entity_ref_json,
+                   target_key,
                    domain,
                    polarity,
                    status,
@@ -3375,16 +3511,16 @@ class SqliteStateStore:
                    updated_at
             FROM preference_memory
             WHERE owner_scope = ?
-              AND target_entity_ref_json = ?
               AND domain = ?
+              AND target_key = ?
               AND polarity = ?
             ORDER BY updated_at DESC, created_at DESC, preference_id DESC
             LIMIT 1
             """,
             (
                 str(preference_update["owner_scope"]),
-                target_entity_ref_json,
                 str(preference_update["domain"]),
+                target_key,
                 str(preference_update["polarity"]),
             ),
         ).fetchone()
@@ -3410,6 +3546,7 @@ class SqliteStateStore:
                     preference_id,
                     owner_scope,
                     target_entity_ref_json,
+                    target_key,
                     domain,
                     polarity,
                     status,
@@ -3418,12 +3555,13 @@ class SqliteStateStore:
                     created_at,
                     updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     preference_id,
                     str(preference_update["owner_scope"]),
                     target_entity_ref_json,
+                    target_key,
                     str(preference_update["domain"]),
                     str(preference_update["polarity"]),
                     str(preference_update["status"]),
@@ -3443,6 +3581,22 @@ class SqliteStateStore:
                 evidence_event_ids=merged_evidence_event_ids,
                 created_at=created_at,
             )
+            self._sync_stable_preference_projection(
+                connection=connection,
+                preference_row={
+                    "preference_id": preference_id,
+                    "owner_scope": str(preference_update["owner_scope"]),
+                    "target_entity_ref_json": target_entity_ref_json,
+                    "target_key": target_key,
+                    "domain": str(preference_update["domain"]),
+                    "polarity": str(preference_update["polarity"]),
+                    "status": str(preference_update["status"]),
+                    "confidence": float(preference_update["confidence"]),
+                    "evidence_event_ids_json": _json_text(merged_evidence_event_ids),
+                    "created_at": created_at,
+                    "updated_at": created_at,
+                },
+            )
             return
         preference_id = str(existing_row["preference_id"])
         before_json = {
@@ -3456,13 +3610,17 @@ class SqliteStateStore:
         connection.execute(
             """
             UPDATE preference_memory
-            SET status = ?,
+            SET target_entity_ref_json = ?,
+                target_key = ?,
+                status = ?,
                 confidence = ?,
                 evidence_event_ids_json = ?,
                 updated_at = ?
             WHERE preference_id = ?
             """,
             (
+                target_entity_ref_json,
+                target_key,
                 str(preference_update["status"]),
                 float(preference_update["confidence"]),
                 _json_text(merged_evidence_event_ids),
@@ -3480,6 +3638,128 @@ class SqliteStateStore:
             evidence_event_ids=merged_evidence_event_ids,
             created_at=created_at,
         )
+        self._sync_stable_preference_projection(
+            connection=connection,
+            preference_row={
+                "preference_id": preference_id,
+                "owner_scope": str(existing_row["owner_scope"]),
+                "target_entity_ref_json": target_entity_ref_json,
+                "target_key": str(existing_row["target_key"]),
+                "domain": str(existing_row["domain"]),
+                "polarity": str(existing_row["polarity"]),
+                "status": str(preference_update["status"]),
+                "confidence": float(preference_update["confidence"]),
+                "evidence_event_ids_json": _json_text(merged_evidence_event_ids),
+                "created_at": int(existing_row["created_at"]),
+                "updated_at": created_at,
+            },
+        )
+
+    # Block: Stable preference projection sync
+    def _sync_stable_preference_projection(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        preference_row: dict[str, Any] | sqlite3.Row,
+    ) -> None:
+        owner_scope = str(preference_row["owner_scope"])
+        target_entity_ref_json = str(preference_row["target_entity_ref_json"])
+        target_key = str(preference_row["target_key"])
+        domain = str(preference_row["domain"])
+        polarity = str(preference_row["polarity"])
+        status = str(preference_row["status"])
+        if owner_scope != "self" or status not in {"confirmed", "revoked"}:
+            connection.execute(
+                """
+                DELETE FROM stable_preference_projection
+                WHERE owner_scope = ?
+                  AND domain = ?
+                  AND target_key = ?
+                  AND polarity = ?
+                """,
+                (owner_scope, domain, target_key, polarity),
+            )
+            return
+        connection.execute(
+            """
+            INSERT INTO stable_preference_projection (
+                owner_scope,
+                target_entity_ref_json,
+                target_key,
+                domain,
+                polarity,
+                preference_id,
+                status,
+                confidence,
+                evidence_event_ids_json,
+                created_at,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(owner_scope, domain, target_key, polarity)
+            DO UPDATE SET
+                target_entity_ref_json = excluded.target_entity_ref_json,
+                preference_id = excluded.preference_id,
+                status = excluded.status,
+                confidence = excluded.confidence,
+                evidence_event_ids_json = excluded.evidence_event_ids_json,
+                created_at = excluded.created_at,
+                updated_at = excluded.updated_at
+            """,
+            (
+                owner_scope,
+                target_entity_ref_json,
+                target_key,
+                domain,
+                polarity,
+                str(preference_row["preference_id"]),
+                status,
+                float(preference_row["confidence"]),
+                str(preference_row["evidence_event_ids_json"]),
+                int(preference_row["created_at"]),
+                int(preference_row["updated_at"]),
+            ),
+        )
+
+    # Block: Stable preference projection rebuild
+    def _rebuild_stable_preference_projection(
+        self,
+        *,
+        connection: sqlite3.Connection,
+    ) -> None:
+        connection.execute("DELETE FROM stable_preference_projection")
+        seen_keys: set[tuple[str, str, str, str]] = set()
+        for row in connection.execute(
+            """
+            SELECT
+                preference_id,
+                owner_scope,
+                target_entity_ref_json,
+                target_key,
+                domain,
+                polarity,
+                status,
+                confidence,
+                evidence_event_ids_json,
+                created_at,
+                updated_at
+            FROM preference_memory
+            ORDER BY updated_at DESC, created_at DESC, preference_id DESC
+            """
+        ).fetchall():
+            projection_key = (
+                str(row["owner_scope"]),
+                str(row["domain"]),
+                str(row["target_key"]),
+                str(row["polarity"]),
+            )
+            if projection_key in seen_keys:
+                continue
+            seen_keys.add(projection_key)
+            self._sync_stable_preference_projection(
+                connection=connection,
+                preference_row=row,
+            )
 
     # Block: Event affect upsert
     def _upsert_event_affect_with_revision(
@@ -4138,6 +4418,13 @@ class SqliteStateStore:
                 job_id=memory_job.job_id,
                 completed_at=now_ms,
             )
+            self._touch_runtime_housekeeping_state(
+                connection=connection,
+                maintenance_scope=maintenance_scope,
+                last_enqueued_at=None,
+                last_completed_at=now_ms,
+                updated_at=now_ms,
+            )
         return affected_count
 
     # Block: Tidy memory apply
@@ -4563,6 +4850,28 @@ class SqliteStateStore:
             ),
         )
 
+    # Block: Runtime housekeeping defaults
+    def _ensure_runtime_housekeeping_state_defaults(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        now_ms: int,
+    ) -> None:
+        for maintenance_scope in TIDY_MEMORY_SCOPES:
+            connection.execute(
+                """
+                INSERT INTO runtime_housekeeping_state (
+                    maintenance_scope,
+                    last_enqueued_at,
+                    last_completed_at,
+                    updated_at
+                )
+                VALUES (?, NULL, NULL, ?)
+                ON CONFLICT(maintenance_scope) DO NOTHING
+                """,
+                (maintenance_scope, now_ms),
+            )
+
     def _ensure_settings_editor_defaults(
         self,
         *,
@@ -4744,6 +5053,255 @@ class SqliteStateStore:
             )
 
     # Block: Settings editor schema normalization
+    def _normalize_bootstrap_tables(
+        self,
+        *,
+        connection: sqlite3.Connection,
+    ) -> None:
+        self._ensure_runtime_settings_table(connection=connection)
+        self._ensure_camera_connections_table(connection=connection)
+        self._ensure_settings_editor_state_table(connection=connection)
+
+    # Block: Runtime settings table normalization
+    def _ensure_runtime_settings_table(
+        self,
+        *,
+        connection: sqlite3.Connection,
+    ) -> None:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS runtime_settings (
+                row_id INTEGER PRIMARY KEY CHECK (row_id = 1),
+                values_json TEXT NOT NULL,
+                value_updated_at_json TEXT NOT NULL,
+                updated_at INTEGER NOT NULL
+            )
+            """
+        )
+
+    # Block: Camera connection table normalization
+    def _ensure_camera_connections_table(
+        self,
+        *,
+        connection: sqlite3.Connection,
+    ) -> None:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS camera_connections (
+                camera_connection_id TEXT PRIMARY KEY,
+                is_enabled INTEGER NOT NULL CHECK (is_enabled IN (0, 1)),
+                display_name TEXT NOT NULL,
+                host TEXT NOT NULL,
+                username TEXT NOT NULL,
+                password TEXT NOT NULL,
+                sort_order INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_camera_connections_sort
+                ON camera_connections (sort_order ASC, updated_at DESC)
+            """
+        )
+
+    # Block: Settings editor table normalization
+    def _ensure_settings_editor_state_table(
+        self,
+        *,
+        connection: sqlite3.Connection,
+    ) -> None:
+        if self._table_exists(connection, "settings_editor_state"):
+            self._drop_stale_settings_editor_state_tables(connection=connection)
+            return
+        recovered_editor_state = self._recover_settings_editor_state_row(
+            connection=connection,
+        )
+        self._create_settings_editor_state_table(connection=connection)
+        if recovered_editor_state is not None:
+            connection.execute(
+                """
+                INSERT INTO settings_editor_state (
+                    row_id,
+                    active_character_preset_id,
+                    active_behavior_preset_id,
+                    active_conversation_preset_id,
+                    active_memory_preset_id,
+                    active_motion_preset_id,
+                    system_values_json,
+                    revision,
+                    updated_at
+                )
+                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    recovered_editor_state["active_character_preset_id"],
+                    recovered_editor_state["active_behavior_preset_id"],
+                    recovered_editor_state["active_conversation_preset_id"],
+                    recovered_editor_state["active_memory_preset_id"],
+                    recovered_editor_state["active_motion_preset_id"],
+                    recovered_editor_state["system_values_json"],
+                    recovered_editor_state["revision"],
+                    recovered_editor_state["updated_at"],
+                ),
+            )
+        self._drop_stale_settings_editor_state_tables(connection=connection)
+
+    # Block: Settings editor current table creation
+    def _create_settings_editor_state_table(
+        self,
+        *,
+        connection: sqlite3.Connection,
+    ) -> None:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS settings_editor_state (
+                row_id INTEGER PRIMARY KEY CHECK (row_id = 1),
+                active_character_preset_id TEXT NOT NULL,
+                active_behavior_preset_id TEXT NOT NULL,
+                active_conversation_preset_id TEXT NOT NULL,
+                active_memory_preset_id TEXT NOT NULL,
+                active_motion_preset_id TEXT NOT NULL,
+                system_values_json TEXT NOT NULL,
+                revision INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            )
+            """
+        )
+
+    # Block: Settings editor repair row recovery
+    def _recover_settings_editor_state_row(
+        self,
+        *,
+        connection: sqlite3.Connection,
+    ) -> dict[str, Any] | None:
+        candidate_rows: list[tuple[int, int, str, dict[str, Any]]] = []
+        expected_column_names = {
+            "row_id",
+            "active_character_preset_id",
+            "active_behavior_preset_id",
+            "active_conversation_preset_id",
+            "active_memory_preset_id",
+            "active_motion_preset_id",
+            "system_values_json",
+            "revision",
+            "updated_at",
+        }
+        temp_table_rows = connection.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table'
+              AND name GLOB 'settings_editor_state_v*'
+            ORDER BY name ASC
+            """
+        ).fetchall()
+        for temp_table_row in temp_table_rows:
+            table_name = str(temp_table_row["name"])
+            if not self._table_has_columns(
+                connection=connection,
+                table_name=table_name,
+                expected_column_names=expected_column_names,
+            ):
+                continue
+            quoted_table_name = _quoted_identifier(table_name)
+            row = connection.execute(
+                f"""
+                SELECT
+                    active_character_preset_id,
+                    active_behavior_preset_id,
+                    active_conversation_preset_id,
+                    active_memory_preset_id,
+                    active_motion_preset_id,
+                    system_values_json,
+                    revision,
+                    updated_at
+                FROM {quoted_table_name}
+                WHERE row_id = 1
+                """
+            ).fetchone()
+            if row is None:
+                continue
+            recovered_row = {
+                "active_character_preset_id": str(row["active_character_preset_id"]),
+                "active_behavior_preset_id": str(row["active_behavior_preset_id"]),
+                "active_conversation_preset_id": str(row["active_conversation_preset_id"]),
+                "active_memory_preset_id": str(row["active_memory_preset_id"]),
+                "active_motion_preset_id": str(row["active_motion_preset_id"]),
+                "system_values_json": str(row["system_values_json"]),
+                "revision": int(row["revision"]),
+                "updated_at": int(row["updated_at"]),
+            }
+            candidate_rows.append(
+                (
+                    recovered_row["updated_at"],
+                    recovered_row["revision"],
+                    table_name,
+                    recovered_row,
+                )
+            )
+        if not candidate_rows:
+            return None
+        candidate_rows.sort(reverse=True)
+        return candidate_rows[0][3]
+
+    # Block: Settings editor stale residue cleanup
+    def _drop_stale_settings_editor_state_tables(
+        self,
+        *,
+        connection: sqlite3.Connection,
+    ) -> None:
+        temp_table_rows = connection.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table'
+              AND name GLOB 'settings_editor_state_v*'
+            ORDER BY name ASC
+            """
+        ).fetchall()
+        for temp_table_row in temp_table_rows:
+            table_name = str(temp_table_row["name"])
+            connection.execute(f"DROP TABLE IF EXISTS {_quoted_identifier(table_name)}")
+
+    # Block: Table existence
+    def _table_exists(
+        self,
+        connection: sqlite3.Connection,
+        table_name: str,
+    ) -> bool:
+        row = connection.execute(
+            """
+            SELECT 1
+            FROM sqlite_master
+            WHERE type = 'table'
+              AND name = ?
+            """,
+            (table_name,),
+        ).fetchone()
+        return row is not None
+
+    # Block: Table column check
+    def _table_has_columns(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        table_name: str,
+        expected_column_names: set[str],
+    ) -> bool:
+        quoted_table_name = _quoted_identifier(table_name)
+        column_rows = connection.execute(
+            f"""
+            PRAGMA table_info({quoted_table_name})
+            """
+        ).fetchall()
+        if not column_rows:
+            return False
+        column_names = {str(row["name"]) for row in column_rows}
+        return expected_column_names.issubset(column_names)
+
     def _ensure_settings_editor_schema_v12(
         self,
         *,
@@ -4756,7 +5314,7 @@ class SqliteStateStore:
             """
         ).fetchall()
         if not column_rows:
-            return
+            raise RuntimeError("settings_editor_state table is missing after bootstrap normalization")
         column_names = {str(row["name"]) for row in column_rows}
         expected_column_names = {
             "row_id",
@@ -5810,7 +6368,7 @@ class SqliteStateStore:
         target_refs: list[dict[str, str]] | None,
         created_at: int,
     ) -> list[str]:
-        if maintenance_scope not in {"completed_jobs_gc", "stale_preview_gc", "stale_vector_gc"}:
+        if maintenance_scope not in TIDY_MEMORY_SCOPES:
             raise StoreValidationError("tidy_memory maintenance_scope is invalid")
         if retention_cutoff_at <= 0:
             raise StoreValidationError("tidy_memory retention_cutoff_at must be positive")
@@ -5833,6 +6391,12 @@ class SqliteStateStore:
             retention_cutoff_at=retention_cutoff_at,
             target_refs=normalized_target_refs,
         )
+        existing_job_id = self._find_memory_job_id_by_idempotency_key(
+            connection=connection,
+            idempotency_key=idempotency_key,
+        )
+        if existing_job_id is not None:
+            return [existing_job_id]
         payload_json: dict[str, Any] = {
             "job_kind": "tidy_memory",
             "cycle_id": cycle_id,
@@ -5844,15 +6408,73 @@ class SqliteStateStore:
         }
         if normalized_target_refs is not None:
             payload_json["target_refs"] = normalized_target_refs
-        return [
-            self._insert_memory_job(
-                connection=connection,
-                job_kind="tidy_memory",
-                payload_json=payload_json,
-                idempotency_key=idempotency_key,
-                created_at=created_at,
-            )
-        ]
+        job_id = self._insert_memory_job(
+            connection=connection,
+            job_kind="tidy_memory",
+            payload_json=payload_json,
+            idempotency_key=idempotency_key,
+            created_at=created_at,
+        )
+        self._touch_runtime_housekeeping_state(
+            connection=connection,
+            maintenance_scope=maintenance_scope,
+            last_enqueued_at=created_at,
+            last_completed_at=None,
+            updated_at=created_at,
+        )
+        return [job_id]
+
+    # Block: Runtime housekeeping touch
+    def _touch_runtime_housekeeping_state(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        maintenance_scope: str,
+        last_enqueued_at: int | None,
+        last_completed_at: int | None,
+        updated_at: int,
+    ) -> None:
+        if maintenance_scope not in TIDY_MEMORY_SCOPES:
+            raise StoreValidationError("runtime housekeeping maintenance_scope is invalid")
+        self._ensure_runtime_housekeeping_state_defaults(
+            connection=connection,
+            now_ms=updated_at,
+        )
+        current_row = connection.execute(
+            """
+            SELECT last_enqueued_at, last_completed_at
+            FROM runtime_housekeeping_state
+            WHERE maintenance_scope = ?
+            """,
+            (maintenance_scope,),
+        ).fetchone()
+        if current_row is None:
+            raise RuntimeError("runtime_housekeeping_state row is missing")
+        next_last_enqueued_at = (
+            last_enqueued_at
+            if last_enqueued_at is not None
+            else current_row["last_enqueued_at"]
+        )
+        next_last_completed_at = (
+            last_completed_at
+            if last_completed_at is not None
+            else current_row["last_completed_at"]
+        )
+        connection.execute(
+            """
+            UPDATE runtime_housekeeping_state
+            SET last_enqueued_at = ?,
+                last_completed_at = ?,
+                updated_at = ?
+            WHERE maintenance_scope = ?
+            """,
+            (
+                next_last_enqueued_at,
+                next_last_completed_at,
+                updated_at,
+                maintenance_scope,
+            ),
+        )
 
     def _insert_memory_job(
         self,
@@ -6404,7 +7026,7 @@ class SqliteStateStore:
             return
         if current_version > SCHEMA_VERSION:
             raise RuntimeError("schema_version is newer than this initializer")
-        if current_version not in {2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14}:
+        if current_version not in {2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}:
             raise RuntimeError("unsupported schema_version for migration")
         while current_version < SCHEMA_VERSION:
             if current_version == 2:
@@ -6458,6 +7080,14 @@ class SqliteStateStore:
             if current_version == 14:
                 self._migrate_schema_14_to_15(connection=connection, now_ms=now_ms)
                 current_version = 15
+                continue
+            if current_version == 15:
+                self._migrate_schema_15_to_16(connection=connection, now_ms=now_ms)
+                current_version = 16
+                continue
+            if current_version == 16:
+                self._migrate_schema_16_to_17(connection=connection, now_ms=now_ms)
+                current_version = 17
                 continue
             raise RuntimeError("unsupported schema_version for migration")
 
@@ -7908,6 +8538,246 @@ class SqliteStateStore:
             (_json_text(15), now_ms),
         )
 
+    # Block: Schema migration 15->16
+    def _migrate_schema_15_to_16(self, *, connection: sqlite3.Connection, now_ms: int) -> None:
+        preference_memory_columns = {
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(preference_memory)").fetchall()
+        }
+        if "target_key" not in preference_memory_columns:
+            connection.execute("ALTER TABLE preference_memory ADD COLUMN target_key TEXT")
+            for row in connection.execute(
+                """
+                SELECT preference_id, target_entity_ref_json
+                FROM preference_memory
+                """
+            ).fetchall():
+                target_entity_ref = _decoded_object_json(row["target_entity_ref_json"])
+                connection.execute(
+                    """
+                    UPDATE preference_memory
+                    SET target_key = ?
+                    WHERE preference_id = ?
+                    """,
+                    (
+                        _preference_target_key(target_entity_ref=target_entity_ref),
+                        str(row["preference_id"]),
+                    ),
+                )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS stable_preference_projection (
+                owner_scope TEXT NOT NULL CHECK (owner_scope IN ('self', 'other_entity')),
+                target_entity_ref_json TEXT NOT NULL,
+                target_key TEXT NOT NULL,
+                domain TEXT NOT NULL,
+                polarity TEXT NOT NULL CHECK (polarity IN ('like', 'dislike')),
+                preference_id TEXT NOT NULL,
+                status TEXT NOT NULL CHECK (status IN ('confirmed', 'revoked')),
+                confidence REAL NOT NULL,
+                evidence_event_ids_json TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (owner_scope, domain, target_key, polarity)
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_stable_preference_projection_scope_status_updated
+                ON stable_preference_projection (owner_scope, status, confidence DESC, updated_at DESC)
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS runtime_housekeeping_state (
+                maintenance_scope TEXT PRIMARY KEY CHECK (
+                    maintenance_scope IN ('completed_jobs_gc', 'stale_preview_gc', 'stale_vector_gc')
+                ),
+                last_enqueued_at INTEGER,
+                last_completed_at INTEGER,
+                updated_at INTEGER NOT NULL
+            )
+            """
+        )
+        self._ensure_runtime_housekeeping_state_defaults(
+            connection=connection,
+            now_ms=now_ms,
+        )
+        for row in connection.execute(
+            """
+            SELECT
+                json_extract(memory_job_payloads.payload_json, '$.maintenance_scope') AS maintenance_scope,
+                MAX(memory_jobs.created_at) AS last_enqueued_at,
+                MAX(memory_jobs.completed_at) AS last_completed_at
+            FROM memory_jobs
+            INNER JOIN memory_job_payloads
+                    ON memory_job_payloads.payload_id = json_extract(memory_jobs.payload_ref_json, '$.payload_id')
+            WHERE memory_jobs.job_kind = 'tidy_memory'
+            GROUP BY json_extract(memory_job_payloads.payload_json, '$.maintenance_scope')
+            """
+        ).fetchall():
+            maintenance_scope = row["maintenance_scope"]
+            if not isinstance(maintenance_scope, str) or maintenance_scope not in TIDY_MEMORY_SCOPES:
+                continue
+            self._touch_runtime_housekeeping_state(
+                connection=connection,
+                maintenance_scope=maintenance_scope,
+                last_enqueued_at=(
+                    int(row["last_enqueued_at"])
+                    if isinstance(row["last_enqueued_at"], int)
+                    else None
+                ),
+                last_completed_at=(
+                    int(row["last_completed_at"])
+                    if isinstance(row["last_completed_at"], int)
+                    else None
+                ),
+                updated_at=now_ms,
+            )
+        self._rebuild_stable_preference_projection(
+            connection=connection,
+        )
+        connection.execute(
+            """
+            UPDATE db_meta
+            SET meta_value_json = ?,
+                updated_at = ?
+            WHERE meta_key = 'schema_version'
+            """,
+            (_json_text(16), now_ms),
+        )
+
+    # Block: Schema migration 16->17
+    def _migrate_schema_16_to_17(self, *, connection: sqlite3.Connection, now_ms: int) -> None:
+        connection.execute("ALTER TABLE preference_memory RENAME TO preference_memory_legacy")
+        connection.execute("DROP INDEX IF EXISTS idx_preference_memory_scope_status_updated")
+        connection.execute("DROP INDEX IF EXISTS idx_preference_memory_domain_polarity_status")
+        connection.execute("DROP INDEX IF EXISTS idx_preference_memory_identity_updated")
+        connection.execute(
+            """
+            CREATE TABLE preference_memory (
+                preference_id TEXT PRIMARY KEY,
+                owner_scope TEXT NOT NULL CHECK (owner_scope IN ('self', 'other_entity')),
+                target_entity_ref_json TEXT NOT NULL,
+                target_key TEXT NOT NULL,
+                domain TEXT NOT NULL,
+                polarity TEXT NOT NULL CHECK (polarity IN ('like', 'dislike')),
+                status TEXT NOT NULL CHECK (status IN ('candidate', 'confirmed', 'revoked')),
+                confidence REAL NOT NULL,
+                evidence_event_ids_json TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX idx_preference_memory_scope_status_updated
+                ON preference_memory (owner_scope, status, updated_at DESC)
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX idx_preference_memory_domain_polarity_status
+                ON preference_memory (domain, polarity, status)
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX idx_preference_memory_identity_updated
+                ON preference_memory (owner_scope, domain, target_key, polarity, updated_at DESC)
+            """
+        )
+        for row in connection.execute(
+            """
+            SELECT
+                preference_id,
+                owner_scope,
+                target_entity_ref_json,
+                domain,
+                polarity,
+                status,
+                confidence,
+                evidence_event_ids_json,
+                created_at,
+                updated_at
+            FROM preference_memory_legacy
+            ORDER BY created_at ASC, preference_id ASC
+            """
+        ).fetchall():
+            target_entity_ref = _decoded_object_json(row["target_entity_ref_json"])
+            connection.execute(
+                """
+                INSERT INTO preference_memory (
+                    preference_id,
+                    owner_scope,
+                    target_entity_ref_json,
+                    target_key,
+                    domain,
+                    polarity,
+                    status,
+                    confidence,
+                    evidence_event_ids_json,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(row["preference_id"]),
+                    str(row["owner_scope"]),
+                    _normalized_target_entity_ref_json(target_entity_ref),
+                    _preference_target_key(target_entity_ref=target_entity_ref),
+                    str(row["domain"]),
+                    str(row["polarity"]),
+                    str(row["status"]),
+                    float(row["confidence"]),
+                    str(row["evidence_event_ids_json"]),
+                    int(row["created_at"]),
+                    int(row["updated_at"]),
+                ),
+            )
+        connection.execute("DROP TABLE preference_memory_legacy")
+        connection.execute("DROP INDEX IF EXISTS idx_stable_preference_projection_scope_status_updated")
+        connection.execute("DROP TABLE IF EXISTS stable_preference_projection")
+        connection.execute(
+            """
+            CREATE TABLE stable_preference_projection (
+                owner_scope TEXT NOT NULL CHECK (owner_scope IN ('self', 'other_entity')),
+                target_entity_ref_json TEXT NOT NULL,
+                target_key TEXT NOT NULL,
+                domain TEXT NOT NULL,
+                polarity TEXT NOT NULL CHECK (polarity IN ('like', 'dislike')),
+                preference_id TEXT NOT NULL,
+                status TEXT NOT NULL CHECK (status IN ('confirmed', 'revoked')),
+                confidence REAL NOT NULL,
+                evidence_event_ids_json TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (owner_scope, domain, target_key, polarity)
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX idx_stable_preference_projection_scope_status_updated
+                ON stable_preference_projection (owner_scope, status, confidence DESC, updated_at DESC)
+            """
+        )
+        self._rebuild_stable_preference_projection(
+            connection=connection,
+        )
+        connection.execute(
+            """
+            UPDATE db_meta
+            SET meta_value_json = ?,
+                updated_at = ?
+            WHERE meta_key = 'schema_version'
+            """,
+            (_json_text(17), now_ms),
+        )
+
     # Block: sqlite-vec schema ensure
     def _ensure_vec_index_schema(self, *, connection: sqlite3.Connection) -> None:
         connection.execute(
@@ -7986,6 +8856,9 @@ class SqliteStateStore:
                     now_ms,
                 ),
             )
+        current_user_version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+        if current_user_version != SCHEMA_VERSION:
+            connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     # Block: Singleton seed
     def _seed_singletons(self, connection: sqlite3.Connection, now_ms: int) -> None:
@@ -8034,6 +8907,10 @@ class SqliteStateStore:
             ),
         )
         self._ensure_runtime_settings_defaults(
+            connection=connection,
+            now_ms=now_ms,
+        )
+        self._ensure_runtime_housekeeping_state_defaults(
             connection=connection,
             now_ms=now_ms,
         )
@@ -9913,6 +10790,7 @@ def _write_memory_plan_preference_entries(
         SELECT
             owner_scope,
             target_entity_ref_json,
+            target_key,
             domain,
             polarity,
             status,
@@ -9929,7 +10807,7 @@ def _write_memory_plan_preference_entries(
     seen_keys: set[tuple[str, str, str]] = set()
     for row in rows:
         target_entity_ref = _decoded_object_json(row["target_entity_ref_json"])
-        target_key = target_entity_ref.get("target_key")
+        target_key = row["target_key"]
         if not isinstance(target_key, str) or not target_key:
             continue
         entry_key = (
@@ -10978,7 +11856,7 @@ def _build_memory_snapshot_rows(
     recent_event_rows: list[sqlite3.Row],
     memory_rows: list[sqlite3.Row],
     affect_rows: list[sqlite3.Row],
-    preference_rows: list[sqlite3.Row],
+    stable_preference_rows: list[sqlite3.Row],
     event_link_rows: list[sqlite3.Row],
     event_thread_rows: list[sqlite3.Row],
     event_about_time_rows: list[sqlite3.Row],
@@ -10992,6 +11870,7 @@ def _build_memory_snapshot_rows(
     semantic_items: list[dict[str, Any]] = []
     affective_items: list[dict[str, Any]] = []
     relationship_items: list[dict[str, Any]] = []
+    preference_items: list[dict[str, Any]] = []
     reflection_items: list[dict[str, Any]] = []
     for row in recent_event_rows:
         episodic_items.append(_event_memory_snapshot_entry(row))
@@ -11014,14 +11893,15 @@ def _build_memory_snapshot_rows(
             reflection_items.append(entry)
     for row in affect_rows:
         affective_items.append(_event_affect_snapshot_entry(row))
-    for row in preference_rows:
-        relationship_items.append(_preference_snapshot_entry(row))
+    for row in stable_preference_rows:
+        preference_items.append(_preference_snapshot_entry(row))
     return {
         "working_memory_items": working_memory_items[:3],
         "episodic_items": episodic_items,
         "semantic_items": semantic_items,
         "affective_items": affective_items,
         "relationship_items": relationship_items,
+        "preference_items": preference_items,
         "reflection_items": reflection_items,
         "recent_event_window": [
             _recent_event_entry(row)
@@ -11050,6 +11930,131 @@ def _memory_snapshot_entry(row: sqlite3.Row) -> dict[str, Any]:
         "updated_at": int(row["updated_at"]),
         "last_confirmed_at": int(row["last_confirmed_at"]),
     }
+
+
+# Block: Stable preference projection read
+def _read_stable_preference_projection_rows(
+    *,
+    connection: sqlite3.Connection,
+) -> list[sqlite3.Row]:
+    rows: list[sqlite3.Row] = []
+    for status, polarity in (
+        ("confirmed", "like"),
+        ("confirmed", "dislike"),
+        ("revoked", None),
+    ):
+        if polarity is None:
+            rows.extend(
+                connection.execute(
+                    """
+                    SELECT
+                        preference_id,
+                        owner_scope,
+                        target_entity_ref_json,
+                        domain,
+                        polarity,
+                        status,
+                        confidence,
+                        evidence_event_ids_json,
+                        created_at,
+                        updated_at
+                    FROM stable_preference_projection
+                    WHERE owner_scope = 'self'
+                      AND status = 'revoked'
+                    ORDER BY confidence DESC, updated_at DESC, created_at DESC, preference_id DESC
+                    LIMIT ?
+                    """,
+                    (STABLE_PREFERENCE_BUCKET_LIMIT,),
+                ).fetchall()
+            )
+            continue
+        rows.extend(
+            connection.execute(
+                """
+                SELECT
+                    preference_id,
+                    owner_scope,
+                    target_entity_ref_json,
+                    domain,
+                    polarity,
+                    status,
+                    confidence,
+                    evidence_event_ids_json,
+                    created_at,
+                    updated_at
+                FROM stable_preference_projection
+                WHERE owner_scope = 'self'
+                  AND status = ?
+                  AND polarity = ?
+                ORDER BY confidence DESC, updated_at DESC, created_at DESC, preference_id DESC
+                LIMIT ?
+                """,
+                (status, polarity, STABLE_PREFERENCE_BUCKET_LIMIT),
+            ).fetchall()
+        )
+    return rows
+
+
+def _read_retrieval_preference_projection_rows(
+    *,
+    connection: sqlite3.Connection,
+) -> list[sqlite3.Row]:
+    rows: list[sqlite3.Row] = []
+    for status, polarity in (
+        ("confirmed", "like"),
+        ("confirmed", "dislike"),
+        ("revoked", None),
+    ):
+        if polarity is None:
+            rows.extend(
+                connection.execute(
+                    """
+                    SELECT
+                        preference_id,
+                        owner_scope,
+                        target_entity_ref_json,
+                        domain,
+                        polarity,
+                        status,
+                        confidence,
+                        evidence_event_ids_json,
+                        created_at,
+                        updated_at
+                    FROM stable_preference_projection
+                    WHERE owner_scope = 'self'
+                      AND status = 'revoked'
+                    ORDER BY confidence DESC, updated_at DESC, created_at DESC, preference_id DESC
+                    LIMIT ?
+                    """,
+                    (RETRIEVAL_STABLE_PREFERENCE_BUCKET_LIMIT,),
+                ).fetchall()
+            )
+            continue
+        rows.extend(
+            connection.execute(
+                """
+                SELECT
+                    preference_id,
+                    owner_scope,
+                    target_entity_ref_json,
+                    domain,
+                    polarity,
+                    status,
+                    confidence,
+                    evidence_event_ids_json,
+                    created_at,
+                    updated_at
+                FROM stable_preference_projection
+                WHERE owner_scope = 'self'
+                  AND status = ?
+                  AND polarity = ?
+                ORDER BY confidence DESC, updated_at DESC, created_at DESC, preference_id DESC
+                LIMIT ?
+                """,
+                (status, polarity, RETRIEVAL_STABLE_PREFERENCE_BUCKET_LIMIT),
+            ).fetchall()
+        )
+    return rows
 
 
 def _event_memory_snapshot_entry(row: sqlite3.Row) -> dict[str, Any]:
@@ -12077,8 +13082,31 @@ def _opaque_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex}"
 
 
+# Block: SQLite identifier quoting
+def _quoted_identifier(name: str) -> str:
+    return '"' + name.replace('"', '""') + '"'
+
+
 def _json_text(value: Any) -> str:
     return json.dumps(value, ensure_ascii=True, separators=(",", ":"))
+
+
+# Block: Preference target key
+def _preference_target_key(*, target_entity_ref: dict[str, Any]) -> str:
+    target_key = target_entity_ref.get("target_key")
+    if not isinstance(target_key, str) or not target_key:
+        raise RuntimeError("preference target_entity_ref.target_key must be non-empty string")
+    return target_key
+
+
+# Block: Preference target ref normalization
+def _normalized_target_entity_ref_json(target_entity_ref: dict[str, Any]) -> str:
+    return json.dumps(
+        target_entity_ref,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
 
 
 # Block: String list helper

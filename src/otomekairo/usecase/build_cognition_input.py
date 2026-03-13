@@ -35,6 +35,7 @@ MEMORY_TRIM_SLOT_ORDER = (
     "episodic_items",
     "semantic_items",
     "affective_items",
+    "preference_items",
     "relationship_items",
     "working_memory_items",
 )
@@ -65,13 +66,12 @@ def build_cognition_input(
         )
     camera_candidates_payload = _build_camera_candidates(camera_candidates)
     behavior_settings = _build_behavior_settings(state_snapshot.effective_settings)
-    preference_selection_state = _build_preference_selection_state(
-        memory_snapshot=state_snapshot.memory_snapshot,
+    stable_preferences = _build_stable_preferences(
+        preference_items=state_snapshot.stable_preference_items,
     )
     selection_profile = _build_selection_profile(
         state_snapshot=state_snapshot,
         behavior_settings=behavior_settings,
-        preference_selection_state=preference_selection_state,
     )
     current_observation = _build_current_observation(
         pending_input=pending_input,
@@ -116,19 +116,20 @@ def build_cognition_input(
         self_snapshot=self_snapshot,
         task_snapshot=task_snapshot,
     )
-    confirmed_preferences = dict(preference_selection_state["confirmed_preferences"])
     long_mood_state = _build_long_mood_state_context(
-        memory_snapshot=state_snapshot.memory_snapshot,
+        long_mood_item=state_snapshot.stable_long_mood_item,
     )
     attention_snapshot = build_attention_snapshot(
         current_observation=current_observation,
         selection_profile=selection_profile,
+        stable_preferences=stable_preferences,
         task_snapshot=state_snapshot.task_snapshot,
         resolved_at=resolved_at,
     )
     skill_candidates = build_skill_candidates(
         current_observation=current_observation,
         selection_profile=selection_profile,
+        stable_preferences=stable_preferences,
         behavior_settings=behavior_settings,
         body_state=state_snapshot.body_state,
         task_snapshot=state_snapshot.task_snapshot,
@@ -147,6 +148,9 @@ def build_cognition_input(
         cycle_meta=cycle_meta,
         time_context=time_context,
         self_snapshot=self_snapshot,
+        stable_self_state=stable_self_state,
+        stable_preferences=stable_preferences,
+        long_mood_state=long_mood_state,
         behavior_settings=behavior_settings,
         selection_profile=selection_profile,
         body_snapshot=state_snapshot.body_state,
@@ -176,7 +180,7 @@ def build_cognition_input(
         memory_bundle=trimmed_memory_bundle,
         recent_dialog=recent_dialog,
         selected_memory_pack=selected_memory_pack,
-        confirmed_preferences=confirmed_preferences,
+        stable_preferences=stable_preferences,
         long_mood_state=long_mood_state,
     )
     retrieval_context = {
@@ -189,7 +193,7 @@ def build_cognition_input(
         time_context=time_context,
         self_snapshot=self_snapshot,
         stable_self_state=stable_self_state,
-        confirmed_preferences=confirmed_preferences,
+        stable_preferences=stable_preferences,
         long_mood_state=long_mood_state,
         behavior_settings=behavior_settings,
         selection_profile=selection_profile,
@@ -213,7 +217,7 @@ def build_cognition_input(
         attention_snapshot=attention_snapshot,
         retrieval_context=retrieval_context,
         stable_self_state=stable_self_state,
-        confirmed_preferences=confirmed_preferences,
+        stable_preferences=stable_preferences,
         long_mood_state=long_mood_state,
         recent_dialog=recent_dialog,
         selected_memory_pack=selected_memory_pack,
@@ -225,7 +229,9 @@ def build_cognition_input(
             "time_context": time_context,
             "self_snapshot": self_snapshot,
             "stable_self_state": stable_self_state,
-            "confirmed_preferences": confirmed_preferences,
+            "stable_preferences": _stable_preferences_payload(
+                stable_preferences=stable_preferences,
+            ),
             "long_mood_state": long_mood_state,
             "behavior_settings": behavior_settings,
             "selection_profile": selection_profile,
@@ -553,7 +559,6 @@ def _build_selection_profile(
     state_snapshot: CognitionStateSnapshot,
     *,
     behavior_settings: dict[str, str],
-    preference_selection_state: dict[str, Any],
 ) -> dict[str, Any]:
     personality = state_snapshot.self_state["personality"]
     current_emotion = state_snapshot.self_state["current_emotion"]
@@ -566,9 +571,6 @@ def _build_selection_profile(
         "trait_values": dict(personality["trait_values"]),
         "interaction_style": interaction_style,
         "relationship_priorities": _build_relationship_priorities(relationship_overview),
-        "learned_preferences": list(preference_selection_state["learned_preferences"]),
-        "learned_aversions": list(preference_selection_state["learned_aversions"]),
-        "revoked_preferences": list(preference_selection_state["revoked_preferences"]),
         "habit_biases": dict(personality["habit_biases"]),
         "emotion_bias": dict(current_emotion["active_biases"]),
         "drive_bias": {
@@ -592,22 +594,20 @@ def _build_selection_profile(
 }
 
 
-# Block: Preference selection state
-def _build_preference_selection_state(*, memory_snapshot: dict[str, Any]) -> dict[str, Any]:
-    relationship_items = memory_snapshot.get("relationship_items")
-    if not isinstance(relationship_items, list):
-        raise RuntimeError("memory_snapshot.relationship_items must be a list")
-    learned_preferences: list[dict[str, Any]] = []
-    learned_aversions: list[dict[str, Any]] = []
-    revoked_preferences: list[dict[str, Any]] = []
-    confirmed_likes: list[dict[str, Any]] = []
-    confirmed_dislikes: list[dict[str, Any]] = []
-    for relationship_item in relationship_items:
-        if not isinstance(relationship_item, dict):
+# Block: Stable preferences builder
+def _build_stable_preferences(*, preference_items: list[dict[str, Any]]) -> dict[str, Any]:
+    if not isinstance(preference_items, list):
+        raise RuntimeError("state_snapshot.stable_preference_items must be a list")
+    like_entries: list[dict[str, Any]] = []
+    dislike_entries: list[dict[str, Any]] = []
+    revoked_entries: list[dict[str, Any]] = []
+    seen_preference_keys: set[tuple[str, str, str]] = set()
+    for preference_item in preference_items:
+        if not isinstance(preference_item, dict):
             continue
-        if str(relationship_item.get("memory_kind")) != "preference":
+        if str(preference_item.get("memory_kind")) != "preference":
             continue
-        payload = relationship_item.get("payload")
+        payload = preference_item.get("payload")
         if not isinstance(payload, dict):
             raise RuntimeError("preference payload must be an object")
         target_entity_ref = payload.get("target_entity_ref")
@@ -619,7 +619,11 @@ def _build_preference_selection_state(*, memory_snapshot: dict[str, Any]) -> dic
         domain = str(payload.get("domain", ""))
         polarity = str(payload.get("polarity", ""))
         status = str(payload.get("status", ""))
-        confidence = float(relationship_item.get("confidence", 0.0))
+        confidence = float(preference_item.get("confidence", 0.0))
+        preference_key = (domain, target_key, polarity)
+        if preference_key in seen_preference_keys:
+            continue
+        seen_preference_keys.add(preference_key)
         evidence_event_ids = payload.get("evidence_event_ids")
         evidence_count = 1
         if isinstance(evidence_event_ids, list):
@@ -634,24 +638,17 @@ def _build_preference_selection_state(*, memory_snapshot: dict[str, Any]) -> dic
             "evidence_count": evidence_count,
         }
         if status == "confirmed":
-            projected_entry = {
-                "domain": domain,
-                "target_key": target_key,
-                "confidence": confidence,
-            }
             if polarity == "like":
-                confirmed_likes.append(projected_entry)
-                learned_preferences.append(selection_entry)
+                like_entries.append(selection_entry)
                 continue
             if polarity == "dislike":
-                confirmed_dislikes.append(projected_entry)
-                learned_aversions.append(selection_entry)
+                dislike_entries.append(selection_entry)
                 continue
             raise RuntimeError("preference payload.polarity must be like or dislike")
         if status == "revoked":
             if polarity not in {"like", "dislike"}:
                 raise RuntimeError("preference payload.polarity must be like or dislike")
-            revoked_preferences.append(
+            revoked_entries.append(
                 {
                     **selection_entry,
                     "polarity": polarity,
@@ -661,19 +658,34 @@ def _build_preference_selection_state(*, memory_snapshot: dict[str, Any]) -> dic
         if status == "candidate":
             continue
         raise RuntimeError("preference payload.status must be candidate, confirmed, or revoked")
-    learned_preferences.sort(key=lambda item: float(item["weight"]), reverse=True)
-    learned_aversions.sort(key=lambda item: float(item["weight"]), reverse=True)
-    revoked_preferences.sort(key=lambda item: float(item["weight"]), reverse=True)
-    confirmed_likes.sort(key=lambda item: float(item["confidence"]), reverse=True)
-    confirmed_dislikes.sort(key=lambda item: float(item["confidence"]), reverse=True)
+    like_entries.sort(key=lambda item: float(item["weight"]), reverse=True)
+    dislike_entries.sort(key=lambda item: float(item["weight"]), reverse=True)
+    revoked_entries.sort(key=lambda item: float(item["weight"]), reverse=True)
     return {
-        "learned_preferences": learned_preferences[:8],
-        "learned_aversions": learned_aversions[:8],
-        "revoked_preferences": revoked_preferences[:8],
-        "confirmed_preferences": {
-            "likes": confirmed_likes[:6],
-            "dislikes": confirmed_dislikes[:6],
-        },
+        "likes": [dict(item) for item in like_entries[:8]],
+        "dislikes": [dict(item) for item in dislike_entries[:8]],
+        "revoked": [dict(item) for item in revoked_entries[:8]],
+    }
+
+
+# Block: Stable preferences payload
+def _stable_preferences_payload(*, stable_preferences: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "likes": [
+            dict(entry)
+            for entry in stable_preferences.get("likes", [])
+            if isinstance(entry, dict)
+        ],
+        "dislikes": [
+            dict(entry)
+            for entry in stable_preferences.get("dislikes", [])
+            if isinstance(entry, dict)
+        ],
+        "revoked": [
+            dict(entry)
+            for entry in stable_preferences.get("revoked", [])
+            if isinstance(entry, dict)
+        ],
     }
 
 
@@ -750,7 +762,7 @@ def _trim_memory_bundle_for_context_budget(
     time_context: dict[str, Any],
     self_snapshot: dict[str, Any],
     stable_self_state: dict[str, Any],
-    confirmed_preferences: dict[str, Any],
+    stable_preferences: dict[str, Any],
     long_mood_state: dict[str, Any] | None,
     behavior_settings: dict[str, Any],
     selection_profile: dict[str, Any],
@@ -780,7 +792,7 @@ def _trim_memory_bundle_for_context_budget(
     self_tokens = _estimate_self_layer_tokens(
         self_snapshot=self_snapshot,
         stable_self_state=stable_self_state,
-        confirmed_preferences=confirmed_preferences,
+        stable_preferences=stable_preferences,
         long_mood_state=long_mood_state,
         selection_profile=selection_profile,
     )
@@ -835,7 +847,7 @@ def _build_context_budget(
     time_context: dict[str, Any],
     self_snapshot: dict[str, Any],
     stable_self_state: dict[str, Any],
-    confirmed_preferences: dict[str, Any],
+    stable_preferences: dict[str, Any],
     long_mood_state: dict[str, Any] | None,
     behavior_settings: dict[str, Any],
     selection_profile: dict[str, Any],
@@ -869,7 +881,7 @@ def _build_context_budget(
         "self": _estimate_self_layer_tokens(
             self_snapshot=self_snapshot,
             stable_self_state=stable_self_state,
-            confirmed_preferences=confirmed_preferences,
+            stable_preferences=stable_preferences,
             long_mood_state=long_mood_state,
             selection_profile=selection_profile,
         ),
@@ -972,7 +984,7 @@ def _estimate_self_layer_tokens(
     *,
     self_snapshot: dict[str, Any],
     stable_self_state: dict[str, Any],
-    confirmed_preferences: dict[str, Any],
+    stable_preferences: dict[str, Any],
     long_mood_state: dict[str, Any] | None,
     selection_profile: dict[str, Any],
 ) -> int:
@@ -980,7 +992,7 @@ def _estimate_self_layer_tokens(
         _self_layer_budget_projection(
             self_snapshot=self_snapshot,
             stable_self_state=stable_self_state,
-            confirmed_preferences=confirmed_preferences,
+            stable_preferences=stable_preferences,
             long_mood_state=long_mood_state,
             selection_profile=selection_profile,
         )
@@ -1072,6 +1084,7 @@ def _trim_memory_bundle_to_token_limit(
             "semantic_items",
             "affective_items",
             "relationship_items",
+            "preference_items",
             "reflection_items",
             "recent_event_window",
         )
@@ -1133,6 +1146,7 @@ def _build_retrieval_selected_json(
             "semantic_items": len(memory_bundle["semantic_items"]),
             "affective_items": len(memory_bundle["affective_items"]),
             "relationship_items": len(memory_bundle["relationship_items"]),
+            "preference_items": len(memory_bundle["preference_items"]),
             "reflection_items": len(memory_bundle["reflection_items"]),
             "recent_event_window": len(memory_bundle["recent_event_window"]),
         },
@@ -1156,6 +1170,10 @@ def _build_retrieval_selected_json(
             "relationship_item_ids": [
                 str(item["memory_state_id"])
                 for item in memory_bundle["relationship_items"]
+            ],
+            "preference_item_ids": [
+                str(item["memory_state_id"])
+                for item in memory_bundle["preference_items"]
             ],
             "reflection_item_ids": [
                 str(item["memory_state_id"])
@@ -1182,6 +1200,7 @@ def _selected_item_refs(*, memory_bundle: dict[str, Any]) -> set[str]:
         "semantic_items",
         "affective_items",
         "relationship_items",
+        "preference_items",
         "reflection_items",
         "recent_event_window",
     ):
@@ -1280,7 +1299,7 @@ def _self_layer_budget_projection(
     *,
     self_snapshot: dict[str, Any],
     stable_self_state: dict[str, Any],
-    confirmed_preferences: dict[str, Any],
+    stable_preferences: dict[str, Any],
     long_mood_state: dict[str, Any] | None,
     selection_profile: dict[str, Any],
 ) -> dict[str, Any]:
@@ -1289,7 +1308,7 @@ def _self_layer_budget_projection(
         "current_emotion_label": str(stable_self_state.get("current_emotion_label", "")),
         "persona_projection": persona_projection,
         "stable_self_state": stable_self_state,
-        "confirmed_preferences": confirmed_preferences,
+        "stable_preferences": stable_preferences,
         "long_mood_state": long_mood_state,
         "relationship_priorities": [
             {
@@ -1642,46 +1661,43 @@ def _build_stable_self_state(
 
 
 # Block: Long mood state context
-def _build_long_mood_state_context(*, memory_snapshot: dict[str, Any]) -> dict[str, Any] | None:
-    affective_items = memory_snapshot.get("affective_items")
-    if not isinstance(affective_items, list):
-        raise RuntimeError("memory_snapshot.affective_items must be a list")
-    for affective_item in affective_items:
-        if not isinstance(affective_item, dict):
-            continue
-        if str(affective_item.get("memory_kind")) != "long_mood_state":
-            continue
-        payload = affective_item.get("payload")
-        if not isinstance(payload, dict):
-            raise RuntimeError("long_mood_state payload must be an object")
-        baseline = payload.get("baseline")
-        shock = payload.get("shock")
-        return {
-            "summary_text": str(affective_item.get("body_text", "")),
-            "primary_label": str(payload.get("primary_label", "")),
-            "baseline_label": (
-                str(baseline.get("primary_label", ""))
-                if isinstance(baseline, dict)
-                else ""
-            ),
-            "shock_label": (
-                str(shock.get("primary_label", ""))
-                if isinstance(shock, dict)
-                else ""
-            ),
-            "stability": (
-                round(float(payload.get("stability")), 2)
-                if isinstance(payload.get("stability"), (int, float))
-                and not isinstance(payload.get("stability"), bool)
-                else None
-            ),
-            "source_affect_labels": [
-                str(label)
-                for label in payload.get("source_affect_labels", [])[:4]
-                if isinstance(label, str) and label
-            ],
-        }
-    return None
+def _build_long_mood_state_context(*, long_mood_item: dict[str, Any] | None) -> dict[str, Any] | None:
+    if long_mood_item is None:
+        return None
+    if not isinstance(long_mood_item, dict):
+        raise RuntimeError("state_snapshot.stable_long_mood_item must be object or null")
+    if str(long_mood_item.get("memory_kind")) != "long_mood_state":
+        raise RuntimeError("state_snapshot.stable_long_mood_item.memory_kind must be long_mood_state")
+    payload = long_mood_item.get("payload")
+    if not isinstance(payload, dict):
+        raise RuntimeError("long_mood_state payload must be an object")
+    baseline = payload.get("baseline")
+    shock = payload.get("shock")
+    return {
+        "summary_text": str(long_mood_item.get("body_text", "")),
+        "primary_label": str(payload.get("primary_label", "")),
+        "baseline_label": (
+            str(baseline.get("primary_label", ""))
+            if isinstance(baseline, dict)
+            else ""
+        ),
+        "shock_label": (
+            str(shock.get("primary_label", ""))
+            if isinstance(shock, dict)
+            else ""
+        ),
+        "stability": (
+            round(float(payload.get("stability")), 2)
+            if isinstance(payload.get("stability"), (int, float))
+            and not isinstance(payload.get("stability"), bool)
+            else None
+        ),
+        "source_affect_labels": [
+            str(label)
+            for label in payload.get("source_affect_labels", [])[:4]
+            if isinstance(label, str) and label
+        ],
+    }
 
 
 # Block: Action selection context
@@ -1691,7 +1707,7 @@ def _build_action_selection_context(
     memory_bundle: dict[str, Any],
     recent_dialog: list[dict[str, Any]],
     selected_memory_pack: dict[str, Any],
-    confirmed_preferences: dict[str, Any],
+    stable_preferences: dict[str, Any],
     long_mood_state: dict[str, Any] | None,
 ) -> dict[str, Any]:
     return {
@@ -1707,10 +1723,13 @@ def _build_action_selection_context(
             affective_items=memory_bundle["affective_items"],
         ),
         "relationship_texts": list(selected_memory_pack["relationship"][:4]),
+        "preference_texts": list(selected_memory_pack["preference"][:4]),
         "reflection_entries": _action_selection_reflection_entries(
             reflection_items=memory_bundle["reflection_items"],
         ),
-        "confirmed_preferences": confirmed_preferences,
+        "stable_preferences": _stable_preferences_payload(
+            stable_preferences=stable_preferences,
+        ),
         "long_mood_state": long_mood_state,
     }
 
@@ -1785,7 +1804,7 @@ def _build_reply_render_input(
     attention_snapshot: dict[str, Any],
     retrieval_context: dict[str, Any],
     stable_self_state: dict[str, Any],
-    confirmed_preferences: dict[str, Any],
+    stable_preferences: dict[str, Any],
     long_mood_state: dict[str, Any] | None,
     recent_dialog: list[dict[str, Any]],
     selected_memory_pack: dict[str, Any],
@@ -1805,7 +1824,9 @@ def _build_reply_render_input(
             retrieval_context=retrieval_context,
         ),
         "stable_self_state": stable_self_state,
-        "confirmed_preferences": confirmed_preferences,
+        "stable_preferences": _stable_preferences_payload(
+            stable_preferences=stable_preferences,
+        ),
         "long_mood_state": long_mood_state,
         "recent_dialog": recent_dialog,
         "selected_memory_pack": selected_memory_pack,
@@ -1920,6 +1941,10 @@ def _build_selected_memory_pack(*, memory_bundle: dict[str, Any]) -> dict[str, A
             entries=memory_bundle["relationship_items"],
             text_getter=_memory_body_text,
         ),
+        "preference": _memory_pack_texts(
+            entries=memory_bundle["preference_items"],
+            text_getter=_preference_memory_text,
+        ),
         "reflection": _memory_pack_texts(
             entries=memory_bundle["reflection_items"],
             text_getter=_reflection_memory_text,
@@ -2007,6 +2032,41 @@ def _reflection_memory_text(memory_entry: dict[str, Any]) -> str:
         if isinstance(what_happened, str) and what_happened:
             return what_happened
     return str(memory_entry["body_text"])
+
+
+# Block: Preference memory text
+def _preference_memory_text(memory_entry: dict[str, Any]) -> str:
+    payload = memory_entry.get("payload")
+    if not isinstance(payload, dict):
+        raise RuntimeError("preference memory payload must be an object")
+    target_entity_ref = payload.get("target_entity_ref")
+    target_key = _preference_target_key_text(target_entity_ref)
+    domain = str(payload.get("domain", "")).strip()
+    polarity = str(payload.get("polarity", "")).strip()
+    status = str(payload.get("status", "")).strip()
+    if not domain or not target_key or polarity not in {"like", "dislike"}:
+        raise RuntimeError("preference memory payload is invalid")
+    if status == "confirmed":
+        status_text = "好み" if polarity == "like" else "苦手"
+    elif status == "revoked":
+        status_text = "撤回済みの好み" if polarity == "like" else "撤回済みの苦手"
+    elif status == "candidate":
+        status_text = "候補の好み" if polarity == "like" else "候補の苦手"
+    else:
+        raise RuntimeError("preference memory payload.status is invalid")
+    return f"{status_text}: {domain}:{target_key}"
+
+
+# Block: Preference target key text
+def _preference_target_key_text(target_entity_ref: Any) -> str:
+    if isinstance(target_entity_ref, dict):
+        for key in ("target_key", "name", "entity_name", "entity_ref", "text"):
+            value = target_entity_ref.get(key)
+            if isinstance(value, str) and value:
+                return value
+    if isinstance(target_entity_ref, str) and target_entity_ref:
+        return target_entity_ref
+    raise RuntimeError("preference memory payload.target_entity_ref is invalid")
 
 
 def _prompt_text(text: str) -> str:

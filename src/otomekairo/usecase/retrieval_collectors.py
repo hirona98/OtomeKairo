@@ -120,7 +120,7 @@ def _collect_associative_memory_candidates(
     retrieval_plan: dict[str, Any],
 ) -> list[dict[str, Any]]:
     collected: list[dict[str, Any]] = []
-    for slot_name in ("working_memory_items", "semantic_items", "relationship_items", "affective_items"):
+    for slot_name in ("working_memory_items", "semantic_items", "relationship_items", "preference_items", "affective_items"):
         for memory_entry in memory_snapshot[slot_name]:
             score, reason_codes = _memory_relevance_score(
                 memory_entry=memory_entry,
@@ -445,7 +445,7 @@ def _collect_relationship_focus_candidates(
     if current_observation["input_kind"] not in {"chat_message", "microphone_message"}:
         return []
     collected: list[dict[str, Any]] = []
-    for slot_name in ("relationship_items", "affective_items", "working_memory_items"):
+    for slot_name in ("relationship_items", "preference_items", "affective_items", "working_memory_items"):
         for memory_entry in memory_snapshot[slot_name]:
             score, reason_codes = _memory_relevance_score(
                 memory_entry=memory_entry,
@@ -480,7 +480,7 @@ def _collect_task_focus_candidates(
     if query_hint is None and source_task_id is None and retrieval_plan["mode"] != "task_targeted":
         return []
     collected: list[dict[str, Any]] = []
-    for slot_name in ("working_memory_items", "semantic_items", "relationship_items", "reflection_items"):
+    for slot_name in ("working_memory_items", "semantic_items", "relationship_items", "preference_items", "reflection_items"):
         for memory_entry in memory_snapshot[slot_name]:
             score, reason_codes = _memory_relevance_score(
                 memory_entry=memory_entry,
@@ -881,6 +881,7 @@ def _state_items_by_id(
         "semantic_items",
         "affective_items",
         "relationship_items",
+        "preference_items",
         "reflection_items",
     ):
         for memory_entry in memory_snapshot[slot_name]:
