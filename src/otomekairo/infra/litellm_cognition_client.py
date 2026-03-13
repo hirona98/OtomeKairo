@@ -277,6 +277,7 @@ def _build_reply_render_messages(request: ReplyRenderRequest) -> list[dict[str, 
     retrieval_summary_text = reply_render_input["retrieval_summary_text"]
     stable_self_state = reply_render_input["stable_self_state"]
     confirmed_preferences = reply_render_input["confirmed_preferences"]
+    revoked_preferences = reply_render_input["revoked_preferences"]
     long_mood_state = reply_render_input["long_mood_state"]
     recent_dialog = reply_render_input["recent_dialog"]
     selected_memory_pack = reply_render_input["selected_memory_pack"]
@@ -305,6 +306,7 @@ def _build_reply_render_messages(request: ReplyRenderRequest) -> list[dict[str, 
             f"想起要約: {retrieval_summary_text}",
             _stable_self_state_prompt_line(stable_self_state),
             _confirmed_preferences_prompt_line(confirmed_preferences),
+            _revoked_preferences_prompt_line(revoked_preferences),
             _long_mood_state_prompt_line(long_mood_state),
             _recent_dialog_prompt_line(recent_dialog),
             _selected_memory_pack_prompt_line(selected_memory_pack),
@@ -1004,6 +1006,15 @@ def _confirmed_preferences_prompt_line(confirmed_preferences: dict[str, Any]) ->
     )
 
 
+# Block: 取り消し済み嗜好 prompt
+def _revoked_preferences_prompt_line(revoked_preferences: Any) -> str:
+    entries = _required_revoked_preference_prompt_entries(
+        revoked_preferences,
+        "reply_render_input.revoked_preferences",
+    )
+    return "取り消し済み嗜好: " + _joined_prompt_text(entries)
+
+
 # Block: 背景感情 prompt
 def _long_mood_state_prompt_line(long_mood_state: dict[str, Any] | None) -> str:
     if long_mood_state is None:
@@ -1143,6 +1154,32 @@ def _required_preference_prompt_entries(value: Any, field_name: str) -> list[str
         if not isinstance(target_key, str) or not target_key:
             raise RuntimeError(f"{field_name}.target_key must be non-empty string")
         entries.append(_memory_prompt_text(_preference_prompt_entry_text(domain=domain, target_key=target_key)))
+    return entries
+
+
+# Block: Revoked preference prompt entries
+def _required_revoked_preference_prompt_entries(value: Any, field_name: str) -> list[str]:
+    if not isinstance(value, list):
+        raise RuntimeError(f"{field_name} must be a list")
+    entries: list[str] = []
+    for entry in value:
+        if not isinstance(entry, dict):
+            raise RuntimeError(f"{field_name} must contain only objects")
+        domain = entry.get("domain")
+        target_key = entry.get("target_key")
+        polarity = entry.get("polarity")
+        if not isinstance(domain, str) or not domain:
+            raise RuntimeError(f"{field_name}.domain must be non-empty string")
+        if not isinstance(target_key, str) or not target_key:
+            raise RuntimeError(f"{field_name}.target_key must be non-empty string")
+        if not isinstance(polarity, str) or polarity not in {"like", "dislike"}:
+            raise RuntimeError(f"{field_name}.polarity must be like or dislike")
+        entries.append(
+            _memory_prompt_text(
+                _preference_prompt_entry_text(domain=domain, target_key=target_key)
+                + f"({polarity}撤回)"
+            )
+        )
     return entries
 
 

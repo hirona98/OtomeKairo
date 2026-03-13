@@ -214,6 +214,7 @@ def build_cognition_input(
         retrieval_context=retrieval_context,
         stable_self_state=stable_self_state,
         confirmed_preferences=confirmed_preferences,
+        revoked_preferences=list(selection_profile["revoked_preferences"]),
         long_mood_state=long_mood_state,
         recent_dialog=recent_dialog,
         selected_memory_pack=selected_memory_pack,
@@ -1787,6 +1788,7 @@ def _build_reply_render_input(
     retrieval_context: dict[str, Any],
     stable_self_state: dict[str, Any],
     confirmed_preferences: dict[str, Any],
+    revoked_preferences: list[dict[str, Any]],
     long_mood_state: dict[str, Any] | None,
     recent_dialog: list[dict[str, Any]],
     selected_memory_pack: dict[str, Any],
@@ -1807,6 +1809,11 @@ def _build_reply_render_input(
         ),
         "stable_self_state": stable_self_state,
         "confirmed_preferences": confirmed_preferences,
+        "revoked_preferences": [
+            dict(revoked_preference)
+            for revoked_preference in revoked_preferences
+            if isinstance(revoked_preference, dict)
+        ],
         "long_mood_state": long_mood_state,
         "recent_dialog": recent_dialog,
         "selected_memory_pack": selected_memory_pack,

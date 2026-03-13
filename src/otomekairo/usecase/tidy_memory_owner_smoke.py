@@ -16,7 +16,7 @@ from otomekairo.schema.settings import build_default_settings
 
 
 # Block: Report constants
-REPORT_SCHEMA_VERSION = 1
+REPORT_SCHEMA_VERSION = 2
 
 
 # Block: Public smoke runner
@@ -55,6 +55,28 @@ def run_tidy_memory_owner_smoke(*, keep_db: bool) -> dict[str, Any]:
             stale_vector_cutoff_at=now_ms - 60_000,
         )
         second_enqueued_count = runtime._enqueue_due_tidy_memory_jobs()
+        _delete_tidy_job_history(db_path=db_path)
+        _set_runtime_housekeeping_last_enqueued_at(
+            db_path=db_path,
+            last_enqueued_at=now_ms - 120_000,
+            updated_at=now_ms,
+        )
+        owner_state_after_history_gc = store.read_tidy_memory_owner_state(
+            completed_jobs_cutoff_at=now_ms - 60_000,
+            stale_preview_cutoff_at=now_ms - 60_000,
+            stale_vector_cutoff_at=now_ms - 60_000,
+        )
+        restart_runtime = RuntimeLoop(
+            store=store,
+            owner_token="smoke-owner-restart",
+            default_settings=default_settings,
+            cognition_client=object(),
+            search_client=object(),
+            camera_controller=object(),
+            camera_sensor=object(),
+            speech_synthesizer=object(),
+        )
+        restart_enqueued_count = restart_runtime._enqueue_due_tidy_memory_jobs()
         report = _build_report(
             db_path=db_path,
             keep_db=keep_db,
@@ -62,6 +84,8 @@ def run_tidy_memory_owner_smoke(*, keep_db: bool) -> dict[str, Any]:
             processed_scopes=processed_scopes,
             owner_state_after=owner_state_after,
             second_enqueued_count=second_enqueued_count,
+            owner_state_after_history_gc=owner_state_after_history_gc,
+            restart_enqueued_count=restart_enqueued_count,
         )
         _validate_report(report)
         return report
@@ -292,6 +316,52 @@ def _drain_tidy_jobs(
         runtime._memory_job_handler(memory_job.job_kind)(memory_job)
 
 
+# Block: Tidy job history delete
+def _delete_tidy_job_history(*, db_path: Path) -> None:
+    with sqlite3.connect(db_path) as connection:
+        payload_ids = [
+            str(row[0])
+            for row in connection.execute(
+                """
+                SELECT json_extract(payload_ref_json, '$.payload_id')
+                FROM memory_jobs
+                WHERE job_kind = 'tidy_memory'
+                  AND json_extract(payload_ref_json, '$.payload_id') IS NOT NULL
+                """
+            ).fetchall()
+        ]
+        connection.execute(
+            """
+            DELETE FROM memory_jobs
+            WHERE job_kind = 'tidy_memory'
+            """
+        )
+        if payload_ids:
+            placeholders = ",".join("?" for _ in payload_ids)
+            connection.execute(
+                f"DELETE FROM memory_job_payloads WHERE payload_id IN ({placeholders})",
+                tuple(payload_ids),
+            )
+
+
+# Block: Housekeeping anchor update
+def _set_runtime_housekeeping_last_enqueued_at(
+    *,
+    db_path: Path,
+    last_enqueued_at: int,
+    updated_at: int,
+) -> None:
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            UPDATE runtime_housekeeping_state
+            SET last_enqueued_at = ?,
+                updated_at = ?
+            """,
+            (last_enqueued_at, updated_at),
+        )
+
+
 # Block: Report build
 def _build_report(
     *,
@@ -301,6 +371,8 @@ def _build_report(
     processed_scopes: list[str],
     owner_state_after: dict[str, dict[str, Any]],
     second_enqueued_count: int,
+    owner_state_after_history_gc: dict[str, dict[str, Any]],
+    restart_enqueued_count: int,
 ) -> dict[str, Any]:
     checks = {
         "tidy_jobs_enqueued": enqueued_count == 3,
@@ -318,6 +390,12 @@ def _build_report(
             for scope_state in owner_state_after.values()
         ),
         "no_immediate_reenqueue": second_enqueued_count == 0,
+        "housekeeping_anchor_survives_history_gc": all(
+            isinstance(scope_state["last_enqueued_at"], int)
+            and int(scope_state["last_enqueued_at"]) > 0
+            for scope_state in owner_state_after_history_gc.values()
+        ),
+        "restart_interval_enqueue_visible": restart_enqueued_count == 3,
     }
     report = {
         "report_schema_version": REPORT_SCHEMA_VERSION,
@@ -326,6 +404,8 @@ def _build_report(
         "processed_scopes": list(processed_scopes),
         "owner_state_after": owner_state_after,
         "second_enqueued_count": second_enqueued_count,
+        "owner_state_after_history_gc": owner_state_after_history_gc,
+        "restart_enqueued_count": restart_enqueued_count,
     }
     if keep_db:
         report["db_path"] = str(db_path)
@@ -344,4 +424,3 @@ def _validate_report(report: dict[str, Any]) -> None:
     ]
     if failed_checks:
         raise RuntimeError("tidy_memory_owner_smoke failed: " + ", ".join(failed_checks))
-

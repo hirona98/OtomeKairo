@@ -401,6 +401,7 @@
 - `relationship_priorities` は、`relationship_priority_entry` の配列である
 - `learned_preferences`、`learned_aversions`、`revoked_preferences` は、`personality_preference_entry` の配列である
 - current 実装では、`learned_preferences` は `state_snapshot.stable_preference_items` のうち `status = "confirmed"` かつ `polarity = "like"`、`learned_aversions` は `status = "confirmed"` かつ `polarity = "dislike"`、`revoked_preferences` は `status = "revoked"` から再構成してよい
+- current 実装では、`state_snapshot.stable_preference_items` は `stable_preference_projection` から bucket ごとに上位件数だけ読んだ compact stable context でよい
 - current 実装では、`revoked_preferences[]` に元の極性を示す `polarity` を追加で持ってよい
 - `habit_biases` は、`self_state.personality_json.habit_biases` と同じ固定キーを持つ
 - `emotion_bias` は、現在感情から作る短期補正値であり、各値は `-1.0..+1.0` の `number` に固定する
@@ -738,6 +739,7 @@
 - `likes[]` と `dislikes[]` の各要素は、少なくとも `domain`、`target_key`、`confidence` を持つ
 - `confidence` は `0.0..1.0` の `number` に固定する
 - current 実装では、`state_snapshot.stable_preference_items.memory_kind = "preference"` かつ `payload.status = "confirmed"` の行だけを含めてよい
+- current 実装では、`state_snapshot.stable_preference_items` は `stable_preference_projection` から `confirmed like`、`confirmed dislike`、`revoked` を bucket ごとに最大 `8` 件ずつ読む
 
 <!-- Block: Long Mood State Context -->
 ### `long_mood_state`
@@ -773,6 +775,7 @@
     "likes": [],
     "dislikes": []
   },
+  "revoked_preferences": [],
   "long_mood_state": null,
   "recent_dialog": [],
   "selected_memory_pack": {
@@ -792,8 +795,9 @@
 ```
 
 - `reply_render_input` は、`reply_render` 専用の派生入力である
-- 必須項目は `observation_text`、`time_reference_text`、`attention_summary_text`、`retrieval_summary_text`、`stable_self_state`、`confirmed_preferences`、`long_mood_state`、`recent_dialog`、`selected_memory_pack`、`reply_style` である
+- 必須項目は `observation_text`、`time_reference_text`、`attention_summary_text`、`retrieval_summary_text`、`stable_self_state`、`confirmed_preferences`、`revoked_preferences`、`long_mood_state`、`recent_dialog`、`selected_memory_pack`、`reply_style` である
 - `observation_text`、`time_reference_text`、`attention_summary_text`、`retrieval_summary_text` は非空の `string` に固定する
+- `revoked_preferences` は、`selection_profile.revoked_preferences` と同じ entry shape を持つ配列である
 - `long_mood_state` は、背景感情がない場合だけ `null` を許可する
 - `reply_style.speech_tone` と `reply_style.response_pace` は非空の `string` に固定する
 

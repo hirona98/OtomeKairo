@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any
 
 from otomekairo.usecase.chat_behavior_golden import build_chat_behavior_golden_report
+from otomekairo.usecase.schema16_migration_smoke import run_schema16_migration_smoke
+from otomekairo.usecase.stable_context_contract_smoke import run_stable_context_contract_smoke
 from otomekairo.usecase.tidy_memory_owner_smoke import run_tidy_memory_owner_smoke
 
 
@@ -21,6 +23,12 @@ def run_eval_gate(*, keep_db: bool) -> dict[str, Any]:
     tidy_memory_owner_report = run_tidy_memory_owner_smoke(
         keep_db=keep_db,
     )
+    schema16_migration_report = run_schema16_migration_smoke(
+        keep_db=keep_db,
+    )
+    stable_context_report = run_stable_context_contract_smoke(
+        keep_db=keep_db,
+    )
     chat_behavior_report = build_chat_behavior_golden_report(
         keep_db=keep_db,
     )
@@ -29,10 +37,14 @@ def run_eval_gate(*, keep_db: bool) -> dict[str, Any]:
         "checks": {
             "py_compile_ok": True,
             "tidy_memory_owner_ok": True,
+            "schema16_migration_ok": True,
+            "stable_context_contract_ok": True,
             "chat_behavior_golden_ok": True,
         },
         "py_compile": py_compile_report,
         "tidy_memory_owner": tidy_memory_owner_report,
+        "schema16_migration": schema16_migration_report,
+        "stable_context_contract": stable_context_report,
         "chat_behavior_golden": chat_behavior_report,
     }
     _validate_report(report)
@@ -87,12 +99,24 @@ def format_eval_gate_report(report: dict[str, Any]) -> str:
     tidy_memory_owner_report = report.get("tidy_memory_owner")
     if not isinstance(tidy_memory_owner_report, dict):
         raise RuntimeError("eval_gate.tidy_memory_owner must be an object")
+    schema16_migration_report = report.get("schema16_migration")
+    if not isinstance(schema16_migration_report, dict):
+        raise RuntimeError("eval_gate.schema16_migration must be an object")
+    stable_context_report = report.get("stable_context_contract")
+    if not isinstance(stable_context_report, dict):
+        raise RuntimeError("eval_gate.stable_context_contract must be an object")
     chat_behavior_report = report.get("chat_behavior_golden")
     if not isinstance(chat_behavior_report, dict):
         raise RuntimeError("eval_gate.chat_behavior_golden must be an object")
     tidy_checks = tidy_memory_owner_report.get("checks")
     if not isinstance(tidy_checks, dict):
         raise RuntimeError("eval_gate.tidy_memory_owner.checks must be an object")
+    schema16_checks = schema16_migration_report.get("checks")
+    if not isinstance(schema16_checks, dict):
+        raise RuntimeError("eval_gate.schema16_migration.checks must be an object")
+    stable_checks = stable_context_report.get("checks")
+    if not isinstance(stable_checks, dict):
+        raise RuntimeError("eval_gate.stable_context_contract.checks must be an object")
     golden_checks = chat_behavior_report.get("checks")
     if not isinstance(golden_checks, dict):
         raise RuntimeError("eval_gate.chat_behavior_golden.checks must be an object")
@@ -107,6 +131,16 @@ def format_eval_gate_report(report: dict[str, Any]) -> str:
         "tidy: " + ", ".join(
             check_name
             for check_name, passed in tidy_checks.items()
+            if bool(passed)
+        ),
+        "schema16: " + ", ".join(
+            check_name
+            for check_name, passed in schema16_checks.items()
+            if bool(passed)
+        ),
+        "stable_context: " + ", ".join(
+            check_name
+            for check_name, passed in stable_checks.items()
             if bool(passed)
         ),
         "golden: " + ", ".join(

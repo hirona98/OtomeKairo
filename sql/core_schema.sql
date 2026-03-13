@@ -449,6 +449,23 @@ CREATE INDEX idx_preference_memory_scope_status_updated
 CREATE INDEX idx_preference_memory_domain_polarity_status
     ON preference_memory (domain, polarity, status);
 
+CREATE TABLE stable_preference_projection (
+    owner_scope TEXT NOT NULL CHECK (owner_scope IN ('self', 'other_entity')),
+    target_entity_ref_json TEXT NOT NULL,
+    domain TEXT NOT NULL,
+    polarity TEXT NOT NULL CHECK (polarity IN ('like', 'dislike')),
+    preference_id TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('confirmed', 'revoked')),
+    confidence REAL NOT NULL,
+    evidence_event_ids_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (owner_scope, target_entity_ref_json, domain, polarity)
+);
+
+CREATE INDEX idx_stable_preference_projection_scope_status_updated
+    ON stable_preference_projection (owner_scope, status, confidence DESC, updated_at DESC);
+
 CREATE TABLE event_affects (
     event_affect_id TEXT PRIMARY KEY,
     event_id TEXT NOT NULL UNIQUE,
@@ -743,6 +760,15 @@ CREATE TABLE memory_job_payloads (
 
 CREATE INDEX idx_memory_job_payloads_kind_created
     ON memory_job_payloads (job_kind, created_at DESC);
+
+CREATE TABLE runtime_housekeeping_state (
+    maintenance_scope TEXT PRIMARY KEY CHECK (
+        maintenance_scope IN ('completed_jobs_gc', 'stale_preview_gc', 'stale_vector_gc')
+    ),
+    last_enqueued_at INTEGER,
+    last_completed_at INTEGER,
+    updated_at INTEGER NOT NULL
+);
 
 -- Block: Search and derived index tables
 CREATE TABLE vec_items (
