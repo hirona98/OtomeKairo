@@ -194,17 +194,6 @@ def _read_stable_preference_projection_rows(
     return rows
 
 
-def _read_retrieval_preference_projection_rows(
-    *,
-    connection: sqlite3.Connection,
-    bucket_limit: int,
-) -> list[sqlite3.Row]:
-    return _read_stable_preference_projection_rows(
-        connection=connection,
-        bucket_limit=bucket_limit,
-    )
-
-
 # Block: Event snapshot rows
 def _event_memory_snapshot_entry(row: sqlite3.Row) -> dict[str, Any]:
     summary_text = _event_summary_text(row)

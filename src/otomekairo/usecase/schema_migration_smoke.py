@@ -1,4 +1,4 @@
-"""Deterministic smoke check for schema 15 -> 17 migration."""
+"""Deterministic smoke check for current schema migration chain."""
 
 from __future__ import annotations
 
@@ -19,8 +19,8 @@ REPORT_SCHEMA_VERSION = 2
 
 
 # Block: Public smoke runner
-def run_schema16_migration_smoke(*, keep_db: bool) -> dict[str, Any]:
-    temp_dir = Path(tempfile.mkdtemp(prefix="otomekairo-schema16-migration-"))
+def run_schema_migration_smoke(*, keep_db: bool) -> dict[str, Any]:
+    temp_dir = Path(tempfile.mkdtemp(prefix="otomekairo-schema-migration-"))
     db_path = temp_dir / "core.sqlite3"
     try:
         default_settings = build_default_settings()
@@ -58,6 +58,52 @@ def run_schema16_migration_smoke(*, keep_db: bool) -> dict[str, Any]:
 def _downgrade_to_schema15_fixture(*, db_path: Path) -> None:
     now_ms = 1_710_000_000_000
     with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE working_memory_items (
+                slot_no INTEGER PRIMARY KEY CHECK (slot_no >= 0),
+                item_kind TEXT NOT NULL,
+                summary_text TEXT NOT NULL,
+                source_refs_json TEXT NOT NULL,
+                updated_at INTEGER NOT NULL,
+                confidence REAL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE recent_event_window_items (
+                window_pos INTEGER PRIMARY KEY CHECK (window_pos >= 0),
+                source_kind TEXT NOT NULL CHECK (source_kind IN ('input_journal', 'event')),
+                source_id TEXT NOT NULL,
+                summary_text TEXT NOT NULL,
+                captured_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE skill_registry (
+                skill_id TEXT PRIMARY KEY,
+                trigger_pattern_json TEXT NOT NULL,
+                preconditions_json TEXT NOT NULL,
+                action_pattern_json TEXT NOT NULL,
+                success_signature_json TEXT NOT NULL,
+                enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                summary_text TEXT,
+                last_used_at INTEGER
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX idx_skill_registry_enabled_updated
+                ON skill_registry (enabled, updated_at DESC)
+            """
+        )
         connection.execute("DROP INDEX IF EXISTS idx_stable_preference_projection_scope_status_updated")
         connection.execute("DROP TABLE IF EXISTS stable_preference_projection")
         connection.execute("DROP TABLE IF EXISTS runtime_housekeeping_state")
@@ -84,6 +130,63 @@ def _downgrade_to_schema15_fixture(*, db_path: Path) -> None:
             polarity="dislike",
             target_key="ホラー映画",
             updated_at=now_ms - 500,
+        )
+        connection.execute(
+            """
+            INSERT INTO working_memory_items (
+                slot_no,
+                item_kind,
+                summary_text,
+                source_refs_json,
+                updated_at,
+                confidence
+            )
+            VALUES (0, 'summary', 'fixture', '[]', ?, 0.8)
+            """,
+            (now_ms - 100,),
+        )
+        connection.execute(
+            """
+            INSERT INTO recent_event_window_items (
+                window_pos,
+                source_kind,
+                source_id,
+                summary_text,
+                captured_at,
+                updated_at
+            )
+            VALUES (0, 'event', 'evt_fixture', 'fixture', ?, ?)
+            """,
+            (now_ms - 100, now_ms - 100),
+        )
+        connection.execute(
+            """
+            INSERT INTO skill_registry (
+                skill_id,
+                trigger_pattern_json,
+                preconditions_json,
+                action_pattern_json,
+                success_signature_json,
+                enabled,
+                created_at,
+                updated_at,
+                summary_text,
+                last_used_at
+            )
+            VALUES (
+                'skill_fixture',
+                '{"trigger":"fixture"}',
+                '[]',
+                '[]',
+                '[]',
+                1,
+                ?,
+                ?,
+                'fixture',
+                ?
+            )
+            """,
+            (now_ms - 100, now_ms - 100, now_ms - 100),
         )
         payload_id = "payload_tidy_fixture"
         connection.execute(
@@ -212,21 +315,40 @@ def _build_report(
         f"{item['payload']['status']}:{item['payload']['polarity']}:{item['payload']['target_entity_ref']['target_key']}"
         for item in cognition_state.stable_preference_items
     )
+    with sqlite3.connect(db_path) as connection:
+        remaining_ghost_tables = sorted(
+            row[0]
+            for row in connection.execute(
+                """
+                SELECT name
+                FROM sqlite_master
+                WHERE type = 'table'
+                  AND name IN (
+                      'working_memory_items',
+                      'recent_event_window_items',
+                      'skill_registry'
+                  )
+                ORDER BY name ASC
+                """
+            ).fetchall()
+        )
     checks = {
-        "schema17_projection_backfilled": stable_keys == [
+        "schema18_projection_backfilled": stable_keys == [
             "confirmed:like:展示",
             "revoked:dislike:ホラー映画",
         ],
-        "schema17_housekeeping_backfilled": (
+        "schema18_housekeeping_backfilled": (
             isinstance(owner_state["completed_jobs_gc"]["last_enqueued_at"], int)
             and int(owner_state["completed_jobs_gc"]["last_enqueued_at"]) > 0
         ),
+        "schema18_ghost_tables_dropped": remaining_ghost_tables == [],
     }
     report = {
         "report_schema_version": REPORT_SCHEMA_VERSION,
         "checks": checks,
         "stable_keys": stable_keys,
         "owner_state": owner_state,
+        "remaining_ghost_tables": remaining_ghost_tables,
     }
     if keep_db:
         report["db_path"] = str(db_path)
@@ -242,5 +364,5 @@ def _validate_report(report: dict[str, Any]) -> None:
     ]
     if failed_checks:
         raise RuntimeError(
-            "schema16_migration_smoke failed: " + ", ".join(sorted(failed_checks))
+            "schema_migration_smoke failed: " + ", ".join(sorted(failed_checks))
         )

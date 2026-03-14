@@ -108,7 +108,6 @@ from otomekairo.infra.sqlite_store_snapshots import (
     _memory_state_target,
     _normalized_entity_name,
     _preference_snapshot_entry,
-    _read_retrieval_preference_projection_rows,
     _read_stable_preference_projection_rows,
     _state_about_time_from_row,
     _state_entity_entries_from_row,
@@ -220,7 +219,7 @@ from otomekairo.usecase.write_memory_plan import (
 
 # Block: Schema constants
 SCHEMA_NAME = "core_schema"
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 STABLE_PREFERENCE_BUCKET_LIMIT = 8
 RETRIEVAL_STABLE_PREFERENCE_BUCKET_LIMIT = 24
 TIDY_MEMORY_SCOPES = (
@@ -1056,7 +1055,7 @@ class SqliteStateStore:
                 connection=connection,
                 bucket_limit=STABLE_PREFERENCE_BUCKET_LIMIT,
             )
-            retrieval_preference_rows = _read_retrieval_preference_projection_rows(
+            retrieval_preference_rows = _read_stable_preference_projection_rows(
                 connection=connection,
                 bucket_limit=RETRIEVAL_STABLE_PREFERENCE_BUCKET_LIMIT,
             )
@@ -7145,7 +7144,7 @@ class SqliteStateStore:
             return
         if current_version > SCHEMA_VERSION:
             raise RuntimeError("schema_version is newer than this initializer")
-        if current_version not in {2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}:
+        if current_version not in {2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17}:
             raise RuntimeError("unsupported schema_version for migration")
         while current_version < SCHEMA_VERSION:
             if current_version == 2:
@@ -7207,6 +7206,10 @@ class SqliteStateStore:
             if current_version == 16:
                 self._migrate_schema_16_to_17(connection=connection, now_ms=now_ms)
                 current_version = 17
+                continue
+            if current_version == 17:
+                self._migrate_schema_17_to_18(connection=connection, now_ms=now_ms)
+                current_version = 18
                 continue
             raise RuntimeError("unsupported schema_version for migration")
 
@@ -8895,6 +8898,22 @@ class SqliteStateStore:
             WHERE meta_key = 'schema_version'
             """,
             (_json_text(17), now_ms),
+        )
+
+    # Block: Schema migration 17->18
+    def _migrate_schema_17_to_18(self, *, connection: sqlite3.Connection, now_ms: int) -> None:
+        connection.execute("DROP INDEX IF EXISTS idx_skill_registry_enabled_updated")
+        connection.execute("DROP TABLE IF EXISTS skill_registry")
+        connection.execute("DROP TABLE IF EXISTS recent_event_window_items")
+        connection.execute("DROP TABLE IF EXISTS working_memory_items")
+        connection.execute(
+            """
+            UPDATE db_meta
+            SET meta_value_json = ?,
+                updated_at = ?
+            WHERE meta_key = 'schema_version'
+            """,
+            (_json_text(18), now_ms),
         )
 
     # Block: sqlite-vec schema ensure
