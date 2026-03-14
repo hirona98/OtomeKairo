@@ -263,11 +263,8 @@ def _fetch_event_rows_by_ids(
             events.observation_summary,
             events.action_summary,
             events.result_summary,
-            events.created_at,
-            event_preview_cache.preview_text
+            events.created_at
         FROM events
-        LEFT JOIN event_preview_cache
-               ON event_preview_cache.event_id = events.event_id
         WHERE events.searchable = 1
           AND events.event_id IN ({placeholder_sql})
         """,

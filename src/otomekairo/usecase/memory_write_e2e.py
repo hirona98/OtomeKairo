@@ -48,11 +48,6 @@ def run_memory_write_e2e(*, db_path: Path) -> dict[str, Any]:
         initializer_version=__version__,
     )
     store.initialize()
-    effective_settings = store.read_effective_settings(default_settings)
-    embedding_model = _required_non_empty_string(
-        effective_settings.get("llm.embedding_model"),
-        "llm.embedding_model must be non-empty string",
-    )
     cycle_reports: list[dict[str, Any]] = []
     for cycle_spec in _scripted_cycles():
         cycle_reports.append(
@@ -60,7 +55,6 @@ def run_memory_write_e2e(*, db_path: Path) -> dict[str, Any]:
                 store=store,
                 db_path=db_path,
                 cycle_spec=cycle_spec,
-                embedding_model=embedding_model,
             )
         )
     cognition_state = store.read_cognition_state(
@@ -82,7 +76,6 @@ def _run_scripted_cycle(
     store: SqliteStateStore,
     db_path: Path,
     cycle_spec: ScriptedCycleSpec,
-    embedding_model: str,
 ) -> dict[str, Any]:
     enqueue_result = store.enqueue_chat_message(
         text=cycle_spec.user_text,
@@ -126,14 +119,10 @@ def _run_scripted_cycle(
             ],
             "resolution_status": "consumed",
         },
-        retrieval_run=None,
         attention_snapshot=None,
         camera_available=False,
     )
-    drained_jobs = _drain_memory_jobs(
-        store=store,
-        embedding_model=embedding_model,
-    )
+    drained_jobs = _drain_memory_jobs(store=store)
     cycle_snapshot = _read_cycle_snapshot(
         db_path=db_path,
         cycle_id=cycle_spec.cycle_id,
@@ -222,7 +211,6 @@ def _response_created_at(*, action_results: list[ActionHistoryRecord]) -> int:
 def _drain_memory_jobs(
     *,
     store: SqliteStateStore,
-    embedding_model: str,
 ) -> dict[str, Any]:
     jobs: list[dict[str, Any]] = []
     job_counts: dict[str, int] = {}
@@ -232,11 +220,6 @@ def _drain_memory_jobs(
             break
         if memory_job.job_kind == "write_memory":
             completed_ref = store.complete_write_memory_job(memory_job=memory_job)
-        elif memory_job.job_kind == "refresh_preview":
-            completed_ref = store.complete_refresh_preview_job(
-                memory_job=memory_job,
-                embedding_model=embedding_model,
-            )
         elif memory_job.job_kind == "embedding_sync":
             completed_ref = store.complete_embedding_sync_job(memory_job=memory_job)
         else:
@@ -435,13 +418,8 @@ def _build_report_checks(report: dict[str, Any]) -> dict[str, bool]:
     }
     checks = {
         "write_memory_jobs_completed": int(job_totals.get("write_memory", 0)) == cycle_count,
-        "refresh_preview_jobs_completed": (
-            int(job_totals.get("refresh_preview", 0))
-            == int(database_counts["event_count"])
-        ),
         "embedding_sync_jobs_completed": (
-            int(job_totals.get("embedding_sync", 0))
-            == int(job_totals.get("write_memory", 0)) + int(job_totals.get("refresh_preview", 0))
+            int(job_totals.get("embedding_sync", 0)) == int(job_totals.get("write_memory", 0))
         ),
         "summary_memory_created": (
             int(database_counts["memory_state_kind_counts"].get("summary", 0)) >= cycle_count
@@ -452,10 +430,6 @@ def _build_report_checks(report: dict[str, Any]) -> dict[str, bool]:
         ),
         "long_mood_state_upserted": (
             int(database_counts["memory_state_kind_counts"].get("long_mood_state", 0)) == 1
-        ),
-        "preview_cache_filled": (
-            int(database_counts["event_preview_count"])
-            == int(database_counts["event_count"])
         ),
         "embedding_targets_materialized": (
             int(database_counts["vec_item_counts"].get("event", 0)) > 0
@@ -537,13 +511,11 @@ def format_memory_write_e2e_report(report: dict[str, Any]) -> str:
         (
             "jobs: "
             f"write_memory {report['job_totals'].get('write_memory', 0)}, "
-            f"refresh_preview {report['job_totals'].get('refresh_preview', 0)}, "
             f"embedding_sync {report['job_totals'].get('embedding_sync', 0)}"
         ),
         (
             "database: "
             f"events {database_counts['event_count']}, "
-            f"previews {database_counts['event_preview_count']}, "
             f"vec_items {database_counts['vec_item_count']}, "
             f"event_links {database_counts['event_link_count']}, "
             f"state_links {database_counts['state_link_count']}, "
@@ -606,10 +578,6 @@ def _read_database_counts(*, db_path: Path) -> dict[str, Any]:
         event_count = _read_single_count(
             connection=connection,
             sql="SELECT COUNT(*) FROM events",
-        )
-        event_preview_count = _read_single_count(
-            connection=connection,
-            sql="SELECT COUNT(*) FROM event_preview_cache",
         )
         vec_item_count = _read_single_count(
             connection=connection,
@@ -694,7 +662,6 @@ def _read_database_counts(*, db_path: Path) -> dict[str, Any]:
         ]
     return {
         "event_count": event_count,
-        "event_preview_count": event_preview_count,
         "vec_item_count": vec_item_count,
         "event_link_count": event_link_count,
         "event_thread_count": event_thread_count,

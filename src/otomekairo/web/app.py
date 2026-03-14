@@ -26,7 +26,6 @@ from otomekairo.web.dependencies import ApiError, AppServices
 from otomekairo.web.chat_input_api import build_chat_input_router
 from otomekairo.web.chat_stream_api import build_chat_stream_router
 from otomekairo.web.microphone_api import build_microphone_router
-from otomekairo.web.retrieval_api import build_retrieval_router
 from otomekairo.web.settings_api import build_settings_router
 from otomekairo.web.status_api import build_status_router
 
@@ -170,7 +169,6 @@ def create_app() -> FastAPI:
 
     # Block: Router registration
     app.include_router(build_status_router(services))
-    app.include_router(build_retrieval_router(services))
     app.include_router(build_settings_router(services))
     app.include_router(build_chat_input_router(services))
     app.include_router(build_chat_stream_router(services))

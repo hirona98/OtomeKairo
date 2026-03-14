@@ -215,9 +215,6 @@ def _event_memory_snapshot_entry(row: sqlite3.Row) -> dict[str, Any]:
         "updated_at": created_at,
         "last_confirmed_at": created_at,
     }
-    preview_text = row["preview_text"]
-    if isinstance(preview_text, str) and preview_text.strip():
-        entry["payload"]["preview_text"] = preview_text.strip()
     return entry
 
 
@@ -600,9 +597,6 @@ def _recent_event_entry(row: sqlite3.Row) -> dict[str, Any]:
         "summary_text": _event_summary_text(row),
         "created_at": int(row["created_at"]),
     }
-    preview_text = row["preview_text"]
-    if isinstance(preview_text, str) and preview_text.strip():
-        entry["preview_text"] = preview_text.strip()
     return entry
 
 

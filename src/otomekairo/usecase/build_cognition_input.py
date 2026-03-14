@@ -45,7 +45,6 @@ MEMORY_TRIM_SLOT_ORDER = (
 @dataclass(frozen=True, slots=True)
 class BuiltCognitionInput:
     cognition_input: dict[str, Any]
-    retrieval_run: dict[str, Any]
 
 
 # Block: Public builder
@@ -95,9 +94,6 @@ def build_cognition_input(
         "relationship_overview": state_snapshot.self_state["relationship_overview"],
         "invariants": state_snapshot.self_state["invariants"],
     }
-    latest_persona_update = state_snapshot.self_state.get("latest_persona_update")
-    if isinstance(latest_persona_update, dict):
-        self_snapshot["last_persona_update"] = latest_persona_update
     cycle_meta = {
         "cycle_id": cycle_id,
         "trigger_reason": normalize_trigger_reason(
@@ -251,11 +247,6 @@ def build_cognition_input(
             "current_observation": current_observation,
             "context_budget": context_budget,
             "reply_render_input": reply_render_input,
-        },
-        retrieval_run={
-            "plan_json": retrieval_artifacts.retrieval_plan,
-            "candidates_json": retrieval_artifacts.candidates_json,
-            "selected_json": retrieval_selected_json,
         },
     )
 
@@ -1317,24 +1308,6 @@ def _self_layer_budget_projection(
             }
             for item in selection_profile["relationship_priorities"][:3]
             if isinstance(item, dict)
-        ],
-        "last_persona_update": _persona_update_budget_projection(self_snapshot=self_snapshot),
-    }
-
-
-def _persona_update_budget_projection(*, self_snapshot: dict[str, Any]) -> dict[str, Any] | None:
-    last_persona_update = self_snapshot.get("last_persona_update")
-    if not isinstance(last_persona_update, dict):
-        return None
-    updated_traits = last_persona_update.get("updated_traits")
-    if not isinstance(updated_traits, list):
-        return None
-    return {
-        "reason": str(last_persona_update.get("reason", "")),
-        "updated_traits": [
-            str(trait_entry.get("trait_name"))
-            for trait_entry in updated_traits[:4]
-            if isinstance(trait_entry, dict) and isinstance(trait_entry.get("trait_name"), str)
         ],
     }
 

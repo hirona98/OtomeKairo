@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from otomekairo.schema.runtime_types import MemoryJobRecord
-from otomekairo.usecase.persona_change import evaluate_persona_change
 from otomekairo.usecase.write_memory_plan import (
     build_write_memory_plan,
     validate_write_memory_payload,
@@ -32,8 +31,6 @@ class WriteMemoryJobExecutionState:
     existing_long_mood_state: dict[str, Any] | None
     existing_preference_entries: list[dict[str, Any]]
     recent_dialogue_context: list[dict[str, Any]]
-    current_personality: dict[str, Any]
-    current_personality_updated_at: int
 
 
 # Block: Public orchestration
@@ -65,12 +62,6 @@ def run_write_memory_job(
         connection=connection,
         memory_write_plan=memory_write_plan,
         created_at=now_ms,
-    )
-    _apply_persona_change_if_needed(
-        connection=connection,
-        store=store,
-        execution_state=execution_state,
-        now_ms=now_ms,
     )
     store.enqueue_write_memory_followup_jobs_in_transaction(
         connection=connection,
@@ -109,32 +100,4 @@ def _build_validated_write_memory_plan(
             applied_at=applied_at,
         ),
         payload=execution_state.validated_payload,
-    )
-
-
-# Block: Persona apply
-def _apply_persona_change_if_needed(
-    *,
-    connection: sqlite3.Connection,
-    store: SqliteStateStore,
-    execution_state: WriteMemoryJobExecutionState,
-    now_ms: int,
-) -> None:
-    persona_change = evaluate_persona_change(
-        connection=connection,
-        now_ms=now_ms,
-        current_personality=execution_state.current_personality,
-        current_personality_updated_at=execution_state.current_personality_updated_at,
-    )
-    if (
-        persona_change.persona_updates is None
-        or persona_change.updated_personality is None
-    ):
-        return
-    store.apply_persona_updates_in_transaction(
-        connection=connection,
-        current_personality=execution_state.current_personality,
-        updated_personality=persona_change.updated_personality,
-        persona_updates=persona_change.persona_updates,
-        updated_at=now_ms,
     )

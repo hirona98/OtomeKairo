@@ -445,57 +445,6 @@ def _public_emotion_summary(current_emotion_json: dict[str, Any]) -> dict[str, A
     }
 
 
-# Block: Latest retrieval row
-def _read_latest_retrieval_row(connection: sqlite3.Connection) -> sqlite3.Row | None:
-    return connection.execute(
-        """
-        SELECT cycle_id, created_at, plan_json, candidates_json, selected_json, resolved_event_ids_json
-        FROM retrieval_runs
-        ORDER BY created_at DESC
-        LIMIT 1
-        """
-    ).fetchone()
-
-
-# Block: Retrieval row decode
-def _retrieval_record_from_row(retrieval_row: sqlite3.Row) -> dict[str, Any]:
-    retrieval_record: dict[str, Any] = {
-        "cycle_id": str(retrieval_row["cycle_id"]),
-        "created_at": int(retrieval_row["created_at"]),
-        "plan": json.loads(retrieval_row["plan_json"]),
-        "candidates": json.loads(retrieval_row["candidates_json"]),
-        "selected": json.loads(retrieval_row["selected_json"]),
-    }
-    if (
-        isinstance(retrieval_row["resolved_event_ids_json"], str)
-        and retrieval_row["resolved_event_ids_json"]
-    ):
-        retrieval_record["resolved_event_ids"] = json.loads(
-            retrieval_row["resolved_event_ids_json"]
-        )
-    return retrieval_record
-
-
-# Block: Latest retrieval record
-def _read_latest_retrieval_record(connection: sqlite3.Connection) -> dict[str, Any] | None:
-    retrieval_row = _read_latest_retrieval_row(connection)
-    if retrieval_row is None:
-        return None
-    return _retrieval_record_from_row(retrieval_row)
-
-
-# Block: Public persona update
-def _public_persona_update(row: sqlite3.Row) -> dict[str, Any]:
-    before_json = json.loads(row["before_json"])
-    after_json = json.loads(row["after_json"])
-    return {
-        "created_at": int(row["created_at"]),
-        "reason": str(row["reason"]),
-        "evidence_event_ids": json.loads(row["evidence_event_ids_json"]),
-        "updated_traits": _trait_update_entries(before_json=before_json, after_json=after_json),
-    }
-
-
 # Block: Event log entry
 def _event_log_entry(row: sqlite3.Row) -> dict[str, Any]:
     payload: dict[str, Any] = {
@@ -537,36 +486,6 @@ def _public_primary_focus(primary_focus_json: dict[str, Any]) -> str:
     if not isinstance(summary, str) or not summary:
         raise RuntimeError("attention_state.primary_focus_json.summary is required")
     return summary
-
-
-# Block: Trait update entries
-def _trait_update_entries(
-    *,
-    before_json: dict[str, Any],
-    after_json: dict[str, Any],
-) -> list[dict[str, Any]]:
-    before_traits = before_json.get("trait_values")
-    after_traits = after_json.get("trait_values")
-    if not isinstance(before_traits, dict) or not isinstance(after_traits, dict):
-        return []
-    updated_traits: list[dict[str, Any]] = []
-    for trait_name in sorted(after_traits):
-        before_value = before_traits.get(trait_name)
-        after_value = after_traits.get(trait_name)
-        if not isinstance(before_value, (int, float)) or not isinstance(after_value, (int, float)):
-            continue
-        delta = round(float(after_value) - float(before_value), 4)
-        if delta == 0.0:
-            continue
-        updated_traits.append(
-            {
-                "trait_name": trait_name,
-                "before": float(before_value),
-                "after": float(after_value),
-                "delta": delta,
-            }
-        )
-    return updated_traits
 
 
 # Block: Receipt summary
