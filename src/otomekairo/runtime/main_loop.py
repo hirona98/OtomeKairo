@@ -41,11 +41,6 @@ PENDING_INPUT_FAILURE_REASON = "processing_failed"
 SETTINGS_OVERRIDE_FAILURE_REASON = "settings_processing_failed"
 SETTINGS_CHANGE_SET_FAILURE_REASON = "settings_editor_processing_failed"
 CANCEL_FAILURE_REASON = "cancel_processing_failed"
-TIDY_MEMORY_SCOPES = (
-    "completed_jobs_gc",
-    "stale_preview_gc",
-    "stale_vector_gc",
-)
 
 
 # Block: Module logger
@@ -198,7 +193,6 @@ class RuntimeLoop:
                 pending_input_mutations,
                 resolution_status,
                 discard_reason,
-                retrieval_run,
                 attention_snapshot,
             ) = self._resolve_pending_input(
                 pending_input=pending_input,
@@ -228,7 +222,6 @@ class RuntimeLoop:
                 pending_input_mutations=pending_input_mutations,
                 discard_reason=discard_reason,
                 ui_events=ui_events,
-                retrieval_run=retrieval_run,
                 attention_snapshot=attention_snapshot,
                 commit_payload=commit_payload,
                 camera_available=self._camera_available(),
@@ -365,7 +358,6 @@ class RuntimeLoop:
         str,
         str | None,
         dict[str, Any] | None,
-        dict[str, Any] | None,
     ]:
         input_kind = pending_input.payload["input_kind"]
         if input_kind in {"chat_message", "microphone_message", "camera_observation", "network_result", "idle_tick"}:
@@ -407,11 +399,10 @@ class RuntimeLoop:
                 cognition_execution.pending_input_mutations,
                 "consumed",
                 None,
-                built_input.retrieval_run,
                 built_input.cognition_input["attention_snapshot"],
             )
         if input_kind == "cancel":
-            return ([], [], [], [], "discarded", "cancel_target_not_found", None, None)
+            return ([], [], [], [], "discarded", "cancel_target_not_found", None)
         ui_events, action_results = _unsupported_input_events(pending_input, resolved_at)
         self._append_ui_events(cycle_id=cycle_id, ui_events=ui_events)
         return (
@@ -421,7 +412,6 @@ class RuntimeLoop:
             [],
             "discarded",
             "unsupported_input_kind",
-            None,
             None,
         )
 
@@ -634,7 +624,6 @@ class RuntimeLoop:
     def _process_memory_job_once(self) -> bool:
         if not self._is_long_cycle_due():
             return False
-        self._enqueue_due_tidy_memory_jobs()
         memory_job = self._store.claim_next_memory_job()
         if memory_job is None:
             return False
@@ -669,10 +658,7 @@ class RuntimeLoop:
     def _memory_job_handler(self, job_kind: str) -> Callable[[MemoryJobRecord], None]:
         handlers = {
             "write_memory": self._run_write_memory_job,
-            "refresh_preview": self._run_refresh_preview_job,
             "embedding_sync": self._run_embedding_sync_job,
-            "quarantine_memory": self._run_quarantine_memory_job,
-            "tidy_memory": self._run_tidy_memory_job,
         }
         handler = handlers.get(job_kind)
         if handler is None:
@@ -683,77 +669,8 @@ class RuntimeLoop:
     def _run_write_memory_job(self, memory_job: MemoryJobRecord) -> None:
         self._store.complete_write_memory_job(memory_job=memory_job)
 
-    def _run_refresh_preview_job(self, memory_job: MemoryJobRecord) -> None:
-        effective_settings = self._store.read_effective_settings(self._default_settings)
-        embedding_model = effective_settings["llm.embedding_model"]
-        if not isinstance(embedding_model, str) or not embedding_model:
-            raise RuntimeError("llm.embedding_model must be non-empty string")
-        self._store.complete_refresh_preview_job(
-            memory_job=memory_job,
-            embedding_model=embedding_model,
-        )
-
     def _run_embedding_sync_job(self, memory_job: MemoryJobRecord) -> None:
         self._store.complete_embedding_sync_job(memory_job=memory_job)
-
-    def _run_quarantine_memory_job(self, memory_job: MemoryJobRecord) -> None:
-        effective_settings = self._store.read_effective_settings(self._default_settings)
-        embedding_model = effective_settings["llm.embedding_model"]
-        if not isinstance(embedding_model, str) or not embedding_model:
-            raise RuntimeError("llm.embedding_model must be non-empty string")
-        self._store.complete_quarantine_memory_job(
-            memory_job=memory_job,
-            embedding_model=embedding_model,
-        )
-
-    def _run_tidy_memory_job(self, memory_job: MemoryJobRecord) -> None:
-        self._store.complete_tidy_memory_job(memory_job=memory_job)
-
-    # Block: Tidy memory owner
-    def _enqueue_due_tidy_memory_jobs(self) -> int:
-        effective_settings = self._store.read_effective_settings(self._default_settings)
-        now_ms = _now_ms()
-        policy = _tidy_memory_policy(effective_settings=effective_settings)
-        owner_state = self._store.read_tidy_memory_owner_state(
-            completed_jobs_cutoff_at=now_ms - policy["completed_jobs_gc"]["retention_ms"],
-            stale_preview_cutoff_at=now_ms - policy["stale_preview_gc"]["retention_ms"],
-            stale_vector_cutoff_at=now_ms - policy["stale_vector_gc"]["retention_ms"],
-        )
-        enqueued_count = 0
-        for maintenance_scope in TIDY_MEMORY_SCOPES:
-            scope_state = owner_state[maintenance_scope]
-            if bool(scope_state["has_active_job"]):
-                continue
-            due_by_interval = _is_tidy_memory_due_by_interval(
-                now_ms=now_ms,
-                baseline_at=(
-                    int(scope_state["last_enqueued_at"])
-                    if isinstance(scope_state["last_enqueued_at"], int)
-                    else self._started_at_ms
-                ),
-                min_interval_ms=policy["min_interval_ms"],
-            )
-            due_by_backlog = int(scope_state["stale_count"]) >= int(policy[maintenance_scope]["trigger_count"])
-            if not due_by_interval and not due_by_backlog:
-                continue
-            retention_cutoff_at = now_ms - int(policy[maintenance_scope]["retention_ms"])
-            self._store.enqueue_tidy_memory(
-                maintenance_scope=maintenance_scope,
-                retention_cutoff_at=retention_cutoff_at,
-                target_refs=None,
-            )
-            enqueued_count += 1
-            logger.debug(
-                "tidy memory job enqueued",
-                extra={
-                    "maintenance_scope": maintenance_scope,
-                    "stale_count": int(scope_state["stale_count"]),
-                    "retention_cutoff_at": retention_cutoff_at,
-                    "due_by_interval": due_by_interval,
-                    "due_by_backlog": due_by_backlog,
-                },
-            )
-        return enqueued_count
 
     # Block: Long cycle gate
     def _is_long_cycle_due(self) -> bool:
@@ -1161,70 +1078,6 @@ def _opaque_id(prefix: str) -> str:
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
-
-
-# Block: Tidy memory policy
-def _tidy_memory_policy(*, effective_settings: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "min_interval_ms": _required_positive_int_setting(
-            effective_settings=effective_settings,
-            key="memory.tidy_min_interval_ms",
-        ),
-        "completed_jobs_gc": {
-            "retention_ms": _required_positive_int_setting(
-                effective_settings=effective_settings,
-                key="memory.tidy_completed_jobs_retention_ms",
-            ),
-            "trigger_count": _required_positive_int_setting(
-                effective_settings=effective_settings,
-                key="memory.tidy_completed_jobs_trigger_count",
-            ),
-        },
-        "stale_preview_gc": {
-            "retention_ms": _required_positive_int_setting(
-                effective_settings=effective_settings,
-                key="memory.tidy_preview_retention_ms",
-            ),
-            "trigger_count": _required_positive_int_setting(
-                effective_settings=effective_settings,
-                key="memory.tidy_preview_trigger_count",
-            ),
-        },
-        "stale_vector_gc": {
-            "retention_ms": _required_positive_int_setting(
-                effective_settings=effective_settings,
-                key="memory.tidy_vector_retention_ms",
-            ),
-            "trigger_count": _required_positive_int_setting(
-                effective_settings=effective_settings,
-                key="memory.tidy_vector_trigger_count",
-            ),
-        },
-    }
-
-
-# Block: Tidy interval due
-def _is_tidy_memory_due_by_interval(
-    *,
-    now_ms: int,
-    baseline_at: int,
-    min_interval_ms: int,
-) -> bool:
-    return (now_ms - baseline_at) >= min_interval_ms
-
-
-# Block: Positive int setting
-def _required_positive_int_setting(
-    *,
-    effective_settings: dict[str, Any],
-    key: str,
-) -> int:
-    value = effective_settings.get(key)
-    if not isinstance(value, int) or isinstance(value, bool):
-        raise RuntimeError(f"{key} must be integer")
-    if value <= 0:
-        raise RuntimeError(f"{key} must be positive")
-    return value
 
 
 # Block: Failed task helpers

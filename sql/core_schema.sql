@@ -633,64 +633,13 @@ CREATE INDEX idx_state_entities_state
 CREATE INDEX idx_state_entities_norm
     ON state_entities (entity_type_norm, entity_name_norm);
 
-CREATE TABLE event_preview_cache (
-    preview_id TEXT PRIMARY KEY,
-    event_id TEXT NOT NULL UNIQUE,
-    preview_text TEXT NOT NULL,
-    source_event_updated_at INTEGER NOT NULL,
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL,
-    FOREIGN KEY (event_id) REFERENCES events (event_id)
-        ON UPDATE CASCADE
-        ON DELETE RESTRICT
-);
-
-CREATE INDEX idx_event_preview_cache_source_updated
-    ON event_preview_cache (source_event_updated_at DESC);
-
-CREATE TABLE revisions (
-    revision_id TEXT PRIMARY KEY,
-    entity_type TEXT NOT NULL,
-    entity_id TEXT NOT NULL,
-    before_json TEXT NOT NULL,
-    after_json TEXT NOT NULL,
-    reason TEXT NOT NULL,
-    evidence_event_ids_json TEXT NOT NULL,
-    created_at INTEGER NOT NULL
-);
-
-CREATE INDEX idx_revisions_entity
-    ON revisions (entity_type, entity_id, created_at DESC);
-
-CREATE INDEX idx_revisions_created
-    ON revisions (created_at DESC);
-
-CREATE TABLE retrieval_runs (
-    run_id TEXT PRIMARY KEY,
-    cycle_id TEXT NOT NULL,
-    created_at INTEGER NOT NULL,
-    plan_json TEXT NOT NULL,
-    candidates_json TEXT NOT NULL,
-    selected_json TEXT NOT NULL,
-    resolved_event_ids_json TEXT
-);
-
-CREATE INDEX idx_retrieval_runs_cycle
-    ON retrieval_runs (cycle_id);
-
-CREATE INDEX idx_retrieval_runs_created
-    ON retrieval_runs (created_at DESC);
-
 -- Block: Memory job tables
 CREATE TABLE memory_jobs (
     job_id TEXT PRIMARY KEY,
     job_kind TEXT NOT NULL CHECK (
         job_kind IN (
             'write_memory',
-            'refresh_preview',
-            'embedding_sync',
-            'tidy_memory',
-            'quarantine_memory'
+            'embedding_sync'
         )
     ),
     payload_ref_json TEXT NOT NULL,
@@ -718,10 +667,7 @@ CREATE TABLE memory_job_payloads (
     job_kind TEXT NOT NULL CHECK (
         job_kind IN (
             'write_memory',
-            'refresh_preview',
-            'embedding_sync',
-            'tidy_memory',
-            'quarantine_memory'
+            'embedding_sync'
         )
     ),
     payload_json TEXT NOT NULL,
@@ -731,15 +677,6 @@ CREATE TABLE memory_job_payloads (
 
 CREATE INDEX idx_memory_job_payloads_kind_created
     ON memory_job_payloads (job_kind, created_at DESC);
-
-CREATE TABLE runtime_housekeeping_state (
-    maintenance_scope TEXT PRIMARY KEY CHECK (
-        maintenance_scope IN ('completed_jobs_gc', 'stale_preview_gc', 'stale_vector_gc')
-    ),
-    last_enqueued_at INTEGER,
-    last_completed_at INTEGER,
-    updated_at INTEGER NOT NULL
-);
 
 -- Block: Search and derived index tables
 CREATE TABLE vec_items (

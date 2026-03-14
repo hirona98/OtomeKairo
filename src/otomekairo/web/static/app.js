@@ -30,8 +30,6 @@
   const connectionText = document.getElementById("connection-text");
   const runtimeText = document.getElementById("runtime-text");
   const runtimeSummaryText = document.getElementById("runtime-summary-text");
-  const retrievalSummaryText = document.getElementById("retrieval-summary-text");
-  const personaUpdateSummaryText = document.getElementById("persona-update-summary-text");
 
   // Block: Settings schema
   const SETTINGS_TAB_KEYS = ["character", "behavior", "conversation", "memory", "motion", "system"];
@@ -837,10 +835,6 @@
       runtimeText.textContent = `状態取得に失敗しました: ${error.message}`;
       runtimeSummaryText.textContent = "状態取得に失敗しました";
       runtimeSummaryText.title = "";
-      retrievalSummaryText.textContent = "状態未取得";
-      retrievalSummaryText.title = "";
-      personaUpdateSummaryText.textContent = "状態未取得";
-      personaUpdateSummaryText.title = "";
     }
   }
 
@@ -921,9 +915,6 @@
     }
     if (!Array.isArray(snapshot.camera_connections)) {
       throw new Error("camera_connections が不正です");
-    }
-    if (!isObject(snapshot.runtime_projection)) {
-      throw new Error("runtime_projection が不正です");
     }
   }
 
@@ -1021,17 +1012,17 @@
 
   // Block: Microphone availability
   function getMicrophoneInputUnavailableReason() {
-    if (!isObject(latestEditorSnapshot) || !isObject(latestEditorSnapshot.runtime_projection)) {
+    if (!isObject(latestEditorSnapshot) || !isObject(latestEditorSnapshot.editor_state)) {
       return "設定読込前です";
     }
-    const effectiveSettings = latestEditorSnapshot.runtime_projection.effective_settings;
-    if (!isObject(effectiveSettings)) {
-      return "設定投影が不正です";
+    const systemValues = latestEditorSnapshot.editor_state.system_values;
+    if (!isObject(systemValues)) {
+      return "設定が不正です";
     }
-    if (effectiveSettings["sensors.microphone.enabled"] !== true) {
+    if (systemValues["sensors.microphone.enabled"] !== true) {
       return "設定でマイク入力が無効です";
     }
-    if (effectiveSettings["speech.stt.enabled"] !== true) {
+    if (systemValues["speech.stt.enabled"] !== true) {
       return "設定で音声認識が無効です";
     }
     return null;
@@ -2343,10 +2334,7 @@
       throw new Error("status payload が不正です");
     }
     const runtime = statusPayload.runtime;
-    const selfState = statusPayload.self_state;
     applyStatusSummary(runtimeSummaryText, buildRuntimeSummary(runtime));
-    applyStatusSummary(retrievalSummaryText, buildRetrievalSummary(runtime.last_retrieval));
-    applyStatusSummary(personaUpdateSummaryText, buildPersonaUpdateSummary(selfState.last_persona_update));
     if (runtime.is_running === true) {
       runtimeText.textContent = "人格ランタイム稼働中";
       return;
@@ -2377,284 +2365,6 @@
     };
   }
 
-  function buildRetrievalSummary(lastRetrieval) {
-    if (!isObject(lastRetrieval)) {
-      return { text: "まだありません", title: "" };
-    }
-    const createdAt = requireInteger(lastRetrieval.created_at, "runtime.last_retrieval.created_at");
-    const mode = requireString(lastRetrieval.mode, "runtime.last_retrieval.mode");
-    const cycleId = requireString(lastRetrieval.cycle_id, "runtime.last_retrieval.cycle_id");
-    const queries = readStringArray(lastRetrieval.queries, "runtime.last_retrieval.queries");
-    const selectedCounts = requireCountMap(lastRetrieval.selected_counts, "runtime.last_retrieval.selected_counts");
-    const collectorNames = readOptionalStringArray(lastRetrieval.collector_names, "runtime.last_retrieval.collector_names");
-    const collectorCounts = readOptionalCountMap(lastRetrieval.collector_counts, "runtime.last_retrieval.collector_counts");
-    const selectedReasonCounts = readOptionalCountMap(
-      lastRetrieval.selected_reason_counts,
-      "runtime.last_retrieval.selected_reason_counts",
-    );
-    const slotSkippedSlotCounts = readOptionalCountMap(
-      lastRetrieval.slot_skipped_slot_counts,
-      "runtime.last_retrieval.slot_skipped_slot_counts",
-    );
-    const reserveSlotCounts = readOptionalCountMap(
-      lastRetrieval.reserve_slot_counts,
-      "runtime.last_retrieval.reserve_slot_counts",
-    );
-    const selectorSummary = readOptionalSelectorSummary(
-      lastRetrieval.selector_summary,
-      "runtime.last_retrieval.selector_summary",
-    );
-    const totalCount = Object.values(selectedCounts).reduce((total, count) => total + count, 0);
-    const textParts = [
-      formatStatusTimestamp(createdAt),
-      mode,
-      summarizeQueries(queries),
-      `合計 ${String(totalCount)} 件（${summarizeSelectedCounts(selectedCounts)}）`,
-    ];
-    if (Object.keys(collectorCounts).length > 0) {
-      textParts.push(`collector ${summarizeCollectorCounts(collectorCounts)}`);
-    }
-    const selectorRatioSummary = summarizeSelectorRatios(selectorSummary);
-    if (selectorRatioSummary.length > 0) {
-      textParts.push(selectorRatioSummary);
-    }
-    if (Object.keys(slotSkippedSlotCounts).length > 0) {
-      textParts.push(`skip ${summarizeSlotCounts(slotSkippedSlotCounts)}`);
-    }
-    if (Object.keys(reserveSlotCounts).length > 0) {
-      textParts.push(`reserve ${summarizeSlotCounts(reserveSlotCounts)}`);
-    }
-    return {
-      text: textParts.join(" / "),
-      title: [
-        `cycle: ${cycleId}`,
-        `queries: ${queries.length > 0 ? queries.join(" / ") : "なし"}`,
-        `selected: ${formatSelectedCounts(selectedCounts)}`,
-        `collectors: ${collectorNames.length > 0 ? collectorNames.join(", ") : "なし"}`,
-        `collector_counts: ${Object.keys(collectorCounts).length > 0 ? formatSelectedCounts(collectorCounts) : "なし"}`,
-        `selected_reasons: ${Object.keys(selectedReasonCounts).length > 0 ? formatSelectedCounts(selectedReasonCounts) : "なし"}`,
-        `slot_skipped_slots: ${Object.keys(slotSkippedSlotCounts).length > 0 ? formatSelectedCounts(slotSkippedSlotCounts) : "なし"}`,
-        `reserve_slots: ${Object.keys(reserveSlotCounts).length > 0 ? formatSelectedCounts(reserveSlotCounts) : "なし"}`,
-        `selector: ${formatSelectorSummary(selectorSummary)}`,
-        "detail: /api/retrieval-runs/latest",
-      ].join("\n"),
-    };
-  }
-
-  function buildPersonaUpdateSummary(lastPersonaUpdate) {
-    if (!isObject(lastPersonaUpdate)) {
-      return { text: "まだありません", title: "" };
-    }
-    const createdAt = requireInteger(lastPersonaUpdate.created_at, "self_state.last_persona_update.created_at");
-    const reason = requireString(lastPersonaUpdate.reason, "self_state.last_persona_update.reason");
-    const updatedTraits = readUpdatedTraits(lastPersonaUpdate.updated_traits, "self_state.last_persona_update.updated_traits");
-    const evidenceEventIds = readStringArray(
-      lastPersonaUpdate.evidence_event_ids,
-      "self_state.last_persona_update.evidence_event_ids",
-    );
-    const traitSummary = updatedTraits.length > 0
-      ? summarizeTraitUpdates(updatedTraits)
-      : reason;
-    return {
-      text: `${formatStatusTimestamp(createdAt)} / ${traitSummary}`,
-      title: [
-        `reason: ${reason}`,
-        `traits: ${updatedTraits.length > 0 ? formatTraitUpdates(updatedTraits) : "なし"}`,
-        `evidence: ${evidenceEventIds.length > 0 ? evidenceEventIds.join(", ") : "なし"}`,
-      ].join("\n"),
-    };
-  }
-
-  // Block: Status summary helpers
-  function summarizeQueries(queries) {
-    if (queries.length === 0) {
-      return "query なし";
-    }
-    const firstQuery = clipText(queries[0], 36);
-    if (queries.length === 1) {
-      return `「${firstQuery}」`;
-    }
-    return `「${firstQuery}」ほか ${String(queries.length - 1)} 件`;
-  }
-
-  function summarizeTraitUpdates(updatedTraits) {
-    const visibleTraits = updatedTraits.slice(0, 3).map((trait) => {
-      const delta = requireNumber(trait.delta, `updated_traits.${trait.trait_name}.delta`);
-      return `${requireString(trait.trait_name, "updated_traits.trait_name")} ${formatSignedDecimal(delta)}`;
-    });
-    if (updatedTraits.length > 3) {
-      visibleTraits.push(`他 ${String(updatedTraits.length - 3)} 件`);
-    }
-    return visibleTraits.join(", ");
-  }
-
-  function formatSelectedCounts(selectedCounts) {
-    return Object.entries(selectedCounts)
-      .map(([key, value]) => `${key}=${String(value)}`)
-      .join(", ");
-  }
-
-  function summarizeSelectedCounts(selectedCounts) {
-    const labelMap = {
-      working_memory_items: "作業",
-      episodic_items: "エピ",
-      semantic_items: "意味",
-      affective_items: "感情",
-      relationship_items: "関係",
-      reflection_items: "反省",
-      recent_event_window: "直近",
-    };
-    return Object.entries(labelMap)
-      .map(([key, label]) => `${label}${String(requireInteger(selectedCounts[key] ?? 0, `selected_counts.${key}`))}`)
-      .join(" / ");
-  }
-
-  function summarizeCollectorCounts(collectorCounts) {
-    return Object.entries(collectorCounts)
-      .slice(0, 3)
-      .map(([key, value]) => `${clipText(key, 12)}:${String(value)}`)
-      .join(", ");
-  }
-
-  function summarizeSelectorRatios(selectorSummary) {
-    if (Object.keys(selectorSummary).length === 0) {
-      return "";
-    }
-    const parts = [];
-    if (Number.isInteger(selectorSummary.llm_return_ratio_percent)) {
-      parts.push(`返却${String(selectorSummary.llm_return_ratio_percent)}%`);
-    }
-    if (Number.isInteger(selectorSummary.selected_candidate_ratio_percent)) {
-      parts.push(`採用${String(selectorSummary.selected_candidate_ratio_percent)}%`);
-    }
-    if (parts.length === 0) {
-      return "";
-    }
-    return `selector ${parts.join(" / ")}`;
-  }
-
-  function summarizeSlotCounts(slotCounts) {
-    const slotLabels = {
-      working_memory_items: "作業",
-      episodic_items: "エピ",
-      semantic_items: "意味",
-      affective_items: "感情",
-      relationship_items: "関係",
-      reflection_items: "反省",
-      recent_event_window: "直近",
-    };
-    return Object.entries(slotCounts)
-      .slice(0, 3)
-      .map(([key, value]) => `${slotLabels[key] || clipText(key, 12)}:${String(value)}`)
-      .join(", ");
-  }
-
-  function formatSelectorSummary(selectorSummary) {
-    if (Object.keys(selectorSummary).length === 0) {
-      return "なし";
-    }
-    return Object.entries(selectorSummary)
-      .map(([key, value]) => `${key}=${String(value)}`)
-      .join(", ");
-  }
-
-  function formatTraitUpdates(updatedTraits) {
-    return updatedTraits
-      .map((trait) => {
-        const traitName = requireString(trait.trait_name, "updated_traits.trait_name");
-        const before = requireNumber(trait.before, `updated_traits.${traitName}.before`);
-        const after = requireNumber(trait.after, `updated_traits.${traitName}.after`);
-        const delta = requireNumber(trait.delta, `updated_traits.${traitName}.delta`);
-        return `${traitName}: ${before.toFixed(2)} -> ${after.toFixed(2)} (${formatSignedDecimal(delta)})`;
-      })
-      .join(", ");
-  }
-
-  function formatStatusTimestamp(timestampMs) {
-    return new Date(timestampMs).toLocaleString("ja-JP", {
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  }
-
-  function formatSignedDecimal(value) {
-    return `${value >= 0 ? "+" : ""}${value.toFixed(2)}`;
-  }
-
-  function clipText(text, maxLength) {
-    if (text.length <= maxLength) {
-      return text;
-    }
-    return `${text.slice(0, maxLength - 3)}...`;
-  }
-
-  function readStringArray(value, label) {
-    if (!Array.isArray(value)) {
-      throw new Error(`${label} が配列ではありません`);
-    }
-    return value.map((item, index) => requireString(item, `${label}[${String(index)}]`));
-  }
-
-  function requireCountMap(value, label) {
-    if (!isObject(value)) {
-      throw new Error(`${label} が object ではありません`);
-    }
-    const counts = {};
-    for (const [key, rawValue] of Object.entries(value)) {
-      counts[key] = requireInteger(rawValue, `${label}.${key}`);
-    }
-    return counts;
-  }
-
-  function readUpdatedTraits(value, label) {
-    if (!Array.isArray(value)) {
-      throw new Error(`${label} が配列ではありません`);
-    }
-    return value.map((item, index) => {
-      if (!isObject(item)) {
-        throw new Error(`${label}[${String(index)}] が object ではありません`);
-      }
-      return item;
-    });
-  }
-
-  function readOptionalStringArray(value, label) {
-    if (value === undefined) {
-      return [];
-    }
-    return readStringArray(value, label);
-  }
-
-  function readOptionalCountMap(value, label) {
-    if (value === undefined) {
-      return {};
-    }
-    return requireCountMap(value, label);
-  }
-
-  // Block: Selector summary 読み取り
-  function readOptionalSelectorSummary(value, label) {
-    if (value === undefined) {
-      return {};
-    }
-    if (!isObject(value)) {
-      throw new Error(`${label} がオブジェクトではありません`);
-    }
-    return Object.fromEntries(Object.entries(value).map(([key, entryValue]) => {
-      if (typeof entryValue === "string") {
-        if (entryValue.length === 0) {
-          throw new Error(`${label}.${key} が空文字列です`);
-        }
-        return [key, entryValue];
-      }
-      if (Number.isInteger(entryValue)) {
-        return [key, entryValue];
-      }
-      throw new Error(`${label}.${key} が文字列または整数ではありません`);
-    }));
-  }
 
   function autoResizeComposer() {
     chatInput.style.height = "auto";

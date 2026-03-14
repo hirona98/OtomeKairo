@@ -12,7 +12,7 @@ from otomekairo.usecase.memory_write_e2e import run_memory_write_e2e
 
 
 # Block: Report constants
-REPORT_SCHEMA_VERSION = 2
+REPORT_SCHEMA_VERSION = 3
 
 
 # Block: Public report build
@@ -69,12 +69,9 @@ def _build_report(
             and int(failure_mode_counts.get("network_unavailable", 0)) >= 1
         ),
         "dialogue_thread_reuse_visible": int(overview["dialogue_thread_reuse_cycle_count"]) >= 4,
-        "preference_restore_visible": int(overview["preference_restore_cycle_count"]) >= 1,
+        "date_recall_visible": int(overview["response_date_recall_cycle_count"]) >= 1,
         "action_transparency_visible": int(overview["response_action_transparency_cycle_count"]) >= 5,
         "failure_explanation_visible": int(overview["response_failure_explanation_cycle_count"]) >= 2,
-        "preference_reference_visible": int(overview["response_preference_reference_cycle_count"]) >= 4,
-        "controlled_preference_violation": int(overview["response_preference_violation_cycle_count"]) <= 1,
-        "mood_tone_hint_visible": int(overview["response_mood_tone_hint_cycle_count"]) >= 4,
     }
     report = {
         "report_schema_version": REPORT_SCHEMA_VERSION,
@@ -156,11 +153,9 @@ def format_chat_behavior_golden_report(report: dict[str, Any]) -> str:
         (
             "behavior: "
             f"thread_reuse {overview['dialogue_thread_reuse_cycle_count']}, "
-            f"preference_reference {overview['response_preference_reference_cycle_count']}, "
-            f"preference_violation {overview['response_preference_violation_cycle_count']}, "
+            f"date_recall {overview['response_date_recall_cycle_count']}, "
             f"action_transparency {overview['response_action_transparency_cycle_count']}, "
-            f"failure_explanation {overview['response_failure_explanation_cycle_count']}, "
-            f"mood_tone_hint {overview['response_mood_tone_hint_cycle_count']}"
+            f"failure_explanation {overview['response_failure_explanation_cycle_count']}"
         ),
         "checks: " + ", ".join(
             check_name

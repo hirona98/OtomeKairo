@@ -40,88 +40,6 @@ def _resolve_memory_job_payload_ref(payload_ref_json: Any) -> dict[str, Any]:
     }
 
 
-# Block: Quarantine target normalization
-def _normalize_quarantine_targets(raw_targets: Any) -> list[dict[str, str]]:
-    if not isinstance(raw_targets, list) or not raw_targets:
-        raise StoreValidationError("quarantine_memory targets must not be empty")
-    normalized_targets: list[dict[str, str]] = []
-    seen_targets: set[tuple[str, str]] = set()
-    for raw_target in raw_targets:
-        if not isinstance(raw_target, dict):
-            raise StoreValidationError("quarantine_memory target must be object")
-        entity_type = raw_target.get("entity_type")
-        entity_id = raw_target.get("entity_id")
-        if not isinstance(entity_type, str) or not entity_type:
-            raise StoreValidationError("quarantine_memory target.entity_type must be non-empty string")
-        if entity_type == "event_affect":
-            raise StoreValidationError("event_affect quarantine is not implemented yet")
-        if entity_type not in {"event", "memory_state"}:
-            raise StoreValidationError("quarantine_memory target.entity_type is invalid")
-        if not isinstance(entity_id, str) or not entity_id:
-            raise StoreValidationError("quarantine_memory target.entity_id must be non-empty string")
-        _append_unique_entity_target(
-            normalized_targets=normalized_targets,
-            seen_targets=seen_targets,
-            entity_type=entity_type,
-            entity_id=entity_id,
-        )
-    return normalized_targets
-
-
-# Block: Tidy target normalization
-def _normalize_tidy_target_refs(raw_target_refs: Any) -> list[dict[str, str]]:
-    if not isinstance(raw_target_refs, list) or not raw_target_refs:
-        raise StoreValidationError("tidy_memory target_refs must not be empty")
-    normalized_refs: list[dict[str, str]] = []
-    seen_refs: set[tuple[str, str]] = set()
-    for raw_target_ref in raw_target_refs:
-        if not isinstance(raw_target_ref, dict):
-            raise StoreValidationError("tidy_memory target_ref must be object")
-        entity_type = raw_target_ref.get("entity_type")
-        entity_id = raw_target_ref.get("entity_id")
-        if not isinstance(entity_type, str) or not entity_type:
-            raise StoreValidationError("tidy_memory target_ref.entity_type must be non-empty string")
-        if not isinstance(entity_id, str) or not entity_id:
-            raise StoreValidationError("tidy_memory target_ref.entity_id must be non-empty string")
-        _append_unique_entity_target(
-            normalized_targets=normalized_refs,
-            seen_targets=seen_refs,
-            entity_type=entity_type,
-            entity_id=entity_id,
-        )
-    return normalized_refs
-
-
-# Block: Entity target dedup
-def _append_unique_entity_target(
-    *,
-    normalized_targets: list[dict[str, str]],
-    seen_targets: set[tuple[str, str]],
-    entity_type: str,
-    entity_id: str,
-) -> None:
-    target_key = (entity_type, entity_id)
-    if target_key in seen_targets:
-        return
-    seen_targets.add(target_key)
-    normalized_targets.append(
-        {
-            "entity_type": entity_type,
-            "entity_id": entity_id,
-        }
-    )
-
-
-# Block: Preview idempotency
-def _refresh_preview_job_idempotency_key(
-    *,
-    cycle_id: str,
-    event_id: str,
-    event_updated_at: int,
-) -> str:
-    return f"refresh_preview:{cycle_id}:{event_id}:{event_updated_at}"
-
-
 # Block: Embedding idempotency
 def _embedding_sync_job_idempotency_key(
     *,
@@ -145,40 +63,6 @@ def _memory_job_error_text(error: Exception) -> str:
     if not error_message:
         return type(error).__name__
     return f"{type(error).__name__}: {error_message}"[:500]
-
-
-# Block: Quarantine idempotency
-def _quarantine_memory_job_idempotency_key(
-    *,
-    cycle_id: str,
-    reason_code: str,
-    targets: list[dict[str, Any]],
-) -> str:
-    target_tokens = [
-        f"{target['entity_type']}:{target['entity_id']}"
-        for target in targets
-    ]
-    return "quarantine_memory:" + cycle_id + ":" + reason_code + ":" + ":".join(target_tokens)
-
-
-# Block: Tidy idempotency
-def _tidy_memory_job_idempotency_key(
-    *,
-    cycle_id: str,
-    maintenance_scope: str,
-    retention_cutoff_at: int,
-    target_refs: list[dict[str, str]] | None,
-) -> str:
-    target_tokens: list[str] = []
-    if target_refs:
-        target_tokens = [
-            f"{target_ref['entity_type']}:{target_ref['entity_id']}"
-            for target_ref in target_refs
-        ]
-    suffix = ":".join(target_tokens)
-    if suffix:
-        suffix = ":" + suffix
-    return f"tidy_memory:{cycle_id}:{maintenance_scope}:{int(retention_cutoff_at)}{suffix}"
 
 
 # Block: Embedding scope normalization
@@ -206,15 +90,19 @@ def _resolve_embedding_source_text(
     if entity_type == "event":
         row = connection.execute(
             """
-            SELECT preview_text
-            FROM event_preview_cache
+            SELECT observation_summary, action_summary, result_summary
+            FROM events
             WHERE event_id = ?
             """,
             (entity_id,),
         ).fetchone()
         if row is None:
-            raise RuntimeError("event preview is missing for embedding_sync")
-        return str(row["preview_text"])
+            raise RuntimeError("event is missing for embedding_sync")
+        for field_name in ("observation_summary", "action_summary", "result_summary"):
+            value = row[field_name]
+            if isinstance(value, str) and value:
+                return value
+        raise RuntimeError("event summary is missing for embedding_sync")
     if entity_type == "memory_state":
         row = connection.execute(
             """

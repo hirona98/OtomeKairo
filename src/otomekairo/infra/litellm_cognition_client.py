@@ -185,7 +185,6 @@ def _build_plan_messages(request: CognitionPlanRequest) -> list[dict[str, Any]]:
             "入力評価が dialogue 以外のときは、ユーザーへの即時発話を義務とみなさず、必要がなければ wait を選んでよい。",
             "入力評価が unverified_user_report のときは、入力内容を確定事実として扱わず、人格・記憶・観測と整合させて判断する。",
             f"不変条件: {_format_invariants(self_snapshot['invariants'])}",
-            _persona_update_prompt_line(self_snapshot),
         ]
     )
     user_prompt = "\n".join(
@@ -1361,23 +1360,6 @@ def _input_evaluation_prompt_line(input_evaluation: dict[str, Any]) -> str:
         f"factuality={factuality} "
         f"reply_required={should_reply_in_channel}"
     )
-
-
-def _persona_update_prompt_line(self_snapshot: dict[str, Any]) -> str:
-    last_persona_update = self_snapshot.get("last_persona_update")
-    if not isinstance(last_persona_update, dict):
-        return "直近の人格更新: なし"
-    reason = last_persona_update.get("reason")
-    updated_traits = last_persona_update.get("updated_traits")
-    if not isinstance(reason, str) or not isinstance(updated_traits, list):
-        raise RuntimeError("self_snapshot.last_persona_update is invalid")
-    trait_names = [
-        str(trait_entry.get("trait_name"))
-        for trait_entry in updated_traits
-        if isinstance(trait_entry, dict) and isinstance(trait_entry.get("trait_name"), str)
-    ]
-    trait_text = ",".join(trait_names[:4]) if trait_names else "trait なし"
-    return f"直近の人格更新: {reason} / {trait_text}"
 
 
 # Block: Behavior prompt formatting

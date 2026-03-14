@@ -49,7 +49,6 @@ from otomekairo.infra.sqlite_store_legacy_runtime import (
     _quoted_identifier,
     _repo_root,
     _runtime_settings_seed_timestamps,
-    _string_list,
     _string_list_or_empty,
     _upsert_runtime_setting_value,
 )
@@ -58,19 +57,13 @@ from otomekairo.usecase.observation_normalization import (
     normalize_observation_source,
 )
 from otomekairo.usecase.camera_observation_payload import build_camera_observation_payload
-from otomekairo.usecase.retrieval_public_view import (
-    build_public_retrieval_detail,
-    build_public_retrieval_summary,
-)
 from otomekairo.infra.sqlite_store_settings_editor import (
-    _active_preset_payload,
     _canonical_editor_state_for_compare,
     _decode_camera_connection_rows,
     _decode_settings_editor_state_row,
     _decode_settings_preset_rows,
     _fetch_editor_preset_rows,
     _insert_settings_change_set,
-    _materialize_effective_settings_from_editor,
     _normalize_settings_editor_system_values,
     _persist_settings_editor_state,
     _read_active_retrieval_profile,
@@ -97,12 +90,9 @@ from otomekairo.infra.sqlite_store_snapshots import (
 from otomekairo.infra.sqlite_store_memory_helpers import (
     _action_entries_for_write_memory_plan,
     _browse_fact_entries_for_write_memory_plan,
-    _build_event_preview_text,
     _current_emotion_json_from_long_mood_payload,
     _event_snapshot_refs_for_write_memory_job,
     _fetch_event_about_time_for_memory_snapshot,
-    _fetch_event_about_time_for_preview,
-    _fetch_event_affect_for_preview,
     _fetch_event_entities_for_memory_snapshot,
     _fetch_event_links_for_memory_snapshot,
     _fetch_event_threads_for_memory_snapshot,
@@ -119,13 +109,8 @@ from otomekairo.infra.sqlite_store_job_helpers import (
     _embedding_sync_job_idempotency_key,
     _memory_job_error_text,
     _normalize_embedding_scopes,
-    _normalize_quarantine_targets,
-    _normalize_tidy_target_refs,
-    _quarantine_memory_job_idempotency_key,
-    _refresh_preview_job_idempotency_key,
     _resolve_embedding_source_text,
     _resolve_memory_job_payload_ref,
-    _tidy_memory_job_idempotency_key,
     _write_memory_job_idempotency_key,
 )
 from otomekairo.infra.sqlite_store_live_state_seeds import (
@@ -169,10 +154,8 @@ from otomekairo.infra.sqlite_store_runtime_view import (
     _public_body_state_summary,
     _public_drive_state_summary,
     _public_emotion_summary,
-    _public_persona_update,
     _public_primary_focus,
     _public_world_state_summary,
-    _read_latest_retrieval_record,
     _runtime_response_summary,
     _task_cycle_context,
     _world_state_has_current_shape,
@@ -201,14 +184,9 @@ from otomekairo.usecase.write_memory_plan import (
 
 # Block: Schema constants
 SCHEMA_NAME = "core_schema"
-SCHEMA_VERSION = 18
+SCHEMA_VERSION = 19
 STABLE_PREFERENCE_BUCKET_LIMIT = 8
 RETRIEVAL_STABLE_PREFERENCE_BUCKET_LIMIT = 24
-TIDY_MEMORY_SCOPES = (
-    "completed_jobs_gc",
-    "stale_preview_gc",
-    "stale_vector_gc",
-)
 SETTINGS_EDITOR_PRESET_TABLE_NAMES = (
     "character_presets",
     "behavior_presets",
@@ -273,7 +251,6 @@ class SqliteStateStore:
                 LIMIT 1
                 """
             ).fetchone()
-            retrieval_record = _read_latest_retrieval_record(connection)
             self_row = connection.execute(
                 """
                 SELECT current_emotion_json
@@ -317,15 +294,6 @@ class SqliteStateStore:
                 FROM task_state
                 """
             ).fetchone()
-            persona_revision_row = connection.execute(
-                """
-                SELECT before_json, after_json, reason, evidence_event_ids_json, created_at
-                FROM revisions
-                WHERE entity_type = 'self_state.personality'
-                ORDER BY created_at DESC
-                LIMIT 1
-                """
-            ).fetchone()
         if (
             self_row is None
             or attention_row is None
@@ -338,8 +306,6 @@ class SqliteStateStore:
         if commit_row is not None:
             runtime_payload["last_cycle_id"] = commit_row["cycle_id"]
             runtime_payload["last_commit_id"] = commit_row["commit_id"]
-        if retrieval_record is not None:
-            runtime_payload["last_retrieval"] = build_public_retrieval_summary(retrieval_record)
         current_emotion_json = json.loads(self_row["current_emotion_json"])
         primary_focus_json = json.loads(attention_row["primary_focus_json"])
         posture_json = json.loads(body_row["posture_json"])
@@ -352,8 +318,6 @@ class SqliteStateStore:
         self_state_payload: dict[str, Any] = {
             "current_emotion": _public_emotion_summary(current_emotion_json),
         }
-        if persona_revision_row is not None:
-            self_state_payload["last_persona_update"] = _public_persona_update(persona_revision_row)
         return {
             "server_time": now_ms,
             "runtime": runtime_payload,
@@ -376,33 +340,6 @@ class SqliteStateStore:
                 "waiting_task_count": waiting_count,
             },
         }
-
-    # Block: Latest retrieval run read
-    def read_latest_retrieval_run(self) -> dict[str, Any] | None:
-        with self._connect() as connection:
-            retrieval_record = _read_latest_retrieval_record(connection)
-        if retrieval_record is None:
-            return None
-        return build_public_retrieval_detail(retrieval_record)
-
-    # Block: Recent retrieval runs read
-    def read_recent_retrieval_runs(self, *, limit: int) -> list[dict[str, Any]]:
-        if limit <= 0:
-            raise StoreValidationError("retrieval limit must be positive")
-        with self._connect() as connection:
-            rows = connection.execute(
-                """
-                SELECT cycle_id, created_at, plan_json, candidates_json, selected_json, resolved_event_ids_json
-                FROM retrieval_runs
-                ORDER BY created_at DESC
-                LIMIT ?
-                """,
-                (limit,),
-            ).fetchall()
-        return [
-            _retrieval_record_from_row(row)
-            for row in rows
-        ]
 
     # Block: Effective settings read
     def read_effective_settings(self, default_settings: dict[str, Any]) -> dict[str, Any]:
@@ -443,117 +380,6 @@ class SqliteStateStore:
             "effective_settings": self.read_effective_settings(default_settings),
             "pending_overrides": pending_overrides,
         }
-
-    # Block: Tidy memory owner state read
-    def read_tidy_memory_owner_state(
-        self,
-        *,
-        completed_jobs_cutoff_at: int,
-        stale_preview_cutoff_at: int,
-        stale_vector_cutoff_at: int,
-    ) -> dict[str, dict[str, Any]]:
-        for cutoff_at, field_name in (
-            (completed_jobs_cutoff_at, "completed_jobs_cutoff_at"),
-            (stale_preview_cutoff_at, "stale_preview_cutoff_at"),
-            (stale_vector_cutoff_at, "stale_vector_cutoff_at"),
-        ):
-            if not isinstance(cutoff_at, int):
-                raise StoreValidationError(f"{field_name} must be integer")
-            if cutoff_at <= 0:
-                raise StoreValidationError(f"{field_name} must be positive")
-        with self._connect() as connection:
-            completed_jobs_count = int(
-                connection.execute(
-                    """
-                    SELECT COUNT(*)
-                    FROM memory_jobs
-                    WHERE status IN ('completed', 'dead_letter')
-                      AND completed_at IS NOT NULL
-                      AND completed_at < ?
-                    """,
-                    (completed_jobs_cutoff_at,),
-                ).fetchone()[0]
-            )
-            stale_preview_count = int(
-                connection.execute(
-                    """
-                    SELECT COUNT(*)
-                    FROM event_preview_cache
-                    INNER JOIN events
-                            ON events.event_id = event_preview_cache.event_id
-                    WHERE events.searchable = 0
-                      AND COALESCE(events.updated_at, events.created_at) < ?
-                    """,
-                    (stale_preview_cutoff_at,),
-                ).fetchone()[0]
-            )
-            stale_vector_count = int(
-                connection.execute(
-                    """
-                    SELECT COUNT(*)
-                    FROM vec_items
-                    WHERE searchable = 0
-                      AND source_updated_at < ?
-                    """,
-                    (stale_vector_cutoff_at,),
-                ).fetchone()[0]
-            )
-            housekeeping_rows = connection.execute(
-                """
-                SELECT
-                    maintenance_scope,
-                    last_enqueued_at
-                FROM runtime_housekeeping_state
-                WHERE maintenance_scope IN ('completed_jobs_gc', 'stale_preview_gc', 'stale_vector_gc')
-                """
-            ).fetchall()
-            active_rows = connection.execute(
-                """
-                SELECT
-                    json_extract(memory_job_payloads.payload_json, '$.maintenance_scope') AS maintenance_scope,
-                    MAX(
-                        CASE
-                            WHEN memory_jobs.status IN ('queued', 'claimed') THEN 1
-                            ELSE 0
-                        END
-                    ) AS has_active_job
-                FROM memory_jobs
-                INNER JOIN memory_job_payloads
-                        ON memory_job_payloads.payload_id = json_extract(memory_jobs.payload_ref_json, '$.payload_id')
-                WHERE memory_jobs.job_kind = 'tidy_memory'
-                GROUP BY json_extract(memory_job_payloads.payload_json, '$.maintenance_scope')
-                """
-            ).fetchall()
-        owner_state = {
-            maintenance_scope: {
-                "stale_count": (
-                    completed_jobs_count
-                    if maintenance_scope == "completed_jobs_gc"
-                    else stale_preview_count
-                    if maintenance_scope == "stale_preview_gc"
-                    else stale_vector_count
-                ),
-                "last_enqueued_at": None,
-                "has_active_job": False,
-            }
-            for maintenance_scope in TIDY_MEMORY_SCOPES
-        }
-        for row in housekeeping_rows:
-            maintenance_scope = row["maintenance_scope"]
-            if not isinstance(maintenance_scope, str) or maintenance_scope not in owner_state:
-                continue
-            last_enqueued_at = row["last_enqueued_at"]
-            owner_state[maintenance_scope]["last_enqueued_at"] = (
-                int(last_enqueued_at)
-                if isinstance(last_enqueued_at, int)
-                else None
-            )
-        for row in active_rows:
-            maintenance_scope = row["maintenance_scope"]
-            if not isinstance(maintenance_scope, str) or maintenance_scope not in owner_state:
-                continue
-            owner_state[maintenance_scope]["has_active_job"] = bool(row["has_active_job"])
-        return owner_state
 
     # Block: Settings editor snapshot
     def read_settings_editor(self, default_settings: dict[str, Any]) -> dict[str, Any]:
@@ -618,15 +444,6 @@ class SqliteStateStore:
         memory_presets = _decode_settings_preset_rows(memory_rows)
         motion_presets = _decode_settings_preset_rows(motion_rows)
         camera_connections = _decode_camera_connection_rows(camera_connection_rows)
-        effective_settings = _materialize_effective_settings_from_editor(
-            default_settings=default_settings,
-            editor_state=editor_state,
-            character_presets=character_presets,
-            behavior_presets=behavior_presets,
-            conversation_presets=conversation_presets,
-            memory_presets=memory_presets,
-            motion_presets=motion_presets,
-        )
         return {
             "editor_state": {
                 "revision": editor_state["revision"],
@@ -645,13 +462,6 @@ class SqliteStateStore:
             "camera_connections": camera_connections,
             "constraints": {
                 "editable_system_keys": list(build_settings_editor_system_keys()),
-            },
-            "runtime_projection": {
-                "effective_settings": effective_settings,
-                "active_motion_preset": _active_preset_payload(
-                    preset_entries=motion_presets,
-                    preset_id=str(editor_state["active_motion_preset_id"]),
-                ),
             },
         }
 
@@ -936,15 +746,6 @@ class SqliteStateStore:
                 LIMIT 3
                 """
             ).fetchall()
-            persona_revision_row = connection.execute(
-                """
-                SELECT before_json, after_json, reason, evidence_event_ids_json, created_at
-                FROM revisions
-                WHERE entity_type = 'self_state.personality'
-                ORDER BY created_at DESC
-                LIMIT 1
-                """
-            ).fetchone()
         if (
             self_row is None
             or attention_row is None
@@ -978,11 +779,8 @@ class SqliteStateStore:
                     events.observation_summary,
                     events.action_summary,
                     events.result_summary,
-                    events.created_at,
-                    event_preview_cache.preview_text
+                    events.created_at
                 FROM events
-                LEFT JOIN event_preview_cache
-                       ON event_preview_cache.event_id = events.event_id
                 WHERE events.searchable = 1
                 ORDER BY events.created_at DESC
                 LIMIT ?
@@ -1116,11 +914,6 @@ class SqliteStateStore:
                 "invariants": json.loads(self_row["invariants_json"]),
                 "personality_updated_at": int(self_row["personality_updated_at"]),
                 "updated_at": int(self_row["updated_at"]),
-                **(
-                    {"latest_persona_update": _public_persona_update(persona_revision_row)}
-                    if persona_revision_row is not None
-                    else {}
-                ),
             },
             attention_state={
                 "primary_focus": json.loads(attention_row["primary_focus_json"]),
@@ -1787,90 +1580,6 @@ class SqliteStateStore:
             )
         return {"accepted": True, "status": "queued"}
 
-    # Block: Quarantine enqueue
-    def enqueue_quarantine_memory(
-        self,
-        *,
-        source_event_ids: list[str],
-        targets: list[dict[str, Any]],
-        reason_code: str,
-        reason_note: str,
-    ) -> dict[str, Any]:
-        if not source_event_ids:
-            raise StoreValidationError("source_event_ids must not be empty")
-        if not isinstance(reason_code, str) or not reason_code:
-            raise StoreValidationError("reason_code must be non-empty string")
-        if not isinstance(reason_note, str) or not reason_note:
-            raise StoreValidationError("reason_note must be non-empty string")
-        normalized_targets = _normalize_quarantine_targets(targets)
-        cycle_id = _opaque_id("cycle")
-        created_at = _now_ms()
-        with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            job_ids = self._enqueue_quarantine_memory_jobs(
-                connection=connection,
-                cycle_id=cycle_id,
-                source_event_ids=source_event_ids,
-                targets=normalized_targets,
-                reason_code=reason_code,
-                reason_note=reason_note,
-                created_at=created_at,
-            )
-        return {
-            "accepted": True,
-            "cycle_id": cycle_id,
-            "job_ids": job_ids,
-            "status": "queued",
-        }
-
-    # Block: Tidy memory enqueue
-    def enqueue_tidy_memory(
-        self,
-        *,
-        maintenance_scope: str,
-        retention_cutoff_at: int,
-        target_refs: list[dict[str, Any]] | None = None,
-    ) -> dict[str, Any]:
-        if not isinstance(maintenance_scope, str) or not maintenance_scope:
-            raise StoreValidationError("maintenance_scope must be non-empty string")
-        if maintenance_scope not in TIDY_MEMORY_SCOPES:
-            raise StoreValidationError("maintenance_scope is invalid")
-        if isinstance(retention_cutoff_at, bool) or not isinstance(retention_cutoff_at, int):
-            raise StoreValidationError("retention_cutoff_at must be integer")
-        if retention_cutoff_at <= 0:
-            raise StoreValidationError("retention_cutoff_at must be positive")
-        normalized_target_refs = None
-        if target_refs is not None:
-            normalized_target_refs = _normalize_tidy_target_refs(target_refs)
-        if maintenance_scope == "completed_jobs_gc" and normalized_target_refs is not None:
-            raise StoreValidationError("target_refs is not allowed for completed_jobs_gc")
-        if maintenance_scope == "stale_preview_gc" and normalized_target_refs is not None:
-            for target_ref in normalized_target_refs:
-                if target_ref["entity_type"] != "event":
-                    raise StoreValidationError("stale_preview_gc target_refs must be event")
-        if maintenance_scope == "stale_vector_gc" and normalized_target_refs is not None:
-            for target_ref in normalized_target_refs:
-                if target_ref["entity_type"] not in {"event", "memory_state", "event_affect"}:
-                    raise StoreValidationError("stale_vector_gc target_refs is invalid")
-        cycle_id = _opaque_id("cycle")
-        created_at = _now_ms()
-        with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            job_ids = self._enqueue_tidy_memory_jobs(
-                connection=connection,
-                cycle_id=cycle_id,
-                maintenance_scope=maintenance_scope,
-                retention_cutoff_at=retention_cutoff_at,
-                target_refs=normalized_target_refs,
-                created_at=created_at,
-            )
-        return {
-            "accepted": True,
-            "cycle_id": cycle_id,
-            "job_ids": job_ids,
-            "status": "queued",
-        }
-
     # Block: Stream window read
     def read_stream_window(self, *, channel: str) -> tuple[int | None, int | None]:
         with self._connect() as connection:
@@ -2446,9 +2155,7 @@ class SqliteStateStore:
         )
         self_state_row = connection.execute(
             """
-            SELECT personality_json,
-                   personality_updated_at,
-                   current_emotion_json
+            SELECT current_emotion_json
             FROM self_state
             WHERE row_id = 1
             """
@@ -2474,8 +2181,6 @@ class SqliteStateStore:
                 connection=connection,
                 before_created_at=min(int(event_row["created_at"]) for event_row in event_rows),
             ),
-            current_personality=_decoded_object_json(self_state_row["personality_json"]),
-            current_personality_updated_at=int(self_state_row["personality_updated_at"]),
         )
 
     # Block: Write memory plan apply wrapper
@@ -2492,24 +2197,6 @@ class SqliteStateStore:
             created_at=created_at,
         )
 
-    # Block: Persona update apply wrapper
-    def apply_persona_updates_in_transaction(
-        self,
-        *,
-        connection: sqlite3.Connection,
-        current_personality: dict[str, Any],
-        updated_personality: dict[str, Any],
-        persona_updates: dict[str, Any],
-        updated_at: int,
-    ) -> bool:
-        return self._apply_persona_updates(
-            connection=connection,
-            current_personality=current_personality,
-            updated_personality=updated_personality,
-            persona_updates=persona_updates,
-            updated_at=updated_at,
-        )
-
     # Block: Write memory followup enqueue
     def enqueue_write_memory_followup_jobs_in_transaction(
         self,
@@ -2521,17 +2208,20 @@ class SqliteStateStore:
         embedding_targets: list[dict[str, Any]],
         created_at: int,
     ) -> None:
-        self._enqueue_refresh_preview_jobs(
-            connection=connection,
-            cycle_id=cycle_id,
-            event_rows=event_rows,
-            created_at=created_at,
-        )
+        event_embedding_targets = [
+            {
+                "entity_type": "event",
+                "entity_id": str(event_row["event_id"]),
+                "source_updated_at": int(event_row["source_updated_at"]),
+                "current_searchable": bool(event_row["searchable"]),
+            }
+            for event_row in event_rows
+        ]
         self._enqueue_embedding_sync_jobs(
             connection=connection,
             cycle_id=cycle_id,
             source_event_ids=source_event_ids,
-            targets=embedding_targets,
+            targets=[*event_embedding_targets, *embedding_targets],
             embedding_model=self._require_runtime_setting_string(
                 connection=connection,
                 key="llm.embedding_model",
@@ -2552,103 +2242,6 @@ class SqliteStateStore:
             job_id=job_id,
             completed_at=completed_at,
         )
-
-    # Block: Revision insert
-    def _insert_revision(
-        self,
-        *,
-        connection: sqlite3.Connection,
-        entity_type: str,
-        entity_id: str,
-        before_json: dict[str, Any],
-        after_json: dict[str, Any],
-        revision_reason: str,
-        evidence_event_ids: list[str],
-        created_at: int,
-    ) -> None:
-        connection.execute(
-            """
-            INSERT INTO revisions (
-                revision_id,
-                entity_type,
-                entity_id,
-                before_json,
-                after_json,
-                reason,
-                evidence_event_ids_json,
-                created_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                _opaque_id("rev"),
-                entity_type,
-                entity_id,
-                _json_text(before_json),
-                _json_text(after_json),
-                revision_reason,
-                _json_text(evidence_event_ids),
-                created_at,
-            ),
-        )
-
-    # Block: Persona update apply
-    def _apply_persona_updates(
-        self,
-        *,
-        connection: sqlite3.Connection,
-        current_personality: dict[str, Any],
-        updated_personality: dict[str, Any],
-        persona_updates: dict[str, Any],
-        updated_at: int,
-    ) -> bool:
-        evidence_event_ids = _string_list(
-            persona_updates.get("evidence_event_ids"),
-            field_name="persona_updates.evidence_event_ids",
-        )
-        base_personality_updated_at = int(persona_updates["base_personality_updated_at"])
-        updated_row_count = connection.execute(
-            """
-            UPDATE self_state
-            SET personality_json = ?,
-                personality_updated_at = ?,
-                updated_at = ?
-            WHERE row_id = 1
-              AND personality_updated_at = ?
-            """,
-            (
-                _json_text(updated_personality),
-                updated_at,
-                updated_at,
-                base_personality_updated_at,
-            ),
-        ).rowcount
-        if updated_row_count != 1:
-            return False
-        connection.execute(
-            """
-            INSERT INTO revisions (
-                revision_id,
-                entity_type,
-                entity_id,
-                before_json,
-                after_json,
-                reason,
-                evidence_event_ids_json,
-                created_at
-            )
-            VALUES (?, 'self_state.personality', 'self_state', ?, ?, ?, ?, ?)
-            """,
-            (
-                _opaque_id("rev"),
-                _json_text(current_personality),
-                _json_text(updated_personality),
-                f"write_memory applied persona_updates: {persona_updates['evidence_summary']}",
-                _json_text(evidence_event_ids),
-                updated_at,
-            ),
-        )
-        return True
 
     # Block: Memory state insert
     def _insert_memory_state_with_revision(
@@ -2698,31 +2291,6 @@ class SqliteStateStore:
                 created_at,
                 created_at,
             ),
-        )
-        self._insert_revision(
-            connection=connection,
-            entity_type="memory_states",
-            entity_id=memory_state_id,
-            before_json={},
-            after_json=_memory_state_revision_json(
-                memory_kind=memory_kind,
-                body_text=body_text,
-                payload_json=payload_json,
-                confidence=confidence,
-                importance=importance,
-                memory_strength=memory_strength,
-                searchable=True,
-                last_confirmed_at=last_confirmed_at,
-                evidence_event_ids=evidence_event_ids,
-                created_at=created_at,
-                updated_at=created_at,
-                valid_from_ts=None,
-                valid_to_ts=None,
-                last_accessed_at=None,
-            ),
-            revision_reason=revision_reason,
-            evidence_event_ids=evidence_event_ids,
-            created_at=created_at,
         )
         return _memory_state_target(
             entity_id=memory_state_id,
@@ -2936,16 +2504,6 @@ class SqliteStateStore:
                     str(existing_row["memory_state_id"]),
                 ),
             )
-            self._insert_revision(
-                connection=connection,
-                entity_type="memory_states",
-                entity_id=str(existing_row["memory_state_id"]),
-                before_json=before_json,
-                after_json=after_json,
-                revision_reason=str(state_update["revision_reason"]),
-                evidence_event_ids=list(after_json["evidence_event_ids"]),
-                created_at=created_at,
-            )
         return _memory_state_target(
             entity_id=str(existing_row["memory_state_id"]),
             source_updated_at=created_at if after_json != before_json else int(existing_row["updated_at"]),
@@ -3024,16 +2582,6 @@ class SqliteStateStore:
                 _json_text(current_emotion_json),
                 created_at,
             ),
-        )
-        self._insert_revision(
-            connection=connection,
-            entity_type="self_state.current_emotion",
-            entity_id="self_state",
-            before_json=before_json,
-            after_json=current_emotion_json,
-            revision_reason=revision_reason,
-            evidence_event_ids=evidence_event_ids,
-            created_at=created_at,
         )
 
     # Block: Existing state update apply
@@ -3115,16 +2663,6 @@ class SqliteStateStore:
                 after_json.get("valid_to_ts"),
                 str(target_state_row["memory_state_id"]),
             ),
-        )
-        self._insert_revision(
-            connection=connection,
-            entity_type="memory_states",
-            entity_id=str(target_state_row["memory_state_id"]),
-            before_json=before_json,
-            after_json=after_json,
-            revision_reason=str(state_update["revision_reason"]),
-            evidence_event_ids=list(after_json["evidence_event_ids"]),
-            created_at=created_at,
         )
         memory_state_target = _memory_state_target(
             entity_id=str(target_state_row["memory_state_id"]),
@@ -3671,16 +3209,6 @@ class SqliteStateStore:
                     created_at,
                 ),
             )
-            self._insert_revision(
-                connection=connection,
-                entity_type="preference_memory",
-                entity_id=preference_id,
-                before_json={},
-                after_json=after_json,
-                revision_reason=str(preference_update["revision_reason"]),
-                evidence_event_ids=merged_evidence_event_ids,
-                created_at=created_at,
-            )
             self._sync_stable_preference_projection(
                 connection=connection,
                 preference_row={
@@ -3727,16 +3255,6 @@ class SqliteStateStore:
                 created_at,
                 preference_id,
             ),
-        )
-        self._insert_revision(
-            connection=connection,
-            entity_type="preference_memory",
-            entity_id=preference_id,
-            before_json=before_json,
-            after_json=after_json,
-            revision_reason=str(preference_update["revision_reason"]),
-            evidence_event_ids=merged_evidence_event_ids,
-            created_at=created_at,
         )
         self._sync_stable_preference_projection(
             connection=connection,
@@ -3911,20 +3429,10 @@ class SqliteStateStore:
                     str(event_affect_update["moment_affect_text"]),
                     _json_text(list(event_affect_update["moment_affect_labels"])),
                     _json_text(dict(event_affect_update["vad"])),
-                    float(event_affect_update["confidence"]),
-                    created_at,
-                ),
-            )
-            self._insert_revision(
-                connection=connection,
-                entity_type="event_affects",
-                entity_id=event_affect_id,
-                before_json={},
-                after_json=after_json,
-                revision_reason=str(event_affect_update["revision_reason"]),
-                evidence_event_ids=list(event_affect_update["evidence_event_ids"]),
-                created_at=created_at,
-            )
+                float(event_affect_update["confidence"]),
+                created_at,
+            ),
+        )
             return {
                 "entity_type": "event_affect",
                 "entity_id": event_affect_id,
@@ -3955,16 +3463,6 @@ class SqliteStateStore:
                 float(event_affect_update["confidence"]),
                 event_affect_id,
             ),
-        )
-        self._insert_revision(
-            connection=connection,
-            entity_type="event_affects",
-            entity_id=event_affect_id,
-            before_json=before_json,
-            after_json=after_json,
-            revision_reason=str(event_affect_update["revision_reason"]),
-            evidence_event_ids=list(event_affect_update["evidence_event_ids"]),
-            created_at=created_at,
         )
         return {
             "entity_type": "event_affect",
@@ -4039,16 +3537,6 @@ class SqliteStateStore:
                     created_at,
                 ),
             )
-            self._insert_revision(
-                connection=connection,
-                entity_type="event_links",
-                entity_id=event_link_id,
-                before_json={},
-                after_json=after_json,
-                revision_reason=str(event_link_update["revision_reason"]),
-                evidence_event_ids=merged_evidence_event_ids,
-                created_at=created_at,
-            )
             return
         event_link_id = str(existing_row["event_link_id"])
         before_json = {
@@ -4071,16 +3559,6 @@ class SqliteStateStore:
                 created_at,
                 event_link_id,
             ),
-        )
-        self._insert_revision(
-            connection=connection,
-            entity_type="event_links",
-            entity_id=event_link_id,
-            before_json=before_json,
-            after_json=after_json,
-            revision_reason=str(event_link_update["revision_reason"]),
-            evidence_event_ids=merged_evidence_event_ids,
-            created_at=created_at,
         )
 
     # Block: Event thread upsert
@@ -4140,16 +3618,6 @@ class SqliteStateStore:
                     event_thread_update.get("thread_role"),
                 ),
             )
-            self._insert_revision(
-                connection=connection,
-                entity_type="event_threads",
-                entity_id=event_thread_id,
-                before_json={},
-                after_json=after_json,
-                revision_reason=str(event_thread_update["revision_reason"]),
-                evidence_event_ids=list(event_thread_update["evidence_event_ids"]),
-                created_at=created_at,
-            )
             return
         event_thread_id = str(existing_row["event_thread_id"])
         before_json = {
@@ -4172,16 +3640,6 @@ class SqliteStateStore:
                 event_thread_update.get("thread_role"),
                 event_thread_id,
             ),
-        )
-        self._insert_revision(
-            connection=connection,
-            entity_type="event_threads",
-            entity_id=event_thread_id,
-            before_json=before_json,
-            after_json=after_json,
-            revision_reason=str(event_thread_update["revision_reason"]),
-            evidence_event_ids=list(event_thread_update["evidence_event_ids"]),
-            created_at=created_at,
         )
 
     # Block: State link upsert
@@ -4252,16 +3710,6 @@ class SqliteStateStore:
                     created_at,
                 ),
             )
-            self._insert_revision(
-                connection=connection,
-                entity_type="state_links",
-                entity_id=state_link_id,
-                before_json={},
-                after_json=after_json,
-                revision_reason=str(state_link_update["revision_reason"]),
-                evidence_event_ids=merged_evidence_event_ids,
-                created_at=created_at,
-            )
             return
         state_link_id = str(existing_row["state_link_id"])
         before_json = {
@@ -4285,91 +3733,6 @@ class SqliteStateStore:
                 state_link_id,
             ),
         )
-        self._insert_revision(
-            connection=connection,
-            entity_type="state_links",
-            entity_id=state_link_id,
-            before_json=before_json,
-            after_json=after_json,
-            revision_reason=str(state_link_update["revision_reason"]),
-            evidence_event_ids=merged_evidence_event_ids,
-            created_at=created_at,
-        )
-
-    def complete_refresh_preview_job(
-        self,
-        *,
-        memory_job: MemoryJobRecord,
-        embedding_model: str,
-    ) -> str:
-        if memory_job.job_kind != "refresh_preview":
-            raise StoreValidationError("memory_job.job_kind must be refresh_preview")
-        if not isinstance(embedding_model, str) or not embedding_model:
-            raise StoreValidationError("embedding_model must be non-empty string")
-        target_event_id = str(memory_job.payload["target_event_id"])
-        target_event_updated_at = int(memory_job.payload["target_event_updated_at"])
-        now_ms = _now_ms()
-        with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            self._ensure_claimed_memory_job(
-                connection=connection,
-                job_id=memory_job.job_id,
-            )
-            event_row = _fetch_events_for_ids(
-                connection=connection,
-                event_ids=[target_event_id],
-            )[0]
-            event_entity_rows = _fetch_event_entities_for_memory_snapshot(
-                connection=connection,
-                event_ids=[target_event_id],
-            )
-            event_thread_rows = _fetch_event_threads_for_memory_snapshot(
-                connection=connection,
-                event_ids=[target_event_id],
-            )
-            event_about_time_row = _fetch_event_about_time_for_preview(
-                connection=connection,
-                event_id=target_event_id,
-            )
-            event_affect_row = _fetch_event_affect_for_preview(
-                connection=connection,
-                event_id=target_event_id,
-            )
-            preview_text = _build_event_preview_text(
-                event_row=event_row,
-                event_entity_rows=event_entity_rows,
-                event_thread_rows=event_thread_rows,
-                event_about_time_row=event_about_time_row,
-                event_affect_row=event_affect_row,
-            )
-            preview_id = self._upsert_event_preview_cache(
-                connection=connection,
-                event_id=target_event_id,
-                preview_text=preview_text,
-                source_event_updated_at=target_event_updated_at,
-                updated_at=now_ms,
-            )
-            self._enqueue_embedding_sync_jobs(
-                connection=connection,
-                cycle_id=str(memory_job.payload["cycle_id"]),
-                source_event_ids=[target_event_id],
-                targets=[
-                    {
-                        "entity_type": "event",
-                        "entity_id": target_event_id,
-                        "source_updated_at": target_event_updated_at,
-                        "current_searchable": bool(event_row["searchable"]),
-                    }
-                ],
-                embedding_model=embedding_model,
-                created_at=now_ms,
-            )
-            self._mark_memory_job_completed(
-                connection=connection,
-                job_id=memory_job.job_id,
-                completed_at=now_ms,
-            )
-        return preview_id
 
     # Block: Embedding sync apply
     def complete_embedding_sync_job(self, *, memory_job: MemoryJobRecord) -> int:
@@ -4446,237 +3809,6 @@ class SqliteStateStore:
             )
         return updated_scope_count
 
-    # Block: Quarantine apply
-    def complete_quarantine_memory_job(
-        self,
-        *,
-        memory_job: MemoryJobRecord,
-        embedding_model: str,
-    ) -> int:
-        if memory_job.job_kind != "quarantine_memory":
-            raise StoreValidationError("memory_job.job_kind must be quarantine_memory")
-        if not isinstance(embedding_model, str) or not embedding_model:
-            raise StoreValidationError("embedding_model must be non-empty string")
-        source_event_ids = memory_job.payload["source_event_ids"]
-        targets = _normalize_quarantine_targets(memory_job.payload["targets"])
-        reason_code = memory_job.payload["reason_code"]
-        reason_note = memory_job.payload["reason_note"]
-        if not isinstance(source_event_ids, list) or not source_event_ids:
-            raise StoreValidationError("quarantine_memory source_event_ids must not be empty")
-        if not isinstance(reason_code, str) or not reason_code:
-            raise StoreValidationError("quarantine_memory reason_code must be non-empty string")
-        if not isinstance(reason_note, str) or not reason_note:
-            raise StoreValidationError("quarantine_memory reason_note must be non-empty string")
-        now_ms = _now_ms()
-        affected_count = 0
-        with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            self._ensure_claimed_memory_job(
-                connection=connection,
-                job_id=memory_job.job_id,
-            )
-            embedding_targets: list[dict[str, Any]] = []
-            for raw_target in targets:
-                entity_type = raw_target["entity_type"]
-                entity_id = raw_target["entity_id"]
-                source_updated_at, changed = self._quarantine_searchable_target(
-                    connection=connection,
-                    entity_type=entity_type,
-                    entity_id=entity_id,
-                    updated_at=now_ms,
-                )
-                if changed:
-                    self._insert_quarantine_revision(
-                        connection=connection,
-                        entity_type=entity_type,
-                        entity_id=entity_id,
-                        source_event_ids=source_event_ids,
-                        reason_code=reason_code,
-                        reason_note=reason_note,
-                        created_at=now_ms,
-                    )
-                    affected_count += 1
-                    embedding_targets.append(
-                        {
-                            "entity_type": entity_type,
-                            "entity_id": entity_id,
-                            "source_updated_at": source_updated_at,
-                            "current_searchable": False,
-                        }
-                    )
-            if embedding_targets:
-                self._enqueue_embedding_sync_jobs(
-                    connection=connection,
-                    cycle_id=str(memory_job.payload["cycle_id"]),
-                    source_event_ids=source_event_ids,
-                    targets=embedding_targets,
-                    embedding_model=embedding_model,
-                    created_at=now_ms,
-                )
-            self._mark_memory_job_completed(
-                connection=connection,
-                job_id=memory_job.job_id,
-                completed_at=now_ms,
-            )
-            self._touch_runtime_housekeeping_state(
-                connection=connection,
-                maintenance_scope=maintenance_scope,
-                last_enqueued_at=None,
-                last_completed_at=now_ms,
-                updated_at=now_ms,
-            )
-        return affected_count
-
-    # Block: Tidy memory apply
-    def complete_tidy_memory_job(self, *, memory_job: MemoryJobRecord) -> int:
-        if memory_job.job_kind != "tidy_memory":
-            raise StoreValidationError("memory_job.job_kind must be tidy_memory")
-        payload = memory_job.payload
-        maintenance_scope = payload.get("maintenance_scope")
-        retention_cutoff_at = payload.get("retention_cutoff_at")
-        source_event_ids = payload.get("source_event_ids")
-        if not isinstance(maintenance_scope, str) or not maintenance_scope:
-            raise StoreValidationError("tidy_memory maintenance_scope must be non-empty string")
-        if isinstance(retention_cutoff_at, bool) or not isinstance(retention_cutoff_at, int):
-            raise StoreValidationError("tidy_memory retention_cutoff_at must be integer")
-        if retention_cutoff_at <= 0:
-            raise StoreValidationError("tidy_memory retention_cutoff_at must be positive")
-        if not isinstance(source_event_ids, list):
-            raise StoreValidationError("tidy_memory source_event_ids must be a list")
-        for event_id in source_event_ids:
-            if not isinstance(event_id, str) or not event_id:
-                raise StoreValidationError("tidy_memory source_event_ids must contain non-empty strings")
-        raw_target_refs = payload.get("target_refs")
-        target_refs = None
-        if raw_target_refs is not None:
-            target_refs = _normalize_tidy_target_refs(raw_target_refs)
-        now_ms = _now_ms()
-        affected_count = 0
-        with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            self._ensure_claimed_memory_job(
-                connection=connection,
-                job_id=memory_job.job_id,
-            )
-
-            # Block: Completed jobs GC
-            if maintenance_scope == "completed_jobs_gc":
-                if target_refs is not None:
-                    raise StoreValidationError("tidy_memory target_refs is not allowed for completed_jobs_gc")
-                affected_count += connection.execute(
-                    """
-                    DELETE FROM memory_jobs
-                    WHERE status IN ('completed', 'dead_letter')
-                      AND completed_at IS NOT NULL
-                      AND completed_at < ?
-                    """,
-                    (retention_cutoff_at,),
-                ).rowcount
-                affected_count += connection.execute(
-                    """
-                    DELETE FROM memory_job_payloads
-                    WHERE payload_id NOT IN (
-                        SELECT json_extract(payload_ref_json, '$.payload_id')
-                        FROM memory_jobs
-                        WHERE json_extract(payload_ref_json, '$.payload_id') IS NOT NULL
-                    )
-                    """,
-                ).rowcount
-
-            # Block: Stale preview GC
-            elif maintenance_scope == "stale_preview_gc":
-                target_event_ids = None
-                if target_refs is not None:
-                    target_event_ids = []
-                    for target_ref in target_refs:
-                        if target_ref["entity_type"] != "event":
-                            raise StoreValidationError("tidy_memory stale_preview_gc target_refs must be event")
-                        target_event_ids.append(target_ref["entity_id"])
-                placeholders = ""
-                parameters: tuple[Any, ...] = (retention_cutoff_at,)
-                if target_event_ids:
-                    placeholders = ",".join("?" for _ in target_event_ids)
-                    parameters = (retention_cutoff_at, *target_event_ids)
-                affected_count += connection.execute(
-                    f"""
-                    DELETE FROM event_preview_cache
-                    WHERE EXISTS (
-                        SELECT 1
-                        FROM events
-                        WHERE events.event_id = event_preview_cache.event_id
-                          AND events.searchable = 0
-                          AND COALESCE(events.updated_at, events.created_at) < ?
-                    )
-                    {f"AND event_preview_cache.event_id IN ({placeholders})" if placeholders else ""}
-                    """,
-                    parameters,
-                ).rowcount
-
-            # Block: Stale vector GC
-            elif maintenance_scope == "stale_vector_gc":
-                if target_refs is not None:
-                    for target_ref in target_refs:
-                        if target_ref["entity_type"] not in {"event", "memory_state", "event_affect"}:
-                            raise StoreValidationError("tidy_memory stale_vector_gc target_refs is invalid")
-                if target_refs is None:
-                    connection.execute(
-                        """
-                        DELETE FROM vec_items_index
-                        WHERE rowid IN (
-                            SELECT rowid
-                            FROM vec_items
-                            WHERE searchable = 0
-                              AND source_updated_at < ?
-                        )
-                        """,
-                        (retention_cutoff_at,),
-                    )
-                    affected_count += connection.execute(
-                        """
-                        DELETE FROM vec_items
-                        WHERE searchable = 0
-                          AND source_updated_at < ?
-                        """,
-                        (retention_cutoff_at,),
-                    ).rowcount
-                else:
-                    where_clauses = ["searchable = 0", "source_updated_at < ?"]
-                    parameters: list[Any] = [retention_cutoff_at]
-                    entity_conditions: list[str] = []
-                    for target_ref in target_refs:
-                        entity_conditions.append("(entity_type = ? AND entity_id = ?)")
-                        parameters.append(target_ref["entity_type"])
-                        parameters.append(target_ref["entity_id"])
-                    where_clauses.append("(" + " OR ".join(entity_conditions) + ")")
-                    where_sql = " AND ".join(where_clauses)
-                    rowids = [
-                        int(row["rowid"])
-                        for row in connection.execute(
-                            f"SELECT rowid FROM vec_items WHERE {where_sql}",
-                            tuple(parameters),
-                        ).fetchall()
-                    ]
-                    if rowids:
-                        placeholder_sql = ",".join("?" for _ in rowids)
-                        connection.execute(
-                            f"DELETE FROM vec_items_index WHERE rowid IN ({placeholder_sql})",
-                            tuple(rowids),
-                        )
-                        affected_count += connection.execute(
-                            f"DELETE FROM vec_items WHERE rowid IN ({placeholder_sql})",
-                            tuple(rowids),
-                        ).rowcount
-
-            else:
-                raise StoreValidationError("tidy_memory maintenance_scope is invalid")
-
-            self._mark_memory_job_completed(
-                connection=connection,
-                job_id=memory_job.job_id,
-                completed_at=now_ms,
-            )
-        return affected_count
-
     # Block: Memory job state helpers
     def _ensure_claimed_memory_job(
         self,
@@ -4719,165 +3851,6 @@ class SqliteStateStore:
         if updated_row_count != 1:
             raise StoreConflictError("memory job must be claimed before completion")
 
-    # Block: Quarantine target update
-    def _quarantine_searchable_target(
-        self,
-        *,
-        connection: sqlite3.Connection,
-        entity_type: str,
-        entity_id: str,
-        updated_at: int,
-    ) -> tuple[int, bool]:
-        if entity_type == "event":
-            row = connection.execute(
-                """
-                SELECT searchable, COALESCE(updated_at, created_at) AS source_updated_at
-                FROM events
-                WHERE event_id = ?
-                """,
-                (entity_id,),
-            ).fetchone()
-            if row is None:
-                raise RuntimeError("event is missing for quarantine_memory")
-            if int(row["searchable"]) == 0:
-                return (int(row["source_updated_at"]), False)
-            connection.execute(
-                """
-                UPDATE events
-                SET searchable = 0,
-                    updated_at = ?
-                WHERE event_id = ?
-                """,
-                (updated_at, entity_id),
-            )
-            return (updated_at, True)
-        if entity_type == "memory_state":
-            row = connection.execute(
-                """
-                SELECT searchable, updated_at
-                FROM memory_states
-                WHERE memory_state_id = ?
-                """,
-                (entity_id,),
-            ).fetchone()
-            if row is None:
-                raise RuntimeError("memory_state is missing for quarantine_memory")
-            if int(row["searchable"]) == 0:
-                return (int(row["updated_at"]), False)
-            connection.execute(
-                """
-                UPDATE memory_states
-                SET searchable = 0,
-                    updated_at = ?
-                WHERE memory_state_id = ?
-                """,
-                (updated_at, entity_id),
-            )
-            return (updated_at, True)
-        raise StoreValidationError("quarantine_memory target entity_type is invalid")
-
-    # Block: Quarantine revision insert
-    def _insert_quarantine_revision(
-        self,
-        *,
-        connection: sqlite3.Connection,
-        entity_type: str,
-        entity_id: str,
-        source_event_ids: list[str],
-        reason_code: str,
-        reason_note: str,
-        created_at: int,
-    ) -> None:
-        revision_entity_type = {
-            "event": "events",
-            "memory_state": "memory_states",
-        }.get(entity_type)
-        if revision_entity_type is None:
-            raise StoreValidationError("quarantine_memory revision entity_type is invalid")
-        connection.execute(
-            """
-            INSERT INTO revisions (
-                revision_id,
-                entity_type,
-                entity_id,
-                before_json,
-                after_json,
-                reason,
-                evidence_event_ids_json,
-                created_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                _opaque_id("rev"),
-                revision_entity_type,
-                entity_id,
-                _json_text({"searchable": True}),
-                _json_text({"searchable": False}),
-                f"quarantine_memory {reason_code}: {reason_note}",
-                _json_text(source_event_ids),
-                created_at,
-            ),
-        )
-
-    def _upsert_event_preview_cache(
-        self,
-        *,
-        connection: sqlite3.Connection,
-        event_id: str,
-        preview_text: str,
-        source_event_updated_at: int,
-        updated_at: int,
-    ) -> str:
-        preview_row = connection.execute(
-            """
-            SELECT preview_id
-            FROM event_preview_cache
-            WHERE event_id = ?
-            """,
-            (event_id,),
-        ).fetchone()
-        preview_id = _opaque_id("prv")
-        if preview_row is None:
-            connection.execute(
-                """
-                INSERT INTO event_preview_cache (
-                    preview_id,
-                    event_id,
-                    preview_text,
-                    source_event_updated_at,
-                    created_at,
-                    updated_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    preview_id,
-                    event_id,
-                    preview_text,
-                    source_event_updated_at,
-                    updated_at,
-                    updated_at,
-                ),
-            )
-            return preview_id
-        preview_id = str(preview_row["preview_id"])
-        connection.execute(
-            """
-            UPDATE event_preview_cache
-            SET preview_text = ?,
-                source_event_updated_at = ?,
-                updated_at = ?
-            WHERE event_id = ?
-            """,
-            (
-                preview_text,
-                source_event_updated_at,
-                updated_at,
-                event_id,
-            ),
-        )
-        return preview_id
 
     def _require_runtime_setting_string(
         self,
@@ -4949,28 +3922,6 @@ class SqliteStateStore:
                 now_ms,
             ),
         )
-
-    # Block: Runtime housekeeping defaults
-    def _ensure_runtime_housekeeping_state_defaults(
-        self,
-        *,
-        connection: sqlite3.Connection,
-        now_ms: int,
-    ) -> None:
-        for maintenance_scope in TIDY_MEMORY_SCOPES:
-            connection.execute(
-                """
-                INSERT INTO runtime_housekeeping_state (
-                    maintenance_scope,
-                    last_enqueued_at,
-                    last_completed_at,
-                    updated_at
-                )
-                VALUES (?, NULL, NULL, ?)
-                ON CONFLICT(maintenance_scope) DO NOTHING
-                """,
-                (maintenance_scope, now_ms),
-            )
 
     def _ensure_settings_editor_defaults(
         self,
@@ -5620,7 +4571,6 @@ class SqliteStateStore:
         pending_input_mutations: list[PendingInputMutationRecord],
         ui_events: list[dict[str, Any]],
         commit_payload: dict[str, Any],
-        retrieval_run: dict[str, Any] | None = None,
         attention_snapshot: dict[str, Any] | None = None,
         discard_reason: str | None = None,
         camera_available: bool,
@@ -5654,13 +4604,6 @@ class SqliteStateStore:
                 connection=connection,
                 cycle_id=cycle_id,
                 event_ids=event_ids,
-                created_at=resolved_at,
-            )
-            retrieval_run_id = self._insert_retrieval_run(
-                connection=connection,
-                cycle_id=cycle_id,
-                retrieval_run=retrieval_run,
-                resolved_event_ids=event_ids,
                 created_at=resolved_at,
             )
             updated_row_count = connection.execute(
@@ -5706,11 +4649,6 @@ class SqliteStateStore:
                             "followup_input_ids": followup_input_ids,
                             "event_ids": event_ids,
                             "enqueued_memory_job_ids": enqueued_memory_job_ids,
-                            **(
-                                {"retrieval_run_id": retrieval_run_id}
-                                if retrieval_run_id is not None
-                                else {}
-                            ),
                         }
                     ),
                 ),
@@ -5728,53 +4666,6 @@ class SqliteStateStore:
         finalized_commit_id = int(commit_id["commit_id"])
         self.sync_commit_log(commit_id=finalized_commit_id)
         return finalized_commit_id
-
-    # Block: Retrieval run write
-    def _insert_retrieval_run(
-        self,
-        *,
-        connection: sqlite3.Connection,
-        cycle_id: str,
-        retrieval_run: dict[str, Any] | None,
-        resolved_event_ids: list[str],
-        created_at: int,
-    ) -> str | None:
-        if retrieval_run is None:
-            return None
-        plan_json = retrieval_run.get("plan_json")
-        candidates_json = retrieval_run.get("candidates_json")
-        selected_json = retrieval_run.get("selected_json")
-        if not isinstance(plan_json, dict):
-            raise StoreValidationError("retrieval_run.plan_json must be object")
-        if not isinstance(candidates_json, dict):
-            raise StoreValidationError("retrieval_run.candidates_json must be object")
-        if not isinstance(selected_json, dict):
-            raise StoreValidationError("retrieval_run.selected_json must be object")
-        run_id = _opaque_id("retr")
-        connection.execute(
-            """
-            INSERT INTO retrieval_runs (
-                run_id,
-                cycle_id,
-                created_at,
-                plan_json,
-                candidates_json,
-                selected_json,
-                resolved_event_ids_json
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                run_id,
-                cycle_id,
-                created_at,
-                _json_text(plan_json),
-                _json_text(candidates_json),
-                _json_text(selected_json),
-                _json_text(resolved_event_ids),
-            ),
-        )
-        return run_id
 
     # Block: Task cycle finalize
     def finalize_task_cycle(
@@ -6032,43 +4923,6 @@ class SqliteStateStore:
             )
         ]
 
-    def _enqueue_refresh_preview_jobs(
-        self,
-        *,
-        connection: sqlite3.Connection,
-        cycle_id: str,
-        event_rows: list[sqlite3.Row],
-        created_at: int,
-    ) -> list[str]:
-        job_ids: list[str] = []
-        for event_row in event_rows:
-            event_id = str(event_row["event_id"])
-            source_event_updated_at = int(event_row["source_updated_at"])
-            payload_json = {
-                "job_kind": "refresh_preview",
-                "cycle_id": cycle_id,
-                "source_event_ids": [event_id],
-                "created_at": created_at,
-                "idempotency_key": _refresh_preview_job_idempotency_key(
-                    cycle_id=cycle_id,
-                    event_id=event_id,
-                    event_updated_at=source_event_updated_at,
-                ),
-                "target_event_id": event_id,
-                "target_event_updated_at": source_event_updated_at,
-                "preview_reason": "event_created",
-            }
-            job_ids.append(
-                self._insert_memory_job(
-                    connection=connection,
-                    job_kind="refresh_preview",
-                    payload_json=payload_json,
-                    idempotency_key=str(payload_json["idempotency_key"]),
-                    created_at=created_at,
-                )
-            )
-        return job_ids
-
     # Block: Embedding sync enqueue
     def _enqueue_embedding_sync_jobs(
         self,
@@ -6106,169 +4960,6 @@ class SqliteStateStore:
                 created_at=created_at,
             )
         ]
-
-    # Block: Quarantine enqueue
-    def _enqueue_quarantine_memory_jobs(
-        self,
-        *,
-        connection: sqlite3.Connection,
-        cycle_id: str,
-        source_event_ids: list[str],
-        targets: list[dict[str, Any]],
-        reason_code: str,
-        reason_note: str,
-        created_at: int,
-    ) -> list[str]:
-        if not source_event_ids:
-            raise StoreValidationError("quarantine_memory source_event_ids must not be empty")
-        if not isinstance(reason_code, str) or not reason_code:
-            raise StoreValidationError("quarantine_memory reason_code must be non-empty string")
-        if not isinstance(reason_note, str) or not reason_note:
-            raise StoreValidationError("quarantine_memory reason_note must be non-empty string")
-        normalized_targets = _normalize_quarantine_targets(targets)
-        idempotency_key = _quarantine_memory_job_idempotency_key(
-            cycle_id=cycle_id,
-            reason_code=reason_code,
-            targets=normalized_targets,
-        )
-        payload_json = {
-            "job_kind": "quarantine_memory",
-            "cycle_id": cycle_id,
-            "source_event_ids": source_event_ids,
-            "created_at": created_at,
-            "idempotency_key": idempotency_key,
-            "reason_code": reason_code,
-            "reason_note": reason_note,
-            "targets": normalized_targets,
-        }
-        return [
-            self._insert_memory_job(
-                connection=connection,
-                job_kind="quarantine_memory",
-                payload_json=payload_json,
-                idempotency_key=idempotency_key,
-                created_at=created_at,
-            )
-        ]
-
-    # Block: Tidy memory enqueue
-    def _enqueue_tidy_memory_jobs(
-        self,
-        *,
-        connection: sqlite3.Connection,
-        cycle_id: str,
-        maintenance_scope: str,
-        retention_cutoff_at: int,
-        target_refs: list[dict[str, str]] | None,
-        created_at: int,
-    ) -> list[str]:
-        if maintenance_scope not in TIDY_MEMORY_SCOPES:
-            raise StoreValidationError("tidy_memory maintenance_scope is invalid")
-        if retention_cutoff_at <= 0:
-            raise StoreValidationError("tidy_memory retention_cutoff_at must be positive")
-        normalized_target_refs = None
-        if target_refs is not None:
-            normalized_target_refs = _normalize_tidy_target_refs(target_refs)
-        if maintenance_scope == "completed_jobs_gc" and normalized_target_refs is not None:
-            raise StoreValidationError("tidy_memory target_refs is not allowed for completed_jobs_gc")
-        if maintenance_scope == "stale_preview_gc" and normalized_target_refs is not None:
-            for target_ref in normalized_target_refs:
-                if target_ref["entity_type"] != "event":
-                    raise StoreValidationError("tidy_memory stale_preview_gc target_refs must be event")
-        if maintenance_scope == "stale_vector_gc" and normalized_target_refs is not None:
-            for target_ref in normalized_target_refs:
-                if target_ref["entity_type"] not in {"event", "memory_state", "event_affect"}:
-                    raise StoreValidationError("tidy_memory stale_vector_gc target_refs is invalid")
-        idempotency_key = _tidy_memory_job_idempotency_key(
-            cycle_id=cycle_id,
-            maintenance_scope=maintenance_scope,
-            retention_cutoff_at=retention_cutoff_at,
-            target_refs=normalized_target_refs,
-        )
-        existing_job_id = self._find_memory_job_id_by_idempotency_key(
-            connection=connection,
-            idempotency_key=idempotency_key,
-        )
-        if existing_job_id is not None:
-            return [existing_job_id]
-        payload_json: dict[str, Any] = {
-            "job_kind": "tidy_memory",
-            "cycle_id": cycle_id,
-            "source_event_ids": [],
-            "created_at": created_at,
-            "idempotency_key": idempotency_key,
-            "maintenance_scope": maintenance_scope,
-            "retention_cutoff_at": retention_cutoff_at,
-        }
-        if normalized_target_refs is not None:
-            payload_json["target_refs"] = normalized_target_refs
-        job_id = self._insert_memory_job(
-            connection=connection,
-            job_kind="tidy_memory",
-            payload_json=payload_json,
-            idempotency_key=idempotency_key,
-            created_at=created_at,
-        )
-        self._touch_runtime_housekeeping_state(
-            connection=connection,
-            maintenance_scope=maintenance_scope,
-            last_enqueued_at=created_at,
-            last_completed_at=None,
-            updated_at=created_at,
-        )
-        return [job_id]
-
-    # Block: Runtime housekeeping touch
-    def _touch_runtime_housekeeping_state(
-        self,
-        *,
-        connection: sqlite3.Connection,
-        maintenance_scope: str,
-        last_enqueued_at: int | None,
-        last_completed_at: int | None,
-        updated_at: int,
-    ) -> None:
-        if maintenance_scope not in TIDY_MEMORY_SCOPES:
-            raise StoreValidationError("runtime housekeeping maintenance_scope is invalid")
-        self._ensure_runtime_housekeeping_state_defaults(
-            connection=connection,
-            now_ms=updated_at,
-        )
-        current_row = connection.execute(
-            """
-            SELECT last_enqueued_at, last_completed_at
-            FROM runtime_housekeeping_state
-            WHERE maintenance_scope = ?
-            """,
-            (maintenance_scope,),
-        ).fetchone()
-        if current_row is None:
-            raise RuntimeError("runtime_housekeeping_state row is missing")
-        next_last_enqueued_at = (
-            last_enqueued_at
-            if last_enqueued_at is not None
-            else current_row["last_enqueued_at"]
-        )
-        next_last_completed_at = (
-            last_completed_at
-            if last_completed_at is not None
-            else current_row["last_completed_at"]
-        )
-        connection.execute(
-            """
-            UPDATE runtime_housekeeping_state
-            SET last_enqueued_at = ?,
-                last_completed_at = ?,
-                updated_at = ?
-            WHERE maintenance_scope = ?
-            """,
-            (
-                next_last_enqueued_at,
-                next_last_completed_at,
-                updated_at,
-                maintenance_scope,
-            ),
-        )
 
     def _insert_memory_job(
         self,
@@ -6968,10 +5659,6 @@ class SqliteStateStore:
             ),
         )
         self._ensure_runtime_settings_defaults(
-            connection=connection,
-            now_ms=now_ms,
-        )
-        self._ensure_runtime_housekeeping_state_defaults(
             connection=connection,
             now_ms=now_ms,
         )

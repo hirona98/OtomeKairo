@@ -1121,51 +1121,10 @@ def _experience_fit_score(
 ) -> float:
     preference_alignment = _normalized_score(persona_consistency["preference_alignment"])
     aversion_penalty = _normalized_score(persona_consistency["aversion_penalty"])
-    persona_update_support = _persona_update_support_score(
-        action_type=action_type,
-        self_snapshot=self_snapshot,
-    )
     return _normalized_score(
         preference_alignment * 0.55
-        + (1.0 - aversion_penalty) * 0.25
-        + persona_update_support * 0.20
+        + (1.0 - aversion_penalty) * 0.45
     )
-
-
-def _persona_update_support_score(
-    *,
-    action_type: str,
-    self_snapshot: dict[str, Any],
-) -> float:
-    last_persona_update = self_snapshot.get("last_persona_update")
-    if not isinstance(last_persona_update, dict):
-        return 0.50
-    updated_traits = last_persona_update.get("updated_traits")
-    if not isinstance(updated_traits, list):
-        return 0.50
-    support_score = 0.50
-    for trait_entry in updated_traits:
-        if not isinstance(trait_entry, dict):
-            continue
-        trait_name = trait_entry.get("trait_name")
-        delta = trait_entry.get("delta")
-        if not isinstance(trait_name, str) or not isinstance(delta, (int, float)):
-            continue
-        if action_type == "browse":
-            if trait_name in {"curiosity", "novelty_preference"}:
-                support_score += float(delta) * 0.60
-            if trait_name == "caution":
-                support_score -= float(delta) * 0.70
-        if action_type == "look":
-            if trait_name in {"curiosity", "novelty_preference"}:
-                support_score += float(delta) * 0.55
-            if trait_name == "caution":
-                support_score -= float(delta) * 0.50
-        if action_type == "wait" and trait_name == "caution":
-            support_score += float(delta) * 0.80
-        if action_type in {"speak", "notify"} and trait_name in {"warmth", "sociability", "assertiveness"}:
-            support_score += float(delta) * 0.50
-    return _normalized_score(support_score)
 
 
 def _has_strong_aversion(
