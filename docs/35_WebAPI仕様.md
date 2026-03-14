@@ -153,7 +153,7 @@ flowchart LR
 - 設定画面は左端に `キャラクター` タブを置き、続けて `振る舞い`、`会話`、`記憶`、`モーション`、`システム` を並べる
 - `振る舞い` タブには `振る舞いプロンプト`、`追加プロンプト（任意）`、`行動傾向` を置き、`CocoroConsole` 相当の会話指示と OtomeKairo 独自の傾向設定をまとめて編集する
 - `キャラクター` タブには `キャラクター選択`、`基本設定`、`マテリアル・影設定`、`音声合成`、`音声認識` を含める
-- チャット画面下部の管理表示は、`GET /api/status` の `runtime.last_retrieval` と `self_state.last_persona_update` を、直近の要約として表示してよい
+- チャット画面下部の管理表示は、`GET /api/status` の `runtime.last_retrieval` を、直近の要約として表示してよい
 - `runtime.last_retrieval` は、時刻、mode、query 要約、合計件数に加えて、`selected_counts` のカテゴリ別内訳も `合計 17 件（作業2 / エピ1 / ...）` 形式で本文表示してよい
 - current の本文要約は、`selector_summary.llm_return_ratio_percent` / `selected_candidate_ratio_percent` と `slot_skipped_slot_counts` / `reserve_slot_counts` を使って、`selector 返却71% / 採用57% / skip エピ1 / reserve 直近1` のような短い監査文を追加してよい
 - retrieval の trace、selector 入力、skip / reserve preview は `GET /api/status` に載せず、`GET /api/retrieval-runs/latest` の詳細監査断面で参照する
@@ -262,19 +262,6 @@ flowchart LR
       "a": 0.18,
       "d": 0.03,
       "labels": ["calm"]
-    },
-    "last_persona_update": {
-      "created_at": 1760000000000,
-      "reason": "persona update applied",
-      "evidence_event_ids": ["evt_001"],
-      "updated_traits": [
-        {
-          "trait_name": "caution",
-          "before": 0.10,
-          "after": 0.18,
-          "delta": 0.08
-        }
-      ]
     }
   },
   "attention_state": {
@@ -299,8 +286,7 @@ flowchart LR
     "priority_effects": {
       "task_progress_bias": 0.35,
       "exploration_bias": 0.15,
-      "maintenance_bias": 0.25,
-      "social_bias": 0.0
+      "maintenance_bias": 0.25
     }
   },
   "task_state": {
@@ -316,13 +302,13 @@ flowchart LR
 - `runtime.last_retrieval` は、`retrieval_runs` が 1 件以上ある場合だけ返し、直近の `RetrievalPlan` と選別件数の summary を返す
 - `runtime.last_retrieval` は、current 実装では `collector_names`、`collector_counts`、`selected_reason_counts`、`slot_skipped_slot_counts`、`reserve_slot_counts`、`selector_summary` を追加で返してよい
 - current 実装の `runtime.last_retrieval.selector_summary` は、`selector_mode` と `selection_reason` の文字列、および件数系の整数を同じ object に入れて返してよい
-- `self_state.last_persona_update` は、`revisions.entity_type=self_state.personality` が 1 件以上ある場合だけ返す
 - `attention_state.primary_focus` は、`attention_state.primary_focus_json.summary` から取り出した表示用文字列を返す
 - `body_state.posture_mode` は、`body_state.posture_json.mode` を返す
-- `body_state.sensor_availability` は、current 実装で接続済みの live sensor 可用性を返し、`microphone` は未接続のため `false` を返す
+- `body_state.sensor_availability` は、current 実装の観測経路可用性を返し、`camera` と `microphone` の 2 キーを持つ
+- `body_state.sensor_availability.microphone` は、録音 API 経路を live sensor と同一視しないため、current 実装では `false` を返す
 - `world_state.situation_summary` は、現在の外部待ち、直近観測、直近 task 完了のいずれかを優先した短い表示文を返す
 - `world_state.external_wait_count` は、`world_state.external_waits_json.count` を返す
-- `drive_state.priority_effects` は、`drive_state.priority_effects_json` の 4 つの bias をそのまま返す
+- `drive_state.priority_effects` は、`drive_state.priority_effects_json` の 3 つの bias をそのまま返す
 - 初回起動直後で短周期未実行のときは、`runtime.is_running=false` とし、`last_cycle_id` と `last_commit_id` は省略する
 - 全状態を丸ごと返さず、UI 表示に必要な要点だけを返す
 

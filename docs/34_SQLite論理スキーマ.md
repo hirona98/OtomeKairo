@@ -9,7 +9,6 @@
 - JSON 列の中身は `docs/36_JSONデータ仕様.md` を見る
 - 初回 seed と排他起動の前提は `docs/37_起動初期化仕様.md` を見る
 - 入力重複とストリーム保持運用は `docs/38_入力ストリーム運用仕様.md` を見る
-- `self_state.personality` の更新原則は `docs/40_人格変化仕様.md` を見る
 - 実際の初期 SQL 文は `sql/core_schema.sql` に置く
 - ここで固定するのは、テーブル名、主キー、必須列、主要制約、主要索引である
 - ここで固定しないのは、実際の `CREATE TABLE` 文、migration 手順、SQLite pragma の全文である
@@ -108,17 +107,15 @@ flowchart TD
 - `self_state`
   - 役割: 現在の人格断面を 1 件で保持する
   - 主キー: `row_id INTEGER PRIMARY KEY CHECK(row_id = 1)`
-  - 必須列: `personality_json`, `current_emotion_json`, `long_term_goals_json`, `relationship_overview_json`, `invariants_json`, `personality_updated_at`, `updated_at`
-  - `personality_json` は、経験で変化する trait、好みの行動様式、学習済みの好悪と回避傾向を持てる形にする
+  - 必須列: `personality_json`, `current_emotion_json`, `long_term_goals_json`, `relationship_overview_json`, `invariants_json`, `updated_at`
+  - `personality_json` は、現在の trait、好みの行動様式、習慣傾向を持てる形にする
   - `personality_json` の JSON キーと必須形は、`docs/36_JSONデータ仕様.md` を正本とする
   - `current_emotion_json` の JSON キーと必須形は、`docs/36_JSONデータ仕様.md` を正本とする
   - `long_term_goals_json` の JSON キーと必須形は、`docs/36_JSONデータ仕様.md` を正本とする
   - `relationship_overview_json` の JSON キーと必須形は、`docs/36_JSONデータ仕様.md` を正本とする
   - `invariants_json` は、自動学習で変更しない人格の不変条件を持つ
   - `invariants_json` の JSON キーと必須形は、`docs/36_JSONデータ仕様.md` を正本とする
-  - `personality_updated_at` は、`personality_json` の版管理専用時刻であり、`base_personality_updated_at` の比較対象にする
-  - `updated_at` は、`self_state` 行全体の更新時刻であり、感情や関係性の更新でも進んでよい
-  - `personality_json` を更新する transaction では、`personality_updated_at` と `updated_at` を同時更新する
+  - `updated_at` は、`self_state` 行全体の更新時刻である
 
 - `runtime_settings`
   - 役割: 現在有効な設定値の反映結果を 1 件で保持する
@@ -454,7 +451,7 @@ flowchart TD
 - 役割: 記憶更新の監査履歴を保持する
 - 主キー: `revision_id TEXT PRIMARY KEY`
 - 必須列: `entity_type`, `entity_id`, `before_json`, `after_json`, `reason`, `evidence_event_ids_json`, `created_at`
-- `entity_type` は、少なくとも `memory_states`、`preference_memory`、`event_links`、`event_threads`、`state_links`、`event_affects`、`self_state.personality` を取りうる
+- `entity_type` は、少なくとも `memory_states`、`preference_memory`、`event_links`、`event_threads`、`state_links`、`event_affects` を取りうる
 - 主要索引: `(entity_type, entity_id, created_at DESC)`, `(created_at DESC)`
 
 <!-- Block: Retrieval Runs -->
@@ -560,7 +557,6 @@ flowchart TD
 - `write_memory` は、必要なら同じ長周期 transaction 内で followup の `memory_jobs` と `memory_job_payloads` を追加してよい
 - `refresh_preview` は、`event_preview_cache` と必要な followup の `memory_jobs` / `memory_job_payloads` 以外を更新してはならない
 - `quarantine_memory` は、`searchable` 系の更新と監査痕跡だけを確定する
-- `self_state` を同じ長周期で更新する場合は、`personality_json` の可変部分だけを更新し、`invariants_json` は変更しない
 
 <!-- Block: Fixed Decisions -->
 ## このドキュメントで確定したこと

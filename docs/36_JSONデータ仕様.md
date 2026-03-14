@@ -16,7 +16,7 @@
 
 - 固定するのは、current 実装で使う JSON オブジェクトのキー、型、必須項目、固定語彙である
 - 固定するのは、`pending_inputs.payload_json`、`settings_overrides.requested_value_json`、`settings_editor_state.system_values_json`、5 種のプリセットテーブルの `payload_json`、`settings_change_sets.payload_json`、`ui_outbound_events.payload_json`、`action_history.command_json`、`action_history.observed_effects_json`、`memory_jobs.payload_ref_json`、`memory_job_payloads.payload_json`、`preference_memory.target_entity_ref_json`、`event_affects.moment_affect_labels_json`、`event_affects.vad_json`、主要な Web API 本文である
-- 固定するのは、`self_state.personality_json`、`self_state.current_emotion_json`、`self_state.long_term_goals_json`、`self_state.relationship_overview_json`、`self_state.invariants_json`、短周期の内部で使う `selection_profile`、`memory_bundle`、`stable_self_state`、`stable_preferences`、`long_mood_state`、`recent_dialog`、`selected_memory_pack`、`action_selection_context`、`reply_render_input`、`reply_render_plan`、`retrieval_context`、`last_persona_update_summary`、`persona_consistency_score`、`attention_score_breakdown`、`self_initiated_score_breakdown`、`action_candidate_score`、`cognition_plan`、`speech_draft`、`cognition_result`、長周期の内部で使う `MemoryWritePlan`、`personality_change_proposal`、`persona_updates` の形である
+- 固定するのは、`self_state.personality_json`、`self_state.current_emotion_json`、`self_state.long_term_goals_json`、`self_state.relationship_overview_json`、`self_state.invariants_json`、短周期の内部で使う `selection_profile`、`memory_bundle`、`stable_self_state`、`stable_preferences`、`long_mood_state`、`recent_dialog`、`selected_memory_pack`、`action_selection_context`、`reply_render_input`、`reply_render_plan`、`retrieval_context`、`persona_consistency_score`、`attention_score_breakdown`、`self_initiated_score_breakdown`、`action_candidate_score`、`cognition_plan`、`speech_draft`、`cognition_result`、長周期の内部で使う `MemoryWritePlan` の形である
 - 固定しないのは、Python のクラス名、Pydantic モデル名、OpenAPI の自動生成細部である
 - 固定しないのは、将来追加する未使用フィールドや後段の拡張イベント種別である
 
@@ -384,8 +384,7 @@
   "drive_bias": {
     "task_progress_bias": 0.0,
     "exploration_bias": 0.0,
-    "maintenance_bias": 0.0,
-    "social_bias": 0.0
+    "maintenance_bias": 0.0
   }
 }
 ```
@@ -398,6 +397,7 @@
 - `relationship_priorities` は、`relationship_priority_entry` の配列である
 - `habit_biases` は、`self_state.personality_json.habit_biases` と同じ固定キーを持つ
 - `emotion_bias` は、現在感情から作る短期補正値であり、各値は `-1.0..+1.0` の `number` に固定する
+- `drive_bias` は、`task_progress_bias`、`exploration_bias`、`maintenance_bias` を必須キーとして持つ
 - `drive_bias` は、内部欲求から作る短期補正値であり、各値は `-1.0..+1.0` の `number` に固定する
 - `selection_profile` は永続化前提の正本ではなく、`self_state`、`current_emotion`、`relationship_overview`、`drive_state` から再構成する
 
@@ -1375,28 +1375,6 @@
 - `completion_settings` は `effective_settings` から再構成する内部オブジェクトであり、`cognition_input` の JSON shape へ混ぜない
 - `api_key` と `base_url` は prompt 材料ではなく、`LLM` adapter の transport 設定としてだけ使う
 
-### `last_persona_update_summary`
-
-```json
-{
-  "created_at": 1760000000000,
-  "reason": "persona update applied",
-  "evidence_event_ids": ["evt_001"],
-  "updated_traits": [
-    {
-      "trait_name": "caution",
-      "before": 0.10,
-      "after": 0.18,
-      "delta": 0.08
-    }
-  ]
-}
-```
-
-- `last_persona_update_summary` は、直近の `self_state.personality` 更新を短周期や `status` で参照するための要約である
-- 必須項目は `created_at`、`reason`、`evidence_event_ids`、`updated_traits` である
-- `updated_traits` の各要素は、少なくとも `trait_name`、`before`、`after`、`delta` を持つ
-
 <!-- Block: Persona Consistency Score -->
 ### `persona_consistency_score`
 
@@ -1611,81 +1589,6 @@
 - `memory_focus` は、少なくとも `focus_kind`、`summary` を持つ
 - `reflection_seed` は、少なくとも `cycle_id`、`input_kind`、`message_id`、`token_count`、`was_cancelled` を持つ
 - `cognition_result` は永続化前提の正本ではなく、その短周期の認知実行ごとに再構成する
-
-<!-- Block: Persona Update Group -->
-## 人格変化の内部 JSON
-
-<!-- Block: Personality Change Proposal -->
-### `personality_change_proposal`
-
-```json
-{
-  "base_personality_updated_at": 1760000000000,
-  "trait_deltas": [
-    {
-      "trait_name": "curiosity",
-      "delta": 0.08,
-      "reason": "未観測対象の確認を反復して選んだ",
-      "evidence_count": 4,
-      "source_cycle_ids": ["cycle_001", "cycle_002"]
-    }
-  ],
-  "style_updates": {
-    "response_pace": "quick"
-  },
-  "habit_updates": {
-    "preferred_action_types": ["look", "browse"]
-  },
-  "evidence_event_ids": ["evt_001", "evt_002", "evt_010"],
-  "evidence_summary": "探索寄りの行動選択が複数周期で安定した"
-}
-```
-
-- `personality_change_proposal` は、長周期の `write_memory` 内部で作る未適用の提案オブジェクトである
-- 必須項目は `base_personality_updated_at`、`trait_deltas`、`habit_updates`、`evidence_event_ids`、`evidence_summary` である
-- `style_updates` は任意で、変化がある場合だけ持つ
-- `trait_deltas` の各要素は、`trait_name`、`delta`、`reason`、`evidence_count`、`source_cycle_ids` を必須とする
-- `trait_name` は、`self_state.personality_json.trait_values` に存在するキーだけを許可する
-- `delta` は、`-1.0..+1.0` の `number` だが、適用前の提案値である
-- `source_cycle_ids` は空配列を許可しない
-- `base_personality_updated_at` は、提案生成時に読んだ `self_state.personality_updated_at` の値である
-- `source_cycle_ids` は、証拠に使った `events` を生んだ短周期の `cycle_id` だけを数える
-- `evidence_event_ids` は、その提案の根拠に採用した `event_id` を重複なしで集約した配列であり、`revisions.evidence_event_ids_json` の入力に使う
-- `habit_updates` は、`preferred_action_types`、`preferred_observation_kinds`、`avoided_action_styles` のうち変更対象だけを持つ部分オブジェクトでよい
-- 閾値未満のときは、`trait_deltas=[]`、`habit_updates={}`、`evidence_event_ids=[]` の empty proposal を返してよい
-- current 実装では、個別の好悪は `preference_memory` を正本にし、`personality_change_proposal` は trait / style / habit だけを扱う
-
-<!-- Block: Persona Updates -->
-### `persona_updates`
-
-```json
-{
-  "base_personality_updated_at": 1760000000000,
-  "updated_trait_values": {
-    "curiosity": 0.08
-  },
-  "style_updates": {
-    "response_pace": "quick"
-  },
-  "habit_updates": {
-    "preferred_action_types": ["look", "browse"]
-  },
-  "evidence_event_ids": ["evt_001", "evt_002", "evt_010"],
-  "evidence_summary": "探索寄りの行動選択が複数周期で安定した"
-}
-```
-
-- `persona_updates` は、`bounded apply` 後に `self_state.personality_json` へ反映可能な差分オブジェクトである
-- 必須項目は `base_personality_updated_at`、`updated_trait_values`、`habit_updates`、`evidence_event_ids`、`evidence_summary` である
-- `style_updates` は任意で、変化がある場合だけ持つ
-- `updated_trait_values` は、`trait_name -> absolute_value` の部分オブジェクトである
-- `updated_trait_values` に含めてよいキーは、`self_state.personality_json.trait_values` の固定キーだけである
-- `updated_trait_values` の各値は、`-1.0..+1.0` の `number` に clamp 済みでなければならない
-- `habit_updates` は、`self_state.personality_json.habit_biases` に上書きする部分オブジェクトである
-- `evidence_event_ids` は、適用する差分を正当化した `event_id` の集約であり、`self_state.personality` の `revisions.evidence_event_ids_json` にそのまま保存する
-- `evidence_summary` は、監査と `revisions` の理由づけに使う短い要約である
-- `base_personality_updated_at` は、適用開始時の `self_state.personality_updated_at` と一致しなければならない
-- 適用時に `base_personality_updated_at` が現在の `self_state.personality_updated_at` と一致しない場合、その `persona_updates` は stale として棄却し、後続の `write_memory` で再生成する
 
 <!-- Block: Memory Write Group -->
 ## 記憶更新の内部 JSON
@@ -1985,12 +1888,12 @@
   "llm.image_model": "openai/gpt-5-mini",
   "llm.embedding_model": "openai/text-embedding-3-large",
   "runtime.idle_tick_ms": 1000,
+  "runtime.long_cycle_min_interval_ms": 10000,
   "behavior.second_person_label": "マスター",
   "character.vrm_file_path": "",
   "speech.tts.provider": "voicevox",
   "speech.stt.provider": "amivoice",
-  "motion.posture_change_loop_count_standing": 30,
-  "integrations.notify_route": "ui_only"
+  "motion.posture_change_loop_count_standing": 30
 }
 ```
 
@@ -2005,10 +1908,10 @@
 ```json
 {
   "llm.model": 1760000000000,
+  "runtime.long_cycle_min_interval_ms": 1760000000000,
   "behavior.second_person_label": 1760000000000,
   "speech.tts.provider": 1760000000000,
-  "motion.posture_change_loop_count_standing": 1760000000000,
-  "integrations.notify_route": 1760000000000
+  "motion.posture_change_loop_count_standing": 1760000000000
 }
 ```
 
@@ -2026,16 +1929,12 @@
   "runtime.idle_tick_ms": 1000,
   "runtime.long_cycle_min_interval_ms": 10000,
   "sensors.microphone.enabled": true,
-  "sensors.camera.enabled": true,
-  "integrations.sns.enabled": false,
-  "integrations.notify_route": "ui_only",
-  "integrations.discord.bot_token": "",
-  "integrations.discord.channel_id": ""
+  "sensors.camera.enabled": true
 }
 ```
 
 - `settings_editor_state.system_values_json` は、設定UIで保持するシステム設定だけを持つ完全オブジェクトである
-- キーは `runtime.idle_tick_ms`、`runtime.long_cycle_min_interval_ms`、`sensors.microphone.enabled`、`sensors.camera.enabled`、`integrations.sns.enabled`、`integrations.notify_route`、`integrations.discord.bot_token`、`integrations.discord.channel_id` に固定する
+- キーは `runtime.idle_tick_ms`、`runtime.long_cycle_min_interval_ms`、`sensors.microphone.enabled`、`sensors.camera.enabled` に固定する
 
 <!-- Block: Settings Editor State -->
 ### `settings editor api.editor_state`
@@ -2050,7 +1949,7 @@
   "active_motion_preset_id": "preset_motion_default",
   "system_values": {
     "runtime.idle_tick_ms": 1000,
-    "integrations.notify_route": "ui_only"
+    "sensors.camera.enabled": true
   }
 }
 ```
@@ -2185,7 +2084,7 @@
   "active_motion_preset_id": "preset_motion_default",
   "system_values": {
     "runtime.idle_tick_ms": 1000,
-    "integrations.notify_route": "ui_only"
+    "sensors.camera.enabled": true
   },
   "preset_versions": {
     "character": 1760000000000,
@@ -2499,8 +2398,6 @@
 - `event_snapshot_refs` の各要素は、少なくとも `event_id`、`event_updated_at` を持つ
 - `event_snapshot_refs` は空配列を許可しない
 - `event_snapshot_refs` は、`source_event_ids` と同じ順序で全件を並べなければならない
-- `write_memory` は、この payload 自体に `persona_updates` を含めない
-- `persona_updates` は、`write_memory` 実行中に生成される内部差分としてだけ扱う
 
 <!-- Block: Refresh Preview -->
 #### `job_kind = refresh_preview`
@@ -2865,12 +2762,6 @@
       "a": 0.18,
       "d": 0.03,
       "labels": ["calm"]
-    },
-    "last_persona_update": {
-      "created_at": 1760000000000,
-      "reason": "persona update applied",
-      "evidence_event_ids": ["evt_001"],
-      "updated_traits": []
     }
   },
   "attention_state": {
@@ -2895,8 +2786,7 @@
     "priority_effects": {
       "task_progress_bias": 0.35,
       "exploration_bias": 0.15,
-      "maintenance_bias": 0.25,
-      "social_bias": 0.0
+      "maintenance_bias": 0.25
     }
   },
   "task_state": {
@@ -2913,14 +2803,13 @@
 - `runtime.last_retrieval` は、`retrieval_runs` が 1 件以上ある場合だけ持つ
 - `runtime.last_retrieval` は、current 実装では `collector_names`、`collector_counts`、`selected_reason_counts`、`slot_skipped_slot_counts`、`reserve_slot_counts`、`selector_summary` を追加で持ってよい
 - `self_state.current_emotion` は、少なくとも `v`、`a`、`d`、`labels` を持つ
-- `self_state.last_persona_update` は、`revisions.entity_type=self_state.personality` が 1 件以上ある場合だけ持つ
 - `attention_state.primary_focus` は、current 実装では `attention_state.primary_focus_json.summary` をそのまま返す短い `string` とする
 - `body_state.posture_mode` は `string` に固定する
 - `body_state.sensor_availability.camera` と `body_state.sensor_availability.microphone` は `boolean` に固定する
 - `body_state.load.task_queue_pressure` と `body_state.load.interaction_load` は `number` に固定する
 - `world_state.situation_summary` は `string` に固定する
 - `world_state.external_wait_count` は `integer` に固定する
-- `drive_state.priority_effects` は `task_progress_bias`、`exploration_bias`、`maintenance_bias`、`social_bias` を持つ `object` に固定する
+- `drive_state.priority_effects` は `task_progress_bias`、`exploration_bias`、`maintenance_bias` を持つ `object` に固定する
 - `task_state.active_task_count`、`task_state.waiting_task_count` は `integer` に固定する
 
 <!-- Block: Latest Retrieval Run -->
