@@ -199,40 +199,6 @@ CREATE TABLE task_state (
 CREATE INDEX idx_task_state_status_priority_updated
     ON task_state (task_status, priority DESC, updated_at DESC);
 
-CREATE TABLE working_memory_items (
-    slot_no INTEGER PRIMARY KEY CHECK (slot_no >= 0),
-    item_kind TEXT NOT NULL,
-    summary_text TEXT NOT NULL,
-    source_refs_json TEXT NOT NULL,
-    updated_at INTEGER NOT NULL,
-    confidence REAL
-);
-
-CREATE TABLE recent_event_window_items (
-    window_pos INTEGER PRIMARY KEY CHECK (window_pos >= 0),
-    source_kind TEXT NOT NULL CHECK (source_kind IN ('input_journal', 'event')),
-    source_id TEXT NOT NULL,
-    summary_text TEXT NOT NULL,
-    captured_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
-);
-
-CREATE TABLE skill_registry (
-    skill_id TEXT PRIMARY KEY,
-    trigger_pattern_json TEXT NOT NULL,
-    preconditions_json TEXT NOT NULL,
-    action_pattern_json TEXT NOT NULL,
-    success_signature_json TEXT NOT NULL,
-    enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL,
-    summary_text TEXT,
-    last_used_at INTEGER
-);
-
-CREATE INDEX idx_skill_registry_enabled_updated
-    ON skill_registry (enabled, updated_at DESC);
-
 -- Block: Control plane tables
 CREATE TABLE pending_inputs (
     input_id TEXT PRIMARY KEY,

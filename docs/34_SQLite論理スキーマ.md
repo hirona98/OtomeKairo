@@ -42,7 +42,7 @@
 ### テーブルの分類
 
 - append-only の正本ログは、`ui_outbound_events`、`input_journal`、`events`、`action_history`、`retrieval_runs`、`revisions`、`commit_records` とする
-- 更新で育つテーブルは、`db_meta`、`runtime_leases`、`self_state`、`runtime_settings`、`settings_editor_state`、`character_presets`、`behavior_presets`、`conversation_presets`、`memory_presets`、`motion_presets`、`camera_connections`、`attention_state`、`body_state`、`world_state`、`drive_state`、`task_state`、`working_memory_items`、`recent_event_window_items`、`skill_registry`、`pending_inputs`、`settings_overrides`、`settings_change_sets`、`memory_states`、`preference_memory`、`stable_preference_projection`、`event_affects`、`event_links`、`event_threads`、`event_about_time`、`state_about_time`、`state_links`、`event_entities`、`state_entities`、`event_preview_cache`、`memory_jobs`、`memory_job_payloads`、`runtime_housekeeping_state`、`vec_items` とする
+- 更新で育つテーブルは、`db_meta`、`runtime_leases`、`self_state`、`runtime_settings`、`settings_editor_state`、`character_presets`、`behavior_presets`、`conversation_presets`、`memory_presets`、`motion_presets`、`camera_connections`、`attention_state`、`body_state`、`world_state`、`drive_state`、`task_state`、`pending_inputs`、`settings_overrides`、`settings_change_sets`、`memory_states`、`preference_memory`、`stable_preference_projection`、`event_affects`、`event_links`、`event_threads`、`event_about_time`、`state_about_time`、`state_links`、`event_entities`、`state_entities`、`event_preview_cache`、`memory_jobs`、`memory_job_payloads`、`runtime_housekeeping_state`、`vec_items` とする
 - append-only テーブルは、論理削除でなく追記を基本とし、通常更新を前提にしない
 - 例外として `event_preview_cache`、`memory_jobs`、`pending_inputs`、`settings_overrides`、`settings_change_sets` は更新を前提とする
 
@@ -51,7 +51,7 @@
 ```mermaid
 flowchart TD
     meta["起動メタ\n db_meta / runtime_leases"]
-    runtime["ランタイム状態\n self_state / runtime_settings ... skill_registry"]
+    runtime["ランタイム状態\n self_state / runtime_settings ... task_state"]
     editor["設定UI正本\n settings_editor_state / 5 preset tables / camera_connections"]
     control["制御面\n pending_inputs / settings_overrides / settings_change_sets / ui_outbound_events"]
     eventlog["観測・行動\n input_journal / action_history / events / commit_records"]
@@ -211,33 +211,12 @@ flowchart TD
 - タスク不在は `task_state` に未完了行がないこととして表し、`idle` 行は持たない
 - 主要索引: `(task_status, priority DESC, updated_at DESC)`
 
-<!-- Block: Working Memory -->
-### `working_memory_items`
+<!-- Block: Logical Snapshot Slots -->
+### 論理 snapshot slot
 
-- 役割: 現在サイクルの作業文脈をスロット単位で保持する
-- 主キー: `slot_no INTEGER PRIMARY KEY`
-- 必須列: `item_kind`, `summary_text`, `source_refs_json`, `updated_at`
-- 任意列: `confidence`
-- `slot_no` は、`0` からの連番で詰め、空き番を放置しない
-
-<!-- Block: Recent Window -->
-### `recent_event_window_items`
-
-- 役割: 直近の生イベント列を順序付きで保持する
-- 主キー: `window_pos INTEGER PRIMARY KEY`
-- 必須列: `source_kind`, `source_id`, `summary_text`, `captured_at`, `updated_at`
-- `source_kind` は、少なくとも `input_journal`、`event` を区別する
-- `window_pos` は、`0` が最新とし、短周期ごとに並び替えて詰め直す
-
-<!-- Block: Skill Registry -->
-### `skill_registry`
-
-- 役割: 再利用可能な行動列を保持する
-- 主キー: `skill_id TEXT PRIMARY KEY`
-- 必須列: `trigger_pattern_json`, `preconditions_json`, `action_pattern_json`, `success_signature_json`, `enabled`, `created_at`, `updated_at`
-- 任意列: `summary_text`, `last_used_at`
-- `preconditions_json` と `action_pattern_json` は、人格に合う発火条件と避けるべき行動様式を含めてよい
-- 主要索引: `(enabled, updated_at DESC)`
+- `working_memory_items`、`recent_event_window`、`episodic_items`、`semantic_items`、`affective_items`、`relationship_items`、`preference_items`、`reflection_items` は、`memory_snapshot` を構成する論理 slot 名であり、SQLite 上の物理 table 名ではない
+- current 実装では、`events`、`memory_states`、`stable_preference_projection`、`event_affects` などの正本 table から `read_cognition_state` 時に組み立てる
+- 物理 schema へ slot 専用 table を増やさず、read model は正本 table から導出する
 
 <!-- Block: Control Plane Group -->
 ## 制御面テーブル
@@ -568,7 +547,7 @@ flowchart TD
 <!-- Block: Short Cycle Boundary -->
 ### 短周期の保存境界
 
-- 同じ短周期 transaction に含めるのは、`pending_inputs`、`settings_overrides`、`settings_change_sets`、必要なら `runtime_settings`、`self_state`、`attention_state`、`body_state`、`world_state`、`drive_state`、`task_state`、`working_memory_items`、`recent_event_window_items`、`action_history`、`events`、`memory_jobs`、`memory_job_payloads`、`retrieval_runs`、`commit_records` とする
+- 同じ短周期 transaction に含めるのは、`pending_inputs`、`settings_overrides`、`settings_change_sets`、必要なら `runtime_settings`、`self_state`、`attention_state`、`body_state`、`world_state`、`drive_state`、`task_state`、`action_history`、`events`、`memory_jobs`、`memory_job_payloads`、`retrieval_runs`、`commit_records` とする
 - `settings_change_sets` を適用するときは、`settings_editor_state`、5 プリセットテーブル、`camera_connections` を同一 transaction 内で read-only に参照してよいが、mutation 対象には含めない
 - `input_journal` は、短周期 transaction の前に先行追記してよい
 - `ui_outbound_events` は、短周期 transaction と分離した append-only 追記を許す
@@ -577,7 +556,7 @@ flowchart TD
 <!-- Block: Long Cycle Boundary -->
 ### 長周期の保存境界
 
-- 同じ長周期 transaction に含めるのは、`memory_jobs`、`memory_states`、`preference_memory`、`stable_preference_projection`、`event_affects`、`event_links`、`event_threads`、`event_about_time`、`state_about_time`、`state_links`、`event_entities`、`state_entities`、`event_preview_cache`、`revisions`、`runtime_housekeeping_state`、`vec_items`、`vec_items_index`、必要なら `self_state` と `skill_registry` とする
+- 同じ長周期 transaction に含めるのは、`memory_jobs`、`memory_states`、`preference_memory`、`stable_preference_projection`、`event_affects`、`event_links`、`event_threads`、`event_about_time`、`state_about_time`、`state_links`、`event_entities`、`state_entities`、`event_preview_cache`、`revisions`、`runtime_housekeeping_state`、`vec_items`、`vec_items_index`、必要なら `self_state` とする
 - `write_memory` は、必要なら同じ長周期 transaction 内で followup の `memory_jobs` と `memory_job_payloads` を追加してよい
 - `refresh_preview` は、`event_preview_cache` と必要な followup の `memory_jobs` / `memory_job_payloads` 以外を更新してはならない
 - `quarantine_memory` は、`searchable` 系の更新と監査痕跡だけを確定する
