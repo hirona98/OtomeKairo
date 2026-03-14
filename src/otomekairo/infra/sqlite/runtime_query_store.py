@@ -5,13 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from otomekairo.infra.sqlite_state_store import SqliteStateStore
+from otomekairo.infra.sqlite.backend import SqliteBackend
 
 
 # Block: Runtime query adapter
 @dataclass(frozen=True, slots=True)
 class SqliteRuntimeQueryStore:
-    backend: SqliteStateStore
+    backend: SqliteBackend
 
     def read_health(self) -> dict[str, Any]:
         return self.backend.read_health()

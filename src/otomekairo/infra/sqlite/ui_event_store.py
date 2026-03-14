@@ -5,13 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from otomekairo.infra.sqlite_state_store import SqliteStateStore
+from otomekairo.infra.sqlite.backend import SqliteBackend
 
 
 # Block: UI event adapter
 @dataclass(frozen=True, slots=True)
 class SqliteUiEventStore:
-    backend: SqliteStateStore
+    backend: SqliteBackend
 
     def read_stream_window(self, *, channel: str) -> tuple[int | None, int | None]:
         return self.backend.read_stream_window(channel=channel)

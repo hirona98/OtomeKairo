@@ -14,13 +14,13 @@ from otomekairo.infra.sqlite.settings_editor_store import SqliteSettingsEditorSt
 from otomekairo.infra.sqlite.settings_store import SqliteSettingsStore
 from otomekairo.infra.sqlite.ui_event_store import SqliteUiEventStore
 from otomekairo.infra.sqlite.unit_of_work import SqliteWriteMemoryUnitOfWork
-from otomekairo.infra.sqlite_state_store import SqliteStateStore
+from otomekairo.infra.sqlite.backend import SqliteBackend
 
 
 # Block: Shared SQLite adapter bundle
 @dataclass(frozen=True, slots=True)
 class SqliteAdapterBundle:
-    backend: SqliteStateStore
+    backend: SqliteBackend
     runtime_query_store: SqliteRuntimeQueryStore
     cycle_commit_store: SqliteCycleCommitStore
     memory_job_store: SqliteMemoryJobStore
@@ -33,7 +33,7 @@ class SqliteAdapterBundle:
 
 # Block: Shared SQLite composition
 def create_sqlite_adapter_bundle(*, db_path: Path) -> SqliteAdapterBundle:
-    backend = SqliteStateStore(
+    backend = SqliteBackend(
         db_path=db_path,
         initializer_version=__version__,
     )

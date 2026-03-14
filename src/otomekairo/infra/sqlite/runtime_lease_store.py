@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from otomekairo.infra.sqlite_state_store import SqliteStateStore
+from otomekairo.infra.sqlite.backend import SqliteBackend
 
 
 # Block: Runtime lease adapter
 @dataclass(frozen=True, slots=True)
 class SqliteRuntimeLeaseStore:
-    backend: SqliteStateStore
+    backend: SqliteBackend
 
     def acquire_runtime_lease(
         self,

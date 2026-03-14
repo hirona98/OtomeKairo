@@ -16,7 +16,7 @@ from otomekairo.infra.sqlite_store_vectors import (
     _replace_vec_index_row,
     _upsert_vec_item_row,
 )
-from otomekairo.infra.sqlite_state_store import SqliteStateStore
+from otomekairo.infra.sqlite.backend import SqliteBackend
 from otomekairo.schema.store_errors import StoreValidationError
 from otomekairo.schema.runtime_types import MemoryJobRecord
 
@@ -24,7 +24,7 @@ from otomekairo.schema.runtime_types import MemoryJobRecord
 # Block: Memory job adapter
 @dataclass(frozen=True, slots=True)
 class SqliteMemoryJobStore:
-    backend: SqliteStateStore
+    backend: SqliteBackend
 
     def claim_next_memory_job(self) -> MemoryJobRecord | None:
         return self.backend.claim_next_memory_job()

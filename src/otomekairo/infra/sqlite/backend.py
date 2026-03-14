@@ -1,4 +1,4 @@
-"""SQLite-backed state and control plane access."""
+"""SQLite-backed backend and control plane access."""
 
 from __future__ import annotations
 
@@ -195,7 +195,7 @@ class BootstrapResult:
 
 
 # Block: Store implementation
-class SqliteStateStore:
+class SqliteBackend:
     def __init__(self, db_path: Path, initializer_version: str) -> None:
         self._db_path = db_path
         self._initializer_version = initializer_version

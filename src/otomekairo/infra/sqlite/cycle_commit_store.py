@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from otomekairo.infra.sqlite_state_store import SqliteStateStore
+from otomekairo.infra.sqlite.backend import SqliteBackend
 from otomekairo.schema.runtime_types import (
     ActionHistoryRecord,
     PendingInputMutationRecord,
@@ -18,7 +18,7 @@ from otomekairo.schema.runtime_types import (
 # Block: Cycle commit adapter
 @dataclass(frozen=True, slots=True)
 class SqliteCycleCommitStore:
-    backend: SqliteStateStore
+    backend: SqliteBackend
 
     def enqueue_chat_message(
         self,

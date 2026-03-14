@@ -5,14 +5,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from otomekairo.infra.sqlite_state_store import SqliteStateStore
+from otomekairo.infra.sqlite.backend import SqliteBackend
 from otomekairo.schema.runtime_types import SettingsOverrideRecord
 
 
 # Block: Settings adapter
 @dataclass(frozen=True, slots=True)
 class SqliteSettingsStore:
-    backend: SqliteStateStore
+    backend: SqliteBackend
 
     def read_settings(self, default_settings: dict[str, Any]) -> dict[str, Any]:
         return self.backend.read_settings(default_settings)
