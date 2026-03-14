@@ -34,7 +34,7 @@ PYTHONPATH=src python3 -m otomekairo.boot.run_chat_replay_eval --db-path /tmp/ot
 - `commit_records` から `processed_input_kind=chat_message` の cycle を抽出する
 - 各 cycle の `event_ids` から user/assistant の発話を復元する
 - `event_threads` から `dialogue:*` thread の再利用を確認する
-- `revisions` を時系列 replay して、cycle 時点の `preference_memory` と `long_mood_state` を再構成する
+- `commit_records` と保存済み記憶断面から、cycle 時点の `preference_memory` と `long_mood_state` の残り方を追う
 - `action_history` から、その cycle の行動種別と失敗種別を取り出して prior preference と照合する
 - assistant 応答文を deterministic な cue で見て、行動説明、失敗説明、preference 参照、mood tone hint を集計する
 

@@ -78,15 +78,10 @@
 - 設定UIの目標仕様は `docs/42_設定UI仕様.md` を正本とする
 - 記憶設計の研究メモ: `docs/note/記憶設計に関する先行研究のメモ.md`
 - 自律行動システムの研究メモ: `docs/note/自律行動システムの先行研究メモ.md`
-- 類似システムの参考フロー図: `docs/note/ココロゴースト_システムフロー図.md`
-- CocoroGhost 統合の完了履歴メモ: `docs/note/CocoroGhost統合設計案.md`
-- `write_memory -> refresh_preview -> embedding_sync` の deterministic e2e 運用メモ: `docs/note/memory_write_e2e運用メモ.md`
+- `write_memory -> embedding_sync` の deterministic e2e 運用メモ: `docs/note/memory_write_e2e運用メモ.md`
 - chat cycle を replay して継続性を測る運用メモ: `docs/note/chat_replay_eval運用メモ.md`
 - deterministic な会話品質 golden pack の運用メモ: `docs/note/chat_behavior_golden運用メモ.md`
 - merge 前の deterministic eval gate の運用メモ: `docs/note/eval_gate運用メモ.md`
-- retrieval_runs から直近傾向を確認する運用メモ: `docs/note/retrieval_eval運用メモ.md`
-- retrieval_runs の review packet を確認する運用メモ: `docs/note/retrieval_triage運用メモ.md`
-- review 済み triage report を quarantine_memory へ取り込む運用メモ: `docs/note/retrieval_review_import運用メモ.md`
 
 <!-- Block: Maintenance -->
 ## 更新ルール（重要）

@@ -3,8 +3,8 @@
 <!-- Block: Purpose -->
 ## 目的
 
-- `write_memory -> refresh_preview -> embedding_sync` の長周期チェーンを、LLM なしの deterministic な scripted conversation で毎回再現できるようにする
-- `summary`、`fact`、`reflection_note`、`long_mood_state`、`preference_memory`、`event_preview_cache`、`vec_items`、`event_links`、`event_threads`、`state_links`、`event_about_time`、`state_about_time` まで一連で壊れていないかを確認する
+- `write_memory -> embedding_sync` の長周期チェーンを、LLM なしの deterministic な scripted conversation で毎回再現できるようにする
+- `summary`、`fact`、`reflection_note`、`long_mood_state`、`preference_memory`、`vec_items`、`event_links`、`event_threads`、`state_links`、`event_about_time`、`state_about_time` まで一連で壊れていないかを確認する
 - 後続の `write_memory orchestration` 分離や `chat replay eval` の前に、保存系の confidence を先に上げる
 
 <!-- Block: Command -->
@@ -44,13 +44,12 @@ PYTHONPATH=src python3 -m otomekairo.boot.run_memory_write_e2e --keep-db
 <!-- Block: Success -->
 ## 期待結果
 
-- `write_memory` は cycle 数と一致し、`refresh_preview` は `events` 件数と一致、`embedding_sync` は `write_memory + refresh_preview` 件数と一致する
+- `write_memory` と `embedding_sync` が、全 cycle 分 `completed` になる
 - `memory_states` に `summary`、`fact`、`reflection_note`、`long_mood_state` が入る
 - `preference_memory` は `action_type` / `observation_kind` に加えて `topic_keyword` も持ち、最終的に `confirmed >= 4`、`revoked >= 2` になる
 - final DB state では `topic_keyword:展示:like` と `topic_keyword:ホラー映画:dislike` が confirmed に残る
 - `action_type_counts` は `browse >= 5`、`speak >= 3`、`notify >= 1`、`look >= 1` を満たす
 - `failure_mode_counts` は `timeout >= 1` と `network_unavailable >= 1` を満たす
-- `event_preview_cache` 件数は `events` 件数と一致する
 - `vec_items` に `event`、`memory_state`、`event_affect` の各 entity_type が入る
 - `event_links`、`event_threads`、`state_links`、`event_about_time`、`state_about_time` が非ゼロで入る
 - `event_links.label` は `reply_to`、`same_topic`、`continuation`、`caused_by` の 4 種が materialize される
