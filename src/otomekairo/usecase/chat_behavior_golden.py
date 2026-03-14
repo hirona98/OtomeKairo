@@ -5,10 +5,9 @@ from __future__ import annotations
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from otomekairo.usecase.chat_replay_eval import build_chat_replay_eval_report
-from otomekairo.usecase.memory_write_e2e import run_memory_write_e2e
 
 
 # Block: Report constants
@@ -16,11 +15,15 @@ REPORT_SCHEMA_VERSION = 3
 
 
 # Block: Public report build
-def build_chat_behavior_golden_report(*, keep_db: bool) -> dict[str, Any]:
+def build_chat_behavior_golden_report(
+    *,
+    keep_db: bool,
+    build_memory_write_report: Callable[[Path], dict[str, Any]],
+) -> dict[str, Any]:
     temp_dir = Path(tempfile.mkdtemp(prefix="otomekairo-chat-behavior-golden-"))
     db_path = temp_dir / "core.sqlite3"
     try:
-        memory_report = run_memory_write_e2e(db_path=db_path)
+        memory_report = build_memory_write_report(db_path)
         chat_report = build_chat_replay_eval_report(
             db_path=db_path,
             limit=20,

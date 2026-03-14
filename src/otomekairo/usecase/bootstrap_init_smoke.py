@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
 import shutil
 import sqlite3
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from otomekairo import __version__
-from otomekairo.infra.sqlite_state_store import SCHEMA_NAME, SCHEMA_VERSION, SqliteStateStore
+from otomekairo.gateway.settings_editor_store import SettingsEditorStore
+from otomekairo.schema.persistence import SCHEMA_NAME, SCHEMA_VERSION
 from otomekairo.schema.settings import build_default_settings
 
 
@@ -18,22 +20,29 @@ from otomekairo.schema.settings import build_default_settings
 REPORT_SCHEMA_VERSION = 1
 
 
+# Block: Smoke store bundle
+@dataclass(frozen=True, slots=True)
+class BootstrapInitSmokeStores:
+    settings_editor_store: SettingsEditorStore
+
+
 # Block: Public smoke runner
-def run_bootstrap_init_smoke(*, keep_db: bool) -> dict[str, Any]:
+def run_bootstrap_init_smoke(
+    *,
+    keep_db: bool,
+    build_stores: Callable[[Path], BootstrapInitSmokeStores],
+) -> dict[str, Any]:
     temp_dir = Path(tempfile.mkdtemp(prefix="otomekairo-bootstrap-init-"))
     db_path = temp_dir / "core.sqlite3"
     try:
         default_settings = build_default_settings()
-        store = SqliteStateStore(
-            db_path=db_path,
-            initializer_version=__version__,
-        )
-        store.initialize()
-        settings_editor = store.read_settings_editor(default_settings)
+        stores = build_stores(db_path)
+        settings_editor = stores.settings_editor_store.read_settings_editor(default_settings)
         report = _build_report(
             db_path=db_path,
             keep_db=keep_db,
             settings_editor=settings_editor,
+            build_stores=build_stores,
         )
         _validate_report(report)
         return report
@@ -48,6 +57,7 @@ def _build_report(
     db_path: Path,
     keep_db: bool,
     settings_editor: dict[str, Any],
+    build_stores: Callable[[Path], BootstrapInitSmokeStores],
 ) -> dict[str, Any]:
     with sqlite3.connect(db_path) as connection:
         meta_rows = connection.execute(
@@ -83,11 +93,7 @@ def _build_report(
         connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION - 1}")
     stale_rejection_message: str | None = None
     try:
-        stale_store = SqliteStateStore(
-            db_path=db_path,
-            initializer_version=__version__,
-        )
-        stale_store.initialize()
+        build_stores(db_path)
     except RuntimeError as exc:
         stale_rejection_message = str(exc)
     editor_state = settings_editor.get("editor_state")

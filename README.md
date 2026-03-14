@@ -35,16 +35,20 @@
 - `src/otomekairo/boot/run_web.py`: `uvicorn` で Web サーバを起動し、既定では `0.0.0.0:8000` に bind する
 - `src/otomekairo/boot/run_runtime.py`: 人格ランタイムの常時ループを起動する
 - `src/otomekairo/boot/run_all.py`: Web サーバと人格ランタイムを同じ親プロセスで起動し、既存のランタイム lease が生きていればそれを再利用し、終了シグナル時はまず `SIGINT` で子プロセスを graceful shutdown させる
+- `src/otomekairo/boot/compose_sqlite.py`: 共通の SQLite backend 初期化と adapter bundle の組み立てを担当し、`run_all.py`、`compose_runtime.py`、`compose_web.py`、deterministic eval runner から再利用する
+- `src/otomekairo/boot/compose_web.py`: Web サーバ用の composition root として `compose_sqlite.py` から受けた SQLite adapter 群、カメラ入力、STT を組み立て、`build_app(...)` へ渡す
+- `src/otomekairo/boot/compose_runtime.py`: ランタイム用の composition root として `compose_sqlite.py` から受けた port bundle、TTS、検索、LiteLLM、カメラ制御を組み立て、`RuntimeLoop` へ渡す
 - `src/otomekairo/infra/logging_setup.py`: `config/developer.toml` を前提に、`launcher / web / runtime` の root / handler / library logger level を起動時に決め、`log/otomekairo.log` への通常テキストログ整形と秘密情報マスクと BASE64 本文の省略を行い、`LiteLLM` の自前コンソール handler も共通ログ経路へ統一し、共有ロックつきで約 1MiB ごとにローテーションする共通ロギング設定を持つ
-- `src/otomekairo/web/app.py`: FastAPI アプリを構成し、API ルータ、静止画配信用の `/captures`、最小ブラウザ UI (`GET /`)、例外処理を束ねる
+- `src/otomekairo/web/app.py`: `AppServices` bundle を受け取り、API ルータ、静止画配信用の `/captures`、最小ブラウザ UI (`GET /`)、例外処理だけを束ねる
 - `src/otomekairo/web/camera_api.py`: `POST /api/camera/capture` でカメラ静止画を取得し、`POST /api/camera/observe` でその画像を自発観測入力として認知キューへ積む
 - `src/otomekairo/web/static/`: `tmp/CocoroConsole` ベースの設定ウインドウを持つ最小チャット UI を持ち、同一オリジンで `POST /api/chat/input`、`POST /api/camera/capture`、`GET /api/chat/stream` を使い、`message` 到着時はチャット表示へ反映し、`audio_url` があればサーバ生成の TTS 音声を再生し、`Cam` は静止画をサムネイル表示して次のチャット入力へ添付し、設定パネルでは `キャラクター / 振る舞い / 会話 / 記憶 / モーション / システム` の 6 タブで 5 種のプリセットとシステム設定・カメラ接続をまとめて編集し、カメラ接続は表内で `使用` の有効化、行追加、行削除、接続情報編集を行う
 - `src/otomekairo/gateway/cognition_client.py`: 認知処理の外部境界を表す抽象を定義する
 - `src/otomekairo/usecase/build_cognition_input.py`: `self_state` などの現在状態から最小の `cognition_input` を組み立て、`task_state` の進行中 / 外部待ちタスク、`sqlite-vec` で補強した直近の `summary` / `fact` 記憶、直近イベント列を `current_observation` と照合して絞り込み、`memory_bundle` として渡す
+- `src/otomekairo/usecase/cognition_prompt_messages.py`: planner / retrieval selector / reply renderer で共有する prompt message 構築を持ち、deterministic smoke と LiteLLM adapter の両方から再利用する
 - `src/otomekairo/usecase/run_cognition.py`: 認知クライアントが返す `cognition_result` を受け取り、`action_command` を使って `speak` は `token` / `message`、`notify` はユーザー通知イベント (`notice`)、`look` は ONVIF 経由のカメラ視点操作、`browse` は `waiting_external` の検索タスクとして実行し、`action_history` へ変換する
 - `src/otomekairo/usecase/run_browse_task.py`: `task_state(waiting_external)` の `browse` タスクを外部検索へ通し、検索結果を内部入力 `network_result` として次周期へ戻し、`action_history` へ変換する
 - `src/otomekairo/usecase/validate_action.py`: `cognition_result.action_proposals` から `speak` / `browse` / `notify` / `look` / `wait` を比較し、`selection_profile` の trait / style / relationship / emotion / drive、`memory_bundle`、`task_snapshot`、カメラ可用性を使って `execute / hold / reject` と構造化した `action_command` を確定する
-- `src/otomekairo/infra/litellm_cognition_client.py`: `LiteLLM` を使って人格断面つきの認知呼び出しを行い、`response_format={"type":"json_schema"}` と厳密な shape 指示で `cognition_result` を構造化させ、`base_model` に設定上の `llm.model` を固定して provider 側の実モデル名展開に影響されずに capability / cost 参照を安定化し、`action_proposals` の最小形も厳密に検証する
+- `src/otomekairo/infra/litellm_cognition_client.py`: `LiteLLM` を使って認知呼び出しを行い、`usecase/cognition_prompt_messages.py` が作った message を transport に流し、`response_format={"type":"json_schema"}` と厳密な validation で `cognition_result` を構造化させる
 - `src/otomekairo/gateway/search_client.py`: 外部検索の境界を表す抽象を定義する
 - `src/otomekairo/gateway/camera_controller.py`: カメラ視点操作の外部境界を定義する
 - `src/otomekairo/gateway/camera_sensor.py`: カメラ静止画取得の外部境界を定義する
@@ -52,8 +56,9 @@
 - `src/otomekairo/infra/wifi_camera_common.py`: ONVIF 接続に使う Wi-Fi カメラ設定の正規化と共通クライアント生成をまとめる
 - `src/otomekairo/infra/wifi_camera_controller.py`: 設定UIで `使用` が有効なカメラ接続を読み、先頭の有効接続に対して ONVIF 経由で `Tapo C220` などの視点操作を行う
 - `src/otomekairo/infra/wifi_camera_sensor.py`: 設定UIで `使用` が有効なカメラ接続を読み、先頭の有効接続から ONVIF で RTSP stream URI を取得し、`ffmpeg` で 1 フレームを `data/camera/` の JPEG として保存する
-- `src/otomekairo/infra/sqlite_state_store.py`: `core_schema.sql` を読み込む DB 初期化と、`sqlite-vec` の `vec0` 仮想表初期化、状態参照・入力受付・設定反映、短周期確定時の `write_memory` enqueue、`network_result` を伴う `browse` では `summary` に加えて `fact` の `memory_state` も作成し、`write_memory -> embedding_sync` の長周期処理、`memory_jobs` の再キュー / `dead_letter`、`ui_outbound_events` の保持窓削除を持つ
-- `src/otomekairo/runtime/main_loop.py`: `settings_overrides`、`settings_change_sets`、`pending_inputs`、`task_state(waiting_external)` を消費し、待機中も応答中も lease heartbeat を維持しながら、失敗時も `claimed` を終端状態へ確定しつつ `logger.exception(...)` で stderr にスタックトレースも出し、`token` の即時追記、進行中 `cancel` の消費、`browse` の外部検索と `network_result` の再認知、`notify` のユーザー通知発行、設定UI保存結果からの `runtime_settings` materialize、短周期と長周期を交互に管理しつつ `runtime.long_cycle_min_interval_ms` で間隔制御したうえで、`write_memory` / `embedding_sync` の最小長周期処理までを行う
+- `src/otomekairo/infra/sqlite_state_store.py`: `core_schema.sql` を読み込む DB 初期化と、`sqlite-vec` の `vec0` 仮想表初期化、状態参照・入力受付・設定反映、短周期確定時の `write_memory` enqueue、`network_result` を伴う `browse` では `summary` に加えて `fact` の `memory_state` も作成し、`write_memory` と `embedding_sync` の transaction 内 helper、`memory_jobs` の再キュー / `dead_letter`、`ui_outbound_events` の保持窓削除を持つ
+- `src/otomekairo/infra/sqlite/`: `runtime_query`、`cycle_commit`、`settings`、`settings_editor`、`ui_event`、`runtime_lease`、`memory_job`、`unit_of_work` を責務別 adapter として分け、共通の SQLite backend を包む
+- `src/otomekairo/runtime/main_loop.py`: `RuntimeStores` bundle 越しに `settings_overrides`、`settings_change_sets`、`pending_inputs`、`task_state(waiting_external)` を消費し、待機中も応答中も lease heartbeat を維持しながら、失敗時も `claimed` を終端状態へ確定しつつ `logger.exception(...)` で stderr にスタックトレースも出し、`token` の即時追記、進行中 `cancel` の消費、`browse` の外部検索と `network_result` の再認知、`notify` のユーザー通知発行、設定UI保存結果からの `runtime_settings` materialize、短周期と長周期を交互に管理しつつ `runtime.long_cycle_min_interval_ms` で間隔制御したうえで、`write_memory` / `embedding_sync` の最小長周期処理までを行う
 - `src/otomekairo/schema/runtime_types.py`: ランタイムの共通データ形を `infra` から切り離して持つ
 - `src/otomekairo/schema/settings.py`: 設定キーの検証と `config/default_settings.json` からの既定値読み込みを持つ
 - `config/default_settings.json`: `runtime_settings` seed と Web の `effective_settings` に使う設定既定値の正本を持つ

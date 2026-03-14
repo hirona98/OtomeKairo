@@ -14,13 +14,12 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from otomekairo import __version__
-from otomekairo.infra.speech_synthesis_common import default_tts_audio_dir
-from otomekairo.infra.amivoice_speech_recognizer import AmivoiceSpeechRecognizer
-from otomekairo.infra.wifi_camera_common import default_camera_capture_dir
-from otomekairo.infra.wifi_camera_sensor import WiFiCameraSensor
-from otomekairo.infra.sqlite_state_store import SqliteStateStore
-from otomekairo.infra.sqlite_store_errors import StoreConflictError, StoreValidationError
-from otomekairo.schema.settings import SettingsValidationError, build_default_settings
+from otomekairo.schema.storage_paths import (
+    default_camera_capture_dir,
+    default_tts_audio_dir,
+)
+from otomekairo.schema.store_errors import StoreConflictError, StoreValidationError
+from otomekairo.schema.settings import SettingsValidationError
 from otomekairo.web.camera_api import build_camera_router
 from otomekairo.web.dependencies import ApiError, AppServices
 from otomekairo.web.chat_input_api import build_chat_input_router
@@ -57,19 +56,7 @@ class RequestContextMiddleware:
 
 
 # Block: App factory
-def create_app() -> FastAPI:
-    store = SqliteStateStore(_default_db_path(), __version__)
-    store.initialize()
-    default_settings = build_default_settings()
-    camera_sensor = WiFiCameraSensor(
-        camera_connections_loader=store.read_enabled_camera_connections,
-    )
-    services = AppServices(
-        store=store,
-        default_settings=default_settings,
-        camera_sensor=camera_sensor,
-        speech_recognizer=AmivoiceSpeechRecognizer(),
-    )
+def build_app(*, services: AppServices) -> FastAPI:
     static_dir = _static_dir()
     capture_dir = _camera_capture_dir()
     tts_audio_dir = _tts_audio_dir()
@@ -188,13 +175,8 @@ def create_app() -> FastAPI:
     return app
 
 
-# Block: Default database path
-def _default_db_path() -> Path:
-    return Path(__file__).resolve().parents[3] / "data" / "core.sqlite3"
-
-
 # Block: Static asset path
-def _static_dir() -> Path:
+def _static_dir():
     return Path(__file__).resolve().parent / "static"
 
 
@@ -205,9 +187,7 @@ def _camera_capture_dir() -> Path:
 
 # Block: TTS audio path
 def _tts_audio_dir() -> Path:
-    audio_dir = default_tts_audio_dir()
-    audio_dir.mkdir(parents=True, exist_ok=True)
-    return audio_dir
+    return default_tts_audio_dir()
 
 
 # Block: Stream janitor
@@ -219,7 +199,7 @@ def _run_stream_janitor_if_due(
     now_ms = _now_ms()
     if now_ms - last_stream_janitor_at < STREAM_JANITOR_INTERVAL_MS:
         return last_stream_janitor_at
-    services.store.prune_ui_outbound_events(
+    services.ui_event_store.prune_ui_outbound_events(
         channel="browser_chat",
         retention_window_ms=STREAM_RETENTION_WINDOW_MS,
         retain_minimum_count=STREAM_RETAIN_MINIMUM_COUNT,

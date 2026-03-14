@@ -53,6 +53,7 @@
 - 設定を直すとき: `docs/39_設定キー運用仕様.md` -> `docs/42_設定UI仕様.md` -> `docs/43_開発者設定仕様.md`
 - 人格を直すとき: `docs/41_人格選択仕様.md` -> `docs/31_ランタイム処理仕様.md`
 - 起動や DB 初期化を直すとき: `docs/37_起動初期化仕様.md` -> `docs/34_SQLite論理スキーマ.md`
+- 起動 wiring を直すとき: `docs/37_起動初期化仕様.md` -> `src/otomekairo/boot/compose_sqlite.py` -> `src/otomekairo/boot/compose_runtime.py` -> `src/otomekairo/boot/compose_web.py`
 - ブラウザUIを直すとき: `src/otomekairo/web/static/` -> `docs/35_WebAPI仕様.md` -> `docs/42_設定UI仕様.md`
 - 設定既定値を見るとき: `config/default_settings.json`
 - 開発者用起動設定を見るとき: `config/developer.toml`

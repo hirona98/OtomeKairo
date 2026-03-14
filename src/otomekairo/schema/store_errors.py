@@ -1,4 +1,4 @@
-"""Shared error types for SQLite store modules."""
+"""Shared store error types."""
 
 from __future__ import annotations
 

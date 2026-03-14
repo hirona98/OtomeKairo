@@ -35,7 +35,7 @@ def main() -> None:
     port = int(os.environ.get("OTOMEKAIRO_PORT", "8000"))
     logger.info("starting web server", extra={"host": host, "port": port})
     config = uvicorn.Config(
-        "otomekairo.web.app:create_app",
+        "otomekairo.boot.compose_web:create_app",
         factory=True,
         host=host,
         port=port,

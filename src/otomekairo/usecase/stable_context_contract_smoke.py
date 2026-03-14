@@ -2,20 +2,16 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
 import shutil
 import sqlite3
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
-from otomekairo import __version__
 from otomekairo.gateway.cognition_client import CognitionPlanRequest, ReplyRenderRequest
-from otomekairo.infra.litellm_cognition_client import (
-    _build_plan_messages,
-    _build_reply_render_messages,
-)
-from otomekairo.infra.sqlite_state_store import SqliteStateStore
+from otomekairo.gateway.runtime_query_store import RuntimeQueryStore
 from otomekairo.schema.settings import build_default_settings
 from otomekairo.usecase.build_cognition_input import (
     _build_action_selection_context,
@@ -24,25 +20,35 @@ from otomekairo.usecase.build_cognition_input import (
     _build_reply_render_input,
     _build_selected_memory_pack,
 )
+from otomekairo.usecase.cognition_prompt_messages import (
+    build_plan_messages,
+    build_reply_render_messages,
+)
 
 
 # Block: Report constants
 REPORT_SCHEMA_VERSION = 4
 
 
+# Block: Smoke store bundle
+@dataclass(frozen=True, slots=True)
+class StableContextContractSmokeStores:
+    runtime_query_store: RuntimeQueryStore
+
+
 # Block: Public smoke runner
-def run_stable_context_contract_smoke(*, keep_db: bool) -> dict[str, Any]:
+def run_stable_context_contract_smoke(
+    *,
+    keep_db: bool,
+    build_stores: Callable[[Path], StableContextContractSmokeStores],
+) -> dict[str, Any]:
     temp_dir = Path(tempfile.mkdtemp(prefix="otomekairo-stable-context-"))
     db_path = temp_dir / "core.sqlite3"
     try:
         default_settings = build_default_settings()
-        store = SqliteStateStore(
-            db_path=db_path,
-            initializer_version=__version__,
-        )
-        store.initialize()
-        _seed_preference_history(store=store)
-        cognition_state = store.read_cognition_state(default_settings)
+        stores = build_stores(db_path)
+        _seed_preference_history(db_path=db_path)
+        cognition_state = stores.runtime_query_store.read_cognition_state(default_settings)
         stable_preference_items = list(cognition_state.stable_preference_items)
         stable_preferences = _build_stable_preferences(
             preference_items=stable_preference_items,
@@ -133,7 +139,7 @@ def run_stable_context_contract_smoke(*, keep_db: bool) -> dict[str, Any]:
                 },
             },
         )
-        cognition_plan_messages = _build_plan_messages(
+        cognition_plan_messages = build_plan_messages(
             CognitionPlanRequest(
                 cycle_id="cycle_smoke",
                 input_kind="chat_message",
@@ -147,7 +153,7 @@ def run_stable_context_contract_smoke(*, keep_db: bool) -> dict[str, Any]:
                 },
             )
         )
-        messages = _build_reply_render_messages(
+        messages = build_reply_render_messages(
             ReplyRenderRequest(
                 cycle_id="cycle_smoke",
                 input_kind="chat_message",
@@ -186,9 +192,9 @@ def run_stable_context_contract_smoke(*, keep_db: bool) -> dict[str, Any]:
 
 
 # Block: Preference history seed
-def _seed_preference_history(*, store: SqliteStateStore) -> None:
+def _seed_preference_history(*, db_path: Path) -> None:
     now_ms = 1_710_000_000_000
-    with store._connect() as connection:
+    with _connect_row_db(db_path) as connection:
         connection.execute("BEGIN IMMEDIATE")
         for index in range(12):
             _insert_preference_row(
@@ -248,10 +254,115 @@ def _seed_preference_history(*, store: SqliteStateStore) -> None:
             status="confirmed",
             target_key="他人好み",
             confidence=0.95,
-            created_at=now_ms - 40_000,
-            updated_at=now_ms - 40_000,
+                created_at=now_ms - 40_000,
+                updated_at=now_ms - 40_000,
         )
-        store._rebuild_stable_preference_projection(connection=connection)
+        _rebuild_stable_preference_projection(connection=connection)
+
+
+# Block: Stable preference projection rebuild
+def _rebuild_stable_preference_projection(
+    *,
+    connection: sqlite3.Connection,
+) -> None:
+    connection.execute("DELETE FROM stable_preference_projection")
+    seen_keys: set[tuple[str, str, str, str]] = set()
+    for row in connection.execute(
+        """
+        SELECT
+            preference_id,
+            owner_scope,
+            target_entity_ref_json,
+            target_key,
+            domain,
+            polarity,
+            status,
+            confidence,
+            evidence_event_ids_json,
+            created_at,
+            updated_at
+        FROM preference_memory
+        ORDER BY updated_at DESC, created_at DESC, preference_id DESC
+        """
+    ).fetchall():
+        projection_key = (
+            str(row["owner_scope"]),
+            str(row["domain"]),
+            str(row["target_key"]),
+            str(row["polarity"]),
+        )
+        if projection_key in seen_keys:
+            continue
+        seen_keys.add(projection_key)
+        _sync_stable_preference_projection(
+            connection=connection,
+            preference_row=row,
+        )
+
+
+# Block: Stable preference projection sync
+def _sync_stable_preference_projection(
+    *,
+    connection: sqlite3.Connection,
+    preference_row: sqlite3.Row,
+) -> None:
+    owner_scope = str(preference_row["owner_scope"])
+    target_key = str(preference_row["target_key"])
+    domain = str(preference_row["domain"])
+    polarity = str(preference_row["polarity"])
+    status = str(preference_row["status"])
+    if owner_scope != "self" or status not in {"confirmed", "revoked"}:
+        connection.execute(
+            """
+            DELETE FROM stable_preference_projection
+            WHERE owner_scope = ?
+              AND domain = ?
+              AND target_key = ?
+              AND polarity = ?
+            """,
+            (owner_scope, domain, target_key, polarity),
+        )
+        return
+    connection.execute(
+        """
+        INSERT INTO stable_preference_projection (
+            owner_scope,
+            target_entity_ref_json,
+            target_key,
+            domain,
+            polarity,
+            preference_id,
+            status,
+            confidence,
+            evidence_event_ids_json,
+            created_at,
+            updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(owner_scope, domain, target_key, polarity)
+        DO UPDATE SET
+            target_entity_ref_json = excluded.target_entity_ref_json,
+            preference_id = excluded.preference_id,
+            status = excluded.status,
+            confidence = excluded.confidence,
+            evidence_event_ids_json = excluded.evidence_event_ids_json,
+            created_at = excluded.created_at,
+            updated_at = excluded.updated_at
+        """,
+        (
+            owner_scope,
+            str(preference_row["target_entity_ref_json"]),
+            target_key,
+            domain,
+            polarity,
+            str(preference_row["preference_id"]),
+            status,
+            float(preference_row["confidence"]),
+            str(preference_row["evidence_event_ids_json"]),
+            int(preference_row["created_at"]),
+            int(preference_row["updated_at"]),
+        ),
+    )
 
 
 # Block: Preference row insert
@@ -617,3 +728,10 @@ def _smoke_cognition_input(
             "attachments": [],
         },
     }
+
+
+# Block: SQLite row connection
+def _connect_row_db(db_path: Path) -> sqlite3.Connection:
+    connection = sqlite3.connect(db_path)
+    connection.row_factory = sqlite3.Row
+    return connection

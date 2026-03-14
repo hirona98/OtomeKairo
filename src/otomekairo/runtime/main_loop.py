@@ -2,19 +2,25 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import logging
 import time
 import uuid
-from pathlib import Path
 from typing import Any, Callable
 
 from otomekairo.gateway.camera_controller import CameraController
 from otomekairo.gateway.camera_sensor import CameraSensor
-from otomekairo import __version__
+from otomekairo.gateway.cycle_commit_store import CycleCommitStore
 from otomekairo.gateway.cognition_client import CognitionClient
+from otomekairo.gateway.memory_job_store import MemoryJobStore
+from otomekairo.gateway.runtime_lease_store import RuntimeLeaseStore
+from otomekairo.gateway.runtime_query_store import RuntimeQueryStore
 from otomekairo.gateway.search_client import SearchClient
+from otomekairo.gateway.settings_editor_store import SettingsEditorStore
+from otomekairo.gateway.settings_store import SettingsStore
 from otomekairo.gateway.speech_synthesizer import SpeechSynthesizer
-from otomekairo.infra.sqlite_state_store import SqliteStateStore
+from otomekairo.gateway.ui_event_store import UiEventStore
+from otomekairo.gateway.unit_of_work import WriteMemoryUnitOfWork
 from otomekairo.schema.runtime_types import (
     ActionHistoryRecord,
     MemoryJobRecord,
@@ -24,7 +30,7 @@ from otomekairo.schema.runtime_types import (
     TaskStateRecord,
     TaskStateMutationRecord,
 )
-from otomekairo.schema.settings import SettingsValidationError, build_default_settings, decode_requested_value, get_setting_definition
+from otomekairo.schema.settings import SettingsValidationError, decode_requested_value, get_setting_definition
 from otomekairo.usecase.build_cognition_input import build_cognition_input
 from otomekairo.usecase.observation_normalization import normalize_trigger_reason
 from otomekairo.usecase.run_browse_task import run_browse_task
@@ -47,12 +53,25 @@ CANCEL_FAILURE_REASON = "cancel_processing_failed"
 logger = logging.getLogger(__name__)
 
 
+# Block: Runtime store bundle
+@dataclass(frozen=True, slots=True)
+class RuntimeStores:
+    runtime_query_store: RuntimeQueryStore
+    cycle_commit_store: CycleCommitStore
+    settings_store: SettingsStore
+    settings_editor_store: SettingsEditorStore
+    ui_event_store: UiEventStore
+    memory_job_store: MemoryJobStore
+    runtime_lease_store: RuntimeLeaseStore
+    write_memory_unit_of_work: WriteMemoryUnitOfWork
+
+
 # Block: Runtime loop
 class RuntimeLoop:
     def __init__(
         self,
         *,
-        store: SqliteStateStore,
+        stores: RuntimeStores,
         owner_token: str,
         default_settings: dict[str, Any],
         cognition_client: CognitionClient,
@@ -70,7 +89,7 @@ class RuntimeLoop:
             raise RuntimeError("lease_heartbeat_ms must be 5000 or less")
         if lease_ttl_ms < MINIMUM_LEASE_TTL_MS:
             raise RuntimeError("lease_ttl_ms must be 15000 or more")
-        self._store = store
+        self._stores = stores
         self._owner_token = owner_token
         self._default_settings = default_settings
         self._cognition_client = cognition_client
@@ -100,10 +119,10 @@ class RuntimeLoop:
     def run_once(self) -> bool:
         self._refresh_runtime_lease()
         if not self._boot_reconciled:
-            self._store.materialize_next_boot_settings()
+            self._stores.settings_editor_store.materialize_next_boot_settings()
             self._boot_reconciled = True
             logger.info("runtime boot settings materialized")
-        replayed_commit_logs = self._store.sync_pending_commit_logs(max_commits=4)
+        replayed_commit_logs = self._stores.runtime_lease_store.sync_pending_commit_logs(max_commits=4)
         did_replay_commit_logs = replayed_commit_logs > 0
         if replayed_commit_logs > 0:
             self._mark_runtime_activity()
@@ -127,7 +146,7 @@ class RuntimeLoop:
             self._prefer_long_cycle = True
             self._mark_runtime_activity()
             return True
-        pending_input = self._store.claim_next_pending_input()
+        pending_input = self._stores.cycle_commit_store.claim_next_pending_input()
         if pending_input is not None:
             logger.info(
                 "claimed pending input",
@@ -141,7 +160,7 @@ class RuntimeLoop:
             self._prefer_long_cycle = True
             self._mark_runtime_activity()
             return True
-        waiting_task = self._store.claim_next_waiting_browse_task()
+        waiting_task = self._stores.cycle_commit_store.claim_next_waiting_browse_task()
         if waiting_task is not None:
             logger.info(
                 "claimed waiting task",
@@ -181,7 +200,7 @@ class RuntimeLoop:
     def _process_claimed_pending_input(self, pending_input: PendingInputRecord) -> None:
         cycle_id = _opaque_id("cycle")
         try:
-            self._store.append_input_journal_for_pending_input(
+            self._stores.cycle_commit_store.append_input_journal_for_pending_input(
                 pending_input=pending_input,
                 cycle_id=cycle_id,
             )
@@ -213,7 +232,7 @@ class RuntimeLoop:
                     else {}
                 ),
             }
-            self._store.finalize_pending_input_cycle(
+            self._stores.cycle_commit_store.finalize_pending_input_cycle(
                 pending_input=pending_input,
                 cycle_id=cycle_id,
                 resolution_status=resolution_status,
@@ -246,7 +265,7 @@ class RuntimeLoop:
                 pending_input=pending_input,
                 error=error,
             )
-            self._store.finalize_pending_input_cycle(
+            self._stores.cycle_commit_store.finalize_pending_input_cycle(
                 pending_input=pending_input,
                 cycle_id=cycle_id,
                 resolution_status="discarded",
@@ -279,7 +298,7 @@ class RuntimeLoop:
                 cycle_id=cycle_id,
                 search_client=self._search_client,
             )
-            self._store.finalize_task_cycle(
+            self._stores.cycle_commit_store.finalize_task_cycle(
                 task=task,
                 cycle_id=cycle_id,
                 final_status=execution.final_status,
@@ -322,7 +341,7 @@ class RuntimeLoop:
                 cycle_id=cycle_id,
                 error=error,
             )
-            self._store.finalize_task_cycle(
+            self._stores.cycle_commit_store.finalize_task_cycle(
                 task=task,
                 cycle_id=cycle_id,
                 final_status="abandoned",
@@ -361,7 +380,7 @@ class RuntimeLoop:
     ]:
         input_kind = pending_input.payload["input_kind"]
         if input_kind in {"chat_message", "microphone_message", "camera_observation", "network_result", "idle_tick"}:
-            state_snapshot = self._store.read_cognition_state(
+            state_snapshot = self._stores.runtime_query_store.read_cognition_state(
                 self._default_settings,
                 observation_hint_text=_pending_input_observation_hint(pending_input),
             )
@@ -418,7 +437,7 @@ class RuntimeLoop:
     # Block: UI event append
     def _append_ui_event(self, *, cycle_id: str, ui_event: dict[str, Any]) -> None:
         self._refresh_runtime_lease()
-        self._store.append_ui_outbound_event(
+        self._stores.ui_event_store.append_ui_outbound_event(
             channel=ui_event["channel"],
             event_type=ui_event["event_type"],
             payload=ui_event["payload"],
@@ -432,7 +451,7 @@ class RuntimeLoop:
     # Block: Active cancel handling
     def _consume_matching_cancel(self, *, channel: str, message_id: str) -> bool:
         self._refresh_runtime_lease()
-        pending_input = self._store.claim_matching_cancel_input(
+        pending_input = self._stores.cycle_commit_store.claim_matching_cancel_input(
             channel=channel,
             target_message_id=message_id,
         )
@@ -441,7 +460,7 @@ class RuntimeLoop:
         cycle_id = _opaque_id("cycle")
         try:
             resolved_at = _now_ms()
-            self._store.append_input_journal_for_pending_input(
+            self._stores.cycle_commit_store.append_input_journal_for_pending_input(
                 pending_input=pending_input,
                 cycle_id=cycle_id,
             )
@@ -465,7 +484,7 @@ class RuntimeLoop:
                 raw_result_ref=None,
                 adapter_trace_ref=None,
             )
-            self._store.finalize_pending_input_cycle(
+            self._stores.cycle_commit_store.finalize_pending_input_cycle(
                 pending_input=pending_input,
                 cycle_id=cycle_id,
                 resolution_status="consumed",
@@ -488,7 +507,7 @@ class RuntimeLoop:
             return True
         except Exception as error:
             logger.exception("cancel processing failed: input_id=%s", pending_input.input_id)
-            self._store.finalize_pending_input_cycle(
+            self._stores.cycle_commit_store.finalize_pending_input_cycle(
                 pending_input=pending_input,
                 cycle_id=cycle_id,
                 resolution_status="discarded",
@@ -514,7 +533,7 @@ class RuntimeLoop:
 
     # Block: Settings change set iteration
     def _process_settings_change_set_once(self) -> bool:
-        settings_change_set = self._store.claim_next_settings_change_set()
+        settings_change_set = self._stores.settings_editor_store.claim_next_settings_change_set()
         if settings_change_set is None:
             return False
         logger.info(
@@ -522,7 +541,7 @@ class RuntimeLoop:
             extra={"change_set_id": settings_change_set.change_set_id},
         )
         try:
-            self._store.finalize_settings_change_set(
+            self._stores.settings_editor_store.finalize_settings_change_set(
                 change_set=settings_change_set,
                 default_settings=self._default_settings,
                 final_status="applied",
@@ -537,7 +556,7 @@ class RuntimeLoop:
                 "settings editor processing failed: change_set_id=%s",
                 settings_change_set.change_set_id,
             )
-            self._store.finalize_settings_change_set(
+            self._stores.settings_editor_store.finalize_settings_change_set(
                 change_set=settings_change_set,
                 default_settings=self._default_settings,
                 final_status="rejected",
@@ -555,7 +574,7 @@ class RuntimeLoop:
 
     # Block: Settings override iteration
     def _process_settings_override_once(self) -> bool:
-        settings_override = self._store.claim_next_settings_override()
+        settings_override = self._stores.settings_store.claim_next_settings_override()
         if settings_override is None:
             return False
         cycle_id = _opaque_id("cycle")
@@ -569,12 +588,12 @@ class RuntimeLoop:
             },
         )
         try:
-            self._store.append_input_journal_for_settings_override(
+            self._stores.settings_store.append_input_journal_for_settings_override(
                 settings_override=settings_override,
                 cycle_id=cycle_id,
             )
             final_status, reject_reason = _evaluate_settings_override(settings_override)
-            self._store.finalize_settings_override(
+            self._stores.settings_store.finalize_settings_override(
                 override_id=settings_override.override_id,
                 key=settings_override.key,
                 requested_value_json=settings_override.requested_value_json,
@@ -599,7 +618,7 @@ class RuntimeLoop:
                 "settings override processing failed: override_id=%s",
                 settings_override.override_id,
             )
-            self._store.finalize_settings_override(
+            self._stores.settings_store.finalize_settings_override(
                 override_id=settings_override.override_id,
                 key=settings_override.key,
                 requested_value_json=settings_override.requested_value_json,
@@ -624,7 +643,7 @@ class RuntimeLoop:
     def _process_memory_job_once(self) -> bool:
         if not self._is_long_cycle_due():
             return False
-        memory_job = self._store.claim_next_memory_job()
+        memory_job = self._stores.memory_job_store.claim_next_memory_job()
         if memory_job is None:
             return False
         logger.debug(
@@ -646,7 +665,7 @@ class RuntimeLoop:
             )
         except Exception as error:
             logger.exception("memory job processing failed: job_id=%s", memory_job.job_id)
-            self._store.fail_claimed_memory_job(
+            self._stores.memory_job_store.fail_claimed_memory_job(
                 memory_job=memory_job,
                 error=error,
                 max_tries=MAX_MEMORY_JOB_TRIES,
@@ -667,10 +686,10 @@ class RuntimeLoop:
 
     # Block: Memory job handlers
     def _run_write_memory_job(self, memory_job: MemoryJobRecord) -> None:
-        self._store.complete_write_memory_job(memory_job=memory_job)
+        self._stores.write_memory_unit_of_work.complete_write_memory_job(memory_job=memory_job)
 
     def _run_embedding_sync_job(self, memory_job: MemoryJobRecord) -> None:
-        self._store.complete_embedding_sync_job(memory_job=memory_job)
+        self._stores.memory_job_store.complete_embedding_sync_job(memory_job=memory_job)
 
     # Block: Long cycle gate
     def _is_long_cycle_due(self) -> bool:
@@ -681,7 +700,7 @@ class RuntimeLoop:
         return (now_ms - self._last_long_cycle_at_ms) >= min_interval_ms
 
     def _long_cycle_min_interval_ms(self) -> int:
-        effective_settings = self._store.read_effective_settings(self._default_settings)
+        effective_settings = self._stores.runtime_query_store.read_effective_settings(self._default_settings)
         min_interval_ms = effective_settings["runtime.long_cycle_min_interval_ms"]
         if isinstance(min_interval_ms, bool) or not isinstance(min_interval_ms, int):
             raise RuntimeError("runtime.long_cycle_min_interval_ms must be integer")
@@ -699,7 +718,7 @@ class RuntimeLoop:
                     self._wait_for_next_runnable_cycle()
         finally:
             logger.info("runtime loop stopping")
-            self._store.release_runtime_lease(owner_token=self._owner_token)
+            self._stores.runtime_lease_store.release_runtime_lease(owner_token=self._owner_token)
 
     # Block: Runtime stop request
     def request_stop(self) -> None:
@@ -711,7 +730,7 @@ class RuntimeLoop:
 
     # Block: Idle timing
     def _idle_tick_ms(self) -> int:
-        effective_settings = self._store.read_effective_settings(self._default_settings)
+        effective_settings = self._stores.runtime_query_store.read_effective_settings(self._default_settings)
         idle_tick_ms = effective_settings["runtime.idle_tick_ms"]
         if isinstance(idle_tick_ms, bool) or not isinstance(idle_tick_ms, int):
             raise RuntimeError("runtime.idle_tick_ms must be integer")
@@ -731,7 +750,7 @@ class RuntimeLoop:
         if not self._idle_tick_due():
             return None
         idle_duration_ms = self._idle_duration_ms()
-        enqueue_result = self._store.enqueue_idle_tick(idle_duration_ms=idle_duration_ms)
+        enqueue_result = self._stores.cycle_commit_store.enqueue_idle_tick(idle_duration_ms=idle_duration_ms)
         idle_input_id = str(enqueue_result["input_id"])
         logger.info(
             "idle tick enqueued",
@@ -740,12 +759,12 @@ class RuntimeLoop:
                 "idle_duration_ms": idle_duration_ms,
             },
         )
-        pending_input = self._store.claim_next_pending_input()
+        pending_input = self._stores.cycle_commit_store.claim_next_pending_input()
         if pending_input is None:
             raise RuntimeError("idle_tick must be claimable immediately after enqueue")
         if pending_input.input_id == idle_input_id:
             return pending_input
-        self._store.discard_queued_pending_input(
+        self._stores.cycle_commit_store.discard_queued_pending_input(
             input_id=idle_input_id,
             discard_reason="idle_tick_superseded",
         )
@@ -763,7 +782,7 @@ class RuntimeLoop:
     def _wait_for_next_runnable_cycle(self) -> None:
         idle_due_at_ms = self._last_activity_at_ms + self._idle_tick_ms()
         while not self._stop_requested:
-            work_state = self._store.read_runtime_work_state()
+            work_state = self._stores.runtime_query_store.read_runtime_work_state()
             if bool(work_state["has_short_cycle_work"]):
                 return
             if bool(work_state["has_memory_job"]) and self._is_long_cycle_due():
@@ -789,7 +808,7 @@ class RuntimeLoop:
             elapsed_ms = now_ms - self._last_lease_refresh_at_ms
             if elapsed_ms < self._lease_heartbeat_ms:
                 return
-        self._store.acquire_runtime_lease(
+        self._stores.runtime_lease_store.acquire_runtime_lease(
             owner_token=self._owner_token,
             lease_ttl_ms=self._lease_ttl_ms,
         )
@@ -813,31 +832,6 @@ class RuntimeLoop:
     # Block: Camera availability helper
     def _camera_available(self) -> bool:
         return self._camera_controller.is_available() and self._camera_sensor.is_available()
-
-
-# Block: Runtime construction
-def build_runtime_loop(*, db_path: Path | None = None) -> RuntimeLoop:
-    resolved_db_path = db_path or _default_db_path()
-    logger.info("initializing runtime loop", extra={"db_path": str(resolved_db_path)})
-    store = SqliteStateStore(
-        db_path=resolved_db_path,
-        initializer_version=__version__,
-    )
-    store.initialize()
-    default_settings = build_default_settings()
-    return RuntimeLoop(
-        store=store,
-        owner_token=_runtime_owner_token(),
-        default_settings=default_settings,
-        cognition_client=_build_default_cognition_client(),
-        search_client=_build_default_search_client(),
-        camera_controller=_build_default_camera_controller(store=store),
-        camera_sensor=_build_default_camera_sensor(store=store),
-        speech_synthesizer=_build_default_speech_synthesizer(),
-        lease_heartbeat_ms=_lease_heartbeat_ms(),
-        lease_ttl_ms=_lease_ttl_ms(),
-    )
-
 
 # Block: Settings evaluation
 def _evaluate_settings_override(settings_override: SettingsOverrideRecord) -> tuple[str, str | None]:
@@ -989,87 +983,6 @@ def _failed_pending_input_events(
             },
         }
     ]
-
-# Block: Runtime helpers
-def _default_db_path() -> Path:
-    return Path(__file__).resolve().parents[3] / "data" / "core.sqlite3"
-
-
-def _runtime_owner_token() -> str:
-    return f"runtime_{uuid.uuid4().hex}"
-
-
-# Block: Lease timing helpers
-def _lease_heartbeat_ms() -> int:
-    return DEFAULT_LEASE_HEARTBEAT_MS
-
-
-def _lease_ttl_ms() -> int:
-    return DEFAULT_LEASE_TTL_MS
-
-
-# Block: Cognition client factory
-def _build_default_cognition_client() -> CognitionClient:
-    from otomekairo.infra.litellm_cognition_client import LiteLLMCognitionClient
-
-    return LiteLLMCognitionClient()
-
-
-def _build_default_search_client() -> SearchClient:
-    from otomekairo.infra.duckduckgo_search_client import DuckDuckGoSearchClient
-
-    return DuckDuckGoSearchClient()
-
-
-# Block: Speech synthesizer factory
-def _build_default_speech_synthesizer() -> SpeechSynthesizer:
-    from otomekairo.infra.aivis_cloud_speech_synthesizer import (
-        AivisCloudSpeechSynthesizer,
-    )
-    from otomekairo.infra.speech_synthesis_common import default_tts_audio_dir
-    from otomekairo.infra.style_bert_vits2_speech_synthesizer import (
-        StyleBertVits2SpeechSynthesizer,
-    )
-    from otomekairo.infra.switching_speech_synthesizer import (
-        SwitchingSpeechSynthesizer,
-    )
-    from otomekairo.infra.voicevox_speech_synthesizer import (
-        VoicevoxSpeechSynthesizer,
-    )
-
-    audio_output_dir = default_tts_audio_dir()
-    return SwitchingSpeechSynthesizer(
-        provider_synthesizers={
-            "aivis-cloud": AivisCloudSpeechSynthesizer(
-                audio_output_dir=audio_output_dir,
-            ),
-            "voicevox": VoicevoxSpeechSynthesizer(
-                audio_output_dir=audio_output_dir,
-            ),
-            "style-bert-vits2": StyleBertVits2SpeechSynthesizer(
-                audio_output_dir=audio_output_dir,
-            ),
-        }
-    )
-
-
-# Block: Camera controller factory
-def _build_default_camera_controller(*, store: SqliteStateStore) -> CameraController:
-    from otomekairo.infra.wifi_camera_controller import WiFiCameraController
-
-    return WiFiCameraController(
-        camera_connections_loader=store.read_enabled_camera_connections,
-    )
-
-
-# Block: Camera sensor factory
-def _build_default_camera_sensor(*, store: SqliteStateStore) -> CameraSensor:
-    from otomekairo.infra.wifi_camera_sensor import WiFiCameraSensor
-
-    return WiFiCameraSensor(
-        camera_connections_loader=store.read_enabled_camera_connections,
-    )
-
 
 # Block: Runtime helper ids
 def _opaque_id(prefix: str) -> str:

@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import time
-from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from pathlib import Path
+
+from otomekairo.schema.storage_paths import default_tts_audio_dir
 
 # Block: Shared adapter constants
 DEFAULT_TIMEOUT_MS = 20_000
@@ -167,11 +169,6 @@ def join_base_url(base_url: str, path: str) -> str:
     if not normalized_path:
         raise RuntimeError("path must be non-empty")
     return f"{normalized_base_url.rstrip('/')}/{normalized_path.lstrip('/')}"
-
-
-# Block: Default audio path
-def default_tts_audio_dir() -> Path:
-    return Path(__file__).resolve().parents[3] / "data" / "audio"
 
 
 # Block: File token helper

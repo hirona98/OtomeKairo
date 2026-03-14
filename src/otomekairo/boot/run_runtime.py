@@ -6,9 +6,10 @@ import logging
 import signal
 from pathlib import Path
 
+from otomekairo.boot.compose_runtime import create_runtime_loop
 from otomekairo.infra.developer_config import load_developer_config
 from otomekairo.infra.logging_setup import configure_process_logging
-from otomekairo.runtime.main_loop import RuntimeLoop, build_runtime_loop
+from otomekairo.runtime.main_loop import RuntimeLoop
 
 
 # Block: Module logger
@@ -23,7 +24,7 @@ def main() -> None:
         developer_config=developer_config,
     )
     logger.info("starting runtime process")
-    runtime_loop = build_runtime_loop()
+    runtime_loop = create_runtime_loop()
     _install_signal_handlers(runtime_loop)
     runtime_loop.run_forever()
 

@@ -47,7 +47,7 @@ def build_camera_router(services: AppServices) -> APIRouter:
             camera_connection_id=payload.camera_connection_id,
         )
         response.status_code = status.HTTP_202_ACCEPTED
-        return services.store.enqueue_camera_observation(
+        return services.cycle_commit_store.enqueue_camera_observation(
             camera_connection_id=capture.camera_connection_id,
             camera_display_name=capture.camera_display_name,
             capture_id=capture.capture_id,
@@ -95,7 +95,7 @@ def _require_enabled_camera_connection(
             error_code="invalid_request",
             message="camera_connection_id は必須です",
         )
-    enabled_camera_connections = services.store.read_enabled_camera_connections()
+    enabled_camera_connections = services.settings_editor_store.read_enabled_camera_connections()
     if not enabled_camera_connections:
         raise ApiError(
             status_code=409,

@@ -15,13 +15,15 @@ from otomekairo.gateway.camera_sensor import (
     CameraCaptureResponse,
     CameraSensor,
 )
-from otomekairo.infra.wifi_camera_common import (
-    CameraConnectionSettings,
+from otomekairo.schema.storage_paths import (
     camera_capture_file_path,
     camera_capture_public_url,
     camera_capture_relative_path,
-    create_onvif_camera,
     default_camera_capture_dir,
+)
+from otomekairo.infra.wifi_camera_common import (
+    CameraConnectionSettings,
+    create_onvif_camera,
     read_camera_connection_settings,
 )
 

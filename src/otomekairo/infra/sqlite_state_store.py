@@ -12,6 +12,7 @@ from typing import Any
 
 import sqlite_vec
 
+from otomekairo.schema.persistence import SCHEMA_NAME, SCHEMA_VERSION
 from otomekairo.schema.runtime_types import (
     ActionHistoryRecord,
     CognitionStateSnapshot,
@@ -32,10 +33,7 @@ from otomekairo.schema.settings import (
     decode_requested_value,
     normalize_settings_editor_document,
 )
-from otomekairo.infra.sqlite_store_errors import (
-    StoreConflictError,
-    StoreValidationError,
-)
+from otomekairo.schema.store_errors import StoreConflictError, StoreValidationError
 from otomekairo.infra.sqlite_store_legacy_runtime import (
     _json_text,
     _merge_runtime_settings,
@@ -171,10 +169,7 @@ from otomekairo.infra.sqlite_store_vectors import (
     _search_vec_similarity_hits,
     _upsert_vec_item_row,
 )
-from otomekairo.usecase.run_write_memory_job import (
-    WriteMemoryJobExecutionState,
-    run_write_memory_job,
-)
+from otomekairo.usecase.run_write_memory_job import WriteMemoryJobExecutionState
 from otomekairo.usecase.runtime_live_state import build_runtime_live_state
 from otomekairo.usecase.about_time_text import about_years_from_text, life_stage_from_text
 from otomekairo.usecase.write_memory_plan import (
@@ -182,9 +177,7 @@ from otomekairo.usecase.write_memory_plan import (
 )
 
 
-# Block: Schema constants
-SCHEMA_NAME = "core_schema"
-SCHEMA_VERSION = 19
+# Block: Store constants
 STABLE_PREFERENCE_BUCKET_LIMIT = 8
 RETRIEVAL_STABLE_PREFERENCE_BUCKET_LIMIT = 24
 SETTINGS_EDITOR_PRESET_TABLE_NAMES = (
@@ -2102,18 +2095,6 @@ class SqliteStateStore:
         if updated_row_count != 1:
             raise StoreConflictError("memory job must be claimed before dead letter handling")
 
-    # Block: Memory job apply
-    def complete_write_memory_job(self, *, memory_job: MemoryJobRecord) -> str:
-        now_ms = _now_ms()
-        with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            return run_write_memory_job(
-                connection=connection,
-                store=self,
-                memory_job=memory_job,
-                now_ms=now_ms,
-            )
-
     # Block: Claimed memory job ensure
     def ensure_claimed_memory_job_in_transaction(
         self,
@@ -3733,81 +3714,6 @@ class SqliteStateStore:
                 state_link_id,
             ),
         )
-
-    # Block: Embedding sync apply
-    def complete_embedding_sync_job(self, *, memory_job: MemoryJobRecord) -> int:
-        if memory_job.job_kind != "embedding_sync":
-            raise StoreValidationError("memory_job.job_kind must be embedding_sync")
-        embedding_model = memory_job.payload["embedding_model"]
-        requested_scopes = memory_job.payload["requested_scopes"]
-        targets = memory_job.payload["targets"]
-        if not isinstance(embedding_model, str) or not embedding_model:
-            raise StoreValidationError("embedding_sync embedding_model must be non-empty string")
-        if not isinstance(requested_scopes, list) or not requested_scopes:
-            raise StoreValidationError("embedding_sync requested_scopes must not be empty")
-        if not isinstance(targets, list) or not targets:
-            raise StoreValidationError("embedding_sync targets must not be empty")
-        normalized_scopes = _normalize_embedding_scopes(requested_scopes)
-        now_ms = _now_ms()
-        updated_scope_count = 0
-        with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            self._ensure_claimed_memory_job(
-                connection=connection,
-                job_id=memory_job.job_id,
-            )
-            for target in targets:
-                entity_type = str(target["entity_type"])
-                entity_id = str(target["entity_id"])
-                source_updated_at = int(target["source_updated_at"])
-                current_searchable = bool(target["current_searchable"])
-                # Block: Scope application
-                for embedding_scope in normalized_scopes:
-                    if current_searchable:
-                        embedding_blob = _build_embedding_blob(
-                            source_text=_resolve_embedding_source_text(
-                                connection=connection,
-                                entity_type=entity_type,
-                                entity_id=entity_id,
-                            ),
-                            embedding_model=embedding_model,
-                            embedding_scope=embedding_scope,
-                        )
-                        vec_row_id = _upsert_vec_item_row(
-                            connection=connection,
-                            entity_type=entity_type,
-                            entity_id=entity_id,
-                            embedding_model=embedding_model,
-                            embedding_scope=embedding_scope,
-                            source_updated_at=source_updated_at,
-                            embedding_blob=embedding_blob,
-                        )
-                        _replace_vec_index_row(
-                            connection=connection,
-                            vec_row_id=vec_row_id,
-                            embedding_blob=embedding_blob,
-                        )
-                    else:
-                        vec_row_id = _mark_vec_item_unsearchable(
-                            connection=connection,
-                            entity_type=entity_type,
-                            entity_id=entity_id,
-                            embedding_model=embedding_model,
-                            embedding_scope=embedding_scope,
-                            source_updated_at=source_updated_at,
-                        )
-                        if vec_row_id is not None:
-                            _delete_vec_index_row(
-                                connection=connection,
-                                vec_row_id=vec_row_id,
-                            )
-                    updated_scope_count += 1
-            self._mark_memory_job_completed(
-                connection=connection,
-                job_id=memory_job.job_id,
-                completed_at=now_ms,
-            )
-        return updated_scope_count
 
     # Block: Memory job state helpers
     def _ensure_claimed_memory_job(

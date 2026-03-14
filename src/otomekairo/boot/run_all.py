@@ -10,10 +10,9 @@ import sys
 import time
 from pathlib import Path
 
-from otomekairo import __version__
+from otomekairo.boot.compose_sqlite import create_sqlite_adapter_bundle
 from otomekairo.infra.developer_config import load_developer_config
 from otomekairo.infra.logging_setup import configure_process_logging
-from otomekairo.infra.sqlite_state_store import SqliteStateStore
 
 
 # Block: Process labels
@@ -103,12 +102,10 @@ def _web_url(child_env: dict[str, str]) -> str:
 
 # Block: Runtime lease check
 def _runtime_already_running(repo_root: Path) -> bool:
-    store = SqliteStateStore(
+    sqlite_bundle = create_sqlite_adapter_bundle(
         db_path=_default_db_path(repo_root),
-        initializer_version=__version__,
     )
-    store.initialize()
-    status = store.read_status()
+    status = sqlite_bundle.runtime_query_store.read_status()
     runtime = status.get("runtime")
     if not isinstance(runtime, dict):
         raise RuntimeError("runtime status must be object")

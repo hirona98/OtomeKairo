@@ -6,7 +6,7 @@ import json
 import sqlite3
 from typing import Any
 
-from otomekairo.infra.sqlite_store_errors import StoreValidationError
+from otomekairo.schema.store_errors import StoreValidationError
 
 
 # Block: Write-memory idempotency

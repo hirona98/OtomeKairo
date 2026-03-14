@@ -46,7 +46,7 @@ def build_chat_stream_router(services: AppServices) -> APIRouter:
             last_event_id=last_event_id,
             after_event_id=after_event_id,
         )
-        stream_window = services.store.read_stream_window(channel=channel)
+        stream_window = services.ui_event_store.read_stream_window(channel=channel)
         event_stream = _stream_events(
             services=services,
             channel=channel,
@@ -93,7 +93,7 @@ async def _stream_events(
 
     heartbeat_started_at = time.monotonic()
     while True:
-        events = services.store.read_ui_events(
+        events = services.ui_event_store.read_ui_events(
             channel=channel,
             after_event_id=current_event_id,
         )

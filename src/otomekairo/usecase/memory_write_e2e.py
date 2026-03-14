@@ -8,10 +8,11 @@ from pathlib import Path
 import sqlite3
 from typing import Any
 
-from otomekairo import __version__
-from otomekairo.infra.sqlite_state_store import SqliteStateStore
+from otomekairo.gateway.cycle_commit_store import CycleCommitStore
+from otomekairo.gateway.memory_job_store import MemoryJobStore
+from otomekairo.gateway.runtime_query_store import RuntimeQueryStore
+from otomekairo.gateway.unit_of_work import WriteMemoryUnitOfWork
 from otomekairo.schema.runtime_types import ActionHistoryRecord
-from otomekairo.schema.settings import build_default_settings
 
 
 # Block: Report constants
@@ -36,28 +37,34 @@ class ScriptedCycleSpec:
     actions: tuple[ScriptedActionSpec, ...]
 
 
+# Block: E2E store bundle
+@dataclass(frozen=True, slots=True)
+class MemoryWriteE2EStores:
+    runtime_query_store: RuntimeQueryStore
+    cycle_commit_store: CycleCommitStore
+    memory_job_store: MemoryJobStore
+    write_memory_unit_of_work: WriteMemoryUnitOfWork
+
+
 # Block: E2E entrypoint
-def run_memory_write_e2e(*, db_path: Path) -> dict[str, Any]:
-    if db_path.exists():
-        raise RuntimeError("memory_write_e2e db_path must point to a new database")
+def run_memory_write_e2e(
+    *,
+    db_path: Path,
+    default_settings: dict[str, Any],
+    stores: MemoryWriteE2EStores,
+) -> dict[str, Any]:
     if db_path.parent.exists() is False:
         raise RuntimeError("memory_write_e2e db_path parent must exist")
-    default_settings = build_default_settings()
-    store = SqliteStateStore(
-        db_path=db_path,
-        initializer_version=__version__,
-    )
-    store.initialize()
     cycle_reports: list[dict[str, Any]] = []
     for cycle_spec in _scripted_cycles():
         cycle_reports.append(
             _run_scripted_cycle(
-                store=store,
+                stores=stores,
                 db_path=db_path,
                 cycle_spec=cycle_spec,
             )
         )
-    cognition_state = store.read_cognition_state(
+    cognition_state = stores.runtime_query_store.read_cognition_state(
         default_settings,
         observation_hint_text="2024-05-03 下北沢 展示",
     )
@@ -73,21 +80,21 @@ def run_memory_write_e2e(*, db_path: Path) -> dict[str, Any]:
 # Block: Scripted cycle execution
 def _run_scripted_cycle(
     *,
-    store: SqliteStateStore,
+    stores: MemoryWriteE2EStores,
     db_path: Path,
     cycle_spec: ScriptedCycleSpec,
 ) -> dict[str, Any]:
-    enqueue_result = store.enqueue_chat_message(
+    enqueue_result = stores.cycle_commit_store.enqueue_chat_message(
         text=cycle_spec.user_text,
         client_message_id=f"{cycle_spec.cycle_id}_client",
         attachments=[],
     )
-    pending_input = store.claim_next_pending_input()
+    pending_input = stores.cycle_commit_store.claim_next_pending_input()
     if pending_input is None:
         raise RuntimeError("memory_write_e2e pending input was not queued")
     if str(enqueue_result["input_id"]) != pending_input.input_id:
         raise RuntimeError("memory_write_e2e claimed unexpected pending input")
-    store.append_input_journal_for_pending_input(
+    stores.cycle_commit_store.append_input_journal_for_pending_input(
         pending_input=pending_input,
         cycle_id=cycle_spec.cycle_id,
     )
@@ -99,13 +106,14 @@ def _run_scripted_cycle(
         cycle_spec=cycle_spec,
         created_at=_response_created_at(action_results=action_results),
     )
-    commit_id = store.finalize_pending_input_cycle(
+    commit_id = stores.cycle_commit_store.finalize_pending_input_cycle(
         pending_input=pending_input,
         cycle_id=cycle_spec.cycle_id,
         resolution_status="consumed",
         action_results=action_results,
         task_mutations=[],
         pending_input_mutations=[],
+        discard_reason=None,
         ui_events=ui_events,
         commit_payload={
             "cycle_kind": "short",
@@ -122,7 +130,7 @@ def _run_scripted_cycle(
         attention_snapshot=None,
         camera_available=False,
     )
-    drained_jobs = _drain_memory_jobs(store=store)
+    drained_jobs = _drain_memory_jobs(stores=stores)
     cycle_snapshot = _read_cycle_snapshot(
         db_path=db_path,
         cycle_id=cycle_spec.cycle_id,
@@ -210,18 +218,22 @@ def _response_created_at(*, action_results: list[ActionHistoryRecord]) -> int:
 # Block: Memory job drain
 def _drain_memory_jobs(
     *,
-    store: SqliteStateStore,
+    stores: MemoryWriteE2EStores,
 ) -> dict[str, Any]:
     jobs: list[dict[str, Any]] = []
     job_counts: dict[str, int] = {}
     while True:
-        memory_job = store.claim_next_memory_job()
+        memory_job = stores.memory_job_store.claim_next_memory_job()
         if memory_job is None:
             break
         if memory_job.job_kind == "write_memory":
-            completed_ref = store.complete_write_memory_job(memory_job=memory_job)
+            completed_ref = stores.write_memory_unit_of_work.complete_write_memory_job(
+                memory_job=memory_job,
+            )
         elif memory_job.job_kind == "embedding_sync":
-            completed_ref = store.complete_embedding_sync_job(memory_job=memory_job)
+            completed_ref = stores.memory_job_store.complete_embedding_sync_job(
+                memory_job=memory_job,
+            )
         else:
             raise RuntimeError(f"memory_write_e2e encountered unsupported job kind: {memory_job.job_kind}")
         job_counts[memory_job.job_kind] = job_counts.get(memory_job.job_kind, 0) + 1

@@ -4,11 +4,7 @@ from __future__ import annotations
 
 import py_compile
 from pathlib import Path
-from typing import Any
-
-from otomekairo.usecase.bootstrap_init_smoke import run_bootstrap_init_smoke
-from otomekairo.usecase.chat_behavior_golden import build_chat_behavior_golden_report
-from otomekairo.usecase.stable_context_contract_smoke import run_stable_context_contract_smoke
+from typing import Any, Callable
 
 
 # Block: Report constants
@@ -16,18 +12,18 @@ REPORT_SCHEMA_VERSION = 2
 
 
 # Block: Public gate runner
-def run_eval_gate(*, keep_db: bool) -> dict[str, Any]:
+def run_eval_gate(
+    *,
+    keep_db: bool,
+    build_bootstrap_init_report: Callable[[bool], dict[str, Any]],
+    build_stable_context_report: Callable[[bool], dict[str, Any]],
+    build_chat_behavior_report: Callable[[bool], dict[str, Any]],
+) -> dict[str, Any]:
     source_root = Path(__file__).resolve().parents[1]
     py_compile_report = _run_py_compile_gate(source_root=source_root)
-    bootstrap_init_report = run_bootstrap_init_smoke(
-        keep_db=keep_db,
-    )
-    stable_context_report = run_stable_context_contract_smoke(
-        keep_db=keep_db,
-    )
-    chat_behavior_report = build_chat_behavior_golden_report(
-        keep_db=keep_db,
-    )
+    bootstrap_init_report = build_bootstrap_init_report(keep_db)
+    stable_context_report = build_stable_context_report(keep_db)
+    chat_behavior_report = build_chat_behavior_report(keep_db)
     report = {
         "report_schema_version": REPORT_SCHEMA_VERSION,
         "checks": {

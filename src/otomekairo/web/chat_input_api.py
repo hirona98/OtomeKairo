@@ -5,7 +5,7 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field
 from fastapi import APIRouter, Query, Response, status
 
-from otomekairo.infra.wifi_camera_common import (
+from otomekairo.schema.storage_paths import (
     camera_capture_file_path,
     camera_capture_public_url,
     camera_capture_relative_path,
@@ -51,7 +51,7 @@ def build_chat_input_router(services: AppServices) -> APIRouter:
     async def post_chat_input(payload: ChatInputRequest, response: Response) -> dict[str, object]:
         response.status_code = status.HTTP_202_ACCEPTED
         normalized_attachments = _normalize_chat_attachments(payload.attachments)
-        return services.store.enqueue_chat_message(
+        return services.cycle_commit_store.enqueue_chat_message(
             text=payload.text,
             client_message_id=payload.client_message_id,
             attachments=normalized_attachments,
@@ -65,13 +65,13 @@ def build_chat_input_router(services: AppServices) -> APIRouter:
     ) -> dict[str, object]:
         if channel != "browser_chat":
             raise ApiError(status_code=400, error_code="invalid_request", message="channel must be browser_chat")
-        return services.store.read_chat_history(channel=channel, limit=limit)
+        return services.ui_event_store.read_chat_history(channel=channel, limit=limit)
 
     # Block: Chat cancel endpoint
     @router.post("/api/chat/cancel", status_code=status.HTTP_202_ACCEPTED)
     async def post_chat_cancel(payload: ChatCancelRequest, response: Response) -> dict[str, object]:
         response.status_code = status.HTTP_202_ACCEPTED
-        return services.store.enqueue_cancel(target_message_id=payload.target_message_id)
+        return services.cycle_commit_store.enqueue_cancel(target_message_id=payload.target_message_id)
 
     return router
 

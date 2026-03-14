@@ -4,17 +4,15 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+from otomekairo.gateway.unit_of_work import WriteMemoryExecutionStore
 from otomekairo.schema.runtime_types import MemoryJobRecord
 from otomekairo.usecase.write_memory_plan import (
     build_write_memory_plan,
     validate_write_memory_payload,
     validate_write_memory_plan,
 )
-
-if TYPE_CHECKING:
-    from otomekairo.infra.sqlite_state_store import SqliteStateStore
 
 
 # Block: Execution state
@@ -37,7 +35,7 @@ class WriteMemoryJobExecutionState:
 def run_write_memory_job(
     *,
     connection: sqlite3.Connection,
-    store: SqliteStateStore,
+    store: WriteMemoryExecutionStore,
     memory_job: MemoryJobRecord,
     now_ms: int,
 ) -> str:
