@@ -1,4 +1,4 @@
-"""SQLite-backed explicit write_memory unit of work."""
+"""SQLite の明示的な write_memory unit_of_work。"""
 
 from __future__ import annotations
 
@@ -11,14 +11,14 @@ from otomekairo.schema.runtime_types import MemoryJobRecord
 from otomekairo.usecase.run_write_memory_job import run_write_memory_job
 
 
-# Block: Write memory unit of work adapter
+# Block: write_memory unit_of_work アダプタ
 @dataclass(frozen=True, slots=True)
 class SqliteWriteMemoryUnitOfWork:
     backend: SqliteBackend
 
     def complete_write_memory_job(self, *, memory_job: MemoryJobRecord) -> str:
         now_ms = _now_ms()
-        execution_store = SqliteWriteMemoryExecutionStore(backend=self.backend)
+        execution_store = SqliteWriteMemoryExecutionStore()
         with self.backend._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             return run_write_memory_job(

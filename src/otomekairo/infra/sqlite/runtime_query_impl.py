@@ -1,15 +1,11 @@
-"""SQLite runtime query implementations."""
+"""SQLite の runtime query 実装。"""
 
 from __future__ import annotations
 
 import json
 from typing import Any
 
-from otomekairo.infra.sqlite.backend import (
-    RETRIEVAL_STABLE_PREFERENCE_BUCKET_LIMIT,
-    STABLE_PREFERENCE_BUCKET_LIMIT,
-    SqliteBackend,
-)
+from otomekairo.infra.sqlite.backend import SqliteBackend
 from otomekairo.infra.sqlite_store_legacy_runtime import _merge_runtime_settings, _now_ms
 from otomekairo.infra.sqlite_store_memory_helpers import (
     _fetch_event_about_time_for_memory_snapshot,
@@ -50,12 +46,17 @@ from otomekairo.schema.runtime_types import CognitionStateSnapshot
 from otomekairo.schema.settings import build_settings_editor_system_keys
 
 
-# Block: Health read
+# Block: stable preference 件数制限
+STABLE_PREFERENCE_BUCKET_LIMIT = 8
+RETRIEVAL_STABLE_PREFERENCE_BUCKET_LIMIT = 24
+
+
+# Block: ヘルス読み出し
 def read_health() -> dict[str, Any]:
     return {"status": "ok", "server_time": _now_ms()}
 
 
-# Block: Status read
+# Block: 状態読み出し
 def read_status(backend: SqliteBackend) -> dict[str, Any]:
     now_ms = _now_ms()
     with backend._connect() as connection:
@@ -167,7 +168,7 @@ def read_status(backend: SqliteBackend) -> dict[str, Any]:
     }
 
 
-# Block: Effective settings read
+# Block: 実効設定読み出し
 def read_effective_settings(
     backend: SqliteBackend,
     default_settings: dict[str, Any],
@@ -186,7 +187,7 @@ def read_effective_settings(
     return _merge_runtime_settings(default_settings, runtime_values)
 
 
-# Block: Cognition state read
+# Block: 認知状態読み出し
 def read_cognition_state(
     backend: SqliteBackend,
     default_settings: dict[str, Any],
@@ -537,7 +538,7 @@ def read_cognition_state(
     )
 
 
-# Block: Runtime work state read
+# Block: ランタイム作業状態読み出し
 def read_runtime_work_state(backend: SqliteBackend) -> dict[str, bool]:
     with backend._connect() as connection:
         row = connection.execute(
@@ -586,7 +587,7 @@ def read_runtime_work_state(backend: SqliteBackend) -> dict[str, bool]:
     }
 
 
-# Block: Settings editor read
+# Block: 設定 editor 読み出し
 def read_settings_editor(backend: SqliteBackend) -> dict[str, Any]:
     with backend._connect() as connection:
         editor_row = connection.execute(
@@ -665,7 +666,7 @@ def read_settings_editor(backend: SqliteBackend) -> dict[str, Any]:
     }
 
 
-# Block: Enabled camera connections read
+# Block: 有効カメラ接続読み出し
 def read_enabled_camera_connections(backend: SqliteBackend) -> list[dict[str, Any]]:
     with backend._connect() as connection:
         camera_connection_rows = connection.execute(
