@@ -6,6 +6,13 @@ from dataclasses import dataclass
 from typing import Any
 
 from otomekairo.infra.sqlite.backend import SqliteBackend
+from otomekairo.infra.sqlite.ui_event_impl import (
+    append_ui_outbound_event,
+    prune_ui_outbound_events,
+    read_chat_history,
+    read_stream_window,
+    read_ui_events,
+)
 
 
 # Block: UI event adapter
@@ -14,7 +21,7 @@ class SqliteUiEventStore:
     backend: SqliteBackend
 
     def read_stream_window(self, *, channel: str) -> tuple[int | None, int | None]:
-        return self.backend.read_stream_window(channel=channel)
+        return read_stream_window(self.backend, channel=channel)
 
     def read_chat_history(
         self,
@@ -22,7 +29,7 @@ class SqliteUiEventStore:
         channel: str,
         limit: int = 200,
     ) -> dict[str, Any]:
-        return self.backend.read_chat_history(channel=channel, limit=limit)
+        return read_chat_history(self.backend, channel=channel, limit=limit)
 
     def prune_ui_outbound_events(
         self,
@@ -31,7 +38,8 @@ class SqliteUiEventStore:
         retention_window_ms: int,
         retain_minimum_count: int,
     ) -> None:
-        self.backend.prune_ui_outbound_events(
+        prune_ui_outbound_events(
+            self.backend,
             channel=channel,
             retention_window_ms=retention_window_ms,
             retain_minimum_count=retain_minimum_count,
@@ -44,7 +52,8 @@ class SqliteUiEventStore:
         after_event_id: int,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
-        return self.backend.read_ui_events(
+        return read_ui_events(
+            self.backend,
             channel=channel,
             after_event_id=after_event_id,
             limit=limit,
@@ -58,7 +67,8 @@ class SqliteUiEventStore:
         payload: dict[str, Any],
         source_cycle_id: str,
     ) -> int:
-        return self.backend.append_ui_outbound_event(
+        return append_ui_outbound_event(
+            self.backend,
             channel=channel,
             event_type=event_type,
             payload=payload,

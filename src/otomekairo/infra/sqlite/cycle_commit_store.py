@@ -6,6 +6,20 @@ from dataclasses import dataclass
 from typing import Any
 
 from otomekairo.infra.sqlite.backend import SqliteBackend
+from otomekairo.infra.sqlite.cycle_commit_impl import (
+    append_input_journal_for_pending_input,
+    claim_matching_cancel_input,
+    claim_next_pending_input,
+    claim_next_waiting_browse_task,
+    discard_queued_pending_input,
+    enqueue_camera_observation,
+    enqueue_cancel,
+    enqueue_chat_message,
+    enqueue_idle_tick,
+    enqueue_microphone_message,
+    finalize_pending_input_cycle,
+    finalize_task_cycle,
+)
 from otomekairo.schema.runtime_types import (
     ActionHistoryRecord,
     PendingInputMutationRecord,
@@ -27,7 +41,8 @@ class SqliteCycleCommitStore:
         client_message_id: str | None,
         attachments: list[dict[str, object]],
     ) -> dict[str, Any]:
-        return self.backend.enqueue_chat_message(
+        return enqueue_chat_message(
+            self.backend,
             text=text,
             client_message_id=client_message_id,
             attachments=attachments,
@@ -40,7 +55,8 @@ class SqliteCycleCommitStore:
         stt_provider: str,
         stt_language: str,
     ) -> dict[str, Any]:
-        return self.backend.enqueue_microphone_message(
+        return enqueue_microphone_message(
+            self.backend,
             transcript_text=transcript_text,
             stt_provider=stt_provider,
             stt_language=stt_language,
@@ -56,7 +72,8 @@ class SqliteCycleCommitStore:
         image_url: str,
         captured_at: int,
     ) -> dict[str, Any]:
-        return self.backend.enqueue_camera_observation(
+        return enqueue_camera_observation(
+            self.backend,
             camera_connection_id=camera_connection_id,
             camera_display_name=camera_display_name,
             capture_id=capture_id,
@@ -70,10 +87,10 @@ class SqliteCycleCommitStore:
         *,
         target_message_id: str | None,
     ) -> dict[str, Any]:
-        return self.backend.enqueue_cancel(target_message_id=target_message_id)
+        return enqueue_cancel(self.backend, target_message_id=target_message_id)
 
     def claim_next_pending_input(self) -> PendingInputRecord | None:
-        return self.backend.claim_next_pending_input()
+        return claim_next_pending_input(self.backend)
 
     def append_input_journal_for_pending_input(
         self,
@@ -81,7 +98,8 @@ class SqliteCycleCommitStore:
         pending_input: PendingInputRecord,
         cycle_id: str,
     ) -> None:
-        self.backend.append_input_journal_for_pending_input(
+        append_input_journal_for_pending_input(
+            self.backend,
             pending_input=pending_input,
             cycle_id=cycle_id,
         )
@@ -101,7 +119,8 @@ class SqliteCycleCommitStore:
         commit_payload: dict[str, Any],
         camera_available: bool,
     ) -> int:
-        return self.backend.finalize_pending_input_cycle(
+        return finalize_pending_input_cycle(
+            self.backend,
             pending_input=pending_input,
             cycle_id=cycle_id,
             resolution_status=resolution_status,
@@ -116,7 +135,7 @@ class SqliteCycleCommitStore:
         )
 
     def claim_next_waiting_browse_task(self) -> TaskStateRecord | None:
-        return self.backend.claim_next_waiting_browse_task()
+        return claim_next_waiting_browse_task(self.backend)
 
     def finalize_task_cycle(
         self,
@@ -130,7 +149,8 @@ class SqliteCycleCommitStore:
         commit_payload: dict[str, Any],
         camera_available: bool,
     ) -> int:
-        return self.backend.finalize_task_cycle(
+        return finalize_task_cycle(
+            self.backend,
             task=task,
             cycle_id=cycle_id,
             final_status=final_status,
@@ -142,7 +162,7 @@ class SqliteCycleCommitStore:
         )
 
     def enqueue_idle_tick(self, *, idle_duration_ms: int) -> dict[str, Any]:
-        return self.backend.enqueue_idle_tick(idle_duration_ms=idle_duration_ms)
+        return enqueue_idle_tick(self.backend, idle_duration_ms=idle_duration_ms)
 
     def discard_queued_pending_input(
         self,
@@ -150,7 +170,8 @@ class SqliteCycleCommitStore:
         input_id: str,
         discard_reason: str,
     ) -> None:
-        self.backend.discard_queued_pending_input(
+        discard_queued_pending_input(
+            self.backend,
             input_id=input_id,
             discard_reason=discard_reason,
         )
@@ -161,7 +182,8 @@ class SqliteCycleCommitStore:
         channel: str,
         target_message_id: str,
     ) -> PendingInputRecord | None:
-        return self.backend.claim_matching_cancel_input(
+        return claim_matching_cancel_input(
+            self.backend,
             channel=channel,
             target_message_id=target_message_id,
         )

@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from otomekairo.infra.sqlite.memory_job_impl import (
+    claim_next_memory_job,
+    fail_claimed_memory_job,
+)
 from otomekairo.infra.sqlite_store_job_helpers import (
     _normalize_embedding_scopes,
     _resolve_embedding_source_text,
@@ -27,7 +31,7 @@ class SqliteMemoryJobStore:
     backend: SqliteBackend
 
     def claim_next_memory_job(self) -> MemoryJobRecord | None:
-        return self.backend.claim_next_memory_job()
+        return claim_next_memory_job(self.backend)
 
     def fail_claimed_memory_job(
         self,
@@ -36,7 +40,8 @@ class SqliteMemoryJobStore:
         error: Exception,
         max_tries: int,
     ) -> None:
-        self.backend.fail_claimed_memory_job(
+        fail_claimed_memory_job(
+            self.backend,
             memory_job=memory_job,
             error=error,
             max_tries=max_tries,

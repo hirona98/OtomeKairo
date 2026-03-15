@@ -6,6 +6,13 @@ from dataclasses import dataclass
 from typing import Any
 
 from otomekairo.infra.sqlite.backend import SqliteBackend
+from otomekairo.infra.sqlite.settings_impl import (
+    append_input_journal_for_settings_override,
+    claim_next_settings_override,
+    enqueue_settings_override,
+    finalize_settings_override,
+    read_settings,
+)
 from otomekairo.schema.runtime_types import SettingsOverrideRecord
 
 
@@ -15,7 +22,7 @@ class SqliteSettingsStore:
     backend: SqliteBackend
 
     def read_settings(self, default_settings: dict[str, Any]) -> dict[str, Any]:
-        return self.backend.read_settings(default_settings)
+        return read_settings(self.backend, default_settings)
 
     def enqueue_settings_override(
         self,
@@ -24,14 +31,15 @@ class SqliteSettingsStore:
         requested_value_json: dict[str, Any],
         apply_scope: str,
     ) -> dict[str, Any]:
-        return self.backend.enqueue_settings_override(
+        return enqueue_settings_override(
+            self.backend,
             key=key,
             requested_value_json=requested_value_json,
             apply_scope=apply_scope,
         )
 
     def claim_next_settings_override(self) -> SettingsOverrideRecord | None:
-        return self.backend.claim_next_settings_override()
+        return claim_next_settings_override(self.backend)
 
     def append_input_journal_for_settings_override(
         self,
@@ -39,7 +47,8 @@ class SqliteSettingsStore:
         settings_override: SettingsOverrideRecord,
         cycle_id: str,
     ) -> None:
-        self.backend.append_input_journal_for_settings_override(
+        append_input_journal_for_settings_override(
+            self.backend,
             settings_override=settings_override,
             cycle_id=cycle_id,
         )
@@ -56,7 +65,8 @@ class SqliteSettingsStore:
         reject_reason: str | None,
         camera_available: bool,
     ) -> None:
-        self.backend.finalize_settings_override(
+        finalize_settings_override(
+            self.backend,
             override_id=override_id,
             key=key,
             requested_value_json=requested_value_json,

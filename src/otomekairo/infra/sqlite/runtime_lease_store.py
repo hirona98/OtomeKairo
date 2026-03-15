@@ -5,6 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from otomekairo.infra.sqlite.backend import SqliteBackend
+from otomekairo.infra.sqlite.runtime_lease_impl import (
+    acquire_runtime_lease,
+    release_runtime_lease,
+    sync_pending_commit_logs,
+)
 
 
 # Block: Runtime lease adapter
@@ -18,13 +23,14 @@ class SqliteRuntimeLeaseStore:
         owner_token: str,
         lease_ttl_ms: int,
     ) -> None:
-        self.backend.acquire_runtime_lease(
+        acquire_runtime_lease(
+            self.backend,
             owner_token=owner_token,
             lease_ttl_ms=lease_ttl_ms,
         )
 
     def release_runtime_lease(self, *, owner_token: str) -> None:
-        self.backend.release_runtime_lease(owner_token=owner_token)
+        release_runtime_lease(self.backend, owner_token=owner_token)
 
     def sync_pending_commit_logs(self, *, max_commits: int = 8) -> int:
-        return self.backend.sync_pending_commit_logs(max_commits=max_commits)
+        return sync_pending_commit_logs(self.backend, max_commits=max_commits)
