@@ -7,14 +7,25 @@ import sqlite3
 from typing import Any
 
 from otomekairo.infra.sqlite.backend import SqliteBackend
+from otomekairo.infra.sqlite.event_writer_impl import (
+    append_input_journal,
+    insert_pending_input_events,
+    insert_task_cycle_events,
+)
+from otomekairo.infra.sqlite.memory_job_impl import enqueue_write_memory_jobs
 from otomekairo.infra.sqlite.runtime_lease_impl import sync_commit_log
+from otomekairo.infra.sqlite.runtime_live_state_impl import (
+    apply_task_state_mutations,
+    insert_pending_input_mutations,
+    replace_attention_state,
+    sync_runtime_live_state,
+)
 from otomekairo.infra.sqlite.ui_event_impl import insert_ui_outbound_event_in_transaction
 from otomekairo.infra.sqlite_store_legacy_runtime import _json_text, _now_ms, _opaque_id
 from otomekairo.infra.sqlite_store_runtime_view import (
     _pending_input_cycle_context,
     _pending_input_receipt_summary,
     _pending_input_user_message_payload,
-    _runtime_response_summary,
     _task_cycle_context,
 )
 from otomekairo.schema.runtime_types import (
@@ -26,10 +37,7 @@ from otomekairo.schema.runtime_types import (
 )
 from otomekairo.schema.store_errors import StoreConflictError, StoreValidationError
 from otomekairo.usecase.camera_observation_payload import build_camera_observation_payload
-from otomekairo.usecase.observation_normalization import (
-    normalize_observation_kind,
-    normalize_observation_source,
-)
+from otomekairo.usecase.observation_normalization import normalize_observation_kind, normalize_observation_source
 
 
 # Block: Chat input enqueue
@@ -455,7 +463,8 @@ def append_input_journal_for_pending_input(
     pending_input: PendingInputRecord,
     cycle_id: str,
 ) -> None:
-    backend._append_input_journal(
+    append_input_journal(
+        backend,
         observation_id=f"obs_{pending_input.input_id}",
         cycle_id=cycle_id,
         source=normalize_observation_source(
@@ -489,20 +498,20 @@ def finalize_pending_input_cycle(
         raise StoreValidationError("resolution_status is invalid")
     resolved_at = _now_ms()
     with backend._connect() as connection:
-        backend._apply_task_state_mutations(
+        apply_task_state_mutations(
             connection=connection,
             task_mutations=task_mutations,
         )
         if attention_snapshot is not None:
-            backend._replace_attention_state(
+            replace_attention_state(
                 connection=connection,
                 attention_snapshot=attention_snapshot,
             )
-        followup_input_ids = backend._insert_pending_input_mutations(
+        followup_input_ids = insert_pending_input_mutations(
             connection=connection,
             pending_input_mutations=pending_input_mutations,
         )
-        event_ids = backend._insert_pending_input_events(
+        event_ids = insert_pending_input_events(
             connection=connection,
             pending_input=pending_input,
             cycle_id=cycle_id,
@@ -510,7 +519,7 @@ def finalize_pending_input_cycle(
             ui_events=ui_events,
             resolved_at=resolved_at,
         )
-        enqueued_memory_job_ids = backend._enqueue_write_memory_jobs(
+        enqueued_memory_job_ids = enqueue_write_memory_jobs(
             connection=connection,
             cycle_id=cycle_id,
             event_ids=event_ids,
@@ -529,7 +538,7 @@ def finalize_pending_input_cycle(
         ).rowcount
         if updated_row_count != 1:
             raise StoreConflictError("pending input must be claimed before finalization")
-        backend._sync_runtime_live_state(
+        sync_runtime_live_state(
             connection=connection,
             camera_available=camera_available,
             updated_at=resolved_at,
@@ -607,24 +616,24 @@ def finalize_task_cycle(
         ).rowcount
         if updated_row_count != 1:
             raise StoreConflictError("task must be active before finalization")
-        followup_input_ids = backend._insert_pending_input_mutations(
+        followup_input_ids = insert_pending_input_mutations(
             connection=connection,
             pending_input_mutations=pending_input_mutations,
         )
-        event_ids = backend._insert_task_cycle_events(
+        event_ids = insert_task_cycle_events(
             connection=connection,
             cycle_id=cycle_id,
             action_results=action_results,
             ui_events=ui_events,
             resolved_at=resolved_at,
         )
-        enqueued_memory_job_ids = backend._enqueue_write_memory_jobs(
+        enqueued_memory_job_ids = enqueue_write_memory_jobs(
             connection=connection,
             cycle_id=cycle_id,
             event_ids=event_ids,
             created_at=resolved_at,
         )
-        backend._sync_runtime_live_state(
+        sync_runtime_live_state(
             connection=connection,
             camera_available=camera_available,
             updated_at=resolved_at,

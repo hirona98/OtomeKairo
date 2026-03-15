@@ -56,8 +56,8 @@
 - `src/otomekairo/infra/wifi_camera_common.py`: ONVIF 接続に使う Wi-Fi カメラ設定の正規化と共通クライアント生成をまとめる
 - `src/otomekairo/infra/wifi_camera_controller.py`: 設定UIで `使用` が有効なカメラ接続を読み、先頭の有効接続に対して ONVIF 経由で `Tapo C220` などの視点操作を行う
 - `src/otomekairo/infra/wifi_camera_sensor.py`: 設定UIで `使用` が有効なカメラ接続を読み、先頭の有効接続から ONVIF で RTSP stream URI を取得し、`ffmpeg` で 1 フレームを `data/camera/` の JPEG として保存する
-- `src/otomekairo/infra/sqlite/backend.py`: `core_schema.sql` を読み込む DB 初期化、`sqlite-vec` の `vec0` 仮想表初期化、`write_memory` / `embedding_sync` の transaction 内 helper、runtime live state 反映、event / memory job の共通 SQL helper を持つ内部基盤であり、runtime / web から直接使う公開 adapter ではない
-- `src/otomekairo/infra/sqlite/`: `runtime_query_impl.py`、`cycle_commit_impl.py`、`settings_impl.py`、`ui_event_impl.py`、`runtime_lease_impl.py`、`memory_job_impl.py` が責務別の SQLite 実装を持ち、`*_store.py` はそれぞれの gateway port を包む薄い adapter として分かれている
+- `src/otomekairo/infra/sqlite/backend.py`: `core_schema.sql` を読み込む DB 初期化、`sqlite-vec` の `vec0` 仮想表初期化、schema/seed の整合確認、`write_memory` の execution state load と apply helper を持つ内部基盤であり、runtime / web から直接使う公開 adapter ではない
+- `src/otomekairo/infra/sqlite/`: `runtime_query_impl.py`、`cycle_commit_impl.py`、`settings_impl.py`、`runtime_live_state_impl.py`、`event_writer_impl.py`、`ui_event_impl.py`、`runtime_lease_impl.py`、`memory_job_impl.py` が責務別の SQLite 実装を持ち、`*_store.py` と `write_memory_execution_store.py` はそれぞれの gateway port / execution contract を包む薄い adapter として分かれている
 - `src/otomekairo/runtime/main_loop.py`: `RuntimeStores` bundle 越しに `settings_overrides`、`settings_change_sets`、`pending_inputs`、`task_state(waiting_external)` を消費し、待機中も応答中も lease heartbeat を維持しながら、失敗時も `claimed` を終端状態へ確定しつつ `logger.exception(...)` で stderr にスタックトレースも出し、`token` の即時追記、進行中 `cancel` の消費、`browse` の外部検索と `network_result` の再認知、`notify` のユーザー通知発行、設定UI保存結果からの `runtime_settings` materialize、短周期と長周期を交互に管理しつつ `runtime.long_cycle_min_interval_ms` で間隔制御したうえで、`write_memory` / `embedding_sync` の最小長周期処理までを行う
 - `src/otomekairo/schema/runtime_types.py`: ランタイムの共通データ形を `infra` から切り離して持つ
 - `src/otomekairo/schema/settings.py`: 設定キーの検証と `config/default_settings.json` からの既定値読み込みを持つ

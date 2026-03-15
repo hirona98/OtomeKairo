@@ -6,11 +6,17 @@ import json
 from typing import Any
 
 from otomekairo.infra.sqlite.backend import SqliteBackend
+from otomekairo.infra.sqlite.event_writer_impl import (
+    append_input_journal,
+    insert_settings_override_events,
+)
+from otomekairo.infra.sqlite.memory_job_impl import enqueue_write_memory_jobs
 from otomekairo.infra.sqlite.runtime_lease_impl import sync_commit_log
 from otomekairo.infra.sqlite.runtime_query_impl import (
     read_effective_settings,
     read_settings_editor,
 )
+from otomekairo.infra.sqlite.runtime_live_state_impl import sync_runtime_live_state
 from otomekairo.infra.sqlite_store_legacy_runtime import (
     _json_text,
     _now_ms,
@@ -242,7 +248,8 @@ def append_input_journal_for_settings_override(
     settings_override: SettingsOverrideRecord,
     cycle_id: str,
 ) -> None:
-    backend._append_input_journal(
+    append_input_journal(
+        backend,
         observation_id=f"obs_{settings_override.override_id}",
         cycle_id=cycle_id,
         source="web_settings",
@@ -281,13 +288,13 @@ def finalize_settings_override(
                 value=applied_value,
                 applied_at=resolved_at,
             )
-            backend._sync_runtime_live_state(
+            sync_runtime_live_state(
                 connection=connection,
                 camera_available=camera_available,
                 updated_at=resolved_at,
                 cycle_context=None,
             )
-        event_ids = backend._insert_settings_override_events(
+        event_ids = insert_settings_override_events(
             connection=connection,
             override_id=override_id,
             cycle_id=cycle_id,
@@ -297,7 +304,7 @@ def finalize_settings_override(
             reject_reason=reject_reason,
             resolved_at=resolved_at,
         )
-        enqueued_memory_job_ids = backend._enqueue_write_memory_jobs(
+        enqueued_memory_job_ids = enqueue_write_memory_jobs(
             connection=connection,
             cycle_id=cycle_id,
             event_ids=event_ids,
@@ -467,7 +474,7 @@ def finalize_settings_change_set(
                         resolved_at,
                     ),
                 )
-                backend._sync_runtime_live_state(
+                sync_runtime_live_state(
                     connection=connection,
                     camera_available=camera_available,
                     updated_at=resolved_at,

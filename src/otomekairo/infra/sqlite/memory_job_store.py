@@ -6,7 +6,9 @@ from dataclasses import dataclass
 
 from otomekairo.infra.sqlite.memory_job_impl import (
     claim_next_memory_job,
+    ensure_claimed_memory_job,
     fail_claimed_memory_job,
+    mark_memory_job_completed,
 )
 from otomekairo.infra.sqlite_store_job_helpers import (
     _normalize_embedding_scopes,
@@ -64,7 +66,7 @@ class SqliteMemoryJobStore:
         updated_scope_count = 0
         with self.backend._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            self.backend._ensure_claimed_memory_job(
+            ensure_claimed_memory_job(
                 connection=connection,
                 job_id=memory_job.job_id,
             )
@@ -114,7 +116,7 @@ class SqliteMemoryJobStore:
                                 vec_row_id=vec_row_id,
                             )
                     updated_scope_count += 1
-            self.backend._mark_memory_job_completed(
+            mark_memory_job_completed(
                 connection=connection,
                 job_id=memory_job.job_id,
                 completed_at=now_ms,
