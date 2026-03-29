@@ -268,6 +268,30 @@ OtomeKairo の返答の中心は継続理解であり、回想の断片ではな
 
 MVP では通常 `0-2 件`、回想系の意図では `1-4 件` 程度でよい。
 
+<!-- Block: EventException -->
+## `events` の例外参照
+
+`events` は、同期想起の通常候補として広く読まない。
+ただし、回想質問で細部確認が必要なときだけ、限定的な例外参照を許してよい。
+
+例外参照を開いてよい条件は次である。
+
+- ユーザーが「何を話していたか」「どうするって言ったか」を直接尋ねている
+- 場所、時期、出来事などのアンカーが入力に明示されている
+- 選ばれた `episode_digests` の `summary_text` / `outcome_text` だけでは細部が不足する
+- 選ばれた `commitment` や `topic` の由来確認が必要である
+
+参照の流れは次でよい。
+
+1. 先に `memory_units` と `episode_digests` を選ぶ
+2. それに紐づく `event_ids` だけを開く
+3. 最大 `1-3 件` の `events` を読む
+4. 生ログのままではなく、短い `event_evidence` に圧縮する
+5. `episodic_evidence` の補助項目としてだけ渡す
+
+ここで重要なのは、`events` を直接ベクトル検索して主候補を作らないことである。
+`events` はあくまで、既に選ばれた候補の細部確認に従属させる。
+
 <!-- Block: Conflicts -->
 ## `conflicts` の候補収集
 
@@ -296,8 +320,9 @@ MVP の同期想起は、次の流れに抑えるのがよい。
 4. 連想レーンで `memory_units` と `episode_digests` の補助候補を小さく集める
 5. section ごとに再順位付けし、構造候補と連想候補を統合する
 6. 選ばれた `memory_units` に対応する `episodic_evidence` を付与する
-7. 候補集合の中で `conflicts` を検出する
-8. section ごとの上限と全体上限をかけて `RecallPack` を確定する
+7. 細部確認が必要な回想だけ、選ばれた `event_ids` から `event_evidence` を補助追加する
+8. 候補集合の中で `conflicts` を検出する
+9. section ごとの上限と全体上限をかけて `RecallPack` を確定する
 
 この順番にすることで、約束と関係理解を骨格として保ちつつ、人間っぽい連想も戻しやすくなる。
 
@@ -313,12 +338,14 @@ MVP の同期想起は、次の流れに抑えるのがよい。
 - 選ばれた `topic` から直結する `commitment` への展開
 - 明示的に出た `entity` から同一 `scope` の `memory_units` を拾うこと
 - 小さい top-k に絞ったベクトル検索で補助候補を拾うこと
+- 選ばれた `episode_digest` や `commitment` から対応 `events` を `1-3 件` だけ引くこと
 
 標準経路に入れないものは次である。
 
 - 複数 hop のリンク展開
 - `events` への再帰的遡り
 - 生ログ全文に対する広域ベクトル検索
+- `events` だけを主候補にした section 充填
 - 大きすぎる top-k による大量補充
 - 反省生成途中の中間産物をそのまま注入すること
 
