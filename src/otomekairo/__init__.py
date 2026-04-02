@@ -1,0 +1,2 @@
+"""OtomeKairo package."""
+
