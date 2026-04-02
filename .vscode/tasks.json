@@ -1,0 +1,16 @@
+{
+  // Block: VSCode task definitions.
+  "version": "2.0.0",
+  "tasks": [
+    {
+      // Block: Prepare venv and development certificate before debugging.
+      "label": "otomekairo: prepare debug env",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/prepare_debug_env.sh",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    }
+  ]
+}

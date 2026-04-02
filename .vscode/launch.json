@@ -1,0 +1,25 @@
+{
+  // Block: VSCode debug launch definitions.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      // Block: Launch the OtomeKairo HTTPS server with the workspace venv.
+      "name": "OtomeKairo: Debug Server",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "otomekairo.run",
+      "cwd": "${workspaceFolder}",
+      "justMyCode": true,
+      "console": "integratedTerminal",
+      "preLaunchTask": "otomekairo: prepare debug env",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src",
+        "OTOMEKAIRO_HOST": "127.0.0.1",
+        "OTOMEKAIRO_PORT": "55601",
+        "OTOMEKAIRO_TLS_CERT_FILE": "${workspaceFolder}/var/dev-tls/cert.pem",
+        "OTOMEKAIRO_TLS_KEY_FILE": "${workspaceFolder}/var/dev-tls/key.pem",
+        "OTOMEKAIRO_DATA_DIR": "${workspaceFolder}/var/otomekairo"
+      }
+    }
+  ]
+}

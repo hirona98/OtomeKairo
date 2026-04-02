@@ -12,7 +12,7 @@ from otomekairo.service import OtomeKairoService
 def main() -> None:
     # Block: Environment
     host = os.environ.get("OTOMEKAIRO_HOST", "127.0.0.1")
-    port = int(os.environ.get("OTOMEKAIRO_PORT", "8443"))
+    port = int(os.environ.get("OTOMEKAIRO_PORT", "55601"))
     cert_file = os.environ.get("OTOMEKAIRO_TLS_CERT_FILE")
     key_file = os.environ.get("OTOMEKAIRO_TLS_KEY_FILE")
     root_dir = Path(os.environ.get("OTOMEKAIRO_DATA_DIR", "var/otomekairo"))

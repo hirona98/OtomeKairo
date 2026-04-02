@@ -93,10 +93,7 @@ response:
 }
 ```
 
-`bootstrap_state` は次のどちらかを返す。
-
-- `ready_for_first_console`
-- `issued`
+MVP では `bootstrap_state` は常に `ready_for_first_console` を返してよい。
 
 ### `GET /api/bootstrap/server-identity`
 
@@ -120,7 +117,7 @@ response:
 ### `POST /api/bootstrap/register-first-console`
 
 - 認証: 不要
-- 役割: 未発行状態のときだけ最初の `console_access_token` を受け取る
+- 役割: 通常 API に入るための `console_access_token` を受け取る
 - request body: `{}` でよい
 
 response:
@@ -134,11 +131,7 @@ response:
 }
 ```
 
-主な失敗:
-
-| HTTP | `error.code` | 意味 |
-|------|--------------|------|
-| `409` | `bootstrap_already_completed` | すでに最初のコンソール登録が終わっている |
+未発行状態では新しいトークンを発行し、発行済み状態では現在のトークンを返してよい。
 
 ### `POST /api/bootstrap/reissue-console-access-token`
 

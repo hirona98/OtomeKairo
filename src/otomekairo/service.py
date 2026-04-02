@@ -47,7 +47,7 @@ class OtomeKairoService:
         return {
             "bootstrap_available": True,
             "https_required": True,
-            "bootstrap_state": "issued" if state["console_access_token"] else "ready_for_first_console",
+            "bootstrap_state": "ready_for_first_console",
         }
 
     def read_server_identity(self) -> dict[str, Any]:
@@ -62,12 +62,12 @@ class OtomeKairoService:
     def register_first_console(self) -> dict[str, Any]:
         # Block: LoadState
         state = self.store.read_state()
-        if state["console_access_token"] is not None:
-            raise ServiceError(409, "bootstrap_already_completed", "First console is already registered.")
 
-        # Block: IssueToken
-        state["console_access_token"] = self._new_console_token()
-        self.store.write_state(state)
+        # Block: EnsureToken
+        if state["console_access_token"] is None:
+            state["console_access_token"] = self._new_console_token()
+            self.store.write_state(state)
+
         return {
             "console_access_token": state["console_access_token"],
         }
