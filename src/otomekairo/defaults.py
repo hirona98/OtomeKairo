@@ -13,6 +13,7 @@ DEFAULT_DECISION_PROFILE_ID = "model_profile:mock_decision"
 DEFAULT_REPLY_PROFILE_ID = "model_profile:mock_reply"
 DEFAULT_MEMORY_PROFILE_ID = "model_profile:mock_memory"
 DEFAULT_EMBED_PROFILE_ID = "model_profile:mock_embedding"
+DEFAULT_DESKTOP_WATCH_INTERVAL_SECONDS = 300
 
 
 # Block: Builder
@@ -26,13 +27,22 @@ def build_default_state() -> dict:
         "selected_persona_id": DEFAULT_PERSONA_ID,
         "selected_memory_set_id": DEFAULT_MEMORY_SET_ID,
         "selected_model_preset_id": DEFAULT_MODEL_PRESET_ID,
+        "memory_enabled": True,
         "wake_policy": {
             "mode": "disabled",
+        },
+        "desktop_watch": {
+            "enabled": False,
+            "interval_seconds": DEFAULT_DESKTOP_WATCH_INTERVAL_SECONDS,
+            "target_client_id": None,
         },
         "personas": {
             DEFAULT_PERSONA_ID: {
                 "persona_id": DEFAULT_PERSONA_ID,
                 "display_name": "Default Persona",
+                "persona_text": "やわらかく寄り添いながら会話する。",
+                "second_person_label": "あなた",
+                "addon_text": "",
                 "core_persona": {
                     "self_image": "long-term companion",
                     "judgement_style": "careful and warm",
@@ -55,30 +65,35 @@ def build_default_state() -> dict:
         "model_profiles": {
             DEFAULT_RECALL_PROFILE_ID: {
                 "model_profile_id": DEFAULT_RECALL_PROFILE_ID,
+                "display_name": "Mock Recall",
                 "kind": "generation",
                 "provider": "mock",
                 "model_name": "mock-recall",
             },
             DEFAULT_DECISION_PROFILE_ID: {
                 "model_profile_id": DEFAULT_DECISION_PROFILE_ID,
+                "display_name": "Mock Decision",
                 "kind": "generation",
                 "provider": "mock",
                 "model_name": "mock-decision",
             },
             DEFAULT_REPLY_PROFILE_ID: {
                 "model_profile_id": DEFAULT_REPLY_PROFILE_ID,
+                "display_name": "Mock Reply",
                 "kind": "generation",
                 "provider": "mock",
                 "model_name": "mock-reply",
             },
             DEFAULT_MEMORY_PROFILE_ID: {
                 "model_profile_id": DEFAULT_MEMORY_PROFILE_ID,
+                "display_name": "Mock Memory",
                 "kind": "generation",
                 "provider": "mock",
                 "model_name": "mock-memory",
             },
             DEFAULT_EMBED_PROFILE_ID: {
                 "model_profile_id": DEFAULT_EMBED_PROFILE_ID,
+                "display_name": "Mock Embedding",
                 "kind": "embedding",
                 "provider": "mock",
                 "model_name": "mock-embedding",
@@ -91,20 +106,73 @@ def build_default_state() -> dict:
                 "roles": {
                     "reply_generation": {
                         "model_profile_id": DEFAULT_REPLY_PROFILE_ID,
+                        "max_turns_window": 10,
+                        "max_tokens": 4096,
+                        "reply_web_search_enabled": True,
                     },
                     "decision_generation": {
                         "model_profile_id": DEFAULT_DECISION_PROFILE_ID,
+                        "max_tokens": 4096,
                     },
                     "recall_hint_generation": {
                         "model_profile_id": DEFAULT_RECALL_PROFILE_ID,
+                        "max_tokens": 2048,
                     },
                     "memory_interpretation": {
                         "model_profile_id": DEFAULT_MEMORY_PROFILE_ID,
+                        "max_tokens": 4096,
                     },
                     "embedding": {
                         "model_profile_id": DEFAULT_EMBED_PROFILE_ID,
+                        "similar_episodes_limit": 40,
+                        "embedding_dimension": 3072,
                     },
                 },
             }
         },
     }
+
+
+def normalize_state(state: dict) -> tuple[dict, bool]:
+    changed = False
+
+    if "memory_enabled" not in state:
+        state["memory_enabled"] = True
+        changed = True
+
+    desktop_watch = state.get("desktop_watch")
+    if not isinstance(desktop_watch, dict):
+        state["desktop_watch"] = {
+            "enabled": False,
+            "interval_seconds": DEFAULT_DESKTOP_WATCH_INTERVAL_SECONDS,
+            "target_client_id": None,
+        }
+        changed = True
+    else:
+        if "enabled" not in desktop_watch:
+            desktop_watch["enabled"] = False
+            changed = True
+        if "interval_seconds" not in desktop_watch:
+            desktop_watch["interval_seconds"] = DEFAULT_DESKTOP_WATCH_INTERVAL_SECONDS
+            changed = True
+        if "target_client_id" not in desktop_watch:
+            desktop_watch["target_client_id"] = None
+            changed = True
+
+    for persona_id, persona in state.get("personas", {}).items():
+        if "persona_text" not in persona:
+            persona["persona_text"] = persona.get("display_name", persona_id)
+            changed = True
+        if "second_person_label" not in persona:
+            persona["second_person_label"] = "あなた"
+            changed = True
+        if "addon_text" not in persona:
+            persona["addon_text"] = ""
+            changed = True
+
+    for profile_id, profile in state.get("model_profiles", {}).items():
+        if "display_name" not in profile:
+            profile["display_name"] = profile_id
+            changed = True
+
+    return state, changed

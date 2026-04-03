@@ -27,8 +27,14 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         self._dispatch("POST")
 
+    def do_PATCH(self) -> None:  # noqa: N802
+        self._dispatch("PATCH")
+
     def do_PUT(self) -> None:  # noqa: N802
         self._dispatch("PUT")
+
+    def do_DELETE(self) -> None:  # noqa: N802
+        self._dispatch("DELETE")
 
     # Block: Logging
     def log_message(self, format: str, *args) -> None:  # noqa: A003
@@ -64,6 +70,9 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
                 return
             if method == "GET" and parsed.path == "/api/config":
                 self._write_success(HTTPStatus.OK, self.server.service.get_config(token))
+                return
+            if method == "GET" and parsed.path == "/api/config/editor-state":
+                self._write_success(HTTPStatus.OK, self.server.service.get_editor_state(token))
                 return
             if method == "GET" and parsed.path == "/api/catalog":
                 self._write_success(HTTPStatus.OK, self.server.service.get_catalog(token))
@@ -104,6 +113,50 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
                     self.server.service.select_model_preset(token, payload.get("model_preset_id")),
                 )
                 return
+            if method == "PATCH" and parsed.path == "/api/config/current":
+                payload = self._read_json_body()
+                self._write_success(
+                    HTTPStatus.OK,
+                    self.server.service.patch_current(token, payload),
+                )
+                return
+            if method == "PUT" and parsed.path == "/api/config/editor-state":
+                payload = self._read_json_body()
+                self._write_success(
+                    HTTPStatus.OK,
+                    self.server.service.replace_editor_state(token, payload),
+                )
+                return
+            if method == "GET" and parsed.path.startswith("/api/config/personas/"):
+                persona_id = parsed.path.rsplit("/", 1)[-1]
+                self._write_success(HTTPStatus.OK, self.server.service.get_persona(token, persona_id))
+                return
+            if method == "PUT" and parsed.path.startswith("/api/config/personas/"):
+                persona_id = parsed.path.rsplit("/", 1)[-1]
+                payload = self._read_json_body()
+                self._write_success(HTTPStatus.OK, self.server.service.replace_persona(token, persona_id, payload))
+                return
+            if method == "DELETE" and parsed.path.startswith("/api/config/personas/"):
+                persona_id = parsed.path.rsplit("/", 1)[-1]
+                self._write_success(HTTPStatus.OK, self.server.service.delete_persona(token, persona_id))
+                return
+            if method == "GET" and parsed.path.startswith("/api/config/memory-sets/"):
+                memory_set_id = parsed.path.rsplit("/", 1)[-1]
+                self._write_success(HTTPStatus.OK, self.server.service.get_memory_set(token, memory_set_id))
+                return
+            if method == "PUT" and parsed.path.startswith("/api/config/memory-sets/"):
+                memory_set_id = parsed.path.rsplit("/", 1)[-1]
+                payload = self._read_json_body()
+                self._write_success(HTTPStatus.OK, self.server.service.replace_memory_set(token, memory_set_id, payload))
+                return
+            if method == "DELETE" and parsed.path.startswith("/api/config/memory-sets/"):
+                memory_set_id = parsed.path.rsplit("/", 1)[-1]
+                self._write_success(HTTPStatus.OK, self.server.service.delete_memory_set(token, memory_set_id))
+                return
+            if method == "GET" and parsed.path.startswith("/api/config/model-presets/"):
+                model_preset_id = parsed.path.rsplit("/", 1)[-1]
+                self._write_success(HTTPStatus.OK, self.server.service.get_model_preset(token, model_preset_id))
+                return
             if method == "PUT" and parsed.path.startswith("/api/config/model-presets/"):
                 model_preset_id = parsed.path.rsplit("/", 1)[-1]
                 payload = self._read_json_body()
@@ -112,6 +165,14 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
                     self.server.service.replace_model_preset(token, model_preset_id, payload),
                 )
                 return
+            if method == "DELETE" and parsed.path.startswith("/api/config/model-presets/"):
+                model_preset_id = parsed.path.rsplit("/", 1)[-1]
+                self._write_success(HTTPStatus.OK, self.server.service.delete_model_preset(token, model_preset_id))
+                return
+            if method == "GET" and parsed.path.startswith("/api/config/model-profiles/"):
+                model_profile_id = parsed.path.rsplit("/", 1)[-1]
+                self._write_success(HTTPStatus.OK, self.server.service.get_model_profile(token, model_profile_id))
+                return
             if method == "PUT" and parsed.path.startswith("/api/config/model-profiles/"):
                 model_profile_id = parsed.path.rsplit("/", 1)[-1]
                 payload = self._read_json_body()
@@ -119,6 +180,10 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
                     HTTPStatus.OK,
                     self.server.service.replace_model_profile(token, model_profile_id, payload),
                 )
+                return
+            if method == "DELETE" and parsed.path.startswith("/api/config/model-profiles/"):
+                model_profile_id = parsed.path.rsplit("/", 1)[-1]
+                self._write_success(HTTPStatus.OK, self.server.service.delete_model_profile(token, model_profile_id))
                 return
 
             # Block: InspectionRoutes

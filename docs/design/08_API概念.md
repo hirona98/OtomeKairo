@@ -91,13 +91,24 @@ MVP の API は、OtomeKairo の運用に必要な要約状態だけを返す。
 設定面では、少なくとも次を扱える必要がある。
 
 - 現在設定の取得
+- 現在設定の部分更新
+- `editor-state` の一括取得
+- `editor-state` の一括置換
+- `persona` の詳細取得
+- `memory_set` の詳細取得
 - 編集対象となる `model_preset` と `model_profile` の詳細取得
 - `select_persona(persona_id)`
 - `select_memory_set(memory_set_id)`
 - `update_wake_policy(wake_policy)`
+- `replace_persona(persona_id, persona_definition)`
+- `replace_memory_set(memory_set_id, memory_set_definition)`
+- `delete_persona(persona_id)`
+- `delete_memory_set(memory_set_id)`
 - `select_model_preset(model_preset_id)`
 - `replace_model_preset(model_preset_id, model_preset_definition)`
 - `replace_model_profile(model_profile_id, model_profile_definition)`
+- `delete_model_preset(model_preset_id)`
+- `delete_model_profile(model_profile_id)`
 
 ここでの正本は常に OtomeKairo 側にある。
 そのため、クライアントは「現在設定を読み、操作要求を送る」だけに留まる。
@@ -155,6 +166,7 @@ MVP では、次は API の主対象にしない。
 - 観測面では会話観測と起床観測を主に扱う
 - 外向きの主結果は MVP では `reply / noop / internal_failure` に置く
 - 設定変更は `07_設定操作契約.md` の意味単位で露出する
+- `CocoroConsole` の一括編集用に `editor-state` の補助面を持ってよい
 - モデルプリセットとモデルプロファイルは設定面と列挙面から扱えるようにする
 - `model_profile` の各項目は他の設定値と同じく設定面で送受信する
 - 設定 API の経路は HTTPS に固定し、利用範囲はローカルネットワーク内を前提にする

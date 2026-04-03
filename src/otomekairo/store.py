@@ -4,7 +4,7 @@ import json
 import tempfile
 from pathlib import Path
 
-from otomekairo.defaults import build_default_state
+from otomekairo.defaults import build_default_state, normalize_state
 
 
 # Block: Constants
@@ -25,7 +25,11 @@ class FileStore:
 
     def read_state(self) -> dict:
         # Block: ReadState
-        return json.loads(self.state_path.read_text(encoding="utf-8"))
+        state = json.loads(self.state_path.read_text(encoding="utf-8"))
+        state, changed = normalize_state(state)
+        if changed:
+            self.write_state(state)
+        return state
 
     def write_state(self, state: dict) -> None:
         # Block: AtomicWrite
