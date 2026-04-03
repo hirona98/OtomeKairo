@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from otomekairo.llm import LLMError, MockLLMClient
+from otomekairo.llm import LLMClient, LLMError
 from otomekairo.store import FileStore
 
 
@@ -39,7 +39,7 @@ class OtomeKairoService:
     def __init__(self, root_dir: Path) -> None:
         # Block: Dependencies
         self.store = FileStore(root_dir)
-        self.mock_llm = MockLLMClient()
+        self.llm = LLMClient()
 
     # Block: Bootstrap
     def probe_bootstrap(self) -> dict[str, Any]:
@@ -415,14 +415,18 @@ class OtomeKairoService:
         try:
             # Block: ModelSelection
             selected_preset = state["model_presets"][state["selected_model_preset_id"]]
+            recall_role = selected_preset["roles"]["recall_hint_generation"]
+            decision_role = selected_preset["roles"]["decision_generation"]
+            reply_role = selected_preset["roles"]["reply_generation"]
             recall_profile = self._profile_for_role(state, selected_preset, "recall_hint_generation")
             decision_profile = self._profile_for_role(state, selected_preset, "decision_generation")
             reply_profile = self._profile_for_role(state, selected_preset, "reply_generation")
             persona = state["personas"][state["selected_persona_id"]]
 
             # Block: RecallHint
-            recall_hint = self.mock_llm.generate_recall_hint(
+            recall_hint = self.llm.generate_recall_hint(
                 profile=recall_profile,
+                role_settings=recall_role,
                 observation_text=observation_text,
                 recent_turns=recent_turns,
                 current_time=started_at,
@@ -443,8 +447,9 @@ class OtomeKairoService:
             }
 
             # Block: Decision
-            decision = self.mock_llm.generate_decision(
+            decision = self.llm.generate_decision(
                 profile=decision_profile,
+                role_settings=decision_role,
                 observation_text=observation_text,
                 recall_hint=recall_hint,
             )
@@ -452,10 +457,12 @@ class OtomeKairoService:
             # Block: Reply
             reply_payload: dict | None = None
             if decision["kind"] == "reply":
-                reply_payload = self.mock_llm.generate_reply(
+                reply_payload = self.llm.generate_reply(
                     profile=reply_profile,
+                    role_settings=reply_role,
                     persona=persona,
                     observation_text=observation_text,
+                    recent_turns=recent_turns,
                     recall_hint=recall_hint,
                     decision=decision,
                 )
