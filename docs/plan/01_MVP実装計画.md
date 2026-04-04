@@ -109,6 +109,206 @@ MVP 実装は、次の順で進める。
 
 記憶更新は、すでに `design/memory/` に置いた責務境界を守って実装する。
 
+<!-- Block: MemoryConcrete -->
+## 記憶実装の具体化
+
+記憶実装では、保存と想起の正本を早い段階で SQLite へ寄せる。
+ここは後から差し替えると影響が大きいため、MVP でも最初から最終形に近い骨格で入れる。
+
+この段階で固定する実装方針は次である。
+
+- 記憶と監査の保存先は `SQLite` を正本にする
+- 連想レーンの埋め込み検索は `sqlite-vec` を使う
+- 文字列一致による検索は使わない
+- `memory_set` は編集可能な設定資源として残しつつ、その内部データは SQLite の内部テーブルへ保持する
+- 現在の `server_state.json` は、当面は設定資源の正本として残してよい
+- ただし、`events`、`retrieval_runs`、`cycle_summary`、`cycle_trace` は SQLite 側へ移し、JSONL 追記は増やさない
+
+### SQLite の責務境界
+
+SQLite 側で正本として持つのは、少なくとも次である。
+
+- `events`
+- `episode_digests`
+- `memory_units`
+- `memory_links`
+- `revisions`
+- `affect_state`
+- `retrieval_runs`
+- `cycle_summaries`
+- `cycle_traces`
+- `vector_index_entries`
+
+一方で、次は当面 `server_state.json` 側に残してよい。
+
+- `selected_persona_id`
+- `selected_memory_set_id`
+- `memory_enabled`
+- `wake_policy`
+- `desktop_watch`
+- `selected_model_preset_id`
+- `persona`
+- `memory_set`
+- `model_preset`
+- `model_profile`
+
+この分離により、記憶本体は関係検索と更新履歴に向く保存系へ寄せつつ、設定面の既存 API は崩さずに進められる。
+
+### SQLite 初期化方針
+
+SQLite 接続では、少なくとも次を固定する。
+
+- DB ファイルは専用の `memory.db` とする
+- `foreign_keys = ON`
+- `journal_mode = WAL`
+- `busy_timeout` を設定する
+- 起動時に `sqlite-vec` extension を load する
+
+`sqlite-vec` の仮想テーブルは、少なくとも次の 2 系統を持つ。
+
+- `memory_units` 用の埋め込み index
+- `episode_digests` 用の埋め込み index
+
+`vector_index_entries` は metadata を持つ通常テーブルとし、実ベクトル本体は `sqlite-vec` の仮想テーブルへ置く。
+これにより、設計上の `vector_index_entries` 契約を保ちながら、距離検索は `sqlite-vec` に任せられる。
+
+ここでの検索方針は次で固定する。
+
+- 構造レーンは、正規化済みカラムへの条件指定だけで候補を取る
+- 連想レーンは、`sqlite-vec` の近傍検索だけを使う
+- `summary_text` や `raw_text_or_payload` への `LIKE`、部分一致、全文検索を標準経路に入れない
+- 候補が足りなくても、文字列一致検索へフォールバックしない
+
+### `memory_set` と内部テーブルの関係
+
+`memory_set` は、引き続き設定面で編集できる軽量な資源として扱う。
+ただし、その実体である記憶データは、すべて `memory_set_id` をキーに SQLite へ保持する。
+
+この段階での基本ルールは次とする。
+
+- `events` から `revisions` までの全レコードは `memory_set_id` を持つ
+- 想起と更新は、常に現在の `selected_memory_set_id` だけを見る
+- `delete_memory_set(memory_set_id)` では、その `memory_set_id` に属する内部テーブルの行も同一トランザクションで削除する
+- `select_memory_set(memory_set_id)` は設定の切り替えだけを行い、内部記憶のコピーや移送はしない
+
+### 実装スライス
+
+記憶実装は、次の順で縦に通す。
+
+#### 3-1. 保存層の差し替え
+
+最初にやるのは、JSONL 監査を SQLite へ移すことである。
+
+- `events`
+- `retrieval_runs`
+- `cycle_summaries`
+- `cycle_traces`
+
+この段階では、会話結果はまだ空の `RecallPack` でもよい。
+重要なのは、以後の記憶更新が SQLite 上の `event_id` を根拠として使えるようにすることである。
+
+#### 3-2. `turn consolidation` の保存骨格
+
+次に、1 サイクルの保存後に最低限の記憶更新を行う。
+
+- `episode_digests` を `1 判断サイクル = 1 digest` で作る
+- `memory_units` 候補を LLM で抽出する
+- 比較キーで既存候補を引く
+- `create / reinforce / refine / supersede / revoke / dormant / noop` を決める
+- 変化があったものだけ `revisions` を残す
+- `affect_state` を更新する
+
+ここで重要なのは、反射的に高度な再整理へ進まないことである。
+まずは `turn consolidation` だけで `preference`、`commitment`、`fact`、`interpretation` を安定して回せるようにする。
+
+#### 3-3. 構造レーンの実装
+
+次に、SQLite の通常問い合わせだけで組める想起を先に通す。
+
+- `active_commitments`
+- `relationship_model`
+- `user_model`
+- `self_model`
+- `active_topics`
+- `conflicts`
+
+この段階では、`primary_intent` と `focus_scopes` を主ルーティングに使い、`status`、`commitment_state`、`scope`、`memory_type` を条件に候補を集める。
+設計上、`commitment` と `relationship` は構造レーン優先なので、まずここを強くする。
+ここで使う比較軸は、`scope_type`、`scope_key`、`memory_type`、`status`、`subject_ref`、`predicate`、`object_ref_or_value`、`commitment_state` のような半構造化項目に限定する。
+自由文の文字列一致検索には寄せない。
+
+#### 3-4. 連想レーンの実装
+
+構造レーンの後で、`sqlite-vec` による連想レーンを足す。
+
+- `memory_units.summary_text` の埋め込み
+- `episode_digests.summary_text`
+- `episode_digests.outcome_text`
+- `episode_digests.open_loops`
+
+検索結果は補助候補としてだけ使い、次を守る。
+
+- `vector-only` 候補を断定根拠にしない
+- rerank と section boost に使う
+- `event_evidence` が必要なときだけ、関連 `event_id` を最大 1-3 件開く
+
+#### 3-5. `RecallPack` の本接続
+
+想起結果を、設計どおりの役割別 `RecallPack` として判断と返答へ渡す。
+
+- `self_model`
+- `user_model`
+- `relationship_model`
+- `active_topics`
+- `active_commitments`
+- `episodic_evidence`
+- `conflicts`
+
+この段階で、空配列固定の最小 slice をやめる。
+`decision_generation` と `reply_generation` は、少なくとも `RecallPack` の要約を見て判断と返答を組み立てるようにする。
+
+#### 3-6. `reflective consolidation` の入口
+
+最後に、非同期または明示起動で動かせる再整理の入口を置く。
+
+初期段階でやるのは次まででよい。
+
+- `summary` 系 `memory_units` の生成
+- `inferred -> confirmed` の見直し
+- 低重要トピックの `dormant` 化
+- `relationship` と `self` の長期変化の再評価
+
+ここでは、広い高次推論へ進まない。
+`design/memory/06_想起と判断ユースケース.md` で「現状では難しい」としている領域は後段へ送る。
+
+### モジュール分割の目安
+
+コード分割はコード側を正とするが、少なくとも責務は次で分ける。
+
+- SQLite 接続と migration
+- 監査保存
+- `turn consolidation`
+- 構造レーン想起
+- `sqlite-vec` 連想レーン
+- `RecallPack` 組み立て
+- `reflective consolidation`
+
+今の `service.py` に直接すべて詰め込まず、保存層と記憶処理は早めに外へ出す前提で進める。
+
+### 先にやらないこと
+
+記憶を最初から本格実装する一方で、次はこの段階では広げない。
+
+- 正確引用の保証
+- 長い時系列の完全再構成
+- 複合意図の同時最適化
+- 曖昧参照の全面解決
+- 多段の関係推論
+- 複雑な外界行動の実行計画
+
+ここを一緒に背負うと、記憶基盤の実装速度が落ちる。
+最初に固定すべきなのは、あくまで記憶の保存責務、更新責務、想起責務の骨格である。
+
 ### 4. 自発起床
 
 会話サイクルと保存系が通った後で、自発起床を足す。
