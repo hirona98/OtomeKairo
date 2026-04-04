@@ -11,11 +11,6 @@ from otomekairo.store import FileStore
 
 
 # Block: Constants
-EVENTS_FILE = "events.jsonl"
-RETRIEVAL_RUNS_FILE = "retrieval_runs.jsonl"
-CYCLE_SUMMARIES_FILE = "cycle_summaries.jsonl"
-CYCLE_TRACES_FILE = "cycle_traces.jsonl"
-
 REQUIRED_ROLE_NAMES = {
     "reply_generation": "generation",
     "decision_generation": "generation",
@@ -523,10 +518,8 @@ class OtomeKairoService:
         self._require_token(token)
 
         # Block: List
-        records = self.store.read_jsonl(CYCLE_SUMMARIES_FILE)
-        selected = list(reversed(records))[:limit]
         return {
-            "cycle_summaries": selected,
+            "cycle_summaries": self.store.list_cycle_summaries(limit),
         }
 
     def get_cycle_trace(self, token: str | None, cycle_id: str) -> dict[str, Any]:
@@ -534,10 +527,9 @@ class OtomeKairoService:
         self._require_token(token)
 
         # Block: FindRecord
-        traces = self.store.read_jsonl(CYCLE_TRACES_FILE)
-        for trace in traces:
-            if trace["cycle_id"] == cycle_id:
-                return trace
+        trace = self.store.get_cycle_trace(cycle_id)
+        if trace is not None:
+            return trace
 
         raise ServiceError(404, "cycle_not_found", "The requested cycle_id does not exist.")
 
@@ -820,10 +812,12 @@ class OtomeKairoService:
         reply_payload: dict | None,
     ) -> None:
         # Block: EventRecords
+        selected_memory_set_id = state["selected_memory_set_id"]
         events = [
             {
                 "event_id": f"event:{uuid.uuid4().hex}",
                 "cycle_id": cycle_id,
+                "memory_set_id": selected_memory_set_id,
                 "kind": "observation",
                 "role": "user",
                 "text": observation_text,
@@ -832,6 +826,7 @@ class OtomeKairoService:
             {
                 "event_id": f"event:{uuid.uuid4().hex}",
                 "cycle_id": cycle_id,
+                "memory_set_id": selected_memory_set_id,
                 "kind": "decision",
                 "role": "system",
                 "result_kind": result_kind,
@@ -844,6 +839,7 @@ class OtomeKairoService:
                 {
                     "event_id": f"event:{uuid.uuid4().hex}",
                     "cycle_id": cycle_id,
+                    "memory_set_id": selected_memory_set_id,
                     "kind": "reply",
                     "role": "assistant",
                     "text": reply_payload["reply_text"],
@@ -854,6 +850,7 @@ class OtomeKairoService:
         # Block: RetrievalRun
         retrieval_run = {
             "cycle_id": cycle_id,
+            "selected_memory_set_id": selected_memory_set_id,
             "started_at": started_at,
             "finished_at": finished_at,
             "result_status": "succeeded",
@@ -913,11 +910,12 @@ class OtomeKairoService:
         }
 
         # Block: Persist
-        for event in events:
-            self.store.append_jsonl(EVENTS_FILE, event)
-        self.store.append_jsonl(RETRIEVAL_RUNS_FILE, retrieval_run)
-        self.store.append_jsonl(CYCLE_SUMMARIES_FILE, cycle_summary)
-        self.store.append_jsonl(CYCLE_TRACES_FILE, cycle_trace)
+        self.store.persist_cycle_records(
+            events=events,
+            retrieval_run=retrieval_run,
+            cycle_summary=cycle_summary,
+            cycle_trace=cycle_trace,
+        )
 
     def _persist_cycle_failure(
         self,
@@ -933,10 +931,12 @@ class OtomeKairoService:
         failure_reason: str,
     ) -> None:
         # Block: EventRecords
+        selected_memory_set_id = state["selected_memory_set_id"]
         events = [
             {
                 "event_id": f"event:{uuid.uuid4().hex}",
                 "cycle_id": cycle_id,
+                "memory_set_id": selected_memory_set_id,
                 "kind": "observation",
                 "role": "user",
                 "text": observation_text,
@@ -945,6 +945,7 @@ class OtomeKairoService:
             {
                 "event_id": f"event:{uuid.uuid4().hex}",
                 "cycle_id": cycle_id,
+                "memory_set_id": selected_memory_set_id,
                 "kind": "recall_hint_failure",
                 "role": "system",
                 "failure_reason": failure_reason,
@@ -955,6 +956,7 @@ class OtomeKairoService:
         # Block: RetrievalRun
         retrieval_run = {
             "cycle_id": cycle_id,
+            "selected_memory_set_id": selected_memory_set_id,
             "started_at": started_at,
             "finished_at": finished_at,
             "result_status": "failed",
@@ -1012,41 +1014,29 @@ class OtomeKairoService:
         }
 
         # Block: Persist
-        for event in events:
-            self.store.append_jsonl(EVENTS_FILE, event)
-        self.store.append_jsonl(RETRIEVAL_RUNS_FILE, retrieval_run)
-        self.store.append_jsonl(CYCLE_SUMMARIES_FILE, cycle_summary)
-        self.store.append_jsonl(CYCLE_TRACES_FILE, cycle_trace)
+        self.store.persist_cycle_records(
+            events=events,
+            retrieval_run=retrieval_run,
+            cycle_summary=cycle_summary,
+            cycle_trace=cycle_trace,
+        )
 
     def _load_recent_turns(self, state: dict) -> list[dict]:
         # Block: WindowSetup
         now = datetime.now(UTC)
         threshold = now - timedelta(minutes=3)
-        events = self.store.read_jsonl(EVENTS_FILE)
         selected_preset = state["model_presets"][state["selected_model_preset_id"]]
         reply_role = selected_preset.get("roles", {}).get("reply_generation", {})
         turn_limit = reply_role.get("max_turns_window")
         if not isinstance(turn_limit, int) or turn_limit < 1:
             turn_limit = 6
 
-        # Block: Filtering
-        turns = []
-        for event in events:
-            if event.get("kind") not in {"observation", "reply"}:
-                continue
-            created_at = self._parse_iso(event["created_at"])
-            if created_at < threshold:
-                continue
-            turns.append(
-                {
-                    "role": event["role"],
-                    "text": event["text"],
-                    "created_at": event["created_at"],
-                }
-            )
-
-        # Block: Truncate
-        return turns[-turn_limit:]
+        # Block: Lookup
+        return self.store.load_recent_turns(
+            memory_set_id=state["selected_memory_set_id"],
+            since_iso=threshold.isoformat(),
+            limit=turn_limit,
+        )
 
     def _new_console_token(self) -> str:
         # Block: Token
