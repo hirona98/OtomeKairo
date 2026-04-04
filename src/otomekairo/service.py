@@ -262,8 +262,9 @@ class OtomeKairoService:
 
     def replace_model_preset(self, token: str | None, model_preset_id: str, definition: dict) -> dict[str, Any]:
         state = self._require_token(token)
-        self._validate_model_preset_definition(state, model_preset_id, definition)
-        state["model_presets"][model_preset_id] = definition
+        normalized_definition = self._normalize_model_preset_definition(definition)
+        self._validate_model_preset_definition(state, model_preset_id, normalized_definition)
+        state["model_presets"][model_preset_id] = normalized_definition
         self.store.write_state(state)
         return {
             "model_preset": state["model_presets"][model_preset_id],
@@ -342,7 +343,7 @@ class OtomeKairoService:
             **state,
             "model_profiles": model_profiles,
         }
-        model_presets = self._entries_by_id(definition.get("model_presets"), "model_preset_id", "model_presets")
+        raw_model_presets = self._entries_by_id(definition.get("model_presets"), "model_preset_id", "model_presets")
 
         if not isinstance(current, dict):
             raise ServiceError(400, "invalid_editor_state_current", "current must be an object.")
@@ -352,7 +353,7 @@ class OtomeKairoService:
             raise ServiceError(400, "missing_memory_sets", "editor-state requires at least one memory_set.")
         if not model_profiles:
             raise ServiceError(400, "missing_model_profiles", "editor-state requires at least one model_profile.")
-        if not model_presets:
+        if not raw_model_presets:
             raise ServiceError(400, "missing_model_presets", "editor-state requires at least one model_preset.")
 
         for persona_id, persona in personas.items():
@@ -362,6 +363,11 @@ class OtomeKairoService:
         for model_profile_id, model_profile in model_profiles.items():
             self._validate_model_profile_definition(model_profile_id, model_profile)
         candidate_state["model_profiles"] = model_profiles
+        # Block: ModelPresetNormalization
+        model_presets = {
+            model_preset_id: self._normalize_model_preset_definition(model_preset)
+            for model_preset_id, model_preset in raw_model_presets.items()
+        }
         for model_preset_id, model_preset in model_presets.items():
             self._validate_model_preset_definition(candidate_state, model_preset_id, model_preset)
 
@@ -704,7 +710,10 @@ class OtomeKairoService:
         for role_name, expected_kind in REQUIRED_ROLE_NAMES.items():
             if role_name not in roles:
                 raise ServiceError(400, "missing_model_role", f"{role_name} is required.")
-            profile_id = roles[role_name].get("model_profile_id")
+            role_definition = roles[role_name]
+            if not isinstance(role_definition, dict):
+                raise ServiceError(400, "invalid_model_role", f"{role_name} must be an object.")
+            profile_id = role_definition.get("model_profile_id")
             if not isinstance(profile_id, str) or not profile_id:
                 raise ServiceError(400, "invalid_model_role_profile", f"{role_name} requires model_profile_id.")
             profile = state["model_profiles"].get(profile_id)
@@ -712,6 +721,46 @@ class OtomeKairoService:
                 raise ServiceError(404, "model_profile_not_found", f"{profile_id} does not exist.")
             if profile["kind"] != expected_kind:
                 raise ServiceError(400, "model_profile_kind_mismatch", f"{role_name} requires kind={expected_kind}.")
+
+            # Block: OptionalReasoningEffort
+            reasoning_effort = role_definition.get("reasoning_effort")
+            if reasoning_effort is not None and not isinstance(reasoning_effort, str):
+                raise ServiceError(400, "invalid_reasoning_effort", f"{role_name}.reasoning_effort must be a string.")
+
+    def _normalize_model_preset_definition(self, definition: dict) -> dict:
+        # Block: TopLevelClone
+        normalized = {
+            **definition,
+        }
+        roles = definition.get("roles")
+        if not isinstance(roles, dict):
+            return normalized
+
+        # Block: RoleNormalization
+        normalized_roles: dict[str, Any] = {}
+        for role_name, role_definition in roles.items():
+            if not isinstance(role_definition, dict):
+                normalized_roles[role_name] = role_definition
+                continue
+
+            normalized_role = {
+                **role_definition,
+            }
+            reasoning_effort = normalized_role.get("reasoning_effort")
+            if isinstance(reasoning_effort, str):
+                trimmed_reasoning_effort = reasoning_effort.strip()
+                if trimmed_reasoning_effort:
+                    normalized_role["reasoning_effort"] = trimmed_reasoning_effort
+                else:
+                    normalized_role.pop("reasoning_effort", None)
+            elif reasoning_effort is None:
+                normalized_role.pop("reasoning_effort", None)
+
+            normalized_roles[role_name] = normalized_role
+
+        # Block: Result
+        normalized["roles"] = normalized_roles
+        return normalized
 
     def _validate_model_profile_definition(self, model_profile_id: str, definition: dict) -> None:
         # Block: Shape

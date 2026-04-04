@@ -520,7 +520,8 @@ request body の最小 shape:
   "display_name": "Default OpenRouter Gemini Preset",
   "roles": {
     "reply_generation": {
-      "model_profile_id": "model_profile:gemini_reply"
+      "model_profile_id": "model_profile:gemini_reply",
+      "reasoning_effort": "low"
     },
     "decision_generation": {
       "model_profile_id": "model_profile:gemini_decision"
@@ -537,6 +538,8 @@ request body の最小 shape:
   }
 }
 ```
+
+`reasoning_effort` は任意であり、空文字列や空白のみの値は保存時に削除して無効扱いにする。
 
 response:
 
@@ -616,6 +619,7 @@ response:
 | `400` | `memory_set_id_mismatch` | path と body の `memory_set_id` が一致しない |
 | `400` | `model_preset_id_mismatch` | path と body の `model_preset_id` が一致しない |
 | `400` | `model_profile_id_mismatch` | path と body の `model_profile_id` が一致しない |
+| `400` | `invalid_reasoning_effort` | `reasoning_effort` が文字列ではない |
 | `400` | `invalid_model` | `model` が空または文字列ではない |
 | `400` | `invalid_model_base_url` | `base_url` が文字列ではない |
 | `400` | `invalid_model_auth` | `auth` が object ではない |
