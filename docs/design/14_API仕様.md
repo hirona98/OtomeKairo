@@ -242,7 +242,7 @@ response:
       },
       "loaded_model_preset_ref": {
         "model_preset_id": "model_preset:default",
-        "display_name": "Default Mock Preset"
+        "display_name": "Default OpenRouter Gemini Preset"
       },
       "connection_state": "ready",
       "wake_scheduler_active": false,
@@ -284,7 +284,7 @@ response:
     "selected_memory_set": {},
     "selected_model_preset": {},
     "selected_model_profile_ids": {
-      "reply_generation": "model_profile:mock_reply"
+      "reply_generation": "model_profile:gemini_reply"
     },
     "selected_model_profiles": {
       "reply_generation": {}
@@ -404,13 +404,13 @@ response:
     "model_presets": [
       {
         "model_preset_id": "model_preset:default",
-        "display_name": "Default Mock Preset"
+        "display_name": "Default OpenRouter Gemini Preset"
       }
     ],
     "model_profiles": [
       {
-        "model_profile_id": "model_profile:mock_reply",
-        "display_name": "Mock Reply"
+        "model_profile_id": "model_profile:gemini_reply",
+        "display_name": "OpenRouter Gemini Reply"
       }
     ]
   }
@@ -517,22 +517,22 @@ request body の最小 shape:
 ```json
 {
   "model_preset_id": "model_preset:default",
-  "display_name": "Default Mock Preset",
+  "display_name": "Default OpenRouter Gemini Preset",
   "roles": {
     "reply_generation": {
-      "model_profile_id": "model_profile:mock_reply"
+      "model_profile_id": "model_profile:gemini_reply"
     },
     "decision_generation": {
-      "model_profile_id": "model_profile:mock_decision"
+      "model_profile_id": "model_profile:gemini_decision"
     },
     "recall_hint_generation": {
-      "model_profile_id": "model_profile:mock_recall"
+      "model_profile_id": "model_profile:gemini_recall"
     },
     "memory_interpretation": {
-      "model_profile_id": "model_profile:mock_memory"
+      "model_profile_id": "model_profile:gemini_memory"
     },
     "embedding": {
-      "model_profile_id": "model_profile:mock_embedding"
+      "model_profile_id": "model_profile:gemini_embedding"
     }
   }
 }
@@ -568,10 +568,14 @@ request body の最小 shape:
 
 ```json
 {
-  "model_profile_id": "model_profile:mock_reply",
+  "model_profile_id": "model_profile:gemini_reply",
+  "display_name": "OpenRouter Gemini Reply",
   "kind": "generation",
-  "provider": "mock",
-  "model_name": "mock-reply"
+  "model": "openrouter/google/gemini-3.1-flash-lite-preview",
+  "auth": {
+    "type": "bearer",
+    "token": ""
+  }
 }
 ```
 
@@ -612,6 +616,9 @@ response:
 | `400` | `memory_set_id_mismatch` | path と body の `memory_set_id` が一致しない |
 | `400` | `model_preset_id_mismatch` | path と body の `model_preset_id` が一致しない |
 | `400` | `model_profile_id_mismatch` | path と body の `model_profile_id` が一致しない |
+| `400` | `invalid_model` | `model` が空または文字列ではない |
+| `400` | `invalid_model_base_url` | `base_url` が文字列ではない |
+| `400` | `invalid_model_auth` | `auth` が object ではない |
 | `400` | `invalid_editor_state_current` | `editor-state.current` が object ではない |
 | `400` | `missing_personas` | `editor-state.personas` が空 |
 | `400` | `missing_memory_sets` | `editor-state.memory_sets` が空 |
@@ -657,13 +664,13 @@ response:
     "model_presets": [
       {
         "model_preset_id": "model_preset:default",
-        "display_name": "Default Mock Preset"
+        "display_name": "Default OpenRouter Gemini Preset"
       }
     ],
     "model_profiles": [
       {
-        "model_profile_id": "model_profile:mock_reply",
-        "display_name": "Mock Reply"
+        "model_profile_id": "model_profile:gemini_reply",
+        "display_name": "OpenRouter Gemini Reply"
       }
     ]
   }

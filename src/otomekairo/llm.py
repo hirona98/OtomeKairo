@@ -98,7 +98,7 @@ class MockLLMClient:
         current_time: str,
     ) -> dict[str, Any]:
         # Block: ProviderCheck
-        self._assert_mock_provider(profile)
+        self._assert_mock_model(profile)
 
         # Block: HeuristicIntent
         normalized = observation_text.strip()
@@ -162,7 +162,7 @@ class MockLLMClient:
         recall_hint: dict,
     ) -> dict[str, Any]:
         # Block: ProviderCheck
-        self._assert_mock_provider(profile)
+        self._assert_mock_model(profile)
 
         # Block: DecisionRule
         normalized = observation_text.strip()
@@ -194,7 +194,7 @@ class MockLLMClient:
         decision: dict,
     ) -> dict[str, Any]:
         # Block: ProviderCheck
-        self._assert_mock_provider(profile)
+        self._assert_mock_model(profile)
 
         # Block: ReplyRule
         tone = persona["expression_style"]["tone"]
@@ -218,13 +218,13 @@ class MockLLMClient:
         return {
             "reply_text": reply_text,
             "reply_style_notes": f"tone={tone}",
-            "confidence_note": "mock_provider",
+            "confidence_note": "mock_model",
         }
 
     # Block: Helpers
-    def _assert_mock_provider(self, profile: dict) -> None:
-        if profile.get("provider") != "mock":
-            raise LLMError(f"Unsupported provider: {profile.get('provider')}")
+    def _assert_mock_model(self, profile: dict) -> None:
+        if profile.get("model") != "mock":
+            raise LLMError(f"Unsupported mock model: {profile.get('model')}")
 
 
 # Block: LiteLLMFacade
@@ -334,8 +334,8 @@ class LLMClient:
         # Block: Payload
         return {
             "reply_text": reply_text,
-            "reply_style_notes": f"provider={profile.get('provider')}",
-            "confidence_note": "litellm_provider",
+            "reply_style_notes": f"model={profile.get('model')}",
+            "confidence_note": "litellm_model",
         }
 
     # Block: LiteLLMCall
@@ -563,25 +563,14 @@ class LLMClient:
 
     # Block: ConfigHelpers
     def _is_mock_profile(self, profile: dict) -> bool:
-        return profile.get("provider") == "mock"
+        return profile.get("model") == "mock"
 
     def _resolve_litellm_model(self, profile: dict) -> str:
-        # Block: RawValues
-        provider = profile.get("provider")
-        model_name = profile.get("model_name")
-        if not isinstance(provider, str) or not provider.strip():
-            raise LLMError("model_profile.provider is missing.")
-        if not isinstance(model_name, str) or not model_name.strip():
-            raise LLMError("model_profile.model_name is missing.")
-
-        # Block: ExistingPrefix
-        if "/" in model_name:
-            return model_name
-
-        # Block: ProviderPrefix
-        if provider == "openai_compatible":
-            return f"openai/{model_name}"
-        return f"{provider}/{model_name}"
+        # Block: RawValue
+        model = profile.get("model")
+        if not isinstance(model, str) or not model.strip():
+            raise LLMError("model_profile.model is missing.")
+        return model.strip()
 
     def _resolve_api_key(self, profile: dict) -> str | None:
         # Block: AuthRead

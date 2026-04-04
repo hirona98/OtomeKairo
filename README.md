@@ -29,19 +29,31 @@
 
 ## LLM 接続
 
-OtomeKairo は `model_profile.provider` が `mock` のときは内蔵の開発用ロジックを使う。
-`mock` 以外の `generation` プロファイルは LiteLLM Python SDK 経由で呼び出す。
+OtomeKairo は `model_profile.model` が `mock` のときは内蔵の開発用ロジックを使う。
+`mock` 以外の `generation` プロファイルは LiteLLM Python SDK へ、そのまま `model` を渡して呼び出す。
+
+新規 state のサンプル値は OpenRouter 前提で、生成系は `openrouter/google/gemini-3.1-flash-lite-preview`、埋め込みは `openrouter/google/gemini-embedding-001` を使う。
 
 最小構成は次のとおりである。
 
-- `provider`
-  - 例: `openai`, `openai_compatible`, `azure`, `ollama`
-- `model_name`
-  - LiteLLM に渡すモデル名
+- `model`
+  - LiteLLM にそのまま渡すモデル文字列
+  - 例: `openrouter/google/gemini-3.1-flash-lite-preview`, `xai/grok-2-latest`, `openrouter/openai/gpt-5`, `ollama/llama3.1`
 - `base_url`
-  - 接続先 API のベース URL
+  - 省略可能
+  - ローカルや OpenAI 互換 API を明示したいときだけ使う
 - `auth`
+  - 省略可能
   - `type=none` または `token` を含む設定
+
+OpenRouter 経由の Gemini サンプルは次のとおりである。
+
+```yaml
+model: openrouter/google/gemini-3.1-flash-lite-preview
+auth:
+  type: bearer
+  token: ""
+```
 
 通常は `CocoroConsole` の設定画面からこれらを編集する。
 

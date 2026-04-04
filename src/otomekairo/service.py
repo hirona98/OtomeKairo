@@ -719,22 +719,17 @@ class OtomeKairoService:
             raise ServiceError(400, "model_profile_id_mismatch", "model_profile_id must match the path.")
 
         kind = definition.get("kind")
-        provider = definition.get("provider")
-        model_name = definition.get("model_name")
+        model = definition.get("model")
+        base_url = definition.get("base_url")
+        auth = definition.get("auth")
         if kind not in {"generation", "embedding"}:
             raise ServiceError(400, "invalid_model_profile_kind", "kind must be generation or embedding.")
-        if not isinstance(provider, str) or not provider:
-            raise ServiceError(400, "invalid_model_provider", "provider is required.")
-        if not isinstance(model_name, str) or not model_name:
-            raise ServiceError(400, "invalid_model_name", "model_name is required.")
-
-        # Block: NonMockProviders
-        if provider != "mock":
-            if not definition.get("base_url"):
-                raise ServiceError(400, "missing_model_base_url", "base_url is required for non-mock providers.")
-            auth = definition.get("auth")
-            if not isinstance(auth, dict) or not auth:
-                raise ServiceError(400, "missing_model_auth", "auth is required for non-mock providers.")
+        if not isinstance(model, str) or not model.strip():
+            raise ServiceError(400, "invalid_model", "model is required.")
+        if base_url is not None and not isinstance(base_url, str):
+            raise ServiceError(400, "invalid_model_base_url", "base_url must be a string.")
+        if auth is not None and not isinstance(auth, dict):
+            raise ServiceError(400, "invalid_model_auth", "auth must be an object.")
 
     def _delete_resource(
         self,

@@ -8,12 +8,14 @@ DEFAULT_PERSONA_ID = "persona:default"
 DEFAULT_MEMORY_SET_ID = "memory_set:default"
 DEFAULT_MODEL_PRESET_ID = "model_preset:default"
 
-DEFAULT_RECALL_PROFILE_ID = "model_profile:mock_recall"
-DEFAULT_DECISION_PROFILE_ID = "model_profile:mock_decision"
-DEFAULT_REPLY_PROFILE_ID = "model_profile:mock_reply"
-DEFAULT_MEMORY_PROFILE_ID = "model_profile:mock_memory"
-DEFAULT_EMBED_PROFILE_ID = "model_profile:mock_embedding"
+DEFAULT_RECALL_PROFILE_ID = "model_profile:gemini_recall"
+DEFAULT_DECISION_PROFILE_ID = "model_profile:gemini_decision"
+DEFAULT_REPLY_PROFILE_ID = "model_profile:gemini_reply"
+DEFAULT_MEMORY_PROFILE_ID = "model_profile:gemini_memory"
+DEFAULT_EMBED_PROFILE_ID = "model_profile:gemini_embedding"
 DEFAULT_DESKTOP_WATCH_INTERVAL_SECONDS = 300
+DEFAULT_GEMINI_GENERATION_MODEL = "openrouter/google/gemini-3.1-flash-lite-preview"
+DEFAULT_GEMINI_EMBEDDING_MODEL = "openrouter/google/gemini-embedding-001"
 
 
 # Block: Builder
@@ -62,73 +64,93 @@ def build_default_state() -> dict:
                 "description": "Empty starter memory set for the MVP slice.",
             }
         },
-        "model_profiles": {
-            DEFAULT_RECALL_PROFILE_ID: {
-                "model_profile_id": DEFAULT_RECALL_PROFILE_ID,
-                "display_name": "Mock Recall",
-                "kind": "generation",
-                "provider": "mock",
-                "model_name": "mock-recall",
-            },
-            DEFAULT_DECISION_PROFILE_ID: {
-                "model_profile_id": DEFAULT_DECISION_PROFILE_ID,
-                "display_name": "Mock Decision",
-                "kind": "generation",
-                "provider": "mock",
-                "model_name": "mock-decision",
-            },
-            DEFAULT_REPLY_PROFILE_ID: {
-                "model_profile_id": DEFAULT_REPLY_PROFILE_ID,
-                "display_name": "Mock Reply",
-                "kind": "generation",
-                "provider": "mock",
-                "model_name": "mock-reply",
-            },
-            DEFAULT_MEMORY_PROFILE_ID: {
-                "model_profile_id": DEFAULT_MEMORY_PROFILE_ID,
-                "display_name": "Mock Memory",
-                "kind": "generation",
-                "provider": "mock",
-                "model_name": "mock-memory",
-            },
-            DEFAULT_EMBED_PROFILE_ID: {
-                "model_profile_id": DEFAULT_EMBED_PROFILE_ID,
-                "display_name": "Mock Embedding",
-                "kind": "embedding",
-                "provider": "mock",
-                "model_name": "mock-embedding",
-            },
-        },
+        "model_profiles": build_default_model_profiles(),
         "model_presets": {
-            DEFAULT_MODEL_PRESET_ID: {
-                "model_preset_id": DEFAULT_MODEL_PRESET_ID,
-                "display_name": "Default Mock Preset",
-                "roles": {
-                    "reply_generation": {
-                        "model_profile_id": DEFAULT_REPLY_PROFILE_ID,
-                        "max_turns_window": 10,
-                        "max_tokens": 4096,
-                        "reply_web_search_enabled": True,
-                    },
-                    "decision_generation": {
-                        "model_profile_id": DEFAULT_DECISION_PROFILE_ID,
-                        "max_tokens": 4096,
-                    },
-                    "recall_hint_generation": {
-                        "model_profile_id": DEFAULT_RECALL_PROFILE_ID,
-                        "max_tokens": 2048,
-                    },
-                    "memory_interpretation": {
-                        "model_profile_id": DEFAULT_MEMORY_PROFILE_ID,
-                        "max_tokens": 4096,
-                    },
-                    "embedding": {
-                        "model_profile_id": DEFAULT_EMBED_PROFILE_ID,
-                        "similar_episodes_limit": 40,
-                        "embedding_dimension": 3072,
-                    },
-                },
-            }
+            DEFAULT_MODEL_PRESET_ID: build_default_model_preset(),
+        },
+    }
+
+
+def build_default_model_profiles() -> dict:
+    # Block: GenerationProfiles
+    generation_profile = {
+        "kind": "generation",
+        "model": DEFAULT_GEMINI_GENERATION_MODEL,
+        "auth": {
+            "type": "bearer",
+            "token": "",
+        },
+    }
+
+    # Block: EmbeddingProfile
+    embedding_profile = {
+        "kind": "embedding",
+        "model": DEFAULT_GEMINI_EMBEDDING_MODEL,
+        "auth": {
+            "type": "bearer",
+            "token": "",
+        },
+    }
+
+    # Block: Result
+    return {
+        DEFAULT_RECALL_PROFILE_ID: {
+            "model_profile_id": DEFAULT_RECALL_PROFILE_ID,
+            "display_name": "OpenRouter Gemini Recall",
+            **generation_profile,
+        },
+        DEFAULT_DECISION_PROFILE_ID: {
+            "model_profile_id": DEFAULT_DECISION_PROFILE_ID,
+            "display_name": "OpenRouter Gemini Decision",
+            **generation_profile,
+        },
+        DEFAULT_REPLY_PROFILE_ID: {
+            "model_profile_id": DEFAULT_REPLY_PROFILE_ID,
+            "display_name": "OpenRouter Gemini Reply",
+            **generation_profile,
+        },
+        DEFAULT_MEMORY_PROFILE_ID: {
+            "model_profile_id": DEFAULT_MEMORY_PROFILE_ID,
+            "display_name": "OpenRouter Gemini Memory",
+            **generation_profile,
+        },
+        DEFAULT_EMBED_PROFILE_ID: {
+            "model_profile_id": DEFAULT_EMBED_PROFILE_ID,
+            "display_name": "OpenRouter Gemini Embedding",
+            **embedding_profile,
+        },
+    }
+
+
+def build_default_model_preset() -> dict:
+    # Block: Result
+    return {
+        "model_preset_id": DEFAULT_MODEL_PRESET_ID,
+        "display_name": "Default OpenRouter Gemini Preset",
+        "roles": {
+            "reply_generation": {
+                "model_profile_id": DEFAULT_REPLY_PROFILE_ID,
+                "max_turns_window": 10,
+                "max_tokens": 4096,
+                "reply_web_search_enabled": True,
+            },
+            "decision_generation": {
+                "model_profile_id": DEFAULT_DECISION_PROFILE_ID,
+                "max_tokens": 4096,
+            },
+            "recall_hint_generation": {
+                "model_profile_id": DEFAULT_RECALL_PROFILE_ID,
+                "max_tokens": 2048,
+            },
+            "memory_interpretation": {
+                "model_profile_id": DEFAULT_MEMORY_PROFILE_ID,
+                "max_tokens": 4096,
+            },
+            "embedding": {
+                "model_profile_id": DEFAULT_EMBED_PROFILE_ID,
+                "similar_episodes_limit": 40,
+                "embedding_dimension": 3072,
+            },
         },
     }
 
