@@ -5,6 +5,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+import sqlite_vec
+
 from otomekairo.state_store import StateStore
 from otomekairo.store_schema import MEMORY_DB_FILE_NAME, StoreSchemaMixin
 
