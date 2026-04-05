@@ -178,13 +178,32 @@ class EventStreamRegistry:
         return session_id
 
     def register_hello(self, session_id: str, *, client_id: str, caps: list[str]) -> None:
-        # Block: Update
+        # Block: Snapshot
+        replaced_sessions: list[dict[str, Any]] = []
         with self._lock:
             session = self._sessions.get(session_id)
             if session is None:
                 raise KeyError(session_id)
+
+            # Block: ReplaceExisting
+            for existing_session_id, existing_session in list(self._sessions.items()):
+                if existing_session_id == session_id:
+                    continue
+                if existing_session.get("client_id") != client_id:
+                    continue
+                replaced_sessions.append(existing_session)
+                self._sessions.pop(existing_session_id, None)
+
+            # Block: Update
             session["client_id"] = client_id
             session["caps"] = set(caps)
+
+        # Block: CloseReplaced
+        for replaced_session in replaced_sessions:
+            try:
+                replaced_session["websocket"].close()
+            except OSError:
+                continue
 
     def remove_connection(self, session_id: str) -> None:
         # Block: Remove
@@ -217,33 +236,27 @@ class EventStreamRegistry:
     def send_to_client(self, client_id: str, payload: dict[str, Any]) -> bool:
         # Block: Snapshot
         with self._lock:
-            sessions = [
-                session
-                for session in self._sessions.values()
-                if session.get("client_id") == client_id
-            ]
+            target_session = None
+            for session in self._sessions.values():
+                if session.get("client_id") != client_id:
+                    continue
+                target_session = session
 
         # Block: Empty
-        if not sessions:
+        if target_session is None:
             return False
 
         # Block: Send
-        sent = False
-        stale_session_ids: list[str] = []
-        for session in sessions:
-            websocket = session["websocket"]
-            try:
-                websocket.send_json(payload)
-                sent = True
-            except OSError:
-                stale_session_ids.append(session["session_id"])
-
-        # Block: Cleanup
-        for session_id in stale_session_ids:
-            self.remove_connection(session_id)
+        websocket = target_session["websocket"]
+        try:
+            websocket.send_json(payload)
+        except OSError:
+            # Block: Cleanup
+            self.remove_connection(target_session["session_id"])
+            return False
 
         # Block: Result
-        return sent
+        return True
 
     def close_all(self) -> None:
         # Block: Snapshot

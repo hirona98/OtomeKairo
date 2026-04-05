@@ -657,13 +657,21 @@ class OtomeKairoService:
             normalized_images.append(image.strip())
 
         # Block: StoreResponse
+        normalized_request_id = request_id.strip()
+        normalized_client_id = client_id.strip()
         with self._vision_capture_lock:
-            pending = self._pending_vision_capture_requests.get(request_id.strip())
+            pending = self._pending_vision_capture_requests.get(normalized_request_id)
             if pending is None:
                 return {}
+            if pending.get("target_client_id") != normalized_client_id:
+                raise ServiceError(
+                    409,
+                    "capture_client_id_mismatch",
+                    "client_id does not match the pending capture target.",
+                )
             pending["response"] = {
-                "request_id": request_id.strip(),
-                "client_id": client_id.strip(),
+                "request_id": normalized_request_id,
+                "client_id": normalized_client_id,
                 "images": normalized_images,
                 "client_context": client_context or {},
                 "error": error.strip() if isinstance(error, str) and error.strip() else None,
@@ -859,7 +867,6 @@ class OtomeKairoService:
 
             # Block: Timestamp
             started_at = self._now_iso()
-            self._set_last_desktop_watch_at(started_at)
 
             # Block: Capture
             capture_response = self._request_desktop_watch_capture(target_client_id=target_client_id)
@@ -867,6 +874,9 @@ class OtomeKairoService:
                 return
             if not capture_response["images"]:
                 return
+
+            # Block: SuccessTimestamp
+            self._set_last_desktop_watch_at(self._now_iso())
 
             # Block: Observation
             selected_candidate = self._select_due_future_act_candidate(
