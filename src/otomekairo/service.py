@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from otomekairo.llm import LLMClient, LLMError
+from otomekairo.memory import MemoryConsolidator
 from otomekairo.store import FileStore
 
 
@@ -35,6 +36,7 @@ class OtomeKairoService:
         # Block: Dependencies
         self.store = FileStore(root_dir)
         self.llm = LLMClient()
+        self.memory = MemoryConsolidator(store=self.store, llm=self.llm)
 
     # Block: Bootstrap
     def probe_bootstrap(self) -> dict[str, Any]:
@@ -241,6 +243,7 @@ class OtomeKairoService:
             in_use_code="selected_memory_set_delete_forbidden",
             deleted_key="deleted_memory_set_id",
         )
+        self.store.delete_memory_set_records(memory_set_id)
         self.store.write_state(state)
         return {
             "deleted_memory_set_id": memory_set_id,
@@ -471,7 +474,7 @@ class OtomeKairoService:
             # Block: Result
             result_kind = decision["kind"]
             finished_at = self._now_iso()
-            self._persist_cycle_success(
+            events = self._persist_cycle_success(
                 cycle_id=cycle_id,
                 started_at=started_at,
                 finished_at=finished_at,
@@ -487,6 +490,22 @@ class OtomeKairoService:
                 result_kind=result_kind,
                 reply_payload=reply_payload,
             )
+
+            # Block: TurnConsolidation
+            try:
+                self.memory.consolidate_turn(
+                    state=state,
+                    cycle_id=cycle_id,
+                    finished_at=finished_at,
+                    observation_text=observation_text,
+                    recall_hint=recall_hint,
+                    decision=decision,
+                    reply_payload=reply_payload,
+                    events=events,
+                )
+            except Exception:
+                pass
+
             return {
                 "cycle_id": cycle_id,
                 "result_kind": result_kind,
@@ -810,7 +829,7 @@ class OtomeKairoService:
         decision: dict,
         result_kind: str,
         reply_payload: dict | None,
-    ) -> None:
+    ) -> list[dict[str, Any]]:
         # Block: EventRecords
         selected_memory_set_id = state["selected_memory_set_id"]
         events = [
@@ -916,6 +935,7 @@ class OtomeKairoService:
             cycle_summary=cycle_summary,
             cycle_trace=cycle_trace,
         )
+        return events
 
     def _persist_cycle_failure(
         self,

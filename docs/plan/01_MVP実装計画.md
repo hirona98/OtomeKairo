@@ -221,6 +221,21 @@ SQLite 接続では、少なくとも次を固定する。
 ここで重要なのは、反射的に高度な再整理へ進まないことである。
 まずは `turn consolidation` だけで `preference`、`commitment`、`fact`、`interpretation` を安定して回せるようにする。
 
+現状の実装は、次まで入っている。
+
+- `episode_digests` の保存
+- `memory_interpretation` 契約の追加
+- `preference`、`commitment`、`interpretation` の候補抽出
+- 比較キーだけを使う `create / reinforce / refine / supersede` の反映
+- `revisions` の保存
+- `affect_state` の upsert
+
+この段階では、まだ次は未着手である。
+
+- `revoke / dormant / noop` の更新判定
+- `fact` の安定抽出
+- `sqlite-vec` を使う連想レーン
+
 #### 3-3. 構造レーンの実装
 
 次に、SQLite の通常問い合わせだけで組める想起を先に通す。
