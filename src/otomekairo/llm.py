@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -285,6 +286,10 @@ class MockLLMClient:
         if primary_intent == "commitment_check":
             focus_scopes.append("relationship:self|user")
 
+        # Block: MentionedHints
+        mentioned_entities = self._mock_mentioned_entities(normalized)
+        mentioned_topics = self._mock_mentioned_topics(normalized)
+
         # Block: Payload
         payload = {
             "primary_intent": primary_intent,
@@ -292,11 +297,55 @@ class MockLLMClient:
             "confidence": 0.7 if normalized else 0.1,
             "time_reference": time_reference,
             "focus_scopes": focus_scopes[:4],
-            "mentioned_entities": [],
-            "mentioned_topics": [],
+            "mentioned_entities": mentioned_entities[:4],
+            "mentioned_topics": mentioned_topics[:4],
         }
         validate_recall_hint_contract(payload)
         return payload
+
+    def _mock_mentioned_entities(self, normalized: str) -> list[str]:
+        # Block: Empty
+        if not normalized:
+            return []
+
+        # Block: Matches
+        entities: list[str] = []
+        for match in re.findall(r"([一-龠ぁ-んァ-ヶA-Za-z0-9]{1,20})(?:さん|君|ちゃん)", normalized):
+            tag = f"person:{match}"
+            if tag not in entities:
+                entities.append(tag)
+            if len(entities) >= 4:
+                break
+
+        # Block: Result
+        return entities
+
+    def _mock_mentioned_topics(self, normalized: str) -> list[str]:
+        # Block: Empty
+        if not normalized:
+            return []
+
+        # Block: KeywordMap
+        topic_keywords = {
+            "睡眠": ("眠", "寝", "朝型", "夜型"),
+            "食事": ("食べ", "ご飯", "ランチ", "夕飯", "カフェ"),
+            "仕事": ("仕事", "会社", "会議", "残業", "出勤"),
+            "約束": ("約束", "予定", "今度", "また今度"),
+            "関係": ("関係", "距離", "話しにく", "ぎくしゃく"),
+            "相談": ("相談", "悩", "困っ", "どうしたら"),
+        }
+
+        # Block: Collect
+        topics: list[str] = []
+        for topic_name, keywords in topic_keywords.items():
+            if not any(keyword in normalized for keyword in keywords):
+                continue
+            topics.append(topic_name)
+            if len(topics) >= 4:
+                break
+
+        # Block: Result
+        return topics
 
     def generate_decision(
         self,

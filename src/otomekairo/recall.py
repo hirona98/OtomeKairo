@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 from otomekairo.llm import LLMClient
+from otomekairo.memory_utils import normalized_text_list
 from otomekairo.store import FileStore
 
 
@@ -22,6 +23,11 @@ SECTION_LIMITS = {
 GLOBAL_RECALL_LIMIT = 14
 ASSOCIATION_MEMORY_LIMIT = 6
 ASSOCIATION_DIGEST_LIMIT = 4
+ASSOCIATION_QUERY_KIND_WEIGHTS = {
+    "observation": 1.0,
+    "entity": 0.92,
+    "topic": 0.88,
+}
 EVENT_EVIDENCE_LIMIT = 3
 EVENT_EVIDENCE_INTENTS = {
     "commitment_check",
@@ -333,9 +339,9 @@ class RecallBuilder:
         recall_hint: dict[str, Any],
         scope_context: dict[str, list[tuple[str, str]]],
     ) -> dict[str, list[dict[str, Any]]]:
-        # Block: Empty
-        query_text = self._association_query_text(observation_text, recall_hint)
-        if not query_text:
+        # Block: QuerySpecs
+        query_specs = self._association_query_specs(observation_text, recall_hint)
+        if not query_specs:
             return self._empty_association_sections()
 
         # Block: EmbeddingContext
@@ -346,62 +352,92 @@ class RecallBuilder:
         embedding_dimension = embedding_role["embedding_dimension"]
         embedding_preset = self._embedding_preset(embedding_profile_id, embedding_dimension)
 
-        # Block: QueryEmbedding
-        query_embedding = self.llm.generate_embeddings(
+        # Block: QueryEmbeddings
+        query_embeddings = self.llm.generate_embeddings(
             profile=embedding_profile,
             role_settings=embedding_role,
-            texts=[query_text],
-        )[0]
-
-        # Block: MemoryHits
-        memory_hits = self.store.search_memory_unit_vector_entries(
-            memory_set_id=state["selected_memory_set_id"],
-            embedding_preset=embedding_preset,
-            query_embedding=query_embedding,
-            embedding_dimension=embedding_dimension,
-            limit=ASSOCIATION_MEMORY_LIMIT,
-            exclude_source_types=["commitment"],
-            statuses=list(ACTIVE_MEMORY_STATUSES),
+            texts=[spec["text"] for spec in query_specs],
         )
 
-        # Block: DigestHits
-        digest_hits = self.store.search_episode_digest_vector_entries(
-            memory_set_id=state["selected_memory_set_id"],
-            embedding_preset=embedding_preset,
-            query_embedding=query_embedding,
-            embedding_dimension=embedding_dimension,
-            limit=ASSOCIATION_DIGEST_LIMIT,
-            scope_filters=None,
-            require_open_loops=recall_hint["primary_intent"] == "commitment_check",
-        )
+        # Block: CandidateState
+        memory_candidates: dict[str, dict[str, Any]] = {}
+        digest_candidates: dict[str, dict[str, Any]] = {}
+
+        # Block: QueryLoop
+        for spec, query_embedding in zip(query_specs, query_embeddings, strict=True):
+            # Block: MemoryHits
+            memory_hits = self.store.search_memory_unit_vector_entries(
+                memory_set_id=state["selected_memory_set_id"],
+                embedding_preset=embedding_preset,
+                query_embedding=query_embedding,
+                embedding_dimension=embedding_dimension,
+                limit=self._association_search_limit(
+                    source_kind="memory_unit",
+                    query_kind=spec["kind"],
+                ),
+                exclude_source_types=["commitment"],
+                statuses=list(ACTIVE_MEMORY_STATUSES),
+            )
+
+            # Block: MemoryMerge
+            for hit in memory_hits:
+                item = self._to_memory_item(hit["record"])
+                section_name = self._section_name_for_memory_item(item)
+                if section_name is None:
+                    continue
+                item["retrieval_lane"] = "association"
+                item["association_score"] = self._association_score(
+                    recall_hint=recall_hint,
+                    distance=hit["distance"],
+                    item=item,
+                    query_kind=spec["kind"],
+                    query_weight=float(spec["weight"]),
+                )
+                self._merge_association_candidate(
+                    candidates=memory_candidates,
+                    item=item,
+                    query_kind=spec["kind"],
+                )
+
+            # Block: DigestHits
+            digest_hits = self.store.search_episode_digest_vector_entries(
+                memory_set_id=state["selected_memory_set_id"],
+                embedding_preset=embedding_preset,
+                query_embedding=query_embedding,
+                embedding_dimension=embedding_dimension,
+                limit=self._association_search_limit(
+                    source_kind="episode_digest",
+                    query_kind=spec["kind"],
+                ),
+                scope_filters=None,
+                require_open_loops=recall_hint["primary_intent"] == "commitment_check",
+            )
+
+            # Block: DigestMerge
+            for hit in digest_hits:
+                item = self._to_digest_item(hit["record"])
+                item["retrieval_lane"] = "association"
+                item["association_score"] = self._association_score(
+                    recall_hint=recall_hint,
+                    distance=hit["distance"],
+                    item=item,
+                    query_kind=spec["kind"],
+                    query_weight=float(spec["weight"]),
+                )
+                self._merge_association_candidate(
+                    candidates=digest_candidates,
+                    item=item,
+                    query_kind=spec["kind"],
+                )
 
         # Block: Sections
         sections = self._empty_association_sections()
-
-        # Block: MemoryItems
-        for hit in memory_hits:
-            item = self._to_memory_item(hit["record"])
-            item["retrieval_lane"] = "association"
-            item["association_score"] = self._association_score(
-                recall_hint=recall_hint,
-                distance=hit["distance"],
-                item=item,
-            )
+        for item in self._finalize_association_candidates(memory_candidates):
             section_name = self._section_name_for_memory_item(item)
             if section_name is None:
                 continue
             sections[section_name].append(item)
-
-        # Block: DigestItems
-        for hit in digest_hits:
-            item = self._to_digest_item(hit["record"])
-            item["retrieval_lane"] = "association"
-            item["association_score"] = self._association_score(
-                recall_hint=recall_hint,
-                distance=hit["distance"],
-                item=item,
-            )
-            sections["episodic_evidence"].append(item)
+        sections["episodic_evidence"].extend(self._finalize_association_candidates(digest_candidates))
 
         # Block: Sort
         for section_name, items in sections.items():
@@ -416,18 +452,201 @@ class RecallBuilder:
         # Block: Result
         return sections
 
-    def _association_query_text(self, observation_text: str, recall_hint: dict[str, Any]) -> str:
-        # Block: Parts
-        parts = [observation_text.strip()]
-        mentioned_topics = [topic for topic in recall_hint.get("mentioned_topics", []) if isinstance(topic, str) and topic.strip()]
-        mentioned_entities = [entity for entity in recall_hint.get("mentioned_entities", []) if isinstance(entity, str) and entity.strip()]
-        if mentioned_topics:
-            parts.append("topics: " + ", ".join(mentioned_topics[:4]))
-        if mentioned_entities:
-            parts.append("entities: " + ", ".join(mentioned_entities[:4]))
+    def _association_query_specs(
+        self,
+        observation_text: str,
+        recall_hint: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        # Block: BaseState
+        specs: list[dict[str, Any]] = []
+        normalized_observation = observation_text.strip()
+
+        # Block: ObservationQuery
+        observation_query = self._association_observation_query_text(
+            normalized_observation,
+            recall_hint,
+        )
+        if observation_query:
+            specs.append(
+                {
+                    "kind": "observation",
+                    "text": observation_query,
+                    "weight": self._association_query_weight(
+                        query_kind="observation",
+                        recall_hint=recall_hint,
+                    ),
+                }
+            )
+
+        # Block: EntityQuery
+        entity_terms = self._association_hint_terms(recall_hint.get("mentioned_entities", []))
+        if entity_terms:
+            specs.append(
+                {
+                    "kind": "entity",
+                    "text": "関連対象\n" + "\n".join(entity_terms),
+                    "weight": self._association_query_weight(
+                        query_kind="entity",
+                        recall_hint=recall_hint,
+                    ),
+                }
+            )
+
+        # Block: TopicQuery
+        topic_terms = self._association_hint_terms(recall_hint.get("mentioned_topics", []))
+        if topic_terms:
+            specs.append(
+                {
+                    "kind": "topic",
+                    "text": "関連話題\n" + "\n".join(topic_terms),
+                    "weight": self._association_query_weight(
+                        query_kind="topic",
+                        recall_hint=recall_hint,
+                    ),
+                }
+            )
 
         # Block: Result
-        return "\n".join(part for part in parts if part)
+        return specs
+
+    def _association_observation_query_text(
+        self,
+        observation_text: str,
+        recall_hint: dict[str, Any],
+    ) -> str:
+        # Block: Empty
+        if not observation_text:
+            return ""
+
+        # Block: Parts
+        parts = [observation_text]
+        primary_intent = recall_hint["primary_intent"]
+        time_reference = str(recall_hint.get("time_reference", "none")).strip()
+        if primary_intent:
+            parts.append(f"意図: {primary_intent}")
+        if time_reference and time_reference != "none":
+            parts.append(f"時間軸: {time_reference}")
+
+        # Block: Result
+        return "\n".join(parts)
+
+    def _association_hint_terms(self, values: list[Any]) -> list[str]:
+        # Block: State
+        expanded: list[str] = []
+
+        # Block: Expand
+        for value in normalized_text_list(values, limit=4):
+            expanded.extend(self._expanded_association_terms(value))
+
+        # Block: Result
+        return normalized_text_list(expanded, limit=8)
+
+    def _expanded_association_terms(self, value: str) -> list[str]:
+        # Block: State
+        terms = [value]
+
+        # Block: TaggedValue
+        prefix, separator, suffix = value.partition(":")
+        if separator and suffix:
+            cleaned_suffix = suffix.strip().strip("<>").replace("|", " ")
+            if cleaned_suffix:
+                terms.append(cleaned_suffix)
+                terms.append(f"{prefix} {cleaned_suffix}")
+
+        # Block: Result
+        return normalized_text_list(terms, limit=3)
+
+    def _association_query_weight(
+        self,
+        *,
+        query_kind: str,
+        recall_hint: dict[str, Any],
+    ) -> float:
+        # Block: Base
+        weight = ASSOCIATION_QUERY_KIND_WEIGHTS.get(query_kind, 1.0)
+        primary_intent = recall_hint["primary_intent"]
+        time_reference = recall_hint.get("time_reference")
+
+        # Block: IntentAdjust
+        if primary_intent == "reminisce" and query_kind == "observation":
+            weight += 0.08
+        if primary_intent in {"commitment_check", "meta_relationship"} and query_kind == "entity":
+            weight += 0.12
+        if primary_intent in {"consult", "check_state", "preference_query"} and query_kind == "topic":
+            weight += 0.12
+
+        # Block: TimeAdjust
+        if time_reference == "past" and query_kind == "observation":
+            weight += 0.04
+        if time_reference == "future" and query_kind == "entity":
+            weight += 0.04
+        if time_reference == "persistent" and query_kind == "topic":
+            weight += 0.04
+
+        # Block: Result
+        return weight
+
+    def _association_search_limit(
+        self,
+        *,
+        source_kind: str,
+        query_kind: str,
+    ) -> int:
+        # Block: Base
+        if source_kind == "memory_unit":
+            base_limit = ASSOCIATION_MEMORY_LIMIT
+        else:
+            base_limit = ASSOCIATION_DIGEST_LIMIT
+
+        # Block: QueryAdjust
+        if query_kind == "observation":
+            return base_limit
+        return max(2, base_limit - 2)
+
+    def _merge_association_candidate(
+        self,
+        *,
+        candidates: dict[str, dict[str, Any]],
+        item: dict[str, Any],
+        query_kind: str,
+    ) -> None:
+        # Block: Lookup
+        record_id = self._record_id(item)
+        existing = candidates.get(record_id)
+        if existing is None:
+            item["association_query_kinds"] = [query_kind]
+            item["association_match_count"] = 1
+            candidates[record_id] = item
+            return
+
+        # Block: Score
+        existing["association_score"] = max(
+            float(existing.get("association_score", 0.0)),
+            float(item.get("association_score", 0.0)),
+        )
+
+        # Block: QueryKinds
+        query_kinds = normalized_text_list(
+            list(existing.get("association_query_kinds", [])) + [query_kind],
+            limit=4,
+        )
+        existing["association_query_kinds"] = query_kinds
+        existing["association_match_count"] = len(query_kinds)
+
+    def _finalize_association_candidates(
+        self,
+        candidates: dict[str, dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        # Block: Finalize
+        finalized: list[dict[str, Any]] = []
+        for item in candidates.values():
+            match_count = int(item.get("association_match_count", 1))
+            if match_count > 1:
+                item["association_score"] = float(item.get("association_score", 0.0)) + 0.03 * (match_count - 1)
+            finalized.append(item)
+
+        # Block: Result
+        return finalized
 
     def _association_score(
         self,
@@ -435,10 +654,19 @@ class RecallBuilder:
         recall_hint: dict[str, Any],
         distance: float,
         item: dict[str, Any],
+        query_kind: str,
+        query_weight: float,
     ) -> float:
         # Block: Base
-        score = 1.0 / (1.0 + max(distance, 0.0))
+        score = query_weight * (1.0 / (1.0 + max(distance, 0.0)))
         primary_intent = recall_hint["primary_intent"]
+
+        # Block: QueryKindBoost
+        item_scope_type = self._association_item_scope_type(item)
+        if query_kind == "entity" and item_scope_type in {"user", "relationship"}:
+            score += 0.05
+        if query_kind == "topic" and item_scope_type == "topic":
+            score += 0.05
 
         # Block: FocusBoost
         if self._focus_scope_matches(recall_hint.get("focus_scopes", []), item):
@@ -462,6 +690,14 @@ class RecallBuilder:
 
         # Block: Result
         return score
+
+    def _association_item_scope_type(self, item: dict[str, Any]) -> str:
+        # Block: EpisodeDigest
+        if item["source_kind"] == "episode_digest":
+            return str(item.get("primary_scope_type", ""))
+
+        # Block: MemoryUnit
+        return str(item.get("scope_type", ""))
 
     def _focus_scope_matches(self, focus_scopes: list[Any], item: dict[str, Any]) -> bool:
         # Block: Parse
