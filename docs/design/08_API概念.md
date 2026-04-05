@@ -13,7 +13,7 @@
 - `CocoroConsole` と OtomeKairo の責務境界を API 上でどう表すか
 
 ここでは API パスや JSON の詳細形式そのものは扱わない。
-厳密な API 仕様は `14_API仕様.md` を正とする。
+厳密な API 仕様は `14_API仕様.md` と `design/api/` 配下を正とする。
 OtomeKairo に自然な操作面だけを固定する。
 
 接続 bootstrap と認証の前段は、この文書ではなく `11_接続と認証.md` を正とする。
@@ -88,7 +88,7 @@ OtomeKairo が event/control stream で capture request を出し、クライア
 ここでは、記憶内部テーブルや想起候補の生データをそのまま返す面は作らない。
 MVP の API は、OtomeKairo の運用に必要な要約状態だけを返す。
 ここでいう参照は、ID、内部参照の要約、または軽量な反映状態のいずれかで返してよい。
-具体形式は `14_API仕様.md` で定める。
+具体形式は `14_API仕様.md` と `design/api/` 配下で定める。
 
 <!-- Block: EventControlSurface -->
 ## event/control stream 面
@@ -190,7 +190,7 @@ MVP では、次は API の主対象にしない。
 - モデルプリセットとモデルプロファイルは設定面と列挙面から扱えるようにする
 - `model_profile` の各項目は他の設定値と同じく設定面で送受信する
 - 設定 API の経路は HTTPS に固定し、利用範囲はローカルネットワーク内を前提にする
-- 厳密な API 仕様は `14_API仕様.md` で定める
+- 厳密な API 仕様は `14_API仕様.md` と `design/api/` 配下で定める
 - 接続 bootstrap と認証の前段は `11_接続と認証.md` で別に扱う
 - デバッグ記録の inspection 面は `12_デバッグ可能性.md` で別に扱う
 - 自発判断の `future_act` は `13_自発判断と自発行動.md` で別に扱い、通常 API の外向き結果にはしない
