@@ -21,7 +21,7 @@ LEGACY_RETRIEVAL_RUNS_FILE_NAME = "retrieval_runs.jsonl"
 LEGACY_CYCLE_SUMMARIES_FILE_NAME = "cycle_summaries.jsonl"
 LEGACY_CYCLE_TRACES_FILE_NAME = "cycle_traces.jsonl"
 
-CURRENT_MEMORY_DB_VERSION = 4
+CURRENT_MEMORY_DB_VERSION = 5
 
 
 # Block: Store
@@ -106,6 +106,21 @@ class FileStore:
             for affect_update in affect_updates:
                 self._upsert_affect_state(conn, affect_update)
 
+    def persist_reflection_run(
+        self,
+        *,
+        reflection_run: dict[str, Any],
+        memory_actions: list[dict[str, Any]],
+    ) -> None:
+        # Block: Transaction
+        with self._memory_db() as conn:
+            # Block: ReflectionRun
+            self._insert_reflection_run(conn, reflection_run)
+
+            # Block: MemoryActions
+            for action in memory_actions:
+                self._apply_memory_action(conn, action)
+
     def list_cycle_summaries(self, limit: int) -> list[dict[str, Any]]:
         # Block: Query
         with self._memory_db() as conn:
@@ -132,6 +147,25 @@ class FileStore:
                 WHERE cycle_id = ?
                 """,
                 (cycle_id,),
+            ).fetchone()
+
+        # Block: Result
+        if row is None:
+            return None
+        return json.loads(row["payload_json"])
+
+    def get_latest_reflection_run(self, memory_set_id: str) -> dict[str, Any] | None:
+        # Block: Query
+        with self._memory_db() as conn:
+            row = conn.execute(
+                """
+                SELECT payload_json
+                FROM reflection_runs
+                WHERE memory_set_id = ?
+                ORDER BY finished_at DESC, rowid DESC
+                LIMIT 1
+                """,
+                (memory_set_id,),
             ).fetchone()
 
         # Block: Result
@@ -172,6 +206,59 @@ class FileStore:
             for row in reversed(rows)
         ]
         return turns
+
+    def count_cycle_summaries_since(
+        self,
+        *,
+        memory_set_id: str,
+        since_iso: str | None,
+    ) -> int:
+        # Block: QueryParts
+        clauses = ["selected_memory_set_id = ?", "failed = 0"]
+        params: list[Any] = [memory_set_id]
+        if isinstance(since_iso, str) and since_iso:
+            clauses.append("started_at > ?")
+            params.append(since_iso)
+
+        query = f"""
+            SELECT COUNT(*)
+            FROM cycle_summaries
+            WHERE {" AND ".join(clauses)}
+        """
+
+        # Block: Query
+        with self._memory_db() as conn:
+            count = conn.execute(query, params).fetchone()[0]
+
+        # Block: Result
+        return int(count)
+
+    def count_high_salience_episode_digests_since(
+        self,
+        *,
+        memory_set_id: str,
+        since_iso: str | None,
+        salience_threshold: float,
+    ) -> int:
+        # Block: QueryParts
+        clauses = ["memory_set_id = ?", "salience >= ?"]
+        params: list[Any] = [memory_set_id, salience_threshold]
+        if isinstance(since_iso, str) and since_iso:
+            clauses.append("formed_at > ?")
+            params.append(since_iso)
+
+        query = f"""
+            SELECT COUNT(*)
+            FROM episode_digests
+            WHERE {" AND ".join(clauses)}
+        """
+
+        # Block: Query
+        with self._memory_db() as conn:
+            count = conn.execute(query, params).fetchone()[0]
+
+        # Block: Result
+        return int(count)
 
     def find_memory_units_for_compare(
         self,
@@ -283,6 +370,59 @@ class FileStore:
         # Block: Result
         return [json.loads(row["payload_json"]) for row in rows]
 
+    def list_memory_units_for_reflection(
+        self,
+        *,
+        memory_set_id: str,
+        statuses: list[str] | None = None,
+        scope_types: list[str] | None = None,
+        include_memory_types: list[str] | None = None,
+        exclude_memory_types: list[str] | None = None,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        # Block: QueryParts
+        clauses = ["memory_set_id = ?"]
+        params: list[Any] = [memory_set_id]
+
+        # Block: Statuses
+        if statuses:
+            placeholders = ", ".join("?" for _ in statuses)
+            clauses.append(f"status IN ({placeholders})")
+            params.extend(statuses)
+
+        # Block: ScopeTypes
+        if scope_types:
+            placeholders = ", ".join("?" for _ in scope_types)
+            clauses.append(f"scope_type IN ({placeholders})")
+            params.extend(scope_types)
+
+        # Block: IncludeMemoryTypes
+        if include_memory_types:
+            placeholders = ", ".join("?" for _ in include_memory_types)
+            clauses.append(f"memory_type IN ({placeholders})")
+            params.extend(include_memory_types)
+
+        # Block: ExcludeMemoryTypes
+        if exclude_memory_types:
+            placeholders = ", ".join("?" for _ in exclude_memory_types)
+            clauses.append(f"memory_type NOT IN ({placeholders})")
+            params.extend(exclude_memory_types)
+
+        query = f"""
+            SELECT payload_json
+            FROM memory_units
+            WHERE {" AND ".join(clauses)}
+            ORDER BY COALESCE(last_confirmed_at, formed_at) DESC, salience DESC, rowid DESC
+            LIMIT ?
+        """
+
+        # Block: Query
+        with self._memory_db() as conn:
+            rows = conn.execute(query, (*params, limit)).fetchall()
+
+        # Block: Result
+        return [json.loads(row["payload_json"]) for row in rows]
+
     def list_episode_digests_for_recall(
         self,
         *,
@@ -312,6 +452,35 @@ class FileStore:
             FROM episode_digests
             WHERE {" AND ".join(clauses)}
             ORDER BY has_open_loops DESC, salience DESC, formed_at DESC, rowid DESC
+            LIMIT ?
+        """
+
+        # Block: Query
+        with self._memory_db() as conn:
+            rows = conn.execute(query, (*params, limit)).fetchall()
+
+        # Block: Result
+        return [json.loads(row["payload_json"]) for row in rows]
+
+    def list_episode_digests_for_reflection(
+        self,
+        *,
+        memory_set_id: str,
+        since_iso: str | None,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        # Block: QueryParts
+        clauses = ["memory_set_id = ?"]
+        params: list[Any] = [memory_set_id]
+        if isinstance(since_iso, str) and since_iso:
+            clauses.append("formed_at > ?")
+            params.append(since_iso)
+
+        query = f"""
+            SELECT payload_json
+            FROM episode_digests
+            WHERE {" AND ".join(clauses)}
+            ORDER BY formed_at DESC, salience DESC, rowid DESC
             LIMIT ?
         """
 
@@ -635,6 +804,7 @@ class FileStore:
             conn.execute("DELETE FROM affect_state WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM memory_units WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM episode_digests WHERE memory_set_id = ?", (memory_set_id,))
+            conn.execute("DELETE FROM reflection_runs WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM events WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM retrieval_runs WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM cycle_traces WHERE selected_memory_set_id = ?", (memory_set_id,))
@@ -652,6 +822,8 @@ class FileStore:
                 self._apply_schema_v3(conn)
             if version < 4:
                 self._apply_schema_v4(conn)
+            if version < 5:
+                self._apply_schema_v5(conn)
             if version < CURRENT_MEMORY_DB_VERSION:
                 conn.execute(f"PRAGMA user_version = {CURRENT_MEMORY_DB_VERSION}")
 
@@ -904,6 +1076,27 @@ class FileStore:
             """
         )
 
+    def _apply_schema_v5(self, conn: sqlite3.Connection) -> None:
+        # Block: Schema
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS reflection_runs (
+                reflection_run_id TEXT PRIMARY KEY,
+                memory_set_id TEXT NOT NULL,
+                started_at TEXT NOT NULL,
+                finished_at TEXT NOT NULL,
+                result_status TEXT NOT NULL,
+                trigger_reasons_json TEXT NOT NULL,
+                source_episode_digest_ids_json TEXT NOT NULL,
+                affected_memory_unit_ids_json TEXT NOT NULL,
+                payload_json TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_reflection_runs_memory_set_finished_at
+            ON reflection_runs(memory_set_id, finished_at);
+            """
+        )
+
     def _import_legacy_jsonl_records(self, conn: sqlite3.Connection) -> None:
         # Block: SummaryLookup
         legacy_summaries = self._read_jsonl_file(LEGACY_CYCLE_SUMMARIES_FILE_NAME)
@@ -1092,6 +1285,35 @@ class FileStore:
                 record["salience"],
                 record["formed_at"],
                 self._to_json(record.get("linked_event_ids", [])),
+                self._to_json(record),
+            ),
+        )
+
+    def _insert_reflection_run(self, conn: sqlite3.Connection, record: dict[str, Any]) -> None:
+        # Block: Insert
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO reflection_runs (
+                reflection_run_id,
+                memory_set_id,
+                started_at,
+                finished_at,
+                result_status,
+                trigger_reasons_json,
+                source_episode_digest_ids_json,
+                affected_memory_unit_ids_json,
+                payload_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                record["reflection_run_id"],
+                record["memory_set_id"],
+                record["started_at"],
+                record["finished_at"],
+                record["result_status"],
+                self._to_json(record.get("trigger_reasons", [])),
+                self._to_json(record.get("source_episode_digest_ids", [])),
+                self._to_json(record.get("affected_memory_unit_ids", [])),
                 self._to_json(record),
             ),
         )

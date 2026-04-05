@@ -340,6 +340,22 @@ SQLite 接続では、少なくとも次を固定する。
 ここでは、広い高次推論へ進まない。
 `design/memory/06_想起と判断ユースケース.md` で「現状では難しい」としている領域は後段へ送る。
 
+現状の実装は、次まで入っている。
+
+- `reflection_runs` を SQLite に保存する
+- post-turn の best-effort trigger 判定を入れる
+- trigger は `chat 8 ターン`、`前回から 24 時間`、`高 salience digest の偏り`、`supersede / revoke`、`relationship` 変化の最小版を使う
+- `memory_type=summary` の `memory_units` を `self / user / relationship / topic` 単位で生成または更新する
+- 反復支持がある `inferred` を `confirmed` へ引き上げる
+- 古く低重要な `topic` 系を `dormant` 化する
+- 反射更新でも `revisions` を残し、変化した `memory_units` の vector index を更新する
+
+この段階では、まだ次は未着手である。
+
+- `relationship` と `self` の高次な長期変化分析
+- `events` の限定ロードを使う精密根拠確認
+- 完全な非同期ジョブ化
+
 ### モジュール分割の目安
 
 コード分割はコード側を正とするが、少なくとも責務は次で分ける。
