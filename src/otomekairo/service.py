@@ -554,7 +554,8 @@ class OtomeKairoService:
         # Block: ResultSelection
         decision = pipeline["decision"]
         reply_payload = pipeline["reply_payload"]
-        result_kind = decision["kind"]
+        internal_result_kind = decision["kind"]
+        result_kind = self._external_result_kind(internal_result_kind)
         finished_at = self._now_iso()
 
         # Block: Persistence
@@ -736,6 +737,35 @@ class OtomeKairoService:
             "episodic_evidence": len(recall_pack["episodic_evidence"]),
             "event_evidence": len(recall_pack["event_evidence"]),
             "conflicts": len(recall_pack["conflicts"]),
+        }
+
+    def _external_result_kind(self, internal_result_kind: str) -> str:
+        # Block: Mapping
+        if internal_result_kind == "future_act":
+            return "noop"
+        return internal_result_kind
+
+    def _future_act_trace_summary(
+        self,
+        *,
+        cycle_id: str,
+        decision: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        # Block: Guard
+        if decision.get("kind") != "future_act":
+            return None
+
+        future_act = decision.get("future_act")
+        if not isinstance(future_act, dict):
+            return None
+
+        # Block: Result
+        return {
+            "source_cycle_id": cycle_id,
+            "intent_kind": future_act.get("intent_kind"),
+            "intent_summary": future_act.get("intent_summary"),
+            "reason_summary": decision.get("reason_summary"),
+            "dedupe_key": future_act.get("dedupe_key"),
         }
 
     def _summarize_affect_context(self, affect_context: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
@@ -1171,6 +1201,10 @@ class OtomeKairoService:
     ) -> list[dict[str, Any]]:
         # Block: EventRecords
         selected_memory_set_id = state["selected_memory_set_id"]
+        future_act_summary = self._future_act_trace_summary(
+            cycle_id=cycle_id,
+            decision=decision,
+        )
         events = [
             {
                 "event_id": f"event:{uuid.uuid4().hex}",
@@ -1187,8 +1221,11 @@ class OtomeKairoService:
                 "memory_set_id": selected_memory_set_id,
                 "kind": "decision",
                 "role": "system",
-                "result_kind": result_kind,
+                "result_kind": decision["kind"],
+                "external_result_kind": result_kind,
                 "reason_code": decision["reason_code"],
+                "reason_summary": decision["reason_summary"],
+                "future_act_summary": future_act_summary,
                 "created_at": finished_at,
             },
         ]
@@ -1267,12 +1304,13 @@ class OtomeKairoService:
                     "recall_pack_summary": self._summarize_recall_pack(recall_pack),
                 },
                 "primary_candidate_kind": decision["kind"],
+                "future_act_candidate_summary": future_act_summary,
             },
             "result_trace": {
                 "result_kind": result_kind,
                 "reply_summary": self._clamp(reply_payload["reply_text"]) if reply_payload else None,
-                "noop_reason_summary": decision["reason_summary"] if result_kind == "noop" else None,
-                "future_act_summary": None,
+                "noop_reason_summary": decision["reason_summary"] if decision["kind"] == "noop" else None,
+                "future_act_summary": future_act_summary,
                 "internal_failure_summary": None,
                 "duration_ms": self._duration_ms(started_at, finished_at),
             },

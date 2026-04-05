@@ -130,12 +130,13 @@ def validate_decision_contract(payload: dict[str, Any]) -> None:
         "reason_code",
         "reason_summary",
         "requires_confirmation",
+        "future_act",
     }
     if set(payload.keys()) != required_keys:
         raise LLMError("Decision keys do not match the contract.")
 
     # Block: ValueChecks
-    if payload["kind"] not in {"reply", "noop"}:
+    if payload["kind"] not in {"reply", "noop", "future_act"}:
         raise LLMError("Decision kind is invalid.")
     if not isinstance(payload["reason_code"], str) or not payload["reason_code"].strip():
         raise LLMError("Decision reason_code must be a non-empty string.")
@@ -143,6 +144,23 @@ def validate_decision_contract(payload: dict[str, Any]) -> None:
         raise LLMError("Decision reason_summary must be a non-empty string.")
     if not isinstance(payload["requires_confirmation"], bool):
         raise LLMError("Decision requires_confirmation must be a boolean.")
+    if payload["kind"] == "future_act":
+        future_act = payload["future_act"]
+        required_future_keys = {
+            "intent_kind",
+            "intent_summary",
+            "dedupe_key",
+        }
+        if not isinstance(future_act, dict) or set(future_act.keys()) != required_future_keys:
+            raise LLMError("Decision future_act is invalid.")
+        for key in required_future_keys:
+            value = future_act.get(key)
+            if not isinstance(value, str) or not value.strip():
+                raise LLMError(f"Decision future_act.{key} must be a non-empty string.")
+        if payload["requires_confirmation"]:
+            raise LLMError("Decision future_act cannot require confirmation.")
+    elif payload["future_act"] is not None:
+        raise LLMError("Decision future_act must be null unless kind is future_act.")
 
 
 def validate_memory_interpretation_contract(payload: dict[str, Any]) -> None:
@@ -392,6 +410,8 @@ class MockLLMClient:
         conflicts = recall_pack.get("conflicts", [])
         active_commitments = recall_pack.get("active_commitments", [])
         episodic_evidence = recall_pack.get("episodic_evidence", [])
+        event_evidence = recall_pack.get("event_evidence", [])
+        active_topics = recall_pack.get("active_topics", [])
         surface_affects = affect_context.get("surface", [])
 
         # Block: DecisionRule
@@ -401,6 +421,27 @@ class MockLLMClient:
                 "reason_code": "empty_observation",
                 "reason_summary": "Observation text was empty after normalization.",
                 "requires_confirmation": False,
+                "future_act": None,
+            }
+        elif self._should_mock_future_act(
+            normalized=normalized,
+            active_commitments=active_commitments,
+            episodic_evidence=episodic_evidence,
+            event_evidence=event_evidence,
+            active_topics=active_topics,
+        ):
+            payload = {
+                "kind": "future_act",
+                "reason_code": "defer_for_later",
+                "reason_summary": "継続価値はあるが、今は返さず後で触れたほうが自然。",
+                "requires_confirmation": False,
+                "future_act": self._mock_future_act_payload(
+                    primary_intent=primary_intent,
+                    active_commitments=active_commitments,
+                    episodic_evidence=episodic_evidence,
+                    event_evidence=event_evidence,
+                    active_topics=active_topics,
+                ),
             }
         elif conflicts:
             payload = {
@@ -408,6 +449,7 @@ class MockLLMClient:
                 "reason_code": "conflict_present",
                 "reason_summary": "RecallPack に矛盾候補があり、確認寄りの返答が必要。",
                 "requires_confirmation": True,
+                "future_act": None,
             }
         elif primary_intent == "commitment_check" and active_commitments:
             payload = {
@@ -415,6 +457,7 @@ class MockLLMClient:
                 "reason_code": "active_commitment",
                 "reason_summary": "進行中の約束や保留があり、継続会話として返答する。",
                 "requires_confirmation": False,
+                "future_act": None,
             }
         elif "reminisce" in secondary_intents and episodic_evidence:
             payload = {
@@ -422,6 +465,7 @@ class MockLLMClient:
                 "reason_code": "secondary_reminisce",
                 "reason_summary": "補助意図として回想があり、関連エピソードを踏まえて返答する。",
                 "requires_confirmation": False,
+                "future_act": None,
             }
         elif surface_affects and surface_affects[0]["affect_label"] in {"不安", "緊張", "迷い", "concern"}:
             payload = {
@@ -429,6 +473,7 @@ class MockLLMClient:
                 "reason_code": "affect_caution",
                 "reason_summary": "AffectContext に慎重さを要する感情があり、確認寄りに返す。",
                 "requires_confirmation": True,
+                "future_act": None,
             }
         else:
             payload = {
@@ -436,6 +481,7 @@ class MockLLMClient:
                 "reason_code": f"intent:{primary_intent}",
                 "reason_summary": "A normal conversation reply is appropriate for the current observation.",
                 "requires_confirmation": primary_intent in {"fact_query", "meta_relationship"},
+                "future_act": None,
             }
 
         # Block: Validation
@@ -563,6 +609,94 @@ class MockLLMClient:
 
         # Block: Result
         return None
+
+    def _should_mock_future_act(
+        self,
+        *,
+        normalized: str,
+        active_commitments: list[dict[str, Any]],
+        episodic_evidence: list[dict[str, Any]],
+        event_evidence: list[dict[str, Any]],
+        active_topics: list[dict[str, Any]],
+    ) -> bool:
+        # Block: MarkerCheck
+        defer_markers = (
+            "また今度",
+            "あとで",
+            "後で",
+            "今はいい",
+            "今じゃなくて",
+            "いったん保留",
+            "また後で",
+            "またあとで",
+            "今は寝る",
+            "明日また",
+        )
+        if not any(marker in normalized for marker in defer_markers):
+            return False
+
+        # Block: RecallBasis
+        return bool(active_commitments or episodic_evidence or event_evidence or active_topics)
+
+    def _mock_future_act_payload(
+        self,
+        *,
+        primary_intent: str,
+        active_commitments: list[dict[str, Any]],
+        episodic_evidence: list[dict[str, Any]],
+        event_evidence: list[dict[str, Any]],
+        active_topics: list[dict[str, Any]],
+    ) -> dict[str, str]:
+        # Block: CommitmentCandidate
+        commitment_item = active_commitments[0] if active_commitments else None
+        if commitment_item is not None:
+            scope_type = commitment_item.get("scope_type", "relationship")
+            scope_key = commitment_item.get("scope_key", "self|user")
+            predicate = commitment_item.get("predicate", "follow_up")
+            return {
+                "intent_kind": "conversation_follow_up",
+                "intent_summary": commitment_item.get("summary_text", "継続中の約束や保留にあとで触れたい。"),
+                "dedupe_key": f"future_act:{scope_type}:{scope_key}:{predicate}",
+            }
+
+        # Block: EpisodeCandidate
+        episode_item = episodic_evidence[0] if episodic_evidence else None
+        if episode_item is not None:
+            scope_type = episode_item.get("primary_scope_type", "user")
+            scope_key = episode_item.get("primary_scope_key", "user")
+            episode_digest_id = episode_item.get("episode_digest_id", "unknown")
+            return {
+                "intent_kind": "conversation_follow_up",
+                "intent_summary": episode_item.get("summary_text", "あとで続きに触れたい出来事がある。"),
+                "dedupe_key": f"future_act:{scope_type}:{scope_key}:{episode_digest_id}",
+            }
+
+        # Block: EventCandidate
+        event_item = event_evidence[0] if event_evidence else None
+        event_basis = self._event_evidence_basis_text(event_item)
+        if event_item is not None:
+            return {
+                "intent_kind": "conversation_follow_up",
+                "intent_summary": event_basis or "あとで触れたい出来事がある。",
+                "dedupe_key": f"future_act:event:{event_item.get('event_id', 'unknown')}",
+            }
+
+        # Block: TopicCandidate
+        topic_item = active_topics[0] if active_topics else None
+        if topic_item is not None:
+            scope_key = topic_item.get("scope_key", topic_item.get("primary_scope_key", "topic"))
+            return {
+                "intent_kind": "conversation_follow_up",
+                "intent_summary": topic_item.get("summary_text", "あとで続けたい話題がある。"),
+                "dedupe_key": f"future_act:topic:{scope_key}",
+            }
+
+        # Block: Fallback
+        return {
+            "intent_kind": "conversation_follow_up",
+            "intent_summary": "あとで会話を再開したい。",
+            "dedupe_key": f"future_act:intent:{primary_intent}",
+        }
 
     def _secondary_intents(self, recall_hint: dict[str, Any]) -> set[str]:
         # Block: Collect
@@ -1248,18 +1382,24 @@ class LLMClient:
         # Block: Prompt
         return (
             "あなたは OtomeKairo の decision_generation です。\n"
-            "観測文に対して reply するか noop にするかを決め、JSON オブジェクト 1 個だけを返してください。\n"
+            "観測文に対して reply / noop / future_act のいずれかを決め、JSON オブジェクト 1 個だけを返してください。\n"
             "Markdown、コードフェンス、説明文は禁止です。\n"
             "入力には recent_turns と internal_context が含まれます。\n"
             "internal_context には TimeContext, AffectContext, RecallPack が入ります。\n"
             "recall_hint.secondary_intents は補助意図として、継続性や確認必要性の補助にだけ使ってください。\n"
             "RecallPack.conflicts があるときは requires_confirmation=true を優先してください。\n"
-            "active_commitments, episodic_evidence, event_evidence は reply の継続根拠に使ってください。\n"
-            "返すキーは必ず次の 4 個です:\n"
-            "- kind: \"reply\" または \"noop\"\n"
+            "active_commitments, episodic_evidence, event_evidence は reply と future_act の継続根拠に使ってください。\n"
+            "future_act は『今は返さないが、後で触れる価値がある』場合だけ選んでください。\n"
+            "明示的な会話要求に自然に返せるなら reply を優先し、future_act を乱用しないでください。\n"
+            "返すキーは必ず次の 5 個です:\n"
+            "- kind: \"reply\" または \"noop\" または \"future_act\"\n"
             "- reason_code: string\n"
             "- reason_summary: string\n"
             "- requires_confirmation: boolean\n"
+            "- future_act: null または object\n"
+            "kind が future_act のときだけ future_act object を返してください。\n"
+            "future_act object のキーは intent_kind, intent_summary, dedupe_key の 3 個に固定してください。\n"
+            "kind が future_act のとき requires_confirmation は false にしてください。\n"
             "空文字や意味のない入力は noop を選んでください。"
         )
 
