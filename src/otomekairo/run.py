@@ -30,9 +30,18 @@ def main() -> None:
     context.load_cert_chain(certfile=cert_file, keyfile=key_file)
     server.socket = context.wrap_socket(server.socket, server_side=True)
 
+    # Block: SchedulerStart
+    service.start_background_wake_scheduler()
+
     # Block: Serve
     print(f"OtomeKairo listening on https://{host}:{port}")
-    server.serve_forever()
+    try:
+        # Block: Loop
+        server.serve_forever()
+    finally:
+        # Block: Shutdown
+        service.stop_background_wake_scheduler()
+        server.server_close()
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import secrets
+import threading
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -23,6 +24,7 @@ REQUIRED_ROLE_NAMES = {
 FUTURE_ACT_NOT_BEFORE_MINUTES = 30
 FUTURE_ACT_EXPIRES_HOURS = 24
 WAKE_REPLY_COOLDOWN_MINUTES = 30
+BACKGROUND_WAKE_POLL_SECONDS = 5.0
 
 
 # Block: Errors
@@ -42,6 +44,8 @@ class OtomeKairoService:
         self.llm = LLMClient()
         self.recall = RecallBuilder(store=self.store, llm=self.llm)
         self.memory = MemoryConsolidator(store=self.store, llm=self.llm)
+        self._runtime_state_lock = threading.RLock()
+        self._wake_execution_lock = threading.Lock()
         self._future_act_candidates: list[dict[str, Any]] = []
         self._wake_runtime_state: dict[str, Any] = {
             "last_wake_at": None,
@@ -49,6 +53,41 @@ class OtomeKairoService:
             "cooldown_until": None,
             "reply_history_by_dedupe": {},
         }
+        self._background_wake_stop_event: threading.Event | None = None
+        self._background_wake_thread: threading.Thread | None = None
+
+    def start_background_wake_scheduler(self) -> None:
+        # Block: Existing
+        with self._runtime_state_lock:
+            if self._background_wake_thread is not None and self._background_wake_thread.is_alive():
+                return
+
+            stop_event = threading.Event()
+            thread = threading.Thread(
+                target=self._background_wake_loop,
+                args=(stop_event,),
+                name="otomekairo-background-wake",
+                daemon=True,
+            )
+            self._background_wake_stop_event = stop_event
+            self._background_wake_thread = thread
+
+        # Block: Start
+        thread.start()
+
+    def stop_background_wake_scheduler(self) -> None:
+        # Block: Snapshot
+        with self._runtime_state_lock:
+            stop_event = self._background_wake_stop_event
+            thread = self._background_wake_thread
+            self._background_wake_stop_event = None
+            self._background_wake_thread = None
+
+        # Block: Stop
+        if stop_event is not None:
+            stop_event.set()
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=5.0)
 
     # Block: Bootstrap
     def probe_bootstrap(self) -> dict[str, Any]:
@@ -493,72 +532,129 @@ class OtomeKairoService:
         if not isinstance(client_context, dict):
             raise ServiceError(400, "invalid_client_context", "The client_context field must be an object.")
 
-        # Block: Snapshot
-        cycle_id = self._new_cycle_id()
-        started_at = self._now_iso()
-        recent_turns = self._load_recent_turns(state)
-        runtime_summary = self._build_runtime_summary(state)
-        settings_snapshot = self._build_settings_snapshot(state)
+        # Block: Execute
+        return self._execute_wake_cycle(
+            state=state,
+            client_context=client_context,
+            trigger_kind="wake",
+        )
 
-        try:
-            # Block: Pipeline
-            selected_candidate = self._select_due_future_act_candidate(
-                memory_set_id=state["selected_memory_set_id"],
-                current_time=started_at,
-            )
-            pipeline, observation_text = self._run_wake_pipeline(
-                state=state,
-                started_at=started_at,
-                recent_turns=recent_turns,
-                selected_candidate=selected_candidate,
-            )
+    def _execute_wake_cycle(
+        self,
+        *,
+        state: dict[str, Any],
+        client_context: dict[str, Any],
+        trigger_kind: str,
+    ) -> dict[str, Any]:
+        # Block: SerializedExecution
+        with self._wake_execution_lock:
+            # Block: Snapshot
+            cycle_id = self._new_cycle_id()
+            started_at = self._now_iso()
+            recent_turns = self._load_recent_turns(state)
+            runtime_summary = self._build_runtime_summary(state)
+            settings_snapshot = self._build_settings_snapshot(state)
 
-            # Block: Success
-            response = self._complete_observation_success(
-                cycle_id=cycle_id,
-                started_at=started_at,
-                state=state,
-                settings_snapshot=settings_snapshot,
-                runtime_summary=runtime_summary,
-                observation_text=observation_text,
-                client_context=client_context,
-                recent_turns=recent_turns,
-                pipeline=pipeline,
-                trigger_kind="wake",
-                observation_event_kind="wake",
-                observation_event_role="system",
-                consolidate_memory=False,
-            )
+            try:
+                # Block: Pipeline
+                selected_candidate = self._select_due_future_act_candidate(
+                    memory_set_id=state["selected_memory_set_id"],
+                    current_time=started_at,
+                )
+                pipeline, observation_text = self._run_wake_pipeline(
+                    state=state,
+                    started_at=started_at,
+                    recent_turns=recent_turns,
+                    selected_candidate=selected_candidate,
+                )
 
-            # Block: PostReply
-            self._record_wake_outcome(
-                current_time=started_at,
-                decision=pipeline["decision"],
-                selected_candidate=selected_candidate,
-            )
-            return response
-        except (LLMError, KeyError, ValueError) as exc:
-            # Block: FailurePersistence
-            finished_at = self._now_iso()
-            self._persist_cycle_failure(
-                cycle_id=cycle_id,
-                started_at=started_at,
-                finished_at=finished_at,
-                state=state,
-                settings_snapshot=settings_snapshot,
-                runtime_summary=runtime_summary,
-                observation_text="定期起床。",
-                client_context=client_context,
-                failure_reason=str(exc),
-                trigger_kind="wake",
-                observation_event_kind="wake",
-                observation_event_role="system",
-            )
-            return {
-                "cycle_id": cycle_id,
-                "result_kind": "internal_failure",
-                "reply": None,
-            }
+                # Block: Success
+                response = self._complete_observation_success(
+                    cycle_id=cycle_id,
+                    started_at=started_at,
+                    state=state,
+                    settings_snapshot=settings_snapshot,
+                    runtime_summary=runtime_summary,
+                    observation_text=observation_text,
+                    client_context=client_context,
+                    recent_turns=recent_turns,
+                    pipeline=pipeline,
+                    trigger_kind=trigger_kind,
+                    observation_event_kind="wake",
+                    observation_event_role="system",
+                    consolidate_memory=False,
+                )
+
+                # Block: PostReply
+                self._record_wake_outcome(
+                    current_time=started_at,
+                    decision=pipeline["decision"],
+                    selected_candidate=selected_candidate,
+                )
+                return response
+            except (LLMError, KeyError, ValueError) as exc:
+                # Block: FailurePersistence
+                finished_at = self._now_iso()
+                self._persist_cycle_failure(
+                    cycle_id=cycle_id,
+                    started_at=started_at,
+                    finished_at=finished_at,
+                    state=state,
+                    settings_snapshot=settings_snapshot,
+                    runtime_summary=runtime_summary,
+                    observation_text="定期起床。",
+                    client_context=client_context,
+                    failure_reason=str(exc),
+                    trigger_kind=trigger_kind,
+                    observation_event_kind="wake",
+                    observation_event_role="system",
+                )
+                return {
+                    "cycle_id": cycle_id,
+                    "result_kind": "internal_failure",
+                    "reply": None,
+                }
+
+    def _background_wake_loop(self, stop_event: threading.Event) -> None:
+        # Block: Loop
+        while not stop_event.is_set():
+            try:
+                state = self.store.read_state()
+                delay_seconds = self._background_wake_delay_seconds(state=state, current_time=self._now_iso())
+                if delay_seconds > 0:
+                    stop_event.wait(timeout=delay_seconds)
+                    continue
+
+                self._execute_wake_cycle(
+                    state=state,
+                    client_context={"source": "background_wake_scheduler"},
+                    trigger_kind="wake",
+                )
+            except Exception:  # noqa: BLE001
+                stop_event.wait(timeout=BACKGROUND_WAKE_POLL_SECONDS)
+
+    def _background_wake_delay_seconds(self, *, state: dict[str, Any], current_time: str) -> float:
+        # Block: Disabled
+        wake_policy = state.get("wake_policy", {})
+        if wake_policy.get("mode") != "interval":
+            return BACKGROUND_WAKE_POLL_SECONDS
+
+        # Block: FirstWake
+        with self._runtime_state_lock:
+            last_wake_at = self._wake_runtime_state.get("last_wake_at")
+        if not isinstance(last_wake_at, str) or not last_wake_at:
+            return 0.0
+
+        # Block: Remaining
+        interval_minutes = int(wake_policy.get("interval_minutes", 1))
+        current_dt = self._parse_iso(current_time)
+        due_at = self._parse_iso(last_wake_at) + timedelta(minutes=interval_minutes)
+        remaining_seconds = (due_at - current_dt).total_seconds()
+        if remaining_seconds <= 0:
+            return 0.0
+
+        # Block: PollCap
+        return min(remaining_seconds, BACKGROUND_WAKE_POLL_SECONDS)
 
     def _run_observation_pipeline(
         self,
@@ -1021,32 +1117,34 @@ class OtomeKairoService:
         memory_set_id: str,
         current_time: str,
     ) -> dict[str, Any] | None:
-        # Block: Prune
-        self._prune_future_act_candidates(current_time=current_time)
-        current_dt = self._parse_iso(current_time)
+        # Block: LockedRead
+        with self._runtime_state_lock:
+            # Block: Prune
+            self._prune_future_act_candidates(current_time=current_time)
+            current_dt = self._parse_iso(current_time)
 
-        # Block: Eligible
-        eligible = []
-        for candidate in self._future_act_candidates:
-            if candidate.get("memory_set_id") != memory_set_id:
-                continue
-            not_before = candidate.get("not_before")
-            if isinstance(not_before, str) and not_before and self._parse_iso(not_before) > current_dt:
-                continue
-            eligible.append(candidate)
+            # Block: Eligible
+            eligible = []
+            for candidate in self._future_act_candidates:
+                if candidate.get("memory_set_id") != memory_set_id:
+                    continue
+                not_before = candidate.get("not_before")
+                if isinstance(not_before, str) and not_before and self._parse_iso(not_before) > current_dt:
+                    continue
+                eligible.append(candidate)
 
-        # Block: Empty
-        if not eligible:
-            return None
+            # Block: Empty
+            if not eligible:
+                return None
 
-        # Block: Sort
-        eligible.sort(
-            key=lambda candidate: (
-                candidate.get("updated_at") or candidate.get("created_at") or "",
-                candidate.get("candidate_id") or "",
+            # Block: Sort
+            eligible.sort(
+                key=lambda candidate: (
+                    candidate.get("updated_at") or candidate.get("created_at") or "",
+                    candidate.get("candidate_id") or "",
+                )
             )
-        )
-        return eligible[0]
+            return dict(eligible[0])
 
     def _apply_future_act_candidate(
         self,
@@ -1056,63 +1154,65 @@ class OtomeKairoService:
         decision: dict[str, Any],
         occurred_at: str,
     ) -> dict[str, Any] | None:
-        # Block: Prune
-        self._prune_future_act_candidates(current_time=occurred_at)
-
         # Block: Guard
         base_summary = self._future_act_trace_summary(cycle_id=cycle_id, decision=decision)
         if base_summary is None:
             return None
 
-        # Block: ExistingLookup
-        existing = self._find_future_act_candidate(
-            memory_set_id=memory_set_id,
-            dedupe_key=base_summary["dedupe_key"],
-            current_time=occurred_at,
-        )
-        not_before = self._future_act_not_before(occurred_at)
-        expires_at = self._future_act_expires_at(occurred_at)
+        # Block: LockedUpsert
+        with self._runtime_state_lock:
+            # Block: Prune
+            self._prune_future_act_candidates(current_time=occurred_at)
 
-        # Block: Upsert
-        if existing is None:
-            candidate = {
-                "candidate_id": f"future_act_candidate:{uuid.uuid4().hex}",
-                "memory_set_id": memory_set_id,
-                "intent_kind": base_summary["intent_kind"],
-                "intent_summary": base_summary["intent_summary"],
-                "reason_summary": base_summary["reason_summary"],
-                "source_cycle_id": cycle_id,
-                "not_before": not_before,
-                "expires_at": expires_at,
-                "dedupe_key": base_summary["dedupe_key"],
-                "created_at": occurred_at,
-                "updated_at": occurred_at,
-            }
-            self._future_act_candidates.append(candidate)
-            queue_action = "created"
-        else:
-            candidate = existing
-            candidate.update(
-                {
+            # Block: ExistingLookup
+            existing = self._find_future_act_candidate(
+                memory_set_id=memory_set_id,
+                dedupe_key=base_summary["dedupe_key"],
+                current_time=occurred_at,
+            )
+            not_before = self._future_act_not_before(occurred_at)
+            expires_at = self._future_act_expires_at(occurred_at)
+
+            # Block: Upsert
+            if existing is None:
+                candidate = {
+                    "candidate_id": f"future_act_candidate:{uuid.uuid4().hex}",
+                    "memory_set_id": memory_set_id,
                     "intent_kind": base_summary["intent_kind"],
                     "intent_summary": base_summary["intent_summary"],
                     "reason_summary": base_summary["reason_summary"],
                     "source_cycle_id": cycle_id,
                     "not_before": not_before,
                     "expires_at": expires_at,
+                    "dedupe_key": base_summary["dedupe_key"],
+                    "created_at": occurred_at,
                     "updated_at": occurred_at,
                 }
-            )
-            queue_action = "updated"
+                self._future_act_candidates.append(candidate)
+                queue_action = "created"
+            else:
+                candidate = existing
+                candidate.update(
+                    {
+                        "intent_kind": base_summary["intent_kind"],
+                        "intent_summary": base_summary["intent_summary"],
+                        "reason_summary": base_summary["reason_summary"],
+                        "source_cycle_id": cycle_id,
+                        "not_before": not_before,
+                        "expires_at": expires_at,
+                        "updated_at": occurred_at,
+                    }
+                )
+                queue_action = "updated"
 
-        # Block: Result
-        return {
-            **base_summary,
-            "candidate_id": candidate["candidate_id"],
-            "queue_action": queue_action,
-            "not_before": candidate["not_before"],
-            "expires_at": candidate["expires_at"],
-        }
+            # Block: Result
+            return {
+                **base_summary,
+                "candidate_id": candidate["candidate_id"],
+                "queue_action": queue_action,
+                "not_before": candidate["not_before"],
+                "expires_at": candidate["expires_at"],
+            }
 
     def _record_wake_outcome(
         self,
@@ -1123,14 +1223,15 @@ class OtomeKairoService:
     ) -> None:
         # Block: Reply
         if decision.get("kind") == "reply":
-            self._wake_runtime_state["last_spontaneous_at"] = current_time
-            self._wake_runtime_state["cooldown_until"] = self._wake_cooldown_until(current_time)
-            if selected_candidate is not None:
-                dedupe_key = selected_candidate.get("dedupe_key")
-                if isinstance(dedupe_key, str) and dedupe_key:
-                    reply_history = self._wake_runtime_state.setdefault("reply_history_by_dedupe", {})
-                    reply_history[dedupe_key] = current_time
-                self._remove_future_act_candidate(selected_candidate.get("candidate_id"))
+            with self._runtime_state_lock:
+                self._wake_runtime_state["last_spontaneous_at"] = current_time
+                self._wake_runtime_state["cooldown_until"] = self._wake_cooldown_until(current_time)
+                if selected_candidate is not None:
+                    dedupe_key = selected_candidate.get("dedupe_key")
+                    if isinstance(dedupe_key, str) and dedupe_key:
+                        reply_history = self._wake_runtime_state.setdefault("reply_history_by_dedupe", {})
+                        reply_history[dedupe_key] = current_time
+                    self._remove_future_act_candidate(selected_candidate.get("candidate_id"))
             return
 
         # Block: FutureAct
@@ -1139,7 +1240,8 @@ class OtomeKairoService:
 
     def _set_last_wake_at(self, current_time: str) -> None:
         # Block: Update
-        self._wake_runtime_state["last_wake_at"] = current_time
+        with self._runtime_state_lock:
+            self._wake_runtime_state["last_wake_at"] = current_time
 
     def _wake_is_due(self, *, state: dict[str, Any], current_time: str) -> dict[str, Any]:
         # Block: Disabled
@@ -1151,7 +1253,8 @@ class OtomeKairoService:
             }
 
         # Block: FirstWake
-        last_wake_at = self._wake_runtime_state.get("last_wake_at")
+        with self._runtime_state_lock:
+            last_wake_at = self._wake_runtime_state.get("last_wake_at")
         if not isinstance(last_wake_at, str) or not last_wake_at:
             return {
                 "should_skip": False,
@@ -1176,7 +1279,8 @@ class OtomeKairoService:
 
     def _wake_cooldown_reason(self, *, current_time: str) -> str | None:
         # Block: Lookup
-        cooldown_until = self._wake_runtime_state.get("cooldown_until")
+        with self._runtime_state_lock:
+            cooldown_until = self._wake_runtime_state.get("cooldown_until")
         if not isinstance(cooldown_until, str) or not cooldown_until:
             return None
 
@@ -1189,8 +1293,9 @@ class OtomeKairoService:
 
     def _was_recently_replied(self, *, dedupe_key: str, current_time: str) -> bool:
         # Block: Lookup
-        reply_history = self._wake_runtime_state.setdefault("reply_history_by_dedupe", {})
-        last_reply_at = reply_history.get(dedupe_key)
+        with self._runtime_state_lock:
+            reply_history = self._wake_runtime_state.setdefault("reply_history_by_dedupe", {})
+            last_reply_at = reply_history.get(dedupe_key)
         if not isinstance(last_reply_at, str) or not last_reply_at:
             return False
 
@@ -1217,11 +1322,12 @@ class OtomeKairoService:
             return
 
         # Block: Filter
-        self._future_act_candidates = [
-            candidate
-            for candidate in self._future_act_candidates
-            if candidate.get("candidate_id") != candidate_id
-        ]
+        with self._runtime_state_lock:
+            self._future_act_candidates = [
+                candidate
+                for candidate in self._future_act_candidates
+                if candidate.get("candidate_id") != candidate_id
+            ]
 
     def _find_future_act_candidate(
         self,
@@ -1230,44 +1336,49 @@ class OtomeKairoService:
         dedupe_key: str,
         current_time: str,
     ) -> dict[str, Any] | None:
-        # Block: CurrentTime
-        current_dt = self._parse_iso(current_time)
+        # Block: LockedScan
+        with self._runtime_state_lock:
+            # Block: CurrentTime
+            current_dt = self._parse_iso(current_time)
 
-        # Block: Scan
-        for candidate in self._future_act_candidates:
-            if candidate.get("memory_set_id") != memory_set_id:
-                continue
-            if candidate.get("dedupe_key") != dedupe_key:
-                continue
-            expires_at = candidate.get("expires_at")
-            if isinstance(expires_at, str) and expires_at and self._parse_iso(expires_at) <= current_dt:
-                continue
-            return candidate
+            # Block: Scan
+            for candidate in self._future_act_candidates:
+                if candidate.get("memory_set_id") != memory_set_id:
+                    continue
+                if candidate.get("dedupe_key") != dedupe_key:
+                    continue
+                expires_at = candidate.get("expires_at")
+                if isinstance(expires_at, str) and expires_at and self._parse_iso(expires_at) <= current_dt:
+                    continue
+                return candidate
 
-        # Block: Empty
-        return None
+            # Block: Empty
+            return None
 
     def _prune_future_act_candidates(self, *, current_time: str) -> None:
-        # Block: CurrentTime
-        current_dt = self._parse_iso(current_time)
+        # Block: LockedFilter
+        with self._runtime_state_lock:
+            # Block: CurrentTime
+            current_dt = self._parse_iso(current_time)
 
-        # Block: Filter
-        self._future_act_candidates = [
-            candidate
-            for candidate in self._future_act_candidates
-            if not isinstance(candidate.get("expires_at"), str)
-            or self._parse_iso(candidate["expires_at"]) > current_dt
-        ]
+            # Block: Filter
+            self._future_act_candidates = [
+                candidate
+                for candidate in self._future_act_candidates
+                if not isinstance(candidate.get("expires_at"), str)
+                or self._parse_iso(candidate["expires_at"]) > current_dt
+            ]
 
     def _clear_future_act_candidates(self) -> None:
         # Block: Reset
-        self._future_act_candidates = []
-        self._wake_runtime_state = {
-            "last_wake_at": None,
-            "last_spontaneous_at": None,
-            "cooldown_until": None,
-            "reply_history_by_dedupe": {},
-        }
+        with self._runtime_state_lock:
+            self._future_act_candidates = []
+            self._wake_runtime_state = {
+                "last_wake_at": None,
+                "last_spontaneous_at": None,
+                "cooldown_until": None,
+                "reply_history_by_dedupe": {},
+            }
 
     def _future_act_not_before(self, occurred_at: str) -> str:
         # Block: Offset
@@ -1496,9 +1607,14 @@ class OtomeKairoService:
                 "display_name": model_preset["display_name"],
             },
             "connection_state": "ready",
-            "wake_scheduler_active": False,
+            "wake_scheduler_active": self._background_wake_scheduler_active() and state["wake_policy"]["mode"] == "interval",
             "ongoing_action_exists": False,
         }
+
+    def _background_wake_scheduler_active(self) -> bool:
+        # Block: State
+        with self._runtime_state_lock:
+            return self._background_wake_thread is not None and self._background_wake_thread.is_alive()
 
     def _catalog_entries(self, entries: dict, id_key: str) -> list[dict]:
         # Block: Transform

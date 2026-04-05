@@ -248,6 +248,8 @@ MVP の wake API は少なくとも次の挙動を持ってよい。
 - `mode=interval` で次回時刻にまだ達していなければ `noop`
 - due な `future_act` 候補があれば再評価し、必要なら `reply`
 
+server 内の background 起床スケジューラも、同じ wake 1 サイクルを内部的に使ってよい。
+
 `result_kind=noop` または `result_kind=internal_failure` のとき、`reply` は `null` を返す。
 
 主な失敗:
@@ -304,6 +306,8 @@ response:
   }
 }
 ```
+
+- `wake_scheduler_active` は、server 内の background 起床スケジューラが稼働中で、かつ `wake_policy.mode=interval` のとき `true` でよい
 
 <!-- Block: Config -->
 ## 設定面
