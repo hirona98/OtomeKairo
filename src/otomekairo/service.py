@@ -7,15 +7,12 @@ from pathlib import Path
 from typing import Any
 
 from otomekairo.llm import LLMClient, LLMError
+from otomekairo.memory import MemoryConsolidator
+from otomekairo.recall import RecallBuilder
 from otomekairo.store import FileStore
 
 
 # Block: Constants
-EVENTS_FILE = "events.jsonl"
-RETRIEVAL_RUNS_FILE = "retrieval_runs.jsonl"
-CYCLE_SUMMARIES_FILE = "cycle_summaries.jsonl"
-CYCLE_TRACES_FILE = "cycle_traces.jsonl"
-
 REQUIRED_ROLE_NAMES = {
     "reply_generation": "generation",
     "decision_generation": "generation",
@@ -40,6 +37,8 @@ class OtomeKairoService:
         # Block: Dependencies
         self.store = FileStore(root_dir)
         self.llm = LLMClient()
+        self.recall = RecallBuilder(store=self.store, llm=self.llm)
+        self.memory = MemoryConsolidator(store=self.store, llm=self.llm)
 
     # Block: Bootstrap
     def probe_bootstrap(self) -> dict[str, Any]:
@@ -246,6 +245,7 @@ class OtomeKairoService:
             in_use_code="selected_memory_set_delete_forbidden",
             deleted_key="deleted_memory_set_id",
         )
+        self.store.delete_memory_set_records(memory_set_id)
         self.store.write_state(state)
         return {
             "deleted_memory_set_id": memory_set_id,
@@ -439,25 +439,29 @@ class OtomeKairoService:
             )
 
             # Block: RecallPack
-            recall_pack = {
-                "self_model": [],
-                "user_model": [],
-                "relationship_model": [],
-                "active_topics": [],
-                "active_commitments": [],
-                "episodic_evidence": [],
-                "event_evidence": [],
-                "conflicts": [],
-                "selected_memory_ids": [],
-                "candidate_count": 0,
-            }
+            recall_pack = self.recall.build_recall_pack(
+                state=state,
+                observation_text=observation_text,
+                recall_hint=recall_hint,
+            )
+
+            # Block: InternalContext
+            time_context = self._build_time_context(current_time=started_at)
+            affect_context = self._build_affect_context(
+                state=state,
+                recall_hint=recall_hint,
+            )
 
             # Block: Decision
             decision = self.llm.generate_decision(
                 profile=decision_profile,
                 role_settings=decision_role,
                 observation_text=observation_text,
+                recent_turns=recent_turns,
+                time_context=time_context,
+                affect_context=affect_context,
                 recall_hint=recall_hint,
+                recall_pack=recall_pack,
             )
 
             # Block: Reply
@@ -469,14 +473,17 @@ class OtomeKairoService:
                     persona=persona,
                     observation_text=observation_text,
                     recent_turns=recent_turns,
+                    time_context=time_context,
+                    affect_context=affect_context,
                     recall_hint=recall_hint,
+                    recall_pack=recall_pack,
                     decision=decision,
                 )
 
             # Block: Result
             result_kind = decision["kind"]
             finished_at = self._now_iso()
-            self._persist_cycle_success(
+            events = self._persist_cycle_success(
                 cycle_id=cycle_id,
                 started_at=started_at,
                 finished_at=finished_at,
@@ -488,10 +495,28 @@ class OtomeKairoService:
                 recent_turns=recent_turns,
                 recall_hint=recall_hint,
                 recall_pack=recall_pack,
+                time_context=time_context,
+                affect_context=affect_context,
                 decision=decision,
                 result_kind=result_kind,
                 reply_payload=reply_payload,
             )
+
+            # Block: TurnConsolidation
+            try:
+                self.memory.consolidate_turn(
+                    state=state,
+                    cycle_id=cycle_id,
+                    finished_at=finished_at,
+                    observation_text=observation_text,
+                    recall_hint=recall_hint,
+                    decision=decision,
+                    reply_payload=reply_payload,
+                    events=events,
+                )
+            except Exception:
+                pass
+
             return {
                 "cycle_id": cycle_id,
                 "result_kind": result_kind,
@@ -523,10 +548,8 @@ class OtomeKairoService:
         self._require_token(token)
 
         # Block: List
-        records = self.store.read_jsonl(CYCLE_SUMMARIES_FILE)
-        selected = list(reversed(records))[:limit]
         return {
-            "cycle_summaries": selected,
+            "cycle_summaries": self.store.list_cycle_summaries(limit),
         }
 
     def get_cycle_trace(self, token: str | None, cycle_id: str) -> dict[str, Any]:
@@ -534,10 +557,9 @@ class OtomeKairoService:
         self._require_token(token)
 
         # Block: FindRecord
-        traces = self.store.read_jsonl(CYCLE_TRACES_FILE)
-        for trace in traces:
-            if trace["cycle_id"] == cycle_id:
-                return trace
+        trace = self.store.get_cycle_trace(cycle_id)
+        if trace is not None:
+            return trace
 
         raise ServiceError(404, "cycle_not_found", "The requested cycle_id does not exist.")
 
@@ -559,6 +581,188 @@ class OtomeKairoService:
         role_value = model_preset["roles"][role_name]
         profile_id = role_value["model_profile_id"]
         return state["model_profiles"][profile_id]
+
+    def _summarize_recall_pack(self, recall_pack: dict[str, Any]) -> dict[str, int]:
+        # Block: Summary
+        return {
+            "self_model": len(recall_pack["self_model"]),
+            "user_model": len(recall_pack["user_model"]),
+            "relationship_model": len(recall_pack["relationship_model"]),
+            "active_topics": len(recall_pack["active_topics"]),
+            "active_commitments": len(recall_pack["active_commitments"]),
+            "episodic_evidence": len(recall_pack["episodic_evidence"]),
+            "conflicts": len(recall_pack["conflicts"]),
+        }
+
+    def _summarize_affect_context(self, affect_context: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+        # Block: Surface
+        surface_labels = [
+            item["affect_label"]
+            for item in affect_context.get("surface", [])
+            if isinstance(item.get("affect_label"), str)
+        ]
+
+        # Block: Background
+        background_labels = [
+            item["affect_label"]
+            for item in affect_context.get("background", [])
+            if isinstance(item.get("affect_label"), str)
+        ]
+
+        # Block: Result
+        return {
+            "surface_count": len(affect_context.get("surface", [])),
+            "background_count": len(affect_context.get("background", [])),
+            "surface_labels": surface_labels,
+            "background_labels": background_labels,
+        }
+
+    def _recall_adopted_reason_summary(self, recall_pack: dict[str, Any]) -> str:
+        # Block: Counts
+        memory_count = len(recall_pack["selected_memory_ids"])
+        digest_count = len(recall_pack["selected_episode_digest_ids"])
+        association_memory_count = len(recall_pack["association_selected_memory_ids"])
+        association_digest_count = len(recall_pack["association_selected_episode_digest_ids"])
+
+        # Block: Empty
+        if memory_count == 0 and digest_count == 0:
+            return "構造レーンで採用候補は選ばれなかった。"
+
+        # Block: AssociationOnly
+        if memory_count == association_memory_count and digest_count == association_digest_count:
+            return (
+                "連想レーンで近傍候補を補助採用した。"
+                f" association_memory_units={association_memory_count}, association_episode_digests={association_digest_count}"
+            )
+
+        # Block: Mixed
+        if association_memory_count > 0 or association_digest_count > 0:
+            return (
+                "構造レーンを主軸にしつつ、連想レーンの近傍候補を補助採用した。"
+                f" memory_units={memory_count}, episode_digests={digest_count},"
+                f" association_memory_units={association_memory_count}, association_episode_digests={association_digest_count}"
+            )
+
+        # Block: Summary
+        return (
+            "構造レーンで scope、memory_type、status、commitment_state に基づいて候補を採用した。"
+            f" memory_units={memory_count}, episode_digests={digest_count}"
+        )
+
+    def _recall_rejected_reason_summary(self, recall_pack: dict[str, Any]) -> str:
+        # Block: Empty
+        if recall_pack["candidate_count"] == 0:
+            return "現時点では構造レーンにも連想レーンにも一致する長期記憶がなかった。"
+
+        # Block: Association
+        if recall_pack["association_selected_memory_ids"] or recall_pack["association_selected_episode_digest_ids"]:
+            return "vector-only 候補は補助扱いに留め、文字列一致フォールバックは使っていない。"
+
+        # Block: Summary
+        return "section 上限と全体上限を優先し、文字列一致フォールバックは使っていない。"
+
+    def _build_time_context(self, *, current_time: str) -> dict[str, Any]:
+        # Block: TimestampParse
+        current_dt = self._parse_iso(current_time)
+
+        # Block: Result
+        return {
+            "current_time": current_time,
+            "weekday": current_dt.strftime("%A").lower(),
+            "part_of_day": self._part_of_day(current_dt.hour),
+        }
+
+    def _build_affect_context(
+        self,
+        *,
+        state: dict[str, Any],
+        recall_hint: dict[str, Any],
+    ) -> dict[str, list[dict[str, Any]]]:
+        # Block: Query
+        records = self.store.list_affect_states_for_context(
+            memory_set_id=state["selected_memory_set_id"],
+            scope_filters=self._build_context_scope_filters(recall_hint),
+            layers=["surface", "background"],
+            limit=6,
+        )
+
+        # Block: Selection
+        affect_context = {
+            "surface": [],
+            "background": [],
+        }
+        for record in records:
+            layer = record.get("layer")
+            if layer not in affect_context:
+                continue
+            if len(affect_context[layer]) >= 2:
+                continue
+            affect_context[layer].append(
+                {
+                    "target_scope_type": record["target_scope_type"],
+                    "target_scope_key": record["target_scope_key"],
+                    "affect_label": record["affect_label"],
+                    "intensity": record["intensity"],
+                    "updated_at": record["updated_at"],
+                }
+            )
+
+        # Block: Result
+        return affect_context
+
+    def _build_context_scope_filters(self, recall_hint: dict[str, Any]) -> list[tuple[str, str]]:
+        # Block: Defaults
+        filters: list[tuple[str, str]] = [("user", "user")]
+        primary_intent = recall_hint["primary_intent"]
+        if primary_intent in {"commitment_check", "consult", "meta_relationship"}:
+            filters.append(("relationship", "self|user"))
+
+        # Block: FocusScopes
+        filters.extend(self._parse_focus_scopes(recall_hint.get("focus_scopes", [])))
+
+        # Block: Dedup
+        deduped: list[tuple[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        for scope_filter in filters:
+            if scope_filter in seen:
+                continue
+            deduped.append(scope_filter)
+            seen.add(scope_filter)
+
+        # Block: Result
+        return deduped
+
+    def _parse_focus_scopes(self, scopes: list[Any]) -> list[tuple[str, str]]:
+        # Block: Parse
+        parsed: list[tuple[str, str]] = []
+        for scope in scopes:
+            if not isinstance(scope, str):
+                continue
+            normalized = scope.strip()
+            if not normalized:
+                continue
+            if normalized in {"self", "user"}:
+                parsed.append((normalized, normalized))
+                continue
+            scope_type, separator, scope_key = normalized.partition(":")
+            if not separator or not scope_key:
+                continue
+            if scope_type not in {"relationship", "topic"}:
+                continue
+            parsed.append((scope_type, scope_key.strip()))
+
+        # Block: Result
+        return parsed
+
+    def _part_of_day(self, hour: int) -> str:
+        # Block: Range
+        if 5 <= hour < 11:
+            return "morning"
+        if 11 <= hour < 17:
+            return "daytime"
+        if 17 <= hour < 22:
+            return "evening"
+        return "night"
 
     def _build_settings_snapshot(self, state: dict) -> dict:
         # Block: Snapshot
@@ -815,15 +1019,19 @@ class OtomeKairoService:
         recent_turns: list[dict],
         recall_hint: dict,
         recall_pack: dict,
+        time_context: dict,
+        affect_context: dict[str, list[dict[str, Any]]],
         decision: dict,
         result_kind: str,
         reply_payload: dict | None,
-    ) -> None:
+    ) -> list[dict[str, Any]]:
         # Block: EventRecords
+        selected_memory_set_id = state["selected_memory_set_id"]
         events = [
             {
                 "event_id": f"event:{uuid.uuid4().hex}",
                 "cycle_id": cycle_id,
+                "memory_set_id": selected_memory_set_id,
                 "kind": "observation",
                 "role": "user",
                 "text": observation_text,
@@ -832,6 +1040,7 @@ class OtomeKairoService:
             {
                 "event_id": f"event:{uuid.uuid4().hex}",
                 "cycle_id": cycle_id,
+                "memory_set_id": selected_memory_set_id,
                 "kind": "decision",
                 "role": "system",
                 "result_kind": result_kind,
@@ -844,6 +1053,7 @@ class OtomeKairoService:
                 {
                     "event_id": f"event:{uuid.uuid4().hex}",
                     "cycle_id": cycle_id,
+                    "memory_set_id": selected_memory_set_id,
                     "kind": "reply",
                     "role": "assistant",
                     "text": reply_payload["reply_text"],
@@ -854,10 +1064,14 @@ class OtomeKairoService:
         # Block: RetrievalRun
         retrieval_run = {
             "cycle_id": cycle_id,
+            "selected_memory_set_id": selected_memory_set_id,
             "started_at": started_at,
             "finished_at": finished_at,
             "result_status": "succeeded",
             "recall_hint": recall_hint,
+            "selected_episode_digest_ids": recall_pack["selected_episode_digest_ids"],
+            "selected_event_ids": recall_pack["selected_event_ids"],
+            "recall_pack_summary": self._summarize_recall_pack(recall_pack),
             "candidate_count": recall_pack["candidate_count"],
             "selected_memory_ids": recall_pack["selected_memory_ids"],
         }
@@ -891,8 +1105,10 @@ class OtomeKairoService:
                 "recall_hint_summary": recall_hint,
                 "candidate_count": recall_pack["candidate_count"],
                 "selected_memory_ids": recall_pack["selected_memory_ids"],
-                "adopted_reason_summary": "No long-term memory candidates were selected in the minimum slice.",
-                "rejected_candidate_summary": "No candidates were retrieved in the minimum slice.",
+                "selected_episode_digest_ids": recall_pack["selected_episode_digest_ids"],
+                "recall_pack_summary": self._summarize_recall_pack(recall_pack),
+                "adopted_reason_summary": self._recall_adopted_reason_summary(recall_pack),
+                "rejected_candidate_summary": self._recall_rejected_reason_summary(recall_pack),
             },
             "decision_trace": {
                 "result_kind": decision["kind"],
@@ -900,6 +1116,11 @@ class OtomeKairoService:
                 "persona_summary": state["personas"][state["selected_persona_id"]]["display_name"],
                 "memory_summary": state["memory_sets"][state["selected_memory_set_id"]]["display_name"],
                 "current_context_summary": self._clamp(observation_text),
+                "internal_context_summary": {
+                    "time_context": time_context,
+                    "affect_context_summary": self._summarize_affect_context(affect_context),
+                    "recall_pack_summary": self._summarize_recall_pack(recall_pack),
+                },
                 "primary_candidate_kind": decision["kind"],
             },
             "result_trace": {
@@ -913,11 +1134,13 @@ class OtomeKairoService:
         }
 
         # Block: Persist
-        for event in events:
-            self.store.append_jsonl(EVENTS_FILE, event)
-        self.store.append_jsonl(RETRIEVAL_RUNS_FILE, retrieval_run)
-        self.store.append_jsonl(CYCLE_SUMMARIES_FILE, cycle_summary)
-        self.store.append_jsonl(CYCLE_TRACES_FILE, cycle_trace)
+        self.store.persist_cycle_records(
+            events=events,
+            retrieval_run=retrieval_run,
+            cycle_summary=cycle_summary,
+            cycle_trace=cycle_trace,
+        )
+        return events
 
     def _persist_cycle_failure(
         self,
@@ -933,10 +1156,12 @@ class OtomeKairoService:
         failure_reason: str,
     ) -> None:
         # Block: EventRecords
+        selected_memory_set_id = state["selected_memory_set_id"]
         events = [
             {
                 "event_id": f"event:{uuid.uuid4().hex}",
                 "cycle_id": cycle_id,
+                "memory_set_id": selected_memory_set_id,
                 "kind": "observation",
                 "role": "user",
                 "text": observation_text,
@@ -945,6 +1170,7 @@ class OtomeKairoService:
             {
                 "event_id": f"event:{uuid.uuid4().hex}",
                 "cycle_id": cycle_id,
+                "memory_set_id": selected_memory_set_id,
                 "kind": "recall_hint_failure",
                 "role": "system",
                 "failure_reason": failure_reason,
@@ -955,10 +1181,14 @@ class OtomeKairoService:
         # Block: RetrievalRun
         retrieval_run = {
             "cycle_id": cycle_id,
+            "selected_memory_set_id": selected_memory_set_id,
             "started_at": started_at,
             "finished_at": finished_at,
             "result_status": "failed",
             "failure_reason": failure_reason,
+            "selected_episode_digest_ids": [],
+            "selected_event_ids": [],
+            "recall_pack_summary": None,
         }
 
         # Block: CycleSummary
@@ -990,6 +1220,8 @@ class OtomeKairoService:
                 "recall_hint_summary": None,
                 "candidate_count": 0,
                 "selected_memory_ids": [],
+                "selected_episode_digest_ids": [],
+                "recall_pack_summary": None,
                 "adopted_reason_summary": None,
                 "rejected_candidate_summary": None,
             },
@@ -1012,41 +1244,29 @@ class OtomeKairoService:
         }
 
         # Block: Persist
-        for event in events:
-            self.store.append_jsonl(EVENTS_FILE, event)
-        self.store.append_jsonl(RETRIEVAL_RUNS_FILE, retrieval_run)
-        self.store.append_jsonl(CYCLE_SUMMARIES_FILE, cycle_summary)
-        self.store.append_jsonl(CYCLE_TRACES_FILE, cycle_trace)
+        self.store.persist_cycle_records(
+            events=events,
+            retrieval_run=retrieval_run,
+            cycle_summary=cycle_summary,
+            cycle_trace=cycle_trace,
+        )
 
     def _load_recent_turns(self, state: dict) -> list[dict]:
         # Block: WindowSetup
         now = datetime.now(UTC)
         threshold = now - timedelta(minutes=3)
-        events = self.store.read_jsonl(EVENTS_FILE)
         selected_preset = state["model_presets"][state["selected_model_preset_id"]]
         reply_role = selected_preset.get("roles", {}).get("reply_generation", {})
         turn_limit = reply_role.get("max_turns_window")
         if not isinstance(turn_limit, int) or turn_limit < 1:
             turn_limit = 6
 
-        # Block: Filtering
-        turns = []
-        for event in events:
-            if event.get("kind") not in {"observation", "reply"}:
-                continue
-            created_at = self._parse_iso(event["created_at"])
-            if created_at < threshold:
-                continue
-            turns.append(
-                {
-                    "role": event["role"],
-                    "text": event["text"],
-                    "created_at": event["created_at"],
-                }
-            )
-
-        # Block: Truncate
-        return turns[-turn_limit:]
+        # Block: Lookup
+        return self.store.load_recent_turns(
+            memory_set_id=state["selected_memory_set_id"],
+            since_iso=threshold.isoformat(),
+            limit=turn_limit,
+        )
 
     def _new_console_token(self) -> str:
         # Block: Token

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import math
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -28,6 +30,36 @@ TIME_REFERENCE_VALUES = {
     "past",
     "future",
     "persistent",
+}
+
+MEMORY_TYPE_VALUES = {
+    "fact",
+    "preference",
+    "relation",
+    "commitment",
+    "interpretation",
+    "summary",
+}
+
+MEMORY_STATUS_VALUES = {
+    "inferred",
+    "confirmed",
+    "superseded",
+    "revoked",
+    "dormant",
+}
+
+COMMITMENT_STATE_VALUES = {
+    "open",
+    "waiting_confirmation",
+    "on_hold",
+    "done",
+    "cancelled",
+}
+
+AFFECT_LAYER_VALUES = {
+    "surface",
+    "background",
 }
 
 
@@ -85,6 +117,117 @@ def validate_decision_contract(payload: dict[str, Any]) -> None:
         raise LLMError("Decision reason_summary must be a non-empty string.")
     if not isinstance(payload["requires_confirmation"], bool):
         raise LLMError("Decision requires_confirmation must be a boolean.")
+
+
+def validate_memory_interpretation_contract(payload: dict[str, Any]) -> None:
+    # Block: RequiredKeys
+    required_keys = {
+        "episode_digest",
+        "candidate_memory_units",
+        "affect_updates",
+    }
+    if set(payload.keys()) != required_keys:
+        raise LLMError("MemoryInterpretation keys do not match the contract.")
+
+    # Block: EpisodeDigestValidation
+    episode_digest = payload["episode_digest"]
+    required_episode_keys = {
+        "episode_type",
+        "primary_scope_type",
+        "primary_scope_key",
+        "summary_text",
+        "outcome_text",
+        "open_loops",
+        "salience",
+    }
+    if not isinstance(episode_digest, dict) or set(episode_digest.keys()) != required_episode_keys:
+        raise LLMError("MemoryInterpretation episode_digest is invalid.")
+    if not isinstance(episode_digest["summary_text"], str) or not episode_digest["summary_text"].strip():
+        raise LLMError("MemoryInterpretation episode_digest.summary_text is invalid.")
+    if episode_digest["outcome_text"] is not None and not isinstance(episode_digest["outcome_text"], str):
+        raise LLMError("MemoryInterpretation episode_digest.outcome_text is invalid.")
+    if not isinstance(episode_digest["open_loops"], list):
+        raise LLMError("MemoryInterpretation episode_digest.open_loops must be a list.")
+    if not isinstance(episode_digest["salience"], (int, float)):
+        raise LLMError("MemoryInterpretation episode_digest.salience must be numeric.")
+
+    # Block: CandidateValidation
+    if not isinstance(payload["candidate_memory_units"], list):
+        raise LLMError("MemoryInterpretation candidate_memory_units must be a list.")
+    for candidate in payload["candidate_memory_units"]:
+        required_candidate_keys = {
+            "memory_type",
+            "scope_type",
+            "scope_key",
+            "subject_ref",
+            "predicate",
+            "object_ref_or_value",
+            "summary_text",
+            "status",
+            "commitment_state",
+            "confidence",
+            "salience",
+            "valid_from",
+            "valid_to",
+            "qualifiers",
+            "reason",
+        }
+        if not isinstance(candidate, dict) or set(candidate.keys()) != required_candidate_keys:
+            raise LLMError("MemoryInterpretation candidate_memory_unit is invalid.")
+        if candidate["memory_type"] not in MEMORY_TYPE_VALUES:
+            raise LLMError("MemoryInterpretation candidate_memory_unit.memory_type is invalid.")
+        if candidate["status"] not in MEMORY_STATUS_VALUES:
+            raise LLMError("MemoryInterpretation candidate_memory_unit.status is invalid.")
+        if not isinstance(candidate["scope_type"], str) or not candidate["scope_type"].strip():
+            raise LLMError("MemoryInterpretation candidate_memory_unit.scope_type is invalid.")
+        if not isinstance(candidate["scope_key"], str) or not candidate["scope_key"].strip():
+            raise LLMError("MemoryInterpretation candidate_memory_unit.scope_key is invalid.")
+        if not isinstance(candidate["subject_ref"], str) or not candidate["subject_ref"].strip():
+            raise LLMError("MemoryInterpretation candidate_memory_unit.subject_ref is invalid.")
+        if not isinstance(candidate["predicate"], str) or not candidate["predicate"].strip():
+            raise LLMError("MemoryInterpretation candidate_memory_unit.predicate is invalid.")
+        if candidate["object_ref_or_value"] is not None and not isinstance(candidate["object_ref_or_value"], str):
+            raise LLMError("MemoryInterpretation candidate_memory_unit.object_ref_or_value is invalid.")
+        if not isinstance(candidate["summary_text"], str) or not candidate["summary_text"].strip():
+            raise LLMError("MemoryInterpretation candidate_memory_unit.summary_text is invalid.")
+        if candidate["commitment_state"] is not None and candidate["commitment_state"] not in COMMITMENT_STATE_VALUES:
+            raise LLMError("MemoryInterpretation candidate_memory_unit.commitment_state is invalid.")
+        if not isinstance(candidate["confidence"], (int, float)):
+            raise LLMError("MemoryInterpretation candidate_memory_unit.confidence must be numeric.")
+        if not isinstance(candidate["salience"], (int, float)):
+            raise LLMError("MemoryInterpretation candidate_memory_unit.salience must be numeric.")
+        if candidate["valid_from"] is not None and not isinstance(candidate["valid_from"], str):
+            raise LLMError("MemoryInterpretation candidate_memory_unit.valid_from is invalid.")
+        if candidate["valid_to"] is not None and not isinstance(candidate["valid_to"], str):
+            raise LLMError("MemoryInterpretation candidate_memory_unit.valid_to is invalid.")
+        if not isinstance(candidate["qualifiers"], dict):
+            raise LLMError("MemoryInterpretation candidate_memory_unit.qualifiers must be an object.")
+        if not isinstance(candidate["reason"], str) or not candidate["reason"].strip():
+            raise LLMError("MemoryInterpretation candidate_memory_unit.reason is invalid.")
+
+    # Block: AffectValidation
+    if not isinstance(payload["affect_updates"], list):
+        raise LLMError("MemoryInterpretation affect_updates must be a list.")
+    for affect_update in payload["affect_updates"]:
+        required_affect_keys = {
+            "layer",
+            "target_scope_type",
+            "target_scope_key",
+            "affect_label",
+            "intensity",
+        }
+        if not isinstance(affect_update, dict) or set(affect_update.keys()) != required_affect_keys:
+            raise LLMError("MemoryInterpretation affect_update is invalid.")
+        if affect_update["layer"] not in AFFECT_LAYER_VALUES:
+            raise LLMError("MemoryInterpretation affect_update.layer is invalid.")
+        if not isinstance(affect_update["target_scope_type"], str) or not affect_update["target_scope_type"].strip():
+            raise LLMError("MemoryInterpretation affect_update.target_scope_type is invalid.")
+        if not isinstance(affect_update["target_scope_key"], str) or not affect_update["target_scope_key"].strip():
+            raise LLMError("MemoryInterpretation affect_update.target_scope_key is invalid.")
+        if not isinstance(affect_update["affect_label"], str) or not affect_update["affect_label"].strip():
+            raise LLMError("MemoryInterpretation affect_update.affect_label is invalid.")
+        if not isinstance(affect_update["intensity"], (int, float)):
+            raise LLMError("MemoryInterpretation affect_update.intensity must be numeric.")
 
 
 # Block: MockClient
@@ -159,13 +302,23 @@ class MockLLMClient:
         self,
         profile: dict,
         observation_text: str,
+        recent_turns: list[dict],
+        time_context: dict[str, Any],
+        affect_context: dict[str, list[dict[str, Any]]],
         recall_hint: dict,
+        recall_pack: dict[str, Any],
     ) -> dict[str, Any]:
         # Block: ProviderCheck
         self._assert_mock_model(profile)
 
-        # Block: DecisionRule
+        # Block: Context
         normalized = observation_text.strip()
+        primary_intent = recall_hint["primary_intent"]
+        conflicts = recall_pack.get("conflicts", [])
+        active_commitments = recall_pack.get("active_commitments", [])
+        surface_affects = affect_context.get("surface", [])
+
+        # Block: DecisionRule
         if not normalized:
             payload = {
                 "kind": "noop",
@@ -173,12 +326,33 @@ class MockLLMClient:
                 "reason_summary": "Observation text was empty after normalization.",
                 "requires_confirmation": False,
             }
+        elif conflicts:
+            payload = {
+                "kind": "reply",
+                "reason_code": "conflict_present",
+                "reason_summary": "RecallPack に矛盾候補があり、確認寄りの返答が必要。",
+                "requires_confirmation": True,
+            }
+        elif primary_intent == "commitment_check" and active_commitments:
+            payload = {
+                "kind": "reply",
+                "reason_code": "active_commitment",
+                "reason_summary": "進行中の約束や保留があり、継続会話として返答する。",
+                "requires_confirmation": False,
+            }
+        elif surface_affects and surface_affects[0]["affect_label"] in {"不安", "緊張", "迷い", "concern"}:
+            payload = {
+                "kind": "reply",
+                "reason_code": "affect_caution",
+                "reason_summary": "AffectContext に慎重さを要する感情があり、確認寄りに返す。",
+                "requires_confirmation": True,
+            }
         else:
             payload = {
                 "kind": "reply",
-                "reason_code": f"intent:{recall_hint['primary_intent']}",
+                "reason_code": f"intent:{primary_intent}",
                 "reason_summary": "A normal conversation reply is appropriate for the current observation.",
-                "requires_confirmation": recall_hint["primary_intent"] in {"fact_query", "meta_relationship"},
+                "requires_confirmation": primary_intent in {"fact_query", "meta_relationship"},
             }
 
         # Block: Validation
@@ -190,36 +364,324 @@ class MockLLMClient:
         profile: dict,
         persona: dict,
         observation_text: str,
+        recent_turns: list[dict],
+        time_context: dict[str, Any],
+        affect_context: dict[str, list[dict[str, Any]]],
         recall_hint: dict,
+        recall_pack: dict[str, Any],
         decision: dict,
     ) -> dict[str, Any]:
         # Block: ProviderCheck
         self._assert_mock_model(profile)
 
-        # Block: ReplyRule
+        # Block: Context
         tone = persona["expression_style"]["tone"]
         primary_intent = recall_hint["primary_intent"]
         text = observation_text.strip()
+        conflict_items = recall_pack.get("conflicts", [])
+        commitment_items = recall_pack.get("active_commitments", [])
+        relationship_items = recall_pack.get("relationship_model", [])
+        user_items = recall_pack.get("user_model", [])
+        topic_items = recall_pack.get("active_topics", [])
+        episode_items = recall_pack.get("episodic_evidence", [])
+        surface_affects = affect_context.get("surface", [])
+        conflict_item = conflict_items[0] if conflict_items else None
+        commitment_item = commitment_items[0] if commitment_items else None
+        relationship_item = relationship_items[0] if relationship_items else None
+        user_item = user_items[0] if user_items else None
+        topic_item = topic_items[0] if topic_items else None
+        episode_item = episode_items[0] if episode_items else None
+        surface_affect = surface_affects[0] if surface_affects else None
 
-        if primary_intent == "consult":
-            reply_text = f"状況は受け取ったよ。{text} の中で、今いちばん困っている点をもう少し教えて。"
+        # Block: CautionPrefix
+        caution_prefix = ""
+        if conflict_item is not None:
+            caution_prefix = "今は少し慎重に受け取っている。"
+        elif surface_affect is not None and surface_affect["affect_label"] in {"不安", "緊張", "迷い", "concern"}:
+            caution_prefix = "少し慎重に聞いているよ。"
+
+        # Block: ReplyRule
+        if decision["requires_confirmation"]:
+            basis_item = relationship_item or episode_item or conflict_item
+            if basis_item is not None:
+                reply_text = (
+                    f"{caution_prefix}{basis_item['summary_text']} という流れで受け取っているけれど、"
+                    f"{text} の理解はこれで合っている？"
+                )
+            else:
+                reply_text = f"{caution_prefix}{text} の受け取りを断定せず確認したい。いまの理解で合っている？"
+        elif primary_intent == "consult":
+            if user_item is not None:
+                reply_text = f"{caution_prefix}{user_item['summary_text']} も踏まえて聞くね。{text} の中で、今いちばん困っている点をもう少し教えて。"
+            else:
+                reply_text = f"{caution_prefix}状況は受け取ったよ。{text} の中で、今いちばん困っている点をもう少し教えて。"
         elif primary_intent == "commitment_check":
-            reply_text = f"その流れは覚えている前提で話すね。{text} に関して、今回どこまで進めたい？"
+            if commitment_item is not None:
+                if "どこまで" in text:
+                    reply_text = f"{commitment_item['summary_text']} の続きとして受け取ったよ。いまはどの範囲まで進めたい？"
+                else:
+                    reply_text = f"{commitment_item['summary_text']} の続きとして受け取ったよ。{text} について、今回はどこまで進めたい？"
+            else:
+                reply_text = f"{caution_prefix}その流れは覚えている前提で話すね。{text} に関して、今回どこまで進めたい？"
         elif primary_intent == "reminisce":
-            reply_text = f"その続きとして受け取ったよ。{text} のどの部分からつなげたい？"
+            if episode_item is not None:
+                reply_text = f"{episode_item['summary_text']} の流れとして受け取ったよ。{text} のどの部分からつなげたい？"
+            else:
+                reply_text = f"{caution_prefix}その続きとして受け取ったよ。{text} のどの部分からつなげたい？"
         elif primary_intent == "preference_query":
-            reply_text = f"好みの話として受け取ったよ。{text} について、今の気分も含めて聞かせて。"
-        elif decision["requires_confirmation"]:
-            reply_text = f"断定せずに確認したい。{text} について、いまの受け取りで合っている？"
+            reply_text = f"{caution_prefix}好みの話として受け取ったよ。{text} について、今の気分も含めて聞かせて。"
         else:
-            reply_text = f"{tone}に受け取ったよ。{text}"
+            topic_prefix = ""
+            if topic_item is not None:
+                topic_prefix = f"{topic_item['summary_text']} の流れで、"
+            elif recent_turns:
+                topic_prefix = "前の流れをつなげつつ、"
+            reply_text = f"{caution_prefix}{tone}に受け取ったよ。{topic_prefix}{text}"
 
         # Block: Payload
         return {
             "reply_text": reply_text,
-            "reply_style_notes": f"tone={tone}",
+            "reply_style_notes": f"tone={tone}; part_of_day={time_context.get('part_of_day', 'unknown')}",
             "confidence_note": "mock_model",
         }
+
+    def generate_memory_interpretation(
+        self,
+        profile: dict,
+        observation_text: str,
+        recall_hint: dict,
+        decision: dict,
+        reply_text: str | None,
+    ) -> dict[str, Any]:
+        # Block: ProviderCheck
+        self._assert_mock_model(profile)
+
+        # Block: EpisodeDigest
+        normalized = observation_text.strip()
+        episode_digest = {
+            "episode_type": self._mock_episode_type(recall_hint["primary_intent"]),
+            "primary_scope_type": self._mock_primary_scope_type(recall_hint["primary_intent"]),
+            "primary_scope_key": self._mock_primary_scope_key(recall_hint["primary_intent"]),
+            "summary_text": normalized or "空の観測だった。",
+            "outcome_text": reply_text or decision["reason_summary"],
+            "open_loops": self._mock_open_loops(normalized, recall_hint["primary_intent"]),
+            "salience": 0.72 if normalized else 0.2,
+        }
+
+        # Block: CandidateMemoryUnits
+        candidate_memory_units = self._mock_candidate_memory_units(normalized)
+
+        # Block: AffectUpdates
+        affect_updates = self._mock_affect_updates(normalized)
+
+        # Block: Payload
+        payload = {
+            "episode_digest": episode_digest,
+            "candidate_memory_units": candidate_memory_units,
+            "affect_updates": affect_updates,
+        }
+        validate_memory_interpretation_contract(payload)
+        return payload
+
+    def generate_embeddings(
+        self,
+        profile: dict,
+        texts: list[str],
+        embedding_dimension: int,
+    ) -> list[list[float]]:
+        # Block: ProviderCheck
+        self._assert_mock_model(profile)
+
+        # Block: Result
+        return [
+            self._mock_embedding_vector(text, embedding_dimension)
+            for text in texts
+        ]
+
+    def _mock_episode_type(self, primary_intent: str) -> str:
+        # Block: Mapping
+        if primary_intent in {"consult", "check_state"}:
+            return "consultation"
+        if primary_intent == "commitment_check":
+            return "commitment_followup"
+        if primary_intent == "preference_query":
+            return "preference_talk"
+        if primary_intent == "meta_relationship":
+            return "relationship_check"
+        return "conversation"
+
+    def _mock_primary_scope_type(self, primary_intent: str) -> str:
+        # Block: Mapping
+        if primary_intent in {"commitment_check", "meta_relationship"}:
+            return "relationship"
+        return "user"
+
+    def _mock_primary_scope_key(self, primary_intent: str) -> str:
+        # Block: Mapping
+        if primary_intent in {"commitment_check", "meta_relationship"}:
+            return "self|user"
+        return "user"
+
+    def _mock_open_loops(self, normalized: str, primary_intent: str) -> list[str]:
+        # Block: LoopRule
+        if primary_intent in {"consult", "commitment_check", "reminisce"} and normalized:
+            return [normalized[:80]]
+        return []
+
+    def _mock_candidate_memory_units(self, normalized: str) -> list[dict[str, Any]]:
+        # Block: Empty
+        if not normalized:
+            return []
+
+        # Block: Builders
+        candidates: list[dict[str, Any]] = []
+
+        if any(token in normalized for token in ("好き", "食べたい", "嫌い", "苦手")):
+            candidates.append(
+                {
+                    "memory_type": "preference",
+                    "scope_type": "user",
+                    "scope_key": "user",
+                    "subject_ref": "user",
+                    "predicate": "likes",
+                    "object_ref_or_value": self._mock_preference_object(normalized),
+                    "summary_text": self._mock_preference_summary(normalized),
+                    "status": "confirmed",
+                    "commitment_state": None,
+                    "confidence": 0.86,
+                    "salience": 0.78,
+                    "valid_from": None,
+                    "valid_to": None,
+                    "qualifiers": {
+                        "polarity": self._mock_preference_polarity(normalized),
+                    },
+                    "reason": "発話中に好みや苦手の明示が含まれていたため。",
+                }
+            )
+
+        if any(token in normalized for token in ("約束", "今度", "また話", "また今度", "後で")):
+            candidates.append(
+                {
+                    "memory_type": "commitment",
+                    "scope_type": "relationship",
+                    "scope_key": "self|user",
+                    "subject_ref": "self",
+                    "predicate": "talk_again",
+                    "object_ref_or_value": "topic:conversation",
+                    "summary_text": "あなたと後で続きを話す流れが残っている。",
+                    "status": "inferred",
+                    "commitment_state": "open",
+                    "confidence": 0.74,
+                    "salience": 0.88,
+                    "valid_from": None,
+                    "valid_to": None,
+                    "qualifiers": {},
+                    "reason": "後続会話や約束を示す表現が含まれていたため。",
+                }
+            )
+
+        if any(token in normalized for token in ("眠れて", "疲れ", "しんど", "つらい")):
+            candidates.append(
+                {
+                    "memory_type": "interpretation",
+                    "scope_type": "user",
+                    "scope_key": "user",
+                    "subject_ref": "user",
+                    "predicate": "seems",
+                    "object_ref_or_value": "state:tired",
+                    "summary_text": "あなたは最近疲れや睡眠の問題を抱えていそうだ。",
+                    "status": "inferred",
+                    "commitment_state": None,
+                    "confidence": 0.62,
+                    "salience": 0.8,
+                    "valid_from": None,
+                    "valid_to": None,
+                    "qualifiers": {
+                        "domain": "health",
+                    },
+                    "reason": "体調や睡眠に関する示唆があったため。",
+                }
+            )
+
+        return candidates
+
+    def _mock_preference_object(self, normalized: str) -> str:
+        # Block: Mapping
+        if "辛" in normalized:
+            return "food:spicy"
+        if "甘" in normalized:
+            return "food:sweet"
+        if "食べ" in normalized:
+            return "topic:food"
+        return "preference:stated"
+
+    def _mock_preference_summary(self, normalized: str) -> str:
+        # Block: Mapping
+        if "嫌い" in normalized or "苦手" in normalized:
+            return "あなたには苦手な好みがある。"
+        return "あなたにははっきりした好みがある。"
+
+    def _mock_preference_polarity(self, normalized: str) -> str:
+        # Block: Mapping
+        if "嫌い" in normalized or "苦手" in normalized:
+            return "negative"
+        return "positive"
+
+    def _mock_affect_updates(self, normalized: str) -> list[dict[str, Any]]:
+        # Block: Builders
+        updates: list[dict[str, Any]] = []
+        if any(token in normalized for token in ("疲れ", "しんど", "つらい", "不安")):
+            updates.append(
+                {
+                    "layer": "surface",
+                    "target_scope_type": "user",
+                    "target_scope_key": "user",
+                    "affect_label": "concern",
+                    "intensity": 0.72,
+                }
+            )
+        if any(token in normalized for token in ("嬉しい", "楽しい", "安心")):
+            updates.append(
+                {
+                    "layer": "surface",
+                    "target_scope_type": "user",
+                    "target_scope_key": "user",
+                    "affect_label": "warmth",
+                    "intensity": 0.65,
+                }
+            )
+        return updates
+
+    def _mock_embedding_vector(self, text: str, embedding_dimension: int) -> list[float]:
+        # Block: EmptyGuard
+        normalized = text.strip()
+        if embedding_dimension <= 0:
+            raise LLMError("embedding_dimension must be positive.")
+        if not normalized:
+            return [0.0] * embedding_dimension
+
+        # Block: Accumulate
+        values = [0.0] * embedding_dimension
+        tokens = [normalized]
+        if len(normalized) >= 2:
+            tokens.extend(normalized[index : index + 2] for index in range(len(normalized) - 1))
+        if len(normalized) >= 3:
+            tokens.extend(normalized[index : index + 3] for index in range(len(normalized) - 2))
+
+        for token in tokens:
+            digest = hashlib.sha256(token.encode("utf-8")).digest()
+            primary_index = int.from_bytes(digest[:4], "little") % embedding_dimension
+            secondary_index = int.from_bytes(digest[4:8], "little") % embedding_dimension
+            primary_value = 0.5 + (digest[8] / 255.0)
+            secondary_value = 0.5 + (digest[9] / 255.0)
+            values[primary_index] += primary_value
+            values[secondary_index] -= secondary_value * 0.25
+
+        # Block: Normalize
+        norm = math.sqrt(sum(value * value for value in values))
+        if norm <= 0.0:
+            return [0.0] * embedding_dimension
+        return [value / norm for value in values]
 
     # Block: Helpers
     def _assert_mock_model(self, profile: dict) -> None:
@@ -269,11 +731,23 @@ class LLMClient:
         profile: dict,
         role_settings: dict,
         observation_text: str,
+        recent_turns: list[dict],
+        time_context: dict[str, Any],
+        affect_context: dict[str, list[dict[str, Any]]],
         recall_hint: dict,
+        recall_pack: dict[str, Any],
     ) -> dict[str, Any]:
         # Block: MockPath
         if self._is_mock_profile(profile):
-            return self.mock_client.generate_decision(profile, observation_text, recall_hint)
+            return self.mock_client.generate_decision(
+                profile,
+                observation_text,
+                recent_turns,
+                time_context,
+                affect_context,
+                recall_hint,
+                recall_pack,
+            )
 
         # Block: PromptBuild
         messages = [
@@ -283,7 +757,14 @@ class LLMClient:
             },
             {
                 "role": "user",
-                "content": self._build_decision_user_prompt(observation_text, recall_hint),
+                "content": self._build_decision_user_prompt(
+                    observation_text=observation_text,
+                    recent_turns=recent_turns,
+                    time_context=time_context,
+                    affect_context=affect_context,
+                    recall_hint=recall_hint,
+                    recall_pack=recall_pack,
+                ),
             },
         ]
 
@@ -301,12 +782,25 @@ class LLMClient:
         persona: dict,
         observation_text: str,
         recent_turns: list[dict],
+        time_context: dict[str, Any],
+        affect_context: dict[str, list[dict[str, Any]]],
         recall_hint: dict,
+        recall_pack: dict[str, Any],
         decision: dict,
     ) -> dict[str, Any]:
         # Block: MockPath
         if self._is_mock_profile(profile):
-            return self.mock_client.generate_reply(profile, persona, observation_text, recall_hint, decision)
+            return self.mock_client.generate_reply(
+                profile,
+                persona,
+                observation_text,
+                recent_turns,
+                time_context,
+                affect_context,
+                recall_hint,
+                recall_pack,
+                decision,
+            )
 
         # Block: PromptBuild
         messages = [
@@ -319,7 +813,10 @@ class LLMClient:
                 "content": self._build_reply_user_prompt(
                     observation_text=observation_text,
                     recent_turns=recent_turns,
+                    time_context=time_context,
+                    affect_context=affect_context,
                     recall_hint=recall_hint,
+                    recall_pack=recall_pack,
                     decision=decision,
                 ),
             },
@@ -337,6 +834,95 @@ class LLMClient:
             "reply_style_notes": f"model={profile.get('model')}",
             "confidence_note": "litellm_model",
         }
+
+    def generate_memory_interpretation(
+        self,
+        *,
+        profile: dict,
+        role_settings: dict,
+        observation_text: str,
+        recall_hint: dict,
+        decision: dict,
+        reply_text: str | None,
+        current_time: str,
+    ) -> dict[str, Any]:
+        # Block: MockPath
+        if self._is_mock_profile(profile):
+            return self.mock_client.generate_memory_interpretation(
+                profile,
+                observation_text,
+                recall_hint,
+                decision,
+                reply_text,
+            )
+
+        # Block: PromptBuild
+        messages = [
+            {
+                "role": "system",
+                "content": self._build_memory_interpretation_system_prompt(),
+            },
+            {
+                "role": "user",
+                "content": self._build_memory_interpretation_user_prompt(
+                    observation_text=observation_text,
+                    recall_hint=recall_hint,
+                    decision=decision,
+                    reply_text=reply_text,
+                    current_time=current_time,
+                ),
+            },
+        ]
+
+        # Block: Completion
+        content = self._complete_text(profile=profile, role_settings=role_settings, messages=messages)
+        payload = self._parse_json_object(content)
+        validate_memory_interpretation_contract(payload)
+        return payload
+
+    def generate_embeddings(
+        self,
+        *,
+        profile: dict,
+        role_settings: dict,
+        texts: list[str],
+    ) -> list[list[float]]:
+        # Block: Empty
+        if not texts:
+            return []
+
+        # Block: Dimension
+        embedding_dimension = role_settings.get("embedding_dimension")
+        if not isinstance(embedding_dimension, int) or embedding_dimension <= 0:
+            raise LLMError("embedding_dimension must be a positive integer.")
+
+        # Block: MockPath
+        if self._is_mock_profile(profile):
+            return self.mock_client.generate_embeddings(profile, texts, embedding_dimension)
+
+        # Block: Import
+        embedding = self._load_litellm_embedding()
+
+        # Block: RequestBuild
+        request_kwargs: dict[str, Any] = {
+            "model": self._resolve_litellm_model(profile),
+            "input": texts,
+        }
+        api_base = profile.get("base_url")
+        if isinstance(api_base, str) and api_base.strip():
+            request_kwargs["api_base"] = api_base.strip()
+        api_key = self._resolve_api_key(profile)
+        if api_key is not None:
+            request_kwargs["api_key"] = api_key
+
+        # Block: Request
+        try:
+            response = embedding(**request_kwargs)
+        except Exception as exc:  # noqa: BLE001
+            raise LLMError(f"LiteLLM embedding call failed: {exc}") from exc
+
+        # Block: Result
+        return self._extract_embedding_vectors(response, expected_count=len(texts))
 
     # Block: LiteLLMCall
     def _complete_text(
@@ -385,6 +971,15 @@ class LLMClient:
 
         return completion
 
+    def _load_litellm_embedding(self) -> Callable[..., Any]:
+        # Block: Import
+        try:
+            from litellm import embedding
+        except ImportError as exc:
+            raise LLMError("LiteLLM is not installed. Run ./scripts/setup_venv.sh to install dependencies.") from exc
+
+        return embedding
+
     # Block: PromptHelpers
     def _build_recall_hint_system_prompt(self) -> str:
         # Block: Prompt
@@ -428,6 +1023,10 @@ class LLMClient:
             "あなたは OtomeKairo の decision_generation です。\n"
             "観測文に対して reply するか noop にするかを決め、JSON オブジェクト 1 個だけを返してください。\n"
             "Markdown、コードフェンス、説明文は禁止です。\n"
+            "入力には recent_turns と internal_context が含まれます。\n"
+            "internal_context には TimeContext, AffectContext, RecallPack が入ります。\n"
+            "RecallPack.conflicts があるときは requires_confirmation=true を優先してください。\n"
+            "active_commitments や episodic_evidence は reply の継続根拠に使ってください。\n"
             "返すキーは必ず次の 4 個です:\n"
             "- kind: \"reply\" または \"noop\"\n"
             "- reason_code: string\n"
@@ -436,9 +1035,21 @@ class LLMClient:
             "空文字や意味のない入力は noop を選んでください。"
         )
 
-    def _build_decision_user_prompt(self, observation_text: str, recall_hint: dict) -> str:
+    def _build_decision_user_prompt(
+        self,
+        *,
+        observation_text: str,
+        recent_turns: list[dict],
+        time_context: dict[str, Any],
+        affect_context: dict[str, list[dict[str, Any]]],
+        recall_hint: dict,
+        recall_pack: dict[str, Any],
+    ) -> str:
         # Block: Prompt
         return (
+            f"recent_turns:\n{self._format_recent_turns(recent_turns)}\n"
+            "internal_context:\n"
+            f"{self._format_internal_context(time_context, affect_context, recall_pack)}\n"
             f"observation_text:\n{observation_text.strip()}\n"
             "recall_hint:\n"
             f"{json.dumps(recall_hint, ensure_ascii=False)}\n"
@@ -457,6 +1068,10 @@ class LLMClient:
         return (
             f"あなたは {display_name} として話します。\n"
             "返答は自然な日本語の本文だけを返してください。JSON、箇条書き、見出し、引用符は禁止です。\n"
+            "入力には recent_turns と internal_context が含まれます。\n"
+            "internal_context には TimeContext, AffectContext, RecallPack が入ります。\n"
+            "RecallPack の内容だけを根拠に、必要な範囲で自然に思い出や継続文脈を混ぜてください。\n"
+            "RecallPack.conflicts があるときは断定を避け、短い確認質問に寄せてください。\n"
             f"persona_text: {persona_text}\n"
             f"second_person_label: {second_person_label}\n"
             f"addon_text: {addon_text}\n"
@@ -470,17 +1085,59 @@ class LLMClient:
         *,
         observation_text: str,
         recent_turns: list[dict],
+        time_context: dict[str, Any],
+        affect_context: dict[str, list[dict[str, Any]]],
         recall_hint: dict,
+        recall_pack: dict[str, Any],
         decision: dict,
     ) -> str:
         # Block: Prompt
         return (
             f"recent_turns:\n{self._format_recent_turns(recent_turns)}\n"
+            "internal_context:\n"
+            f"{self._format_internal_context(time_context, affect_context, recall_pack)}\n"
             f"observation_text:\n{observation_text.strip()}\n"
             "recall_hint:\n"
             f"{json.dumps(recall_hint, ensure_ascii=False)}\n"
             "decision:\n"
             f"{json.dumps(decision, ensure_ascii=False)}\n"
+        )
+
+    def _build_memory_interpretation_system_prompt(self) -> str:
+        # Block: Prompt
+        return (
+            "あなたは OtomeKairo の memory_interpretation です。\n"
+            "会話 1 サイクルから episode_digest, candidate_memory_units, affect_updates を抽出し、JSON オブジェクト 1 個だけを返してください。\n"
+            "Markdown、コードフェンス、説明文は禁止です。\n"
+            "返すトップレベルキーは episode_digest, candidate_memory_units, affect_updates の 3 つだけです。\n"
+            "candidate_memory_units は、今後の会話や判断に効く継続理解だけを入れてください。\n"
+            "弱い雑談断片や一時判断は memory_unit にしないでください。\n"
+            "memory_type は fact, preference, relation, commitment, interpretation, summary のいずれかです。\n"
+            "status は inferred, confirmed, superseded, revoked, dormant のいずれかです。\n"
+            "commitment_state は commitment のときだけ open, waiting_confirmation, on_hold, done, cancelled のいずれかを使い、それ以外では null にしてください。\n"
+            "episode_digest.open_loops は短い文字列の配列にしてください。\n"
+            "affect_updates は必要なときだけ返し、不要なら空配列にしてください。"
+        )
+
+    def _build_memory_interpretation_user_prompt(
+        self,
+        *,
+        observation_text: str,
+        recall_hint: dict,
+        decision: dict,
+        reply_text: str | None,
+        current_time: str,
+    ) -> str:
+        # Block: Prompt
+        return (
+            f"current_time: {current_time}\n"
+            f"observation_text:\n{observation_text.strip()}\n"
+            "recall_hint:\n"
+            f"{json.dumps(recall_hint, ensure_ascii=False)}\n"
+            "decision:\n"
+            f"{json.dumps(decision, ensure_ascii=False)}\n"
+            "reply_text:\n"
+            f"{reply_text or '(none)'}\n"
         )
 
     # Block: ResponseHelpers
@@ -561,6 +1218,28 @@ class LLMClient:
             raise LLMError("LiteLLM did not return a JSON object.")
         return payload
 
+    def _extract_embedding_vectors(self, response: Any, *, expected_count: int) -> list[list[float]]:
+        # Block: DataRead
+        data = getattr(response, "data", None)
+        if data is None and isinstance(response, dict):
+            data = response.get("data")
+        if not isinstance(data, list) or len(data) != expected_count:
+            raise LLMError("LiteLLM embedding response did not include expected data.")
+
+        # Block: Parse
+        vectors: list[list[float]] = []
+        for item in data:
+            vector = getattr(item, "embedding", None)
+            if vector is None and isinstance(item, dict):
+                vector = item.get("embedding")
+            if not isinstance(vector, list) or not vector:
+                raise LLMError("LiteLLM embedding item did not include embedding.")
+            parsed = [float(value) for value in vector]
+            vectors.append(parsed)
+
+        # Block: Result
+        return vectors
+
     # Block: ConfigHelpers
     def _is_mock_profile(self, profile: dict) -> bool:
         return profile.get("model") == "mock"
@@ -586,6 +1265,83 @@ class LLMClient:
             if isinstance(value, str) and value.strip():
                 return value.strip()
         return None
+
+    def _format_internal_context(
+        self,
+        time_context: dict[str, Any],
+        affect_context: dict[str, list[dict[str, Any]]],
+        recall_pack: dict[str, Any],
+    ) -> str:
+        # Block: Payload
+        payload = {
+            "time_context": time_context,
+            "affect_context": affect_context,
+            "recall_pack": self._compact_recall_pack(recall_pack),
+        }
+
+        # Block: Result
+        return json.dumps(payload, ensure_ascii=False)
+
+    def _compact_recall_pack(self, recall_pack: dict[str, Any]) -> dict[str, Any]:
+        # Block: Payload
+        return {
+            "self_model": [self._compact_memory_context_item(item) for item in recall_pack.get("self_model", [])],
+            "user_model": [self._compact_memory_context_item(item) for item in recall_pack.get("user_model", [])],
+            "relationship_model": [self._compact_memory_context_item(item) for item in recall_pack.get("relationship_model", [])],
+            "active_topics": [self._compact_topic_context_item(item) for item in recall_pack.get("active_topics", [])],
+            "active_commitments": [self._compact_memory_context_item(item) for item in recall_pack.get("active_commitments", [])],
+            "episodic_evidence": [self._compact_digest_context_item(item) for item in recall_pack.get("episodic_evidence", [])],
+            "conflicts": [self._compact_conflict_context_item(item) for item in recall_pack.get("conflicts", [])],
+        }
+
+    def _compact_memory_context_item(self, item: dict[str, Any]) -> dict[str, Any]:
+        # Block: Payload
+        payload = {
+            "memory_type": item["memory_type"],
+            "scope_type": item["scope_type"],
+            "scope_key": item["scope_key"],
+            "summary_text": item["summary_text"],
+        }
+        if item.get("commitment_state") is not None:
+            payload["commitment_state"] = item["commitment_state"]
+        if item.get("object_ref_or_value") is not None:
+            payload["object_ref_or_value"] = item["object_ref_or_value"]
+        if item.get("retrieval_lane") is not None:
+            payload["retrieval_lane"] = item["retrieval_lane"]
+
+        # Block: Result
+        return payload
+
+    def _compact_topic_context_item(self, item: dict[str, Any]) -> dict[str, Any]:
+        # Block: DigestTopic
+        if item.get("source_kind") == "episode_digest":
+            return self._compact_digest_context_item(item)
+
+        # Block: MemoryTopic
+        return self._compact_memory_context_item(item)
+
+    def _compact_digest_context_item(self, item: dict[str, Any]) -> dict[str, Any]:
+        # Block: Payload
+        payload = {
+            "primary_scope_type": item["primary_scope_type"],
+            "primary_scope_key": item["primary_scope_key"],
+            "summary_text": item["summary_text"],
+            "open_loops": item.get("open_loops", []),
+        }
+        if item.get("outcome_text") is not None:
+            payload["outcome_text"] = item["outcome_text"]
+        if item.get("retrieval_lane") is not None:
+            payload["retrieval_lane"] = item["retrieval_lane"]
+
+        # Block: Result
+        return payload
+
+    def _compact_conflict_context_item(self, item: dict[str, Any]) -> dict[str, Any]:
+        # Block: Payload
+        return {
+            "summary_text": item["summary_text"],
+            "compare_key": item["compare_key"],
+        }
 
     def _format_recent_turns(self, recent_turns: list[dict]) -> str:
         # Block: Empty
