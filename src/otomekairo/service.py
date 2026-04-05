@@ -20,6 +20,8 @@ REQUIRED_ROLE_NAMES = {
     "memory_interpretation": "generation",
     "embedding": "embedding",
 }
+FUTURE_ACT_NOT_BEFORE_MINUTES = 30
+FUTURE_ACT_EXPIRES_HOURS = 24
 
 
 # Block: Errors
@@ -39,6 +41,7 @@ class OtomeKairoService:
         self.llm = LLMClient()
         self.recall = RecallBuilder(store=self.store, llm=self.llm)
         self.memory = MemoryConsolidator(store=self.store, llm=self.llm)
+        self._future_act_candidates: list[dict[str, Any]] = []
 
     # Block: Bootstrap
     def probe_bootstrap(self) -> dict[str, Any]:
@@ -137,17 +140,20 @@ class OtomeKairoService:
     # Block: ConfigApis
     def patch_current(self, token: str | None, payload: dict) -> dict[str, Any]:
         state = self._require_token(token)
+        should_clear_future_act = False
 
         if "selected_persona_id" in payload:
             persona_id = payload["selected_persona_id"]
             if persona_id not in state["personas"]:
                 raise ServiceError(404, "persona_not_found", "The requested persona_id does not exist.")
+            should_clear_future_act = should_clear_future_act or persona_id != state["selected_persona_id"]
             state["selected_persona_id"] = persona_id
 
         if "selected_memory_set_id" in payload:
             memory_set_id = payload["selected_memory_set_id"]
             if memory_set_id not in state["memory_sets"]:
                 raise ServiceError(404, "memory_set_not_found", "The requested memory_set_id does not exist.")
+            should_clear_future_act = should_clear_future_act or memory_set_id != state["selected_memory_set_id"]
             state["selected_memory_set_id"] = memory_set_id
 
         if "selected_model_preset_id" in payload:
@@ -155,6 +161,7 @@ class OtomeKairoService:
             if model_preset_id not in state["model_presets"]:
                 raise ServiceError(404, "model_preset_not_found", "The requested model_preset_id does not exist.")
             self._validate_model_preset_definition(state, model_preset_id, state["model_presets"][model_preset_id])
+            should_clear_future_act = should_clear_future_act or model_preset_id != state["selected_model_preset_id"]
             state["selected_model_preset_id"] = model_preset_id
 
         if "wake_policy" in payload:
@@ -170,6 +177,8 @@ class OtomeKairoService:
             state["desktop_watch"] = payload["desktop_watch"]
 
         self.store.write_state(state)
+        if should_clear_future_act:
+            self._clear_future_act_candidates()
         return self.get_config(token=state["console_access_token"])
 
     def select_persona(self, token: str | None, persona_id: str) -> dict[str, Any]:
@@ -198,6 +207,8 @@ class OtomeKairoService:
         self._validate_persona_definition(persona_id, definition)
         state["personas"][persona_id] = definition
         self.store.write_state(state)
+        if persona_id == state["selected_persona_id"]:
+            self._clear_future_act_candidates()
         return {
             "persona": state["personas"][persona_id],
         }
@@ -231,6 +242,8 @@ class OtomeKairoService:
         self._validate_memory_set_definition(memory_set_id, definition)
         state["memory_sets"][memory_set_id] = definition
         self.store.write_state(state)
+        if memory_set_id == state["selected_memory_set_id"]:
+            self._clear_future_act_candidates()
         return {
             "memory_set": state["memory_sets"][memory_set_id],
         }
@@ -266,6 +279,8 @@ class OtomeKairoService:
         self._validate_model_preset_definition(state, model_preset_id, normalized_definition)
         state["model_presets"][model_preset_id] = normalized_definition
         self.store.write_state(state)
+        if model_preset_id == state["selected_model_preset_id"]:
+            self._clear_future_act_candidates()
         return {
             "model_preset": state["model_presets"][model_preset_id],
         }
@@ -308,6 +323,8 @@ class OtomeKairoService:
             self._validate_model_preset_definition(candidate_state, preset_id, preset)
         state["model_profiles"][model_profile_id] = definition
         self.store.write_state(state)
+        if self._selected_model_preset_uses_profile(state, model_profile_id):
+            self._clear_future_act_candidates()
         return {
             "model_profile": state["model_profiles"][model_profile_id],
         }
@@ -396,6 +413,7 @@ class OtomeKairoService:
         state["model_profiles"] = model_profiles
         state["model_presets"] = model_presets
         self.store.write_state(state)
+        self._clear_future_act_candidates()
         return self._build_editor_state(state)
 
     # Block: ObservationApi
@@ -557,6 +575,12 @@ class OtomeKairoService:
         internal_result_kind = decision["kind"]
         result_kind = self._external_result_kind(internal_result_kind)
         finished_at = self._now_iso()
+        future_act_summary = self._apply_future_act_candidate(
+            cycle_id=cycle_id,
+            memory_set_id=state["selected_memory_set_id"],
+            decision=decision,
+            occurred_at=finished_at,
+        )
 
         # Block: Persistence
         events = self._persist_cycle_success(
@@ -576,6 +600,7 @@ class OtomeKairoService:
             decision=decision,
             result_kind=result_kind,
             reply_payload=reply_payload,
+            future_act_summary=future_act_summary,
         )
 
         # Block: MemoryTrace
@@ -767,6 +792,130 @@ class OtomeKairoService:
             "reason_summary": decision.get("reason_summary"),
             "dedupe_key": future_act.get("dedupe_key"),
         }
+
+    def _apply_future_act_candidate(
+        self,
+        *,
+        cycle_id: str,
+        memory_set_id: str,
+        decision: dict[str, Any],
+        occurred_at: str,
+    ) -> dict[str, Any] | None:
+        # Block: Prune
+        self._prune_future_act_candidates(current_time=occurred_at)
+
+        # Block: Guard
+        base_summary = self._future_act_trace_summary(cycle_id=cycle_id, decision=decision)
+        if base_summary is None:
+            return None
+
+        # Block: ExistingLookup
+        existing = self._find_future_act_candidate(
+            memory_set_id=memory_set_id,
+            dedupe_key=base_summary["dedupe_key"],
+            current_time=occurred_at,
+        )
+        not_before = self._future_act_not_before(occurred_at)
+        expires_at = self._future_act_expires_at(occurred_at)
+
+        # Block: Upsert
+        if existing is None:
+            candidate = {
+                "candidate_id": f"future_act_candidate:{uuid.uuid4().hex}",
+                "memory_set_id": memory_set_id,
+                "intent_kind": base_summary["intent_kind"],
+                "intent_summary": base_summary["intent_summary"],
+                "reason_summary": base_summary["reason_summary"],
+                "source_cycle_id": cycle_id,
+                "not_before": not_before,
+                "expires_at": expires_at,
+                "dedupe_key": base_summary["dedupe_key"],
+                "created_at": occurred_at,
+                "updated_at": occurred_at,
+            }
+            self._future_act_candidates.append(candidate)
+            queue_action = "created"
+        else:
+            candidate = existing
+            candidate.update(
+                {
+                    "intent_kind": base_summary["intent_kind"],
+                    "intent_summary": base_summary["intent_summary"],
+                    "reason_summary": base_summary["reason_summary"],
+                    "source_cycle_id": cycle_id,
+                    "not_before": not_before,
+                    "expires_at": expires_at,
+                    "updated_at": occurred_at,
+                }
+            )
+            queue_action = "updated"
+
+        # Block: Result
+        return {
+            **base_summary,
+            "candidate_id": candidate["candidate_id"],
+            "queue_action": queue_action,
+            "not_before": candidate["not_before"],
+            "expires_at": candidate["expires_at"],
+        }
+
+    def _find_future_act_candidate(
+        self,
+        *,
+        memory_set_id: str,
+        dedupe_key: str,
+        current_time: str,
+    ) -> dict[str, Any] | None:
+        # Block: CurrentTime
+        current_dt = self._parse_iso(current_time)
+
+        # Block: Scan
+        for candidate in self._future_act_candidates:
+            if candidate.get("memory_set_id") != memory_set_id:
+                continue
+            if candidate.get("dedupe_key") != dedupe_key:
+                continue
+            expires_at = candidate.get("expires_at")
+            if isinstance(expires_at, str) and expires_at and self._parse_iso(expires_at) <= current_dt:
+                continue
+            return candidate
+
+        # Block: Empty
+        return None
+
+    def _prune_future_act_candidates(self, *, current_time: str) -> None:
+        # Block: CurrentTime
+        current_dt = self._parse_iso(current_time)
+
+        # Block: Filter
+        self._future_act_candidates = [
+            candidate
+            for candidate in self._future_act_candidates
+            if not isinstance(candidate.get("expires_at"), str)
+            or self._parse_iso(candidate["expires_at"]) > current_dt
+        ]
+
+    def _clear_future_act_candidates(self) -> None:
+        # Block: Reset
+        self._future_act_candidates = []
+
+    def _future_act_not_before(self, occurred_at: str) -> str:
+        # Block: Offset
+        return (self._parse_iso(occurred_at) + timedelta(minutes=FUTURE_ACT_NOT_BEFORE_MINUTES)).isoformat()
+
+    def _future_act_expires_at(self, occurred_at: str) -> str:
+        # Block: Offset
+        return (self._parse_iso(occurred_at) + timedelta(hours=FUTURE_ACT_EXPIRES_HOURS)).isoformat()
+
+    def _selected_model_preset_uses_profile(self, state: dict[str, Any], model_profile_id: str) -> bool:
+        # Block: Lookup
+        selected_preset = state["model_presets"][state["selected_model_preset_id"]]
+        for role_value in selected_preset.get("roles", {}).values():
+            if role_value.get("model_profile_id") == model_profile_id:
+                return True
+
+        # Block: Empty
+        return False
 
     def _summarize_affect_context(self, affect_context: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
         # Block: Surface
@@ -1198,13 +1347,10 @@ class OtomeKairoService:
         decision: dict,
         result_kind: str,
         reply_payload: dict | None,
+        future_act_summary: dict[str, Any] | None,
     ) -> list[dict[str, Any]]:
         # Block: EventRecords
         selected_memory_set_id = state["selected_memory_set_id"]
-        future_act_summary = self._future_act_trace_summary(
-            cycle_id=cycle_id,
-            decision=decision,
-        )
         events = [
             {
                 "event_id": f"event:{uuid.uuid4().hex}",

@@ -44,10 +44,10 @@
 - `secondary_intents` は rerank、section boost、返答方針補助に効く
 - 第三者や固有名は `focus_scopes` ではなく `mentioned_entities` で扱う
 - `future_act` は内部結果として扱え、trace に候補要約を残せる
+- runtime-only の `future_act` 候補キューがあり、dedupe / update / expiry metadata を持てる
 
 一方で、MVP 全体としてはまだ未完である。
 
-- runtime-only の `future_act` 候補キューは未実装である
 - `wake_policy` は設定としてはあるが、実際の起床ループは未実装である
 - `desktop_watch` も設定としてはあるが、観測源としては未実装である
 - embedding 更新と `reflective consolidation` の完全非同期化は未完である
@@ -228,6 +228,9 @@
   - `decision_generation` の内部結果で `reply / noop / future_act` を返せる
   - 通常 API の外向き結果は引き続き `reply / noop / internal_failure` に保つ
   - `future_act_summary` を trace と監査 event に残す
+  - runtime-only の候補キューへ `create / update` できる
+  - `candidate_id`、`dedupe_key`、`not_before`、`expires_at` を持てる
+  - selected persona / memory / model 変更時にクリアできる
 - 監査強化
   - memory consolidation failure を cycle trace と events に残す
   - reflective failure を `reflection_runs` と events に残す
@@ -235,17 +238,6 @@
   - compare key と evidence cycle を基準に扱う
   - scope 単位の雑な confirmed 昇格を避ける
   - `summary` は早すぎる confirmed を避ける
-
-## 未着手: `future_act` 候補キュー
-
-未着手なのは次である。
-
-- runtime-only の `future_act` 候補キューを持つ
-- 起床判断時に再評価する
-- memory 切り替えや再起動でクリアしてよい境界を守る
-- 長期記憶へ直接書かない
-
-このキューは `memory_units` とは別物であり、短期の内部保留状態として扱う。
 
 ## 未着手: 自発起床ループ
 
@@ -283,20 +275,19 @@
 - `event_evidence` は短い圧縮根拠であり、逐語引用や正確引用は保証しない
 - `RecallHint` は長期記憶を読まず、現在観測と直近文脈だけから作る
 - 複合意図は `primary_intent` 主軸で扱い、完全な同時最適化はしない
-- `future_act` は内部結果としては使えるが、候補キューと起床再評価はまだない
+- `future_act` 候補キューはあるが、起床再評価と消費はまだない
 - 自発起床と `desktop_watch` が未実装なので、現状は会話主導の MVP である
 
 ## 直近の実装順
 
 次はこの順で進める。
 
-1. runtime-only の `future_act` 候補キューを導入する
-2. `future_act` の dedupe / expiry / not_before を起床再評価前提で整える
-3. `wake_policy` と起床判断ループを通す
-4. `desktop_watch` を観測源として繋ぐ
-5. `relationship / self` の高次な反射再整理を絞って足す
-6. 非同期ジョブ化と運用硬化へ進む
-7. 仕様が固まった範囲から回帰テストを追加する
+1. `wake_policy` と起床判断ループを通す
+2. `future_act` 候補の再評価、消費、期限切れ整理を起床側へ接続する
+3. `desktop_watch` を観測源として繋ぐ
+4. `relationship / self` の高次な反射再整理を絞って足す
+5. 非同期ジョブ化と運用硬化へ進む
+6. 仕様が固まった範囲から回帰テストを追加する
 
 この順にする理由は、先に記憶の使い道を仕上げ、その後で自発判断へ広げるほうが安全だからである。
 
