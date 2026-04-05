@@ -21,7 +21,7 @@ LEGACY_RETRIEVAL_RUNS_FILE_NAME = "retrieval_runs.jsonl"
 LEGACY_CYCLE_SUMMARIES_FILE_NAME = "cycle_summaries.jsonl"
 LEGACY_CYCLE_TRACES_FILE_NAME = "cycle_traces.jsonl"
 
-CURRENT_MEMORY_DB_VERSION = 2
+CURRENT_MEMORY_DB_VERSION = 3
 
 
 # Block: Store
@@ -214,6 +214,114 @@ class FileStore:
         # Block: Result
         return [json.loads(row["payload_json"]) for row in rows]
 
+    def list_memory_units_for_recall(
+        self,
+        *,
+        memory_set_id: str,
+        scope_filters: list[tuple[str, str]] | None = None,
+        scope_types: list[str] | None = None,
+        include_memory_types: list[str] | None = None,
+        exclude_memory_types: list[str] | None = None,
+        statuses: list[str] | None = None,
+        commitment_states: list[str] | None = None,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        # Block: QueryParts
+        clauses = ["memory_set_id = ?"]
+        params: list[Any] = [memory_set_id]
+
+        # Block: ScopeFilters
+        if scope_filters:
+            scope_clauses: list[str] = []
+            for scope_type, scope_key in scope_filters:
+                scope_clauses.append("(scope_type = ? AND scope_key = ?)")
+                params.extend([scope_type, scope_key])
+            clauses.append("(" + " OR ".join(scope_clauses) + ")")
+
+        # Block: ScopeTypes
+        if scope_types:
+            placeholders = ", ".join("?" for _ in scope_types)
+            clauses.append(f"scope_type IN ({placeholders})")
+            params.extend(scope_types)
+
+        # Block: IncludeMemoryTypes
+        if include_memory_types:
+            placeholders = ", ".join("?" for _ in include_memory_types)
+            clauses.append(f"memory_type IN ({placeholders})")
+            params.extend(include_memory_types)
+
+        # Block: ExcludeMemoryTypes
+        if exclude_memory_types:
+            placeholders = ", ".join("?" for _ in exclude_memory_types)
+            clauses.append(f"memory_type NOT IN ({placeholders})")
+            params.extend(exclude_memory_types)
+
+        # Block: Statuses
+        if statuses:
+            placeholders = ", ".join("?" for _ in statuses)
+            clauses.append(f"status IN ({placeholders})")
+            params.extend(statuses)
+
+        # Block: CommitmentStates
+        if commitment_states:
+            placeholders = ", ".join("?" for _ in commitment_states)
+            clauses.append(f"commitment_state IN ({placeholders})")
+            params.extend(commitment_states)
+
+        query = f"""
+            SELECT payload_json
+            FROM memory_units
+            WHERE {" AND ".join(clauses)}
+            ORDER BY salience DESC, confidence DESC, COALESCE(last_confirmed_at, formed_at) DESC, rowid DESC
+            LIMIT ?
+        """
+
+        # Block: Query
+        with self._memory_db() as conn:
+            rows = conn.execute(query, (*params, limit)).fetchall()
+
+        # Block: Result
+        return [json.loads(row["payload_json"]) for row in rows]
+
+    def list_episode_digests_for_recall(
+        self,
+        *,
+        memory_set_id: str,
+        scope_filters: list[tuple[str, str]] | None = None,
+        require_open_loops: bool = False,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        # Block: QueryParts
+        clauses = ["memory_set_id = ?"]
+        params: list[Any] = [memory_set_id]
+
+        # Block: ScopeFilters
+        if scope_filters:
+            scope_clauses: list[str] = []
+            for scope_type, scope_key in scope_filters:
+                scope_clauses.append("(primary_scope_type = ? AND primary_scope_key = ?)")
+                params.extend([scope_type, scope_key])
+            clauses.append("(" + " OR ".join(scope_clauses) + ")")
+
+        # Block: OpenLoopFilter
+        if require_open_loops:
+            clauses.append("has_open_loops = 1")
+
+        query = f"""
+            SELECT payload_json
+            FROM episode_digests
+            WHERE {" AND ".join(clauses)}
+            ORDER BY has_open_loops DESC, salience DESC, formed_at DESC, rowid DESC
+            LIMIT ?
+        """
+
+        # Block: Query
+        with self._memory_db() as conn:
+            rows = conn.execute(query, (*params, limit)).fetchall()
+
+        # Block: Result
+        return [json.loads(row["payload_json"]) for row in rows]
+
     def delete_memory_set_records(self, memory_set_id: str) -> None:
         # Block: Transaction
         with self._memory_db() as conn:
@@ -235,6 +343,8 @@ class FileStore:
                 self._apply_schema_v1(conn)
             if version < 2:
                 self._apply_schema_v2(conn)
+            if version < 3:
+                self._apply_schema_v3(conn)
             if version < CURRENT_MEMORY_DB_VERSION:
                 conn.execute(f"PRAGMA user_version = {CURRENT_MEMORY_DB_VERSION}")
 
@@ -420,6 +530,44 @@ class FileStore:
             """
         )
 
+    def _apply_schema_v3(self, conn: sqlite3.Connection) -> None:
+        # Block: ColumnLookup
+        column_names = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(episode_digests)").fetchall()
+        }
+
+        # Block: ColumnAdd
+        if "has_open_loops" not in column_names:
+            conn.execute(
+                """
+                ALTER TABLE episode_digests
+                ADD COLUMN has_open_loops INTEGER NOT NULL DEFAULT 0
+                """
+            )
+
+        # Block: Backfill
+        conn.execute(
+            """
+            UPDATE episode_digests
+            SET has_open_loops = CASE
+                WHEN open_loops_json = '[]' THEN 0
+                ELSE 1
+            END
+            """
+        )
+
+        # Block: Indexes
+        conn.executescript(
+            """
+            CREATE INDEX IF NOT EXISTS idx_episode_digests_scope_recent
+            ON episode_digests(memory_set_id, primary_scope_type, primary_scope_key, formed_at);
+
+            CREATE INDEX IF NOT EXISTS idx_episode_digests_open_loops_recent
+            ON episode_digests(memory_set_id, has_open_loops, formed_at);
+            """
+        )
+
     def _import_legacy_jsonl_records(self, conn: sqlite3.Connection) -> None:
         # Block: SummaryLookup
         legacy_summaries = self._read_jsonl_file(LEGACY_CYCLE_SUMMARIES_FILE_NAME)
@@ -571,6 +719,9 @@ class FileStore:
         )
 
     def _insert_episode_digest(self, conn: sqlite3.Connection, record: dict[str, Any]) -> None:
+        # Block: DerivedFields
+        open_loops = record.get("open_loops", [])
+
         # Block: Insert
         conn.execute(
             """
@@ -584,11 +735,12 @@ class FileStore:
                 summary_text,
                 outcome_text,
                 open_loops_json,
+                has_open_loops,
                 salience,
                 formed_at,
                 linked_event_ids_json,
                 payload_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record["episode_digest_id"],
@@ -599,7 +751,8 @@ class FileStore:
                 record["primary_scope_key"],
                 record["summary_text"],
                 record.get("outcome_text"),
-                self._to_json(record.get("open_loops", [])),
+                self._to_json(open_loops),
+                int(bool(open_loops)),
                 record["salience"],
                 record["formed_at"],
                 self._to_json(record.get("linked_event_ids", [])),

@@ -8,6 +8,7 @@ from typing import Any
 
 from otomekairo.llm import LLMClient, LLMError
 from otomekairo.memory import MemoryConsolidator
+from otomekairo.recall import RecallBuilder
 from otomekairo.store import FileStore
 
 
@@ -36,6 +37,7 @@ class OtomeKairoService:
         # Block: Dependencies
         self.store = FileStore(root_dir)
         self.llm = LLMClient()
+        self.recall = RecallBuilder(store=self.store)
         self.memory = MemoryConsolidator(store=self.store, llm=self.llm)
 
     # Block: Bootstrap
@@ -437,18 +439,10 @@ class OtomeKairoService:
             )
 
             # Block: RecallPack
-            recall_pack = {
-                "self_model": [],
-                "user_model": [],
-                "relationship_model": [],
-                "active_topics": [],
-                "active_commitments": [],
-                "episodic_evidence": [],
-                "event_evidence": [],
-                "conflicts": [],
-                "selected_memory_ids": [],
-                "candidate_count": 0,
-            }
+            recall_pack = self.recall.build_recall_pack(
+                state=state,
+                recall_hint=recall_hint,
+            )
 
             # Block: Decision
             decision = self.llm.generate_decision(
@@ -570,6 +564,41 @@ class OtomeKairoService:
         role_value = model_preset["roles"][role_name]
         profile_id = role_value["model_profile_id"]
         return state["model_profiles"][profile_id]
+
+    def _summarize_recall_pack(self, recall_pack: dict[str, Any]) -> dict[str, int]:
+        # Block: Summary
+        return {
+            "self_model": len(recall_pack["self_model"]),
+            "user_model": len(recall_pack["user_model"]),
+            "relationship_model": len(recall_pack["relationship_model"]),
+            "active_topics": len(recall_pack["active_topics"]),
+            "active_commitments": len(recall_pack["active_commitments"]),
+            "episodic_evidence": len(recall_pack["episodic_evidence"]),
+            "conflicts": len(recall_pack["conflicts"]),
+        }
+
+    def _recall_adopted_reason_summary(self, recall_pack: dict[str, Any]) -> str:
+        # Block: Counts
+        memory_count = len(recall_pack["selected_memory_ids"])
+        digest_count = len(recall_pack["selected_episode_digest_ids"])
+
+        # Block: Empty
+        if memory_count == 0 and digest_count == 0:
+            return "構造レーンで採用候補は選ばれなかった。"
+
+        # Block: Summary
+        return (
+            "構造レーンで scope、memory_type、status、commitment_state に基づいて候補を採用した。"
+            f" memory_units={memory_count}, episode_digests={digest_count}"
+        )
+
+    def _recall_rejected_reason_summary(self, recall_pack: dict[str, Any]) -> str:
+        # Block: Empty
+        if recall_pack["candidate_count"] == 0:
+            return "現時点では構造レーンに一致する長期記憶がなかった。"
+
+        # Block: Summary
+        return "section 上限と全体上限を優先し、連想レーンや文字列一致フォールバックは使っていない。"
 
     def _build_settings_snapshot(self, state: dict) -> dict:
         # Block: Snapshot
@@ -874,6 +903,9 @@ class OtomeKairoService:
             "finished_at": finished_at,
             "result_status": "succeeded",
             "recall_hint": recall_hint,
+            "selected_episode_digest_ids": recall_pack["selected_episode_digest_ids"],
+            "selected_event_ids": recall_pack["selected_event_ids"],
+            "recall_pack_summary": self._summarize_recall_pack(recall_pack),
             "candidate_count": recall_pack["candidate_count"],
             "selected_memory_ids": recall_pack["selected_memory_ids"],
         }
@@ -907,8 +939,10 @@ class OtomeKairoService:
                 "recall_hint_summary": recall_hint,
                 "candidate_count": recall_pack["candidate_count"],
                 "selected_memory_ids": recall_pack["selected_memory_ids"],
-                "adopted_reason_summary": "No long-term memory candidates were selected in the minimum slice.",
-                "rejected_candidate_summary": "No candidates were retrieved in the minimum slice.",
+                "selected_episode_digest_ids": recall_pack["selected_episode_digest_ids"],
+                "recall_pack_summary": self._summarize_recall_pack(recall_pack),
+                "adopted_reason_summary": self._recall_adopted_reason_summary(recall_pack),
+                "rejected_candidate_summary": self._recall_rejected_reason_summary(recall_pack),
             },
             "decision_trace": {
                 "result_kind": decision["kind"],
@@ -981,6 +1015,9 @@ class OtomeKairoService:
             "finished_at": finished_at,
             "result_status": "failed",
             "failure_reason": failure_reason,
+            "selected_episode_digest_ids": [],
+            "selected_event_ids": [],
+            "recall_pack_summary": None,
         }
 
         # Block: CycleSummary
@@ -1012,6 +1049,8 @@ class OtomeKairoService:
                 "recall_hint_summary": None,
                 "candidate_count": 0,
                 "selected_memory_ids": [],
+                "selected_episode_digest_ids": [],
+                "recall_pack_summary": None,
                 "adopted_reason_summary": None,
                 "rejected_candidate_summary": None,
             },

@@ -252,6 +252,22 @@ SQLite 接続では、少なくとも次を固定する。
 ここで使う比較軸は、`scope_type`、`scope_key`、`memory_type`、`status`、`subject_ref`、`predicate`、`object_ref_or_value`、`commitment_state` のような半構造化項目に限定する。
 自由文の文字列一致検索には寄せない。
 
+現状の実装は、次まで入っている。
+
+- `RecallBuilder` を新設し、空の `RecallPack` を廃止
+- `active_commitments` を `memory_type=commitment` と active な `commitment_state` で別枠取得
+- `user_model`、`relationship_model`、`self_model` を `scope_type / scope_key / status` で取得
+- `active_topics` を `scope_type=topic` と `episode_digests.has_open_loops` で補助取得
+- `episodic_evidence` を `episode_digests` の構造条件だけで取得
+- `conflicts` を比較キー単位の併存候補から抽出
+- `retrieval_runs` と `cycle_traces` に `selected_episode_digest_ids` と `recall_pack_summary` を保存
+
+この段階では、まだ次は未着手である。
+
+- `sqlite-vec` を使う連想レーン
+- `event_evidence` の限定ロード
+- `decision_generation` と `reply_generation` への `RecallPack` 本注入
+
 #### 3-4. 連想レーンの実装
 
 構造レーンの後で、`sqlite-vec` による連想レーンを足す。
