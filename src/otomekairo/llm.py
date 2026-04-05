@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -285,6 +286,10 @@ class MockLLMClient:
         if primary_intent == "commitment_check":
             focus_scopes.append("relationship:self|user")
 
+        # Block: MentionedHints
+        mentioned_entities = self._mock_mentioned_entities(normalized)
+        mentioned_topics = self._mock_mentioned_topics(normalized)
+
         # Block: Payload
         payload = {
             "primary_intent": primary_intent,
@@ -292,11 +297,55 @@ class MockLLMClient:
             "confidence": 0.7 if normalized else 0.1,
             "time_reference": time_reference,
             "focus_scopes": focus_scopes[:4],
-            "mentioned_entities": [],
-            "mentioned_topics": [],
+            "mentioned_entities": mentioned_entities[:4],
+            "mentioned_topics": mentioned_topics[:4],
         }
         validate_recall_hint_contract(payload)
         return payload
+
+    def _mock_mentioned_entities(self, normalized: str) -> list[str]:
+        # Block: Empty
+        if not normalized:
+            return []
+
+        # Block: Matches
+        entities: list[str] = []
+        for match in re.findall(r"([一-龠ぁ-んァ-ヶA-Za-z0-9]{1,20})(?:さん|君|ちゃん)", normalized):
+            tag = f"person:{match}"
+            if tag not in entities:
+                entities.append(tag)
+            if len(entities) >= 4:
+                break
+
+        # Block: Result
+        return entities
+
+    def _mock_mentioned_topics(self, normalized: str) -> list[str]:
+        # Block: Empty
+        if not normalized:
+            return []
+
+        # Block: KeywordMap
+        topic_keywords = {
+            "睡眠": ("眠", "寝", "朝型", "夜型"),
+            "食事": ("食べ", "ご飯", "ランチ", "夕飯", "カフェ"),
+            "仕事": ("仕事", "会社", "会議", "残業", "出勤"),
+            "約束": ("約束", "予定", "今度", "また今度"),
+            "関係": ("関係", "距離", "話しにく", "ぎくしゃく"),
+            "相談": ("相談", "悩", "困っ", "どうしたら"),
+        }
+
+        # Block: Collect
+        topics: list[str] = []
+        for topic_name, keywords in topic_keywords.items():
+            if not any(keyword in normalized for keyword in keywords):
+                continue
+            topics.append(topic_name)
+            if len(topics) >= 4:
+                break
+
+        # Block: Result
+        return topics
 
     def generate_decision(
         self,
@@ -384,6 +433,7 @@ class MockLLMClient:
         user_items = recall_pack.get("user_model", [])
         topic_items = recall_pack.get("active_topics", [])
         episode_items = recall_pack.get("episodic_evidence", [])
+        event_items = recall_pack.get("event_evidence", [])
         surface_affects = affect_context.get("surface", [])
         conflict_item = conflict_items[0] if conflict_items else None
         commitment_item = commitment_items[0] if commitment_items else None
@@ -391,7 +441,9 @@ class MockLLMClient:
         user_item = user_items[0] if user_items else None
         topic_item = topic_items[0] if topic_items else None
         episode_item = episode_items[0] if episode_items else None
+        event_item = event_items[0] if event_items else None
         surface_affect = surface_affects[0] if surface_affects else None
+        event_basis = self._event_evidence_basis_text(event_item)
 
         # Block: CautionPrefix
         caution_prefix = ""
@@ -402,10 +454,18 @@ class MockLLMClient:
 
         # Block: ReplyRule
         if decision["requires_confirmation"]:
-            basis_item = relationship_item or episode_item or conflict_item
-            if basis_item is not None:
+            basis_text = None
+            if relationship_item is not None:
+                basis_text = relationship_item["summary_text"]
+            elif episode_item is not None:
+                basis_text = episode_item["summary_text"]
+            elif event_basis is not None:
+                basis_text = event_basis
+            elif conflict_item is not None:
+                basis_text = conflict_item["summary_text"]
+            if basis_text is not None:
                 reply_text = (
-                    f"{caution_prefix}{basis_item['summary_text']} という流れで受け取っているけれど、"
+                    f"{caution_prefix}{basis_text} という流れで受け取っているけれど、"
                     f"{text} の理解はこれで合っている？"
                 )
             else:
@@ -421,11 +481,15 @@ class MockLLMClient:
                     reply_text = f"{commitment_item['summary_text']} の続きとして受け取ったよ。いまはどの範囲まで進めたい？"
                 else:
                     reply_text = f"{commitment_item['summary_text']} の続きとして受け取ったよ。{text} について、今回はどこまで進めたい？"
+            elif event_basis is not None:
+                reply_text = f"{event_basis} の続きとして受け取ったよ。{text} について、今回はどこまで進めたい？"
             else:
                 reply_text = f"{caution_prefix}その流れは覚えている前提で話すね。{text} に関して、今回どこまで進めたい？"
         elif primary_intent == "reminisce":
             if episode_item is not None:
                 reply_text = f"{episode_item['summary_text']} の流れとして受け取ったよ。{text} のどの部分からつなげたい？"
+            elif event_basis is not None:
+                reply_text = f"{event_basis} の場面として受け取ったよ。{text} のどの部分からつなげたい？"
             else:
                 reply_text = f"{caution_prefix}その続きとして受け取ったよ。{text} のどの部分からつなげたい？"
         elif primary_intent == "preference_query":
@@ -444,6 +508,20 @@ class MockLLMClient:
             "reply_style_notes": f"tone={tone}; part_of_day={time_context.get('part_of_day', 'unknown')}",
             "confidence_note": "mock_model",
         }
+
+    def _event_evidence_basis_text(self, item: dict[str, Any] | None) -> str | None:
+        # Block: Empty
+        if item is None:
+            return None
+
+        # Block: Slots
+        for key in ("decision_or_result", "topic", "anchor", "tone_or_note"):
+            value = item.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+
+        # Block: Result
+        return None
 
     def generate_memory_interpretation(
         self,
@@ -535,6 +613,12 @@ class MockLLMClient:
 
         # Block: Builders
         candidates: list[dict[str, Any]] = []
+        correction_signal = self._mock_has_correction_signal(normalized)
+
+        # Block: Fact
+        fact_candidate = self._mock_fact_candidate(normalized, correction_signal=correction_signal)
+        if fact_candidate is not None:
+            candidates.append(fact_candidate)
 
         if any(token in normalized for token in ("好き", "食べたい", "嫌い", "苦手")):
             candidates.append(
@@ -554,8 +638,10 @@ class MockLLMClient:
                     "valid_to": None,
                     "qualifiers": {
                         "polarity": self._mock_preference_polarity(normalized),
+                        "source": "explicit_correction" if correction_signal else "explicit_statement",
+                        "negates_previous": correction_signal,
                     },
-                    "reason": "発話中に好みや苦手の明示が含まれていたため。",
+                    "reason": "発話中に好みや苦手の明示が含まれており、必要なら既存理解の訂正にもなりうるため。",
                 }
             )
 
@@ -575,7 +661,9 @@ class MockLLMClient:
                     "salience": 0.88,
                     "valid_from": None,
                     "valid_to": None,
-                    "qualifiers": {},
+                    "qualifiers": {
+                        "source": "inference",
+                    },
                     "reason": "後続会話や約束を示す表現が含まれていたため。",
                 }
             )
@@ -598,12 +686,89 @@ class MockLLMClient:
                     "valid_to": None,
                     "qualifiers": {
                         "domain": "health",
+                        "source": "inference",
                     },
                     "reason": "体調や睡眠に関する示唆があったため。",
                 }
             )
 
         return candidates
+
+    def _mock_fact_candidate(self, normalized: str, *, correction_signal: bool) -> dict[str, Any] | None:
+        # Block: DailyRhythm
+        if "朝型" in normalized or "夜型" in normalized:
+            object_ref = "rhythm:morning" if "朝型" in normalized else "rhythm:night"
+            summary_text = "あなたの生活リズムは朝型寄りだ。" if "朝型" in normalized else "あなたの生活リズムは夜型寄りだ。"
+            reason = "生活リズムに関する明示があり、継続理解として残す価値があるため。"
+            if correction_signal:
+                reason = "生活リズムに関する明示訂正があり、既存理解の更新候補になるため。"
+            return {
+                "memory_type": "fact",
+                "scope_type": "user",
+                "scope_key": "user",
+                "subject_ref": "user",
+                "predicate": "daily_rhythm",
+                "object_ref_or_value": object_ref,
+                "summary_text": summary_text,
+                "status": "confirmed",
+                "commitment_state": None,
+                "confidence": 0.9,
+                "salience": 0.76,
+                "valid_from": None,
+                "valid_to": None,
+                "qualifiers": {
+                    "source": "explicit_correction" if correction_signal else "explicit_statement",
+                    "negates_previous": correction_signal,
+                    "temporal_scope": "current",
+                },
+                "reason": reason,
+            }
+
+        # Block: WorkStyle
+        if any(token in normalized for token in ("在宅", "リモート", "出社")):
+            object_ref = "work:remote" if "在宅" in normalized or "リモート" in normalized else "work:office"
+            summary_text = "あなたの働き方は在宅寄りだ。" if object_ref == "work:remote" else "あなたの働き方は出社寄りだ。"
+            reason = "働き方に関する明示があり、継続理解として残す価値があるため。"
+            if correction_signal:
+                reason = "働き方に関する明示訂正があり、既存理解の更新候補になるため。"
+            return {
+                "memory_type": "fact",
+                "scope_type": "user",
+                "scope_key": "user",
+                "subject_ref": "user",
+                "predicate": "work_style",
+                "object_ref_or_value": object_ref,
+                "summary_text": summary_text,
+                "status": "confirmed",
+                "commitment_state": None,
+                "confidence": 0.88,
+                "salience": 0.72,
+                "valid_from": None,
+                "valid_to": None,
+                "qualifiers": {
+                    "source": "explicit_correction" if correction_signal else "explicit_statement",
+                    "negates_previous": correction_signal,
+                    "temporal_scope": "current",
+                },
+                "reason": reason,
+            }
+
+        # Block: Result
+        return None
+
+    def _mock_has_correction_signal(self, normalized: str) -> bool:
+        # Block: Tokens
+        correction_tokens = (
+            "いや",
+            "違う",
+            "勘違い",
+            "じゃなく",
+            "ではなく",
+            "むしろ",
+        )
+
+        # Block: Result
+        return any(token in normalized for token in correction_tokens)
 
     def _mock_preference_object(self, normalized: str) -> str:
         # Block: Mapping
@@ -1026,7 +1191,7 @@ class LLMClient:
             "入力には recent_turns と internal_context が含まれます。\n"
             "internal_context には TimeContext, AffectContext, RecallPack が入ります。\n"
             "RecallPack.conflicts があるときは requires_confirmation=true を優先してください。\n"
-            "active_commitments や episodic_evidence は reply の継続根拠に使ってください。\n"
+            "active_commitments, episodic_evidence, event_evidence は reply の継続根拠に使ってください。\n"
             "返すキーは必ず次の 4 個です:\n"
             "- kind: \"reply\" または \"noop\"\n"
             "- reason_code: string\n"
@@ -1071,6 +1236,7 @@ class LLMClient:
             "入力には recent_turns と internal_context が含まれます。\n"
             "internal_context には TimeContext, AffectContext, RecallPack が入ります。\n"
             "RecallPack の内容だけを根拠に、必要な範囲で自然に思い出や継続文脈を混ぜてください。\n"
+            "RecallPack.event_evidence は 1-3 件の短い証拠要約として扱い、必要なときだけ自然に参照してください。\n"
             "RecallPack.conflicts があるときは断定を避け、短い確認質問に寄せてください。\n"
             f"persona_text: {persona_text}\n"
             f"second_person_label: {second_person_label}\n"
@@ -1112,6 +1278,12 @@ class LLMClient:
             "返すトップレベルキーは episode_digest, candidate_memory_units, affect_updates の 3 つだけです。\n"
             "candidate_memory_units は、今後の会話や判断に効く継続理解だけを入れてください。\n"
             "弱い雑談断片や一時判断は memory_unit にしないでください。\n"
+            "明示された生活状況、習慣、役割、現在の継続状態は fact を優先してください。\n"
+            "明示訂正で以前の理解を置き換えるなら、replacement 候補を返し qualifiers.negates_previous=true を付けてください。\n"
+            "否定だけで置換内容がない場合だけ status=revoked を使ってください。\n"
+            "false ではないが前面に出さない理解だけを status=dormant にしてください。\n"
+            "弱い単発推測や event に留めるべき断片は candidate_memory_units に入れず、結果として noop になってよいです。\n"
+            "qualifiers には必要なら source=explicit_statement|explicit_correction|inference, negates_previous, replace_prior, allow_parallel を入れてください。\n"
             "memory_type は fact, preference, relation, commitment, interpretation, summary のいずれかです。\n"
             "status は inferred, confirmed, superseded, revoked, dormant のいずれかです。\n"
             "commitment_state は commitment のときだけ open, waiting_confirmation, on_hold, done, cancelled のいずれかを使い、それ以外では null にしてください。\n"
@@ -1291,6 +1463,7 @@ class LLMClient:
             "active_topics": [self._compact_topic_context_item(item) for item in recall_pack.get("active_topics", [])],
             "active_commitments": [self._compact_memory_context_item(item) for item in recall_pack.get("active_commitments", [])],
             "episodic_evidence": [self._compact_digest_context_item(item) for item in recall_pack.get("episodic_evidence", [])],
+            "event_evidence": [self._compact_event_evidence_item(item) for item in recall_pack.get("event_evidence", [])],
             "conflicts": [self._compact_conflict_context_item(item) for item in recall_pack.get("conflicts", [])],
         }
 
@@ -1342,6 +1515,20 @@ class LLMClient:
             "summary_text": item["summary_text"],
             "compare_key": item["compare_key"],
         }
+
+    def _compact_event_evidence_item(self, item: dict[str, Any]) -> dict[str, Any]:
+        # Block: Payload
+        payload = {
+            "kind": item["kind"],
+        }
+        for key in ("anchor", "topic", "decision_or_result", "tone_or_note"):
+            value = item.get(key)
+            if value is None:
+                continue
+            payload[key] = value
+
+        # Block: Result
+        return payload
 
     def _format_recent_turns(self, recent_turns: list[dict]) -> str:
         # Block: Empty
