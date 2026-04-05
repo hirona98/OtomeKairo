@@ -5,6 +5,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
+from otomekairo.event_stream import ServerWebSocket, WebSocketProtocolError, build_websocket_accept
 from otomekairo.service import OtomeKairoService, ServiceError
 
 
@@ -77,6 +78,9 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
             if method == "GET" and parsed.path == "/api/catalog":
                 self._write_success(HTTPStatus.OK, self.server.service.get_catalog(token))
                 return
+            if method == "GET" and parsed.path == "/api/events/stream":
+                self._handle_events_stream(token)
+                return
 
             # Block: ObservationRoute
             if method == "POST" and parsed.path == "/api/observations/conversation":
@@ -86,6 +90,13 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
             if method == "POST" and parsed.path == "/api/observations/wake":
                 payload = self._read_json_body()
                 self._write_success(HTTPStatus.OK, self.server.service.observe_wake(token, payload))
+                return
+            if method == "POST" and parsed.path == "/api/v2/vision/capture-response":
+                payload = self._read_json_body()
+                self._write_success(
+                    HTTPStatus.OK,
+                    self.server.service.submit_vision_capture_response(token, payload),
+                )
                 return
 
             # Block: ConfigRoutes
@@ -211,6 +222,47 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
             self._write_error(exc.status_code, exc.error_code, exc.message)
         except Exception as exc:  # noqa: BLE001
             self._write_error(HTTPStatus.INTERNAL_SERVER_ERROR, "internal_server_error", str(exc))
+
+    def _handle_events_stream(self, token: str | None) -> None:
+        # Block: Authorization
+        self.server.service._require_token(token)
+
+        # Block: Headers
+        upgrade = self.headers.get("Upgrade", "")
+        connection = self.headers.get("Connection", "")
+        websocket_key = self.headers.get("Sec-WebSocket-Key")
+        websocket_version = self.headers.get("Sec-WebSocket-Version")
+        if upgrade.lower() != "websocket" or "upgrade" not in connection.lower():
+            raise ServiceError(400, "invalid_websocket_upgrade", "Upgrade: websocket is required.")
+        if not isinstance(websocket_key, str) or not websocket_key.strip():
+            raise ServiceError(400, "missing_websocket_key", "Sec-WebSocket-Key is required.")
+        if websocket_version != "13":
+            raise ServiceError(400, "invalid_websocket_version", "Sec-WebSocket-Version must be 13.")
+
+        # Block: Handshake
+        accept_value = build_websocket_accept(websocket_key.strip())
+        self.send_response(HTTPStatus.SWITCHING_PROTOCOLS)
+        self.send_header("Upgrade", "websocket")
+        self.send_header("Connection", "Upgrade")
+        self.send_header("Sec-WebSocket-Accept", accept_value)
+        self.end_headers()
+        self.wfile.flush()
+
+        # Block: Connection
+        websocket = ServerWebSocket(self.connection)
+        session_id = self.server.service.register_event_stream_connection(websocket)
+        try:
+            # Block: ReceiveLoop
+            while True:
+                payload = websocket.receive_json()
+                if payload is None:
+                    break
+                self.server.service.handle_event_stream_message(session_id, payload)
+        except (json.JSONDecodeError, ServiceError, ValueError, WebSocketProtocolError):
+            websocket.close()
+        finally:
+            # Block: Cleanup
+            self.server.service.unregister_event_stream_connection(session_id)
 
     # Block: RequestHelpers
     def _read_json_body(self) -> dict:

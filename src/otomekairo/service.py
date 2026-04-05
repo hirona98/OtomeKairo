@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from otomekairo.event_stream import EventStreamRegistry, ServerWebSocket
 from otomekairo.llm import LLMClient, LLMError
 from otomekairo.memory import MemoryConsolidator
 from otomekairo.recall import RecallBuilder
@@ -25,6 +26,8 @@ FUTURE_ACT_NOT_BEFORE_MINUTES = 30
 FUTURE_ACT_EXPIRES_HOURS = 24
 WAKE_REPLY_COOLDOWN_MINUTES = 30
 BACKGROUND_WAKE_POLL_SECONDS = 5.0
+BACKGROUND_DESKTOP_WATCH_POLL_SECONDS = 5.0
+DESKTOP_WATCH_CAPTURE_TIMEOUT_MS = 5000
 
 
 # Block: Errors
@@ -46,6 +49,7 @@ class OtomeKairoService:
         self.memory = MemoryConsolidator(store=self.store, llm=self.llm)
         self._runtime_state_lock = threading.RLock()
         self._wake_execution_lock = threading.Lock()
+        self._desktop_watch_execution_lock = threading.Lock()
         self._future_act_candidates: list[dict[str, Any]] = []
         self._wake_runtime_state: dict[str, Any] = {
             "last_wake_at": None,
@@ -53,8 +57,18 @@ class OtomeKairoService:
             "cooldown_until": None,
             "reply_history_by_dedupe": {},
         }
+        self._desktop_watch_runtime_state: dict[str, Any] = {
+            "last_watch_at": None,
+        }
         self._background_wake_stop_event: threading.Event | None = None
         self._background_wake_thread: threading.Thread | None = None
+        self._background_desktop_watch_stop_event: threading.Event | None = None
+        self._background_desktop_watch_thread: threading.Thread | None = None
+        self._event_stream_registry = EventStreamRegistry()
+        self._vision_capture_lock = threading.RLock()
+        self._pending_vision_capture_requests: dict[str, dict[str, Any]] = {}
+        self._stream_event_lock = threading.Lock()
+        self._next_stream_event_value = 1
 
     def start_background_wake_scheduler(self) -> None:
         # Block: Existing
@@ -88,6 +102,79 @@ class OtomeKairoService:
             stop_event.set()
         if thread is not None and thread.is_alive():
             thread.join(timeout=5.0)
+
+    def start_background_desktop_watch(self) -> None:
+        # Block: Existing
+        with self._runtime_state_lock:
+            if self._background_desktop_watch_thread is not None and self._background_desktop_watch_thread.is_alive():
+                return
+
+            stop_event = threading.Event()
+            thread = threading.Thread(
+                target=self._background_desktop_watch_loop,
+                args=(stop_event,),
+                name="otomekairo-background-desktop-watch",
+                daemon=True,
+            )
+            self._background_desktop_watch_stop_event = stop_event
+            self._background_desktop_watch_thread = thread
+
+        # Block: Start
+        thread.start()
+
+    def stop_background_desktop_watch(self) -> None:
+        # Block: Snapshot
+        with self._runtime_state_lock:
+            stop_event = self._background_desktop_watch_stop_event
+            thread = self._background_desktop_watch_thread
+            self._background_desktop_watch_stop_event = None
+            self._background_desktop_watch_thread = None
+
+        # Block: Stop
+        if stop_event is not None:
+            stop_event.set()
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=5.0)
+
+    def register_event_stream_connection(self, websocket: ServerWebSocket) -> str:
+        # Block: Registry
+        return self._event_stream_registry.add_connection(websocket)
+
+    def handle_event_stream_message(self, session_id: str, payload: dict[str, Any]) -> None:
+        # Block: Type
+        message_type = payload.get("type")
+        if message_type != "hello":
+            raise ServiceError(400, "invalid_event_stream_message", "Only hello messages are supported.")
+
+        # Block: Fields
+        client_id = payload.get("client_id")
+        caps = payload.get("caps", [])
+        if not isinstance(client_id, str) or not client_id.strip():
+            raise ServiceError(400, "invalid_client_id", "hello.client_id must be a non-empty string.")
+        if not isinstance(caps, list):
+            raise ServiceError(400, "invalid_caps", "hello.caps must be an array.")
+
+        # Block: Caps
+        normalized_caps: list[str] = []
+        for cap in caps:
+            if not isinstance(cap, str) or not cap.strip():
+                raise ServiceError(400, "invalid_caps", "hello.caps must contain non-empty strings.")
+            normalized_caps.append(cap.strip())
+
+        # Block: Register
+        self._event_stream_registry.register_hello(
+            session_id,
+            client_id=client_id.strip(),
+            caps=normalized_caps,
+        )
+
+    def unregister_event_stream_connection(self, session_id: str) -> None:
+        # Block: Registry
+        self._event_stream_registry.remove_connection(session_id)
+
+    def close_event_streams(self) -> None:
+        # Block: Registry
+        self._event_stream_registry.close_all()
 
     # Block: Bootstrap
     def probe_bootstrap(self) -> dict[str, Any]:
@@ -539,6 +626,53 @@ class OtomeKairoService:
             trigger_kind="wake",
         )
 
+    def submit_vision_capture_response(self, token: str | None, payload: dict) -> dict[str, Any]:
+        # Block: Authorization
+        self._require_token(token)
+
+        # Block: Fields
+        request_id = payload.get("request_id")
+        client_id = payload.get("client_id")
+        images = payload.get("images", [])
+        client_context = payload.get("client_context")
+        error = payload.get("error")
+
+        # Block: Validation
+        if not isinstance(request_id, str) or not request_id.strip():
+            raise ServiceError(400, "invalid_request_id", "request_id must be a non-empty string.")
+        if not isinstance(client_id, str) or not client_id.strip():
+            raise ServiceError(400, "invalid_client_id", "client_id must be a non-empty string.")
+        if not isinstance(images, list):
+            raise ServiceError(400, "invalid_images", "images must be an array.")
+        if client_context is not None and not isinstance(client_context, dict):
+            raise ServiceError(400, "invalid_client_context", "client_context must be an object.")
+        if error is not None and not isinstance(error, str):
+            raise ServiceError(400, "invalid_capture_error", "error must be a string or null.")
+
+        # Block: ImageValidation
+        normalized_images: list[str] = []
+        for image in images:
+            if not isinstance(image, str) or not image.strip():
+                raise ServiceError(400, "invalid_images", "images must contain non-empty strings.")
+            normalized_images.append(image.strip())
+
+        # Block: StoreResponse
+        with self._vision_capture_lock:
+            pending = self._pending_vision_capture_requests.get(request_id.strip())
+            if pending is None:
+                return {}
+            pending["response"] = {
+                "request_id": request_id.strip(),
+                "client_id": client_id.strip(),
+                "images": normalized_images,
+                "client_context": client_context or {},
+                "error": error.strip() if isinstance(error, str) and error.strip() else None,
+            }
+            pending["event"].set()
+
+        # Block: Result
+        return {}
+
     def _execute_wake_cycle(
         self,
         *,
@@ -655,6 +789,147 @@ class OtomeKairoService:
 
         # Block: PollCap
         return min(remaining_seconds, BACKGROUND_WAKE_POLL_SECONDS)
+
+    def _background_desktop_watch_loop(self, stop_event: threading.Event) -> None:
+        # Block: Loop
+        while not stop_event.is_set():
+            try:
+                state = self.store.read_state()
+                delay_seconds = self._background_desktop_watch_delay_seconds(
+                    state=state,
+                    current_time=self._now_iso(),
+                )
+                if delay_seconds > 0:
+                    stop_event.wait(timeout=delay_seconds)
+                    continue
+
+                self._execute_desktop_watch_cycle(state=state)
+            except Exception:  # noqa: BLE001
+                stop_event.wait(timeout=BACKGROUND_DESKTOP_WATCH_POLL_SECONDS)
+
+    def _background_desktop_watch_delay_seconds(
+        self,
+        *,
+        state: dict[str, Any],
+        current_time: str,
+    ) -> float:
+        # Block: Config
+        desktop_watch = state.get("desktop_watch", {})
+        target_client_id = desktop_watch.get("target_client_id")
+        if not isinstance(desktop_watch, dict) or not desktop_watch.get("enabled"):
+            return BACKGROUND_DESKTOP_WATCH_POLL_SECONDS
+        if not isinstance(target_client_id, str) or not target_client_id.strip():
+            return BACKGROUND_DESKTOP_WATCH_POLL_SECONDS
+        if not self._event_stream_registry.has_capability(target_client_id.strip(), "vision.desktop"):
+            return BACKGROUND_DESKTOP_WATCH_POLL_SECONDS
+
+        # Block: FirstWatch
+        with self._runtime_state_lock:
+            last_watch_at = self._desktop_watch_runtime_state.get("last_watch_at")
+        if not isinstance(last_watch_at, str) or not last_watch_at:
+            return 0.0
+
+        # Block: Remaining
+        interval_seconds = int(desktop_watch.get("interval_seconds", 1))
+        current_dt = self._parse_iso(current_time)
+        due_at = self._parse_iso(last_watch_at) + timedelta(seconds=interval_seconds)
+        remaining_seconds = (due_at - current_dt).total_seconds()
+        if remaining_seconds <= 0:
+            return 0.0
+
+        # Block: PollCap
+        return min(remaining_seconds, BACKGROUND_DESKTOP_WATCH_POLL_SECONDS)
+
+    def _execute_desktop_watch_cycle(self, *, state: dict[str, Any]) -> None:
+        # Block: SerializedExecution
+        with self._desktop_watch_execution_lock:
+            # Block: Target
+            desktop_watch = state.get("desktop_watch", {})
+            target_client_id = desktop_watch.get("target_client_id")
+            if not isinstance(target_client_id, str) or not target_client_id.strip():
+                return
+            target_client_id = target_client_id.strip()
+            if not self._event_stream_registry.has_capability(target_client_id, "vision.desktop"):
+                return
+
+            # Block: Timestamp
+            started_at = self._now_iso()
+            self._set_last_desktop_watch_at(started_at)
+
+            # Block: Capture
+            capture_response = self._request_desktop_watch_capture(target_client_id=target_client_id)
+            if capture_response is None:
+                return
+            if not capture_response["images"]:
+                return
+
+            # Block: Observation
+            selected_candidate = self._select_due_future_act_candidate(
+                memory_set_id=state["selected_memory_set_id"],
+                current_time=started_at,
+            )
+            client_context = self._build_desktop_watch_client_context(capture_response)
+            observation_text = self._build_desktop_watch_observation_text(
+                client_context=client_context,
+                selected_candidate=selected_candidate,
+            )
+
+            # Block: Snapshot
+            cycle_id = self._new_cycle_id()
+            recent_turns = self._load_recent_turns(state)
+            runtime_summary = self._build_runtime_summary(state)
+            settings_snapshot = self._build_settings_snapshot(state)
+
+            try:
+                # Block: Pipeline
+                pipeline = self._run_observation_pipeline(
+                    state=state,
+                    started_at=started_at,
+                    observation_text=observation_text,
+                    recent_turns=recent_turns,
+                )
+
+                # Block: Success
+                self._complete_observation_success(
+                    cycle_id=cycle_id,
+                    started_at=started_at,
+                    state=state,
+                    settings_snapshot=settings_snapshot,
+                    runtime_summary=runtime_summary,
+                    observation_text=observation_text,
+                    client_context=client_context,
+                    recent_turns=recent_turns,
+                    pipeline=pipeline,
+                    trigger_kind="desktop_watch",
+                    observation_event_kind="desktop_watch",
+                    observation_event_role="system",
+                    consolidate_memory=False,
+                )
+                self._record_wake_outcome(
+                    current_time=started_at,
+                    decision=pipeline["decision"],
+                    selected_candidate=selected_candidate,
+                )
+                self._emit_desktop_watch_reply_event(
+                    capture_response=capture_response,
+                    pipeline=pipeline,
+                )
+            except (LLMError, KeyError, ValueError) as exc:
+                # Block: Failure
+                self._persist_cycle_failure(
+                    cycle_id=cycle_id,
+                    started_at=started_at,
+                    finished_at=self._now_iso(),
+                    state=state,
+                    settings_snapshot=settings_snapshot,
+                    runtime_summary=runtime_summary,
+                    observation_text=observation_text,
+                    client_context=client_context,
+                    failure_reason=str(exc),
+                    trigger_kind="desktop_watch",
+                    observation_event_kind="desktop_watch",
+                    observation_event_role="system",
+                )
 
     def _run_observation_pipeline(
         self,
@@ -1238,6 +1513,141 @@ class OtomeKairoService:
         if decision.get("kind") == "future_act":
             return
 
+    def _set_last_desktop_watch_at(self, current_time: str) -> None:
+        # Block: Update
+        with self._runtime_state_lock:
+            self._desktop_watch_runtime_state["last_watch_at"] = current_time
+
+    def _request_desktop_watch_capture(self, *, target_client_id: str) -> dict[str, Any] | None:
+        # Block: Request
+        request_id = f"vision_capture_request:{uuid.uuid4().hex}"
+        pending = {
+            "event": threading.Event(),
+            "response": None,
+            "target_client_id": target_client_id,
+        }
+        with self._vision_capture_lock:
+            self._pending_vision_capture_requests[request_id] = pending
+
+        # Block: Command
+        sent = self._event_stream_registry.send_to_client(
+            target_client_id,
+            {
+                "event_id": 0,
+                "type": "vision.capture_request",
+                "data": {
+                    "request_id": request_id,
+                    "source": "desktop",
+                    "mode": "still",
+                    "purpose": "desktop_watch",
+                    "timeout_ms": DESKTOP_WATCH_CAPTURE_TIMEOUT_MS,
+                },
+            },
+        )
+        if not sent:
+            with self._vision_capture_lock:
+                self._pending_vision_capture_requests.pop(request_id, None)
+            return None
+
+        # Block: Wait
+        pending["event"].wait(timeout=(DESKTOP_WATCH_CAPTURE_TIMEOUT_MS / 1000.0) + 1.0)
+
+        # Block: Result
+        with self._vision_capture_lock:
+            result = pending["response"]
+            self._pending_vision_capture_requests.pop(request_id, None)
+            if not isinstance(result, dict):
+                return None
+            return result
+
+    def _build_desktop_watch_client_context(self, capture_response: dict[str, Any]) -> dict[str, Any]:
+        # Block: Source
+        client_context = capture_response.get("client_context", {})
+        if not isinstance(client_context, dict):
+            client_context = {}
+
+        # Block: Result
+        return {
+            "source": "desktop_watch",
+            "client_id": capture_response.get("client_id"),
+            "active_app": client_context.get("active_app"),
+            "window_title": client_context.get("window_title"),
+            "locale": client_context.get("locale"),
+        }
+
+    def _build_desktop_watch_observation_text(
+        self,
+        *,
+        client_context: dict[str, Any],
+        selected_candidate: dict[str, Any] | None,
+    ) -> str:
+        # Block: Context
+        active_app = client_context.get("active_app")
+        window_title = client_context.get("window_title")
+        parts = ["desktop_watch 観測。"]
+        if selected_candidate is not None:
+            parts.append(self._wake_observation_text(selected_candidate))
+        if isinstance(active_app, str) and active_app.strip():
+            parts.append(f"前景アプリは {active_app.strip()}。")
+        if isinstance(window_title, str) and window_title.strip():
+            parts.append(f"ウィンドウタイトルは {window_title.strip()}。")
+
+        # Block: Candidate
+        if selected_candidate is not None:
+            parts.append("いま保留中の会話候補を再評価したい。")
+
+        # Block: Result
+        return " ".join(parts)
+
+    def _emit_desktop_watch_reply_event(
+        self,
+        *,
+        capture_response: dict[str, Any],
+        pipeline: dict[str, Any],
+    ) -> None:
+        # Block: Guard
+        reply_payload = pipeline.get("reply_payload")
+        if not isinstance(reply_payload, dict):
+            return
+
+        # Block: Client
+        target_client_id = capture_response.get("client_id")
+        if not isinstance(target_client_id, str) or not target_client_id.strip():
+            return
+
+        # Block: Context
+        client_context = capture_response.get("client_context", {})
+        if not isinstance(client_context, dict):
+            client_context = {}
+        window_title = client_context.get("window_title")
+        active_app = client_context.get("active_app")
+        summary = None
+        if isinstance(window_title, str) and window_title.strip():
+            summary = window_title.strip()
+        elif isinstance(active_app, str) and active_app.strip():
+            summary = active_app.strip()
+
+        # Block: Event
+        event = {
+            "event_id": self._next_stream_event_id(),
+            "type": "desktop_watch",
+            "data": {
+                "system_text": f"[desktop_watch] {summary}" if isinstance(summary, str) and summary else "[desktop_watch]",
+                "message": reply_payload["reply_text"],
+                "images": capture_response.get("images", []),
+            },
+        }
+        self._event_stream_registry.send_to_client(target_client_id.strip(), event)
+
+    def _next_stream_event_id(self) -> int:
+        # Block: Counter
+        with self._stream_event_lock:
+            event_id = self._next_stream_event_value
+            self._next_stream_event_value += 1
+
+        # Block: Result
+        return event_id
+
     def _set_last_wake_at(self, current_time: str) -> None:
         # Block: Update
         with self._runtime_state_lock:
@@ -1378,6 +1788,9 @@ class OtomeKairoService:
                 "last_spontaneous_at": None,
                 "cooldown_until": None,
                 "reply_history_by_dedupe": {},
+            }
+            self._desktop_watch_runtime_state = {
+                "last_watch_at": None,
             }
 
     def _future_act_not_before(self, occurred_at: str) -> str:

@@ -1,0 +1,259 @@
+from __future__ import annotations
+
+import base64
+import hashlib
+import json
+import socket
+import struct
+import threading
+import uuid
+from typing import Any
+
+
+# Block: Constants
+WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+
+# Block: Errors
+class WebSocketProtocolError(Exception):
+    pass
+
+
+# Block: Handshake
+def build_websocket_accept(key: str) -> str:
+    # Block: Digest
+    digest = hashlib.sha1(f"{key}{WEBSOCKET_GUID}".encode("utf-8")).digest()
+
+    # Block: Result
+    return base64.b64encode(digest).decode("ascii")
+
+
+# Block: WebSocket
+class ServerWebSocket:
+    def __init__(self, connection: socket.socket) -> None:
+        # Block: Fields
+        self._connection = connection
+        self._send_lock = threading.Lock()
+        self._closed = False
+
+    def receive_json(self) -> dict[str, Any] | None:
+        # Block: Text
+        text = self.receive_text()
+        if text is None:
+            return None
+
+        # Block: Decode
+        payload = json.loads(text)
+        if not isinstance(payload, dict):
+            raise WebSocketProtocolError("WebSocket message must be a JSON object.")
+
+        # Block: Result
+        return payload
+
+    def receive_text(self) -> str | None:
+        # Block: Loop
+        while True:
+            opcode, payload = self._read_frame()
+            if opcode == 0x8:
+                self.close()
+                return None
+            if opcode == 0x9:
+                self._send_frame(opcode=0xA, payload=payload)
+                continue
+            if opcode == 0xA:
+                continue
+            if opcode != 0x1:
+                raise WebSocketProtocolError(f"Unsupported opcode: {opcode}")
+            return payload.decode("utf-8")
+
+    def send_json(self, payload: dict[str, Any]) -> None:
+        # Block: Encode
+        self.send_text(json.dumps(payload, ensure_ascii=False))
+
+    def send_text(self, text: str) -> None:
+        # Block: Encode
+        self._send_frame(opcode=0x1, payload=text.encode("utf-8"))
+
+    def close(self) -> None:
+        # Block: Idempotent
+        with self._send_lock:
+            if self._closed:
+                return
+            self._closed = True
+
+            # Block: Frame
+            try:
+                self._send_frame_unlocked(opcode=0x8, payload=b"")
+            except OSError:
+                pass
+
+            # Block: Socket
+            try:
+                self._connection.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            self._connection.close()
+
+    def _read_frame(self) -> tuple[int, bytes]:
+        # Block: Header
+        header = self._read_exact(2)
+        first_byte = header[0]
+        second_byte = header[1]
+        fin = (first_byte & 0x80) != 0
+        opcode = first_byte & 0x0F
+        masked = (second_byte & 0x80) != 0
+        payload_length = second_byte & 0x7F
+
+        # Block: Validation
+        if not fin:
+            raise WebSocketProtocolError("Fragmented frames are not supported.")
+        if not masked:
+            raise WebSocketProtocolError("Client frames must be masked.")
+
+        # Block: ExtendedLength
+        if payload_length == 126:
+            payload_length = struct.unpack("!H", self._read_exact(2))[0]
+        elif payload_length == 127:
+            payload_length = struct.unpack("!Q", self._read_exact(8))[0]
+
+        # Block: Payload
+        mask = self._read_exact(4)
+        payload = self._read_exact(payload_length)
+        unmasked = bytes(byte ^ mask[index % 4] for index, byte in enumerate(payload))
+        return opcode, unmasked
+
+    def _send_frame(self, *, opcode: int, payload: bytes) -> None:
+        # Block: LockedSend
+        with self._send_lock:
+            if self._closed:
+                return
+            self._send_frame_unlocked(opcode=opcode, payload=payload)
+
+    def _send_frame_unlocked(self, *, opcode: int, payload: bytes) -> None:
+        # Block: Header
+        header = bytearray([0x80 | (opcode & 0x0F)])
+        payload_length = len(payload)
+        if payload_length < 126:
+            header.append(payload_length)
+        elif payload_length < 65536:
+            header.append(126)
+            header.extend(struct.pack("!H", payload_length))
+        else:
+            header.append(127)
+            header.extend(struct.pack("!Q", payload_length))
+
+        # Block: Send
+        self._connection.sendall(bytes(header) + payload)
+
+    def _read_exact(self, size: int) -> bytes:
+        # Block: Loop
+        chunks = bytearray()
+        while len(chunks) < size:
+            chunk = self._connection.recv(size - len(chunks))
+            if not chunk:
+                raise WebSocketProtocolError("WebSocket connection closed.")
+            chunks.extend(chunk)
+        return bytes(chunks)
+
+
+# Block: Registry
+class EventStreamRegistry:
+    def __init__(self) -> None:
+        # Block: Fields
+        self._lock = threading.RLock()
+        self._sessions: dict[str, dict[str, Any]] = {}
+
+    def add_connection(self, websocket: ServerWebSocket) -> str:
+        # Block: Session
+        session_id = f"event_stream_session:{uuid.uuid4().hex}"
+        with self._lock:
+            self._sessions[session_id] = {
+                "session_id": session_id,
+                "websocket": websocket,
+                "client_id": None,
+                "caps": set(),
+            }
+
+        # Block: Result
+        return session_id
+
+    def register_hello(self, session_id: str, *, client_id: str, caps: list[str]) -> None:
+        # Block: Update
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if session is None:
+                raise KeyError(session_id)
+            session["client_id"] = client_id
+            session["caps"] = set(caps)
+
+    def remove_connection(self, session_id: str) -> None:
+        # Block: Remove
+        with self._lock:
+            self._sessions.pop(session_id, None)
+
+    def has_capability(self, client_id: str, capability: str) -> bool:
+        # Block: Scan
+        with self._lock:
+            for session in self._sessions.values():
+                if session.get("client_id") != client_id:
+                    continue
+                caps = session.get("caps", set())
+                if capability in caps:
+                    return True
+
+        # Block: Empty
+        return False
+
+    def is_client_connected(self, client_id: str) -> bool:
+        # Block: Scan
+        with self._lock:
+            for session in self._sessions.values():
+                if session.get("client_id") == client_id:
+                    return True
+
+        # Block: Empty
+        return False
+
+    def send_to_client(self, client_id: str, payload: dict[str, Any]) -> bool:
+        # Block: Snapshot
+        with self._lock:
+            sessions = [
+                session
+                for session in self._sessions.values()
+                if session.get("client_id") == client_id
+            ]
+
+        # Block: Empty
+        if not sessions:
+            return False
+
+        # Block: Send
+        sent = False
+        stale_session_ids: list[str] = []
+        for session in sessions:
+            websocket = session["websocket"]
+            try:
+                websocket.send_json(payload)
+                sent = True
+            except OSError:
+                stale_session_ids.append(session["session_id"])
+
+        # Block: Cleanup
+        for session_id in stale_session_ids:
+            self.remove_connection(session_id)
+
+        # Block: Result
+        return sent
+
+    def close_all(self) -> None:
+        # Block: Snapshot
+        with self._lock:
+            sessions = list(self._sessions.values())
+            self._sessions = {}
+
+        # Block: Close
+        for session in sessions:
+            try:
+                session["websocket"].close()
+            except OSError:
+                continue

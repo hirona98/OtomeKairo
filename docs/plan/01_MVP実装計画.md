@@ -47,10 +47,11 @@
 - runtime-only の `future_act` 候補キューがあり、dedupe / update / expiry metadata を持てる
 - wake observation API と background 起床スケジューラがあり、`wake_policy` の due 判定と `future_act` 候補再評価で `reply / noop / future_act` を扱える
 - `wake_scheduler_active` は server 内 scheduler の稼働状態を反映できる
+- `desktop_watch` は event stream と capture-response を介して観測源として接続されている
+- `desktop_watch` は `target_client_id` と `vision.desktop` capability を使って対象 console を選べる
 
 一方で、MVP 全体としてはまだ未完である。
 
-- `desktop_watch` も設定としてはあるが、観測源としては未実装である
 - embedding 更新と `reflective consolidation` の完全非同期化は未完である
 - `relationship` / `self` の高次な長期変化分析は未完である
 - 回帰テストはまだ本格整備していない
@@ -85,6 +86,9 @@
   - vector 永続化
 - `src/otomekairo/service.py`
   - API と会話パイプラインの orchestrator
+- `src/otomekairo/event_stream.py`
+  - WebSocket frame handling
+  - event stream registry
 - `src/otomekairo/recall.py`
   - 構造レーン
   - 連想レーン
@@ -244,6 +248,13 @@
   - wake API と同じ判断経路で wake cycle を実行する
   - manual wake と background wake の二重実行は直列化する
   - runtime-only queue と wake runtime state は lock 付きで扱う
+- desktop_watch
+  - `GET /api/events/stream` で client が `hello` を送り、`client_id` と `caps` を登録できる
+  - `desktop_watch.target_client_id` に対して `vision.capture_request` を送れる
+  - `POST /api/v2/vision/capture-response` を受けられる
+  - `desktop_watch.interval_seconds` に基づく background loop がある
+  - capture result の `client_context` を使って `trigger_kind="desktop_watch"` の判断 cycle を実行できる
+  - `reply` 時は `desktop_watch` event と添付 image を target client へ返せる
 - 監査強化
   - memory consolidation failure を cycle trace と events に残す
   - reflective failure を `reflection_runs` と events に残す
@@ -266,16 +277,30 @@
 この段階でも、外界行動の実行まではやらない。
 自発的に話すか、保留するかの内部判断に留める。
 
-## 未着手: `desktop_watch` と wake の拡張
+## 完了済み: `desktop_watch` 接続の第一段
 
-自律起床の第一段は入ったが、wake 系はまだ未完である。
+この段階で、CocoroConsole とつながる最小の `desktop_watch` は通っている。
+
+- `events/stream` WebSocket がある
+- client の `hello(client_id, caps)` を受けられる
+- `vision.capture_request` と `vision/capture-response` が往復する
+- `target_client_id` と `vision.desktop` capability で対象 client を絞る
+- capture result の `active_app / window_title / locale` を `client_context` として判断へ渡せる
+- `reply` になった場合は `desktop_watch` event を stream へ返せる
+
+この段階でも、画像内容の意味理解まではまだやらない。
+MVP では capture image を通知添付に使い、判断は `client_context` 主体に留める。
+
+## 未着手: `desktop_watch` の高度化
+
+`desktop_watch` は第一段まで入ったが、まだ詰める余地がある。
 
 後続でやることは次である。
 
-- `desktop_watch` を観測源として接続する
+- capture image 自体を判断材料へ入れる
 - wake 時の client context を richer にする
 - 時刻帯や前景状況を使う判断補助を絞って足す
-- background wake の長時間 smoke を整備する
+- background wake / desktop_watch の長時間 smoke を整備する
 
 ## 未着手: 記憶の高度化と運用硬化
 
@@ -299,18 +324,17 @@
 - `event_evidence` は短い圧縮根拠であり、逐語引用や正確引用は保証しない
 - `RecallHint` は長期記憶を読まず、現在観測と直近文脈だけから作る
 - 複合意図は `primary_intent` 主軸で扱い、完全な同時最適化はしない
-- `desktop_watch` が未実装なので、現状は会話主導 + interval wake の MVP である
+- `desktop_watch` の画像そのものはまだ判断に入れておらず、現状は `client_context` 主体である
 - background wake はあるが、複雑な時間帯制御や外界行動実行はまだ持たない
 
 ## 直近の実装順
 
 次はこの順で進める。
 
-1. `desktop_watch` を観測源として繋ぐ
-2. wake での client context 利用を強める
-3. `relationship / self` の高次な反射再整理を絞って足す
-4. 非同期ジョブ化と運用硬化へ進む
-5. 仕様が固まった範囲から回帰テストを追加する
+1. wake / desktop_watch での client context 利用を強める
+2. `relationship / self` の高次な反射再整理を絞って足す
+3. 非同期ジョブ化と運用硬化へ進む
+4. 仕様が固まった範囲から回帰テストを追加する
 
 この順にする理由は、先に記憶の使い道を仕上げ、その後で自発判断へ広げるほうが安全だからである。
 
@@ -321,6 +345,6 @@
 
 - background wake と wake API が同じ判断経路を通る
 - `wake_scheduler_active` が実ランタイムを反映する
-- `desktop_watch` 観測を wake 入力へ繋げられる
+- `desktop_watch` 観測を server-driven stream から判断入力へ繋げられる
 - runtime-only 候補キューと wake runtime state の境界が壊れない
 - 少なくとも最小の smoke / 回帰確認がある

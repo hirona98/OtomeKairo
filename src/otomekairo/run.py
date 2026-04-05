@@ -32,6 +32,7 @@ def main() -> None:
 
     # Block: SchedulerStart
     service.start_background_wake_scheduler()
+    service.start_background_desktop_watch()
 
     # Block: Serve
     print(f"OtomeKairo listening on https://{host}:{port}")
@@ -40,6 +41,8 @@ def main() -> None:
         server.serve_forever()
     finally:
         # Block: Shutdown
+        service.close_event_streams()
+        service.stop_background_desktop_watch()
         service.stop_background_wake_scheduler()
         server.server_close()
 
