@@ -193,6 +193,56 @@ class SQLiteMemoryStore:
         ]
         return turns
 
+    def load_events_for_evidence(
+        self,
+        *,
+        memory_set_id: str,
+        event_ids: list[str],
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        # Block: Empty
+        if not event_ids or limit <= 0:
+            return []
+
+        # Block: QueryParts
+        requested_ids = [
+            event_id
+            for event_id in event_ids
+            if isinstance(event_id, str)
+        ]
+        if not requested_ids:
+            return []
+        placeholders = ", ".join("?" for _ in requested_ids)
+
+        # Block: Query
+        with self._memory_db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT event_id, payload_json
+                FROM events
+                WHERE memory_set_id = ?
+                  AND event_id IN ({placeholders})
+                """,
+                (memory_set_id, *requested_ids),
+            ).fetchall()
+
+        # Block: Ordering
+        rows_by_id = {
+            row["event_id"]: json.loads(row["payload_json"])
+            for row in rows
+        }
+        ordered: list[dict[str, Any]] = []
+        for event_id in requested_ids:
+            record = rows_by_id.get(event_id)
+            if record is None:
+                continue
+            ordered.append(record)
+            if len(ordered) >= limit:
+                break
+
+        # Block: Result
+        return ordered
+
     def count_cycle_summaries_since(
         self,
         *,

@@ -734,6 +734,7 @@ class OtomeKairoService:
             "active_topics": len(recall_pack["active_topics"]),
             "active_commitments": len(recall_pack["active_commitments"]),
             "episodic_evidence": len(recall_pack["episodic_evidence"]),
+            "event_evidence": len(recall_pack["event_evidence"]),
             "conflicts": len(recall_pack["conflicts"]),
         }
 
@@ -1249,6 +1250,7 @@ class OtomeKairoService:
                 "candidate_count": recall_pack["candidate_count"],
                 "selected_memory_ids": recall_pack["selected_memory_ids"],
                 "selected_episode_digest_ids": recall_pack["selected_episode_digest_ids"],
+                "selected_event_ids": recall_pack["selected_event_ids"],
                 "recall_pack_summary": self._summarize_recall_pack(recall_pack),
                 "adopted_reason_summary": self._recall_adopted_reason_summary(recall_pack),
                 "rejected_candidate_summary": self._recall_rejected_reason_summary(recall_pack),
@@ -1372,6 +1374,7 @@ class OtomeKairoService:
                 "candidate_count": 0,
                 "selected_memory_ids": [],
                 "selected_episode_digest_ids": [],
+                "selected_event_ids": [],
                 "recall_pack_summary": None,
                 "adopted_reason_summary": None,
                 "rejected_candidate_summary": None,

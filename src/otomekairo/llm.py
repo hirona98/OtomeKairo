@@ -384,6 +384,7 @@ class MockLLMClient:
         user_items = recall_pack.get("user_model", [])
         topic_items = recall_pack.get("active_topics", [])
         episode_items = recall_pack.get("episodic_evidence", [])
+        event_items = recall_pack.get("event_evidence", [])
         surface_affects = affect_context.get("surface", [])
         conflict_item = conflict_items[0] if conflict_items else None
         commitment_item = commitment_items[0] if commitment_items else None
@@ -391,7 +392,9 @@ class MockLLMClient:
         user_item = user_items[0] if user_items else None
         topic_item = topic_items[0] if topic_items else None
         episode_item = episode_items[0] if episode_items else None
+        event_item = event_items[0] if event_items else None
         surface_affect = surface_affects[0] if surface_affects else None
+        event_basis = self._event_evidence_basis_text(event_item)
 
         # Block: CautionPrefix
         caution_prefix = ""
@@ -402,10 +405,18 @@ class MockLLMClient:
 
         # Block: ReplyRule
         if decision["requires_confirmation"]:
-            basis_item = relationship_item or episode_item or conflict_item
-            if basis_item is not None:
+            basis_text = None
+            if relationship_item is not None:
+                basis_text = relationship_item["summary_text"]
+            elif episode_item is not None:
+                basis_text = episode_item["summary_text"]
+            elif event_basis is not None:
+                basis_text = event_basis
+            elif conflict_item is not None:
+                basis_text = conflict_item["summary_text"]
+            if basis_text is not None:
                 reply_text = (
-                    f"{caution_prefix}{basis_item['summary_text']} という流れで受け取っているけれど、"
+                    f"{caution_prefix}{basis_text} という流れで受け取っているけれど、"
                     f"{text} の理解はこれで合っている？"
                 )
             else:
@@ -421,11 +432,15 @@ class MockLLMClient:
                     reply_text = f"{commitment_item['summary_text']} の続きとして受け取ったよ。いまはどの範囲まで進めたい？"
                 else:
                     reply_text = f"{commitment_item['summary_text']} の続きとして受け取ったよ。{text} について、今回はどこまで進めたい？"
+            elif event_basis is not None:
+                reply_text = f"{event_basis} の続きとして受け取ったよ。{text} について、今回はどこまで進めたい？"
             else:
                 reply_text = f"{caution_prefix}その流れは覚えている前提で話すね。{text} に関して、今回どこまで進めたい？"
         elif primary_intent == "reminisce":
             if episode_item is not None:
                 reply_text = f"{episode_item['summary_text']} の流れとして受け取ったよ。{text} のどの部分からつなげたい？"
+            elif event_basis is not None:
+                reply_text = f"{event_basis} の場面として受け取ったよ。{text} のどの部分からつなげたい？"
             else:
                 reply_text = f"{caution_prefix}その続きとして受け取ったよ。{text} のどの部分からつなげたい？"
         elif primary_intent == "preference_query":
@@ -444,6 +459,20 @@ class MockLLMClient:
             "reply_style_notes": f"tone={tone}; part_of_day={time_context.get('part_of_day', 'unknown')}",
             "confidence_note": "mock_model",
         }
+
+    def _event_evidence_basis_text(self, item: dict[str, Any] | None) -> str | None:
+        # Block: Empty
+        if item is None:
+            return None
+
+        # Block: Slots
+        for key in ("decision_or_result", "topic", "anchor", "tone_or_note"):
+            value = item.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+
+        # Block: Result
+        return None
 
     def generate_memory_interpretation(
         self,
@@ -1026,7 +1055,7 @@ class LLMClient:
             "入力には recent_turns と internal_context が含まれます。\n"
             "internal_context には TimeContext, AffectContext, RecallPack が入ります。\n"
             "RecallPack.conflicts があるときは requires_confirmation=true を優先してください。\n"
-            "active_commitments や episodic_evidence は reply の継続根拠に使ってください。\n"
+            "active_commitments, episodic_evidence, event_evidence は reply の継続根拠に使ってください。\n"
             "返すキーは必ず次の 4 個です:\n"
             "- kind: \"reply\" または \"noop\"\n"
             "- reason_code: string\n"
@@ -1071,6 +1100,7 @@ class LLMClient:
             "入力には recent_turns と internal_context が含まれます。\n"
             "internal_context には TimeContext, AffectContext, RecallPack が入ります。\n"
             "RecallPack の内容だけを根拠に、必要な範囲で自然に思い出や継続文脈を混ぜてください。\n"
+            "RecallPack.event_evidence は 1-3 件の短い証拠要約として扱い、必要なときだけ自然に参照してください。\n"
             "RecallPack.conflicts があるときは断定を避け、短い確認質問に寄せてください。\n"
             f"persona_text: {persona_text}\n"
             f"second_person_label: {second_person_label}\n"
@@ -1291,6 +1321,7 @@ class LLMClient:
             "active_topics": [self._compact_topic_context_item(item) for item in recall_pack.get("active_topics", [])],
             "active_commitments": [self._compact_memory_context_item(item) for item in recall_pack.get("active_commitments", [])],
             "episodic_evidence": [self._compact_digest_context_item(item) for item in recall_pack.get("episodic_evidence", [])],
+            "event_evidence": [self._compact_event_evidence_item(item) for item in recall_pack.get("event_evidence", [])],
             "conflicts": [self._compact_conflict_context_item(item) for item in recall_pack.get("conflicts", [])],
         }
 
@@ -1342,6 +1373,20 @@ class LLMClient:
             "summary_text": item["summary_text"],
             "compare_key": item["compare_key"],
         }
+
+    def _compact_event_evidence_item(self, item: dict[str, Any]) -> dict[str, Any]:
+        # Block: Payload
+        payload = {
+            "kind": item["kind"],
+        }
+        for key in ("anchor", "topic", "decision_or_result", "tone_or_note"):
+            value = item.get(key)
+            if value is None:
+                continue
+            payload[key] = value
+
+        # Block: Result
+        return payload
 
     def _format_recent_turns(self, recent_turns: list[dict]) -> str:
         # Block: Empty

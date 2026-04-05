@@ -259,12 +259,9 @@ SQLite 接続では、少なくとも次を固定する。
 - `user_model`、`relationship_model`、`self_model` を `scope_type / scope_key / status` で取得
 - `active_topics` を `scope_type=topic` と `episode_digests.has_open_loops` で補助取得
 - `episodic_evidence` を `episode_digests` の構造条件だけで取得
+- 選択済み `episode_digests.linked_event_ids` と `memory_units.evidence_event_ids` から最大 3 件だけ `events` を開き、`event_evidence` を slot 型に圧縮
 - `conflicts` を比較キー単位の併存候補から抽出
-- `retrieval_runs` と `cycle_traces` に `selected_episode_digest_ids` と `recall_pack_summary` を保存
-
-この段階では、まだ次は未着手である。
-
-- `event_evidence` の限定ロード
+- `retrieval_runs` と `cycle_traces` に `selected_episode_digest_ids`、`selected_event_ids`、`recall_pack_summary` を保存
 
 #### 3-4. 連想レーンの実装
 
@@ -287,12 +284,12 @@ SQLite 接続では、少なくとも次を固定する。
 - `turn consolidation` 後に、新規または更新された `memory_units` / `episode_digests` だけを差分 upsert
 - query 側は `observation_text` を埋め込み、`memory_units` と `episode_digests` を近傍検索
 - 連想候補は `user_model` / `relationship_model` / `self_model` / `active_topics` / `episodic_evidence` に補助的に混ぜる
+- `event_evidence` が必要なときだけ、採用済み候補にぶら下がる `event_id` を最大 3 件だけ開く
 - `vector-only` 採用は `cycle_traces.recall_trace` に分かる形で残す
 
 この段階では、まだ次は未着手である。
 
 - `mentioned_entities` / `mentioned_topics` を強く使う query 強化
-- `event_evidence` の限定ロード
 - 非同期の埋め込み更新ジョブ
 
 #### 3-5. `RecallPack` の本接続
@@ -316,14 +313,14 @@ SQLite 接続では、少なくとも次を固定する。
 - `internal_context` は `TimeContext`、`AffectContext`、`RecallPack` の 3 つで組む
 - `AffectContext` は `affect_state` を `scope` 条件だけで読んで `surface / background` に圧縮する
 - `RecallPack` は prompt 直前に section ごとの短い内部要約へ圧縮して渡す
+- `RecallPack.event_evidence` は `anchor / topic / decision_or_result / tone_or_note` の短い要約として decision / reply に渡す
 - `decision_generation` prompt は `conflicts` を確認寄り判断の根拠として扱う
 - `reply_generation` prompt は `RecallPack` の要約を見て、継続文脈や確認質問を組み立てる
-- mock 実装でも `active_commitments`、`episodic_evidence`、`conflicts`、`AffectContext` が返答に効く
+- mock 実装でも `active_commitments`、`episodic_evidence`、`event_evidence`、`conflicts`、`AffectContext` が返答に効く
 - `cycle_traces.decision_trace` に internal context summary を残す
 
 この段階では、まだ次は未着手である。
 
-- `event_evidence` の限定ロード
 - `RecallPack` を使った `future_act` 判断分岐
 
 #### 3-6. `reflective consolidation` の入口
