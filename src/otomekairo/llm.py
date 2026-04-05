@@ -564,6 +564,12 @@ class MockLLMClient:
 
         # Block: Builders
         candidates: list[dict[str, Any]] = []
+        correction_signal = self._mock_has_correction_signal(normalized)
+
+        # Block: Fact
+        fact_candidate = self._mock_fact_candidate(normalized, correction_signal=correction_signal)
+        if fact_candidate is not None:
+            candidates.append(fact_candidate)
 
         if any(token in normalized for token in ("好き", "食べたい", "嫌い", "苦手")):
             candidates.append(
@@ -583,8 +589,10 @@ class MockLLMClient:
                     "valid_to": None,
                     "qualifiers": {
                         "polarity": self._mock_preference_polarity(normalized),
+                        "source": "explicit_correction" if correction_signal else "explicit_statement",
+                        "negates_previous": correction_signal,
                     },
-                    "reason": "発話中に好みや苦手の明示が含まれていたため。",
+                    "reason": "発話中に好みや苦手の明示が含まれており、必要なら既存理解の訂正にもなりうるため。",
                 }
             )
 
@@ -604,7 +612,9 @@ class MockLLMClient:
                     "salience": 0.88,
                     "valid_from": None,
                     "valid_to": None,
-                    "qualifiers": {},
+                    "qualifiers": {
+                        "source": "inference",
+                    },
                     "reason": "後続会話や約束を示す表現が含まれていたため。",
                 }
             )
@@ -627,12 +637,89 @@ class MockLLMClient:
                     "valid_to": None,
                     "qualifiers": {
                         "domain": "health",
+                        "source": "inference",
                     },
                     "reason": "体調や睡眠に関する示唆があったため。",
                 }
             )
 
         return candidates
+
+    def _mock_fact_candidate(self, normalized: str, *, correction_signal: bool) -> dict[str, Any] | None:
+        # Block: DailyRhythm
+        if "朝型" in normalized or "夜型" in normalized:
+            object_ref = "rhythm:morning" if "朝型" in normalized else "rhythm:night"
+            summary_text = "あなたの生活リズムは朝型寄りだ。" if "朝型" in normalized else "あなたの生活リズムは夜型寄りだ。"
+            reason = "生活リズムに関する明示があり、継続理解として残す価値があるため。"
+            if correction_signal:
+                reason = "生活リズムに関する明示訂正があり、既存理解の更新候補になるため。"
+            return {
+                "memory_type": "fact",
+                "scope_type": "user",
+                "scope_key": "user",
+                "subject_ref": "user",
+                "predicate": "daily_rhythm",
+                "object_ref_or_value": object_ref,
+                "summary_text": summary_text,
+                "status": "confirmed",
+                "commitment_state": None,
+                "confidence": 0.9,
+                "salience": 0.76,
+                "valid_from": None,
+                "valid_to": None,
+                "qualifiers": {
+                    "source": "explicit_correction" if correction_signal else "explicit_statement",
+                    "negates_previous": correction_signal,
+                    "temporal_scope": "current",
+                },
+                "reason": reason,
+            }
+
+        # Block: WorkStyle
+        if any(token in normalized for token in ("在宅", "リモート", "出社")):
+            object_ref = "work:remote" if "在宅" in normalized or "リモート" in normalized else "work:office"
+            summary_text = "あなたの働き方は在宅寄りだ。" if object_ref == "work:remote" else "あなたの働き方は出社寄りだ。"
+            reason = "働き方に関する明示があり、継続理解として残す価値があるため。"
+            if correction_signal:
+                reason = "働き方に関する明示訂正があり、既存理解の更新候補になるため。"
+            return {
+                "memory_type": "fact",
+                "scope_type": "user",
+                "scope_key": "user",
+                "subject_ref": "user",
+                "predicate": "work_style",
+                "object_ref_or_value": object_ref,
+                "summary_text": summary_text,
+                "status": "confirmed",
+                "commitment_state": None,
+                "confidence": 0.88,
+                "salience": 0.72,
+                "valid_from": None,
+                "valid_to": None,
+                "qualifiers": {
+                    "source": "explicit_correction" if correction_signal else "explicit_statement",
+                    "negates_previous": correction_signal,
+                    "temporal_scope": "current",
+                },
+                "reason": reason,
+            }
+
+        # Block: Result
+        return None
+
+    def _mock_has_correction_signal(self, normalized: str) -> bool:
+        # Block: Tokens
+        correction_tokens = (
+            "いや",
+            "違う",
+            "勘違い",
+            "じゃなく",
+            "ではなく",
+            "むしろ",
+        )
+
+        # Block: Result
+        return any(token in normalized for token in correction_tokens)
 
     def _mock_preference_object(self, normalized: str) -> str:
         # Block: Mapping
@@ -1142,6 +1229,12 @@ class LLMClient:
             "返すトップレベルキーは episode_digest, candidate_memory_units, affect_updates の 3 つだけです。\n"
             "candidate_memory_units は、今後の会話や判断に効く継続理解だけを入れてください。\n"
             "弱い雑談断片や一時判断は memory_unit にしないでください。\n"
+            "明示された生活状況、習慣、役割、現在の継続状態は fact を優先してください。\n"
+            "明示訂正で以前の理解を置き換えるなら、replacement 候補を返し qualifiers.negates_previous=true を付けてください。\n"
+            "否定だけで置換内容がない場合だけ status=revoked を使ってください。\n"
+            "false ではないが前面に出さない理解だけを status=dormant にしてください。\n"
+            "弱い単発推測や event に留めるべき断片は candidate_memory_units に入れず、結果として noop になってよいです。\n"
+            "qualifiers には必要なら source=explicit_statement|explicit_correction|inference, negates_previous, replace_prior, allow_parallel を入れてください。\n"
             "memory_type は fact, preference, relation, commitment, interpretation, summary のいずれかです。\n"
             "status は inferred, confirmed, superseded, revoked, dormant のいずれかです。\n"
             "commitment_state は commitment のときだけ open, waiting_confirmation, on_hold, done, cancelled のいずれかを使い、それ以外では null にしてください。\n"

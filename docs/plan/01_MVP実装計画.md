@@ -225,15 +225,16 @@ SQLite 接続では、少なくとも次を固定する。
 
 - `episode_digests` の保存
 - `memory_interpretation` 契約の追加
-- `preference`、`commitment`、`interpretation` の候補抽出
-- 比較キーだけを使う `create / reinforce / refine / supersede` の反映
+- `preference`、`commitment`、`interpretation` に加えて、明示された生活リズムや働き方の `fact` 候補抽出
+- 比較キーの上で `create / reinforce / refine / supersede / revoke / dormant / noop` を解決
+- 同じ compare key に複数 object がぶら下がる場合は、`preference / relation / commitment / interpretation` を並存させうる
+- 同一 object の明示否定は `revoke + create`、明示訂正の `fact` は `supersede + create` を優先
+- 弱い `interpretation / relation` と低信頼候補は `noop` で抑制
 - `revisions` の保存
 - `affect_state` の upsert
 
 この段階では、まだ次は未着手である。
 
-- `revoke / dormant / noop` の更新判定
-- `fact` の安定抽出
 - `sqlite-vec` を使う連想レーン
 
 #### 3-3. 構造レーンの実装
@@ -367,7 +368,7 @@ SQLite 接続では、少なくとも次を固定する。
 - `memory.py`
   - `turn consolidation` の orchestration
 - `memory_actions.py`
-  - `create / reinforce / refine / supersede` の解決
+  - `create / reinforce / refine / supersede / revoke / dormant / noop` の解決
 - `memory_vector.py`
   - `sqlite-vec` 用の source text 構築と index 同期
 - `memory_reflection.py`
