@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from otomekairo.llm import LLMClient
 from otomekairo.store import FileStore
 
 
@@ -19,20 +20,28 @@ SECTION_LIMITS = {
     "conflicts": 2,
 }
 GLOBAL_RECALL_LIMIT = 14
+ASSOCIATION_MEMORY_LIMIT = 6
+ASSOCIATION_DIGEST_LIMIT = 4
 
 
 # Block: RecallBuilder
 class RecallBuilder:
-    def __init__(self, *, store: FileStore) -> None:
+    def __init__(self, *, store: FileStore, llm: LLMClient) -> None:
         # Block: Dependencies
         self.store = store
+        self.llm = llm
 
     def build_recall_pack(
         self,
         *,
         state: dict[str, Any],
+        observation_text: str,
         recall_hint: dict[str, Any],
     ) -> dict[str, Any]:
+        # Block: MemoryToggle
+        if not state.get("memory_enabled", True):
+            return self._empty_recall_pack()
+
         # Block: Context
         memory_set_id = state["selected_memory_set_id"]
         primary_intent = recall_hint["primary_intent"]
@@ -103,6 +112,41 @@ class RecallBuilder:
         )
         self._collect_raw_candidate_ids(raw_candidate_ids, episodic_evidence)
 
+        # Block: AssociationSections
+        association_sections = self._build_association_sections(
+            state=state,
+            observation_text=observation_text,
+            recall_hint=recall_hint,
+            scope_context=scope_context,
+        )
+        self._collect_raw_candidate_ids(raw_candidate_ids, association_sections["self_model"])
+        self._collect_raw_candidate_ids(raw_candidate_ids, association_sections["user_model"])
+        self._collect_raw_candidate_ids(raw_candidate_ids, association_sections["relationship_model"])
+        self._collect_raw_candidate_ids(raw_candidate_ids, association_sections["active_topics"])
+        self._collect_raw_candidate_ids(raw_candidate_ids, association_sections["episodic_evidence"])
+
+        # Block: MergeAssociation
+        self_model = self._limit_memory_section(
+            raw_items=self_model + association_sections["self_model"],
+            limit=SECTION_LIMITS["self_model"],
+        )
+        user_model = self._limit_memory_section(
+            raw_items=user_model + association_sections["user_model"],
+            limit=SECTION_LIMITS["user_model"],
+        )
+        relationship_model = self._limit_memory_section(
+            raw_items=relationship_model + association_sections["relationship_model"],
+            limit=SECTION_LIMITS["relationship_model"],
+        )
+        active_topics = self._limit_mixed_section(
+            raw_items=active_topics + association_sections["active_topics"],
+            limit=SECTION_LIMITS["active_topics"],
+        )
+        episodic_evidence = self._limit_digest_section(
+            raw_items=episodic_evidence + association_sections["episodic_evidence"],
+            limit=SECTION_LIMITS["episodic_evidence"],
+        )
+
         # Block: ConflictSource
         selected_memory_items = active_commitments + relationship_model + user_model + self_model
 
@@ -129,6 +173,16 @@ class RecallBuilder:
         # Block: SelectionSummary
         selected_memory_ids = self._collect_selected_ids(sections, key="memory_unit_id")
         selected_episode_digest_ids = self._collect_selected_ids(sections, key="episode_digest_id")
+        association_selected_memory_ids = self._collect_selected_ids(
+            sections,
+            key="memory_unit_id",
+            retrieval_lane="association",
+        )
+        association_selected_episode_digest_ids = self._collect_selected_ids(
+            sections,
+            key="episode_digest_id",
+            retrieval_lane="association",
+        )
 
         # Block: Result
         return {
@@ -136,6 +190,8 @@ class RecallBuilder:
             "event_evidence": [],
             "selected_memory_ids": selected_memory_ids,
             "selected_episode_digest_ids": selected_episode_digest_ids,
+            "association_selected_memory_ids": association_selected_memory_ids,
+            "association_selected_episode_digest_ids": association_selected_episode_digest_ids,
             "selected_event_ids": [],
             "candidate_count": len(raw_candidate_ids),
         }
@@ -254,6 +310,170 @@ class RecallBuilder:
 
         # Block: Result
         return [self._to_digest_item(record) for record in records]
+
+    def _build_association_sections(
+        self,
+        *,
+        state: dict[str, Any],
+        observation_text: str,
+        recall_hint: dict[str, Any],
+        scope_context: dict[str, list[tuple[str, str]]],
+    ) -> dict[str, list[dict[str, Any]]]:
+        # Block: Empty
+        query_text = self._association_query_text(observation_text, recall_hint)
+        if not query_text:
+            return self._empty_association_sections()
+
+        # Block: EmbeddingContext
+        selected_preset = state["model_presets"][state["selected_model_preset_id"]]
+        embedding_role = selected_preset["roles"]["embedding"]
+        embedding_profile_id = embedding_role["model_profile_id"]
+        embedding_profile = state["model_profiles"][embedding_profile_id]
+        embedding_dimension = embedding_role["embedding_dimension"]
+        embedding_preset = self._embedding_preset(embedding_profile_id, embedding_dimension)
+
+        # Block: QueryEmbedding
+        query_embedding = self.llm.generate_embeddings(
+            profile=embedding_profile,
+            role_settings=embedding_role,
+            texts=[query_text],
+        )[0]
+
+        # Block: MemoryHits
+        memory_hits = self.store.search_memory_unit_vector_entries(
+            memory_set_id=state["selected_memory_set_id"],
+            embedding_preset=embedding_preset,
+            query_embedding=query_embedding,
+            embedding_dimension=embedding_dimension,
+            limit=ASSOCIATION_MEMORY_LIMIT,
+            exclude_source_types=["commitment"],
+            statuses=list(ACTIVE_MEMORY_STATUSES),
+        )
+
+        # Block: DigestHits
+        digest_hits = self.store.search_episode_digest_vector_entries(
+            memory_set_id=state["selected_memory_set_id"],
+            embedding_preset=embedding_preset,
+            query_embedding=query_embedding,
+            embedding_dimension=embedding_dimension,
+            limit=ASSOCIATION_DIGEST_LIMIT,
+            scope_filters=None,
+            require_open_loops=recall_hint["primary_intent"] == "commitment_check",
+        )
+
+        # Block: Sections
+        sections = self._empty_association_sections()
+
+        # Block: MemoryItems
+        for hit in memory_hits:
+            item = self._to_memory_item(hit["record"])
+            item["retrieval_lane"] = "association"
+            item["association_score"] = self._association_score(
+                recall_hint=recall_hint,
+                distance=hit["distance"],
+                item=item,
+            )
+            section_name = self._section_name_for_memory_item(item)
+            if section_name is None:
+                continue
+            sections[section_name].append(item)
+
+        # Block: DigestItems
+        for hit in digest_hits:
+            item = self._to_digest_item(hit["record"])
+            item["retrieval_lane"] = "association"
+            item["association_score"] = self._association_score(
+                recall_hint=recall_hint,
+                distance=hit["distance"],
+                item=item,
+            )
+            sections["episodic_evidence"].append(item)
+
+        # Block: Sort
+        for section_name, items in sections.items():
+            items.sort(
+                key=lambda item: (
+                    float(item.get("association_score", 0.0)),
+                    float(item.get("salience", 0.0)),
+                ),
+                reverse=True,
+            )
+
+        # Block: Result
+        return sections
+
+    def _association_query_text(self, observation_text: str, recall_hint: dict[str, Any]) -> str:
+        # Block: Parts
+        parts = [observation_text.strip()]
+        mentioned_topics = [topic for topic in recall_hint.get("mentioned_topics", []) if isinstance(topic, str) and topic.strip()]
+        mentioned_entities = [entity for entity in recall_hint.get("mentioned_entities", []) if isinstance(entity, str) and entity.strip()]
+        if mentioned_topics:
+            parts.append("topics: " + ", ".join(mentioned_topics[:4]))
+        if mentioned_entities:
+            parts.append("entities: " + ", ".join(mentioned_entities[:4]))
+
+        # Block: Result
+        return "\n".join(part for part in parts if part)
+
+    def _association_score(
+        self,
+        *,
+        recall_hint: dict[str, Any],
+        distance: float,
+        item: dict[str, Any],
+    ) -> float:
+        # Block: Base
+        score = 1.0 / (1.0 + max(distance, 0.0))
+        primary_intent = recall_hint["primary_intent"]
+
+        # Block: FocusBoost
+        if self._focus_scope_matches(recall_hint.get("focus_scopes", []), item):
+            score += 0.08
+
+        # Block: IntentBoost
+        if primary_intent == "reminisce" and item["source_kind"] == "episode_digest":
+            score += 0.12
+        if primary_intent == "commitment_check" and (
+            item.get("has_open_loops") or item.get("commitment_state") in ACTIVE_COMMITMENT_STATES
+        ):
+            score += 0.12
+        if primary_intent == "meta_relationship" and item.get("scope_type") == "relationship":
+            score += 0.1
+        if primary_intent in {"consult", "check_state"} and item.get("scope_type") in {"user", "topic"}:
+            score += 0.08
+        if primary_intent == "preference_query" and item.get("memory_type") == "preference":
+            score += 0.08
+        if recall_hint.get("time_reference") == "past" and item["source_kind"] == "episode_digest":
+            score += 0.05
+
+        # Block: Result
+        return score
+
+    def _focus_scope_matches(self, focus_scopes: list[Any], item: dict[str, Any]) -> bool:
+        # Block: Parse
+        focus_specs = self._parse_focus_scopes(focus_scopes)
+        if item["source_kind"] == "episode_digest":
+            scope_type = item["primary_scope_type"]
+            scope_key = item["primary_scope_key"]
+        else:
+            scope_type = item["scope_type"]
+            scope_key = item["scope_key"]
+
+        # Block: Match
+        return (scope_type, scope_key) in focus_specs
+
+    def _section_name_for_memory_item(self, item: dict[str, Any]) -> str | None:
+        # Block: Mapping
+        scope_type = item["scope_type"]
+        if scope_type == "self":
+            return "self_model"
+        if scope_type == "user":
+            return "user_model"
+        if scope_type == "relationship":
+            return "relationship_model"
+        if scope_type == "topic":
+            return "active_topics"
+        return None
 
     def _build_conflicts(
         self,
@@ -547,12 +767,51 @@ class RecallBuilder:
         # Block: Result
         return merged
 
+    def _empty_association_sections(self) -> dict[str, list[dict[str, Any]]]:
+        # Block: Result
+        return {
+            "self_model": [],
+            "user_model": [],
+            "relationship_model": [],
+            "active_topics": [],
+            "episodic_evidence": [],
+        }
+
+    def _empty_recall_pack(self) -> dict[str, Any]:
+        # Block: Result
+        return {
+            "self_model": [],
+            "user_model": [],
+            "relationship_model": [],
+            "active_topics": [],
+            "active_commitments": [],
+            "episodic_evidence": [],
+            "event_evidence": [],
+            "conflicts": [],
+            "selected_memory_ids": [],
+            "selected_episode_digest_ids": [],
+            "association_selected_memory_ids": [],
+            "association_selected_episode_digest_ids": [],
+            "selected_event_ids": [],
+            "candidate_count": 0,
+        }
+
+    def _embedding_preset(self, embedding_profile_id: str, embedding_dimension: int) -> str:
+        # Block: Identifier
+        return f"{embedding_profile_id}:dim{embedding_dimension}"
+
     def _collect_raw_candidate_ids(self, raw_candidate_ids: set[str], items: list[dict[str, Any]]) -> None:
         # Block: Collect
         for item in items:
             raw_candidate_ids.add(self._record_id(item))
 
-    def _collect_selected_ids(self, sections: dict[str, list[dict[str, Any]]], *, key: str) -> list[str]:
+    def _collect_selected_ids(
+        self,
+        sections: dict[str, list[dict[str, Any]]],
+        *,
+        key: str,
+        retrieval_lane: str | None = None,
+    ) -> list[str]:
         # Block: State
         selected: list[str] = []
         seen: set[str] = set()
@@ -560,6 +819,8 @@ class RecallBuilder:
         # Block: Collect
         for section_items in sections.values():
             for item in section_items:
+                if retrieval_lane is not None and item.get("retrieval_lane") != retrieval_lane:
+                    continue
                 value = item.get(key)
                 if not isinstance(value, str) or value in seen:
                     continue
@@ -607,6 +868,7 @@ class RecallBuilder:
             "summary_text": record["summary_text"],
             "outcome_text": record.get("outcome_text"),
             "open_loops": record.get("open_loops", []),
+            "has_open_loops": bool(record.get("open_loops")),
             "salience": record["salience"],
             "formed_at": record["formed_at"],
             "linked_event_ids": record.get("linked_event_ids", []),
@@ -627,6 +889,7 @@ class RecallBuilder:
             "summary_text": summary_text,
             "outcome_text": record.get("outcome_text"),
             "open_loops": open_loops,
+            "has_open_loops": bool(open_loops),
             "salience": record["salience"],
             "formed_at": record["formed_at"],
             "linked_event_ids": record.get("linked_event_ids", []),

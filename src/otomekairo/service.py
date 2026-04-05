@@ -37,7 +37,7 @@ class OtomeKairoService:
         # Block: Dependencies
         self.store = FileStore(root_dir)
         self.llm = LLMClient()
-        self.recall = RecallBuilder(store=self.store)
+        self.recall = RecallBuilder(store=self.store, llm=self.llm)
         self.memory = MemoryConsolidator(store=self.store, llm=self.llm)
 
     # Block: Bootstrap
@@ -441,6 +441,7 @@ class OtomeKairoService:
             # Block: RecallPack
             recall_pack = self.recall.build_recall_pack(
                 state=state,
+                observation_text=observation_text,
                 recall_hint=recall_hint,
             )
 
@@ -581,10 +582,27 @@ class OtomeKairoService:
         # Block: Counts
         memory_count = len(recall_pack["selected_memory_ids"])
         digest_count = len(recall_pack["selected_episode_digest_ids"])
+        association_memory_count = len(recall_pack["association_selected_memory_ids"])
+        association_digest_count = len(recall_pack["association_selected_episode_digest_ids"])
 
         # Block: Empty
         if memory_count == 0 and digest_count == 0:
             return "構造レーンで採用候補は選ばれなかった。"
+
+        # Block: AssociationOnly
+        if memory_count == association_memory_count and digest_count == association_digest_count:
+            return (
+                "連想レーンで近傍候補を補助採用した。"
+                f" association_memory_units={association_memory_count}, association_episode_digests={association_digest_count}"
+            )
+
+        # Block: Mixed
+        if association_memory_count > 0 or association_digest_count > 0:
+            return (
+                "構造レーンを主軸にしつつ、連想レーンの近傍候補を補助採用した。"
+                f" memory_units={memory_count}, episode_digests={digest_count},"
+                f" association_memory_units={association_memory_count}, association_episode_digests={association_digest_count}"
+            )
 
         # Block: Summary
         return (
@@ -595,10 +613,14 @@ class OtomeKairoService:
     def _recall_rejected_reason_summary(self, recall_pack: dict[str, Any]) -> str:
         # Block: Empty
         if recall_pack["candidate_count"] == 0:
-            return "現時点では構造レーンに一致する長期記憶がなかった。"
+            return "現時点では構造レーンにも連想レーンにも一致する長期記憶がなかった。"
+
+        # Block: Association
+        if recall_pack["association_selected_memory_ids"] or recall_pack["association_selected_episode_digest_ids"]:
+            return "vector-only 候補は補助扱いに留め、文字列一致フォールバックは使っていない。"
 
         # Block: Summary
-        return "section 上限と全体上限を優先し、連想レーンや文字列一致フォールバックは使っていない。"
+        return "section 上限と全体上限を優先し、文字列一致フォールバックは使っていない。"
 
     def _build_settings_snapshot(self, state: dict) -> dict:
         # Block: Snapshot

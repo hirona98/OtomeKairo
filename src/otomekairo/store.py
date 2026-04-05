@@ -21,7 +21,7 @@ LEGACY_RETRIEVAL_RUNS_FILE_NAME = "retrieval_runs.jsonl"
 LEGACY_CYCLE_SUMMARIES_FILE_NAME = "cycle_summaries.jsonl"
 LEGACY_CYCLE_TRACES_FILE_NAME = "cycle_traces.jsonl"
 
-CURRENT_MEMORY_DB_VERSION = 3
+CURRENT_MEMORY_DB_VERSION = 4
 
 
 # Block: Store
@@ -322,9 +322,273 @@ class FileStore:
         # Block: Result
         return [json.loads(row["payload_json"]) for row in rows]
 
+    def upsert_vector_index_entries(
+        self,
+        *,
+        entries: list[dict[str, Any]],
+        embedding_dimension: int,
+    ) -> None:
+        # Block: Empty
+        if not entries:
+            return
+
+        # Block: Transaction
+        with self._memory_db() as conn:
+            self._ensure_vector_tables(conn, embedding_dimension)
+
+            # Block: Upserts
+            for entry in entries:
+                existing_row = conn.execute(
+                    """
+                    SELECT vector_entry_id
+                    FROM vector_index_entries
+                    WHERE memory_set_id = ?
+                      AND source_kind = ?
+                      AND source_id = ?
+                      AND embedding_preset = ?
+                    """,
+                    (
+                        entry["memory_set_id"],
+                        entry["source_kind"],
+                        entry["source_id"],
+                        entry["embedding_preset"],
+                    ),
+                ).fetchone()
+
+                # Block: Identity
+                vector_entry_id: int
+                if existing_row is None:
+                    cursor = conn.execute(
+                        """
+                        INSERT INTO vector_index_entries (
+                            memory_set_id,
+                            source_kind,
+                            source_id,
+                            embedding_preset,
+                            source_text,
+                            scope_type,
+                            scope_key,
+                            source_type,
+                            status,
+                            salience,
+                            has_open_loops,
+                            updated_at,
+                            text_hash
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            entry["memory_set_id"],
+                            entry["source_kind"],
+                            entry["source_id"],
+                            entry["embedding_preset"],
+                            entry["source_text"],
+                            entry["scope_type"],
+                            entry["scope_key"],
+                            entry["source_type"],
+                            entry["status"],
+                            entry["salience"],
+                            int(bool(entry["has_open_loops"])),
+                            entry["updated_at"],
+                            entry["text_hash"],
+                        ),
+                    )
+                    vector_entry_id = int(cursor.lastrowid)
+                else:
+                    vector_entry_id = int(existing_row["vector_entry_id"])
+                    conn.execute(
+                        """
+                        UPDATE vector_index_entries
+                        SET source_text = ?,
+                            scope_type = ?,
+                            scope_key = ?,
+                            source_type = ?,
+                            status = ?,
+                            salience = ?,
+                            has_open_loops = ?,
+                            updated_at = ?,
+                            text_hash = ?
+                        WHERE vector_entry_id = ?
+                        """,
+                        (
+                            entry["source_text"],
+                            entry["scope_type"],
+                            entry["scope_key"],
+                            entry["source_type"],
+                            entry["status"],
+                            entry["salience"],
+                            int(bool(entry["has_open_loops"])),
+                            entry["updated_at"],
+                            entry["text_hash"],
+                            vector_entry_id,
+                        ),
+                    )
+
+                # Block: VectorUpsert
+                vector_table_name = self._vector_table_name(entry["source_kind"])
+                conn.execute(
+                    f"INSERT OR REPLACE INTO {vector_table_name}(id, embedding) VALUES (?, ?)",
+                    (
+                        vector_entry_id,
+                        sqlite_vec.serialize_float32(entry["embedding"]),
+                    ),
+                )
+
+    def search_memory_unit_vector_entries(
+        self,
+        *,
+        memory_set_id: str,
+        embedding_preset: str,
+        query_embedding: list[float],
+        embedding_dimension: int,
+        limit: int,
+        scope_filters: list[tuple[str, str]] | None = None,
+        scope_types: list[str] | None = None,
+        exclude_source_types: list[str] | None = None,
+        statuses: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        # Block: Empty
+        if not query_embedding or limit <= 0:
+            return []
+
+        # Block: QueryParts
+        clauses = [
+            "meta.memory_set_id = ?",
+            "meta.embedding_preset = ?",
+        ]
+        params: list[Any] = [
+            sqlite_vec.serialize_float32(query_embedding),
+            limit,
+            memory_set_id,
+            embedding_preset,
+        ]
+
+        # Block: ScopeFilters
+        if scope_filters:
+            scope_clauses: list[str] = []
+            for scope_type, scope_key in scope_filters:
+                scope_clauses.append("(meta.scope_type = ? AND meta.scope_key = ?)")
+                params.extend([scope_type, scope_key])
+            clauses.append("(" + " OR ".join(scope_clauses) + ")")
+
+        # Block: ScopeTypes
+        if scope_types:
+            placeholders = ", ".join("?" for _ in scope_types)
+            clauses.append(f"meta.scope_type IN ({placeholders})")
+            params.extend(scope_types)
+
+        # Block: ExcludeSourceTypes
+        if exclude_source_types:
+            placeholders = ", ".join("?" for _ in exclude_source_types)
+            clauses.append(f"meta.source_type NOT IN ({placeholders})")
+            params.extend(exclude_source_types)
+
+        # Block: Statuses
+        if statuses:
+            placeholders = ", ".join("?" for _ in statuses)
+            clauses.append(f"meta.status IN ({placeholders})")
+            params.extend(statuses)
+
+        query = f"""
+            SELECT unit.payload_json, memory_unit_vec.distance
+            FROM memory_unit_vec
+            JOIN vector_index_entries AS meta
+              ON meta.vector_entry_id = memory_unit_vec.id
+            JOIN memory_units AS unit
+              ON unit.memory_unit_id = meta.source_id
+            WHERE memory_unit_vec.embedding MATCH ?
+              AND k = ?
+              AND {" AND ".join(clauses)}
+            ORDER BY memory_unit_vec.distance ASC, meta.salience DESC
+            LIMIT ?
+        """
+
+        # Block: Query
+        with self._memory_db() as conn:
+            self._ensure_vector_tables(conn, embedding_dimension)
+            rows = conn.execute(query, (*params, limit)).fetchall()
+
+        # Block: Result
+        return [
+            {
+                "record": json.loads(row["payload_json"]),
+                "distance": float(row["distance"]),
+            }
+            for row in rows
+        ]
+
+    def search_episode_digest_vector_entries(
+        self,
+        *,
+        memory_set_id: str,
+        embedding_preset: str,
+        query_embedding: list[float],
+        embedding_dimension: int,
+        limit: int,
+        scope_filters: list[tuple[str, str]] | None = None,
+        require_open_loops: bool = False,
+    ) -> list[dict[str, Any]]:
+        # Block: Empty
+        if not query_embedding or limit <= 0:
+            return []
+
+        # Block: QueryParts
+        clauses = [
+            "meta.memory_set_id = ?",
+            "meta.embedding_preset = ?",
+        ]
+        params: list[Any] = [
+            sqlite_vec.serialize_float32(query_embedding),
+            limit,
+            memory_set_id,
+            embedding_preset,
+        ]
+
+        # Block: ScopeFilters
+        if scope_filters:
+            scope_clauses: list[str] = []
+            for scope_type, scope_key in scope_filters:
+                scope_clauses.append("(meta.scope_type = ? AND meta.scope_key = ?)")
+                params.extend([scope_type, scope_key])
+            clauses.append("(" + " OR ".join(scope_clauses) + ")")
+
+        # Block: OpenLoops
+        if require_open_loops:
+            clauses.append("meta.has_open_loops = 1")
+
+        query = f"""
+            SELECT digest.payload_json, episode_digest_vec.distance
+            FROM episode_digest_vec
+            JOIN vector_index_entries AS meta
+              ON meta.vector_entry_id = episode_digest_vec.id
+            JOIN episode_digests AS digest
+              ON digest.episode_digest_id = meta.source_id
+            WHERE episode_digest_vec.embedding MATCH ?
+              AND k = ?
+              AND {" AND ".join(clauses)}
+            ORDER BY episode_digest_vec.distance ASC, meta.has_open_loops DESC, meta.salience DESC
+            LIMIT ?
+        """
+
+        # Block: Query
+        with self._memory_db() as conn:
+            self._ensure_vector_tables(conn, embedding_dimension)
+            rows = conn.execute(query, (*params, limit)).fetchall()
+
+        # Block: Result
+        return [
+            {
+                "record": json.loads(row["payload_json"]),
+                "distance": float(row["distance"]),
+            }
+            for row in rows
+        ]
+
     def delete_memory_set_records(self, memory_set_id: str) -> None:
         # Block: Transaction
         with self._memory_db() as conn:
+            # Block: VectorDelete
+            self._delete_vector_index_entries(conn, memory_set_id)
+
             # Block: DeleteOrder
             conn.execute("DELETE FROM revisions WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM affect_state WHERE memory_set_id = ?", (memory_set_id,))
@@ -345,6 +609,8 @@ class FileStore:
                 self._apply_schema_v2(conn)
             if version < 3:
                 self._apply_schema_v3(conn)
+            if version < 4:
+                self._apply_schema_v4(conn)
             if version < CURRENT_MEMORY_DB_VERSION:
                 conn.execute(f"PRAGMA user_version = {CURRENT_MEMORY_DB_VERSION}")
 
@@ -568,6 +834,35 @@ class FileStore:
             """
         )
 
+    def _apply_schema_v4(self, conn: sqlite3.Connection) -> None:
+        # Block: Schema
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS vector_index_entries (
+                vector_entry_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                memory_set_id TEXT NOT NULL,
+                source_kind TEXT NOT NULL,
+                source_id TEXT NOT NULL,
+                embedding_preset TEXT NOT NULL,
+                source_text TEXT NOT NULL,
+                scope_type TEXT NOT NULL,
+                scope_key TEXT NOT NULL,
+                source_type TEXT NOT NULL,
+                status TEXT NOT NULL,
+                salience REAL NOT NULL,
+                has_open_loops INTEGER NOT NULL,
+                updated_at TEXT NOT NULL,
+                text_hash TEXT NOT NULL
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_vector_index_entries_source
+            ON vector_index_entries(memory_set_id, source_kind, source_id, embedding_preset);
+
+            CREATE INDEX IF NOT EXISTS idx_vector_index_entries_scope
+            ON vector_index_entries(memory_set_id, source_kind, scope_type, scope_key, status, salience);
+            """
+        )
+
     def _import_legacy_jsonl_records(self, conn: sqlite3.Connection) -> None:
         # Block: SummaryLookup
         legacy_summaries = self._read_jsonl_file(LEGACY_CYCLE_SUMMARIES_FILE_NAME)
@@ -759,6 +1054,102 @@ class FileStore:
                 self._to_json(record),
             ),
         )
+
+    def _ensure_vector_tables(self, conn: sqlite3.Connection, embedding_dimension: int) -> None:
+        # Block: DimensionCheck
+        if embedding_dimension <= 0:
+            raise ValueError("embedding_dimension must be positive.")
+
+        # Block: MemoryUnitTable
+        self._ensure_vector_table(
+            conn,
+            table_name="memory_unit_vec",
+            embedding_dimension=embedding_dimension,
+        )
+
+        # Block: EpisodeDigestTable
+        self._ensure_vector_table(
+            conn,
+            table_name="episode_digest_vec",
+            embedding_dimension=embedding_dimension,
+        )
+
+    def _ensure_vector_table(self, conn: sqlite3.Connection, *, table_name: str, embedding_dimension: int) -> None:
+        # Block: ExistingSchema
+        schema_row = conn.execute(
+            """
+            SELECT sql
+            FROM sqlite_schema
+            WHERE type = 'table'
+              AND name = ?
+            """,
+            (table_name,),
+        ).fetchone()
+
+        # Block: Create
+        if schema_row is None:
+            conn.execute(
+                f"""
+                CREATE VIRTUAL TABLE {table_name}
+                USING vec0(id INTEGER PRIMARY KEY, embedding FLOAT[{embedding_dimension}])
+                """
+            )
+            return
+
+        # Block: Validate
+        schema_sql = schema_row["sql"] or ""
+        if f"FLOAT[{embedding_dimension}]".lower() not in schema_sql.lower():
+            raise ValueError(f"{table_name} dimension does not match current embedding_dimension.")
+
+    def _delete_vector_index_entries(self, conn: sqlite3.Connection, memory_set_id: str) -> None:
+        # Block: Query
+        rows = conn.execute(
+            """
+            SELECT vector_entry_id, source_kind
+            FROM vector_index_entries
+            WHERE memory_set_id = ?
+            """,
+            (memory_set_id,),
+        ).fetchall()
+
+        # Block: Empty
+        if not rows:
+            return
+
+        # Block: DeleteVectors
+        for row in rows:
+            table_name = self._vector_table_name(row["source_kind"])
+            if self._table_exists(conn, table_name):
+                conn.execute(
+                    f"DELETE FROM {table_name} WHERE id = ?",
+                    (row["vector_entry_id"],),
+                )
+
+        # Block: DeleteMetadata
+        conn.execute(
+            "DELETE FROM vector_index_entries WHERE memory_set_id = ?",
+            (memory_set_id,),
+        )
+
+    def _table_exists(self, conn: sqlite3.Connection, table_name: str) -> bool:
+        # Block: Query
+        row = conn.execute(
+            """
+            SELECT 1
+            FROM sqlite_schema
+            WHERE name = ?
+            """,
+            (table_name,),
+        ).fetchone()
+        return row is not None
+
+    def _vector_table_name(self, source_kind: str) -> str:
+        # Block: Mapping
+        if source_kind == "memory_unit":
+            return "memory_unit_vec"
+        if source_kind == "episode_digest":
+            return "episode_digest_vec"
+        raise ValueError(f"Unsupported source_kind: {source_kind}")
 
     def _apply_memory_action(self, conn: sqlite3.Connection, action: dict[str, Any]) -> None:
         # Block: OperationRead

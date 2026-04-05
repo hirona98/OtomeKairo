@@ -264,7 +264,6 @@ SQLite 接続では、少なくとも次を固定する。
 
 この段階では、まだ次は未着手である。
 
-- `sqlite-vec` を使う連想レーン
 - `event_evidence` の限定ロード
 - `decision_generation` と `reply_generation` への `RecallPack` 本注入
 
@@ -282,6 +281,20 @@ SQLite 接続では、少なくとも次を固定する。
 - `vector-only` 候補を断定根拠にしない
 - rerank と section boost に使う
 - `event_evidence` が必要なときだけ、関連 `event_id` を最大 1-3 件開く
+
+現状の実装は、次まで入っている。
+
+- `vector_index_entries` metadata table と `memory_unit_vec` / `episode_digest_vec` を追加
+- `turn consolidation` 後に、新規または更新された `memory_units` / `episode_digests` だけを差分 upsert
+- query 側は `observation_text` を埋め込み、`memory_units` と `episode_digests` を近傍検索
+- 連想候補は `user_model` / `relationship_model` / `self_model` / `active_topics` / `episodic_evidence` に補助的に混ぜる
+- `vector-only` 採用は `cycle_traces.recall_trace` に分かる形で残す
+
+この段階では、まだ次は未着手である。
+
+- `mentioned_entities` / `mentioned_topics` を強く使う query 強化
+- `event_evidence` の限定ロード
+- 非同期の埋め込み更新ジョブ
 
 #### 3-5. `RecallPack` の本接続
 

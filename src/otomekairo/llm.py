@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import math
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -400,6 +402,21 @@ class MockLLMClient:
         validate_memory_interpretation_contract(payload)
         return payload
 
+    def generate_embeddings(
+        self,
+        profile: dict,
+        texts: list[str],
+        embedding_dimension: int,
+    ) -> list[list[float]]:
+        # Block: ProviderCheck
+        self._assert_mock_model(profile)
+
+        # Block: Result
+        return [
+            self._mock_embedding_vector(text, embedding_dimension)
+            for text in texts
+        ]
+
     def _mock_episode_type(self, primary_intent: str) -> str:
         # Block: Mapping
         if primary_intent in {"consult", "check_state"}:
@@ -553,6 +570,37 @@ class MockLLMClient:
                 }
             )
         return updates
+
+    def _mock_embedding_vector(self, text: str, embedding_dimension: int) -> list[float]:
+        # Block: EmptyGuard
+        normalized = text.strip()
+        if embedding_dimension <= 0:
+            raise LLMError("embedding_dimension must be positive.")
+        if not normalized:
+            return [0.0] * embedding_dimension
+
+        # Block: Accumulate
+        values = [0.0] * embedding_dimension
+        tokens = [normalized]
+        if len(normalized) >= 2:
+            tokens.extend(normalized[index : index + 2] for index in range(len(normalized) - 1))
+        if len(normalized) >= 3:
+            tokens.extend(normalized[index : index + 3] for index in range(len(normalized) - 2))
+
+        for token in tokens:
+            digest = hashlib.sha256(token.encode("utf-8")).digest()
+            primary_index = int.from_bytes(digest[:4], "little") % embedding_dimension
+            secondary_index = int.from_bytes(digest[4:8], "little") % embedding_dimension
+            primary_value = 0.5 + (digest[8] / 255.0)
+            secondary_value = 0.5 + (digest[9] / 255.0)
+            values[primary_index] += primary_value
+            values[secondary_index] -= secondary_value * 0.25
+
+        # Block: Normalize
+        norm = math.sqrt(sum(value * value for value in values))
+        if norm <= 0.0:
+            return [0.0] * embedding_dimension
+        return [value / norm for value in values]
 
     # Block: Helpers
     def _assert_mock_model(self, profile: dict) -> None:
@@ -716,6 +764,50 @@ class LLMClient:
         validate_memory_interpretation_contract(payload)
         return payload
 
+    def generate_embeddings(
+        self,
+        *,
+        profile: dict,
+        role_settings: dict,
+        texts: list[str],
+    ) -> list[list[float]]:
+        # Block: Empty
+        if not texts:
+            return []
+
+        # Block: Dimension
+        embedding_dimension = role_settings.get("embedding_dimension")
+        if not isinstance(embedding_dimension, int) or embedding_dimension <= 0:
+            raise LLMError("embedding_dimension must be a positive integer.")
+
+        # Block: MockPath
+        if self._is_mock_profile(profile):
+            return self.mock_client.generate_embeddings(profile, texts, embedding_dimension)
+
+        # Block: Import
+        embedding = self._load_litellm_embedding()
+
+        # Block: RequestBuild
+        request_kwargs: dict[str, Any] = {
+            "model": self._resolve_litellm_model(profile),
+            "input": texts,
+        }
+        api_base = profile.get("base_url")
+        if isinstance(api_base, str) and api_base.strip():
+            request_kwargs["api_base"] = api_base.strip()
+        api_key = self._resolve_api_key(profile)
+        if api_key is not None:
+            request_kwargs["api_key"] = api_key
+
+        # Block: Request
+        try:
+            response = embedding(**request_kwargs)
+        except Exception as exc:  # noqa: BLE001
+            raise LLMError(f"LiteLLM embedding call failed: {exc}") from exc
+
+        # Block: Result
+        return self._extract_embedding_vectors(response, expected_count=len(texts))
+
     # Block: LiteLLMCall
     def _complete_text(
         self,
@@ -762,6 +854,15 @@ class LLMClient:
             raise LLMError("LiteLLM is not installed. Run ./scripts/setup_venv.sh to install dependencies.") from exc
 
         return completion
+
+    def _load_litellm_embedding(self) -> Callable[..., Any]:
+        # Block: Import
+        try:
+            from litellm import embedding
+        except ImportError as exc:
+            raise LLMError("LiteLLM is not installed. Run ./scripts/setup_venv.sh to install dependencies.") from exc
+
+        return embedding
 
     # Block: PromptHelpers
     def _build_recall_hint_system_prompt(self) -> str:
@@ -975,6 +1076,28 @@ class LLMClient:
         if not isinstance(payload, dict):
             raise LLMError("LiteLLM did not return a JSON object.")
         return payload
+
+    def _extract_embedding_vectors(self, response: Any, *, expected_count: int) -> list[list[float]]:
+        # Block: DataRead
+        data = getattr(response, "data", None)
+        if data is None and isinstance(response, dict):
+            data = response.get("data")
+        if not isinstance(data, list) or len(data) != expected_count:
+            raise LLMError("LiteLLM embedding response did not include expected data.")
+
+        # Block: Parse
+        vectors: list[list[float]] = []
+        for item in data:
+            vector = getattr(item, "embedding", None)
+            if vector is None and isinstance(item, dict):
+                vector = item.get("embedding")
+            if not isinstance(vector, list) or not vector:
+                raise LLMError("LiteLLM embedding item did not include embedding.")
+            parsed = [float(value) for value in vector]
+            vectors.append(parsed)
+
+        # Block: Result
+        return vectors
 
     # Block: ConfigHelpers
     def _is_mock_profile(self, profile: dict) -> bool:
