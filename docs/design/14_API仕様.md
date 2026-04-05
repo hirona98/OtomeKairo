@@ -168,13 +168,18 @@ request:
 {
   "text": "こんにちは",
   "client_context": {
-    "source": "CocoroConsole"
+    "source": "CocoroConsole",
+    "client_id": "console-...",
+    "active_app": "Slack",
+    "window_title": "general | Slack",
+    "locale": "ja-JP"
   }
 }
 ```
 
 - `text` は必須の文字列
 - `client_context` は省略可能な object
+- MVP では `client_context` に `source / client_id / active_app / window_title / locale` を含めてよい
 
 response:
 
@@ -216,12 +221,17 @@ request:
 ```json
 {
   "client_context": {
-    "source": "CocoroConsole"
+    "source": "CocoroConsole",
+    "client_id": "console-...",
+    "active_app": "Slack",
+    "window_title": "general | Slack",
+    "locale": "ja-JP"
   }
 }
 ```
 
 - `client_context` は省略可能な object
+- MVP では wake でも `client_context` の `source / active_app / window_title / locale` を観測正規化に使ってよい
 
 response:
 
@@ -359,6 +369,7 @@ request:
 - `images` は 0 件以上の Data URI 配列でよい
 - `client_context` は省略可能な object
 - `error` は省略可能な string または `null`
+- `client_context.active_app / window_title / locale` は `desktop_watch` 観測の判断補助に使ってよい
 
 response:
 

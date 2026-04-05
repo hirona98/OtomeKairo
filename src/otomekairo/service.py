@@ -688,6 +688,10 @@ class OtomeKairoService:
             recent_turns = self._load_recent_turns(state)
             runtime_summary = self._build_runtime_summary(state)
             settings_snapshot = self._build_settings_snapshot(state)
+            observation_text = self._build_wake_observation_text(
+                client_context=client_context,
+                selected_candidate=None,
+            )
 
             try:
                 # Block: Pipeline
@@ -698,6 +702,7 @@ class OtomeKairoService:
                 pipeline, observation_text = self._run_wake_pipeline(
                     state=state,
                     started_at=started_at,
+                    client_context=client_context,
                     recent_turns=recent_turns,
                     selected_candidate=selected_candidate,
                 )
@@ -736,7 +741,7 @@ class OtomeKairoService:
                     state=state,
                     settings_snapshot=settings_snapshot,
                     runtime_summary=runtime_summary,
-                    observation_text="定期起床。",
+                    observation_text=observation_text,
                     client_context=client_context,
                     failure_reason=str(exc),
                     trigger_kind=trigger_kind,
@@ -1015,19 +1020,26 @@ class OtomeKairoService:
         *,
         state: dict[str, Any],
         started_at: str,
+        client_context: dict[str, Any],
         recent_turns: list[dict[str, Any]],
         selected_candidate: dict[str, Any] | None,
     ) -> tuple[dict[str, Any], str]:
+        # Block: ObservationText
+        observation_text = self._build_wake_observation_text(
+            client_context=client_context,
+            selected_candidate=selected_candidate,
+        )
+
         # Block: WakePolicy
         due = self._wake_is_due(state=state, current_time=started_at)
         if due["should_skip"]:
-            return self._noop_pipeline(started_at=started_at, reason_summary=due["reason_summary"]), "定期起床。"
+            return self._noop_pipeline(started_at=started_at, reason_summary=due["reason_summary"]), observation_text
 
         # Block: Cooldown
         cooldown_reason = self._wake_cooldown_reason(current_time=started_at)
         if cooldown_reason is not None:
             self._set_last_wake_at(started_at)
-            return self._noop_pipeline(started_at=started_at, reason_summary=cooldown_reason), "定期起床。"
+            return self._noop_pipeline(started_at=started_at, reason_summary=cooldown_reason), observation_text
 
         # Block: Candidate
         if selected_candidate is None:
@@ -1037,7 +1049,7 @@ class OtomeKairoService:
                     started_at=started_at,
                     reason_summary="起床機会は来たが、再評価すべき future_act 候補はまだ無い。",
                 ),
-                "定期起床。",
+                observation_text,
             )
 
         # Block: ReplySuppression
@@ -1051,14 +1063,13 @@ class OtomeKairoService:
                     started_at=started_at,
                     reason_summary="同じ future_act 候補には最近 reply 済みのため、今回は再介入しない。",
                 ),
-                self._wake_observation_text(selected_candidate),
+                observation_text,
             )
 
         # Block: TriggerAccounting
         self._set_last_wake_at(started_at)
 
         # Block: WakeObservation
-        observation_text = self._wake_observation_text(selected_candidate)
         pipeline = self._run_observation_pipeline(
             state=state,
             started_at=started_at,
@@ -1573,6 +1584,7 @@ class OtomeKairoService:
             "active_app": client_context.get("active_app"),
             "window_title": client_context.get("window_title"),
             "locale": client_context.get("locale"),
+            "image_count": len(capture_response.get("images", [])),
         }
 
     def _build_desktop_watch_observation_text(
@@ -1581,19 +1593,21 @@ class OtomeKairoService:
         client_context: dict[str, Any],
         selected_candidate: dict[str, Any] | None,
     ) -> str:
-        # Block: Context
-        active_app = client_context.get("active_app")
-        window_title = client_context.get("window_title")
+        # Block: Prefix
         parts = ["desktop_watch 観測。"]
-        if selected_candidate is not None:
-            parts.append(self._wake_observation_text(selected_candidate))
-        if isinstance(active_app, str) and active_app.strip():
-            parts.append(f"前景アプリは {active_app.strip()}。")
-        if isinstance(window_title, str) and window_title.strip():
-            parts.append(f"ウィンドウタイトルは {window_title.strip()}。")
+
+        # Block: Context
+        parts.extend(
+            self._client_context_observation_parts(
+                client_context=client_context,
+                include_source=False,
+                include_capture=True,
+            )
+        )
 
         # Block: Candidate
         if selected_candidate is not None:
+            parts.append(self._wake_observation_text(selected_candidate))
             parts.append("いま保留中の会話候補を再評価したい。")
 
         # Block: Result
@@ -1725,6 +1739,85 @@ class OtomeKairoService:
 
         # Block: Fallback
         return "定期起床。未完了の保留候補を再評価したい。"
+
+    def _build_wake_observation_text(
+        self,
+        *,
+        client_context: dict[str, Any],
+        selected_candidate: dict[str, Any] | None,
+    ) -> str:
+        # Block: Prefix
+        parts = ["定期起床。"]
+
+        # Block: Context
+        parts.extend(
+            self._client_context_observation_parts(
+                client_context=client_context,
+                include_source=True,
+                include_capture=False,
+            )
+        )
+
+        # Block: Candidate
+        if selected_candidate is not None:
+            parts.append(self._wake_observation_text(selected_candidate))
+            parts.append("いま保留中の会話候補を再評価したい。")
+
+        # Block: Result
+        return " ".join(parts)
+
+    def _client_context_observation_parts(
+        self,
+        *,
+        client_context: dict[str, Any],
+        include_source: bool,
+        include_capture: bool,
+    ) -> list[str]:
+        # Block: Fields
+        source = self._client_context_text(client_context.get("source"), limit=48)
+        active_app = self._client_context_text(client_context.get("active_app"), limit=80)
+        window_title = self._client_context_text(client_context.get("window_title"), limit=120)
+        locale = self._client_context_text(client_context.get("locale"), limit=32)
+        parts: list[str] = []
+
+        # Block: Source
+        if include_source and isinstance(source, str):
+            if source == "background_wake_scheduler":
+                parts.append("観測源は background wake scheduler。")
+            else:
+                parts.append(f"観測源は {source}。")
+
+        # Block: Foreground
+        if isinstance(active_app, str):
+            parts.append(f"前景アプリは {active_app}。")
+        if isinstance(window_title, str):
+            parts.append(f"ウィンドウタイトルは {window_title}。")
+
+        # Block: Locale
+        if isinstance(locale, str):
+            parts.append(f"UIロケールは {locale}。")
+
+        # Block: Capture
+        if include_capture:
+            image_count = client_context.get("image_count")
+            if isinstance(image_count, int) and image_count > 0:
+                parts.append(f"キャプチャ画像を {image_count} 件受け取った。")
+
+        # Block: Result
+        return parts
+
+    def _client_context_text(self, value: Any, *, limit: int) -> str | None:
+        # Block: Type
+        if not isinstance(value, str):
+            return None
+
+        # Block: Normalize
+        stripped = value.strip()
+        if not stripped:
+            return None
+
+        # Block: Result
+        return self._clamp(stripped, limit=limit)
 
     def _remove_future_act_candidate(self, candidate_id: Any) -> None:
         # Block: Guard
