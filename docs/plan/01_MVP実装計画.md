@@ -358,19 +358,27 @@ SQLite 接続では、少なくとも次を固定する。
 - `events` の限定ロードを使う精密根拠確認
 - 完全な非同期ジョブ化
 
-### モジュール分割の目安
+### モジュール分割の現状
 
-コード分割はコード側を正とするが、少なくとも責務は次で分ける。
+現状のコードは、少なくとも次の責務で分割した。
 
-- SQLite 接続と migration
-- 監査保存
-- `turn consolidation`
-- 構造レーン想起
-- `sqlite-vec` 連想レーン
-- `RecallPack` 組み立て
-- `reflective consolidation`
+- `state_store.py`
+  - `server_state.json` の read / write
+- `store.py`
+  - `FileStore` の公開 facade
+  - SQLite 側の query / migration / vector 永続化
+- `memory.py`
+  - `turn consolidation` の orchestration
+- `memory_actions.py`
+  - `create / reinforce / refine / supersede` の解決
+- `memory_vector.py`
+  - `sqlite-vec` 用の source text 構築と index 同期
+- `memory_reflection.py`
+  - `reflective consolidation`
+- `recall.py`
+  - 構造レーンと連想レーンを含む `RecallPack` 組み立て
 
-今の `service.py` に直接すべて詰め込まず、保存層と記憶処理は早めに外へ出す前提で進める。
+`service.py` は会話パイプラインの orchestrator に寄せ、記憶更新や保存の詳細は各モジュールへ寄せる。
 
 ### 先にやらないこと
 

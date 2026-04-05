@@ -2,18 +2,16 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import tempfile
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 import sqlite_vec
 
-from otomekairo.defaults import build_default_state, normalize_state
+from otomekairo.state_store import StateStore
 
 
 # Block: Constants
-STATE_FILE_NAME = "server_state.json"
 MEMORY_DB_FILE_NAME = "memory.db"
 
 LEGACY_EVENTS_FILE_NAME = "events.jsonl"
@@ -25,42 +23,15 @@ CURRENT_MEMORY_DB_VERSION = 5
 
 
 # Block: Store
-class FileStore:
+class SQLiteMemoryStore:
     def __init__(self, root_dir: Path) -> None:
         # Block: Paths
         self.root_dir = root_dir
-        self.state_path = root_dir / STATE_FILE_NAME
         self.memory_db_path = root_dir / MEMORY_DB_FILE_NAME
 
         # Block: Initialization
         self.root_dir.mkdir(parents=True, exist_ok=True)
-        if not self.state_path.exists():
-            self.write_state(build_default_state())
         self._initialize_memory_db()
-
-    def read_state(self) -> dict:
-        # Block: ReadState
-        state = json.loads(self.state_path.read_text(encoding="utf-8"))
-        state, changed = normalize_state(state)
-        if changed:
-            self.write_state(state)
-        return state
-
-    def write_state(self, state: dict) -> None:
-        # Block: AtomicWrite
-        self.root_dir.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(
-            "w",
-            encoding="utf-8",
-            dir=self.root_dir,
-            delete=False,
-        ) as handle:
-            json.dump(state, handle, ensure_ascii=False, indent=2)
-            handle.write("\n")
-            temp_path = Path(handle.name)
-
-        # Block: CommitWrite
-        temp_path.replace(self.state_path)
 
     def persist_cycle_records(
         self,
@@ -1633,3 +1604,26 @@ class FileStore:
     def _to_json(self, payload: Any) -> str:
         # Block: Serialize
         return json.dumps(payload, ensure_ascii=False)
+
+
+# Block: Facade
+class FileStore:
+    def __init__(self, root_dir: Path) -> None:
+        # Block: Dependencies
+        self.root_dir = root_dir
+        self.state_store = StateStore(root_dir)
+        self.memory_store = SQLiteMemoryStore(root_dir)
+        self.state_path = self.state_store.state_path
+        self.memory_db_path = self.memory_store.memory_db_path
+
+    def read_state(self) -> dict:
+        # Block: Delegate
+        return self.state_store.read_state()
+
+    def write_state(self, state: dict) -> None:
+        # Block: Delegate
+        self.state_store.write_state(state)
+
+    def __getattr__(self, name: str) -> Any:
+        # Block: Delegate
+        return getattr(self.memory_store, name)

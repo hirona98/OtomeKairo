@@ -419,155 +419,26 @@ class OtomeKairoService:
         settings_snapshot = self._build_settings_snapshot(state)
 
         try:
-            # Block: ModelSelection
-            selected_preset = state["model_presets"][state["selected_model_preset_id"]]
-            recall_role = selected_preset["roles"]["recall_hint_generation"]
-            decision_role = selected_preset["roles"]["decision_generation"]
-            reply_role = selected_preset["roles"]["reply_generation"]
-            recall_profile = self._profile_for_role(state, selected_preset, "recall_hint_generation")
-            decision_profile = self._profile_for_role(state, selected_preset, "decision_generation")
-            reply_profile = self._profile_for_role(state, selected_preset, "reply_generation")
-            persona = state["personas"][state["selected_persona_id"]]
-
-            # Block: RecallHint
-            recall_hint = self.llm.generate_recall_hint(
-                profile=recall_profile,
-                role_settings=recall_role,
+            # Block: Pipeline
+            pipeline = self._run_observation_pipeline(
+                state=state,
+                started_at=started_at,
                 observation_text=observation_text,
                 recent_turns=recent_turns,
-                current_time=started_at,
             )
 
-            # Block: RecallPack
-            recall_pack = self.recall.build_recall_pack(
-                state=state,
-                observation_text=observation_text,
-                recall_hint=recall_hint,
-            )
-
-            # Block: InternalContext
-            time_context = self._build_time_context(current_time=started_at)
-            affect_context = self._build_affect_context(
-                state=state,
-                recall_hint=recall_hint,
-            )
-
-            # Block: Decision
-            decision = self.llm.generate_decision(
-                profile=decision_profile,
-                role_settings=decision_role,
-                observation_text=observation_text,
-                recent_turns=recent_turns,
-                time_context=time_context,
-                affect_context=affect_context,
-                recall_hint=recall_hint,
-                recall_pack=recall_pack,
-            )
-
-            # Block: Reply
-            reply_payload: dict | None = None
-            if decision["kind"] == "reply":
-                reply_payload = self.llm.generate_reply(
-                    profile=reply_profile,
-                    role_settings=reply_role,
-                    persona=persona,
-                    observation_text=observation_text,
-                    recent_turns=recent_turns,
-                    time_context=time_context,
-                    affect_context=affect_context,
-                    recall_hint=recall_hint,
-                    recall_pack=recall_pack,
-                    decision=decision,
-                )
-
-            # Block: Result
-            result_kind = decision["kind"]
-            finished_at = self._now_iso()
-            events = self._persist_cycle_success(
+            # Block: Success
+            return self._complete_observation_success(
                 cycle_id=cycle_id,
                 started_at=started_at,
-                finished_at=finished_at,
                 state=state,
                 settings_snapshot=settings_snapshot,
                 runtime_summary=runtime_summary,
                 observation_text=observation_text,
                 client_context=client_context,
                 recent_turns=recent_turns,
-                recall_hint=recall_hint,
-                recall_pack=recall_pack,
-                time_context=time_context,
-                affect_context=affect_context,
-                decision=decision,
-                result_kind=result_kind,
-                reply_payload=reply_payload,
+                pipeline=pipeline,
             )
-
-            # Block: TurnConsolidation
-            memory_trace: dict[str, Any]
-            try:
-                memory_trace = self.memory.consolidate_turn(
-                    state=state,
-                    cycle_id=cycle_id,
-                    finished_at=finished_at,
-                    observation_text=observation_text,
-                    recall_hint=recall_hint,
-                    decision=decision,
-                    reply_payload=reply_payload,
-                    events=events,
-                )
-            except Exception as exc:  # noqa: BLE001
-                memory_trace = {
-                    "turn_consolidation_status": "failed",
-                    "episode_digest_id": None,
-                    "memory_action_count": 0,
-                    "affect_update_count": 0,
-                    "failure_reason": str(exc),
-                    "reflective_consolidation": {
-                        "started": False,
-                        "result_status": "not_started",
-                        "trigger_reasons": [],
-                        "affected_memory_unit_ids": [],
-                        "failure_reason": None,
-                    },
-                }
-                self.store.append_events(
-                    events=[
-                        self._build_memory_audit_event(
-                            cycle_id=cycle_id,
-                            memory_set_id=state["selected_memory_set_id"],
-                            kind="memory_consolidation_failure",
-                            created_at=self._now_iso(),
-                            payload={"failure_reason": str(exc)},
-                        )
-                    ]
-                )
-
-            # Block: ReflectionAudit
-            reflective_trace = memory_trace.get("reflective_consolidation", {})
-            if reflective_trace.get("result_status") == "failed":
-                self.store.append_events(
-                    events=[
-                        self._build_memory_audit_event(
-                            cycle_id=cycle_id,
-                            memory_set_id=state["selected_memory_set_id"],
-                            kind="reflective_consolidation_failure",
-                            created_at=self._now_iso(),
-                            payload={
-                                "failure_reason": reflective_trace.get("failure_reason"),
-                                "trigger_reasons": reflective_trace.get("trigger_reasons", []),
-                            },
-                        )
-                    ]
-                )
-
-            # Block: MemoryTraceUpdate
-            self._update_cycle_trace_memory_trace(cycle_id=cycle_id, memory_trace=memory_trace)
-
-            return {
-                "cycle_id": cycle_id,
-                "result_kind": result_kind,
-                "reply": {"text": reply_payload["reply_text"]} if reply_payload else None,
-            }
         except (LLMError, KeyError, ValueError) as exc:
             # Block: FailurePersistence
             finished_at = self._now_iso()
@@ -587,6 +458,232 @@ class OtomeKairoService:
                 "result_kind": "internal_failure",
                 "reply": None,
             }
+
+    def _run_observation_pipeline(
+        self,
+        *,
+        state: dict[str, Any],
+        started_at: str,
+        observation_text: str,
+        recent_turns: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        # Block: ModelSelection
+        selected_preset = state["model_presets"][state["selected_model_preset_id"]]
+        recall_role = selected_preset["roles"]["recall_hint_generation"]
+        decision_role = selected_preset["roles"]["decision_generation"]
+        reply_role = selected_preset["roles"]["reply_generation"]
+        recall_profile = self._profile_for_role(state, selected_preset, "recall_hint_generation")
+        decision_profile = self._profile_for_role(state, selected_preset, "decision_generation")
+        reply_profile = self._profile_for_role(state, selected_preset, "reply_generation")
+        persona = state["personas"][state["selected_persona_id"]]
+
+        # Block: RecallHint
+        recall_hint = self.llm.generate_recall_hint(
+            profile=recall_profile,
+            role_settings=recall_role,
+            observation_text=observation_text,
+            recent_turns=recent_turns,
+            current_time=started_at,
+        )
+
+        # Block: RecallPack
+        recall_pack = self.recall.build_recall_pack(
+            state=state,
+            observation_text=observation_text,
+            recall_hint=recall_hint,
+        )
+
+        # Block: InternalContext
+        time_context = self._build_time_context(current_time=started_at)
+        affect_context = self._build_affect_context(
+            state=state,
+            recall_hint=recall_hint,
+        )
+
+        # Block: Decision
+        decision = self.llm.generate_decision(
+            profile=decision_profile,
+            role_settings=decision_role,
+            observation_text=observation_text,
+            recent_turns=recent_turns,
+            time_context=time_context,
+            affect_context=affect_context,
+            recall_hint=recall_hint,
+            recall_pack=recall_pack,
+        )
+
+        # Block: Reply
+        reply_payload: dict[str, Any] | None = None
+        if decision["kind"] == "reply":
+            reply_payload = self.llm.generate_reply(
+                profile=reply_profile,
+                role_settings=reply_role,
+                persona=persona,
+                observation_text=observation_text,
+                recent_turns=recent_turns,
+                time_context=time_context,
+                affect_context=affect_context,
+                recall_hint=recall_hint,
+                recall_pack=recall_pack,
+                decision=decision,
+            )
+
+        # Block: Result
+        return {
+            "recall_hint": recall_hint,
+            "recall_pack": recall_pack,
+            "time_context": time_context,
+            "affect_context": affect_context,
+            "decision": decision,
+            "reply_payload": reply_payload,
+        }
+
+    def _complete_observation_success(
+        self,
+        *,
+        cycle_id: str,
+        started_at: str,
+        state: dict[str, Any],
+        settings_snapshot: dict[str, Any],
+        runtime_summary: dict[str, Any],
+        observation_text: str,
+        client_context: dict[str, Any],
+        recent_turns: list[dict[str, Any]],
+        pipeline: dict[str, Any],
+    ) -> dict[str, Any]:
+        # Block: ResultSelection
+        decision = pipeline["decision"]
+        reply_payload = pipeline["reply_payload"]
+        result_kind = decision["kind"]
+        finished_at = self._now_iso()
+
+        # Block: Persistence
+        events = self._persist_cycle_success(
+            cycle_id=cycle_id,
+            started_at=started_at,
+            finished_at=finished_at,
+            state=state,
+            settings_snapshot=settings_snapshot,
+            runtime_summary=runtime_summary,
+            observation_text=observation_text,
+            client_context=client_context,
+            recent_turns=recent_turns,
+            recall_hint=pipeline["recall_hint"],
+            recall_pack=pipeline["recall_pack"],
+            time_context=pipeline["time_context"],
+            affect_context=pipeline["affect_context"],
+            decision=decision,
+            result_kind=result_kind,
+            reply_payload=reply_payload,
+        )
+
+        # Block: MemoryTrace
+        self._finalize_memory_trace(
+            cycle_id=cycle_id,
+            finished_at=finished_at,
+            state=state,
+            observation_text=observation_text,
+            events=events,
+            pipeline=pipeline,
+        )
+
+        # Block: Response
+        return {
+            "cycle_id": cycle_id,
+            "result_kind": result_kind,
+            "reply": {"text": reply_payload["reply_text"]} if reply_payload else None,
+        }
+
+    def _finalize_memory_trace(
+        self,
+        *,
+        cycle_id: str,
+        finished_at: str,
+        state: dict[str, Any],
+        observation_text: str,
+        events: list[dict[str, Any]],
+        pipeline: dict[str, Any],
+    ) -> None:
+        # Block: TurnConsolidation
+        try:
+            memory_trace = self.memory.consolidate_turn(
+                state=state,
+                cycle_id=cycle_id,
+                finished_at=finished_at,
+                observation_text=observation_text,
+                recall_hint=pipeline["recall_hint"],
+                decision=pipeline["decision"],
+                reply_payload=pipeline["reply_payload"],
+                events=events,
+            )
+        except Exception as exc:  # noqa: BLE001
+            memory_trace = self._failed_memory_trace(str(exc))
+            self.store.append_events(
+                events=[
+                    self._build_memory_audit_event(
+                        cycle_id=cycle_id,
+                        memory_set_id=state["selected_memory_set_id"],
+                        kind="memory_consolidation_failure",
+                        created_at=self._now_iso(),
+                        payload={"failure_reason": str(exc)},
+                    )
+                ]
+            )
+
+        # Block: ReflectionAudit
+        self._append_reflective_failure_events(
+            cycle_id=cycle_id,
+            memory_set_id=state["selected_memory_set_id"],
+            memory_trace=memory_trace,
+        )
+
+        # Block: MemoryTraceUpdate
+        self._update_cycle_trace_memory_trace(cycle_id=cycle_id, memory_trace=memory_trace)
+
+    def _failed_memory_trace(self, failure_reason: str) -> dict[str, Any]:
+        # Block: Result
+        return {
+            "turn_consolidation_status": "failed",
+            "episode_digest_id": None,
+            "memory_action_count": 0,
+            "affect_update_count": 0,
+            "failure_reason": failure_reason,
+            "reflective_consolidation": {
+                "started": False,
+                "result_status": "not_started",
+                "trigger_reasons": [],
+                "affected_memory_unit_ids": [],
+                "failure_reason": None,
+            },
+        }
+
+    def _append_reflective_failure_events(
+        self,
+        *,
+        cycle_id: str,
+        memory_set_id: str,
+        memory_trace: dict[str, Any],
+    ) -> None:
+        # Block: Lookup
+        reflective_trace = memory_trace.get("reflective_consolidation", {})
+        if reflective_trace.get("result_status") != "failed":
+            return
+
+        # Block: Audit
+        self.store.append_events(
+            events=[
+                self._build_memory_audit_event(
+                    cycle_id=cycle_id,
+                    memory_set_id=memory_set_id,
+                    kind="reflective_consolidation_failure",
+                    created_at=self._now_iso(),
+                    payload={
+                        "failure_reason": reflective_trace.get("failure_reason"),
+                        "trigger_reasons": reflective_trace.get("trigger_reasons", []),
+                    },
+                )
+            ]
+        )
 
     # Block: InspectionApis
     def list_cycle_summaries(self, token: str | None, limit: int) -> dict[str, Any]:
