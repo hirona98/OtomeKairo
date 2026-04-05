@@ -322,6 +322,47 @@ class FileStore:
         # Block: Result
         return [json.loads(row["payload_json"]) for row in rows]
 
+    def list_affect_states_for_context(
+        self,
+        *,
+        memory_set_id: str,
+        scope_filters: list[tuple[str, str]] | None = None,
+        layers: list[str] | None = None,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        # Block: QueryParts
+        clauses = ["memory_set_id = ?"]
+        params: list[Any] = [memory_set_id]
+
+        # Block: ScopeFilters
+        if scope_filters:
+            scope_clauses: list[str] = []
+            for scope_type, scope_key in scope_filters:
+                scope_clauses.append("(target_scope_type = ? AND target_scope_key = ?)")
+                params.extend([scope_type, scope_key])
+            clauses.append("(" + " OR ".join(scope_clauses) + ")")
+
+        # Block: Layers
+        if layers:
+            placeholders = ", ".join("?" for _ in layers)
+            clauses.append(f"layer IN ({placeholders})")
+            params.extend(layers)
+
+        query = f"""
+            SELECT payload_json
+            FROM affect_state
+            WHERE {" AND ".join(clauses)}
+            ORDER BY intensity DESC, updated_at DESC, rowid DESC
+            LIMIT ?
+        """
+
+        # Block: Query
+        with self._memory_db() as conn:
+            rows = conn.execute(query, (*params, limit)).fetchall()
+
+        # Block: Result
+        return [json.loads(row["payload_json"]) for row in rows]
+
     def upsert_vector_index_entries(
         self,
         *,

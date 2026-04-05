@@ -265,7 +265,6 @@ SQLite 接続では、少なくとも次を固定する。
 この段階では、まだ次は未着手である。
 
 - `event_evidence` の限定ロード
-- `decision_generation` と `reply_generation` への `RecallPack` 本注入
 
 #### 3-4. 連想レーンの実装
 
@@ -310,6 +309,22 @@ SQLite 接続では、少なくとも次を固定する。
 
 この段階で、空配列固定の最小 slice をやめる。
 `decision_generation` と `reply_generation` は、少なくとも `RecallPack` の要約を見て判断と返答を組み立てるようにする。
+
+現状の実装は、次まで入っている。
+
+- `decision_generation` に `recent_turns` と `internal_context` を渡す
+- `internal_context` は `TimeContext`、`AffectContext`、`RecallPack` の 3 つで組む
+- `AffectContext` は `affect_state` を `scope` 条件だけで読んで `surface / background` に圧縮する
+- `RecallPack` は prompt 直前に section ごとの短い内部要約へ圧縮して渡す
+- `decision_generation` prompt は `conflicts` を確認寄り判断の根拠として扱う
+- `reply_generation` prompt は `RecallPack` の要約を見て、継続文脈や確認質問を組み立てる
+- mock 実装でも `active_commitments`、`episodic_evidence`、`conflicts`、`AffectContext` が返答に効く
+- `cycle_traces.decision_trace` に internal context summary を残す
+
+この段階では、まだ次は未着手である。
+
+- `event_evidence` の限定ロード
+- `RecallPack` を使った `future_act` 判断分岐
 
 #### 3-6. `reflective consolidation` の入口
 

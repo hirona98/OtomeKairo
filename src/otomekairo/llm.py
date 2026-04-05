@@ -302,13 +302,23 @@ class MockLLMClient:
         self,
         profile: dict,
         observation_text: str,
+        recent_turns: list[dict],
+        time_context: dict[str, Any],
+        affect_context: dict[str, list[dict[str, Any]]],
         recall_hint: dict,
+        recall_pack: dict[str, Any],
     ) -> dict[str, Any]:
         # Block: ProviderCheck
         self._assert_mock_model(profile)
 
-        # Block: DecisionRule
+        # Block: Context
         normalized = observation_text.strip()
+        primary_intent = recall_hint["primary_intent"]
+        conflicts = recall_pack.get("conflicts", [])
+        active_commitments = recall_pack.get("active_commitments", [])
+        surface_affects = affect_context.get("surface", [])
+
+        # Block: DecisionRule
         if not normalized:
             payload = {
                 "kind": "noop",
@@ -316,12 +326,33 @@ class MockLLMClient:
                 "reason_summary": "Observation text was empty after normalization.",
                 "requires_confirmation": False,
             }
+        elif conflicts:
+            payload = {
+                "kind": "reply",
+                "reason_code": "conflict_present",
+                "reason_summary": "RecallPack に矛盾候補があり、確認寄りの返答が必要。",
+                "requires_confirmation": True,
+            }
+        elif primary_intent == "commitment_check" and active_commitments:
+            payload = {
+                "kind": "reply",
+                "reason_code": "active_commitment",
+                "reason_summary": "進行中の約束や保留があり、継続会話として返答する。",
+                "requires_confirmation": False,
+            }
+        elif surface_affects and surface_affects[0]["affect_label"] in {"不安", "緊張", "迷い", "concern"}:
+            payload = {
+                "kind": "reply",
+                "reason_code": "affect_caution",
+                "reason_summary": "AffectContext に慎重さを要する感情があり、確認寄りに返す。",
+                "requires_confirmation": True,
+            }
         else:
             payload = {
                 "kind": "reply",
-                "reason_code": f"intent:{recall_hint['primary_intent']}",
+                "reason_code": f"intent:{primary_intent}",
                 "reason_summary": "A normal conversation reply is appropriate for the current observation.",
-                "requires_confirmation": recall_hint["primary_intent"] in {"fact_query", "meta_relationship"},
+                "requires_confirmation": primary_intent in {"fact_query", "meta_relationship"},
             }
 
         # Block: Validation
@@ -333,34 +364,84 @@ class MockLLMClient:
         profile: dict,
         persona: dict,
         observation_text: str,
+        recent_turns: list[dict],
+        time_context: dict[str, Any],
+        affect_context: dict[str, list[dict[str, Any]]],
         recall_hint: dict,
+        recall_pack: dict[str, Any],
         decision: dict,
     ) -> dict[str, Any]:
         # Block: ProviderCheck
         self._assert_mock_model(profile)
 
-        # Block: ReplyRule
+        # Block: Context
         tone = persona["expression_style"]["tone"]
         primary_intent = recall_hint["primary_intent"]
         text = observation_text.strip()
+        conflict_items = recall_pack.get("conflicts", [])
+        commitment_items = recall_pack.get("active_commitments", [])
+        relationship_items = recall_pack.get("relationship_model", [])
+        user_items = recall_pack.get("user_model", [])
+        topic_items = recall_pack.get("active_topics", [])
+        episode_items = recall_pack.get("episodic_evidence", [])
+        surface_affects = affect_context.get("surface", [])
+        conflict_item = conflict_items[0] if conflict_items else None
+        commitment_item = commitment_items[0] if commitment_items else None
+        relationship_item = relationship_items[0] if relationship_items else None
+        user_item = user_items[0] if user_items else None
+        topic_item = topic_items[0] if topic_items else None
+        episode_item = episode_items[0] if episode_items else None
+        surface_affect = surface_affects[0] if surface_affects else None
 
-        if primary_intent == "consult":
-            reply_text = f"状況は受け取ったよ。{text} の中で、今いちばん困っている点をもう少し教えて。"
+        # Block: CautionPrefix
+        caution_prefix = ""
+        if conflict_item is not None:
+            caution_prefix = "今は少し慎重に受け取っている。"
+        elif surface_affect is not None and surface_affect["affect_label"] in {"不安", "緊張", "迷い", "concern"}:
+            caution_prefix = "少し慎重に聞いているよ。"
+
+        # Block: ReplyRule
+        if decision["requires_confirmation"]:
+            basis_item = relationship_item or episode_item or conflict_item
+            if basis_item is not None:
+                reply_text = (
+                    f"{caution_prefix}{basis_item['summary_text']} という流れで受け取っているけれど、"
+                    f"{text} の理解はこれで合っている？"
+                )
+            else:
+                reply_text = f"{caution_prefix}{text} の受け取りを断定せず確認したい。いまの理解で合っている？"
+        elif primary_intent == "consult":
+            if user_item is not None:
+                reply_text = f"{caution_prefix}{user_item['summary_text']} も踏まえて聞くね。{text} の中で、今いちばん困っている点をもう少し教えて。"
+            else:
+                reply_text = f"{caution_prefix}状況は受け取ったよ。{text} の中で、今いちばん困っている点をもう少し教えて。"
         elif primary_intent == "commitment_check":
-            reply_text = f"その流れは覚えている前提で話すね。{text} に関して、今回どこまで進めたい？"
+            if commitment_item is not None:
+                if "どこまで" in text:
+                    reply_text = f"{commitment_item['summary_text']} の続きとして受け取ったよ。いまはどの範囲まで進めたい？"
+                else:
+                    reply_text = f"{commitment_item['summary_text']} の続きとして受け取ったよ。{text} について、今回はどこまで進めたい？"
+            else:
+                reply_text = f"{caution_prefix}その流れは覚えている前提で話すね。{text} に関して、今回どこまで進めたい？"
         elif primary_intent == "reminisce":
-            reply_text = f"その続きとして受け取ったよ。{text} のどの部分からつなげたい？"
+            if episode_item is not None:
+                reply_text = f"{episode_item['summary_text']} の流れとして受け取ったよ。{text} のどの部分からつなげたい？"
+            else:
+                reply_text = f"{caution_prefix}その続きとして受け取ったよ。{text} のどの部分からつなげたい？"
         elif primary_intent == "preference_query":
-            reply_text = f"好みの話として受け取ったよ。{text} について、今の気分も含めて聞かせて。"
-        elif decision["requires_confirmation"]:
-            reply_text = f"断定せずに確認したい。{text} について、いまの受け取りで合っている？"
+            reply_text = f"{caution_prefix}好みの話として受け取ったよ。{text} について、今の気分も含めて聞かせて。"
         else:
-            reply_text = f"{tone}に受け取ったよ。{text}"
+            topic_prefix = ""
+            if topic_item is not None:
+                topic_prefix = f"{topic_item['summary_text']} の流れで、"
+            elif recent_turns:
+                topic_prefix = "前の流れをつなげつつ、"
+            reply_text = f"{caution_prefix}{tone}に受け取ったよ。{topic_prefix}{text}"
 
         # Block: Payload
         return {
             "reply_text": reply_text,
-            "reply_style_notes": f"tone={tone}",
+            "reply_style_notes": f"tone={tone}; part_of_day={time_context.get('part_of_day', 'unknown')}",
             "confidence_note": "mock_model",
         }
 
@@ -650,11 +731,23 @@ class LLMClient:
         profile: dict,
         role_settings: dict,
         observation_text: str,
+        recent_turns: list[dict],
+        time_context: dict[str, Any],
+        affect_context: dict[str, list[dict[str, Any]]],
         recall_hint: dict,
+        recall_pack: dict[str, Any],
     ) -> dict[str, Any]:
         # Block: MockPath
         if self._is_mock_profile(profile):
-            return self.mock_client.generate_decision(profile, observation_text, recall_hint)
+            return self.mock_client.generate_decision(
+                profile,
+                observation_text,
+                recent_turns,
+                time_context,
+                affect_context,
+                recall_hint,
+                recall_pack,
+            )
 
         # Block: PromptBuild
         messages = [
@@ -664,7 +757,14 @@ class LLMClient:
             },
             {
                 "role": "user",
-                "content": self._build_decision_user_prompt(observation_text, recall_hint),
+                "content": self._build_decision_user_prompt(
+                    observation_text=observation_text,
+                    recent_turns=recent_turns,
+                    time_context=time_context,
+                    affect_context=affect_context,
+                    recall_hint=recall_hint,
+                    recall_pack=recall_pack,
+                ),
             },
         ]
 
@@ -682,12 +782,25 @@ class LLMClient:
         persona: dict,
         observation_text: str,
         recent_turns: list[dict],
+        time_context: dict[str, Any],
+        affect_context: dict[str, list[dict[str, Any]]],
         recall_hint: dict,
+        recall_pack: dict[str, Any],
         decision: dict,
     ) -> dict[str, Any]:
         # Block: MockPath
         if self._is_mock_profile(profile):
-            return self.mock_client.generate_reply(profile, persona, observation_text, recall_hint, decision)
+            return self.mock_client.generate_reply(
+                profile,
+                persona,
+                observation_text,
+                recent_turns,
+                time_context,
+                affect_context,
+                recall_hint,
+                recall_pack,
+                decision,
+            )
 
         # Block: PromptBuild
         messages = [
@@ -700,7 +813,10 @@ class LLMClient:
                 "content": self._build_reply_user_prompt(
                     observation_text=observation_text,
                     recent_turns=recent_turns,
+                    time_context=time_context,
+                    affect_context=affect_context,
                     recall_hint=recall_hint,
+                    recall_pack=recall_pack,
                     decision=decision,
                 ),
             },
@@ -907,6 +1023,10 @@ class LLMClient:
             "あなたは OtomeKairo の decision_generation です。\n"
             "観測文に対して reply するか noop にするかを決め、JSON オブジェクト 1 個だけを返してください。\n"
             "Markdown、コードフェンス、説明文は禁止です。\n"
+            "入力には recent_turns と internal_context が含まれます。\n"
+            "internal_context には TimeContext, AffectContext, RecallPack が入ります。\n"
+            "RecallPack.conflicts があるときは requires_confirmation=true を優先してください。\n"
+            "active_commitments や episodic_evidence は reply の継続根拠に使ってください。\n"
             "返すキーは必ず次の 4 個です:\n"
             "- kind: \"reply\" または \"noop\"\n"
             "- reason_code: string\n"
@@ -915,9 +1035,21 @@ class LLMClient:
             "空文字や意味のない入力は noop を選んでください。"
         )
 
-    def _build_decision_user_prompt(self, observation_text: str, recall_hint: dict) -> str:
+    def _build_decision_user_prompt(
+        self,
+        *,
+        observation_text: str,
+        recent_turns: list[dict],
+        time_context: dict[str, Any],
+        affect_context: dict[str, list[dict[str, Any]]],
+        recall_hint: dict,
+        recall_pack: dict[str, Any],
+    ) -> str:
         # Block: Prompt
         return (
+            f"recent_turns:\n{self._format_recent_turns(recent_turns)}\n"
+            "internal_context:\n"
+            f"{self._format_internal_context(time_context, affect_context, recall_pack)}\n"
             f"observation_text:\n{observation_text.strip()}\n"
             "recall_hint:\n"
             f"{json.dumps(recall_hint, ensure_ascii=False)}\n"
@@ -936,6 +1068,10 @@ class LLMClient:
         return (
             f"あなたは {display_name} として話します。\n"
             "返答は自然な日本語の本文だけを返してください。JSON、箇条書き、見出し、引用符は禁止です。\n"
+            "入力には recent_turns と internal_context が含まれます。\n"
+            "internal_context には TimeContext, AffectContext, RecallPack が入ります。\n"
+            "RecallPack の内容だけを根拠に、必要な範囲で自然に思い出や継続文脈を混ぜてください。\n"
+            "RecallPack.conflicts があるときは断定を避け、短い確認質問に寄せてください。\n"
             f"persona_text: {persona_text}\n"
             f"second_person_label: {second_person_label}\n"
             f"addon_text: {addon_text}\n"
@@ -949,12 +1085,17 @@ class LLMClient:
         *,
         observation_text: str,
         recent_turns: list[dict],
+        time_context: dict[str, Any],
+        affect_context: dict[str, list[dict[str, Any]]],
         recall_hint: dict,
+        recall_pack: dict[str, Any],
         decision: dict,
     ) -> str:
         # Block: Prompt
         return (
             f"recent_turns:\n{self._format_recent_turns(recent_turns)}\n"
+            "internal_context:\n"
+            f"{self._format_internal_context(time_context, affect_context, recall_pack)}\n"
             f"observation_text:\n{observation_text.strip()}\n"
             "recall_hint:\n"
             f"{json.dumps(recall_hint, ensure_ascii=False)}\n"
@@ -1124,6 +1265,83 @@ class LLMClient:
             if isinstance(value, str) and value.strip():
                 return value.strip()
         return None
+
+    def _format_internal_context(
+        self,
+        time_context: dict[str, Any],
+        affect_context: dict[str, list[dict[str, Any]]],
+        recall_pack: dict[str, Any],
+    ) -> str:
+        # Block: Payload
+        payload = {
+            "time_context": time_context,
+            "affect_context": affect_context,
+            "recall_pack": self._compact_recall_pack(recall_pack),
+        }
+
+        # Block: Result
+        return json.dumps(payload, ensure_ascii=False)
+
+    def _compact_recall_pack(self, recall_pack: dict[str, Any]) -> dict[str, Any]:
+        # Block: Payload
+        return {
+            "self_model": [self._compact_memory_context_item(item) for item in recall_pack.get("self_model", [])],
+            "user_model": [self._compact_memory_context_item(item) for item in recall_pack.get("user_model", [])],
+            "relationship_model": [self._compact_memory_context_item(item) for item in recall_pack.get("relationship_model", [])],
+            "active_topics": [self._compact_topic_context_item(item) for item in recall_pack.get("active_topics", [])],
+            "active_commitments": [self._compact_memory_context_item(item) for item in recall_pack.get("active_commitments", [])],
+            "episodic_evidence": [self._compact_digest_context_item(item) for item in recall_pack.get("episodic_evidence", [])],
+            "conflicts": [self._compact_conflict_context_item(item) for item in recall_pack.get("conflicts", [])],
+        }
+
+    def _compact_memory_context_item(self, item: dict[str, Any]) -> dict[str, Any]:
+        # Block: Payload
+        payload = {
+            "memory_type": item["memory_type"],
+            "scope_type": item["scope_type"],
+            "scope_key": item["scope_key"],
+            "summary_text": item["summary_text"],
+        }
+        if item.get("commitment_state") is not None:
+            payload["commitment_state"] = item["commitment_state"]
+        if item.get("object_ref_or_value") is not None:
+            payload["object_ref_or_value"] = item["object_ref_or_value"]
+        if item.get("retrieval_lane") is not None:
+            payload["retrieval_lane"] = item["retrieval_lane"]
+
+        # Block: Result
+        return payload
+
+    def _compact_topic_context_item(self, item: dict[str, Any]) -> dict[str, Any]:
+        # Block: DigestTopic
+        if item.get("source_kind") == "episode_digest":
+            return self._compact_digest_context_item(item)
+
+        # Block: MemoryTopic
+        return self._compact_memory_context_item(item)
+
+    def _compact_digest_context_item(self, item: dict[str, Any]) -> dict[str, Any]:
+        # Block: Payload
+        payload = {
+            "primary_scope_type": item["primary_scope_type"],
+            "primary_scope_key": item["primary_scope_key"],
+            "summary_text": item["summary_text"],
+            "open_loops": item.get("open_loops", []),
+        }
+        if item.get("outcome_text") is not None:
+            payload["outcome_text"] = item["outcome_text"]
+        if item.get("retrieval_lane") is not None:
+            payload["retrieval_lane"] = item["retrieval_lane"]
+
+        # Block: Result
+        return payload
+
+    def _compact_conflict_context_item(self, item: dict[str, Any]) -> dict[str, Any]:
+        # Block: Payload
+        return {
+            "summary_text": item["summary_text"],
+            "compare_key": item["compare_key"],
+        }
 
     def _format_recent_turns(self, recent_turns: list[dict]) -> str:
         # Block: Empty

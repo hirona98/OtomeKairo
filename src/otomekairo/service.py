@@ -445,12 +445,23 @@ class OtomeKairoService:
                 recall_hint=recall_hint,
             )
 
+            # Block: InternalContext
+            time_context = self._build_time_context(current_time=started_at)
+            affect_context = self._build_affect_context(
+                state=state,
+                recall_hint=recall_hint,
+            )
+
             # Block: Decision
             decision = self.llm.generate_decision(
                 profile=decision_profile,
                 role_settings=decision_role,
                 observation_text=observation_text,
+                recent_turns=recent_turns,
+                time_context=time_context,
+                affect_context=affect_context,
                 recall_hint=recall_hint,
+                recall_pack=recall_pack,
             )
 
             # Block: Reply
@@ -462,7 +473,10 @@ class OtomeKairoService:
                     persona=persona,
                     observation_text=observation_text,
                     recent_turns=recent_turns,
+                    time_context=time_context,
+                    affect_context=affect_context,
                     recall_hint=recall_hint,
+                    recall_pack=recall_pack,
                     decision=decision,
                 )
 
@@ -481,6 +495,8 @@ class OtomeKairoService:
                 recent_turns=recent_turns,
                 recall_hint=recall_hint,
                 recall_pack=recall_pack,
+                time_context=time_context,
+                affect_context=affect_context,
                 decision=decision,
                 result_kind=result_kind,
                 reply_payload=reply_payload,
@@ -578,6 +594,29 @@ class OtomeKairoService:
             "conflicts": len(recall_pack["conflicts"]),
         }
 
+    def _summarize_affect_context(self, affect_context: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+        # Block: Surface
+        surface_labels = [
+            item["affect_label"]
+            for item in affect_context.get("surface", [])
+            if isinstance(item.get("affect_label"), str)
+        ]
+
+        # Block: Background
+        background_labels = [
+            item["affect_label"]
+            for item in affect_context.get("background", [])
+            if isinstance(item.get("affect_label"), str)
+        ]
+
+        # Block: Result
+        return {
+            "surface_count": len(affect_context.get("surface", [])),
+            "background_count": len(affect_context.get("background", [])),
+            "surface_labels": surface_labels,
+            "background_labels": background_labels,
+        }
+
     def _recall_adopted_reason_summary(self, recall_pack: dict[str, Any]) -> str:
         # Block: Counts
         memory_count = len(recall_pack["selected_memory_ids"])
@@ -621,6 +660,109 @@ class OtomeKairoService:
 
         # Block: Summary
         return "section 上限と全体上限を優先し、文字列一致フォールバックは使っていない。"
+
+    def _build_time_context(self, *, current_time: str) -> dict[str, Any]:
+        # Block: TimestampParse
+        current_dt = self._parse_iso(current_time)
+
+        # Block: Result
+        return {
+            "current_time": current_time,
+            "weekday": current_dt.strftime("%A").lower(),
+            "part_of_day": self._part_of_day(current_dt.hour),
+        }
+
+    def _build_affect_context(
+        self,
+        *,
+        state: dict[str, Any],
+        recall_hint: dict[str, Any],
+    ) -> dict[str, list[dict[str, Any]]]:
+        # Block: Query
+        records = self.store.list_affect_states_for_context(
+            memory_set_id=state["selected_memory_set_id"],
+            scope_filters=self._build_context_scope_filters(recall_hint),
+            layers=["surface", "background"],
+            limit=6,
+        )
+
+        # Block: Selection
+        affect_context = {
+            "surface": [],
+            "background": [],
+        }
+        for record in records:
+            layer = record.get("layer")
+            if layer not in affect_context:
+                continue
+            if len(affect_context[layer]) >= 2:
+                continue
+            affect_context[layer].append(
+                {
+                    "target_scope_type": record["target_scope_type"],
+                    "target_scope_key": record["target_scope_key"],
+                    "affect_label": record["affect_label"],
+                    "intensity": record["intensity"],
+                    "updated_at": record["updated_at"],
+                }
+            )
+
+        # Block: Result
+        return affect_context
+
+    def _build_context_scope_filters(self, recall_hint: dict[str, Any]) -> list[tuple[str, str]]:
+        # Block: Defaults
+        filters: list[tuple[str, str]] = [("user", "user")]
+        primary_intent = recall_hint["primary_intent"]
+        if primary_intent in {"commitment_check", "consult", "meta_relationship"}:
+            filters.append(("relationship", "self|user"))
+
+        # Block: FocusScopes
+        filters.extend(self._parse_focus_scopes(recall_hint.get("focus_scopes", [])))
+
+        # Block: Dedup
+        deduped: list[tuple[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        for scope_filter in filters:
+            if scope_filter in seen:
+                continue
+            deduped.append(scope_filter)
+            seen.add(scope_filter)
+
+        # Block: Result
+        return deduped
+
+    def _parse_focus_scopes(self, scopes: list[Any]) -> list[tuple[str, str]]:
+        # Block: Parse
+        parsed: list[tuple[str, str]] = []
+        for scope in scopes:
+            if not isinstance(scope, str):
+                continue
+            normalized = scope.strip()
+            if not normalized:
+                continue
+            if normalized in {"self", "user"}:
+                parsed.append((normalized, normalized))
+                continue
+            scope_type, separator, scope_key = normalized.partition(":")
+            if not separator or not scope_key:
+                continue
+            if scope_type not in {"relationship", "topic"}:
+                continue
+            parsed.append((scope_type, scope_key.strip()))
+
+        # Block: Result
+        return parsed
+
+    def _part_of_day(self, hour: int) -> str:
+        # Block: Range
+        if 5 <= hour < 11:
+            return "morning"
+        if 11 <= hour < 17:
+            return "daytime"
+        if 17 <= hour < 22:
+            return "evening"
+        return "night"
 
     def _build_settings_snapshot(self, state: dict) -> dict:
         # Block: Snapshot
@@ -877,6 +1019,8 @@ class OtomeKairoService:
         recent_turns: list[dict],
         recall_hint: dict,
         recall_pack: dict,
+        time_context: dict,
+        affect_context: dict[str, list[dict[str, Any]]],
         decision: dict,
         result_kind: str,
         reply_payload: dict | None,
@@ -972,6 +1116,11 @@ class OtomeKairoService:
                 "persona_summary": state["personas"][state["selected_persona_id"]]["display_name"],
                 "memory_summary": state["memory_sets"][state["selected_memory_set_id"]]["display_name"],
                 "current_context_summary": self._clamp(observation_text),
+                "internal_context_summary": {
+                    "time_context": time_context,
+                    "affect_context_summary": self._summarize_affect_context(affect_context),
+                    "recall_pack_summary": self._summarize_recall_pack(recall_pack),
+                },
                 "primary_candidate_kind": decision["kind"],
             },
             "result_trace": {
