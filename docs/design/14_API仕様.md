@@ -203,6 +203,59 @@ response:
 | `400` | `invalid_text` | `text` が文字列ではない |
 | `400` | `invalid_client_context` | `client_context` が object ではない |
 
+### `POST /api/observations/wake`
+
+- 認証: 必要
+- 役割: 起床観測を受け、wake 1 サイクルを実行する
+
+request:
+
+```json
+{
+  "client_context": {
+    "source": "CocoroConsole"
+  }
+}
+```
+
+- `client_context` は省略可能な object
+
+response:
+
+```json
+{
+  "ok": true,
+  "data": {
+    "cycle_id": "cycle:...",
+    "result_kind": "noop",
+    "reply": null
+  }
+}
+```
+
+`result_kind` は次のいずれかを返す。
+
+- `reply`
+- `noop`
+- `internal_failure`
+
+`future_act` は内部結果として扱い、外向きには返さない。
+そのため、wake で内部的に `future_act` が選ばれた場合も、response の `result_kind` は `noop` でよい。
+
+MVP の wake API は少なくとも次の挙動を持ってよい。
+
+- `wake_policy.mode=disabled` なら `noop`
+- `mode=interval` で次回時刻にまだ達していなければ `noop`
+- due な `future_act` 候補があれば再評価し、必要なら `reply`
+
+`result_kind=noop` または `result_kind=internal_failure` のとき、`reply` は `null` を返す。
+
+主な失敗:
+
+| HTTP | `error.code` | 意味 |
+|------|--------------|------|
+| `400` | `invalid_client_context` | `client_context` が object ではない |
+
 <!-- Block: Status -->
 ## 状態面
 

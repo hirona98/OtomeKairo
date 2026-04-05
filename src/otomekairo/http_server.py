@@ -83,6 +83,10 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
                 payload = self._read_json_body()
                 self._write_success(HTTPStatus.OK, self.server.service.observe_conversation(token, payload))
                 return
+            if method == "POST" and parsed.path == "/api/observations/wake":
+                payload = self._read_json_body()
+                self._write_success(HTTPStatus.OK, self.server.service.observe_wake(token, payload))
+                return
 
             # Block: ConfigRoutes
             if method == "POST" and parsed.path == "/api/config/select-persona":

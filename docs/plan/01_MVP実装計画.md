@@ -45,10 +45,11 @@
 - 第三者や固有名は `focus_scopes` ではなく `mentioned_entities` で扱う
 - `future_act` は内部結果として扱え、trace に候補要約を残せる
 - runtime-only の `future_act` 候補キューがあり、dedupe / update / expiry metadata を持てる
+- wake observation API があり、`wake_policy` の due 判定と `future_act` 候補再評価で `reply / noop / future_act` を扱える
 
 一方で、MVP 全体としてはまだ未完である。
 
-- `wake_policy` は設定としてはあるが、実際の起床ループは未実装である
+- 自律的な background 起床スケジューラはまだ無い
 - `desktop_watch` も設定としてはあるが、観測源としては未実装である
 - embedding 更新と `reflective consolidation` の完全非同期化は未完である
 - `relationship` / `self` の高次な長期変化分析は未完である
@@ -231,6 +232,12 @@
   - runtime-only の候補キューへ `create / update` できる
   - `candidate_id`、`dedupe_key`、`not_before`、`expires_at` を持てる
   - selected persona / memory / model 変更時にクリアできる
+- wake observation
+  - `POST /api/observations/wake` で起床判断を走らせられる
+  - `wake_policy` が `disabled` なら `noop`
+  - `interval_minutes` に達していなければ `noop`
+  - due な `future_act` 候補があれば再評価し、`reply` なら候補を消費する
+  - cooldown と同一 `dedupe_key` の直近 reply を見て過剰反応を抑える
 - 監査強化
   - memory consolidation failure を cycle trace と events に残す
   - reflective failure を `reflection_runs` と events に残す
@@ -239,13 +246,13 @@
   - scope 単位の雑な confirmed 昇格を避ける
   - `summary` は早すぎる confirmed を避ける
 
-## 未着手: 自発起床ループ
+## 未着手: 自律的な自発起床ループ
 
-`wake_policy` と `desktop_watch` は設定としては存在するが、実際の起床ループはまだない。
+wake observation API はあるが、サーバ内部の background 起床スケジューラはまだない。
 
 ここでやることは次である。
 
-- `wake_policy` に基づく判断機会の生成
+- `wake_policy` に基づいて内部で判断機会を自動生成する
 - `desktop_watch` を観測源として接続する
 - 起床時に `reply / noop / future_act` を内部判断する
 - 連続起床時の過剰反応を判断側で抑える
@@ -275,16 +282,16 @@
 - `event_evidence` は短い圧縮根拠であり、逐語引用や正確引用は保証しない
 - `RecallHint` は長期記憶を読まず、現在観測と直近文脈だけから作る
 - 複合意図は `primary_intent` 主軸で扱い、完全な同時最適化はしない
-- `future_act` 候補キューはあるが、起床再評価と消費はまだない
-- 自発起床と `desktop_watch` が未実装なので、現状は会話主導の MVP である
+- `future_act` 候補キューはあり、wake observation で再評価できるが、自律起床はまだない
+- `desktop_watch` が未実装なので、現状は会話主導 + 手動 wake の MVP である
 
 ## 直近の実装順
 
 次はこの順で進める。
 
-1. `wake_policy` と起床判断ループを通す
-2. `future_act` 候補の再評価、消費、期限切れ整理を起床側へ接続する
-3. `desktop_watch` を観測源として繋ぐ
+1. background の起床スケジューラを service 内へ持つ
+2. `desktop_watch` を観測源として繋ぐ
+3. wake での client context 利用を強める
 4. `relationship / self` の高次な反射再整理を絞って足す
 5. 非同期ジョブ化と運用硬化へ進む
 6. 仕様が固まった範囲から回帰テストを追加する
