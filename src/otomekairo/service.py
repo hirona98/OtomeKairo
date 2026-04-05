@@ -503,8 +503,9 @@ class OtomeKairoService:
             )
 
             # Block: TurnConsolidation
+            memory_trace: dict[str, Any]
             try:
-                self.memory.consolidate_turn(
+                memory_trace = self.memory.consolidate_turn(
                     state=state,
                     cycle_id=cycle_id,
                     finished_at=finished_at,
@@ -514,8 +515,53 @@ class OtomeKairoService:
                     reply_payload=reply_payload,
                     events=events,
                 )
-            except Exception:
-                pass
+            except Exception as exc:  # noqa: BLE001
+                memory_trace = {
+                    "turn_consolidation_status": "failed",
+                    "episode_digest_id": None,
+                    "memory_action_count": 0,
+                    "affect_update_count": 0,
+                    "failure_reason": str(exc),
+                    "reflective_consolidation": {
+                        "started": False,
+                        "result_status": "not_started",
+                        "trigger_reasons": [],
+                        "affected_memory_unit_ids": [],
+                        "failure_reason": None,
+                    },
+                }
+                self.store.append_events(
+                    events=[
+                        self._build_memory_audit_event(
+                            cycle_id=cycle_id,
+                            memory_set_id=state["selected_memory_set_id"],
+                            kind="memory_consolidation_failure",
+                            created_at=self._now_iso(),
+                            payload={"failure_reason": str(exc)},
+                        )
+                    ]
+                )
+
+            # Block: ReflectionAudit
+            reflective_trace = memory_trace.get("reflective_consolidation", {})
+            if reflective_trace.get("result_status") == "failed":
+                self.store.append_events(
+                    events=[
+                        self._build_memory_audit_event(
+                            cycle_id=cycle_id,
+                            memory_set_id=state["selected_memory_set_id"],
+                            kind="reflective_consolidation_failure",
+                            created_at=self._now_iso(),
+                            payload={
+                                "failure_reason": reflective_trace.get("failure_reason"),
+                                "trigger_reasons": reflective_trace.get("trigger_reasons", []),
+                            },
+                        )
+                    ]
+                )
+
+            # Block: MemoryTraceUpdate
+            self._update_cycle_trace_memory_trace(cycle_id=cycle_id, memory_trace=memory_trace)
 
             return {
                 "cycle_id": cycle_id,
@@ -1131,6 +1177,14 @@ class OtomeKairoService:
                 "internal_failure_summary": None,
                 "duration_ms": self._duration_ms(started_at, finished_at),
             },
+            "memory_trace": {
+                "turn_consolidation_status": "pending",
+                "episode_digest_id": None,
+                "memory_action_count": 0,
+                "affect_update_count": 0,
+                "failure_reason": None,
+                "reflective_consolidation": None,
+            },
         }
 
         # Block: Persist
@@ -1241,6 +1295,7 @@ class OtomeKairoService:
                 "internal_failure_summary": failure_reason,
                 "duration_ms": self._duration_ms(started_at, finished_at),
             },
+            "memory_trace": None,
         }
 
         # Block: Persist
@@ -1250,6 +1305,36 @@ class OtomeKairoService:
             cycle_summary=cycle_summary,
             cycle_trace=cycle_trace,
         )
+
+    def _update_cycle_trace_memory_trace(self, *, cycle_id: str, memory_trace: dict[str, Any]) -> None:
+        # Block: Lookup
+        cycle_trace = self.store.get_cycle_trace(cycle_id)
+        if cycle_trace is None:
+            return
+
+        # Block: Replace
+        cycle_trace["memory_trace"] = memory_trace
+        self.store.replace_cycle_trace(cycle_trace=cycle_trace)
+
+    def _build_memory_audit_event(
+        self,
+        *,
+        cycle_id: str,
+        memory_set_id: str,
+        kind: str,
+        created_at: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        # Block: Event
+        return {
+            "event_id": f"event:{uuid.uuid4().hex}",
+            "cycle_id": cycle_id,
+            "memory_set_id": memory_set_id,
+            "kind": kind,
+            "role": "system",
+            "created_at": created_at,
+            **payload,
+        }
 
     def _load_recent_turns(self, state: dict) -> list[dict]:
         # Block: WindowSetup

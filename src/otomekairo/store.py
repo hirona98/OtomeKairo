@@ -85,6 +85,21 @@ class FileStore:
             # Block: TraceInsert
             self._insert_cycle_trace(conn, cycle_trace)
 
+    def append_events(self, *, events: list[dict[str, Any]]) -> None:
+        # Block: Empty
+        if not events:
+            return
+
+        # Block: Transaction
+        with self._memory_db() as conn:
+            for event in events:
+                self._insert_event(conn, event)
+
+    def replace_cycle_trace(self, *, cycle_trace: dict[str, Any]) -> None:
+        # Block: Transaction
+        with self._memory_db() as conn:
+            self._insert_cycle_trace(conn, cycle_trace)
+
     def persist_turn_consolidation(
         self,
         *,
@@ -106,20 +121,20 @@ class FileStore:
             for affect_update in affect_updates:
                 self._upsert_affect_state(conn, affect_update)
 
-    def persist_reflection_run(
-        self,
-        *,
-        reflection_run: dict[str, Any],
-        memory_actions: list[dict[str, Any]],
-    ) -> None:
+    def persist_memory_actions(self, *, memory_actions: list[dict[str, Any]]) -> None:
+        # Block: Empty
+        if not memory_actions:
+            return
+
         # Block: Transaction
         with self._memory_db() as conn:
-            # Block: ReflectionRun
-            self._insert_reflection_run(conn, reflection_run)
-
-            # Block: MemoryActions
             for action in memory_actions:
                 self._apply_memory_action(conn, action)
+
+    def upsert_reflection_run(self, *, reflection_run: dict[str, Any]) -> None:
+        # Block: Transaction
+        with self._memory_db() as conn:
+            self._insert_reflection_run(conn, reflection_run)
 
     def list_cycle_summaries(self, limit: int) -> list[dict[str, Any]]:
         # Block: Query
@@ -636,7 +651,11 @@ class FileStore:
                 # Block: VectorUpsert
                 vector_table_name = self._vector_table_name(entry["source_kind"])
                 conn.execute(
-                    f"INSERT OR REPLACE INTO {vector_table_name}(id, embedding) VALUES (?, ?)",
+                    f"DELETE FROM {vector_table_name} WHERE id = ?",
+                    (vector_entry_id,),
+                )
+                conn.execute(
+                    f"INSERT INTO {vector_table_name}(id, embedding) VALUES (?, ?)",
                     (
                         vector_entry_id,
                         sqlite_vec.serialize_float32(entry["embedding"]),

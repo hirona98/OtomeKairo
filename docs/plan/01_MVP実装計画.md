@@ -346,9 +346,11 @@ SQLite 接続では、少なくとも次を固定する。
 - post-turn の best-effort trigger 判定を入れる
 - trigger は `chat 8 ターン`、`前回から 24 時間`、`高 salience digest の偏り`、`supersede / revoke`、`relationship` 変化の最小版を使う
 - `memory_type=summary` の `memory_units` を `self / user / relationship / topic` 単位で生成または更新する
-- 反復支持がある `inferred` を `confirmed` へ引き上げる
+- `summary` は初期状態では保守的に `inferred` で作り、十分な digest 数と複数ターン根拠があるときだけ `confirmed` にする
+- `inferred -> confirmed` は scope 単位ではなく compare 単位かつ複数ターン根拠で引き上げる
 - 古く低重要な `topic` 系を `dormant` 化する
 - 反射更新でも `revisions` を残し、変化した `memory_units` の vector index を更新する
+- 失敗時は `reflection_runs.failure_reason` と `cycle_traces.memory_trace` に残し、監査イベントも追記する
 
 この段階では、まだ次は未着手である。
 

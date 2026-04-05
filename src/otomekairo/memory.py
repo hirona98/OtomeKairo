@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from datetime import UTC, datetime, timedelta
 import hashlib
+import json
 import uuid
 from typing import Any
 
@@ -18,7 +19,10 @@ REFLECTION_HIGH_SALIENCE_THRESHOLD = 0.8
 REFLECTION_HIGH_SALIENCE_COUNT = 3
 REFLECTION_DIGEST_LIMIT = 24
 REFLECTION_MEMORY_LIMIT = 96
-REFLECTION_MIN_SUMMARY_EVIDENCE = 2
+REFLECTION_MIN_SUMMARY_EVIDENCE = 3
+REFLECTION_MIN_SUMMARY_DIGESTS = 2
+REFLECTION_CONFIRMED_SUMMARY_EVIDENCE = 7
+REFLECTION_CONFIRMED_SUMMARY_DIGESTS = 4
 REFLECTION_TOPIC_DORMANT_AFTER_DAYS = 14
 REFLECTION_CONFIRMED_TOPIC_DORMANT_AFTER_DAYS = 30
 
@@ -45,9 +49,18 @@ class MemoryConsolidator:
         # Block: MemoryToggle
         if not state.get("memory_enabled", True):
             return {
+                "turn_consolidation_status": "disabled",
                 "episode_digest_id": None,
                 "memory_action_count": 0,
                 "affect_update_count": 0,
+                "failure_reason": None,
+                "reflective_consolidation": {
+                    "started": False,
+                    "result_status": "disabled",
+                    "trigger_reasons": [],
+                    "affected_memory_unit_ids": [],
+                    "failure_reason": None,
+                },
             }
 
         # Block: ModelSelection
@@ -86,6 +99,7 @@ class MemoryConsolidator:
                     memory_set_id=selected_memory_set_id,
                     finished_at=finished_at,
                     event_ids=event_ids,
+                    cycle_ids=[cycle_id],
                     candidate=candidate,
                 )
             )
@@ -116,32 +130,20 @@ class MemoryConsolidator:
         )
 
         # Block: ReflectiveConsolidation
-        reflective_result = {
-            "started": False,
-            "result_status": "not_triggered",
-            "trigger_reasons": [],
-            "affected_memory_unit_ids": [],
-        }
-        try:
-            reflective_result = self._maybe_run_reflective_consolidation(
-                state=state,
-                finished_at=finished_at,
-                episode_digest=episode_digest,
-                memory_actions=memory_actions,
-            )
-        except Exception:
-            reflective_result = {
-                "started": False,
-                "result_status": "failed",
-                "trigger_reasons": [],
-                "affected_memory_unit_ids": [],
-            }
+        reflective_result = self._maybe_run_reflective_consolidation(
+            state=state,
+            finished_at=finished_at,
+            episode_digest=episode_digest,
+            memory_actions=memory_actions,
+        )
 
         # Block: Result
         return {
+            "turn_consolidation_status": "succeeded",
             "episode_digest_id": episode_digest["episode_digest_id"],
             "memory_action_count": len(memory_actions),
             "affect_update_count": len(affect_updates),
+            "failure_reason": None,
             "reflective_consolidation": reflective_result,
         }
 
@@ -363,88 +365,127 @@ class MemoryConsolidator:
                 "result_status": "not_triggered",
                 "trigger_reasons": [],
                 "affected_memory_unit_ids": [],
+                "failure_reason": None,
             }
 
-        # Block: InputCollection
+        # Block: RunState
+        reflection_run_id = f"reflection_run:{uuid.uuid4().hex}"
         started_at = self._now_iso()
         since_iso = latest_run["finished_at"] if isinstance(latest_run, dict) else None
-        digests = self.store.list_episode_digests_for_reflection(
-            memory_set_id=memory_set_id,
-            since_iso=since_iso,
-            limit=REFLECTION_DIGEST_LIMIT,
-        )
-        active_units = self.store.list_memory_units_for_reflection(
-            memory_set_id=memory_set_id,
-            statuses=list(ACTIVE_MEMORY_STATUSES),
-            scope_types=["self", "user", "relationship", "topic"],
-            limit=REFLECTION_MEMORY_LIMIT,
-        )
-
-        # Block: ActionBuild
+        digests: list[dict[str, Any]] = []
         reflection_actions: list[dict[str, Any]] = []
-        reflection_actions.extend(
-            self._build_reflective_summary_actions(
-                memory_set_id=memory_set_id,
-                finished_at=finished_at,
-                digests=digests,
-                active_units=active_units,
-            )
-        )
-        reflection_actions.extend(
-            self._build_reflective_confirmation_actions(
-                memory_set_id=memory_set_id,
-                finished_at=finished_at,
-                digests=digests,
-                active_units=active_units,
-            )
-        )
-        reflection_actions.extend(
-            self._build_reflective_dormant_actions(
-                memory_set_id=memory_set_id,
-                finished_at=finished_at,
-                digests=digests,
-                active_units=active_units,
-                excluded_memory_unit_ids={
-                    action["memory_unit_id"]
-                    for action in reflection_actions
-                },
-            )
-        )
 
-        # Block: Persistence
-        finished_reflection_at = self._now_iso()
-        affected_memory_unit_ids = self._unique_memory_unit_ids(reflection_actions)
-        reflection_run = {
-            "reflection_run_id": f"reflection_run:{uuid.uuid4().hex}",
-            "memory_set_id": memory_set_id,
-            "started_at": started_at,
-            "finished_at": finished_reflection_at,
-            "result_status": "updated" if reflection_actions else "no_change",
-            "trigger_reasons": trigger_reasons,
-            "source_episode_digest_ids": [digest["episode_digest_id"] for digest in digests],
-            "affected_memory_unit_ids": affected_memory_unit_ids,
-            "action_counts": self._action_counts(reflection_actions),
-        }
-        self.store.persist_reflection_run(
-            reflection_run=reflection_run,
-            memory_actions=reflection_actions,
-        )
+        try:
+            # Block: InputCollection
+            digests = self.store.list_episode_digests_for_reflection(
+                memory_set_id=memory_set_id,
+                since_iso=since_iso,
+                limit=REFLECTION_DIGEST_LIMIT,
+            )
+            active_units = self.store.list_memory_units_for_reflection(
+                memory_set_id=memory_set_id,
+                statuses=list(ACTIVE_MEMORY_STATUSES),
+                scope_types=["self", "user", "relationship", "topic"],
+                limit=REFLECTION_MEMORY_LIMIT,
+            )
 
-        # Block: VectorIndex
-        self._sync_vector_index(
-            state=state,
-            finished_at=finished_reflection_at,
-            episode_digest=None,
-            memory_actions=reflection_actions,
-        )
+            # Block: ActionBuild
+            reflection_actions.extend(
+                self._build_reflective_summary_actions(
+                    memory_set_id=memory_set_id,
+                    finished_at=finished_at,
+                    digests=digests,
+                    active_units=active_units,
+                )
+            )
+            reflection_actions.extend(
+                self._build_reflective_confirmation_actions(
+                    memory_set_id=memory_set_id,
+                    finished_at=finished_at,
+                    active_units=active_units,
+                )
+            )
+            reflection_actions.extend(
+                self._build_reflective_dormant_actions(
+                    memory_set_id=memory_set_id,
+                    finished_at=finished_at,
+                    digests=digests,
+                    active_units=active_units,
+                    excluded_memory_unit_ids={
+                        action["memory_unit_id"]
+                        for action in reflection_actions
+                    },
+                )
+            )
 
-        # Block: Result
-        return {
-            "started": True,
-            "result_status": reflection_run["result_status"],
-            "trigger_reasons": trigger_reasons,
-            "affected_memory_unit_ids": affected_memory_unit_ids,
-        }
+            # Block: MemoryPersistence
+            self.store.persist_memory_actions(memory_actions=reflection_actions)
+
+            # Block: VectorIndex
+            finished_reflection_at = self._now_iso()
+            failure_reason: str | None = None
+            result_status = "updated" if reflection_actions else "no_change"
+            try:
+                self._sync_vector_index(
+                    state=state,
+                    finished_at=finished_reflection_at,
+                    episode_digest=None,
+                    memory_actions=reflection_actions,
+                )
+            except Exception as exc:  # noqa: BLE001
+                result_status = "failed"
+                failure_reason = str(exc)
+
+            # Block: ReflectionRun
+            affected_memory_unit_ids = self._unique_memory_unit_ids(reflection_actions)
+            self.store.upsert_reflection_run(
+                reflection_run={
+                    "reflection_run_id": reflection_run_id,
+                    "memory_set_id": memory_set_id,
+                    "started_at": started_at,
+                    "finished_at": finished_reflection_at,
+                    "result_status": result_status,
+                    "trigger_reasons": trigger_reasons,
+                    "source_episode_digest_ids": [digest["episode_digest_id"] for digest in digests],
+                    "affected_memory_unit_ids": affected_memory_unit_ids,
+                    "action_counts": self._action_counts(reflection_actions),
+                    "failure_reason": failure_reason,
+                }
+            )
+
+            # Block: Result
+            return {
+                "started": True,
+                "result_status": result_status,
+                "trigger_reasons": trigger_reasons,
+                "affected_memory_unit_ids": affected_memory_unit_ids,
+                "failure_reason": failure_reason,
+            }
+        except Exception as exc:  # noqa: BLE001
+            # Block: FailureRun
+            finished_reflection_at = self._now_iso()
+            failure_reason = str(exc)
+            self.store.upsert_reflection_run(
+                reflection_run={
+                    "reflection_run_id": reflection_run_id,
+                    "memory_set_id": memory_set_id,
+                    "started_at": started_at,
+                    "finished_at": finished_reflection_at,
+                    "result_status": "failed",
+                    "trigger_reasons": trigger_reasons,
+                    "source_episode_digest_ids": [digest["episode_digest_id"] for digest in digests],
+                    "affected_memory_unit_ids": self._unique_memory_unit_ids(reflection_actions),
+                    "action_counts": self._action_counts(reflection_actions),
+                    "failure_reason": failure_reason,
+                }
+            )
+            return {
+                "started": True,
+                "result_status": "failed",
+                "trigger_reasons": trigger_reasons,
+                "affected_memory_unit_ids": self._unique_memory_unit_ids(reflection_actions),
+                "failure_reason": failure_reason,
+            }
 
     def _reflective_trigger_reasons(
         self,
@@ -560,6 +601,7 @@ class MemoryConsolidator:
                     memory_set_id=memory_set_id,
                     finished_at=finished_at,
                     event_ids=evidence_event_ids,
+                    cycle_ids=self._reflective_cycle_ids(scope_digests=scope_digests, limit=12),
                     candidate=candidate,
                 )
             )
@@ -578,12 +620,14 @@ class MemoryConsolidator:
         evidence_count = len(scope_digests) + len(scope_units)
         if evidence_count < REFLECTION_MIN_SUMMARY_EVIDENCE:
             return False
+        if len(scope_digests) < REFLECTION_MIN_SUMMARY_DIGESTS:
+            return False
 
         # Block: TopicGuard
         if scope_type == "topic":
             if len(scope_units) >= 2:
                 return True
-            return any(digest.get("open_loops") for digest in scope_digests)
+            return sum(1 for digest in scope_digests if digest.get("open_loops")) >= 2
 
         # Block: Result
         return True
@@ -599,7 +643,15 @@ class MemoryConsolidator:
         # Block: Evidence
         memory_types = self._dominant_memory_types(scope_units)
         evidence_count = len(scope_digests) + len(scope_units)
+        digest_count = len(scope_digests)
         open_loop_count = sum(1 for digest in scope_digests if digest.get("open_loops"))
+        summary_status = self._reflective_summary_status(
+            scope_type=scope_type,
+            evidence_count=evidence_count,
+            digest_count=digest_count,
+            open_loop_count=open_loop_count,
+        )
+        confidence_floor = 0.74 if summary_status == "confirmed" else 0.58
 
         # Block: Candidate
         return {
@@ -615,13 +667,17 @@ class MemoryConsolidator:
                 memory_types=memory_types,
                 open_loop_count=open_loop_count,
             ),
-            "status": "confirmed",
+            "status": summary_status,
             "commitment_state": None,
-            "confidence": min(0.86, 0.62 + (0.05 * min(evidence_count, 4)) + (0.04 if open_loop_count > 0 else 0.0)),
+            "confidence": min(
+                0.86 if summary_status == "confirmed" else 0.72,
+                confidence_floor + (0.03 * min(evidence_count, 4)) + (0.03 if open_loop_count > 0 else 0.0),
+            ),
             "salience": self._reflective_summary_salience(
                 scope_type=scope_type,
                 evidence_count=evidence_count,
                 open_loop_count=open_loop_count,
+                status=summary_status,
             ),
             "valid_from": None,
             "valid_to": None,
@@ -640,16 +696,8 @@ class MemoryConsolidator:
         *,
         memory_set_id: str,
         finished_at: str,
-        digests: list[dict[str, Any]],
         active_units: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        # Block: ScopeDigestCounts
-        scope_digest_counts = Counter(
-            (digest.get("primary_scope_type"), digest.get("primary_scope_key"))
-            for digest in digests
-            if isinstance(digest.get("primary_scope_key"), str)
-        )
-
         # Block: Selection
         actions: list[dict[str, Any]] = []
         for unit in active_units:
@@ -658,13 +706,27 @@ class MemoryConsolidator:
             if unit.get("memory_type") == "summary":
                 continue
 
-            event_count = len(unit.get("evidence_event_ids", []))
-            scope_key = (unit.get("scope_type"), unit.get("scope_key"))
-            scope_support = scope_digest_counts.get(scope_key, 0)
+            matches = self.store.find_memory_units_for_compare(
+                memory_set_id=memory_set_id,
+                memory_type=unit["memory_type"],
+                scope_type=unit["scope_type"],
+                scope_key=unit["scope_key"],
+                subject_ref=unit["subject_ref"],
+                predicate=unit["predicate"],
+                limit=5,
+            )
+            active_matches = [
+                match
+                for match in matches
+                if match.get("status") in ACTIVE_MEMORY_STATUSES
+            ]
+            if self._has_conflicting_active_variants(active_matches):
+                continue
+
+            support_turn_count = self._support_turn_count(unit)
             if not (
-                event_count >= 3
-                or (event_count >= 2 and float(unit.get("confidence", 0.0)) >= 0.7)
-                or scope_support >= 2
+                support_turn_count >= 3
+                or (support_turn_count >= 2 and float(unit.get("confidence", 0.0)) >= 0.78 and len(active_matches) == 1)
             ):
                 continue
 
@@ -675,14 +737,6 @@ class MemoryConsolidator:
                 "salience": max(self._clamp_score(unit["salience"]), 0.55),
                 "last_confirmed_at": finished_at,
             }
-            evidence_event_ids = self._merged_event_ids(
-                unit.get("evidence_event_ids", []),
-                self._scope_digest_event_ids(
-                    digests=digests,
-                    scope_type=unit["scope_type"],
-                    scope_key=unit["scope_key"],
-                ),
-            )
             actions.append(
                 self._build_memory_action(
                     operation="reinforce",
@@ -692,8 +746,8 @@ class MemoryConsolidator:
                     related_memory_unit_ids=[],
                     before_snapshot=unit,
                     after_snapshot=updated_unit,
-                    reason="reflective consolidation で反復支持を確認し、inferred を confirmed へ引き上げたため。",
-                    event_ids=evidence_event_ids,
+                    reason="reflective consolidation で同一 memory_unit の反復根拠を確認し、inferred を confirmed へ引き上げたため。",
+                    event_ids=unit.get("evidence_event_ids", []),
                 )
             )
 
@@ -789,6 +843,43 @@ class MemoryConsolidator:
         # Block: Result
         return [memory_type for memory_type, _ in counts.most_common(2)]
 
+    def _has_conflicting_active_variants(self, matches: list[dict[str, Any]]) -> bool:
+        # Block: VariantSignatures
+        variant_signatures = {
+            (
+                match.get("object_ref_or_value"),
+                self._stable_json(match.get("qualifiers", {})),
+            )
+            for match in matches
+        }
+
+        # Block: Result
+        return len(variant_signatures) > 1
+
+    def _reflective_summary_status(
+        self,
+        *,
+        scope_type: str,
+        evidence_count: int,
+        digest_count: int,
+        open_loop_count: int,
+    ) -> str:
+        # Block: Topic
+        if scope_type == "topic":
+            if digest_count >= REFLECTION_CONFIRMED_SUMMARY_DIGESTS and open_loop_count >= 2:
+                return "confirmed"
+            return "inferred"
+
+        # Block: Confirmed
+        if (
+            evidence_count >= REFLECTION_CONFIRMED_SUMMARY_EVIDENCE
+            and digest_count >= REFLECTION_CONFIRMED_SUMMARY_DIGESTS
+        ):
+            return "confirmed"
+
+        # Block: Result
+        return "inferred"
+
     def _reflective_summary_text(
         self,
         *,
@@ -842,6 +933,7 @@ class MemoryConsolidator:
         scope_type: str,
         evidence_count: int,
         open_loop_count: int,
+        status: str,
     ) -> float:
         # Block: Base
         base = {
@@ -853,8 +945,11 @@ class MemoryConsolidator:
 
         # Block: Result
         return min(
-            0.78,
-            base + (0.04 * min(evidence_count, 4)) + (0.04 if open_loop_count > 0 else 0.0),
+            0.78 if status == "confirmed" else 0.62,
+            base
+            + (0.03 * min(evidence_count, 4))
+            + (0.03 if open_loop_count > 0 else 0.0)
+            - (0.08 if status != "confirmed" else 0.0),
         )
 
     def _reflective_event_ids(
@@ -878,24 +973,32 @@ class MemoryConsolidator:
         # Block: Result
         return merged[:limit]
 
-    def _scope_digest_event_ids(
+    def _reflective_cycle_ids(
         self,
         *,
-        digests: list[dict[str, Any]],
-        scope_type: str,
-        scope_key: str,
+        scope_digests: list[dict[str, Any]],
+        limit: int,
     ) -> list[str]:
-        # Block: Merge
-        merged: list[str] = []
-        for digest in digests:
-            if digest.get("primary_scope_type") != scope_type:
+        # Block: Collect
+        cycle_ids: list[str] = []
+        for digest in scope_digests:
+            cycle_id = digest.get("cycle_id")
+            if not isinstance(cycle_id, str):
                 continue
-            if digest.get("primary_scope_key") != scope_key:
+            if cycle_id in cycle_ids:
                 continue
-            merged = self._merged_event_ids(merged, digest.get("linked_event_ids", []))
+            cycle_ids.append(cycle_id)
+            if len(cycle_ids) >= limit:
+                break
 
         # Block: Result
-        return merged
+        return cycle_ids
+
+    def _stable_json(self, value: Any) -> str:
+        # Block: Serialize
+        return hashlib.sha256(
+            self._to_json_string(value).encode("utf-8")
+        ).hexdigest()
 
     def _unique_memory_unit_ids(self, actions: list[dict[str, Any]]) -> list[str]:
         # Block: Collect
@@ -962,12 +1065,17 @@ class MemoryConsolidator:
             return parsed.replace(tzinfo=UTC)
         return parsed.astimezone(UTC)
 
+    def _to_json_string(self, value: Any) -> str:
+        # Block: Serialize
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
     def _resolve_memory_actions(
         self,
         *,
         memory_set_id: str,
         finished_at: str,
         event_ids: list[str],
+        cycle_ids: list[str],
         candidate: dict[str, Any],
     ) -> list[dict[str, Any]]:
         # Block: Lookup
@@ -986,6 +1094,7 @@ class MemoryConsolidator:
                 memory_set_id=memory_set_id,
                 finished_at=finished_at,
                 event_ids=event_ids,
+                cycle_ids=cycle_ids,
                 candidate=candidate,
             )
             return [
@@ -1012,6 +1121,7 @@ class MemoryConsolidator:
                 candidate=candidate,
                 finished_at=finished_at,
                 event_ids=event_ids,
+                cycle_ids=cycle_ids,
             )
             return [
                 self._build_memory_action(
@@ -1034,6 +1144,7 @@ class MemoryConsolidator:
                 candidate=candidate,
                 finished_at=finished_at,
                 event_ids=event_ids,
+                cycle_ids=cycle_ids,
             )
             return [
                 self._build_memory_action(
@@ -1054,6 +1165,7 @@ class MemoryConsolidator:
             memory_set_id=memory_set_id,
             finished_at=finished_at,
             event_ids=event_ids,
+            cycle_ids=cycle_ids,
             candidate=candidate,
         )
         superseded_unit = {
@@ -1093,6 +1205,7 @@ class MemoryConsolidator:
         memory_set_id: str,
         finished_at: str,
         event_ids: list[str],
+        cycle_ids: list[str],
         candidate: dict[str, Any],
     ) -> dict[str, Any]:
         # Block: Record
@@ -1115,6 +1228,7 @@ class MemoryConsolidator:
             "valid_from": candidate.get("valid_from"),
             "valid_to": candidate.get("valid_to"),
             "evidence_event_ids": event_ids,
+            "evidence_cycle_ids": cycle_ids,
             "qualifiers": candidate.get("qualifiers", {}),
         }
 
@@ -1125,6 +1239,7 @@ class MemoryConsolidator:
         candidate: dict[str, Any],
         finished_at: str,
         event_ids: list[str],
+        cycle_ids: list[str],
     ) -> dict[str, Any]:
         # Block: Status
         next_status = existing["status"]
@@ -1143,6 +1258,7 @@ class MemoryConsolidator:
             "salience": max(self._clamp_score(existing["salience"]), self._clamp_score(candidate["salience"])),
             "last_confirmed_at": finished_at,
             "evidence_event_ids": self._merged_event_ids(existing.get("evidence_event_ids", []), event_ids),
+            "evidence_cycle_ids": self._merged_cycle_ids(existing.get("evidence_cycle_ids", []), cycle_ids),
             "qualifiers": {
                 **existing.get("qualifiers", {}),
                 **candidate.get("qualifiers", {}),
@@ -1156,6 +1272,7 @@ class MemoryConsolidator:
         candidate: dict[str, Any],
         finished_at: str,
         event_ids: list[str],
+        cycle_ids: list[str],
     ) -> dict[str, Any]:
         # Block: Status
         next_status = existing["status"]
@@ -1175,6 +1292,7 @@ class MemoryConsolidator:
             "valid_from": candidate.get("valid_from") or existing.get("valid_from"),
             "valid_to": candidate.get("valid_to") or existing.get("valid_to"),
             "evidence_event_ids": self._merged_event_ids(existing.get("evidence_event_ids", []), event_ids),
+            "evidence_cycle_ids": self._merged_cycle_ids(existing.get("evidence_cycle_ids", []), cycle_ids),
             "qualifiers": {
                 **existing.get("qualifiers", {}),
                 **candidate.get("qualifiers", {}),
@@ -1265,6 +1383,29 @@ class MemoryConsolidator:
             if isinstance(event_id, str) and event_id not in merged:
                 merged.append(event_id)
         return merged
+
+    def _merged_cycle_ids(self, existing_cycle_ids: list[Any], new_cycle_ids: list[str]) -> list[str]:
+        # Block: Merge
+        merged: list[str] = []
+        for cycle_id in existing_cycle_ids + new_cycle_ids:
+            if isinstance(cycle_id, str) and cycle_id not in merged:
+                merged.append(cycle_id)
+        return merged
+
+    def _support_turn_count(self, unit: dict[str, Any]) -> int:
+        # Block: CycleSupport
+        cycle_ids = [
+            cycle_id
+            for cycle_id in unit.get("evidence_cycle_ids", [])
+            if isinstance(cycle_id, str)
+        ]
+        if cycle_ids:
+            return len(cycle_ids)
+
+        # Block: EventFallback
+        if unit.get("evidence_event_ids"):
+            return 1
+        return 0
 
     def _normalized_text_list(self, values: list[Any], *, limit: int) -> list[str]:
         # Block: Normalize
