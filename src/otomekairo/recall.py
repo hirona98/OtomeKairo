@@ -171,7 +171,7 @@ class RecallBuilder:
 
         # Block: GlobalTrim
         sections = self._apply_global_limit(
-            primary_intent=primary_intent,
+            recall_hint=recall_hint,
             sections={
                 "self_model": self_model,
                 "user_model": user_model,
@@ -521,9 +521,12 @@ class RecallBuilder:
         # Block: Parts
         parts = [observation_text]
         primary_intent = recall_hint["primary_intent"]
+        secondary_intents = self._secondary_intents(recall_hint)
         time_reference = str(recall_hint.get("time_reference", "none")).strip()
         if primary_intent:
             parts.append(f"意図: {primary_intent}")
+        if secondary_intents:
+            parts.append("補助意図: " + ", ".join(secondary_intents))
         if time_reference and time_reference != "none":
             parts.append(f"時間軸: {time_reference}")
 
@@ -565,6 +568,7 @@ class RecallBuilder:
         # Block: Base
         weight = ASSOCIATION_QUERY_KIND_WEIGHTS.get(query_kind, 1.0)
         primary_intent = recall_hint["primary_intent"]
+        secondary_intents = set(self._secondary_intents(recall_hint))
         time_reference = recall_hint.get("time_reference")
 
         # Block: IntentAdjust
@@ -574,6 +578,14 @@ class RecallBuilder:
             weight += 0.12
         if primary_intent in {"consult", "check_state", "preference_query"} and query_kind == "topic":
             weight += 0.12
+
+        # Block: SecondaryAdjust
+        if "reminisce" in secondary_intents and query_kind == "observation":
+            weight += 0.04
+        if "meta_relationship" in secondary_intents and query_kind == "entity":
+            weight += 0.05
+        if {"consult", "check_state", "preference_query"} & secondary_intents and query_kind == "topic":
+            weight += 0.04
 
         # Block: TimeAdjust
         if time_reference == "past" and query_kind == "observation":
@@ -660,6 +672,7 @@ class RecallBuilder:
         # Block: Base
         score = query_weight * (1.0 / (1.0 + max(distance, 0.0)))
         primary_intent = recall_hint["primary_intent"]
+        secondary_intents = set(self._secondary_intents(recall_hint))
 
         # Block: QueryKindBoost
         item_scope_type = self._association_item_scope_type(item)
@@ -687,6 +700,16 @@ class RecallBuilder:
             score += 0.08
         if recall_hint.get("time_reference") == "past" and item["source_kind"] == "episode_digest":
             score += 0.05
+
+        # Block: SecondaryBoost
+        if "reminisce" in secondary_intents and item["source_kind"] == "episode_digest":
+            score += 0.04
+        if "meta_relationship" in secondary_intents and item_scope_type == "relationship":
+            score += 0.04
+        if {"consult", "check_state"} & secondary_intents and item_scope_type in {"user", "topic"}:
+            score += 0.03
+        if "preference_query" in secondary_intents and item.get("memory_type") == "preference":
+            score += 0.03
 
         # Block: Result
         return score
@@ -924,7 +947,11 @@ class RecallBuilder:
     def _event_evidence_section_priority(self, primary_intent: str) -> list[str]:
         # Block: BaseOrder
         ordered = ["episodic_evidence"]
-        for section_name in self._section_priority(primary_intent):
+        recall_hint = {
+            "primary_intent": primary_intent,
+            "secondary_intents": [],
+        }
+        for section_name in self._section_priority(recall_hint):
             if section_name in {"episodic_evidence", "conflicts"}:
                 continue
             ordered.append(section_name)
@@ -967,7 +994,7 @@ class RecallBuilder:
     def _apply_global_limit(
         self,
         *,
-        primary_intent: str,
+        recall_hint: dict[str, Any],
         sections: dict[str, list[dict[str, Any]]],
     ) -> dict[str, list[dict[str, Any]]]:
         # Block: InitialState
@@ -984,7 +1011,7 @@ class RecallBuilder:
         remaining = GLOBAL_RECALL_LIMIT - len(trimmed["conflicts"])
 
         # Block: Order
-        for section_name in self._section_priority(primary_intent):
+        for section_name in self._section_priority(recall_hint):
             if remaining <= 0:
                 break
             section_items: list[dict[str, Any]] = []
@@ -1002,7 +1029,31 @@ class RecallBuilder:
         # Block: Result
         return trimmed
 
-    def _section_priority(self, primary_intent: str) -> list[str]:
+    def _section_priority(self, recall_hint: dict[str, Any]) -> list[str]:
+        # Block: PrimaryOrder
+        primary_intent = recall_hint["primary_intent"]
+        ordered = self._primary_section_priority(primary_intent)
+
+        # Block: SecondaryBoosts
+        boosted_sections = self._secondary_section_boosts(
+            self._secondary_intents(recall_hint),
+        )
+
+        # Block: Merge
+        merged: list[str] = []
+        if ordered:
+            merged.append(ordered[0])
+        for section_name in boosted_sections:
+            if section_name not in merged:
+                merged.append(section_name)
+        for section_name in ordered:
+            if section_name not in merged:
+                merged.append(section_name)
+
+        # Block: Result
+        return merged
+
+    def _primary_section_priority(self, primary_intent: str) -> list[str]:
         # Block: Mapping
         if primary_intent == "commitment_check":
             return [
@@ -1057,6 +1108,29 @@ class RecallBuilder:
             "episodic_evidence",
             "self_model",
         ]
+
+    def _secondary_section_boosts(self, secondary_intents: list[str]) -> list[str]:
+        # Block: State
+        boosted: list[str] = []
+
+        # Block: Collect
+        for intent in secondary_intents:
+            for section_name in self._primary_section_priority(intent)[:2]:
+                if section_name not in boosted:
+                    boosted.append(section_name)
+
+        # Block: Result
+        return boosted
+
+    def _secondary_intents(self, recall_hint: dict[str, Any]) -> list[str]:
+        # Block: Normalize
+        secondary_intents = normalized_text_list(
+            recall_hint.get("secondary_intents", []),
+            limit=2,
+        )
+
+        # Block: Result
+        return secondary_intents
 
     def _limit_memory_section(
         self,

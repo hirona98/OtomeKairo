@@ -62,6 +62,8 @@ AFFECT_LAYER_VALUES = {
     "surface",
     "background",
 }
+MAX_SECONDARY_INTENTS = 2
+MAX_HINT_SCOPE_VALUES = 4
 
 
 # Block: ContractValidation
@@ -86,16 +88,39 @@ def validate_recall_hint_contract(payload: dict[str, Any]) -> None:
         raise LLMError("RecallHint time_reference is invalid.")
     if not isinstance(payload["secondary_intents"], list):
         raise LLMError("RecallHint secondary_intents must be a list.")
+    if len(payload["secondary_intents"]) > MAX_SECONDARY_INTENTS:
+        raise LLMError("RecallHint secondary_intents exceed the maximum length.")
+    for intent in payload["secondary_intents"]:
+        if not isinstance(intent, str) or not intent.strip():
+            raise LLMError("RecallHint secondary_intents entries must be non-empty strings.")
+        if intent not in INTENT_VALUES:
+            raise LLMError("RecallHint secondary_intent is invalid.")
+    if len(payload["secondary_intents"]) != len(set(payload["secondary_intents"])):
+        raise LLMError("RecallHint secondary_intents contain duplicates.")
     if payload["primary_intent"] in payload["secondary_intents"]:
         raise LLMError("RecallHint duplicates primary intent.")
     if not isinstance(payload["focus_scopes"], list):
         raise LLMError("RecallHint focus_scopes must be a list.")
+    if len(payload["focus_scopes"]) > MAX_HINT_SCOPE_VALUES:
+        raise LLMError("RecallHint focus_scopes exceed the maximum length.")
+    if any(not isinstance(scope, str) or not scope.strip() for scope in payload["focus_scopes"]):
+        raise LLMError("RecallHint focus_scopes entries must be non-empty strings.")
     if not isinstance(payload["mentioned_entities"], list):
         raise LLMError("RecallHint mentioned_entities must be a list.")
+    if len(payload["mentioned_entities"]) > MAX_HINT_SCOPE_VALUES:
+        raise LLMError("RecallHint mentioned_entities exceed the maximum length.")
+    if any(not isinstance(entity, str) or not entity.strip() for entity in payload["mentioned_entities"]):
+        raise LLMError("RecallHint mentioned_entities entries must be non-empty strings.")
     if not isinstance(payload["mentioned_topics"], list):
         raise LLMError("RecallHint mentioned_topics must be a list.")
+    if len(payload["mentioned_topics"]) > MAX_HINT_SCOPE_VALUES:
+        raise LLMError("RecallHint mentioned_topics exceed the maximum length.")
+    if any(not isinstance(topic, str) or not topic.strip() for topic in payload["mentioned_topics"]):
+        raise LLMError("RecallHint mentioned_topics entries must be non-empty strings.")
     if not isinstance(payload["confidence"], (int, float)):
         raise LLMError("RecallHint confidence must be numeric.")
+    if not 0.0 <= float(payload["confidence"]) <= 1.0:
+        raise LLMError("RecallHint confidence must be between 0.0 and 1.0.")
 
 
 def validate_decision_contract(payload: dict[str, Any]) -> None:
@@ -363,8 +388,10 @@ class MockLLMClient:
         # Block: Context
         normalized = observation_text.strip()
         primary_intent = recall_hint["primary_intent"]
+        secondary_intents = self._secondary_intents(recall_hint)
         conflicts = recall_pack.get("conflicts", [])
         active_commitments = recall_pack.get("active_commitments", [])
+        episodic_evidence = recall_pack.get("episodic_evidence", [])
         surface_affects = affect_context.get("surface", [])
 
         # Block: DecisionRule
@@ -387,6 +414,13 @@ class MockLLMClient:
                 "kind": "reply",
                 "reason_code": "active_commitment",
                 "reason_summary": "進行中の約束や保留があり、継続会話として返答する。",
+                "requires_confirmation": False,
+            }
+        elif "reminisce" in secondary_intents and episodic_evidence:
+            payload = {
+                "kind": "reply",
+                "reason_code": "secondary_reminisce",
+                "reason_summary": "補助意図として回想があり、関連エピソードを踏まえて返答する。",
                 "requires_confirmation": False,
             }
         elif surface_affects and surface_affects[0]["affect_label"] in {"不安", "緊張", "迷い", "concern"}:
@@ -426,6 +460,7 @@ class MockLLMClient:
         # Block: Context
         tone = persona["expression_style"]["tone"]
         primary_intent = recall_hint["primary_intent"]
+        secondary_intents = self._secondary_intents(recall_hint)
         text = observation_text.strip()
         conflict_items = recall_pack.get("conflicts", [])
         commitment_items = recall_pack.get("active_commitments", [])
@@ -452,6 +487,12 @@ class MockLLMClient:
         elif surface_affect is not None and surface_affect["affect_label"] in {"不安", "緊張", "迷い", "concern"}:
             caution_prefix = "少し慎重に聞いているよ。"
 
+        # Block: ContinuityPrefix
+        continuity_prefix = ""
+        if primary_intent != "reminisce" and "reminisce" in secondary_intents:
+            if episode_item is not None or event_basis is not None or recent_turns:
+                continuity_prefix = "前の流れも踏まえると、"
+
         # Block: ReplyRule
         if decision["requires_confirmation"]:
             basis_text = None
@@ -472,9 +513,9 @@ class MockLLMClient:
                 reply_text = f"{caution_prefix}{text} の受け取りを断定せず確認したい。いまの理解で合っている？"
         elif primary_intent == "consult":
             if user_item is not None:
-                reply_text = f"{caution_prefix}{user_item['summary_text']} も踏まえて聞くね。{text} の中で、今いちばん困っている点をもう少し教えて。"
+                reply_text = f"{caution_prefix}{continuity_prefix}{user_item['summary_text']} も踏まえて聞くね。{text} の中で、今いちばん困っている点をもう少し教えて。"
             else:
-                reply_text = f"{caution_prefix}状況は受け取ったよ。{text} の中で、今いちばん困っている点をもう少し教えて。"
+                reply_text = f"{caution_prefix}{continuity_prefix}状況は受け取ったよ。{text} の中で、今いちばん困っている点をもう少し教えて。"
         elif primary_intent == "commitment_check":
             if commitment_item is not None:
                 if "どこまで" in text:
@@ -493,14 +534,14 @@ class MockLLMClient:
             else:
                 reply_text = f"{caution_prefix}その続きとして受け取ったよ。{text} のどの部分からつなげたい？"
         elif primary_intent == "preference_query":
-            reply_text = f"{caution_prefix}好みの話として受け取ったよ。{text} について、今の気分も含めて聞かせて。"
+            reply_text = f"{caution_prefix}{continuity_prefix}好みの話として受け取ったよ。{text} について、今の気分も含めて聞かせて。"
         else:
             topic_prefix = ""
             if topic_item is not None:
                 topic_prefix = f"{topic_item['summary_text']} の流れで、"
             elif recent_turns:
                 topic_prefix = "前の流れをつなげつつ、"
-            reply_text = f"{caution_prefix}{tone}に受け取ったよ。{topic_prefix}{text}"
+            reply_text = f"{caution_prefix}{continuity_prefix}{tone}に受け取ったよ。{topic_prefix}{text}"
 
         # Block: Payload
         return {
@@ -522,6 +563,16 @@ class MockLLMClient:
 
         # Block: Result
         return None
+
+    def _secondary_intents(self, recall_hint: dict[str, Any]) -> set[str]:
+        # Block: Collect
+        secondary_intents: set[str] = set()
+        for intent in recall_hint.get("secondary_intents", []):
+            if isinstance(intent, str) and intent in INTENT_VALUES:
+                secondary_intents.add(intent)
+
+        # Block: Result
+        return secondary_intents
 
     def generate_memory_interpretation(
         self,
@@ -884,11 +935,21 @@ class LLMClient:
             },
         ]
 
-        # Block: Completion
-        content = self._complete_text(profile=profile, role_settings=role_settings, messages=messages)
-        payload = self._parse_json_object(content)
-        validate_recall_hint_contract(payload)
-        return payload
+        # Block: Retry
+        last_contract_error: LLMError | None = None
+        for attempt in range(2):
+            content = self._complete_text(profile=profile, role_settings=role_settings, messages=messages)
+            try:
+                return self._parse_recall_hint_payload(content)
+            except LLMError as exc:
+                last_contract_error = exc
+                if attempt >= 1:
+                    raise
+
+        # Block: Failure
+        if last_contract_error is not None:
+            raise last_contract_error
+        raise LLMError("RecallHint generation failed without a parseable response.")
 
     def generate_decision(
         self,
@@ -1163,9 +1224,10 @@ class LLMClient:
             "- secondary_intents: string[] (最大2件。primary_intent を含めない)\n"
             "- confidence: number\n"
             "- time_reference: string\n"
-            "- focus_scopes: string[]\n"
-            "- mentioned_entities: string[]\n"
-            "- mentioned_topics: string[]\n"
+            "- focus_scopes: string[] (最大4件。self / user / relationship:<key> / topic:<key> に留める)\n"
+            "- mentioned_entities: string[] (最大4件)\n"
+            "- mentioned_topics: string[] (最大4件)\n"
+            "第三者名や固有名は focus_scopes ではなく mentioned_entities に入れてください。\n"
             "不確実なときは conservative に smalltalk / none / 空配列を選んでください。"
         )
 
@@ -1190,6 +1252,7 @@ class LLMClient:
             "Markdown、コードフェンス、説明文は禁止です。\n"
             "入力には recent_turns と internal_context が含まれます。\n"
             "internal_context には TimeContext, AffectContext, RecallPack が入ります。\n"
+            "recall_hint.secondary_intents は補助意図として、継続性や確認必要性の補助にだけ使ってください。\n"
             "RecallPack.conflicts があるときは requires_confirmation=true を優先してください。\n"
             "active_commitments, episodic_evidence, event_evidence は reply の継続根拠に使ってください。\n"
             "返すキーは必ず次の 4 個です:\n"
@@ -1235,6 +1298,7 @@ class LLMClient:
             "返答は自然な日本語の本文だけを返してください。JSON、箇条書き、見出し、引用符は禁止です。\n"
             "入力には recent_turns と internal_context が含まれます。\n"
             "internal_context には TimeContext, AffectContext, RecallPack が入ります。\n"
+            "recall_hint.secondary_intents は話題継続や温度調整の補助にだけ使い、主方針は primary_intent に従ってください。\n"
             "RecallPack の内容だけを根拠に、必要な範囲で自然に思い出や継続文脈を混ぜてください。\n"
             "RecallPack.event_evidence は 1-3 件の短い証拠要約として扱い、必要なときだけ自然に参照してください。\n"
             "RecallPack.conflicts があるときは断定を避け、短い確認質問に寄せてください。\n"
@@ -1311,6 +1375,14 @@ class LLMClient:
             "reply_text:\n"
             f"{reply_text or '(none)'}\n"
         )
+
+    def _parse_recall_hint_payload(self, content: str) -> dict[str, Any]:
+        # Block: Parse
+        payload = self._parse_json_object(content)
+        validate_recall_hint_contract(payload)
+
+        # Block: Result
+        return payload
 
     # Block: ResponseHelpers
     def _extract_response_text(self, response: Any) -> str:
