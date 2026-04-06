@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from typing import Any, Callable
+from urllib import error as urllib_error
+from urllib import request as urllib_request
 
 from otomekairo.llm_contracts import (
     INTENT_VALUES,
@@ -13,6 +15,11 @@ from otomekairo.llm_contracts import (
     validate_recall_hint_contract,
 )
 from otomekairo.llm_mock import MockLLMClient
+
+
+# Block: Constants
+OPENROUTER_DEFAULT_API_BASE = "https://openrouter.ai/api/v1"
+OPENROUTER_DEFAULT_TIMEOUT_SECONDS = 600
 
 
 # Block: LiteLLMFacade
@@ -236,6 +243,16 @@ class LLMClient:
         if self._is_mock_profile(profile):
             return self.mock_client.generate_embeddings(profile, texts, embedding_dimension)
 
+        # Block: OpenRouterPath
+        if self._is_openrouter_embedding_profile(profile):
+            response = self._request_openrouter_embeddings(profile=profile, texts=texts)
+            return self._extract_embedding_vectors(
+                response,
+                expected_count=len(texts),
+                expected_dimension=embedding_dimension,
+                source_label="OpenRouter",
+            )
+
         # Block: Import
         embedding = self._load_litellm_embedding()
 
@@ -258,7 +275,12 @@ class LLMClient:
             raise LLMError(f"LiteLLM embedding call failed: {exc}") from exc
 
         # Block: Result
-        return self._extract_embedding_vectors(response, expected_count=len(texts))
+        return self._extract_embedding_vectors(
+            response,
+            expected_count=len(texts),
+            expected_dimension=embedding_dimension,
+            source_label="LiteLLM",
+        )
 
     # Block: LiteLLMCall
     def _complete_text(
@@ -578,13 +600,20 @@ class LLMClient:
             raise LLMError("LiteLLM did not return a JSON object.")
         return payload
 
-    def _extract_embedding_vectors(self, response: Any, *, expected_count: int) -> list[list[float]]:
+    def _extract_embedding_vectors(
+        self,
+        response: Any,
+        *,
+        expected_count: int,
+        expected_dimension: int | None = None,
+        source_label: str = "LiteLLM",
+    ) -> list[list[float]]:
         # Block: DataRead
         data = getattr(response, "data", None)
         if data is None and isinstance(response, dict):
             data = response.get("data")
         if not isinstance(data, list) or len(data) != expected_count:
-            raise LLMError("LiteLLM embedding response did not include expected data.")
+            raise LLMError(f"{source_label} embedding response did not include expected data.")
 
         # Block: Parse
         vectors: list[list[float]] = []
@@ -593,8 +622,12 @@ class LLMClient:
             if vector is None and isinstance(item, dict):
                 vector = item.get("embedding")
             if not isinstance(vector, list) or not vector:
-                raise LLMError("LiteLLM embedding item did not include embedding.")
+                raise LLMError(f"{source_label} embedding item did not include embedding.")
             parsed = [float(value) for value in vector]
+            if expected_dimension is not None and len(parsed) != expected_dimension:
+                raise LLMError(
+                    f"{source_label} embedding dimension mismatch: expected {expected_dimension}, got {len(parsed)}."
+                )
             vectors.append(parsed)
 
         # Block: Result
@@ -604,12 +637,123 @@ class LLMClient:
     def _is_mock_profile(self, profile: dict) -> bool:
         return profile.get("model") == "mock"
 
+    def _is_openrouter_embedding_profile(self, profile: dict) -> bool:
+        # Block: ModelCheck
+        model = profile.get("model")
+        if isinstance(model, str) and model.strip().startswith("openrouter/"):
+            return True
+
+        # Block: BaseUrlCheck
+        api_base = profile.get("base_url")
+        if isinstance(api_base, str) and "openrouter.ai" in api_base:
+            return True
+
+        # Block: Default
+        return False
+
     def _resolve_litellm_model(self, profile: dict) -> str:
         # Block: RawValue
         model = profile.get("model")
         if not isinstance(model, str) or not model.strip():
             raise LLMError("model_profile.model is missing.")
         return model.strip()
+
+    def _resolve_openrouter_embedding_model(self, profile: dict) -> str:
+        # Block: Normalize
+        model = self._resolve_litellm_model(profile)
+        if model.startswith("openrouter/"):
+            return model.removeprefix("openrouter/")
+        return model
+
+    def _resolve_openrouter_api_base(self, profile: dict) -> str:
+        # Block: CustomBase
+        api_base = profile.get("base_url")
+        if isinstance(api_base, str) and api_base.strip():
+            normalized = api_base.strip().rstrip("/")
+            if "openrouter.ai" in normalized and "/api/v1" not in normalized:
+                normalized = f"{normalized}/api/v1"
+            if normalized.endswith("/embeddings"):
+                return normalized.rsplit("/", 1)[0]
+            return normalized
+
+        # Block: DefaultBase
+        return OPENROUTER_DEFAULT_API_BASE
+
+    def _request_openrouter_embeddings(
+        self,
+        *,
+        profile: dict,
+        texts: list[str],
+    ) -> dict[str, Any]:
+        # Block: ApiKey
+        api_key = self._resolve_api_key(profile)
+        if api_key is None:
+            raise LLMError("OpenRouter embedding requires auth token.")
+
+        # Block: RequestData
+        api_base = self._resolve_openrouter_api_base(profile)
+        payload = {
+            "model": self._resolve_openrouter_embedding_model(profile),
+            "input": texts,
+            "encoding_format": "float",
+        }
+        request = urllib_request.Request(
+            url=f"{api_base}/embeddings",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+
+        # Block: ResponseRead
+        try:
+            with urllib_request.urlopen(request, timeout=OPENROUTER_DEFAULT_TIMEOUT_SECONDS) as response:
+                body = response.read().decode("utf-8")
+        except urllib_error.HTTPError as exc:
+            error_body = exc.read().decode("utf-8", errors="replace")
+            detail = self._extract_http_error_detail(error_body)
+            raise LLMError(f"OpenRouter embedding call failed: {exc.code} {detail}") from exc
+        except urllib_error.URLError as exc:
+            raise LLMError(f"OpenRouter embedding call failed: {exc.reason}") from exc
+
+        # Block: Parse
+        try:
+            payload = json.loads(body)
+        except json.JSONDecodeError as exc:
+            raise LLMError(f"OpenRouter embedding response was not valid JSON: {exc}") from exc
+        if not isinstance(payload, dict):
+            raise LLMError("OpenRouter embedding response did not return an object.")
+        return payload
+
+    def _extract_http_error_detail(self, error_body: str) -> str:
+        # Block: Empty
+        stripped = error_body.strip()
+        if not stripped:
+            return "unknown_error"
+
+        # Block: JsonParse
+        try:
+            payload = json.loads(stripped)
+        except json.JSONDecodeError:
+            payload = None
+
+        # Block: ErrorMessage
+        if isinstance(payload, dict):
+            error_value = payload.get("error")
+            if isinstance(error_value, dict):
+                message = error_value.get("message")
+                if isinstance(message, str) and message.strip():
+                    return message.strip()
+            if isinstance(error_value, str) and error_value.strip():
+                return error_value.strip()
+            message = payload.get("message")
+            if isinstance(message, str) and message.strip():
+                return message.strip()
+
+        # Block: Fallback
+        return stripped
 
     def _resolve_api_key(self, profile: dict) -> str | None:
         # Block: AuthRead
