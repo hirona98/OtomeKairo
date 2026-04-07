@@ -164,6 +164,12 @@ class ServiceSpontaneousMixin:
                     observation_event_kind="wake",
                     observation_event_role="system",
                 )
+                self._emit_observation_failure_logs(
+                    cycle_id=cycle_id,
+                    trigger_kind=trigger_kind,
+                    observation_text=observation_text,
+                    failure_reason=str(exc),
+                )
                 return {
                     "cycle_id": cycle_id,
                     "result_kind": "internal_failure",
@@ -349,6 +355,12 @@ class ServiceSpontaneousMixin:
                     trigger_kind="desktop_watch",
                     observation_event_kind="desktop_watch",
                     observation_event_role="system",
+                )
+                self._emit_observation_failure_logs(
+                    cycle_id=cycle_id,
+                    trigger_kind="desktop_watch",
+                    observation_text=observation_text,
+                    failure_reason=str(exc),
                 )
 
     def _future_act_trace_summary(

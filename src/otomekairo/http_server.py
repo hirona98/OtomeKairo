@@ -11,6 +11,9 @@ from otomekairo.service import OtomeKairoService, ServiceError
 
 # Block: Server
 class OtomeKairoHttpServer(ThreadingHTTPServer):
+    # Block: SocketReuse
+    allow_reuse_address = True
+
     def __init__(self, server_address: tuple[str, int], service: OtomeKairoService) -> None:
         # Block: BaseInit
         super().__init__(server_address, OtomeKairoHandler)
@@ -20,6 +23,7 @@ class OtomeKairoHttpServer(ThreadingHTTPServer):
 # Block: Handler
 class OtomeKairoHandler(BaseHTTPRequestHandler):
     server: OtomeKairoHttpServer
+    protocol_version = "HTTP/1.1"
 
     # Block: Methods
     def do_GET(self) -> None:  # noqa: N802
@@ -80,6 +84,9 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
                 return
             if method == "GET" and parsed.path == "/api/events/stream":
                 self._handle_events_stream(token)
+                return
+            if method == "GET" and parsed.path == "/api/logs/stream":
+                self._handle_logs_stream(token)
                 return
 
             # Block: ObservationRoute
@@ -263,6 +270,46 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
         finally:
             # Block: Cleanup
             self.server.service.unregister_event_stream_connection(session_id)
+
+    def _handle_logs_stream(self, token: str | None) -> None:
+        # Block: Authorization
+        self.server.service._require_token(token)
+
+        # Block: Headers
+        upgrade = self.headers.get("Upgrade", "")
+        connection = self.headers.get("Connection", "")
+        websocket_key = self.headers.get("Sec-WebSocket-Key")
+        websocket_version = self.headers.get("Sec-WebSocket-Version")
+        if upgrade.lower() != "websocket" or "upgrade" not in connection.lower():
+            raise ServiceError(400, "invalid_websocket_upgrade", "Upgrade: websocket is required.")
+        if not isinstance(websocket_key, str) or not websocket_key.strip():
+            raise ServiceError(400, "missing_websocket_key", "Sec-WebSocket-Key is required.")
+        if websocket_version != "13":
+            raise ServiceError(400, "invalid_websocket_version", "Sec-WebSocket-Version must be 13.")
+
+        # Block: Handshake
+        accept_value = build_websocket_accept(websocket_key.strip())
+        self.send_response(HTTPStatus.SWITCHING_PROTOCOLS)
+        self.send_header("Upgrade", "websocket")
+        self.send_header("Connection", "Upgrade")
+        self.send_header("Sec-WebSocket-Accept", accept_value)
+        self.end_headers()
+        self.wfile.flush()
+
+        # Block: Connection
+        websocket = ServerWebSocket(self.connection)
+        session_id = self.server.service.register_log_stream_connection(websocket)
+        try:
+            # Block: ReceiveLoop
+            while True:
+                text = websocket.receive_text()
+                if text is None:
+                    break
+        except WebSocketProtocolError:
+            websocket.close()
+        finally:
+            # Block: Cleanup
+            self.server.service.remove_log_stream_connection(session_id)
 
     # Block: RequestHelpers
     def _read_json_body(self) -> dict:

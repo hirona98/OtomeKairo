@@ -48,6 +48,7 @@ API 仕様は、次のように分ける。
 - `design/api/04_列挙とinspection.md`
   - `catalog`
   - `inspection`
+  - `logs/stream`
 
 <!-- Block: UpdateRule -->
 ## 更新ルール

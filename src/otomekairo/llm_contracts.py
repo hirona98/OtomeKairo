@@ -61,6 +61,28 @@ MAX_SECONDARY_INTENTS = 2
 MAX_HINT_SCOPE_VALUES = 4
 
 
+# Block: HelperValidation
+def _validate_exact_keys(value: Any, required_keys: set[str], label: str) -> None:
+    # Block: Shape
+    if not isinstance(value, dict):
+        raise LLMError(f"{label} must be an object.")
+
+    # Block: KeyCheck
+    actual_keys = set(value.keys())
+    if actual_keys == required_keys:
+        return
+
+    # Block: Detail
+    missing_keys = sorted(required_keys - actual_keys)
+    extra_keys = sorted(actual_keys - required_keys)
+    details: list[str] = []
+    if missing_keys:
+        details.append(f"missing={','.join(missing_keys)}")
+    if extra_keys:
+        details.append(f"extra={','.join(extra_keys)}")
+    raise LLMError(f"{label} keys are invalid ({'; '.join(details)}).")
+
+
 # Block: RecallHintValidation
 def validate_recall_hint_contract(payload: dict[str, Any]) -> None:
     # Block: RequiredKeys
@@ -128,8 +150,7 @@ def validate_decision_contract(payload: dict[str, Any]) -> None:
         "requires_confirmation",
         "future_act",
     }
-    if set(payload.keys()) != required_keys:
-        raise LLMError("Decision keys do not match the contract.")
+    _validate_exact_keys(payload, required_keys, "Decision")
 
     # Block: ValueChecks
     if payload["kind"] not in {"reply", "noop", "future_act"}:
@@ -167,8 +188,7 @@ def validate_memory_interpretation_contract(payload: dict[str, Any]) -> None:
         "candidate_memory_units",
         "affect_updates",
     }
-    if set(payload.keys()) != required_keys:
-        raise LLMError("MemoryInterpretation keys do not match the contract.")
+    _validate_exact_keys(payload, required_keys, "MemoryInterpretation")
 
     # Block: EpisodeDigestValidation
     episode_digest = payload["episode_digest"]
@@ -181,8 +201,7 @@ def validate_memory_interpretation_contract(payload: dict[str, Any]) -> None:
         "open_loops",
         "salience",
     }
-    if not isinstance(episode_digest, dict) or set(episode_digest.keys()) != required_episode_keys:
-        raise LLMError("MemoryInterpretation episode_digest is invalid.")
+    _validate_exact_keys(episode_digest, required_episode_keys, "MemoryInterpretation episode_digest")
     if not isinstance(episode_digest["summary_text"], str) or not episode_digest["summary_text"].strip():
         raise LLMError("MemoryInterpretation episode_digest.summary_text is invalid.")
     if episode_digest["outcome_text"] is not None and not isinstance(episode_digest["outcome_text"], str):
@@ -213,8 +232,7 @@ def validate_memory_interpretation_contract(payload: dict[str, Any]) -> None:
             "qualifiers",
             "reason",
         }
-        if not isinstance(candidate, dict) or set(candidate.keys()) != required_candidate_keys:
-            raise LLMError("MemoryInterpretation candidate_memory_unit is invalid.")
+        _validate_exact_keys(candidate, required_candidate_keys, "MemoryInterpretation candidate_memory_unit")
         if candidate["memory_type"] not in MEMORY_TYPE_VALUES:
             raise LLMError("MemoryInterpretation candidate_memory_unit.memory_type is invalid.")
         if candidate["status"] not in MEMORY_STATUS_VALUES:
@@ -257,10 +275,12 @@ def validate_memory_interpretation_contract(payload: dict[str, Any]) -> None:
             "affect_label",
             "intensity",
         }
-        if not isinstance(affect_update, dict) or set(affect_update.keys()) != required_affect_keys:
-            raise LLMError("MemoryInterpretation affect_update is invalid.")
+        _validate_exact_keys(affect_update, required_affect_keys, "MemoryInterpretation affect_update")
         if affect_update["layer"] not in AFFECT_LAYER_VALUES:
-            raise LLMError("MemoryInterpretation affect_update.layer is invalid.")
+            raise LLMError(
+                "MemoryInterpretation affect_update.layer is invalid "
+                f"(got={affect_update['layer']!r}, expected=surface|background)."
+            )
         if not isinstance(affect_update["target_scope_type"], str) or not affect_update["target_scope_type"].strip():
             raise LLMError("MemoryInterpretation affect_update.target_scope_type is invalid.")
         if not isinstance(affect_update["target_scope_key"], str) or not affect_update["target_scope_key"].strip():

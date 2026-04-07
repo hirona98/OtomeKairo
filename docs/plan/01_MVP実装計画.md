@@ -42,6 +42,7 @@
 - 記憶基盤は `SQLite + sqlite-vec` 前提で通っている
 - `turn consolidation`、構造レーン、連想レーン、`event_evidence`、`RecallPack` 接続、`reflective consolidation` の入口まで入っている
 - `RecallHint` は validator 強化と 1 回再試行まで入っている
+- `memory_interpretation` も厳密な構造化契約と 1 回修復再試行で扱っている
 - `secondary_intents` は rerank、section boost、返答方針補助に効く
 - 第三者や固有名は `focus_scopes` ではなく `mentioned_entities` で扱う
 - `future_act` は内部結果として扱え、trace に候補要約を残せる
@@ -51,6 +52,7 @@
 - `desktop_watch` は event stream と capture-response を介して観測源として接続されている
 - `desktop_watch` は `target_client_id` と `vision.desktop` capability を使って対象 console を選べる
 - wake / `desktop_watch` の観測文には `source / active_app / window_title / locale` を正規化して入れられる
+- `logs/stream` があり、`CocoroConsole` のログビューアーへ `Observation / Recall / Decision / Result / Memory` の短い live 要約を流せる
 
 一方で、MVP 全体としてはまだ未完である。
 
@@ -91,6 +93,9 @@
 - `src/otomekairo/event_stream.py`
   - WebSocket frame handling
   - event stream registry
+- `src/otomekairo/log_stream.py`
+  - log stream registry
+  - recent live log replay
 - `src/otomekairo/recall.py`
   - 構造レーン
   - 連想レーン

@@ -217,11 +217,35 @@ class LLMClient:
             },
         ]
 
-        # Block: Completion
-        content = self._complete_text(profile=profile, role_settings=role_settings, messages=messages)
-        payload = self._parse_json_object(content)
-        validate_memory_interpretation_contract(payload)
-        return payload
+        # Block: Retry
+        last_contract_error: LLMError | None = None
+        attempt_messages = list(messages)
+        for attempt in range(2):
+            content = self._complete_text(profile=profile, role_settings=role_settings, messages=attempt_messages)
+            try:
+                payload = self._parse_json_object(content)
+                validate_memory_interpretation_contract(payload)
+                return payload
+            except LLMError as exc:
+                last_contract_error = exc
+                if attempt >= 1:
+                    raise
+                attempt_messages = [
+                    *messages,
+                    {
+                        "role": "assistant",
+                        "content": content,
+                    },
+                    {
+                        "role": "user",
+                        "content": self._build_memory_interpretation_repair_prompt(str(exc)),
+                    },
+                ]
+
+        # Block: Failure
+        if last_contract_error is not None:
+            raise last_contract_error
+        raise LLMError("MemoryInterpretation generation failed without a parseable response.")
 
     def generate_embeddings(
         self,
@@ -478,6 +502,7 @@ class LLMClient:
             "会話 1 サイクルから episode_digest, candidate_memory_units, affect_updates を抽出し、JSON オブジェクト 1 個だけを返してください。\n"
             "Markdown、コードフェンス、説明文は禁止です。\n"
             "返すトップレベルキーは episode_digest, candidate_memory_units, affect_updates の 3 つだけです。\n"
+            "キー名は完全一致させ、余計なキーを足してはいけません。\n"
             "candidate_memory_units は、今後の会話や判断に効く継続理解だけを入れてください。\n"
             "弱い雑談断片や一時判断は memory_unit にしないでください。\n"
             "明示された生活状況、習慣、役割、現在の継続状態は fact を優先してください。\n"
@@ -489,8 +514,28 @@ class LLMClient:
             "memory_type は fact, preference, relation, commitment, interpretation, summary のいずれかです。\n"
             "status は inferred, confirmed, superseded, revoked, dormant のいずれかです。\n"
             "commitment_state は commitment のときだけ open, waiting_confirmation, on_hold, done, cancelled のいずれかを使い、それ以外では null にしてください。\n"
+            "episode_digest は episode_type, primary_scope_type, primary_scope_key, summary_text, outcome_text, open_loops, salience の 7 キーだけを持つ object にしてください。\n"
+            "candidate_memory_units の各要素は memory_type, scope_type, scope_key, subject_ref, predicate, object_ref_or_value, summary_text, status, commitment_state, confidence, salience, valid_from, valid_to, qualifiers, reason の 15 キーだけを持つ object にしてください。\n"
+            "affect_updates の各要素は layer, target_scope_type, target_scope_key, affect_label, intensity の 5 キーだけを持つ object にしてください。\n"
+            "affect_updates.layer は surface または background のどちらかだけを使ってください。\n"
+            "感情更新に自信がない場合や、軽い雑談で持続的な感情状態が読めない場合は affect_updates を空配列にしてください。\n"
             "episode_digest.open_loops は短い文字列の配列にしてください。\n"
-            "affect_updates は必要なときだけ返し、不要なら空配列にしてください。"
+            "outcome_text, object_ref_or_value, valid_from, valid_to は不要なら null を入れてください。\n"
+            "candidate_memory_units と affect_updates は不要なら空配列にしてください。\n"
+            "例:\n"
+            "{\n"
+            '  "episode_digest": {\n'
+            '    "episode_type": "conversation",\n'
+            '    "primary_scope_type": "user",\n'
+            '    "primary_scope_key": "user:default",\n'
+            '    "summary_text": "ユーザーが軽いテスト発話をした。",\n'
+            '    "outcome_text": null,\n'
+            '    "open_loops": [],\n'
+            '    "salience": 0.35\n'
+            "  },\n"
+            '  "candidate_memory_units": [],\n'
+            '  "affect_updates": []\n'
+            "}"
         )
 
     def _build_memory_interpretation_user_prompt(
@@ -512,6 +557,21 @@ class LLMClient:
             f"{json.dumps(decision, ensure_ascii=False)}\n"
             "reply_text:\n"
             f"{reply_text or '(none)'}\n"
+        )
+
+    def _build_memory_interpretation_repair_prompt(self, validation_error: str) -> str:
+        # Block: Prompt
+        return (
+            "前回の出力は memory_interpretation 契約を満たしていませんでした。\n"
+            f"validator_error: {validation_error}\n"
+            "同じ意味を保ったまま、JSON オブジェクト 1 個だけを返し直してください。\n"
+            "トップレベルキーは episode_digest, candidate_memory_units, affect_updates の 3 つだけです。\n"
+            "episode_digest には episode_type, primary_scope_type, primary_scope_key, summary_text, outcome_text, open_loops, salience だけを入れてください。\n"
+            "candidate_memory_units の各要素には memory_type, scope_type, scope_key, subject_ref, predicate, object_ref_or_value, summary_text, status, commitment_state, confidence, salience, valid_from, valid_to, qualifiers, reason だけを入れてください。\n"
+            "affect_updates の各要素には layer, target_scope_type, target_scope_key, affect_label, intensity だけを入れてください。\n"
+            "affect_updates.layer は surface または background だけです。\n"
+            "感情更新に自信がないなら affect_updates は空配列にしてください。\n"
+            "余計なキー、説明文、Markdown、コードフェンスは禁止です。"
         )
 
     def _parse_recall_hint_payload(self, content: str) -> dict[str, Any]:

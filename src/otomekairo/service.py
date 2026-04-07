@@ -9,6 +9,7 @@ from typing import Any
 
 from otomekairo.event_stream import EventStreamRegistry
 from otomekairo.llm import LLMClient, LLMError
+from otomekairo.log_stream import LogStreamRegistry
 from otomekairo.memory import MemoryConsolidator
 from otomekairo.recall import RecallBuilder
 from otomekairo.service_common import ServiceError
@@ -43,6 +44,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         self._background_desktop_watch_stop_event: threading.Event | None = None
         self._background_desktop_watch_thread: threading.Thread | None = None
         self._event_stream_registry = EventStreamRegistry()
+        self._log_stream_registry = LogStreamRegistry()
         self._vision_capture_lock = threading.RLock()
         self._pending_vision_capture_requests: dict[str, dict[str, Any]] = {}
         self._stream_event_lock = threading.Lock()
@@ -167,6 +169,12 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
                 runtime_summary=runtime_summary,
                 observation_text=observation_text,
                 client_context=client_context,
+                failure_reason=str(exc),
+            )
+            self._emit_observation_failure_logs(
+                cycle_id=cycle_id,
+                trigger_kind="user_message",
+                observation_text=observation_text,
                 failure_reason=str(exc),
             )
             return {
@@ -371,6 +379,16 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             observation_event_role=observation_event_role,
         )
 
+        # Block: DebugLogs
+        self._emit_observation_success_logs(
+            cycle_id=cycle_id,
+            trigger_kind=trigger_kind,
+            observation_text=observation_text,
+            pipeline=pipeline,
+            result_kind=result_kind,
+            reply_payload=reply_payload,
+        )
+
         # Block: MemoryTrace
         if consolidate_memory:
             self._finalize_memory_trace(
@@ -383,6 +401,10 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             )
         else:
             self._update_cycle_trace_memory_trace(
+                cycle_id=cycle_id,
+                memory_trace=self._skipped_memory_trace("wake_cycle"),
+            )
+            self._emit_memory_trace_logs(
                 cycle_id=cycle_id,
                 memory_trace=self._skipped_memory_trace("wake_cycle"),
             )
@@ -439,6 +461,9 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
 
         # Block: MemoryTraceUpdate
         self._update_cycle_trace_memory_trace(cycle_id=cycle_id, memory_trace=memory_trace)
+
+        # Block: DebugLogs
+        self._emit_memory_trace_logs(cycle_id=cycle_id, memory_trace=memory_trace)
 
     def _failed_memory_trace(self, failure_reason: str) -> dict[str, Any]:
         # Block: Result
@@ -524,6 +549,14 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
 
         raise ServiceError(404, "cycle_not_found", "The requested cycle_id does not exist.")
 
+    def register_log_stream_connection(self, websocket: Any) -> str:
+        # Block: Result
+        return self._log_stream_registry.add_connection(websocket)
+
+    def remove_log_stream_connection(self, session_id: str) -> None:
+        # Block: Remove
+        self._log_stream_registry.remove_connection(session_id)
+
     # Block: Helpers
     def _require_token(self, token: str | None) -> dict:
         # Block: LoadState
@@ -555,6 +588,204 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             "event_evidence": len(recall_pack["event_evidence"]),
             "conflicts": len(recall_pack["conflicts"]),
         }
+
+    def _emit_observation_success_logs(
+        self,
+        *,
+        cycle_id: str,
+        trigger_kind: str,
+        observation_text: str,
+        pipeline: dict[str, Any],
+        result_kind: str,
+        reply_payload: dict[str, Any] | None,
+    ) -> None:
+        # Block: RecallLists
+        recall_hint = pipeline["recall_hint"]
+        recall_pack = pipeline["recall_pack"]
+        decision = pipeline["decision"]
+        association_memory_ids = set(recall_pack["association_selected_memory_ids"])
+        association_digest_ids = set(recall_pack["association_selected_episode_digest_ids"])
+        structured_memory_ids = [
+            memory_id for memory_id in recall_pack["selected_memory_ids"] if memory_id not in association_memory_ids
+        ]
+        structured_digest_ids = [
+            digest_id
+            for digest_id in recall_pack["selected_episode_digest_ids"]
+            if digest_id not in association_digest_ids
+        ]
+
+        # Block: Logs
+        logs = [
+            self._build_live_log_record(
+                level="INFO",
+                component="Observation",
+                message=(
+                    f"{self._short_cycle_id(cycle_id)} trigger={trigger_kind} "
+                    f"input={self._clamp(observation_text)}"
+                ),
+            ),
+            self._build_live_log_record(
+                level="INFO",
+                component="RecallHint",
+                message=(
+                    f"{self._short_cycle_id(cycle_id)} primary={recall_hint['primary_intent']} "
+                    f"secondary={self._format_list_for_log(recall_hint['secondary_intents'])} "
+                    f"time={recall_hint['time_reference']} confidence={recall_hint['confidence']}"
+                ),
+            ),
+            self._build_live_log_record(
+                level="INFO",
+                component="RecallStructured",
+                message=(
+                    f"{self._short_cycle_id(cycle_id)} "
+                    f"memory_units={self._format_id_list_for_log(structured_memory_ids)} "
+                    f"episode_digests={self._format_id_list_for_log(structured_digest_ids)}"
+                ),
+            ),
+            self._build_live_log_record(
+                level="INFO",
+                component="RecallAssociation",
+                message=(
+                    f"{self._short_cycle_id(cycle_id)} "
+                    f"memory_units={self._format_id_list_for_log(recall_pack['association_selected_memory_ids'])} "
+                    f"episode_digests={self._format_id_list_for_log(recall_pack['association_selected_episode_digest_ids'])}"
+                ),
+            ),
+            self._build_live_log_record(
+                level="INFO",
+                component="RecallResult",
+                message=(
+                    f"{self._short_cycle_id(cycle_id)} candidates={recall_pack['candidate_count']} "
+                    f"adopted={self._clamp(self._recall_adopted_reason_summary(recall_pack))}"
+                ),
+            ),
+            self._build_live_log_record(
+                level="INFO",
+                component="Decision",
+                message=(
+                    f"{self._short_cycle_id(cycle_id)} kind={decision['kind']} "
+                    f"reason={self._clamp(decision['reason_summary'])}"
+                ),
+            ),
+            self._build_live_log_record(
+                level="INFO",
+                component="Result",
+                message=(
+                    f"{self._short_cycle_id(cycle_id)} result={result_kind} "
+                    f"reply={self._clamp(reply_payload['reply_text']) if reply_payload else '-'}"
+                ),
+            ),
+        ]
+        self._log_stream_registry.append_logs(logs)
+
+    def _emit_observation_failure_logs(
+        self,
+        *,
+        cycle_id: str,
+        trigger_kind: str,
+        observation_text: str,
+        failure_reason: str,
+    ) -> None:
+        # Block: Logs
+        logs = [
+            self._build_live_log_record(
+                level="INFO",
+                component="Observation",
+                message=(
+                    f"{self._short_cycle_id(cycle_id)} trigger={trigger_kind} "
+                    f"input={self._clamp(observation_text)}"
+                ),
+            ),
+            self._build_live_log_record(
+                level="ERROR",
+                component="Failure",
+                message=(
+                    f"{self._short_cycle_id(cycle_id)} internal_failure "
+                    f"reason={self._clamp(failure_reason)}"
+                ),
+            ),
+        ]
+        self._log_stream_registry.append_logs(logs)
+
+    def _emit_memory_trace_logs(self, *, cycle_id: str, memory_trace: dict[str, Any]) -> None:
+        # Block: Status
+        status = str(memory_trace.get("turn_consolidation_status", "unknown"))
+        if status == "failed":
+            level = "WARNING"
+            message = (
+                f"{self._short_cycle_id(cycle_id)} status=failed "
+                f"reason={self._clamp(str(memory_trace.get('failure_reason') or '-'))}"
+            )
+        elif status == "skipped":
+            level = "INFO"
+            message = (
+                f"{self._short_cycle_id(cycle_id)} status=skipped "
+                f"reason={self._clamp(str(memory_trace.get('skip_reason') or '-'))}"
+            )
+        else:
+            message = (
+                f"{self._short_cycle_id(cycle_id)} status={status} "
+                f"episode_digest={memory_trace.get('episode_digest_id') or '-'} "
+                f"memory_actions={memory_trace.get('memory_action_count', 0)} "
+                f"affect_updates={memory_trace.get('affect_update_count', 0)}"
+            )
+            reflective = memory_trace.get("reflective_consolidation") or {}
+            if reflective.get("started"):
+                message += f" reflection={reflective.get('result_status', 'unknown')}"
+            level = "INFO"
+
+        # Block: Emit
+        self._log_stream_registry.append_logs(
+            [
+                self._build_live_log_record(
+                    level=level,
+                    component="Memory",
+                    message=message,
+                )
+            ]
+        )
+
+    def _build_live_log_record(self, *, level: str, component: str, message: str) -> dict[str, Any]:
+        # Block: Result
+        return {
+            "ts": self._now_iso(),
+            "level": level,
+            "logger": component,
+            "msg": message,
+        }
+
+    def _short_cycle_id(self, cycle_id: str) -> str:
+        # Block: Empty
+        if ":" not in cycle_id:
+            return cycle_id[:12]
+
+        # Block: Result
+        return cycle_id.split(":", 1)[1][:12]
+
+    def _format_list_for_log(self, values: list[Any]) -> str:
+        # Block: Empty
+        if not values:
+            return "-"
+
+        # Block: Result
+        return ",".join(str(value) for value in values[:3])
+
+    def _format_id_list_for_log(self, values: list[str]) -> str:
+        # Block: Empty
+        if not values:
+            return "-"
+
+        # Block: Result
+        return ",".join(self._short_identifier(value) for value in values[:3])
+
+    def _short_identifier(self, value: str) -> str:
+        # Block: Empty
+        if ":" not in value:
+            return value[:18]
+
+        # Block: Result
+        prefix, suffix = value.split(":", 1)
+        return f"{prefix}:{suffix[:8]}"
 
     def _external_result_kind(self, internal_result_kind: str) -> str:
         # Block: Mapping

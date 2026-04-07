@@ -105,6 +105,20 @@ MVP の `desktop_watch` では、通常の request/response API とは別に、s
 この面は、詳細ログの常時ストリーミングではない。
 OtomeKairo が必要なときだけ command を出し、クライアントが必要最小の応答を返すための運用面である。
 
+<!-- Block: DebugStreamSurface -->
+## debug stream 面
+
+MVP では、`CocoroConsole` のログビューアー向けに、inspection 面とは別の debug stream を持ってよい。
+
+ここで扱うのは次である。
+
+- `logs/stream`
+  - OtomeKairo が判断サイクルの短い段階要約ログを流す
+
+この面は、通常 API の代替ではない。
+また、完全な生ログや LLM の長い思考過程を流す面でもない。
+`recall`、`decision`、`memory` の採用結果を短い構造化ログとして live に観測するための補助面である。
+
 <!-- Block: ConfigSurface -->
 ## 設定を読む / 変える面
 
@@ -170,10 +184,11 @@ MVP では、次は API の主対象にしない。
 
 - 記憶内部テーブルの直接操作
 - 外界行動の複雑な実行要求
-- 詳細ログの常時ストリーミング
 - クライアント側が正本を持つ同期方式
 - リクエストごとの `model` 文字列上書き
 - HTTPS 以外での設定 API 通信
+
+ただし、`logs/stream` のような debug 専用の短い段階要約 stream は、この非目標に含めない。
 
 これらは最初の API 概念には含めない。
 

@@ -10,6 +10,7 @@
 - `GET /api/catalog`
 - `GET /api/inspection/cycle-summaries`
 - `GET /api/inspection/cycles/{cycle_id}`
+- `GET /api/logs/stream`
 
 共通ルールは `00_API仕様ガイド.md` を正とする。
 
@@ -114,3 +115,37 @@ response:
 | HTTP | `error.code` | 意味 |
 |------|--------------|------|
 | `404` | `cycle_not_found` | 指定した `cycle_id` が存在しない |
+
+### `GET /api/logs/stream`
+
+- 認証: 必要
+- 役割: `CocoroConsole` のログビューアー向けに、判断サイクルの短い段階要約ログを WebSocket で流す
+- client から送る message は不要
+- 接続時には、直近の短いログが replay されてよい
+
+message shape:
+
+```json
+[
+  {
+    "ts": "2026-04-06T00:00:00+00:00",
+    "level": "INFO",
+    "logger": "RecallStructured",
+    "msg": "cf09b49a3ce1 memory_units=memory_unit:1234abcd episode_digests=episode_digest:5678efgh"
+  }
+]
+```
+
+`logger` には少なくとも次を流してよい。
+
+- `Observation`
+- `RecallHint`
+- `RecallStructured`
+- `RecallAssociation`
+- `RecallResult`
+- `Decision`
+- `Result`
+- `Memory`
+
+ここで流すのは live 表示向けの派生ログであり、inspection の正本ではない。
+完全な prompt、生の LLM 応答全文、長い思考過程は流さない。
