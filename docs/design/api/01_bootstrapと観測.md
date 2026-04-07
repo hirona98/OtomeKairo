@@ -1,6 +1,6 @@
 # bootstrapと観測
 
-<!-- Block: Role -->
+<!-- Role -->
 ## この文書の役割
 
 この文書は、bootstrap 面と通常の観測面の厳密な API 仕様を定める。
@@ -13,7 +13,7 @@
 
 共通ルールは `00_API仕様ガイド.md` を正とする。
 
-<!-- Block: Bootstrap -->
+<!-- Bootstrap -->
 ## bootstrap 面
 
 ### `GET /api/bootstrap/probe`
@@ -91,7 +91,7 @@ response:
 }
 ```
 
-<!-- Block: Observation -->
+<!-- Observation -->
 ## 観測面
 
 ### `POST /api/observations/conversation`

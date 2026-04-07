@@ -11,10 +11,10 @@ from otomekairo.memory_vector import MemoryVectorIndexer
 from otomekairo.store import FileStore
 
 
-# Block: Consolidator
+# Consolidator
 class MemoryConsolidator:
     def __init__(self, *, store: FileStore, llm: LLMClient) -> None:
-        # Block: Dependencies
+        # Dependencies
         self.store = store
         self.llm = llm
         self.action_resolver = MemoryActionResolver(store=store)
@@ -37,7 +37,7 @@ class MemoryConsolidator:
         reply_payload: dict[str, Any] | None,
         events: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        # Block: MemoryToggle
+        # MemoryToggle
         if not state.get("memory_enabled", True):
             return {
                 "turn_consolidation_status": "disabled",
@@ -54,13 +54,13 @@ class MemoryConsolidator:
                 },
             }
 
-        # Block: ModelSelection
+        # ModelSelection
         selected_preset = state["model_presets"][state["selected_model_preset_id"]]
         memory_role = selected_preset["roles"]["memory_interpretation"]
         memory_profile_id = memory_role["model_profile_id"]
         memory_profile = state["model_profiles"][memory_profile_id]
 
-        # Block: Interpretation
+        # Interpretation
         interpretation = self.llm.generate_memory_interpretation(
             profile=memory_profile,
             role_settings=memory_role,
@@ -71,7 +71,7 @@ class MemoryConsolidator:
             current_time=finished_at,
         )
 
-        # Block: EpisodeDigest
+        # EpisodeDigest
         selected_memory_set_id = state["selected_memory_set_id"]
         event_ids = [event["event_id"] for event in events]
         episode_digest = self._build_episode_digest(
@@ -82,7 +82,7 @@ class MemoryConsolidator:
             payload=interpretation["episode_digest"],
         )
 
-        # Block: MemoryActions
+        # MemoryActions
         memory_actions: list[dict[str, Any]] = []
         for candidate in interpretation["candidate_memory_units"]:
             memory_actions.extend(
@@ -95,7 +95,7 @@ class MemoryConsolidator:
                 )
             )
 
-        # Block: AffectUpdates
+        # AffectUpdates
         affect_updates = [
             self._build_affect_update(
                 memory_set_id=selected_memory_set_id,
@@ -105,14 +105,14 @@ class MemoryConsolidator:
             for affect_update in interpretation["affect_updates"]
         ]
 
-        # Block: Persistence
+        # Persistence
         self.store.persist_turn_consolidation(
             episode_digest=episode_digest,
             memory_actions=memory_actions,
             affect_updates=affect_updates,
         )
 
-        # Block: VectorIndex
+        # VectorIndex
         self.vector_indexer.sync(
             state=state,
             finished_at=finished_at,
@@ -120,7 +120,7 @@ class MemoryConsolidator:
             memory_actions=memory_actions,
         )
 
-        # Block: ReflectiveConsolidation
+        # ReflectiveConsolidation
         reflective_result = self.reflective.run(
             state=state,
             finished_at=finished_at,
@@ -128,7 +128,7 @@ class MemoryConsolidator:
             memory_actions=memory_actions,
         )
 
-        # Block: Result
+        # Result
         return {
             "turn_consolidation_status": "succeeded",
             "episode_digest_id": episode_digest["episode_digest_id"],
@@ -147,7 +147,7 @@ class MemoryConsolidator:
         event_ids: list[str],
         payload: dict[str, Any],
     ) -> dict[str, Any]:
-        # Block: Record
+        # Record
         return {
             "episode_digest_id": f"episode_digest:{uuid.uuid4().hex}",
             "cycle_id": cycle_id,
@@ -170,7 +170,7 @@ class MemoryConsolidator:
         finished_at: str,
         payload: dict[str, Any],
     ) -> dict[str, Any]:
-        # Block: Record
+        # Record
         return {
             "affect_state_id": f"affect_state:{uuid.uuid4().hex}",
             "memory_set_id": memory_set_id,

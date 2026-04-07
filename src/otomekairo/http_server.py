@@ -9,23 +9,23 @@ from otomekairo.event_stream import ServerWebSocket, WebSocketProtocolError, bui
 from otomekairo.service import OtomeKairoService, ServiceError
 
 
-# Block: Server
+# Server
 class OtomeKairoHttpServer(ThreadingHTTPServer):
-    # Block: SocketReuse
+    # SocketReuse
     allow_reuse_address = True
 
     def __init__(self, server_address: tuple[str, int], service: OtomeKairoService) -> None:
-        # Block: BaseInit
+        # BaseInit
         super().__init__(server_address, OtomeKairoHandler)
         self.service = service
 
 
-# Block: Handler
+# Handler
 class OtomeKairoHandler(BaseHTTPRequestHandler):
     server: OtomeKairoHttpServer
     protocol_version = "HTTP/1.1"
 
-    # Block: Methods
+    # Methods
     def do_GET(self) -> None:  # noqa: N802
         self._dispatch("GET")
 
@@ -41,18 +41,18 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
     def do_DELETE(self) -> None:  # noqa: N802
         self._dispatch("DELETE")
 
-    # Block: Logging
+    # Logging
     def log_message(self, format: str, *args) -> None:  # noqa: A003
         return
 
-    # Block: Dispatcher
+    # Dispatcher
     def _dispatch(self, method: str) -> None:
         try:
             parsed = urlparse(self.path)
             query = parse_qs(parsed.query)
             token = self._bearer_token()
 
-            # Block: BootstrapRoutes
+            # BootstrapRoutes
             if method == "GET" and parsed.path == "/api/bootstrap/probe":
                 self._write_success(HTTPStatus.OK, self.server.service.probe_bootstrap())
                 return
@@ -69,7 +69,7 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
                 )
                 return
 
-            # Block: ReadRoutes
+            # ReadRoutes
             if method == "GET" and parsed.path == "/api/status":
                 self._write_success(HTTPStatus.OK, self.server.service.get_status(token))
                 return
@@ -89,7 +89,7 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
                 self._handle_logs_stream(token)
                 return
 
-            # Block: ObservationRoute
+            # ObservationRoute
             if method == "POST" and parsed.path == "/api/observations/conversation":
                 payload = self._read_json_body()
                 self._write_success(HTTPStatus.OK, self.server.service.observe_conversation(token, payload))
@@ -106,7 +106,7 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
                 )
                 return
 
-            # Block: ConfigRoutes
+            # ConfigRoutes
             if method == "POST" and parsed.path == "/api/config/select-persona":
                 payload = self._read_json_body()
                 self._write_success(
@@ -208,7 +208,7 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
                 self._write_success(HTTPStatus.OK, self.server.service.delete_model_profile(token, model_profile_id))
                 return
 
-            # Block: InspectionRoutes
+            # InspectionRoutes
             if method == "GET" and parsed.path == "/api/inspection/cycle-summaries":
                 limit = int(query.get("limit", ["20"])[0])
                 self._write_success(
@@ -221,7 +221,7 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
                 self._write_success(HTTPStatus.OK, self.server.service.get_cycle_trace(token, cycle_id))
                 return
 
-            # Block: NotFound
+            # NotFound
             raise ServiceError(404, "route_not_found", "The requested route does not exist.")
         except json.JSONDecodeError:
             self._write_error(HTTPStatus.BAD_REQUEST, "invalid_json", "The request body must be valid JSON.")
@@ -231,10 +231,10 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
             self._write_error(HTTPStatus.INTERNAL_SERVER_ERROR, "internal_server_error", str(exc))
 
     def _handle_events_stream(self, token: str | None) -> None:
-        # Block: Authorization
+        # Authorization
         self.server.service._require_token(token)
 
-        # Block: Headers
+        # Headers
         upgrade = self.headers.get("Upgrade", "")
         connection = self.headers.get("Connection", "")
         websocket_key = self.headers.get("Sec-WebSocket-Key")
@@ -246,7 +246,7 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
         if websocket_version != "13":
             raise ServiceError(400, "invalid_websocket_version", "Sec-WebSocket-Version must be 13.")
 
-        # Block: Handshake
+        # Handshake
         accept_value = build_websocket_accept(websocket_key.strip())
         self.send_response(HTTPStatus.SWITCHING_PROTOCOLS)
         self.send_header("Upgrade", "websocket")
@@ -255,11 +255,11 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.flush()
 
-        # Block: Connection
+        # Connection
         websocket = ServerWebSocket(self.connection)
         session_id = self.server.service.register_event_stream_connection(websocket)
         try:
-            # Block: ReceiveLoop
+            # ReceiveLoop
             while True:
                 payload = websocket.receive_json()
                 if payload is None:
@@ -268,14 +268,14 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
         except (json.JSONDecodeError, ServiceError, ValueError, WebSocketProtocolError):
             websocket.close()
         finally:
-            # Block: Cleanup
+            # Cleanup
             self.server.service.unregister_event_stream_connection(session_id)
 
     def _handle_logs_stream(self, token: str | None) -> None:
-        # Block: Authorization
+        # Authorization
         self.server.service._require_token(token)
 
-        # Block: Headers
+        # Headers
         upgrade = self.headers.get("Upgrade", "")
         connection = self.headers.get("Connection", "")
         websocket_key = self.headers.get("Sec-WebSocket-Key")
@@ -287,7 +287,7 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
         if websocket_version != "13":
             raise ServiceError(400, "invalid_websocket_version", "Sec-WebSocket-Version must be 13.")
 
-        # Block: Handshake
+        # Handshake
         accept_value = build_websocket_accept(websocket_key.strip())
         self.send_response(HTTPStatus.SWITCHING_PROTOCOLS)
         self.send_header("Upgrade", "websocket")
@@ -296,11 +296,11 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.flush()
 
-        # Block: Connection
+        # Connection
         websocket = ServerWebSocket(self.connection)
         session_id = self.server.service.register_log_stream_connection(websocket)
         try:
-            # Block: ReceiveLoop
+            # ReceiveLoop
             while True:
                 text = websocket.receive_text()
                 if text is None:
@@ -308,10 +308,10 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
         except WebSocketProtocolError:
             websocket.close()
         finally:
-            # Block: Cleanup
+            # Cleanup
             self.server.service.remove_log_stream_connection(session_id)
 
-    # Block: RequestHelpers
+    # RequestHelpers
     def _read_json_body(self) -> dict:
         length = int(self.headers.get("Content-Length", "0"))
         raw_body = self.rfile.read(length) if length > 0 else b"{}"
@@ -328,7 +328,7 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
             return None
         return authorization.removeprefix("Bearer ").strip()
 
-    # Block: ResponseHelpers
+    # ResponseHelpers
     def _write_success(self, status: int, data: dict) -> None:
         payload = {
             "ok": True,

@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-# Block: Paths
+# Paths
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 VENV_DIR="${REPO_ROOT}/.venv"
@@ -11,23 +11,23 @@ DATA_DIR="${REPO_ROOT}/var/otomekairo"
 CERT_FILE="${TLS_DIR}/cert.pem"
 KEY_FILE="${TLS_DIR}/key.pem"
 
-# Block: VenvCheck
+# VenvCheck
 if [[ ! -x "${VENV_DIR}/bin/python" ]]; then
   echo ".venv がありません。先に ./scripts/setup_venv.sh を実行してください。" >&2
   exit 1
 fi
 
-# Block: OpenSSLCheck
+# OpenSSLCheck
 if ! command -v openssl >/dev/null 2>&1; then
   echo "openssl が見つかりません。" >&2
   exit 1
 fi
 
-# Block: DirectorySetup
+# DirectorySetup
 mkdir -p "${TLS_DIR}"
 mkdir -p "${DATA_DIR}"
 
-# Block: PortCheck
+# PortCheck
 if command -v ss >/dev/null 2>&1; then
   if ss -ltn | grep -q ":${OTOMEKAIRO_PORT:-8443}\\b"; then
     echo "ポート ${OTOMEKAIRO_PORT:-8443} は使用中です。既存プロセスを止めるか、OTOMEKAIRO_PORT を変更してください。" >&2
@@ -35,7 +35,7 @@ if command -v ss >/dev/null 2>&1; then
   fi
 fi
 
-# Block: DevCertificate
+# DevCertificate
 if [[ ! -f "${CERT_FILE}" || ! -f "${KEY_FILE}" ]]; then
   openssl req \
     -x509 \
@@ -47,7 +47,7 @@ if [[ ! -f "${CERT_FILE}" || ! -f "${KEY_FILE}" ]]; then
     -subj "/CN=127.0.0.1"
 fi
 
-# Block: ServerRun
+# ServerRun
 export OTOMEKAIRO_HOST="${OTOMEKAIRO_HOST:-127.0.0.1}"
 export OTOMEKAIRO_PORT="${OTOMEKAIRO_PORT:-55601}"
 export OTOMEKAIRO_TLS_CERT_FILE="${OTOMEKAIRO_TLS_CERT_FILE:-${CERT_FILE}}"

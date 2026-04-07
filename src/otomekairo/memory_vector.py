@@ -8,10 +8,10 @@ from otomekairo.memory_utils import normalized_text_list
 from otomekairo.store import FileStore
 
 
-# Block: Indexer
+# Indexer
 class MemoryVectorIndexer:
     def __init__(self, *, store: FileStore, llm: LLMClient) -> None:
-        # Block: Dependencies
+        # Dependencies
         self.store = store
         self.llm = llm
 
@@ -23,7 +23,7 @@ class MemoryVectorIndexer:
         episode_digest: dict[str, Any] | None,
         memory_actions: list[dict[str, Any]],
     ) -> None:
-        # Block: EmbeddingRole
+        # EmbeddingRole
         selected_preset = state["model_presets"][state["selected_model_preset_id"]]
         embedding_role = selected_preset["roles"]["embedding"]
         embedding_profile_id = embedding_role["model_profile_id"]
@@ -31,7 +31,7 @@ class MemoryVectorIndexer:
         embedding_dimension = embedding_role["embedding_dimension"]
         embedding_preset = self._embedding_preset(embedding_profile_id, embedding_dimension)
 
-        # Block: Sources
+        # Sources
         entries = self._build_vector_index_entries(
             finished_at=finished_at,
             embedding_preset=embedding_preset,
@@ -41,14 +41,14 @@ class MemoryVectorIndexer:
         if not entries:
             return
 
-        # Block: Embeddings
+        # Embeddings
         embeddings = self.llm.generate_embeddings(
             profile=embedding_profile,
             role_settings=embedding_role,
             texts=[entry["source_text"] for entry in entries],
         )
 
-        # Block: Payloads
+        # Payloads
         payloads = [
             {
                 **entry,
@@ -57,7 +57,7 @@ class MemoryVectorIndexer:
             for entry, embedding in zip(entries, embeddings, strict=True)
         ]
 
-        # Block: Persist
+        # Persist
         self.store.upsert_vector_index_entries(
             entries=payloads,
             embedding_dimension=embedding_dimension,
@@ -71,11 +71,11 @@ class MemoryVectorIndexer:
         episode_digest: dict[str, Any] | None,
         memory_actions: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        # Block: State
+        # State
         entries: list[dict[str, Any]] = []
         seen_source_ids: set[tuple[str, str]] = set()
 
-        # Block: EpisodeDigest
+        # EpisodeDigest
         if episode_digest is not None:
             episode_entry = self._vector_entry_for_episode_digest(
                 finished_at=finished_at,
@@ -86,7 +86,7 @@ class MemoryVectorIndexer:
                 entries.append(episode_entry)
                 seen_source_ids.add(("episode_digest", episode_digest["episode_digest_id"]))
 
-        # Block: MemoryUnits
+        # MemoryUnits
         for action in memory_actions:
             memory_unit = action.get("memory_unit")
             if not isinstance(memory_unit, dict):
@@ -104,7 +104,7 @@ class MemoryVectorIndexer:
             entries.append(memory_entry)
             seen_source_ids.add(source_key)
 
-        # Block: Result
+        # Result
         return entries
 
     def _vector_entry_for_episode_digest(
@@ -114,12 +114,12 @@ class MemoryVectorIndexer:
         embedding_preset: str,
         record: dict[str, Any],
     ) -> dict[str, Any] | None:
-        # Block: SourceText
+        # SourceText
         source_text = self._episode_digest_source_text(record)
         if not source_text:
             return None
 
-        # Block: Entry
+        # Entry
         return {
             "memory_set_id": record["memory_set_id"],
             "source_kind": "episode_digest",
@@ -143,12 +143,12 @@ class MemoryVectorIndexer:
         embedding_preset: str,
         record: dict[str, Any],
     ) -> dict[str, Any] | None:
-        # Block: SourceText
+        # SourceText
         source_text = record.get("summary_text", "").strip()
         if not source_text:
             return None
 
-        # Block: Entry
+        # Entry
         return {
             "memory_set_id": record["memory_set_id"],
             "source_kind": "memory_unit",
@@ -166,20 +166,20 @@ class MemoryVectorIndexer:
         }
 
     def _episode_digest_source_text(self, record: dict[str, Any]) -> str:
-        # Block: Parts
+        # Parts
         parts: list[str] = [record.get("summary_text", "").strip()]
         outcome_text = record.get("outcome_text")
         if isinstance(outcome_text, str) and outcome_text.strip():
             parts.append(outcome_text.strip())
         parts.extend(normalized_text_list(record.get("open_loops", []), limit=4))
 
-        # Block: Result
+        # Result
         return "\n".join(part for part in parts if part)
 
     def _embedding_preset(self, embedding_profile_id: str, embedding_dimension: int) -> str:
-        # Block: Identifier
+        # Identifier
         return f"{embedding_profile_id}:dim{embedding_dimension}"
 
     def _text_hash(self, value: str) -> str:
-        # Block: Hash
+        # Hash
         return hashlib.sha256(value.encode("utf-8")).hexdigest()

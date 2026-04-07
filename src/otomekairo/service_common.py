@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 
-# Block: Constants
+# Constants
 REQUIRED_ROLE_NAMES = {
     "reply_generation": "generation",
     "decision_generation": "generation",
@@ -17,7 +17,7 @@ BACKGROUND_DESKTOP_WATCH_POLL_SECONDS = 5.0
 DESKTOP_WATCH_CAPTURE_TIMEOUT_MS = 5000
 
 
-# Block: Errors
+# Errors
 class ServiceError(Exception):
     def __init__(self, status_code: int, error_code: str, message: str) -> None:
         super().__init__(message)

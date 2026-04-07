@@ -12,7 +12,7 @@ from otomekairo.memory_utils import (
 from otomekairo.store import FileStore
 
 
-# Block: Constants
+# Constants
 NO_WRITE_CONFIDENCE_FLOOR = 0.35
 NO_WRITE_SALIENCE_FLOOR = 0.2
 INTERPRETATION_CONFIDENCE_FLOOR = 0.58
@@ -39,10 +39,10 @@ PARALLEL_MEMORY_TYPES = {
 }
 
 
-# Block: Resolver
+# Resolver
 class MemoryActionResolver:
     def __init__(self, *, store: FileStore) -> None:
-        # Block: Dependencies
+        # Dependencies
         self.store = store
 
     def resolve_memory_actions(
@@ -54,12 +54,12 @@ class MemoryActionResolver:
         cycle_ids: list[str],
         candidate: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        # Block: Candidate
+        # Candidate
         normalized_candidate = self._normalized_candidate(candidate)
         if self._should_noop_candidate(normalized_candidate):
             return []
 
-        # Block: Lookup
+        # Lookup
         matches = self._ordered_matches(
             self.store.find_memory_units_for_compare(
                 memory_set_id=memory_set_id,
@@ -71,7 +71,7 @@ class MemoryActionResolver:
             )
         )
 
-        # Block: SpecialStatus
+        # SpecialStatus
         if normalized_candidate["status"] == "revoked":
             return self._resolve_revoke_request(
                 memory_set_id=memory_set_id,
@@ -91,11 +91,11 @@ class MemoryActionResolver:
                 matches=matches,
             )
 
-        # Block: MatchSelection
+        # MatchSelection
         same_memory_match = self._same_memory_match(matches, normalized_candidate)
         primary_match = self._primary_match(matches, normalized_candidate)
 
-        # Block: CreatePath
+        # CreatePath
         if same_memory_match is None and primary_match is None:
             return [
                 self._build_create_action(
@@ -108,7 +108,7 @@ class MemoryActionResolver:
                 )
             ]
 
-        # Block: ReinforcePath
+        # ReinforcePath
         if same_memory_match is not None:
             updated_unit = self.build_reinforced_memory_unit(
                 existing=same_memory_match,
@@ -131,7 +131,7 @@ class MemoryActionResolver:
                 )
             ]
 
-        # Block: RefinePath
+        # RefinePath
         if primary_match is not None and self.can_refine(primary_match, normalized_candidate):
             updated_unit = self.build_refined_memory_unit(
                 existing=primary_match,
@@ -154,7 +154,7 @@ class MemoryActionResolver:
                 )
             ]
 
-        # Block: RevokeWithReplacement
+        # RevokeWithReplacement
         if primary_match is not None and self._should_revoke_with_replacement(primary_match, normalized_candidate):
             return self._build_revoke_and_create_actions(
                 memory_set_id=memory_set_id,
@@ -165,7 +165,7 @@ class MemoryActionResolver:
                 matches=matches,
             )
 
-        # Block: ParallelPath
+        # ParallelPath
         if primary_match is not None and self._should_create_parallel(primary_match, normalized_candidate):
             return [
                 self._build_create_action(
@@ -178,7 +178,7 @@ class MemoryActionResolver:
                 )
             ]
 
-        # Block: SupersedePath
+        # SupersedePath
         if primary_match is not None and self._should_supersede(primary_match, normalized_candidate):
             new_unit = self.build_new_memory_unit(
                 memory_set_id=memory_set_id,
@@ -218,7 +218,7 @@ class MemoryActionResolver:
                 ),
             ]
 
-        # Block: Fallback
+        # Fallback
         return []
 
     def build_new_memory_unit(
@@ -230,7 +230,7 @@ class MemoryActionResolver:
         cycle_ids: list[str],
         candidate: dict[str, Any],
     ) -> dict[str, Any]:
-        # Block: Record
+        # Record
         return {
             "memory_unit_id": f"memory_unit:{uuid.uuid4().hex}",
             "memory_set_id": memory_set_id,
@@ -263,19 +263,19 @@ class MemoryActionResolver:
         event_ids: list[str],
         cycle_ids: list[str],
     ) -> dict[str, Any]:
-        # Block: Status
+        # Status
         next_status = existing["status"]
         if existing["status"] == "dormant":
             next_status = "confirmed" if self._candidate_confirms_memory(candidate) else candidate["status"]
         elif existing["status"] == "inferred" and self._candidate_confirms_memory(candidate):
             next_status = "confirmed"
 
-        # Block: ConfirmedAt
+        # ConfirmedAt
         last_confirmed_at = existing.get("last_confirmed_at")
         if self._candidate_confirms_memory(candidate):
             last_confirmed_at = finished_at
 
-        # Block: Record
+        # Record
         return {
             **existing,
             "summary_text": existing["summary_text"],
@@ -300,19 +300,19 @@ class MemoryActionResolver:
         event_ids: list[str],
         cycle_ids: list[str],
     ) -> dict[str, Any]:
-        # Block: Status
+        # Status
         next_status = existing["status"]
         if self._candidate_confirms_memory(candidate):
             next_status = "confirmed"
         elif existing["status"] == "dormant":
             next_status = "inferred"
 
-        # Block: ConfirmedAt
+        # ConfirmedAt
         last_confirmed_at = existing.get("last_confirmed_at")
         if self._candidate_confirms_memory(candidate):
             last_confirmed_at = finished_at
 
-        # Block: Record
+        # Record
         return {
             **existing,
             "object_ref_or_value": candidate.get("object_ref_or_value"),
@@ -337,7 +337,7 @@ class MemoryActionResolver:
         event_ids: list[str],
         cycle_ids: list[str],
     ) -> dict[str, Any]:
-        # Block: Record
+        # Record
         return {
             **existing,
             "status": "superseded",
@@ -355,7 +355,7 @@ class MemoryActionResolver:
         event_ids: list[str],
         cycle_ids: list[str],
     ) -> dict[str, Any]:
-        # Block: Record
+        # Record
         return {
             **existing,
             "status": "revoked",
@@ -373,7 +373,7 @@ class MemoryActionResolver:
         event_ids: list[str],
         cycle_ids: list[str],
     ) -> dict[str, Any]:
-        # Block: Record
+        # Record
         return {
             **existing,
             "status": "dormant",
@@ -395,7 +395,7 @@ class MemoryActionResolver:
         reason: str,
         event_ids: list[str],
     ) -> dict[str, Any]:
-        # Block: Action
+        # Action
         return {
             "operation": operation,
             "revision_id": f"revision:{uuid.uuid4().hex}",
@@ -411,29 +411,29 @@ class MemoryActionResolver:
         }
 
     def is_same_memory(self, existing: dict[str, Any], candidate: dict[str, Any]) -> bool:
-        # Block: ObjectCompare
+        # ObjectCompare
         if existing.get("object_ref_or_value") != candidate.get("object_ref_or_value"):
             return False
 
-        # Block: CommitmentCompare
+        # CommitmentCompare
         if existing.get("commitment_state") != candidate.get("commitment_state"):
             return False
 
-        # Block: QualifierCompare
+        # QualifierCompare
         return self._semantic_qualifiers(existing.get("qualifiers", {})) == self._semantic_qualifiers(
             candidate.get("qualifiers", {})
         )
 
     def can_refine(self, existing: dict[str, Any], candidate: dict[str, Any]) -> bool:
-        # Block: PolarityGuard
+        # PolarityGuard
         if self._polarity_conflicts(existing, candidate):
             return False
 
-        # Block: ObjectGuard
+        # ObjectGuard
         if existing.get("object_ref_or_value") != candidate.get("object_ref_or_value"):
             return False
 
-        # Block: ContentCheck
+        # ContentCheck
         return (
             existing.get("summary_text") != candidate["summary_text"].strip()
             or self._semantic_qualifiers(existing.get("qualifiers", {}))
@@ -444,7 +444,7 @@ class MemoryActionResolver:
         )
 
     def _normalized_candidate(self, candidate: dict[str, Any]) -> dict[str, Any]:
-        # Block: Record
+        # Record
         return {
             **candidate,
             "summary_text": candidate["summary_text"].strip(),
@@ -455,7 +455,7 @@ class MemoryActionResolver:
         }
 
     def _ordered_matches(self, matches: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        # Block: Result
+        # Result
         return sorted(
             matches,
             key=lambda match: (
@@ -468,7 +468,7 @@ class MemoryActionResolver:
         )
 
     def _match_status_rank(self, status: Any) -> int:
-        # Block: Mapping
+        # Mapping
         if status == "confirmed":
             return 3
         if status == "inferred":
@@ -478,18 +478,18 @@ class MemoryActionResolver:
         return 0
 
     def _same_memory_match(self, matches: list[dict[str, Any]], candidate: dict[str, Any]) -> dict[str, Any] | None:
-        # Block: Scan
+        # Scan
         for match in matches:
             if match.get("status") not in REVIVABLE_MEMORY_STATUSES:
                 continue
             if self.is_same_memory(match, candidate):
                 return match
 
-        # Block: Result
+        # Result
         return None
 
     def _primary_match(self, matches: list[dict[str, Any]], candidate: dict[str, Any]) -> dict[str, Any] | None:
-        # Block: SameObject
+        # SameObject
         same_object_matches = [
             match
             for match in matches
@@ -499,7 +499,7 @@ class MemoryActionResolver:
         if same_object_matches:
             return same_object_matches[0]
 
-        # Block: Active
+        # Active
         active_matches = [
             match
             for match in matches
@@ -508,7 +508,7 @@ class MemoryActionResolver:
         if active_matches:
             return active_matches[0]
 
-        # Block: Dormant
+        # Dormant
         dormant_matches = [
             match
             for match in matches
@@ -517,7 +517,7 @@ class MemoryActionResolver:
         if dormant_matches:
             return dormant_matches[0]
 
-        # Block: Result
+        # Result
         return None
 
     def _resolve_revoke_request(
@@ -530,12 +530,12 @@ class MemoryActionResolver:
         candidate: dict[str, Any],
         matches: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        # Block: Targets
+        # Targets
         targets = self._revocation_targets(matches, candidate)
         if not targets:
             return []
 
-        # Block: Actions
+        # Actions
         actions: list[dict[str, Any]] = []
         for target in targets:
             revoked_unit = self.build_revoked_memory_unit(
@@ -558,7 +558,7 @@ class MemoryActionResolver:
                 )
             )
 
-        # Block: Result
+        # Result
         return actions
 
     def _resolve_dormant_request(
@@ -571,12 +571,12 @@ class MemoryActionResolver:
         candidate: dict[str, Any],
         matches: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        # Block: Target
+        # Target
         target = self._primary_match(matches, candidate)
         if target is None or target.get("status") == "dormant":
             return []
 
-        # Block: Action
+        # Action
         dormant_unit = self.build_dormant_memory_unit(
             existing=target,
             event_ids=event_ids,
@@ -606,12 +606,12 @@ class MemoryActionResolver:
         candidate: dict[str, Any],
         matches: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        # Block: Targets
+        # Targets
         targets = self._revocation_targets(matches, candidate)
         if not targets:
             return []
 
-        # Block: NewUnit
+        # NewUnit
         new_unit = self.build_new_memory_unit(
             memory_set_id=memory_set_id,
             finished_at=finished_at,
@@ -621,7 +621,7 @@ class MemoryActionResolver:
         )
         target_ids = [target["memory_unit_id"] for target in targets]
 
-        # Block: Actions
+        # Actions
         actions: list[dict[str, Any]] = []
         for target in targets:
             revoked_unit = self.build_revoked_memory_unit(
@@ -657,7 +657,7 @@ class MemoryActionResolver:
             )
         )
 
-        # Block: Result
+        # Result
         return actions
 
     def _build_create_action(
@@ -670,7 +670,7 @@ class MemoryActionResolver:
         candidate: dict[str, Any],
         related_memory_unit_ids: list[str],
     ) -> dict[str, Any]:
-        # Block: Unit
+        # Unit
         new_unit = self.build_new_memory_unit(
             memory_set_id=memory_set_id,
             finished_at=finished_at,
@@ -679,7 +679,7 @@ class MemoryActionResolver:
             candidate=candidate,
         )
 
-        # Block: Result
+        # Result
         return self.build_memory_action(
             operation="create",
             memory_set_id=memory_set_id,
@@ -693,73 +693,73 @@ class MemoryActionResolver:
         )
 
     def _should_noop_candidate(self, candidate: dict[str, Any]) -> bool:
-        # Block: UnsupportedStatuses
+        # UnsupportedStatuses
         if candidate["status"] == "superseded":
             return True
 
-        # Block: SummaryGuard
+        # SummaryGuard
         if candidate["memory_type"] == "summary":
             return True
 
-        # Block: StatusBypass
+        # StatusBypass
         if candidate["status"] in {"revoked", "dormant"}:
             return False
 
-        # Block: WeakGuard
+        # WeakGuard
         if candidate["confidence"] < NO_WRITE_CONFIDENCE_FLOOR:
             return True
         if candidate["salience"] < NO_WRITE_SALIENCE_FLOOR:
             return True
 
-        # Block: TypeSpecificGuard
+        # TypeSpecificGuard
         if candidate["memory_type"] == "interpretation":
             return not self._candidate_is_explicit(candidate) and candidate["confidence"] < INTERPRETATION_CONFIDENCE_FLOOR
         if candidate["memory_type"] == "relation":
             return not self._candidate_is_explicit(candidate) and candidate["confidence"] < RELATION_CONFIDENCE_FLOOR
 
-        # Block: Result
+        # Result
         return False
 
     def _should_revoke_with_replacement(self, existing: dict[str, Any], candidate: dict[str, Any]) -> bool:
-        # Block: SameObjectGuard
+        # SameObjectGuard
         if not self._same_object(existing, candidate):
             return False
 
-        # Block: ExplicitGuard
+        # ExplicitGuard
         if not self._candidate_is_explicit(candidate):
             return False
 
-        # Block: Signal
+        # Signal
         if candidate.get("qualifiers", {}).get("negates_previous") is True:
             return True
         return self._polarity_conflicts(existing, candidate)
 
     def _should_create_parallel(self, existing: dict[str, Any], candidate: dict[str, Any]) -> bool:
-        # Block: ReplaceGuard
+        # ReplaceGuard
         qualifiers = candidate.get("qualifiers", {})
         if qualifiers.get("replace_prior") is True or qualifiers.get("negates_previous") is True:
             return False
 
-        # Block: ExplicitParallel
+        # ExplicitParallel
         if qualifiers.get("allow_parallel") is True:
             return True
 
-        # Block: TypeGuard
+        # TypeGuard
         if candidate["memory_type"] not in PARALLEL_MEMORY_TYPES:
             return False
 
-        # Block: ObjectGuard
+        # ObjectGuard
         return not self._same_object(existing, candidate)
 
     def _should_supersede(self, existing: dict[str, Any], candidate: dict[str, Any]) -> bool:
-        # Block: ReplaceHint
+        # ReplaceHint
         qualifiers = candidate.get("qualifiers", {})
         if qualifiers.get("replace_prior") is True:
             return True
         if qualifiers.get("negates_previous") is True and not self._same_object(existing, candidate):
             return True
 
-        # Block: FactUpdate
+        # FactUpdate
         if candidate["memory_type"] == "fact":
             if self._same_object(existing, candidate):
                 return False
@@ -767,11 +767,11 @@ class MemoryActionResolver:
                 return True
             return self._candidate_is_explicit(candidate)
 
-        # Block: Default
+        # Default
         return candidate["memory_type"] not in PARALLEL_MEMORY_TYPES
 
     def _revocation_targets(self, matches: list[dict[str, Any]], candidate: dict[str, Any]) -> list[dict[str, Any]]:
-        # Block: SameObjectTargets
+        # SameObjectTargets
         same_object_targets = [
             match
             for match in matches
@@ -781,48 +781,48 @@ class MemoryActionResolver:
         if same_object_targets:
             return same_object_targets
 
-        # Block: BroadTarget
+        # BroadTarget
         if candidate["status"] == "revoked" and candidate.get("object_ref_or_value") is None:
             primary_match = self._primary_match(matches, candidate)
             if primary_match is not None:
                 return [primary_match]
 
-        # Block: Result
+        # Result
         return []
 
     def _candidate_confirms_memory(self, candidate: dict[str, Any]) -> bool:
-        # Block: Status
+        # Status
         if candidate["status"] == "confirmed":
             return True
 
-        # Block: Explicit
+        # Explicit
         return self._candidate_is_explicit(candidate) and candidate["memory_type"] != "interpretation"
 
     def _candidate_is_explicit(self, candidate: dict[str, Any]) -> bool:
-        # Block: Source
+        # Source
         source = candidate.get("qualifiers", {}).get("source")
         if source in DIRECT_SOURCE_VALUES:
             return True
 
-        # Block: Fallback
+        # Fallback
         return candidate["status"] == "confirmed" and candidate["memory_type"] in {"fact", "preference", "commitment"}
 
     def _same_object(self, existing: dict[str, Any], candidate: dict[str, Any]) -> bool:
-        # Block: Compare
+        # Compare
         return existing.get("object_ref_or_value") == candidate.get("object_ref_or_value")
 
     def _polarity_conflicts(self, existing: dict[str, Any], candidate: dict[str, Any]) -> bool:
-        # Block: Values
+        # Values
         existing_polarity = existing.get("qualifiers", {}).get("polarity")
         candidate_polarity = candidate.get("qualifiers", {}).get("polarity")
         if existing_polarity is None or candidate_polarity is None:
             return False
 
-        # Block: Result
+        # Result
         return existing_polarity != candidate_polarity
 
     def _semantic_qualifiers(self, qualifiers: dict[str, Any]) -> dict[str, Any]:
-        # Block: Filter
+        # Filter
         return {
             key: value
             for key, value in qualifiers.items()
@@ -830,7 +830,7 @@ class MemoryActionResolver:
         }
 
     def _merged_qualifiers(self, existing: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
-        # Block: Merge
+        # Merge
         return {
             **existing.get("qualifiers", {}),
             **candidate.get("qualifiers", {}),

@@ -3,12 +3,12 @@ from __future__ import annotations
 from typing import Any
 
 
-# Block: Errors
+# Errors
 class LLMError(Exception):
     pass
 
 
-# Block: Config
+# Config
 INTENT_VALUES = {
     "smalltalk",
     "reminisce",
@@ -61,18 +61,18 @@ MAX_SECONDARY_INTENTS = 2
 MAX_HINT_SCOPE_VALUES = 4
 
 
-# Block: HelperValidation
+# HelperValidation
 def _validate_exact_keys(value: Any, required_keys: set[str], label: str) -> None:
-    # Block: Shape
+    # Shape
     if not isinstance(value, dict):
         raise LLMError(f"{label} must be an object.")
 
-    # Block: KeyCheck
+    # KeyCheck
     actual_keys = set(value.keys())
     if actual_keys == required_keys:
         return
 
-    # Block: Detail
+    # Detail
     missing_keys = sorted(required_keys - actual_keys)
     extra_keys = sorted(actual_keys - required_keys)
     details: list[str] = []
@@ -83,9 +83,9 @@ def _validate_exact_keys(value: Any, required_keys: set[str], label: str) -> Non
     raise LLMError(f"{label} keys are invalid ({'; '.join(details)}).")
 
 
-# Block: RecallHintValidation
+# RecallHintValidation
 def validate_recall_hint_contract(payload: dict[str, Any]) -> None:
-    # Block: RequiredKeys
+    # RequiredKeys
     required_keys = {
         "primary_intent",
         "secondary_intents",
@@ -98,7 +98,7 @@ def validate_recall_hint_contract(payload: dict[str, Any]) -> None:
     if set(payload.keys()) != required_keys:
         raise LLMError("RecallHint keys do not match the contract.")
 
-    # Block: ValueChecks
+    # ValueChecks
     if payload["primary_intent"] not in INTENT_VALUES:
         raise LLMError("RecallHint primary_intent is invalid.")
     if payload["time_reference"] not in TIME_REFERENCE_VALUES:
@@ -140,9 +140,9 @@ def validate_recall_hint_contract(payload: dict[str, Any]) -> None:
         raise LLMError("RecallHint confidence must be between 0.0 and 1.0.")
 
 
-# Block: DecisionValidation
+# DecisionValidation
 def validate_decision_contract(payload: dict[str, Any]) -> None:
-    # Block: RequiredKeys
+    # RequiredKeys
     required_keys = {
         "kind",
         "reason_code",
@@ -152,7 +152,7 @@ def validate_decision_contract(payload: dict[str, Any]) -> None:
     }
     _validate_exact_keys(payload, required_keys, "Decision")
 
-    # Block: ValueChecks
+    # ValueChecks
     if payload["kind"] not in {"reply", "noop", "future_act"}:
         raise LLMError("Decision kind is invalid.")
     if not isinstance(payload["reason_code"], str) or not payload["reason_code"].strip():
@@ -180,9 +180,9 @@ def validate_decision_contract(payload: dict[str, Any]) -> None:
         raise LLMError("Decision future_act must be null unless kind is future_act.")
 
 
-# Block: MemoryInterpretationValidation
+# MemoryInterpretationValidation
 def validate_memory_interpretation_contract(payload: dict[str, Any]) -> None:
-    # Block: RequiredKeys
+    # RequiredKeys
     required_keys = {
         "episode_digest",
         "candidate_memory_units",
@@ -190,7 +190,7 @@ def validate_memory_interpretation_contract(payload: dict[str, Any]) -> None:
     }
     _validate_exact_keys(payload, required_keys, "MemoryInterpretation")
 
-    # Block: EpisodeDigestValidation
+    # EpisodeDigestValidation
     episode_digest = payload["episode_digest"]
     required_episode_keys = {
         "episode_type",
@@ -211,7 +211,7 @@ def validate_memory_interpretation_contract(payload: dict[str, Any]) -> None:
     if not isinstance(episode_digest["salience"], (int, float)):
         raise LLMError("MemoryInterpretation episode_digest.salience must be numeric.")
 
-    # Block: CandidateValidation
+    # CandidateValidation
     if not isinstance(payload["candidate_memory_units"], list):
         raise LLMError("MemoryInterpretation candidate_memory_units must be a list.")
     for candidate in payload["candidate_memory_units"]:
@@ -264,7 +264,7 @@ def validate_memory_interpretation_contract(payload: dict[str, Any]) -> None:
         if not isinstance(candidate["reason"], str) or not candidate["reason"].strip():
             raise LLMError("MemoryInterpretation candidate_memory_unit.reason is invalid.")
 
-    # Block: AffectValidation
+    # AffectValidation
     if not isinstance(payload["affect_updates"], list):
         raise LLMError("MemoryInterpretation affect_updates must be a list.")
     for affect_update in payload["affect_updates"]:

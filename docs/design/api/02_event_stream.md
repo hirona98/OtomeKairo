@@ -1,6 +1,6 @@
 # event stream
 
-<!-- Block: Role -->
+<!-- Role -->
 ## この文書の役割
 
 この文書は、server-driven event/control stream の API 仕様を定める。
@@ -12,7 +12,7 @@
 
 共通ルールは `00_API仕様ガイド.md` を正とする。
 
-<!-- Block: EventControl -->
+<!-- EventControl -->
 ## event/control stream 面
 
 ### `GET /api/events/stream`

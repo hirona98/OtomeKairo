@@ -7,24 +7,24 @@ from pathlib import Path
 from otomekairo.defaults import build_default_state, normalize_state
 
 
-# Block: Constants
+# Constants
 STATE_FILE_NAME = "server_state.json"
 
 
-# Block: Store
+# Store
 class StateStore:
     def __init__(self, root_dir: Path) -> None:
-        # Block: Paths
+        # Paths
         self.root_dir = root_dir
         self.state_path = root_dir / STATE_FILE_NAME
 
-        # Block: Initialization
+        # Initialization
         self.root_dir.mkdir(parents=True, exist_ok=True)
         if not self.state_path.exists():
             self.write_state(build_default_state())
 
     def read_state(self) -> dict:
-        # Block: ReadState
+        # ReadState
         state = json.loads(self.state_path.read_text(encoding="utf-8"))
         state, changed = normalize_state(state)
         if changed:
@@ -32,7 +32,7 @@ class StateStore:
         return state
 
     def write_state(self, state: dict) -> None:
-        # Block: AtomicWrite
+        # AtomicWrite
         self.root_dir.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(
             "w",
@@ -44,5 +44,5 @@ class StateStore:
             handle.write("\n")
             temp_path = Path(handle.name)
 
-        # Block: CommitWrite
+        # CommitWrite
         temp_path.replace(self.state_path)

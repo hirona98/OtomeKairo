@@ -1,9 +1,9 @@
 {
-  // Block: VSCode debug launch definitions.
+  // VSCode debug launch definitions.
   "version": "0.2.0",
   "configurations": [
     {
-      // Block: Launch the OtomeKairo HTTPS server with the workspace venv.
+      // Launch the OtomeKairo HTTPS server with the workspace venv.
       "name": "OtomeKairo: Debug Server",
       "type": "debugpy",
       "request": "launch",

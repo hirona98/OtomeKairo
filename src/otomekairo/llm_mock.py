@@ -15,7 +15,7 @@ from otomekairo.llm_contracts import (
 )
 
 
-# Block: MockClient
+# MockClient
 @dataclass(slots=True)
 class MockLLMClient:
     def generate_recall_hint(
@@ -25,10 +25,10 @@ class MockLLMClient:
         recent_turns: list[dict],
         current_time: str,
     ) -> dict[str, Any]:
-        # Block: ProviderCheck
+        # ProviderCheck
         self._assert_mock_model(profile)
 
-        # Block: HeuristicIntent
+        # HeuristicIntent
         normalized = observation_text.strip()
         lower_text = normalized.lower()
 
@@ -57,11 +57,11 @@ class MockLLMClient:
         elif lower_text.endswith("?") or "?" in lower_text:
             primary_intent = "fact_query"
 
-        # Block: SecondaryIntent
+        # SecondaryIntent
         if primary_intent in {"consult", "check_state"} and recent_turns:
             secondary_intents.append("reminisce")
 
-        # Block: FocusScope
+        # FocusScope
         focus_scopes = ["user"]
         if primary_intent == "meta_relationship":
             focus_scopes.append("relationship:self|user")
@@ -70,11 +70,11 @@ class MockLLMClient:
         if primary_intent == "commitment_check":
             focus_scopes.append("relationship:self|user")
 
-        # Block: MentionedHints
+        # MentionedHints
         mentioned_entities = self._mock_mentioned_entities(normalized)
         mentioned_topics = self._mock_mentioned_topics(normalized)
 
-        # Block: Payload
+        # Payload
         payload = {
             "primary_intent": primary_intent,
             "secondary_intents": secondary_intents[:2],
@@ -88,11 +88,11 @@ class MockLLMClient:
         return payload
 
     def _mock_mentioned_entities(self, normalized: str) -> list[str]:
-        # Block: Empty
+        # Empty
         if not normalized:
             return []
 
-        # Block: Matches
+        # Matches
         entities: list[str] = []
         for match in re.findall(r"([一-龠ぁ-んァ-ヶA-Za-z0-9]{1,20})(?:さん|君|ちゃん)", normalized):
             tag = f"person:{match}"
@@ -101,15 +101,15 @@ class MockLLMClient:
             if len(entities) >= 4:
                 break
 
-        # Block: Result
+        # Result
         return entities
 
     def _mock_mentioned_topics(self, normalized: str) -> list[str]:
-        # Block: Empty
+        # Empty
         if not normalized:
             return []
 
-        # Block: KeywordMap
+        # KeywordMap
         topic_keywords = {
             "睡眠": ("眠", "寝", "朝型", "夜型"),
             "食事": ("食べ", "ご飯", "ランチ", "夕飯", "カフェ"),
@@ -119,7 +119,7 @@ class MockLLMClient:
             "相談": ("相談", "悩", "困っ", "どうしたら"),
         }
 
-        # Block: Collect
+        # Collect
         topics: list[str] = []
         for topic_name, keywords in topic_keywords.items():
             if not any(keyword in normalized for keyword in keywords):
@@ -128,7 +128,7 @@ class MockLLMClient:
             if len(topics) >= 4:
                 break
 
-        # Block: Result
+        # Result
         return topics
 
     def generate_decision(
@@ -141,10 +141,10 @@ class MockLLMClient:
         recall_hint: dict,
         recall_pack: dict[str, Any],
     ) -> dict[str, Any]:
-        # Block: ProviderCheck
+        # ProviderCheck
         self._assert_mock_model(profile)
 
-        # Block: Context
+        # Context
         normalized = observation_text.strip()
         primary_intent = recall_hint["primary_intent"]
         secondary_intents = self._secondary_intents(recall_hint)
@@ -155,7 +155,7 @@ class MockLLMClient:
         active_topics = recall_pack.get("active_topics", [])
         surface_affects = affect_context.get("surface", [])
 
-        # Block: DecisionRule
+        # DecisionRule
         if not normalized:
             payload = {
                 "kind": "noop",
@@ -225,7 +225,7 @@ class MockLLMClient:
                 "future_act": None,
             }
 
-        # Block: Validation
+        # Validation
         validate_decision_contract(payload)
         return payload
 
@@ -241,10 +241,10 @@ class MockLLMClient:
         recall_pack: dict[str, Any],
         decision: dict,
     ) -> dict[str, Any]:
-        # Block: ProviderCheck
+        # ProviderCheck
         self._assert_mock_model(profile)
 
-        # Block: Context
+        # Context
         tone = persona["expression_style"]["tone"]
         primary_intent = recall_hint["primary_intent"]
         secondary_intents = self._secondary_intents(recall_hint)
@@ -267,20 +267,20 @@ class MockLLMClient:
         surface_affect = surface_affects[0] if surface_affects else None
         event_basis = self._event_evidence_basis_text(event_item)
 
-        # Block: CautionPrefix
+        # CautionPrefix
         caution_prefix = ""
         if conflict_item is not None:
             caution_prefix = "今は少し慎重に受け取っている。"
         elif surface_affect is not None and surface_affect["affect_label"] in {"不安", "緊張", "迷い", "concern"}:
             caution_prefix = "少し慎重に聞いているよ。"
 
-        # Block: ContinuityPrefix
+        # ContinuityPrefix
         continuity_prefix = ""
         if primary_intent != "reminisce" and "reminisce" in secondary_intents:
             if episode_item is not None or event_basis is not None or recent_turns:
                 continuity_prefix = "前の流れも踏まえると、"
 
-        # Block: ReplyRule
+        # ReplyRule
         if decision["requires_confirmation"]:
             basis_text = None
             if relationship_item is not None:
@@ -330,7 +330,7 @@ class MockLLMClient:
                 topic_prefix = "前の流れをつなげつつ、"
             reply_text = f"{caution_prefix}{continuity_prefix}{tone}に受け取ったよ。{topic_prefix}{text}"
 
-        # Block: Payload
+        # Payload
         return {
             "reply_text": reply_text,
             "reply_style_notes": f"tone={tone}; part_of_day={time_context.get('part_of_day', 'unknown')}",
@@ -338,17 +338,17 @@ class MockLLMClient:
         }
 
     def _event_evidence_basis_text(self, item: dict[str, Any] | None) -> str | None:
-        # Block: Empty
+        # Empty
         if item is None:
             return None
 
-        # Block: Slots
+        # Slots
         for key in ("decision_or_result", "topic", "anchor", "tone_or_note"):
             value = item.get(key)
             if isinstance(value, str) and value.strip():
                 return value.strip()
 
-        # Block: Result
+        # Result
         return None
 
     def _should_mock_future_act(
@@ -360,7 +360,7 @@ class MockLLMClient:
         event_evidence: list[dict[str, Any]],
         active_topics: list[dict[str, Any]],
     ) -> bool:
-        # Block: MarkerCheck
+        # MarkerCheck
         defer_markers = (
             "また今度",
             "あとで",
@@ -376,7 +376,7 @@ class MockLLMClient:
         if not any(marker in normalized for marker in defer_markers):
             return False
 
-        # Block: RecallBasis
+        # RecallBasis
         return bool(active_commitments or episodic_evidence or event_evidence or active_topics)
 
     def _mock_future_act_payload(
@@ -388,7 +388,7 @@ class MockLLMClient:
         event_evidence: list[dict[str, Any]],
         active_topics: list[dict[str, Any]],
     ) -> dict[str, str]:
-        # Block: CommitmentCandidate
+        # CommitmentCandidate
         commitment_item = active_commitments[0] if active_commitments else None
         if commitment_item is not None:
             scope_type = commitment_item.get("scope_type", "relationship")
@@ -400,7 +400,7 @@ class MockLLMClient:
                 "dedupe_key": f"future_act:{scope_type}:{scope_key}:{predicate}",
             }
 
-        # Block: EpisodeCandidate
+        # EpisodeCandidate
         episode_item = episodic_evidence[0] if episodic_evidence else None
         if episode_item is not None:
             scope_type = episode_item.get("primary_scope_type", "user")
@@ -412,7 +412,7 @@ class MockLLMClient:
                 "dedupe_key": f"future_act:{scope_type}:{scope_key}:{episode_digest_id}",
             }
 
-        # Block: EventCandidate
+        # EventCandidate
         event_item = event_evidence[0] if event_evidence else None
         event_basis = self._event_evidence_basis_text(event_item)
         if event_item is not None:
@@ -422,7 +422,7 @@ class MockLLMClient:
                 "dedupe_key": f"future_act:event:{event_item.get('event_id', 'unknown')}",
             }
 
-        # Block: TopicCandidate
+        # TopicCandidate
         topic_item = active_topics[0] if active_topics else None
         if topic_item is not None:
             scope_key = topic_item.get("scope_key", topic_item.get("primary_scope_key", "topic"))
@@ -432,7 +432,7 @@ class MockLLMClient:
                 "dedupe_key": f"future_act:topic:{scope_key}",
             }
 
-        # Block: Fallback
+        # Fallback
         return {
             "intent_kind": "conversation_follow_up",
             "intent_summary": "あとで会話を再開したい。",
@@ -440,13 +440,13 @@ class MockLLMClient:
         }
 
     def _secondary_intents(self, recall_hint: dict[str, Any]) -> set[str]:
-        # Block: Collect
+        # Collect
         secondary_intents: set[str] = set()
         for intent in recall_hint.get("secondary_intents", []):
             if isinstance(intent, str) and intent in INTENT_VALUES:
                 secondary_intents.add(intent)
 
-        # Block: Result
+        # Result
         return secondary_intents
 
     def generate_memory_interpretation(
@@ -457,10 +457,10 @@ class MockLLMClient:
         decision: dict,
         reply_text: str | None,
     ) -> dict[str, Any]:
-        # Block: ProviderCheck
+        # ProviderCheck
         self._assert_mock_model(profile)
 
-        # Block: EpisodeDigest
+        # EpisodeDigest
         normalized = observation_text.strip()
         episode_digest = {
             "episode_type": self._mock_episode_type(recall_hint["primary_intent"]),
@@ -472,13 +472,13 @@ class MockLLMClient:
             "salience": 0.72 if normalized else 0.2,
         }
 
-        # Block: CandidateMemoryUnits
+        # CandidateMemoryUnits
         candidate_memory_units = self._mock_candidate_memory_units(normalized)
 
-        # Block: AffectUpdates
+        # AffectUpdates
         affect_updates = self._mock_affect_updates(normalized)
 
-        # Block: Payload
+        # Payload
         payload = {
             "episode_digest": episode_digest,
             "candidate_memory_units": candidate_memory_units,
@@ -493,17 +493,17 @@ class MockLLMClient:
         texts: list[str],
         embedding_dimension: int,
     ) -> list[list[float]]:
-        # Block: ProviderCheck
+        # ProviderCheck
         self._assert_mock_model(profile)
 
-        # Block: Result
+        # Result
         return [
             self._mock_embedding_vector(text, embedding_dimension)
             for text in texts
         ]
 
     def _mock_episode_type(self, primary_intent: str) -> str:
-        # Block: Mapping
+        # Mapping
         if primary_intent in {"consult", "check_state"}:
             return "consultation"
         if primary_intent == "commitment_check":
@@ -515,33 +515,33 @@ class MockLLMClient:
         return "conversation"
 
     def _mock_primary_scope_type(self, primary_intent: str) -> str:
-        # Block: Mapping
+        # Mapping
         if primary_intent in {"commitment_check", "meta_relationship"}:
             return "relationship"
         return "user"
 
     def _mock_primary_scope_key(self, primary_intent: str) -> str:
-        # Block: Mapping
+        # Mapping
         if primary_intent in {"commitment_check", "meta_relationship"}:
             return "self|user"
         return "user"
 
     def _mock_open_loops(self, normalized: str, primary_intent: str) -> list[str]:
-        # Block: LoopRule
+        # LoopRule
         if primary_intent in {"consult", "commitment_check", "reminisce"} and normalized:
             return [normalized[:80]]
         return []
 
     def _mock_candidate_memory_units(self, normalized: str) -> list[dict[str, Any]]:
-        # Block: Empty
+        # Empty
         if not normalized:
             return []
 
-        # Block: Builders
+        # Builders
         candidates: list[dict[str, Any]] = []
         correction_signal = self._mock_has_correction_signal(normalized)
 
-        # Block: Fact
+        # Fact
         fact_candidate = self._mock_fact_candidate(normalized, correction_signal=correction_signal)
         if fact_candidate is not None:
             candidates.append(fact_candidate)
@@ -621,7 +621,7 @@ class MockLLMClient:
         return candidates
 
     def _mock_fact_candidate(self, normalized: str, *, correction_signal: bool) -> dict[str, Any] | None:
-        # Block: DailyRhythm
+        # DailyRhythm
         if "朝型" in normalized or "夜型" in normalized:
             object_ref = "rhythm:morning" if "朝型" in normalized else "rhythm:night"
             summary_text = "あなたの生活リズムは朝型寄りだ。" if "朝型" in normalized else "あなたの生活リズムは夜型寄りだ。"
@@ -650,7 +650,7 @@ class MockLLMClient:
                 "reason": reason,
             }
 
-        # Block: WorkStyle
+        # WorkStyle
         if any(token in normalized for token in ("在宅", "リモート", "出社")):
             object_ref = "work:remote" if "在宅" in normalized or "リモート" in normalized else "work:office"
             summary_text = "あなたの働き方は在宅寄りだ。" if object_ref == "work:remote" else "あなたの働き方は出社寄りだ。"
@@ -679,11 +679,11 @@ class MockLLMClient:
                 "reason": reason,
             }
 
-        # Block: Result
+        # Result
         return None
 
     def _mock_has_correction_signal(self, normalized: str) -> bool:
-        # Block: Tokens
+        # Tokens
         correction_tokens = (
             "いや",
             "違う",
@@ -693,11 +693,11 @@ class MockLLMClient:
             "むしろ",
         )
 
-        # Block: Result
+        # Result
         return any(token in normalized for token in correction_tokens)
 
     def _mock_preference_object(self, normalized: str) -> str:
-        # Block: Mapping
+        # Mapping
         if "辛" in normalized:
             return "food:spicy"
         if "甘" in normalized:
@@ -707,19 +707,19 @@ class MockLLMClient:
         return "preference:stated"
 
     def _mock_preference_summary(self, normalized: str) -> str:
-        # Block: Mapping
+        # Mapping
         if "嫌い" in normalized or "苦手" in normalized:
             return "あなたには苦手な好みがある。"
         return "あなたにははっきりした好みがある。"
 
     def _mock_preference_polarity(self, normalized: str) -> str:
-        # Block: Mapping
+        # Mapping
         if "嫌い" in normalized or "苦手" in normalized:
             return "negative"
         return "positive"
 
     def _mock_affect_updates(self, normalized: str) -> list[dict[str, Any]]:
-        # Block: Builders
+        # Builders
         updates: list[dict[str, Any]] = []
         if any(token in normalized for token in ("疲れ", "しんど", "つらい", "不安")):
             updates.append(
@@ -744,14 +744,14 @@ class MockLLMClient:
         return updates
 
     def _mock_embedding_vector(self, text: str, embedding_dimension: int) -> list[float]:
-        # Block: EmptyGuard
+        # EmptyGuard
         normalized = text.strip()
         if embedding_dimension <= 0:
             raise LLMError("embedding_dimension must be positive.")
         if not normalized:
             return [0.0] * embedding_dimension
 
-        # Block: Accumulate
+        # Accumulate
         values = [0.0] * embedding_dimension
         tokens = [normalized]
         if len(normalized) >= 2:
@@ -768,13 +768,13 @@ class MockLLMClient:
             values[primary_index] += primary_value
             values[secondary_index] -= secondary_value * 0.25
 
-        # Block: Normalize
+        # Normalize
         norm = math.sqrt(sum(value * value for value in values))
         if norm <= 0.0:
             return [0.0] * embedding_dimension
         return [value / norm for value in values]
 
     def _assert_mock_model(self, profile: dict) -> None:
-        # Block: ModelCheck
+        # ModelCheck
         if profile.get("model") != "mock":
             raise LLMError(f"Unsupported mock model: {profile.get('model')}")

@@ -1,4 +1,4 @@
 {
-  // Block: Use the workspace virtual environment for Python execution.
+  // Use the workspace virtual environment for Python execution.
   "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python"
 }

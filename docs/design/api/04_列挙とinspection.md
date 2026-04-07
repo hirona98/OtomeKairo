@@ -1,6 +1,6 @@
 # 列挙とinspection
 
-<!-- Block: Role -->
+<!-- Role -->
 ## この文書の役割
 
 この文書は、列挙面と inspection 面の API 仕様を定める。
@@ -14,7 +14,7 @@
 
 共通ルールは `00_API仕様ガイド.md` を正とする。
 
-<!-- Block: Catalog -->
+<!-- Catalog -->
 ## 列挙面
 
 ### `GET /api/catalog`
@@ -56,7 +56,7 @@ response:
 }
 ```
 
-<!-- Block: Inspection -->
+<!-- Inspection -->
 ## inspection 面
 
 ### `GET /api/inspection/cycle-summaries?limit=<n>`

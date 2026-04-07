@@ -11,14 +11,14 @@ from otomekairo.state_store import StateStore
 from otomekairo.store_schema import MEMORY_DB_FILE_NAME, StoreSchemaMixin
 
 
-# Block: Store
+# Store
 class SQLiteMemoryStore(StoreSchemaMixin):
     def __init__(self, root_dir: Path) -> None:
-        # Block: Paths
+        # Paths
         self.root_dir = root_dir
         self.memory_db_path = root_dir / MEMORY_DB_FILE_NAME
 
-        # Block: Initialization
+        # Initialization
         self.root_dir.mkdir(parents=True, exist_ok=True)
         self._initialize_memory_db()
 
@@ -30,33 +30,33 @@ class SQLiteMemoryStore(StoreSchemaMixin):
         cycle_summary: dict[str, Any],
         cycle_trace: dict[str, Any],
     ) -> None:
-        # Block: Transaction
+        # Transaction
         with self._memory_db() as conn:
-            # Block: CycleSummaryInsert
+            # CycleSummaryInsert
             self._insert_cycle_summary(conn, cycle_summary)
 
-            # Block: EventInsert
+            # EventInsert
             for event in events:
                 self._insert_event(conn, event)
 
-            # Block: RetrievalInsert
+            # RetrievalInsert
             self._insert_retrieval_run(conn, retrieval_run)
 
-            # Block: TraceInsert
+            # TraceInsert
             self._insert_cycle_trace(conn, cycle_trace)
 
     def append_events(self, *, events: list[dict[str, Any]]) -> None:
-        # Block: Empty
+        # Empty
         if not events:
             return
 
-        # Block: Transaction
+        # Transaction
         with self._memory_db() as conn:
             for event in events:
                 self._insert_event(conn, event)
 
     def replace_cycle_trace(self, *, cycle_trace: dict[str, Any]) -> None:
-        # Block: Transaction
+        # Transaction
         with self._memory_db() as conn:
             self._insert_cycle_trace(conn, cycle_trace)
 
@@ -67,37 +67,37 @@ class SQLiteMemoryStore(StoreSchemaMixin):
         memory_actions: list[dict[str, Any]],
         affect_updates: list[dict[str, Any]],
     ) -> None:
-        # Block: Transaction
+        # Transaction
         with self._memory_db() as conn:
-            # Block: EpisodeDigestInsert
+            # EpisodeDigestInsert
             if episode_digest is not None:
                 self._insert_episode_digest(conn, episode_digest)
 
-            # Block: MemoryActions
+            # MemoryActions
             for action in memory_actions:
                 self._apply_memory_action(conn, action)
 
-            # Block: AffectUpdates
+            # AffectUpdates
             for affect_update in affect_updates:
                 self._upsert_affect_state(conn, affect_update)
 
     def persist_memory_actions(self, *, memory_actions: list[dict[str, Any]]) -> None:
-        # Block: Empty
+        # Empty
         if not memory_actions:
             return
 
-        # Block: Transaction
+        # Transaction
         with self._memory_db() as conn:
             for action in memory_actions:
                 self._apply_memory_action(conn, action)
 
     def upsert_reflection_run(self, *, reflection_run: dict[str, Any]) -> None:
-        # Block: Transaction
+        # Transaction
         with self._memory_db() as conn:
             self._insert_reflection_run(conn, reflection_run)
 
     def list_cycle_summaries(self, limit: int) -> list[dict[str, Any]]:
-        # Block: Query
+        # Query
         with self._memory_db() as conn:
             rows = conn.execute(
                 """
@@ -109,11 +109,11 @@ class SQLiteMemoryStore(StoreSchemaMixin):
                 (limit,),
             ).fetchall()
 
-        # Block: Result
+        # Result
         return [json.loads(row["payload_json"]) for row in rows]
 
     def get_cycle_trace(self, cycle_id: str) -> dict[str, Any] | None:
-        # Block: Query
+        # Query
         with self._memory_db() as conn:
             row = conn.execute(
                 """
@@ -124,13 +124,13 @@ class SQLiteMemoryStore(StoreSchemaMixin):
                 (cycle_id,),
             ).fetchone()
 
-        # Block: Result
+        # Result
         if row is None:
             return None
         return json.loads(row["payload_json"])
 
     def get_latest_reflection_run(self, memory_set_id: str) -> dict[str, Any] | None:
-        # Block: Query
+        # Query
         with self._memory_db() as conn:
             row = conn.execute(
                 """
@@ -143,7 +143,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
                 (memory_set_id,),
             ).fetchone()
 
-        # Block: Result
+        # Result
         if row is None:
             return None
         return json.loads(row["payload_json"])
@@ -155,7 +155,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
         since_iso: str,
         limit: int,
     ) -> list[dict[str, Any]]:
-        # Block: Query
+        # Query
         with self._memory_db() as conn:
             rows = conn.execute(
                 """
@@ -171,7 +171,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
                 (memory_set_id, since_iso, limit),
             ).fetchall()
 
-        # Block: Result
+        # Result
         turns = [
             {
                 "role": row["role"],
@@ -189,11 +189,11 @@ class SQLiteMemoryStore(StoreSchemaMixin):
         event_ids: list[str],
         limit: int,
     ) -> list[dict[str, Any]]:
-        # Block: Empty
+        # Empty
         if not event_ids or limit <= 0:
             return []
 
-        # Block: QueryParts
+        # QueryParts
         requested_ids = [
             event_id
             for event_id in event_ids
@@ -203,7 +203,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
             return []
         placeholders = ", ".join("?" for _ in requested_ids)
 
-        # Block: Query
+        # Query
         with self._memory_db() as conn:
             rows = conn.execute(
                 f"""
@@ -215,7 +215,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
                 (memory_set_id, *requested_ids),
             ).fetchall()
 
-        # Block: Ordering
+        # Ordering
         rows_by_id = {
             row["event_id"]: json.loads(row["payload_json"])
             for row in rows
@@ -229,7 +229,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
             if len(ordered) >= limit:
                 break
 
-        # Block: Result
+        # Result
         return ordered
 
     def count_cycle_summaries_since(
@@ -238,7 +238,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
         memory_set_id: str,
         since_iso: str | None,
     ) -> int:
-        # Block: QueryParts
+        # QueryParts
         clauses = ["selected_memory_set_id = ?", "failed = 0"]
         params: list[Any] = [memory_set_id]
         if isinstance(since_iso, str) and since_iso:
@@ -251,11 +251,11 @@ class SQLiteMemoryStore(StoreSchemaMixin):
             WHERE {" AND ".join(clauses)}
         """
 
-        # Block: Query
+        # Query
         with self._memory_db() as conn:
             count = conn.execute(query, params).fetchone()[0]
 
-        # Block: Result
+        # Result
         return int(count)
 
     def count_high_salience_episode_digests_since(
@@ -265,7 +265,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
         since_iso: str | None,
         salience_threshold: float,
     ) -> int:
-        # Block: QueryParts
+        # QueryParts
         clauses = ["memory_set_id = ?", "salience >= ?"]
         params: list[Any] = [memory_set_id, salience_threshold]
         if isinstance(since_iso, str) and since_iso:
@@ -278,11 +278,11 @@ class SQLiteMemoryStore(StoreSchemaMixin):
             WHERE {" AND ".join(clauses)}
         """
 
-        # Block: Query
+        # Query
         with self._memory_db() as conn:
             count = conn.execute(query, params).fetchone()[0]
 
-        # Block: Result
+        # Result
         return int(count)
 
     def find_memory_units_for_compare(
@@ -296,7 +296,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
         predicate: str,
         limit: int = 5,
     ) -> list[dict[str, Any]]:
-        # Block: Query
+        # Query
         with self._memory_db() as conn:
             rows = conn.execute(
                 """
@@ -323,7 +323,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
                 ),
             ).fetchall()
 
-        # Block: Result
+        # Result
         return [json.loads(row["payload_json"]) for row in rows]
 
     def list_memory_units_for_recall(
@@ -338,11 +338,11 @@ class SQLiteMemoryStore(StoreSchemaMixin):
         commitment_states: list[str] | None = None,
         limit: int,
     ) -> list[dict[str, Any]]:
-        # Block: QueryParts
+        # QueryParts
         clauses = ["memory_set_id = ?"]
         params: list[Any] = [memory_set_id]
 
-        # Block: ScopeFilters
+        # ScopeFilters
         if scope_filters:
             scope_clauses: list[str] = []
             for scope_type, scope_key in scope_filters:
@@ -350,31 +350,31 @@ class SQLiteMemoryStore(StoreSchemaMixin):
                 params.extend([scope_type, scope_key])
             clauses.append("(" + " OR ".join(scope_clauses) + ")")
 
-        # Block: ScopeTypes
+        # ScopeTypes
         if scope_types:
             placeholders = ", ".join("?" for _ in scope_types)
             clauses.append(f"scope_type IN ({placeholders})")
             params.extend(scope_types)
 
-        # Block: IncludeMemoryTypes
+        # IncludeMemoryTypes
         if include_memory_types:
             placeholders = ", ".join("?" for _ in include_memory_types)
             clauses.append(f"memory_type IN ({placeholders})")
             params.extend(include_memory_types)
 
-        # Block: ExcludeMemoryTypes
+        # ExcludeMemoryTypes
         if exclude_memory_types:
             placeholders = ", ".join("?" for _ in exclude_memory_types)
             clauses.append(f"memory_type NOT IN ({placeholders})")
             params.extend(exclude_memory_types)
 
-        # Block: Statuses
+        # Statuses
         if statuses:
             placeholders = ", ".join("?" for _ in statuses)
             clauses.append(f"status IN ({placeholders})")
             params.extend(statuses)
 
-        # Block: CommitmentStates
+        # CommitmentStates
         if commitment_states:
             placeholders = ", ".join("?" for _ in commitment_states)
             clauses.append(f"commitment_state IN ({placeholders})")
@@ -388,11 +388,11 @@ class SQLiteMemoryStore(StoreSchemaMixin):
             LIMIT ?
         """
 
-        # Block: Query
+        # Query
         with self._memory_db() as conn:
             rows = conn.execute(query, (*params, limit)).fetchall()
 
-        # Block: Result
+        # Result
         return [json.loads(row["payload_json"]) for row in rows]
 
     def list_memory_units_for_reflection(
@@ -405,29 +405,29 @@ class SQLiteMemoryStore(StoreSchemaMixin):
         exclude_memory_types: list[str] | None = None,
         limit: int,
     ) -> list[dict[str, Any]]:
-        # Block: QueryParts
+        # QueryParts
         clauses = ["memory_set_id = ?"]
         params: list[Any] = [memory_set_id]
 
-        # Block: Statuses
+        # Statuses
         if statuses:
             placeholders = ", ".join("?" for _ in statuses)
             clauses.append(f"status IN ({placeholders})")
             params.extend(statuses)
 
-        # Block: ScopeTypes
+        # ScopeTypes
         if scope_types:
             placeholders = ", ".join("?" for _ in scope_types)
             clauses.append(f"scope_type IN ({placeholders})")
             params.extend(scope_types)
 
-        # Block: IncludeMemoryTypes
+        # IncludeMemoryTypes
         if include_memory_types:
             placeholders = ", ".join("?" for _ in include_memory_types)
             clauses.append(f"memory_type IN ({placeholders})")
             params.extend(include_memory_types)
 
-        # Block: ExcludeMemoryTypes
+        # ExcludeMemoryTypes
         if exclude_memory_types:
             placeholders = ", ".join("?" for _ in exclude_memory_types)
             clauses.append(f"memory_type NOT IN ({placeholders})")
@@ -441,11 +441,11 @@ class SQLiteMemoryStore(StoreSchemaMixin):
             LIMIT ?
         """
 
-        # Block: Query
+        # Query
         with self._memory_db() as conn:
             rows = conn.execute(query, (*params, limit)).fetchall()
 
-        # Block: Result
+        # Result
         return [json.loads(row["payload_json"]) for row in rows]
 
     def list_episode_digests_for_recall(
@@ -456,11 +456,11 @@ class SQLiteMemoryStore(StoreSchemaMixin):
         require_open_loops: bool = False,
         limit: int,
     ) -> list[dict[str, Any]]:
-        # Block: QueryParts
+        # QueryParts
         clauses = ["memory_set_id = ?"]
         params: list[Any] = [memory_set_id]
 
-        # Block: ScopeFilters
+        # ScopeFilters
         if scope_filters:
             scope_clauses: list[str] = []
             for scope_type, scope_key in scope_filters:
@@ -468,7 +468,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
                 params.extend([scope_type, scope_key])
             clauses.append("(" + " OR ".join(scope_clauses) + ")")
 
-        # Block: OpenLoopFilter
+        # OpenLoopFilter
         if require_open_loops:
             clauses.append("has_open_loops = 1")
 
@@ -480,11 +480,11 @@ class SQLiteMemoryStore(StoreSchemaMixin):
             LIMIT ?
         """
 
-        # Block: Query
+        # Query
         with self._memory_db() as conn:
             rows = conn.execute(query, (*params, limit)).fetchall()
 
-        # Block: Result
+        # Result
         return [json.loads(row["payload_json"]) for row in rows]
 
     def list_episode_digests_for_reflection(
@@ -494,7 +494,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
         since_iso: str | None,
         limit: int,
     ) -> list[dict[str, Any]]:
-        # Block: QueryParts
+        # QueryParts
         clauses = ["memory_set_id = ?"]
         params: list[Any] = [memory_set_id]
         if isinstance(since_iso, str) and since_iso:
@@ -509,11 +509,11 @@ class SQLiteMemoryStore(StoreSchemaMixin):
             LIMIT ?
         """
 
-        # Block: Query
+        # Query
         with self._memory_db() as conn:
             rows = conn.execute(query, (*params, limit)).fetchall()
 
-        # Block: Result
+        # Result
         return [json.loads(row["payload_json"]) for row in rows]
 
     def list_affect_states_for_context(
@@ -524,11 +524,11 @@ class SQLiteMemoryStore(StoreSchemaMixin):
         layers: list[str] | None = None,
         limit: int,
     ) -> list[dict[str, Any]]:
-        # Block: QueryParts
+        # QueryParts
         clauses = ["memory_set_id = ?"]
         params: list[Any] = [memory_set_id]
 
-        # Block: ScopeFilters
+        # ScopeFilters
         if scope_filters:
             scope_clauses: list[str] = []
             for scope_type, scope_key in scope_filters:
@@ -536,7 +536,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
                 params.extend([scope_type, scope_key])
             clauses.append("(" + " OR ".join(scope_clauses) + ")")
 
-        # Block: Layers
+        # Layers
         if layers:
             placeholders = ", ".join("?" for _ in layers)
             clauses.append(f"layer IN ({placeholders})")
@@ -550,11 +550,11 @@ class SQLiteMemoryStore(StoreSchemaMixin):
             LIMIT ?
         """
 
-        # Block: Query
+        # Query
         with self._memory_db() as conn:
             rows = conn.execute(query, (*params, limit)).fetchall()
 
-        # Block: Result
+        # Result
         return [json.loads(row["payload_json"]) for row in rows]
 
     def upsert_vector_index_entries(
@@ -563,15 +563,15 @@ class SQLiteMemoryStore(StoreSchemaMixin):
         entries: list[dict[str, Any]],
         embedding_dimension: int,
     ) -> None:
-        # Block: Empty
+        # Empty
         if not entries:
             return
 
-        # Block: Transaction
+        # Transaction
         with self._memory_db() as conn:
             self._ensure_vector_tables(conn, embedding_dimension)
 
-            # Block: Upserts
+            # Upserts
             for entry in entries:
                 existing_row = conn.execute(
                     """
@@ -590,7 +590,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
                     ),
                 ).fetchone()
 
-                # Block: Identity
+                # Identity
                 vector_entry_id: int
                 if existing_row is None:
                     cursor = conn.execute(
@@ -658,7 +658,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
                         ),
                     )
 
-                # Block: VectorUpsert
+                # VectorUpsert
                 vector_table_name = self._vector_table_name(entry["source_kind"])
                 conn.execute(
                     f"DELETE FROM {vector_table_name} WHERE id = ?",
@@ -685,11 +685,11 @@ class SQLiteMemoryStore(StoreSchemaMixin):
         exclude_source_types: list[str] | None = None,
         statuses: list[str] | None = None,
     ) -> list[dict[str, Any]]:
-        # Block: Empty
+        # Empty
         if not query_embedding or limit <= 0:
             return []
 
-        # Block: QueryParts
+        # QueryParts
         clauses = [
             "meta.memory_set_id = ?",
             "meta.embedding_preset = ?",
@@ -701,7 +701,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
             embedding_preset,
         ]
 
-        # Block: ScopeFilters
+        # ScopeFilters
         if scope_filters:
             scope_clauses: list[str] = []
             for scope_type, scope_key in scope_filters:
@@ -709,19 +709,19 @@ class SQLiteMemoryStore(StoreSchemaMixin):
                 params.extend([scope_type, scope_key])
             clauses.append("(" + " OR ".join(scope_clauses) + ")")
 
-        # Block: ScopeTypes
+        # ScopeTypes
         if scope_types:
             placeholders = ", ".join("?" for _ in scope_types)
             clauses.append(f"meta.scope_type IN ({placeholders})")
             params.extend(scope_types)
 
-        # Block: ExcludeSourceTypes
+        # ExcludeSourceTypes
         if exclude_source_types:
             placeholders = ", ".join("?" for _ in exclude_source_types)
             clauses.append(f"meta.source_type NOT IN ({placeholders})")
             params.extend(exclude_source_types)
 
-        # Block: Statuses
+        # Statuses
         if statuses:
             placeholders = ", ".join("?" for _ in statuses)
             clauses.append(f"meta.status IN ({placeholders})")
@@ -741,12 +741,12 @@ class SQLiteMemoryStore(StoreSchemaMixin):
             LIMIT ?
         """
 
-        # Block: Query
+        # Query
         with self._memory_db() as conn:
             self._ensure_vector_tables(conn, embedding_dimension)
             rows = conn.execute(query, (*params, limit)).fetchall()
 
-        # Block: Result
+        # Result
         return [
             {
                 "record": json.loads(row["payload_json"]),
@@ -766,11 +766,11 @@ class SQLiteMemoryStore(StoreSchemaMixin):
         scope_filters: list[tuple[str, str]] | None = None,
         require_open_loops: bool = False,
     ) -> list[dict[str, Any]]:
-        # Block: Empty
+        # Empty
         if not query_embedding or limit <= 0:
             return []
 
-        # Block: QueryParts
+        # QueryParts
         clauses = [
             "meta.memory_set_id = ?",
             "meta.embedding_preset = ?",
@@ -782,7 +782,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
             embedding_preset,
         ]
 
-        # Block: ScopeFilters
+        # ScopeFilters
         if scope_filters:
             scope_clauses: list[str] = []
             for scope_type, scope_key in scope_filters:
@@ -790,7 +790,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
                 params.extend([scope_type, scope_key])
             clauses.append("(" + " OR ".join(scope_clauses) + ")")
 
-        # Block: OpenLoops
+        # OpenLoops
         if require_open_loops:
             clauses.append("meta.has_open_loops = 1")
 
@@ -808,12 +808,12 @@ class SQLiteMemoryStore(StoreSchemaMixin):
             LIMIT ?
         """
 
-        # Block: Query
+        # Query
         with self._memory_db() as conn:
             self._ensure_vector_tables(conn, embedding_dimension)
             rows = conn.execute(query, (*params, limit)).fetchall()
 
-        # Block: Result
+        # Result
         return [
             {
                 "record": json.loads(row["payload_json"]),
@@ -823,12 +823,12 @@ class SQLiteMemoryStore(StoreSchemaMixin):
         ]
 
     def delete_memory_set_records(self, memory_set_id: str) -> None:
-        # Block: Transaction
+        # Transaction
         with self._memory_db() as conn:
-            # Block: VectorDelete
+            # VectorDelete
             self._delete_vector_index_entries(conn, memory_set_id)
 
-            # Block: DeleteOrder
+            # DeleteOrder
             conn.execute("DELETE FROM revisions WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM affect_state WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM memory_units WHERE memory_set_id = ?", (memory_set_id,))
@@ -840,7 +840,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
             conn.execute("DELETE FROM cycle_summaries WHERE selected_memory_set_id = ?", (memory_set_id,))
 
     def _insert_event(self, conn: sqlite3.Connection, record: dict[str, Any]) -> None:
-        # Block: Insert
+        # Insert
         conn.execute(
             """
             INSERT OR REPLACE INTO events (
@@ -867,7 +867,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
         )
 
     def _insert_retrieval_run(self, conn: sqlite3.Connection, record: dict[str, Any]) -> None:
-        # Block: Insert
+        # Insert
         conn.execute(
             """
             INSERT OR REPLACE INTO retrieval_runs (
@@ -890,7 +890,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
         )
 
     def _insert_cycle_summary(self, conn: sqlite3.Connection, record: dict[str, Any]) -> None:
-        # Block: Insert
+        # Insert
         conn.execute(
             """
             INSERT OR REPLACE INTO cycle_summaries (
@@ -923,10 +923,10 @@ class SQLiteMemoryStore(StoreSchemaMixin):
         )
 
     def _insert_cycle_trace(self, conn: sqlite3.Connection, record: dict[str, Any]) -> None:
-        # Block: TraceFields
+        # TraceFields
         cycle_summary = record.get("cycle_summary", {})
 
-        # Block: Insert
+        # Insert
         conn.execute(
             """
             INSERT OR REPLACE INTO cycle_traces (
@@ -945,10 +945,10 @@ class SQLiteMemoryStore(StoreSchemaMixin):
         )
 
     def _insert_episode_digest(self, conn: sqlite3.Connection, record: dict[str, Any]) -> None:
-        # Block: DerivedFields
+        # DerivedFields
         open_loops = record.get("open_loops", [])
 
-        # Block: Insert
+        # Insert
         conn.execute(
             """
             INSERT OR REPLACE INTO episode_digests (
@@ -987,7 +987,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
         )
 
     def _insert_reflection_run(self, conn: sqlite3.Connection, record: dict[str, Any]) -> None:
-        # Block: Insert
+        # Insert
         conn.execute(
             """
             INSERT OR REPLACE INTO reflection_runs (
@@ -1016,18 +1016,18 @@ class SQLiteMemoryStore(StoreSchemaMixin):
         )
 
     def _ensure_vector_tables(self, conn: sqlite3.Connection, embedding_dimension: int) -> None:
-        # Block: DimensionCheck
+        # DimensionCheck
         if embedding_dimension <= 0:
             raise ValueError("embedding_dimension must be positive.")
 
-        # Block: MemoryUnitTable
+        # MemoryUnitTable
         self._ensure_vector_table(
             conn,
             table_name="memory_unit_vec",
             embedding_dimension=embedding_dimension,
         )
 
-        # Block: EpisodeDigestTable
+        # EpisodeDigestTable
         self._ensure_vector_table(
             conn,
             table_name="episode_digest_vec",
@@ -1035,7 +1035,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
         )
 
     def _ensure_vector_table(self, conn: sqlite3.Connection, *, table_name: str, embedding_dimension: int) -> None:
-        # Block: ExistingSchema
+        # ExistingSchema
         schema_row = conn.execute(
             """
             SELECT sql
@@ -1046,7 +1046,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
             (table_name,),
         ).fetchone()
 
-        # Block: Create
+        # Create
         if schema_row is None:
             conn.execute(
                 f"""
@@ -1056,13 +1056,13 @@ class SQLiteMemoryStore(StoreSchemaMixin):
             )
             return
 
-        # Block: Validate
+        # Validate
         schema_sql = schema_row["sql"] or ""
         if f"FLOAT[{embedding_dimension}]".lower() not in schema_sql.lower():
             raise ValueError(f"{table_name} dimension does not match current embedding_dimension.")
 
     def _delete_vector_index_entries(self, conn: sqlite3.Connection, memory_set_id: str) -> None:
-        # Block: Query
+        # Query
         rows = conn.execute(
             """
             SELECT vector_entry_id, source_kind
@@ -1072,11 +1072,11 @@ class SQLiteMemoryStore(StoreSchemaMixin):
             (memory_set_id,),
         ).fetchall()
 
-        # Block: Empty
+        # Empty
         if not rows:
             return
 
-        # Block: DeleteVectors
+        # DeleteVectors
         for row in rows:
             table_name = self._vector_table_name(row["source_kind"])
             if self._table_exists(conn, table_name):
@@ -1085,14 +1085,14 @@ class SQLiteMemoryStore(StoreSchemaMixin):
                     (row["vector_entry_id"],),
                 )
 
-        # Block: DeleteMetadata
+        # DeleteMetadata
         conn.execute(
             "DELETE FROM vector_index_entries WHERE memory_set_id = ?",
             (memory_set_id,),
         )
 
     def _table_exists(self, conn: sqlite3.Connection, table_name: str) -> bool:
-        # Block: Query
+        # Query
         row = conn.execute(
             """
             SELECT 1
@@ -1104,7 +1104,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
         return row is not None
 
     def _vector_table_name(self, source_kind: str) -> str:
-        # Block: Mapping
+        # Mapping
         if source_kind == "memory_unit":
             return "memory_unit_vec"
         if source_kind == "episode_digest":
@@ -1112,23 +1112,23 @@ class SQLiteMemoryStore(StoreSchemaMixin):
         raise ValueError(f"Unsupported source_kind: {source_kind}")
 
     def _apply_memory_action(self, conn: sqlite3.Connection, action: dict[str, Any]) -> None:
-        # Block: OperationRead
+        # OperationRead
         operation = action["operation"]
         memory_unit = action.get("memory_unit")
 
-        # Block: Noop
+        # Noop
         if operation == "noop":
             return
 
-        # Block: UpsertMemoryUnit
+        # UpsertMemoryUnit
         if memory_unit is not None:
             self._upsert_memory_unit(conn, memory_unit)
 
-        # Block: RevisionInsert
+        # RevisionInsert
         self._insert_revision(conn, action)
 
     def _upsert_memory_unit(self, conn: sqlite3.Connection, record: dict[str, Any]) -> None:
-        # Block: Insert
+        # Insert
         conn.execute(
             """
             INSERT OR REPLACE INTO memory_units (
@@ -1179,7 +1179,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
         )
 
     def _insert_revision(self, conn: sqlite3.Connection, action: dict[str, Any]) -> None:
-        # Block: PayloadBuild
+        # PayloadBuild
         revision = {
             "revision_id": action["revision_id"],
             "memory_set_id": action["memory_set_id"],
@@ -1193,7 +1193,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
             "evidence_event_ids": action.get("evidence_event_ids", []),
         }
 
-        # Block: Insert
+        # Insert
         conn.execute(
             """
             INSERT OR REPLACE INTO revisions (
@@ -1226,7 +1226,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
         )
 
     def _upsert_affect_state(self, conn: sqlite3.Connection, record: dict[str, Any]) -> None:
-        # Block: ExistingLookup
+        # ExistingLookup
         existing_row = conn.execute(
             """
             SELECT affect_state_id, observed_at
@@ -1246,7 +1246,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
             ),
         ).fetchone()
 
-        # Block: IdentityResolve
+        # IdentityResolve
         affect_state_id = record["affect_state_id"]
         observed_at = record["observed_at"]
         if existing_row is not None:
@@ -1259,7 +1259,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
             "observed_at": observed_at,
         }
 
-        # Block: Upsert
+        # Upsert
         conn.execute(
             """
             INSERT OR REPLACE INTO affect_state (
@@ -1290,14 +1290,14 @@ class SQLiteMemoryStore(StoreSchemaMixin):
         )
 
     def _to_json(self, payload: Any) -> str:
-        # Block: Serialize
+        # Serialize
         return json.dumps(payload, ensure_ascii=False)
 
 
-# Block: Facade
+# Facade
 class FileStore:
     def __init__(self, root_dir: Path) -> None:
-        # Block: Dependencies
+        # Dependencies
         self.root_dir = root_dir
         self.state_store = StateStore(root_dir)
         self.memory_store = SQLiteMemoryStore(root_dir)
@@ -1305,13 +1305,13 @@ class FileStore:
         self.memory_db_path = self.memory_store.memory_db_path
 
     def read_state(self) -> dict:
-        # Block: Delegate
+        # Delegate
         return self.state_store.read_state()
 
     def write_state(self, state: dict) -> None:
-        # Block: Delegate
+        # Delegate
         self.state_store.write_state(state)
 
     def __getattr__(self, name: str) -> Any:
-        # Block: Delegate
+        # Delegate
         return getattr(self.memory_store, name)

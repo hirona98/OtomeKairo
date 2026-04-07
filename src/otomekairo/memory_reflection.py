@@ -20,7 +20,7 @@ from otomekairo.memory_vector import MemoryVectorIndexer
 from otomekairo.store import FileStore
 
 
-# Block: Constants
+# Constants
 ACTIVE_MEMORY_STATUSES = ("inferred", "confirmed")
 REFLECTION_TRIGGER_CYCLE_INTERVAL = 8
 REFLECTION_TRIGGER_HOURS = 24
@@ -36,7 +36,7 @@ REFLECTION_TOPIC_DORMANT_AFTER_DAYS = 14
 REFLECTION_CONFIRMED_TOPIC_DORMANT_AFTER_DAYS = 30
 
 
-# Block: Reflective
+# Reflective
 class ReflectiveConsolidator:
     def __init__(
         self,
@@ -45,7 +45,7 @@ class ReflectiveConsolidator:
         action_resolver: MemoryActionResolver,
         vector_indexer: MemoryVectorIndexer,
     ) -> None:
-        # Block: Dependencies
+        # Dependencies
         self.store = store
         self.action_resolver = action_resolver
         self.vector_indexer = vector_indexer
@@ -58,7 +58,7 @@ class ReflectiveConsolidator:
         episode_digest: dict[str, Any],
         memory_actions: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        # Block: TriggerCheck
+        # TriggerCheck
         memory_set_id = state["selected_memory_set_id"]
         latest_run = self.store.get_latest_reflection_run(memory_set_id)
         trigger_reasons = self._reflective_trigger_reasons(
@@ -77,7 +77,7 @@ class ReflectiveConsolidator:
                 "failure_reason": None,
             }
 
-        # Block: RunState
+        # RunState
         reflection_run_id = f"reflection_run:{uuid.uuid4().hex}"
         started_at = now_iso()
         since_iso = latest_run["finished_at"] if isinstance(latest_run, dict) else None
@@ -85,7 +85,7 @@ class ReflectiveConsolidator:
         reflection_actions: list[dict[str, Any]] = []
 
         try:
-            # Block: InputCollection
+            # InputCollection
             digests = self.store.list_episode_digests_for_reflection(
                 memory_set_id=memory_set_id,
                 since_iso=since_iso,
@@ -98,7 +98,7 @@ class ReflectiveConsolidator:
                 limit=REFLECTION_MEMORY_LIMIT,
             )
 
-            # Block: ActionBuild
+            # ActionBuild
             reflection_actions.extend(
                 self._build_reflective_summary_actions(
                     memory_set_id=memory_set_id,
@@ -127,10 +127,10 @@ class ReflectiveConsolidator:
                 )
             )
 
-            # Block: MemoryPersistence
+            # MemoryPersistence
             self.store.persist_memory_actions(memory_actions=reflection_actions)
 
-            # Block: VectorIndex
+            # VectorIndex
             finished_reflection_at = now_iso()
             failure_reason: str | None = None
             result_status = "updated" if reflection_actions else "no_change"
@@ -145,7 +145,7 @@ class ReflectiveConsolidator:
                 result_status = "failed"
                 failure_reason = str(exc)
 
-            # Block: ReflectionRun
+            # ReflectionRun
             affected_memory_unit_ids = unique_memory_unit_ids(reflection_actions)
             self.store.upsert_reflection_run(
                 reflection_run={
@@ -162,7 +162,7 @@ class ReflectiveConsolidator:
                 }
             )
 
-            # Block: Result
+            # Result
             return {
                 "started": True,
                 "result_status": result_status,
@@ -171,7 +171,7 @@ class ReflectiveConsolidator:
                 "failure_reason": failure_reason,
             }
         except Exception as exc:  # noqa: BLE001
-            # Block: FailureRun
+            # FailureRun
             finished_reflection_at = now_iso()
             failure_reason = str(exc)
             self.store.upsert_reflection_run(
@@ -205,11 +205,11 @@ class ReflectiveConsolidator:
         episode_digest: dict[str, Any],
         memory_actions: list[dict[str, Any]],
     ) -> list[str]:
-        # Block: Since
+        # Since
         since_iso = latest_run["finished_at"] if isinstance(latest_run, dict) else None
         reasons: list[str] = []
 
-        # Block: CycleInterval
+        # CycleInterval
         cycle_count = self.store.count_cycle_summaries_since(
             memory_set_id=memory_set_id,
             since_iso=since_iso,
@@ -217,11 +217,11 @@ class ReflectiveConsolidator:
         if cycle_count >= REFLECTION_TRIGGER_CYCLE_INTERVAL:
             reasons.append("chat_turn_interval")
 
-        # Block: ElapsedTime
+        # ElapsedTime
         if isinstance(since_iso, str) and hours_since(since_iso, finished_at) >= REFLECTION_TRIGGER_HOURS:
             reasons.append("elapsed_24h")
 
-        # Block: HighSalience
+        # HighSalience
         high_salience_count = self.store.count_high_salience_episode_digests_since(
             memory_set_id=memory_set_id,
             since_iso=since_iso,
@@ -230,11 +230,11 @@ class ReflectiveConsolidator:
         if high_salience_count >= REFLECTION_HIGH_SALIENCE_COUNT:
             reasons.append("high_salience_cluster")
 
-        # Block: CorrectionSignal
+        # CorrectionSignal
         if any(action["operation"] in {"supersede", "revoke"} for action in memory_actions):
             reasons.append("explicit_correction")
 
-        # Block: RelationshipSignal
+        # RelationshipSignal
         relationship_signal = episode_digest["primary_scope_type"] == "relationship" and episode_digest["salience"] >= 0.65
         if not relationship_signal:
             relationship_signal = any(
@@ -244,7 +244,7 @@ class ReflectiveConsolidator:
         if relationship_signal:
             reasons.append("relationship_change")
 
-        # Block: Result
+        # Result
         deduped: list[str] = []
         for reason in reasons:
             if reason not in deduped:
@@ -259,7 +259,7 @@ class ReflectiveConsolidator:
         digests: list[dict[str, Any]],
         active_units: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        # Block: Grouping
+        # Grouping
         digest_groups: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
         memory_groups: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
         for digest in digests:
@@ -281,7 +281,7 @@ class ReflectiveConsolidator:
                 continue
             memory_groups[(scope_type, scope_key)].append(unit)
 
-        # Block: ScopeScan
+        # ScopeScan
         actions: list[dict[str, Any]] = []
         scope_keys = sorted(set(digest_groups.keys()) | set(memory_groups.keys()))
         for scope_type, scope_key in scope_keys:
@@ -315,7 +315,7 @@ class ReflectiveConsolidator:
                 )
             )
 
-        # Block: Result
+        # Result
         return actions
 
     def _should_build_reflective_summary(
@@ -325,20 +325,20 @@ class ReflectiveConsolidator:
         scope_digests: list[dict[str, Any]],
         scope_units: list[dict[str, Any]],
     ) -> bool:
-        # Block: EvidenceCount
+        # EvidenceCount
         evidence_count = len(scope_digests) + len(scope_units)
         if evidence_count < REFLECTION_MIN_SUMMARY_EVIDENCE:
             return False
         if len(scope_digests) < REFLECTION_MIN_SUMMARY_DIGESTS:
             return False
 
-        # Block: TopicGuard
+        # TopicGuard
         if scope_type == "topic":
             if len(scope_units) >= 2:
                 return True
             return sum(1 for digest in scope_digests if digest.get("open_loops")) >= 2
 
-        # Block: Result
+        # Result
         return True
 
     def _build_reflective_summary_candidate(
@@ -349,7 +349,7 @@ class ReflectiveConsolidator:
         scope_digests: list[dict[str, Any]],
         scope_units: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        # Block: Evidence
+        # Evidence
         memory_types = self._dominant_memory_types(scope_units)
         evidence_count = len(scope_digests) + len(scope_units)
         digest_count = len(scope_digests)
@@ -362,7 +362,7 @@ class ReflectiveConsolidator:
         )
         confidence_floor = 0.74 if summary_status == "confirmed" else 0.58
 
-        # Block: Candidate
+        # Candidate
         return {
             "memory_type": "summary",
             "scope_type": scope_type,
@@ -407,7 +407,7 @@ class ReflectiveConsolidator:
         finished_at: str,
         active_units: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        # Block: Selection
+        # Selection
         actions: list[dict[str, Any]] = []
         for unit in active_units:
             if unit.get("status") != "inferred":
@@ -460,7 +460,7 @@ class ReflectiveConsolidator:
                 )
             )
 
-        # Block: Result
+        # Result
         return actions
 
     def _build_reflective_dormant_actions(
@@ -472,14 +472,14 @@ class ReflectiveConsolidator:
         active_units: list[dict[str, Any]],
         excluded_memory_unit_ids: set[str],
     ) -> list[dict[str, Any]]:
-        # Block: RecentTopicScopes
+        # RecentTopicScopes
         recent_topic_scopes = {
             (digest.get("primary_scope_type"), digest.get("primary_scope_key"))
             for digest in digests
             if digest.get("primary_scope_type") == "topic" and isinstance(digest.get("primary_scope_key"), str)
         }
 
-        # Block: OrderedUnits
+        # OrderedUnits
         ordered_units = sorted(
             active_units,
             key=lambda unit: (
@@ -488,7 +488,7 @@ class ReflectiveConsolidator:
             ),
         )
 
-        # Block: Selection
+        # Selection
         actions: list[dict[str, Any]] = []
         for unit in ordered_units:
             if unit["memory_unit_id"] in excluded_memory_unit_ids:
@@ -530,30 +530,30 @@ class ReflectiveConsolidator:
                 )
             )
 
-        # Block: Result
+        # Result
         return actions
 
     def _summary_subject_ref(self, scope_type: str, scope_key: str) -> str:
-        # Block: Relationship
+        # Relationship
         if scope_type == "relationship":
             return "self|user"
 
-        # Block: Result
+        # Result
         return scope_key
 
     def _dominant_memory_types(self, scope_units: list[dict[str, Any]]) -> list[str]:
-        # Block: Count
+        # Count
         counts = Counter(
             unit["memory_type"]
             for unit in scope_units
             if isinstance(unit.get("memory_type"), str)
         )
 
-        # Block: Result
+        # Result
         return [memory_type for memory_type, _ in counts.most_common(2)]
 
     def _has_conflicting_active_variants(self, matches: list[dict[str, Any]]) -> bool:
-        # Block: VariantSignatures
+        # VariantSignatures
         variant_signatures = {
             (
                 match.get("object_ref_or_value"),
@@ -562,7 +562,7 @@ class ReflectiveConsolidator:
             for match in matches
         }
 
-        # Block: Result
+        # Result
         return len(variant_signatures) > 1
 
     def _reflective_summary_status(
@@ -573,20 +573,20 @@ class ReflectiveConsolidator:
         digest_count: int,
         open_loop_count: int,
     ) -> str:
-        # Block: Topic
+        # Topic
         if scope_type == "topic":
             if digest_count >= REFLECTION_CONFIRMED_SUMMARY_DIGESTS and open_loop_count >= 2:
                 return "confirmed"
             return "inferred"
 
-        # Block: Confirmed
+        # Confirmed
         if (
             evidence_count >= REFLECTION_CONFIRMED_SUMMARY_EVIDENCE
             and digest_count >= REFLECTION_CONFIRMED_SUMMARY_DIGESTS
         ):
             return "confirmed"
 
-        # Block: Result
+        # Result
         return "inferred"
 
     def _reflective_summary_text(
@@ -597,14 +597,14 @@ class ReflectiveConsolidator:
         memory_types: list[str],
         open_loop_count: int,
     ) -> str:
-        # Block: Topic
+        # Topic
         if scope_type == "topic":
             topic_label = display_scope_key(scope_key)
             if open_loop_count > 0:
                 return f"最近は {topic_label} に関する話題が未完了テーマとして続いている。"
             return f"最近は {topic_label} に関する話題が繰り返し現れている。"
 
-        # Block: Relationship
+        # Relationship
         if scope_type == "relationship":
             if open_loop_count > 0:
                 return "最近のあなたとのやり取りでは、継続中の確認事項や会話の流れが積み上がっている。"
@@ -612,16 +612,16 @@ class ReflectiveConsolidator:
                 return "最近のあなたとのやり取りでは、距離感や支え方に関する理解が少しずつ安定している。"
             return "最近のあなたとのやり取りでは、関係文脈が継続して積み上がっている。"
 
-        # Block: Self
+        # Self
         if scope_type == "self":
             return "最近の自分側の応答では、受け止め方や関わり方に一定の傾向が見えている。"
 
-        # Block: User
+        # User
         theme_text = self._reflective_theme_text(memory_types)
         return f"最近のあなたに関するやり取りでは、{theme_text}の理解が少しずつ積み上がっている。"
 
     def _reflective_theme_text(self, memory_types: list[str]) -> str:
-        # Block: Mapping
+        # Mapping
         labels = {
             "fact": "事実や状況",
             "preference": "好み",
@@ -644,7 +644,7 @@ class ReflectiveConsolidator:
         open_loop_count: int,
         status: str,
     ) -> float:
-        # Block: Base
+        # Base
         base = {
             "self": 0.46,
             "user": 0.5,
@@ -652,7 +652,7 @@ class ReflectiveConsolidator:
             "topic": 0.42,
         }.get(scope_type, 0.44)
 
-        # Block: Result
+        # Result
         return min(
             0.78 if status == "confirmed" else 0.62,
             base
@@ -668,7 +668,7 @@ class ReflectiveConsolidator:
         scope_units: list[dict[str, Any]],
         limit: int,
     ) -> list[str]:
-        # Block: Seed
+        # Seed
         merged: list[str] = []
         for digest in scope_digests:
             linked_event_ids = digest.get("linked_event_ids", [])
@@ -687,7 +687,7 @@ class ReflectiveConsolidator:
                 if len(merged) >= limit:
                     return merged[:limit]
 
-        # Block: Result
+        # Result
         return merged[:limit]
 
     def _reflective_cycle_ids(
@@ -696,7 +696,7 @@ class ReflectiveConsolidator:
         scope_digests: list[dict[str, Any]],
         limit: int,
     ) -> list[str]:
-        # Block: Collect
+        # Collect
         cycle_ids: list[str] = []
         for digest in scope_digests:
             cycle_id = digest.get("cycle_id")
@@ -706,11 +706,11 @@ class ReflectiveConsolidator:
             if len(cycle_ids) >= limit:
                 break
 
-        # Block: Result
+        # Result
         return cycle_ids
 
     def _support_turn_count(self, unit: dict[str, Any]) -> int:
-        # Block: CycleSupport
+        # CycleSupport
         cycle_ids = [
             cycle_id
             for cycle_id in unit.get("evidence_cycle_ids", [])
@@ -719,7 +719,7 @@ class ReflectiveConsolidator:
         if cycle_ids:
             return len(cycle_ids)
 
-        # Block: EventFallback
+        # EventFallback
         if unit.get("evidence_event_ids"):
             return 1
         return 0

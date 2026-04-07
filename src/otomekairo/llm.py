@@ -17,12 +17,12 @@ from otomekairo.llm_contracts import (
 from otomekairo.llm_mock import MockLLMClient
 
 
-# Block: Constants
+# Constants
 OPENROUTER_DEFAULT_API_BASE = "https://openrouter.ai/api/v1"
 OPENROUTER_DEFAULT_TIMEOUT_SECONDS = 600
 
 
-# Block: LiteLLMFacade
+# LiteLLMFacade
 @dataclass(slots=True)
 class LLMClient:
     mock_client: MockLLMClient = field(default_factory=MockLLMClient)
@@ -36,11 +36,11 @@ class LLMClient:
         recent_turns: list[dict],
         current_time: str,
     ) -> dict[str, Any]:
-        # Block: MockPath
+        # MockPath
         if self._is_mock_profile(profile):
             return self.mock_client.generate_recall_hint(profile, observation_text, recent_turns, current_time)
 
-        # Block: PromptBuild
+        # PromptBuild
         messages = [
             {
                 "role": "system",
@@ -52,7 +52,7 @@ class LLMClient:
             },
         ]
 
-        # Block: Retry
+        # Retry
         last_contract_error: LLMError | None = None
         for attempt in range(2):
             content = self._complete_text(profile=profile, role_settings=role_settings, messages=messages)
@@ -63,7 +63,7 @@ class LLMClient:
                 if attempt >= 1:
                     raise
 
-        # Block: Failure
+        # Failure
         if last_contract_error is not None:
             raise last_contract_error
         raise LLMError("RecallHint generation failed without a parseable response.")
@@ -80,7 +80,7 @@ class LLMClient:
         recall_hint: dict,
         recall_pack: dict[str, Any],
     ) -> dict[str, Any]:
-        # Block: MockPath
+        # MockPath
         if self._is_mock_profile(profile):
             return self.mock_client.generate_decision(
                 profile,
@@ -92,7 +92,7 @@ class LLMClient:
                 recall_pack,
             )
 
-        # Block: PromptBuild
+        # PromptBuild
         messages = [
             {
                 "role": "system",
@@ -111,7 +111,7 @@ class LLMClient:
             },
         ]
 
-        # Block: Completion
+        # Completion
         content = self._complete_text(profile=profile, role_settings=role_settings, messages=messages)
         payload = self._parse_json_object(content)
         validate_decision_contract(payload)
@@ -131,7 +131,7 @@ class LLMClient:
         recall_pack: dict[str, Any],
         decision: dict,
     ) -> dict[str, Any]:
-        # Block: MockPath
+        # MockPath
         if self._is_mock_profile(profile):
             return self.mock_client.generate_reply(
                 profile,
@@ -145,7 +145,7 @@ class LLMClient:
                 decision,
             )
 
-        # Block: PromptBuild
+        # PromptBuild
         messages = [
             {
                 "role": "system",
@@ -165,13 +165,13 @@ class LLMClient:
             },
         ]
 
-        # Block: Completion
+        # Completion
         content = self._complete_text(profile=profile, role_settings=role_settings, messages=messages)
         reply_text = content.strip()
         if not reply_text:
             raise LLMError("Reply generation returned empty content.")
 
-        # Block: Payload
+        # Payload
         return {
             "reply_text": reply_text,
             "reply_style_notes": f"model={profile.get('model')}",
@@ -189,7 +189,7 @@ class LLMClient:
         reply_text: str | None,
         current_time: str,
     ) -> dict[str, Any]:
-        # Block: MockPath
+        # MockPath
         if self._is_mock_profile(profile):
             return self.mock_client.generate_memory_interpretation(
                 profile,
@@ -199,7 +199,7 @@ class LLMClient:
                 reply_text,
             )
 
-        # Block: PromptBuild
+        # PromptBuild
         messages = [
             {
                 "role": "system",
@@ -217,7 +217,7 @@ class LLMClient:
             },
         ]
 
-        # Block: Retry
+        # Retry
         last_contract_error: LLMError | None = None
         attempt_messages = list(messages)
         for attempt in range(2):
@@ -242,7 +242,7 @@ class LLMClient:
                     },
                 ]
 
-        # Block: Failure
+        # Failure
         if last_contract_error is not None:
             raise last_contract_error
         raise LLMError("MemoryInterpretation generation failed without a parseable response.")
@@ -254,20 +254,20 @@ class LLMClient:
         role_settings: dict,
         texts: list[str],
     ) -> list[list[float]]:
-        # Block: Empty
+        # Empty
         if not texts:
             return []
 
-        # Block: Dimension
+        # Dimension
         embedding_dimension = role_settings.get("embedding_dimension")
         if not isinstance(embedding_dimension, int) or embedding_dimension <= 0:
             raise LLMError("embedding_dimension must be a positive integer.")
 
-        # Block: MockPath
+        # MockPath
         if self._is_mock_profile(profile):
             return self.mock_client.generate_embeddings(profile, texts, embedding_dimension)
 
-        # Block: OpenRouterPath
+        # OpenRouterPath
         if self._is_openrouter_embedding_profile(profile):
             response = self._request_openrouter_embeddings(profile=profile, texts=texts)
             return self._extract_embedding_vectors(
@@ -277,10 +277,10 @@ class LLMClient:
                 source_label="OpenRouter",
             )
 
-        # Block: Import
+        # Import
         embedding = self._load_litellm_embedding()
 
-        # Block: RequestBuild
+        # RequestBuild
         request_kwargs: dict[str, Any] = {
             "model": self._resolve_litellm_model(profile),
             "input": texts,
@@ -292,13 +292,13 @@ class LLMClient:
         if api_key is not None:
             request_kwargs["api_key"] = api_key
 
-        # Block: Request
+        # Request
         try:
             response = embedding(**request_kwargs)
         except Exception as exc:  # noqa: BLE001
             raise LLMError(f"LiteLLM embedding call failed: {exc}") from exc
 
-        # Block: Result
+        # Result
         return self._extract_embedding_vectors(
             response,
             expected_count=len(texts),
@@ -306,7 +306,7 @@ class LLMClient:
             source_label="LiteLLM",
         )
 
-    # Block: LiteLLMCall
+    # LiteLLMCall
     def _complete_text(
         self,
         *,
@@ -314,10 +314,10 @@ class LLMClient:
         role_settings: dict,
         messages: list[dict[str, str]],
     ) -> str:
-        # Block: Import
+        # Import
         completion = self._load_litellm_completion()
 
-        # Block: RequestBuild
+        # RequestBuild
         request_kwargs: dict[str, Any] = {
             "model": self._resolve_litellm_model(profile),
             "messages": messages,
@@ -335,17 +335,17 @@ class LLMClient:
         if isinstance(reasoning_effort, str) and reasoning_effort.strip():
             request_kwargs["reasoning_effort"] = reasoning_effort.strip()
 
-        # Block: Request
+        # Request
         try:
             response = completion(**request_kwargs)
         except Exception as exc:  # noqa: BLE001
             raise LLMError(f"LiteLLM call failed: {exc}") from exc
 
-        # Block: ResponseExtract
+        # ResponseExtract
         return self._extract_response_text(response)
 
     def _load_litellm_completion(self) -> Callable[..., Any]:
-        # Block: Import
+        # Import
         try:
             from litellm import completion
         except ImportError as exc:
@@ -354,7 +354,7 @@ class LLMClient:
         return completion
 
     def _load_litellm_embedding(self) -> Callable[..., Any]:
-        # Block: Import
+        # Import
         try:
             from litellm import embedding
         except ImportError as exc:
@@ -362,9 +362,9 @@ class LLMClient:
 
         return embedding
 
-    # Block: PromptHelpers
+    # PromptHelpers
     def _build_recall_hint_system_prompt(self) -> str:
-        # Block: Prompt
+        # Prompt
         return (
             "あなたは OtomeKairo の recall_hint_generation です。\n"
             "観測文を分析し、JSON オブジェクト 1 個だけを返してください。\n"
@@ -393,7 +393,7 @@ class LLMClient:
         recent_turns: list[dict],
         current_time: str,
     ) -> str:
-        # Block: Prompt
+        # Prompt
         return (
             f"current_time: {current_time}\n"
             f"recent_turns:\n{self._format_recent_turns(recent_turns)}\n"
@@ -401,7 +401,7 @@ class LLMClient:
         )
 
     def _build_decision_system_prompt(self) -> str:
-        # Block: Prompt
+        # Prompt
         return (
             "あなたは OtomeKairo の decision_generation です。\n"
             "観測文に対して reply / noop / future_act のいずれかを決め、JSON オブジェクト 1 個だけを返してください。\n"
@@ -435,7 +435,7 @@ class LLMClient:
         recall_hint: dict,
         recall_pack: dict[str, Any],
     ) -> str:
-        # Block: Prompt
+        # Prompt
         return (
             f"recent_turns:\n{self._format_recent_turns(recent_turns)}\n"
             "internal_context:\n"
@@ -446,7 +446,7 @@ class LLMClient:
         )
 
     def _build_reply_system_prompt(self, persona: dict) -> str:
-        # Block: PersonaFields
+        # PersonaFields
         display_name = persona.get("display_name", "OtomeKairo")
         persona_text = persona.get("persona_text", "")
         second_person_label = persona.get("second_person_label", "あなた")
@@ -454,7 +454,7 @@ class LLMClient:
         core_persona = json.dumps(persona.get("core_persona", {}), ensure_ascii=False)
         expression_style = json.dumps(persona.get("expression_style", {}), ensure_ascii=False)
 
-        # Block: Prompt
+        # Prompt
         return (
             f"あなたは {display_name} として話します。\n"
             "返答は自然な日本語の本文だけを返してください。JSON、箇条書き、見出し、引用符は禁止です。\n"
@@ -483,7 +483,7 @@ class LLMClient:
         recall_pack: dict[str, Any],
         decision: dict,
     ) -> str:
-        # Block: Prompt
+        # Prompt
         return (
             f"recent_turns:\n{self._format_recent_turns(recent_turns)}\n"
             "internal_context:\n"
@@ -496,7 +496,7 @@ class LLMClient:
         )
 
     def _build_memory_interpretation_system_prompt(self) -> str:
-        # Block: Prompt
+        # Prompt
         return (
             "あなたは OtomeKairo の memory_interpretation です。\n"
             "会話 1 サイクルから episode_digest, candidate_memory_units, affect_updates を抽出し、JSON オブジェクト 1 個だけを返してください。\n"
@@ -547,7 +547,7 @@ class LLMClient:
         reply_text: str | None,
         current_time: str,
     ) -> str:
-        # Block: Prompt
+        # Prompt
         return (
             f"current_time: {current_time}\n"
             f"observation_text:\n{observation_text.strip()}\n"
@@ -560,7 +560,7 @@ class LLMClient:
         )
 
     def _build_memory_interpretation_repair_prompt(self, validation_error: str) -> str:
-        # Block: Prompt
+        # Prompt
         return (
             "前回の出力は memory_interpretation 契約を満たしていませんでした。\n"
             f"validator_error: {validation_error}\n"
@@ -575,16 +575,16 @@ class LLMClient:
         )
 
     def _parse_recall_hint_payload(self, content: str) -> dict[str, Any]:
-        # Block: Parse
+        # Parse
         payload = self._parse_json_object(content)
         validate_recall_hint_contract(payload)
 
-        # Block: Result
+        # Result
         return payload
 
-    # Block: ResponseHelpers
+    # ResponseHelpers
     def _extract_response_text(self, response: Any) -> str:
-        # Block: ChoiceRead
+        # ChoiceRead
         choices = getattr(response, "choices", None)
         if choices is None and isinstance(response, dict):
             choices = response.get("choices")
@@ -597,12 +597,12 @@ class LLMClient:
         if message is None:
             raise LLMError("LiteLLM response did not include message.")
 
-        # Block: ContentRead
+        # ContentRead
         content = getattr(message, "content", None)
         if content is None and isinstance(message, dict):
             content = message.get("content")
 
-        # Block: ContentNormalize
+        # ContentNormalize
         if isinstance(content, str):
             return content
         if isinstance(content, list):
@@ -610,7 +610,7 @@ class LLMClient:
         raise LLMError("LiteLLM response content was empty.")
 
     def _flatten_content_parts(self, content: list[Any]) -> str:
-        # Block: Flatten
+        # Flatten
         text_parts: list[str] = []
         for part in content:
             if isinstance(part, str):
@@ -630,14 +630,14 @@ class LLMClient:
         return result
 
     def _parse_json_object(self, content: str) -> dict[str, Any]:
-        # Block: DirectParse
+        # DirectParse
         stripped = content.strip()
         try:
             payload = json.loads(stripped)
         except json.JSONDecodeError:
             payload = None
 
-        # Block: FenceFallback
+        # FenceFallback
         if payload is None:
             normalized = stripped.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
             try:
@@ -645,7 +645,7 @@ class LLMClient:
             except json.JSONDecodeError:
                 payload = None
 
-        # Block: BraceFallback
+        # BraceFallback
         if payload is None:
             start = stripped.find("{")
             end = stripped.rfind("}")
@@ -655,7 +655,7 @@ class LLMClient:
                 except json.JSONDecodeError as exc:
                     raise LLMError(f"LiteLLM JSON parse failed: {exc}") from exc
 
-        # Block: ShapeCheck
+        # ShapeCheck
         if not isinstance(payload, dict):
             raise LLMError("LiteLLM did not return a JSON object.")
         return payload
@@ -668,14 +668,14 @@ class LLMClient:
         expected_dimension: int | None = None,
         source_label: str = "LiteLLM",
     ) -> list[list[float]]:
-        # Block: DataRead
+        # DataRead
         data = getattr(response, "data", None)
         if data is None and isinstance(response, dict):
             data = response.get("data")
         if not isinstance(data, list) or len(data) != expected_count:
             raise LLMError(f"{source_label} embedding response did not include expected data.")
 
-        # Block: Parse
+        # Parse
         vectors: list[list[float]] = []
         for item in data:
             vector = getattr(item, "embedding", None)
@@ -690,43 +690,43 @@ class LLMClient:
                 )
             vectors.append(parsed)
 
-        # Block: Result
+        # Result
         return vectors
 
-    # Block: ConfigHelpers
+    # ConfigHelpers
     def _is_mock_profile(self, profile: dict) -> bool:
         return profile.get("model") == "mock"
 
     def _is_openrouter_embedding_profile(self, profile: dict) -> bool:
-        # Block: ModelCheck
+        # ModelCheck
         model = profile.get("model")
         if isinstance(model, str) and model.strip().startswith("openrouter/"):
             return True
 
-        # Block: BaseUrlCheck
+        # BaseUrlCheck
         api_base = profile.get("base_url")
         if isinstance(api_base, str) and "openrouter.ai" in api_base:
             return True
 
-        # Block: Default
+        # Default
         return False
 
     def _resolve_litellm_model(self, profile: dict) -> str:
-        # Block: RawValue
+        # RawValue
         model = profile.get("model")
         if not isinstance(model, str) or not model.strip():
             raise LLMError("model_profile.model is missing.")
         return model.strip()
 
     def _resolve_openrouter_embedding_model(self, profile: dict) -> str:
-        # Block: Normalize
+        # Normalize
         model = self._resolve_litellm_model(profile)
         if model.startswith("openrouter/"):
             return model.removeprefix("openrouter/")
         return model
 
     def _resolve_openrouter_api_base(self, profile: dict) -> str:
-        # Block: CustomBase
+        # CustomBase
         api_base = profile.get("base_url")
         if isinstance(api_base, str) and api_base.strip():
             normalized = api_base.strip().rstrip("/")
@@ -736,7 +736,7 @@ class LLMClient:
                 return normalized.rsplit("/", 1)[0]
             return normalized
 
-        # Block: DefaultBase
+        # DefaultBase
         return OPENROUTER_DEFAULT_API_BASE
 
     def _request_openrouter_embeddings(
@@ -745,12 +745,12 @@ class LLMClient:
         profile: dict,
         texts: list[str],
     ) -> dict[str, Any]:
-        # Block: ApiKey
+        # ApiKey
         api_key = self._resolve_api_key(profile)
         if api_key is None:
             raise LLMError("OpenRouter embedding requires auth token.")
 
-        # Block: RequestData
+        # RequestData
         api_base = self._resolve_openrouter_api_base(profile)
         payload = {
             "model": self._resolve_openrouter_embedding_model(profile),
@@ -767,7 +767,7 @@ class LLMClient:
             method="POST",
         )
 
-        # Block: ResponseRead
+        # ResponseRead
         try:
             with urllib_request.urlopen(request, timeout=OPENROUTER_DEFAULT_TIMEOUT_SECONDS) as response:
                 body = response.read().decode("utf-8")
@@ -778,7 +778,7 @@ class LLMClient:
         except urllib_error.URLError as exc:
             raise LLMError(f"OpenRouter embedding call failed: {exc.reason}") from exc
 
-        # Block: Parse
+        # Parse
         try:
             payload = json.loads(body)
         except json.JSONDecodeError as exc:
@@ -788,18 +788,18 @@ class LLMClient:
         return payload
 
     def _extract_http_error_detail(self, error_body: str) -> str:
-        # Block: Empty
+        # Empty
         stripped = error_body.strip()
         if not stripped:
             return "unknown_error"
 
-        # Block: JsonParse
+        # JsonParse
         try:
             payload = json.loads(stripped)
         except json.JSONDecodeError:
             payload = None
 
-        # Block: ErrorMessage
+        # ErrorMessage
         if isinstance(payload, dict):
             error_value = payload.get("error")
             if isinstance(error_value, dict):
@@ -812,18 +812,18 @@ class LLMClient:
             if isinstance(message, str) and message.strip():
                 return message.strip()
 
-        # Block: Fallback
+        # Fallback
         return stripped
 
     def _resolve_api_key(self, profile: dict) -> str | None:
-        # Block: AuthRead
+        # AuthRead
         auth = profile.get("auth")
         if not isinstance(auth, dict):
             return None
         if auth.get("type") == "none":
             return None
 
-        # Block: TokenResolve
+        # TokenResolve
         for key in ("token", "api_key", "key"):
             value = auth.get(key)
             if isinstance(value, str) and value.strip():
@@ -836,18 +836,18 @@ class LLMClient:
         affect_context: dict[str, list[dict[str, Any]]],
         recall_pack: dict[str, Any],
     ) -> str:
-        # Block: Payload
+        # Payload
         payload = {
             "time_context": time_context,
             "affect_context": affect_context,
             "recall_pack": self._compact_recall_pack(recall_pack),
         }
 
-        # Block: Result
+        # Result
         return json.dumps(payload, ensure_ascii=False)
 
     def _compact_recall_pack(self, recall_pack: dict[str, Any]) -> dict[str, Any]:
-        # Block: Payload
+        # Payload
         return {
             "self_model": [self._compact_memory_context_item(item) for item in recall_pack.get("self_model", [])],
             "user_model": [self._compact_memory_context_item(item) for item in recall_pack.get("user_model", [])],
@@ -860,7 +860,7 @@ class LLMClient:
         }
 
     def _compact_memory_context_item(self, item: dict[str, Any]) -> dict[str, Any]:
-        # Block: Payload
+        # Payload
         payload = {
             "memory_type": item["memory_type"],
             "scope_type": item["scope_type"],
@@ -874,19 +874,19 @@ class LLMClient:
         if item.get("retrieval_lane") is not None:
             payload["retrieval_lane"] = item["retrieval_lane"]
 
-        # Block: Result
+        # Result
         return payload
 
     def _compact_topic_context_item(self, item: dict[str, Any]) -> dict[str, Any]:
-        # Block: DigestTopic
+        # DigestTopic
         if item.get("source_kind") == "episode_digest":
             return self._compact_digest_context_item(item)
 
-        # Block: MemoryTopic
+        # MemoryTopic
         return self._compact_memory_context_item(item)
 
     def _compact_digest_context_item(self, item: dict[str, Any]) -> dict[str, Any]:
-        # Block: Payload
+        # Payload
         payload = {
             "primary_scope_type": item["primary_scope_type"],
             "primary_scope_key": item["primary_scope_key"],
@@ -898,18 +898,18 @@ class LLMClient:
         if item.get("retrieval_lane") is not None:
             payload["retrieval_lane"] = item["retrieval_lane"]
 
-        # Block: Result
+        # Result
         return payload
 
     def _compact_conflict_context_item(self, item: dict[str, Any]) -> dict[str, Any]:
-        # Block: Payload
+        # Payload
         return {
             "summary_text": item["summary_text"],
             "compare_key": item["compare_key"],
         }
 
     def _compact_event_evidence_item(self, item: dict[str, Any]) -> dict[str, Any]:
-        # Block: Payload
+        # Payload
         payload = {
             "kind": item["kind"],
         }
@@ -919,15 +919,15 @@ class LLMClient:
                 continue
             payload[key] = value
 
-        # Block: Result
+        # Result
         return payload
 
     def _format_recent_turns(self, recent_turns: list[dict]) -> str:
-        # Block: Empty
+        # Empty
         if not recent_turns:
             return "(none)"
 
-        # Block: Lines
+        # Lines
         lines = []
         for turn in recent_turns:
             role = turn.get("role", "unknown")

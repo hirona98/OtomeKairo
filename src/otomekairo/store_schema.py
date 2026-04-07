@@ -8,7 +8,7 @@ from typing import Any
 import sqlite_vec
 
 
-# Block: Constants
+# Constants
 MEMORY_DB_FILE_NAME = "memory.db"
 
 LEGACY_EVENTS_FILE_NAME = "events.jsonl"
@@ -19,10 +19,10 @@ LEGACY_CYCLE_TRACES_FILE_NAME = "cycle_traces.jsonl"
 CURRENT_MEMORY_DB_VERSION = 5
 
 
-# Block: SchemaMixin
+# SchemaMixin
 class StoreSchemaMixin:
     def _initialize_memory_db(self) -> None:
-        # Block: SchemaSetup
+        # SchemaSetup
         with self._memory_db() as conn:
             version = conn.execute("PRAGMA user_version").fetchone()[0]
             if version < 1:
@@ -38,18 +38,18 @@ class StoreSchemaMixin:
             if version < CURRENT_MEMORY_DB_VERSION:
                 conn.execute(f"PRAGMA user_version = {CURRENT_MEMORY_DB_VERSION}")
 
-            # Block: LegacyImport
+            # LegacyImport
             self._import_legacy_jsonl_records(conn)
 
     def _open_memory_db(self) -> sqlite3.Connection:
-        # Block: Connection
+        # Connection
         conn = sqlite3.connect(self.memory_db_path)
         conn.row_factory = sqlite3.Row
         conn.enable_load_extension(True)
         sqlite_vec.load(conn)
         conn.enable_load_extension(False)
 
-        # Block: Pragmas
+        # Pragmas
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("PRAGMA journal_mode = WAL")
         conn.execute("PRAGMA busy_timeout = 5000")
@@ -57,7 +57,7 @@ class StoreSchemaMixin:
 
     @contextmanager
     def _memory_db(self) -> sqlite3.Connection:
-        # Block: ConnectionLifecycle
+        # ConnectionLifecycle
         conn = self._open_memory_db()
         try:
             with conn:
@@ -66,7 +66,7 @@ class StoreSchemaMixin:
             conn.close()
 
     def _apply_schema_v1(self, conn: sqlite3.Connection) -> None:
-        # Block: Schema
+        # Schema
         conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS events (
@@ -131,7 +131,7 @@ class StoreSchemaMixin:
         )
 
     def _apply_schema_v2(self, conn: sqlite3.Connection) -> None:
-        # Block: Schema
+        # Schema
         conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS episode_digests (
@@ -221,13 +221,13 @@ class StoreSchemaMixin:
         )
 
     def _apply_schema_v3(self, conn: sqlite3.Connection) -> None:
-        # Block: ColumnLookup
+        # ColumnLookup
         column_names = {
             row["name"]
             for row in conn.execute("PRAGMA table_info(episode_digests)").fetchall()
         }
 
-        # Block: ColumnAdd
+        # ColumnAdd
         if "has_open_loops" not in column_names:
             conn.execute(
                 """
@@ -236,7 +236,7 @@ class StoreSchemaMixin:
                 """
             )
 
-        # Block: Backfill
+        # Backfill
         conn.execute(
             """
             UPDATE episode_digests
@@ -247,7 +247,7 @@ class StoreSchemaMixin:
             """
         )
 
-        # Block: Indexes
+        # Indexes
         conn.executescript(
             """
             CREATE INDEX IF NOT EXISTS idx_episode_digests_scope_recent
@@ -259,7 +259,7 @@ class StoreSchemaMixin:
         )
 
     def _apply_schema_v4(self, conn: sqlite3.Connection) -> None:
-        # Block: Schema
+        # Schema
         conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS vector_index_entries (
@@ -288,7 +288,7 @@ class StoreSchemaMixin:
         )
 
     def _apply_schema_v5(self, conn: sqlite3.Connection) -> None:
-        # Block: Schema
+        # Schema
         conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS reflection_runs (
@@ -309,7 +309,7 @@ class StoreSchemaMixin:
         )
 
     def _import_legacy_jsonl_records(self, conn: sqlite3.Connection) -> None:
-        # Block: SummaryLookup
+        # SummaryLookup
         legacy_summaries = self._read_jsonl_file(LEGACY_CYCLE_SUMMARIES_FILE_NAME)
         summary_by_cycle_id = {
             summary["cycle_id"]: summary
@@ -317,19 +317,19 @@ class StoreSchemaMixin:
             if isinstance(summary, dict) and isinstance(summary.get("cycle_id"), str)
         }
 
-        # Block: ImportCycleSummaries
+        # ImportCycleSummaries
         if not self._table_has_rows(conn, "cycle_summaries"):
             for summary in legacy_summaries:
                 if isinstance(summary, dict):
                     self._insert_cycle_summary(conn, summary)
 
-        # Block: ImportCycleTraces
+        # ImportCycleTraces
         if not self._table_has_rows(conn, "cycle_traces"):
             for trace in self._read_jsonl_file(LEGACY_CYCLE_TRACES_FILE_NAME):
                 if isinstance(trace, dict):
                     self._insert_cycle_trace(conn, trace)
 
-        # Block: ImportEvents
+        # ImportEvents
         if not self._table_has_rows(conn, "events"):
             for event in self._read_jsonl_file(LEGACY_EVENTS_FILE_NAME):
                 if not isinstance(event, dict):
@@ -341,7 +341,7 @@ class StoreSchemaMixin:
                 }
                 self._insert_event(conn, legacy_record)
 
-        # Block: ImportRetrievalRuns
+        # ImportRetrievalRuns
         if not self._table_has_rows(conn, "retrieval_runs"):
             for retrieval_run in self._read_jsonl_file(LEGACY_RETRIEVAL_RUNS_FILE_NAME):
                 if not isinstance(retrieval_run, dict):
@@ -354,12 +354,12 @@ class StoreSchemaMixin:
                 self._insert_retrieval_run(conn, legacy_record)
 
     def _table_has_rows(self, conn: sqlite3.Connection, table_name: str) -> bool:
-        # Block: Query
+        # Query
         count = conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
         return count > 0
 
     def _read_jsonl_file(self, file_name: str) -> list[dict[str, Any]]:
-        # Block: ReadRecords
+        # ReadRecords
         path = self.root_dir / file_name
         if not path.exists():
             return []

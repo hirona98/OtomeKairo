@@ -6,19 +6,19 @@ from otomekairo.event_stream import ServerWebSocket
 from otomekairo.service_common import REQUIRED_ROLE_NAMES, ServiceError
 
 
-# Block: ConfigMixin
+# ConfigMixin
 class ServiceConfigMixin:
     def register_event_stream_connection(self, websocket: ServerWebSocket) -> str:
-        # Block: Registry
+        # Registry
         return self._event_stream_registry.add_connection(websocket)
 
     def handle_event_stream_message(self, session_id: str, payload: dict[str, Any]) -> None:
-        # Block: Type
+        # Type
         message_type = payload.get("type")
         if message_type != "hello":
             raise ServiceError(400, "invalid_event_stream_message", "Only hello messages are supported.")
 
-        # Block: Fields
+        # Fields
         client_id = payload.get("client_id")
         caps = payload.get("caps", [])
         if not isinstance(client_id, str) or not client_id.strip():
@@ -26,14 +26,14 @@ class ServiceConfigMixin:
         if not isinstance(caps, list):
             raise ServiceError(400, "invalid_caps", "hello.caps must be an array.")
 
-        # Block: Caps
+        # Caps
         normalized_caps: list[str] = []
         for cap in caps:
             if not isinstance(cap, str) or not cap.strip():
                 raise ServiceError(400, "invalid_caps", "hello.caps must contain non-empty strings.")
             normalized_caps.append(cap.strip())
 
-        # Block: Register
+        # Register
         self._event_stream_registry.register_hello(
             session_id,
             client_id=client_id.strip(),
@@ -41,15 +41,15 @@ class ServiceConfigMixin:
         )
 
     def unregister_event_stream_connection(self, session_id: str) -> None:
-        # Block: Registry
+        # Registry
         self._event_stream_registry.remove_connection(session_id)
 
     def close_event_streams(self) -> None:
-        # Block: Registry
+        # Registry
         self._event_stream_registry.close_all()
 
     def probe_bootstrap(self) -> dict[str, Any]:
-        # Block: State
+        # State
         self.store.read_state()
         return {
             "bootstrap_available": True,
@@ -58,7 +58,7 @@ class ServiceConfigMixin:
         }
 
     def read_server_identity(self) -> dict[str, Any]:
-        # Block: State
+        # State
         state = self.store.read_state()
         return {
             "server_id": state["server_id"],
@@ -68,24 +68,24 @@ class ServiceConfigMixin:
         }
 
     def register_first_console(self) -> dict[str, Any]:
-        # Block: LoadState
+        # LoadState
         state = self.store.read_state()
 
-        # Block: EnsureToken
+        # EnsureToken
         if state["console_access_token"] is None:
             state["console_access_token"] = self._new_console_token()
             self.store.write_state(state)
 
-        # Block: Result
+        # Result
         return {
             "console_access_token": state["console_access_token"],
         }
 
     def reissue_console_access_token(self, token: str | None) -> dict[str, Any]:
-        # Block: Authorization
+        # Authorization
         state = self._require_token(token)
 
-        # Block: IssueToken
+        # IssueToken
         state["console_access_token"] = self._new_console_token()
         self.store.write_state(state)
         return {
@@ -93,20 +93,20 @@ class ServiceConfigMixin:
         }
 
     def get_status(self, token: str | None) -> dict[str, Any]:
-        # Block: Authorization
+        # Authorization
         state = self._require_token(token)
 
-        # Block: Response
+        # Response
         return {
             "settings_snapshot": self._build_settings_snapshot(state),
             "runtime_summary": self._build_runtime_summary(state),
         }
 
     def get_config(self, token: str | None) -> dict[str, Any]:
-        # Block: Authorization
+        # Authorization
         state = self._require_token(token)
 
-        # Block: SelectedResources
+        # SelectedResources
         selected_preset = state["model_presets"][state["selected_model_preset_id"]]
         selected_profile_ids = {
             role_name: role_value["model_profile_id"]
@@ -117,7 +117,7 @@ class ServiceConfigMixin:
             for role_name, profile_id in selected_profile_ids.items()
         }
 
-        # Block: Response
+        # Response
         return {
             "settings_snapshot": self._build_settings_snapshot(state),
             "selected_persona": state["personas"][state["selected_persona_id"]],
@@ -128,15 +128,15 @@ class ServiceConfigMixin:
         }
 
     def get_editor_state(self, token: str | None) -> dict[str, Any]:
-        # Block: Authorization
+        # Authorization
         state = self._require_token(token)
         return self._build_editor_state(state)
 
     def get_catalog(self, token: str | None) -> dict[str, Any]:
-        # Block: Authorization
+        # Authorization
         state = self._require_token(token)
 
-        # Block: Response
+        # Response
         return {
             "personas": self._catalog_entries(state["personas"], "persona_id"),
             "memory_sets": self._catalog_entries(state["memory_sets"], "memory_set_id"),
@@ -145,11 +145,11 @@ class ServiceConfigMixin:
         }
 
     def patch_current(self, token: str | None, payload: dict[str, Any]) -> dict[str, Any]:
-        # Block: State
+        # State
         state = self._require_token(token)
         should_clear_future_act = False
 
-        # Block: SelectedPersona
+        # SelectedPersona
         if "selected_persona_id" in payload:
             persona_id = payload["selected_persona_id"]
             if persona_id not in state["personas"]:
@@ -157,7 +157,7 @@ class ServiceConfigMixin:
             should_clear_future_act = should_clear_future_act or persona_id != state["selected_persona_id"]
             state["selected_persona_id"] = persona_id
 
-        # Block: SelectedMemorySet
+        # SelectedMemorySet
         if "selected_memory_set_id" in payload:
             memory_set_id = payload["selected_memory_set_id"]
             if memory_set_id not in state["memory_sets"]:
@@ -165,7 +165,7 @@ class ServiceConfigMixin:
             should_clear_future_act = should_clear_future_act or memory_set_id != state["selected_memory_set_id"]
             state["selected_memory_set_id"] = memory_set_id
 
-        # Block: SelectedModelPreset
+        # SelectedModelPreset
         if "selected_model_preset_id" in payload:
             model_preset_id = payload["selected_model_preset_id"]
             if model_preset_id not in state["model_presets"]:
@@ -174,7 +174,7 @@ class ServiceConfigMixin:
             should_clear_future_act = should_clear_future_act or model_preset_id != state["selected_model_preset_id"]
             state["selected_model_preset_id"] = model_preset_id
 
-        # Block: ToggleFields
+        # ToggleFields
         if "wake_policy" in payload:
             self._validate_wake_policy(payload["wake_policy"])
             state["wake_policy"] = payload["wake_policy"]
@@ -185,30 +185,30 @@ class ServiceConfigMixin:
             self._validate_desktop_watch(payload["desktop_watch"])
             state["desktop_watch"] = payload["desktop_watch"]
 
-        # Block: Persist
+        # Persist
         self.store.write_state(state)
         if should_clear_future_act:
             self._clear_future_act_candidates()
         return self.get_config(token=state["console_access_token"])
 
     def select_persona(self, token: str | None, persona_id: str) -> dict[str, Any]:
-        # Block: Delegate
+        # Delegate
         return self.patch_current(token, {"selected_persona_id": persona_id})
 
     def select_memory_set(self, token: str | None, memory_set_id: str) -> dict[str, Any]:
-        # Block: Delegate
+        # Delegate
         return self.patch_current(token, {"selected_memory_set_id": memory_set_id})
 
     def update_wake_policy(self, token: str | None, wake_policy: dict[str, Any]) -> dict[str, Any]:
-        # Block: Delegate
+        # Delegate
         return self.patch_current(token, {"wake_policy": wake_policy})
 
     def select_model_preset(self, token: str | None, model_preset_id: str) -> dict[str, Any]:
-        # Block: Delegate
+        # Delegate
         return self.patch_current(token, {"selected_model_preset_id": model_preset_id})
 
     def get_persona(self, token: str | None, persona_id: str) -> dict[str, Any]:
-        # Block: Authorization
+        # Authorization
         state = self._require_token(token)
         persona = state["personas"].get(persona_id)
         if persona is None:
@@ -218,7 +218,7 @@ class ServiceConfigMixin:
         }
 
     def replace_persona(self, token: str | None, persona_id: str, definition: dict[str, Any]) -> dict[str, Any]:
-        # Block: Authorization
+        # Authorization
         state = self._require_token(token)
         self._validate_persona_definition(persona_id, definition)
         state["personas"][persona_id] = definition
@@ -230,7 +230,7 @@ class ServiceConfigMixin:
         }
 
     def delete_persona(self, token: str | None, persona_id: str) -> dict[str, Any]:
-        # Block: Authorization
+        # Authorization
         state = self._require_token(token)
         self._delete_resource(
             entries=state["personas"],
@@ -246,7 +246,7 @@ class ServiceConfigMixin:
         }
 
     def get_memory_set(self, token: str | None, memory_set_id: str) -> dict[str, Any]:
-        # Block: Authorization
+        # Authorization
         state = self._require_token(token)
         memory_set = state["memory_sets"].get(memory_set_id)
         if memory_set is None:
@@ -256,7 +256,7 @@ class ServiceConfigMixin:
         }
 
     def replace_memory_set(self, token: str | None, memory_set_id: str, definition: dict[str, Any]) -> dict[str, Any]:
-        # Block: Authorization
+        # Authorization
         state = self._require_token(token)
         self._validate_memory_set_definition(memory_set_id, definition)
         state["memory_sets"][memory_set_id] = definition
@@ -268,7 +268,7 @@ class ServiceConfigMixin:
         }
 
     def delete_memory_set(self, token: str | None, memory_set_id: str) -> dict[str, Any]:
-        # Block: Authorization
+        # Authorization
         state = self._require_token(token)
         self._delete_resource(
             entries=state["memory_sets"],
@@ -285,7 +285,7 @@ class ServiceConfigMixin:
         }
 
     def get_model_preset(self, token: str | None, model_preset_id: str) -> dict[str, Any]:
-        # Block: Authorization
+        # Authorization
         state = self._require_token(token)
         model_preset = state["model_presets"].get(model_preset_id)
         if model_preset is None:
@@ -295,7 +295,7 @@ class ServiceConfigMixin:
         }
 
     def replace_model_preset(self, token: str | None, model_preset_id: str, definition: dict[str, Any]) -> dict[str, Any]:
-        # Block: Authorization
+        # Authorization
         state = self._require_token(token)
         normalized_definition = self._normalize_model_preset_definition(definition)
         self._validate_model_preset_definition(state, model_preset_id, normalized_definition)
@@ -308,7 +308,7 @@ class ServiceConfigMixin:
         }
 
     def delete_model_preset(self, token: str | None, model_preset_id: str) -> dict[str, Any]:
-        # Block: Authorization
+        # Authorization
         state = self._require_token(token)
         self._delete_resource(
             entries=state["model_presets"],
@@ -324,7 +324,7 @@ class ServiceConfigMixin:
         }
 
     def get_model_profile(self, token: str | None, model_profile_id: str) -> dict[str, Any]:
-        # Block: Authorization
+        # Authorization
         state = self._require_token(token)
         model_profile = state["model_profiles"].get(model_profile_id)
         if model_profile is None:
@@ -334,7 +334,7 @@ class ServiceConfigMixin:
         }
 
     def replace_model_profile(self, token: str | None, model_profile_id: str, definition: dict[str, Any]) -> dict[str, Any]:
-        # Block: Authorization
+        # Authorization
         state = self._require_token(token)
         self._validate_model_profile_definition(model_profile_id, definition)
         candidate_state = {
@@ -355,7 +355,7 @@ class ServiceConfigMixin:
         }
 
     def delete_model_profile(self, token: str | None, model_profile_id: str) -> dict[str, Any]:
-        # Block: Authorization
+        # Authorization
         state = self._require_token(token)
         if model_profile_id not in state["model_profiles"]:
             raise ServiceError(404, "model_profile_not_found", "The requested model_profile_id does not exist.")
@@ -376,10 +376,10 @@ class ServiceConfigMixin:
         }
 
     def replace_editor_state(self, token: str | None, definition: dict[str, Any]) -> dict[str, Any]:
-        # Block: Authorization
+        # Authorization
         state = self._require_token(token)
 
-        # Block: RawEntries
+        # RawEntries
         current = definition.get("current")
         personas = self._entries_by_id(definition.get("personas"), "persona_id", "personas")
         memory_sets = self._entries_by_id(definition.get("memory_sets"), "memory_set_id", "memory_sets")
@@ -390,7 +390,7 @@ class ServiceConfigMixin:
         }
         raw_model_presets = self._entries_by_id(definition.get("model_presets"), "model_preset_id", "model_presets")
 
-        # Block: ShapeChecks
+        # ShapeChecks
         if not isinstance(current, dict):
             raise ServiceError(400, "invalid_editor_state_current", "current must be an object.")
         if not personas:
@@ -402,7 +402,7 @@ class ServiceConfigMixin:
         if not raw_model_presets:
             raise ServiceError(400, "missing_model_presets", "editor-state requires at least one model_preset.")
 
-        # Block: Validation
+        # Validation
         for persona_id, persona in personas.items():
             self._validate_persona_definition(persona_id, persona)
         for memory_set_id, memory_set in memory_sets.items():
@@ -410,7 +410,7 @@ class ServiceConfigMixin:
         for model_profile_id, model_profile in model_profiles.items():
             self._validate_model_profile_definition(model_profile_id, model_profile)
 
-        # Block: ModelPresetNormalization
+        # ModelPresetNormalization
         model_presets = {
             model_preset_id: self._normalize_model_preset_definition(model_preset)
             for model_preset_id, model_preset in raw_model_presets.items()
@@ -418,7 +418,7 @@ class ServiceConfigMixin:
         for model_preset_id, model_preset in model_presets.items():
             self._validate_model_preset_definition(candidate_state, model_preset_id, model_preset)
 
-        # Block: CurrentSelection
+        # CurrentSelection
         selected_persona_id = current.get("selected_persona_id")
         selected_memory_set_id = current.get("selected_memory_set_id")
         selected_model_preset_id = current.get("selected_model_preset_id")
@@ -429,12 +429,12 @@ class ServiceConfigMixin:
         if selected_model_preset_id not in model_presets:
             raise ServiceError(404, "model_preset_not_found", "The selected_model_preset_id does not exist in model_presets.")
 
-        # Block: ToggleValidation
+        # ToggleValidation
         self._validate_wake_policy(current.get("wake_policy"))
         self._validate_memory_enabled(current.get("memory_enabled"))
         self._validate_desktop_watch(current.get("desktop_watch"))
 
-        # Block: Persist
+        # Persist
         state["selected_persona_id"] = selected_persona_id
         state["selected_memory_set_id"] = selected_memory_set_id
         state["selected_model_preset_id"] = selected_model_preset_id
@@ -450,11 +450,11 @@ class ServiceConfigMixin:
         return self._build_editor_state(state)
 
     def _require_token(self, token: str | None) -> dict[str, Any]:
-        # Block: LoadState
+        # LoadState
         state = self.store.read_state()
         issued = state["console_access_token"]
 
-        # Block: Validation
+        # Validation
         if issued is None:
             raise ServiceError(401, "bootstrap_required", "A console_access_token has not been issued yet.")
         if token != issued:
@@ -462,17 +462,17 @@ class ServiceConfigMixin:
         return state
 
     def _selected_model_preset_uses_profile(self, state: dict[str, Any], model_profile_id: str) -> bool:
-        # Block: Lookup
+        # Lookup
         selected_preset = state["model_presets"][state["selected_model_preset_id"]]
         for role_value in selected_preset.get("roles", {}).values():
             if role_value.get("model_profile_id") == model_profile_id:
                 return True
 
-        # Block: Empty
+        # Empty
         return False
 
     def _build_settings_snapshot(self, state: dict[str, Any]) -> dict[str, Any]:
-        # Block: Snapshot
+        # Snapshot
         return {
             "selected_persona_id": state["selected_persona_id"],
             "selected_memory_set_id": state["selected_memory_set_id"],
@@ -483,7 +483,7 @@ class ServiceConfigMixin:
         }
 
     def _build_editor_state(self, state: dict[str, Any]) -> dict[str, Any]:
-        # Block: Result
+        # Result
         return {
             "current": self._build_settings_snapshot(state),
             "personas": list(state["personas"].values()),
@@ -493,7 +493,7 @@ class ServiceConfigMixin:
         }
 
     def _build_runtime_summary(self, state: dict[str, Any]) -> dict[str, Any]:
-        # Block: Snapshot
+        # Snapshot
         persona = state["personas"][state["selected_persona_id"]]
         memory_set = state["memory_sets"][state["selected_memory_set_id"]]
         model_preset = state["model_presets"][state["selected_model_preset_id"]]
@@ -516,12 +516,12 @@ class ServiceConfigMixin:
         }
 
     def _background_wake_scheduler_active(self) -> bool:
-        # Block: State
+        # State
         with self._runtime_state_lock:
             return self._background_wake_thread is not None and self._background_wake_thread.is_alive()
 
     def _catalog_entries(self, entries: dict[str, dict[str, Any]], id_key: str) -> list[dict[str, Any]]:
-        # Block: Transform
+        # Transform
         return [
             {
                 id_key: value[id_key],
@@ -531,11 +531,11 @@ class ServiceConfigMixin:
         ]
 
     def _entries_by_id(self, entries: Any, id_key: str, field_name: str) -> dict[str, dict[str, Any]]:
-        # Block: Shape
+        # Shape
         if not isinstance(entries, list):
             raise ServiceError(400, f"invalid_{field_name}", f"{field_name} must be an array.")
 
-        # Block: Collect
+        # Collect
         result: dict[str, dict[str, Any]] = {}
         for entry in entries:
             if not isinstance(entry, dict):
@@ -547,32 +547,32 @@ class ServiceConfigMixin:
                 raise ServiceError(400, f"duplicate_{field_name}_id", f"{entry_id} is duplicated in {field_name}.")
             result[entry_id] = entry
 
-        # Block: Result
+        # Result
         return result
 
     def _validate_wake_policy(self, wake_policy: dict[str, Any]) -> None:
-        # Block: Shape
+        # Shape
         if not isinstance(wake_policy, dict):
             raise ServiceError(400, "invalid_wake_policy", "wake_policy must be an object.")
 
-        # Block: Mode
+        # Mode
         mode = wake_policy.get("mode")
         if mode not in {"disabled", "interval"}:
             raise ServiceError(400, "invalid_wake_policy_mode", "wake_policy.mode must be disabled or interval.")
 
-        # Block: Interval
+        # Interval
         if mode == "interval":
             interval_minutes = wake_policy.get("interval_minutes")
             if not isinstance(interval_minutes, int) or interval_minutes < 1:
                 raise ServiceError(400, "invalid_interval_minutes", "interval_minutes must be an integer >= 1.")
 
     def _validate_memory_enabled(self, memory_enabled: Any) -> None:
-        # Block: Shape
+        # Shape
         if not isinstance(memory_enabled, bool):
             raise ServiceError(400, "invalid_memory_enabled", "memory_enabled must be a boolean.")
 
     def _validate_desktop_watch(self, desktop_watch: Any) -> None:
-        # Block: Shape
+        # Shape
         if not isinstance(desktop_watch, dict):
             raise ServiceError(400, "invalid_desktop_watch", "desktop_watch must be an object.")
         enabled = desktop_watch.get("enabled")
@@ -594,7 +594,7 @@ class ServiceConfigMixin:
             )
 
     def _validate_persona_definition(self, persona_id: str, definition: dict[str, Any]) -> None:
-        # Block: Shape
+        # Shape
         if definition.get("persona_id") != persona_id:
             raise ServiceError(400, "persona_id_mismatch", "persona_id must match the path.")
         display_name = definition.get("display_name")
@@ -614,7 +614,7 @@ class ServiceConfigMixin:
                 raise ServiceError(400, f"invalid_{field_name}", f"{field_name} must be a string.")
 
     def _validate_memory_set_definition(self, memory_set_id: str, definition: dict[str, Any]) -> None:
-        # Block: Shape
+        # Shape
         if definition.get("memory_set_id") != memory_set_id:
             raise ServiceError(400, "memory_set_id_mismatch", "memory_set_id must match the path.")
         display_name = definition.get("display_name")
@@ -625,14 +625,14 @@ class ServiceConfigMixin:
             raise ServiceError(400, "invalid_memory_set_description", "description must be a string.")
 
     def _validate_model_preset_definition(self, state: dict[str, Any], model_preset_id: str, definition: dict[str, Any]) -> None:
-        # Block: Shape
+        # Shape
         if definition.get("model_preset_id") != model_preset_id:
             raise ServiceError(400, "model_preset_id_mismatch", "model_preset_id must match the path.")
         roles = definition.get("roles")
         if not isinstance(roles, dict):
             raise ServiceError(400, "invalid_model_preset_roles", "roles must be an object.")
 
-        # Block: RequiredRoles
+        # RequiredRoles
         for role_name, expected_kind in REQUIRED_ROLE_NAMES.items():
             if role_name not in roles:
                 raise ServiceError(400, "missing_model_role", f"{role_name} is required.")
@@ -652,7 +652,7 @@ class ServiceConfigMixin:
                 raise ServiceError(400, "invalid_reasoning_effort", f"{role_name}.reasoning_effort must be a string.")
 
     def _normalize_model_preset_definition(self, definition: dict[str, Any]) -> dict[str, Any]:
-        # Block: Clone
+        # Clone
         normalized = {
             **definition,
         }
@@ -660,7 +660,7 @@ class ServiceConfigMixin:
         if not isinstance(roles, dict):
             return normalized
 
-        # Block: RoleNormalization
+        # RoleNormalization
         normalized_roles: dict[str, Any] = {}
         for role_name, role_definition in roles.items():
             if not isinstance(role_definition, dict):
@@ -680,12 +680,12 @@ class ServiceConfigMixin:
                 normalized_role.pop("reasoning_effort", None)
             normalized_roles[role_name] = normalized_role
 
-        # Block: Result
+        # Result
         normalized["roles"] = normalized_roles
         return normalized
 
     def _validate_model_profile_definition(self, model_profile_id: str, definition: dict[str, Any]) -> None:
-        # Block: Shape
+        # Shape
         if definition.get("model_profile_id") != model_profile_id:
             raise ServiceError(400, "model_profile_id_mismatch", "model_profile_id must match the path.")
         kind = definition.get("kind")
@@ -711,7 +711,7 @@ class ServiceConfigMixin:
         in_use_code: str,
         deleted_key: str,
     ) -> dict[str, Any]:
-        # Block: NotFound
+        # NotFound
         if entry_id not in entries:
             raise ServiceError(404, not_found_code, f"The requested {deleted_key} does not exist.")
         if entry_id == selected_id:

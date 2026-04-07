@@ -9,7 +9,7 @@ from otomekairo.recall_event_evidence import RecallEventEvidenceMixin
 from otomekairo.store import FileStore
 
 
-# Block: Constants
+# Constants
 ACTIVE_MEMORY_STATUSES = ("inferred", "confirmed")
 ACTIVE_COMMITMENT_STATES = ("open", "waiting_confirmation", "on_hold")
 SECTION_LIMITS = {
@@ -31,10 +31,10 @@ ASSOCIATION_QUERY_KIND_WEIGHTS = {
 }
 
 
-# Block: RecallBuilder
+# RecallBuilder
 class RecallBuilder(RecallEventEvidenceMixin):
     def __init__(self, *, store: FileStore, llm: LLMClient) -> None:
-        # Block: Dependencies
+        # Dependencies
         self.store = store
         self.llm = llm
 
@@ -45,24 +45,24 @@ class RecallBuilder(RecallEventEvidenceMixin):
         observation_text: str,
         recall_hint: dict[str, Any],
     ) -> dict[str, Any]:
-        # Block: MemoryToggle
+        # MemoryToggle
         if not state.get("memory_enabled", True):
             return self._empty_recall_pack()
 
-        # Block: Context
+        # Context
         memory_set_id = state["selected_memory_set_id"]
         primary_intent = recall_hint["primary_intent"]
         scope_context = self._build_scope_context(recall_hint)
         raw_candidate_ids: set[str] = set()
 
-        # Block: ActiveCommitments
+        # ActiveCommitments
         active_commitments = self._limit_memory_section(
             raw_items=self._build_active_commitments(memory_set_id=memory_set_id),
             limit=SECTION_LIMITS["active_commitments"],
         )
         self._collect_raw_candidate_ids(raw_candidate_ids, active_commitments)
 
-        # Block: RelationshipModel
+        # RelationshipModel
         relationship_model = self._limit_memory_section(
             raw_items=self._build_scope_memory_section(
                 memory_set_id=memory_set_id,
@@ -74,7 +74,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
         )
         self._collect_raw_candidate_ids(raw_candidate_ids, relationship_model)
 
-        # Block: UserModel
+        # UserModel
         user_model = self._limit_memory_section(
             raw_items=self._build_scope_memory_section(
                 memory_set_id=memory_set_id,
@@ -86,7 +86,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
         )
         self._collect_raw_candidate_ids(raw_candidate_ids, user_model)
 
-        # Block: SelfModel
+        # SelfModel
         self_model = self._limit_memory_section(
             raw_items=self._build_scope_memory_section(
                 memory_set_id=memory_set_id,
@@ -98,7 +98,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
         )
         self._collect_raw_candidate_ids(raw_candidate_ids, self_model)
 
-        # Block: ActiveTopics
+        # ActiveTopics
         active_topics = self._limit_mixed_section(
             raw_items=self._build_active_topics(
                 memory_set_id=memory_set_id,
@@ -108,7 +108,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
         )
         self._collect_raw_candidate_ids(raw_candidate_ids, active_topics)
 
-        # Block: EpisodicEvidence
+        # EpisodicEvidence
         episodic_evidence = self._limit_digest_section(
             raw_items=self._build_episodic_evidence(
                 memory_set_id=memory_set_id,
@@ -119,7 +119,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
         )
         self._collect_raw_candidate_ids(raw_candidate_ids, episodic_evidence)
 
-        # Block: AssociationSections
+        # AssociationSections
         association_sections = self._build_association_sections(
             state=state,
             observation_text=observation_text,
@@ -132,7 +132,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
         self._collect_raw_candidate_ids(raw_candidate_ids, association_sections["active_topics"])
         self._collect_raw_candidate_ids(raw_candidate_ids, association_sections["episodic_evidence"])
 
-        # Block: MergeAssociation
+        # MergeAssociation
         self_model = self._limit_memory_section(
             raw_items=self_model + association_sections["self_model"],
             limit=SECTION_LIMITS["self_model"],
@@ -154,16 +154,16 @@ class RecallBuilder(RecallEventEvidenceMixin):
             limit=SECTION_LIMITS["episodic_evidence"],
         )
 
-        # Block: ConflictSource
+        # ConflictSource
         selected_memory_items = active_commitments + relationship_model + user_model + self_model
 
-        # Block: Conflicts
+        # Conflicts
         conflicts = self._build_conflicts(
             memory_set_id=memory_set_id,
             selected_memory_items=selected_memory_items,
         )
 
-        # Block: GlobalTrim
+        # GlobalTrim
         sections = self._apply_global_limit(
             recall_hint=recall_hint,
             sections={
@@ -177,7 +177,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
             },
         )
 
-        # Block: SelectionSummary
+        # SelectionSummary
         selected_memory_ids = self._collect_selected_ids(sections, key="memory_unit_id")
         selected_episode_digest_ids = self._collect_selected_ids(sections, key="episode_digest_id")
         association_selected_memory_ids = self._collect_selected_ids(
@@ -198,7 +198,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
         )
         selected_event_ids = [item["event_id"] for item in event_evidence]
 
-        # Block: Result
+        # Result
         return {
             **sections,
             "event_evidence": event_evidence,
@@ -211,11 +211,11 @@ class RecallBuilder(RecallEventEvidenceMixin):
         }
 
     def _build_scope_context(self, recall_hint: dict[str, Any]) -> dict[str, list[tuple[str, str]]]:
-        # Block: FocusScopes
+        # FocusScopes
         focus_specs = self._parse_focus_scopes(recall_hint.get("focus_scopes", []))
         primary_intent = recall_hint["primary_intent"]
 
-        # Block: BaseScopes
+        # BaseScopes
         user_filters = self._merged_scope_filters([("user", "user")], focus_specs, allowed_scope_type="user")
         self_filters = self._merged_scope_filters([("self", "self")], focus_specs, allowed_scope_type="self")
         relationship_defaults = [("relationship", "self|user")]
@@ -231,7 +231,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
             allowed_scope_type=None,
         )
 
-        # Block: Result
+        # Result
         return {
             "user_filters": user_filters,
             "self_filters": self_filters,
@@ -241,7 +241,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
         }
 
     def _build_active_commitments(self, *, memory_set_id: str) -> list[dict[str, Any]]:
-        # Block: Query
+        # Query
         records = self.store.list_memory_units_for_recall(
             memory_set_id=memory_set_id,
             include_memory_types=["commitment"],
@@ -250,7 +250,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
             limit=SECTION_LIMITS["active_commitments"] * 3,
         )
 
-        # Block: Result
+        # Result
         return [self._to_memory_item(record) for record in records]
 
     def _build_scope_memory_section(
@@ -261,11 +261,11 @@ class RecallBuilder(RecallEventEvidenceMixin):
         limit: int,
         exclude_memory_types: list[str] | None = None,
     ) -> list[dict[str, Any]]:
-        # Block: Empty
+        # Empty
         if not scope_filters:
             return []
 
-        # Block: Query
+        # Query
         records = self.store.list_memory_units_for_recall(
             memory_set_id=memory_set_id,
             scope_filters=scope_filters,
@@ -274,7 +274,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
             limit=limit,
         )
 
-        # Block: Result
+        # Result
         return [self._to_memory_item(record) for record in records]
 
     def _build_active_topics(
@@ -283,7 +283,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
         memory_set_id: str,
         topic_scope_filters: list[tuple[str, str]],
     ) -> list[dict[str, Any]]:
-        # Block: TopicMemory
+        # TopicMemory
         topic_records = self.store.list_memory_units_for_recall(
             memory_set_id=memory_set_id,
             scope_filters=topic_scope_filters or None,
@@ -292,10 +292,10 @@ class RecallBuilder(RecallEventEvidenceMixin):
             limit=SECTION_LIMITS["active_topics"] * 2,
         )
 
-        # Block: TopicItems
+        # TopicItems
         items = [self._to_memory_item(record) for record in topic_records]
 
-        # Block: OpenLoops
+        # OpenLoops
         digest_records = self.store.list_episode_digests_for_recall(
             memory_set_id=memory_set_id,
             scope_filters=[],
@@ -304,7 +304,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
         )
         items.extend(self._to_topic_digest_item(record) for record in digest_records)
 
-        # Block: Result
+        # Result
         return items
 
     def _build_episodic_evidence(
@@ -314,7 +314,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
         scope_filters: list[tuple[str, str]],
         primary_intent: str,
     ) -> list[dict[str, Any]]:
-        # Block: Query
+        # Query
         records = self.store.list_episode_digests_for_recall(
             memory_set_id=memory_set_id,
             scope_filters=scope_filters,
@@ -322,7 +322,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
             limit=SECTION_LIMITS["episodic_evidence"] * 4,
         )
 
-        # Block: Result
+        # Result
         return [self._to_digest_item(record) for record in records]
 
     def _build_association_sections(
@@ -333,12 +333,12 @@ class RecallBuilder(RecallEventEvidenceMixin):
         recall_hint: dict[str, Any],
         scope_context: dict[str, list[tuple[str, str]]],
     ) -> dict[str, list[dict[str, Any]]]:
-        # Block: QuerySpecs
+        # QuerySpecs
         query_specs = self._association_query_specs(observation_text, recall_hint)
         if not query_specs:
             return self._empty_association_sections()
 
-        # Block: EmbeddingContext
+        # EmbeddingContext
         selected_preset = state["model_presets"][state["selected_model_preset_id"]]
         embedding_role = selected_preset["roles"]["embedding"]
         embedding_profile_id = embedding_role["model_profile_id"]
@@ -346,20 +346,20 @@ class RecallBuilder(RecallEventEvidenceMixin):
         embedding_dimension = embedding_role["embedding_dimension"]
         embedding_preset = self._embedding_preset(embedding_profile_id, embedding_dimension)
 
-        # Block: QueryEmbeddings
+        # QueryEmbeddings
         query_embeddings = self.llm.generate_embeddings(
             profile=embedding_profile,
             role_settings=embedding_role,
             texts=[spec["text"] for spec in query_specs],
         )
 
-        # Block: CandidateState
+        # CandidateState
         memory_candidates: dict[str, dict[str, Any]] = {}
         digest_candidates: dict[str, dict[str, Any]] = {}
 
-        # Block: QueryLoop
+        # QueryLoop
         for spec, query_embedding in zip(query_specs, query_embeddings, strict=True):
-            # Block: MemoryHits
+            # MemoryHits
             memory_hits = self.store.search_memory_unit_vector_entries(
                 memory_set_id=state["selected_memory_set_id"],
                 embedding_preset=embedding_preset,
@@ -373,7 +373,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
                 statuses=list(ACTIVE_MEMORY_STATUSES),
             )
 
-            # Block: MemoryMerge
+            # MemoryMerge
             for hit in memory_hits:
                 item = self._to_memory_item(hit["record"])
                 section_name = self._section_name_for_memory_item(item)
@@ -393,7 +393,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
                     query_kind=spec["kind"],
                 )
 
-            # Block: DigestHits
+            # DigestHits
             digest_hits = self.store.search_episode_digest_vector_entries(
                 memory_set_id=state["selected_memory_set_id"],
                 embedding_preset=embedding_preset,
@@ -407,7 +407,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
                 require_open_loops=recall_hint["primary_intent"] == "commitment_check",
             )
 
-            # Block: DigestMerge
+            # DigestMerge
             for hit in digest_hits:
                 item = self._to_digest_item(hit["record"])
                 item["retrieval_lane"] = "association"
@@ -424,7 +424,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
                     query_kind=spec["kind"],
                 )
 
-        # Block: Sections
+        # Sections
         sections = self._empty_association_sections()
         for item in self._finalize_association_candidates(memory_candidates):
             section_name = self._section_name_for_memory_item(item)
@@ -433,7 +433,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
             sections[section_name].append(item)
         sections["episodic_evidence"].extend(self._finalize_association_candidates(digest_candidates))
 
-        # Block: Sort
+        # Sort
         for section_name, items in sections.items():
             items.sort(
                 key=lambda item: (
@@ -443,7 +443,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
                 reverse=True,
             )
 
-        # Block: Result
+        # Result
         return sections
 
     def _association_query_specs(
@@ -451,11 +451,11 @@ class RecallBuilder(RecallEventEvidenceMixin):
         observation_text: str,
         recall_hint: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        # Block: BaseState
+        # BaseState
         specs: list[dict[str, Any]] = []
         normalized_observation = observation_text.strip()
 
-        # Block: ObservationQuery
+        # ObservationQuery
         observation_query = self._association_observation_query_text(
             normalized_observation,
             recall_hint,
@@ -472,7 +472,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
                 }
             )
 
-        # Block: EntityQuery
+        # EntityQuery
         entity_terms = self._association_hint_terms(recall_hint.get("mentioned_entities", []))
         if entity_terms:
             specs.append(
@@ -486,7 +486,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
                 }
             )
 
-        # Block: TopicQuery
+        # TopicQuery
         topic_terms = self._association_hint_terms(recall_hint.get("mentioned_topics", []))
         if topic_terms:
             specs.append(
@@ -500,7 +500,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
                 }
             )
 
-        # Block: Result
+        # Result
         return specs
 
     def _association_observation_query_text(
@@ -508,11 +508,11 @@ class RecallBuilder(RecallEventEvidenceMixin):
         observation_text: str,
         recall_hint: dict[str, Any],
     ) -> str:
-        # Block: Empty
+        # Empty
         if not observation_text:
             return ""
 
-        # Block: Parts
+        # Parts
         parts = [observation_text]
         primary_intent = recall_hint["primary_intent"]
         secondary_intents = self._secondary_intents(recall_hint)
@@ -524,25 +524,25 @@ class RecallBuilder(RecallEventEvidenceMixin):
         if time_reference and time_reference != "none":
             parts.append(f"時間軸: {time_reference}")
 
-        # Block: Result
+        # Result
         return "\n".join(parts)
 
     def _association_hint_terms(self, values: list[Any]) -> list[str]:
-        # Block: State
+        # State
         expanded: list[str] = []
 
-        # Block: Expand
+        # Expand
         for value in normalized_text_list(values, limit=4):
             expanded.extend(self._expanded_association_terms(value))
 
-        # Block: Result
+        # Result
         return normalized_text_list(expanded, limit=8)
 
     def _expanded_association_terms(self, value: str) -> list[str]:
-        # Block: State
+        # State
         terms = [value]
 
-        # Block: TaggedValue
+        # TaggedValue
         prefix, separator, suffix = value.partition(":")
         if separator and suffix:
             cleaned_suffix = suffix.strip().strip("<>").replace("|", " ")
@@ -550,7 +550,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
                 terms.append(cleaned_suffix)
                 terms.append(f"{prefix} {cleaned_suffix}")
 
-        # Block: Result
+        # Result
         return normalized_text_list(terms, limit=3)
 
     def _association_query_weight(
@@ -559,13 +559,13 @@ class RecallBuilder(RecallEventEvidenceMixin):
         query_kind: str,
         recall_hint: dict[str, Any],
     ) -> float:
-        # Block: Base
+        # Base
         weight = ASSOCIATION_QUERY_KIND_WEIGHTS.get(query_kind, 1.0)
         primary_intent = recall_hint["primary_intent"]
         secondary_intents = set(self._secondary_intents(recall_hint))
         time_reference = recall_hint.get("time_reference")
 
-        # Block: IntentAdjust
+        # IntentAdjust
         if primary_intent == "reminisce" and query_kind == "observation":
             weight += 0.08
         if primary_intent in {"commitment_check", "meta_relationship"} and query_kind == "entity":
@@ -573,7 +573,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
         if primary_intent in {"consult", "check_state", "preference_query"} and query_kind == "topic":
             weight += 0.12
 
-        # Block: SecondaryAdjust
+        # SecondaryAdjust
         if "reminisce" in secondary_intents and query_kind == "observation":
             weight += 0.04
         if "meta_relationship" in secondary_intents and query_kind == "entity":
@@ -581,7 +581,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
         if {"consult", "check_state", "preference_query"} & secondary_intents and query_kind == "topic":
             weight += 0.04
 
-        # Block: TimeAdjust
+        # TimeAdjust
         if time_reference == "past" and query_kind == "observation":
             weight += 0.04
         if time_reference == "future" and query_kind == "entity":
@@ -589,7 +589,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
         if time_reference == "persistent" and query_kind == "topic":
             weight += 0.04
 
-        # Block: Result
+        # Result
         return weight
 
     def _association_search_limit(
@@ -598,13 +598,13 @@ class RecallBuilder(RecallEventEvidenceMixin):
         source_kind: str,
         query_kind: str,
     ) -> int:
-        # Block: Base
+        # Base
         if source_kind == "memory_unit":
             base_limit = ASSOCIATION_MEMORY_LIMIT
         else:
             base_limit = ASSOCIATION_DIGEST_LIMIT
 
-        # Block: QueryAdjust
+        # QueryAdjust
         if query_kind == "observation":
             return base_limit
         return max(2, base_limit - 2)
@@ -616,7 +616,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
         item: dict[str, Any],
         query_kind: str,
     ) -> None:
-        # Block: Lookup
+        # Lookup
         record_id = self._record_id(item)
         existing = candidates.get(record_id)
         if existing is None:
@@ -625,13 +625,13 @@ class RecallBuilder(RecallEventEvidenceMixin):
             candidates[record_id] = item
             return
 
-        # Block: Score
+        # Score
         existing["association_score"] = max(
             float(existing.get("association_score", 0.0)),
             float(item.get("association_score", 0.0)),
         )
 
-        # Block: QueryKinds
+        # QueryKinds
         query_kinds = normalized_text_list(
             list(existing.get("association_query_kinds", [])) + [query_kind],
             limit=4,
@@ -643,7 +643,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
         self,
         candidates: dict[str, dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        # Block: Finalize
+        # Finalize
         finalized: list[dict[str, Any]] = []
         for item in candidates.values():
             match_count = int(item.get("association_match_count", 1))
@@ -651,7 +651,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
                 item["association_score"] = float(item.get("association_score", 0.0)) + 0.03 * (match_count - 1)
             finalized.append(item)
 
-        # Block: Result
+        # Result
         return finalized
 
     def _association_score(
@@ -663,23 +663,23 @@ class RecallBuilder(RecallEventEvidenceMixin):
         query_kind: str,
         query_weight: float,
     ) -> float:
-        # Block: Base
+        # Base
         score = query_weight * (1.0 / (1.0 + max(distance, 0.0)))
         primary_intent = recall_hint["primary_intent"]
         secondary_intents = set(self._secondary_intents(recall_hint))
 
-        # Block: QueryKindBoost
+        # QueryKindBoost
         item_scope_type = self._association_item_scope_type(item)
         if query_kind == "entity" and item_scope_type in {"user", "relationship"}:
             score += 0.05
         if query_kind == "topic" and item_scope_type == "topic":
             score += 0.05
 
-        # Block: FocusBoost
+        # FocusBoost
         if self._focus_scope_matches(recall_hint.get("focus_scopes", []), item):
             score += 0.08
 
-        # Block: IntentBoost
+        # IntentBoost
         if primary_intent == "reminisce" and item["source_kind"] == "episode_digest":
             score += 0.12
         if primary_intent == "commitment_check" and (
@@ -695,7 +695,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
         if recall_hint.get("time_reference") == "past" and item["source_kind"] == "episode_digest":
             score += 0.05
 
-        # Block: SecondaryBoost
+        # SecondaryBoost
         if "reminisce" in secondary_intents and item["source_kind"] == "episode_digest":
             score += 0.04
         if "meta_relationship" in secondary_intents and item_scope_type == "relationship":
@@ -705,19 +705,19 @@ class RecallBuilder(RecallEventEvidenceMixin):
         if "preference_query" in secondary_intents and item.get("memory_type") == "preference":
             score += 0.03
 
-        # Block: Result
+        # Result
         return score
 
     def _association_item_scope_type(self, item: dict[str, Any]) -> str:
-        # Block: EpisodeDigest
+        # EpisodeDigest
         if item["source_kind"] == "episode_digest":
             return str(item.get("primary_scope_type", ""))
 
-        # Block: MemoryUnit
+        # MemoryUnit
         return str(item.get("scope_type", ""))
 
     def _focus_scope_matches(self, focus_scopes: list[Any], item: dict[str, Any]) -> bool:
-        # Block: Parse
+        # Parse
         focus_specs = self._parse_focus_scopes(focus_scopes)
         if item["source_kind"] == "episode_digest":
             scope_type = item["primary_scope_type"]
@@ -726,11 +726,11 @@ class RecallBuilder(RecallEventEvidenceMixin):
             scope_type = item["scope_type"]
             scope_key = item["scope_key"]
 
-        # Block: Match
+        # Match
         return (scope_type, scope_key) in focus_specs
 
     def _section_name_for_memory_item(self, item: dict[str, Any]) -> str | None:
-        # Block: Mapping
+        # Mapping
         scope_type = item["scope_type"]
         if scope_type == "self":
             return "self_model"
@@ -748,11 +748,11 @@ class RecallBuilder(RecallEventEvidenceMixin):
         memory_set_id: str,
         selected_memory_items: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        # Block: State
+        # State
         conflicts: list[dict[str, Any]] = []
         seen_conflict_keys: set[tuple[str, str, str, str, str]] = set()
 
-        # Block: Scan
+        # Scan
         for item in selected_memory_items:
             compare_key = (
                 item["memory_type"],
@@ -791,7 +791,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
             if len(variant_signatures) < 2:
                 continue
 
-            # Block: ConflictEntry
+            # ConflictEntry
             conflicts.append(
                 {
                     "source_kind": "conflict",
@@ -810,7 +810,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
             if len(conflicts) >= SECTION_LIMITS["conflicts"]:
                 break
 
-        # Block: Result
+        # Result
         return conflicts
 
     def _apply_global_limit(
@@ -819,7 +819,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
         recall_hint: dict[str, Any],
         sections: dict[str, list[dict[str, Any]]],
     ) -> dict[str, list[dict[str, Any]]]:
-        # Block: InitialState
+        # InitialState
         used_record_ids: set[str] = set()
         trimmed = {
             "self_model": [],
@@ -832,7 +832,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
         }
         remaining = GLOBAL_RECALL_LIMIT - len(trimmed["conflicts"])
 
-        # Block: Order
+        # Order
         for section_name in self._section_priority(recall_hint):
             if remaining <= 0:
                 break
@@ -848,20 +848,20 @@ class RecallBuilder(RecallEventEvidenceMixin):
             trimmed[section_name] = section_items
             remaining -= len(section_items)
 
-        # Block: Result
+        # Result
         return trimmed
 
     def _section_priority(self, recall_hint: dict[str, Any]) -> list[str]:
-        # Block: PrimaryOrder
+        # PrimaryOrder
         primary_intent = recall_hint["primary_intent"]
         ordered = self._primary_section_priority(primary_intent)
 
-        # Block: SecondaryBoosts
+        # SecondaryBoosts
         boosted_sections = self._secondary_section_boosts(
             self._secondary_intents(recall_hint),
         )
 
-        # Block: Merge
+        # Merge
         merged: list[str] = []
         if ordered:
             merged.append(ordered[0])
@@ -872,11 +872,11 @@ class RecallBuilder(RecallEventEvidenceMixin):
             if section_name not in merged:
                 merged.append(section_name)
 
-        # Block: Result
+        # Result
         return merged
 
     def _primary_section_priority(self, primary_intent: str) -> list[str]:
-        # Block: Mapping
+        # Mapping
         if primary_intent == "commitment_check":
             return [
                 "active_commitments",
@@ -932,26 +932,26 @@ class RecallBuilder(RecallEventEvidenceMixin):
         ]
 
     def _secondary_section_boosts(self, secondary_intents: list[str]) -> list[str]:
-        # Block: State
+        # State
         boosted: list[str] = []
 
-        # Block: Collect
+        # Collect
         for intent in secondary_intents:
             for section_name in self._primary_section_priority(intent)[:2]:
                 if section_name not in boosted:
                     boosted.append(section_name)
 
-        # Block: Result
+        # Result
         return boosted
 
     def _secondary_intents(self, recall_hint: dict[str, Any]) -> list[str]:
-        # Block: Normalize
+        # Normalize
         secondary_intents = normalized_text_list(
             recall_hint.get("secondary_intents", []),
             limit=2,
         )
 
-        # Block: Result
+        # Result
         return secondary_intents
 
     def _limit_memory_section(
@@ -960,7 +960,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
         raw_items: list[dict[str, Any]],
         limit: int,
     ) -> list[dict[str, Any]]:
-        # Block: Selection
+        # Selection
         selected: list[dict[str, Any]] = []
         seen_record_ids: set[str] = set()
         summary_count = 0
@@ -977,7 +977,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
             if len(selected) >= limit:
                 break
 
-        # Block: Result
+        # Result
         return selected
 
     def _limit_digest_section(
@@ -986,7 +986,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
         raw_items: list[dict[str, Any]],
         limit: int,
     ) -> list[dict[str, Any]]:
-        # Block: Selection
+        # Selection
         selected: list[dict[str, Any]] = []
         seen_record_ids: set[str] = set()
         for item in raw_items:
@@ -998,7 +998,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
             if len(selected) >= limit:
                 break
 
-        # Block: Result
+        # Result
         return selected
 
     def _limit_mixed_section(
@@ -1007,7 +1007,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
         raw_items: list[dict[str, Any]],
         limit: int,
     ) -> list[dict[str, Any]]:
-        # Block: Selection
+        # Selection
         selected: list[dict[str, Any]] = []
         seen_record_ids: set[str] = set()
         summary_count = 0
@@ -1024,14 +1024,14 @@ class RecallBuilder(RecallEventEvidenceMixin):
             if len(selected) >= limit:
                 break
 
-        # Block: Result
+        # Result
         return selected
 
     def _parse_focus_scopes(self, scopes: list[Any]) -> list[tuple[str, str]]:
-        # Block: State
+        # State
         parsed: list[tuple[str, str]] = []
 
-        # Block: Parse
+        # Parse
         for scope in scopes:
             if not isinstance(scope, str):
                 continue
@@ -1048,7 +1048,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
                 continue
             parsed.append((scope_type, scope_key.strip()))
 
-        # Block: Result
+        # Result
         return parsed
 
     def _merged_scope_filters(
@@ -1058,18 +1058,18 @@ class RecallBuilder(RecallEventEvidenceMixin):
         *,
         allowed_scope_type: str | None,
     ) -> list[tuple[str, str]]:
-        # Block: State
+        # State
         merged: list[tuple[str, str]] = []
         seen: set[tuple[str, str]] = set()
 
-        # Block: Defaults
+        # Defaults
         for scope_filter in defaults:
             if scope_filter in seen:
                 continue
             merged.append(scope_filter)
             seen.add(scope_filter)
 
-        # Block: FocusSpecs
+        # FocusSpecs
         for scope_filter in focus_specs:
             if allowed_scope_type is not None and scope_filter[0] != allowed_scope_type:
                 continue
@@ -1078,11 +1078,11 @@ class RecallBuilder(RecallEventEvidenceMixin):
             merged.append(scope_filter)
             seen.add(scope_filter)
 
-        # Block: Result
+        # Result
         return merged
 
     def _empty_association_sections(self) -> dict[str, list[dict[str, Any]]]:
-        # Block: Result
+        # Result
         return {
             "self_model": [],
             "user_model": [],
@@ -1092,7 +1092,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
         }
 
     def _empty_recall_pack(self) -> dict[str, Any]:
-        # Block: Result
+        # Result
         return {
             "self_model": [],
             "user_model": [],
@@ -1111,11 +1111,11 @@ class RecallBuilder(RecallEventEvidenceMixin):
         }
 
     def _embedding_preset(self, embedding_profile_id: str, embedding_dimension: int) -> str:
-        # Block: Identifier
+        # Identifier
         return f"{embedding_profile_id}:dim{embedding_dimension}"
 
     def _collect_raw_candidate_ids(self, raw_candidate_ids: set[str], items: list[dict[str, Any]]) -> None:
-        # Block: Collect
+        # Collect
         for item in items:
             raw_candidate_ids.add(self._record_id(item))
 
@@ -1126,11 +1126,11 @@ class RecallBuilder(RecallEventEvidenceMixin):
         key: str,
         retrieval_lane: str | None = None,
     ) -> list[str]:
-        # Block: State
+        # State
         selected: list[str] = []
         seen: set[str] = set()
 
-        # Block: Collect
+        # Collect
         for section_items in sections.values():
             for item in section_items:
                 if retrieval_lane is not None and item.get("retrieval_lane") != retrieval_lane:
@@ -1141,19 +1141,19 @@ class RecallBuilder(RecallEventEvidenceMixin):
                 selected.append(value)
                 seen.add(value)
 
-        # Block: Result
+        # Result
         return selected
 
     def _record_id(self, item: dict[str, Any]) -> str:
-        # Block: MemoryUnit
+        # MemoryUnit
         if "memory_unit_id" in item:
             return item["memory_unit_id"]
 
-        # Block: EpisodeDigest
+        # EpisodeDigest
         return item["episode_digest_id"]
 
     def _to_memory_item(self, record: dict[str, Any]) -> dict[str, Any]:
-        # Block: Item
+        # Item
         return {
             "source_kind": "memory_unit",
             "memory_unit_id": record["memory_unit_id"],
@@ -1172,7 +1172,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
         }
 
     def _to_digest_item(self, record: dict[str, Any]) -> dict[str, Any]:
-        # Block: Item
+        # Item
         return {
             "source_kind": "episode_digest",
             "episode_digest_id": record["episode_digest_id"],
@@ -1189,11 +1189,11 @@ class RecallBuilder(RecallEventEvidenceMixin):
         }
 
     def _to_topic_digest_item(self, record: dict[str, Any]) -> dict[str, Any]:
-        # Block: OpenLoopSummary
+        # OpenLoopSummary
         open_loops = record.get("open_loops", [])
         summary_text = open_loops[0] if open_loops else record["summary_text"]
 
-        # Block: Item
+        # Item
         return {
             "source_kind": "episode_digest",
             "episode_digest_id": record["episode_digest_id"],
