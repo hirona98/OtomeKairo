@@ -28,7 +28,7 @@ handshake:
 - `Sec-WebSocket-Version: 13`
 - `Sec-WebSocket-Key: ...`
 
-接続後、client は最初に `hello` を送ってよい。
+接続後、client は最初に `hello` を送る。
 
 client -> server:
 
@@ -42,9 +42,9 @@ client -> server:
 
 - `client_id` は対象 client の安定識別子である
 - `caps` はその client が現在受けられる command capability 一覧である
-- 同じ `client_id` で再接続した場合、server は古い stream session を置き換えてよい
+- 同じ `client_id` で再接続した場合、server は古い stream session を置き換える
 
-MVP では、client から受ける message は `hello` だけでよい。
+MVP では、client から受ける message は `hello` だけとする。
 
 server -> client の代表例:
 
@@ -74,7 +74,7 @@ server -> client の代表例:
 }
 ```
 
-MVP では、少なくとも次の event type があればよい。
+MVP では、少なくとも次の event type を持つ。
 
 - `vision.capture_request`
 - `desktop_watch`
@@ -108,10 +108,10 @@ request:
 }
 ```
 
-- `images` は 0 件以上の Data URI 配列でよい
-- `client_context` は省略可能な object
-- `error` は省略可能な string または `null`
-- `client_context.active_app / window_title / locale` は `desktop_watch` 観測の判断補助に使ってよい
+- `images` は 0 件以上の Data URI 配列とする
+- `client_context` は object または `null` とする。値がないときは省略する
+- `error` は string または `null` とする。値がないときは省略する
+- `client_context.active_app / window_title / locale` は `desktop_watch` 観測の判断補助に使う
 
 response:
 
@@ -122,7 +122,7 @@ response:
 }
 ```
 
-MVP では、遅延した capture response が来た場合は無視して成功で返してよい。
+MVP では、遅延した capture response が来た場合は無視して成功で返す。
 
 主な失敗:
 

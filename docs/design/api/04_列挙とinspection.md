@@ -20,7 +20,7 @@
 ### `GET /api/catalog`
 
 - 認証: 必要
-- 役割: 選択可能な人格、記憶、モデル設定資源の一覧を返す
+- 役割: 人格、記憶、モデル設定資源の一覧を返す
 
 response:
 
@@ -121,7 +121,7 @@ response:
 - 認証: 必要
 - 役割: `CocoroConsole` のログビューアー向けに、判断サイクルの短い段階要約ログを WebSocket で流す
 - client から送る message は不要
-- 接続時には、直近の短いログが replay されてよい
+- 接続時には、直近の短いログを replay する
 
 message shape:
 
@@ -136,7 +136,7 @@ message shape:
 ]
 ```
 
-`logger` には少なくとも次を流してよい。
+`logger` には少なくとも次を流す。
 
 - `Observation`
 - `RecallHint`
