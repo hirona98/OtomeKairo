@@ -1,20 +1,5 @@
 # 列挙とinspection
 
-<!-- Role -->
-## この文書の役割
-
-この文書は、列挙面と inspection 面の API 仕様を定める。
-
-ここで扱うのは次である。
-
-- `GET /api/catalog`
-- `GET /api/inspection/cycle-summaries`
-- `GET /api/inspection/cycles/{cycle_id}`
-- `GET /api/logs/stream`
-
-共通ルールは `00_API仕様ガイド.md` を正とする。
-
-<!-- Catalog -->
 ## 列挙面
 
 ### `GET /api/catalog`
@@ -56,7 +41,6 @@ response:
 }
 ```
 
-<!-- Inspection -->
 ## inspection 面
 
 ### `GET /api/inspection/cycle-summaries?limit=<n>`

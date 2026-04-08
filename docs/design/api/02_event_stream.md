@@ -1,18 +1,5 @@
 # event stream
 
-<!-- Role -->
-## この文書の役割
-
-この文書は、server-driven event/control stream の API 仕様を定める。
-
-ここで扱うのは次である。
-
-- `GET /api/events/stream`
-- `POST /api/v2/vision/capture-response`
-
-共通ルールは `00_API仕様ガイド.md` を正とする。
-
-<!-- EventControl -->
 ## event/control stream 面
 
 ### `GET /api/events/stream`

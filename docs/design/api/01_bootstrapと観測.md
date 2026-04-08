@@ -1,19 +1,5 @@
 # bootstrapと観測
 
-<!-- Role -->
-## この文書の役割
-
-この文書は、bootstrap 面と通常の観測面の厳密な API 仕様を定める。
-
-ここで扱うのは次である。
-
-- bootstrap
-- 会話観測
-- wake 観測
-
-共通ルールは `00_API仕様ガイド.md` を正とする。
-
-<!-- Bootstrap -->
 ## bootstrap 面
 
 ### `GET /api/bootstrap/probe`
@@ -91,7 +77,6 @@ response:
 }
 ```
 
-<!-- Observation -->
 ## 観測面
 
 ### `POST /api/observations/conversation`
