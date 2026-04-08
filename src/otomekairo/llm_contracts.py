@@ -3,12 +3,12 @@ from __future__ import annotations
 from typing import Any
 
 
-# Errors
+# エラー
 class LLMError(Exception):
     pass
 
 
-# Config
+# 設定
 INTENT_VALUES = {
     "smalltalk",
     "reminisce",
@@ -69,18 +69,18 @@ MAX_SECONDARY_INTENTS = 2
 MAX_HINT_SCOPE_VALUES = 4
 
 
-# HelperValidation
+# 補助検証
 def _validate_exact_keys(value: Any, required_keys: set[str], label: str) -> None:
-    # Shape
+    # 形状
     if not isinstance(value, dict):
         raise LLMError(f"{label} must be an object.")
 
-    # KeyCheck
+    # キー確認
     actual_keys = set(value.keys())
     if actual_keys == required_keys:
         return
 
-    # Detail
+    # 詳細
     missing_keys = sorted(required_keys - actual_keys)
     extra_keys = sorted(actual_keys - required_keys)
     details: list[str] = []
@@ -92,7 +92,7 @@ def _validate_exact_keys(value: Any, required_keys: set[str], label: str) -> Non
 
 
 def _has_named_ref_prefix(value: str) -> bool:
-    # NamedRefPrefixes
+    # 名前付き参照プレフィックス
     for prefix in ("person:", "place:", "tool:"):
         if value.startswith(prefix) and value != prefix:
             return True
@@ -100,16 +100,16 @@ def _has_named_ref_prefix(value: str) -> bool:
 
 
 def _is_relationship_ref(value: str) -> bool:
-    # CoreRefs
+    # 中核参照
     if value in {"self", "user"}:
         return True
 
-    # NamedRefs
+    # 名前付き参照
     return _has_named_ref_prefix(value)
 
 
 def _normalized_relationship_refs(values: list[str]) -> list[str]:
-    # Ordering
+    # 順序付け
     unique_values = list(dict.fromkeys(values))
     if "self" in unique_values:
         tail = sorted(value for value in unique_values if value != "self")
@@ -118,16 +118,16 @@ def _normalized_relationship_refs(values: list[str]) -> list[str]:
 
 
 def _validate_scope_identity(*, scope_type: Any, scope_key: Any, label: str) -> None:
-    # TypeCheck
+    # 型確認
     if scope_type not in SCOPE_TYPE_VALUES:
         raise LLMError(f"{label}.scope_type is invalid.")
     if not isinstance(scope_key, str) or not scope_key.strip():
         raise LLMError(f"{label}.scope_key is invalid.")
 
-    # Normalized
+    # 正規化済み
     normalized_scope_key = scope_key.strip()
 
-    # FixedScopes
+    # 固定Scopes
     if scope_type == "self" and normalized_scope_key != "self":
         raise LLMError(f"{label}.scope_key must be 'self' when scope_type is self.")
     if scope_type == "user" and normalized_scope_key != "user":
@@ -135,19 +135,19 @@ def _validate_scope_identity(*, scope_type: Any, scope_key: Any, label: str) -> 
     if scope_type == "world" and normalized_scope_key != "world":
         raise LLMError(f"{label}.scope_key must be 'world' when scope_type is world.")
 
-    # TopicScope
+    # トピックスコープ
     if scope_type == "topic":
         if not normalized_scope_key.startswith("topic:") or normalized_scope_key == "topic:":
             raise LLMError(f"{label}.scope_key must be topic:<name> when scope_type is topic.")
         return
 
-    # EntityScope
+    # エンティティスコープ
     if scope_type == "entity":
         if not _has_named_ref_prefix(normalized_scope_key):
             raise LLMError(f"{label}.scope_key must be person:/place:/tool: when scope_type is entity.")
         return
 
-    # RelationshipScope
+    # 関係スコープ
     if scope_type == "relationship":
         refs = normalized_scope_key.split("|")
         if len(refs) < 2:
@@ -160,9 +160,9 @@ def _validate_scope_identity(*, scope_type: Any, scope_key: Any, label: str) -> 
             raise LLMError(f"{label}.scope_key must be normalized for relationship scope.")
 
 
-# RecallHintValidation
+# recall_hint検証
 def validate_recall_hint_contract(payload: dict[str, Any]) -> None:
-    # RequiredKeys
+    # 必須キー群
     required_keys = {
         "primary_intent",
         "secondary_intents",
@@ -175,7 +175,7 @@ def validate_recall_hint_contract(payload: dict[str, Any]) -> None:
     if set(payload.keys()) != required_keys:
         raise LLMError("RecallHint keys do not match the contract.")
 
-    # ValueChecks
+    # 値Checks
     if payload["primary_intent"] not in INTENT_VALUES:
         raise LLMError("RecallHint primary_intent is invalid.")
     if payload["time_reference"] not in TIME_REFERENCE_VALUES:
@@ -217,9 +217,9 @@ def validate_recall_hint_contract(payload: dict[str, Any]) -> None:
         raise LLMError("RecallHint confidence must be between 0.0 and 1.0.")
 
 
-# DecisionValidation
+# decision検証
 def validate_decision_contract(payload: dict[str, Any]) -> None:
-    # RequiredKeys
+    # 必須キー群
     required_keys = {
         "kind",
         "reason_code",
@@ -229,7 +229,7 @@ def validate_decision_contract(payload: dict[str, Any]) -> None:
     }
     _validate_exact_keys(payload, required_keys, "Decision")
 
-    # ValueChecks
+    # 値Checks
     if payload["kind"] not in {"reply", "noop", "future_act"}:
         raise LLMError("Decision kind is invalid.")
     if not isinstance(payload["reason_code"], str) or not payload["reason_code"].strip():
@@ -257,9 +257,9 @@ def validate_decision_contract(payload: dict[str, Any]) -> None:
         raise LLMError("Decision future_act must be null unless kind is future_act.")
 
 
-# MemoryInterpretationValidation
+# memory interpretation検証
 def validate_memory_interpretation_contract(payload: dict[str, Any]) -> None:
-    # RequiredKeys
+    # 必須キー群
     required_keys = {
         "episode_digest",
         "candidate_memory_units",
@@ -267,7 +267,7 @@ def validate_memory_interpretation_contract(payload: dict[str, Any]) -> None:
     }
     _validate_exact_keys(payload, required_keys, "MemoryInterpretation")
 
-    # EpisodeDigestValidation
+    # episode digest検証
     episode_digest = payload["episode_digest"]
     required_episode_keys = {
         "episode_type",
@@ -293,7 +293,7 @@ def validate_memory_interpretation_contract(payload: dict[str, Any]) -> None:
         label="MemoryInterpretation episode_digest",
     )
 
-    # CandidateValidation
+    # 候補検証
     if not isinstance(payload["candidate_memory_units"], list):
         raise LLMError("MemoryInterpretation candidate_memory_units must be a list.")
     for candidate in payload["candidate_memory_units"]:
@@ -347,7 +347,7 @@ def validate_memory_interpretation_contract(payload: dict[str, Any]) -> None:
         if not isinstance(candidate["reason"], str) or not candidate["reason"].strip():
             raise LLMError("MemoryInterpretation candidate_memory_unit.reason is invalid.")
 
-    # AffectValidation
+    # affect検証
     if not isinstance(payload["affect_updates"], list):
         raise LLMError("MemoryInterpretation affect_updates must be a list.")
     for affect_update in payload["affect_updates"]:

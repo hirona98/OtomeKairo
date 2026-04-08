@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 
 
-# DefaultIdentifiers
+# 既定の識別子
 DEFAULT_PERSONA_ID = "persona:default"
 DEFAULT_MEMORY_SET_ID = "memory_set:default"
 DEFAULT_MODEL_PRESET_ID = "model_preset:default"
@@ -18,7 +18,7 @@ DEFAULT_GEMINI_GENERATION_MODEL = "openrouter/google/gemini-3.1-flash-lite-previ
 DEFAULT_GEMINI_EMBEDDING_MODEL = "openrouter/google/gemini-embedding-001"
 
 
-# Builder
+# 構築
 def build_default_state() -> dict:
     server_id = f"server:{uuid.uuid4().hex}"
     return {
@@ -72,7 +72,7 @@ def build_default_state() -> dict:
 
 
 def build_default_model_profiles() -> dict:
-    # GenerationProfiles
+    # 生成プロファイル
     generation_profile = {
         "kind": "generation",
         "model": DEFAULT_GEMINI_GENERATION_MODEL,
@@ -82,7 +82,7 @@ def build_default_model_profiles() -> dict:
         },
     }
 
-    # EmbeddingProfile
+    # 埋め込みプロファイル
     embedding_profile = {
         "kind": "embedding",
         "model": DEFAULT_GEMINI_EMBEDDING_MODEL,
@@ -92,7 +92,7 @@ def build_default_model_profiles() -> dict:
         },
     }
 
-    # Result
+    # 結果
     return {
         DEFAULT_RECALL_PROFILE_ID: {
             "model_profile_id": DEFAULT_RECALL_PROFILE_ID,
@@ -123,7 +123,7 @@ def build_default_model_profiles() -> dict:
 
 
 def build_default_model_preset() -> dict:
-    # Result
+    # 結果
     return {
         "model_preset_id": DEFAULT_MODEL_PRESET_ID,
         "display_name": "Default OpenRouter Gemini Preset",

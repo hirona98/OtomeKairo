@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-# Paths
+# パス群
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 VENV_DIR="${REPO_ROOT}/.venv"
@@ -11,20 +11,20 @@ DATA_DIR="${REPO_ROOT}/var/otomekairo"
 CERT_FILE="${TLS_DIR}/cert.pem"
 KEY_FILE="${TLS_DIR}/key.pem"
 
-# BaseSetup
+# 基本設定
 "${SCRIPT_DIR}/setup_venv.sh"
 
-# OpenSSLCheck
+# OpenSSL確認
 if ! command -v openssl >/dev/null 2>&1; then
   echo "openssl が見つかりません。" >&2
   exit 1
 fi
 
-# DirectorySetup
+# ディレクトリ設定
 mkdir -p "${TLS_DIR}"
 mkdir -p "${DATA_DIR}"
 
-# DevCertificate
+# 開発用証明書
 if [[ ! -f "${CERT_FILE}" || ! -f "${KEY_FILE}" ]]; then
   openssl req \
     -x509 \
@@ -36,7 +36,7 @@ if [[ ! -f "${CERT_FILE}" || ! -f "${KEY_FILE}" ]]; then
     -subj "/CN=127.0.0.1"
 fi
 
-# Result
+# 結果
 echo "VSCode デバッグ用の準備が完了しました。"
 echo "Python: ${VENV_DIR}/bin/python"
 echo "Cert  : ${CERT_FILE}"

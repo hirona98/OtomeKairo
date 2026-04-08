@@ -17,18 +17,18 @@ from otomekairo.service_common import (
 )
 
 
-# SpontaneousMixin
+# 自発Mixin
 class ServiceSpontaneousMixin:
     def observe_wake(self, token: str | None, payload: dict[str, Any]) -> dict[str, Any]:
-        # Authorization
+        # 認可
         state = self._require_token(token)
 
-        # ClientContext
+        # クライアントコンテキスト
         client_context = payload.get("client_context", {})
         if not isinstance(client_context, dict):
             raise ServiceError(400, "invalid_client_context", "The client_context field must be an object.")
 
-        # Execute
+        # 実行
         return self._execute_wake_cycle(
             state=state,
             client_context=client_context,
@@ -36,17 +36,17 @@ class ServiceSpontaneousMixin:
         )
 
     def submit_vision_capture_response(self, token: str | None, payload: dict[str, Any]) -> dict[str, Any]:
-        # Authorization
+        # 認可
         self._require_token(token)
 
-        # Fields
+        # 項目
         request_id = payload.get("request_id")
         client_id = payload.get("client_id")
         images = payload.get("images", [])
         client_context = payload.get("client_context")
         error = payload.get("error")
 
-        # Validation
+        # 検証
         if not isinstance(request_id, str) or not request_id.strip():
             raise ServiceError(400, "invalid_request_id", "request_id must be a non-empty string.")
         if not isinstance(client_id, str) or not client_id.strip():
@@ -58,14 +58,14 @@ class ServiceSpontaneousMixin:
         if error is not None and not isinstance(error, str):
             raise ServiceError(400, "invalid_capture_error", "error must be a string or null.")
 
-        # ImageValidation
+        # 画像検証
         normalized_images: list[str] = []
         for image in images:
             if not isinstance(image, str) or not image.strip():
                 raise ServiceError(400, "invalid_images", "images must contain non-empty strings.")
             normalized_images.append(image.strip())
 
-        # StoreResponse
+        # 応答保存
         normalized_request_id = request_id.strip()
         normalized_client_id = client_id.strip()
         with self._vision_capture_lock:
@@ -87,7 +87,7 @@ class ServiceSpontaneousMixin:
             }
             pending["event"].set()
 
-        # Result
+        # 結果
         return {}
 
     def _execute_wake_cycle(
@@ -97,7 +97,7 @@ class ServiceSpontaneousMixin:
         client_context: dict[str, Any],
         trigger_kind: str,
     ) -> dict[str, Any]:
-        # SerializedExecution
+        # 直列化実行
         with self._wake_execution_lock:
             cycle_id = self._new_cycle_id()
             started_at = self._now_iso()
@@ -110,7 +110,7 @@ class ServiceSpontaneousMixin:
             )
 
             try:
-                # Pipeline
+                # パイプライン
                 selected_candidate = self._select_due_future_act_candidate(
                     memory_set_id=state["selected_memory_set_id"],
                     current_time=started_at,
@@ -123,7 +123,7 @@ class ServiceSpontaneousMixin:
                     selected_candidate=selected_candidate,
                 )
 
-                # Success
+                # 成功
                 response = self._complete_observation_success(
                     cycle_id=cycle_id,
                     started_at=started_at,
@@ -140,7 +140,7 @@ class ServiceSpontaneousMixin:
                     consolidate_memory=False,
                 )
 
-                # PostReply
+                # 返信後処理
                 self._record_wake_outcome(
                     current_time=started_at,
                     decision=pipeline["decision"],
@@ -148,7 +148,7 @@ class ServiceSpontaneousMixin:
                 )
                 return response
             except (LLMError, KeyError, ValueError) as exc:
-                # FailurePersistence
+                # 失敗永続化
                 finished_at = self._now_iso()
                 self._persist_cycle_failure(
                     cycle_id=cycle_id,
@@ -177,7 +177,7 @@ class ServiceSpontaneousMixin:
                 }
 
     def _background_wake_loop(self, stop_event: threading.Event) -> None:
-        # Loop
+        # ループ
         while not stop_event.is_set():
             try:
                 state = self.store.read_state()
@@ -194,18 +194,18 @@ class ServiceSpontaneousMixin:
                 stop_event.wait(timeout=BACKGROUND_WAKE_POLL_SECONDS)
 
     def _background_wake_delay_seconds(self, *, state: dict[str, Any], current_time: str) -> float:
-        # Disabled
+        # 無効時
         wake_policy = state.get("wake_policy", {})
         if wake_policy.get("mode") != "interval":
             return BACKGROUND_WAKE_POLL_SECONDS
 
-        # FirstWake
+        # 初回起床
         with self._runtime_state_lock:
             last_wake_at = self._wake_runtime_state.get("last_wake_at")
         if not isinstance(last_wake_at, str) or not last_wake_at:
             return 0.0
 
-        # Remaining
+        # 残り
         interval_minutes = int(wake_policy.get("interval_minutes", 1))
         current_dt = self._parse_iso(current_time)
         due_at = self._parse_iso(last_wake_at) + timedelta(minutes=interval_minutes)
@@ -213,11 +213,11 @@ class ServiceSpontaneousMixin:
         if remaining_seconds <= 0:
             return 0.0
 
-        # PollCap
+        # ポーリング上限
         return min(remaining_seconds, BACKGROUND_WAKE_POLL_SECONDS)
 
     def _background_desktop_watch_loop(self, stop_event: threading.Event) -> None:
-        # Loop
+        # ループ
         while not stop_event.is_set():
             try:
                 state = self.store.read_state()
@@ -238,7 +238,7 @@ class ServiceSpontaneousMixin:
         state: dict[str, Any],
         current_time: str,
     ) -> float:
-        # Config
+        # 設定
         desktop_watch = state.get("desktop_watch", {})
         target_client_id = desktop_watch.get("target_client_id")
         if not isinstance(desktop_watch, dict) or not desktop_watch.get("enabled"):
@@ -248,13 +248,13 @@ class ServiceSpontaneousMixin:
         if not self._event_stream_registry.has_capability(target_client_id.strip(), "vision.desktop"):
             return BACKGROUND_DESKTOP_WATCH_POLL_SECONDS
 
-        # FirstWatch
+        # 初回監視
         with self._runtime_state_lock:
             last_watch_at = self._desktop_watch_runtime_state.get("last_watch_at")
         if not isinstance(last_watch_at, str) or not last_watch_at:
             return 0.0
 
-        # Remaining
+        # 残り
         interval_seconds = int(desktop_watch.get("interval_seconds", 1))
         current_dt = self._parse_iso(current_time)
         due_at = self._parse_iso(last_watch_at) + timedelta(seconds=interval_seconds)
@@ -262,11 +262,11 @@ class ServiceSpontaneousMixin:
         if remaining_seconds <= 0:
             return 0.0
 
-        # PollCap
+        # ポーリング上限
         return min(remaining_seconds, BACKGROUND_DESKTOP_WATCH_POLL_SECONDS)
 
     def _execute_desktop_watch_cycle(self, *, state: dict[str, Any]) -> None:
-        # SerializedExecution
+        # 直列化実行
         with self._desktop_watch_execution_lock:
             desktop_watch = state.get("desktop_watch", {})
             target_client_id = desktop_watch.get("target_client_id")
@@ -276,20 +276,20 @@ class ServiceSpontaneousMixin:
             if not self._event_stream_registry.has_capability(target_client_id, "vision.desktop"):
                 return
 
-            # Timestamp
+            # タイムスタンプ
             started_at = self._now_iso()
 
-            # Capture
+            # キャプチャ
             capture_response = self._request_desktop_watch_capture(target_client_id=target_client_id)
             if capture_response is None:
                 return
             if not capture_response["images"]:
                 return
 
-            # SuccessTimestamp
+            # 成功タイムスタンプ
             self._set_last_desktop_watch_at(self._now_iso())
 
-            # Observation
+            # 観測
             selected_candidate = self._select_due_future_act_candidate(
                 memory_set_id=state["selected_memory_set_id"],
                 current_time=started_at,
@@ -300,14 +300,14 @@ class ServiceSpontaneousMixin:
                 selected_candidate=selected_candidate,
             )
 
-            # Snapshot
+            # スナップショット
             cycle_id = self._new_cycle_id()
             recent_turns = self._load_recent_turns(state)
             runtime_summary = self._build_runtime_summary(state)
             settings_snapshot = self._build_settings_snapshot(state)
 
             try:
-                # Pipeline
+                # パイプライン
                 pipeline = self._run_observation_pipeline(
                     state=state,
                     started_at=started_at,
@@ -315,7 +315,7 @@ class ServiceSpontaneousMixin:
                     recent_turns=recent_turns,
                 )
 
-                # Success
+                # 成功
                 self._complete_observation_success(
                     cycle_id=cycle_id,
                     started_at=started_at,
@@ -341,7 +341,7 @@ class ServiceSpontaneousMixin:
                     pipeline=pipeline,
                 )
             except (LLMError, KeyError, ValueError) as exc:
-                # Failure
+                # 失敗
                 self._persist_cycle_failure(
                     cycle_id=cycle_id,
                     started_at=started_at,
@@ -369,14 +369,14 @@ class ServiceSpontaneousMixin:
         cycle_id: str,
         decision: dict[str, Any],
     ) -> dict[str, Any] | None:
-        # Guard
+        # 確認
         if decision.get("kind") != "future_act":
             return None
         future_act = decision.get("future_act")
         if not isinstance(future_act, dict):
             return None
 
-        # Result
+        # 結果
         return {
             "source_cycle_id": cycle_id,
             "intent_kind": future_act.get("intent_kind"),
@@ -391,7 +391,7 @@ class ServiceSpontaneousMixin:
         memory_set_id: str,
         current_time: str,
     ) -> dict[str, Any] | None:
-        # LockedRead
+        # ロック下読み取り
         with self._runtime_state_lock:
             self._prune_future_act_candidates(current_time=current_time)
             current_dt = self._parse_iso(current_time)
@@ -421,12 +421,12 @@ class ServiceSpontaneousMixin:
         decision: dict[str, Any],
         occurred_at: str,
     ) -> dict[str, Any] | None:
-        # Guard
+        # 確認
         base_summary = self._future_act_trace_summary(cycle_id=cycle_id, decision=decision)
         if base_summary is None:
             return None
 
-        # LockedUpsert
+        # ロック下upsert
         with self._runtime_state_lock:
             self._prune_future_act_candidates(current_time=occurred_at)
             existing = self._find_future_act_candidate(
@@ -467,7 +467,7 @@ class ServiceSpontaneousMixin:
                 )
                 queue_action = "updated"
 
-            # Result
+            # 結果
             return {
                 **base_summary,
                 "candidate_id": candidate["candidate_id"],
@@ -483,7 +483,7 @@ class ServiceSpontaneousMixin:
         decision: dict[str, Any],
         selected_candidate: dict[str, Any] | None,
     ) -> None:
-        # Reply
+        # 返信
         if decision.get("kind") == "reply":
             with self._runtime_state_lock:
                 self._wake_runtime_state["last_spontaneous_at"] = current_time
@@ -496,17 +496,17 @@ class ServiceSpontaneousMixin:
                     self._remove_future_act_candidate(selected_candidate.get("candidate_id"))
             return
 
-        # FutureAct
+        # 将来行動
         if decision.get("kind") == "future_act":
             return
 
     def _set_last_desktop_watch_at(self, current_time: str) -> None:
-        # Update
+        # 更新
         with self._runtime_state_lock:
             self._desktop_watch_runtime_state["last_watch_at"] = current_time
 
     def _request_desktop_watch_capture(self, *, target_client_id: str) -> dict[str, Any] | None:
-        # Request
+        # リクエスト
         request_id = f"vision_capture_request:{uuid.uuid4().hex}"
         pending = {
             "event": threading.Event(),
@@ -516,7 +516,7 @@ class ServiceSpontaneousMixin:
         with self._vision_capture_lock:
             self._pending_vision_capture_requests[request_id] = pending
 
-        # Command
+        # コマンド
         sent = self._event_stream_registry.send_to_client(
             target_client_id,
             {
@@ -536,10 +536,10 @@ class ServiceSpontaneousMixin:
                 self._pending_vision_capture_requests.pop(request_id, None)
             return None
 
-        # Wait
+        # 待機
         pending["event"].wait(timeout=(DESKTOP_WATCH_CAPTURE_TIMEOUT_MS / 1000.0) + 1.0)
 
-        # Result
+        # 結果
         with self._vision_capture_lock:
             result = pending["response"]
             self._pending_vision_capture_requests.pop(request_id, None)
@@ -548,12 +548,12 @@ class ServiceSpontaneousMixin:
             return result
 
     def _build_desktop_watch_client_context(self, capture_response: dict[str, Any]) -> dict[str, Any]:
-        # Source
+        # source取得
         client_context = capture_response.get("client_context", {})
         if not isinstance(client_context, dict):
             client_context = {}
 
-        # Result
+        # 結果
         return {
             "source": "desktop_watch",
             "client_id": capture_response.get("client_id"),
@@ -569,7 +569,7 @@ class ServiceSpontaneousMixin:
         client_context: dict[str, Any],
         selected_candidate: dict[str, Any] | None,
     ) -> str:
-        # Prefix
+        # プレフィックス
         parts = ["desktop_watch 観測。"]
         parts.extend(
             self._client_context_observation_parts(
@@ -589,17 +589,17 @@ class ServiceSpontaneousMixin:
         capture_response: dict[str, Any],
         pipeline: dict[str, Any],
     ) -> None:
-        # Guard
+        # 確認
         reply_payload = pipeline.get("reply_payload")
         if not isinstance(reply_payload, dict):
             return
 
-        # Client
+        # クライアント
         target_client_id = capture_response.get("client_id")
         if not isinstance(target_client_id, str) or not target_client_id.strip():
             return
 
-        # Context
+        # コンテキスト
         client_context = capture_response.get("client_context", {})
         if not isinstance(client_context, dict):
             client_context = {}
@@ -611,7 +611,7 @@ class ServiceSpontaneousMixin:
         elif isinstance(active_app, str) and active_app.strip():
             summary = active_app.strip()
 
-        # Event
+        # イベント
         event = {
             "event_id": self._next_stream_event_id(),
             "type": "desktop_watch",
@@ -624,19 +624,19 @@ class ServiceSpontaneousMixin:
         self._event_stream_registry.send_to_client(target_client_id.strip(), event)
 
     def _next_stream_event_id(self) -> int:
-        # Counter
+        # カウンター
         with self._stream_event_lock:
             event_id = self._next_stream_event_value
             self._next_stream_event_value += 1
         return event_id
 
     def _set_last_wake_at(self, current_time: str) -> None:
-        # Update
+        # 更新
         with self._runtime_state_lock:
             self._wake_runtime_state["last_wake_at"] = current_time
 
     def _wake_is_due(self, *, state: dict[str, Any], current_time: str) -> dict[str, Any]:
-        # Disabled
+        # 無効時
         wake_policy = state.get("wake_policy", {})
         if wake_policy.get("mode") != "interval":
             return {
@@ -644,7 +644,7 @@ class ServiceSpontaneousMixin:
                 "reason_summary": "wake_policy が disabled のため、自発判断は止まっている。",
             }
 
-        # FirstWake
+        # 初回起床
         with self._runtime_state_lock:
             last_wake_at = self._wake_runtime_state.get("last_wake_at")
         if not isinstance(last_wake_at, str) or not last_wake_at:
@@ -653,7 +653,7 @@ class ServiceSpontaneousMixin:
                 "reason_summary": None,
             }
 
-        # Interval
+        # 間隔
         interval_minutes = wake_policy.get("interval_minutes", 0)
         current_dt = self._parse_iso(current_time)
         due_at = self._parse_iso(last_wake_at) + timedelta(minutes=int(interval_minutes))
@@ -663,14 +663,14 @@ class ServiceSpontaneousMixin:
                 "reason_summary": "interval wake の次回時刻にまだ達していない。",
             }
 
-        # Due
+        # 期限到来
         return {
             "should_skip": False,
             "reason_summary": None,
         }
 
     def _wake_cooldown_reason(self, *, current_time: str) -> str | None:
-        # Lookup
+        # 検索
         with self._runtime_state_lock:
             cooldown_until = self._wake_runtime_state.get("cooldown_until")
         if not isinstance(cooldown_until, str) or not cooldown_until:
@@ -680,7 +680,7 @@ class ServiceSpontaneousMixin:
         return None
 
     def _was_recently_replied(self, *, dedupe_key: str, current_time: str) -> bool:
-        # Lookup
+        # 検索
         with self._runtime_state_lock:
             reply_history = self._wake_runtime_state.setdefault("reply_history_by_dedupe", {})
             last_reply_at = reply_history.get(dedupe_key)
@@ -690,11 +690,11 @@ class ServiceSpontaneousMixin:
         return current_dt - self._parse_iso(last_reply_at) < timedelta(minutes=WAKE_REPLY_COOLDOWN_MINUTES)
 
     def _wake_cooldown_until(self, current_time: str) -> str:
-        # Timestamp
+        # タイムスタンプ
         return (self._parse_iso(current_time) + timedelta(minutes=WAKE_REPLY_COOLDOWN_MINUTES)).isoformat()
 
     def _wake_observation_text(self, candidate: dict[str, Any]) -> str:
-        # Intent
+        # intent判定
         intent_kind = candidate.get("intent_kind", "conversation_follow_up")
         if intent_kind == "conversation_follow_up":
             return "約束の続きとして会話を再開したい。いま話しかける価値があるかを見たい。"
@@ -706,7 +706,7 @@ class ServiceSpontaneousMixin:
         client_context: dict[str, Any],
         selected_candidate: dict[str, Any] | None,
     ) -> str:
-        # Prefix
+        # プレフィックス
         parts = ["定期起床。"]
         parts.extend(
             self._client_context_observation_parts(
@@ -727,41 +727,41 @@ class ServiceSpontaneousMixin:
         include_source: bool,
         include_capture: bool,
     ) -> list[str]:
-        # Fields
+        # 項目
         source = self._client_context_text(client_context.get("source"), limit=48)
         active_app = self._client_context_text(client_context.get("active_app"), limit=80)
         window_title = self._client_context_text(client_context.get("window_title"), limit=120)
         locale = self._client_context_text(client_context.get("locale"), limit=32)
         parts: list[str] = []
 
-        # Source
+        # source取得
         if include_source and isinstance(source, str):
             if source == "background_wake_scheduler":
                 parts.append("観測源は background wake scheduler。")
             else:
                 parts.append(f"観測源は {source}。")
 
-        # Foreground
+        # 前景
         if isinstance(active_app, str):
             parts.append(f"前景アプリは {active_app}。")
         if isinstance(window_title, str):
             parts.append(f"ウィンドウタイトルは {window_title}。")
 
-        # Locale
+        # ロケール
         if isinstance(locale, str):
             parts.append(f"UIロケールは {locale}。")
 
-        # Capture
+        # キャプチャ
         if include_capture:
             image_count = client_context.get("image_count")
             if isinstance(image_count, int) and image_count > 0:
                 parts.append(f"キャプチャ画像を {image_count} 件受け取った。")
 
-        # Result
+        # 結果
         return parts
 
     def _client_context_text(self, value: Any, *, limit: int) -> str | None:
-        # Type
+        # 型
         if not isinstance(value, str):
             return None
         stripped = value.strip()
@@ -770,7 +770,7 @@ class ServiceSpontaneousMixin:
         return self._clamp(stripped, limit=limit)
 
     def _remove_future_act_candidate(self, candidate_id: Any) -> None:
-        # Guard
+        # 確認
         if not isinstance(candidate_id, str) or not candidate_id:
             return
         with self._runtime_state_lock:
@@ -787,7 +787,7 @@ class ServiceSpontaneousMixin:
         dedupe_key: str,
         current_time: str,
     ) -> dict[str, Any] | None:
-        # LockedScan
+        # ロック下走査
         with self._runtime_state_lock:
             current_dt = self._parse_iso(current_time)
             for candidate in self._future_act_candidates:
@@ -802,7 +802,7 @@ class ServiceSpontaneousMixin:
             return None
 
     def _prune_future_act_candidates(self, *, current_time: str) -> None:
-        # LockedFilter
+        # ロック下絞り込み
         with self._runtime_state_lock:
             current_dt = self._parse_iso(current_time)
             self._future_act_candidates = [
@@ -813,7 +813,7 @@ class ServiceSpontaneousMixin:
             ]
 
     def _clear_future_act_candidates(self) -> None:
-        # Reset
+        # リセット
         with self._runtime_state_lock:
             self._future_act_candidates = []
             self._wake_runtime_state = {
@@ -827,9 +827,9 @@ class ServiceSpontaneousMixin:
             }
 
     def _future_act_not_before(self, occurred_at: str) -> str:
-        # Offset
+        # オフセット
         return (self._parse_iso(occurred_at) + timedelta(minutes=FUTURE_ACT_NOT_BEFORE_MINUTES)).isoformat()
 
     def _future_act_expires_at(self, occurred_at: str) -> str:
-        # Offset
+        # オフセット
         return (self._parse_iso(occurred_at) + timedelta(hours=FUTURE_ACT_EXPIRES_HOURS)).isoformat()

@@ -18,10 +18,10 @@ from otomekairo.service_spontaneous import ServiceSpontaneousMixin
 from otomekairo.store import FileStore
 
 
-# Service
+# サービス
 class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
     def __init__(self, root_dir: Path) -> None:
-        # Dependencies
+        # 依存関係
         self.store = FileStore(root_dir)
         self.llm = LLMClient()
         self.recall = RecallBuilder(store=self.store, llm=self.llm)
@@ -51,7 +51,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         self._next_stream_event_value = 1
 
     def start_background_wake_scheduler(self) -> None:
-        # Existing
+        # 既存
         with self._runtime_state_lock:
             if self._background_wake_thread is not None and self._background_wake_thread.is_alive():
                 return
@@ -66,25 +66,25 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             self._background_wake_stop_event = stop_event
             self._background_wake_thread = thread
 
-        # Start
+        # 開始
         thread.start()
 
     def stop_background_wake_scheduler(self) -> None:
-        # Snapshot
+        # スナップショット
         with self._runtime_state_lock:
             stop_event = self._background_wake_stop_event
             thread = self._background_wake_thread
             self._background_wake_stop_event = None
             self._background_wake_thread = None
 
-        # Stop
+        # 停止
         if stop_event is not None:
             stop_event.set()
         if thread is not None and thread.is_alive():
             thread.join(timeout=5.0)
 
     def start_background_desktop_watch(self) -> None:
-        # Existing
+        # 既存
         with self._runtime_state_lock:
             if self._background_desktop_watch_thread is not None and self._background_desktop_watch_thread.is_alive():
                 return
@@ -99,29 +99,29 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             self._background_desktop_watch_stop_event = stop_event
             self._background_desktop_watch_thread = thread
 
-        # Start
+        # 開始
         thread.start()
 
     def stop_background_desktop_watch(self) -> None:
-        # Snapshot
+        # スナップショット
         with self._runtime_state_lock:
             stop_event = self._background_desktop_watch_stop_event
             thread = self._background_desktop_watch_thread
             self._background_desktop_watch_stop_event = None
             self._background_desktop_watch_thread = None
 
-        # Stop
+        # 停止
         if stop_event is not None:
             stop_event.set()
         if thread is not None and thread.is_alive():
             thread.join(timeout=5.0)
 
-    # ObservationApi
+    # 観測API
     def observe_conversation(self, token: str | None, payload: dict) -> dict[str, Any]:
-        # Authorization
+        # 認可
         state = self._require_token(token)
 
-        # Validation
+        # 検証
         observation_text = payload.get("text")
         client_context = payload.get("client_context", {})
         if not isinstance(observation_text, str):
@@ -129,7 +129,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         if not isinstance(client_context, dict):
             raise ServiceError(400, "invalid_client_context", "The client_context field must be an object.")
 
-        # Snapshot
+        # スナップショット
         cycle_id = self._new_cycle_id()
         started_at = self._now_iso()
         recent_turns = self._load_recent_turns(state)
@@ -137,7 +137,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         settings_snapshot = self._build_settings_snapshot(state)
 
         try:
-            # Pipeline
+            # パイプライン
             pipeline = self._run_observation_pipeline(
                 state=state,
                 started_at=started_at,
@@ -145,7 +145,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
                 recent_turns=recent_turns,
             )
 
-            # Success
+            # 成功
             return self._complete_observation_success(
                 cycle_id=cycle_id,
                 started_at=started_at,
@@ -158,7 +158,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
                 pipeline=pipeline,
             )
         except (LLMError, KeyError, ValueError) as exc:
-            # FailurePersistence
+            # 失敗永続化
             finished_at = self._now_iso()
             self._persist_cycle_failure(
                 cycle_id=cycle_id,
@@ -191,7 +191,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         observation_text: str,
         recent_turns: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        # ModelSelection
+        # モデル選択
         selected_preset = state["model_presets"][state["selected_model_preset_id"]]
         recall_role = selected_preset["roles"]["recall_hint_generation"]
         decision_role = selected_preset["roles"]["decision_generation"]
@@ -201,7 +201,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         reply_profile = self._profile_for_role(state, selected_preset, "reply_generation")
         persona = state["personas"][state["selected_persona_id"]]
 
-        # RecallHint
+        # recall_hint生成
         recall_hint = self.llm.generate_recall_hint(
             profile=recall_profile,
             role_settings=recall_role,
@@ -210,21 +210,21 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             current_time=started_at,
         )
 
-        # RecallPack
+        # recall_pack構築
         recall_pack = self.recall.build_recall_pack(
             state=state,
             observation_text=observation_text,
             recall_hint=recall_hint,
         )
 
-        # InternalContext
+        # 内部コンテキスト
         time_context = self._build_time_context(current_time=started_at)
         affect_context = self._build_affect_context(
             state=state,
             recall_hint=recall_hint,
         )
 
-        # Decision
+        # decision生成
         decision = self.llm.generate_decision(
             profile=decision_profile,
             role_settings=decision_role,
@@ -236,7 +236,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             recall_pack=recall_pack,
         )
 
-        # Reply
+        # 返信
         reply_payload: dict[str, Any] | None = None
         if decision["kind"] == "reply":
             reply_payload = self.llm.generate_reply(
@@ -252,7 +252,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
                 decision=decision,
             )
 
-        # Result
+        # 結果
         return {
             "recall_hint": recall_hint,
             "recall_pack": recall_pack,
@@ -271,24 +271,24 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         recent_turns: list[dict[str, Any]],
         selected_candidate: dict[str, Any] | None,
     ) -> tuple[dict[str, Any], str]:
-        # ObservationText
+        # 観測テキスト
         observation_text = self._build_wake_observation_text(
             client_context=client_context,
             selected_candidate=selected_candidate,
         )
 
-        # WakePolicy
+        # 起床ポリシー
         due = self._wake_is_due(state=state, current_time=started_at)
         if due["should_skip"]:
             return self._noop_pipeline(started_at=started_at, reason_summary=due["reason_summary"]), observation_text
 
-        # Cooldown
+        # クールダウン
         cooldown_reason = self._wake_cooldown_reason(current_time=started_at)
         if cooldown_reason is not None:
             self._set_last_wake_at(started_at)
             return self._noop_pipeline(started_at=started_at, reason_summary=cooldown_reason), observation_text
 
-        # Candidate
+        # 候補
         if selected_candidate is None:
             self._set_last_wake_at(started_at)
             return (
@@ -299,7 +299,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
                 observation_text,
             )
 
-        # ReplySuppression
+        # 返信抑制
         if self._was_recently_replied(
             dedupe_key=selected_candidate["dedupe_key"],
             current_time=started_at,
@@ -313,10 +313,10 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
                 observation_text,
             )
 
-        # TriggerAccounting
+        # トリガー集計
         self._set_last_wake_at(started_at)
 
-        # WakeObservation
+        # 起床観測
         pipeline = self._run_observation_pipeline(
             state=state,
             started_at=started_at,
@@ -342,7 +342,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         observation_event_role: str = "user",
         consolidate_memory: bool = True,
     ) -> dict[str, Any]:
-        # ResultSelection
+        # 結果選択
         decision = pipeline["decision"]
         reply_payload = pipeline["reply_payload"]
         internal_result_kind = decision["kind"]
@@ -355,7 +355,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             occurred_at=finished_at,
         )
 
-        # Persistence
+        # 永続化
         events = self._persist_cycle_success(
             cycle_id=cycle_id,
             started_at=started_at,
@@ -379,7 +379,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             observation_event_role=observation_event_role,
         )
 
-        # DebugLogs
+        # デバッグログ群
         self._emit_observation_success_logs(
             cycle_id=cycle_id,
             trigger_kind=trigger_kind,
@@ -389,7 +389,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             reply_payload=reply_payload,
         )
 
-        # MemoryTrace
+        # memory trace更新
         if consolidate_memory:
             self._finalize_memory_trace(
                 cycle_id=cycle_id,
@@ -409,7 +409,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
                 memory_trace=self._skipped_memory_trace("wake_cycle"),
             )
 
-        # Response
+        # 応答
         return {
             "cycle_id": cycle_id,
             "result_kind": result_kind,
@@ -426,7 +426,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         events: list[dict[str, Any]],
         pipeline: dict[str, Any],
     ) -> None:
-        # TurnConsolidation
+        # ターン統合
         try:
             memory_trace = self.memory.consolidate_turn(
                 state=state,
@@ -452,21 +452,21 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
                 ]
             )
 
-        # ReflectionAudit
+        # 内省監査
         self._append_reflective_failure_events(
             cycle_id=cycle_id,
             memory_set_id=state["selected_memory_set_id"],
             memory_trace=memory_trace,
         )
 
-        # MemoryTraceUpdate
+        # memory trace更新
         self._update_cycle_trace_memory_trace(cycle_id=cycle_id, memory_trace=memory_trace)
 
-        # DebugLogs
+        # デバッグログ群
         self._emit_memory_trace_logs(cycle_id=cycle_id, memory_trace=memory_trace)
 
     def _failed_memory_trace(self, failure_reason: str) -> dict[str, Any]:
-        # Result
+        # 結果
         return {
             "turn_consolidation_status": "failed",
             "episode_digest_id": None,
@@ -483,7 +483,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         }
 
     def _skipped_memory_trace(self, reason: str) -> dict[str, Any]:
-        # Result
+        # 結果
         return {
             "turn_consolidation_status": "skipped",
             "episode_digest_id": None,
@@ -507,12 +507,12 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         memory_set_id: str,
         memory_trace: dict[str, Any],
     ) -> None:
-        # Lookup
+        # 検索
         reflective_trace = memory_trace.get("reflective_consolidation", {})
         if reflective_trace.get("result_status") != "failed":
             return
 
-        # Audit
+        # 監査
         self.store.append_events(
             events=[
                 self._build_memory_audit_event(
@@ -528,21 +528,21 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             ]
         )
 
-    # InspectionApis
+    # 検査API群
     def list_cycle_summaries(self, token: str | None, limit: int) -> dict[str, Any]:
-        # Authorization
+        # 認可
         self._require_token(token)
 
-        # List
+        # 一覧
         return {
             "cycle_summaries": self.store.list_cycle_summaries(limit),
         }
 
     def get_cycle_trace(self, token: str | None, cycle_id: str) -> dict[str, Any]:
-        # Authorization
+        # 認可
         self._require_token(token)
 
-        # FindRecord
+        # レコード検索
         trace = self.store.get_cycle_trace(cycle_id)
         if trace is not None:
             return trace
@@ -550,20 +550,20 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         raise ServiceError(404, "cycle_not_found", "The requested cycle_id does not exist.")
 
     def register_log_stream_connection(self, websocket: Any) -> str:
-        # Result
+        # 結果
         return self._log_stream_registry.add_connection(websocket)
 
     def remove_log_stream_connection(self, session_id: str) -> None:
-        # Remove
+        # 削除
         self._log_stream_registry.remove_connection(session_id)
 
-    # Helpers
+    # 補助
     def _require_token(self, token: str | None) -> dict:
-        # LoadState
+        # 読み込み状態
         state = self.store.read_state()
         issued = state["console_access_token"]
 
-        # Validation
+        # 検証
         if issued is None:
             raise ServiceError(401, "bootstrap_required", "A console_access_token has not been issued yet.")
         if token != issued:
@@ -571,13 +571,13 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         return state
 
     def _profile_for_role(self, state: dict, model_preset: dict, role_name: str) -> dict:
-        # Lookup
+        # 検索
         role_value = model_preset["roles"][role_name]
         profile_id = role_value["model_profile_id"]
         return state["model_profiles"][profile_id]
 
     def _summarize_recall_pack(self, recall_pack: dict[str, Any]) -> dict[str, int]:
-        # Summary
+        # 要約
         return {
             "self_model": len(recall_pack["self_model"]),
             "user_model": len(recall_pack["user_model"]),
@@ -599,7 +599,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         result_kind: str,
         reply_payload: dict[str, Any] | None,
     ) -> None:
-        # RecallLists
+        # recall一覧
         recall_hint = pipeline["recall_hint"]
         recall_pack = pipeline["recall_pack"]
         decision = pipeline["decision"]
@@ -614,7 +614,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             if digest_id not in association_digest_ids
         ]
 
-        # Logs
+        # ログ群
         logs = [
             self._build_live_log_record(
                 level="INFO",
@@ -686,7 +686,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         observation_text: str,
         failure_reason: str,
     ) -> None:
-        # Logs
+        # ログ群
         logs = [
             self._build_live_log_record(
                 level="INFO",
@@ -708,7 +708,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         self._log_stream_registry.append_logs(logs)
 
     def _emit_memory_trace_logs(self, *, cycle_id: str, memory_trace: dict[str, Any]) -> None:
-        # Status
+        # status判定
         status = str(memory_trace.get("turn_consolidation_status", "unknown"))
         if status == "failed":
             level = "WARNING"
@@ -734,7 +734,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
                 message += f" reflection={reflective.get('result_status', 'unknown')}"
             level = "INFO"
 
-        # Emit
+        # 送出
         self._log_stream_registry.append_logs(
             [
                 self._build_live_log_record(
@@ -746,7 +746,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         )
 
     def _build_live_log_record(self, *, level: str, component: str, message: str) -> dict[str, Any]:
-        # Result
+        # 結果
         return {
             "ts": self._now_iso(),
             "level": level,
@@ -755,46 +755,46 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         }
 
     def _short_cycle_id(self, cycle_id: str) -> str:
-        # Empty
+        # 空
         if ":" not in cycle_id:
             return cycle_id[:12]
 
-        # Result
+        # 結果
         return cycle_id.split(":", 1)[1][:12]
 
     def _format_list_for_log(self, values: list[Any]) -> str:
-        # Empty
+        # 空
         if not values:
             return "-"
 
-        # Result
+        # 結果
         return ",".join(str(value) for value in values[:3])
 
     def _format_id_list_for_log(self, values: list[str]) -> str:
-        # Empty
+        # 空
         if not values:
             return "-"
 
-        # Result
+        # 結果
         return ",".join(self._short_identifier(value) for value in values[:3])
 
     def _short_identifier(self, value: str) -> str:
-        # Empty
+        # 空
         if ":" not in value:
             return value[:18]
 
-        # Result
+        # 結果
         prefix, suffix = value.split(":", 1)
         return f"{prefix}:{suffix[:8]}"
 
     def _external_result_kind(self, internal_result_kind: str) -> str:
-        # Mapping
+        # マッピング
         if internal_result_kind == "future_act":
             return "noop"
         return internal_result_kind
 
     def _noop_pipeline(self, *, started_at: str, reason_summary: str) -> dict[str, Any]:
-        # Result
+        # 結果
         return {
             "recall_hint": self._empty_recall_hint(),
             "recall_pack": self._empty_recall_pack(),
@@ -814,7 +814,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         }
 
     def _empty_recall_hint(self) -> dict[str, Any]:
-        # Result
+        # 結果
         return {
             "primary_intent": "smalltalk",
             "secondary_intents": [],
@@ -826,7 +826,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         }
 
     def _empty_recall_pack(self) -> dict[str, Any]:
-        # Result
+        # 結果
         return {
             "self_model": [],
             "user_model": [],
@@ -846,21 +846,21 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
 
 
     def _summarize_affect_context(self, affect_context: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
-        # Surface
+        # 表層
         surface_labels = [
             item["affect_label"]
             for item in affect_context.get("surface", [])
             if isinstance(item.get("affect_label"), str)
         ]
 
-        # Background
+        # 背景
         background_labels = [
             item["affect_label"]
             for item in affect_context.get("background", [])
             if isinstance(item.get("affect_label"), str)
         ]
 
-        # Result
+        # 結果
         return {
             "surface_count": len(affect_context.get("surface", [])),
             "background_count": len(affect_context.get("background", [])),
@@ -869,24 +869,24 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         }
 
     def _recall_adopted_reason_summary(self, recall_pack: dict[str, Any]) -> str:
-        # Counts
+        # 件数群
         memory_count = len(recall_pack["selected_memory_ids"])
         digest_count = len(recall_pack["selected_episode_digest_ids"])
         association_memory_count = len(recall_pack["association_selected_memory_ids"])
         association_digest_count = len(recall_pack["association_selected_episode_digest_ids"])
 
-        # Empty
+        # 空
         if memory_count == 0 and digest_count == 0:
             return "構造レーンで採用候補は選ばれなかった。"
 
-        # AssociationOnly
+        # 関連のみ
         if memory_count == association_memory_count and digest_count == association_digest_count:
             return (
                 "連想レーンで近傍候補を補助採用した。"
                 f" association_memory_units={association_memory_count}, association_episode_digests={association_digest_count}"
             )
 
-        # Mixed
+        # 混在
         if association_memory_count > 0 or association_digest_count > 0:
             return (
                 "構造レーンを主軸にしつつ、連想レーンの近傍候補を補助採用した。"
@@ -894,29 +894,29 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
                 f" association_memory_units={association_memory_count}, association_episode_digests={association_digest_count}"
             )
 
-        # Summary
+        # 要約
         return (
             "構造レーンで scope、memory_type、status、commitment_state に基づいて候補を採用した。"
             f" memory_units={memory_count}, episode_digests={digest_count}"
         )
 
     def _recall_rejected_reason_summary(self, recall_pack: dict[str, Any]) -> str:
-        # Empty
+        # 空
         if recall_pack["candidate_count"] == 0:
             return "現時点では構造レーンにも連想レーンにも一致する長期記憶がなかった。"
 
-        # Association
+        # 関連
         if recall_pack["association_selected_memory_ids"] or recall_pack["association_selected_episode_digest_ids"]:
             return "vector-only 候補は補助扱いに留め、文字列一致フォールバックは使っていない。"
 
-        # Summary
+        # 要約
         return "section 上限と全体上限を優先し、文字列一致フォールバックは使っていない。"
 
     def _build_time_context(self, *, current_time: str) -> dict[str, Any]:
-        # TimestampParse
+        # タイムスタンプ解析
         current_dt = self._parse_iso(current_time)
 
-        # Result
+        # 結果
         return {
             "current_time": current_time,
             "weekday": current_dt.strftime("%A").lower(),
@@ -929,7 +929,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         state: dict[str, Any],
         recall_hint: dict[str, Any],
     ) -> dict[str, list[dict[str, Any]]]:
-        # Query
+        # クエリ
         records = self.store.list_affect_states_for_context(
             memory_set_id=state["selected_memory_set_id"],
             scope_filters=self._build_context_scope_filters(recall_hint),
@@ -937,7 +937,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             limit=6,
         )
 
-        # Selection
+        # 選択
         affect_context = {
             "surface": [],
             "background": [],
@@ -958,20 +958,20 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
                 }
             )
 
-        # Result
+        # 結果
         return affect_context
 
     def _build_context_scope_filters(self, recall_hint: dict[str, Any]) -> list[tuple[str, str]]:
-        # Defaults
+        # 既定値
         filters: list[tuple[str, str]] = [("user", "user")]
         primary_intent = recall_hint["primary_intent"]
         if primary_intent in {"commitment_check", "consult", "meta_relationship"}:
             filters.append(("relationship", "self|user"))
 
-        # FocusScopes
+        # focus scope群
         filters.extend(self._parse_focus_scopes(recall_hint.get("focus_scopes", [])))
 
-        # Dedup
+        # 重複排除
         deduped: list[tuple[str, str]] = []
         seen: set[tuple[str, str]] = set()
         for scope_filter in filters:
@@ -980,11 +980,11 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             deduped.append(scope_filter)
             seen.add(scope_filter)
 
-        # Result
+        # 結果
         return deduped
 
     def _parse_focus_scopes(self, scopes: list[Any]) -> list[tuple[str, str]]:
-        # Parse
+        # 解析
         parsed: list[tuple[str, str]] = []
         for scope in scopes:
             if not isinstance(scope, str):
@@ -1002,11 +1002,11 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
                 continue
             parsed.append((scope_type, scope_key.strip()))
 
-        # Result
+        # 結果
         return parsed
 
     def _part_of_day(self, hour: int) -> str:
-        # Range
+        # 範囲
         if 5 <= hour < 11:
             return "morning"
         if 11 <= hour < 17:
@@ -1039,7 +1039,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         observation_event_kind: str,
         observation_event_role: str,
     ) -> list[dict[str, Any]]:
-        # EventRecords
+        # イベントRecords
         selected_memory_set_id = state["selected_memory_set_id"]
         events = [
             {
@@ -1078,7 +1078,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
                 }
             )
 
-        # RetrievalRun
+        # Retrieval実行
         retrieval_run = {
             "cycle_id": cycle_id,
             "selected_memory_set_id": selected_memory_set_id,
@@ -1093,7 +1093,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             "selected_memory_ids": recall_pack["selected_memory_ids"],
         }
 
-        # CycleSummary
+        # サイクル要約
         cycle_summary = {
             "cycle_id": cycle_id,
             "server_id": state["server_id"],
@@ -1107,7 +1107,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             "failed": False,
         }
 
-        # CycleTrace
+        # サイクルTrace
         cycle_trace = {
             "cycle_id": cycle_id,
             "cycle_summary": cycle_summary,
@@ -1160,7 +1160,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             },
         }
 
-        # Persist
+        # 永続化
         self.store.persist_cycle_records(
             events=events,
             retrieval_run=retrieval_run,
@@ -1185,7 +1185,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         observation_event_kind: str = "observation",
         observation_event_role: str = "user",
     ) -> None:
-        # EventRecords
+        # イベントRecords
         selected_memory_set_id = state["selected_memory_set_id"]
         events = [
             {
@@ -1208,7 +1208,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             },
         ]
 
-        # RetrievalRun
+        # Retrieval実行
         retrieval_run = {
             "cycle_id": cycle_id,
             "selected_memory_set_id": selected_memory_set_id,
@@ -1221,7 +1221,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             "recall_pack_summary": None,
         }
 
-        # CycleSummary
+        # サイクル要約
         cycle_summary = {
             "cycle_id": cycle_id,
             "server_id": state["server_id"],
@@ -1235,7 +1235,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             "failed": True,
         }
 
-        # CycleTrace
+        # サイクルTrace
         cycle_trace = {
             "cycle_id": cycle_id,
             "cycle_summary": cycle_summary,
@@ -1275,7 +1275,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             "memory_trace": None,
         }
 
-        # Persist
+        # 永続化
         self.store.persist_cycle_records(
             events=events,
             retrieval_run=retrieval_run,
@@ -1284,12 +1284,12 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         )
 
     def _update_cycle_trace_memory_trace(self, *, cycle_id: str, memory_trace: dict[str, Any]) -> None:
-        # Lookup
+        # 検索
         cycle_trace = self.store.get_cycle_trace(cycle_id)
         if cycle_trace is None:
             return
 
-        # Replace
+        # 置換
         cycle_trace["memory_trace"] = memory_trace
         self.store.replace_cycle_trace(cycle_trace=cycle_trace)
 
@@ -1302,7 +1302,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         created_at: str,
         payload: dict[str, Any],
     ) -> dict[str, Any]:
-        # Event
+        # イベント
         return {
             "event_id": f"event:{uuid.uuid4().hex}",
             "cycle_id": cycle_id,
@@ -1314,7 +1314,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         }
 
     def _load_recent_turns(self, state: dict) -> list[dict]:
-        # WindowSetup
+        # ウィンドウ設定
         now = datetime.now(UTC)
         threshold = now - timedelta(minutes=3)
         selected_preset = state["model_presets"][state["selected_model_preset_id"]]
@@ -1323,7 +1323,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         if not isinstance(turn_limit, int) or turn_limit < 1:
             turn_limit = 6
 
-        # Lookup
+        # 検索
         return self.store.load_recent_turns(
             memory_set_id=state["selected_memory_set_id"],
             since_iso=threshold.isoformat(),
@@ -1331,29 +1331,29 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         )
 
     def _new_console_token(self) -> str:
-        # Token
+        # トークン
         return f"tok_{secrets.token_urlsafe(24)}"
 
     def _new_cycle_id(self) -> str:
-        # Identifier
+        # 識別子
         return f"cycle:{uuid.uuid4().hex}"
 
     def _now_iso(self) -> str:
-        # Timestamp
+        # タイムスタンプ
         return datetime.now(UTC).isoformat()
 
     def _parse_iso(self, value: str) -> datetime:
-        # Timestamp
+        # タイムスタンプ
         return datetime.fromisoformat(value)
 
     def _duration_ms(self, started_at: str, finished_at: str) -> int:
-        # Duration
+        # 期間
         started = self._parse_iso(started_at)
         finished = self._parse_iso(finished_at)
         return max(int((finished - started).total_seconds() * 1000), 0)
 
     def _clamp(self, value: str | None, limit: int = 160) -> str | None:
-        # Clamp
+        # 範囲制限
         if value is None:
             return None
         stripped = value.strip()

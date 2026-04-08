@@ -8,39 +8,39 @@ from otomekairo.http_server import OtomeKairoHttpServer
 from otomekairo.service import OtomeKairoService
 
 
-# Main
+# メイン
 def main() -> None:
-    # Environment
+    # 環境
     host = os.environ.get("OTOMEKAIRO_HOST", "127.0.0.1")
     port = int(os.environ.get("OTOMEKAIRO_PORT", "55601"))
     cert_file = os.environ.get("OTOMEKAIRO_TLS_CERT_FILE")
     key_file = os.environ.get("OTOMEKAIRO_TLS_KEY_FILE")
     root_dir = Path(os.environ.get("OTOMEKAIRO_DATA_DIR", "var/otomekairo"))
 
-    # TLSValidation
+    # TLS検証
     if not cert_file or not key_file:
         raise SystemExit("OTOMEKAIRO_TLS_CERT_FILE and OTOMEKAIRO_TLS_KEY_FILE are required.")
 
-    # Service
+    # サービス
     service = OtomeKairoService(root_dir=root_dir)
     server = OtomeKairoHttpServer((host, port), service)
 
-    # TLSContext
+    # TLSコンテキスト
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.load_cert_chain(certfile=cert_file, keyfile=key_file)
     server.socket = context.wrap_socket(server.socket, server_side=True)
 
-    # SchedulerStart
+    # スケジューラー開始
     service.start_background_wake_scheduler()
     service.start_background_desktop_watch()
 
-    # Serve
+    # 起動処理
     print(f"OtomeKairo listening on https://{host}:{port}")
     try:
-        # Loop
+        # ループ
         server.serve_forever()
     finally:
-        # Shutdown
+        # 終了処理
         service.close_event_streams()
         service.stop_background_desktop_watch()
         service.stop_background_wake_scheduler()
