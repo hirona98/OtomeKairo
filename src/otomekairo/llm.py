@@ -513,6 +513,13 @@ class LLMClient:
             "qualifiers には必要なら source=explicit_statement|explicit_correction|inference, negates_previous, replace_prior, allow_parallel を入れてください。\n"
             "memory_type は fact, preference, relation, commitment, interpretation, summary のいずれかです。\n"
             "status は inferred, confirmed, superseded, revoked, dormant のいずれかです。\n"
+            "primary_scope_type, candidate_memory_units[].scope_type, affect_updates[].target_scope_type は self, user, entity, topic, relationship, world のいずれかだけを使ってください。\n"
+            "scope_type=self のとき scope_key は self、scope_type=user のとき scope_key は user、scope_type=world のとき scope_key は world に固定してください。\n"
+            "scope_type=topic のとき scope_key は topic:<normalized_name> にしてください。\n"
+            "scope_type=relationship のとき scope_key は self|user や self|person:tanaka のような正規化済みキーにしてください。user|self, relation:default, user:default_to_ai のような独自キーは禁止です。\n"
+            "自分自身の対話姿勢や自己認識は self / self / subject_ref=self を使ってください。\n"
+            "自分とユーザーの距離感、信頼、安心感、話しやすさ、支え方は relationship / self|user を使ってください。\n"
+            "ai, agent, meta_communication などの独自 scope_type は使ってはいけません。\n"
             "commitment_state は commitment のときだけ open, waiting_confirmation, on_hold, done, cancelled のいずれかを使い、それ以外では null にしてください。\n"
             "episode_digest は episode_type, primary_scope_type, primary_scope_key, summary_text, outcome_text, open_loops, salience の 7 キーだけを持つ object にしてください。\n"
             "candidate_memory_units の各要素は memory_type, scope_type, scope_key, subject_ref, predicate, object_ref_or_value, summary_text, status, commitment_state, confidence, salience, valid_from, valid_to, qualifiers, reason の 15 キーだけを持つ object にしてください。\n"
@@ -527,7 +534,7 @@ class LLMClient:
             '  "episode_digest": {\n'
             '    "episode_type": "conversation",\n'
             '    "primary_scope_type": "user",\n'
-            '    "primary_scope_key": "user:default",\n'
+            '    "primary_scope_key": "user",\n'
             '    "summary_text": "ユーザーが軽いテスト発話をした。",\n'
             '    "outcome_text": null,\n'
             '    "open_loops": [],\n'
@@ -570,6 +577,9 @@ class LLMClient:
             "candidate_memory_units の各要素には memory_type, scope_type, scope_key, subject_ref, predicate, object_ref_or_value, summary_text, status, commitment_state, confidence, salience, valid_from, valid_to, qualifiers, reason だけを入れてください。\n"
             "affect_updates の各要素には layer, target_scope_type, target_scope_key, affect_label, intensity だけを入れてください。\n"
             "affect_updates.layer は surface または background だけです。\n"
+            "scope_type は self, user, entity, topic, relationship, world だけを使ってください。\n"
+            "scope_type=self なら scope_key=self、scope_type=user なら scope_key=user、scope_type=relationship なら scope_key は self|user のような正規化済みキーです。\n"
+            "ai, agent, meta_communication, relation:default, user:default_to_ai などの独自表現は禁止です。\n"
             "感情更新に自信がないなら affect_updates は空配列にしてください。\n"
             "余計なキー、説明文、Markdown、コードフェンスは禁止です。"
         )

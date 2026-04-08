@@ -53,10 +53,11 @@ class MemoryActionResolver:
         event_ids: list[str],
         cycle_ids: list[str],
         candidate: dict[str, Any],
+        allow_summary: bool = False,
     ) -> list[dict[str, Any]]:
         # Candidate
         normalized_candidate = self._normalized_candidate(candidate)
-        if self._should_noop_candidate(normalized_candidate):
+        if self._should_noop_candidate(normalized_candidate, allow_summary=allow_summary):
             return []
 
         # Lookup
@@ -692,13 +693,15 @@ class MemoryActionResolver:
             event_ids=event_ids,
         )
 
-    def _should_noop_candidate(self, candidate: dict[str, Any]) -> bool:
+    def _should_noop_candidate(self, candidate: dict[str, Any], *, allow_summary: bool) -> bool:
         # UnsupportedStatuses
         if candidate["status"] == "superseded":
             return True
 
         # SummaryGuard
         if candidate["memory_type"] == "summary":
+            if allow_summary:
+                return False
             return True
 
         # StatusBypass

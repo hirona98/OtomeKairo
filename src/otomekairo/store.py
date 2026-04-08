@@ -129,18 +129,32 @@ class SQLiteMemoryStore(StoreSchemaMixin):
             return None
         return json.loads(row["payload_json"])
 
-    def get_latest_reflection_run(self, memory_set_id: str) -> dict[str, Any] | None:
+    def get_latest_reflection_run(
+        self,
+        memory_set_id: str,
+        *,
+        result_status: str | None = None,
+    ) -> dict[str, Any] | None:
+        # QueryParts
+        clauses = ["memory_set_id = ?"]
+        params: list[Any] = [memory_set_id]
+        if isinstance(result_status, str) and result_status:
+            clauses.append("result_status = ?")
+            params.append(result_status)
+
+        query = f"""
+            SELECT payload_json
+            FROM reflection_runs
+            WHERE {" AND ".join(clauses)}
+            ORDER BY finished_at DESC, rowid DESC
+            LIMIT 1
+        """
+
         # Query
         with self._memory_db() as conn:
             row = conn.execute(
-                """
-                SELECT payload_json
-                FROM reflection_runs
-                WHERE memory_set_id = ?
-                ORDER BY finished_at DESC, rowid DESC
-                LIMIT 1
-                """,
-                (memory_set_id,),
+                query,
+                params,
             ).fetchone()
 
         # Result

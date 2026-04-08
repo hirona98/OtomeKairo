@@ -57,6 +57,14 @@ AFFECT_LAYER_VALUES = {
     "surface",
     "background",
 }
+SCOPE_TYPE_VALUES = {
+    "self",
+    "user",
+    "entity",
+    "topic",
+    "relationship",
+    "world",
+}
 MAX_SECONDARY_INTENTS = 2
 MAX_HINT_SCOPE_VALUES = 4
 
@@ -81,6 +89,75 @@ def _validate_exact_keys(value: Any, required_keys: set[str], label: str) -> Non
     if extra_keys:
         details.append(f"extra={','.join(extra_keys)}")
     raise LLMError(f"{label} keys are invalid ({'; '.join(details)}).")
+
+
+def _has_named_ref_prefix(value: str) -> bool:
+    # NamedRefPrefixes
+    for prefix in ("person:", "place:", "tool:"):
+        if value.startswith(prefix) and value != prefix:
+            return True
+    return False
+
+
+def _is_relationship_ref(value: str) -> bool:
+    # CoreRefs
+    if value in {"self", "user"}:
+        return True
+
+    # NamedRefs
+    return _has_named_ref_prefix(value)
+
+
+def _normalized_relationship_refs(values: list[str]) -> list[str]:
+    # Ordering
+    unique_values = list(dict.fromkeys(values))
+    if "self" in unique_values:
+        tail = sorted(value for value in unique_values if value != "self")
+        return ["self", *tail]
+    return sorted(unique_values)
+
+
+def _validate_scope_identity(*, scope_type: Any, scope_key: Any, label: str) -> None:
+    # TypeCheck
+    if scope_type not in SCOPE_TYPE_VALUES:
+        raise LLMError(f"{label}.scope_type is invalid.")
+    if not isinstance(scope_key, str) or not scope_key.strip():
+        raise LLMError(f"{label}.scope_key is invalid.")
+
+    # Normalized
+    normalized_scope_key = scope_key.strip()
+
+    # FixedScopes
+    if scope_type == "self" and normalized_scope_key != "self":
+        raise LLMError(f"{label}.scope_key must be 'self' when scope_type is self.")
+    if scope_type == "user" and normalized_scope_key != "user":
+        raise LLMError(f"{label}.scope_key must be 'user' when scope_type is user.")
+    if scope_type == "world" and normalized_scope_key != "world":
+        raise LLMError(f"{label}.scope_key must be 'world' when scope_type is world.")
+
+    # TopicScope
+    if scope_type == "topic":
+        if not normalized_scope_key.startswith("topic:") or normalized_scope_key == "topic:":
+            raise LLMError(f"{label}.scope_key must be topic:<name> when scope_type is topic.")
+        return
+
+    # EntityScope
+    if scope_type == "entity":
+        if not _has_named_ref_prefix(normalized_scope_key):
+            raise LLMError(f"{label}.scope_key must be person:/place:/tool: when scope_type is entity.")
+        return
+
+    # RelationshipScope
+    if scope_type == "relationship":
+        refs = normalized_scope_key.split("|")
+        if len(refs) < 2:
+            raise LLMError(f"{label}.scope_key must join two or more refs with '|'.")
+        if any(not _is_relationship_ref(ref) for ref in refs):
+            raise LLMError(f"{label}.scope_key contains an invalid relationship ref.")
+        if len(refs) != len(set(refs)):
+            raise LLMError(f"{label}.scope_key contains duplicate relationship refs.")
+        if refs != _normalized_relationship_refs(refs):
+            raise LLMError(f"{label}.scope_key must be normalized for relationship scope.")
 
 
 # RecallHintValidation
@@ -210,6 +287,11 @@ def validate_memory_interpretation_contract(payload: dict[str, Any]) -> None:
         raise LLMError("MemoryInterpretation episode_digest.open_loops must be a list.")
     if not isinstance(episode_digest["salience"], (int, float)):
         raise LLMError("MemoryInterpretation episode_digest.salience must be numeric.")
+    _validate_scope_identity(
+        scope_type=episode_digest["primary_scope_type"],
+        scope_key=episode_digest["primary_scope_key"],
+        label="MemoryInterpretation episode_digest",
+    )
 
     # CandidateValidation
     if not isinstance(payload["candidate_memory_units"], list):
@@ -237,10 +319,11 @@ def validate_memory_interpretation_contract(payload: dict[str, Any]) -> None:
             raise LLMError("MemoryInterpretation candidate_memory_unit.memory_type is invalid.")
         if candidate["status"] not in MEMORY_STATUS_VALUES:
             raise LLMError("MemoryInterpretation candidate_memory_unit.status is invalid.")
-        if not isinstance(candidate["scope_type"], str) or not candidate["scope_type"].strip():
-            raise LLMError("MemoryInterpretation candidate_memory_unit.scope_type is invalid.")
-        if not isinstance(candidate["scope_key"], str) or not candidate["scope_key"].strip():
-            raise LLMError("MemoryInterpretation candidate_memory_unit.scope_key is invalid.")
+        _validate_scope_identity(
+            scope_type=candidate["scope_type"],
+            scope_key=candidate["scope_key"],
+            label="MemoryInterpretation candidate_memory_unit",
+        )
         if not isinstance(candidate["subject_ref"], str) or not candidate["subject_ref"].strip():
             raise LLMError("MemoryInterpretation candidate_memory_unit.subject_ref is invalid.")
         if not isinstance(candidate["predicate"], str) or not candidate["predicate"].strip():
@@ -281,10 +364,11 @@ def validate_memory_interpretation_contract(payload: dict[str, Any]) -> None:
                 "MemoryInterpretation affect_update.layer is invalid "
                 f"(got={affect_update['layer']!r}, expected=surface|background)."
             )
-        if not isinstance(affect_update["target_scope_type"], str) or not affect_update["target_scope_type"].strip():
-            raise LLMError("MemoryInterpretation affect_update.target_scope_type is invalid.")
-        if not isinstance(affect_update["target_scope_key"], str) or not affect_update["target_scope_key"].strip():
-            raise LLMError("MemoryInterpretation affect_update.target_scope_key is invalid.")
+        _validate_scope_identity(
+            scope_type=affect_update["target_scope_type"],
+            scope_key=affect_update["target_scope_key"],
+            label="MemoryInterpretation affect_update",
+        )
         if not isinstance(affect_update["affect_label"], str) or not affect_update["affect_label"].strip():
             raise LLMError("MemoryInterpretation affect_update.affect_label is invalid.")
         if not isinstance(affect_update["intensity"], (int, float)):
