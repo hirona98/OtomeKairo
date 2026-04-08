@@ -267,6 +267,9 @@ class LLMClient:
         if self._is_mock_profile(profile):
             return self.mock_client.generate_embeddings(profile, texts, embedding_dimension)
 
+        # OpenRouter の embedding だけは公式 embeddings API を直接たたく。
+        # それ以外の embedding は LiteLLM 経由に寄せている。
+        # OpenRouter 側の互換差分をこの分岐へ閉じ込めるため。
         # OpenRouter経路
         if self._is_openrouter_embedding_profile(profile):
             response = self._request_openrouter_embeddings(profile=profile, texts=texts)
@@ -705,6 +708,7 @@ class LLMClient:
 
     # 設定補助
     def _is_mock_profile(self, profile: dict) -> bool:
+        # model=mock は開発用の内蔵ロジックへ切り替える予約値として扱う。
         return profile.get("model") == "mock"
 
     def _is_openrouter_embedding_profile(self, profile: dict) -> bool:
@@ -755,6 +759,7 @@ class LLMClient:
         profile: dict,
         texts: list[str],
     ) -> dict[str, Any]:
+        # OpenRouter embedding は LiteLLM ではなく公式 API の戻り形に合わせて扱う。
         # APIキー
         api_key = self._resolve_api_key(profile)
         if api_key is None:

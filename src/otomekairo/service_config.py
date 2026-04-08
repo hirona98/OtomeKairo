@@ -71,6 +71,7 @@ class ServiceConfigMixin:
         # 読み込み状態
         state = self.store.read_state()
 
+        # bootstrap では未発行なら新規発行し、発行済みなら現在値を返すだけにする。
         # 確保トークン
         if state["console_access_token"] is None:
             state["console_access_token"] = self._new_console_token()
@@ -85,6 +86,7 @@ class ServiceConfigMixin:
         # 認可
         state = self._require_token(token)
 
+        # 再発行時は保持値を新トークンへ即時に置き換え、旧トークンは残さない。
         # 発行トークン
         state["console_access_token"] = self._new_console_token()
         self.store.write_state(state)
@@ -192,18 +194,22 @@ class ServiceConfigMixin:
         return self.get_config(token=state["console_access_token"])
 
     def select_persona(self, token: str | None, persona_id: str) -> dict[str, Any]:
+        # 単項目選択も current 更新の一形態として patch_current へ寄せる。
         # 委譲
         return self.patch_current(token, {"selected_persona_id": persona_id})
 
     def select_memory_set(self, token: str | None, memory_set_id: str) -> dict[str, Any]:
+        # 単項目選択も current 更新の一形態として patch_current へ寄せる。
         # 委譲
         return self.patch_current(token, {"selected_memory_set_id": memory_set_id})
 
     def update_wake_policy(self, token: str | None, wake_policy: dict[str, Any]) -> dict[str, Any]:
+        # wake_policy は部分 patch ではなく全体置き換えの形で patch_current へ通す。
         # 委譲
         return self.patch_current(token, {"wake_policy": wake_policy})
 
     def select_model_preset(self, token: str | None, model_preset_id: str) -> dict[str, Any]:
+        # 単項目選択も current 更新の一形態として patch_current へ寄せる。
         # 委譲
         return self.patch_current(token, {"selected_model_preset_id": model_preset_id})
 
