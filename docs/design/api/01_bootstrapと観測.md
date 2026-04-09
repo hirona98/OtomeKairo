@@ -20,7 +20,7 @@ response:
 }
 ```
 
-MVP では `bootstrap_state` は常に `ready_for_first_console` を返す。
+この設計では `bootstrap_state` は `ready_for_first_console` を返す。
 
 ### `GET /api/bootstrap/server-identity`
 
@@ -101,7 +101,7 @@ request:
 
 - `text` は必須の文字列
 - `client_context` は object とする。値がないときは省略する
-- MVP では `client_context` に `source / client_id / active_app / window_title / locale` を含める
+- 標準の `client_context` には `source / client_id / active_app / window_title / locale` を含める
 
 response:
 
@@ -153,7 +153,7 @@ request:
 ```
 
 - `client_context` は object とする。値がないときは省略する
-- MVP では wake でも `client_context` の `source / active_app / window_title / locale` を観測正規化に使う
+- wake でも `client_context` の `source / active_app / window_title / locale` を観測正規化に使う
 
 response:
 
@@ -174,14 +174,14 @@ response:
 - `noop`
 - `internal_failure`
 
-`future_act` は内部結果として扱い、外向きには返さない。
-そのため、wake で内部的に `future_act` が選ばれた場合も、response の `result_kind` は `noop` とする。
+保留意図は内部結果として扱い、外向きには返さない。
+そのため、wake で内部的に保留意図が選ばれた場合も、response の `result_kind` は `noop` とする。
 
-MVP の wake API は少なくとも次の挙動を持つ。
+wake API は少なくとも次の挙動を持つ。
 
 - `wake_policy.mode=disabled` なら `noop`
 - `mode=interval` で次回時刻にまだ達していなければ `noop`
-- due な `future_act` 候補があれば再評価し、必要なら `reply`
+- 再評価時刻に達した保留意図があれば再評価し、必要なら `reply`
 
 server 内の background 起床スケジューラも、同じ wake 1 サイクルを内部的に使う。
 

@@ -31,7 +31,7 @@ client -> server:
 - `caps` はその client が現在受けられる command capability 一覧である
 - 同じ `client_id` で再接続した場合、server は古い stream session を置き換える
 
-MVP では、client から受ける message は `hello` だけとする。
+この設計では、client から受ける message は `hello` だけとする。
 
 server -> client の代表例:
 
@@ -61,7 +61,7 @@ server -> client の代表例:
 }
 ```
 
-MVP では、少なくとも次の event type を持つ。
+少なくとも次の event type を持つ。
 
 - `vision.capture_request`
 - `desktop_watch`
@@ -109,7 +109,7 @@ response:
 }
 ```
 
-MVP では、遅延した capture response が来た場合は無視して成功で返す。
+遅延した capture response が来た場合は無視して成功で返す。
 
 主な失敗:
 
