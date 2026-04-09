@@ -28,12 +28,12 @@ REFLECTION_TRIGGER_HOURS = 24
 REFLECTION_HIGH_SALIENCE_THRESHOLD = 0.8
 REFLECTION_HIGH_SALIENCE_COUNT = 3
 REFLECTION_SCOPE_SIGNAL_SALIENCE = 0.65
-REFLECTION_DIGEST_LIMIT = 24
+REFLECTION_EPISODE_LIMIT = 24
 REFLECTION_MEMORY_LIMIT = 96
 REFLECTION_MIN_SUMMARY_EVIDENCE = 3
-REFLECTION_MIN_SUMMARY_DIGESTS = 2
+REFLECTION_MIN_SUMMARY_EPISODES = 2
 REFLECTION_CONFIRMED_SUMMARY_EVIDENCE = 7
-REFLECTION_CONFIRMED_SUMMARY_DIGESTS = 4
+REFLECTION_CONFIRMED_SUMMARY_EPISODES = 4
 REFLECTION_TOPIC_DORMANT_AFTER_DAYS = 14
 REFLECTION_CONFIRMED_TOPIC_DORMANT_AFTER_DAYS = 30
 
@@ -57,7 +57,7 @@ class ReflectiveConsolidator:
         *,
         state: dict[str, Any],
         finished_at: str,
-        episode_digest: dict[str, Any],
+        episode: dict[str, Any],
         memory_actions: list[dict[str, Any]],
     ) -> dict[str, Any]:
         # トリガー確認
@@ -71,7 +71,7 @@ class ReflectiveConsolidator:
             memory_set_id=memory_set_id,
             finished_at=finished_at,
             latest_run=latest_run,
-            episode_digest=episode_digest,
+            episode=episode,
             memory_actions=memory_actions,
         )
         if not trigger_reasons:
@@ -87,15 +87,15 @@ class ReflectiveConsolidator:
         reflection_run_id = f"reflection_run:{uuid.uuid4().hex}"
         started_at = now_iso()
         since_iso = latest_updated_run["finished_at"] if isinstance(latest_updated_run, dict) else None
-        digests: list[dict[str, Any]] = []
+        episodes: list[dict[str, Any]] = []
         reflection_actions: list[dict[str, Any]] = []
 
         try:
             # 入力収集
-            digests = self.store.list_episode_digests_for_reflection(
+            episodes = self.store.list_episodes_for_reflection(
                 memory_set_id=memory_set_id,
                 since_iso=since_iso,
-                limit=REFLECTION_DIGEST_LIMIT,
+                limit=REFLECTION_EPISODE_LIMIT,
             )
             active_units = self.store.list_memory_units_for_reflection(
                 memory_set_id=memory_set_id,
@@ -109,7 +109,7 @@ class ReflectiveConsolidator:
                 self._build_reflective_summary_actions(
                     memory_set_id=memory_set_id,
                     finished_at=finished_at,
-                    digests=digests,
+                    episodes=episodes,
                     active_units=active_units,
                 )
             )
@@ -124,7 +124,7 @@ class ReflectiveConsolidator:
                 self._build_reflective_dormant_actions(
                     memory_set_id=memory_set_id,
                     finished_at=finished_at,
-                    digests=digests,
+                    episodes=episodes,
                     active_units=active_units,
                     excluded_memory_unit_ids={
                         action["memory_unit_id"]
@@ -144,7 +144,7 @@ class ReflectiveConsolidator:
                 self.vector_indexer.sync(
                     state=state,
                     finished_at=finished_reflection_at,
-                    episode_digest=None,
+                    episode=None,
                     memory_actions=reflection_actions,
                 )
             except Exception as exc:  # noqa: BLE001
@@ -161,7 +161,7 @@ class ReflectiveConsolidator:
                     "finished_at": finished_reflection_at,
                     "result_status": result_status,
                     "trigger_reasons": trigger_reasons,
-                    "source_episode_digest_ids": [digest["episode_digest_id"] for digest in digests],
+                    "source_episode_ids": [episode["episode_id"] for episode in episodes],
                     "affected_memory_unit_ids": affected_memory_unit_ids,
                     "action_counts": action_counts(reflection_actions),
                     "failure_reason": failure_reason,
@@ -188,7 +188,7 @@ class ReflectiveConsolidator:
                     "finished_at": finished_reflection_at,
                     "result_status": "failed",
                     "trigger_reasons": trigger_reasons,
-                    "source_episode_digest_ids": [digest["episode_digest_id"] for digest in digests],
+                    "source_episode_ids": [episode["episode_id"] for episode in episodes],
                     "affected_memory_unit_ids": unique_memory_unit_ids(reflection_actions),
                     "action_counts": action_counts(reflection_actions),
                     "failure_reason": failure_reason,
@@ -208,7 +208,7 @@ class ReflectiveConsolidator:
         memory_set_id: str,
         finished_at: str,
         latest_run: dict[str, Any] | None,
-        episode_digest: dict[str, Any],
+        episode: dict[str, Any],
         memory_actions: list[dict[str, Any]],
     ) -> list[str]:
         # 開始基準
@@ -228,7 +228,7 @@ class ReflectiveConsolidator:
             reasons.append("elapsed_24h")
 
         # 高顕著度
-        high_salience_count = self.store.count_high_salience_episode_digests_since(
+        high_salience_count = self.store.count_high_salience_episodes_since(
             memory_set_id=memory_set_id,
             since_iso=since_iso,
             salience_threshold=REFLECTION_HIGH_SALIENCE_THRESHOLD,
@@ -243,7 +243,7 @@ class ReflectiveConsolidator:
         # 関係シグナル
         if self._has_scope_trigger_signal(
             signal_scope_type="relationship",
-            episode_digest=episode_digest,
+            episode=episode,
             memory_actions=memory_actions,
         ):
             reasons.append("relationship_change")
@@ -251,7 +251,7 @@ class ReflectiveConsolidator:
         # 自己シグナル
         if self._has_scope_trigger_signal(
             signal_scope_type="self",
-            episode_digest=episode_digest,
+            episode=episode,
             memory_actions=memory_actions,
         ):
             reasons.append("self_change")
@@ -268,20 +268,20 @@ class ReflectiveConsolidator:
         *,
         memory_set_id: str,
         finished_at: str,
-        digests: list[dict[str, Any]],
+        episodes: list[dict[str, Any]],
         active_units: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         # グループ化
-        digest_groups: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+        episode_groups: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
         memory_groups: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
-        for digest in digests:
-            scope_type = digest.get("primary_scope_type")
-            scope_key = digest.get("primary_scope_key")
+        for episode in episodes:
+            scope_type = episode.get("primary_scope_type")
+            scope_key = episode.get("primary_scope_key")
             if scope_type not in REFLECTIVE_SCOPE_TYPES:
                 continue
             if not isinstance(scope_key, str) or not scope_key:
                 continue
-            digest_groups[(scope_type, scope_key)].append(digest)
+            episode_groups[(scope_type, scope_key)].append(episode)
         for unit in active_units:
             scope_type = unit.get("scope_type")
             scope_key = unit.get("scope_key")
@@ -295,13 +295,13 @@ class ReflectiveConsolidator:
 
         # スコープ走査
         actions: list[dict[str, Any]] = []
-        scope_keys = sorted(set(digest_groups.keys()) | set(memory_groups.keys()))
+        scope_keys = sorted(set(episode_groups.keys()) | set(memory_groups.keys()))
         for scope_type, scope_key in scope_keys:
-            scope_digests = digest_groups.get((scope_type, scope_key), [])
+            scope_episodes = episode_groups.get((scope_type, scope_key), [])
             scope_units = memory_groups.get((scope_type, scope_key), [])
             if not self._should_build_reflective_summary(
                 scope_type=scope_type,
-                scope_digests=scope_digests,
+                scope_episodes=scope_episodes,
                 scope_units=scope_units,
             ):
                 continue
@@ -309,11 +309,11 @@ class ReflectiveConsolidator:
             candidate = self._build_reflective_summary_candidate(
                 scope_type=scope_type,
                 scope_key=scope_key,
-                scope_digests=scope_digests,
+                scope_episodes=scope_episodes,
                 scope_units=scope_units,
             )
             evidence_event_ids = self._reflective_event_ids(
-                scope_digests=scope_digests,
+                scope_episodes=scope_episodes,
                 scope_units=scope_units,
                 limit=12,
             )
@@ -322,7 +322,7 @@ class ReflectiveConsolidator:
                     memory_set_id=memory_set_id,
                     finished_at=finished_at,
                     event_ids=evidence_event_ids,
-                    cycle_ids=self._reflective_cycle_ids(scope_digests=scope_digests, limit=12),
+                    cycle_ids=self._reflective_cycle_ids(scope_episodes=scope_episodes, limit=12),
                     candidate=candidate,
                     allow_summary=True,
                 )
@@ -335,25 +335,25 @@ class ReflectiveConsolidator:
         self,
         *,
         scope_type: str,
-        scope_digests: list[dict[str, Any]],
+        scope_episodes: list[dict[str, Any]],
         scope_units: list[dict[str, Any]],
     ) -> bool:
         # 根拠件数
-        evidence_count = len(scope_digests) + len(scope_units)
+        evidence_count = len(scope_episodes) + len(scope_units)
         support_cycle_count = self._reflective_support_cycle_count(
-            scope_digests=scope_digests,
+            scope_episodes=scope_episodes,
             scope_units=scope_units,
         )
         if evidence_count < REFLECTION_MIN_SUMMARY_EVIDENCE:
             return False
-        if support_cycle_count < REFLECTION_MIN_SUMMARY_DIGESTS:
+        if support_cycle_count < REFLECTION_MIN_SUMMARY_EPISODES:
             return False
 
         # トピック確認
         if scope_type == "topic":
             if len(scope_units) >= 2:
                 return True
-            return sum(1 for digest in scope_digests if digest.get("open_loops")) >= 2
+            return sum(1 for episode in scope_episodes if episode.get("open_loops")) >= 2
 
         # 結果
         return True
@@ -363,18 +363,17 @@ class ReflectiveConsolidator:
         *,
         scope_type: str,
         scope_key: str,
-        scope_digests: list[dict[str, Any]],
+        scope_episodes: list[dict[str, Any]],
         scope_units: list[dict[str, Any]],
     ) -> dict[str, Any]:
         # 根拠
         memory_types = self._dominant_memory_types(scope_units)
-        evidence_count = len(scope_digests) + len(scope_units)
-        digest_count = len(scope_digests)
+        evidence_count = len(scope_episodes) + len(scope_units)
         support_cycle_count = self._reflective_support_cycle_count(
-            scope_digests=scope_digests,
+            scope_episodes=scope_episodes,
             scope_units=scope_units,
         )
-        open_loop_count = sum(1 for digest in scope_digests if digest.get("open_loops"))
+        open_loop_count = sum(1 for episode in scope_episodes if episode.get("open_loops"))
         summary_status = self._reflective_summary_status(
             scope_type=scope_type,
             evidence_count=evidence_count,
@@ -414,7 +413,7 @@ class ReflectiveConsolidator:
             "qualifiers": {
                 "summary_scope": scope_type,
                 "source_memory_types": memory_types,
-                "evidence_digest_count": len(scope_digests),
+                "evidence_episode_count": len(scope_episodes),
                 "evidence_memory_count": len(scope_units),
                 "support_cycle_count": support_cycle_count,
                 "open_loop_count": open_loop_count,
@@ -489,13 +488,13 @@ class ReflectiveConsolidator:
         self,
         *,
         signal_scope_type: str,
-        episode_digest: dict[str, Any],
+        episode: dict[str, Any],
         memory_actions: list[dict[str, Any]],
     ) -> bool:
         # 要約シグナル
         if (
-            episode_digest.get("primary_scope_type") == signal_scope_type
-            and float(episode_digest.get("salience", 0.0)) >= REFLECTION_SCOPE_SIGNAL_SALIENCE
+            episode.get("primary_scope_type") == signal_scope_type
+            and float(episode.get("salience", 0.0)) >= REFLECTION_SCOPE_SIGNAL_SALIENCE
         ):
             return True
 
@@ -511,15 +510,15 @@ class ReflectiveConsolidator:
         *,
         memory_set_id: str,
         finished_at: str,
-        digests: list[dict[str, Any]],
+        episodes: list[dict[str, Any]],
         active_units: list[dict[str, Any]],
         excluded_memory_unit_ids: set[str],
     ) -> list[dict[str, Any]]:
         # 最近のトピックスコープ群
         recent_topic_scopes = {
-            (digest.get("primary_scope_type"), digest.get("primary_scope_key"))
-            for digest in digests
-            if digest.get("primary_scope_type") == "topic" and isinstance(digest.get("primary_scope_key"), str)
+            (episode.get("primary_scope_type"), episode.get("primary_scope_key"))
+            for episode in episodes
+            if episode.get("primary_scope_type") == "topic" and isinstance(episode.get("primary_scope_key"), str)
         }
 
         # 順序付きunit群
@@ -618,14 +617,14 @@ class ReflectiveConsolidator:
     ) -> str:
         # トピック
         if scope_type == "topic":
-            if support_cycle_count >= REFLECTION_CONFIRMED_SUMMARY_DIGESTS and open_loop_count >= 2:
+            if support_cycle_count >= REFLECTION_CONFIRMED_SUMMARY_EPISODES and open_loop_count >= 2:
                 return "confirmed"
             return "inferred"
 
         # 確認済み
         if (
             evidence_count >= REFLECTION_CONFIRMED_SUMMARY_EVIDENCE
-            and support_cycle_count >= REFLECTION_CONFIRMED_SUMMARY_DIGESTS
+            and support_cycle_count >= REFLECTION_CONFIRMED_SUMMARY_EPISODES
         ):
             return "confirmed"
 
@@ -714,14 +713,14 @@ class ReflectiveConsolidator:
     def _reflective_event_ids(
         self,
         *,
-        scope_digests: list[dict[str, Any]],
+        scope_episodes: list[dict[str, Any]],
         scope_units: list[dict[str, Any]],
         limit: int,
     ) -> list[str]:
         # シード
         merged: list[str] = []
-        for digest in scope_digests:
-            linked_event_ids = digest.get("linked_event_ids", [])
+        for episode in scope_episodes:
+            linked_event_ids = episode.get("linked_event_ids", [])
             for event_id in linked_event_ids:
                 if not isinstance(event_id, str) or event_id in merged:
                     continue
@@ -743,13 +742,13 @@ class ReflectiveConsolidator:
     def _reflective_cycle_ids(
         self,
         *,
-        scope_digests: list[dict[str, Any]],
+        scope_episodes: list[dict[str, Any]],
         limit: int,
     ) -> list[str]:
         # 収集
         cycle_ids: list[str] = []
-        for digest in scope_digests:
-            cycle_id = digest.get("cycle_id")
+        for episode in scope_episodes:
+            cycle_id = episode.get("cycle_id")
             if not isinstance(cycle_id, str) or cycle_id in cycle_ids:
                 continue
             cycle_ids.append(cycle_id)
@@ -762,13 +761,13 @@ class ReflectiveConsolidator:
     def _reflective_support_cycle_count(
         self,
         *,
-        scope_digests: list[dict[str, Any]],
+        scope_episodes: list[dict[str, Any]],
         scope_units: list[dict[str, Any]],
     ) -> int:
         # 収集
         cycle_ids: list[str] = self._reflective_cycle_ids(
-            scope_digests=scope_digests,
-            limit=REFLECTION_DIGEST_LIMIT,
+            scope_episodes=scope_episodes,
+            limit=REFLECTION_EPISODE_LIMIT,
         )
         for unit in scope_units:
             for cycle_id in unit.get("evidence_cycle_ids", []):

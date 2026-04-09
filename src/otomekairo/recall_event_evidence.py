@@ -151,7 +151,7 @@ class RecallEventEvidenceMixin:
 
     def _prioritized_event_ids_for_item(self, item: dict[str, Any]) -> list[str]:
         # イベントID群
-        if item["source_kind"] == "episode_digest":
+        if item["source_kind"] == "episode":
             event_ids = item.get("linked_event_ids", [])
         else:
             event_ids = item.get("evidence_event_ids", [])

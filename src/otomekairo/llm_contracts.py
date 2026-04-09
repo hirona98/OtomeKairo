@@ -225,12 +225,12 @@ def validate_decision_contract(payload: dict[str, Any]) -> None:
         "reason_code",
         "reason_summary",
         "requires_confirmation",
-        "future_act",
+        "pending_intent",
     }
     _validate_exact_keys(payload, required_keys, "Decision")
 
     # 値Checks
-    if payload["kind"] not in {"reply", "noop", "future_act"}:
+    if payload["kind"] not in {"reply", "noop", "pending_intent"}:
         raise LLMError("Decision kind is invalid.")
     if not isinstance(payload["reason_code"], str) or not payload["reason_code"].strip():
         raise LLMError("Decision reason_code must be a non-empty string.")
@@ -238,39 +238,40 @@ def validate_decision_contract(payload: dict[str, Any]) -> None:
         raise LLMError("Decision reason_summary must be a non-empty string.")
     if not isinstance(payload["requires_confirmation"], bool):
         raise LLMError("Decision requires_confirmation must be a boolean.")
-    if payload["kind"] == "future_act":
-        future_act = payload["future_act"]
-        required_future_keys = {
+    if payload["kind"] == "pending_intent":
+        pending_intent = payload["pending_intent"]
+        required_pending_keys = {
             "intent_kind",
             "intent_summary",
             "dedupe_key",
         }
-        if not isinstance(future_act, dict) or set(future_act.keys()) != required_future_keys:
-            raise LLMError("Decision future_act is invalid.")
-        for key in required_future_keys:
-            value = future_act.get(key)
+        if not isinstance(pending_intent, dict) or set(pending_intent.keys()) != required_pending_keys:
+            raise LLMError("Decision pending_intent is invalid.")
+        for key in required_pending_keys:
+            value = pending_intent.get(key)
             if not isinstance(value, str) or not value.strip():
-                raise LLMError(f"Decision future_act.{key} must be a non-empty string.")
+                raise LLMError(f"Decision pending_intent.{key} must be a non-empty string.")
         if payload["requires_confirmation"]:
-            raise LLMError("Decision future_act cannot require confirmation.")
-    elif payload["future_act"] is not None:
-        raise LLMError("Decision future_act must be null unless kind is future_act.")
+            raise LLMError("Decision pending_intent cannot require confirmation.")
+    elif payload["pending_intent"] is not None:
+        raise LLMError("Decision pending_intent must be null unless kind is pending_intent.")
 
 
 # memory interpretation検証
 def validate_memory_interpretation_contract(payload: dict[str, Any]) -> None:
     # 必須キー群
     required_keys = {
-        "episode_digest",
+        "episode",
         "candidate_memory_units",
         "affect_updates",
     }
     _validate_exact_keys(payload, required_keys, "MemoryInterpretation")
 
-    # episode digest検証
-    episode_digest = payload["episode_digest"]
+    # episode検証
+    episode = payload["episode"]
     required_episode_keys = {
         "episode_type",
+        "episode_series_id",
         "primary_scope_type",
         "primary_scope_key",
         "summary_text",
@@ -278,19 +279,23 @@ def validate_memory_interpretation_contract(payload: dict[str, Any]) -> None:
         "open_loops",
         "salience",
     }
-    _validate_exact_keys(episode_digest, required_episode_keys, "MemoryInterpretation episode_digest")
-    if not isinstance(episode_digest["summary_text"], str) or not episode_digest["summary_text"].strip():
-        raise LLMError("MemoryInterpretation episode_digest.summary_text is invalid.")
-    if episode_digest["outcome_text"] is not None and not isinstance(episode_digest["outcome_text"], str):
-        raise LLMError("MemoryInterpretation episode_digest.outcome_text is invalid.")
-    if not isinstance(episode_digest["open_loops"], list):
-        raise LLMError("MemoryInterpretation episode_digest.open_loops must be a list.")
-    if not isinstance(episode_digest["salience"], (int, float)):
-        raise LLMError("MemoryInterpretation episode_digest.salience must be numeric.")
+    _validate_exact_keys(episode, required_episode_keys, "MemoryInterpretation episode")
+    if not isinstance(episode["summary_text"], str) or not episode["summary_text"].strip():
+        raise LLMError("MemoryInterpretation episode.summary_text is invalid.")
+    if episode["episode_series_id"] is not None and (
+        not isinstance(episode["episode_series_id"], str) or not episode["episode_series_id"].strip()
+    ):
+        raise LLMError("MemoryInterpretation episode.episode_series_id is invalid.")
+    if episode["outcome_text"] is not None and not isinstance(episode["outcome_text"], str):
+        raise LLMError("MemoryInterpretation episode.outcome_text is invalid.")
+    if not isinstance(episode["open_loops"], list):
+        raise LLMError("MemoryInterpretation episode.open_loops must be a list.")
+    if not isinstance(episode["salience"], (int, float)):
+        raise LLMError("MemoryInterpretation episode.salience must be numeric.")
     _validate_scope_identity(
-        scope_type=episode_digest["primary_scope_type"],
-        scope_key=episode_digest["primary_scope_key"],
-        label="MemoryInterpretation episode_digest",
+        scope_type=episode["primary_scope_type"],
+        scope_key=episode["primary_scope_key"],
+        label="MemoryInterpretation episode",
     )
 
     # 候補検証

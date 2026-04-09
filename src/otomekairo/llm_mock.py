@@ -20,13 +20,13 @@ from otomekairo.llm_contracts import (
 class MockLLMClient:
     def generate_recall_hint(
         self,
-        profile: dict,
+        role_definition: dict,
         observation_text: str,
         recent_turns: list[dict],
         current_time: str,
     ) -> dict[str, Any]:
         # provider確認
-        self._assert_mock_model(profile)
+        self._assert_mock_model(role_definition)
 
         # ヒューリスティックintent
         normalized = observation_text.strip()
@@ -133,7 +133,7 @@ class MockLLMClient:
 
     def generate_decision(
         self,
-        profile: dict,
+        role_definition: dict,
         observation_text: str,
         recent_turns: list[dict],
         time_context: dict[str, Any],
@@ -142,7 +142,7 @@ class MockLLMClient:
         recall_pack: dict[str, Any],
     ) -> dict[str, Any]:
         # provider確認
-        self._assert_mock_model(profile)
+        self._assert_mock_model(role_definition)
 
         # コンテキスト
         normalized = observation_text.strip()
@@ -162,9 +162,9 @@ class MockLLMClient:
                 "reason_code": "empty_observation",
                 "reason_summary": "Observation text was empty after normalization.",
                 "requires_confirmation": False,
-                "future_act": None,
+                "pending_intent": None,
             }
-        elif self._should_mock_future_act(
+        elif self._should_mock_pending_intent(
             normalized=normalized,
             active_commitments=active_commitments,
             episodic_evidence=episodic_evidence,
@@ -172,11 +172,11 @@ class MockLLMClient:
             active_topics=active_topics,
         ):
             payload = {
-                "kind": "future_act",
+                "kind": "pending_intent",
                 "reason_code": "defer_for_later",
                 "reason_summary": "継続価値はあるが、今は返さず後で触れたほうが自然。",
                 "requires_confirmation": False,
-                "future_act": self._mock_future_act_payload(
+                "pending_intent": self._mock_pending_intent_payload(
                     primary_intent=primary_intent,
                     active_commitments=active_commitments,
                     episodic_evidence=episodic_evidence,
@@ -190,7 +190,7 @@ class MockLLMClient:
                 "reason_code": "conflict_present",
                 "reason_summary": "RecallPack に矛盾候補があり、確認寄りの返答が必要。",
                 "requires_confirmation": True,
-                "future_act": None,
+                "pending_intent": None,
             }
         elif primary_intent == "commitment_check" and active_commitments:
             payload = {
@@ -198,7 +198,7 @@ class MockLLMClient:
                 "reason_code": "active_commitment",
                 "reason_summary": "進行中の約束や保留があり、継続会話として返答する。",
                 "requires_confirmation": False,
-                "future_act": None,
+                "pending_intent": None,
             }
         elif "reminisce" in secondary_intents and episodic_evidence:
             payload = {
@@ -206,7 +206,7 @@ class MockLLMClient:
                 "reason_code": "secondary_reminisce",
                 "reason_summary": "補助意図として回想があり、関連エピソードを踏まえて返答する。",
                 "requires_confirmation": False,
-                "future_act": None,
+                "pending_intent": None,
             }
         elif surface_affects and surface_affects[0]["affect_label"] in {"不安", "緊張", "迷い", "concern"}:
             payload = {
@@ -214,7 +214,7 @@ class MockLLMClient:
                 "reason_code": "affect_caution",
                 "reason_summary": "AffectContext に慎重さを要する感情があり、確認寄りに返す。",
                 "requires_confirmation": True,
-                "future_act": None,
+                "pending_intent": None,
             }
         else:
             payload = {
@@ -222,7 +222,7 @@ class MockLLMClient:
                 "reason_code": f"intent:{primary_intent}",
                 "reason_summary": "A normal conversation reply is appropriate for the current observation.",
                 "requires_confirmation": primary_intent in {"fact_query", "meta_relationship"},
-                "future_act": None,
+                "pending_intent": None,
             }
 
         # 検証
@@ -231,7 +231,7 @@ class MockLLMClient:
 
     def generate_reply(
         self,
-        profile: dict,
+        role_definition: dict,
         persona: dict,
         observation_text: str,
         recent_turns: list[dict],
@@ -242,7 +242,7 @@ class MockLLMClient:
         decision: dict,
     ) -> dict[str, Any]:
         # provider確認
-        self._assert_mock_model(profile)
+        self._assert_mock_model(role_definition)
 
         # コンテキスト
         tone = persona["expression_style"]["tone"]
@@ -351,7 +351,7 @@ class MockLLMClient:
         # 結果
         return None
 
-    def _should_mock_future_act(
+    def _should_mock_pending_intent(
         self,
         *,
         normalized: str,
@@ -379,7 +379,7 @@ class MockLLMClient:
         # recall基準
         return bool(active_commitments or episodic_evidence or event_evidence or active_topics)
 
-    def _mock_future_act_payload(
+    def _mock_pending_intent_payload(
         self,
         *,
         primary_intent: str,
@@ -397,7 +397,7 @@ class MockLLMClient:
             return {
                 "intent_kind": "conversation_follow_up",
                 "intent_summary": commitment_item.get("summary_text", "継続中の約束や保留にあとで触れたい。"),
-                "dedupe_key": f"future_act:{scope_type}:{scope_key}:{predicate}",
+                "dedupe_key": f"pending_intent:{scope_type}:{scope_key}:{predicate}",
             }
 
         # episode候補
@@ -405,11 +405,11 @@ class MockLLMClient:
         if episode_item is not None:
             scope_type = episode_item.get("primary_scope_type", "user")
             scope_key = episode_item.get("primary_scope_key", "user")
-            episode_digest_id = episode_item.get("episode_digest_id", "unknown")
+            episode_id = episode_item.get("episode_id", "unknown")
             return {
                 "intent_kind": "conversation_follow_up",
                 "intent_summary": episode_item.get("summary_text", "あとで続きに触れたい出来事がある。"),
-                "dedupe_key": f"future_act:{scope_type}:{scope_key}:{episode_digest_id}",
+                "dedupe_key": f"pending_intent:{scope_type}:{scope_key}:{episode_id}",
             }
 
         # イベント候補
@@ -419,7 +419,7 @@ class MockLLMClient:
             return {
                 "intent_kind": "conversation_follow_up",
                 "intent_summary": event_basis or "あとで触れたい出来事がある。",
-                "dedupe_key": f"future_act:event:{event_item.get('event_id', 'unknown')}",
+                "dedupe_key": f"pending_intent:event:{event_item.get('event_id', 'unknown')}",
             }
 
         # トピック候補
@@ -429,14 +429,14 @@ class MockLLMClient:
             return {
                 "intent_kind": "conversation_follow_up",
                 "intent_summary": topic_item.get("summary_text", "あとで続けたい話題がある。"),
-                "dedupe_key": f"future_act:topic:{scope_key}",
+                "dedupe_key": f"pending_intent:topic:{scope_key}",
             }
 
         # 代替
         return {
             "intent_kind": "conversation_follow_up",
             "intent_summary": "あとで会話を再開したい。",
-            "dedupe_key": f"future_act:intent:{primary_intent}",
+            "dedupe_key": f"pending_intent:intent:{primary_intent}",
         }
 
     def _secondary_intents(self, recall_hint: dict[str, Any]) -> set[str]:
@@ -451,19 +451,20 @@ class MockLLMClient:
 
     def generate_memory_interpretation(
         self,
-        profile: dict,
+        role_definition: dict,
         observation_text: str,
         recall_hint: dict,
         decision: dict,
         reply_text: str | None,
     ) -> dict[str, Any]:
         # provider確認
-        self._assert_mock_model(profile)
+        self._assert_mock_model(role_definition)
 
         # Episode要約
         normalized = observation_text.strip()
-        episode_digest = {
+        episode = {
             "episode_type": self._mock_episode_type(recall_hint["primary_intent"]),
+            "episode_series_id": None,
             "primary_scope_type": self._mock_primary_scope_type(recall_hint["primary_intent"]),
             "primary_scope_key": self._mock_primary_scope_key(recall_hint["primary_intent"]),
             "summary_text": normalized or "空の観測だった。",
@@ -480,7 +481,7 @@ class MockLLMClient:
 
         # payload作成
         payload = {
-            "episode_digest": episode_digest,
+            "episode": episode,
             "candidate_memory_units": candidate_memory_units,
             "affect_updates": affect_updates,
         }
@@ -489,12 +490,12 @@ class MockLLMClient:
 
     def generate_embeddings(
         self,
-        profile: dict,
+        role_definition: dict,
         texts: list[str],
         embedding_dimension: int,
     ) -> list[list[float]]:
         # provider確認
-        self._assert_mock_model(profile)
+        self._assert_mock_model(role_definition)
 
         # 結果
         return [
@@ -774,7 +775,12 @@ class MockLLMClient:
             return [0.0] * embedding_dimension
         return [value / norm for value in values]
 
-    def _assert_mock_model(self, profile: dict) -> None:
+    def _assert_mock_model(self, role_definition: dict) -> None:
         # モデル確認
-        if profile.get("model") != "mock":
-            raise LLMError(f"Unsupported mock model: {profile.get('model')}")
+        provider = role_definition.get("provider")
+        model = role_definition.get("model")
+        if isinstance(provider, str) and provider.strip() == "mock":
+            return
+        if isinstance(model, str) and model.strip().startswith("mock"):
+            return
+        raise LLMError(f"Unsupported mock model: {model}")

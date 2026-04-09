@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -63,15 +64,15 @@ class SQLiteMemoryStore(StoreSchemaMixin):
     def persist_turn_consolidation(
         self,
         *,
-        episode_digest: dict[str, Any] | None,
+        episode: dict[str, Any] | None,
         memory_actions: list[dict[str, Any]],
         affect_updates: list[dict[str, Any]],
     ) -> None:
         # トランザクション
         with self._memory_db() as conn:
-            # episode digest追加
-            if episode_digest is not None:
-                self._insert_episode_digest(conn, episode_digest)
+            # episode追加
+            if episode is not None:
+                self._insert_episode(conn, episode)
 
             # 記憶アクション群
             for action in memory_actions:
@@ -272,7 +273,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
         # 結果
         return int(count)
 
-    def count_high_salience_episode_digests_since(
+    def count_high_salience_episodes_since(
         self,
         *,
         memory_set_id: str,
@@ -288,7 +289,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
 
         query = f"""
             SELECT COUNT(*)
-            FROM episode_digests
+            FROM episodes
             WHERE {" AND ".join(clauses)}
         """
 
@@ -462,7 +463,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
         # 結果
         return [json.loads(row["payload_json"]) for row in rows]
 
-    def list_episode_digests_for_recall(
+    def list_episodes_for_recall(
         self,
         *,
         memory_set_id: str,
@@ -488,7 +489,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
 
         query = f"""
             SELECT payload_json
-            FROM episode_digests
+            FROM episodes
             WHERE {" AND ".join(clauses)}
             ORDER BY has_open_loops DESC, salience DESC, formed_at DESC, rowid DESC
             LIMIT ?
@@ -501,7 +502,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
         # 結果
         return [json.loads(row["payload_json"]) for row in rows]
 
-    def list_episode_digests_for_reflection(
+    def list_episodes_for_reflection(
         self,
         *,
         memory_set_id: str,
@@ -517,7 +518,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
 
         query = f"""
             SELECT payload_json
-            FROM episode_digests
+            FROM episodes
             WHERE {" AND ".join(clauses)}
             ORDER BY formed_at DESC, salience DESC, rowid DESC
             LIMIT ?
@@ -526,6 +527,37 @@ class SQLiteMemoryStore(StoreSchemaMixin):
         # クエリ
         with self._memory_db() as conn:
             rows = conn.execute(query, (*params, limit)).fetchall()
+
+        # 結果
+        return [json.loads(row["payload_json"]) for row in rows]
+
+    def list_recent_episodes_for_series(
+        self,
+        *,
+        memory_set_id: str,
+        primary_scope_type: str,
+        primary_scope_key: str,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        # クエリ
+        with self._memory_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT payload_json
+                FROM episodes
+                WHERE memory_set_id = ?
+                  AND primary_scope_type = ?
+                  AND primary_scope_key = ?
+                ORDER BY formed_at DESC, rowid DESC
+                LIMIT ?
+                """,
+                (
+                    memory_set_id,
+                    primary_scope_type,
+                    primary_scope_key,
+                    limit,
+                ),
+            ).fetchall()
 
         # 結果
         return [json.loads(row["payload_json"]) for row in rows]
@@ -769,7 +801,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
             for row in rows
         ]
 
-    def search_episode_digest_vector_entries(
+    def search_episode_vector_entries(
         self,
         *,
         memory_set_id: str,
@@ -809,16 +841,16 @@ class SQLiteMemoryStore(StoreSchemaMixin):
             clauses.append("meta.has_open_loops = 1")
 
         query = f"""
-            SELECT digest.payload_json, episode_digest_vec.distance
-            FROM episode_digest_vec
+            SELECT episode.payload_json, episode_vec.distance
+            FROM episode_vec
             JOIN vector_index_entries AS meta
-              ON meta.vector_entry_id = episode_digest_vec.id
-            JOIN episode_digests AS digest
-              ON digest.episode_digest_id = meta.source_id
-            WHERE episode_digest_vec.embedding MATCH ?
+              ON meta.vector_entry_id = episode_vec.id
+            JOIN episodes AS episode
+              ON episode.episode_id = meta.source_id
+            WHERE episode_vec.embedding MATCH ?
               AND k = ?
               AND {" AND ".join(clauses)}
-            ORDER BY episode_digest_vec.distance ASC, meta.has_open_loops DESC, meta.salience DESC
+            ORDER BY episode_vec.distance ASC, meta.has_open_loops DESC, meta.salience DESC
             LIMIT ?
         """
 
@@ -846,12 +878,162 @@ class SQLiteMemoryStore(StoreSchemaMixin):
             conn.execute("DELETE FROM revisions WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM affect_state WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM memory_units WHERE memory_set_id = ?", (memory_set_id,))
-            conn.execute("DELETE FROM episode_digests WHERE memory_set_id = ?", (memory_set_id,))
+            conn.execute("DELETE FROM episodes WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM reflection_runs WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM events WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM retrieval_runs WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM cycle_traces WHERE selected_memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM cycle_summaries WHERE selected_memory_set_id = ?", (memory_set_id,))
+
+    def clone_memory_set_records(
+        self,
+        *,
+        source_memory_set_id: str,
+        target_memory_set_id: str,
+    ) -> None:
+        # トランザクション
+        with self._memory_db() as conn:
+            # 旧ID対応表
+            cycle_id_map: dict[str, str] = {}
+            event_id_map: dict[str, str] = {}
+            episode_id_map: dict[str, str] = {}
+            memory_unit_id_map: dict[str, str] = {}
+
+            # event 複製
+            source_events = self._load_payload_rows(conn, "events", source_memory_set_id)
+            cloned_events: list[dict[str, Any]] = []
+            for record in source_events:
+                old_event_id = record["event_id"]
+                new_event_id = f"event:{uuid.uuid4().hex}"
+                event_id_map[old_event_id] = new_event_id
+                source_cycle_id = record["cycle_id"]
+                cycle_id_map.setdefault(source_cycle_id, f"cycle:{uuid.uuid4().hex}")
+                cloned_events.append(
+                    {
+                        **record,
+                        "event_id": new_event_id,
+                        "cycle_id": cycle_id_map[source_cycle_id],
+                        "memory_set_id": target_memory_set_id,
+                    }
+                )
+            for record in cloned_events:
+                self._insert_event(conn, record)
+
+            # episode 複製
+            source_episodes = self._load_payload_rows(conn, "episodes", source_memory_set_id)
+            cloned_episodes: list[dict[str, Any]] = []
+            for record in source_episodes:
+                old_episode_id = record["episode_id"]
+                new_episode_id = f"episode:{uuid.uuid4().hex}"
+                episode_id_map[old_episode_id] = new_episode_id
+                source_cycle_id = record["cycle_id"]
+                cycle_id_map.setdefault(source_cycle_id, f"cycle:{uuid.uuid4().hex}")
+                cloned_episodes.append(
+                    {
+                        **record,
+                        "episode_id": new_episode_id,
+                        "cycle_id": cycle_id_map[source_cycle_id],
+                        "memory_set_id": target_memory_set_id,
+                    }
+                )
+            for record in cloned_episodes:
+                record["linked_event_ids"] = [
+                    event_id_map.get(event_id, event_id)
+                    for event_id in record.get("linked_event_ids", [])
+                ]
+                episode_series_id = record.get("episode_series_id")
+                if isinstance(episode_series_id, str) and episode_series_id in episode_id_map:
+                    record["episode_series_id"] = episode_id_map[episode_series_id]
+                self._insert_episode(conn, record)
+
+            # memory unit 複製
+            source_memory_units = self._load_payload_rows(conn, "memory_units", source_memory_set_id)
+            cloned_memory_units: list[dict[str, Any]] = []
+            for record in source_memory_units:
+                old_memory_unit_id = record["memory_unit_id"]
+                new_memory_unit_id = f"memory_unit:{uuid.uuid4().hex}"
+                memory_unit_id_map[old_memory_unit_id] = new_memory_unit_id
+                cloned_memory_units.append(
+                    {
+                        **record,
+                        "memory_unit_id": new_memory_unit_id,
+                        "memory_set_id": target_memory_set_id,
+                    }
+                )
+            for record in cloned_memory_units:
+                record["evidence_event_ids"] = [
+                    event_id_map.get(event_id, event_id)
+                    for event_id in record.get("evidence_event_ids", [])
+                ]
+                self._upsert_memory_unit(conn, record)
+
+            # revision 複製
+            source_revisions = self._load_payload_rows(conn, "revisions", source_memory_set_id)
+            for record in source_revisions:
+                cloned_before = self._clone_memory_unit_snapshot(
+                    record.get("before_snapshot"),
+                    event_id_map=event_id_map,
+                    memory_unit_id_map=memory_unit_id_map,
+                )
+                cloned_after = self._clone_memory_unit_snapshot(
+                    record.get("after_snapshot"),
+                    event_id_map=event_id_map,
+                    memory_unit_id_map=memory_unit_id_map,
+                )
+                cloned_revision = {
+                    **record,
+                    "revision_id": f"revision:{uuid.uuid4().hex}",
+                    "memory_set_id": target_memory_set_id,
+                    "memory_unit_id": memory_unit_id_map.get(record["memory_unit_id"], record["memory_unit_id"]),
+                    "related_memory_unit_ids": [
+                        memory_unit_id_map.get(memory_unit_id, memory_unit_id)
+                        for memory_unit_id in record.get("related_memory_unit_ids", [])
+                    ],
+                    "before_snapshot": cloned_before,
+                    "after_snapshot": cloned_after,
+                    "evidence_event_ids": [
+                        event_id_map.get(event_id, event_id)
+                        for event_id in record.get("evidence_event_ids", [])
+                    ],
+                }
+                self._insert_revision(conn, cloned_revision)
+
+            # affect_state 複製
+            source_affect_states = self._load_payload_rows(conn, "affect_state", source_memory_set_id)
+            for record in source_affect_states:
+                cloned_affect_state = {
+                    **record,
+                    "affect_state_id": f"affect_state:{uuid.uuid4().hex}",
+                    "memory_set_id": target_memory_set_id,
+                }
+                self._upsert_affect_state(conn, cloned_affect_state)
+
+            # reflection_run 複製
+            source_reflection_runs = self._load_payload_rows(conn, "reflection_runs", source_memory_set_id)
+            for record in source_reflection_runs:
+                cloned_reflection_run = {
+                    **record,
+                    "reflection_run_id": f"reflection_run:{uuid.uuid4().hex}",
+                    "memory_set_id": target_memory_set_id,
+                    "source_episode_ids": [
+                        episode_id_map.get(episode_id, episode_id)
+                        for episode_id in record.get("source_episode_ids", [])
+                    ],
+                    "affected_memory_unit_ids": [
+                        memory_unit_id_map.get(memory_unit_id, memory_unit_id)
+                        for memory_unit_id in record.get("affected_memory_unit_ids", [])
+                    ],
+                }
+                self._insert_reflection_run(conn, cloned_reflection_run)
+
+            # ベクトル索引複製
+            self._clone_vector_index_entries(
+                conn,
+                source_memory_set_id=source_memory_set_id,
+                target_memory_set_id=target_memory_set_id,
+                episode_id_map=episode_id_map,
+                memory_unit_id_map=memory_unit_id_map,
+            )
 
     def _insert_event(self, conn: sqlite3.Connection, record: dict[str, Any]) -> None:
         # 追加
@@ -953,23 +1135,24 @@ class SQLiteMemoryStore(StoreSchemaMixin):
             (
                 record["cycle_id"],
                 cycle_summary.get("started_at", ""),
-                cycle_summary.get("selected_memory_set_id", "memory_set:legacy"),
+                cycle_summary.get("selected_memory_set_id", ""),
                 self._to_json(record),
             ),
         )
 
-    def _insert_episode_digest(self, conn: sqlite3.Connection, record: dict[str, Any]) -> None:
+    def _insert_episode(self, conn: sqlite3.Connection, record: dict[str, Any]) -> None:
         # 派生項目
         open_loops = record.get("open_loops", [])
 
         # 追加
         conn.execute(
             """
-            INSERT OR REPLACE INTO episode_digests (
-                episode_digest_id,
+            INSERT OR REPLACE INTO episodes (
+                episode_id,
                 cycle_id,
                 memory_set_id,
                 episode_type,
+                episode_series_id,
                 primary_scope_type,
                 primary_scope_key,
                 summary_text,
@@ -980,13 +1163,14 @@ class SQLiteMemoryStore(StoreSchemaMixin):
                 formed_at,
                 linked_event_ids_json,
                 payload_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                record["episode_digest_id"],
+                record["episode_id"],
                 record["cycle_id"],
                 record["memory_set_id"],
                 record["episode_type"],
+                record.get("episode_series_id"),
                 record["primary_scope_type"],
                 record["primary_scope_key"],
                 record["summary_text"],
@@ -1011,7 +1195,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
                 finished_at,
                 result_status,
                 trigger_reasons_json,
-                source_episode_digest_ids_json,
+                source_episode_ids_json,
                 affected_memory_unit_ids_json,
                 payload_json
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1023,7 +1207,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
                 record["finished_at"],
                 record["result_status"],
                 self._to_json(record.get("trigger_reasons", [])),
-                self._to_json(record.get("source_episode_digest_ids", [])),
+                self._to_json(record.get("source_episode_ids", [])),
                 self._to_json(record.get("affected_memory_unit_ids", [])),
                 self._to_json(record),
             ),
@@ -1041,10 +1225,10 @@ class SQLiteMemoryStore(StoreSchemaMixin):
             embedding_dimension=embedding_dimension,
         )
 
-        # episode digestテーブル
+        # episodeテーブル
         self._ensure_vector_table(
             conn,
-            table_name="episode_digest_vec",
+            table_name="episode_vec",
             embedding_dimension=embedding_dimension,
         )
 
@@ -1121,8 +1305,8 @@ class SQLiteMemoryStore(StoreSchemaMixin):
         # マッピング
         if source_kind == "memory_unit":
             return "memory_unit_vec"
-        if source_kind == "episode_digest":
-            return "episode_digest_vec"
+        if source_kind == "episode":
+            return "episode_vec"
         raise ValueError(f"Unsupported source_kind: {source_kind}")
 
     def _apply_memory_action(self, conn: sqlite3.Connection, action: dict[str, Any]) -> None:
@@ -1306,6 +1490,120 @@ class SQLiteMemoryStore(StoreSchemaMixin):
     def _to_json(self, payload: Any) -> str:
         # 直列化
         return json.dumps(payload, ensure_ascii=False)
+
+    def _load_payload_rows(
+        self,
+        conn: sqlite3.Connection,
+        table_name: str,
+        memory_set_id: str,
+    ) -> list[dict[str, Any]]:
+        rows = conn.execute(
+            f"""
+            SELECT payload_json
+            FROM {table_name}
+            WHERE memory_set_id = ?
+            ORDER BY rowid ASC
+            """,
+            (memory_set_id,),
+        ).fetchall()
+        return [json.loads(row["payload_json"]) for row in rows]
+
+    def _clone_memory_unit_snapshot(
+        self,
+        snapshot: dict[str, Any] | None,
+        *,
+        event_id_map: dict[str, str],
+        memory_unit_id_map: dict[str, str],
+    ) -> dict[str, Any] | None:
+        if snapshot is None:
+            return None
+        cloned_snapshot = {
+            **snapshot,
+            "memory_unit_id": memory_unit_id_map.get(snapshot["memory_unit_id"], snapshot["memory_unit_id"]),
+            "evidence_event_ids": [
+                event_id_map.get(event_id, event_id)
+                for event_id in snapshot.get("evidence_event_ids", [])
+            ],
+        }
+        return cloned_snapshot
+
+    def _clone_vector_index_entries(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        source_memory_set_id: str,
+        target_memory_set_id: str,
+        episode_id_map: dict[str, str],
+        memory_unit_id_map: dict[str, str],
+    ) -> None:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM vector_index_entries
+            WHERE memory_set_id = ?
+            ORDER BY vector_entry_id ASC
+            """,
+            (source_memory_set_id,),
+        ).fetchall()
+
+        for row in rows:
+            source_kind = row["source_kind"]
+            source_id = row["source_id"]
+            if source_kind == "episode":
+                target_source_id = episode_id_map.get(source_id)
+            elif source_kind == "memory_unit":
+                target_source_id = memory_unit_id_map.get(source_id)
+            else:
+                continue
+            if target_source_id is None:
+                continue
+
+            cursor = conn.execute(
+                """
+                INSERT INTO vector_index_entries (
+                    memory_set_id,
+                    source_kind,
+                    source_id,
+                    embedding_preset,
+                    source_text,
+                    scope_type,
+                    scope_key,
+                    source_type,
+                    status,
+                    salience,
+                    has_open_loops,
+                    updated_at,
+                    text_hash
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    target_memory_set_id,
+                    source_kind,
+                    target_source_id,
+                    row["embedding_preset"],
+                    row["source_text"],
+                    row["scope_type"],
+                    row["scope_key"],
+                    row["source_type"],
+                    row["status"],
+                    row["salience"],
+                    row["has_open_loops"],
+                    row["updated_at"],
+                    row["text_hash"],
+                ),
+            )
+            new_vector_entry_id = int(cursor.lastrowid)
+
+            vector_blob = conn.execute(
+                f"SELECT embedding FROM {self._vector_table_name(source_kind)} WHERE id = ?",
+                (row["vector_entry_id"],),
+            ).fetchone()
+            if vector_blob is None:
+                continue
+            conn.execute(
+                f"INSERT INTO {self._vector_table_name(source_kind)}(id, embedding) VALUES (?, ?)",
+                (new_vector_entry_id, vector_blob["embedding"]),
+            )
 
 
 # ファサード

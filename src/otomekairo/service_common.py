@@ -3,14 +3,14 @@ from __future__ import annotations
 
 # 定数
 REQUIRED_ROLE_NAMES = {
-    "reply_generation": "generation",
+    "expression_generation": "generation",
     "decision_generation": "generation",
-    "recall_hint_generation": "generation",
+    "observation_interpretation": "generation",
     "memory_interpretation": "generation",
     "embedding": "embedding",
 }
-FUTURE_ACT_NOT_BEFORE_MINUTES = 30
-FUTURE_ACT_EXPIRES_HOURS = 24
+PENDING_INTENT_NOT_BEFORE_MINUTES = 30
+PENDING_INTENT_EXPIRES_HOURS = 24
 WAKE_REPLY_COOLDOWN_MINUTES = 30
 BACKGROUND_WAKE_POLL_SECONDS = 5.0
 BACKGROUND_DESKTOP_WATCH_POLL_SECONDS = 5.0

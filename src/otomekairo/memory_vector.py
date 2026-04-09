@@ -20,22 +20,20 @@ class MemoryVectorIndexer:
         *,
         state: dict[str, Any],
         finished_at: str,
-        episode_digest: dict[str, Any] | None,
+        episode: dict[str, Any] | None,
         memory_actions: list[dict[str, Any]],
     ) -> None:
         # 埋め込みロール
         selected_preset = state["model_presets"][state["selected_model_preset_id"]]
         embedding_role = selected_preset["roles"]["embedding"]
-        embedding_profile_id = embedding_role["model_profile_id"]
-        embedding_profile = state["model_profiles"][embedding_profile_id]
-        embedding_dimension = embedding_role["embedding_dimension"]
-        embedding_preset = self._embedding_preset(embedding_profile_id, embedding_dimension)
+        embedding_dimension = self._embedding_dimension(embedding_role)
+        embedding_preset = self._embedding_preset(embedding_role, embedding_dimension)
 
         # source群
         entries = self._build_vector_index_entries(
             finished_at=finished_at,
             embedding_preset=embedding_preset,
-            episode_digest=episode_digest,
+            episode=episode,
             memory_actions=memory_actions,
         )
         if not entries:
@@ -43,8 +41,7 @@ class MemoryVectorIndexer:
 
         # 埋め込み群
         embeddings = self.llm.generate_embeddings(
-            profile=embedding_profile,
-            role_settings=embedding_role,
+            role_definition=embedding_role,
             texts=[entry["source_text"] for entry in entries],
         )
 
@@ -68,7 +65,7 @@ class MemoryVectorIndexer:
         *,
         finished_at: str,
         embedding_preset: str,
-        episode_digest: dict[str, Any] | None,
+        episode: dict[str, Any] | None,
         memory_actions: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         # 状態
@@ -76,15 +73,15 @@ class MemoryVectorIndexer:
         seen_source_ids: set[tuple[str, str]] = set()
 
         # Episode要約
-        if episode_digest is not None:
-            episode_entry = self._vector_entry_for_episode_digest(
+        if episode is not None:
+            episode_entry = self._vector_entry_for_episode(
                 finished_at=finished_at,
                 embedding_preset=embedding_preset,
-                record=episode_digest,
+                record=episode,
             )
             if episode_entry is not None:
                 entries.append(episode_entry)
-                seen_source_ids.add(("episode_digest", episode_digest["episode_digest_id"]))
+                seen_source_ids.add(("episode", episode["episode_id"]))
 
         # 記憶単位群
         for action in memory_actions:
@@ -107,7 +104,7 @@ class MemoryVectorIndexer:
         # 結果
         return entries
 
-    def _vector_entry_for_episode_digest(
+    def _vector_entry_for_episode(
         self,
         *,
         finished_at: str,
@@ -115,15 +112,15 @@ class MemoryVectorIndexer:
         record: dict[str, Any],
     ) -> dict[str, Any] | None:
         # sourceテキスト
-        source_text = self._episode_digest_source_text(record)
+        source_text = self._episode_source_text(record)
         if not source_text:
             return None
 
         # エントリ
         return {
             "memory_set_id": record["memory_set_id"],
-            "source_kind": "episode_digest",
-            "source_id": record["episode_digest_id"],
+            "source_kind": "episode",
+            "source_id": record["episode_id"],
             "embedding_preset": embedding_preset,
             "source_text": source_text,
             "scope_type": record["primary_scope_type"],
@@ -165,7 +162,7 @@ class MemoryVectorIndexer:
             "text_hash": self._text_hash(source_text),
         }
 
-    def _episode_digest_source_text(self, record: dict[str, Any]) -> str:
+    def _episode_source_text(self, record: dict[str, Any]) -> str:
         # 部品群
         parts: list[str] = [record.get("summary_text", "").strip()]
         outcome_text = record.get("outcome_text")
@@ -176,9 +173,16 @@ class MemoryVectorIndexer:
         # 結果
         return "\n".join(part for part in parts if part)
 
-    def _embedding_preset(self, embedding_profile_id: str, embedding_dimension: int) -> str:
+    def _embedding_preset(self, role_definition: dict[str, Any], embedding_dimension: int) -> str:
         # 識別子
-        return f"{embedding_profile_id}:dim{embedding_dimension}"
+        provider = str(role_definition.get("provider", "unknown")).strip() or "unknown"
+        model = str(role_definition.get("model", "unknown")).strip() or "unknown"
+        endpoint_ref = str(role_definition.get("endpoint_ref", "default")).strip() or "default"
+        return f"{provider}:{model}:{endpoint_ref}:dim{embedding_dimension}"
+
+    def _embedding_dimension(self, role_definition: dict[str, Any]) -> int:
+        _ = role_definition
+        return 3072
 
     def _text_hash(self, value: str) -> str:
         # ハッシュ

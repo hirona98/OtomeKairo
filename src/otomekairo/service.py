@@ -29,7 +29,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         self._runtime_state_lock = threading.RLock()
         self._wake_execution_lock = threading.Lock()
         self._desktop_watch_execution_lock = threading.Lock()
-        self._future_act_candidates: list[dict[str, Any]] = []
+        self._pending_intent_candidates: list[dict[str, Any]] = []
         self._wake_runtime_state: dict[str, Any] = {
             "last_wake_at": None,
             "last_spontaneous_at": None,
@@ -193,18 +193,14 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
     ) -> dict[str, Any]:
         # モデル選択
         selected_preset = state["model_presets"][state["selected_model_preset_id"]]
-        recall_role = selected_preset["roles"]["recall_hint_generation"]
+        recall_role = selected_preset["roles"]["observation_interpretation"]
         decision_role = selected_preset["roles"]["decision_generation"]
-        reply_role = selected_preset["roles"]["reply_generation"]
-        recall_profile = self._profile_for_role(state, selected_preset, "recall_hint_generation")
-        decision_profile = self._profile_for_role(state, selected_preset, "decision_generation")
-        reply_profile = self._profile_for_role(state, selected_preset, "reply_generation")
+        reply_role = selected_preset["roles"]["expression_generation"]
         persona = state["personas"][state["selected_persona_id"]]
 
         # recall_hint生成
         recall_hint = self.llm.generate_recall_hint(
-            profile=recall_profile,
-            role_settings=recall_role,
+            role_definition=recall_role,
             observation_text=observation_text,
             recent_turns=recent_turns,
             current_time=started_at,
@@ -226,8 +222,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
 
         # decision生成
         decision = self.llm.generate_decision(
-            profile=decision_profile,
-            role_settings=decision_role,
+            role_definition=decision_role,
             observation_text=observation_text,
             recent_turns=recent_turns,
             time_context=time_context,
@@ -240,8 +235,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         reply_payload: dict[str, Any] | None = None
         if decision["kind"] == "reply":
             reply_payload = self.llm.generate_reply(
-                profile=reply_profile,
-                role_settings=reply_role,
+                role_definition=reply_role,
                 persona=persona,
                 observation_text=observation_text,
                 recent_turns=recent_turns,
@@ -294,7 +288,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             return (
                 self._noop_pipeline(
                     started_at=started_at,
-                    reason_summary="起床機会は来たが、再評価すべき future_act 候補はまだ無い。",
+                    reason_summary="起床機会は来たが、再評価すべき pending_intent 候補はまだ無い。",
                 ),
                 observation_text,
             )
@@ -308,7 +302,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             return (
                 self._noop_pipeline(
                     started_at=started_at,
-                    reason_summary="同じ future_act 候補には最近 reply 済みのため、今回は再介入しない。",
+                    reason_summary="同じ pending_intent 候補には最近 reply 済みのため、今回は再介入しない。",
                 ),
                 observation_text,
             )
@@ -348,7 +342,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         internal_result_kind = decision["kind"]
         result_kind = self._external_result_kind(internal_result_kind)
         finished_at = self._now_iso()
-        future_act_summary = self._apply_future_act_candidate(
+        pending_intent_summary = self._apply_pending_intent_candidate(
             cycle_id=cycle_id,
             memory_set_id=state["selected_memory_set_id"],
             decision=decision,
@@ -373,7 +367,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             decision=decision,
             result_kind=result_kind,
             reply_payload=reply_payload,
-            future_act_summary=future_act_summary,
+            pending_intent_summary=pending_intent_summary,
             trigger_kind=trigger_kind,
             observation_event_kind=observation_event_kind,
             observation_event_role=observation_event_role,
@@ -469,9 +463,14 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         # 結果
         return {
             "turn_consolidation_status": "failed",
-            "episode_digest_id": None,
+            "episode_id": None,
+            "episode_summary": None,
+            "episode_series_id": None,
+            "open_loops": [],
             "memory_action_count": 0,
             "affect_update_count": 0,
+            "updated_memory_unit_ids": [],
+            "affect_updates": [],
             "failure_reason": failure_reason,
             "reflective_consolidation": {
                 "started": False,
@@ -486,9 +485,14 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         # 結果
         return {
             "turn_consolidation_status": "skipped",
-            "episode_digest_id": None,
+            "episode_id": None,
+            "episode_summary": None,
+            "episode_series_id": None,
+            "open_loops": [],
             "memory_action_count": 0,
             "affect_update_count": 0,
+            "updated_memory_unit_ids": [],
+            "affect_updates": [],
             "failure_reason": None,
             "skip_reason": reason,
             "reflective_consolidation": {
@@ -570,12 +574,6 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             raise ServiceError(401, "invalid_token", "The console_access_token is missing or invalid.")
         return state
 
-    def _profile_for_role(self, state: dict, model_preset: dict, role_name: str) -> dict:
-        # 検索
-        role_value = model_preset["roles"][role_name]
-        profile_id = role_value["model_profile_id"]
-        return state["model_profiles"][profile_id]
-
     def _summarize_recall_pack(self, recall_pack: dict[str, Any]) -> dict[str, int]:
         # 要約
         return {
@@ -604,14 +602,14 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         recall_pack = pipeline["recall_pack"]
         decision = pipeline["decision"]
         association_memory_ids = set(recall_pack["association_selected_memory_ids"])
-        association_digest_ids = set(recall_pack["association_selected_episode_digest_ids"])
+        association_episode_ids = set(recall_pack["association_selected_episode_ids"])
         structured_memory_ids = [
             memory_id for memory_id in recall_pack["selected_memory_ids"] if memory_id not in association_memory_ids
         ]
-        structured_digest_ids = [
-            digest_id
-            for digest_id in recall_pack["selected_episode_digest_ids"]
-            if digest_id not in association_digest_ids
+        structured_episode_ids = [
+            episode_id
+            for episode_id in recall_pack["selected_episode_ids"]
+            if episode_id not in association_episode_ids
         ]
 
         # ログ群
@@ -639,7 +637,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
                 message=(
                     f"{self._short_cycle_id(cycle_id)} "
                     f"memory_units={self._format_id_list_for_log(structured_memory_ids)} "
-                    f"episode_digests={self._format_id_list_for_log(structured_digest_ids)}"
+                    f"episodes={self._format_id_list_for_log(structured_episode_ids)}"
                 ),
             ),
             self._build_live_log_record(
@@ -648,7 +646,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
                 message=(
                     f"{self._short_cycle_id(cycle_id)} "
                     f"memory_units={self._format_id_list_for_log(recall_pack['association_selected_memory_ids'])} "
-                    f"episode_digests={self._format_id_list_for_log(recall_pack['association_selected_episode_digest_ids'])}"
+                    f"episodes={self._format_id_list_for_log(recall_pack['association_selected_episode_ids'])}"
                 ),
             ),
             self._build_live_log_record(
@@ -725,7 +723,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         else:
             message = (
                 f"{self._short_cycle_id(cycle_id)} status={status} "
-                f"episode_digest={memory_trace.get('episode_digest_id') or '-'} "
+                f"episode={memory_trace.get('episode_id') or '-'} "
                 f"memory_actions={memory_trace.get('memory_action_count', 0)} "
                 f"affect_updates={memory_trace.get('affect_update_count', 0)}"
             )
@@ -789,7 +787,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
 
     def _external_result_kind(self, internal_result_kind: str) -> str:
         # マッピング
-        if internal_result_kind == "future_act":
+        if internal_result_kind == "pending_intent":
             return "noop"
         return internal_result_kind
 
@@ -808,7 +806,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
                 "reason_code": "wake_noop",
                 "reason_summary": reason_summary,
                 "requires_confirmation": False,
-                "future_act": None,
+                "pending_intent": None,
             },
             "reply_payload": None,
         }
@@ -837,9 +835,9 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             "event_evidence": [],
             "conflicts": [],
             "selected_memory_ids": [],
-            "selected_episode_digest_ids": [],
+            "selected_episode_ids": [],
             "association_selected_memory_ids": [],
-            "association_selected_episode_digest_ids": [],
+            "association_selected_episode_ids": [],
             "selected_event_ids": [],
             "candidate_count": 0,
         }
@@ -871,33 +869,33 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
     def _recall_adopted_reason_summary(self, recall_pack: dict[str, Any]) -> str:
         # 件数群
         memory_count = len(recall_pack["selected_memory_ids"])
-        digest_count = len(recall_pack["selected_episode_digest_ids"])
+        episode_count = len(recall_pack["selected_episode_ids"])
         association_memory_count = len(recall_pack["association_selected_memory_ids"])
-        association_digest_count = len(recall_pack["association_selected_episode_digest_ids"])
+        association_episode_count = len(recall_pack["association_selected_episode_ids"])
 
         # 空
-        if memory_count == 0 and digest_count == 0:
+        if memory_count == 0 and episode_count == 0:
             return "構造レーンで採用候補は選ばれなかった。"
 
         # 関連のみ
-        if memory_count == association_memory_count and digest_count == association_digest_count:
+        if memory_count == association_memory_count and episode_count == association_episode_count:
             return (
                 "連想レーンで近傍候補を補助採用した。"
-                f" association_memory_units={association_memory_count}, association_episode_digests={association_digest_count}"
+                f" association_memory_units={association_memory_count}, association_episodes={association_episode_count}"
             )
 
         # 混在
-        if association_memory_count > 0 or association_digest_count > 0:
+        if association_memory_count > 0 or association_episode_count > 0:
             return (
                 "構造レーンを主軸にしつつ、連想レーンの近傍候補を補助採用した。"
-                f" memory_units={memory_count}, episode_digests={digest_count},"
-                f" association_memory_units={association_memory_count}, association_episode_digests={association_digest_count}"
+                f" memory_units={memory_count}, episodes={episode_count},"
+                f" association_memory_units={association_memory_count}, association_episodes={association_episode_count}"
             )
 
         # 要約
         return (
             "構造レーンで scope、memory_type、status、commitment_state に基づいて候補を採用した。"
-            f" memory_units={memory_count}, episode_digests={digest_count}"
+            f" memory_units={memory_count}, episodes={episode_count}"
         )
 
     def _recall_rejected_reason_summary(self, recall_pack: dict[str, Any]) -> str:
@@ -906,7 +904,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             return "現時点では構造レーンにも連想レーンにも一致する長期記憶がなかった。"
 
         # 関連
-        if recall_pack["association_selected_memory_ids"] or recall_pack["association_selected_episode_digest_ids"]:
+        if recall_pack["association_selected_memory_ids"] or recall_pack["association_selected_episode_ids"]:
             return "vector-only 候補は補助扱いに留め、文字列一致フォールバックは使っていない。"
 
         # 要約
@@ -1034,7 +1032,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         decision: dict,
         result_kind: str,
         reply_payload: dict | None,
-        future_act_summary: dict[str, Any] | None,
+        pending_intent_summary: dict[str, Any] | None,
         trigger_kind: str,
         observation_event_kind: str,
         observation_event_role: str,
@@ -1061,7 +1059,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
                 "external_result_kind": result_kind,
                 "reason_code": decision["reason_code"],
                 "reason_summary": decision["reason_summary"],
-                "future_act_summary": future_act_summary,
+                "pending_intent_summary": pending_intent_summary,
                 "created_at": finished_at,
             },
         ]
@@ -1086,7 +1084,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             "finished_at": finished_at,
             "result_status": "succeeded",
             "recall_hint": recall_hint,
-            "selected_episode_digest_ids": recall_pack["selected_episode_digest_ids"],
+            "selected_episode_ids": recall_pack["selected_episode_ids"],
             "selected_event_ids": recall_pack["selected_event_ids"],
             "recall_pack_summary": self._summarize_recall_pack(recall_pack),
             "candidate_count": recall_pack["candidate_count"],
@@ -1121,8 +1119,8 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             "recall_trace": {
                 "recall_hint_summary": recall_hint,
                 "candidate_count": recall_pack["candidate_count"],
-                "selected_memory_ids": recall_pack["selected_memory_ids"],
-                "selected_episode_digest_ids": recall_pack["selected_episode_digest_ids"],
+                "selected_memory_unit_ids": recall_pack["selected_memory_ids"],
+                "selected_episode_ids": recall_pack["selected_episode_ids"],
                 "selected_event_ids": recall_pack["selected_event_ids"],
                 "recall_pack_summary": self._summarize_recall_pack(recall_pack),
                 "adopted_reason_summary": self._recall_adopted_reason_summary(recall_pack),
@@ -1140,21 +1138,26 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
                     "recall_pack_summary": self._summarize_recall_pack(recall_pack),
                 },
                 "primary_candidate_kind": decision["kind"],
-                "future_act_candidate_summary": future_act_summary,
+                "pending_intent_candidate_summary": pending_intent_summary,
             },
             "result_trace": {
                 "result_kind": result_kind,
                 "reply_summary": self._clamp(reply_payload["reply_text"]) if reply_payload else None,
                 "noop_reason_summary": decision["reason_summary"] if decision["kind"] == "noop" else None,
-                "future_act_summary": future_act_summary,
+                "pending_intent_summary": pending_intent_summary,
                 "internal_failure_summary": None,
                 "duration_ms": self._duration_ms(started_at, finished_at),
             },
             "memory_trace": {
                 "turn_consolidation_status": "pending",
-                "episode_digest_id": None,
+                "episode_id": None,
+                "episode_summary": None,
+                "episode_series_id": None,
+                "open_loops": [],
                 "memory_action_count": 0,
                 "affect_update_count": 0,
+                "updated_memory_unit_ids": [],
+                "affect_updates": [],
                 "failure_reason": None,
                 "reflective_consolidation": None,
             },
@@ -1216,7 +1219,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             "finished_at": finished_at,
             "result_status": "failed",
             "failure_reason": failure_reason,
-            "selected_episode_digest_ids": [],
+            "selected_episode_ids": [],
             "selected_event_ids": [],
             "recall_pack_summary": None,
         }
@@ -1249,8 +1252,8 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             "recall_trace": {
                 "recall_hint_summary": None,
                 "candidate_count": 0,
-                "selected_memory_ids": [],
-                "selected_episode_digest_ids": [],
+                "selected_memory_unit_ids": [],
+                "selected_episode_ids": [],
                 "selected_event_ids": [],
                 "recall_pack_summary": None,
                 "adopted_reason_summary": None,
@@ -1268,7 +1271,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
                 "result_kind": "internal_failure",
                 "reply_summary": None,
                 "noop_reason_summary": None,
-                "future_act_summary": None,
+                "pending_intent_summary": None,
                 "internal_failure_summary": failure_reason,
                 "duration_ms": self._duration_ms(started_at, finished_at),
             },
@@ -1317,11 +1320,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         # ウィンドウ設定
         now = datetime.now(UTC)
         threshold = now - timedelta(minutes=3)
-        selected_preset = state["model_presets"][state["selected_model_preset_id"]]
-        reply_role = selected_preset.get("roles", {}).get("reply_generation", {})
-        turn_limit = reply_role.get("max_turns_window")
-        if not isinstance(turn_limit, int) or turn_limit < 1:
-            turn_limit = 6
+        turn_limit = 6
 
         # 検索
         return self.store.load_recent_turns(

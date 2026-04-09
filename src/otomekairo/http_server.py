@@ -171,6 +171,10 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
                 payload = self._read_json_body()
                 self._write_success(HTTPStatus.OK, self.server.service.replace_memory_set(token, memory_set_id, payload))
                 return
+            if method == "POST" and parsed.path == "/api/config/memory-sets/clone":
+                payload = self._read_json_body()
+                self._write_success(HTTPStatus.OK, self.server.service.clone_memory_set(token, payload))
+                return
             if method == "DELETE" and parsed.path.startswith("/api/config/memory-sets/"):
                 memory_set_id = parsed.path.rsplit("/", 1)[-1]
                 self._write_success(HTTPStatus.OK, self.server.service.delete_memory_set(token, memory_set_id))
@@ -190,22 +194,6 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
             if method == "DELETE" and parsed.path.startswith("/api/config/model-presets/"):
                 model_preset_id = parsed.path.rsplit("/", 1)[-1]
                 self._write_success(HTTPStatus.OK, self.server.service.delete_model_preset(token, model_preset_id))
-                return
-            if method == "GET" and parsed.path.startswith("/api/config/model-profiles/"):
-                model_profile_id = parsed.path.rsplit("/", 1)[-1]
-                self._write_success(HTTPStatus.OK, self.server.service.get_model_profile(token, model_profile_id))
-                return
-            if method == "PUT" and parsed.path.startswith("/api/config/model-profiles/"):
-                model_profile_id = parsed.path.rsplit("/", 1)[-1]
-                payload = self._read_json_body()
-                self._write_success(
-                    HTTPStatus.OK,
-                    self.server.service.replace_model_profile(token, model_profile_id, payload),
-                )
-                return
-            if method == "DELETE" and parsed.path.startswith("/api/config/model-profiles/"):
-                model_profile_id = parsed.path.rsplit("/", 1)[-1]
-                self._write_success(HTTPStatus.OK, self.server.service.delete_model_profile(token, model_profile_id))
                 return
 
             # 検査ルート

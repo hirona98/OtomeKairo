@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
 
 from otomekairo.event_stream import ServerWebSocket
@@ -72,7 +73,6 @@ class ServiceConfigMixin:
         state = self.store.read_state()
 
         # bootstrap では未発行なら新規発行し、発行済みなら現在値を返すだけにする。
-        # 確保トークン
         if state["console_access_token"] is None:
             state["console_access_token"] = self._new_console_token()
             self.store.write_state(state)
@@ -87,7 +87,6 @@ class ServiceConfigMixin:
         state = self._require_token(token)
 
         # 再発行時は保持値を新トークンへ即時に置き換え、旧トークンは残さない。
-        # 発行トークン
         state["console_access_token"] = self._new_console_token()
         self.store.write_state(state)
         return {
@@ -107,26 +106,14 @@ class ServiceConfigMixin:
     def get_config(self, token: str | None) -> dict[str, Any]:
         # 認可
         state = self._require_token(token)
-
-        # 選択済みリソース群
         selected_preset = state["model_presets"][state["selected_model_preset_id"]]
-        selected_profile_ids = {
-            role_name: role_value["model_profile_id"]
-            for role_name, role_value in selected_preset["roles"].items()
-        }
-        selected_profiles = {
-            role_name: state["model_profiles"][profile_id]
-            for role_name, profile_id in selected_profile_ids.items()
-        }
 
         # 応答
         return {
             "settings_snapshot": self._build_settings_snapshot(state),
-            "selected_persona": state["personas"][state["selected_persona_id"]],
-            "selected_memory_set": state["memory_sets"][state["selected_memory_set_id"]],
-            "selected_model_preset": selected_preset,
-            "selected_model_profile_ids": selected_profile_ids,
-            "selected_model_profiles": selected_profiles,
+            "selected_persona": deepcopy(state["personas"][state["selected_persona_id"]]),
+            "selected_memory_set": deepcopy(state["memory_sets"][state["selected_memory_set_id"]]),
+            "selected_model_preset": self._public_model_preset(selected_preset),
         }
 
     def get_editor_state(self, token: str | None) -> dict[str, Any]:
@@ -143,40 +130,39 @@ class ServiceConfigMixin:
             "personas": self._catalog_entries(state["personas"], "persona_id"),
             "memory_sets": self._catalog_entries(state["memory_sets"], "memory_set_id"),
             "model_presets": self._catalog_entries(state["model_presets"], "model_preset_id"),
-            "model_profiles": self._catalog_entries(state["model_profiles"], "model_profile_id"),
         }
 
     def patch_current(self, token: str | None, payload: dict[str, Any]) -> dict[str, Any]:
         # 状態
         state = self._require_token(token)
-        should_clear_future_act = False
+        should_clear_pending_intents = False
 
         # 選択済みpersona
         if "selected_persona_id" in payload:
             persona_id = payload["selected_persona_id"]
             if persona_id not in state["personas"]:
                 raise ServiceError(404, "persona_not_found", "The requested persona_id does not exist.")
-            should_clear_future_act = should_clear_future_act or persona_id != state["selected_persona_id"]
+            should_clear_pending_intents = should_clear_pending_intents or persona_id != state["selected_persona_id"]
             state["selected_persona_id"] = persona_id
 
-        # 選択済み記憶設定
+        # 選択済み記憶集合
         if "selected_memory_set_id" in payload:
             memory_set_id = payload["selected_memory_set_id"]
             if memory_set_id not in state["memory_sets"]:
                 raise ServiceError(404, "memory_set_not_found", "The requested memory_set_id does not exist.")
-            should_clear_future_act = should_clear_future_act or memory_set_id != state["selected_memory_set_id"]
+            should_clear_pending_intents = should_clear_pending_intents or memory_set_id != state["selected_memory_set_id"]
             state["selected_memory_set_id"] = memory_set_id
 
-        # 選択済みモデルpreset
+        # 選択済みモデルプリセット
         if "selected_model_preset_id" in payload:
             model_preset_id = payload["selected_model_preset_id"]
             if model_preset_id not in state["model_presets"]:
                 raise ServiceError(404, "model_preset_not_found", "The requested model_preset_id does not exist.")
-            self._validate_model_preset_definition(state, model_preset_id, state["model_presets"][model_preset_id])
-            should_clear_future_act = should_clear_future_act or model_preset_id != state["selected_model_preset_id"]
+            self._validate_model_preset_definition(model_preset_id, state["model_presets"][model_preset_id])
+            should_clear_pending_intents = should_clear_pending_intents or model_preset_id != state["selected_model_preset_id"]
             state["selected_model_preset_id"] = model_preset_id
 
-        # 切り替えFields
+        # 動作設定
         if "wake_policy" in payload:
             self._validate_wake_policy(payload["wake_policy"])
             state["wake_policy"] = payload["wake_policy"]
@@ -189,28 +175,20 @@ class ServiceConfigMixin:
 
         # 永続化
         self.store.write_state(state)
-        if should_clear_future_act:
-            self._clear_future_act_candidates()
+        if should_clear_pending_intents:
+            self._clear_pending_intent_candidates()
         return self.get_config(token=state["console_access_token"])
 
     def select_persona(self, token: str | None, persona_id: str) -> dict[str, Any]:
-        # 単項目選択も current 更新の一形態として patch_current へ寄せる。
-        # 委譲
         return self.patch_current(token, {"selected_persona_id": persona_id})
 
     def select_memory_set(self, token: str | None, memory_set_id: str) -> dict[str, Any]:
-        # 単項目選択も current 更新の一形態として patch_current へ寄せる。
-        # 委譲
         return self.patch_current(token, {"selected_memory_set_id": memory_set_id})
 
     def update_wake_policy(self, token: str | None, wake_policy: dict[str, Any]) -> dict[str, Any]:
-        # wake_policy は部分 patch ではなく全体置き換えの形で patch_current へ通す。
-        # 委譲
         return self.patch_current(token, {"wake_policy": wake_policy})
 
     def select_model_preset(self, token: str | None, model_preset_id: str) -> dict[str, Any]:
-        # 単項目選択も current 更新の一形態として patch_current へ寄せる。
-        # 委譲
         return self.patch_current(token, {"selected_model_preset_id": model_preset_id})
 
     def get_persona(self, token: str | None, persona_id: str) -> dict[str, Any]:
@@ -220,19 +198,19 @@ class ServiceConfigMixin:
         if persona is None:
             raise ServiceError(404, "persona_not_found", "The requested persona_id does not exist.")
         return {
-            "persona": persona,
+            "persona": deepcopy(persona),
         }
 
     def replace_persona(self, token: str | None, persona_id: str, definition: dict[str, Any]) -> dict[str, Any]:
         # 認可
         state = self._require_token(token)
         self._validate_persona_definition(persona_id, definition)
-        state["personas"][persona_id] = definition
+        state["personas"][persona_id] = deepcopy(definition)
         self.store.write_state(state)
         if persona_id == state["selected_persona_id"]:
-            self._clear_future_act_candidates()
+            self._clear_pending_intent_candidates()
         return {
-            "persona": state["personas"][persona_id],
+            "persona": deepcopy(state["personas"][persona_id]),
         }
 
     def delete_persona(self, token: str | None, persona_id: str) -> dict[str, Any]:
@@ -258,19 +236,52 @@ class ServiceConfigMixin:
         if memory_set is None:
             raise ServiceError(404, "memory_set_not_found", "The requested memory_set_id does not exist.")
         return {
-            "memory_set": memory_set,
+            "memory_set": deepcopy(memory_set),
         }
 
     def replace_memory_set(self, token: str | None, memory_set_id: str, definition: dict[str, Any]) -> dict[str, Any]:
         # 認可
         state = self._require_token(token)
         self._validate_memory_set_definition(memory_set_id, definition)
-        state["memory_sets"][memory_set_id] = definition
+        state["memory_sets"][memory_set_id] = deepcopy(definition)
         self.store.write_state(state)
         if memory_set_id == state["selected_memory_set_id"]:
-            self._clear_future_act_candidates()
+            self._clear_pending_intent_candidates()
         return {
-            "memory_set": state["memory_sets"][memory_set_id],
+            "memory_set": deepcopy(state["memory_sets"][memory_set_id]),
+        }
+
+    def clone_memory_set(self, token: str | None, definition: dict[str, Any]) -> dict[str, Any]:
+        # 認可
+        state = self._require_token(token)
+
+        # 入力
+        source_memory_set_id = definition.get("source_memory_set_id")
+        if not isinstance(source_memory_set_id, str) or not source_memory_set_id:
+            raise ServiceError(400, "invalid_source_memory_set_id", "source_memory_set_id is required.")
+        if source_memory_set_id not in state["memory_sets"]:
+            raise ServiceError(404, "source_memory_set_not_found", "The source memory_set_id does not exist.")
+
+        memory_set_id = definition.get("memory_set_id")
+        if memory_set_id in state["memory_sets"]:
+            raise ServiceError(409, "memory_set_id_already_exists", "The destination memory_set_id already exists.")
+
+        cloned_definition = {
+            "memory_set_id": memory_set_id,
+            "display_name": definition.get("display_name"),
+            "description": definition.get("description"),
+        }
+        self._validate_memory_set_definition(memory_set_id, cloned_definition)
+
+        # 永続化
+        state["memory_sets"][memory_set_id] = cloned_definition
+        self.store.clone_memory_set_records(
+            source_memory_set_id=source_memory_set_id,
+            target_memory_set_id=memory_set_id,
+        )
+        self.store.write_state(state)
+        return {
+            "memory_set": deepcopy(cloned_definition),
         }
 
     def delete_memory_set(self, token: str | None, memory_set_id: str) -> dict[str, Any]:
@@ -297,20 +308,20 @@ class ServiceConfigMixin:
         if model_preset is None:
             raise ServiceError(404, "model_preset_not_found", "The requested model_preset_id does not exist.")
         return {
-            "model_preset": model_preset,
+            "model_preset": self._public_model_preset(model_preset),
         }
 
     def replace_model_preset(self, token: str | None, model_preset_id: str, definition: dict[str, Any]) -> dict[str, Any]:
         # 認可
         state = self._require_token(token)
         normalized_definition = self._normalize_model_preset_definition(definition)
-        self._validate_model_preset_definition(state, model_preset_id, normalized_definition)
+        self._validate_model_preset_definition(model_preset_id, normalized_definition)
         state["model_presets"][model_preset_id] = normalized_definition
         self.store.write_state(state)
         if model_preset_id == state["selected_model_preset_id"]:
-            self._clear_future_act_candidates()
+            self._clear_pending_intent_candidates()
         return {
-            "model_preset": state["model_presets"][model_preset_id],
+            "model_preset": self._public_model_preset(state["model_presets"][model_preset_id]),
         }
 
     def delete_model_preset(self, token: str | None, model_preset_id: str) -> dict[str, Any]:
@@ -329,58 +340,6 @@ class ServiceConfigMixin:
             "deleted_model_preset_id": model_preset_id,
         }
 
-    def get_model_profile(self, token: str | None, model_profile_id: str) -> dict[str, Any]:
-        # 認可
-        state = self._require_token(token)
-        model_profile = state["model_profiles"].get(model_profile_id)
-        if model_profile is None:
-            raise ServiceError(404, "model_profile_not_found", "The requested model_profile_id does not exist.")
-        return {
-            "model_profile": model_profile,
-        }
-
-    def replace_model_profile(self, token: str | None, model_profile_id: str, definition: dict[str, Any]) -> dict[str, Any]:
-        # 認可
-        state = self._require_token(token)
-        self._validate_model_profile_definition(model_profile_id, definition)
-        candidate_state = {
-            **state,
-            "model_profiles": {
-                **state["model_profiles"],
-                model_profile_id: definition,
-            },
-        }
-        for preset_id, preset in state["model_presets"].items():
-            self._validate_model_preset_definition(candidate_state, preset_id, preset)
-        state["model_profiles"][model_profile_id] = definition
-        self.store.write_state(state)
-        if self._selected_model_preset_uses_profile(state, model_profile_id):
-            self._clear_future_act_candidates()
-        return {
-            "model_profile": state["model_profiles"][model_profile_id],
-        }
-
-    def delete_model_profile(self, token: str | None, model_profile_id: str) -> dict[str, Any]:
-        # 認可
-        state = self._require_token(token)
-        if model_profile_id not in state["model_profiles"]:
-            raise ServiceError(404, "model_profile_not_found", "The requested model_profile_id does not exist.")
-        for model_preset in state["model_presets"].values():
-            for role_value in model_preset.get("roles", {}).values():
-                if role_value.get("model_profile_id") == model_profile_id:
-                    raise ServiceError(
-                        409,
-                        "model_profile_in_use",
-                        "The requested model_profile_id is still referenced by a model_preset.",
-                    )
-        if len(state["model_profiles"]) <= 1:
-            raise ServiceError(409, "last_resource_delete_forbidden", "At least one model_profile must remain.")
-        del state["model_profiles"][model_profile_id]
-        self.store.write_state(state)
-        return {
-            "deleted_model_profile_id": model_profile_id,
-        }
-
     def replace_editor_state(self, token: str | None, definition: dict[str, Any]) -> dict[str, Any]:
         # 認可
         state = self._require_token(token)
@@ -389,11 +348,6 @@ class ServiceConfigMixin:
         current = definition.get("current")
         personas = self._entries_by_id(definition.get("personas"), "persona_id", "personas")
         memory_sets = self._entries_by_id(definition.get("memory_sets"), "memory_set_id", "memory_sets")
-        model_profiles = self._entries_by_id(definition.get("model_profiles"), "model_profile_id", "model_profiles")
-        candidate_state = {
-            **state,
-            "model_profiles": model_profiles,
-        }
         raw_model_presets = self._entries_by_id(definition.get("model_presets"), "model_preset_id", "model_presets")
 
         # 形状Checks
@@ -403,8 +357,6 @@ class ServiceConfigMixin:
             raise ServiceError(400, "missing_personas", "editor-state requires at least one persona.")
         if not memory_sets:
             raise ServiceError(400, "missing_memory_sets", "editor-state requires at least one memory_set.")
-        if not model_profiles:
-            raise ServiceError(400, "missing_model_profiles", "editor-state requires at least one model_profile.")
         if not raw_model_presets:
             raise ServiceError(400, "missing_model_presets", "editor-state requires at least one model_preset.")
 
@@ -413,16 +365,13 @@ class ServiceConfigMixin:
             self._validate_persona_definition(persona_id, persona)
         for memory_set_id, memory_set in memory_sets.items():
             self._validate_memory_set_definition(memory_set_id, memory_set)
-        for model_profile_id, model_profile in model_profiles.items():
-            self._validate_model_profile_definition(model_profile_id, model_profile)
 
-        # モデルpresetNormalization
         model_presets = {
             model_preset_id: self._normalize_model_preset_definition(model_preset)
             for model_preset_id, model_preset in raw_model_presets.items()
         }
         for model_preset_id, model_preset in model_presets.items():
-            self._validate_model_preset_definition(candidate_state, model_preset_id, model_preset)
+            self._validate_model_preset_definition(model_preset_id, model_preset)
 
         # 現在の選択
         selected_persona_id = current.get("selected_persona_id")
@@ -435,7 +384,7 @@ class ServiceConfigMixin:
         if selected_model_preset_id not in model_presets:
             raise ServiceError(404, "model_preset_not_found", "The selected_model_preset_id does not exist in model_presets.")
 
-        # 切り替え検証
+        # 動作設定検証
         self._validate_wake_policy(current.get("wake_policy"))
         self._validate_memory_enabled(current.get("memory_enabled"))
         self._validate_desktop_watch(current.get("desktop_watch"))
@@ -449,10 +398,9 @@ class ServiceConfigMixin:
         state["desktop_watch"] = current["desktop_watch"]
         state["personas"] = personas
         state["memory_sets"] = memory_sets
-        state["model_profiles"] = model_profiles
         state["model_presets"] = model_presets
         self.store.write_state(state)
-        self._clear_future_act_candidates()
+        self._clear_pending_intent_candidates()
         return self._build_editor_state(state)
 
     def _require_token(self, token: str | None) -> dict[str, Any]:
@@ -467,67 +415,36 @@ class ServiceConfigMixin:
             raise ServiceError(401, "invalid_token", "The console_access_token is missing or invalid.")
         return state
 
-    def _selected_model_preset_uses_profile(self, state: dict[str, Any], model_profile_id: str) -> bool:
-        # 検索
-        selected_preset = state["model_presets"][state["selected_model_preset_id"]]
-        for role_value in selected_preset.get("roles", {}).values():
-            if role_value.get("model_profile_id") == model_profile_id:
-                return True
-
-        # 空
-        return False
-
     def _build_settings_snapshot(self, state: dict[str, Any]) -> dict[str, Any]:
-        # スナップショット
         return {
             "selected_persona_id": state["selected_persona_id"],
             "selected_memory_set_id": state["selected_memory_set_id"],
             "memory_enabled": state["memory_enabled"],
-            "desktop_watch": state["desktop_watch"],
-            "wake_policy": state["wake_policy"],
+            "desktop_watch": deepcopy(state["desktop_watch"]),
+            "wake_policy": deepcopy(state["wake_policy"]),
             "selected_model_preset_id": state["selected_model_preset_id"],
         }
 
     def _build_editor_state(self, state: dict[str, Any]) -> dict[str, Any]:
-        # 結果
         return {
             "current": self._build_settings_snapshot(state),
-            "personas": list(state["personas"].values()),
-            "memory_sets": list(state["memory_sets"].values()),
-            "model_presets": list(state["model_presets"].values()),
-            "model_profiles": list(state["model_profiles"].values()),
+            "personas": [deepcopy(value) for value in state["personas"].values()],
+            "memory_sets": [deepcopy(value) for value in state["memory_sets"].values()],
+            "model_presets": [deepcopy(value) for value in state["model_presets"].values()],
         }
 
     def _build_runtime_summary(self, state: dict[str, Any]) -> dict[str, Any]:
-        # スナップショット
-        persona = state["personas"][state["selected_persona_id"]]
-        memory_set = state["memory_sets"][state["selected_memory_set_id"]]
-        model_preset = state["model_presets"][state["selected_model_preset_id"]]
         return {
-            "loaded_persona_ref": {
-                "persona_id": persona["persona_id"],
-                "display_name": persona["display_name"],
-            },
-            "loaded_memory_set_ref": {
-                "memory_set_id": memory_set["memory_set_id"],
-                "display_name": memory_set["display_name"],
-            },
-            "loaded_model_preset_ref": {
-                "model_preset_id": model_preset["model_preset_id"],
-                "display_name": model_preset["display_name"],
-            },
             "connection_state": "ready",
             "wake_scheduler_active": self._background_wake_scheduler_active() and state["wake_policy"]["mode"] == "interval",
             "ongoing_action_exists": False,
         }
 
     def _background_wake_scheduler_active(self) -> bool:
-        # 状態
         with self._runtime_state_lock:
             return self._background_wake_thread is not None and self._background_wake_thread.is_alive()
 
     def _catalog_entries(self, entries: dict[str, dict[str, Any]], id_key: str) -> list[dict[str, Any]]:
-        # 変換
         return [
             {
                 id_key: value[id_key],
@@ -537,11 +454,9 @@ class ServiceConfigMixin:
         ]
 
     def _entries_by_id(self, entries: Any, id_key: str, field_name: str) -> dict[str, dict[str, Any]]:
-        # 形状
         if not isinstance(entries, list):
             raise ServiceError(400, f"invalid_{field_name}", f"{field_name} must be an array.")
 
-        # 収集
         result: dict[str, dict[str, Any]] = {}
         for entry in entries:
             if not isinstance(entry, dict):
@@ -552,33 +467,26 @@ class ServiceConfigMixin:
             if entry_id in result:
                 raise ServiceError(400, f"duplicate_{field_name}_id", f"{entry_id} is duplicated in {field_name}.")
             result[entry_id] = entry
-
-        # 結果
         return result
 
     def _validate_wake_policy(self, wake_policy: dict[str, Any]) -> None:
-        # 形状
         if not isinstance(wake_policy, dict):
             raise ServiceError(400, "invalid_wake_policy", "wake_policy must be an object.")
 
-        # モード
         mode = wake_policy.get("mode")
         if mode not in {"disabled", "interval"}:
             raise ServiceError(400, "invalid_wake_policy_mode", "wake_policy.mode must be disabled or interval.")
 
-        # 間隔
         if mode == "interval":
             interval_minutes = wake_policy.get("interval_minutes")
             if not isinstance(interval_minutes, int) or interval_minutes < 1:
                 raise ServiceError(400, "invalid_interval_minutes", "interval_minutes must be an integer >= 1.")
 
     def _validate_memory_enabled(self, memory_enabled: Any) -> None:
-        # 形状
         if not isinstance(memory_enabled, bool):
             raise ServiceError(400, "invalid_memory_enabled", "memory_enabled must be a boolean.")
 
     def _validate_desktop_watch(self, desktop_watch: Any) -> None:
-        # 形状
         if not isinstance(desktop_watch, dict):
             raise ServiceError(400, "invalid_desktop_watch", "desktop_watch must be an object.")
         enabled = desktop_watch.get("enabled")
@@ -600,7 +508,6 @@ class ServiceConfigMixin:
             )
 
     def _validate_persona_definition(self, persona_id: str, definition: dict[str, Any]) -> None:
-        # 形状
         if definition.get("persona_id") != persona_id:
             raise ServiceError(400, "persona_id_mismatch", "persona_id must match the path.")
         display_name = definition.get("display_name")
@@ -616,11 +523,13 @@ class ServiceConfigMixin:
         if not isinstance(tone, str) or not tone.strip():
             raise ServiceError(400, "invalid_persona_tone", "expression_style.tone is required.")
         for field_name in ("persona_text", "second_person_label", "addon_text"):
-            if field_name in definition and definition[field_name] is not None and not isinstance(definition[field_name], str):
+            value = definition.get(field_name)
+            if value is not None and not isinstance(value, str):
                 raise ServiceError(400, f"invalid_{field_name}", f"{field_name} must be a string.")
 
-    def _validate_memory_set_definition(self, memory_set_id: str, definition: dict[str, Any]) -> None:
-        # 形状
+    def _validate_memory_set_definition(self, memory_set_id: Any, definition: dict[str, Any]) -> None:
+        if not isinstance(memory_set_id, str) or not memory_set_id:
+            raise ServiceError(400, "memory_set_id_mismatch", "memory_set_id must match the path.")
         if definition.get("memory_set_id") != memory_set_id:
             raise ServiceError(400, "memory_set_id_mismatch", "memory_set_id must match the path.")
         display_name = definition.get("display_name")
@@ -630,82 +539,104 @@ class ServiceConfigMixin:
         if description is not None and not isinstance(description, str):
             raise ServiceError(400, "invalid_memory_set_description", "description must be a string.")
 
-    def _validate_model_preset_definition(self, state: dict[str, Any], model_preset_id: str, definition: dict[str, Any]) -> None:
-        # 形状
+    def _validate_model_preset_definition(self, model_preset_id: str, definition: dict[str, Any]) -> None:
         if definition.get("model_preset_id") != model_preset_id:
             raise ServiceError(400, "model_preset_id_mismatch", "model_preset_id must match the path.")
+        display_name = definition.get("display_name")
+        if not isinstance(display_name, str) or not display_name.strip():
+            raise ServiceError(400, "invalid_model_preset_display_name", "display_name is required.")
         roles = definition.get("roles")
         if not isinstance(roles, dict):
             raise ServiceError(400, "invalid_model_preset_roles", "roles must be an object.")
 
-        # 必須ロール群
         for role_name, expected_kind in REQUIRED_ROLE_NAMES.items():
             if role_name not in roles:
                 raise ServiceError(400, "missing_model_role", f"{role_name} is required.")
             role_definition = roles[role_name]
-            if not isinstance(role_definition, dict):
-                raise ServiceError(400, "invalid_model_role", f"{role_name} must be an object.")
-            profile_id = role_definition.get("model_profile_id")
-            if not isinstance(profile_id, str) or not profile_id:
-                raise ServiceError(400, "invalid_model_role_profile", f"{role_name} requires model_profile_id.")
-            profile = state["model_profiles"].get(profile_id)
-            if profile is None:
-                raise ServiceError(404, "model_profile_not_found", f"{profile_id} does not exist.")
-            if profile["kind"] != expected_kind:
-                raise ServiceError(400, "model_profile_kind_mismatch", f"{role_name} requires kind={expected_kind}.")
-            reasoning_effort = role_definition.get("reasoning_effort")
-            if reasoning_effort is not None and not isinstance(reasoning_effort, str):
-                raise ServiceError(400, "invalid_reasoning_effort", f"{role_name}.reasoning_effort must be a string.")
+            self._validate_model_role_definition(role_name, role_definition, expected_kind)
+
+    def _validate_model_role_definition(self, role_name: str, definition: Any, expected_kind: str) -> None:
+        if not isinstance(definition, dict):
+            raise ServiceError(400, "invalid_model_role", f"{role_name} must be an object.")
+
+        kind = definition.get("kind")
+        provider = definition.get("provider")
+        model = definition.get("model")
+        endpoint_ref = definition.get("endpoint_ref")
+        api_key = definition.get("api_key")
+        reasoning_effort = definition.get("reasoning_effort")
+
+        if kind not in {"generation", "embedding"}:
+            raise ServiceError(400, "invalid_model_role_kind", f"{role_name}.kind is invalid.")
+        if kind != expected_kind:
+            raise ServiceError(400, "model_role_kind_mismatch", f"{role_name} requires kind={expected_kind}.")
+        if not isinstance(provider, str) or not provider.strip():
+            raise ServiceError(400, "invalid_model_role_provider", f"{role_name}.provider is required.")
+        if not isinstance(model, str) or not model.strip():
+            raise ServiceError(400, "invalid_model_role_model", f"{role_name}.model is required.")
+        if not isinstance(endpoint_ref, str) or not endpoint_ref.strip():
+            raise ServiceError(400, "invalid_model_role_endpoint_ref", f"{role_name}.endpoint_ref is required.")
+        if not isinstance(api_key, str):
+            raise ServiceError(400, "invalid_model_role_api_key", f"{role_name}.api_key must be a string.")
+        if reasoning_effort is not None and not isinstance(reasoning_effort, str):
+            raise ServiceError(400, "invalid_reasoning_effort", f"{role_name}.reasoning_effort must be a string.")
 
     def _normalize_model_preset_definition(self, definition: dict[str, Any]) -> dict[str, Any]:
-        # 複製
         normalized = {
             **definition,
         }
+        display_name = normalized.get("display_name")
+        if isinstance(display_name, str):
+            normalized["display_name"] = display_name.strip()
+
         roles = definition.get("roles")
         if not isinstance(roles, dict):
             return normalized
 
-        # ロールNormalization
         normalized_roles: dict[str, Any] = {}
         for role_name, role_definition in roles.items():
             if not isinstance(role_definition, dict):
                 normalized_roles[role_name] = role_definition
                 continue
-            normalized_role = {
-                **role_definition,
-            }
-            reasoning_effort = normalized_role.get("reasoning_effort")
+            normalized_role: dict[str, Any] = {}
+            for field_name in ("kind", "provider", "model", "endpoint_ref", "api_key"):
+                if field_name not in role_definition:
+                    continue
+                value = role_definition.get(field_name)
+                if isinstance(value, str):
+                    normalized_role[field_name] = value.strip()
+                else:
+                    normalized_role[field_name] = value
+            reasoning_effort = role_definition.get("reasoning_effort")
             if isinstance(reasoning_effort, str):
                 trimmed_reasoning_effort = reasoning_effort.strip()
                 if trimmed_reasoning_effort:
                     normalized_role["reasoning_effort"] = trimmed_reasoning_effort
-                else:
-                    normalized_role.pop("reasoning_effort", None)
-            elif reasoning_effort is None:
-                normalized_role.pop("reasoning_effort", None)
             normalized_roles[role_name] = normalized_role
 
-        # 結果
         normalized["roles"] = normalized_roles
         return normalized
 
-    def _validate_model_profile_definition(self, model_profile_id: str, definition: dict[str, Any]) -> None:
-        # 形状
-        if definition.get("model_profile_id") != model_profile_id:
-            raise ServiceError(400, "model_profile_id_mismatch", "model_profile_id must match the path.")
-        kind = definition.get("kind")
-        model = definition.get("model")
-        base_url = definition.get("base_url")
-        auth = definition.get("auth")
-        if kind not in {"generation", "embedding"}:
-            raise ServiceError(400, "invalid_model_profile_kind", "kind must be generation or embedding.")
-        if not isinstance(model, str) or not model.strip():
-            raise ServiceError(400, "invalid_model", "model is required.")
-        if base_url is not None and not isinstance(base_url, str):
-            raise ServiceError(400, "invalid_model_base_url", "base_url must be a string.")
-        if auth is not None and not isinstance(auth, dict):
-            raise ServiceError(400, "invalid_model_auth", "auth must be an object.")
+    def _public_model_preset(self, definition: dict[str, Any]) -> dict[str, Any]:
+        public_definition = deepcopy(definition)
+        roles = public_definition.get("roles", {})
+        if not isinstance(roles, dict):
+            return public_definition
+        public_definition["roles"] = {
+            role_name: self._public_model_role(role_definition)
+            for role_name, role_definition in roles.items()
+        }
+        return public_definition
+
+    def _public_model_role(self, definition: Any) -> Any:
+        if not isinstance(definition, dict):
+            return definition
+        public_definition = {
+            **definition,
+            "api_key_present": bool(definition.get("api_key")),
+        }
+        public_definition.pop("api_key", None)
+        return public_definition
 
     def _delete_resource(
         self,
@@ -717,7 +648,6 @@ class ServiceConfigMixin:
         in_use_code: str,
         deleted_key: str,
     ) -> dict[str, Any]:
-        # 未検出
         if entry_id not in entries:
             raise ServiceError(404, not_found_code, f"The requested {deleted_key} does not exist.")
         if entry_id == selected_id:

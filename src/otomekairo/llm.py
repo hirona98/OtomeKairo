@@ -30,15 +30,14 @@ class LLMClient:
     def generate_recall_hint(
         self,
         *,
-        profile: dict,
-        role_settings: dict,
+        role_definition: dict,
         observation_text: str,
         recent_turns: list[dict],
         current_time: str,
     ) -> dict[str, Any]:
         # モック経路
-        if self._is_mock_profile(profile):
-            return self.mock_client.generate_recall_hint(profile, observation_text, recent_turns, current_time)
+        if self._is_mock_role_definition(role_definition):
+            return self.mock_client.generate_recall_hint(role_definition, observation_text, recent_turns, current_time)
 
         # プロンプト構築
         messages = [
@@ -55,7 +54,7 @@ class LLMClient:
         # 再試行
         last_contract_error: LLMError | None = None
         for attempt in range(2):
-            content = self._complete_text(profile=profile, role_settings=role_settings, messages=messages)
+            content = self._complete_text(role_definition=role_definition, messages=messages)
             try:
                 return self._parse_recall_hint_payload(content)
             except LLMError as exc:
@@ -71,8 +70,7 @@ class LLMClient:
     def generate_decision(
         self,
         *,
-        profile: dict,
-        role_settings: dict,
+        role_definition: dict,
         observation_text: str,
         recent_turns: list[dict],
         time_context: dict[str, Any],
@@ -81,9 +79,9 @@ class LLMClient:
         recall_pack: dict[str, Any],
     ) -> dict[str, Any]:
         # モック経路
-        if self._is_mock_profile(profile):
+        if self._is_mock_role_definition(role_definition):
             return self.mock_client.generate_decision(
-                profile,
+                role_definition,
                 observation_text,
                 recent_turns,
                 time_context,
@@ -112,7 +110,7 @@ class LLMClient:
         ]
 
         # 補完
-        content = self._complete_text(profile=profile, role_settings=role_settings, messages=messages)
+        content = self._complete_text(role_definition=role_definition, messages=messages)
         payload = self._parse_json_object(content)
         validate_decision_contract(payload)
         return payload
@@ -120,8 +118,7 @@ class LLMClient:
     def generate_reply(
         self,
         *,
-        profile: dict,
-        role_settings: dict,
+        role_definition: dict,
         persona: dict,
         observation_text: str,
         recent_turns: list[dict],
@@ -132,9 +129,9 @@ class LLMClient:
         decision: dict,
     ) -> dict[str, Any]:
         # モック経路
-        if self._is_mock_profile(profile):
+        if self._is_mock_role_definition(role_definition):
             return self.mock_client.generate_reply(
-                profile,
+                role_definition,
                 persona,
                 observation_text,
                 recent_turns,
@@ -166,7 +163,7 @@ class LLMClient:
         ]
 
         # 補完
-        content = self._complete_text(profile=profile, role_settings=role_settings, messages=messages)
+        content = self._complete_text(role_definition=role_definition, messages=messages)
         reply_text = content.strip()
         if not reply_text:
             raise LLMError("Reply generation returned empty content.")
@@ -174,15 +171,14 @@ class LLMClient:
         # payload作成
         return {
             "reply_text": reply_text,
-            "reply_style_notes": f"model={profile.get('model')}",
+            "reply_style_notes": f"model={role_definition.get('model')}",
             "confidence_note": "litellm_model",
         }
 
     def generate_memory_interpretation(
         self,
         *,
-        profile: dict,
-        role_settings: dict,
+        role_definition: dict,
         observation_text: str,
         recall_hint: dict,
         decision: dict,
@@ -190,9 +186,9 @@ class LLMClient:
         current_time: str,
     ) -> dict[str, Any]:
         # モック経路
-        if self._is_mock_profile(profile):
+        if self._is_mock_role_definition(role_definition):
             return self.mock_client.generate_memory_interpretation(
-                profile,
+                role_definition,
                 observation_text,
                 recall_hint,
                 decision,
@@ -221,7 +217,7 @@ class LLMClient:
         last_contract_error: LLMError | None = None
         attempt_messages = list(messages)
         for attempt in range(2):
-            content = self._complete_text(profile=profile, role_settings=role_settings, messages=attempt_messages)
+            content = self._complete_text(role_definition=role_definition, messages=attempt_messages)
             try:
                 payload = self._parse_json_object(content)
                 validate_memory_interpretation_contract(payload)
@@ -250,8 +246,7 @@ class LLMClient:
     def generate_embeddings(
         self,
         *,
-        profile: dict,
-        role_settings: dict,
+        role_definition: dict,
         texts: list[str],
     ) -> list[list[float]]:
         # 空
@@ -259,20 +254,20 @@ class LLMClient:
             return []
 
         # 次元
-        embedding_dimension = role_settings.get("embedding_dimension")
+        embedding_dimension = self._embedding_dimension(role_definition)
         if not isinstance(embedding_dimension, int) or embedding_dimension <= 0:
             raise LLMError("embedding_dimension must be a positive integer.")
 
         # モック経路
-        if self._is_mock_profile(profile):
-            return self.mock_client.generate_embeddings(profile, texts, embedding_dimension)
+        if self._is_mock_role_definition(role_definition):
+            return self.mock_client.generate_embeddings(role_definition, texts, embedding_dimension)
 
         # OpenRouter の embedding だけは公式 embeddings API を直接たたく。
         # それ以外の embedding は LiteLLM 経由に寄せている。
         # OpenRouter 側の互換差分をこの分岐へ閉じ込めるため。
         # OpenRouter経路
-        if self._is_openrouter_embedding_profile(profile):
-            response = self._request_openrouter_embeddings(profile=profile, texts=texts)
+        if self._is_openrouter_embedding_role_definition(role_definition):
+            response = self._request_openrouter_embeddings(role_definition=role_definition, texts=texts)
             return self._extract_embedding_vectors(
                 response,
                 expected_count=len(texts),
@@ -285,13 +280,13 @@ class LLMClient:
 
         # リクエスト構築
         request_kwargs: dict[str, Any] = {
-            "model": self._resolve_litellm_model(profile),
+            "model": self._resolve_litellm_model(role_definition),
             "input": texts,
         }
-        api_base = profile.get("base_url")
+        api_base = self._resolve_api_base(role_definition)
         if isinstance(api_base, str) and api_base.strip():
             request_kwargs["api_base"] = api_base.strip()
-        api_key = self._resolve_api_key(profile)
+        api_key = self._resolve_api_key(role_definition)
         if api_key is not None:
             request_kwargs["api_key"] = api_key
 
@@ -313,8 +308,7 @@ class LLMClient:
     def _complete_text(
         self,
         *,
-        profile: dict,
-        role_settings: dict,
+        role_definition: dict,
         messages: list[dict[str, str]],
     ) -> str:
         # インポート
@@ -322,19 +316,16 @@ class LLMClient:
 
         # リクエスト構築
         request_kwargs: dict[str, Any] = {
-            "model": self._resolve_litellm_model(profile),
+            "model": self._resolve_litellm_model(role_definition),
             "messages": messages,
         }
-        api_base = profile.get("base_url")
+        api_base = self._resolve_api_base(role_definition)
         if isinstance(api_base, str) and api_base.strip():
             request_kwargs["api_base"] = api_base.strip()
-        api_key = self._resolve_api_key(profile)
+        api_key = self._resolve_api_key(role_definition)
         if api_key is not None:
             request_kwargs["api_key"] = api_key
-        max_tokens = role_settings.get("max_tokens")
-        if isinstance(max_tokens, int) and max_tokens > 0:
-            request_kwargs["max_tokens"] = max_tokens
-        reasoning_effort = role_settings.get("reasoning_effort")
+        reasoning_effort = role_definition.get("reasoning_effort")
         if isinstance(reasoning_effort, str) and reasoning_effort.strip():
             request_kwargs["reasoning_effort"] = reasoning_effort.strip()
 
@@ -369,7 +360,7 @@ class LLMClient:
     def _build_recall_hint_system_prompt(self) -> str:
         # プロンプト
         return (
-            "あなたは OtomeKairo の recall_hint_generation です。\n"
+            "あなたは OtomeKairo の observation_interpretation です。\n"
             "観測文を分析し、JSON オブジェクト 1 個だけを返してください。\n"
             "Markdown、コードフェンス、説明文は禁止です。\n"
             "primary_intent は次のいずれかです: "
@@ -407,24 +398,24 @@ class LLMClient:
         # プロンプト
         return (
             "あなたは OtomeKairo の decision_generation です。\n"
-            "観測文に対して reply / noop / future_act のいずれかを決め、JSON オブジェクト 1 個だけを返してください。\n"
+            "観測文に対して reply / noop / pending_intent のいずれかを決め、JSON オブジェクト 1 個だけを返してください。\n"
             "Markdown、コードフェンス、説明文は禁止です。\n"
             "入力には recent_turns と internal_context が含まれます。\n"
             "internal_context には TimeContext, AffectContext, RecallPack が入ります。\n"
             "recall_hint.secondary_intents は補助意図として、継続性や確認必要性の補助にだけ使ってください。\n"
             "RecallPack.conflicts があるときは requires_confirmation=true を優先してください。\n"
-            "active_commitments, episodic_evidence, event_evidence は reply と future_act の継続根拠に使ってください。\n"
-            "future_act は『今は返さないが、後で触れる価値がある』場合だけ選んでください。\n"
-            "明示的な会話要求に自然に返せるなら reply を優先し、future_act を乱用しないでください。\n"
+            "active_commitments, episodic_evidence, event_evidence は reply と pending_intent の継続根拠に使ってください。\n"
+            "pending_intent は『今は返さないが、後で触れる価値がある』場合だけ選んでください。\n"
+            "明示的な会話要求に自然に返せるなら reply を優先し、pending_intent を乱用しないでください。\n"
             "返すキーは必ず次の 5 個です:\n"
-            "- kind: \"reply\" または \"noop\" または \"future_act\"\n"
+            "- kind: \"reply\" または \"noop\" または \"pending_intent\"\n"
             "- reason_code: string\n"
             "- reason_summary: string\n"
             "- requires_confirmation: boolean\n"
-            "- future_act: null または object\n"
-            "kind が future_act のときだけ future_act object を返してください。\n"
-            "future_act object のキーは intent_kind, intent_summary, dedupe_key の 3 個に固定してください。\n"
-            "kind が future_act のとき requires_confirmation は false にしてください。\n"
+            "- pending_intent: null または object\n"
+            "kind が pending_intent のときだけ pending_intent object を返してください。\n"
+            "pending_intent object のキーは intent_kind, intent_summary, dedupe_key の 3 個に固定してください。\n"
+            "kind が pending_intent のとき requires_confirmation は false にしてください。\n"
             "空文字や意味のない入力は noop を選んでください。"
         )
 
@@ -502,9 +493,9 @@ class LLMClient:
         # プロンプト
         return (
             "あなたは OtomeKairo の memory_interpretation です。\n"
-            "会話 1 サイクルから episode_digest, candidate_memory_units, affect_updates を抽出し、JSON オブジェクト 1 個だけを返してください。\n"
+            "会話 1 サイクルから episode, candidate_memory_units, affect_updates を抽出し、JSON オブジェクト 1 個だけを返してください。\n"
             "Markdown、コードフェンス、説明文は禁止です。\n"
-            "返すトップレベルキーは episode_digest, candidate_memory_units, affect_updates の 3 つだけです。\n"
+            "返すトップレベルキーは episode, candidate_memory_units, affect_updates の 3 つだけです。\n"
             "キー名は完全一致させ、余計なキーを足してはいけません。\n"
             "candidate_memory_units は、今後の会話や判断に効く継続理解だけを入れてください。\n"
             "弱い雑談断片や一時判断は memory_unit にしないでください。\n"
@@ -524,18 +515,19 @@ class LLMClient:
             "自分とユーザーの距離感、信頼、安心感、話しやすさ、支え方は relationship / self|user を使ってください。\n"
             "ai, agent, meta_communication などの独自 scope_type は使ってはいけません。\n"
             "commitment_state は commitment のときだけ open, waiting_confirmation, on_hold, done, cancelled のいずれかを使い、それ以外では null にしてください。\n"
-            "episode_digest は episode_type, primary_scope_type, primary_scope_key, summary_text, outcome_text, open_loops, salience の 7 キーだけを持つ object にしてください。\n"
+            "episode は episode_type, episode_series_id, primary_scope_type, primary_scope_key, summary_text, outcome_text, open_loops, salience の 8 キーだけを持つ object にしてください。\n"
             "candidate_memory_units の各要素は memory_type, scope_type, scope_key, subject_ref, predicate, object_ref_or_value, summary_text, status, commitment_state, confidence, salience, valid_from, valid_to, qualifiers, reason の 15 キーだけを持つ object にしてください。\n"
             "affect_updates の各要素は layer, target_scope_type, target_scope_key, affect_label, intensity の 5 キーだけを持つ object にしてください。\n"
             "affect_updates.layer は surface または background のどちらかだけを使ってください。\n"
             "感情更新に自信がない場合や、軽い雑談で持続的な感情状態が読めない場合は affect_updates を空配列にしてください。\n"
-            "episode_digest.open_loops は短い文字列の配列にしてください。\n"
+            "episode.episode_series_id は通常 null にし、episode.open_loops は短い文字列の配列にしてください。\n"
             "outcome_text, object_ref_or_value, valid_from, valid_to は不要なら null を入れてください。\n"
             "candidate_memory_units と affect_updates は不要なら空配列にしてください。\n"
             "例:\n"
             "{\n"
-            '  "episode_digest": {\n'
+            '  "episode": {\n'
             '    "episode_type": "conversation",\n'
+            '    "episode_series_id": null,\n'
             '    "primary_scope_type": "user",\n'
             '    "primary_scope_key": "user",\n'
             '    "summary_text": "ユーザーが軽いテスト発話をした。",\n'
@@ -575,8 +567,8 @@ class LLMClient:
             "前回の出力は memory_interpretation 契約を満たしていませんでした。\n"
             f"validator_error: {validation_error}\n"
             "同じ意味を保ったまま、JSON オブジェクト 1 個だけを返し直してください。\n"
-            "トップレベルキーは episode_digest, candidate_memory_units, affect_updates の 3 つだけです。\n"
-            "episode_digest には episode_type, primary_scope_type, primary_scope_key, summary_text, outcome_text, open_loops, salience だけを入れてください。\n"
+            "トップレベルキーは episode, candidate_memory_units, affect_updates の 3 つだけです。\n"
+            "episode には episode_type, episode_series_id, primary_scope_type, primary_scope_key, summary_text, outcome_text, open_loops, salience だけを入れてください。\n"
             "candidate_memory_units の各要素には memory_type, scope_type, scope_key, subject_ref, predicate, object_ref_or_value, summary_text, status, commitment_state, confidence, salience, valid_from, valid_to, qualifiers, reason だけを入れてください。\n"
             "affect_updates の各要素には layer, target_scope_type, target_scope_key, affect_label, intensity だけを入れてください。\n"
             "affect_updates.layer は surface または background だけです。\n"
@@ -707,68 +699,62 @@ class LLMClient:
         return vectors
 
     # 設定補助
-    def _is_mock_profile(self, profile: dict) -> bool:
-        # model=mock は開発用の内蔵ロジックへ切り替える予約値として扱う。
-        return profile.get("model") == "mock"
+    def _is_mock_role_definition(self, role_definition: dict) -> bool:
+        # provider=mock または model=mock* は開発用の内蔵ロジックへ切り替える。
+        provider = role_definition.get("provider")
+        if isinstance(provider, str) and provider.strip() == "mock":
+            return True
+        model = role_definition.get("model")
+        return isinstance(model, str) and model.strip().startswith("mock")
 
-    def _is_openrouter_embedding_profile(self, profile: dict) -> bool:
+    def _is_openrouter_embedding_role_definition(self, role_definition: dict) -> bool:
         # モデル確認
-        model = profile.get("model")
+        model = role_definition.get("model")
         if isinstance(model, str) and model.strip().startswith("openrouter/"):
             return True
 
-        # base_url確認
-        api_base = profile.get("base_url")
-        if isinstance(api_base, str) and "openrouter.ai" in api_base:
+        # provider確認
+        provider = role_definition.get("provider")
+        if isinstance(provider, str) and provider.strip() == "openrouter":
             return True
 
         # 既定
         return False
 
-    def _resolve_litellm_model(self, profile: dict) -> str:
+    def _resolve_litellm_model(self, role_definition: dict) -> str:
         # 生値値
-        model = profile.get("model")
+        model = role_definition.get("model")
         if not isinstance(model, str) or not model.strip():
-            raise LLMError("model_profile.model is missing.")
+            raise LLMError("role_definition.model is missing.")
         return model.strip()
 
-    def _resolve_openrouter_embedding_model(self, profile: dict) -> str:
+    def _resolve_openrouter_embedding_model(self, role_definition: dict) -> str:
         # 正規化
-        model = self._resolve_litellm_model(profile)
+        model = self._resolve_litellm_model(role_definition)
         if model.startswith("openrouter/"):
             return model.removeprefix("openrouter/")
         return model
 
-    def _resolve_openrouter_api_base(self, profile: dict) -> str:
-        # カスタムbase_url
-        api_base = profile.get("base_url")
-        if isinstance(api_base, str) and api_base.strip():
-            normalized = api_base.strip().rstrip("/")
-            if "openrouter.ai" in normalized and "/api/v1" not in normalized:
-                normalized = f"{normalized}/api/v1"
-            if normalized.endswith("/embeddings"):
-                return normalized.rsplit("/", 1)[0]
-            return normalized
-
-        # 既定のbase_url
+    def _resolve_openrouter_api_base(self, role_definition: dict) -> str:
+        # endpoint_ref は論理参照として保持し、実行時の OpenRouter 経路は既定値へ寄せる。
         return OPENROUTER_DEFAULT_API_BASE
 
     def _request_openrouter_embeddings(
         self,
         *,
-        profile: dict,
+        role_definition: dict,
         texts: list[str],
     ) -> dict[str, Any]:
         # OpenRouter embedding は LiteLLM ではなく公式 API の戻り形に合わせて扱う。
         # APIキー
-        api_key = self._resolve_api_key(profile)
+        api_key = self._resolve_api_key(role_definition)
         if api_key is None:
             raise LLMError("OpenRouter embedding requires auth token.")
 
         # リクエストData
-        api_base = self._resolve_openrouter_api_base(profile)
+        api_base = self._resolve_openrouter_api_base(role_definition)
         payload = {
-            "model": self._resolve_openrouter_embedding_model(profile),
+            "model": self._resolve_openrouter_embedding_model(role_definition),
             "input": texts,
             "encoding_format": "float",
         }
@@ -830,20 +816,21 @@ class LLMClient:
         # 代替
         return stripped
 
-    def _resolve_api_key(self, profile: dict) -> str | None:
-        # 認証情報読み取り
-        auth = profile.get("auth")
-        if not isinstance(auth, dict):
-            return None
-        if auth.get("type") == "none":
-            return None
-
-        # トークン解決
-        for key in ("token", "api_key", "key"):
-            value = auth.get(key)
-            if isinstance(value, str) and value.strip():
-                return value.strip()
+    def _resolve_api_base(self, role_definition: dict) -> str | None:
+        provider = role_definition.get("provider")
+        if isinstance(provider, str) and provider.strip() == "openrouter":
+            return OPENROUTER_DEFAULT_API_BASE
         return None
+
+    def _resolve_api_key(self, role_definition: dict) -> str | None:
+        value = role_definition.get("api_key")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        return None
+
+    def _embedding_dimension(self, role_definition: dict) -> int:
+        _ = role_definition
+        return 3072
 
     def _format_internal_context(
         self,
@@ -869,7 +856,7 @@ class LLMClient:
             "relationship_model": [self._compact_memory_context_item(item) for item in recall_pack.get("relationship_model", [])],
             "active_topics": [self._compact_topic_context_item(item) for item in recall_pack.get("active_topics", [])],
             "active_commitments": [self._compact_memory_context_item(item) for item in recall_pack.get("active_commitments", [])],
-            "episodic_evidence": [self._compact_digest_context_item(item) for item in recall_pack.get("episodic_evidence", [])],
+            "episodic_evidence": [self._compact_episode_context_item(item) for item in recall_pack.get("episodic_evidence", [])],
             "event_evidence": [self._compact_event_evidence_item(item) for item in recall_pack.get("event_evidence", [])],
             "conflicts": [self._compact_conflict_context_item(item) for item in recall_pack.get("conflicts", [])],
         }
@@ -894,13 +881,13 @@ class LLMClient:
 
     def _compact_topic_context_item(self, item: dict[str, Any]) -> dict[str, Any]:
         # 要約トピック
-        if item.get("source_kind") == "episode_digest":
-            return self._compact_digest_context_item(item)
+        if item.get("source_kind") == "episode":
+            return self._compact_episode_context_item(item)
 
         # 記憶トピック
         return self._compact_memory_context_item(item)
 
-    def _compact_digest_context_item(self, item: dict[str, Any]) -> dict[str, Any]:
+    def _compact_episode_context_item(self, item: dict[str, Any]) -> dict[str, Any]:
         # payload作成
         payload = {
             "primary_scope_type": item["primary_scope_type"],

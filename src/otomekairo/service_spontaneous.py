@@ -10,8 +10,8 @@ from otomekairo.service_common import (
     BACKGROUND_DESKTOP_WATCH_POLL_SECONDS,
     BACKGROUND_WAKE_POLL_SECONDS,
     DESKTOP_WATCH_CAPTURE_TIMEOUT_MS,
-    FUTURE_ACT_EXPIRES_HOURS,
-    FUTURE_ACT_NOT_BEFORE_MINUTES,
+    PENDING_INTENT_EXPIRES_HOURS,
+    PENDING_INTENT_NOT_BEFORE_MINUTES,
     WAKE_REPLY_COOLDOWN_MINUTES,
     ServiceError,
 )
@@ -111,7 +111,7 @@ class ServiceSpontaneousMixin:
 
             try:
                 # パイプライン
-                selected_candidate = self._select_due_future_act_candidate(
+                selected_candidate = self._select_due_pending_intent_candidate(
                     memory_set_id=state["selected_memory_set_id"],
                     current_time=started_at,
                 )
@@ -290,7 +290,7 @@ class ServiceSpontaneousMixin:
             self._set_last_desktop_watch_at(self._now_iso())
 
             # 観測
-            selected_candidate = self._select_due_future_act_candidate(
+            selected_candidate = self._select_due_pending_intent_candidate(
                 memory_set_id=state["selected_memory_set_id"],
                 current_time=started_at,
             )
@@ -363,29 +363,29 @@ class ServiceSpontaneousMixin:
                     failure_reason=str(exc),
                 )
 
-    def _future_act_trace_summary(
+    def _pending_intent_trace_summary(
         self,
         *,
         cycle_id: str,
         decision: dict[str, Any],
     ) -> dict[str, Any] | None:
         # 確認
-        if decision.get("kind") != "future_act":
+        if decision.get("kind") != "pending_intent":
             return None
-        future_act = decision.get("future_act")
-        if not isinstance(future_act, dict):
+        pending_intent = decision.get("pending_intent")
+        if not isinstance(pending_intent, dict):
             return None
 
         # 結果
         return {
             "source_cycle_id": cycle_id,
-            "intent_kind": future_act.get("intent_kind"),
-            "intent_summary": future_act.get("intent_summary"),
+            "intent_kind": pending_intent.get("intent_kind"),
+            "intent_summary": pending_intent.get("intent_summary"),
             "reason_summary": decision.get("reason_summary"),
-            "dedupe_key": future_act.get("dedupe_key"),
+            "dedupe_key": pending_intent.get("dedupe_key"),
         }
 
-    def _select_due_future_act_candidate(
+    def _select_due_pending_intent_candidate(
         self,
         *,
         memory_set_id: str,
@@ -393,10 +393,10 @@ class ServiceSpontaneousMixin:
     ) -> dict[str, Any] | None:
         # ロック下読み取り
         with self._runtime_state_lock:
-            self._prune_future_act_candidates(current_time=current_time)
+            self._prune_pending_intent_candidates(current_time=current_time)
             current_dt = self._parse_iso(current_time)
             eligible = []
-            for candidate in self._future_act_candidates:
+            for candidate in self._pending_intent_candidates:
                 if candidate.get("memory_set_id") != memory_set_id:
                     continue
                 not_before = candidate.get("not_before")
@@ -413,7 +413,7 @@ class ServiceSpontaneousMixin:
             )
             return dict(eligible[0])
 
-    def _apply_future_act_candidate(
+    def _apply_pending_intent_candidate(
         self,
         *,
         cycle_id: str,
@@ -422,23 +422,23 @@ class ServiceSpontaneousMixin:
         occurred_at: str,
     ) -> dict[str, Any] | None:
         # 確認
-        base_summary = self._future_act_trace_summary(cycle_id=cycle_id, decision=decision)
+        base_summary = self._pending_intent_trace_summary(cycle_id=cycle_id, decision=decision)
         if base_summary is None:
             return None
 
         # ロック下upsert
         with self._runtime_state_lock:
-            self._prune_future_act_candidates(current_time=occurred_at)
-            existing = self._find_future_act_candidate(
+            self._prune_pending_intent_candidates(current_time=occurred_at)
+            existing = self._find_pending_intent_candidate(
                 memory_set_id=memory_set_id,
                 dedupe_key=base_summary["dedupe_key"],
                 current_time=occurred_at,
             )
-            not_before = self._future_act_not_before(occurred_at)
-            expires_at = self._future_act_expires_at(occurred_at)
+            not_before = self._pending_intent_not_before(occurred_at)
+            expires_at = self._pending_intent_expires_at(occurred_at)
             if existing is None:
                 candidate = {
-                    "candidate_id": f"future_act_candidate:{uuid.uuid4().hex}",
+                    "candidate_id": f"pending_intent_candidate:{uuid.uuid4().hex}",
                     "memory_set_id": memory_set_id,
                     "intent_kind": base_summary["intent_kind"],
                     "intent_summary": base_summary["intent_summary"],
@@ -450,7 +450,7 @@ class ServiceSpontaneousMixin:
                     "created_at": occurred_at,
                     "updated_at": occurred_at,
                 }
-                self._future_act_candidates.append(candidate)
+                self._pending_intent_candidates.append(candidate)
                 queue_action = "created"
             else:
                 candidate = existing
@@ -493,11 +493,11 @@ class ServiceSpontaneousMixin:
                     if isinstance(dedupe_key, str) and dedupe_key:
                         reply_history = self._wake_runtime_state.setdefault("reply_history_by_dedupe", {})
                         reply_history[dedupe_key] = current_time
-                    self._remove_future_act_candidate(selected_candidate.get("candidate_id"))
+                    self._remove_pending_intent_candidate(selected_candidate.get("candidate_id"))
             return
 
         # 将来行動
-        if decision.get("kind") == "future_act":
+        if decision.get("kind") == "pending_intent":
             return
 
     def _set_last_desktop_watch_at(self, current_time: str) -> None:
@@ -769,18 +769,18 @@ class ServiceSpontaneousMixin:
             return None
         return self._clamp(stripped, limit=limit)
 
-    def _remove_future_act_candidate(self, candidate_id: Any) -> None:
+    def _remove_pending_intent_candidate(self, candidate_id: Any) -> None:
         # 確認
         if not isinstance(candidate_id, str) or not candidate_id:
             return
         with self._runtime_state_lock:
-            self._future_act_candidates = [
+            self._pending_intent_candidates = [
                 candidate
-                for candidate in self._future_act_candidates
+                for candidate in self._pending_intent_candidates
                 if candidate.get("candidate_id") != candidate_id
             ]
 
-    def _find_future_act_candidate(
+    def _find_pending_intent_candidate(
         self,
         *,
         memory_set_id: str,
@@ -790,7 +790,7 @@ class ServiceSpontaneousMixin:
         # ロック下走査
         with self._runtime_state_lock:
             current_dt = self._parse_iso(current_time)
-            for candidate in self._future_act_candidates:
+            for candidate in self._pending_intent_candidates:
                 if candidate.get("memory_set_id") != memory_set_id:
                     continue
                 if candidate.get("dedupe_key") != dedupe_key:
@@ -801,21 +801,21 @@ class ServiceSpontaneousMixin:
                 return candidate
             return None
 
-    def _prune_future_act_candidates(self, *, current_time: str) -> None:
+    def _prune_pending_intent_candidates(self, *, current_time: str) -> None:
         # ロック下絞り込み
         with self._runtime_state_lock:
             current_dt = self._parse_iso(current_time)
-            self._future_act_candidates = [
+            self._pending_intent_candidates = [
                 candidate
-                for candidate in self._future_act_candidates
+                for candidate in self._pending_intent_candidates
                 if not isinstance(candidate.get("expires_at"), str)
                 or self._parse_iso(candidate["expires_at"]) > current_dt
             ]
 
-    def _clear_future_act_candidates(self) -> None:
+    def _clear_pending_intent_candidates(self) -> None:
         # リセット
         with self._runtime_state_lock:
-            self._future_act_candidates = []
+            self._pending_intent_candidates = []
             self._wake_runtime_state = {
                 "last_wake_at": None,
                 "last_spontaneous_at": None,
@@ -826,10 +826,10 @@ class ServiceSpontaneousMixin:
                 "last_watch_at": None,
             }
 
-    def _future_act_not_before(self, occurred_at: str) -> str:
+    def _pending_intent_not_before(self, occurred_at: str) -> str:
         # オフセット
-        return (self._parse_iso(occurred_at) + timedelta(minutes=FUTURE_ACT_NOT_BEFORE_MINUTES)).isoformat()
+        return (self._parse_iso(occurred_at) + timedelta(minutes=PENDING_INTENT_NOT_BEFORE_MINUTES)).isoformat()
 
-    def _future_act_expires_at(self, occurred_at: str) -> str:
+    def _pending_intent_expires_at(self, occurred_at: str) -> str:
         # オフセット
-        return (self._parse_iso(occurred_at) + timedelta(hours=FUTURE_ACT_EXPIRES_HOURS)).isoformat()
+        return (self._parse_iso(occurred_at) + timedelta(hours=PENDING_INTENT_EXPIRES_HOURS)).isoformat()
