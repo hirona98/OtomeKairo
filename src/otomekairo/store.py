@@ -893,94 +893,155 @@ class SQLiteMemoryStore(StoreSchemaMixin):
     ) -> None:
         # トランザクション
         with self._memory_db() as conn:
-            # 旧ID対応表
-            cycle_id_map: dict[str, str] = {}
-            event_id_map: dict[str, str] = {}
-            episode_id_map: dict[str, str] = {}
-            memory_unit_id_map: dict[str, str] = {}
+            cycle_id_map, event_id_map = self._clone_event_records(
+                conn,
+                source_memory_set_id=source_memory_set_id,
+                target_memory_set_id=target_memory_set_id,
+            )
+            episode_id_map = self._clone_episode_records(
+                conn,
+                source_memory_set_id=source_memory_set_id,
+                target_memory_set_id=target_memory_set_id,
+                cycle_id_map=cycle_id_map,
+                event_id_map=event_id_map,
+            )
+            memory_unit_id_map = self._clone_memory_unit_records(
+                conn,
+                source_memory_set_id=source_memory_set_id,
+                target_memory_set_id=target_memory_set_id,
+                event_id_map=event_id_map,
+            )
+            self._clone_revision_records(
+                conn,
+                source_memory_set_id=source_memory_set_id,
+                target_memory_set_id=target_memory_set_id,
+                event_id_map=event_id_map,
+                memory_unit_id_map=memory_unit_id_map,
+            )
+            self._clone_affect_state_records(
+                conn,
+                source_memory_set_id=source_memory_set_id,
+                target_memory_set_id=target_memory_set_id,
+            )
+            self._clone_reflection_run_records(
+                conn,
+                source_memory_set_id=source_memory_set_id,
+                target_memory_set_id=target_memory_set_id,
+                episode_id_map=episode_id_map,
+                memory_unit_id_map=memory_unit_id_map,
+            )
+            self._clone_vector_index_entries(
+                conn,
+                source_memory_set_id=source_memory_set_id,
+                target_memory_set_id=target_memory_set_id,
+                episode_id_map=episode_id_map,
+                memory_unit_id_map=memory_unit_id_map,
+            )
 
-            # event 複製
-            source_events = self._load_payload_rows(conn, "events", source_memory_set_id)
-            cloned_events: list[dict[str, Any]] = []
-            for record in source_events:
-                old_event_id = record["event_id"]
-                new_event_id = f"event:{uuid.uuid4().hex}"
-                event_id_map[old_event_id] = new_event_id
-                source_cycle_id = record["cycle_id"]
-                cycle_id_map.setdefault(source_cycle_id, f"cycle:{uuid.uuid4().hex}")
-                cloned_events.append(
-                    {
-                        **record,
-                        "event_id": new_event_id,
-                        "cycle_id": cycle_id_map[source_cycle_id],
-                        "memory_set_id": target_memory_set_id,
-                    }
-                )
-            for record in cloned_events:
-                self._insert_event(conn, record)
+    def _clone_event_records(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        source_memory_set_id: str,
+        target_memory_set_id: str,
+    ) -> tuple[dict[str, str], dict[str, str]]:
+        cycle_id_map: dict[str, str] = {}
+        event_id_map: dict[str, str] = {}
+        source_events = self._load_payload_rows(conn, "events", source_memory_set_id)
+        for record in source_events:
+            source_cycle_id = record["cycle_id"]
+            cycle_id_map.setdefault(source_cycle_id, f"cycle:{uuid.uuid4().hex}")
+            old_event_id = record["event_id"]
+            event_id_map[old_event_id] = f"event:{uuid.uuid4().hex}"
+            self._insert_event(
+                conn,
+                {
+                    **record,
+                    "event_id": event_id_map[old_event_id],
+                    "cycle_id": cycle_id_map[source_cycle_id],
+                    "memory_set_id": target_memory_set_id,
+                },
+            )
+        return cycle_id_map, event_id_map
 
-            # episode 複製
-            source_episodes = self._load_payload_rows(conn, "episodes", source_memory_set_id)
-            cloned_episodes: list[dict[str, Any]] = []
-            for record in source_episodes:
-                old_episode_id = record["episode_id"]
-                new_episode_id = f"episode:{uuid.uuid4().hex}"
-                episode_id_map[old_episode_id] = new_episode_id
-                source_cycle_id = record["cycle_id"]
-                cycle_id_map.setdefault(source_cycle_id, f"cycle:{uuid.uuid4().hex}")
-                cloned_episodes.append(
-                    {
-                        **record,
-                        "episode_id": new_episode_id,
-                        "cycle_id": cycle_id_map[source_cycle_id],
-                        "memory_set_id": target_memory_set_id,
-                    }
-                )
-            for record in cloned_episodes:
-                record["linked_event_ids"] = [
-                    event_id_map.get(event_id, event_id)
-                    for event_id in record.get("linked_event_ids", [])
-                ]
-                episode_series_id = record.get("episode_series_id")
-                if isinstance(episode_series_id, str) and episode_series_id in episode_id_map:
-                    record["episode_series_id"] = episode_id_map[episode_series_id]
-                self._insert_episode(conn, record)
+    def _clone_episode_records(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        source_memory_set_id: str,
+        target_memory_set_id: str,
+        cycle_id_map: dict[str, str],
+        event_id_map: dict[str, str],
+    ) -> dict[str, str]:
+        episode_id_map: dict[str, str] = {}
+        source_episodes = self._load_payload_rows(conn, "episodes", source_memory_set_id)
+        cloned_episodes: list[dict[str, Any]] = []
+        for record in source_episodes:
+            source_cycle_id = record["cycle_id"]
+            cycle_id_map.setdefault(source_cycle_id, f"cycle:{uuid.uuid4().hex}")
+            old_episode_id = record["episode_id"]
+            episode_id_map[old_episode_id] = f"episode:{uuid.uuid4().hex}"
+            cloned_episodes.append(
+                {
+                    **record,
+                    "episode_id": episode_id_map[old_episode_id],
+                    "cycle_id": cycle_id_map[source_cycle_id],
+                    "memory_set_id": target_memory_set_id,
+                }
+            )
 
-            # memory unit 複製
-            source_memory_units = self._load_payload_rows(conn, "memory_units", source_memory_set_id)
-            cloned_memory_units: list[dict[str, Any]] = []
-            for record in source_memory_units:
-                old_memory_unit_id = record["memory_unit_id"]
-                new_memory_unit_id = f"memory_unit:{uuid.uuid4().hex}"
-                memory_unit_id_map[old_memory_unit_id] = new_memory_unit_id
-                cloned_memory_units.append(
-                    {
-                        **record,
-                        "memory_unit_id": new_memory_unit_id,
-                        "memory_set_id": target_memory_set_id,
-                    }
-                )
-            for record in cloned_memory_units:
-                record["evidence_event_ids"] = [
-                    event_id_map.get(event_id, event_id)
-                    for event_id in record.get("evidence_event_ids", [])
-                ]
-                self._upsert_memory_unit(conn, record)
+        for record in cloned_episodes:
+            record["linked_event_ids"] = [
+                event_id_map.get(event_id, event_id)
+                for event_id in record.get("linked_event_ids", [])
+            ]
+            episode_series_id = record.get("episode_series_id")
+            if isinstance(episode_series_id, str) and episode_series_id in episode_id_map:
+                record["episode_series_id"] = episode_id_map[episode_series_id]
+            self._insert_episode(conn, record)
+        return episode_id_map
 
-            # revision 複製
-            source_revisions = self._load_payload_rows(conn, "revisions", source_memory_set_id)
-            for record in source_revisions:
-                cloned_before = self._clone_memory_unit_snapshot(
-                    record.get("before_snapshot"),
-                    event_id_map=event_id_map,
-                    memory_unit_id_map=memory_unit_id_map,
-                )
-                cloned_after = self._clone_memory_unit_snapshot(
-                    record.get("after_snapshot"),
-                    event_id_map=event_id_map,
-                    memory_unit_id_map=memory_unit_id_map,
-                )
-                cloned_revision = {
+    def _clone_memory_unit_records(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        source_memory_set_id: str,
+        target_memory_set_id: str,
+        event_id_map: dict[str, str],
+    ) -> dict[str, str]:
+        memory_unit_id_map: dict[str, str] = {}
+        source_memory_units = self._load_payload_rows(conn, "memory_units", source_memory_set_id)
+        for record in source_memory_units:
+            old_memory_unit_id = record["memory_unit_id"]
+            memory_unit_id_map[old_memory_unit_id] = f"memory_unit:{uuid.uuid4().hex}"
+            self._upsert_memory_unit(
+                conn,
+                {
+                    **record,
+                    "memory_unit_id": memory_unit_id_map[old_memory_unit_id],
+                    "memory_set_id": target_memory_set_id,
+                    "evidence_event_ids": [
+                        event_id_map.get(event_id, event_id)
+                        for event_id in record.get("evidence_event_ids", [])
+                    ],
+                },
+            )
+        return memory_unit_id_map
+
+    def _clone_revision_records(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        source_memory_set_id: str,
+        target_memory_set_id: str,
+        event_id_map: dict[str, str],
+        memory_unit_id_map: dict[str, str],
+    ) -> None:
+        source_revisions = self._load_payload_rows(conn, "revisions", source_memory_set_id)
+        for record in source_revisions:
+            self._insert_revision(
+                conn,
+                {
                     **record,
                     "revision_id": f"revision:{uuid.uuid4().hex}",
                     "memory_set_id": target_memory_set_id,
@@ -989,29 +1050,55 @@ class SQLiteMemoryStore(StoreSchemaMixin):
                         memory_unit_id_map.get(memory_unit_id, memory_unit_id)
                         for memory_unit_id in record.get("related_memory_unit_ids", [])
                     ],
-                    "before_snapshot": cloned_before,
-                    "after_snapshot": cloned_after,
+                    "before_snapshot": self._clone_memory_unit_snapshot(
+                        record.get("before_snapshot"),
+                        event_id_map=event_id_map,
+                        memory_unit_id_map=memory_unit_id_map,
+                    ),
+                    "after_snapshot": self._clone_memory_unit_snapshot(
+                        record.get("after_snapshot"),
+                        event_id_map=event_id_map,
+                        memory_unit_id_map=memory_unit_id_map,
+                    ),
                     "evidence_event_ids": [
                         event_id_map.get(event_id, event_id)
                         for event_id in record.get("evidence_event_ids", [])
                     ],
-                }
-                self._insert_revision(conn, cloned_revision)
+                },
+            )
 
-            # affect_state 複製
-            source_affect_states = self._load_payload_rows(conn, "affect_state", source_memory_set_id)
-            for record in source_affect_states:
-                cloned_affect_state = {
+    def _clone_affect_state_records(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        source_memory_set_id: str,
+        target_memory_set_id: str,
+    ) -> None:
+        source_affect_states = self._load_payload_rows(conn, "affect_state", source_memory_set_id)
+        for record in source_affect_states:
+            self._upsert_affect_state(
+                conn,
+                {
                     **record,
                     "affect_state_id": f"affect_state:{uuid.uuid4().hex}",
                     "memory_set_id": target_memory_set_id,
-                }
-                self._upsert_affect_state(conn, cloned_affect_state)
+                },
+            )
 
-            # reflection_run 複製
-            source_reflection_runs = self._load_payload_rows(conn, "reflection_runs", source_memory_set_id)
-            for record in source_reflection_runs:
-                cloned_reflection_run = {
+    def _clone_reflection_run_records(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        source_memory_set_id: str,
+        target_memory_set_id: str,
+        episode_id_map: dict[str, str],
+        memory_unit_id_map: dict[str, str],
+    ) -> None:
+        source_reflection_runs = self._load_payload_rows(conn, "reflection_runs", source_memory_set_id)
+        for record in source_reflection_runs:
+            self._insert_reflection_run(
+                conn,
+                {
                     **record,
                     "reflection_run_id": f"reflection_run:{uuid.uuid4().hex}",
                     "memory_set_id": target_memory_set_id,
@@ -1023,16 +1110,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
                         memory_unit_id_map.get(memory_unit_id, memory_unit_id)
                         for memory_unit_id in record.get("affected_memory_unit_ids", [])
                     ],
-                }
-                self._insert_reflection_run(conn, cloned_reflection_run)
-
-            # ベクトル索引複製
-            self._clone_vector_index_entries(
-                conn,
-                source_memory_set_id=source_memory_set_id,
-                target_memory_set_id=target_memory_set_id,
-                episode_id_map=episode_id_map,
-                memory_unit_id_map=memory_unit_id_map,
+                },
             )
 
     def _insert_event(self, conn: sqlite3.Connection, record: dict[str, Any]) -> None:
