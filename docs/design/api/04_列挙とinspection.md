@@ -80,10 +80,15 @@ response:
     "observation_trace": {},
     "recall_trace": {},
     "decision_trace": {},
-    "result_trace": {}
+    "result_trace": {},
+    "memory_trace": {}
   }
 }
 ```
+
+- `recall_trace` には `selected_memory_unit_ids`、`selected_episode_ids`、必要時だけ `selected_event_ids` を含めてよい
+- `memory_trace` には 生成した `episode` の要約、`episode_series_id`、`open_loops`、`memory_units` 更新要約、`affect_state` 更新要約を含めてよい
+- `episode_series_id` と `open_loops` は追跡用の inspection 情報として扱い、通常の状態面や設定面では返さない
 
 主な失敗:
 
