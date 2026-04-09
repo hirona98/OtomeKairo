@@ -18,7 +18,7 @@ API 仕様は、次のように分ける。
 - `design/api/03_状態と設定.md`
   - `status`
   - `config`
-  - 設定資源の read / replace / delete
+  - 設定定義の read / replace / delete
 - `design/api/04_列挙とinspection.md`
   - `catalog`
   - `inspection`

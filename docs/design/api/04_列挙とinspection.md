@@ -5,7 +5,7 @@
 ### `GET /api/catalog`
 
 - 認証: 必要
-- 役割: 人格、記憶、モデル設定資源の一覧を返す
+- 役割: 人格設定、記憶集合、モデルプリセットの一覧を返す
 
 response:
 
@@ -29,12 +29,6 @@ response:
       {
         "model_preset_id": "model_preset:default",
         "display_name": "Default OpenRouter Gemini Preset"
-      }
-    ],
-    "model_profiles": [
-      {
-        "model_profile_id": "model_profile:gemini_reply",
-        "display_name": "OpenRouter Gemini Reply"
       }
     ]
   }
@@ -62,9 +56,6 @@ response:
         "trigger_kind": "user_message",
         "started_at": "2026-03-31T00:00:00+00:00",
         "finished_at": "2026-03-31T00:00:00+00:00",
-        "selected_persona_id": "persona:default",
-        "selected_memory_set_id": "memory_set:default",
-        "selected_model_preset_id": "model_preset:default",
         "result_kind": "reply",
         "failed": false
       }
