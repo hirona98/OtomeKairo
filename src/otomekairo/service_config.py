@@ -192,64 +192,57 @@ class ServiceConfigMixin:
         return self.patch_current(token, {"selected_model_preset_id": model_preset_id})
 
     def get_persona(self, token: str | None, persona_id: str) -> dict[str, Any]:
-        # 認可
-        state = self._require_token(token)
-        persona = state["personas"].get(persona_id)
-        if persona is None:
-            raise ServiceError(404, "persona_not_found", "The requested persona_id does not exist.")
-        return {
-            "persona": deepcopy(persona),
-        }
+        return self._get_resource_entry(
+            token=token,
+            entries_key="personas",
+            entry_id=persona_id,
+            resource_key="persona",
+            not_found_code="persona_not_found",
+            not_found_message="The requested persona_id does not exist.",
+        )
 
     def replace_persona(self, token: str | None, persona_id: str, definition: dict[str, Any]) -> dict[str, Any]:
-        # 認可
-        state = self._require_token(token)
-        self._validate_persona_definition(persona_id, definition)
-        state["personas"][persona_id] = deepcopy(definition)
-        self.store.write_state(state)
-        if persona_id == state["selected_persona_id"]:
-            self._clear_pending_intent_candidates()
-        return {
-            "persona": deepcopy(state["personas"][persona_id]),
-        }
+        return self._replace_resource_entry(
+            token=token,
+            entries_key="personas",
+            selected_id_key="selected_persona_id",
+            entry_id=persona_id,
+            definition=definition,
+            resource_key="persona",
+            validator=self._validate_persona_definition,
+        )
 
     def delete_persona(self, token: str | None, persona_id: str) -> dict[str, Any]:
-        # 認可
-        state = self._require_token(token)
-        self._delete_resource(
-            entries=state["personas"],
+        return self._delete_resource_entry(
+            token=token,
+            entries_key="personas",
+            selected_id_key="selected_persona_id",
             entry_id=persona_id,
-            selected_id=state["selected_persona_id"],
             not_found_code="persona_not_found",
             in_use_code="selected_persona_delete_forbidden",
             deleted_key="deleted_persona_id",
         )
-        self.store.write_state(state)
-        return {
-            "deleted_persona_id": persona_id,
-        }
 
     def get_memory_set(self, token: str | None, memory_set_id: str) -> dict[str, Any]:
-        # 認可
-        state = self._require_token(token)
-        memory_set = state["memory_sets"].get(memory_set_id)
-        if memory_set is None:
-            raise ServiceError(404, "memory_set_not_found", "The requested memory_set_id does not exist.")
-        return {
-            "memory_set": deepcopy(memory_set),
-        }
+        return self._get_resource_entry(
+            token=token,
+            entries_key="memory_sets",
+            entry_id=memory_set_id,
+            resource_key="memory_set",
+            not_found_code="memory_set_not_found",
+            not_found_message="The requested memory_set_id does not exist.",
+        )
 
     def replace_memory_set(self, token: str | None, memory_set_id: str, definition: dict[str, Any]) -> dict[str, Any]:
-        # 認可
-        state = self._require_token(token)
-        self._validate_memory_set_definition(memory_set_id, definition)
-        state["memory_sets"][memory_set_id] = deepcopy(definition)
-        self.store.write_state(state)
-        if memory_set_id == state["selected_memory_set_id"]:
-            self._clear_pending_intent_candidates()
-        return {
-            "memory_set": deepcopy(state["memory_sets"][memory_set_id]),
-        }
+        return self._replace_resource_entry(
+            token=token,
+            entries_key="memory_sets",
+            selected_id_key="selected_memory_set_id",
+            entry_id=memory_set_id,
+            definition=definition,
+            resource_key="memory_set",
+            validator=self._validate_memory_set_definition,
+        )
 
     def clone_memory_set(self, token: str | None, definition: dict[str, Any]) -> dict[str, Any]:
         # 認可
@@ -285,60 +278,51 @@ class ServiceConfigMixin:
         }
 
     def delete_memory_set(self, token: str | None, memory_set_id: str) -> dict[str, Any]:
-        # 認可
-        state = self._require_token(token)
-        self._delete_resource(
-            entries=state["memory_sets"],
+        return self._delete_resource_entry(
+            token=token,
+            entries_key="memory_sets",
+            selected_id_key="selected_memory_set_id",
             entry_id=memory_set_id,
-            selected_id=state["selected_memory_set_id"],
             not_found_code="memory_set_not_found",
             in_use_code="selected_memory_set_delete_forbidden",
             deleted_key="deleted_memory_set_id",
+            after_delete=self.store.delete_memory_set_records,
         )
-        self.store.delete_memory_set_records(memory_set_id)
-        self.store.write_state(state)
-        return {
-            "deleted_memory_set_id": memory_set_id,
-        }
 
     def get_model_preset(self, token: str | None, model_preset_id: str) -> dict[str, Any]:
-        # 認可
-        state = self._require_token(token)
-        model_preset = state["model_presets"].get(model_preset_id)
-        if model_preset is None:
-            raise ServiceError(404, "model_preset_not_found", "The requested model_preset_id does not exist.")
-        return {
-            "model_preset": self._public_model_preset(model_preset),
-        }
+        return self._get_resource_entry(
+            token=token,
+            entries_key="model_presets",
+            entry_id=model_preset_id,
+            resource_key="model_preset",
+            not_found_code="model_preset_not_found",
+            not_found_message="The requested model_preset_id does not exist.",
+            public_builder=self._public_model_preset,
+        )
 
     def replace_model_preset(self, token: str | None, model_preset_id: str, definition: dict[str, Any]) -> dict[str, Any]:
-        # 認可
-        state = self._require_token(token)
-        normalized_definition = self._normalize_model_preset_definition(definition)
-        self._validate_model_preset_definition(model_preset_id, normalized_definition)
-        state["model_presets"][model_preset_id] = normalized_definition
-        self.store.write_state(state)
-        if model_preset_id == state["selected_model_preset_id"]:
-            self._clear_pending_intent_candidates()
-        return {
-            "model_preset": self._public_model_preset(state["model_presets"][model_preset_id]),
-        }
+        return self._replace_resource_entry(
+            token=token,
+            entries_key="model_presets",
+            selected_id_key="selected_model_preset_id",
+            entry_id=model_preset_id,
+            definition=definition,
+            resource_key="model_preset",
+            validator=self._validate_model_preset_definition,
+            normalizer=self._normalize_model_preset_definition,
+            public_builder=self._public_model_preset,
+        )
 
     def delete_model_preset(self, token: str | None, model_preset_id: str) -> dict[str, Any]:
-        # 認可
-        state = self._require_token(token)
-        self._delete_resource(
-            entries=state["model_presets"],
+        return self._delete_resource_entry(
+            token=token,
+            entries_key="model_presets",
+            selected_id_key="selected_model_preset_id",
             entry_id=model_preset_id,
-            selected_id=state["selected_model_preset_id"],
             not_found_code="model_preset_not_found",
             in_use_code="selected_model_preset_delete_forbidden",
             deleted_key="deleted_model_preset_id",
         )
-        self.store.write_state(state)
-        return {
-            "deleted_model_preset_id": model_preset_id,
-        }
 
     def replace_editor_state(self, token: str | None, definition: dict[str, Any]) -> dict[str, Any]:
         # 認可
@@ -452,6 +436,95 @@ class ServiceConfigMixin:
             }
             for value in entries.values()
         ]
+
+    def _get_resource_entry(
+        self,
+        *,
+        token: str | None,
+        entries_key: str,
+        entry_id: str,
+        resource_key: str,
+        not_found_code: str,
+        not_found_message: str,
+        public_builder: Any | None = None,
+    ) -> dict[str, Any]:
+        # 認可
+        state = self._require_token(token)
+        entry = state[entries_key].get(entry_id)
+        if entry is None:
+            raise ServiceError(404, not_found_code, not_found_message)
+        if public_builder is None:
+            return {
+                resource_key: deepcopy(entry),
+            }
+        return {
+            resource_key: public_builder(entry),
+        }
+
+    def _replace_resource_entry(
+        self,
+        *,
+        token: str | None,
+        entries_key: str,
+        selected_id_key: str,
+        entry_id: str,
+        definition: dict[str, Any],
+        resource_key: str,
+        validator: Any,
+        normalizer: Any | None = None,
+        public_builder: Any | None = None,
+    ) -> dict[str, Any]:
+        # 認可
+        state = self._require_token(token)
+
+        # 正規化と検証
+        stored_definition = normalizer(definition) if normalizer is not None else definition
+        validator(entry_id, stored_definition)
+
+        # 永続化
+        state[entries_key][entry_id] = deepcopy(stored_definition)
+        self.store.write_state(state)
+        if entry_id == state[selected_id_key]:
+            self._clear_pending_intent_candidates()
+
+        # 応答
+        entry = state[entries_key][entry_id]
+        if public_builder is None:
+            return {
+                resource_key: deepcopy(entry),
+            }
+        return {
+            resource_key: public_builder(entry),
+        }
+
+    def _delete_resource_entry(
+        self,
+        *,
+        token: str | None,
+        entries_key: str,
+        selected_id_key: str,
+        entry_id: str,
+        not_found_code: str,
+        in_use_code: str,
+        deleted_key: str,
+        after_delete: Any | None = None,
+    ) -> dict[str, Any]:
+        # 認可
+        state = self._require_token(token)
+        self._delete_resource(
+            entries=state[entries_key],
+            entry_id=entry_id,
+            selected_id=state[selected_id_key],
+            not_found_code=not_found_code,
+            in_use_code=in_use_code,
+            deleted_key=deleted_key,
+        )
+        if after_delete is not None:
+            after_delete(entry_id)
+        self.store.write_state(state)
+        return {
+            deleted_key: entry_id,
+        }
 
     def _entries_by_id(self, entries: Any, id_key: str, field_name: str) -> dict[str, dict[str, Any]]:
         if not isinstance(entries, list):
