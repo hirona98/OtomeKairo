@@ -106,7 +106,7 @@ message shape:
     "ts": "2026-04-06T00:00:00+00:00",
     "level": "INFO",
     "logger": "RecallStructured",
-    "msg": "cf09b49a3ce1 memory_units=memory_unit:1234abcd episode_digests=episode_digest:5678efgh"
+    "msg": "cf09b49a3ce1 memory_units=memory_unit:1234abcd episodes=episode:5678efgh"
   }
 ]
 ```
