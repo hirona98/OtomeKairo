@@ -103,7 +103,6 @@ class ServiceSpontaneousMixin:
             started_at = self._now_iso()
             recent_turns = self._load_recent_turns(state)
             runtime_summary = self._build_runtime_summary(state)
-            settings_snapshot = self._build_settings_snapshot(state)
             observation_text = self._build_wake_observation_text(
                 client_context=client_context,
                 selected_candidate=None,
@@ -128,11 +127,9 @@ class ServiceSpontaneousMixin:
                     cycle_id=cycle_id,
                     started_at=started_at,
                     state=state,
-                    settings_snapshot=settings_snapshot,
                     runtime_summary=runtime_summary,
                     observation_text=observation_text,
                     client_context=client_context,
-                    recent_turns=recent_turns,
                     pipeline=pipeline,
                     trigger_kind=trigger_kind,
                     observation_event_kind="wake",
@@ -155,7 +152,6 @@ class ServiceSpontaneousMixin:
                     started_at=started_at,
                     finished_at=finished_at,
                     state=state,
-                    settings_snapshot=settings_snapshot,
                     runtime_summary=runtime_summary,
                     observation_text=observation_text,
                     client_context=client_context,
@@ -304,7 +300,6 @@ class ServiceSpontaneousMixin:
             cycle_id = self._new_cycle_id()
             recent_turns = self._load_recent_turns(state)
             runtime_summary = self._build_runtime_summary(state)
-            settings_snapshot = self._build_settings_snapshot(state)
 
             try:
                 # パイプライン
@@ -320,11 +315,9 @@ class ServiceSpontaneousMixin:
                     cycle_id=cycle_id,
                     started_at=started_at,
                     state=state,
-                    settings_snapshot=settings_snapshot,
                     runtime_summary=runtime_summary,
                     observation_text=observation_text,
                     client_context=client_context,
-                    recent_turns=recent_turns,
                     pipeline=pipeline,
                     trigger_kind="desktop_watch",
                     observation_event_kind="desktop_watch",
@@ -347,7 +340,6 @@ class ServiceSpontaneousMixin:
                     started_at=started_at,
                     finished_at=self._now_iso(),
                     state=state,
-                    settings_snapshot=settings_snapshot,
                     runtime_summary=runtime_summary,
                     observation_text=observation_text,
                     client_context=client_context,

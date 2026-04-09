@@ -134,7 +134,6 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         started_at = self._now_iso()
         recent_turns = self._load_recent_turns(state)
         runtime_summary = self._build_runtime_summary(state)
-        settings_snapshot = self._build_settings_snapshot(state)
 
         try:
             # パイプライン
@@ -150,11 +149,9 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
                 cycle_id=cycle_id,
                 started_at=started_at,
                 state=state,
-                settings_snapshot=settings_snapshot,
                 runtime_summary=runtime_summary,
                 observation_text=observation_text,
                 client_context=client_context,
-                recent_turns=recent_turns,
                 pipeline=pipeline,
             )
         except (LLMError, KeyError, ValueError) as exc:
@@ -165,7 +162,6 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
                 started_at=started_at,
                 finished_at=finished_at,
                 state=state,
-                settings_snapshot=settings_snapshot,
                 runtime_summary=runtime_summary,
                 observation_text=observation_text,
                 client_context=client_context,
@@ -325,11 +321,9 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         cycle_id: str,
         started_at: str,
         state: dict[str, Any],
-        settings_snapshot: dict[str, Any],
         runtime_summary: dict[str, Any],
         observation_text: str,
         client_context: dict[str, Any],
-        recent_turns: list[dict[str, Any]],
         pipeline: dict[str, Any],
         trigger_kind: str = "user_message",
         observation_event_kind: str = "observation",
@@ -355,11 +349,9 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             started_at=started_at,
             finished_at=finished_at,
             state=state,
-            settings_snapshot=settings_snapshot,
             runtime_summary=runtime_summary,
             observation_text=observation_text,
             client_context=client_context,
-            recent_turns=recent_turns,
             recall_hint=pipeline["recall_hint"],
             recall_pack=pipeline["recall_pack"],
             time_context=pipeline["time_context"],
@@ -394,13 +386,14 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
                 pipeline=pipeline,
             )
         else:
+            skipped_memory_trace = self._skipped_memory_trace("wake_cycle")
             self._update_cycle_trace_memory_trace(
                 cycle_id=cycle_id,
-                memory_trace=self._skipped_memory_trace("wake_cycle"),
+                memory_trace=skipped_memory_trace,
             )
             self._emit_memory_trace_logs(
                 cycle_id=cycle_id,
-                memory_trace=self._skipped_memory_trace("wake_cycle"),
+                memory_trace=skipped_memory_trace,
             )
 
         # 応答
@@ -560,19 +553,6 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
     def remove_log_stream_connection(self, session_id: str) -> None:
         # 削除
         self._log_stream_registry.remove_connection(session_id)
-
-    # 補助
-    def _require_token(self, token: str | None) -> dict:
-        # 読み込み状態
-        state = self.store.read_state()
-        issued = state["console_access_token"]
-
-        # 検証
-        if issued is None:
-            raise ServiceError(401, "bootstrap_required", "A console_access_token has not been issued yet.")
-        if token != issued:
-            raise ServiceError(401, "invalid_token", "The console_access_token is missing or invalid.")
-        return state
 
     def _summarize_recall_pack(self, recall_pack: dict[str, Any]) -> dict[str, int]:
         # 要約
@@ -1013,46 +993,58 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             return "evening"
         return "night"
 
-    def _persist_cycle_success(
+    def _build_cycle_events(
         self,
         *,
         cycle_id: str,
-        started_at: str,
-        finished_at: str,
-        state: dict,
-        settings_snapshot: dict,
-        runtime_summary: dict,
-        observation_text: str,
-        client_context: dict,
-        recent_turns: list[dict],
-        recall_hint: dict,
-        recall_pack: dict,
-        time_context: dict,
-        affect_context: dict[str, list[dict[str, Any]]],
-        decision: dict,
-        result_kind: str,
-        reply_payload: dict | None,
-        pending_intent_summary: dict[str, Any] | None,
-        trigger_kind: str,
+        memory_set_id: str,
         observation_event_kind: str,
         observation_event_role: str,
+        observation_text: str,
+        started_at: str,
+        finished_at: str,
+        decision: dict[str, Any] | None = None,
+        result_kind: str | None = None,
+        reply_payload: dict[str, Any] | None = None,
+        pending_intent_summary: dict[str, Any] | None = None,
+        failure_reason: str | None = None,
     ) -> list[dict[str, Any]]:
-        # イベントRecords
-        selected_memory_set_id = state["selected_memory_set_id"]
+        # 観測イベント
         events = [
             {
                 "event_id": f"event:{uuid.uuid4().hex}",
                 "cycle_id": cycle_id,
-                "memory_set_id": selected_memory_set_id,
+                "memory_set_id": memory_set_id,
                 "kind": observation_event_kind,
                 "role": observation_event_role,
                 "text": observation_text,
                 "created_at": started_at,
-            },
+            }
+        ]
+
+        # 失敗イベント
+        if failure_reason is not None:
+            events.append(
+                {
+                    "event_id": f"event:{uuid.uuid4().hex}",
+                    "cycle_id": cycle_id,
+                    "memory_set_id": memory_set_id,
+                    "kind": "recall_hint_failure",
+                    "role": "system",
+                    "failure_reason": failure_reason,
+                    "created_at": finished_at,
+                }
+            )
+            return events
+
+        # 決定イベント
+        if decision is None or result_kind is None:
+            raise ValueError("decision and result_kind are required for success events.")
+        events.append(
             {
                 "event_id": f"event:{uuid.uuid4().hex}",
                 "cycle_id": cycle_id,
-                "memory_set_id": selected_memory_set_id,
+                "memory_set_id": memory_set_id,
                 "kind": "decision",
                 "role": "system",
                 "result_kind": decision["kind"],
@@ -1061,25 +1053,37 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
                 "reason_summary": decision["reason_summary"],
                 "pending_intent_summary": pending_intent_summary,
                 "created_at": finished_at,
-            },
-        ]
+            }
+        )
+
+        # 応答イベント
         if reply_payload is not None:
             events.append(
                 {
                     "event_id": f"event:{uuid.uuid4().hex}",
                     "cycle_id": cycle_id,
-                    "memory_set_id": selected_memory_set_id,
+                    "memory_set_id": memory_set_id,
                     "kind": "reply",
                     "role": "assistant",
                     "text": reply_payload["reply_text"],
                     "created_at": finished_at,
                 }
             )
+        return events
 
-        # Retrieval実行
-        retrieval_run = {
+    def _build_retrieval_run_success(
+        self,
+        *,
+        cycle_id: str,
+        memory_set_id: str,
+        started_at: str,
+        finished_at: str,
+        recall_hint: dict[str, Any],
+        recall_pack: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
             "cycle_id": cycle_id,
-            "selected_memory_set_id": selected_memory_set_id,
+            "selected_memory_set_id": memory_set_id,
             "started_at": started_at,
             "finished_at": finished_at,
             "result_status": "succeeded",
@@ -1091,8 +1095,39 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             "selected_memory_ids": recall_pack["selected_memory_ids"],
         }
 
-        # サイクル要約
-        cycle_summary = {
+    def _build_retrieval_run_failure(
+        self,
+        *,
+        cycle_id: str,
+        memory_set_id: str,
+        started_at: str,
+        finished_at: str,
+        failure_reason: str,
+    ) -> dict[str, Any]:
+        return {
+            "cycle_id": cycle_id,
+            "selected_memory_set_id": memory_set_id,
+            "started_at": started_at,
+            "finished_at": finished_at,
+            "result_status": "failed",
+            "failure_reason": failure_reason,
+            "selected_episode_ids": [],
+            "selected_event_ids": [],
+            "recall_pack_summary": None,
+        }
+
+    def _build_cycle_summary(
+        self,
+        *,
+        cycle_id: str,
+        started_at: str,
+        finished_at: str,
+        state: dict[str, Any],
+        trigger_kind: str,
+        result_kind: str,
+        failed: bool,
+    ) -> dict[str, Any]:
+        return {
             "cycle_id": cycle_id,
             "server_id": state["server_id"],
             "trigger_kind": trigger_kind,
@@ -1102,68 +1137,234 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             "selected_memory_set_id": state["selected_memory_set_id"],
             "selected_model_preset_id": state["selected_model_preset_id"],
             "result_kind": result_kind,
-            "failed": False,
+            "failed": failed,
         }
 
-        # サイクルTrace
-        cycle_trace = {
+    def _build_cycle_trace(
+        self,
+        *,
+        cycle_id: str,
+        cycle_summary: dict[str, Any],
+        observation_text: str,
+        client_context: dict[str, Any],
+        runtime_summary: dict[str, Any],
+        recall_trace: dict[str, Any],
+        decision_trace: dict[str, Any],
+        result_trace: dict[str, Any],
+        memory_trace: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        return {
             "cycle_id": cycle_id,
             "cycle_summary": cycle_summary,
             "observation_trace": {
-                "trigger_kind": trigger_kind,
+                "trigger_kind": cycle_summary["trigger_kind"],
                 "user_input_summary": self._clamp(observation_text),
                 "client_context_summary": self._clamp(str(client_context)),
                 "normalized_observation_summary": self._clamp(observation_text.strip()),
                 "runtime_state_summary": runtime_summary,
             },
-            "recall_trace": {
-                "recall_hint_summary": recall_hint,
-                "candidate_count": recall_pack["candidate_count"],
-                "selected_memory_unit_ids": recall_pack["selected_memory_ids"],
-                "selected_episode_ids": recall_pack["selected_episode_ids"],
-                "selected_event_ids": recall_pack["selected_event_ids"],
-                "recall_pack_summary": self._summarize_recall_pack(recall_pack),
-                "adopted_reason_summary": self._recall_adopted_reason_summary(recall_pack),
-                "rejected_candidate_summary": self._recall_rejected_reason_summary(recall_pack),
-            },
-            "decision_trace": {
-                "result_kind": decision["kind"],
-                "reason_summary": decision["reason_summary"],
-                "persona_summary": state["personas"][state["selected_persona_id"]]["display_name"],
-                "memory_summary": state["memory_sets"][state["selected_memory_set_id"]]["display_name"],
-                "current_context_summary": self._clamp(observation_text),
-                "internal_context_summary": {
-                    "time_context": time_context,
-                    "affect_context_summary": self._summarize_affect_context(affect_context),
-                    "recall_pack_summary": self._summarize_recall_pack(recall_pack),
-                },
-                "primary_candidate_kind": decision["kind"],
-                "pending_intent_candidate_summary": pending_intent_summary,
-            },
-            "result_trace": {
-                "result_kind": result_kind,
-                "reply_summary": self._clamp(reply_payload["reply_text"]) if reply_payload else None,
-                "noop_reason_summary": decision["reason_summary"] if decision["kind"] == "noop" else None,
-                "pending_intent_summary": pending_intent_summary,
-                "internal_failure_summary": None,
-                "duration_ms": self._duration_ms(started_at, finished_at),
-            },
-            "memory_trace": {
-                "turn_consolidation_status": "pending",
-                "episode_id": None,
-                "episode_summary": None,
-                "episode_series_id": None,
-                "open_loops": [],
-                "memory_action_count": 0,
-                "affect_update_count": 0,
-                "updated_memory_unit_ids": [],
-                "affect_updates": [],
-                "failure_reason": None,
-                "reflective_consolidation": None,
-            },
+            "recall_trace": recall_trace,
+            "decision_trace": decision_trace,
+            "result_trace": result_trace,
+            "memory_trace": memory_trace,
         }
 
-        # 永続化
+    def _build_success_recall_trace(self, recall_hint: dict[str, Any], recall_pack: dict[str, Any]) -> dict[str, Any]:
+        recall_pack_summary = self._summarize_recall_pack(recall_pack)
+        return {
+            "recall_hint_summary": recall_hint,
+            "candidate_count": recall_pack["candidate_count"],
+            "selected_memory_unit_ids": recall_pack["selected_memory_ids"],
+            "selected_episode_ids": recall_pack["selected_episode_ids"],
+            "selected_event_ids": recall_pack["selected_event_ids"],
+            "recall_pack_summary": recall_pack_summary,
+            "adopted_reason_summary": self._recall_adopted_reason_summary(recall_pack),
+            "rejected_candidate_summary": self._recall_rejected_reason_summary(recall_pack),
+        }
+
+    def _build_failure_recall_trace(self) -> dict[str, Any]:
+        return {
+            "recall_hint_summary": None,
+            "candidate_count": 0,
+            "selected_memory_unit_ids": [],
+            "selected_episode_ids": [],
+            "selected_event_ids": [],
+            "recall_pack_summary": None,
+            "adopted_reason_summary": None,
+            "rejected_candidate_summary": None,
+        }
+
+    def _build_success_decision_trace(
+        self,
+        *,
+        state: dict[str, Any],
+        observation_text: str,
+        time_context: dict[str, Any],
+        affect_context: dict[str, list[dict[str, Any]]],
+        recall_pack: dict[str, Any],
+        decision: dict[str, Any],
+        pending_intent_summary: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        return {
+            "result_kind": decision["kind"],
+            "reason_summary": decision["reason_summary"],
+            "persona_summary": state["personas"][state["selected_persona_id"]]["display_name"],
+            "memory_summary": state["memory_sets"][state["selected_memory_set_id"]]["display_name"],
+            "current_context_summary": self._clamp(observation_text),
+            "internal_context_summary": {
+                "time_context": time_context,
+                "affect_context_summary": self._summarize_affect_context(affect_context),
+                "recall_pack_summary": self._summarize_recall_pack(recall_pack),
+            },
+            "primary_candidate_kind": decision["kind"],
+            "pending_intent_candidate_summary": pending_intent_summary,
+        }
+
+    def _build_failure_decision_trace(
+        self,
+        *,
+        state: dict[str, Any],
+        observation_text: str,
+        failure_reason: str,
+    ) -> dict[str, Any]:
+        return {
+            "result_kind": "internal_failure",
+            "reason_summary": failure_reason,
+            "persona_summary": state["personas"][state["selected_persona_id"]]["display_name"],
+            "memory_summary": state["memory_sets"][state["selected_memory_set_id"]]["display_name"],
+            "current_context_summary": self._clamp(observation_text),
+            "primary_candidate_kind": None,
+        }
+
+    def _build_success_result_trace(
+        self,
+        *,
+        started_at: str,
+        finished_at: str,
+        decision: dict[str, Any],
+        result_kind: str,
+        reply_payload: dict[str, Any] | None,
+        pending_intent_summary: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        return {
+            "result_kind": result_kind,
+            "reply_summary": self._clamp(reply_payload["reply_text"]) if reply_payload else None,
+            "noop_reason_summary": decision["reason_summary"] if decision["kind"] == "noop" else None,
+            "pending_intent_summary": pending_intent_summary,
+            "internal_failure_summary": None,
+            "duration_ms": self._duration_ms(started_at, finished_at),
+        }
+
+    def _build_failure_result_trace(
+        self,
+        *,
+        started_at: str,
+        finished_at: str,
+        failure_reason: str,
+    ) -> dict[str, Any]:
+        return {
+            "result_kind": "internal_failure",
+            "reply_summary": None,
+            "noop_reason_summary": None,
+            "pending_intent_summary": None,
+            "internal_failure_summary": failure_reason,
+            "duration_ms": self._duration_ms(started_at, finished_at),
+        }
+
+    def _pending_memory_trace(self) -> dict[str, Any]:
+        return {
+            "turn_consolidation_status": "pending",
+            "episode_id": None,
+            "episode_summary": None,
+            "episode_series_id": None,
+            "open_loops": [],
+            "memory_action_count": 0,
+            "affect_update_count": 0,
+            "updated_memory_unit_ids": [],
+            "affect_updates": [],
+            "failure_reason": None,
+            "reflective_consolidation": None,
+        }
+
+    def _persist_cycle_success(
+        self,
+        *,
+        cycle_id: str,
+        started_at: str,
+        finished_at: str,
+        state: dict[str, Any],
+        runtime_summary: dict[str, Any],
+        observation_text: str,
+        client_context: dict[str, Any],
+        recall_hint: dict[str, Any],
+        recall_pack: dict[str, Any],
+        time_context: dict[str, Any],
+        affect_context: dict[str, list[dict[str, Any]]],
+        decision: dict[str, Any],
+        result_kind: str,
+        reply_payload: dict[str, Any] | None,
+        pending_intent_summary: dict[str, Any] | None,
+        trigger_kind: str,
+        observation_event_kind: str,
+        observation_event_role: str,
+    ) -> list[dict[str, Any]]:
+        memory_set_id = state["selected_memory_set_id"]
+        events = self._build_cycle_events(
+            cycle_id=cycle_id,
+            memory_set_id=memory_set_id,
+            observation_event_kind=observation_event_kind,
+            observation_event_role=observation_event_role,
+            observation_text=observation_text,
+            started_at=started_at,
+            finished_at=finished_at,
+            decision=decision,
+            result_kind=result_kind,
+            reply_payload=reply_payload,
+            pending_intent_summary=pending_intent_summary,
+        )
+        retrieval_run = self._build_retrieval_run_success(
+            cycle_id=cycle_id,
+            memory_set_id=memory_set_id,
+            started_at=started_at,
+            finished_at=finished_at,
+            recall_hint=recall_hint,
+            recall_pack=recall_pack,
+        )
+        cycle_summary = self._build_cycle_summary(
+            cycle_id=cycle_id,
+            started_at=started_at,
+            finished_at=finished_at,
+            state=state,
+            trigger_kind=trigger_kind,
+            result_kind=result_kind,
+            failed=False,
+        )
+        cycle_trace = self._build_cycle_trace(
+            cycle_id=cycle_id,
+            cycle_summary=cycle_summary,
+            observation_text=observation_text,
+            client_context=client_context,
+            runtime_summary=runtime_summary,
+            recall_trace=self._build_success_recall_trace(recall_hint, recall_pack),
+            decision_trace=self._build_success_decision_trace(
+                state=state,
+                observation_text=observation_text,
+                time_context=time_context,
+                affect_context=affect_context,
+                recall_pack=recall_pack,
+                decision=decision,
+                pending_intent_summary=pending_intent_summary,
+            ),
+            result_trace=self._build_success_result_trace(
+                started_at=started_at,
+                finished_at=finished_at,
+                decision=decision,
+                result_kind=result_kind,
+                reply_payload=reply_payload,
+                pending_intent_summary=pending_intent_summary,
+            ),
+            memory_trace=self._pending_memory_trace(),
+        )
         self.store.persist_cycle_records(
             events=events,
             retrieval_run=retrieval_run,
@@ -1178,107 +1379,61 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         cycle_id: str,
         started_at: str,
         finished_at: str,
-        state: dict,
-        settings_snapshot: dict,
-        runtime_summary: dict,
+        state: dict[str, Any],
+        runtime_summary: dict[str, Any],
         observation_text: str,
-        client_context: dict,
+        client_context: dict[str, Any],
         failure_reason: str,
         trigger_kind: str = "user_message",
         observation_event_kind: str = "observation",
         observation_event_role: str = "user",
     ) -> None:
-        # イベントRecords
-        selected_memory_set_id = state["selected_memory_set_id"]
-        events = [
-            {
-                "event_id": f"event:{uuid.uuid4().hex}",
-                "cycle_id": cycle_id,
-                "memory_set_id": selected_memory_set_id,
-                "kind": observation_event_kind,
-                "role": observation_event_role,
-                "text": observation_text,
-                "created_at": started_at,
-            },
-            {
-                "event_id": f"event:{uuid.uuid4().hex}",
-                "cycle_id": cycle_id,
-                "memory_set_id": selected_memory_set_id,
-                "kind": "recall_hint_failure",
-                "role": "system",
-                "failure_reason": failure_reason,
-                "created_at": finished_at,
-            },
-        ]
-
-        # Retrieval実行
-        retrieval_run = {
-            "cycle_id": cycle_id,
-            "selected_memory_set_id": selected_memory_set_id,
-            "started_at": started_at,
-            "finished_at": finished_at,
-            "result_status": "failed",
-            "failure_reason": failure_reason,
-            "selected_episode_ids": [],
-            "selected_event_ids": [],
-            "recall_pack_summary": None,
-        }
-
-        # サイクル要約
-        cycle_summary = {
-            "cycle_id": cycle_id,
-            "server_id": state["server_id"],
-            "trigger_kind": trigger_kind,
-            "started_at": started_at,
-            "finished_at": finished_at,
-            "selected_persona_id": state["selected_persona_id"],
-            "selected_memory_set_id": state["selected_memory_set_id"],
-            "selected_model_preset_id": state["selected_model_preset_id"],
-            "result_kind": "internal_failure",
-            "failed": True,
-        }
-
-        # サイクルTrace
-        cycle_trace = {
-            "cycle_id": cycle_id,
-            "cycle_summary": cycle_summary,
-            "observation_trace": {
-                "trigger_kind": trigger_kind,
-                "user_input_summary": self._clamp(observation_text),
-                "client_context_summary": self._clamp(str(client_context)),
-                "normalized_observation_summary": self._clamp(observation_text.strip()),
-                "runtime_state_summary": runtime_summary,
-            },
-            "recall_trace": {
-                "recall_hint_summary": None,
-                "candidate_count": 0,
-                "selected_memory_unit_ids": [],
-                "selected_episode_ids": [],
-                "selected_event_ids": [],
-                "recall_pack_summary": None,
-                "adopted_reason_summary": None,
-                "rejected_candidate_summary": None,
-            },
-            "decision_trace": {
-                "result_kind": "internal_failure",
-                "reason_summary": failure_reason,
-                "persona_summary": state["personas"][state["selected_persona_id"]]["display_name"],
-                "memory_summary": state["memory_sets"][state["selected_memory_set_id"]]["display_name"],
-                "current_context_summary": self._clamp(observation_text),
-                "primary_candidate_kind": None,
-            },
-            "result_trace": {
-                "result_kind": "internal_failure",
-                "reply_summary": None,
-                "noop_reason_summary": None,
-                "pending_intent_summary": None,
-                "internal_failure_summary": failure_reason,
-                "duration_ms": self._duration_ms(started_at, finished_at),
-            },
-            "memory_trace": None,
-        }
-
-        # 永続化
+        memory_set_id = state["selected_memory_set_id"]
+        events = self._build_cycle_events(
+            cycle_id=cycle_id,
+            memory_set_id=memory_set_id,
+            observation_event_kind=observation_event_kind,
+            observation_event_role=observation_event_role,
+            observation_text=observation_text,
+            started_at=started_at,
+            finished_at=finished_at,
+            failure_reason=failure_reason,
+        )
+        retrieval_run = self._build_retrieval_run_failure(
+            cycle_id=cycle_id,
+            memory_set_id=memory_set_id,
+            started_at=started_at,
+            finished_at=finished_at,
+            failure_reason=failure_reason,
+        )
+        cycle_summary = self._build_cycle_summary(
+            cycle_id=cycle_id,
+            started_at=started_at,
+            finished_at=finished_at,
+            state=state,
+            trigger_kind=trigger_kind,
+            result_kind="internal_failure",
+            failed=True,
+        )
+        cycle_trace = self._build_cycle_trace(
+            cycle_id=cycle_id,
+            cycle_summary=cycle_summary,
+            observation_text=observation_text,
+            client_context=client_context,
+            runtime_summary=runtime_summary,
+            recall_trace=self._build_failure_recall_trace(),
+            decision_trace=self._build_failure_decision_trace(
+                state=state,
+                observation_text=observation_text,
+                failure_reason=failure_reason,
+            ),
+            result_trace=self._build_failure_result_trace(
+                started_at=started_at,
+                finished_at=finished_at,
+                failure_reason=failure_reason,
+            ),
+            memory_trace=None,
+        )
         self.store.persist_cycle_records(
             events=events,
             retrieval_run=retrieval_run,
