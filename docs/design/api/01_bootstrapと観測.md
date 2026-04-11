@@ -112,7 +112,7 @@ response:
     "cycle_id": "cycle:...",
     "result_kind": "reply",
     "reply": {
-      "text": "gentleに受け取ったよ。こんにちは"
+      "text": "やわらかく穏やかに受け取ったよ。こんにちは"
     }
   }
 }

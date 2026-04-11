@@ -16,7 +16,7 @@ response:
     "personas": [
       {
         "persona_id": "persona:default",
-        "display_name": "Default Persona"
+        "display_name": "標準人格設定"
       }
     ],
     "memory_sets": [
