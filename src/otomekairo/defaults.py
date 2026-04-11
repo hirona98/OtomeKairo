@@ -59,7 +59,6 @@ def build_default_state() -> dict:
         "desktop_watch": {
             "enabled": False,
             "interval_seconds": DEFAULT_DESKTOP_WATCH_INTERVAL_SECONDS,
-            "target_client_id": None,
         },
         "personas": {
             DEFAULT_PERSONA_ID: {

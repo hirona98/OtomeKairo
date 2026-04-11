@@ -167,8 +167,9 @@ class ServiceConfigMixin:
             self._validate_wake_policy(payload["wake_policy"])
             state["wake_policy"] = payload["wake_policy"]
         if "desktop_watch" in payload:
-            self._validate_desktop_watch(payload["desktop_watch"])
-            state["desktop_watch"] = payload["desktop_watch"]
+            desktop_watch = self._normalize_desktop_watch(payload["desktop_watch"])
+            self._validate_desktop_watch(desktop_watch)
+            state["desktop_watch"] = desktop_watch
 
         # 永続化
         self.store.write_state(state)
@@ -390,14 +391,15 @@ class ServiceConfigMixin:
 
         # 動作設定検証
         self._validate_wake_policy(current.get("wake_policy"))
-        self._validate_desktop_watch(current.get("desktop_watch"))
+        desktop_watch = self._normalize_desktop_watch(current.get("desktop_watch"))
+        self._validate_desktop_watch(desktop_watch)
 
         # 永続化
         state["selected_persona_id"] = selected_persona_id
         state["selected_memory_set_id"] = selected_memory_set_id
         state["selected_model_preset_id"] = selected_model_preset_id
         state["wake_policy"] = current["wake_policy"]
-        state["desktop_watch"] = current["desktop_watch"]
+        state["desktop_watch"] = desktop_watch
         state["personas"] = personas
         state["memory_sets"] = memory_sets
         state["model_presets"] = model_presets
@@ -425,7 +427,7 @@ class ServiceConfigMixin:
         return {
             "selected_persona_id": state["selected_persona_id"],
             "selected_memory_set_id": state["selected_memory_set_id"],
-            "desktop_watch": deepcopy(state["desktop_watch"]),
+            "desktop_watch": self._normalize_desktop_watch(state["desktop_watch"]),
             "wake_policy": deepcopy(state["wake_policy"]),
             "selected_model_preset_id": state["selected_model_preset_id"],
         }
@@ -581,7 +583,6 @@ class ServiceConfigMixin:
             raise ServiceError(400, "invalid_desktop_watch", "desktop_watch must be an object.")
         enabled = desktop_watch.get("enabled")
         interval_seconds = desktop_watch.get("interval_seconds")
-        target_client_id = desktop_watch.get("target_client_id")
         if not isinstance(enabled, bool):
             raise ServiceError(400, "invalid_desktop_watch_enabled", "desktop_watch.enabled must be a boolean.")
         if not isinstance(interval_seconds, int) or interval_seconds < 1:
@@ -590,12 +591,18 @@ class ServiceConfigMixin:
                 "invalid_desktop_watch_interval_seconds",
                 "desktop_watch.interval_seconds must be an integer >= 1.",
             )
-        if target_client_id is not None and (not isinstance(target_client_id, str) or not target_client_id.strip()):
-            raise ServiceError(
-                400,
-                "invalid_desktop_watch_target_client_id",
-                "desktop_watch.target_client_id must be null or a non-empty string.",
-            )
+
+    def _normalize_desktop_watch(self, desktop_watch: Any) -> Any:
+        if not isinstance(desktop_watch, dict):
+            return desktop_watch
+        normalized: dict[str, Any] = {}
+        enabled = desktop_watch.get("enabled")
+        interval_seconds = desktop_watch.get("interval_seconds")
+        if isinstance(enabled, bool):
+            normalized["enabled"] = enabled
+        if isinstance(interval_seconds, int):
+            normalized["interval_seconds"] = interval_seconds
+        return normalized
 
     def _validate_persona_definition(self, persona_id: str, definition: dict[str, Any]) -> None:
         if definition.get("persona_id") != persona_id:

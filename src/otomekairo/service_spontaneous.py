@@ -236,12 +236,9 @@ class ServiceSpontaneousMixin:
     ) -> float:
         # 設定
         desktop_watch = state.get("desktop_watch", {})
-        target_client_id = desktop_watch.get("target_client_id")
         if not isinstance(desktop_watch, dict) or not desktop_watch.get("enabled"):
             return BACKGROUND_DESKTOP_WATCH_POLL_SECONDS
-        if not isinstance(target_client_id, str) or not target_client_id.strip():
-            return BACKGROUND_DESKTOP_WATCH_POLL_SECONDS
-        if not self._event_stream_registry.has_capability(target_client_id.strip(), "vision.desktop"):
+        if self._desktop_watch_target_client_id() is None:
             return BACKGROUND_DESKTOP_WATCH_POLL_SECONDS
 
         # 初回監視
@@ -265,11 +262,10 @@ class ServiceSpontaneousMixin:
         # 直列化実行
         with self._desktop_watch_execution_lock:
             desktop_watch = state.get("desktop_watch", {})
-            target_client_id = desktop_watch.get("target_client_id")
-            if not isinstance(target_client_id, str) or not target_client_id.strip():
+            if not isinstance(desktop_watch, dict) or not desktop_watch.get("enabled"):
                 return
-            target_client_id = target_client_id.strip()
-            if not self._event_stream_registry.has_capability(target_client_id, "vision.desktop"):
+            target_client_id = self._desktop_watch_target_client_id()
+            if target_client_id is None:
                 return
 
             # タイムスタンプ
@@ -614,6 +610,10 @@ class ServiceSpontaneousMixin:
             },
         }
         self._event_stream_registry.send_to_client(target_client_id.strip(), event)
+
+    def _desktop_watch_target_client_id(self) -> str | None:
+        # 接続中で vision.desktop を持つ client が 1 台だけなら採用する
+        return self._event_stream_registry.find_single_client_with_capability("vision.desktop")
 
     def _next_stream_event_id(self) -> int:
         # カウンター

@@ -51,7 +51,7 @@
 - wake observation API と background 起床スケジューラがあり、`wake_policy` の due 判定と保留意図の再評価で `reply / noop / pending_intent` を扱える
 - `wake_scheduler_active` は server 内 scheduler の稼働状態を反映できる
 - `desktop_watch` は event stream と capture-response を介して観測源として接続されている
-- `desktop_watch` は `target_client_id` と `vision.desktop` capability を使って対象 console を選べる
+- `desktop_watch` は接続中の `vision.desktop` capability を持つ唯一の console を自動で対象にする
 - wake / `desktop_watch` の観測文には `source / active_app / window_title / locale` を正規化して入れられる
 - `logs/stream` があり、`CocoroConsole` のログビューアーへ `Observation / Recall / Decision / Result / Memory` の短い live 要約を流せる
 
@@ -262,7 +262,7 @@ API 結果種別や記憶契約の意味境界は `docs/design/` 側を正とす
   - runtime-only queue と wake runtime state は lock 付きで扱う
 - desktop_watch
   - `GET /api/events/stream` で client が `hello` を送り、`client_id` と `caps` を登録できる
-  - `desktop_watch.target_client_id` に対して `vision.capture_request` を送れる
+  - 接続中の `vision.desktop` capability を持つ唯一の client に `vision.capture_request` を送れる
   - `POST /api/v2/vision/capture-response` を受けられる
   - `desktop_watch.interval_seconds` に基づく background loop がある
   - capture result の `client_context` を使って `trigger_kind="desktop_watch"` の判断 cycle を実行できる
@@ -296,7 +296,7 @@ API 結果種別や記憶契約の意味境界は `docs/design/` 側を正とす
 - `events/stream` WebSocket がある
 - client の `hello(client_id, caps)` を受けられる
 - `vision.capture_request` と `vision/capture-response` が往復する
-- `target_client_id` と `vision.desktop` capability で対象 client を絞る
+- 接続中の `vision.desktop` capability を持つ唯一の client を自動選択する
 - capture result の `active_app / window_title / locale` を `client_context` として判断へ渡せる
 - `desktop_watch` 観測文に `active_app / window_title / locale / image_count` を正規化して入れられる
 - `reply` になった場合は `desktop_watch` event を stream へ返せる

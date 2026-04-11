@@ -223,6 +223,24 @@ class EventStreamRegistry:
         # 空
         return False
 
+    def find_single_client_with_capability(self, capability: str) -> str | None:
+        # capability を持つ接続中 client 群
+        with self._lock:
+            client_ids = sorted(
+                {
+                    client_id.strip()
+                    for session in self._sessions.values()
+                    if isinstance((client_id := session.get("client_id")), str)
+                    and client_id.strip()
+                    and capability in session.get("caps", set())
+                }
+            )
+
+        # 1 台だけのときだけ採用する
+        if len(client_ids) != 1:
+            return None
+        return client_ids[0]
+
     def is_client_connected(self, client_id: str) -> bool:
         # 走査
         with self._lock:
