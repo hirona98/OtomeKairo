@@ -34,6 +34,12 @@ def complete_text(
     reasoning_effort = role_definition.get("reasoning_effort")
     if isinstance(reasoning_effort, str) and reasoning_effort.strip():
         request_kwargs["reasoning_effort"] = reasoning_effort.strip()
+    max_output_tokens = _resolve_max_output_tokens(role_definition)
+    if max_output_tokens is not None:
+        request_kwargs["max_tokens"] = max_output_tokens
+    web_search_options = _resolve_web_search_options(role_definition)
+    if web_search_options is not None:
+        request_kwargs["web_search_options"] = web_search_options
 
     try:
         response = completion(**request_kwargs)
@@ -190,4 +196,18 @@ def _resolve_api_key(role_definition: dict) -> str | None:
     value = role_definition.get("api_key")
     if isinstance(value, str) and value.strip():
         return value.strip()
+    return None
+
+
+def _resolve_max_output_tokens(role_definition: dict) -> int | None:
+    value = role_definition.get("max_output_tokens")
+    if isinstance(value, int) and value >= 1:
+        return value
+    return None
+
+
+def _resolve_web_search_options(role_definition: dict) -> dict[str, Any] | None:
+    value = role_definition.get("web_search_enabled")
+    if value is True:
+        return {}
     return None

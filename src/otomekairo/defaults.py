@@ -8,6 +8,12 @@ DEFAULT_PERSONA_ID = "persona:default"
 DEFAULT_MEMORY_SET_ID = "memory_set:default"
 DEFAULT_MODEL_PRESET_ID = "model_preset:default"
 DEFAULT_DESKTOP_WATCH_INTERVAL_SECONDS = 300
+DEFAULT_PROMPT_WINDOW_RECENT_TURN_LIMIT = 30
+DEFAULT_PROMPT_WINDOW_RECENT_TURN_MINUTES = 3
+DEFAULT_OBSERVATION_MAX_OUTPUT_TOKENS = 3000
+DEFAULT_DECISION_MAX_OUTPUT_TOKENS = 3000
+DEFAULT_EXPRESSION_MAX_OUTPUT_TOKENS = 4000
+DEFAULT_MEMORY_MAX_OUTPUT_TOKENS = 3000
 DEFAULT_GEMINI_GENERATION_MODEL = "openrouter/google/gemini-3.1-flash-lite-preview"
 DEFAULT_GEMINI_EMBEDDING_MODEL = "openrouter/google/gemini-embedding-001"
 DEFAULT_PERSONA_DISPLAY_NAME = "標準人格設定"
@@ -88,23 +94,35 @@ def build_default_model_preset() -> dict:
     return {
         "model_preset_id": DEFAULT_MODEL_PRESET_ID,
         "display_name": "Default OpenRouter Gemini Preset",
+        "prompt_window": {
+            "recent_turn_limit": DEFAULT_PROMPT_WINDOW_RECENT_TURN_LIMIT,
+            "recent_turn_minutes": DEFAULT_PROMPT_WINDOW_RECENT_TURN_MINUTES,
+        },
         "roles": {
             "observation_interpretation": {
                 "model": DEFAULT_GEMINI_GENERATION_MODEL,
                 "api_key": "",
                 "reasoning_effort": "low",
+                "max_output_tokens": DEFAULT_OBSERVATION_MAX_OUTPUT_TOKENS,
+                "web_search_enabled": False,
             },
             "decision_generation": {
                 "model": DEFAULT_GEMINI_GENERATION_MODEL,
                 "api_key": "",
+                "max_output_tokens": DEFAULT_DECISION_MAX_OUTPUT_TOKENS,
+                "web_search_enabled": False,
             },
             "expression_generation": {
                 "model": DEFAULT_GEMINI_GENERATION_MODEL,
                 "api_key": "",
+                "max_output_tokens": DEFAULT_EXPRESSION_MAX_OUTPUT_TOKENS,
+                "web_search_enabled": False,
             },
             "memory_interpretation": {
                 "model": DEFAULT_GEMINI_GENERATION_MODEL,
                 "api_key": "",
+                "max_output_tokens": DEFAULT_MEMORY_MAX_OUTPUT_TOKENS,
+                "web_search_enabled": False,
             },
         },
     }

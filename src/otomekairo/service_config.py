@@ -646,6 +646,8 @@ class ServiceConfigMixin:
         display_name = definition.get("display_name")
         if not isinstance(display_name, str) or not display_name.strip():
             raise ServiceError(400, "invalid_model_preset_display_name", "display_name is required.")
+        prompt_window = definition.get("prompt_window")
+        self._validate_prompt_window(prompt_window)
         roles = definition.get("roles")
         if not isinstance(roles, dict):
             raise ServiceError(400, "invalid_model_preset_roles", "roles must be an object.")
@@ -664,6 +666,8 @@ class ServiceConfigMixin:
         api_base = definition.get("api_base")
         api_key = definition.get("api_key")
         reasoning_effort = definition.get("reasoning_effort")
+        max_output_tokens = definition.get("max_output_tokens")
+        web_search_enabled = definition.get("web_search_enabled")
 
         if not isinstance(model, str) or not model.strip():
             raise ServiceError(400, "invalid_model_role_model", f"{role_name}.model is required.")
@@ -673,6 +677,18 @@ class ServiceConfigMixin:
             raise ServiceError(400, "invalid_model_role_api_key", f"{role_name}.api_key must be a string.")
         if reasoning_effort is not None and not isinstance(reasoning_effort, str):
             raise ServiceError(400, "invalid_reasoning_effort", f"{role_name}.reasoning_effort must be a string.")
+        if not isinstance(max_output_tokens, int) or max_output_tokens < 1:
+            raise ServiceError(
+                400,
+                "invalid_max_output_tokens",
+                f"{role_name}.max_output_tokens must be an integer >= 1.",
+            )
+        if not isinstance(web_search_enabled, bool):
+            raise ServiceError(
+                400,
+                "invalid_web_search_enabled",
+                f"{role_name}.web_search_enabled must be a boolean.",
+            )
 
     def _normalize_model_preset_definition(self, definition: dict[str, Any]) -> dict[str, Any]:
         normalized = {
@@ -681,6 +697,9 @@ class ServiceConfigMixin:
         display_name = normalized.get("display_name")
         if isinstance(display_name, str):
             normalized["display_name"] = display_name.strip()
+        prompt_window = definition.get("prompt_window")
+        if isinstance(prompt_window, dict):
+            normalized["prompt_window"] = self._normalize_prompt_window(prompt_window)
 
         roles = definition.get("roles")
         if not isinstance(roles, dict):
@@ -708,6 +727,12 @@ class ServiceConfigMixin:
                 trimmed_reasoning_effort = reasoning_effort.strip()
                 if trimmed_reasoning_effort:
                     normalized_role["reasoning_effort"] = trimmed_reasoning_effort
+            max_output_tokens = role_definition.get("max_output_tokens")
+            if isinstance(max_output_tokens, int):
+                normalized_role["max_output_tokens"] = max_output_tokens
+            web_search_enabled = role_definition.get("web_search_enabled")
+            if isinstance(web_search_enabled, bool):
+                normalized_role["web_search_enabled"] = web_search_enabled
             normalized_roles[role_name] = normalized_role
 
         normalized["roles"] = normalized_roles
@@ -738,6 +763,33 @@ class ServiceConfigMixin:
                     continue
                 normalized[field_name] = trimmed_value
             else:
+                normalized[field_name] = value
+        return normalized
+
+    def _validate_prompt_window(self, prompt_window: Any) -> None:
+        if not isinstance(prompt_window, dict):
+            raise ServiceError(400, "invalid_prompt_window", "prompt_window must be an object.")
+
+        recent_turn_limit = prompt_window.get("recent_turn_limit")
+        recent_turn_minutes = prompt_window.get("recent_turn_minutes")
+        if not isinstance(recent_turn_limit, int) or recent_turn_limit < 1:
+            raise ServiceError(
+                400,
+                "invalid_recent_turn_limit",
+                "prompt_window.recent_turn_limit must be an integer >= 1.",
+            )
+        if not isinstance(recent_turn_minutes, int) or recent_turn_minutes < 1:
+            raise ServiceError(
+                400,
+                "invalid_recent_turn_minutes",
+                "prompt_window.recent_turn_minutes must be an integer >= 1.",
+            )
+
+    def _normalize_prompt_window(self, prompt_window: dict[str, Any]) -> dict[str, Any]:
+        normalized: dict[str, Any] = {}
+        for field_name in ("recent_turn_limit", "recent_turn_minutes"):
+            value = prompt_window.get(field_name)
+            if isinstance(value, int):
                 normalized[field_name] = value
         return normalized
 

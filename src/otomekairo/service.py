@@ -1474,9 +1474,11 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
 
     def _load_recent_turns(self, state: dict) -> list[dict]:
         # ウィンドウ設定
+        selected_preset = state["model_presets"][state["selected_model_preset_id"]]
+        prompt_window = selected_preset["prompt_window"]
         now = datetime.now(UTC)
-        threshold = now - timedelta(minutes=3)
-        turn_limit = 6
+        threshold = now - timedelta(minutes=prompt_window["recent_turn_minutes"])
+        turn_limit = prompt_window["recent_turn_limit"]
 
         # 検索
         return self.store.load_recent_turns(
