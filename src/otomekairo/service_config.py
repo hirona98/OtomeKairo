@@ -441,15 +441,29 @@ class ServiceConfigMixin:
         }
 
     def _build_runtime_summary(self, state: dict[str, Any]) -> dict[str, Any]:
+        with self._runtime_state_lock:
+            memory_job_in_progress = self._memory_postprocess_runtime_state.get("current_cycle_id") is not None
         return {
             "connection_state": "ready",
             "wake_scheduler_active": self._background_wake_scheduler_active() and state["wake_policy"]["mode"] == "interval",
             "ongoing_action_exists": False,
+            "memory_job_worker_active": self._background_memory_postprocess_worker_active(),
+            "pending_memory_job_count": self.store.count_memory_postprocess_jobs(
+                result_statuses=["queued", "running"],
+            ),
+            "memory_job_in_progress": memory_job_in_progress,
         }
 
     def _background_wake_scheduler_active(self) -> bool:
         with self._runtime_state_lock:
             return self._background_wake_thread is not None and self._background_wake_thread.is_alive()
+
+    def _background_memory_postprocess_worker_active(self) -> bool:
+        with self._runtime_state_lock:
+            return (
+                self._background_memory_postprocess_thread is not None
+                and self._background_memory_postprocess_thread.is_alive()
+            )
 
     def _catalog_entries(self, entries: dict[str, dict[str, Any]], id_key: str) -> list[dict[str, Any]]:
         return [

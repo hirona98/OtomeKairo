@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import queue
 import secrets
 import threading
 import uuid
@@ -43,6 +44,12 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         self._background_wake_thread: threading.Thread | None = None
         self._background_desktop_watch_stop_event: threading.Event | None = None
         self._background_desktop_watch_thread: threading.Thread | None = None
+        self._background_memory_postprocess_stop_event: threading.Event | None = None
+        self._background_memory_postprocess_thread: threading.Thread | None = None
+        self._memory_postprocess_queue: queue.Queue[dict[str, Any] | None] = queue.Queue()
+        self._memory_postprocess_runtime_state: dict[str, Any] = {
+            "current_cycle_id": None,
+        }
         self._event_stream_registry = EventStreamRegistry()
         self._log_stream_registry = LogStreamRegistry()
         self._vision_capture_lock = threading.RLock()
@@ -115,6 +122,219 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             stop_event.set()
         if thread is not None and thread.is_alive():
             thread.join(timeout=5.0)
+
+    def start_background_memory_postprocess_worker(self) -> None:
+        # 既存
+        with self._runtime_state_lock:
+            if (
+                self._background_memory_postprocess_thread is not None
+                and self._background_memory_postprocess_thread.is_alive()
+            ):
+                return
+
+            # 再起動時も incomplete job を拾い直せるよう、永続状態からキューを復元する。
+            self._memory_postprocess_queue = queue.Queue()
+            restored_jobs = self.store.list_memory_postprocess_jobs(
+                result_statuses=["queued", "running"],
+            )
+            for job in restored_jobs:
+                requeued_job = self._requeue_memory_postprocess_job(job)
+                self._memory_postprocess_queue.put(requeued_job)
+
+            stop_event = threading.Event()
+            thread = threading.Thread(
+                target=self._background_memory_postprocess_loop,
+                args=(stop_event,),
+                name="otomekairo-background-memory-postprocess",
+                daemon=True,
+            )
+            self._background_memory_postprocess_stop_event = stop_event
+            self._background_memory_postprocess_thread = thread
+            self._memory_postprocess_runtime_state["current_cycle_id"] = None
+
+        # 開始
+        thread.start()
+
+    def stop_background_memory_postprocess_worker(self) -> None:
+        # スナップショット
+        with self._runtime_state_lock:
+            stop_event = self._background_memory_postprocess_stop_event
+            thread = self._background_memory_postprocess_thread
+            self._background_memory_postprocess_stop_event = None
+            self._background_memory_postprocess_thread = None
+            self._memory_postprocess_runtime_state["current_cycle_id"] = None
+
+        # 停止
+        if stop_event is not None:
+            stop_event.set()
+        self._memory_postprocess_queue.put(None)
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=5.0)
+
+    def _requeue_memory_postprocess_job(self, job: dict[str, Any]) -> dict[str, Any]:
+        # 再投入
+        requeued_job = {
+            **job,
+            "started_at": None,
+            "finished_at": None,
+            "result_status": "queued",
+        }
+        self.store.upsert_memory_postprocess_job(job=requeued_job)
+        self._update_memory_trace_postprocess(
+            cycle_id=requeued_job["cycle_id"],
+            vector_index_sync={
+                "result_status": "queued",
+                "failure_reason": None,
+            },
+            reflective_consolidation={
+                "started": False,
+                "result_status": "queued",
+                "trigger_reasons": [],
+                "affected_memory_unit_ids": [],
+                "failure_reason": None,
+            },
+            emit_logs=False,
+        )
+        return requeued_job
+
+    def _background_memory_postprocess_loop(self, stop_event: threading.Event) -> None:
+        # ループ
+        while True:
+            if stop_event.is_set() and self._memory_postprocess_queue.empty():
+                break
+
+            try:
+                job = self._memory_postprocess_queue.get(timeout=0.5)
+            except queue.Empty:
+                continue
+
+            if job is None:
+                if stop_event.is_set():
+                    break
+                continue
+
+            self._run_memory_postprocess_job(job)
+
+    def _run_memory_postprocess_job(self, job: dict[str, Any]) -> None:
+        # 削除済み job は走らせない。
+        persisted_job = self.store.get_memory_postprocess_job(job["cycle_id"])
+        if persisted_job is None:
+            return
+
+        # job開始
+        started_job = {
+            **persisted_job,
+            "started_at": self._now_iso(),
+            "finished_at": None,
+            "result_status": "running",
+        }
+        self.store.upsert_memory_postprocess_job(job=started_job)
+        with self._runtime_state_lock:
+            self._memory_postprocess_runtime_state["current_cycle_id"] = started_job["cycle_id"]
+
+        try:
+            # 実行
+            postprocess_result = self.memory.run_postprocess_job(job=started_job)
+            self._update_memory_trace_postprocess(
+                cycle_id=started_job["cycle_id"],
+                vector_index_sync=postprocess_result["vector_index_sync"],
+                reflective_consolidation=postprocess_result["reflective_consolidation"],
+            )
+            self._append_vector_index_failure_events(
+                cycle_id=started_job["cycle_id"],
+                memory_set_id=started_job["memory_set_id"],
+                vector_index_sync=postprocess_result["vector_index_sync"],
+            )
+
+            # 完了
+            completed_job = {
+                **started_job,
+                "finished_at": self._now_iso(),
+                "result_status": (
+                    "failed"
+                    if (
+                        postprocess_result["vector_index_sync"]["result_status"] == "failed"
+                        or postprocess_result["reflective_consolidation"]["result_status"] == "failed"
+                    )
+                    else "succeeded"
+                ),
+            }
+            self.store.upsert_memory_postprocess_job(job=completed_job)
+        except Exception as exc:  # noqa: BLE001
+            # 想定外失敗
+            failure_reason = str(exc)
+            self._update_memory_trace_postprocess(
+                cycle_id=started_job["cycle_id"],
+                vector_index_sync={
+                    "result_status": "failed",
+                    "failure_reason": failure_reason,
+                },
+                reflective_consolidation={
+                    "started": False,
+                    "result_status": "not_started",
+                    "trigger_reasons": [],
+                    "affected_memory_unit_ids": [],
+                    "failure_reason": None,
+                },
+            )
+            self._append_vector_index_failure_events(
+                cycle_id=started_job["cycle_id"],
+                memory_set_id=started_job["memory_set_id"],
+                vector_index_sync={
+                    "result_status": "failed",
+                    "failure_reason": failure_reason,
+                },
+            )
+            self.store.upsert_memory_postprocess_job(
+                job={
+                    **started_job,
+                    "finished_at": self._now_iso(),
+                    "result_status": "failed",
+                }
+            )
+        finally:
+            with self._runtime_state_lock:
+                self._memory_postprocess_runtime_state["current_cycle_id"] = None
+
+    def _queue_memory_postprocess_job(self, job: dict[str, Any]) -> None:
+        # 永続化してから in-memory queue に載せる。
+        self.store.upsert_memory_postprocess_job(job=job)
+        self._memory_postprocess_queue.put(job)
+
+    def _update_memory_trace_postprocess(
+        self,
+        *,
+        cycle_id: str,
+        vector_index_sync: dict[str, Any],
+        reflective_consolidation: dict[str, Any],
+        emit_logs: bool = True,
+    ) -> None:
+        # 検索
+        cycle_trace = self.store.get_cycle_trace(cycle_id)
+        if cycle_trace is None:
+            return
+
+        # 更新
+        memory_trace = cycle_trace.get("memory_trace")
+        if not isinstance(memory_trace, dict):
+            memory_trace = self._pending_memory_trace()
+        memory_trace["vector_index_sync"] = vector_index_sync
+        memory_trace["reflective_consolidation"] = reflective_consolidation
+        self.store.replace_cycle_trace(
+            cycle_trace={
+                **cycle_trace,
+                "memory_trace": memory_trace,
+            }
+        )
+
+        # 監査 / ログ
+        self._append_reflective_failure_events(
+            cycle_id=cycle_id,
+            memory_set_id=cycle_trace["cycle_summary"]["selected_memory_set_id"],
+            memory_trace=memory_trace,
+        )
+        if emit_logs:
+            self._emit_memory_trace_logs(cycle_id=cycle_id, memory_trace=memory_trace)
 
     # 観測API
     def observe_conversation(self, token: str | None, payload: dict) -> dict[str, Any]:
@@ -416,7 +636,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
     ) -> None:
         # ターン統合
         try:
-            memory_trace = self.memory.consolidate_turn(
+            memory_trace, postprocess_job = self.memory.consolidate_turn(
                 state=state,
                 cycle_id=cycle_id,
                 finished_at=finished_at,
@@ -439,19 +659,47 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
                     )
                 ]
             )
-
-        # 内省監査
-        self._append_reflective_failure_events(
-            cycle_id=cycle_id,
-            memory_set_id=state["selected_memory_set_id"],
-            memory_trace=memory_trace,
-        )
+            postprocess_job = None
 
         # memory trace更新
         self._update_cycle_trace_memory_trace(cycle_id=cycle_id, memory_trace=memory_trace)
 
         # デバッグログ群
         self._emit_memory_trace_logs(cycle_id=cycle_id, memory_trace=memory_trace)
+
+        # 後段job投入
+        if postprocess_job is None:
+            return
+        try:
+            self._queue_memory_postprocess_job(postprocess_job)
+        except Exception as exc:  # noqa: BLE001
+            failed_postprocess_trace = {
+                **memory_trace,
+                "vector_index_sync": {
+                    "result_status": "failed",
+                    "failure_reason": str(exc),
+                },
+                "reflective_consolidation": {
+                    "started": False,
+                    "result_status": "not_started",
+                    "trigger_reasons": [],
+                    "affected_memory_unit_ids": [],
+                    "failure_reason": None,
+                },
+            }
+            self._update_cycle_trace_memory_trace(
+                cycle_id=cycle_id,
+                memory_trace=failed_postprocess_trace,
+            )
+            self._append_vector_index_failure_events(
+                cycle_id=cycle_id,
+                memory_set_id=state["selected_memory_set_id"],
+                vector_index_sync=failed_postprocess_trace["vector_index_sync"],
+            )
+            self._emit_memory_trace_logs(
+                cycle_id=cycle_id,
+                memory_trace=failed_postprocess_trace,
+            )
 
     def _failed_memory_trace(self, failure_reason: str) -> dict[str, Any]:
         # 結果
@@ -466,6 +714,10 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             "updated_memory_unit_ids": [],
             "affect_updates": [],
             "failure_reason": failure_reason,
+            "vector_index_sync": {
+                "result_status": "not_started",
+                "failure_reason": None,
+            },
             "reflective_consolidation": {
                 "started": False,
                 "result_status": "not_started",
@@ -489,14 +741,44 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             "affect_updates": [],
             "failure_reason": None,
             "skip_reason": reason,
+            "vector_index_sync": {
+                "result_status": "skipped",
+                "failure_reason": None,
+            },
             "reflective_consolidation": {
                 "started": False,
-                "result_status": "not_started",
+                "result_status": "skipped",
                 "trigger_reasons": [],
                 "affected_memory_unit_ids": [],
                 "failure_reason": None,
             },
         }
+
+    def _append_vector_index_failure_events(
+        self,
+        *,
+        cycle_id: str,
+        memory_set_id: str,
+        vector_index_sync: dict[str, Any],
+    ) -> None:
+        # 検索
+        if vector_index_sync.get("result_status") != "failed":
+            return
+
+        # 監査
+        self.store.append_events(
+            events=[
+                self._build_memory_audit_event(
+                    cycle_id=cycle_id,
+                    memory_set_id=memory_set_id,
+                    kind="vector_index_sync_failure",
+                    created_at=self._now_iso(),
+                    payload={
+                        "failure_reason": vector_index_sync.get("failure_reason"),
+                    },
+                )
+            ]
+        )
 
     def _append_reflective_failure_events(
         self,
@@ -702,15 +984,16 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
                 f"reason={self._clamp(str(memory_trace.get('skip_reason') or '-'))}"
             )
         else:
+            vector_sync = memory_trace.get("vector_index_sync") or {}
+            reflective = memory_trace.get("reflective_consolidation") or {}
             message = (
                 f"{self._short_cycle_id(cycle_id)} status={status} "
                 f"episode={memory_trace.get('episode_id') or '-'} "
                 f"memory_actions={memory_trace.get('memory_action_count', 0)} "
-                f"affect_updates={memory_trace.get('affect_update_count', 0)}"
+                f"affect_updates={memory_trace.get('affect_update_count', 0)} "
+                f"vector={vector_sync.get('result_status', 'unknown')}"
             )
-            reflective = memory_trace.get("reflective_consolidation") or {}
-            if reflective.get("started"):
-                message += f" reflection={reflective.get('result_status', 'unknown')}"
+            message += f" reflection={reflective.get('result_status', 'unknown')}"
             level = "INFO"
 
         # 送出
@@ -1284,7 +1567,17 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             "updated_memory_unit_ids": [],
             "affect_updates": [],
             "failure_reason": None,
-            "reflective_consolidation": None,
+            "vector_index_sync": {
+                "result_status": "not_started",
+                "failure_reason": None,
+            },
+            "reflective_consolidation": {
+                "started": False,
+                "result_status": "not_started",
+                "trigger_reasons": [],
+                "affected_memory_unit_ids": [],
+                "failure_reason": None,
+            },
         }
 
     def _persist_cycle_success(

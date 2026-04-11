@@ -242,5 +242,21 @@ class StoreSchemaMixin:
 
             CREATE INDEX IF NOT EXISTS idx_reflection_runs_memory_set_finished_at
             ON reflection_runs(memory_set_id, finished_at);
+
+            CREATE TABLE IF NOT EXISTS memory_postprocess_jobs (
+                cycle_id TEXT PRIMARY KEY,
+                memory_set_id TEXT NOT NULL,
+                queued_at TEXT NOT NULL,
+                started_at TEXT,
+                finished_at TEXT,
+                result_status TEXT NOT NULL,
+                payload_json TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_memory_postprocess_jobs_status_queued_at
+            ON memory_postprocess_jobs(result_status, queued_at);
+
+            CREATE INDEX IF NOT EXISTS idx_memory_postprocess_jobs_memory_set_status
+            ON memory_postprocess_jobs(memory_set_id, result_status, queued_at);
             """
         )

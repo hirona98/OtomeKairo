@@ -31,6 +31,7 @@ def main() -> None:
     server.socket = context.wrap_socket(server.socket, server_side=True)
 
     # スケジューラー開始
+    service.start_background_memory_postprocess_worker()
     service.start_background_wake_scheduler()
     service.start_background_desktop_watch()
 
@@ -44,6 +45,7 @@ def main() -> None:
         service.close_event_streams()
         service.stop_background_desktop_watch()
         service.stop_background_wake_scheduler()
+        service.stop_background_memory_postprocess_worker()
         server.server_close()
 
 

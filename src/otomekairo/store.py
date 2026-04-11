@@ -97,6 +97,83 @@ class SQLiteMemoryStore(StoreSchemaMixin):
         with self._memory_db() as conn:
             self._insert_reflection_run(conn, reflection_run)
 
+    def upsert_memory_postprocess_job(self, *, job: dict[str, Any]) -> None:
+        # トランザクション
+        with self._memory_db() as conn:
+            self._insert_memory_postprocess_job(conn, job)
+
+    def list_memory_postprocess_jobs(
+        self,
+        *,
+        result_statuses: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        # Query部品群
+        clauses: list[str] = []
+        params: list[Any] = []
+        if result_statuses:
+            placeholders = ", ".join("?" for _ in result_statuses)
+            clauses.append(f"result_status IN ({placeholders})")
+            params.extend(result_statuses)
+
+        query = """
+            SELECT payload_json
+            FROM memory_postprocess_jobs
+        """
+        if clauses:
+            query += f"\nWHERE {' AND '.join(clauses)}"
+        query += "\nORDER BY queued_at ASC, rowid ASC"
+
+        # クエリ
+        with self._memory_db() as conn:
+            rows = conn.execute(query, params).fetchall()
+
+        # 結果
+        return [json.loads(row["payload_json"]) for row in rows]
+
+    def count_memory_postprocess_jobs(
+        self,
+        *,
+        result_statuses: list[str] | None = None,
+    ) -> int:
+        # Query部品群
+        clauses: list[str] = []
+        params: list[Any] = []
+        if result_statuses:
+            placeholders = ", ".join("?" for _ in result_statuses)
+            clauses.append(f"result_status IN ({placeholders})")
+            params.extend(result_statuses)
+
+        query = """
+            SELECT COUNT(*)
+            FROM memory_postprocess_jobs
+        """
+        if clauses:
+            query += f"\nWHERE {' AND '.join(clauses)}"
+
+        # クエリ
+        with self._memory_db() as conn:
+            row = conn.execute(query, params).fetchone()
+
+        # 結果
+        return int(row[0]) if row is not None else 0
+
+    def get_memory_postprocess_job(self, cycle_id: str) -> dict[str, Any] | None:
+        # クエリ
+        with self._memory_db() as conn:
+            row = conn.execute(
+                """
+                SELECT payload_json
+                FROM memory_postprocess_jobs
+                WHERE cycle_id = ?
+                """,
+                (cycle_id,),
+            ).fetchone()
+
+        # 結果
+        if row is None:
+            return None
+        return json.loads(row["payload_json"])
+
     def list_cycle_summaries(self, limit: int) -> list[dict[str, Any]]:
         # クエリ
         with self._memory_db() as conn:
@@ -865,6 +942,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
             self._delete_vector_index_entries(conn, memory_set_id)
 
             # 削除順序
+            conn.execute("DELETE FROM memory_postprocess_jobs WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM revisions WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM affect_state WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM memory_units WHERE memory_set_id = ?", (memory_set_id,))
@@ -1282,6 +1360,31 @@ class SQLiteMemoryStore(StoreSchemaMixin):
                 self._to_json(record.get("trigger_reasons", [])),
                 self._to_json(record.get("source_episode_ids", [])),
                 self._to_json(record.get("affected_memory_unit_ids", [])),
+                self._to_json(record),
+            ),
+        )
+
+    def _insert_memory_postprocess_job(self, conn: sqlite3.Connection, record: dict[str, Any]) -> None:
+        # 追加
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO memory_postprocess_jobs (
+                cycle_id,
+                memory_set_id,
+                queued_at,
+                started_at,
+                finished_at,
+                result_status,
+                payload_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                record["cycle_id"],
+                record["memory_set_id"],
+                record["queued_at"],
+                record.get("started_at"),
+                record.get("finished_at"),
+                record["result_status"],
                 self._to_json(record),
             ),
         )

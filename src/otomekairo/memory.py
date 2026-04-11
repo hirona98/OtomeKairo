@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import uuid
 from typing import Any
 
@@ -36,7 +37,7 @@ class MemoryConsolidator:
         decision: dict[str, Any],
         reply_payload: dict[str, Any] | None,
         events: list[dict[str, Any]],
-    ) -> dict[str, Any]:
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
         # モデル選択
         selected_preset = state["model_presets"][state["selected_model_preset_id"]]
         memory_role = selected_preset["roles"]["memory_interpretation"]
@@ -92,17 +93,86 @@ class MemoryConsolidator:
             affect_updates=affect_updates,
         )
 
-        # ベクトル索引
-        self.vector_indexer.sync(
-            state=state,
-            finished_at=finished_at,
-            episode=episode,
-            memory_actions=memory_actions,
+        # 結果
+        return (
+            {
+                "turn_consolidation_status": "succeeded",
+                "episode_id": episode["episode_id"],
+                "episode_summary": episode["summary_text"],
+                "episode_series_id": episode.get("episode_series_id"),
+                "open_loops": episode.get("open_loops", []),
+                "memory_action_count": len(memory_actions),
+                "affect_update_count": len(affect_updates),
+                "updated_memory_unit_ids": [
+                    action["memory_unit_id"]
+                    for action in memory_actions
+                    if action.get("memory_unit_id")
+                ],
+                "affect_updates": [
+                    {
+                        "layer": update["layer"],
+                        "target_scope_type": update["target_scope_type"],
+                        "target_scope_key": update["target_scope_key"],
+                        "affect_label": update["affect_label"],
+                        "intensity": update["intensity"],
+                    }
+                    for update in affect_updates
+                ],
+                "failure_reason": None,
+                "vector_index_sync": {
+                    "result_status": "queued",
+                    "failure_reason": None,
+                },
+                "reflective_consolidation": {
+                    "started": False,
+                    "result_status": "queued",
+                    "trigger_reasons": [],
+                    "affected_memory_unit_ids": [],
+                    "failure_reason": None,
+                },
+            },
+            self._build_postprocess_job(
+                state=state,
+                cycle_id=cycle_id,
+                finished_at=finished_at,
+                episode=episode,
+                memory_actions=memory_actions,
+            ),
         )
+
+    def run_postprocess_job(self, *, job: dict[str, Any]) -> dict[str, Any]:
+        # job状態
+        state_snapshot = job["state_snapshot"]
+        finished_at = job["turn_finished_at"]
+        episode = job["episode"]
+        memory_actions = job["memory_actions"]
+
+        # ベクトル索引
+        try:
+            self.vector_indexer.sync(
+                state=state_snapshot,
+                finished_at=finished_at,
+                episode=episode,
+                memory_actions=memory_actions,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "vector_index_sync": {
+                    "result_status": "failed",
+                    "failure_reason": str(exc),
+                },
+                "reflective_consolidation": {
+                    "started": False,
+                    "result_status": "not_started",
+                    "trigger_reasons": [],
+                    "affected_memory_unit_ids": [],
+                    "failure_reason": None,
+                },
+            }
 
         # 内省統合
         reflective_result = self.reflective.run(
-            state=state,
+            state=state_snapshot,
             finished_at=finished_at,
             episode=episode,
             memory_actions=memory_actions,
@@ -110,26 +180,43 @@ class MemoryConsolidator:
 
         # 結果
         return {
-            "turn_consolidation_status": "succeeded",
-            "episode_id": episode["episode_id"],
-            "episode_summary": episode["summary_text"],
-            "episode_series_id": episode.get("episode_series_id"),
-            "open_loops": episode.get("open_loops", []),
-            "memory_action_count": len(memory_actions),
-            "affect_update_count": len(affect_updates),
-            "updated_memory_unit_ids": [action["memory_unit_id"] for action in memory_actions if action.get("memory_unit_id")],
-            "affect_updates": [
-                {
-                    "layer": update["layer"],
-                    "target_scope_type": update["target_scope_type"],
-                    "target_scope_key": update["target_scope_key"],
-                    "affect_label": update["affect_label"],
-                    "intensity": update["intensity"],
-                }
-                for update in affect_updates
-            ],
-            "failure_reason": None,
+            "vector_index_sync": {
+                "result_status": "succeeded",
+                "failure_reason": None,
+            },
             "reflective_consolidation": reflective_result,
+        }
+
+    def _build_postprocess_job(
+        self,
+        *,
+        state: dict[str, Any],
+        cycle_id: str,
+        finished_at: str,
+        episode: dict[str, Any],
+        memory_actions: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        selected_memory_set_id = state["selected_memory_set_id"]
+        return {
+            "cycle_id": cycle_id,
+            "memory_set_id": selected_memory_set_id,
+            "queued_at": finished_at,
+            "started_at": None,
+            "finished_at": None,
+            "result_status": "queued",
+            "turn_finished_at": finished_at,
+            "state_snapshot": {
+                "selected_memory_set_id": selected_memory_set_id,
+                "memory_sets": {
+                    selected_memory_set_id: {
+                        "embedding": deepcopy(
+                            state["memory_sets"][selected_memory_set_id]["embedding"]
+                        )
+                    }
+                },
+            },
+            "episode": deepcopy(episode),
+            "memory_actions": deepcopy(memory_actions),
         }
 
     def _build_episode(
