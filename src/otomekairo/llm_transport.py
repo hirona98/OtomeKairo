@@ -31,9 +31,16 @@ def complete_text(
     api_key = _resolve_api_key(role_definition)
     if api_key is not None:
         request_kwargs["api_key"] = api_key
-    reasoning_effort = role_definition.get("reasoning_effort")
-    if isinstance(reasoning_effort, str) and reasoning_effort.strip():
-        request_kwargs["reasoning_effort"] = reasoning_effort.strip()
+    reasoning_effort = _resolve_reasoning_effort(role_definition)
+    if reasoning_effort is not None:
+        if _model_provider_name(role_definition) == "openrouter":
+            request_kwargs["extra_body"] = {
+                "reasoning": {
+                    "effort": reasoning_effort,
+                }
+            }
+        else:
+            request_kwargs["reasoning_effort"] = reasoning_effort
     max_output_tokens = _resolve_max_output_tokens(role_definition)
     if max_output_tokens is not None:
         request_kwargs["max_tokens"] = max_output_tokens
@@ -204,6 +211,16 @@ def _resolve_max_output_tokens(role_definition: dict) -> int | None:
     if isinstance(value, int) and value >= 1:
         return value
     return None
+
+
+def _resolve_reasoning_effort(role_definition: dict) -> str | None:
+    value = role_definition.get("reasoning_effort")
+    if not isinstance(value, str):
+        return None
+    trimmed_value = value.strip()
+    if not trimmed_value:
+        return None
+    return trimmed_value
 
 
 def _resolve_web_search_options(role_definition: dict) -> dict[str, Any] | None:
