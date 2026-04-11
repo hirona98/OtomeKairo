@@ -626,13 +626,11 @@ class SQLiteMemoryStore(StoreSchemaMixin):
                     WHERE memory_set_id = ?
                       AND source_kind = ?
                       AND source_id = ?
-                      AND embedding_signature = ?
                     """,
                     (
                         entry["memory_set_id"],
                         entry["source_kind"],
                         entry["source_id"],
-                        entry["embedding_signature"],
                     ),
                 ).fetchone()
 
@@ -645,7 +643,6 @@ class SQLiteMemoryStore(StoreSchemaMixin):
                             memory_set_id,
                             source_kind,
                             source_id,
-                            embedding_signature,
                             source_text,
                             scope_type,
                             scope_key,
@@ -655,13 +652,12 @@ class SQLiteMemoryStore(StoreSchemaMixin):
                             has_open_loops,
                             updated_at,
                             text_hash
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             entry["memory_set_id"],
                             entry["source_kind"],
                             entry["source_id"],
-                            entry["embedding_signature"],
                             entry["source_text"],
                             entry["scope_type"],
                             entry["scope_key"],
@@ -722,7 +718,6 @@ class SQLiteMemoryStore(StoreSchemaMixin):
         self,
         *,
         memory_set_id: str,
-        embedding_signature: str,
         query_embedding: list[float],
         embedding_dimension: int,
         limit: int,
@@ -738,13 +733,11 @@ class SQLiteMemoryStore(StoreSchemaMixin):
         # Query部品群
         clauses = [
             "meta.memory_set_id = ?",
-            "meta.embedding_signature = ?",
         ]
         params: list[Any] = [
             sqlite_vec.serialize_float32(query_embedding),
             limit,
             memory_set_id,
-            embedding_signature,
         ]
 
         # スコープFilters
@@ -805,7 +798,6 @@ class SQLiteMemoryStore(StoreSchemaMixin):
         self,
         *,
         memory_set_id: str,
-        embedding_signature: str,
         query_embedding: list[float],
         embedding_dimension: int,
         limit: int,
@@ -819,13 +811,11 @@ class SQLiteMemoryStore(StoreSchemaMixin):
         # Query部品群
         clauses = [
             "meta.memory_set_id = ?",
-            "meta.embedding_signature = ?",
         ]
         params: list[Any] = [
             sqlite_vec.serialize_float32(query_embedding),
             limit,
             memory_set_id,
-            embedding_signature,
         ]
 
         # スコープFilters
@@ -884,6 +874,11 @@ class SQLiteMemoryStore(StoreSchemaMixin):
             conn.execute("DELETE FROM retrieval_runs WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM cycle_traces WHERE selected_memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM cycle_summaries WHERE selected_memory_set_id = ?", (memory_set_id,))
+
+    def reset_memory_set_vector_index(self, memory_set_id: str) -> None:
+        # トランザクション
+        with self._memory_db() as conn:
+            self._delete_vector_index_entries(conn, memory_set_id)
 
     def clone_memory_set_records(
         self,
@@ -1642,7 +1637,6 @@ class SQLiteMemoryStore(StoreSchemaMixin):
                     memory_set_id,
                     source_kind,
                     source_id,
-                    embedding_signature,
                     source_text,
                     scope_type,
                     scope_key,
@@ -1652,13 +1646,12 @@ class SQLiteMemoryStore(StoreSchemaMixin):
                     has_open_loops,
                     updated_at,
                     text_hash
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     target_memory_set_id,
                     source_kind,
                     target_source_id,
-                    row["embedding_signature"],
                     row["source_text"],
                     row["scope_type"],
                     row["scope_key"],

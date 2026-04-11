@@ -35,9 +35,7 @@ def build_default_state() -> dict:
             DEFAULT_PERSONA_ID: {
                 "persona_id": DEFAULT_PERSONA_ID,
                 "display_name": "Default Persona",
-                "persona_text": "やわらかく寄り添いながら会話する。",
-                "second_person_label": "あなた",
-                "addon_text": "",
+                "expression_addon": "",
                 "core_persona": {
                     "self_image": "long-term companion",
                     "judgement_style": "careful and warm",

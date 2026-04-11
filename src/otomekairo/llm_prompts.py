@@ -217,9 +217,7 @@ def _build_decision_user_prompt(
 # Reply system prompt。
 def _build_reply_system_prompt(persona: dict) -> str:
     display_name = persona.get("display_name", "OtomeKairo")
-    persona_text = persona.get("persona_text", "")
-    second_person_label = persona.get("second_person_label", "あなた")
-    addon_text = persona.get("addon_text", "")
+    expression_addon = persona.get("expression_addon", "")
     core_persona = json.dumps(persona.get("core_persona", {}), ensure_ascii=False)
     expression_style = json.dumps(persona.get("expression_style", {}), ensure_ascii=False)
     return (
@@ -231,9 +229,7 @@ def _build_reply_system_prompt(persona: dict) -> str:
         "RecallPack の内容だけを根拠に、必要な範囲で自然に思い出や継続文脈を混ぜてください。\n"
         "RecallPack.event_evidence は 1-3 件の短い証拠要約として扱い、必要なときだけ自然に参照してください。\n"
         "RecallPack.conflicts があるときは断定を避け、短い確認質問に寄せてください。\n"
-        f"persona_text: {persona_text}\n"
-        f"second_person_label: {second_person_label}\n"
-        f"addon_text: {addon_text}\n"
+        f"expression_addon: {expression_addon}\n"
         f"core_persona: {core_persona}\n"
         f"expression_style: {expression_style}\n"
         "断定確認が必要な場合は、短く確認質問に寄せてください。"

@@ -232,17 +232,26 @@ class ServiceConfigMixin:
         )
 
     def replace_memory_set(self, token: str | None, memory_set_id: str, definition: dict[str, Any]) -> dict[str, Any]:
-        return self._replace_resource_entry(
-            token=token,
-            entries_key="memory_sets",
-            selected_id_key="selected_memory_set_id",
-            entry_id=memory_set_id,
-            definition=definition,
-            resource_key="memory_set",
-            validator=self._validate_memory_set_definition,
-            normalizer=self._normalize_memory_set_definition,
-            public_builder=self._public_memory_set,
-        )
+        # 認可
+        state = self._require_token(token)
+
+        # 正規化と検証
+        previous_definition = deepcopy(state["memory_sets"].get(memory_set_id))
+        stored_definition = self._normalize_memory_set_definition(definition)
+        self._validate_memory_set_definition(memory_set_id, stored_definition)
+
+        # 永続化
+        state["memory_sets"][memory_set_id] = deepcopy(stored_definition)
+        self.store.write_state(state)
+        if self._embedding_definition_changed(previous_definition, stored_definition):
+            self.store.reset_memory_set_vector_index(memory_set_id)
+        if memory_set_id == state["selected_memory_set_id"]:
+            self._clear_pending_intent_candidates()
+
+        # 応答
+        return {
+            "memory_set": self._public_memory_set(state["memory_sets"][memory_set_id]),
+        }
 
     def clone_memory_set(self, token: str | None, definition: dict[str, Any]) -> dict[str, Any]:
         # 認可
@@ -328,6 +337,7 @@ class ServiceConfigMixin:
     def replace_editor_state(self, token: str | None, definition: dict[str, Any]) -> dict[str, Any]:
         # 認可
         state = self._require_token(token)
+        previous_memory_sets = deepcopy(state["memory_sets"])
 
         # 生値Entries
         current = definition.get("current")
@@ -387,6 +397,10 @@ class ServiceConfigMixin:
         state["memory_sets"] = memory_sets
         state["model_presets"] = model_presets
         self.store.write_state(state)
+        for memory_set_id, memory_set in memory_sets.items():
+            previous_definition = previous_memory_sets.get(memory_set_id)
+            if self._embedding_definition_changed(previous_definition, memory_set):
+                self.store.reset_memory_set_vector_index(memory_set_id)
         self._clear_pending_intent_candidates()
         return self._build_editor_state(state)
 
@@ -593,10 +607,13 @@ class ServiceConfigMixin:
         tone = expression_style.get("tone")
         if not isinstance(tone, str) or not tone.strip():
             raise ServiceError(400, "invalid_persona_tone", "expression_style.tone is required.")
+        expression_addon = definition.get("expression_addon")
+        if expression_addon is not None and not isinstance(expression_addon, str):
+            raise ServiceError(400, "invalid_expression_addon", "expression_addon must be a string.")
         for field_name in ("persona_text", "second_person_label", "addon_text"):
             value = definition.get(field_name)
-            if value is not None and not isinstance(value, str):
-                raise ServiceError(400, f"invalid_{field_name}", f"{field_name} must be a string.")
+            if value is not None:
+                raise ServiceError(400, f"invalid_{field_name}", f"{field_name} is no longer supported.")
 
     def _validate_memory_set_definition(self, memory_set_id: Any, definition: dict[str, Any]) -> None:
         if not isinstance(memory_set_id, str) or not memory_set_id:
@@ -708,6 +725,15 @@ class ServiceConfigMixin:
             else:
                 normalized[field_name] = value
         return normalized
+
+    def _embedding_definition_changed(
+        self,
+        previous_definition: dict[str, Any] | None,
+        current_definition: dict[str, Any],
+    ) -> bool:
+        if not isinstance(previous_definition, dict):
+            return False
+        return previous_definition.get("embedding") != current_definition.get("embedding")
 
     def _validate_embedding_definition(self, field_path: str, definition: Any) -> None:
         if not isinstance(definition, dict):

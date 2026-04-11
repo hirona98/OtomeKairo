@@ -27,12 +27,10 @@ class MemoryVectorIndexer:
         selected_memory_set = state["memory_sets"][state["selected_memory_set_id"]]
         embedding_definition = selected_memory_set["embedding"]
         embedding_dimension = self._embedding_dimension(embedding_definition)
-        embedding_signature = self._embedding_signature(embedding_definition, embedding_dimension)
 
         # source群
         entries = self._build_vector_index_entries(
             finished_at=finished_at,
-            embedding_signature=embedding_signature,
             episode=episode,
             memory_actions=memory_actions,
         )
@@ -64,7 +62,6 @@ class MemoryVectorIndexer:
         self,
         *,
         finished_at: str,
-        embedding_signature: str,
         episode: dict[str, Any] | None,
         memory_actions: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
@@ -76,7 +73,6 @@ class MemoryVectorIndexer:
         if episode is not None:
             episode_entry = self._vector_entry_for_episode(
                 finished_at=finished_at,
-                embedding_signature=embedding_signature,
                 record=episode,
             )
             if episode_entry is not None:
@@ -93,7 +89,6 @@ class MemoryVectorIndexer:
                 continue
             memory_entry = self._vector_entry_for_memory_unit(
                 finished_at=finished_at,
-                embedding_signature=embedding_signature,
                 record=memory_unit,
             )
             if memory_entry is None:
@@ -108,7 +103,6 @@ class MemoryVectorIndexer:
         self,
         *,
         finished_at: str,
-        embedding_signature: str,
         record: dict[str, Any],
     ) -> dict[str, Any] | None:
         # sourceテキスト
@@ -121,7 +115,6 @@ class MemoryVectorIndexer:
             "memory_set_id": record["memory_set_id"],
             "source_kind": "episode",
             "source_id": record["episode_id"],
-            "embedding_signature": embedding_signature,
             "source_text": source_text,
             "scope_type": record["primary_scope_type"],
             "scope_key": record["primary_scope_key"],
@@ -137,7 +130,6 @@ class MemoryVectorIndexer:
         self,
         *,
         finished_at: str,
-        embedding_signature: str,
         record: dict[str, Any],
     ) -> dict[str, Any] | None:
         # sourceテキスト
@@ -150,7 +142,6 @@ class MemoryVectorIndexer:
             "memory_set_id": record["memory_set_id"],
             "source_kind": "memory_unit",
             "source_id": record["memory_unit_id"],
-            "embedding_signature": embedding_signature,
             "source_text": source_text,
             "scope_type": record["scope_type"],
             "scope_key": record["scope_key"],
@@ -172,12 +163,6 @@ class MemoryVectorIndexer:
 
         # 結果
         return "\n".join(part for part in parts if part)
-
-    def _embedding_signature(self, definition: dict[str, Any], embedding_dimension: int) -> str:
-        # 識別子
-        model = str(definition.get("model", "unknown")).strip() or "unknown"
-        api_base = str(definition.get("api_base", "default")).strip() or "default"
-        return f"{model}:{api_base}:dim{embedding_dimension}"
 
     def _embedding_dimension(self, definition: dict[str, Any]) -> int:
         _ = definition

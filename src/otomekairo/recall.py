@@ -338,7 +338,6 @@ class RecallBuilder(RecallEventEvidenceMixin):
         selected_memory_set = state["memory_sets"][state["selected_memory_set_id"]]
         embedding_definition = selected_memory_set["embedding"]
         embedding_dimension = self._embedding_dimension(embedding_definition)
-        embedding_signature = self._embedding_signature(embedding_definition, embedding_dimension)
 
         # クエリ埋め込み群
         query_embeddings = self.llm.generate_embeddings(
@@ -355,7 +354,6 @@ class RecallBuilder(RecallEventEvidenceMixin):
             # memory hit群
             memory_hits = self.store.search_memory_unit_vector_entries(
                 memory_set_id=state["selected_memory_set_id"],
-                embedding_signature=embedding_signature,
                 query_embedding=query_embedding,
                 embedding_dimension=embedding_dimension,
                 limit=self._association_search_limit(
@@ -389,7 +387,6 @@ class RecallBuilder(RecallEventEvidenceMixin):
             # episode hit群
             episode_hits = self.store.search_episode_vector_entries(
                 memory_set_id=state["selected_memory_set_id"],
-                embedding_signature=embedding_signature,
                 query_embedding=query_embedding,
                 embedding_dimension=embedding_dimension,
                 limit=self._association_search_limit(
@@ -1102,12 +1099,6 @@ class RecallBuilder(RecallEventEvidenceMixin):
             "selected_event_ids": [],
             "candidate_count": 0,
         }
-
-    def _embedding_signature(self, definition: dict[str, Any], embedding_dimension: int) -> str:
-        # 識別子
-        model = str(definition.get("model", "unknown")).strip() or "unknown"
-        api_base = str(definition.get("api_base", "default")).strip() or "default"
-        return f"{model}:{api_base}:dim{embedding_dimension}"
 
     def _embedding_dimension(self, definition: dict[str, Any]) -> int:
         _ = definition
