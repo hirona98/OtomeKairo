@@ -134,6 +134,7 @@ class MockLLMClient:
     def generate_decision(
         self,
         role_definition: dict,
+        persona: dict,
         observation_text: str,
         recent_turns: list[dict],
         time_context: dict[str, Any],
@@ -142,6 +143,7 @@ class MockLLMClient:
         recall_pack: dict[str, Any],
     ) -> dict[str, Any]:
         # model確認
+        _ = persona
         self._assert_mock_model(role_definition)
 
         # コンテキスト
@@ -245,7 +247,7 @@ class MockLLMClient:
         self._assert_mock_model(role_definition)
 
         # コンテキスト
-        tone = persona["expression_style"]["tone"]
+        persona_prompt = str(persona.get("persona_prompt", "")).strip()
         primary_intent = recall_hint["primary_intent"]
         secondary_intents = self._secondary_intents(recall_hint)
         text = observation_text.strip()
@@ -328,12 +330,14 @@ class MockLLMClient:
                 topic_prefix = f"{topic_item['summary_text']} の流れで、"
             elif recent_turns:
                 topic_prefix = "前の流れをつなげつつ、"
-            reply_text = f"{caution_prefix}{continuity_prefix}{tone}に受け取ったよ。{topic_prefix}{text}"
+            reply_text = f"{caution_prefix}{continuity_prefix}{topic_prefix}{text}として受け取ったよ。"
 
         # payload作成
         return {
             "reply_text": reply_text,
-            "reply_style_notes": f"tone={tone}; part_of_day={time_context.get('part_of_day', 'unknown')}",
+            "reply_style_notes": (
+                f"persona_prompt_present={bool(persona_prompt)}; part_of_day={time_context.get('part_of_day', 'unknown')}"
+            ),
             "confidence_note": "mock_model",
         }
 

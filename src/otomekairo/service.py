@@ -219,6 +219,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         # decision生成
         decision = self.llm.generate_decision(
             role_definition=decision_role,
+            persona=persona,
             observation_text=observation_text,
             recent_turns=recent_turns,
             time_context=time_context,

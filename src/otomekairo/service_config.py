@@ -207,6 +207,7 @@ class ServiceConfigMixin:
             definition=definition,
             resource_key="persona",
             validator=self._validate_persona_definition,
+            normalizer=self._normalize_persona_definition,
         )
 
     def delete_persona(self, token: str | None, persona_id: str) -> dict[str, Any]:
@@ -356,6 +357,10 @@ class ServiceConfigMixin:
             raise ServiceError(400, "missing_model_presets", "editor-state requires at least one model_preset.")
 
         # 検証
+        personas = {
+            persona_id: self._normalize_persona_definition(persona)
+            for persona_id, persona in personas.items()
+        }
         for persona_id, persona in personas.items():
             self._validate_persona_definition(persona_id, persona)
         memory_sets = {
@@ -595,25 +600,35 @@ class ServiceConfigMixin:
     def _validate_persona_definition(self, persona_id: str, definition: dict[str, Any]) -> None:
         if definition.get("persona_id") != persona_id:
             raise ServiceError(400, "persona_id_mismatch", "persona_id must match the path.")
+        unsupported_fields = sorted(
+            set(definition.keys()) - {"persona_id", "display_name", "persona_prompt", "expression_addon"}
+        )
+        if unsupported_fields:
+            raise ServiceError(
+                400,
+                "unsupported_persona_field",
+                f"{unsupported_fields[0]} is not supported in persona definitions.",
+            )
         display_name = definition.get("display_name")
         if not isinstance(display_name, str) or not display_name.strip():
             raise ServiceError(400, "invalid_persona_display_name", "display_name is required.")
-        core_persona = definition.get("core_persona")
-        expression_style = definition.get("expression_style")
-        if not isinstance(core_persona, dict):
-            raise ServiceError(400, "invalid_core_persona", "core_persona must be an object.")
-        if not isinstance(expression_style, dict):
-            raise ServiceError(400, "invalid_expression_style", "expression_style must be an object.")
-        tone = expression_style.get("tone")
-        if not isinstance(tone, str) or not tone.strip():
-            raise ServiceError(400, "invalid_persona_tone", "expression_style.tone is required.")
+        persona_prompt = definition.get("persona_prompt")
+        if not isinstance(persona_prompt, str) or not persona_prompt.strip():
+            raise ServiceError(400, "invalid_persona_prompt", "persona_prompt is required.")
         expression_addon = definition.get("expression_addon")
         if expression_addon is not None and not isinstance(expression_addon, str):
             raise ServiceError(400, "invalid_expression_addon", "expression_addon must be a string.")
-        for field_name in ("persona_text", "second_person_label", "addon_text"):
-            value = definition.get(field_name)
-            if value is not None:
-                raise ServiceError(400, f"invalid_{field_name}", f"{field_name} is no longer supported.")
+
+    def _normalize_persona_definition(self, definition: dict[str, Any]) -> dict[str, Any]:
+        normalized = {
+            **definition,
+        }
+        for field_name in ("display_name", "persona_prompt", "expression_addon"):
+            value = normalized.get(field_name)
+            if not isinstance(value, str):
+                continue
+            normalized[field_name] = value.strip()
+        return normalized
 
     def _validate_memory_set_definition(self, memory_set_id: Any, definition: dict[str, Any]) -> None:
         if not isinstance(memory_set_id, str) or not memory_set_id:

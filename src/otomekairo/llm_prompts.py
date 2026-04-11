@@ -28,6 +28,7 @@ def build_recall_hint_messages(
 # Decision 用の message 群を組み立てる。
 def build_decision_messages(
     *,
+    persona: dict,
     observation_text: str,
     recent_turns: list[dict],
     time_context: dict[str, Any],
@@ -38,7 +39,7 @@ def build_decision_messages(
     return [
         {
             "role": "system",
-            "content": _build_decision_system_prompt(),
+            "content": _build_decision_system_prompt(persona),
         },
         {
             "role": "user",
@@ -169,10 +170,13 @@ def _build_recall_hint_user_prompt(
     )
 
 
-# Decision system prompt。
-def _build_decision_system_prompt() -> str:
+def _build_decision_system_prompt(persona: dict) -> str:
+    display_name = persona.get("display_name", "OtomeKairo")
+    persona_prompt = str(persona.get("persona_prompt", "")).strip()
     return (
-        "あなたは OtomeKairo の decision_generation です。\n"
+        f"あなたは {display_name} の判断を作る decision_generation です。\n"
+        "人格設定本文:\n"
+        f"{persona_prompt or 'なし'}\n"
         "観測文に対して reply / noop / pending_intent のいずれかを決め、JSON オブジェクト 1 個だけを返してください。\n"
         "Markdown、コードフェンス、説明文は禁止です。\n"
         "入力には recent_turns と internal_context が含まれます。\n"
@@ -214,12 +218,10 @@ def _build_decision_user_prompt(
     )
 
 
-# Reply system prompt。
 def _build_reply_system_prompt(persona: dict) -> str:
     display_name = persona.get("display_name", "OtomeKairo")
-    expression_addon = persona.get("expression_addon", "")
-    core_persona = json.dumps(persona.get("core_persona", {}), ensure_ascii=False)
-    expression_style = json.dumps(persona.get("expression_style", {}), ensure_ascii=False)
+    persona_prompt = str(persona.get("persona_prompt", "")).strip()
+    expression_addon = str(persona.get("expression_addon", "")).strip()
     return (
         f"あなたは {display_name} として話します。\n"
         "返答は自然な日本語の本文だけを返してください。JSON、箇条書き、見出し、引用符は禁止です。\n"
@@ -229,9 +231,10 @@ def _build_reply_system_prompt(persona: dict) -> str:
         "RecallPack の内容だけを根拠に、必要な範囲で自然に思い出や継続文脈を混ぜてください。\n"
         "RecallPack.event_evidence は 1-3 件の短い証拠要約として扱い、必要なときだけ自然に参照してください。\n"
         "RecallPack.conflicts があるときは断定を避け、短い確認質問に寄せてください。\n"
-        f"expression_addon: {expression_addon}\n"
-        f"core_persona: {core_persona}\n"
-        f"expression_style: {expression_style}\n"
+        "人格設定本文:\n"
+        f"{persona_prompt or 'なし'}\n"
+        "表現補助:\n"
+        f"{expression_addon or 'なし'}\n"
         "断定確認が必要な場合は、短く確認質問に寄せてください。"
     )
 
@@ -421,3 +424,4 @@ def _format_recent_turns(recent_turns: list[dict]) -> str:
         text = str(turn.get("text", "")).strip()
         lines.append(f"- {role}: {text}")
     return "\n".join(lines)
+
