@@ -23,7 +23,6 @@ def build_default_state() -> dict:
         "selected_persona_id": DEFAULT_PERSONA_ID,
         "selected_memory_set_id": DEFAULT_MEMORY_SET_ID,
         "selected_model_preset_id": DEFAULT_MODEL_PRESET_ID,
-        "memory_enabled": True,
         "wake_policy": {
             "mode": "disabled",
         },
@@ -52,11 +51,7 @@ def build_default_state() -> dict:
             }
         },
         "memory_sets": {
-            DEFAULT_MEMORY_SET_ID: {
-                "memory_set_id": DEFAULT_MEMORY_SET_ID,
-                "display_name": "Default Memory",
-                "description": "Empty starter memory set for the MVP slice.",
-            }
+            DEFAULT_MEMORY_SET_ID: build_default_memory_set(),
         },
         "model_presets": {
             DEFAULT_MODEL_PRESET_ID: build_default_model_preset(),
@@ -64,46 +59,39 @@ def build_default_state() -> dict:
     }
 
 
+def build_default_memory_set() -> dict:
+    # 記憶集合
+    return {
+        "memory_set_id": DEFAULT_MEMORY_SET_ID,
+        "display_name": "Default Memory",
+        "embedding": {
+            "model": DEFAULT_GEMINI_EMBEDDING_MODEL,
+            "api_key": "",
+        },
+    }
+
+
 def build_default_model_preset() -> dict:
-    # 結果
+    # 生成用モデル群
     return {
         "model_preset_id": DEFAULT_MODEL_PRESET_ID,
         "display_name": "Default OpenRouter Gemini Preset",
         "roles": {
             "observation_interpretation": {
-                "kind": "generation",
-                "provider": "openrouter",
                 "model": DEFAULT_GEMINI_GENERATION_MODEL,
-                "endpoint_ref": "endpoint:openrouter_primary",
                 "api_key": "",
                 "reasoning_effort": "low",
             },
             "decision_generation": {
-                "kind": "generation",
-                "provider": "openrouter",
                 "model": DEFAULT_GEMINI_GENERATION_MODEL,
-                "endpoint_ref": "endpoint:openrouter_primary",
                 "api_key": "",
             },
             "expression_generation": {
-                "kind": "generation",
-                "provider": "openrouter",
                 "model": DEFAULT_GEMINI_GENERATION_MODEL,
-                "endpoint_ref": "endpoint:openrouter_primary",
                 "api_key": "",
             },
             "memory_interpretation": {
-                "kind": "generation",
-                "provider": "openrouter",
                 "model": DEFAULT_GEMINI_GENERATION_MODEL,
-                "endpoint_ref": "endpoint:openrouter_primary",
-                "api_key": "",
-            },
-            "embedding": {
-                "kind": "embedding",
-                "provider": "openrouter",
-                "model": DEFAULT_GEMINI_EMBEDDING_MODEL,
-                "endpoint_ref": "endpoint:openrouter_primary",
                 "api_key": "",
             },
         },

@@ -45,10 +45,6 @@ class RecallBuilder(RecallEventEvidenceMixin):
         observation_text: str,
         recall_hint: dict[str, Any],
     ) -> dict[str, Any]:
-        # 記憶切り替え
-        if not state.get("memory_enabled", True):
-            return self._empty_recall_pack()
-
         # コンテキスト
         memory_set_id = state["selected_memory_set_id"]
         primary_intent = recall_hint["primary_intent"]
@@ -339,14 +335,14 @@ class RecallBuilder(RecallEventEvidenceMixin):
             return self._empty_association_sections()
 
         # 埋め込みコンテキスト
-        selected_preset = state["model_presets"][state["selected_model_preset_id"]]
-        embedding_role = selected_preset["roles"]["embedding"]
-        embedding_dimension = self._embedding_dimension(embedding_role)
-        embedding_preset = self._embedding_preset(embedding_role, embedding_dimension)
+        selected_memory_set = state["memory_sets"][state["selected_memory_set_id"]]
+        embedding_definition = selected_memory_set["embedding"]
+        embedding_dimension = self._embedding_dimension(embedding_definition)
+        embedding_signature = self._embedding_signature(embedding_definition, embedding_dimension)
 
         # クエリ埋め込み群
         query_embeddings = self.llm.generate_embeddings(
-            role_definition=embedding_role,
+            role_definition=embedding_definition,
             texts=[spec["text"] for spec in query_specs],
         )
 
@@ -359,7 +355,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
             # memory hit群
             memory_hits = self.store.search_memory_unit_vector_entries(
                 memory_set_id=state["selected_memory_set_id"],
-                embedding_preset=embedding_preset,
+                embedding_signature=embedding_signature,
                 query_embedding=query_embedding,
                 embedding_dimension=embedding_dimension,
                 limit=self._association_search_limit(
@@ -393,7 +389,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
             # episode hit群
             episode_hits = self.store.search_episode_vector_entries(
                 memory_set_id=state["selected_memory_set_id"],
-                embedding_preset=embedding_preset,
+                embedding_signature=embedding_signature,
                 query_embedding=query_embedding,
                 embedding_dimension=embedding_dimension,
                 limit=self._association_search_limit(
@@ -1107,15 +1103,14 @@ class RecallBuilder(RecallEventEvidenceMixin):
             "candidate_count": 0,
         }
 
-    def _embedding_preset(self, role_definition: dict[str, Any], embedding_dimension: int) -> str:
+    def _embedding_signature(self, definition: dict[str, Any], embedding_dimension: int) -> str:
         # 識別子
-        provider = str(role_definition.get("provider", "unknown")).strip() or "unknown"
-        model = str(role_definition.get("model", "unknown")).strip() or "unknown"
-        endpoint_ref = str(role_definition.get("endpoint_ref", "default")).strip() or "default"
-        return f"{provider}:{model}:{endpoint_ref}:dim{embedding_dimension}"
+        model = str(definition.get("model", "unknown")).strip() or "unknown"
+        api_base = str(definition.get("api_base", "default")).strip() or "default"
+        return f"{model}:{api_base}:dim{embedding_dimension}"
 
-    def _embedding_dimension(self, role_definition: dict[str, Any]) -> int:
-        _ = role_definition
+    def _embedding_dimension(self, definition: dict[str, Any]) -> int:
+        _ = definition
         return 3072
 
     def _collect_raw_candidate_ids(self, raw_candidate_ids: set[str], items: list[dict[str, Any]]) -> None:

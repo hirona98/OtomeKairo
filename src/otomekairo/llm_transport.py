@@ -14,7 +14,7 @@ OPENROUTER_DEFAULT_API_BASE = "https://openrouter.ai/api/v1"
 OPENROUTER_DEFAULT_TIMEOUT_SECONDS = 600
 
 
-# text completion を provider 差分込みで実行する。
+# text completion を model 差分込みで実行する。
 def complete_text(
     *,
     role_definition: dict,
@@ -42,7 +42,7 @@ def complete_text(
     return extract_response_text(response)
 
 
-# embedding を provider 差分込みで実行する。
+# embedding を model 差分込みで実行する。
 def generate_embeddings(
     *,
     role_definition: dict,
@@ -99,13 +99,7 @@ def _load_litellm_embedding() -> Callable[..., Any]:
 
 
 def _is_openrouter_embedding_role_definition(role_definition: dict) -> bool:
-    model = role_definition.get("model")
-    if isinstance(model, str) and model.strip().startswith("openrouter/"):
-        return True
-    provider = role_definition.get("provider")
-    if isinstance(provider, str) and provider.strip() == "openrouter":
-        return True
-    return False
+    return _model_provider_name(role_definition) == "openrouter"
 
 
 def _resolve_litellm_model(role_definition: dict) -> str:
@@ -123,7 +117,9 @@ def _resolve_openrouter_embedding_model(role_definition: dict) -> str:
 
 
 def _resolve_openrouter_api_base(role_definition: dict) -> str:
-    _ = role_definition
+    configured_api_base = _resolve_api_base(role_definition)
+    if configured_api_base is not None:
+        return configured_api_base
     return OPENROUTER_DEFAULT_API_BASE
 
 
@@ -172,10 +168,22 @@ def _request_openrouter_embeddings(
 
 
 def _resolve_api_base(role_definition: dict) -> str | None:
-    provider = role_definition.get("provider")
-    if isinstance(provider, str) and provider.strip() == "openrouter":
+    configured_api_base = role_definition.get("api_base")
+    if isinstance(configured_api_base, str) and configured_api_base.strip():
+        return configured_api_base.strip()
+    if _model_provider_name(role_definition) == "openrouter":
         return OPENROUTER_DEFAULT_API_BASE
     return None
+
+
+def _model_provider_name(role_definition: dict) -> str:
+    model = role_definition.get("model")
+    if not isinstance(model, str):
+        return ""
+    normalized_model = model.strip()
+    if not normalized_model:
+        return ""
+    return normalized_model.split("/", 1)[0]
 
 
 def _resolve_api_key(role_definition: dict) -> str | None:

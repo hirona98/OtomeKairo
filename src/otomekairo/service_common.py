@@ -2,13 +2,12 @@ from __future__ import annotations
 
 
 # 定数
-REQUIRED_ROLE_NAMES = {
-    "expression_generation": "generation",
-    "decision_generation": "generation",
-    "observation_interpretation": "generation",
-    "memory_interpretation": "generation",
-    "embedding": "embedding",
-}
+REQUIRED_MODEL_ROLE_NAMES = (
+    "expression_generation",
+    "decision_generation",
+    "observation_interpretation",
+    "memory_interpretation",
+)
 PENDING_INTENT_NOT_BEFORE_MINUTES = 30
 PENDING_INTENT_EXPIRES_HOURS = 24
 WAKE_REPLY_COOLDOWN_MINUTES = 30

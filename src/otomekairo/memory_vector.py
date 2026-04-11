@@ -23,16 +23,16 @@ class MemoryVectorIndexer:
         episode: dict[str, Any] | None,
         memory_actions: list[dict[str, Any]],
     ) -> None:
-        # 埋め込みロール
-        selected_preset = state["model_presets"][state["selected_model_preset_id"]]
-        embedding_role = selected_preset["roles"]["embedding"]
-        embedding_dimension = self._embedding_dimension(embedding_role)
-        embedding_preset = self._embedding_preset(embedding_role, embedding_dimension)
+        # 埋め込み設定
+        selected_memory_set = state["memory_sets"][state["selected_memory_set_id"]]
+        embedding_definition = selected_memory_set["embedding"]
+        embedding_dimension = self._embedding_dimension(embedding_definition)
+        embedding_signature = self._embedding_signature(embedding_definition, embedding_dimension)
 
         # source群
         entries = self._build_vector_index_entries(
             finished_at=finished_at,
-            embedding_preset=embedding_preset,
+            embedding_signature=embedding_signature,
             episode=episode,
             memory_actions=memory_actions,
         )
@@ -41,7 +41,7 @@ class MemoryVectorIndexer:
 
         # 埋め込み群
         embeddings = self.llm.generate_embeddings(
-            role_definition=embedding_role,
+            role_definition=embedding_definition,
             texts=[entry["source_text"] for entry in entries],
         )
 
@@ -64,7 +64,7 @@ class MemoryVectorIndexer:
         self,
         *,
         finished_at: str,
-        embedding_preset: str,
+        embedding_signature: str,
         episode: dict[str, Any] | None,
         memory_actions: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
@@ -76,7 +76,7 @@ class MemoryVectorIndexer:
         if episode is not None:
             episode_entry = self._vector_entry_for_episode(
                 finished_at=finished_at,
-                embedding_preset=embedding_preset,
+                embedding_signature=embedding_signature,
                 record=episode,
             )
             if episode_entry is not None:
@@ -93,7 +93,7 @@ class MemoryVectorIndexer:
                 continue
             memory_entry = self._vector_entry_for_memory_unit(
                 finished_at=finished_at,
-                embedding_preset=embedding_preset,
+                embedding_signature=embedding_signature,
                 record=memory_unit,
             )
             if memory_entry is None:
@@ -108,7 +108,7 @@ class MemoryVectorIndexer:
         self,
         *,
         finished_at: str,
-        embedding_preset: str,
+        embedding_signature: str,
         record: dict[str, Any],
     ) -> dict[str, Any] | None:
         # sourceテキスト
@@ -121,7 +121,7 @@ class MemoryVectorIndexer:
             "memory_set_id": record["memory_set_id"],
             "source_kind": "episode",
             "source_id": record["episode_id"],
-            "embedding_preset": embedding_preset,
+            "embedding_signature": embedding_signature,
             "source_text": source_text,
             "scope_type": record["primary_scope_type"],
             "scope_key": record["primary_scope_key"],
@@ -137,7 +137,7 @@ class MemoryVectorIndexer:
         self,
         *,
         finished_at: str,
-        embedding_preset: str,
+        embedding_signature: str,
         record: dict[str, Any],
     ) -> dict[str, Any] | None:
         # sourceテキスト
@@ -150,7 +150,7 @@ class MemoryVectorIndexer:
             "memory_set_id": record["memory_set_id"],
             "source_kind": "memory_unit",
             "source_id": record["memory_unit_id"],
-            "embedding_preset": embedding_preset,
+            "embedding_signature": embedding_signature,
             "source_text": source_text,
             "scope_type": record["scope_type"],
             "scope_key": record["scope_key"],
@@ -173,15 +173,14 @@ class MemoryVectorIndexer:
         # 結果
         return "\n".join(part for part in parts if part)
 
-    def _embedding_preset(self, role_definition: dict[str, Any], embedding_dimension: int) -> str:
+    def _embedding_signature(self, definition: dict[str, Any], embedding_dimension: int) -> str:
         # 識別子
-        provider = str(role_definition.get("provider", "unknown")).strip() or "unknown"
-        model = str(role_definition.get("model", "unknown")).strip() or "unknown"
-        endpoint_ref = str(role_definition.get("endpoint_ref", "default")).strip() or "default"
-        return f"{provider}:{model}:{endpoint_ref}:dim{embedding_dimension}"
+        model = str(definition.get("model", "unknown")).strip() or "unknown"
+        api_base = str(definition.get("api_base", "default")).strip() or "default"
+        return f"{model}:{api_base}:dim{embedding_dimension}"
 
-    def _embedding_dimension(self, role_definition: dict[str, Any]) -> int:
-        _ = role_definition
+    def _embedding_dimension(self, definition: dict[str, Any]) -> int:
+        _ = definition
         return 3072
 
     def _text_hash(self, value: str) -> str:

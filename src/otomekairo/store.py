@@ -626,13 +626,13 @@ class SQLiteMemoryStore(StoreSchemaMixin):
                     WHERE memory_set_id = ?
                       AND source_kind = ?
                       AND source_id = ?
-                      AND embedding_preset = ?
+                      AND embedding_signature = ?
                     """,
                     (
                         entry["memory_set_id"],
                         entry["source_kind"],
                         entry["source_id"],
-                        entry["embedding_preset"],
+                        entry["embedding_signature"],
                     ),
                 ).fetchone()
 
@@ -645,7 +645,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
                             memory_set_id,
                             source_kind,
                             source_id,
-                            embedding_preset,
+                            embedding_signature,
                             source_text,
                             scope_type,
                             scope_key,
@@ -661,7 +661,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
                             entry["memory_set_id"],
                             entry["source_kind"],
                             entry["source_id"],
-                            entry["embedding_preset"],
+                            entry["embedding_signature"],
                             entry["source_text"],
                             entry["scope_type"],
                             entry["scope_key"],
@@ -722,7 +722,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
         self,
         *,
         memory_set_id: str,
-        embedding_preset: str,
+        embedding_signature: str,
         query_embedding: list[float],
         embedding_dimension: int,
         limit: int,
@@ -738,13 +738,13 @@ class SQLiteMemoryStore(StoreSchemaMixin):
         # Query部品群
         clauses = [
             "meta.memory_set_id = ?",
-            "meta.embedding_preset = ?",
+            "meta.embedding_signature = ?",
         ]
         params: list[Any] = [
             sqlite_vec.serialize_float32(query_embedding),
             limit,
             memory_set_id,
-            embedding_preset,
+            embedding_signature,
         ]
 
         # スコープFilters
@@ -805,7 +805,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
         self,
         *,
         memory_set_id: str,
-        embedding_preset: str,
+        embedding_signature: str,
         query_embedding: list[float],
         embedding_dimension: int,
         limit: int,
@@ -819,13 +819,13 @@ class SQLiteMemoryStore(StoreSchemaMixin):
         # Query部品群
         clauses = [
             "meta.memory_set_id = ?",
-            "meta.embedding_preset = ?",
+            "meta.embedding_signature = ?",
         ]
         params: list[Any] = [
             sqlite_vec.serialize_float32(query_embedding),
             limit,
             memory_set_id,
-            embedding_preset,
+            embedding_signature,
         ]
 
         # スコープFilters
@@ -1642,7 +1642,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
                     memory_set_id,
                     source_kind,
                     source_id,
-                    embedding_preset,
+                    embedding_signature,
                     source_text,
                     scope_type,
                     scope_key,
@@ -1658,7 +1658,7 @@ class SQLiteMemoryStore(StoreSchemaMixin):
                     target_memory_set_id,
                     source_kind,
                     target_source_id,
-                    row["embedding_preset"],
+                    row["embedding_signature"],
                     row["source_text"],
                     row["scope_type"],
                     row["scope_key"],

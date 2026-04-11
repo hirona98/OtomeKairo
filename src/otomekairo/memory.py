@@ -37,23 +37,6 @@ class MemoryConsolidator:
         reply_payload: dict[str, Any] | None,
         events: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        # 記憶切り替え
-        if not state.get("memory_enabled", True):
-            return {
-                "turn_consolidation_status": "disabled",
-                "episode_id": None,
-                "memory_action_count": 0,
-                "affect_update_count": 0,
-                "failure_reason": None,
-                "reflective_consolidation": {
-                    "started": False,
-                    "result_status": "disabled",
-                    "trigger_reasons": [],
-                    "affected_memory_unit_ids": [],
-                    "failure_reason": None,
-                },
-            }
-
         # モデル選択
         selected_preset = state["model_presets"][state["selected_model_preset_id"]]
         memory_role = selected_preset["roles"]["memory_interpretation"]

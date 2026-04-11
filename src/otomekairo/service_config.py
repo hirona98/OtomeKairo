@@ -4,7 +4,7 @@ from copy import deepcopy
 from typing import Any
 
 from otomekairo.event_stream import ServerWebSocket
-from otomekairo.service_common import REQUIRED_ROLE_NAMES, ServiceError
+from otomekairo.service_common import REQUIRED_MODEL_ROLE_NAMES, ServiceError
 
 
 # 設定Mixin
@@ -112,7 +112,7 @@ class ServiceConfigMixin:
         return {
             "settings_snapshot": self._build_settings_snapshot(state),
             "selected_persona": deepcopy(state["personas"][state["selected_persona_id"]]),
-            "selected_memory_set": deepcopy(state["memory_sets"][state["selected_memory_set_id"]]),
+            "selected_memory_set": self._public_memory_set(state["memory_sets"][state["selected_memory_set_id"]]),
             "selected_model_preset": self._public_model_preset(selected_preset),
         }
 
@@ -166,9 +166,6 @@ class ServiceConfigMixin:
         if "wake_policy" in payload:
             self._validate_wake_policy(payload["wake_policy"])
             state["wake_policy"] = payload["wake_policy"]
-        if "memory_enabled" in payload:
-            self._validate_memory_enabled(payload["memory_enabled"])
-            state["memory_enabled"] = payload["memory_enabled"]
         if "desktop_watch" in payload:
             self._validate_desktop_watch(payload["desktop_watch"])
             state["desktop_watch"] = payload["desktop_watch"]
@@ -231,6 +228,7 @@ class ServiceConfigMixin:
             resource_key="memory_set",
             not_found_code="memory_set_not_found",
             not_found_message="The requested memory_set_id does not exist.",
+            public_builder=self._public_memory_set,
         )
 
     def replace_memory_set(self, token: str | None, memory_set_id: str, definition: dict[str, Any]) -> dict[str, Any]:
@@ -242,6 +240,8 @@ class ServiceConfigMixin:
             definition=definition,
             resource_key="memory_set",
             validator=self._validate_memory_set_definition,
+            normalizer=self._normalize_memory_set_definition,
+            public_builder=self._public_memory_set,
         )
 
     def clone_memory_set(self, token: str | None, definition: dict[str, Any]) -> dict[str, Any]:
@@ -262,8 +262,9 @@ class ServiceConfigMixin:
         cloned_definition = {
             "memory_set_id": memory_set_id,
             "display_name": definition.get("display_name"),
-            "description": definition.get("description"),
+            "embedding": deepcopy(state["memory_sets"][source_memory_set_id]["embedding"]),
         }
+        cloned_definition = self._normalize_memory_set_definition(cloned_definition)
         self._validate_memory_set_definition(memory_set_id, cloned_definition)
 
         # 永続化
@@ -274,7 +275,7 @@ class ServiceConfigMixin:
         )
         self.store.write_state(state)
         return {
-            "memory_set": deepcopy(cloned_definition),
+            "memory_set": self._public_memory_set(cloned_definition),
         }
 
     def delete_memory_set(self, token: str | None, memory_set_id: str) -> dict[str, Any]:
@@ -347,6 +348,10 @@ class ServiceConfigMixin:
         # 検証
         for persona_id, persona in personas.items():
             self._validate_persona_definition(persona_id, persona)
+        memory_sets = {
+            memory_set_id: self._normalize_memory_set_definition(memory_set)
+            for memory_set_id, memory_set in memory_sets.items()
+        }
         for memory_set_id, memory_set in memory_sets.items():
             self._validate_memory_set_definition(memory_set_id, memory_set)
 
@@ -370,7 +375,6 @@ class ServiceConfigMixin:
 
         # 動作設定検証
         self._validate_wake_policy(current.get("wake_policy"))
-        self._validate_memory_enabled(current.get("memory_enabled"))
         self._validate_desktop_watch(current.get("desktop_watch"))
 
         # 永続化
@@ -378,7 +382,6 @@ class ServiceConfigMixin:
         state["selected_memory_set_id"] = selected_memory_set_id
         state["selected_model_preset_id"] = selected_model_preset_id
         state["wake_policy"] = current["wake_policy"]
-        state["memory_enabled"] = current["memory_enabled"]
         state["desktop_watch"] = current["desktop_watch"]
         state["personas"] = personas
         state["memory_sets"] = memory_sets
@@ -403,7 +406,6 @@ class ServiceConfigMixin:
         return {
             "selected_persona_id": state["selected_persona_id"],
             "selected_memory_set_id": state["selected_memory_set_id"],
-            "memory_enabled": state["memory_enabled"],
             "desktop_watch": deepcopy(state["desktop_watch"]),
             "wake_policy": deepcopy(state["wake_policy"]),
             "selected_model_preset_id": state["selected_model_preset_id"],
@@ -555,10 +557,6 @@ class ServiceConfigMixin:
             if not isinstance(interval_minutes, int) or interval_minutes < 1:
                 raise ServiceError(400, "invalid_interval_minutes", "interval_minutes must be an integer >= 1.")
 
-    def _validate_memory_enabled(self, memory_enabled: Any) -> None:
-        if not isinstance(memory_enabled, bool):
-            raise ServiceError(400, "invalid_memory_enabled", "memory_enabled must be a boolean.")
-
     def _validate_desktop_watch(self, desktop_watch: Any) -> None:
         if not isinstance(desktop_watch, dict):
             raise ServiceError(400, "invalid_desktop_watch", "desktop_watch must be an object.")
@@ -608,9 +606,7 @@ class ServiceConfigMixin:
         display_name = definition.get("display_name")
         if not isinstance(display_name, str) or not display_name.strip():
             raise ServiceError(400, "invalid_memory_set_display_name", "display_name is required.")
-        description = definition.get("description")
-        if description is not None and not isinstance(description, str):
-            raise ServiceError(400, "invalid_memory_set_description", "description must be a string.")
+        self._validate_embedding_definition("memory_set.embedding", definition.get("embedding"))
 
     def _validate_model_preset_definition(self, model_preset_id: str, definition: dict[str, Any]) -> None:
         if definition.get("model_preset_id") != model_preset_id:
@@ -622,33 +618,25 @@ class ServiceConfigMixin:
         if not isinstance(roles, dict):
             raise ServiceError(400, "invalid_model_preset_roles", "roles must be an object.")
 
-        for role_name, expected_kind in REQUIRED_ROLE_NAMES.items():
+        for role_name in REQUIRED_MODEL_ROLE_NAMES:
             if role_name not in roles:
                 raise ServiceError(400, "missing_model_role", f"{role_name} is required.")
             role_definition = roles[role_name]
-            self._validate_model_role_definition(role_name, role_definition, expected_kind)
+            self._validate_model_role_definition(role_name, role_definition)
 
-    def _validate_model_role_definition(self, role_name: str, definition: Any, expected_kind: str) -> None:
+    def _validate_model_role_definition(self, role_name: str, definition: Any) -> None:
         if not isinstance(definition, dict):
             raise ServiceError(400, "invalid_model_role", f"{role_name} must be an object.")
 
-        kind = definition.get("kind")
-        provider = definition.get("provider")
         model = definition.get("model")
-        endpoint_ref = definition.get("endpoint_ref")
+        api_base = definition.get("api_base")
         api_key = definition.get("api_key")
         reasoning_effort = definition.get("reasoning_effort")
 
-        if kind not in {"generation", "embedding"}:
-            raise ServiceError(400, "invalid_model_role_kind", f"{role_name}.kind is invalid.")
-        if kind != expected_kind:
-            raise ServiceError(400, "model_role_kind_mismatch", f"{role_name} requires kind={expected_kind}.")
-        if not isinstance(provider, str) or not provider.strip():
-            raise ServiceError(400, "invalid_model_role_provider", f"{role_name}.provider is required.")
         if not isinstance(model, str) or not model.strip():
             raise ServiceError(400, "invalid_model_role_model", f"{role_name}.model is required.")
-        if not isinstance(endpoint_ref, str) or not endpoint_ref.strip():
-            raise ServiceError(400, "invalid_model_role_endpoint_ref", f"{role_name}.endpoint_ref is required.")
+        if api_base is not None and not isinstance(api_base, str):
+            raise ServiceError(400, "invalid_model_role_api_base", f"{role_name}.api_base must be a string.")
         if not isinstance(api_key, str):
             raise ServiceError(400, "invalid_model_role_api_key", f"{role_name}.api_key must be a string.")
         if reasoning_effort is not None and not isinstance(reasoning_effort, str):
@@ -672,12 +660,15 @@ class ServiceConfigMixin:
                 normalized_roles[role_name] = role_definition
                 continue
             normalized_role: dict[str, Any] = {}
-            for field_name in ("kind", "provider", "model", "endpoint_ref", "api_key"):
+            for field_name in ("model", "api_base", "api_key"):
                 if field_name not in role_definition:
                     continue
                 value = role_definition.get(field_name)
                 if isinstance(value, str):
-                    normalized_role[field_name] = value.strip()
+                    trimmed_value = value.strip()
+                    if field_name == "api_base" and not trimmed_value:
+                        continue
+                    normalized_role[field_name] = trimmed_value
                 else:
                     normalized_role[field_name] = value
             reasoning_effort = role_definition.get("reasoning_effort")
@@ -689,6 +680,49 @@ class ServiceConfigMixin:
 
         normalized["roles"] = normalized_roles
         return normalized
+
+    def _normalize_memory_set_definition(self, definition: dict[str, Any]) -> dict[str, Any]:
+        normalized = {
+            **definition,
+        }
+        display_name = normalized.get("display_name")
+        if isinstance(display_name, str):
+            normalized["display_name"] = display_name.strip()
+
+        embedding = definition.get("embedding")
+        if isinstance(embedding, dict):
+            normalized["embedding"] = self._normalize_embedding_definition(embedding)
+        return normalized
+
+    def _normalize_embedding_definition(self, definition: dict[str, Any]) -> dict[str, Any]:
+        normalized: dict[str, Any] = {}
+        for field_name in ("model", "api_base", "api_key"):
+            if field_name not in definition:
+                continue
+            value = definition.get(field_name)
+            if isinstance(value, str):
+                trimmed_value = value.strip()
+                if field_name == "api_base" and not trimmed_value:
+                    continue
+                normalized[field_name] = trimmed_value
+            else:
+                normalized[field_name] = value
+        return normalized
+
+    def _validate_embedding_definition(self, field_path: str, definition: Any) -> None:
+        if not isinstance(definition, dict):
+            raise ServiceError(400, "invalid_embedding_definition", f"{field_path} must be an object.")
+
+        model = definition.get("model")
+        api_base = definition.get("api_base")
+        api_key = definition.get("api_key")
+
+        if not isinstance(model, str) or not model.strip():
+            raise ServiceError(400, "invalid_embedding_model", f"{field_path}.model is required.")
+        if api_base is not None and not isinstance(api_base, str):
+            raise ServiceError(400, "invalid_embedding_api_base", f"{field_path}.api_base must be a string.")
+        if not isinstance(api_key, str):
+            raise ServiceError(400, "invalid_embedding_api_key", f"{field_path}.api_key must be a string.")
 
     def _public_model_preset(self, definition: dict[str, Any]) -> dict[str, Any]:
         public_definition = deepcopy(definition)
@@ -704,6 +738,21 @@ class ServiceConfigMixin:
     def _public_model_role(self, definition: Any) -> Any:
         if not isinstance(definition, dict):
             return definition
+        public_definition = {
+            **definition,
+            "api_key_present": bool(definition.get("api_key")),
+        }
+        public_definition.pop("api_key", None)
+        return public_definition
+
+    def _public_memory_set(self, definition: dict[str, Any]) -> dict[str, Any]:
+        public_definition = deepcopy(definition)
+        embedding = public_definition.get("embedding")
+        if isinstance(embedding, dict):
+            public_definition["embedding"] = self._public_embedding_definition(embedding)
+        return public_definition
+
+    def _public_embedding_definition(self, definition: dict[str, Any]) -> dict[str, Any]:
         public_definition = {
             **definition,
             "api_key_present": bool(definition.get("api_key")),

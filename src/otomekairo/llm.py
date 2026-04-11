@@ -229,7 +229,7 @@ class LLMClient:
         if self._is_mock_role_definition(role_definition):
             return self.mock_client.generate_embeddings(role_definition, texts, embedding_dimension)
 
-        # provider差分込みの transport へ委譲する。
+        # model差分込みの transport へ委譲する。
         return transport_generate_embeddings(
             role_definition=role_definition,
             texts=texts,
@@ -238,10 +238,7 @@ class LLMClient:
 
     # 設定補助
     def _is_mock_role_definition(self, role_definition: dict) -> bool:
-        # provider=mock または model=mock* は開発用の内蔵ロジックへ切り替える。
-        provider = role_definition.get("provider")
-        if isinstance(provider, str) and provider.strip() == "mock":
-            return True
+        # model=mock* は開発用の内蔵ロジックへ切り替える。
         model = role_definition.get("model")
         return isinstance(model, str) and model.strip().startswith("mock")
 

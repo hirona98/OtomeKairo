@@ -8,7 +8,7 @@ import sqlite_vec
 
 # 定数
 MEMORY_DB_FILE_NAME = "memory.db"
-CURRENT_MEMORY_DB_VERSION = 6
+CURRENT_MEMORY_DB_VERSION = 7
 
 
 # スキーマMixin
@@ -211,7 +211,7 @@ class StoreSchemaMixin:
                 memory_set_id TEXT NOT NULL,
                 source_kind TEXT NOT NULL,
                 source_id TEXT NOT NULL,
-                embedding_preset TEXT NOT NULL,
+                embedding_signature TEXT NOT NULL,
                 source_text TEXT NOT NULL,
                 scope_type TEXT NOT NULL,
                 scope_key TEXT NOT NULL,
@@ -224,7 +224,7 @@ class StoreSchemaMixin:
             );
 
             CREATE UNIQUE INDEX IF NOT EXISTS idx_vector_index_entries_source
-            ON vector_index_entries(memory_set_id, source_kind, source_id, embedding_preset);
+            ON vector_index_entries(memory_set_id, source_kind, source_id, embedding_signature);
 
             CREATE INDEX IF NOT EXISTS idx_vector_index_entries_scope
             ON vector_index_entries(memory_set_id, source_kind, scope_type, scope_key, status, salience);

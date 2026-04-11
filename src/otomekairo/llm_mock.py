@@ -25,7 +25,7 @@ class MockLLMClient:
         recent_turns: list[dict],
         current_time: str,
     ) -> dict[str, Any]:
-        # provider確認
+        # model確認
         self._assert_mock_model(role_definition)
 
         # ヒューリスティックintent
@@ -141,7 +141,7 @@ class MockLLMClient:
         recall_hint: dict,
         recall_pack: dict[str, Any],
     ) -> dict[str, Any]:
-        # provider確認
+        # model確認
         self._assert_mock_model(role_definition)
 
         # コンテキスト
@@ -241,7 +241,7 @@ class MockLLMClient:
         recall_pack: dict[str, Any],
         decision: dict,
     ) -> dict[str, Any]:
-        # provider確認
+        # model確認
         self._assert_mock_model(role_definition)
 
         # コンテキスト
@@ -457,7 +457,7 @@ class MockLLMClient:
         decision: dict,
         reply_text: str | None,
     ) -> dict[str, Any]:
-        # provider確認
+        # model確認
         self._assert_mock_model(role_definition)
 
         # Episode要約
@@ -494,7 +494,7 @@ class MockLLMClient:
         texts: list[str],
         embedding_dimension: int,
     ) -> list[list[float]]:
-        # provider確認
+        # model確認
         self._assert_mock_model(role_definition)
 
         # 結果
@@ -777,10 +777,7 @@ class MockLLMClient:
 
     def _assert_mock_model(self, role_definition: dict) -> None:
         # モデル確認
-        provider = role_definition.get("provider")
         model = role_definition.get("model")
-        if isinstance(provider, str) and provider.strip() == "mock":
-            return
         if isinstance(model, str) and model.strip().startswith("mock"):
             return
         raise LLMError(f"Unsupported mock model: {model}")
