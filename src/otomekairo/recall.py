@@ -1101,8 +1101,10 @@ class RecallBuilder(RecallEventEvidenceMixin):
         }
 
     def _embedding_dimension(self, definition: dict[str, Any]) -> int:
-        _ = definition
-        return 3072
+        embedding_dimension = definition.get("embedding_dimension")
+        if not isinstance(embedding_dimension, int) or embedding_dimension <= 0:
+            raise ValueError("memory_set.embedding.embedding_dimension must be a positive integer.")
+        return embedding_dimension
 
     def _collect_raw_candidate_ids(self, raw_candidate_ids: set[str], items: list[dict[str, Any]]) -> None:
         # 収集

@@ -246,5 +246,4 @@ class LLMClient:
         return isinstance(model, str) and model.strip().startswith("mock")
 
     def _embedding_dimension(self, role_definition: dict) -> int:
-        _ = role_definition
-        return 3072
+        return role_definition.get("embedding_dimension")

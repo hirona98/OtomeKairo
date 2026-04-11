@@ -764,6 +764,9 @@ class ServiceConfigMixin:
                 normalized[field_name] = trimmed_value
             else:
                 normalized[field_name] = value
+        embedding_dimension = definition.get("embedding_dimension")
+        if isinstance(embedding_dimension, int):
+            normalized["embedding_dimension"] = embedding_dimension
         return normalized
 
     def _validate_prompt_window(self, prompt_window: Any) -> None:
@@ -809,6 +812,7 @@ class ServiceConfigMixin:
         model = definition.get("model")
         api_base = definition.get("api_base")
         api_key = definition.get("api_key")
+        embedding_dimension = definition.get("embedding_dimension")
 
         if not isinstance(model, str) or not model.strip():
             raise ServiceError(400, "invalid_embedding_model", f"{field_path}.model is required.")
@@ -816,6 +820,12 @@ class ServiceConfigMixin:
             raise ServiceError(400, "invalid_embedding_api_base", f"{field_path}.api_base must be a string.")
         if not isinstance(api_key, str):
             raise ServiceError(400, "invalid_embedding_api_key", f"{field_path}.api_key must be a string.")
+        if not isinstance(embedding_dimension, int) or embedding_dimension < 1:
+            raise ServiceError(
+                400,
+                "invalid_embedding_dimension",
+                f"{field_path}.embedding_dimension must be an integer >= 1.",
+            )
 
     def _public_model_preset(self, definition: dict[str, Any]) -> dict[str, Any]:
         public_definition = deepcopy(definition)

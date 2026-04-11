@@ -14,6 +14,7 @@ DEFAULT_OBSERVATION_MAX_OUTPUT_TOKENS = 3000
 DEFAULT_DECISION_MAX_OUTPUT_TOKENS = 3000
 DEFAULT_EXPRESSION_MAX_OUTPUT_TOKENS = 4000
 DEFAULT_MEMORY_MAX_OUTPUT_TOKENS = 3000
+DEFAULT_EMBEDDING_DIMENSION = 3072
 DEFAULT_GEMINI_GENERATION_MODEL = "openrouter/google/gemini-3.1-flash-lite-preview"
 DEFAULT_GEMINI_EMBEDDING_MODEL = "openrouter/google/gemini-embedding-001"
 DEFAULT_PERSONA_DISPLAY_NAME = "標準人格設定"
@@ -84,6 +85,7 @@ def build_default_memory_set() -> dict:
         "display_name": "Default Memory",
         "embedding": {
             "model": DEFAULT_GEMINI_EMBEDDING_MODEL,
+            "embedding_dimension": DEFAULT_EMBEDDING_DIMENSION,
             "api_key": "",
         },
     }
