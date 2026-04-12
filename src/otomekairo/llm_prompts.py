@@ -166,6 +166,22 @@ def build_recall_pack_selection_messages(
     ]
 
 
+def build_pending_intent_selection_messages(
+    *,
+    source_pack: dict[str, Any],
+) -> list[dict[str, str]]:
+    return [
+        {
+            "role": "system",
+            "content": _build_pending_intent_selection_system_prompt(),
+        },
+        {
+            "role": "user",
+            "content": _build_pending_intent_selection_user_prompt(source_pack),
+        },
+    ]
+
+
 # validator_error を元に repair prompt を返す。
 def build_memory_interpretation_repair_prompt(validation_error: str) -> str:
     return (
@@ -223,6 +239,18 @@ def build_recall_pack_selection_repair_prompt(validation_error: str) -> str:
         "source pack にある conflict_ref はすべて 1 回ずつ返してください。\n"
         "summary_text は 1 文、改行なし、内部識別子なしで返してください。\n"
         "新しい候補の追加、section 名の発明、Markdown、コードフェンス、説明文は禁止です。"
+    )
+
+
+def build_pending_intent_selection_repair_prompt(validation_error: str) -> str:
+    return (
+        "前回の出力は pending_intent_selection 契約を満たしていませんでした。\n"
+        f"validator_error: {validation_error}\n"
+        "同じ source pack だけを根拠に、JSON オブジェクト 1 個だけを返し直してください。\n"
+        "トップレベルキーは selected_candidate_ref, selection_reason の 2 つだけです。\n"
+        "selected_candidate_ref は source pack に含まれる candidate_ref か none のどちらかだけです。\n"
+        "selection_reason は 1 文、改行なし、内部識別子なしで返してください。\n"
+        "新しい候補の追加、内部識別子、Markdown、コードフェンス、説明文は禁止です。"
     )
 
 
@@ -460,6 +488,22 @@ def _build_recall_pack_selection_system_prompt() -> str:
     )
 
 
+def _build_pending_intent_selection_system_prompt() -> str:
+    return (
+        "あなたは OtomeKairo の pending_intent_selection です。\n"
+        "eligible な保留意図候補の中から、今の trigger で再評価に乗せる candidate_ref を最大 1 件だけ選び、JSON オブジェクト 1 個で返してください。\n"
+        "Markdown、コードフェンス、説明文は禁止です。\n"
+        "返すトップレベルキーは selected_candidate_ref, selection_reason の 2 つだけです。\n"
+        "selected_candidate_ref は source pack にある candidate_ref か none だけを使ってください。\n"
+        "候補外のものを足してはいけません。内部識別子を書いてはいけません。\n"
+        "oldest-first で選ばず、trigger_kind と observation_context に照らして今前に出す自然さを優先してください。\n"
+        "wake では慎重に選び、自然さが弱いなら none を返してください。\n"
+        "desktop_watch では active_app / window_title / locale / image_count だけを手掛かりにしてください。\n"
+        "image の意味理解はまだ行いません。\n"
+        "selection_reason は 1 文、改行なしで返してください。"
+    )
+
+
 def _build_memory_interpretation_user_prompt(
     *,
     observation_text: str,
@@ -495,6 +539,13 @@ def _build_event_evidence_user_prompt(source_pack: dict[str, Any]) -> str:
 
 
 def _build_recall_pack_selection_user_prompt(source_pack: dict[str, Any]) -> str:
+    return (
+        "source_pack:\n"
+        f"{json.dumps(source_pack, ensure_ascii=False)}\n"
+    )
+
+
+def _build_pending_intent_selection_user_prompt(source_pack: dict[str, Any]) -> str:
     return (
         "source_pack:\n"
         f"{json.dumps(source_pack, ensure_ascii=False)}\n"

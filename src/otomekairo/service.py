@@ -528,6 +528,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         client_context: dict[str, Any],
         recent_turns: list[dict[str, Any]],
         selected_candidate: dict[str, Any] | None,
+        pending_intent_selection: dict[str, Any] | None = None,
     ) -> tuple[dict[str, Any], str]:
         # 観測テキスト
         observation_text = self._build_wake_observation_text(
@@ -549,10 +550,19 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         # 候補
         if selected_candidate is None:
             self._set_last_wake_at(started_at)
+            if (
+                isinstance(pending_intent_selection, dict)
+                and pending_intent_selection.get("selected_candidate_ref") == "none"
+                and isinstance(pending_intent_selection.get("selection_reason"), str)
+                and pending_intent_selection["selection_reason"].strip()
+            ):
+                reason_summary = pending_intent_selection["selection_reason"].strip()
+            else:
+                reason_summary = "起床機会は来たが、再評価すべき pending_intent 候補はまだ無い。"
             return (
                 self._noop_pipeline(
                     started_at=started_at,
-                    reason_summary="起床機会は来たが、再評価すべき pending_intent 候補はまだ無い。",
+                    reason_summary=reason_summary,
                 ),
                 observation_text,
             )
@@ -597,6 +607,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         observation_event_kind: str = "observation",
         observation_event_role: str = "user",
         consolidate_memory: bool = True,
+        pending_intent_selection: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         # 結果選択
         decision = pipeline["decision"]
@@ -631,6 +642,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             trigger_kind=trigger_kind,
             observation_event_kind=observation_event_kind,
             observation_event_role=observation_event_role,
+            pending_intent_selection=pending_intent_selection,
         )
 
         # デバッグログ群
@@ -641,6 +653,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             pipeline=pipeline,
             result_kind=result_kind,
             reply_payload=reply_payload,
+            pending_intent_selection=pending_intent_selection,
         )
 
         # memory trace更新
@@ -956,6 +969,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         pipeline: dict[str, Any],
         result_kind: str,
         reply_payload: dict[str, Any] | None,
+        pending_intent_selection: dict[str, Any] | None = None,
     ) -> None:
         # recall一覧
         recall_hint = pipeline["recall_hint"]
@@ -1034,6 +1048,25 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
                 ),
             ),
         ]
+        if isinstance(pending_intent_selection, dict) and (
+            int(pending_intent_selection.get("candidate_pool_count", 0)) > 0
+            or str(pending_intent_selection.get("result_status") or "") == "failed"
+        ):
+            logs.insert(
+                1,
+                self._build_live_log_record(
+                    level="INFO",
+                    component="Observation",
+                    message=(
+                        f"{self._short_cycle_id(cycle_id)} pending_intent_selection "
+                        f"pool={pending_intent_selection.get('candidate_pool_count', 0)} "
+                        f"eligible={pending_intent_selection.get('eligible_candidate_count', 0)} "
+                        f"selected={pending_intent_selection.get('selected_candidate_ref') or '-'} "
+                        f"status={pending_intent_selection.get('result_status', 'unknown')} "
+                        f"reason={self._clamp(str(pending_intent_selection.get('selection_reason') or '-'))}"
+                    ),
+                ),
+            )
         self._log_stream_registry.append_logs(logs)
 
     def _emit_observation_failure_logs(
@@ -1043,6 +1076,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         trigger_kind: str,
         observation_text: str,
         failure_reason: str,
+        pending_intent_selection: dict[str, Any] | None = None,
     ) -> None:
         # ログ群
         logs = [
@@ -1063,6 +1097,25 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
                 ),
             ),
         ]
+        if isinstance(pending_intent_selection, dict) and (
+            int(pending_intent_selection.get("candidate_pool_count", 0)) > 0
+            or str(pending_intent_selection.get("result_status") or "") == "failed"
+        ):
+            logs.insert(
+                1,
+                self._build_live_log_record(
+                    level="INFO",
+                    component="Observation",
+                    message=(
+                        f"{self._short_cycle_id(cycle_id)} pending_intent_selection "
+                        f"pool={pending_intent_selection.get('candidate_pool_count', 0)} "
+                        f"eligible={pending_intent_selection.get('eligible_candidate_count', 0)} "
+                        f"selected={pending_intent_selection.get('selected_candidate_ref') or '-'} "
+                        f"status={pending_intent_selection.get('result_status', 'unknown')} "
+                        f"reason={self._clamp(str(pending_intent_selection.get('selection_reason') or '-'))}"
+                    ),
+                ),
+            )
         self._log_stream_registry.append_logs(logs)
 
     def _emit_memory_trace_logs(self, *, cycle_id: str, memory_trace: dict[str, Any]) -> None:
@@ -1228,6 +1281,17 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             "dropped_candidate_refs": [],
             "conflict_summary_count": 0,
             "result_status": "succeeded",
+            "failure_reason": None,
+        }
+
+    def _empty_pending_intent_selection_trace(self) -> dict[str, Any]:
+        return {
+            "candidate_pool_count": 0,
+            "eligible_candidate_count": 0,
+            "selected_candidate_ref": None,
+            "selected_candidate_id": None,
+            "selection_reason": None,
+            "result_status": "not_requested",
             "failure_reason": None,
         }
 
@@ -1593,6 +1657,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         decision_trace: dict[str, Any],
         result_trace: dict[str, Any],
         memory_trace: dict[str, Any] | None,
+        pending_intent_selection: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return {
             "cycle_id": cycle_id,
@@ -1603,6 +1668,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
                 "client_context_summary": self._clamp(str(client_context)),
                 "normalized_observation_summary": self._clamp(observation_text.strip()),
                 "runtime_state_summary": runtime_summary,
+                "pending_intent_selection": pending_intent_selection or self._empty_pending_intent_selection_trace(),
             },
             "recall_trace": recall_trace,
             "decision_trace": decision_trace,
@@ -1778,6 +1844,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         trigger_kind: str,
         observation_event_kind: str,
         observation_event_role: str,
+        pending_intent_selection: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         memory_set_id = state["selected_memory_set_id"]
         events = self._build_cycle_events(
@@ -1843,6 +1910,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
                 pending_intent_summary=pending_intent_summary,
             ),
             memory_trace=self._pending_memory_trace(),
+            pending_intent_selection=pending_intent_selection,
         )
         self.store.persist_cycle_records(
             events=events,
@@ -1869,6 +1937,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         recall_trace: dict[str, Any] | None = None,
         failure_event_kind: str = "recall_hint_failure",
         failure_event_payload: dict[str, Any] | None = None,
+        pending_intent_selection: dict[str, Any] | None = None,
     ) -> None:
         memory_set_id = state["selected_memory_set_id"]
         events = self._build_cycle_events(
@@ -1917,6 +1986,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
                 failure_reason=failure_reason,
             ),
             memory_trace=None,
+            pending_intent_selection=pending_intent_selection,
         )
         self.store.persist_cycle_records(
             events=events,

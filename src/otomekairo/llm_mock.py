@@ -14,6 +14,7 @@ from otomekairo.llm_contracts import (
     validate_event_evidence_contract,
     validate_memory_interpretation_contract,
     validate_memory_reflection_summary_contract,
+    validate_pending_intent_selection_contract,
     validate_recall_pack_selection_contract,
     validate_recall_hint_contract,
 )
@@ -680,6 +681,65 @@ class MockLLMClient:
         validate_recall_pack_selection_contract(payload, source_pack=source_pack)
         return payload
 
+    def generate_pending_intent_selection(
+        self,
+        role_definition: dict,
+        source_pack: dict[str, Any],
+    ) -> dict[str, Any]:
+        # model確認
+        self._assert_mock_model(role_definition)
+
+        # source pack
+        trigger_kind = str(source_pack.get("trigger_kind") or "wake")
+        candidates = [
+            candidate
+            for candidate in source_pack.get("candidates", [])
+            if isinstance(candidate, dict)
+        ]
+
+        # 候補なし
+        if not candidates:
+            payload = {
+                "selected_candidate_ref": "none",
+                "selection_reason": "今は再評価に使える保留候補が見当たらない。",
+            }
+            validate_pending_intent_selection_contract(payload, source_pack=source_pack)
+            return payload
+
+        # 最良候補
+        scored_candidates = sorted(
+            candidates,
+            key=lambda candidate: self._mock_pending_intent_candidate_score(candidate, source_pack),
+            reverse=True,
+        )
+        best_candidate = scored_candidates[0]
+        best_score = self._mock_pending_intent_candidate_score(best_candidate, source_pack)
+        threshold = self._mock_pending_intent_selection_threshold(trigger_kind, len(candidates))
+
+        # payload
+        if best_score >= threshold:
+            payload = {
+                "selected_candidate_ref": str(best_candidate["candidate_ref"]).strip(),
+                "selection_reason": self._mock_pending_intent_selection_reason(
+                    candidate=best_candidate,
+                    source_pack=source_pack,
+                    selected=True,
+                ),
+            }
+        else:
+            payload = {
+                "selected_candidate_ref": "none",
+                "selection_reason": self._mock_pending_intent_selection_reason(
+                    candidate=best_candidate,
+                    source_pack=source_pack,
+                    selected=False,
+                ),
+            }
+
+        # 検証
+        validate_pending_intent_selection_contract(payload, source_pack=source_pack)
+        return payload
+
     def generate_embeddings(
         self,
         role_definition: dict,
@@ -1125,6 +1185,135 @@ class MockLLMClient:
         if len(summary_text) <= 120:
             return summary_text
         return summary_text[:119].rstrip("。 ") + "。"
+
+    def _mock_pending_intent_candidate_score(
+        self,
+        candidate: dict[str, Any],
+        source_pack: dict[str, Any],
+    ) -> float:
+        # コンテキスト特徴
+        observation_context = source_pack.get("observation_context", {})
+        recent_turns = source_pack.get("recent_turns", [])
+        trigger_kind = str(source_pack.get("trigger_kind") or "wake")
+        context_text = self._mock_pending_intent_context_text(observation_context, recent_turns)
+        candidate_text = " ".join(
+            value.strip()
+            for value in (
+                str(candidate.get("intent_summary") or ""),
+                str(candidate.get("reason_summary") or ""),
+            )
+            if value.strip()
+        )
+        context_features = self._mock_pending_intent_text_features(context_text)
+        candidate_features = self._mock_pending_intent_text_features(candidate_text)
+
+        # 基本スコア
+        score = 0.0
+        if candidate_features and context_features:
+            overlap_count = len(candidate_features & context_features)
+            score += min(overlap_count / 8.0, 1.0) * 0.8
+        if str(candidate.get("intent_kind") or "") == "conversation_follow_up" and recent_turns:
+            score += 0.15
+
+        # trigger 補正
+        if trigger_kind == "desktop_watch" and isinstance(observation_context, dict):
+            if any(
+                isinstance(observation_context.get(key), str) and str(observation_context.get(key)).strip()
+                for key in ("active_app", "window_title", "locale")
+            ):
+                score += 0.12
+            image_count = observation_context.get("image_count")
+            if isinstance(image_count, int) and image_count > 0:
+                score += 0.05
+
+        # 時刻補助
+        minutes_since_updated = candidate.get("minutes_since_updated")
+        if isinstance(minutes_since_updated, int):
+            if minutes_since_updated <= 30:
+                score += 0.15
+            elif minutes_since_updated <= 120:
+                score += 0.08
+        minutes_until_expiry = candidate.get("minutes_until_expiry")
+        if isinstance(minutes_until_expiry, int) and minutes_until_expiry <= 60:
+            score += 0.05
+
+        # 結果
+        return score
+
+    def _mock_pending_intent_selection_threshold(self, trigger_kind: str, candidate_count: int) -> float:
+        # base
+        threshold = 0.4 if trigger_kind == "desktop_watch" else 0.5
+        if candidate_count == 1:
+            threshold -= 0.1
+        return threshold
+
+    def _mock_pending_intent_selection_reason(
+        self,
+        *,
+        candidate: dict[str, Any],
+        source_pack: dict[str, Any],
+        selected: bool,
+    ) -> str:
+        # トリガー
+        trigger_kind = str(source_pack.get("trigger_kind") or "wake")
+        observation_context = source_pack.get("observation_context", {})
+        has_foreground_context = isinstance(observation_context, dict) and any(
+            isinstance(observation_context.get(key), str) and str(observation_context.get(key)).strip()
+            for key in ("active_app", "window_title", "locale")
+        )
+
+        # 選択
+        if selected:
+            if trigger_kind == "desktop_watch" and has_foreground_context:
+                return "前景の文脈と保留意図の継続性が噛み合っており、今はこの候補を再評価に乗せる自然さがある。"
+            return "直近のやり取りとの連続性があり、今はこの候補を再評価に乗せる自然さがある。"
+
+        # 非選択
+        if trigger_kind == "wake":
+            return "今の起床機会だけでは、この保留候補を前に出す自然さがまだ弱い。"
+        if has_foreground_context:
+            return "前景の文脈だけでは、この保留候補を前に出す決め手がまだ弱い。"
+        return "今の観測だけでは、この保留候補を前に出す決め手がまだ弱い。"
+
+    def _mock_pending_intent_context_text(
+        self,
+        observation_context: Any,
+        recent_turns: list[dict[str, Any]],
+    ) -> str:
+        # 観測文脈
+        parts: list[str] = []
+        if isinstance(observation_context, dict):
+            for key in ("source", "active_app", "window_title", "locale"):
+                value = observation_context.get(key)
+                if isinstance(value, str) and value.strip():
+                    parts.append(value.strip())
+
+        # recent_turns
+        for turn in recent_turns[-4:]:
+            if not isinstance(turn, dict):
+                continue
+            text = turn.get("text")
+            if isinstance(text, str) and text.strip():
+                parts.append(text.strip())
+
+        # 結果
+        return " ".join(parts)
+
+    def _mock_pending_intent_text_features(self, value: str) -> set[str]:
+        # 正規化
+        normalized = re.sub(r"\s+", "", value)
+        normalized = re.sub(r"[。、「」『』（）()［］【】,，.．!！?？:：;；]", "", normalized)
+        if len(normalized) < 2:
+            return set()
+
+        # 収集
+        features: set[str] = set()
+        for size in (2, 3):
+            for index in range(len(normalized) - size + 1):
+                features.add(normalized[index : index + size])
+
+        # 結果
+        return features
 
     def _mock_event_evidence_section_label(self, section_name: Any) -> str:
         if section_name == "active_commitments":

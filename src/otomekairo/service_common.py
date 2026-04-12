@@ -10,6 +10,7 @@ REQUIRED_MODEL_ROLE_NAMES = (
     "memory_reflection_summary",
     "event_evidence_generation",
     "recall_pack_selection",
+    "pending_intent_selection",
 )
 PENDING_INTENT_NOT_BEFORE_MINUTES = 30
 PENDING_INTENT_EXPIRES_HOURS = 24

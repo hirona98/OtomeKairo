@@ -76,6 +76,7 @@ MAX_MEMORY_REFLECTION_SUMMARY_SENTENCES = 2
 MAX_MEMORY_REFLECTION_SUMMARY_LENGTH = 140
 MAX_EVENT_EVIDENCE_SLOT_SENTENCES = 1
 MAX_RECALL_PACK_CONFLICT_SUMMARY_SENTENCES = 1
+MAX_PENDING_INTENT_SELECTION_REASON_SENTENCES = 1
 RECALL_PACK_SECTION_NAMES = (
     "self_model",
     "user_model",
@@ -610,3 +611,57 @@ def validate_recall_pack_selection_contract(payload: dict[str, Any], *, source_p
 
     if seen_conflict_refs != valid_conflict_refs:
         raise LLMError("RecallPackSelection conflict_summaries must cover all conflict refs.")
+
+
+def _pending_intent_selection_candidate_refs(source_pack: dict[str, Any]) -> set[str]:
+    # source pack
+    candidates = source_pack.get("candidates", [])
+    if not isinstance(candidates, list):
+        raise LLMError("PendingIntentSelection source_pack.candidates must be a list.")
+
+    # 収集
+    refs: set[str] = set()
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            raise LLMError("PendingIntentSelection source_pack candidate must be an object.")
+        candidate_ref = candidate.get("candidate_ref")
+        if not isinstance(candidate_ref, str) or not candidate_ref.strip():
+            raise LLMError("PendingIntentSelection source_pack candidate_ref is invalid.")
+        normalized_ref = candidate_ref.strip()
+        if normalized_ref in refs:
+            raise LLMError("PendingIntentSelection source_pack candidate_ref must be unique.")
+        refs.add(normalized_ref)
+
+    # 結果
+    return refs
+
+
+def validate_pending_intent_selection_contract(payload: dict[str, Any], *, source_pack: dict[str, Any]) -> None:
+    # 必須キー群
+    _validate_exact_keys(payload, {"selected_candidate_ref", "selection_reason"}, "PendingIntentSelection")
+
+    # candidate refs
+    valid_candidate_refs = _pending_intent_selection_candidate_refs(source_pack)
+
+    # selected_candidate_ref
+    selected_candidate_ref = payload["selected_candidate_ref"]
+    if not isinstance(selected_candidate_ref, str) or not selected_candidate_ref.strip():
+        raise LLMError("PendingIntentSelection selected_candidate_ref is invalid.")
+    normalized_ref = selected_candidate_ref.strip()
+    if normalized_ref != "none" and normalized_ref not in valid_candidate_refs:
+        raise LLMError("PendingIntentSelection selected_candidate_ref must exist in source_pack or be 'none'.")
+
+    # selection_reason
+    selection_reason = payload["selection_reason"]
+    if not isinstance(selection_reason, str):
+        raise LLMError("PendingIntentSelection selection_reason must be a string.")
+    normalized_reason = selection_reason.strip()
+    if not normalized_reason:
+        raise LLMError("PendingIntentSelection selection_reason must not be empty.")
+    if "\n" in normalized_reason or "\r" in normalized_reason:
+        raise LLMError("PendingIntentSelection selection_reason must not contain newlines.")
+    if INTERNAL_IDENTIFIER_PATTERN.search(normalized_reason) is not None:
+        raise LLMError("PendingIntentSelection selection_reason must not contain internal identifiers.")
+    sentence_count = len([part for part in re.split(r"[。!?！？]+", normalized_reason) if part.strip()])
+    if sentence_count != MAX_PENDING_INTENT_SELECTION_REASON_SENTENCES:
+        raise LLMError("PendingIntentSelection selection_reason must be exactly one sentence.")

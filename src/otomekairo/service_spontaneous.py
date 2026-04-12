@@ -5,7 +5,7 @@ import uuid
 from datetime import timedelta
 from typing import Any
 
-from otomekairo.llm import LLMError
+from otomekairo.llm import LLMContractError, LLMError
 from otomekairo.recall import RecallPackSelectionError
 from otomekairo.service_common import (
     BACKGROUND_DESKTOP_WATCH_POLL_SECONDS,
@@ -16,6 +16,19 @@ from otomekairo.service_common import (
     WAKE_REPLY_COOLDOWN_MINUTES,
     ServiceError,
 )
+
+
+class PendingIntentSelectionError(LLMError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        pending_intent_selection: dict[str, Any],
+        failure_stage: str,
+    ) -> None:
+        super().__init__(message)
+        self.pending_intent_selection = pending_intent_selection
+        self.failure_stage = failure_stage
 
 
 # 自発Mixin
@@ -104,23 +117,73 @@ class ServiceSpontaneousMixin:
             started_at = self._now_iso()
             recent_turns = self._load_recent_turns(state)
             runtime_summary = self._build_runtime_summary(state)
+            pending_intent_selection = self._empty_pending_intent_selection_trace()
             observation_text = self._build_wake_observation_text(
                 client_context=client_context,
                 selected_candidate=None,
             )
 
             try:
+                # due / cooldown
+                due = self._wake_is_due(state=state, current_time=started_at)
+                if due["should_skip"]:
+                    pipeline = self._noop_pipeline(
+                        started_at=started_at,
+                        reason_summary=due["reason_summary"],
+                    )
+                    return self._complete_observation_success(
+                        cycle_id=cycle_id,
+                        started_at=started_at,
+                        state=state,
+                        runtime_summary=runtime_summary,
+                        observation_text=observation_text,
+                        client_context=client_context,
+                        pipeline=pipeline,
+                        trigger_kind=trigger_kind,
+                        observation_event_kind="wake",
+                        observation_event_role="system",
+                        consolidate_memory=False,
+                        pending_intent_selection=pending_intent_selection,
+                    )
+                cooldown_reason = self._wake_cooldown_reason(current_time=started_at)
+                if cooldown_reason is not None:
+                    self._set_last_wake_at(started_at)
+                    pipeline = self._noop_pipeline(
+                        started_at=started_at,
+                        reason_summary=cooldown_reason,
+                    )
+                    return self._complete_observation_success(
+                        cycle_id=cycle_id,
+                        started_at=started_at,
+                        state=state,
+                        runtime_summary=runtime_summary,
+                        observation_text=observation_text,
+                        client_context=client_context,
+                        pipeline=pipeline,
+                        trigger_kind=trigger_kind,
+                        observation_event_kind="wake",
+                        observation_event_role="system",
+                        consolidate_memory=False,
+                        pending_intent_selection=pending_intent_selection,
+                    )
+
                 # パイプライン
-                selected_candidate = self._select_due_pending_intent_candidate(
-                    memory_set_id=state["selected_memory_set_id"],
+                selection_result = self._select_due_pending_intent_candidate(
+                    state=state,
+                    trigger_kind=trigger_kind,
+                    client_context=client_context,
+                    recent_turns=recent_turns,
                     current_time=started_at,
                 )
+                selected_candidate = selection_result["selected_candidate"]
+                pending_intent_selection = selection_result["pending_intent_selection"]
                 pipeline, observation_text = self._run_wake_pipeline(
                     state=state,
                     started_at=started_at,
                     client_context=client_context,
                     recent_turns=recent_turns,
                     selected_candidate=selected_candidate,
+                    pending_intent_selection=pending_intent_selection,
                 )
 
                 # 成功
@@ -136,6 +199,7 @@ class ServiceSpontaneousMixin:
                     observation_event_kind="wake",
                     observation_event_role="system",
                     consolidate_memory=False,
+                    pending_intent_selection=pending_intent_selection,
                 )
 
                 # 返信後処理
@@ -145,6 +209,39 @@ class ServiceSpontaneousMixin:
                     selected_candidate=selected_candidate,
                 )
                 return response
+            except PendingIntentSelectionError as exc:
+                # 失敗永続化
+                finished_at = self._now_iso()
+                self._persist_cycle_failure(
+                    cycle_id=cycle_id,
+                    started_at=started_at,
+                    finished_at=finished_at,
+                    state=state,
+                    runtime_summary=runtime_summary,
+                    observation_text=observation_text,
+                    client_context=client_context,
+                    failure_reason=str(exc),
+                    trigger_kind=trigger_kind,
+                    observation_event_kind="wake",
+                    observation_event_role="system",
+                    failure_event_kind="pending_intent_selection_failure",
+                    failure_event_payload={
+                        "failure_stage": exc.failure_stage,
+                    },
+                    pending_intent_selection=exc.pending_intent_selection,
+                )
+                self._emit_observation_failure_logs(
+                    cycle_id=cycle_id,
+                    trigger_kind=trigger_kind,
+                    observation_text=observation_text,
+                    failure_reason=str(exc),
+                    pending_intent_selection=exc.pending_intent_selection,
+                )
+                return {
+                    "cycle_id": cycle_id,
+                    "result_kind": "internal_failure",
+                    "reply": None,
+                }
             except RecallPackSelectionError as exc:
                 # 失敗永続化
                 finished_at = self._now_iso()
@@ -168,12 +265,14 @@ class ServiceSpontaneousMixin:
                     failure_event_payload={
                         "failure_stage": exc.failure_stage,
                     },
+                    pending_intent_selection=pending_intent_selection,
                 )
                 self._emit_observation_failure_logs(
                     cycle_id=cycle_id,
                     trigger_kind=trigger_kind,
                     observation_text=observation_text,
                     failure_reason=str(exc),
+                    pending_intent_selection=pending_intent_selection,
                 )
                 return {
                     "cycle_id": cycle_id,
@@ -195,12 +294,14 @@ class ServiceSpontaneousMixin:
                     trigger_kind=trigger_kind,
                     observation_event_kind="wake",
                     observation_event_role="system",
+                    pending_intent_selection=pending_intent_selection,
                 )
                 self._emit_observation_failure_logs(
                     cycle_id=cycle_id,
                     trigger_kind=trigger_kind,
                     observation_text=observation_text,
                     failure_reason=str(exc),
+                    pending_intent_selection=pending_intent_selection,
                 )
                 return {
                     "cycle_id": cycle_id,
@@ -317,23 +418,31 @@ class ServiceSpontaneousMixin:
             # 成功タイムスタンプ
             self._set_last_desktop_watch_at(self._now_iso())
 
-            # 観測
-            selected_candidate = self._select_due_pending_intent_candidate(
-                memory_set_id=state["selected_memory_set_id"],
-                current_time=started_at,
-            )
             client_context = self._build_desktop_watch_client_context(capture_response)
-            observation_text = self._build_desktop_watch_observation_text(
-                client_context=client_context,
-                selected_candidate=selected_candidate,
-            )
+            observation_text = self._build_desktop_watch_observation_text(client_context=client_context, selected_candidate=None)
 
             # スナップショット
             cycle_id = self._new_cycle_id()
             recent_turns = self._load_recent_turns(state)
             runtime_summary = self._build_runtime_summary(state)
+            pending_intent_selection = self._empty_pending_intent_selection_trace()
 
             try:
+                # 候補選択
+                selection_result = self._select_due_pending_intent_candidate(
+                    state=state,
+                    trigger_kind="desktop_watch",
+                    client_context=client_context,
+                    recent_turns=recent_turns,
+                    current_time=started_at,
+                )
+                selected_candidate = selection_result["selected_candidate"]
+                pending_intent_selection = selection_result["pending_intent_selection"]
+                observation_text = self._build_desktop_watch_observation_text(
+                    client_context=client_context,
+                    selected_candidate=selected_candidate,
+                )
+
                 # パイプライン
                 pipeline = self._run_observation_pipeline(
                     state=state,
@@ -355,6 +464,7 @@ class ServiceSpontaneousMixin:
                     observation_event_kind="desktop_watch",
                     observation_event_role="system",
                     consolidate_memory=False,
+                    pending_intent_selection=pending_intent_selection,
                 )
                 self._record_wake_outcome(
                     current_time=started_at,
@@ -364,6 +474,33 @@ class ServiceSpontaneousMixin:
                 self._emit_desktop_watch_reply_event(
                     capture_response=capture_response,
                     pipeline=pipeline,
+                )
+            except PendingIntentSelectionError as exc:
+                # 失敗
+                self._persist_cycle_failure(
+                    cycle_id=cycle_id,
+                    started_at=started_at,
+                    finished_at=self._now_iso(),
+                    state=state,
+                    runtime_summary=runtime_summary,
+                    observation_text=observation_text,
+                    client_context=client_context,
+                    failure_reason=str(exc),
+                    trigger_kind="desktop_watch",
+                    observation_event_kind="desktop_watch",
+                    observation_event_role="system",
+                    failure_event_kind="pending_intent_selection_failure",
+                    failure_event_payload={
+                        "failure_stage": exc.failure_stage,
+                    },
+                    pending_intent_selection=exc.pending_intent_selection,
+                )
+                self._emit_observation_failure_logs(
+                    cycle_id=cycle_id,
+                    trigger_kind="desktop_watch",
+                    observation_text=observation_text,
+                    failure_reason=str(exc),
+                    pending_intent_selection=exc.pending_intent_selection,
                 )
             except RecallPackSelectionError as exc:
                 # 失敗
@@ -387,12 +524,14 @@ class ServiceSpontaneousMixin:
                     failure_event_payload={
                         "failure_stage": exc.failure_stage,
                     },
+                    pending_intent_selection=pending_intent_selection,
                 )
                 self._emit_observation_failure_logs(
                     cycle_id=cycle_id,
                     trigger_kind="desktop_watch",
                     observation_text=observation_text,
                     failure_reason=str(exc),
+                    pending_intent_selection=pending_intent_selection,
                 )
             except (LLMError, KeyError, ValueError) as exc:
                 # 失敗
@@ -408,12 +547,14 @@ class ServiceSpontaneousMixin:
                     trigger_kind="desktop_watch",
                     observation_event_kind="desktop_watch",
                     observation_event_role="system",
+                    pending_intent_selection=pending_intent_selection,
                 )
                 self._emit_observation_failure_logs(
                     cycle_id=cycle_id,
                     trigger_kind="desktop_watch",
                     observation_text=observation_text,
                     failure_reason=str(exc),
+                    pending_intent_selection=pending_intent_selection,
                 )
 
     def _pending_intent_trace_summary(
@@ -441,30 +582,283 @@ class ServiceSpontaneousMixin:
     def _select_due_pending_intent_candidate(
         self,
         *,
+        state: dict[str, Any],
+        trigger_kind: str,
+        client_context: dict[str, Any],
+        recent_turns: list[dict[str, Any]],
+        current_time: str,
+    ) -> dict[str, Any]:
+        # 初期状態
+        trace = self._empty_pending_intent_selection_trace()
+        memory_set_id = state["selected_memory_set_id"]
+
+        # 候補群
+        candidate_pool = self._pending_intent_candidate_pool(
+            memory_set_id=memory_set_id,
+            current_time=current_time,
+        )
+        trace["candidate_pool_count"] = len(candidate_pool)
+        current_dt = self._parse_iso(current_time)
+        eligible_candidates = [
+            candidate
+            for candidate in candidate_pool
+            if not isinstance(candidate.get("not_before"), str)
+            or not candidate["not_before"]
+            or self._parse_iso(candidate["not_before"]) <= current_dt
+        ]
+        trace["eligible_candidate_count"] = len(eligible_candidates)
+        if not eligible_candidates:
+            return {
+                "selected_candidate": None,
+                "pending_intent_selection": trace,
+            }
+
+        # source pack
+        try:
+            source_pack = self._build_pending_intent_selection_source_pack(
+                trigger_kind=trigger_kind,
+                client_context=client_context,
+                recent_turns=recent_turns,
+                candidates=eligible_candidates,
+                current_time=current_time,
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            trace["result_status"] = "failed"
+            trace["failure_reason"] = str(exc)
+            raise PendingIntentSelectionError(
+                str(exc),
+                pending_intent_selection=trace,
+                failure_stage="build_source_pack",
+            ) from exc
+
+        # 選択
+        role_definition = state["model_presets"][state["selected_model_preset_id"]]["roles"]["pending_intent_selection"]
+        try:
+            payload = self.llm.generate_pending_intent_selection(
+                role_definition=role_definition,
+                source_pack=source_pack,
+            )
+        except LLMContractError as exc:
+            trace["result_status"] = "failed"
+            trace["failure_reason"] = str(exc)
+            raise PendingIntentSelectionError(
+                str(exc),
+                pending_intent_selection=trace,
+                failure_stage="contract_validation",
+            ) from exc
+        except LLMError as exc:
+            trace["result_status"] = "failed"
+            trace["failure_reason"] = str(exc)
+            raise PendingIntentSelectionError(
+                str(exc),
+                pending_intent_selection=trace,
+                failure_stage="llm_generation",
+            ) from exc
+
+        # 反映
+        try:
+            selection_result = self._apply_pending_intent_selection(
+                payload=payload,
+                source_pack=source_pack,
+                candidates=eligible_candidates,
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            trace["result_status"] = "failed"
+            trace["failure_reason"] = str(exc)
+            raise PendingIntentSelectionError(
+                str(exc),
+                pending_intent_selection=trace,
+                failure_stage="apply_selection",
+            ) from exc
+
+        # 結果
+        trace["selected_candidate_ref"] = selection_result["selected_candidate_ref"]
+        trace["selection_reason"] = selection_result["selection_reason"]
+        trace["result_status"] = "succeeded"
+        selected_candidate = selection_result["selected_candidate"]
+        if selected_candidate is not None:
+            trace["selected_candidate_id"] = selected_candidate.get("candidate_id")
+        return {
+            "selected_candidate": selected_candidate,
+            "pending_intent_selection": trace,
+        }
+
+    def _pending_intent_candidate_pool(
+        self,
+        *,
         memory_set_id: str,
         current_time: str,
-    ) -> dict[str, Any] | None:
+    ) -> list[dict[str, Any]]:
         # ロック下読み取り
         with self._runtime_state_lock:
             self._prune_pending_intent_candidates(current_time=current_time)
-            current_dt = self._parse_iso(current_time)
-            eligible = []
-            for candidate in self._pending_intent_candidates:
-                if candidate.get("memory_set_id") != memory_set_id:
-                    continue
-                not_before = candidate.get("not_before")
-                if isinstance(not_before, str) and not_before and self._parse_iso(not_before) > current_dt:
-                    continue
-                eligible.append(candidate)
-            if not eligible:
-                return None
-            eligible.sort(
-                key=lambda candidate: (
-                    candidate.get("updated_at") or candidate.get("created_at") or "",
-                    candidate.get("candidate_id") or "",
+            return [
+                dict(candidate)
+                for candidate in self._pending_intent_candidates
+                if candidate.get("memory_set_id") == memory_set_id
+            ]
+
+    def _build_pending_intent_selection_source_pack(
+        self,
+        *,
+        trigger_kind: str,
+        client_context: dict[str, Any],
+        recent_turns: list[dict[str, Any]],
+        candidates: list[dict[str, Any]],
+        current_time: str,
+    ) -> dict[str, Any]:
+        return {
+            "trigger_kind": trigger_kind,
+            "observation_context": self._build_pending_intent_selection_observation_context(
+                trigger_kind=trigger_kind,
+                client_context=client_context,
+            ),
+            "recent_turns": self._pending_intent_selection_recent_turns(recent_turns),
+            "selection_policy": {
+                "allow_none": True,
+                "max_selected_candidates": 1,
+            },
+            "candidates": [
+                self._pending_intent_selection_candidate_source_item(
+                    candidate_ref=f"candidate:{index}",
+                    candidate=candidate,
+                    current_time=current_time,
                 )
+                for index, candidate in enumerate(candidates, start=1)
+            ],
+        }
+
+    def _build_pending_intent_selection_observation_context(
+        self,
+        *,
+        trigger_kind: str,
+        client_context: dict[str, Any],
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "source": self._client_context_text(client_context.get("source"), limit=48) or trigger_kind,
+        }
+        active_app = self._client_context_text(client_context.get("active_app"), limit=80)
+        if active_app is not None:
+            payload["active_app"] = active_app
+        window_title = self._client_context_text(client_context.get("window_title"), limit=120)
+        if window_title is not None:
+            payload["window_title"] = window_title
+        locale = self._client_context_text(client_context.get("locale"), limit=32)
+        if locale is not None:
+            payload["locale"] = locale
+        image_count = client_context.get("image_count")
+        if trigger_kind == "desktop_watch" and isinstance(image_count, int) and image_count >= 0:
+            payload["image_count"] = image_count
+        return payload
+
+    def _pending_intent_selection_recent_turns(self, recent_turns: list[dict[str, Any]]) -> list[dict[str, str]]:
+        compact_turns: list[dict[str, str]] = []
+        for turn in recent_turns[-4:]:
+            if not isinstance(turn, dict):
+                continue
+            role = turn.get("role")
+            text = turn.get("text")
+            if not isinstance(role, str) or not role.strip():
+                continue
+            if not isinstance(text, str) or not text.strip():
+                continue
+            compact_turns.append(
+                {
+                    "role": role.strip(),
+                    "text": self._clamp(text.strip(), limit=120),
+                }
             )
-            return dict(eligible[0])
+        return compact_turns
+
+    def _pending_intent_selection_candidate_source_item(
+        self,
+        *,
+        candidate_ref: str,
+        candidate: dict[str, Any],
+        current_time: str,
+    ) -> dict[str, Any]:
+        intent_kind = candidate.get("intent_kind")
+        intent_summary = candidate.get("intent_summary")
+        reason_summary = candidate.get("reason_summary")
+        created_at = candidate.get("created_at")
+        updated_at = candidate.get("updated_at") or created_at
+        expires_at = candidate.get("expires_at")
+        if not isinstance(intent_kind, str) or not intent_kind.strip():
+            raise ValueError("pending_intent candidate.intent_kind is invalid.")
+        if not isinstance(intent_summary, str) or not intent_summary.strip():
+            raise ValueError("pending_intent candidate.intent_summary is invalid.")
+        if not isinstance(reason_summary, str) or not reason_summary.strip():
+            raise ValueError("pending_intent candidate.reason_summary is invalid.")
+        if not isinstance(created_at, str) or not created_at.strip():
+            raise ValueError("pending_intent candidate.created_at is invalid.")
+        if not isinstance(updated_at, str) or not updated_at.strip():
+            raise ValueError("pending_intent candidate.updated_at is invalid.")
+        if not isinstance(expires_at, str) or not expires_at.strip():
+            raise ValueError("pending_intent candidate.expires_at is invalid.")
+        return {
+            "candidate_ref": candidate_ref,
+            "intent_kind": intent_kind.strip(),
+            "intent_summary": self._clamp(intent_summary.strip(), limit=120),
+            "reason_summary": self._clamp(reason_summary.strip(), limit=160),
+            "minutes_since_created": self._pending_intent_selection_minutes_since(
+                current_time=current_time,
+                timestamp=created_at,
+            ),
+            "minutes_since_updated": self._pending_intent_selection_minutes_since(
+                current_time=current_time,
+                timestamp=updated_at,
+            ),
+            "minutes_until_expiry": self._pending_intent_selection_minutes_until(
+                current_time=current_time,
+                timestamp=expires_at,
+            ),
+        }
+
+    def _pending_intent_selection_minutes_since(
+        self,
+        *,
+        current_time: str,
+        timestamp: str,
+    ) -> int:
+        delta_seconds = (self._parse_iso(current_time) - self._parse_iso(timestamp)).total_seconds()
+        return max(0, int(delta_seconds // 60))
+
+    def _pending_intent_selection_minutes_until(
+        self,
+        *,
+        current_time: str,
+        timestamp: str,
+    ) -> int:
+        delta_seconds = (self._parse_iso(timestamp) - self._parse_iso(current_time)).total_seconds()
+        return max(0, int(delta_seconds // 60))
+
+    def _apply_pending_intent_selection(
+        self,
+        *,
+        payload: dict[str, Any],
+        source_pack: dict[str, Any],
+        candidates: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        # lookup
+        candidate_lookup = {
+            source_candidate["candidate_ref"]: dict(candidate)
+            for source_candidate, candidate in zip(source_pack["candidates"], candidates, strict=True)
+        }
+
+        # 結果
+        selected_candidate_ref = str(payload["selected_candidate_ref"]).strip()
+        selection_reason = str(payload["selection_reason"]).strip()
+        if selected_candidate_ref == "none":
+            return {
+                "selected_candidate_ref": "none",
+                "selected_candidate": None,
+                "selection_reason": selection_reason,
+            }
+        return {
+            "selected_candidate_ref": selected_candidate_ref,
+            "selected_candidate": candidate_lookup[selected_candidate_ref],
+            "selection_reason": selection_reason,
+        }
 
     def _apply_pending_intent_candidate(
         self,
