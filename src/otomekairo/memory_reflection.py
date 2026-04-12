@@ -4,12 +4,12 @@ from collections import Counter, defaultdict
 from typing import Any
 import uuid
 
+from otomekairo.llm import LLMClient, LLMError
 from otomekairo.memory_actions import MemoryActionResolver
 from otomekairo.memory_utils import (
     action_counts,
     clamp_score,
     days_since,
-    display_scope_key,
     hours_since,
     now_iso,
     stable_json,
@@ -34,6 +34,8 @@ REFLECTION_MIN_SUMMARY_EVIDENCE = 3
 REFLECTION_MIN_SUMMARY_EPISODES = 2
 REFLECTION_CONFIRMED_SUMMARY_EVIDENCE = 7
 REFLECTION_CONFIRMED_SUMMARY_EPISODES = 4
+REFLECTION_SUMMARY_PACK_EPISODE_LIMIT = 6
+REFLECTION_SUMMARY_PACK_MEMORY_LIMIT = 8
 REFLECTION_TOPIC_DORMANT_AFTER_DAYS = 14
 REFLECTION_CONFIRMED_TOPIC_DORMANT_AFTER_DAYS = 30
 
@@ -44,11 +46,13 @@ class ReflectiveConsolidator:
         self,
         *,
         store: FileStore,
+        llm: LLMClient,
         action_resolver: MemoryActionResolver,
         vector_indexer: MemoryVectorIndexer,
     ) -> None:
         # 依存関係
         self.store = store
+        self.llm = llm
         self.action_resolver = action_resolver
         self.vector_indexer = vector_indexer
 
@@ -62,6 +66,7 @@ class ReflectiveConsolidator:
     ) -> dict[str, Any]:
         # トリガー確認
         memory_set_id = state["selected_memory_set_id"]
+        summary_generation = self._empty_summary_generation()
         latest_run = self.store.get_latest_reflection_run(memory_set_id)
         latest_updated_run = self.store.get_latest_reflection_run(
             memory_set_id,
@@ -80,6 +85,7 @@ class ReflectiveConsolidator:
                 "result_status": "not_triggered",
                 "trigger_reasons": [],
                 "affected_memory_unit_ids": [],
+                "summary_generation": summary_generation,
                 "failure_reason": None,
             }
 
@@ -103,16 +109,17 @@ class ReflectiveConsolidator:
                 scope_types=list(REFLECTIVE_SCOPE_TYPES),
                 limit=REFLECTION_MEMORY_LIMIT,
             )
+            reflection_summary_role = self._reflection_summary_role_definition(state=state)
 
             # アクション構築
-            reflection_actions.extend(
-                self._build_reflective_summary_actions(
-                    memory_set_id=memory_set_id,
-                    finished_at=finished_at,
-                    episodes=episodes,
-                    active_units=active_units,
-                )
+            summary_actions, summary_generation = self._build_reflective_summary_actions(
+                memory_set_id=memory_set_id,
+                finished_at=finished_at,
+                episodes=episodes,
+                active_units=active_units,
+                reflection_summary_role=reflection_summary_role,
             )
+            reflection_actions.extend(summary_actions)
             reflection_actions.extend(
                 self._build_reflective_confirmation_actions(
                     memory_set_id=memory_set_id,
@@ -164,6 +171,7 @@ class ReflectiveConsolidator:
                     "source_episode_ids": [episode["episode_id"] for episode in episodes],
                     "affected_memory_unit_ids": affected_memory_unit_ids,
                     "action_counts": action_counts(reflection_actions),
+                    "summary_generation": summary_generation,
                     "failure_reason": failure_reason,
                 }
             )
@@ -174,6 +182,7 @@ class ReflectiveConsolidator:
                 "result_status": result_status,
                 "trigger_reasons": trigger_reasons,
                 "affected_memory_unit_ids": affected_memory_unit_ids,
+                "summary_generation": summary_generation,
                 "failure_reason": failure_reason,
             }
         except Exception as exc:  # noqa: BLE001
@@ -191,6 +200,7 @@ class ReflectiveConsolidator:
                     "source_episode_ids": [episode["episode_id"] for episode in episodes],
                     "affected_memory_unit_ids": unique_memory_unit_ids(reflection_actions),
                     "action_counts": action_counts(reflection_actions),
+                    "summary_generation": summary_generation,
                     "failure_reason": failure_reason,
                 }
             )
@@ -199,8 +209,28 @@ class ReflectiveConsolidator:
                 "result_status": "failed",
                 "trigger_reasons": trigger_reasons,
                 "affected_memory_unit_ids": unique_memory_unit_ids(reflection_actions),
+                "summary_generation": summary_generation,
                 "failure_reason": failure_reason,
             }
+
+    def _empty_summary_generation(self) -> dict[str, Any]:
+        return {
+            "requested_scope_count": 0,
+            "succeeded_scope_count": 0,
+            "failed_scopes": [],
+        }
+
+    def _reflection_summary_role_definition(self, *, state: dict[str, Any]) -> dict[str, Any]:
+        # state snapshot から role を読む。current 設定は参照しない。
+        selected_model_preset_id = state["selected_model_preset_id"]
+        selected_model_preset = state["model_presets"][selected_model_preset_id]
+        roles = selected_model_preset.get("roles")
+        if not isinstance(roles, dict):
+            raise LLMError("reflection summary role is unavailable because roles is invalid.")
+        role_definition = roles.get("memory_reflection_summary")
+        if not isinstance(role_definition, dict):
+            raise LLMError("reflection summary role is unavailable in the selected model preset.")
+        return role_definition
 
     def _reflective_trigger_reasons(
         self,
@@ -270,10 +300,12 @@ class ReflectiveConsolidator:
         finished_at: str,
         episodes: list[dict[str, Any]],
         active_units: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
+        reflection_summary_role: dict[str, Any],
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         # グループ化
         episode_groups: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
         memory_groups: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+        summary_groups: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
         for episode in episodes:
             scope_type = episode.get("primary_scope_type")
             scope_key = episode.get("primary_scope_key")
@@ -289,12 +321,16 @@ class ReflectiveConsolidator:
                 continue
             if not isinstance(scope_key, str) or not scope_key:
                 continue
-            if unit.get("memory_type") in {"summary", "commitment"}:
+            if unit.get("memory_type") == "summary":
+                summary_groups[(scope_type, scope_key)].append(unit)
+                continue
+            if unit.get("memory_type") == "commitment":
                 continue
             memory_groups[(scope_type, scope_key)].append(unit)
 
         # スコープ走査
         actions: list[dict[str, Any]] = []
+        summary_generation = self._empty_summary_generation()
         scope_keys = sorted(set(episode_groups.keys()) | set(memory_groups.keys()))
         for scope_type, scope_key in scope_keys:
             scope_episodes = episode_groups.get((scope_type, scope_key), [])
@@ -306,11 +342,45 @@ class ReflectiveConsolidator:
             ):
                 continue
 
+            summary_generation["requested_scope_count"] += 1
+            try:
+                evidence_pack = self._build_reflective_summary_evidence_pack(
+                    scope_type=scope_type,
+                    scope_key=scope_key,
+                    scope_episodes=scope_episodes,
+                    scope_units=scope_units,
+                    existing_summary_units=summary_groups.get((scope_type, scope_key), []),
+                )
+            except Exception as exc:  # noqa: BLE001
+                self._append_summary_generation_failure(
+                    summary_generation=summary_generation,
+                    scope_type=scope_type,
+                    scope_key=scope_key,
+                    failure_stage="build_evidence_pack",
+                    failure_reason=str(exc),
+                )
+                continue
+
+            try:
+                summary_payload = self.llm.generate_memory_reflection_summary(
+                    role_definition=reflection_summary_role,
+                    evidence_pack=evidence_pack,
+                )
+            except Exception as exc:  # noqa: BLE001
+                self._append_summary_generation_failure(
+                    summary_generation=summary_generation,
+                    scope_type=scope_type,
+                    scope_key=scope_key,
+                    failure_stage="generate_summary_text",
+                    failure_reason=str(exc),
+                )
+                continue
+
             candidate = self._build_reflective_summary_candidate(
                 scope_type=scope_type,
                 scope_key=scope_key,
-                scope_episodes=scope_episodes,
-                scope_units=scope_units,
+                summary_text=summary_payload["summary_text"],
+                evidence_pack=evidence_pack,
             )
             evidence_event_ids = self._reflective_event_ids(
                 scope_episodes=scope_episodes,
@@ -327,9 +397,10 @@ class ReflectiveConsolidator:
                     allow_summary=True,
                 )
             )
+            summary_generation["succeeded_scope_count"] += 1
 
         # 結果
-        return actions
+        return actions, summary_generation
 
     def _should_build_reflective_summary(
         self,
@@ -363,23 +434,16 @@ class ReflectiveConsolidator:
         *,
         scope_type: str,
         scope_key: str,
-        scope_episodes: list[dict[str, Any]],
-        scope_units: list[dict[str, Any]],
+        summary_text: str,
+        evidence_pack: dict[str, Any],
     ) -> dict[str, Any]:
         # 根拠
-        memory_types = self._dominant_memory_types(scope_units)
-        evidence_count = len(scope_episodes) + len(scope_units)
-        support_cycle_count = self._reflective_support_cycle_count(
-            scope_episodes=scope_episodes,
-            scope_units=scope_units,
-        )
-        open_loop_count = sum(1 for episode in scope_episodes if episode.get("open_loops"))
-        summary_status = self._reflective_summary_status(
-            scope_type=scope_type,
-            evidence_count=evidence_count,
-            support_cycle_count=support_cycle_count,
-            open_loop_count=open_loop_count,
-        )
+        memory_types = evidence_pack["dominant_memory_types"]
+        evidence_counts = evidence_pack["evidence_counts"]
+        evidence_count = evidence_counts["episodes"] + evidence_counts["memory_units"]
+        support_cycle_count = evidence_counts["support_cycles"]
+        open_loop_count = evidence_counts["open_loops"]
+        summary_status = evidence_pack["summary_status_candidate"]
         confidence_floor = 0.74 if summary_status == "confirmed" else 0.58
 
         # 候補
@@ -390,14 +454,7 @@ class ReflectiveConsolidator:
             "subject_ref": self._summary_subject_ref(scope_type, scope_key),
             "predicate": "long_term_pattern",
             "object_ref_or_value": f"{scope_type}:{scope_key}:summary",
-            "summary_text": self._reflective_summary_text(
-                scope_type=scope_type,
-                scope_key=scope_key,
-                memory_types=memory_types,
-                open_loop_count=open_loop_count,
-                scope_units=scope_units,
-                scope_episodes=scope_episodes,
-            ),
+            "summary_text": summary_text.strip(),
             "status": summary_status,
             "commitment_state": None,
             "confidence": min(
@@ -415,8 +472,8 @@ class ReflectiveConsolidator:
             "qualifiers": {
                 "summary_scope": scope_type,
                 "source_memory_types": memory_types,
-                "evidence_episode_count": len(scope_episodes),
-                "evidence_memory_count": len(scope_units),
+                "evidence_episode_count": evidence_counts["episodes"],
+                "evidence_memory_count": evidence_counts["memory_units"],
                 "support_cycle_count": support_cycle_count,
                 "open_loop_count": open_loop_count,
             },
@@ -633,184 +690,116 @@ class ReflectiveConsolidator:
         # 結果
         return "inferred"
 
-    def _reflective_summary_text(
+    def _build_reflective_summary_evidence_pack(
         self,
         *,
         scope_type: str,
         scope_key: str,
-        memory_types: list[str],
-        open_loop_count: int,
         scope_units: list[dict[str, Any]],
         scope_episodes: list[dict[str, Any]],
-    ) -> str:
-        # 主題候補
-        themes = self._reflective_summary_themes(
-            scope_type=scope_type,
-            scope_units=scope_units,
+        existing_summary_units: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        # counts
+        memory_types = self._dominant_memory_types(scope_units)
+        evidence_count = len(scope_episodes) + len(scope_units)
+        support_cycle_count = self._reflective_support_cycle_count(
             scope_episodes=scope_episodes,
-            limit=2,
+            scope_units=scope_units,
         )
-        theme_text = self._reflective_theme_text_from_labels(themes)
+        open_loop_count = sum(1 for episode in scope_episodes if episode.get("open_loops"))
+        summary_status = self._reflective_summary_status(
+            scope_type=scope_type,
+            evidence_count=evidence_count,
+            support_cycle_count=support_cycle_count,
+            open_loop_count=open_loop_count,
+        )
 
-        # トピック
-        if scope_type == "topic":
-            topic_label = display_scope_key(scope_key)
-            if open_loop_count > 0:
-                return f"最近は {topic_label} に関する話題が未完了テーマとして続いている。"
-            return f"最近は {topic_label} に関する話題が繰り返し現れている。"
-
-        # 関係
-        if scope_type == "relationship":
-            if scope_key != "self|user":
-                relationship_label = display_scope_key(scope_key)
-                if open_loop_count > 0:
-                    if theme_text is not None:
-                        return f"最近は {relationship_label} の関係文脈で、{theme_text}を中心に継続中の確認事項や流れが積み上がっている。"
-                    return f"最近は {relationship_label} の関係文脈で継続中の確認事項や流れが積み上がっている。"
-                if "relation" in memory_types:
-                    if theme_text is not None:
-                        return f"最近は {relationship_label} の関係文脈で、{theme_text}に関する理解が少しずつ安定している。"
-                    return f"最近は {relationship_label} の関係理解が少しずつ安定している。"
-                if theme_text is not None:
-                    return f"最近は {relationship_label} の関係文脈で、{theme_text}が継続して積み上がっている。"
-                return f"最近は {relationship_label} の関係文脈が継続して積み上がっている。"
-            if open_loop_count > 0:
-                if theme_text is not None:
-                    return f"最近のあなたとのやり取りでは、{theme_text}を中心に継続中の確認事項や会話の流れが積み上がっている。"
-                return "最近のあなたとのやり取りでは、継続中の確認事項や会話の流れが積み上がっている。"
-            if "relation" in memory_types:
-                if theme_text is not None:
-                    return f"最近のあなたとのやり取りでは、{theme_text}に関する理解が少しずつ安定している。"
-                return "最近のあなたとのやり取りでは、距離感や支え方に関する理解が少しずつ安定している。"
-            if theme_text is not None:
-                return f"最近のあなたとのやり取りでは、{theme_text}に関する文脈が継続して積み上がっている。"
-            return "最近のあなたとのやり取りでは、関係文脈が継続して積み上がっている。"
-
-        # 自己
-        if scope_type == "self":
-            if open_loop_count > 0 and theme_text is not None:
-                return f"最近の自分側の応答では、{theme_text}を保ちながら継続中の確認事項も抱えている。"
-            if theme_text is not None:
-                return f"最近の自分側の応答では、{theme_text}に一定の傾向が見えている。"
-            return "最近の自分側の応答では、受け止め方や関わり方に一定の傾向が見えている。"
-
-        # ユーザー
-        if theme_text is not None:
-            return f"最近のあなたに関するやり取りでは、{theme_text}の理解が少しずつ積み上がっている。"
-        theme_text = self._reflective_theme_text(memory_types)
-        return f"最近のあなたに関するやり取りでは、{theme_text}の理解が少しずつ積み上がっている。"
-
-    def _reflective_theme_text(self, memory_types: list[str]) -> str:
-        # マッピング
-        labels = {
-            "fact": "事実や状況",
-            "preference": "好み",
-            "relation": "関係性",
-            "interpretation": "状態や受け止め",
-            "summary": "長期傾向",
+        return {
+            "scope_type": scope_type,
+            "scope_key": scope_key,
+            "summary_status_candidate": summary_status,
+            "dominant_memory_types": memory_types,
+            "evidence_counts": {
+                "episodes": len(scope_episodes),
+                "memory_units": len(scope_units),
+                "support_cycles": support_cycle_count,
+                "open_loops": open_loop_count,
+            },
+            "existing_summary_text": self._existing_summary_text(existing_summary_units),
+            "episodes": [
+                self._summary_pack_episode_item(item)
+                for item in scope_episodes[:REFLECTION_SUMMARY_PACK_EPISODE_LIMIT]
+            ],
+            "memory_units": [
+                self._summary_pack_memory_item(item)
+                for item in self._summary_pack_memory_units(scope_units)
+            ],
         }
-        parts = [labels[memory_type] for memory_type in memory_types if memory_type in labels]
-        if not parts:
-            return "状態"
-        if len(parts) == 1:
-            return parts[0]
-        return "や".join(parts)
 
-    def _reflective_summary_themes(
-        self,
-        *,
-        scope_type: str,
-        scope_units: list[dict[str, Any]],
-        scope_episodes: list[dict[str, Any]],
-        limit: int,
-    ) -> list[str]:
-        # 収集
-        themes: list[str] = []
-        for unit in scope_units:
-            theme = self._reflective_theme_from_unit(scope_type=scope_type, unit=unit)
-            if theme is None or theme in themes:
-                continue
-            themes.append(theme)
-            if len(themes) >= limit:
-                return themes
-
-        # open loop がある場合は継続テーマも補助的に加える
-        if not themes and any(episode.get("open_loops") for episode in scope_episodes):
-            continuity_theme = self._reflective_continuity_theme(scope_type=scope_type)
-            if continuity_theme is not None and continuity_theme not in themes:
-                themes.append(continuity_theme)
-
-        # 結果
-        return themes[:limit]
-
-    def _reflective_theme_from_unit(
-        self,
-        *,
-        scope_type: str,
-        unit: dict[str, Any],
-    ) -> str | None:
-        # 明示 map
-        predicate = unit.get("predicate")
-        object_ref = unit.get("object_ref_or_value")
-        memory_type = unit.get("memory_type")
-        summary_text = unit.get("summary_text")
-
-        if predicate == "system_status":
-            return "動作状態"
-        if predicate == "daily_rhythm":
-            return "生活リズム"
-        if predicate == "work_style":
-            return "働き方"
-        if predicate == "likes":
-            return "好み"
-        if predicate == "talk_again":
-            return "続きを話す流れ"
-        if predicate == "seeks_confirmation_of":
-            return "確認の仕方"
-        if predicate == "seems":
-            if isinstance(object_ref, str) and object_ref == "state:tired":
-                return "体調や負荷"
-            return "状態理解"
-        if memory_type == "relation":
-            return "距離感や支え方"
-        if scope_type == "self" and memory_type in {"fact", "interpretation"}:
-            if isinstance(summary_text, str) and "動作" in summary_text:
-                return "動作状態"
-            return "応答のあり方"
-
-        # 既存 summary_text の表現を補助的に使う
-        if isinstance(summary_text, str):
-            normalized = summary_text.strip().rstrip("。")
-            if normalized:
-                if len(normalized) <= 18:
-                    return normalized
-                if "確認" in normalized:
-                    return "確認事項"
-                if "関係" in normalized:
-                    return "関係理解"
-
-        # 結果
+    def _existing_summary_text(self, existing_summary_units: list[dict[str, Any]]) -> str | None:
+        # 既存 summary の先頭だけを使う。
+        for unit in existing_summary_units:
+            summary_text = unit.get("summary_text")
+            if isinstance(summary_text, str) and summary_text.strip():
+                return summary_text.strip()
         return None
 
-    def _reflective_continuity_theme(self, *, scope_type: str) -> str | None:
-        # スコープ別
-        if scope_type == "relationship":
-            return "継続中の確認事項"
-        if scope_type == "self":
-            return "返答の運び方"
-        if scope_type == "user":
-            return "気がかりな状態"
-        return None
+    def _summary_pack_memory_units(self, scope_units: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        # salience / confidence 優先で上位を使う。
+        ordered_units = sorted(
+            scope_units,
+            key=lambda unit: (
+                -clamp_score(unit.get("salience")),
+                -clamp_score(unit.get("confidence")),
+                -self._safe_timestamp(unit.get("last_confirmed_at") or unit.get("formed_at")),
+            ),
+        )
+        return ordered_units[:REFLECTION_SUMMARY_PACK_MEMORY_LIMIT]
 
-    def _reflective_theme_text_from_labels(self, labels: list[str]) -> str | None:
-        # 空
-        if not labels:
-            return None
+    def _safe_timestamp(self, value: Any) -> float:
+        timestamp = timestamp_sort_key(value)
+        if timestamp == float("inf"):
+            return 0.0
+        return timestamp
 
-        # 結果
-        if len(labels) == 1:
-            return labels[0]
-        return "や".join(labels[:2])
+    def _summary_pack_episode_item(self, episode: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "formed_at": episode.get("formed_at"),
+            "summary_text": episode.get("summary_text"),
+            "outcome_text": episode.get("outcome_text"),
+            "open_loops": episode.get("open_loops", []),
+            "salience": clamp_score(episode.get("salience")),
+        }
+
+    def _summary_pack_memory_item(self, unit: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "memory_type": unit.get("memory_type"),
+            "predicate": unit.get("predicate"),
+            "object_ref_or_value": unit.get("object_ref_or_value"),
+            "summary_text": unit.get("summary_text"),
+            "status": unit.get("status"),
+            "confidence": clamp_score(unit.get("confidence")),
+            "salience": clamp_score(unit.get("salience")),
+        }
+
+    def _append_summary_generation_failure(
+        self,
+        *,
+        summary_generation: dict[str, Any],
+        scope_type: str,
+        scope_key: str,
+        failure_stage: str,
+        failure_reason: str,
+    ) -> None:
+        failed_scopes = summary_generation["failed_scopes"]
+        failed_scopes.append(
+            {
+                "scope_type": scope_type,
+                "scope_key": scope_key,
+                "failure_stage": failure_stage,
+                "failure_reason": failure_reason,
+            }
+        )
 
     def _reflective_summary_salience(
         self,

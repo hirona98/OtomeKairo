@@ -11,6 +11,7 @@ from otomekairo.llm_contracts import (
     LLMError,
     validate_decision_contract,
     validate_memory_interpretation_contract,
+    validate_memory_reflection_summary_contract,
     validate_recall_hint_contract,
 )
 
@@ -492,6 +493,56 @@ class MockLLMClient:
         validate_memory_interpretation_contract(payload)
         return payload
 
+    def generate_memory_reflection_summary(
+        self,
+        role_definition: dict,
+        evidence_pack: dict[str, Any],
+    ) -> dict[str, Any]:
+        # model確認
+        self._assert_mock_model(role_definition)
+
+        # evidence pack
+        scope_type = str(evidence_pack.get("scope_type") or "")
+        scope_key = str(evidence_pack.get("scope_key") or "")
+        counts = evidence_pack.get("evidence_counts", {})
+        open_loop_count = counts.get("open_loops", 0) if isinstance(counts, dict) else 0
+        summary_status = str(evidence_pack.get("summary_status_candidate") or "inferred")
+        theme = self._mock_reflection_theme(evidence_pack.get("memory_units"))
+
+        # 文面
+        if scope_type == "topic":
+            topic_label = self._mock_reflection_scope_label(scope_key)
+            if int(open_loop_count) > 0:
+                summary_text = f"最近は {topic_label} に関する話題が未完了の流れを含みながら続いている。"
+            else:
+                summary_text = f"最近は {topic_label} に関する話題が繰り返し現れている。"
+        elif scope_type == "relationship":
+            relation_label = (
+                "あなたとのやり取り"
+                if scope_key == "self|user"
+                else f"{self._mock_reflection_scope_label(scope_key)} の関係文脈"
+            )
+            if int(open_loop_count) > 0:
+                summary_text = f"最近の{relation_label}では、{theme}を気にかけながら続きを確かめる流れが続いている。"
+            elif summary_status == "confirmed":
+                summary_text = f"最近の{relation_label}では、{theme}に関する理解が少しずつ安定している。"
+            else:
+                summary_text = f"最近の{relation_label}では、{theme}に関する流れがゆるやかに積み上がっている。"
+        elif scope_type == "self":
+            if int(open_loop_count) > 0:
+                summary_text = f"最近の自分側の応答では、{theme}を保ちながら継続中の確認事項も抱えている。"
+            else:
+                summary_text = f"最近の自分側の応答では、{theme}に一定の傾向が見えている。"
+        else:
+            summary_text = f"最近のあなたに関するやり取りでは、{theme}の理解が少しずつ積み上がっている。"
+
+        # payload
+        payload = {
+            "summary_text": summary_text[:140].replace("\n", " ").strip(),
+        }
+        validate_memory_reflection_summary_contract(payload)
+        return payload
+
     def generate_embeddings(
         self,
         role_definition: dict,
@@ -747,6 +798,44 @@ class MockLLMClient:
                 }
             )
         return updates
+
+    def _mock_reflection_theme(self, memory_units: Any) -> str:
+        # 既存 memory unit から主題を拾う。
+        if isinstance(memory_units, list):
+            for unit in memory_units:
+                if not isinstance(unit, dict):
+                    continue
+                predicate = unit.get("predicate")
+                if predicate == "system_status":
+                    return "動作状態"
+                if predicate == "daily_rhythm":
+                    return "生活リズム"
+                if predicate == "work_style":
+                    return "働き方"
+                if predicate == "likes":
+                    return "好み"
+                if predicate == "talk_again":
+                    return "続きを話す流れ"
+                if predicate == "seems":
+                    return "状態理解"
+
+                summary_text = unit.get("summary_text")
+                if isinstance(summary_text, str):
+                    normalized = summary_text.strip().rstrip("。")
+                    if normalized:
+                        return normalized[:18]
+
+        # 既定
+        return "やり取りの傾向"
+
+    def _mock_reflection_scope_label(self, scope_key: str) -> str:
+        # 簡易表示
+        normalized = scope_key.strip()
+        if normalized.startswith("topic:"):
+            return normalized.split(":", 1)[1]
+        if normalized == "self|user":
+            return "あなた"
+        return normalized
 
     def _mock_embedding_vector(self, text: str, embedding_dimension: int) -> list[float]:
         # 空確認

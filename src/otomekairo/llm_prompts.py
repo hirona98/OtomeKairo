@@ -114,6 +114,22 @@ def build_memory_interpretation_messages(
     ]
 
 
+def build_memory_reflection_summary_messages(
+    *,
+    evidence_pack: dict[str, Any],
+) -> list[dict[str, str]]:
+    return [
+        {
+            "role": "system",
+            "content": _build_memory_reflection_summary_system_prompt(),
+        },
+        {
+            "role": "user",
+            "content": _build_memory_reflection_summary_user_prompt(evidence_pack),
+        },
+    ]
+
+
 # validator_error を元に repair prompt を返す。
 def build_memory_interpretation_repair_prompt(validation_error: str) -> str:
     return (
@@ -130,6 +146,17 @@ def build_memory_interpretation_repair_prompt(validation_error: str) -> str:
         "ai, agent, meta_communication, relation:default, user:default_to_ai などの独自表現は禁止です。\n"
         "感情更新に自信がないなら affect_updates は空配列にしてください。\n"
         "余計なキー、説明文、Markdown、コードフェンスは禁止です。"
+    )
+
+
+def build_memory_reflection_summary_repair_prompt(validation_error: str) -> str:
+    return (
+        "前回の出力は memory_reflection_summary 契約を満たしていませんでした。\n"
+        f"validator_error: {validation_error}\n"
+        "同じ evidence pack だけを根拠に、JSON オブジェクト 1 個だけを返し直してください。\n"
+        "トップレベルキーは summary_text だけです。\n"
+        "summary_text は 1 文から 2 文、140 文字以内、改行なしで返してください。\n"
+        "新しい事実の追加、内部識別子、Markdown、コードフェンス、説明文は禁止です。"
     )
 
 
@@ -313,6 +340,21 @@ def _build_memory_interpretation_system_prompt() -> str:
     )
 
 
+def _build_memory_reflection_summary_system_prompt() -> str:
+    return (
+        "あなたは OtomeKairo の memory_reflection_summary です。\n"
+        "reflective consolidation 用の evidence pack を読み、summary_text だけを JSON オブジェクト 1 個で返してください。\n"
+        "Markdown、コードフェンス、説明文は禁止です。\n"
+        "返すキーは summary_text だけです。\n"
+        "summary_text は 1 文から 2 文、140 文字以内、改行なしで返してください。\n"
+        "渡された evidence pack の外を推測で埋めないでください。\n"
+        "単発出来事の説明ではなく、反復して見えている傾向として要約してください。\n"
+        "summary_status_candidate=inferred のときは断定しすぎず、confirmed のときも過剰な人格断定は避けてください。\n"
+        "open_loops は長期傾向に効くときだけ自然に触れてください。\n"
+        "event_id や memory_unit_id のような内部識別子を書いてはいけません。"
+    )
+
+
 def _build_memory_interpretation_user_prompt(
     *,
     observation_text: str,
@@ -330,6 +372,13 @@ def _build_memory_interpretation_user_prompt(
         f"{json.dumps(decision, ensure_ascii=False)}\n"
         "reply_text:\n"
         f"{reply_text or '(none)'}\n"
+    )
+
+
+def _build_memory_reflection_summary_user_prompt(evidence_pack: dict[str, Any]) -> str:
+    return (
+        "evidence_pack:\n"
+        f"{json.dumps(evidence_pack, ensure_ascii=False)}\n"
     )
 
 
@@ -424,4 +473,3 @@ def _format_recent_turns(recent_turns: list[dict]) -> str:
         text = str(turn.get("text", "")).strip()
         lines.append(f"- {role}: {text}")
     return "\n".join(lines)
-

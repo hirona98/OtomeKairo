@@ -72,7 +72,7 @@
 
 ## 補足資料
 
-完了済み実装の細かい説明、コード構成、現実装が依存している前提は [03_実装済み詳細.md](/home/hiro9/work/CocoroAI/work1/OtomeKairo/docs/plan/03_実装済み詳細.md) へ移した。
+完了済み実装の細かい説明、コード構成、現実装が依存している前提は [03_実装済み詳細.md](03_実装済み詳細.md) へ移した。
 この文書には、進捗判断と次アクションに必要な粒度だけを残す。
 
 ## MVP外: `desktop_watch` の高度化
@@ -85,18 +85,15 @@
 - 時刻帯や前景状況を使う判断補助を絞って足す
 - `--profile soak` を土台に、background wake / desktop_watch の実時間が長い soak と追加 failure case へ広げる
 
-## MVP後: 記憶の高度化と運用硬化
+## 次フェーズ: LLM寄せ移行
 
-MVP の次段としてやることは次である。
+MVP 後の個別拡張は、いったん保留にする。
+次フェーズでは、意味判断をできる限り LLM に寄せるための移行を優先する。
 
-- `relationship` と `self` の要約精度向上と、より高次な長期変化分析
-- `events` の限定ロードを使う精密根拠確認
-- `desktop_watch` の capture image を使う判断品質の拡張
+共通方針として、意味判断はできる限り LLM に寄せ、コードは契約、状態遷移、永続化、監査へ寄せる。詳細は [LLM判断優先方針.md](../design/20_LLM判断優先方針.md) を正とする。
+移行計画の正本は [04_LLM寄せ移行計画.md](04_LLM寄せ移行計画.md) とする。
 
-このうち `relationship / self` 要約品質については、第一手として `reflective consolidation` の summary 文面生成で `predicate / object_ref_or_value / open_loop` を使うようにし、定型文一辺倒よりは具体性を持たせた。
-ただし、高次な長期変化分析や根拠確認の精密化はまだ未完である。
-
-今回の前提では、回帰テスト整備は post-MVP の対象外とする。
+今回の前提では、回帰テスト整備はこのフェーズの対象外とする。
 
 ## 既知の制約
 
@@ -108,15 +105,17 @@ MVP の次段としてやることは次である。
 - `desktop_watch` の画像そのものはまだ判断に入れておらず、現状は `client_context` 主体である
 - background wake はあるが、複雑な時間帯制御や外界行動実行はまだ持たない
 
-## post-MVP の実装順
+## LLM寄せ移行の実装順
 
-次はこの順で進める。
+現時点では 1 が完了し、次は 2 以降の順で進める。
 
-1. `relationship / self` の要約精度向上を進める
-2. `events` の限定ロードを使う精密根拠確認を入れる
-3. `desktop_watch` の画像意味理解を判断へ段階的に入れる
+1. `reflective consolidation` の summary 文面を LLM 化する
+2. `event_evidence` の圧縮表現を LLM 化する
+3. `RecallPack` の意味的 rerank / section 配置 / `conflicts` 文面を LLM 化する
+4. `wake` の pending-intent 候補選択を LLM 化する
+5. `desktop_watch` の観測意味理解を LLM 化する
 
-この順にする理由は、MVP の安定動作確認は済んでいるため、次は記憶品質を先に上げ、その後に観測品質を広げるほうが効果が大きいからである。
+この順にする理由は、文面生成寄りの層から先に LLM 化し、その後で recall 選別、自発再介入、画像観測へ広げるほうが、状態境界を壊さずに進めやすいからである。
 
 ## MVP 完了条件
 

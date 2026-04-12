@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 
@@ -67,6 +68,11 @@ SCOPE_TYPE_VALUES = {
 }
 MAX_SECONDARY_INTENTS = 2
 MAX_HINT_SCOPE_VALUES = 4
+MAX_MEMORY_REFLECTION_SUMMARY_SENTENCES = 2
+MAX_MEMORY_REFLECTION_SUMMARY_LENGTH = 140
+INTERNAL_IDENTIFIER_PATTERN = re.compile(
+    r"\b(?:event|memory_unit|cycle|reflection_run|retrieval_run|pending_intent):[A-Za-z0-9._-]+\b"
+)
 
 
 # 補助検証
@@ -378,3 +384,27 @@ def validate_memory_interpretation_contract(payload: dict[str, Any]) -> None:
             raise LLMError("MemoryInterpretation affect_update.affect_label is invalid.")
         if not isinstance(affect_update["intensity"], (int, float)):
             raise LLMError("MemoryInterpretation affect_update.intensity must be numeric.")
+
+
+def validate_memory_reflection_summary_contract(payload: dict[str, Any]) -> None:
+    # 必須キー群
+    _validate_exact_keys(payload, {"summary_text"}, "MemoryReflectionSummary")
+
+    # summary_text
+    summary_text = payload["summary_text"]
+    if not isinstance(summary_text, str):
+        raise LLMError("MemoryReflectionSummary summary_text must be a string.")
+
+    normalized = summary_text.strip()
+    if not normalized:
+        raise LLMError("MemoryReflectionSummary summary_text must not be empty.")
+    if "\n" in normalized or "\r" in normalized:
+        raise LLMError("MemoryReflectionSummary summary_text must not contain newlines.")
+    if len(normalized) > MAX_MEMORY_REFLECTION_SUMMARY_LENGTH:
+        raise LLMError("MemoryReflectionSummary summary_text exceeds the maximum length.")
+    if INTERNAL_IDENTIFIER_PATTERN.search(normalized) is not None:
+        raise LLMError("MemoryReflectionSummary summary_text must not contain internal identifiers.")
+
+    sentence_count = len([part for part in re.split(r"[。!?！？]+", normalized) if part.strip()])
+    if not 1 <= sentence_count <= MAX_MEMORY_REFLECTION_SUMMARY_SENTENCES:
+        raise LLMError("MemoryReflectionSummary summary_text must be one or two sentences.")

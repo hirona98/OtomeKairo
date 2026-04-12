@@ -191,6 +191,11 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
                 "result_status": "queued",
                 "trigger_reasons": [],
                 "affected_memory_unit_ids": [],
+                "summary_generation": {
+                    "requested_scope_count": 0,
+                    "succeeded_scope_count": 0,
+                    "failed_scopes": [],
+                },
                 "failure_reason": None,
             },
             emit_logs=False,
@@ -274,6 +279,11 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
                     "result_status": "not_started",
                     "trigger_reasons": [],
                     "affected_memory_unit_ids": [],
+                    "summary_generation": {
+                        "requested_scope_count": 0,
+                        "succeeded_scope_count": 0,
+                        "failed_scopes": [],
+                    },
                     "failure_reason": None,
                 },
             )
@@ -329,6 +339,11 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
 
         # 監査 / ログ
         self._append_reflective_failure_events(
+            cycle_id=cycle_id,
+            memory_set_id=cycle_trace["cycle_summary"]["selected_memory_set_id"],
+            memory_trace=memory_trace,
+        )
+        self._append_reflective_summary_generation_failure_events(
             cycle_id=cycle_id,
             memory_set_id=cycle_trace["cycle_summary"]["selected_memory_set_id"],
             memory_trace=memory_trace,
@@ -684,6 +699,11 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
                     "result_status": "not_started",
                     "trigger_reasons": [],
                     "affected_memory_unit_ids": [],
+                    "summary_generation": {
+                        "requested_scope_count": 0,
+                        "succeeded_scope_count": 0,
+                        "failed_scopes": [],
+                    },
                     "failure_reason": None,
                 },
             }
@@ -723,6 +743,11 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
                 "result_status": "not_started",
                 "trigger_reasons": [],
                 "affected_memory_unit_ids": [],
+                "summary_generation": {
+                    "requested_scope_count": 0,
+                    "succeeded_scope_count": 0,
+                    "failed_scopes": [],
+                },
                 "failure_reason": None,
             },
         }
@@ -750,6 +775,11 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
                 "result_status": "skipped",
                 "trigger_reasons": [],
                 "affected_memory_unit_ids": [],
+                "summary_generation": {
+                    "requested_scope_count": 0,
+                    "succeeded_scope_count": 0,
+                    "failed_scopes": [],
+                },
                 "failure_reason": None,
             },
         }
@@ -805,6 +835,41 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
                         "trigger_reasons": reflective_trace.get("trigger_reasons", []),
                     },
                 )
+            ]
+        )
+
+    def _append_reflective_summary_generation_failure_events(
+        self,
+        *,
+        cycle_id: str,
+        memory_set_id: str,
+        memory_trace: dict[str, Any],
+    ) -> None:
+        # 検索
+        reflective_trace = memory_trace.get("reflective_consolidation", {})
+        summary_generation = reflective_trace.get("summary_generation", {})
+        failed_scopes = summary_generation.get("failed_scopes", [])
+        if not isinstance(failed_scopes, list) or not failed_scopes:
+            return
+
+        # 監査
+        created_at = self._now_iso()
+        self.store.append_events(
+            events=[
+                self._build_memory_audit_event(
+                    cycle_id=cycle_id,
+                    memory_set_id=memory_set_id,
+                    kind="reflective_summary_generation_failure",
+                    created_at=created_at,
+                    payload={
+                        "scope_type": failure.get("scope_type"),
+                        "scope_key": failure.get("scope_key"),
+                        "failure_stage": failure.get("failure_stage"),
+                        "failure_reason": failure.get("failure_reason"),
+                    },
+                )
+                for failure in failed_scopes
+                if isinstance(failure, dict)
             ]
         )
 
@@ -1576,6 +1641,11 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
                 "result_status": "not_started",
                 "trigger_reasons": [],
                 "affected_memory_unit_ids": [],
+                "summary_generation": {
+                    "requested_scope_count": 0,
+                    "succeeded_scope_count": 0,
+                    "failed_scopes": [],
+                },
                 "failure_reason": None,
             },
         }

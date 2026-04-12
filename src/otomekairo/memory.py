@@ -22,6 +22,7 @@ class MemoryConsolidator:
         self.vector_indexer = MemoryVectorIndexer(store=store, llm=llm)
         self.reflective = ReflectiveConsolidator(
             store=store,
+            llm=llm,
             action_resolver=self.action_resolver,
             vector_indexer=self.vector_indexer,
         )
@@ -128,6 +129,11 @@ class MemoryConsolidator:
                     "result_status": "queued",
                     "trigger_reasons": [],
                     "affected_memory_unit_ids": [],
+                    "summary_generation": {
+                        "requested_scope_count": 0,
+                        "succeeded_scope_count": 0,
+                        "failed_scopes": [],
+                    },
                     "failure_reason": None,
                 },
             },
@@ -166,6 +172,11 @@ class MemoryConsolidator:
                     "result_status": "not_started",
                     "trigger_reasons": [],
                     "affected_memory_unit_ids": [],
+                    "summary_generation": {
+                        "requested_scope_count": 0,
+                        "succeeded_scope_count": 0,
+                        "failed_scopes": [],
+                    },
                     "failure_reason": None,
                 },
             }
@@ -197,6 +208,9 @@ class MemoryConsolidator:
         memory_actions: list[dict[str, Any]],
     ) -> dict[str, Any]:
         selected_memory_set_id = state["selected_memory_set_id"]
+        selected_model_preset_id = state["selected_model_preset_id"]
+        selected_model_preset = state["model_presets"][selected_model_preset_id]
+        reflection_summary_role = selected_model_preset["roles"]["memory_reflection_summary"]
         return {
             "cycle_id": cycle_id,
             "memory_set_id": selected_memory_set_id,
@@ -207,11 +221,19 @@ class MemoryConsolidator:
             "turn_finished_at": finished_at,
             "state_snapshot": {
                 "selected_memory_set_id": selected_memory_set_id,
+                "selected_model_preset_id": selected_model_preset_id,
                 "memory_sets": {
                     selected_memory_set_id: {
                         "embedding": deepcopy(
                             state["memory_sets"][selected_memory_set_id]["embedding"]
                         )
+                    }
+                },
+                "model_presets": {
+                    selected_model_preset_id: {
+                        "roles": {
+                            "memory_reflection_summary": deepcopy(reflection_summary_role),
+                        }
                     }
                 },
             },

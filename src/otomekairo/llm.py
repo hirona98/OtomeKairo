@@ -7,6 +7,7 @@ from otomekairo.llm_contracts import (
     LLMError,
     validate_decision_contract,
     validate_memory_interpretation_contract,
+    validate_memory_reflection_summary_contract,
 )
 from otomekairo.llm_mock import MockLLMClient
 from otomekairo.llm_parsing import parse_json_object, parse_recall_hint_payload
@@ -14,6 +15,8 @@ from otomekairo.llm_prompts import (
     build_decision_messages,
     build_memory_interpretation_messages,
     build_memory_interpretation_repair_prompt,
+    build_memory_reflection_summary_messages,
+    build_memory_reflection_summary_repair_prompt,
     build_recall_hint_messages,
     build_reply_messages,
 )
@@ -212,6 +215,51 @@ class LLMClient:
         if last_contract_error is not None:
             raise last_contract_error
         raise LLMError("MemoryInterpretation generation failed without a parseable response.")
+
+    def generate_memory_reflection_summary(
+        self,
+        *,
+        role_definition: dict,
+        evidence_pack: dict[str, Any],
+    ) -> dict[str, Any]:
+        # モック経路
+        if self._is_mock_role_definition(role_definition):
+            return self.mock_client.generate_memory_reflection_summary(role_definition, evidence_pack)
+
+        # プロンプト構築
+        messages = build_memory_reflection_summary_messages(
+            evidence_pack=evidence_pack,
+        )
+
+        # 再試行
+        last_contract_error: LLMError | None = None
+        attempt_messages = list(messages)
+        for attempt in range(2):
+            content = complete_text(role_definition=role_definition, messages=attempt_messages)
+            try:
+                payload = parse_json_object(content)
+                validate_memory_reflection_summary_contract(payload)
+                return payload
+            except LLMError as exc:
+                last_contract_error = exc
+                if attempt >= 1:
+                    raise
+                attempt_messages = [
+                    *messages,
+                    {
+                        "role": "assistant",
+                        "content": content,
+                    },
+                    {
+                        "role": "user",
+                        "content": build_memory_reflection_summary_repair_prompt(str(exc)),
+                    },
+                ]
+
+        # 失敗
+        if last_contract_error is not None:
+            raise last_contract_error
+        raise LLMError("MemoryReflectionSummary generation failed without a parseable response.")
 
     def generate_embeddings(
         self,
