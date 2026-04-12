@@ -130,6 +130,22 @@ def build_memory_reflection_summary_messages(
     ]
 
 
+def build_event_evidence_messages(
+    *,
+    source_pack: dict[str, Any],
+) -> list[dict[str, str]]:
+    return [
+        {
+            "role": "system",
+            "content": _build_event_evidence_system_prompt(),
+        },
+        {
+            "role": "user",
+            "content": _build_event_evidence_user_prompt(source_pack),
+        },
+    ]
+
+
 # validator_error を元に repair prompt を返す。
 def build_memory_interpretation_repair_prompt(validation_error: str) -> str:
     return (
@@ -156,6 +172,18 @@ def build_memory_reflection_summary_repair_prompt(validation_error: str) -> str:
         "同じ evidence pack だけを根拠に、JSON オブジェクト 1 個だけを返し直してください。\n"
         "トップレベルキーは summary_text だけです。\n"
         "summary_text は 1 文から 2 文、140 文字以内、改行なしで返してください。\n"
+        "新しい事実の追加、内部識別子、Markdown、コードフェンス、説明文は禁止です。"
+    )
+
+
+def build_event_evidence_repair_prompt(validation_error: str) -> str:
+    return (
+        "前回の出力は event_evidence_generation 契約を満たしていませんでした。\n"
+        f"validator_error: {validation_error}\n"
+        "同じ source pack だけを根拠に、JSON オブジェクト 1 個だけを返し直してください。\n"
+        "トップレベルキーは anchor, topic, decision_or_result, tone_or_note の 4 つだけです。\n"
+        "各値は string または null です。少なくとも 1 つは null ではなくしてください。\n"
+        "各 slot は present な場合 1 文だけ、改行なしで返してください。\n"
         "新しい事実の追加、内部識別子、Markdown、コードフェンス、説明文は禁止です。"
     )
 
@@ -355,6 +383,22 @@ def _build_memory_reflection_summary_system_prompt() -> str:
     )
 
 
+def _build_event_evidence_system_prompt() -> str:
+    return (
+        "あなたは OtomeKairo の event_evidence_generation です。\n"
+        "selected event 1 件ぶんの source pack を読み、短い証拠表現の slot だけを JSON オブジェクト 1 個で返してください。\n"
+        "Markdown、コードフェンス、説明文は禁止です。\n"
+        "返すキーは anchor, topic, decision_or_result, tone_or_note の 4 つだけです。\n"
+        "各値は string または null にしてください。少なくとも 1 つは null ではなくしてください。\n"
+        "各 slot は 1 文だけ、改行なしで返してください。\n"
+        "source pack に無い事実を補ってはいけません。\n"
+        "長い逐語引用、言い直し、相槌の再掲は避けてください。\n"
+        "decision_or_result は決定や結果があるときだけ書き、tone_or_note は補助に留めてください。\n"
+        "primary_intent=commitment_check では決定や継続性を優先しやすくし、primary_intent=reminisce や time_reference=past では anchor と topic を残しやすくしてください。\n"
+        "event_id や cycle_id のような内部識別子を書いてはいけません。"
+    )
+
+
 def _build_memory_interpretation_user_prompt(
     *,
     observation_text: str,
@@ -379,6 +423,13 @@ def _build_memory_reflection_summary_user_prompt(evidence_pack: dict[str, Any]) 
     return (
         "evidence_pack:\n"
         f"{json.dumps(evidence_pack, ensure_ascii=False)}\n"
+    )
+
+
+def _build_event_evidence_user_prompt(source_pack: dict[str, Any]) -> str:
+    return (
+        "source_pack:\n"
+        f"{json.dumps(source_pack, ensure_ascii=False)}\n"
     )
 
 

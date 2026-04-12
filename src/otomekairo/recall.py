@@ -186,18 +186,22 @@ class RecallBuilder(RecallEventEvidenceMixin):
             key="episode_id",
             retrieval_lane="association",
         )
-        event_evidence = self._build_event_evidence(
+        event_evidence_role = state["model_presets"][state["selected_model_preset_id"]]["roles"]["event_evidence_generation"]
+        event_evidence_result = self._build_event_evidence(
             memory_set_id=memory_set_id,
             primary_intent=primary_intent,
             recall_hint=recall_hint,
             sections=sections,
+            role_definition=event_evidence_role,
         )
-        selected_event_ids = [item["event_id"] for item in event_evidence]
+        event_evidence = event_evidence_result["event_evidence"]
+        selected_event_ids = event_evidence_result["selected_event_ids"]
 
         # 結果
         return {
             **sections,
             "event_evidence": event_evidence,
+            "event_evidence_generation": event_evidence_result["event_evidence_generation"],
             "selected_memory_ids": selected_memory_ids,
             "selected_episode_ids": selected_episode_ids,
             "association_selected_memory_ids": association_selected_memory_ids,
@@ -1091,6 +1095,12 @@ class RecallBuilder(RecallEventEvidenceMixin):
             "active_commitments": [],
             "episodic_evidence": [],
             "event_evidence": [],
+            "event_evidence_generation": {
+                "requested_event_count": 0,
+                "loaded_event_count": 0,
+                "succeeded_event_count": 0,
+                "failed_items": [],
+            },
             "conflicts": [],
             "selected_memory_ids": [],
             "selected_episode_ids": [],

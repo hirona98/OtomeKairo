@@ -4,8 +4,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from otomekairo.llm_contracts import (
+    LLMContractError,
     LLMError,
     validate_decision_contract,
+    validate_event_evidence_contract,
     validate_memory_interpretation_contract,
     validate_memory_reflection_summary_contract,
 )
@@ -13,6 +15,8 @@ from otomekairo.llm_mock import MockLLMClient
 from otomekairo.llm_parsing import parse_json_object, parse_recall_hint_payload
 from otomekairo.llm_prompts import (
     build_decision_messages,
+    build_event_evidence_messages,
+    build_event_evidence_repair_prompt,
     build_memory_interpretation_messages,
     build_memory_interpretation_repair_prompt,
     build_memory_reflection_summary_messages,
@@ -260,6 +264,58 @@ class LLMClient:
         if last_contract_error is not None:
             raise last_contract_error
         raise LLMError("MemoryReflectionSummary generation failed without a parseable response.")
+
+    def generate_event_evidence(
+        self,
+        *,
+        role_definition: dict,
+        source_pack: dict[str, Any],
+    ) -> dict[str, Any]:
+        # モック経路
+        if self._is_mock_role_definition(role_definition):
+            return self.mock_client.generate_event_evidence(role_definition, source_pack)
+
+        # プロンプト構築
+        messages = build_event_evidence_messages(
+            source_pack=source_pack,
+        )
+
+        # 再試行
+        last_error: LLMError | None = None
+        attempt_messages = list(messages)
+        for attempt in range(2):
+            content = complete_text(role_definition=role_definition, messages=attempt_messages)
+            try:
+                payload = parse_json_object(content)
+                try:
+                    validate_event_evidence_contract(payload)
+                    return payload
+                except LLMError as exc:
+                    last_error = LLMContractError(str(exc))
+            except LLMError as exc:
+                last_error = exc
+
+            if attempt >= 1:
+                if last_error is not None:
+                    raise last_error
+                raise LLMError("EventEvidence generation failed without a parseable response.")
+
+            attempt_messages = [
+                *messages,
+                {
+                    "role": "assistant",
+                    "content": content,
+                },
+                {
+                    "role": "user",
+                    "content": build_event_evidence_repair_prompt(str(last_error)),
+                },
+            ]
+
+        # 失敗
+        if last_error is not None:
+            raise last_error
+        raise LLMError("EventEvidence generation failed without a parseable response.")
 
     def generate_embeddings(
         self,

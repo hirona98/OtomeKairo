@@ -9,6 +9,10 @@ class LLMError(Exception):
     pass
 
 
+class LLMContractError(LLMError):
+    pass
+
+
 # 設定
 INTENT_VALUES = {
     "smalltalk",
@@ -70,6 +74,7 @@ MAX_SECONDARY_INTENTS = 2
 MAX_HINT_SCOPE_VALUES = 4
 MAX_MEMORY_REFLECTION_SUMMARY_SENTENCES = 2
 MAX_MEMORY_REFLECTION_SUMMARY_LENGTH = 140
+MAX_EVENT_EVIDENCE_SLOT_SENTENCES = 1
 INTERNAL_IDENTIFIER_PATTERN = re.compile(
     r"\b(?:event|memory_unit|cycle|reflection_run|retrieval_run|pending_intent):[A-Za-z0-9._-]+\b"
 )
@@ -408,3 +413,37 @@ def validate_memory_reflection_summary_contract(payload: dict[str, Any]) -> None
     sentence_count = len([part for part in re.split(r"[。!?！？]+", normalized) if part.strip()])
     if not 1 <= sentence_count <= MAX_MEMORY_REFLECTION_SUMMARY_SENTENCES:
         raise LLMError("MemoryReflectionSummary summary_text must be one or two sentences.")
+
+
+def validate_event_evidence_contract(payload: dict[str, Any]) -> None:
+    # 必須キー群
+    required_keys = {
+        "anchor",
+        "topic",
+        "decision_or_result",
+        "tone_or_note",
+    }
+    _validate_exact_keys(payload, required_keys, "EventEvidence")
+
+    # slot 群
+    present_slot_count = 0
+    for slot_name in ("anchor", "topic", "decision_or_result", "tone_or_note"):
+        value = payload[slot_name]
+        if value is None:
+            continue
+        if not isinstance(value, str):
+            raise LLMError(f"EventEvidence {slot_name} must be a string or null.")
+        normalized = value.strip()
+        if not normalized:
+            raise LLMError(f"EventEvidence {slot_name} must not be empty when present.")
+        if "\n" in normalized or "\r" in normalized:
+            raise LLMError(f"EventEvidence {slot_name} must not contain newlines.")
+        if INTERNAL_IDENTIFIER_PATTERN.search(normalized) is not None:
+            raise LLMError(f"EventEvidence {slot_name} must not contain internal identifiers.")
+        sentence_count = len([part for part in re.split(r"[。!?！？]+", normalized) if part.strip()])
+        if sentence_count != MAX_EVENT_EVIDENCE_SLOT_SENTENCES:
+            raise LLMError(f"EventEvidence {slot_name} must be exactly one sentence when present.")
+        present_slot_count += 1
+
+    if present_slot_count == 0:
+        raise LLMError("EventEvidence must include at least one non-null slot.")

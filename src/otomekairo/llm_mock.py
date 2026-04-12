@@ -10,6 +10,7 @@ from otomekairo.llm_contracts import (
     INTENT_VALUES,
     LLMError,
     validate_decision_contract,
+    validate_event_evidence_contract,
     validate_memory_interpretation_contract,
     validate_memory_reflection_summary_contract,
     validate_recall_hint_contract,
@@ -543,6 +544,69 @@ class MockLLMClient:
         validate_memory_reflection_summary_contract(payload)
         return payload
 
+    def generate_event_evidence(
+        self,
+        role_definition: dict,
+        source_pack: dict[str, Any],
+    ) -> dict[str, Any]:
+        # model確認
+        self._assert_mock_model(role_definition)
+
+        # source pack
+        primary_intent = str(source_pack.get("primary_intent") or "smalltalk")
+        time_reference = str(source_pack.get("time_reference") or "none")
+        selection_basis = source_pack.get("selection_basis", {})
+        event = source_pack.get("event", {})
+        retrieval_sections = selection_basis.get("retrieval_sections", []) if isinstance(selection_basis, dict) else []
+        source_summaries = selection_basis.get("source_summaries", []) if isinstance(selection_basis, dict) else []
+        kind = str(event.get("kind") or "event").strip() or "event"
+        event_text = self._mock_event_evidence_text(event.get("text"))
+        source_summary = self._mock_event_evidence_text(source_summaries[0] if source_summaries else None)
+        reason_summary = self._mock_event_evidence_text(event.get("reason_summary"))
+        result_kind = str(event.get("result_kind") or "").strip()
+        section_label = self._mock_event_evidence_section_label(retrieval_sections[0] if retrieval_sections else None)
+
+        # slot 群
+        anchor_prefix = "前回の" if primary_intent == "reminisce" or time_reference == "past" else "そのときの"
+        if kind == "decision":
+            anchor = f"{anchor_prefix}{section_label}の判断場面"
+        elif kind == "reply":
+            anchor = f"{anchor_prefix}{section_label}への返答場面"
+        elif kind == "observation":
+            anchor = f"{anchor_prefix}{section_label}の会話場面"
+        else:
+            anchor = f"{anchor_prefix}{section_label}に関する場面"
+
+        topic = event_text or source_summary
+
+        decision_or_result = None
+        if kind == "decision":
+            if reason_summary is not None:
+                decision_or_result = reason_summary
+            elif result_kind:
+                decision_or_result = f"{result_kind} を選ぶ流れになった。"
+            else:
+                decision_or_result = "その場で応答方針を決めた。"
+        elif kind == "reply" and event_text is not None:
+            decision_or_result = f"{event_text} と返した。"
+
+        tone_or_note = None
+        if primary_intent in {"consult", "check_state"}:
+            tone_or_note = "様子を確かめながら進める空気だった。"
+        elif kind == "decision" and result_kind == "pending_intent":
+            tone_or_note = "その場では返さず、後で触れる含みを残した。"
+        elif kind == "reply":
+            tone_or_note = "前の流れを受けて返していた。"
+
+        payload = {
+            "anchor": anchor,
+            "topic": topic,
+            "decision_or_result": decision_or_result,
+            "tone_or_note": tone_or_note,
+        }
+        validate_event_evidence_contract(payload)
+        return payload
+
     def generate_embeddings(
         self,
         role_definition: dict,
@@ -836,6 +900,37 @@ class MockLLMClient:
         if normalized == "self|user":
             return "あなた"
         return normalized
+
+    def _mock_event_evidence_section_label(self, section_name: Any) -> str:
+        if section_name == "active_commitments":
+            return "約束の流れ"
+        if section_name == "episodic_evidence":
+            return "前の出来事"
+        if section_name == "relationship_model":
+            return "関係の流れ"
+        if section_name == "user_model":
+            return "あなたの近況"
+        if section_name == "active_topics":
+            return "話題の流れ"
+        if section_name == "self_model":
+            return "自分側の応答"
+        return "やり取り"
+
+    def _mock_event_evidence_text(self, value: Any) -> str | None:
+        if not isinstance(value, str):
+            return None
+        normalized = " ".join(value.split()).strip()
+        if not normalized:
+            return None
+        for delimiter in ("。", "!", "！", "?", "？"):
+            if delimiter not in normalized:
+                continue
+            head, _, _ = normalized.partition(delimiter)
+            normalized = (head + delimiter).strip()
+            break
+        if len(normalized) <= 72:
+            return normalized
+        return normalized[:71].rstrip() + "…"
 
     def _mock_embedding_vector(self, text: str, embedding_dimension: int) -> list[float]:
         # 空確認

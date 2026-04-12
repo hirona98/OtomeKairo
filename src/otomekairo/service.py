@@ -1162,6 +1162,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             "active_commitments": [],
             "episodic_evidence": [],
             "event_evidence": [],
+            "event_evidence_generation": self._empty_event_evidence_generation_trace(),
             "conflicts": [],
             "selected_memory_ids": [],
             "selected_episode_ids": [],
@@ -1169,6 +1170,14 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             "association_selected_episode_ids": [],
             "selected_event_ids": [],
             "candidate_count": 0,
+        }
+
+    def _empty_event_evidence_generation_trace(self) -> dict[str, Any]:
+        return {
+            "requested_event_count": 0,
+            "loaded_event_count": 0,
+            "succeeded_event_count": 0,
+            "failed_items": [],
         }
 
 
@@ -1430,6 +1439,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         recall_hint: dict[str, Any],
         recall_pack: dict[str, Any],
     ) -> dict[str, Any]:
+        event_evidence_generation = recall_pack.get("event_evidence_generation", {})
         return {
             "cycle_id": cycle_id,
             "selected_memory_set_id": memory_set_id,
@@ -1442,6 +1452,11 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             "recall_pack_summary": self._summarize_recall_pack(recall_pack),
             "candidate_count": recall_pack["candidate_count"],
             "selected_memory_ids": recall_pack["selected_memory_ids"],
+            "event_evidence_generation": {
+                "requested_event_count": int(event_evidence_generation.get("requested_event_count", 0)),
+                "succeeded_event_count": int(event_evidence_generation.get("succeeded_event_count", 0)),
+                "failed_count": len(event_evidence_generation.get("failed_items", [])),
+            },
         }
 
     def _build_retrieval_run_failure(
@@ -1526,6 +1541,10 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             "selected_memory_unit_ids": recall_pack["selected_memory_ids"],
             "selected_episode_ids": recall_pack["selected_episode_ids"],
             "selected_event_ids": recall_pack["selected_event_ids"],
+            "event_evidence_generation": recall_pack.get(
+                "event_evidence_generation",
+                self._empty_event_evidence_generation_trace(),
+            ),
             "recall_pack_summary": recall_pack_summary,
             "adopted_reason_summary": self._recall_adopted_reason_summary(recall_pack),
             "rejected_candidate_summary": self._recall_rejected_reason_summary(recall_pack),
@@ -1538,6 +1557,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             "selected_memory_unit_ids": [],
             "selected_episode_ids": [],
             "selected_event_ids": [],
+            "event_evidence_generation": self._empty_event_evidence_generation_trace(),
             "recall_pack_summary": None,
             "adopted_reason_summary": None,
             "rejected_candidate_summary": None,
@@ -1685,6 +1705,14 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             result_kind=result_kind,
             reply_payload=reply_payload,
             pending_intent_summary=pending_intent_summary,
+        )
+        events.extend(
+            self._build_event_evidence_audit_events(
+                cycle_id=cycle_id,
+                memory_set_id=memory_set_id,
+                created_at=finished_at,
+                recall_pack=recall_pack,
+            )
         )
         retrieval_run = self._build_retrieval_run_success(
             cycle_id=cycle_id,
@@ -1834,6 +1862,36 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             "created_at": created_at,
             **payload,
         }
+
+    def _build_event_evidence_audit_events(
+        self,
+        *,
+        cycle_id: str,
+        memory_set_id: str,
+        created_at: str,
+        recall_pack: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        generation = recall_pack.get("event_evidence_generation", {})
+        failed_items = generation.get("failed_items", []) if isinstance(generation, dict) else []
+        events: list[dict[str, Any]] = []
+        for failed_item in failed_items:
+            if not isinstance(failed_item, dict):
+                continue
+            events.append(
+                self._build_memory_audit_event(
+                    cycle_id=cycle_id,
+                    memory_set_id=memory_set_id,
+                    kind="event_evidence_generation_failure",
+                    created_at=created_at,
+                    payload={
+                        "source_event_id": failed_item.get("event_id"),
+                        "source_event_kind": failed_item.get("kind"),
+                        "failure_stage": failed_item.get("failure_stage"),
+                        "failure_reason": failed_item.get("failure_reason"),
+                    },
+                )
+            )
+        return events
 
     def _load_recent_turns(self, state: dict) -> list[dict]:
         # ウィンドウ設定
