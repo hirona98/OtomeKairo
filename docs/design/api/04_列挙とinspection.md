@@ -6,6 +6,7 @@
 
 - 認証: 必要
 - 役割: 人格設定、記憶集合、モデルプリセットの一覧を返す
+- 現時点では capability 一覧は返さない。接続中 client の capability は `GET /api/events/stream` の `hello.caps` で扱う
 
 response:
 

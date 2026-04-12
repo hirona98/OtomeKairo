@@ -5,10 +5,10 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "otomekairo"
 version = "0.1.0"
-description = "OtomeKairo MVP server"
+description = "OtomeKairo server"
 readme = "README.md"
 requires-python = ">=3.12"
-license = { text = "MIT" }
+license = { text = "Apache License 2.0" }
 authors = [
   { name = "hiro9" }
 ]
