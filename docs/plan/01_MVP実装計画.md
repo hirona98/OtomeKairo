@@ -107,15 +107,16 @@ MVP 後の個別拡張は、いったん保留にする。
 
 ## LLM寄せ移行の実装順
 
-現時点では 1 が完了し、次は 2 以降の順で進める。
+現時点では 1 から 4 まで完了した。
 
 1. `reflective consolidation` の summary 文面を LLM 化する
 2. `event_evidence` の圧縮表現を LLM 化する
 3. `RecallPack` の意味的 rerank / section 配置 / `conflicts` 文面を LLM 化する
 4. `wake` の pending-intent 候補選択を LLM 化する
-5. `desktop_watch` の観測意味理解を LLM 化する
 
-この順にする理由は、文面生成寄りの層から先に LLM 化し、その後で recall 選別、自発再介入、画像観測へ広げるほうが、状態境界を壊さずに進めやすいからである。
+`desktop_watch` の観測意味理解は別計画候補として保留する。
+
+この順にする理由は、文面生成寄りの層から先に LLM 化し、その後で recall 選別と自発再介入までを固めるほうが、状態境界を壊さずに進めやすいからである。
 
 ## MVP 完了条件
 

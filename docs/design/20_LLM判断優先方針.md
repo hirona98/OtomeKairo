@@ -85,7 +85,8 @@ OtomeKairo では、次の分離を基本形にする。
 2. `event_evidence` の圧縮表現
 3. 想起候補の意味的 rerank と section 選別
 4. `wake` の pending-intent 候補選択
-5. `desktop_watch` の capture image を含む観測意味理解
+
+`desktop_watch` の capture image を含む観測意味理解は、別計画候補として保留する。
 
 ## 個別設計との関係
 
