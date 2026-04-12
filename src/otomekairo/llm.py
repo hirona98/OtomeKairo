@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -195,36 +196,13 @@ class LLMClient:
             reply_text=reply_text,
             current_time=current_time,
         )
-
-        # 再試行
-        last_contract_error: LLMError | None = None
-        attempt_messages = list(messages)
-        for attempt in range(2):
-            content = complete_text(role_definition=role_definition, messages=attempt_messages)
-            try:
-                payload = parse_json_object(content)
-                validate_memory_interpretation_contract(payload)
-                return payload
-            except LLMError as exc:
-                last_contract_error = exc
-                if attempt >= 1:
-                    raise
-                attempt_messages = [
-                    *messages,
-                    {
-                        "role": "assistant",
-                        "content": content,
-                    },
-                    {
-                        "role": "user",
-                        "content": build_memory_interpretation_repair_prompt(str(exc)),
-                    },
-                ]
-
-        # 失敗
-        if last_contract_error is not None:
-            raise last_contract_error
-        raise LLMError("MemoryInterpretation generation failed without a parseable response.")
+        return self._generate_structured_payload(
+            role_definition=role_definition,
+            messages=messages,
+            validator=validate_memory_interpretation_contract,
+            repair_prompt_builder=build_memory_interpretation_repair_prompt,
+            failure_message="MemoryInterpretation generation failed without a parseable response.",
+        )
 
     def generate_memory_reflection_summary(
         self,
@@ -240,36 +218,13 @@ class LLMClient:
         messages = build_memory_reflection_summary_messages(
             evidence_pack=evidence_pack,
         )
-
-        # 再試行
-        last_contract_error: LLMError | None = None
-        attempt_messages = list(messages)
-        for attempt in range(2):
-            content = complete_text(role_definition=role_definition, messages=attempt_messages)
-            try:
-                payload = parse_json_object(content)
-                validate_memory_reflection_summary_contract(payload)
-                return payload
-            except LLMError as exc:
-                last_contract_error = exc
-                if attempt >= 1:
-                    raise
-                attempt_messages = [
-                    *messages,
-                    {
-                        "role": "assistant",
-                        "content": content,
-                    },
-                    {
-                        "role": "user",
-                        "content": build_memory_reflection_summary_repair_prompt(str(exc)),
-                    },
-                ]
-
-        # 失敗
-        if last_contract_error is not None:
-            raise last_contract_error
-        raise LLMError("MemoryReflectionSummary generation failed without a parseable response.")
+        return self._generate_structured_payload(
+            role_definition=role_definition,
+            messages=messages,
+            validator=validate_memory_reflection_summary_contract,
+            repair_prompt_builder=build_memory_reflection_summary_repair_prompt,
+            failure_message="MemoryReflectionSummary generation failed without a parseable response.",
+        )
 
     def generate_event_evidence(
         self,
@@ -285,43 +240,14 @@ class LLMClient:
         messages = build_event_evidence_messages(
             source_pack=source_pack,
         )
-
-        # 再試行
-        last_error: LLMError | None = None
-        attempt_messages = list(messages)
-        for attempt in range(2):
-            content = complete_text(role_definition=role_definition, messages=attempt_messages)
-            try:
-                payload = parse_json_object(content)
-                try:
-                    validate_event_evidence_contract(payload)
-                    return payload
-                except LLMError as exc:
-                    last_error = LLMContractError(str(exc))
-            except LLMError as exc:
-                last_error = exc
-
-            if attempt >= 1:
-                if last_error is not None:
-                    raise last_error
-                raise LLMError("EventEvidence generation failed without a parseable response.")
-
-            attempt_messages = [
-                *messages,
-                {
-                    "role": "assistant",
-                    "content": content,
-                },
-                {
-                    "role": "user",
-                    "content": build_event_evidence_repair_prompt(str(last_error)),
-                },
-            ]
-
-        # 失敗
-        if last_error is not None:
-            raise last_error
-        raise LLMError("EventEvidence generation failed without a parseable response.")
+        return self._generate_structured_payload(
+            role_definition=role_definition,
+            messages=messages,
+            validator=validate_event_evidence_contract,
+            repair_prompt_builder=build_event_evidence_repair_prompt,
+            failure_message="EventEvidence generation failed without a parseable response.",
+            wrap_validation_error=True,
+        )
 
     def generate_recall_pack_selection(
         self,
@@ -337,43 +263,14 @@ class LLMClient:
         messages = build_recall_pack_selection_messages(
             source_pack=source_pack,
         )
-
-        # 再試行
-        last_error: LLMError | None = None
-        attempt_messages = list(messages)
-        for attempt in range(2):
-            content = complete_text(role_definition=role_definition, messages=attempt_messages)
-            try:
-                payload = parse_json_object(content)
-                try:
-                    validate_recall_pack_selection_contract(payload, source_pack=source_pack)
-                    return payload
-                except LLMError as exc:
-                    last_error = LLMContractError(str(exc))
-            except LLMError as exc:
-                last_error = exc
-
-            if attempt >= 1:
-                if last_error is not None:
-                    raise last_error
-                raise LLMError("RecallPackSelection generation failed without a parseable response.")
-
-            attempt_messages = [
-                *messages,
-                {
-                    "role": "assistant",
-                    "content": content,
-                },
-                {
-                    "role": "user",
-                    "content": build_recall_pack_selection_repair_prompt(str(last_error)),
-                },
-            ]
-
-        # 失敗
-        if last_error is not None:
-            raise last_error
-        raise LLMError("RecallPackSelection generation failed without a parseable response.")
+        return self._generate_structured_payload(
+            role_definition=role_definition,
+            messages=messages,
+            validator=lambda payload: validate_recall_pack_selection_contract(payload, source_pack=source_pack),
+            repair_prompt_builder=build_recall_pack_selection_repair_prompt,
+            failure_message="RecallPackSelection generation failed without a parseable response.",
+            wrap_validation_error=True,
+        )
 
     def generate_pending_intent_selection(
         self,
@@ -389,43 +286,14 @@ class LLMClient:
         messages = build_pending_intent_selection_messages(
             source_pack=source_pack,
         )
-
-        # 再試行
-        last_error: LLMError | None = None
-        attempt_messages = list(messages)
-        for attempt in range(2):
-            content = complete_text(role_definition=role_definition, messages=attempt_messages)
-            try:
-                payload = parse_json_object(content)
-                try:
-                    validate_pending_intent_selection_contract(payload, source_pack=source_pack)
-                    return payload
-                except LLMError as exc:
-                    last_error = LLMContractError(str(exc))
-            except LLMError as exc:
-                last_error = exc
-
-            if attempt >= 1:
-                if last_error is not None:
-                    raise last_error
-                raise LLMError("PendingIntentSelection generation failed without a parseable response.")
-
-            attempt_messages = [
-                *messages,
-                {
-                    "role": "assistant",
-                    "content": content,
-                },
-                {
-                    "role": "user",
-                    "content": build_pending_intent_selection_repair_prompt(str(last_error)),
-                },
-            ]
-
-        # 失敗
-        if last_error is not None:
-            raise last_error
-        raise LLMError("PendingIntentSelection generation failed without a parseable response.")
+        return self._generate_structured_payload(
+            role_definition=role_definition,
+            messages=messages,
+            validator=lambda payload: validate_pending_intent_selection_contract(payload, source_pack=source_pack),
+            repair_prompt_builder=build_pending_intent_selection_repair_prompt,
+            failure_message="PendingIntentSelection generation failed without a parseable response.",
+            wrap_validation_error=True,
+        )
 
     def generate_embeddings(
         self,
@@ -461,3 +329,48 @@ class LLMClient:
 
     def _embedding_dimension(self, role_definition: dict) -> int:
         return role_definition.get("embedding_dimension")
+
+    def _generate_structured_payload(
+        self,
+        *,
+        role_definition: dict,
+        messages: list[dict[str, Any]],
+        validator: Callable[[dict[str, Any]], None],
+        repair_prompt_builder: Callable[[str], str],
+        failure_message: str,
+        wrap_validation_error: bool = False,
+    ) -> dict[str, Any]:
+        last_error: LLMError | None = None
+        attempt_messages = list(messages)
+        for attempt in range(2):
+            content = complete_text(role_definition=role_definition, messages=attempt_messages)
+            try:
+                payload = parse_json_object(content)
+                try:
+                    validator(payload)
+                    return payload
+                except LLMError as exc:
+                    last_error = LLMContractError(str(exc)) if wrap_validation_error else exc
+            except LLMError as exc:
+                last_error = exc
+
+            if attempt >= 1:
+                if last_error is not None:
+                    raise last_error
+                raise LLMError(failure_message)
+
+            attempt_messages = [
+                *messages,
+                {
+                    "role": "assistant",
+                    "content": content,
+                },
+                {
+                    "role": "user",
+                    "content": repair_prompt_builder(str(last_error)),
+                },
+            ]
+
+        if last_error is not None:
+            raise last_error
+        raise LLMError(failure_message)
