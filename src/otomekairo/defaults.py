@@ -16,6 +16,7 @@ DEFAULT_EXPRESSION_MAX_OUTPUT_TOKENS = 4000
 DEFAULT_MEMORY_MAX_OUTPUT_TOKENS = 3000
 DEFAULT_REFLECTION_SUMMARY_MAX_OUTPUT_TOKENS = 2000
 DEFAULT_EVENT_EVIDENCE_MAX_OUTPUT_TOKENS = 1500
+DEFAULT_RECALL_PACK_SELECTION_MAX_OUTPUT_TOKENS = 2000
 DEFAULT_EMBEDDING_DIMENSION = 3072
 DEFAULT_GEMINI_GENERATION_MODEL = "openrouter/google/gemini-3.1-flash-lite-preview"
 DEFAULT_GEMINI_EMBEDDING_MODEL = "openrouter/google/gemini-embedding-001"
@@ -137,6 +138,12 @@ def build_default_model_preset() -> dict:
                 "model": DEFAULT_GEMINI_GENERATION_MODEL,
                 "api_key": "",
                 "max_output_tokens": DEFAULT_EVENT_EVIDENCE_MAX_OUTPUT_TOKENS,
+                "web_search_enabled": False,
+            },
+            "recall_pack_selection": {
+                "model": DEFAULT_GEMINI_GENERATION_MODEL,
+                "api_key": "",
+                "max_output_tokens": DEFAULT_RECALL_PACK_SELECTION_MAX_OUTPUT_TOKENS,
                 "web_search_enabled": False,
             },
         },

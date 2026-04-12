@@ -4,6 +4,11 @@ import json
 from typing import Any
 
 from otomekairo.llm import LLMClient
+from otomekairo.llm_contracts import (
+    LLMContractError,
+    LLMError,
+    RECALL_PACK_SECTION_NAMES,
+)
 from otomekairo.memory_utils import normalized_text_list
 from otomekairo.recall_event_evidence import RecallEventEvidenceMixin
 from otomekairo.store import FileStore
@@ -29,6 +34,21 @@ ASSOCIATION_QUERY_KIND_WEIGHTS = {
     "entity": 0.92,
     "topic": 0.88,
 }
+
+
+class RecallPackSelectionError(LLMError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        recall_hint_summary: dict[str, Any],
+        recall_pack_selection: dict[str, Any],
+        failure_stage: str,
+    ) -> None:
+        super().__init__(message)
+        self.recall_hint_summary = recall_hint_summary
+        self.recall_pack_selection = recall_pack_selection
+        self.failure_stage = failure_stage
 
 
 # recall構築
@@ -159,19 +179,25 @@ class RecallBuilder(RecallEventEvidenceMixin):
             selected_memory_items=selected_memory_items,
         )
 
-        # 全体トリム
-        sections = self._apply_global_limit(
+        # RecallPack 選別
+        recall_pack_selection_role = state["model_presets"][state["selected_model_preset_id"]]["roles"][
+            "recall_pack_selection"
+        ]
+        selection_result = self._select_recall_pack_sections(
+            observation_text=observation_text,
             recall_hint=recall_hint,
-            sections={
+            candidate_sections={
                 "self_model": self_model,
                 "user_model": user_model,
                 "relationship_model": relationship_model,
                 "active_topics": active_topics,
                 "active_commitments": active_commitments,
                 "episodic_evidence": episodic_evidence,
-                "conflicts": conflicts,
             },
+            conflicts=conflicts,
+            role_definition=recall_pack_selection_role,
         )
+        sections = selection_result["sections"]
 
         # 選択要約
         selected_memory_ids = self._collect_selected_ids(sections, key="memory_unit_id")
@@ -207,6 +233,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
             "association_selected_memory_ids": association_selected_memory_ids,
             "association_selected_episode_ids": association_selected_episode_ids,
             "selected_event_ids": selected_event_ids,
+            "recall_pack_selection": selection_result["recall_pack_selection"],
             "candidate_count": len(raw_candidate_ids),
         }
 
@@ -797,6 +824,14 @@ class RecallBuilder(RecallEventEvidenceMixin):
                         "predicate": item["predicate"],
                     },
                     "memory_unit_ids": [match["memory_unit_id"] for match in active_matches],
+                    "variant_summaries": normalized_text_list(
+                        [
+                            str(match["summary_text"]).strip()
+                            for match in active_matches
+                            if isinstance(match.get("summary_text"), str) and match["summary_text"].strip()
+                        ],
+                        limit=3,
+                    ),
                     "summary_text": "同じ対象について異なる理解が併存している。",
                 }
             )
@@ -807,43 +842,318 @@ class RecallBuilder(RecallEventEvidenceMixin):
         # 結果
         return conflicts
 
-    def _apply_global_limit(
+    def _select_recall_pack_sections(
         self,
         *,
+        observation_text: str,
         recall_hint: dict[str, Any],
-        sections: dict[str, list[dict[str, Any]]],
-    ) -> dict[str, list[dict[str, Any]]]:
+        candidate_sections: dict[str, list[dict[str, Any]]],
+        conflicts: list[dict[str, Any]],
+        role_definition: dict[str, Any],
+    ) -> dict[str, Any]:
         # 初期状態
-        used_record_ids: set[str] = set()
-        trimmed = {
-            "self_model": [],
-            "user_model": [],
-            "relationship_model": [],
-            "active_topics": [],
-            "active_commitments": [],
-            "episodic_evidence": [],
-            "conflicts": sections["conflicts"][: SECTION_LIMITS["conflicts"]],
+        trace = self._empty_recall_pack_selection()
+        trace["candidate_section_counts"] = {
+            section_name: len(candidate_sections.get(section_name, []))
+            for section_name in RECALL_PACK_SECTION_NAMES
         }
-        remaining = GLOBAL_RECALL_LIMIT - len(trimmed["conflicts"])
+        if not any(trace["candidate_section_counts"].values()) and not conflicts:
+            return {
+                "sections": self._empty_selected_sections(),
+                "recall_pack_selection": trace,
+            }
 
-        # 順序
-        for section_name in self._section_priority(recall_hint):
-            if remaining <= 0:
-                break
-            section_items: list[dict[str, Any]] = []
-            for item in sections[section_name]:
+        # source pack
+        try:
+            source_pack = self._build_recall_pack_selection_source_pack(
+                observation_text=observation_text,
+                recall_hint=recall_hint,
+                candidate_sections=candidate_sections,
+                conflicts=conflicts,
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            trace["result_status"] = "failed"
+            trace["failure_reason"] = str(exc)
+            raise RecallPackSelectionError(
+                str(exc),
+                recall_hint_summary=recall_hint,
+                recall_pack_selection=trace,
+                failure_stage="build_source_pack",
+            ) from exc
+
+        # selection
+        try:
+            payload = self.llm.generate_recall_pack_selection(
+                role_definition=role_definition,
+                source_pack=source_pack,
+            )
+        except LLMContractError as exc:
+            trace["result_status"] = "failed"
+            trace["failure_reason"] = str(exc)
+            raise RecallPackSelectionError(
+                str(exc),
+                recall_hint_summary=recall_hint,
+                recall_pack_selection=trace,
+                failure_stage="contract_validation",
+            ) from exc
+        except LLMError as exc:
+            trace["result_status"] = "failed"
+            trace["failure_reason"] = str(exc)
+            raise RecallPackSelectionError(
+                str(exc),
+                recall_hint_summary=recall_hint,
+                recall_pack_selection=trace,
+                failure_stage="llm_generation",
+            ) from exc
+
+        # 反映
+        try:
+            selection_result = self._apply_recall_pack_selection(
+                payload=payload,
+                source_pack=source_pack,
+                candidate_sections=candidate_sections,
+                conflicts=conflicts,
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            trace["result_status"] = "failed"
+            trace["failure_reason"] = str(exc)
+            raise RecallPackSelectionError(
+                str(exc),
+                recall_hint_summary=recall_hint,
+                recall_pack_selection=trace,
+                failure_stage="contract_validation",
+            ) from exc
+
+        # 結果
+        trace["selected_section_order"] = selection_result["selected_section_order"]
+        trace["selected_candidate_refs"] = selection_result["selected_candidate_refs"]
+        trace["dropped_candidate_refs"] = selection_result["dropped_candidate_refs"]
+        trace["conflict_summary_count"] = selection_result["conflict_summary_count"]
+        return {
+            "sections": selection_result["sections"],
+            "recall_pack_selection": trace,
+        }
+
+    def _build_recall_pack_selection_source_pack(
+        self,
+        *,
+        observation_text: str,
+        recall_hint: dict[str, Any],
+        candidate_sections: dict[str, list[dict[str, Any]]],
+        conflicts: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        # section 群
+        source_sections: list[dict[str, Any]] = []
+        for section_name in RECALL_PACK_SECTION_NAMES:
+            items = candidate_sections.get(section_name, [])
+            if not items:
+                continue
+            source_sections.append(
+                {
+                    "section_name": section_name,
+                    "candidates": [
+                        self._recall_pack_selection_candidate_source_item(
+                            candidate_ref=f"candidate:{section_name}:{index}",
+                            item=item,
+                        )
+                        for index, item in enumerate(items, start=1)
+                    ],
+                }
+            )
+
+        # conflict 群
+        source_conflicts = [
+            self._recall_pack_selection_conflict_source_item(
+                conflict_ref=f"conflict:{index}",
+                item=item,
+            )
+            for index, item in enumerate(conflicts, start=1)
+        ]
+
+        # 結果
+        return {
+            "observation_text": observation_text.strip(),
+            "recall_hint": recall_hint,
+            "constraints": {
+                "global_recall_limit": GLOBAL_RECALL_LIMIT,
+                "section_limits": dict(SECTION_LIMITS),
+            },
+            "candidate_sections": source_sections,
+            "conflicts": source_conflicts,
+        }
+
+    def _recall_pack_selection_candidate_source_item(
+        self,
+        *,
+        candidate_ref: str,
+        item: dict[str, Any],
+    ) -> dict[str, Any]:
+        # 共通項目
+        payload = {
+            "candidate_ref": candidate_ref,
+            "source_kind": item["source_kind"],
+            "retrieval_lane": item.get("retrieval_lane", "structured"),
+            "summary_text": item["summary_text"],
+            "salience": item["salience"],
+        }
+        if item.get("association_score") is not None:
+            payload["association_score"] = round(float(item["association_score"]), 4)
+
+        # 記憶単位
+        if item["source_kind"] == "memory_unit":
+            payload["memory_type"] = item["memory_type"]
+            payload["scope_type"] = item["scope_type"]
+            payload["scope_key"] = item["scope_key"]
+            payload["status"] = item["status"]
+            if item.get("commitment_state") is not None:
+                payload["commitment_state"] = item["commitment_state"]
+            return payload
+
+        # Episode要約
+        if item["source_kind"] == "episode":
+            payload["primary_scope_type"] = item["primary_scope_type"]
+            payload["primary_scope_key"] = item["primary_scope_key"]
+            payload["open_loops"] = item.get("open_loops", [])
+            if item.get("outcome_text") is not None:
+                payload["outcome_text"] = item["outcome_text"]
+            return payload
+
+        raise ValueError(f"unsupported candidate source_kind: {item['source_kind']}")
+
+    def _recall_pack_selection_conflict_source_item(
+        self,
+        *,
+        conflict_ref: str,
+        item: dict[str, Any],
+    ) -> dict[str, Any]:
+        # variant 群
+        variant_summaries = normalized_text_list(
+            item.get("variant_summaries", []),
+            limit=3,
+        )
+        if not variant_summaries:
+            raise ValueError("conflict source requires variant_summaries.")
+
+        # 結果
+        return {
+            "conflict_ref": conflict_ref,
+            "compare_key": item["compare_key"],
+            "variant_summaries": variant_summaries,
+        }
+
+    def _apply_recall_pack_selection(
+        self,
+        *,
+        payload: dict[str, Any],
+        source_pack: dict[str, Any],
+        candidate_sections: dict[str, list[dict[str, Any]]],
+        conflicts: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        # candidate lookup
+        candidate_lookup: dict[str, dict[str, Any]] = {}
+        for section in source_pack["candidate_sections"]:
+            section_name = section["section_name"]
+            items = candidate_sections[section_name]
+            for candidate_source, item in zip(section["candidates"], items, strict=True):
+                candidate_lookup[candidate_source["candidate_ref"]] = {
+                    "section_name": section_name,
+                    "item": item,
+                }
+
+        # conflict lookup
+        conflict_lookup: dict[str, dict[str, Any]] = {}
+        for conflict_source, conflict in zip(source_pack["conflicts"], conflicts, strict=True):
+            conflict_lookup[conflict_source["conflict_ref"]] = conflict
+
+        # 初期状態
+        selected_sections = self._empty_selected_sections(
+            conflicts=self._selected_conflicts_from_payload(
+                payload=payload,
+                conflict_lookup=conflict_lookup,
+            )
+        )
+        selected_section_order: list[str] = []
+        selected_candidate_refs: list[str] = []
+        dropped_candidate_refs: list[str] = []
+        used_record_ids: set[str] = set()
+        remaining = GLOBAL_RECALL_LIMIT - len(selected_sections["conflicts"])
+
+        # section ごと反映
+        for section_payload in payload["section_selection"]:
+            section_name = section_payload["section_name"]
+            selected_section_order.append(section_name)
+            section_items = selected_sections[section_name]
+            for candidate_ref in section_payload["candidate_refs"]:
+                selected_candidate_refs.append(candidate_ref)
+                item = candidate_lookup[candidate_ref]["item"]
                 record_id = self._record_id(item)
+                if remaining <= 0:
+                    dropped_candidate_refs.append(candidate_ref)
+                    continue
+                if len(section_items) >= SECTION_LIMITS[section_name]:
+                    dropped_candidate_refs.append(candidate_ref)
+                    continue
                 if record_id in used_record_ids:
+                    dropped_candidate_refs.append(candidate_ref)
                     continue
                 section_items.append(item)
                 used_record_ids.add(record_id)
-                if len(section_items) >= remaining:
-                    break
-            trimmed[section_name] = section_items
-            remaining -= len(section_items)
+                remaining -= 1
 
         # 結果
-        return trimmed
+        return {
+            "sections": selected_sections,
+            "selected_section_order": selected_section_order,
+            "selected_candidate_refs": selected_candidate_refs,
+            "dropped_candidate_refs": dropped_candidate_refs,
+            "conflict_summary_count": len(selected_sections["conflicts"]),
+        }
+
+    def _selected_conflicts_from_payload(
+        self,
+        *,
+        payload: dict[str, Any],
+        conflict_lookup: dict[str, dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        # source 順維持
+        summary_by_ref = {
+            item["conflict_ref"]: item["summary_text"]
+            for item in payload["conflict_summaries"]
+        }
+        return [
+            {
+                **conflict,
+                "summary_text": summary_by_ref[conflict_ref],
+            }
+            for conflict_ref, conflict in conflict_lookup.items()
+        ]
+
+    def _empty_selected_sections(
+        self,
+        *,
+        conflicts: list[dict[str, Any]] | None = None,
+    ) -> dict[str, list[dict[str, Any]]]:
+        # 結果
+        sections = {
+            section_name: []
+            for section_name in RECALL_PACK_SECTION_NAMES
+        }
+        sections["conflicts"] = conflicts or []
+        return sections
+
+    def _empty_recall_pack_selection(self) -> dict[str, Any]:
+        return {
+            "candidate_section_counts": {
+                section_name: 0
+                for section_name in RECALL_PACK_SECTION_NAMES
+            },
+            "selected_section_order": [],
+            "selected_candidate_refs": [],
+            "dropped_candidate_refs": [],
+            "conflict_summary_count": 0,
+            "result_status": "succeeded",
+            "failure_reason": None,
+        }
 
     def _section_priority(self, recall_hint: dict[str, Any]) -> list[str]:
         # 主順序
@@ -1101,6 +1411,7 @@ class RecallBuilder(RecallEventEvidenceMixin):
                 "succeeded_event_count": 0,
                 "failed_items": [],
             },
+            "recall_pack_selection": self._empty_recall_pack_selection(),
             "conflicts": [],
             "selected_memory_ids": [],
             "selected_episode_ids": [],

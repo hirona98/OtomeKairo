@@ -12,7 +12,7 @@ from otomekairo.event_stream import EventStreamRegistry
 from otomekairo.llm import LLMClient, LLMError
 from otomekairo.log_stream import LogStreamRegistry
 from otomekairo.memory import MemoryConsolidator
-from otomekairo.recall import RecallBuilder
+from otomekairo.recall import RecallBuilder, RecallPackSelectionError
 from otomekairo.service_common import ServiceError
 from otomekairo.service_config import ServiceConfigMixin
 from otomekairo.service_spontaneous import ServiceSpontaneousMixin
@@ -389,6 +389,38 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
                 client_context=client_context,
                 pipeline=pipeline,
             )
+        except RecallPackSelectionError as exc:
+            # 失敗永続化
+            finished_at = self._now_iso()
+            self._persist_cycle_failure(
+                cycle_id=cycle_id,
+                started_at=started_at,
+                finished_at=finished_at,
+                state=state,
+                runtime_summary=runtime_summary,
+                observation_text=observation_text,
+                client_context=client_context,
+                failure_reason=str(exc),
+                recall_trace=self._build_failure_recall_trace(
+                    recall_hint=exc.recall_hint_summary,
+                    recall_pack_selection=exc.recall_pack_selection,
+                ),
+                failure_event_kind="recall_pack_selection_failure",
+                failure_event_payload={
+                    "failure_stage": exc.failure_stage,
+                },
+            )
+            self._emit_observation_failure_logs(
+                cycle_id=cycle_id,
+                trigger_kind="user_message",
+                observation_text=observation_text,
+                failure_reason=str(exc),
+            )
+            return {
+                "cycle_id": cycle_id,
+                "result_kind": "internal_failure",
+                "reply": None,
+            }
         except (LLMError, KeyError, ValueError) as exc:
             # 失敗永続化
             finished_at = self._now_iso()
@@ -1163,6 +1195,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             "episodic_evidence": [],
             "event_evidence": [],
             "event_evidence_generation": self._empty_event_evidence_generation_trace(),
+            "recall_pack_selection": self._empty_recall_pack_selection_trace(),
             "conflicts": [],
             "selected_memory_ids": [],
             "selected_episode_ids": [],
@@ -1178,6 +1211,24 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             "loaded_event_count": 0,
             "succeeded_event_count": 0,
             "failed_items": [],
+        }
+
+    def _empty_recall_pack_selection_trace(self) -> dict[str, Any]:
+        return {
+            "candidate_section_counts": {
+                "self_model": 0,
+                "user_model": 0,
+                "relationship_model": 0,
+                "active_topics": 0,
+                "active_commitments": 0,
+                "episodic_evidence": 0,
+            },
+            "selected_section_order": [],
+            "selected_candidate_refs": [],
+            "dropped_candidate_refs": [],
+            "conflict_summary_count": 0,
+            "result_status": "succeeded",
+            "failure_reason": None,
         }
 
 
@@ -1210,6 +1261,9 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         episode_count = len(recall_pack["selected_episode_ids"])
         association_memory_count = len(recall_pack["association_selected_memory_ids"])
         association_episode_count = len(recall_pack["association_selected_episode_ids"])
+        recall_pack_selection = recall_pack.get("recall_pack_selection", {})
+        selected_sections = recall_pack_selection.get("selected_section_order", [])
+        selected_sections_summary = ",".join(selected_sections) if isinstance(selected_sections, list) else ""
 
         # 空
         if memory_count == 0 and episode_count == 0:
@@ -1218,21 +1272,24 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         # 関連のみ
         if memory_count == association_memory_count and episode_count == association_episode_count:
             return (
-                "連想レーンで近傍候補を補助採用した。"
+                "連想レーンで近傍候補を補助採用し、recall_pack_selection が意味的に最終選別した。"
+                f" sections={selected_sections_summary or '-'}"
                 f" association_memory_units={association_memory_count}, association_episodes={association_episode_count}"
             )
 
         # 混在
         if association_memory_count > 0 or association_episode_count > 0:
             return (
-                "構造レーンを主軸にしつつ、連想レーンの近傍候補を補助採用した。"
+                "構造レーンを主軸にしつつ、連想レーンの近傍候補を補助採用し、recall_pack_selection が意味的に最終選別した。"
+                f" sections={selected_sections_summary or '-'}"
                 f" memory_units={memory_count}, episodes={episode_count},"
                 f" association_memory_units={association_memory_count}, association_episodes={association_episode_count}"
             )
 
         # 要約
         return (
-            "構造レーンで scope、memory_type、status、commitment_state に基づいて候補を採用した。"
+            "構造レーンで候補を集め、recall_pack_selection が意味的に最終選別した。"
+            f" sections={selected_sections_summary or '-'}"
             f" memory_units={memory_count}, episodes={episode_count}"
         )
 
@@ -1241,12 +1298,18 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         if recall_pack["candidate_count"] == 0:
             return "現時点では構造レーンにも連想レーンにも一致する長期記憶がなかった。"
 
+        # selection
+        recall_pack_selection = recall_pack.get("recall_pack_selection", {})
+        dropped_candidate_refs = recall_pack_selection.get("dropped_candidate_refs", [])
+        if isinstance(dropped_candidate_refs, list) and dropped_candidate_refs:
+            return "候補収集後に recall_pack_selection と deterministic 制約で一部候補を落とした。"
+
         # 関連
         if recall_pack["association_selected_memory_ids"] or recall_pack["association_selected_episode_ids"]:
-            return "vector-only 候補は補助扱いに留め、文字列一致フォールバックは使っていない。"
+            return "候補収集後に recall_pack_selection で採否を絞り、vector-only 候補は補助扱いに留めた。"
 
         # 要約
-        return "section 上限と全体上限を優先し、文字列一致フォールバックは使っていない。"
+        return "候補収集後に recall_pack_selection で採否を絞り、件数上限と dedupe を優先した。"
 
     def _build_time_context(self, *, current_time: str) -> dict[str, Any]:
         # タイムスタンプ解析
@@ -1366,6 +1429,8 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         reply_payload: dict[str, Any] | None = None,
         pending_intent_summary: dict[str, Any] | None = None,
         failure_reason: str | None = None,
+        failure_event_kind: str = "recall_hint_failure",
+        failure_event_payload: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         # 観測イベント
         events = [
@@ -1382,15 +1447,20 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
 
         # 失敗イベント
         if failure_reason is not None:
+            payload = {
+                "failure_reason": failure_reason,
+            }
+            if isinstance(failure_event_payload, dict):
+                payload.update(failure_event_payload)
             events.append(
                 {
                     "event_id": f"event:{uuid.uuid4().hex}",
                     "cycle_id": cycle_id,
                     "memory_set_id": memory_set_id,
-                    "kind": "recall_hint_failure",
+                    "kind": failure_event_kind,
                     "role": "system",
-                    "failure_reason": failure_reason,
                     "created_at": finished_at,
+                    **payload,
                 }
             )
             return events
@@ -1440,6 +1510,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         recall_pack: dict[str, Any],
     ) -> dict[str, Any]:
         event_evidence_generation = recall_pack.get("event_evidence_generation", {})
+        recall_pack_selection = recall_pack.get("recall_pack_selection", {})
         return {
             "cycle_id": cycle_id,
             "selected_memory_set_id": memory_set_id,
@@ -1456,6 +1527,12 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
                 "requested_event_count": int(event_evidence_generation.get("requested_event_count", 0)),
                 "succeeded_event_count": int(event_evidence_generation.get("succeeded_event_count", 0)),
                 "failed_count": len(event_evidence_generation.get("failed_items", [])),
+            },
+            "recall_pack_selection": {
+                "result_status": str(recall_pack_selection.get("result_status", "succeeded")),
+                "selected_section_order": recall_pack_selection.get("selected_section_order", []),
+                "selected_candidate_count": len(recall_pack_selection.get("selected_candidate_refs", [])),
+                "dropped_candidate_count": len(recall_pack_selection.get("dropped_candidate_refs", [])),
             },
         }
 
@@ -1545,19 +1622,29 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
                 "event_evidence_generation",
                 self._empty_event_evidence_generation_trace(),
             ),
+            "recall_pack_selection": recall_pack.get(
+                "recall_pack_selection",
+                self._empty_recall_pack_selection_trace(),
+            ),
             "recall_pack_summary": recall_pack_summary,
             "adopted_reason_summary": self._recall_adopted_reason_summary(recall_pack),
             "rejected_candidate_summary": self._recall_rejected_reason_summary(recall_pack),
         }
 
-    def _build_failure_recall_trace(self) -> dict[str, Any]:
+    def _build_failure_recall_trace(
+        self,
+        *,
+        recall_hint: dict[str, Any] | None = None,
+        recall_pack_selection: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         return {
-            "recall_hint_summary": None,
+            "recall_hint_summary": recall_hint,
             "candidate_count": 0,
             "selected_memory_unit_ids": [],
             "selected_episode_ids": [],
             "selected_event_ids": [],
             "event_evidence_generation": self._empty_event_evidence_generation_trace(),
+            "recall_pack_selection": recall_pack_selection or self._empty_recall_pack_selection_trace(),
             "recall_pack_summary": None,
             "adopted_reason_summary": None,
             "rejected_candidate_summary": None,
@@ -1779,6 +1866,9 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
         trigger_kind: str = "user_message",
         observation_event_kind: str = "observation",
         observation_event_role: str = "user",
+        recall_trace: dict[str, Any] | None = None,
+        failure_event_kind: str = "recall_hint_failure",
+        failure_event_payload: dict[str, Any] | None = None,
     ) -> None:
         memory_set_id = state["selected_memory_set_id"]
         events = self._build_cycle_events(
@@ -1790,6 +1880,8 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             started_at=started_at,
             finished_at=finished_at,
             failure_reason=failure_reason,
+            failure_event_kind=failure_event_kind,
+            failure_event_payload=failure_event_payload,
         )
         retrieval_run = self._build_retrieval_run_failure(
             cycle_id=cycle_id,
@@ -1813,7 +1905,7 @@ class OtomeKairoService(ServiceSpontaneousMixin, ServiceConfigMixin):
             observation_text=observation_text,
             client_context=client_context,
             runtime_summary=runtime_summary,
-            recall_trace=self._build_failure_recall_trace(),
+            recall_trace=recall_trace or self._build_failure_recall_trace(),
             decision_trace=self._build_failure_decision_trace(
                 state=state,
                 observation_text=observation_text,

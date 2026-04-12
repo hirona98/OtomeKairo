@@ -6,6 +6,7 @@ from datetime import timedelta
 from typing import Any
 
 from otomekairo.llm import LLMError
+from otomekairo.recall import RecallPackSelectionError
 from otomekairo.service_common import (
     BACKGROUND_DESKTOP_WATCH_POLL_SECONDS,
     BACKGROUND_WAKE_POLL_SECONDS,
@@ -144,6 +145,41 @@ class ServiceSpontaneousMixin:
                     selected_candidate=selected_candidate,
                 )
                 return response
+            except RecallPackSelectionError as exc:
+                # 失敗永続化
+                finished_at = self._now_iso()
+                self._persist_cycle_failure(
+                    cycle_id=cycle_id,
+                    started_at=started_at,
+                    finished_at=finished_at,
+                    state=state,
+                    runtime_summary=runtime_summary,
+                    observation_text=observation_text,
+                    client_context=client_context,
+                    failure_reason=str(exc),
+                    trigger_kind=trigger_kind,
+                    observation_event_kind="wake",
+                    observation_event_role="system",
+                    recall_trace=self._build_failure_recall_trace(
+                        recall_hint=exc.recall_hint_summary,
+                        recall_pack_selection=exc.recall_pack_selection,
+                    ),
+                    failure_event_kind="recall_pack_selection_failure",
+                    failure_event_payload={
+                        "failure_stage": exc.failure_stage,
+                    },
+                )
+                self._emit_observation_failure_logs(
+                    cycle_id=cycle_id,
+                    trigger_kind=trigger_kind,
+                    observation_text=observation_text,
+                    failure_reason=str(exc),
+                )
+                return {
+                    "cycle_id": cycle_id,
+                    "result_kind": "internal_failure",
+                    "reply": None,
+                }
             except (LLMError, KeyError, ValueError) as exc:
                 # 失敗永続化
                 finished_at = self._now_iso()
@@ -328,6 +364,35 @@ class ServiceSpontaneousMixin:
                 self._emit_desktop_watch_reply_event(
                     capture_response=capture_response,
                     pipeline=pipeline,
+                )
+            except RecallPackSelectionError as exc:
+                # 失敗
+                self._persist_cycle_failure(
+                    cycle_id=cycle_id,
+                    started_at=started_at,
+                    finished_at=self._now_iso(),
+                    state=state,
+                    runtime_summary=runtime_summary,
+                    observation_text=observation_text,
+                    client_context=client_context,
+                    failure_reason=str(exc),
+                    trigger_kind="desktop_watch",
+                    observation_event_kind="desktop_watch",
+                    observation_event_role="system",
+                    recall_trace=self._build_failure_recall_trace(
+                        recall_hint=exc.recall_hint_summary,
+                        recall_pack_selection=exc.recall_pack_selection,
+                    ),
+                    failure_event_kind="recall_pack_selection_failure",
+                    failure_event_payload={
+                        "failure_stage": exc.failure_stage,
+                    },
+                )
+                self._emit_observation_failure_logs(
+                    cycle_id=cycle_id,
+                    trigger_kind="desktop_watch",
+                    observation_text=observation_text,
+                    failure_reason=str(exc),
                 )
             except (LLMError, KeyError, ValueError) as exc:
                 # 失敗

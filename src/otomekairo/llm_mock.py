@@ -8,11 +8,13 @@ from typing import Any
 
 from otomekairo.llm_contracts import (
     INTENT_VALUES,
+    RECALL_PACK_SECTION_NAMES,
     LLMError,
     validate_decision_contract,
     validate_event_evidence_contract,
     validate_memory_interpretation_contract,
     validate_memory_reflection_summary_contract,
+    validate_recall_pack_selection_contract,
     validate_recall_hint_contract,
 )
 
@@ -607,6 +609,77 @@ class MockLLMClient:
         validate_event_evidence_contract(payload)
         return payload
 
+    def generate_recall_pack_selection(
+        self,
+        role_definition: dict,
+        source_pack: dict[str, Any],
+    ) -> dict[str, Any]:
+        # model確認
+        self._assert_mock_model(role_definition)
+
+        # source pack
+        recall_hint = source_pack.get("recall_hint", {})
+        candidate_sections = source_pack.get("candidate_sections", [])
+        conflicts = source_pack.get("conflicts", [])
+        ordered_section_names = self._mock_recall_pack_section_order(recall_hint, candidate_sections)
+
+        # section selection
+        section_lookup = {
+            section["section_name"]: section
+            for section in candidate_sections
+            if isinstance(section, dict) and isinstance(section.get("section_name"), str)
+        }
+        section_selection: list[dict[str, Any]] = []
+        used_candidate_refs: set[str] = set()
+        for section_name in ordered_section_names:
+            section = section_lookup.get(section_name)
+            if not isinstance(section, dict):
+                continue
+            candidates = section.get("candidates", [])
+            if not isinstance(candidates, list):
+                continue
+            ordered_candidates = sorted(
+                (candidate for candidate in candidates if isinstance(candidate, dict)),
+                key=lambda candidate: self._mock_recall_pack_candidate_score(candidate, recall_hint),
+                reverse=True,
+            )
+            candidate_refs: list[str] = []
+            for candidate in ordered_candidates:
+                candidate_ref = candidate.get("candidate_ref")
+                if not isinstance(candidate_ref, str) or not candidate_ref.strip():
+                    continue
+                normalized_ref = candidate_ref.strip()
+                if normalized_ref in used_candidate_refs:
+                    continue
+                candidate_refs.append(normalized_ref)
+                used_candidate_refs.add(normalized_ref)
+            if candidate_refs:
+                section_selection.append(
+                    {
+                        "section_name": section_name,
+                        "candidate_refs": candidate_refs,
+                    }
+                )
+
+        # conflict summaries
+        conflict_summaries = [
+            {
+                "conflict_ref": conflict["conflict_ref"],
+                "summary_text": self._mock_recall_pack_conflict_summary(conflict),
+            }
+            for conflict in conflicts
+            if isinstance(conflict, dict)
+            and isinstance(conflict.get("conflict_ref"), str)
+        ]
+
+        # payload
+        payload = {
+            "section_selection": section_selection,
+            "conflict_summaries": conflict_summaries,
+        }
+        validate_recall_pack_selection_contract(payload, source_pack=source_pack)
+        return payload
+
     def generate_embeddings(
         self,
         role_definition: dict,
@@ -900,6 +973,158 @@ class MockLLMClient:
         if normalized == "self|user":
             return "あなた"
         return normalized
+
+    def _mock_recall_pack_section_order(
+        self,
+        recall_hint: dict[str, Any],
+        candidate_sections: list[Any],
+    ) -> list[str]:
+        # 利用可能 section 群
+        available_sections = [
+            section.get("section_name")
+            for section in candidate_sections
+            if isinstance(section, dict) and section.get("section_name") in RECALL_PACK_SECTION_NAMES
+        ]
+
+        # 主順序
+        primary_intent = str(recall_hint.get("primary_intent") or "smalltalk")
+        ordered = self._mock_recall_pack_primary_section_order(primary_intent)
+
+        # 副次補正
+        boosted_sections: list[str] = []
+        for intent in self._secondary_intents(recall_hint):
+            for section_name in self._mock_recall_pack_primary_section_order(intent)[:2]:
+                if section_name not in boosted_sections:
+                    boosted_sections.append(section_name)
+        if recall_hint.get("time_reference") == "past" and "episodic_evidence" in available_sections:
+            boosted_sections.insert(0, "episodic_evidence")
+
+        # 統合
+        merged: list[str] = []
+        for section_name in [*boosted_sections, *ordered, *available_sections]:
+            if section_name not in available_sections or section_name in merged:
+                continue
+            merged.append(section_name)
+        return merged
+
+    def _mock_recall_pack_primary_section_order(self, primary_intent: str) -> list[str]:
+        if primary_intent == "commitment_check":
+            return [
+                "active_commitments",
+                "relationship_model",
+                "episodic_evidence",
+                "user_model",
+                "active_topics",
+                "self_model",
+            ]
+        if primary_intent == "meta_relationship":
+            return [
+                "relationship_model",
+                "user_model",
+                "episodic_evidence",
+                "active_commitments",
+                "active_topics",
+                "self_model",
+            ]
+        if primary_intent == "consult":
+            return [
+                "user_model",
+                "relationship_model",
+                "active_topics",
+                "episodic_evidence",
+                "active_commitments",
+                "self_model",
+            ]
+        if primary_intent == "reminisce":
+            return [
+                "episodic_evidence",
+                "active_topics",
+                "user_model",
+                "relationship_model",
+                "active_commitments",
+                "self_model",
+            ]
+        if primary_intent == "check_state":
+            return [
+                "user_model",
+                "active_topics",
+                "relationship_model",
+                "episodic_evidence",
+                "active_commitments",
+                "self_model",
+            ]
+        return [
+            "user_model",
+            "relationship_model",
+            "active_topics",
+            "active_commitments",
+            "episodic_evidence",
+            "self_model",
+        ]
+
+    def _mock_recall_pack_candidate_score(
+        self,
+        candidate: dict[str, Any],
+        recall_hint: dict[str, Any],
+    ) -> float:
+        # 基底
+        score = float(candidate.get("salience", 0.0))
+        if candidate.get("retrieval_lane") == "structured":
+            score += 0.04
+        association_score = candidate.get("association_score")
+        if isinstance(association_score, (int, float)):
+            score += float(association_score) * 0.03
+
+        # 文脈補正
+        primary_intent = str(recall_hint.get("primary_intent") or "smalltalk")
+        time_reference = str(recall_hint.get("time_reference") or "none")
+        source_kind = str(candidate.get("source_kind") or "")
+        scope_type = str(candidate.get("scope_type") or candidate.get("primary_scope_type") or "")
+        if primary_intent == "commitment_check":
+            if candidate.get("memory_type") == "commitment":
+                score += 0.12
+            if candidate.get("commitment_state") in {"open", "waiting_confirmation", "on_hold"}:
+                score += 0.08
+            if isinstance(candidate.get("open_loops"), list) and candidate["open_loops"]:
+                score += 0.06
+        if primary_intent == "reminisce" and source_kind == "episode":
+            score += 0.12
+        if primary_intent == "meta_relationship" and scope_type == "relationship":
+            score += 0.08
+        if primary_intent in {"consult", "check_state"} and scope_type in {"user", "topic"}:
+            score += 0.06
+        if time_reference == "past" and source_kind == "episode":
+            score += 0.05
+
+        # 結果
+        return score
+
+    def _mock_recall_pack_conflict_summary(self, conflict: dict[str, Any]) -> str:
+        # variant summary 群
+        compact_summaries: list[str] = []
+        for value in conflict.get("variant_summaries", []):
+            compact_value = self._mock_event_evidence_text(value)
+            if compact_value is None:
+                continue
+            compact_summaries.append(compact_value.rstrip("。!?！？"))
+        if len(compact_summaries) >= 2:
+            summary_text = f"{compact_summaries[0]} と {compact_summaries[1]} の理解が並んでいる。"
+        elif compact_summaries:
+            summary_text = f"{compact_summaries[0]} をめぐる理解が揺れている。"
+        else:
+            compare_key = conflict.get("compare_key", {})
+            predicate = str(compare_key.get("predicate") or "").strip()
+            if predicate == "talk_again":
+                summary_text = "続きをどう扱うかについて異なる理解が並んでいる。"
+            elif predicate == "likes":
+                summary_text = "好みの理解について異なる線が並んでいる。"
+            elif predicate == "seems":
+                summary_text = "状態理解について異なる見立てが並んでいる。"
+            else:
+                summary_text = "同じ対象について異なる理解が並んでいる。"
+        if len(summary_text) <= 120:
+            return summary_text
+        return summary_text[:119].rstrip("。 ") + "。"
 
     def _mock_event_evidence_section_label(self, section_name: Any) -> str:
         if section_name == "active_commitments":

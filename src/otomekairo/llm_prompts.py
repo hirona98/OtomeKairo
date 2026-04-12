@@ -3,7 +3,11 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from otomekairo.llm_contracts import INTENT_VALUES, TIME_REFERENCE_VALUES
+from otomekairo.llm_contracts import (
+    INTENT_VALUES,
+    RECALL_PACK_SECTION_NAMES,
+    TIME_REFERENCE_VALUES,
+)
 
 
 # RecallHint 用の message 群を組み立てる。
@@ -146,6 +150,22 @@ def build_event_evidence_messages(
     ]
 
 
+def build_recall_pack_selection_messages(
+    *,
+    source_pack: dict[str, Any],
+) -> list[dict[str, str]]:
+    return [
+        {
+            "role": "system",
+            "content": _build_recall_pack_selection_system_prompt(),
+        },
+        {
+            "role": "user",
+            "content": _build_recall_pack_selection_user_prompt(source_pack),
+        },
+    ]
+
+
 # validator_error を元に repair prompt を返す。
 def build_memory_interpretation_repair_prompt(validation_error: str) -> str:
     return (
@@ -185,6 +205,24 @@ def build_event_evidence_repair_prompt(validation_error: str) -> str:
         "各値は string または null です。少なくとも 1 つは null ではなくしてください。\n"
         "各 slot は present な場合 1 文だけ、改行なしで返してください。\n"
         "新しい事実の追加、内部識別子、Markdown、コードフェンス、説明文は禁止です。"
+    )
+
+
+def build_recall_pack_selection_repair_prompt(validation_error: str) -> str:
+    return (
+        "前回の出力は recall_pack_selection 契約を満たしていませんでした。\n"
+        f"validator_error: {validation_error}\n"
+        "同じ source pack だけを根拠に、JSON オブジェクト 1 個だけを返し直してください。\n"
+        "トップレベルキーは section_selection, conflict_summaries の 2 つだけです。\n"
+        "section_selection の各要素は section_name と candidate_refs を持つ object だけです。\n"
+        "section_name は "
+        + " / ".join(RECALL_PACK_SECTION_NAMES)
+        + " のいずれかだけを使ってください。\n"
+        "candidate_refs には source pack に含まれる candidate_ref だけを使い、section をまたいで重複させないでください。\n"
+        "conflict_summaries の各要素は conflict_ref と summary_text を持つ object だけです。\n"
+        "source pack にある conflict_ref はすべて 1 回ずつ返してください。\n"
+        "summary_text は 1 文、改行なし、内部識別子なしで返してください。\n"
+        "新しい候補の追加、section 名の発明、Markdown、コードフェンス、説明文は禁止です。"
     )
 
 
@@ -399,6 +437,29 @@ def _build_event_evidence_system_prompt() -> str:
     )
 
 
+def _build_recall_pack_selection_system_prompt() -> str:
+    return (
+        "あなたは OtomeKairo の recall_pack_selection です。\n"
+        "候補群の中から RecallPack に採る candidate_ref の順序と conflicts の summary_text だけを JSON オブジェクト 1 個で返してください。\n"
+        "Markdown、コードフェンス、説明文は禁止です。\n"
+        "返すトップレベルキーは section_selection, conflict_summaries の 2 つだけです。\n"
+        "section_selection の各要素は section_name と candidate_refs を持つ object です。\n"
+        "section_name は "
+        + " / ".join(RECALL_PACK_SECTION_NAMES)
+        + " のいずれかだけを使ってください。\n"
+        "candidate_refs には source pack に含まれる candidate_ref だけを使い、元の section を変えないでください。\n"
+        "同じ candidate_ref を section をまたいで重複させてはいけません。\n"
+        "conflict_summaries の各要素は conflict_ref と summary_text を持つ object です。\n"
+        "source pack にある conflict_ref は、ある場合すべて 1 回ずつ返してください。\n"
+        "summary_text は 1 文、改行なし、内部識別子なしで返してください。\n"
+        "候補外のものを足してはいけません。section 名を発明してはいけません。\n"
+        "primary_intent を主軸にし、secondary_intents は軽い補助に留めてください。\n"
+        "association 候補は使えても、構造候補より無条件に優先してはいけません。\n"
+        "commitment_check では open loop や active commitment を重く見やすくし、reminisce や time_reference=past では episodic_evidence を前へ置きやすくしてください。\n"
+        "比較不能なら候補を広く並べるより、少なく選んでください。"
+    )
+
+
 def _build_memory_interpretation_user_prompt(
     *,
     observation_text: str,
@@ -427,6 +488,13 @@ def _build_memory_reflection_summary_user_prompt(evidence_pack: dict[str, Any]) 
 
 
 def _build_event_evidence_user_prompt(source_pack: dict[str, Any]) -> str:
+    return (
+        "source_pack:\n"
+        f"{json.dumps(source_pack, ensure_ascii=False)}\n"
+    )
+
+
+def _build_recall_pack_selection_user_prompt(source_pack: dict[str, Any]) -> str:
     return (
         "source_pack:\n"
         f"{json.dumps(source_pack, ensure_ascii=False)}\n"

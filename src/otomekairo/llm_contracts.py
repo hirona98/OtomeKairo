@@ -75,8 +75,17 @@ MAX_HINT_SCOPE_VALUES = 4
 MAX_MEMORY_REFLECTION_SUMMARY_SENTENCES = 2
 MAX_MEMORY_REFLECTION_SUMMARY_LENGTH = 140
 MAX_EVENT_EVIDENCE_SLOT_SENTENCES = 1
+MAX_RECALL_PACK_CONFLICT_SUMMARY_SENTENCES = 1
+RECALL_PACK_SECTION_NAMES = (
+    "self_model",
+    "user_model",
+    "relationship_model",
+    "active_topics",
+    "active_commitments",
+    "episodic_evidence",
+)
 INTERNAL_IDENTIFIER_PATTERN = re.compile(
-    r"\b(?:event|memory_unit|cycle|reflection_run|retrieval_run|pending_intent):[A-Za-z0-9._-]+\b"
+    r"\b(?:event|episode|memory_unit|cycle|reflection_run|retrieval_run|pending_intent|candidate|conflict):[A-Za-z0-9._-]+\b"
 )
 
 
@@ -447,3 +456,157 @@ def validate_event_evidence_contract(payload: dict[str, Any]) -> None:
 
     if present_slot_count == 0:
         raise LLMError("EventEvidence must include at least one non-null slot.")
+
+
+def _recall_pack_candidate_refs_by_section(source_pack: dict[str, Any]) -> dict[str, set[str]]:
+    # source pack
+    candidate_sections = source_pack.get("candidate_sections", [])
+    if not isinstance(candidate_sections, list):
+        raise LLMError("RecallPackSelection source_pack.candidate_sections must be a list.")
+
+    # 収集
+    refs_by_section = {
+        section_name: set()
+        for section_name in RECALL_PACK_SECTION_NAMES
+    }
+    seen_sections: set[str] = set()
+    seen_candidate_refs: set[str] = set()
+    for section in candidate_sections:
+        _validate_exact_keys(
+            section,
+            {"section_name", "candidates"},
+            "RecallPackSelection source_pack candidate_section",
+        )
+        section_name = section["section_name"]
+        if section_name not in refs_by_section:
+            raise LLMError("RecallPackSelection source_pack section_name is invalid.")
+        if section_name in seen_sections:
+            raise LLMError("RecallPackSelection source_pack section_name must not repeat.")
+        seen_sections.add(section_name)
+
+        candidates = section["candidates"]
+        if not isinstance(candidates, list):
+            raise LLMError("RecallPackSelection source_pack candidates must be a list.")
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
+                raise LLMError("RecallPackSelection source_pack candidate must be an object.")
+            candidate_ref = candidate.get("candidate_ref")
+            if not isinstance(candidate_ref, str) or not candidate_ref.strip():
+                raise LLMError("RecallPackSelection source_pack candidate_ref is invalid.")
+            normalized_ref = candidate_ref.strip()
+            if normalized_ref in seen_candidate_refs:
+                raise LLMError("RecallPackSelection source_pack candidate_ref must be unique.")
+            refs_by_section[section_name].add(normalized_ref)
+            seen_candidate_refs.add(normalized_ref)
+
+    # 結果
+    return refs_by_section
+
+
+def _recall_pack_conflict_refs(source_pack: dict[str, Any]) -> set[str]:
+    # source pack
+    conflicts = source_pack.get("conflicts", [])
+    if not isinstance(conflicts, list):
+        raise LLMError("RecallPackSelection source_pack.conflicts must be a list.")
+
+    # 収集
+    refs: set[str] = set()
+    for conflict in conflicts:
+        if not isinstance(conflict, dict):
+            raise LLMError("RecallPackSelection source_pack conflict must be an object.")
+        conflict_ref = conflict.get("conflict_ref")
+        if not isinstance(conflict_ref, str) or not conflict_ref.strip():
+            raise LLMError("RecallPackSelection source_pack conflict_ref is invalid.")
+        normalized_ref = conflict_ref.strip()
+        if normalized_ref in refs:
+            raise LLMError("RecallPackSelection source_pack conflict_ref must be unique.")
+        refs.add(normalized_ref)
+
+    # 結果
+    return refs
+
+
+def validate_recall_pack_selection_contract(payload: dict[str, Any], *, source_pack: dict[str, Any]) -> None:
+    # 必須キー群
+    _validate_exact_keys(payload, {"section_selection", "conflict_summaries"}, "RecallPackSelection")
+
+    # source pack refs
+    valid_candidate_refs_by_section = _recall_pack_candidate_refs_by_section(source_pack)
+    valid_conflict_refs = _recall_pack_conflict_refs(source_pack)
+
+    # section_selection
+    section_selection = payload["section_selection"]
+    if not isinstance(section_selection, list):
+        raise LLMError("RecallPackSelection section_selection must be a list.")
+
+    seen_sections: set[str] = set()
+    seen_candidate_refs: set[str] = set()
+    for section_item in section_selection:
+        _validate_exact_keys(
+            section_item,
+            {"section_name", "candidate_refs"},
+            "RecallPackSelection section_selection item",
+        )
+        section_name = section_item["section_name"]
+        if section_name not in valid_candidate_refs_by_section:
+            raise LLMError("RecallPackSelection section_name is invalid.")
+        if section_name in seen_sections:
+            raise LLMError("RecallPackSelection section_name must not repeat.")
+        seen_sections.add(section_name)
+
+        candidate_refs = section_item["candidate_refs"]
+        if not isinstance(candidate_refs, list) or not candidate_refs:
+            raise LLMError("RecallPackSelection candidate_refs must be a non-empty list.")
+
+        local_seen_refs: set[str] = set()
+        for candidate_ref in candidate_refs:
+            if not isinstance(candidate_ref, str) or not candidate_ref.strip():
+                raise LLMError("RecallPackSelection candidate_ref is invalid.")
+            normalized_ref = candidate_ref.strip()
+            if normalized_ref not in valid_candidate_refs_by_section[section_name]:
+                raise LLMError("RecallPackSelection candidate_ref must belong to its section in source_pack.")
+            if normalized_ref in local_seen_refs:
+                raise LLMError("RecallPackSelection candidate_refs must not repeat within a section.")
+            if normalized_ref in seen_candidate_refs:
+                raise LLMError("RecallPackSelection candidate_refs must not repeat across sections.")
+            local_seen_refs.add(normalized_ref)
+            seen_candidate_refs.add(normalized_ref)
+
+    # conflict_summaries
+    conflict_summaries = payload["conflict_summaries"]
+    if not isinstance(conflict_summaries, list):
+        raise LLMError("RecallPackSelection conflict_summaries must be a list.")
+
+    seen_conflict_refs: set[str] = set()
+    for conflict_item in conflict_summaries:
+        _validate_exact_keys(
+            conflict_item,
+            {"conflict_ref", "summary_text"},
+            "RecallPackSelection conflict_summary",
+        )
+        conflict_ref = conflict_item["conflict_ref"]
+        if not isinstance(conflict_ref, str) or not conflict_ref.strip():
+            raise LLMError("RecallPackSelection conflict_ref is invalid.")
+        normalized_ref = conflict_ref.strip()
+        if normalized_ref not in valid_conflict_refs:
+            raise LLMError("RecallPackSelection conflict_ref must exist in source_pack.")
+        if normalized_ref in seen_conflict_refs:
+            raise LLMError("RecallPackSelection conflict_ref must not repeat.")
+        seen_conflict_refs.add(normalized_ref)
+
+        summary_text = conflict_item["summary_text"]
+        if not isinstance(summary_text, str):
+            raise LLMError("RecallPackSelection summary_text must be a string.")
+        normalized_summary = summary_text.strip()
+        if not normalized_summary:
+            raise LLMError("RecallPackSelection summary_text must not be empty.")
+        if "\n" in normalized_summary or "\r" in normalized_summary:
+            raise LLMError("RecallPackSelection summary_text must not contain newlines.")
+        if INTERNAL_IDENTIFIER_PATTERN.search(normalized_summary) is not None:
+            raise LLMError("RecallPackSelection summary_text must not contain internal identifiers.")
+        sentence_count = len([part for part in re.split(r"[。!?！？]+", normalized_summary) if part.strip()])
+        if sentence_count != MAX_RECALL_PACK_CONFLICT_SUMMARY_SENTENCES:
+            raise LLMError("RecallPackSelection summary_text must be exactly one sentence.")
+
+    if seen_conflict_refs != valid_conflict_refs:
+        raise LLMError("RecallPackSelection conflict_summaries must cover all conflict refs.")
