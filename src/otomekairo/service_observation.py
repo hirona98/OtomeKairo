@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from otomekairo.llm import LLMError
+from otomekairo.memory_utils import display_local_iso, localize_timestamp_fields
 from otomekairo.recall import RecallPackSelectionError
 from otomekairo.service_common import ServiceError
 
@@ -351,7 +352,7 @@ class ServiceObservationMixin:
 
         # 一覧
         return {
-            "cycle_summaries": self.store.list_cycle_summaries(limit),
+            "cycle_summaries": localize_timestamp_fields(self.store.list_cycle_summaries(limit)),
         }
 
     def get_cycle_trace(self, token: str | None, cycle_id: str) -> dict[str, Any]:
@@ -361,7 +362,7 @@ class ServiceObservationMixin:
         # レコード検索
         trace = self.store.get_cycle_trace(cycle_id)
         if trace is not None:
-            return trace
+            return localize_timestamp_fields(trace)
 
         raise ServiceError(404, "cycle_not_found", "The requested cycle_id does not exist.")
 
@@ -586,7 +587,7 @@ class ServiceObservationMixin:
     def _build_live_log_record(self, *, level: str, component: str, message: str) -> dict[str, Any]:
         # 結果
         return {
-            "ts": self._now_iso(),
+            "ts": display_local_iso(self._now_iso()),
             "level": level,
             "logger": component,
             "msg": message,

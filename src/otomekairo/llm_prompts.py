@@ -8,6 +8,7 @@ from otomekairo.llm_contracts import (
     RECALL_PACK_SECTION_NAMES,
     TIME_REFERENCE_VALUES,
 )
+from otomekairo.memory_utils import display_local_iso, localize_timestamp_fields
 
 
 # RecallHint 用の message 群を組み立てる。
@@ -285,7 +286,7 @@ def _build_recall_hint_user_prompt(
     current_time: str,
 ) -> str:
     return (
-        f"current_time: {current_time}\n"
+        f"current_time: {display_local_iso(current_time)}\n"
         f"recent_turns:\n{_format_recent_turns(recent_turns)}\n"
         f"observation_text:\n{observation_text.strip()}\n"
     )
@@ -513,7 +514,7 @@ def _build_memory_interpretation_user_prompt(
     current_time: str,
 ) -> str:
     return (
-        f"current_time: {current_time}\n"
+        f"current_time: {display_local_iso(current_time)}\n"
         f"observation_text:\n{observation_text.strip()}\n"
         "recall_hint:\n"
         f"{json.dumps(recall_hint, ensure_ascii=False)}\n"
@@ -527,14 +528,14 @@ def _build_memory_interpretation_user_prompt(
 def _build_memory_reflection_summary_user_prompt(evidence_pack: dict[str, Any]) -> str:
     return (
         "evidence_pack:\n"
-        f"{json.dumps(evidence_pack, ensure_ascii=False)}\n"
+        f"{json.dumps(localize_timestamp_fields(evidence_pack), ensure_ascii=False)}\n"
     )
 
 
 def _build_event_evidence_user_prompt(source_pack: dict[str, Any]) -> str:
     return (
         "source_pack:\n"
-        f"{json.dumps(source_pack, ensure_ascii=False)}\n"
+        f"{json.dumps(localize_timestamp_fields(source_pack), ensure_ascii=False)}\n"
     )
 
 
@@ -563,7 +564,7 @@ def _format_internal_context(
         "affect_context": affect_context,
         "recall_pack": _compact_recall_pack(recall_pack),
     }
-    return json.dumps(payload, ensure_ascii=False)
+    return json.dumps(localize_timestamp_fields(payload), ensure_ascii=False)
 
 
 def _compact_recall_pack(recall_pack: dict[str, Any]) -> dict[str, Any]:

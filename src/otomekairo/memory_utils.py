@@ -34,6 +34,41 @@ def parse_iso(value: str) -> datetime:
     return parsed.astimezone(UTC)
 
 
+def display_local_iso(value: str) -> str:
+    # 表示用にローカル時刻へそろえ、タイムゾーン表記は落とす。
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        return parsed.isoformat()
+    return parsed.astimezone().replace(tzinfo=None).isoformat()
+
+
+def localize_timestamp_fields(value: Any) -> Any:
+    # 表示面だけをローカル時刻へ変換する。
+    if isinstance(value, list):
+        return [localize_timestamp_fields(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+
+    localized: dict[str, Any] = {}
+    for key, item in value.items():
+        if _is_timestamp_display_key(key) and isinstance(item, str) and item.strip():
+            localized[key] = display_local_iso(item)
+            continue
+        localized[key] = localize_timestamp_fields(item)
+    return localized
+
+
+def _is_timestamp_display_key(key: Any) -> bool:
+    # `_at` と一部の例外キーを表示用 timestamp とみなす。
+    if not isinstance(key, str):
+        return False
+    return (
+        key.endswith("_at")
+        or key.endswith("_iso")
+        or key in {"current_time", "ts", "valid_from", "valid_to", "not_before", "cooldown_until"}
+    )
+
+
 def hours_since(older_iso: str, newer_iso: str) -> float:
     # 差分
     older = parse_iso(older_iso)
