@@ -395,6 +395,8 @@ class ReflectiveConsolidator:
                 scope_key=scope_key,
                 memory_types=memory_types,
                 open_loop_count=open_loop_count,
+                scope_units=scope_units,
+                scope_episodes=scope_episodes,
             ),
             "status": summary_status,
             "commitment_state": None,
@@ -638,7 +640,18 @@ class ReflectiveConsolidator:
         scope_key: str,
         memory_types: list[str],
         open_loop_count: int,
+        scope_units: list[dict[str, Any]],
+        scope_episodes: list[dict[str, Any]],
     ) -> str:
+        # 主題候補
+        themes = self._reflective_summary_themes(
+            scope_type=scope_type,
+            scope_units=scope_units,
+            scope_episodes=scope_episodes,
+            limit=2,
+        )
+        theme_text = self._reflective_theme_text_from_labels(themes)
+
         # トピック
         if scope_type == "topic":
             topic_label = display_scope_key(scope_key)
@@ -651,21 +664,39 @@ class ReflectiveConsolidator:
             if scope_key != "self|user":
                 relationship_label = display_scope_key(scope_key)
                 if open_loop_count > 0:
+                    if theme_text is not None:
+                        return f"最近は {relationship_label} の関係文脈で、{theme_text}を中心に継続中の確認事項や流れが積み上がっている。"
                     return f"最近は {relationship_label} の関係文脈で継続中の確認事項や流れが積み上がっている。"
                 if "relation" in memory_types:
+                    if theme_text is not None:
+                        return f"最近は {relationship_label} の関係文脈で、{theme_text}に関する理解が少しずつ安定している。"
                     return f"最近は {relationship_label} の関係理解が少しずつ安定している。"
+                if theme_text is not None:
+                    return f"最近は {relationship_label} の関係文脈で、{theme_text}が継続して積み上がっている。"
                 return f"最近は {relationship_label} の関係文脈が継続して積み上がっている。"
             if open_loop_count > 0:
+                if theme_text is not None:
+                    return f"最近のあなたとのやり取りでは、{theme_text}を中心に継続中の確認事項や会話の流れが積み上がっている。"
                 return "最近のあなたとのやり取りでは、継続中の確認事項や会話の流れが積み上がっている。"
             if "relation" in memory_types:
+                if theme_text is not None:
+                    return f"最近のあなたとのやり取りでは、{theme_text}に関する理解が少しずつ安定している。"
                 return "最近のあなたとのやり取りでは、距離感や支え方に関する理解が少しずつ安定している。"
+            if theme_text is not None:
+                return f"最近のあなたとのやり取りでは、{theme_text}に関する文脈が継続して積み上がっている。"
             return "最近のあなたとのやり取りでは、関係文脈が継続して積み上がっている。"
 
         # 自己
         if scope_type == "self":
+            if open_loop_count > 0 and theme_text is not None:
+                return f"最近の自分側の応答では、{theme_text}を保ちながら継続中の確認事項も抱えている。"
+            if theme_text is not None:
+                return f"最近の自分側の応答では、{theme_text}に一定の傾向が見えている。"
             return "最近の自分側の応答では、受け止め方や関わり方に一定の傾向が見えている。"
 
         # ユーザー
+        if theme_text is not None:
+            return f"最近のあなたに関するやり取りでは、{theme_text}の理解が少しずつ積み上がっている。"
         theme_text = self._reflective_theme_text(memory_types)
         return f"最近のあなたに関するやり取りでは、{theme_text}の理解が少しずつ積み上がっている。"
 
@@ -684,6 +715,102 @@ class ReflectiveConsolidator:
         if len(parts) == 1:
             return parts[0]
         return "や".join(parts)
+
+    def _reflective_summary_themes(
+        self,
+        *,
+        scope_type: str,
+        scope_units: list[dict[str, Any]],
+        scope_episodes: list[dict[str, Any]],
+        limit: int,
+    ) -> list[str]:
+        # 収集
+        themes: list[str] = []
+        for unit in scope_units:
+            theme = self._reflective_theme_from_unit(scope_type=scope_type, unit=unit)
+            if theme is None or theme in themes:
+                continue
+            themes.append(theme)
+            if len(themes) >= limit:
+                return themes
+
+        # open loop がある場合は継続テーマも補助的に加える
+        if not themes and any(episode.get("open_loops") for episode in scope_episodes):
+            continuity_theme = self._reflective_continuity_theme(scope_type=scope_type)
+            if continuity_theme is not None and continuity_theme not in themes:
+                themes.append(continuity_theme)
+
+        # 結果
+        return themes[:limit]
+
+    def _reflective_theme_from_unit(
+        self,
+        *,
+        scope_type: str,
+        unit: dict[str, Any],
+    ) -> str | None:
+        # 明示 map
+        predicate = unit.get("predicate")
+        object_ref = unit.get("object_ref_or_value")
+        memory_type = unit.get("memory_type")
+        summary_text = unit.get("summary_text")
+
+        if predicate == "system_status":
+            return "動作状態"
+        if predicate == "daily_rhythm":
+            return "生活リズム"
+        if predicate == "work_style":
+            return "働き方"
+        if predicate == "likes":
+            return "好み"
+        if predicate == "talk_again":
+            return "続きを話す流れ"
+        if predicate == "seeks_confirmation_of":
+            return "確認の仕方"
+        if predicate == "seems":
+            if isinstance(object_ref, str) and object_ref == "state:tired":
+                return "体調や負荷"
+            return "状態理解"
+        if memory_type == "relation":
+            return "距離感や支え方"
+        if scope_type == "self" and memory_type in {"fact", "interpretation"}:
+            if isinstance(summary_text, str) and "動作" in summary_text:
+                return "動作状態"
+            return "応答のあり方"
+
+        # 既存 summary_text の表現を補助的に使う
+        if isinstance(summary_text, str):
+            normalized = summary_text.strip().rstrip("。")
+            if normalized:
+                if len(normalized) <= 18:
+                    return normalized
+                if "確認" in normalized:
+                    return "確認事項"
+                if "関係" in normalized:
+                    return "関係理解"
+
+        # 結果
+        return None
+
+    def _reflective_continuity_theme(self, *, scope_type: str) -> str | None:
+        # スコープ別
+        if scope_type == "relationship":
+            return "継続中の確認事項"
+        if scope_type == "self":
+            return "返答の運び方"
+        if scope_type == "user":
+            return "気がかりな状態"
+        return None
+
+    def _reflective_theme_text_from_labels(self, labels: list[str]) -> str | None:
+        # 空
+        if not labels:
+            return None
+
+        # 結果
+        if len(labels) == 1:
+            return labels[0]
+        return "や".join(labels[:2])
 
     def _reflective_summary_salience(
         self,

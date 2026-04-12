@@ -93,6 +93,9 @@ MVP の次段としてやることは次である。
 - `events` の限定ロードを使う精密根拠確認
 - `desktop_watch` の capture image を使う判断品質の拡張
 
+このうち `relationship / self` 要約品質については、第一手として `reflective consolidation` の summary 文面生成で `predicate / object_ref_or_value / open_loop` を使うようにし、定型文一辺倒よりは具体性を持たせた。
+ただし、高次な長期変化分析や根拠確認の精密化はまだ未完である。
+
 今回の前提では、回帰テスト整備は post-MVP の対象外とする。
 
 ## 既知の制約
