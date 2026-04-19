@@ -60,9 +60,11 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
                 self._write_success(HTTPStatus.OK, self.server.service.read_server_identity())
                 return
             if method == "POST" and parsed.path == "/api/bootstrap/register-first-console":
+                self._read_json_body()
                 self._write_success(HTTPStatus.CREATED, self.server.service.register_first_console())
                 return
             if method == "POST" and parsed.path == "/api/bootstrap/reissue-console-access-token":
+                self._read_json_body()
                 self._write_success(
                     HTTPStatus.OK,
                     self.server.service.reissue_console_access_token(token),
