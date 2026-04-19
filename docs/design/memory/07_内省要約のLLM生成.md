@@ -4,7 +4,7 @@
 
 現在の `reflective consolidation` は、`summary` 系 `memory_units` を作るときの `summary_text` をロジックで組み立てている。
 
-この方式は、MVP 段階では次の点で有利だった。
+この方式は、初期段階では次の点で有利だった。
 
 - 壊れにくい
 - trigger や state 遷移と切り分けやすい

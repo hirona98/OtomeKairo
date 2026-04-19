@@ -13,7 +13,7 @@
 - `association_score()` による候補 score 補正
 - `conflicts.summary_text` の固定文
 
-この方式は、MVP 段階では次の点で有利だった。
+この方式は、初期段階では次の点で有利だった。
 
 - 壊れにくい
 - trace と inspection で追いやすい

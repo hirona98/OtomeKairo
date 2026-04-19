@@ -5,7 +5,7 @@
 現在の `event_evidence` は、選ばれた `event_id` を最大 1-3 件だけ読み、
 `anchor / topic / decision_or_result / tone_or_note` をロジックで埋めている。
 
-この方式は、MVP 段階では次の点で有利だった。
+この方式は、初期段階では次の点で有利だった。
 
 - 選択順と件数上限を deterministic に保てる
 - `events` の広い再読を防ぎやすい
