@@ -95,7 +95,7 @@ OtomeKairo では、`RecallPack` 全体を LLM 任せにはしない。
 - 候補群の中から、どの候補をどの順で `RecallPack` に採るべきかを返す
 - `conflicts` 候補に対して短い `summary_text` を返す
 
-この role を `observation_interpretation` や `decision_generation` から分ける理由は次である。
+この role を `input_interpretation` や `decision_generation` から分ける理由は次である。
 
 - 想起の中心選別と、会話判断の責務を分離できる
 - recall 品質の改善が decision prompt に波及しにくい
@@ -109,7 +109,7 @@ LLM に渡すのは raw DB row 群ではなく、候補群を request-local ref 
 
 ```json
 {
-  "observation_text": "この前の続きだけど、どう進める？",
+  "input_text": "この前の続きだけど、どう進める？",
   "recall_hint": {
     "primary_intent": "commitment_check",
     "secondary_intents": ["reminisce"],
@@ -245,7 +245,7 @@ system prompt では、少なくとも次を明示する。
 - `conflicts.summary_text` では、何が競合しているかを短く説明する
 - 比較不能なら候補を広く並べるより、少なく選ぶ
 
-user prompt では、観測文、`RecallHint`、constraint、候補 sections、conflicts をそのまま構造化で渡す。
+user prompt では、入力文、`RecallHint`、constraint、候補 sections、conflicts をそのまま構造化で渡す。
 
 ## 処理フロー
 

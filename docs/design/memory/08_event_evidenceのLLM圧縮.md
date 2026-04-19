@@ -87,7 +87,7 @@ OtomeKairo では、`event_evidence` 全体を LLM 任せにはしない。
 
 - selected event 1 件分の source pack を読み、slot payload を返す
 
-この role を `observation_interpretation` や `decision_generation` から分ける理由は次である。
+この role を `input_interpretation` や `decision_generation` から分ける理由は次である。
 
 - 入出力契約が小さく、責務が限定されている
 - prompt を変えても通常会話の判断 prompt へ波及しにくい

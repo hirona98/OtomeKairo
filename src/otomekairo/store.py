@@ -253,7 +253,7 @@ class SQLiteMemoryStore(StoreCloneMixin, StoreVectorMixin, StoreSchemaMixin):
                 SELECT role, text, created_at
                 FROM events
                 WHERE memory_set_id = ?
-                  AND kind IN ('observation', 'reply')
+                  AND kind IN ('conversation_input', 'reply')
                   AND text IS NOT NULL
                   AND created_at >= ?
                 ORDER BY created_at DESC, rowid DESC

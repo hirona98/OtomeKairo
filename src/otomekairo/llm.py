@@ -43,17 +43,17 @@ class LLMClient:
         self,
         *,
         role_definition: dict,
-        observation_text: str,
+        input_text: str,
         recent_turns: list[dict],
         current_time: str,
     ) -> dict[str, Any]:
         # モック経路
         if self._is_mock_role_definition(role_definition):
-            return self.mock_client.generate_recall_hint(role_definition, observation_text, recent_turns, current_time)
+            return self.mock_client.generate_recall_hint(role_definition, input_text, recent_turns, current_time)
 
         # プロンプト構築
         messages = build_recall_hint_messages(
-            observation_text=observation_text,
+            input_text=input_text,
             recent_turns=recent_turns,
             current_time=current_time,
         )
@@ -79,7 +79,7 @@ class LLMClient:
         *,
         role_definition: dict,
         persona: dict,
-        observation_text: str,
+        input_text: str,
         recent_turns: list[dict],
         time_context: dict[str, Any],
         affect_context: dict[str, list[dict[str, Any]]],
@@ -91,7 +91,7 @@ class LLMClient:
             return self.mock_client.generate_decision(
                 role_definition,
                 persona,
-                observation_text,
+                input_text,
                 recent_turns,
                 time_context,
                 affect_context,
@@ -102,7 +102,7 @@ class LLMClient:
         # プロンプト構築
         messages = build_decision_messages(
             persona=persona,
-            observation_text=observation_text,
+            input_text=input_text,
             recent_turns=recent_turns,
             time_context=time_context,
             affect_context=affect_context,
@@ -121,7 +121,7 @@ class LLMClient:
         *,
         role_definition: dict,
         persona: dict,
-        observation_text: str,
+        input_text: str,
         recent_turns: list[dict],
         time_context: dict[str, Any],
         affect_context: dict[str, list[dict[str, Any]]],
@@ -134,7 +134,7 @@ class LLMClient:
             return self.mock_client.generate_reply(
                 role_definition,
                 persona,
-                observation_text,
+                input_text,
                 recent_turns,
                 time_context,
                 affect_context,
@@ -146,7 +146,7 @@ class LLMClient:
         # プロンプト構築
         messages = build_reply_messages(
             persona=persona,
-            observation_text=observation_text,
+            input_text=input_text,
             recent_turns=recent_turns,
             time_context=time_context,
             affect_context=affect_context,
@@ -172,7 +172,7 @@ class LLMClient:
         self,
         *,
         role_definition: dict,
-        observation_text: str,
+        input_text: str,
         recall_hint: dict,
         decision: dict,
         reply_text: str | None,
@@ -182,7 +182,7 @@ class LLMClient:
         if self._is_mock_role_definition(role_definition):
             return self.mock_client.generate_memory_interpretation(
                 role_definition,
-                observation_text,
+                input_text,
                 recall_hint,
                 decision,
                 reply_text,
@@ -190,7 +190,7 @@ class LLMClient:
 
         # プロンプト構築
         messages = build_memory_interpretation_messages(
-            observation_text=observation_text,
+            input_text=input_text,
             recall_hint=recall_hint,
             decision=decision,
             reply_text=reply_text,

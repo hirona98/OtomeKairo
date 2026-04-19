@@ -25,7 +25,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
         self,
         *,
         state: dict[str, Any],
-        observation_text: str,
+        input_text: str,
         recall_hint: dict[str, Any],
     ) -> dict[str, Any]:
         # コンテキスト
@@ -101,7 +101,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
         # 関連セクション群
         association_sections = self._build_association_sections(
             state=state,
-            observation_text=observation_text,
+            input_text=input_text,
             recall_hint=recall_hint,
             scope_context=scope_context,
         )
@@ -147,7 +147,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             "recall_pack_selection"
         ]
         selection_result = self._select_recall_pack_sections(
-            observation_text=observation_text,
+            input_text=input_text,
             recall_hint=recall_hint,
             candidate_sections={
                 "self_model": self_model,

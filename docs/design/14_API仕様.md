@@ -8,10 +8,10 @@ API 仕様は、次のように分ける。
   - 共通ルール
   - 認証の基本
   - 共通エラー
-- `design/api/01_bootstrapと観測.md`
+- `design/api/01_bootstrapと入力.md`
   - bootstrap
-  - 会話観測
-  - wake 観測
+  - 会話入力
+  - wake 起床要求
 - `design/api/02_event_stream.md`
   - `events/stream`
   - `vision/capture-response`

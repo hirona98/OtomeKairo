@@ -91,14 +91,14 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
                 self._handle_logs_stream(token)
                 return
 
-            # 観測ルート
-            if method == "POST" and parsed.path == "/api/observations/conversation":
+            # 入力ルート
+            if method == "POST" and parsed.path == "/api/conversation":
                 payload = self._read_json_body()
-                self._write_success(HTTPStatus.OK, self.server.service.observe_conversation(token, payload))
+                self._write_success(HTTPStatus.OK, self.server.service.handle_conversation(token, payload))
                 return
-            if method == "POST" and parsed.path == "/api/observations/wake":
+            if method == "POST" and parsed.path == "/api/wake":
                 payload = self._read_json_body()
-                self._write_success(HTTPStatus.OK, self.server.service.observe_wake(token, payload))
+                self._write_success(HTTPStatus.OK, self.server.service.trigger_wake(token, payload))
                 return
             if method == "POST" and parsed.path == "/api/v2/vision/capture-response":
                 payload = self._read_json_body()

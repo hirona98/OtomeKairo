@@ -1,4 +1,4 @@
-# bootstrapと観測
+# bootstrapと入力
 
 ## bootstrap 面
 
@@ -77,12 +77,12 @@ response:
 }
 ```
 
-## 観測面
+## 対話面
 
-### `POST /api/observations/conversation`
+### `POST /api/conversation`
 
 - 認証: 必要
-- 役割: 会話観測を受け、会話 1 サイクルを実行する
+- 役割: 会話入力を受け、会話 1 サイクルを実行する
 
 request:
 
@@ -133,10 +133,12 @@ response:
 | `400` | `invalid_text` | `text` が文字列ではない |
 | `400` | `invalid_client_context` | `client_context` が object ではない |
 
-### `POST /api/observations/wake`
+## 自律面
+
+### `POST /api/wake`
 
 - 認証: 必要
-- 役割: 起床観測を受け、wake 1 サイクルを実行する
+- 役割: 起床要求を受け、wake 1 サイクルを実行する
 
 request:
 
@@ -153,7 +155,7 @@ request:
 ```
 
 - `client_context` は object とする。値がないときは省略する
-- wake でも `client_context` の `source / active_app / window_title / locale` を観測正規化に使う
+- wake でも `client_context` の `source / active_app / window_title / locale` を起床入力の整形に使う
 
 response:
 

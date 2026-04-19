@@ -26,7 +26,7 @@ class MockLLMClient:
     def generate_recall_hint(
         self,
         role_definition: dict,
-        observation_text: str,
+        input_text: str,
         recent_turns: list[dict],
         current_time: str,
     ) -> dict[str, Any]:
@@ -34,7 +34,7 @@ class MockLLMClient:
         self._assert_mock_model(role_definition)
 
         # ヒューリスティックintent
-        normalized = observation_text.strip()
+        normalized = input_text.strip()
         lower_text = normalized.lower()
 
         primary_intent = "smalltalk"
@@ -140,7 +140,7 @@ class MockLLMClient:
         self,
         role_definition: dict,
         persona: dict,
-        observation_text: str,
+        input_text: str,
         recent_turns: list[dict],
         time_context: dict[str, Any],
         affect_context: dict[str, list[dict[str, Any]]],
@@ -152,7 +152,7 @@ class MockLLMClient:
         self._assert_mock_model(role_definition)
 
         # コンテキスト
-        normalized = observation_text.strip()
+        normalized = input_text.strip()
         primary_intent = recall_hint["primary_intent"]
         secondary_intents = self._secondary_intents(recall_hint)
         conflicts = recall_pack.get("conflicts", [])
@@ -166,8 +166,8 @@ class MockLLMClient:
         if not normalized:
             payload = {
                 "kind": "noop",
-                "reason_code": "empty_observation",
-                "reason_summary": "Observation text was empty after normalization.",
+                "reason_code": "empty_input",
+                "reason_summary": "Input text was empty after normalization.",
                 "requires_confirmation": False,
                 "pending_intent": None,
             }
@@ -227,7 +227,7 @@ class MockLLMClient:
             payload = {
                 "kind": "reply",
                 "reason_code": f"intent:{primary_intent}",
-                "reason_summary": "A normal conversation reply is appropriate for the current observation.",
+                "reason_summary": "A normal conversation reply is appropriate for the current input.",
                 "requires_confirmation": primary_intent in {"fact_query", "meta_relationship"},
                 "pending_intent": None,
             }
@@ -240,7 +240,7 @@ class MockLLMClient:
         self,
         role_definition: dict,
         persona: dict,
-        observation_text: str,
+        input_text: str,
         recent_turns: list[dict],
         time_context: dict[str, Any],
         affect_context: dict[str, list[dict[str, Any]]],
@@ -255,7 +255,7 @@ class MockLLMClient:
         persona_prompt = str(persona.get("persona_prompt", "")).strip()
         primary_intent = recall_hint["primary_intent"]
         secondary_intents = self._secondary_intents(recall_hint)
-        text = observation_text.strip()
+        text = input_text.strip()
         conflict_items = recall_pack.get("conflicts", [])
         commitment_items = recall_pack.get("active_commitments", [])
         relationship_items = recall_pack.get("relationship_model", [])
@@ -461,7 +461,7 @@ class MockLLMClient:
     def generate_memory_interpretation(
         self,
         role_definition: dict,
-        observation_text: str,
+        input_text: str,
         recall_hint: dict,
         decision: dict,
         reply_text: str | None,
@@ -470,13 +470,13 @@ class MockLLMClient:
         self._assert_mock_model(role_definition)
 
         # Episode要約
-        normalized = observation_text.strip()
+        normalized = input_text.strip()
         episode = {
             "episode_type": self._mock_episode_type(recall_hint["primary_intent"]),
             "episode_series_id": None,
             "primary_scope_type": self._mock_primary_scope_type(recall_hint["primary_intent"]),
             "primary_scope_key": self._mock_primary_scope_key(recall_hint["primary_intent"]),
-            "summary_text": normalized or "空の観測だった。",
+            "summary_text": normalized or "空の入力だった。",
             "outcome_text": reply_text or decision["reason_summary"],
             "open_loops": self._mock_open_loops(normalized, recall_hint["primary_intent"]),
             "salience": 0.72 if normalized else 0.2,
@@ -575,7 +575,7 @@ class MockLLMClient:
             anchor = f"{anchor_prefix}{section_label}の判断場面"
         elif kind == "reply":
             anchor = f"{anchor_prefix}{section_label}への返答場面"
-        elif kind == "observation":
+        elif kind == "conversation_input":
             anchor = f"{anchor_prefix}{section_label}の会話場面"
         else:
             anchor = f"{anchor_prefix}{section_label}に関する場面"
@@ -1192,10 +1192,10 @@ class MockLLMClient:
         source_pack: dict[str, Any],
     ) -> float:
         # コンテキスト特徴
-        observation_context = source_pack.get("observation_context", {})
+        input_context = source_pack.get("input_context", {})
         recent_turns = source_pack.get("recent_turns", [])
         trigger_kind = str(source_pack.get("trigger_kind") or "wake")
-        context_text = self._mock_pending_intent_context_text(observation_context, recent_turns)
+        context_text = self._mock_pending_intent_context_text(input_context, recent_turns)
         candidate_text = " ".join(
             value.strip()
             for value in (
@@ -1216,13 +1216,13 @@ class MockLLMClient:
             score += 0.15
 
         # trigger 補正
-        if trigger_kind == "desktop_watch" and isinstance(observation_context, dict):
+        if trigger_kind == "desktop_watch" and isinstance(input_context, dict):
             if any(
-                isinstance(observation_context.get(key), str) and str(observation_context.get(key)).strip()
+                isinstance(input_context.get(key), str) and str(input_context.get(key)).strip()
                 for key in ("active_app", "window_title", "locale")
             ):
                 score += 0.12
-            image_count = observation_context.get("image_count")
+            image_count = input_context.get("image_count")
             if isinstance(image_count, int) and image_count > 0:
                 score += 0.05
 
@@ -1256,9 +1256,9 @@ class MockLLMClient:
     ) -> str:
         # トリガー
         trigger_kind = str(source_pack.get("trigger_kind") or "wake")
-        observation_context = source_pack.get("observation_context", {})
-        has_foreground_context = isinstance(observation_context, dict) and any(
-            isinstance(observation_context.get(key), str) and str(observation_context.get(key)).strip()
+        input_context = source_pack.get("input_context", {})
+        has_foreground_context = isinstance(input_context, dict) and any(
+            isinstance(input_context.get(key), str) and str(input_context.get(key)).strip()
             for key in ("active_app", "window_title", "locale")
         )
 
@@ -1273,18 +1273,18 @@ class MockLLMClient:
             return "今の起床機会だけでは、この保留候補を前に出す自然さがまだ弱い。"
         if has_foreground_context:
             return "前景の文脈だけでは、この保留候補を前に出す決め手がまだ弱い。"
-        return "今の観測だけでは、この保留候補を前に出す決め手がまだ弱い。"
+        return "今の入力だけでは、この保留候補を前に出す決め手がまだ弱い。"
 
     def _mock_pending_intent_context_text(
         self,
-        observation_context: Any,
+        input_context: Any,
         recent_turns: list[dict[str, Any]],
     ) -> str:
-        # 観測文脈
+        # 入力文脈
         parts: list[str] = []
-        if isinstance(observation_context, dict):
+        if isinstance(input_context, dict):
             for key in ("source", "active_app", "window_title", "locale"):
-                value = observation_context.get(key)
+                value = input_context.get(key)
                 if isinstance(value, str) and value.strip():
                     parts.append(value.strip())
 

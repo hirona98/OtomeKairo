@@ -241,7 +241,7 @@ class ServiceMemoryMixin:
         cycle_id: str,
         finished_at: str,
         state: dict[str, Any],
-        observation_text: str,
+        input_text: str,
         events: list[dict[str, Any]],
         pipeline: dict[str, Any],
     ) -> None:
@@ -251,7 +251,7 @@ class ServiceMemoryMixin:
                 state=state,
                 cycle_id=cycle_id,
                 finished_at=finished_at,
-                observation_text=observation_text,
+                input_text=input_text,
                 recall_hint=pipeline["recall_hint"],
                 decision=pipeline["decision"],
                 reply_payload=pipeline["reply_payload"],

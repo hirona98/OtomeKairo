@@ -10,7 +10,7 @@ ACTIVE_COMMITMENT_STATES = ("open", "waiting_confirmation", "on_hold")
 ASSOCIATION_MEMORY_LIMIT = 6
 ASSOCIATION_EPISODE_LIMIT = 4
 ASSOCIATION_QUERY_KIND_WEIGHTS = {
-    "observation": 1.0,
+    "input": 1.0,
     "entity": 0.92,
     "topic": 0.88,
 }
@@ -21,12 +21,12 @@ class RecallAssociationMixin:
         self,
         *,
         state: dict[str, Any],
-        observation_text: str,
+        input_text: str,
         recall_hint: dict[str, Any],
         scope_context: dict[str, list[tuple[str, str]]],
     ) -> dict[str, list[dict[str, Any]]]:
         # クエリ仕様群
-        query_specs = self._association_query_specs(observation_text, recall_hint)
+        query_specs = self._association_query_specs(input_text, recall_hint)
         if not query_specs:
             return self._empty_association_sections()
 
@@ -134,25 +134,25 @@ class RecallAssociationMixin:
 
     def _association_query_specs(
         self,
-        observation_text: str,
+        input_text: str,
         recall_hint: dict[str, Any],
     ) -> list[dict[str, Any]]:
         # 基底状態
         specs: list[dict[str, Any]] = []
-        normalized_observation = observation_text.strip()
+        normalized_input = input_text.strip()
 
-        # 観測クエリ
-        observation_query = self._association_observation_query_text(
-            normalized_observation,
+        # 入力クエリ
+        input_query = self._association_input_query_text(
+            normalized_input,
             recall_hint,
         )
-        if observation_query:
+        if input_query:
             specs.append(
                 {
-                    "kind": "observation",
-                    "text": observation_query,
+                    "kind": "input",
+                    "text": input_query,
                     "weight": self._association_query_weight(
-                        query_kind="observation",
+                        query_kind="input",
                         recall_hint=recall_hint,
                     ),
                 }
@@ -189,17 +189,17 @@ class RecallAssociationMixin:
         # 結果
         return specs
 
-    def _association_observation_query_text(
+    def _association_input_query_text(
         self,
-        observation_text: str,
+        input_text: str,
         recall_hint: dict[str, Any],
     ) -> str:
         # 空
-        if not observation_text:
+        if not input_text:
             return ""
 
         # 部品群
-        parts = [observation_text]
+        parts = [input_text]
         primary_intent = recall_hint["primary_intent"]
         secondary_intents = self._secondary_intents(recall_hint)
         time_reference = str(recall_hint.get("time_reference", "none")).strip()
@@ -252,7 +252,7 @@ class RecallAssociationMixin:
         time_reference = recall_hint.get("time_reference")
 
         # intent補正
-        if primary_intent == "reminisce" and query_kind == "observation":
+        if primary_intent == "reminisce" and query_kind == "input":
             weight += 0.08
         if primary_intent in {"commitment_check", "meta_relationship"} and query_kind == "entity":
             weight += 0.12
@@ -260,7 +260,7 @@ class RecallAssociationMixin:
             weight += 0.12
 
         # 副次補正
-        if "reminisce" in secondary_intents and query_kind == "observation":
+        if "reminisce" in secondary_intents and query_kind == "input":
             weight += 0.04
         if "meta_relationship" in secondary_intents and query_kind == "entity":
             weight += 0.05
@@ -268,7 +268,7 @@ class RecallAssociationMixin:
             weight += 0.04
 
         # 時刻補正
-        if time_reference == "past" and query_kind == "observation":
+        if time_reference == "past" and query_kind == "input":
             weight += 0.04
         if time_reference == "future" and query_kind == "entity":
             weight += 0.04
@@ -291,7 +291,7 @@ class RecallAssociationMixin:
             base_limit = ASSOCIATION_EPISODE_LIMIT
 
         # クエリ補正
-        if query_kind == "observation":
+        if query_kind == "input":
             return base_limit
         return max(2, base_limit - 2)
 

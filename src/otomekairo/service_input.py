@@ -11,16 +11,16 @@ from otomekairo.recall import RecallPackSelectionError
 from otomekairo.service_common import ServiceError
 
 
-class ServiceObservationMixin:
-    # 観測API
-    def observe_conversation(self, token: str | None, payload: dict) -> dict[str, Any]:
+class ServiceInputMixin:
+    # 入力API
+    def handle_conversation(self, token: str | None, payload: dict) -> dict[str, Any]:
         # 認可
         state = self._require_token(token)
 
         # 検証
-        observation_text = payload.get("text")
+        input_text = payload.get("text")
         client_context = payload.get("client_context", {})
-        if not isinstance(observation_text, str):
+        if not isinstance(input_text, str):
             raise ServiceError(400, "invalid_text", "The text field must be a string.")
         if not isinstance(client_context, dict):
             raise ServiceError(400, "invalid_client_context", "The client_context field must be an object.")
@@ -33,20 +33,20 @@ class ServiceObservationMixin:
 
         try:
             # パイプライン
-            pipeline = self._run_observation_pipeline(
+            pipeline = self._run_input_pipeline(
                 state=state,
                 started_at=started_at,
-                observation_text=observation_text,
+                input_text=input_text,
                 recent_turns=recent_turns,
             )
 
             # 成功
-            return self._complete_observation_success(
+            return self._complete_input_success(
                 cycle_id=cycle_id,
                 started_at=started_at,
                 state=state,
                 runtime_summary=runtime_summary,
-                observation_text=observation_text,
+                input_text=input_text,
                 client_context=client_context,
                 pipeline=pipeline,
             )
@@ -59,7 +59,7 @@ class ServiceObservationMixin:
                 finished_at=finished_at,
                 state=state,
                 runtime_summary=runtime_summary,
-                observation_text=observation_text,
+                input_text=input_text,
                 client_context=client_context,
                 failure_reason=str(exc),
                 recall_trace=self._build_failure_recall_trace(
@@ -71,10 +71,10 @@ class ServiceObservationMixin:
                     "failure_stage": exc.failure_stage,
                 },
             )
-            self._emit_observation_failure_logs(
+            self._emit_input_failure_logs(
                 cycle_id=cycle_id,
                 trigger_kind="user_message",
-                observation_text=observation_text,
+                input_text=input_text,
                 failure_reason=str(exc),
             )
             return {
@@ -91,14 +91,14 @@ class ServiceObservationMixin:
                 finished_at=finished_at,
                 state=state,
                 runtime_summary=runtime_summary,
-                observation_text=observation_text,
+                input_text=input_text,
                 client_context=client_context,
                 failure_reason=str(exc),
             )
-            self._emit_observation_failure_logs(
+            self._emit_input_failure_logs(
                 cycle_id=cycle_id,
                 trigger_kind="user_message",
-                observation_text=observation_text,
+                input_text=input_text,
                 failure_reason=str(exc),
             )
             return {
@@ -107,17 +107,17 @@ class ServiceObservationMixin:
                 "reply": None,
             }
 
-    def _run_observation_pipeline(
+    def _run_input_pipeline(
         self,
         *,
         state: dict[str, Any],
         started_at: str,
-        observation_text: str,
+        input_text: str,
         recent_turns: list[dict[str, Any]],
     ) -> dict[str, Any]:
         # モデル選択
         selected_preset = state["model_presets"][state["selected_model_preset_id"]]
-        recall_role = selected_preset["roles"]["observation_interpretation"]
+        recall_role = selected_preset["roles"]["input_interpretation"]
         decision_role = selected_preset["roles"]["decision_generation"]
         reply_role = selected_preset["roles"]["expression_generation"]
         persona = state["personas"][state["selected_persona_id"]]
@@ -125,7 +125,7 @@ class ServiceObservationMixin:
         # recall_hint生成
         recall_hint = self.llm.generate_recall_hint(
             role_definition=recall_role,
-            observation_text=observation_text,
+            input_text=input_text,
             recent_turns=recent_turns,
             current_time=started_at,
         )
@@ -133,7 +133,7 @@ class ServiceObservationMixin:
         # recall_pack構築
         recall_pack = self.recall.build_recall_pack(
             state=state,
-            observation_text=observation_text,
+            input_text=input_text,
             recall_hint=recall_hint,
         )
 
@@ -148,7 +148,7 @@ class ServiceObservationMixin:
         decision = self.llm.generate_decision(
             role_definition=decision_role,
             persona=persona,
-            observation_text=observation_text,
+            input_text=input_text,
             recent_turns=recent_turns,
             time_context=time_context,
             affect_context=affect_context,
@@ -162,7 +162,7 @@ class ServiceObservationMixin:
             reply_payload = self.llm.generate_reply(
                 role_definition=reply_role,
                 persona=persona,
-                observation_text=observation_text,
+                input_text=input_text,
                 recent_turns=recent_turns,
                 time_context=time_context,
                 affect_context=affect_context,
@@ -191,8 +191,8 @@ class ServiceObservationMixin:
         selected_candidate: dict[str, Any] | None,
         pending_intent_selection: dict[str, Any] | None = None,
     ) -> tuple[dict[str, Any], str]:
-        # 観測テキスト
-        observation_text = self._build_wake_observation_text(
+        # 入力テキスト
+        input_text = self._build_wake_input_text(
             client_context=client_context,
             selected_candidate=selected_candidate,
         )
@@ -200,13 +200,13 @@ class ServiceObservationMixin:
         # 起床ポリシー
         due = self._wake_is_due(state=state, current_time=started_at)
         if due["should_skip"]:
-            return self._noop_pipeline(started_at=started_at, reason_summary=due["reason_summary"]), observation_text
+            return self._noop_pipeline(started_at=started_at, reason_summary=due["reason_summary"]), input_text
 
         # クールダウン
         cooldown_reason = self._wake_cooldown_reason(current_time=started_at)
         if cooldown_reason is not None:
             self._set_last_wake_at(started_at)
-            return self._noop_pipeline(started_at=started_at, reason_summary=cooldown_reason), observation_text
+            return self._noop_pipeline(started_at=started_at, reason_summary=cooldown_reason), input_text
 
         # 候補
         if selected_candidate is None:
@@ -225,7 +225,7 @@ class ServiceObservationMixin:
                     started_at=started_at,
                     reason_summary=reason_summary,
                 ),
-                observation_text,
+                input_text,
             )
 
         # 返信抑制
@@ -239,34 +239,34 @@ class ServiceObservationMixin:
                     started_at=started_at,
                     reason_summary="同じ pending_intent 候補には最近 reply 済みのため、今回は再介入しない。",
                 ),
-                observation_text,
+                input_text,
             )
 
         # トリガー集計
         self._set_last_wake_at(started_at)
 
-        # 起床観測
-        pipeline = self._run_observation_pipeline(
+        # 起床入力
+        pipeline = self._run_input_pipeline(
             state=state,
             started_at=started_at,
-            observation_text=observation_text,
+            input_text=input_text,
             recent_turns=recent_turns,
         )
-        return pipeline, observation_text
+        return pipeline, input_text
 
-    def _complete_observation_success(
+    def _complete_input_success(
         self,
         *,
         cycle_id: str,
         started_at: str,
         state: dict[str, Any],
         runtime_summary: dict[str, Any],
-        observation_text: str,
+        input_text: str,
         client_context: dict[str, Any],
         pipeline: dict[str, Any],
         trigger_kind: str = "user_message",
-        observation_event_kind: str = "observation",
-        observation_event_role: str = "user",
+        input_event_kind: str = "conversation_input",
+        input_event_role: str = "user",
         consolidate_memory: bool = True,
         pending_intent_selection: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -290,7 +290,7 @@ class ServiceObservationMixin:
             finished_at=finished_at,
             state=state,
             runtime_summary=runtime_summary,
-            observation_text=observation_text,
+            input_text=input_text,
             client_context=client_context,
             recall_hint=pipeline["recall_hint"],
             recall_pack=pipeline["recall_pack"],
@@ -301,16 +301,16 @@ class ServiceObservationMixin:
             reply_payload=reply_payload,
             pending_intent_summary=pending_intent_summary,
             trigger_kind=trigger_kind,
-            observation_event_kind=observation_event_kind,
-            observation_event_role=observation_event_role,
+            input_event_kind=input_event_kind,
+            input_event_role=input_event_role,
             pending_intent_selection=pending_intent_selection,
         )
 
         # デバッグログ群
-        self._emit_observation_success_logs(
+        self._emit_input_success_logs(
             cycle_id=cycle_id,
             trigger_kind=trigger_kind,
-            observation_text=observation_text,
+            input_text=input_text,
             pipeline=pipeline,
             result_kind=result_kind,
             reply_payload=reply_payload,
@@ -323,7 +323,7 @@ class ServiceObservationMixin:
                 cycle_id=cycle_id,
                 finished_at=finished_at,
                 state=state,
-                observation_text=observation_text,
+                input_text=input_text,
                 events=events,
                 pipeline=pipeline,
             )
@@ -387,12 +387,12 @@ class ServiceObservationMixin:
             "conflicts": len(recall_pack["conflicts"]),
         }
 
-    def _emit_observation_success_logs(
+    def _emit_input_success_logs(
         self,
         *,
         cycle_id: str,
         trigger_kind: str,
-        observation_text: str,
+        input_text: str,
         pipeline: dict[str, Any],
         result_kind: str,
         reply_payload: dict[str, Any] | None,
@@ -417,10 +417,10 @@ class ServiceObservationMixin:
         logs = [
             self._build_live_log_record(
                 level="INFO",
-                component="Observation",
+                component="Input",
                 message=(
                     f"{self._short_cycle_id(cycle_id)} trigger={trigger_kind} "
-                    f"input={self._clamp(observation_text)}"
+                    f"input={self._clamp(input_text)}"
                 ),
             ),
             self._build_live_log_record(
@@ -483,7 +483,7 @@ class ServiceObservationMixin:
                 1,
                 self._build_live_log_record(
                     level="INFO",
-                    component="Observation",
+                    component="Input",
                     message=(
                         f"{self._short_cycle_id(cycle_id)} pending_intent_selection "
                         f"pool={pending_intent_selection.get('candidate_pool_count', 0)} "
@@ -496,12 +496,12 @@ class ServiceObservationMixin:
             )
         self._log_stream_registry.append_logs(logs)
 
-    def _emit_observation_failure_logs(
+    def _emit_input_failure_logs(
         self,
         *,
         cycle_id: str,
         trigger_kind: str,
-        observation_text: str,
+        input_text: str,
         failure_reason: str,
         pending_intent_selection: dict[str, Any] | None = None,
     ) -> None:
@@ -509,10 +509,10 @@ class ServiceObservationMixin:
         logs = [
             self._build_live_log_record(
                 level="INFO",
-                component="Observation",
+                component="Input",
                 message=(
                     f"{self._short_cycle_id(cycle_id)} trigger={trigger_kind} "
-                    f"input={self._clamp(observation_text)}"
+                    f"input={self._clamp(input_text)}"
                 ),
             ),
             self._build_live_log_record(
@@ -532,7 +532,7 @@ class ServiceObservationMixin:
                 1,
                 self._build_live_log_record(
                     level="INFO",
-                    component="Observation",
+                    component="Input",
                     message=(
                         f"{self._short_cycle_id(cycle_id)} pending_intent_selection "
                         f"pool={pending_intent_selection.get('candidate_pool_count', 0)} "
@@ -909,9 +909,9 @@ class ServiceObservationMixin:
         *,
         cycle_id: str,
         memory_set_id: str,
-        observation_event_kind: str,
-        observation_event_role: str,
-        observation_text: str,
+        input_event_kind: str,
+        input_event_role: str,
+        input_text: str,
         started_at: str,
         finished_at: str,
         decision: dict[str, Any] | None = None,
@@ -922,15 +922,15 @@ class ServiceObservationMixin:
         failure_event_kind: str = "recall_hint_failure",
         failure_event_payload: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
-        # 観測イベント
+        # 入力イベント
         events = [
             {
                 "event_id": f"event:{uuid.uuid4().hex}",
                 "cycle_id": cycle_id,
                 "memory_set_id": memory_set_id,
-                "kind": observation_event_kind,
-                "role": observation_event_role,
-                "text": observation_text,
+                "kind": input_event_kind,
+                "role": input_event_role,
+                "text": input_text,
                 "created_at": started_at,
             }
         ]
@@ -1076,7 +1076,7 @@ class ServiceObservationMixin:
         *,
         cycle_id: str,
         cycle_summary: dict[str, Any],
-        observation_text: str,
+        input_text: str,
         client_context: dict[str, Any],
         runtime_summary: dict[str, Any],
         recall_trace: dict[str, Any],
@@ -1088,11 +1088,11 @@ class ServiceObservationMixin:
         return {
             "cycle_id": cycle_id,
             "cycle_summary": cycle_summary,
-            "observation_trace": {
+            "input_trace": {
                 "trigger_kind": cycle_summary["trigger_kind"],
-                "user_input_summary": self._clamp(observation_text),
+                "input_summary": self._clamp(input_text),
                 "client_context_summary": self._clamp(str(client_context)),
-                "normalized_observation_summary": self._clamp(observation_text.strip()),
+                "normalized_input_summary": self._clamp(input_text.strip()),
                 "runtime_state_summary": runtime_summary,
                 "pending_intent_selection": pending_intent_selection or self._empty_pending_intent_selection_trace(),
             },
@@ -1146,7 +1146,7 @@ class ServiceObservationMixin:
         self,
         *,
         state: dict[str, Any],
-        observation_text: str,
+        input_text: str,
         time_context: dict[str, Any],
         affect_context: dict[str, list[dict[str, Any]]],
         recall_pack: dict[str, Any],
@@ -1158,7 +1158,7 @@ class ServiceObservationMixin:
             "reason_summary": decision["reason_summary"],
             "persona_summary": state["personas"][state["selected_persona_id"]]["display_name"],
             "memory_summary": state["memory_sets"][state["selected_memory_set_id"]]["display_name"],
-            "current_context_summary": self._clamp(observation_text),
+            "current_context_summary": self._clamp(input_text),
             "internal_context_summary": {
                 "time_context": time_context,
                 "affect_context_summary": self._summarize_affect_context(affect_context),
@@ -1172,7 +1172,7 @@ class ServiceObservationMixin:
         self,
         *,
         state: dict[str, Any],
-        observation_text: str,
+        input_text: str,
         failure_reason: str,
     ) -> dict[str, Any]:
         return {
@@ -1180,7 +1180,7 @@ class ServiceObservationMixin:
             "reason_summary": failure_reason,
             "persona_summary": state["personas"][state["selected_persona_id"]]["display_name"],
             "memory_summary": state["memory_sets"][state["selected_memory_set_id"]]["display_name"],
-            "current_context_summary": self._clamp(observation_text),
+            "current_context_summary": self._clamp(input_text),
             "primary_candidate_kind": None,
         }
 
@@ -1227,7 +1227,7 @@ class ServiceObservationMixin:
         finished_at: str,
         state: dict[str, Any],
         runtime_summary: dict[str, Any],
-        observation_text: str,
+        input_text: str,
         client_context: dict[str, Any],
         recall_hint: dict[str, Any],
         recall_pack: dict[str, Any],
@@ -1238,17 +1238,17 @@ class ServiceObservationMixin:
         reply_payload: dict[str, Any] | None,
         pending_intent_summary: dict[str, Any] | None,
         trigger_kind: str,
-        observation_event_kind: str,
-        observation_event_role: str,
+        input_event_kind: str,
+        input_event_role: str,
         pending_intent_selection: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         memory_set_id = state["selected_memory_set_id"]
         events = self._build_cycle_events(
             cycle_id=cycle_id,
             memory_set_id=memory_set_id,
-            observation_event_kind=observation_event_kind,
-            observation_event_role=observation_event_role,
-            observation_text=observation_text,
+            input_event_kind=input_event_kind,
+            input_event_role=input_event_role,
+            input_text=input_text,
             started_at=started_at,
             finished_at=finished_at,
             decision=decision,
@@ -1284,13 +1284,13 @@ class ServiceObservationMixin:
         cycle_trace = self._build_cycle_trace(
             cycle_id=cycle_id,
             cycle_summary=cycle_summary,
-            observation_text=observation_text,
+            input_text=input_text,
             client_context=client_context,
             runtime_summary=runtime_summary,
             recall_trace=self._build_success_recall_trace(recall_hint, recall_pack),
             decision_trace=self._build_success_decision_trace(
                 state=state,
-                observation_text=observation_text,
+                input_text=input_text,
                 time_context=time_context,
                 affect_context=affect_context,
                 recall_pack=recall_pack,
@@ -1324,12 +1324,12 @@ class ServiceObservationMixin:
         finished_at: str,
         state: dict[str, Any],
         runtime_summary: dict[str, Any],
-        observation_text: str,
+        input_text: str,
         client_context: dict[str, Any],
         failure_reason: str,
         trigger_kind: str = "user_message",
-        observation_event_kind: str = "observation",
-        observation_event_role: str = "user",
+        input_event_kind: str = "conversation_input",
+        input_event_role: str = "user",
         recall_trace: dict[str, Any] | None = None,
         failure_event_kind: str = "recall_hint_failure",
         failure_event_payload: dict[str, Any] | None = None,
@@ -1339,9 +1339,9 @@ class ServiceObservationMixin:
         events = self._build_cycle_events(
             cycle_id=cycle_id,
             memory_set_id=memory_set_id,
-            observation_event_kind=observation_event_kind,
-            observation_event_role=observation_event_role,
-            observation_text=observation_text,
+            input_event_kind=input_event_kind,
+            input_event_role=input_event_role,
+            input_text=input_text,
             started_at=started_at,
             finished_at=finished_at,
             failure_reason=failure_reason,
@@ -1367,13 +1367,13 @@ class ServiceObservationMixin:
         cycle_trace = self._build_cycle_trace(
             cycle_id=cycle_id,
             cycle_summary=cycle_summary,
-            observation_text=observation_text,
+            input_text=input_text,
             client_context=client_context,
             runtime_summary=runtime_summary,
             recall_trace=recall_trace or self._build_failure_recall_trace(),
             decision_trace=self._build_failure_decision_trace(
                 state=state,
-                observation_text=observation_text,
+                input_text=input_text,
                 failure_reason=failure_reason,
             ),
             result_trace=self._build_failure_result_trace(

@@ -14,7 +14,7 @@ from otomekairo.memory_utils import display_local_iso, localize_timestamp_fields
 # RecallHint 用の message 群を組み立てる。
 def build_recall_hint_messages(
     *,
-    observation_text: str,
+    input_text: str,
     recent_turns: list[dict],
     current_time: str,
 ) -> list[dict[str, str]]:
@@ -25,7 +25,7 @@ def build_recall_hint_messages(
         },
         {
             "role": "user",
-            "content": _build_recall_hint_user_prompt(observation_text, recent_turns, current_time),
+            "content": _build_recall_hint_user_prompt(input_text, recent_turns, current_time),
         },
     ]
 
@@ -34,7 +34,7 @@ def build_recall_hint_messages(
 def build_decision_messages(
     *,
     persona: dict,
-    observation_text: str,
+    input_text: str,
     recent_turns: list[dict],
     time_context: dict[str, Any],
     affect_context: dict[str, list[dict[str, Any]]],
@@ -49,7 +49,7 @@ def build_decision_messages(
         {
             "role": "user",
             "content": _build_decision_user_prompt(
-                observation_text=observation_text,
+                input_text=input_text,
                 recent_turns=recent_turns,
                 time_context=time_context,
                 affect_context=affect_context,
@@ -64,7 +64,7 @@ def build_decision_messages(
 def build_reply_messages(
     *,
     persona: dict,
-    observation_text: str,
+    input_text: str,
     recent_turns: list[dict],
     time_context: dict[str, Any],
     affect_context: dict[str, list[dict[str, Any]]],
@@ -80,7 +80,7 @@ def build_reply_messages(
         {
             "role": "user",
             "content": _build_reply_user_prompt(
-                observation_text=observation_text,
+                input_text=input_text,
                 recent_turns=recent_turns,
                 time_context=time_context,
                 affect_context=affect_context,
@@ -95,7 +95,7 @@ def build_reply_messages(
 # MemoryInterpretation 用の message 群を組み立てる。
 def build_memory_interpretation_messages(
     *,
-    observation_text: str,
+    input_text: str,
     recall_hint: dict,
     decision: dict,
     reply_text: str | None,
@@ -109,7 +109,7 @@ def build_memory_interpretation_messages(
         {
             "role": "user",
             "content": _build_memory_interpretation_user_prompt(
-                observation_text=observation_text,
+                input_text=input_text,
                 recall_hint=recall_hint,
                 decision=decision,
                 reply_text=reply_text,
@@ -258,8 +258,8 @@ def build_pending_intent_selection_repair_prompt(validation_error: str) -> str:
 # RecallHint system prompt。
 def _build_recall_hint_system_prompt() -> str:
     return (
-        "あなたは OtomeKairo の observation_interpretation です。\n"
-        "観測文を分析し、JSON オブジェクト 1 個だけを返してください。\n"
+        "あなたは OtomeKairo の input_interpretation です。\n"
+        "入力文を分析し、JSON オブジェクト 1 個だけを返してください。\n"
         "Markdown、コードフェンス、説明文は禁止です。\n"
         "primary_intent は次のいずれかです: "
         + ", ".join(sorted(INTENT_VALUES))
@@ -281,14 +281,14 @@ def _build_recall_hint_system_prompt() -> str:
 
 
 def _build_recall_hint_user_prompt(
-    observation_text: str,
+    input_text: str,
     recent_turns: list[dict],
     current_time: str,
 ) -> str:
     return (
         f"current_time: {display_local_iso(current_time)}\n"
         f"recent_turns:\n{_format_recent_turns(recent_turns)}\n"
-        f"observation_text:\n{observation_text.strip()}\n"
+        f"input_text:\n{input_text.strip()}\n"
     )
 
 
@@ -299,7 +299,7 @@ def _build_decision_system_prompt(persona: dict) -> str:
         f"あなたは {display_name} の判断を作る decision_generation です。\n"
         "人格設定本文:\n"
         f"{persona_prompt or 'なし'}\n"
-        "観測文に対して reply / noop / pending_intent のいずれかを決め、JSON オブジェクト 1 個だけを返してください。\n"
+        "入力文に対して reply / noop / pending_intent のいずれかを決め、JSON オブジェクト 1 個だけを返してください。\n"
         "Markdown、コードフェンス、説明文は禁止です。\n"
         "入力には recent_turns と internal_context が含まれます。\n"
         "internal_context には TimeContext, AffectContext, RecallPack が入ります。\n"
@@ -323,7 +323,7 @@ def _build_decision_system_prompt(persona: dict) -> str:
 
 def _build_decision_user_prompt(
     *,
-    observation_text: str,
+    input_text: str,
     recent_turns: list[dict],
     time_context: dict[str, Any],
     affect_context: dict[str, list[dict[str, Any]]],
@@ -334,7 +334,7 @@ def _build_decision_user_prompt(
         f"recent_turns:\n{_format_recent_turns(recent_turns)}\n"
         "internal_context:\n"
         f"{_format_internal_context(time_context, affect_context, recall_pack)}\n"
-        f"observation_text:\n{observation_text.strip()}\n"
+        f"input_text:\n{input_text.strip()}\n"
         "recall_hint:\n"
         f"{json.dumps(recall_hint, ensure_ascii=False)}\n"
     )
@@ -363,7 +363,7 @@ def _build_reply_system_prompt(persona: dict) -> str:
 
 def _build_reply_user_prompt(
     *,
-    observation_text: str,
+    input_text: str,
     recent_turns: list[dict],
     time_context: dict[str, Any],
     affect_context: dict[str, list[dict[str, Any]]],
@@ -375,7 +375,7 @@ def _build_reply_user_prompt(
         f"recent_turns:\n{_format_recent_turns(recent_turns)}\n"
         "internal_context:\n"
         f"{_format_internal_context(time_context, affect_context, recall_pack)}\n"
-        f"observation_text:\n{observation_text.strip()}\n"
+        f"input_text:\n{input_text.strip()}\n"
         "recall_hint:\n"
         f"{json.dumps(recall_hint, ensure_ascii=False)}\n"
         "decision:\n"
@@ -497,7 +497,7 @@ def _build_pending_intent_selection_system_prompt() -> str:
         "返すトップレベルキーは selected_candidate_ref, selection_reason の 2 つだけです。\n"
         "selected_candidate_ref は source pack にある candidate_ref か none だけを使ってください。\n"
         "候補外のものを足してはいけません。内部識別子を書いてはいけません。\n"
-        "oldest-first で選ばず、trigger_kind と observation_context に照らして今前に出す自然さを優先してください。\n"
+        "oldest-first で選ばず、trigger_kind と input_context に照らして今前に出す自然さを優先してください。\n"
         "wake では慎重に選び、自然さが弱いなら none を返してください。\n"
         "desktop_watch では active_app / window_title / locale / image_count だけを手掛かりにしてください。\n"
         "image の意味理解はまだ行いません。\n"
@@ -507,7 +507,7 @@ def _build_pending_intent_selection_system_prompt() -> str:
 
 def _build_memory_interpretation_user_prompt(
     *,
-    observation_text: str,
+    input_text: str,
     recall_hint: dict,
     decision: dict,
     reply_text: str | None,
@@ -515,7 +515,7 @@ def _build_memory_interpretation_user_prompt(
 ) -> str:
     return (
         f"current_time: {display_local_iso(current_time)}\n"
-        f"observation_text:\n{observation_text.strip()}\n"
+        f"input_text:\n{input_text.strip()}\n"
         "recall_hint:\n"
         f"{json.dumps(recall_hint, ensure_ascii=False)}\n"
         "decision:\n"

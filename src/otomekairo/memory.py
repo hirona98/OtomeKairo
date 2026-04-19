@@ -33,7 +33,7 @@ class MemoryConsolidator:
         state: dict[str, Any],
         cycle_id: str,
         finished_at: str,
-        observation_text: str,
+        input_text: str,
         recall_hint: dict[str, Any],
         decision: dict[str, Any],
         reply_payload: dict[str, Any] | None,
@@ -46,7 +46,7 @@ class MemoryConsolidator:
         # 解釈
         interpretation = self.llm.generate_memory_interpretation(
             role_definition=memory_role,
-            observation_text=observation_text,
+            input_text=input_text,
             recall_hint=recall_hint,
             decision=decision,
             reply_text=reply_payload["reply_text"] if reply_payload else None,

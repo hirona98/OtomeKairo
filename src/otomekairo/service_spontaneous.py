@@ -33,7 +33,7 @@ class PendingIntentSelectionError(LLMError):
 
 # 自発Mixin
 class ServiceSpontaneousMixin:
-    def observe_wake(self, token: str | None, payload: dict[str, Any]) -> dict[str, Any]:
+    def trigger_wake(self, token: str | None, payload: dict[str, Any]) -> dict[str, Any]:
         # 認可
         state = self._require_token(token)
 
@@ -118,7 +118,7 @@ class ServiceSpontaneousMixin:
             recent_turns = self._load_recent_turns(state)
             runtime_summary = self._build_runtime_summary(state)
             pending_intent_selection = self._empty_pending_intent_selection_trace()
-            observation_text = self._build_wake_observation_text(
+            input_text = self._build_wake_input_text(
                 client_context=client_context,
                 selected_candidate=None,
             )
@@ -131,17 +131,17 @@ class ServiceSpontaneousMixin:
                         started_at=started_at,
                         reason_summary=due["reason_summary"],
                     )
-                    return self._complete_observation_success(
+                    return self._complete_input_success(
                         cycle_id=cycle_id,
                         started_at=started_at,
                         state=state,
                         runtime_summary=runtime_summary,
-                        observation_text=observation_text,
+                        input_text=input_text,
                         client_context=client_context,
                         pipeline=pipeline,
                         trigger_kind=trigger_kind,
-                        observation_event_kind="wake",
-                        observation_event_role="system",
+                        input_event_kind="wake",
+                        input_event_role="system",
                         consolidate_memory=False,
                         pending_intent_selection=pending_intent_selection,
                     )
@@ -152,17 +152,17 @@ class ServiceSpontaneousMixin:
                         started_at=started_at,
                         reason_summary=cooldown_reason,
                     )
-                    return self._complete_observation_success(
+                    return self._complete_input_success(
                         cycle_id=cycle_id,
                         started_at=started_at,
                         state=state,
                         runtime_summary=runtime_summary,
-                        observation_text=observation_text,
+                        input_text=input_text,
                         client_context=client_context,
                         pipeline=pipeline,
                         trigger_kind=trigger_kind,
-                        observation_event_kind="wake",
-                        observation_event_role="system",
+                        input_event_kind="wake",
+                        input_event_role="system",
                         consolidate_memory=False,
                         pending_intent_selection=pending_intent_selection,
                     )
@@ -177,7 +177,7 @@ class ServiceSpontaneousMixin:
                 )
                 selected_candidate = selection_result["selected_candidate"]
                 pending_intent_selection = selection_result["pending_intent_selection"]
-                pipeline, observation_text = self._run_wake_pipeline(
+                pipeline, input_text = self._run_wake_pipeline(
                     state=state,
                     started_at=started_at,
                     client_context=client_context,
@@ -187,17 +187,17 @@ class ServiceSpontaneousMixin:
                 )
 
                 # 成功
-                response = self._complete_observation_success(
+                response = self._complete_input_success(
                     cycle_id=cycle_id,
                     started_at=started_at,
                     state=state,
                     runtime_summary=runtime_summary,
-                    observation_text=observation_text,
+                    input_text=input_text,
                     client_context=client_context,
                     pipeline=pipeline,
                     trigger_kind=trigger_kind,
-                    observation_event_kind="wake",
-                    observation_event_role="system",
+                    input_event_kind="wake",
+                    input_event_role="system",
                     consolidate_memory=False,
                     pending_intent_selection=pending_intent_selection,
                 )
@@ -218,22 +218,22 @@ class ServiceSpontaneousMixin:
                     finished_at=finished_at,
                     state=state,
                     runtime_summary=runtime_summary,
-                    observation_text=observation_text,
+                    input_text=input_text,
                     client_context=client_context,
                     failure_reason=str(exc),
                     trigger_kind=trigger_kind,
-                    observation_event_kind="wake",
-                    observation_event_role="system",
+                    input_event_kind="wake",
+                    input_event_role="system",
                     failure_event_kind="pending_intent_selection_failure",
                     failure_event_payload={
                         "failure_stage": exc.failure_stage,
                     },
                     pending_intent_selection=exc.pending_intent_selection,
                 )
-                self._emit_observation_failure_logs(
+                self._emit_input_failure_logs(
                     cycle_id=cycle_id,
                     trigger_kind=trigger_kind,
-                    observation_text=observation_text,
+                    input_text=input_text,
                     failure_reason=str(exc),
                     pending_intent_selection=exc.pending_intent_selection,
                 )
@@ -251,12 +251,12 @@ class ServiceSpontaneousMixin:
                     finished_at=finished_at,
                     state=state,
                     runtime_summary=runtime_summary,
-                    observation_text=observation_text,
+                    input_text=input_text,
                     client_context=client_context,
                     failure_reason=str(exc),
                     trigger_kind=trigger_kind,
-                    observation_event_kind="wake",
-                    observation_event_role="system",
+                    input_event_kind="wake",
+                    input_event_role="system",
                     recall_trace=self._build_failure_recall_trace(
                         recall_hint=exc.recall_hint_summary,
                         recall_pack_selection=exc.recall_pack_selection,
@@ -267,10 +267,10 @@ class ServiceSpontaneousMixin:
                     },
                     pending_intent_selection=pending_intent_selection,
                 )
-                self._emit_observation_failure_logs(
+                self._emit_input_failure_logs(
                     cycle_id=cycle_id,
                     trigger_kind=trigger_kind,
-                    observation_text=observation_text,
+                    input_text=input_text,
                     failure_reason=str(exc),
                     pending_intent_selection=pending_intent_selection,
                 )
@@ -288,18 +288,18 @@ class ServiceSpontaneousMixin:
                     finished_at=finished_at,
                     state=state,
                     runtime_summary=runtime_summary,
-                    observation_text=observation_text,
+                    input_text=input_text,
                     client_context=client_context,
                     failure_reason=str(exc),
                     trigger_kind=trigger_kind,
-                    observation_event_kind="wake",
-                    observation_event_role="system",
+                    input_event_kind="wake",
+                    input_event_role="system",
                     pending_intent_selection=pending_intent_selection,
                 )
-                self._emit_observation_failure_logs(
+                self._emit_input_failure_logs(
                     cycle_id=cycle_id,
                     trigger_kind=trigger_kind,
-                    observation_text=observation_text,
+                    input_text=input_text,
                     failure_reason=str(exc),
                     pending_intent_selection=pending_intent_selection,
                 )
@@ -419,7 +419,7 @@ class ServiceSpontaneousMixin:
             self._set_last_desktop_watch_at(self._now_iso())
 
             client_context = self._build_desktop_watch_client_context(capture_response)
-            observation_text = self._build_desktop_watch_observation_text(client_context=client_context, selected_candidate=None)
+            input_text = self._build_desktop_watch_input_text(client_context=client_context, selected_candidate=None)
 
             # スナップショット
             cycle_id = self._new_cycle_id()
@@ -438,31 +438,31 @@ class ServiceSpontaneousMixin:
                 )
                 selected_candidate = selection_result["selected_candidate"]
                 pending_intent_selection = selection_result["pending_intent_selection"]
-                observation_text = self._build_desktop_watch_observation_text(
+                input_text = self._build_desktop_watch_input_text(
                     client_context=client_context,
                     selected_candidate=selected_candidate,
                 )
 
                 # パイプライン
-                pipeline = self._run_observation_pipeline(
+                pipeline = self._run_input_pipeline(
                     state=state,
                     started_at=started_at,
-                    observation_text=observation_text,
+                    input_text=input_text,
                     recent_turns=recent_turns,
                 )
 
                 # 成功
-                self._complete_observation_success(
+                self._complete_input_success(
                     cycle_id=cycle_id,
                     started_at=started_at,
                     state=state,
                     runtime_summary=runtime_summary,
-                    observation_text=observation_text,
+                    input_text=input_text,
                     client_context=client_context,
                     pipeline=pipeline,
                     trigger_kind="desktop_watch",
-                    observation_event_kind="desktop_watch",
-                    observation_event_role="system",
+                    input_event_kind="desktop_watch",
+                    input_event_role="system",
                     consolidate_memory=False,
                     pending_intent_selection=pending_intent_selection,
                 )
@@ -483,22 +483,22 @@ class ServiceSpontaneousMixin:
                     finished_at=self._now_iso(),
                     state=state,
                     runtime_summary=runtime_summary,
-                    observation_text=observation_text,
+                    input_text=input_text,
                     client_context=client_context,
                     failure_reason=str(exc),
                     trigger_kind="desktop_watch",
-                    observation_event_kind="desktop_watch",
-                    observation_event_role="system",
+                    input_event_kind="desktop_watch",
+                    input_event_role="system",
                     failure_event_kind="pending_intent_selection_failure",
                     failure_event_payload={
                         "failure_stage": exc.failure_stage,
                     },
                     pending_intent_selection=exc.pending_intent_selection,
                 )
-                self._emit_observation_failure_logs(
+                self._emit_input_failure_logs(
                     cycle_id=cycle_id,
                     trigger_kind="desktop_watch",
-                    observation_text=observation_text,
+                    input_text=input_text,
                     failure_reason=str(exc),
                     pending_intent_selection=exc.pending_intent_selection,
                 )
@@ -510,12 +510,12 @@ class ServiceSpontaneousMixin:
                     finished_at=self._now_iso(),
                     state=state,
                     runtime_summary=runtime_summary,
-                    observation_text=observation_text,
+                    input_text=input_text,
                     client_context=client_context,
                     failure_reason=str(exc),
                     trigger_kind="desktop_watch",
-                    observation_event_kind="desktop_watch",
-                    observation_event_role="system",
+                    input_event_kind="desktop_watch",
+                    input_event_role="system",
                     recall_trace=self._build_failure_recall_trace(
                         recall_hint=exc.recall_hint_summary,
                         recall_pack_selection=exc.recall_pack_selection,
@@ -526,10 +526,10 @@ class ServiceSpontaneousMixin:
                     },
                     pending_intent_selection=pending_intent_selection,
                 )
-                self._emit_observation_failure_logs(
+                self._emit_input_failure_logs(
                     cycle_id=cycle_id,
                     trigger_kind="desktop_watch",
-                    observation_text=observation_text,
+                    input_text=input_text,
                     failure_reason=str(exc),
                     pending_intent_selection=pending_intent_selection,
                 )
@@ -541,18 +541,18 @@ class ServiceSpontaneousMixin:
                     finished_at=self._now_iso(),
                     state=state,
                     runtime_summary=runtime_summary,
-                    observation_text=observation_text,
+                    input_text=input_text,
                     client_context=client_context,
                     failure_reason=str(exc),
                     trigger_kind="desktop_watch",
-                    observation_event_kind="desktop_watch",
-                    observation_event_role="system",
+                    input_event_kind="desktop_watch",
+                    input_event_role="system",
                     pending_intent_selection=pending_intent_selection,
                 )
-                self._emit_observation_failure_logs(
+                self._emit_input_failure_logs(
                     cycle_id=cycle_id,
                     trigger_kind="desktop_watch",
-                    observation_text=observation_text,
+                    input_text=input_text,
                     failure_reason=str(exc),
                     pending_intent_selection=pending_intent_selection,
                 )
@@ -709,7 +709,7 @@ class ServiceSpontaneousMixin:
     ) -> dict[str, Any]:
         return {
             "trigger_kind": trigger_kind,
-            "observation_context": self._build_pending_intent_selection_observation_context(
+            "input_context": self._build_pending_intent_selection_input_context(
                 trigger_kind=trigger_kind,
                 client_context=client_context,
             ),
@@ -728,7 +728,7 @@ class ServiceSpontaneousMixin:
             ],
         }
 
-    def _build_pending_intent_selection_observation_context(
+    def _build_pending_intent_selection_input_context(
         self,
         *,
         trigger_kind: str,
@@ -1010,7 +1010,7 @@ class ServiceSpontaneousMixin:
             "image_count": len(capture_response.get("images", [])),
         }
 
-    def _build_desktop_watch_observation_text(
+    def _build_desktop_watch_input_text(
         self,
         *,
         client_context: dict[str, Any],
@@ -1019,14 +1019,14 @@ class ServiceSpontaneousMixin:
         # プレフィックス
         parts = ["desktop_watch 観測。"]
         parts.extend(
-            self._client_context_observation_parts(
+            self._client_context_input_parts(
                 client_context=client_context,
                 include_source=False,
                 include_capture=True,
             )
         )
         if selected_candidate is not None:
-            parts.append(self._wake_observation_text(selected_candidate))
+            parts.append(self._wake_input_text(selected_candidate))
             parts.append("いま保留中の会話候補を再評価したい。")
         return " ".join(parts)
 
@@ -1144,14 +1144,14 @@ class ServiceSpontaneousMixin:
         # タイムスタンプ
         return (self._parse_iso(current_time) + timedelta(minutes=WAKE_REPLY_COOLDOWN_MINUTES)).isoformat()
 
-    def _wake_observation_text(self, candidate: dict[str, Any]) -> str:
+    def _wake_input_text(self, candidate: dict[str, Any]) -> str:
         # intent判定
         intent_kind = candidate.get("intent_kind", "conversation_follow_up")
         if intent_kind == "conversation_follow_up":
             return "約束の続きとして会話を再開したい。いま話しかける価値があるかを見たい。"
         return "定期起床。未完了の保留候補を再評価したい。"
 
-    def _build_wake_observation_text(
+    def _build_wake_input_text(
         self,
         *,
         client_context: dict[str, Any],
@@ -1160,18 +1160,18 @@ class ServiceSpontaneousMixin:
         # プレフィックス
         parts = ["定期起床。"]
         parts.extend(
-            self._client_context_observation_parts(
+            self._client_context_input_parts(
                 client_context=client_context,
                 include_source=True,
                 include_capture=False,
             )
         )
         if selected_candidate is not None:
-            parts.append(self._wake_observation_text(selected_candidate))
+            parts.append(self._wake_input_text(selected_candidate))
             parts.append("いま保留中の会話候補を再評価したい。")
         return " ".join(parts)
 
-    def _client_context_observation_parts(
+    def _client_context_input_parts(
         self,
         *,
         client_context: dict[str, Any],
@@ -1188,9 +1188,9 @@ class ServiceSpontaneousMixin:
         # source取得
         if include_source and isinstance(source, str):
             if source == "background_wake_scheduler":
-                parts.append("観測源は background wake scheduler。")
+                parts.append("入力源は background wake scheduler。")
             else:
-                parts.append(f"観測源は {source}。")
+                parts.append(f"入力源は {source}。")
 
         # 前景
         if isinstance(active_app, str):

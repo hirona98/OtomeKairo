@@ -5,7 +5,7 @@ from __future__ import annotations
 REQUIRED_MODEL_ROLE_NAMES = (
     "expression_generation",
     "decision_generation",
-    "observation_interpretation",
+    "input_interpretation",
     "memory_interpretation",
     "memory_reflection_summary",
     "event_evidence_generation",

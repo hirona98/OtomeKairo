@@ -119,7 +119,7 @@ class RecallSelectionMixin:
     def _select_recall_pack_sections(
         self,
         *,
-        observation_text: str,
+        input_text: str,
         recall_hint: dict[str, Any],
         candidate_sections: dict[str, list[dict[str, Any]]],
         conflicts: list[dict[str, Any]],
@@ -140,7 +140,7 @@ class RecallSelectionMixin:
         # source pack
         try:
             source_pack = self._build_recall_pack_selection_source_pack(
-                observation_text=observation_text,
+                input_text=input_text,
                 recall_hint=recall_hint,
                 candidate_sections=candidate_sections,
                 conflicts=conflicts,
@@ -211,7 +211,7 @@ class RecallSelectionMixin:
     def _build_recall_pack_selection_source_pack(
         self,
         *,
-        observation_text: str,
+        input_text: str,
         recall_hint: dict[str, Any],
         candidate_sections: dict[str, list[dict[str, Any]]],
         conflicts: list[dict[str, Any]],
@@ -246,7 +246,7 @@ class RecallSelectionMixin:
 
         # 結果
         return {
-            "observation_text": observation_text.strip(),
+            "input_text": input_text.strip(),
             "recall_hint": recall_hint,
             "constraints": {
                 "global_recall_limit": GLOBAL_RECALL_LIMIT,

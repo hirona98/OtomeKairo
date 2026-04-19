@@ -909,8 +909,8 @@ class LongSmokeRunner:
                     continue
                 inspected_cycle_ids.add(cycle_id)
                 trace = self.api.get(f"/api/inspection/cycles/{cycle_id}")
-                observation_summary = ((trace.get("observation_trace") or {}).get("normalized_observation_summary"))
-                if not isinstance(observation_summary, str) or marker not in observation_summary:
+                input_summary = ((trace.get("input_trace") or {}).get("normalized_input_summary"))
+                if not isinstance(input_summary, str) or marker not in input_summary:
                     continue
                 matched_trace = trace
                 break
@@ -1279,7 +1279,7 @@ class LongSmokeRunner:
         window_title: str,
     ) -> str:
         response = self.api.post(
-            "/api/observations/conversation",
+            "/api/conversation",
             {
                 "text": text,
                 "client_context": {
@@ -1293,7 +1293,7 @@ class LongSmokeRunner:
         )
         cycle_id = response.get("cycle_id")
         if not isinstance(cycle_id, str) or not cycle_id:
-            raise SmokeError("conversation observation did not return cycle_id.")
+            raise SmokeError("conversation input did not return cycle_id.")
         self.conversation_cycle_ids.append(cycle_id)
         return cycle_id
 
@@ -1308,7 +1308,7 @@ def parse_args() -> argparse.Namespace:
         description="background wake / desktop_watch / memory worker をまとめて回す隔離 long smoke",
     )
     parser.add_argument("--profile", choices=tuple(PROFILE_DEFAULTS.keys()), default="smoke", help="既定値 preset")
-    parser.add_argument("--run-seconds", type=int, help="観測を流し続ける秒数")
+    parser.add_argument("--run-seconds", type=int, help="入力を流し続ける秒数")
     parser.add_argument("--conversation-interval-seconds", type=float, help="会話投入間隔")
     parser.add_argument("--desktop-watch-interval-seconds", type=int, help="desktop_watch 間隔")
     parser.add_argument("--wake-interval-minutes", type=int, help="background wake 間隔")

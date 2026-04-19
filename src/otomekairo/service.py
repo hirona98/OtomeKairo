@@ -13,7 +13,7 @@ from otomekairo.recall import RecallBuilder
 from otomekairo.service_common import ServiceError
 from otomekairo.service_config import ServiceConfigMixin
 from otomekairo.service_memory import ServiceMemoryMixin
-from otomekairo.service_observation import ServiceObservationMixin
+from otomekairo.service_input import ServiceInputMixin
 from otomekairo.service_spontaneous import ServiceSpontaneousMixin
 from otomekairo.store import FileStore
 
@@ -22,7 +22,7 @@ from otomekairo.store import FileStore
 class OtomeKairoService(
     ServiceSpontaneousMixin,
     ServiceConfigMixin,
-    ServiceObservationMixin,
+    ServiceInputMixin,
     ServiceMemoryMixin,
 ):
     def __init__(self, root_dir: Path) -> None:
