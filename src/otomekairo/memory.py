@@ -18,7 +18,7 @@ class MemoryConsolidator:
         # 依存関係
         self.store = store
         self.llm = llm
-        self.action_resolver = MemoryActionResolver(store=store)
+        self.action_resolver = MemoryActionResolver(store=store, llm=llm)
         self.vector_indexer = MemoryVectorIndexer(store=store, llm=llm)
         self.reflective = ReflectiveConsolidator(
             store=store,
@@ -55,6 +55,7 @@ class MemoryConsolidator:
 
         # Episode要約
         selected_memory_set_id = state["selected_memory_set_id"]
+        embedding_definition = state["memory_sets"][selected_memory_set_id]["embedding"]
         event_ids = [event["event_id"] for event in events]
         episode = self._build_episode(
             cycle_id=cycle_id,
@@ -74,6 +75,7 @@ class MemoryConsolidator:
                     event_ids=event_ids,
                     cycle_ids=[cycle_id],
                     candidate=candidate,
+                    embedding_definition=embedding_definition,
                 )
             )
 

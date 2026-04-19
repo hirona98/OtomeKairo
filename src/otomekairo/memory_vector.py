@@ -4,7 +4,11 @@ import hashlib
 from typing import Any
 
 from otomekairo.llm import LLMClient
-from otomekairo.memory_utils import normalized_text_list
+from otomekairo.memory_utils import (
+    NON_SEMANTIC_QUALIFIER_KEYS,
+    build_memory_unit_semantic_text,
+    normalized_text_list,
+)
 from otomekairo.store import FileStore
 
 
@@ -133,7 +137,10 @@ class MemoryVectorIndexer:
         record: dict[str, Any],
     ) -> dict[str, Any] | None:
         # sourceテキスト
-        source_text = record.get("summary_text", "").strip()
+        source_text = build_memory_unit_semantic_text(
+            record,
+            exclude_qualifier_keys=NON_SEMANTIC_QUALIFIER_KEYS,
+        )
         if not source_text:
             return None
 

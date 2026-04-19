@@ -109,6 +109,7 @@ class ReflectiveConsolidator:
                 scope_types=list(REFLECTIVE_SCOPE_TYPES),
                 limit=REFLECTION_MEMORY_LIMIT,
             )
+            embedding_definition = state["memory_sets"][memory_set_id]["embedding"]
             reflection_summary_role = self._reflection_summary_role_definition(state=state)
 
             # アクション構築
@@ -117,6 +118,7 @@ class ReflectiveConsolidator:
                 finished_at=finished_at,
                 episodes=episodes,
                 active_units=active_units,
+                embedding_definition=embedding_definition,
                 reflection_summary_role=reflection_summary_role,
             )
             reflection_actions.extend(summary_actions)
@@ -300,6 +302,7 @@ class ReflectiveConsolidator:
         finished_at: str,
         episodes: list[dict[str, Any]],
         active_units: list[dict[str, Any]],
+        embedding_definition: dict[str, Any],
         reflection_summary_role: dict[str, Any],
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         # グループ化
@@ -394,6 +397,7 @@ class ReflectiveConsolidator:
                     event_ids=evidence_event_ids,
                     cycle_ids=self._reflective_cycle_ids(scope_episodes=scope_episodes, limit=12),
                     candidate=candidate,
+                    embedding_definition=embedding_definition,
                     allow_summary=True,
                 )
             )

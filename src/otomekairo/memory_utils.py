@@ -139,6 +139,91 @@ def display_scope_key(scope_key: str) -> str:
     return scope_key
 
 
+NON_SEMANTIC_QUALIFIER_KEYS = {
+    "allow_parallel",
+    "negates_previous",
+    "replace_prior",
+    "source",
+    "summary_scope",
+    "source_memory_types",
+}
+
+
+def build_memory_unit_semantic_text(
+    record: dict[str, Any],
+    *,
+    exclude_qualifier_keys: set[str] | None = None,
+) -> str:
+    # 比較と索引用の意味テキストを組み立てる。
+    parts: list[str] = []
+
+    summary_text = optional_text(record.get("summary_text"))
+    if summary_text is not None:
+        parts.append(summary_text)
+
+    predicate = optional_text(record.get("predicate"))
+    if predicate is not None:
+        parts.append(f"predicate:{predicate}")
+
+    object_text = _semantic_text(record.get("object_ref_or_value"))
+    if object_text is not None:
+        parts.append(f"object:{object_text}")
+
+    qualifiers = semantic_qualifiers(
+        record.get("qualifiers"),
+        exclude_keys=exclude_qualifier_keys,
+    )
+    for key in sorted(qualifiers):
+        value_text = _semantic_text(qualifiers.get(key))
+        if value_text is None:
+            continue
+        parts.append(f"qualifier:{key}={value_text}")
+
+    return "\n".join(parts)
+
+
+def semantic_qualifiers(
+    qualifiers: Any,
+    *,
+    exclude_keys: set[str] | None = None,
+) -> dict[str, Any]:
+    # 制御用や集計用の qualifier を落として、意味差分だけを残す。
+    if not isinstance(qualifiers, dict):
+        return {}
+
+    semantic_items: dict[str, Any] = {}
+    for key, value in qualifiers.items():
+        if not isinstance(key, str) or not key:
+            continue
+        if key in NON_SEMANTIC_QUALIFIER_KEYS:
+            continue
+        if exclude_keys and key in exclude_keys:
+            continue
+        if key.endswith("_count"):
+            continue
+        value_text = _semantic_text(value)
+        if value_text is None:
+            continue
+        semantic_items[key] = value
+
+    return semantic_items
+
+
+def _semantic_text(value: Any) -> str | None:
+    # ベクトル化に使える短いテキストへ正規化する。
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return optional_text(value)
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, (list, dict)):
+        return to_json_string(value)
+    return optional_text(str(value))
+
+
 # コレクション
 def merged_event_ids(existing_event_ids: list[Any], new_event_ids: list[str]) -> list[str]:
     # 統合

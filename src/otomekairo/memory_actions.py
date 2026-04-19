@@ -1,15 +1,23 @@
 from __future__ import annotations
 
+import math
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from otomekairo.memory_utils import (
+    NON_SEMANTIC_QUALIFIER_KEYS,
+    build_memory_unit_semantic_text,
     clamp_score,
     merged_cycle_ids,
     merged_event_ids,
+    optional_text,
+    semantic_qualifiers,
     timestamp_sort_key,
 )
 from otomekairo.store import FileStore
+
+if TYPE_CHECKING:
+    from otomekairo.llm import LLMClient
 
 
 # 定数
@@ -25,25 +33,23 @@ DIRECT_SOURCE_VALUES = {
     "explicit_confirmation",
     "explicit_correction",
 }
-CONTROL_QUALIFIER_KEYS = {
-    "allow_parallel",
-    "negates_previous",
-    "replace_prior",
-    "source",
-}
+SEMANTIC_EXCLUDED_QUALIFIER_KEYS = NON_SEMANTIC_QUALIFIER_KEYS
 PARALLEL_MEMORY_TYPES = {
     "commitment",
     "interpretation",
     "preference",
     "relation",
 }
+SEMANTIC_REFINE_THRESHOLD = 0.9
+SEMANTIC_REFINE_MEMORY_TYPES = {"interpretation"}
 
 
 # 解決器
 class MemoryActionResolver:
-    def __init__(self, *, store: FileStore) -> None:
+    def __init__(self, *, store: FileStore, llm: "LLMClient | None" = None) -> None:
         # 依存関係
         self.store = store
+        self.llm = llm
 
     def resolve_memory_actions(
         self,
@@ -53,6 +59,7 @@ class MemoryActionResolver:
         event_ids: list[str],
         cycle_ids: list[str],
         candidate: dict[str, Any],
+        embedding_definition: dict[str, Any] | None = None,
         allow_summary: bool = False,
     ) -> list[dict[str, Any]]:
         # 候補
@@ -61,16 +68,19 @@ class MemoryActionResolver:
             return []
 
         # 検索
-        matches = self._ordered_matches(
-            self.store.find_memory_units_for_compare(
+        matches = self._annotate_semantic_matches(
+            matches=self.store.find_memory_units_for_compare(
                 memory_set_id=memory_set_id,
                 memory_type=normalized_candidate["memory_type"],
                 scope_type=normalized_candidate["scope_type"],
                 scope_key=normalized_candidate["scope_key"],
                 subject_ref=normalized_candidate["subject_ref"],
                 predicate=normalized_candidate["predicate"],
-            )
+            ),
+            candidate=normalized_candidate,
+            embedding_definition=embedding_definition,
         )
+        matches = self._ordered_matches(matches)
 
         # 特別なstatus
         if normalized_candidate["status"] == "revoked":
@@ -95,9 +105,12 @@ class MemoryActionResolver:
         # 一致選択
         same_memory_match = self._same_memory_match(matches, normalized_candidate)
         primary_match = self._primary_match(matches, normalized_candidate)
+        semantic_refine_match: dict[str, Any] | None = None
+        if primary_match is None or not self._same_object(primary_match, normalized_candidate):
+            semantic_refine_match = self._semantic_refine_match(matches, normalized_candidate)
 
         # create経路
-        if same_memory_match is None and primary_match is None:
+        if same_memory_match is None and primary_match is None and semantic_refine_match is None:
             return [
                 self._build_create_action(
                     memory_set_id=memory_set_id,
@@ -217,6 +230,29 @@ class MemoryActionResolver:
                     reason=normalized_candidate["reason"],
                     event_ids=event_ids,
                 ),
+            ]
+
+        # semantic refine経路
+        if semantic_refine_match is not None:
+            updated_unit = self.build_refined_memory_unit(
+                existing=semantic_refine_match,
+                candidate=normalized_candidate,
+                finished_at=finished_at,
+                event_ids=event_ids,
+                cycle_ids=cycle_ids,
+            )
+            return [
+                self.build_memory_action(
+                    operation="refine",
+                    memory_set_id=memory_set_id,
+                    finished_at=finished_at,
+                    memory_unit=updated_unit,
+                    related_memory_unit_ids=[],
+                    before_snapshot=semantic_refine_match,
+                    after_snapshot=updated_unit,
+                    reason=normalized_candidate["reason"],
+                    event_ids=event_ids,
+                )
             ]
 
         # 代替
@@ -430,8 +466,8 @@ class MemoryActionResolver:
         if self._polarity_conflicts(existing, candidate):
             return False
 
-        # object確認
-        if existing.get("object_ref_or_value") != candidate.get("object_ref_or_value"):
+        # exact object が一致しない更新は semantic refine 側でのみ扱う。
+        if not self._same_object(existing, candidate):
             return False
 
         # 内容確認
@@ -519,6 +555,28 @@ class MemoryActionResolver:
             return dormant_matches[0]
 
         # 結果
+        return None
+
+    def _semantic_refine_match(self, matches: list[dict[str, Any]], candidate: dict[str, Any]) -> dict[str, Any] | None:
+        semantic_matches = [
+            match
+            for match in matches
+            if match.get("status") in REVIVABLE_MEMORY_STATUSES
+            and not self._same_object(match, candidate)
+        ]
+        semantic_matches.sort(
+            key=lambda match: (
+                self._semantic_similarity(match),
+                self._match_status_rank(match.get("status")),
+                clamp_score(match.get("confidence")),
+                clamp_score(match.get("salience")),
+                timestamp_sort_key(match.get("last_confirmed_at") or match.get("formed_at")),
+            ),
+            reverse=True,
+        )
+        for match in semantic_matches:
+            if self._can_refine_semantically(match, candidate):
+                return match
         return None
 
     def _resolve_revoke_request(
@@ -814,6 +872,33 @@ class MemoryActionResolver:
         # 比較
         return existing.get("object_ref_or_value") == candidate.get("object_ref_or_value")
 
+    def _can_refine_semantically(self, existing: dict[str, Any], candidate: dict[str, Any]) -> bool:
+        # 適用範囲
+        if candidate["memory_type"] not in SEMANTIC_REFINE_MEMORY_TYPES:
+            return False
+        if self._candidate_is_explicit(candidate) or self._memory_unit_is_explicit(existing):
+            return False
+        if self._has_structural_update_signal(candidate):
+            return False
+
+        existing_object = optional_text(existing.get("object_ref_or_value"))
+        candidate_object = optional_text(candidate.get("object_ref_or_value"))
+        if existing_object is None and candidate_object is None:
+            return False
+        if existing_object is not None and candidate_object is not None:
+            return False
+
+        # 意味補助は qualifiers と進行状態が同じ場合だけ使う。
+        if existing.get("commitment_state") != candidate.get("commitment_state"):
+            return False
+        if self._semantic_qualifiers(existing.get("qualifiers", {})) != self._semantic_qualifiers(
+            candidate.get("qualifiers", {})
+        ):
+            return False
+
+        # 類似度
+        return self._semantic_similarity(existing) >= SEMANTIC_REFINE_THRESHOLD
+
     def _polarity_conflicts(self, existing: dict[str, Any], candidate: dict[str, Any]) -> bool:
         # 値群
         existing_polarity = existing.get("qualifiers", {}).get("polarity")
@@ -826,11 +911,21 @@ class MemoryActionResolver:
 
     def _semantic_qualifiers(self, qualifiers: dict[str, Any]) -> dict[str, Any]:
         # 絞り込み
-        return {
-            key: value
-            for key, value in qualifiers.items()
-            if key not in CONTROL_QUALIFIER_KEYS
-        }
+        return semantic_qualifiers(
+            qualifiers,
+            exclude_keys=SEMANTIC_EXCLUDED_QUALIFIER_KEYS,
+        )
+
+    def _memory_unit_is_explicit(self, memory_unit: dict[str, Any]) -> bool:
+        source = memory_unit.get("qualifiers", {}).get("source")
+        return source in DIRECT_SOURCE_VALUES
+
+    def _has_structural_update_signal(self, candidate: dict[str, Any]) -> bool:
+        qualifiers = candidate.get("qualifiers", {})
+        return any(
+            qualifiers.get(key) is True
+            for key in ("allow_parallel", "negates_previous", "replace_prior")
+        )
 
     def _merged_qualifiers(self, existing: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
         # 統合
@@ -838,3 +933,78 @@ class MemoryActionResolver:
             **existing.get("qualifiers", {}),
             **candidate.get("qualifiers", {}),
         }
+
+    def _annotate_semantic_matches(
+        self,
+        *,
+        matches: list[dict[str, Any]],
+        candidate: dict[str, Any],
+        embedding_definition: dict[str, Any] | None,
+    ) -> list[dict[str, Any]]:
+        # 対象外
+        if not matches or not self._should_compare_semantically(candidate, embedding_definition):
+            return matches
+
+        # compare text 群
+        candidate_text = build_memory_unit_semantic_text(
+            candidate,
+            exclude_qualifier_keys=SEMANTIC_EXCLUDED_QUALIFIER_KEYS,
+        )
+        if not candidate_text:
+            return matches
+        match_texts = [
+            build_memory_unit_semantic_text(
+                match,
+                exclude_qualifier_keys=SEMANTIC_EXCLUDED_QUALIFIER_KEYS,
+            )
+            for match in matches
+        ]
+
+        # 埋め込み比較
+        embeddings = self.llm.generate_embeddings(
+            role_definition=embedding_definition,
+            texts=[candidate_text, *match_texts],
+        )
+        candidate_embedding = embeddings[0]
+
+        # 注釈付与
+        annotated_matches: list[dict[str, Any]] = []
+        for match, match_embedding in zip(matches, embeddings[1:], strict=True):
+            annotated_matches.append(
+                {
+                    **match,
+                    "_semantic_similarity": self._cosine_similarity(candidate_embedding, match_embedding),
+                }
+            )
+        return annotated_matches
+
+    def _should_compare_semantically(
+        self,
+        candidate: dict[str, Any],
+        embedding_definition: dict[str, Any] | None,
+    ) -> bool:
+        # 依存関係
+        if self.llm is None or not isinstance(embedding_definition, dict):
+            return False
+
+        # 特殊状態と型
+        if candidate["status"] in {"revoked", "dormant"}:
+            return False
+        return candidate["memory_type"] in SEMANTIC_REFINE_MEMORY_TYPES
+
+    def _semantic_similarity(self, record: dict[str, Any]) -> float:
+        value = record.get("_semantic_similarity")
+        if not isinstance(value, (int, float)):
+            return 0.0
+        return float(value)
+
+    def _cosine_similarity(self, left: list[float], right: list[float]) -> float:
+        # 正規化済みでなくても使えるよう cosine を明示計算する。
+        if not left or not right or len(left) != len(right):
+            return 0.0
+        dot = sum(left_value * right_value for left_value, right_value in zip(left, right, strict=True))
+        left_norm = math.sqrt(sum(value * value for value in left))
+        right_norm = math.sqrt(sum(value * value for value in right))
+        if left_norm <= 0.0 or right_norm <= 0.0:
+            return 0.0
+        return dot / (left_norm * right_norm)
