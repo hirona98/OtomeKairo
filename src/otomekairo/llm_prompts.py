@@ -37,7 +37,7 @@ def build_decision_messages(
     input_text: str,
     recent_turns: list[dict],
     time_context: dict[str, Any],
-    affect_context: dict[str, list[dict[str, Any]]],
+    affect_context: dict[str, Any],
     recall_hint: dict,
     recall_pack: dict[str, Any],
 ) -> list[dict[str, str]]:
@@ -67,7 +67,7 @@ def build_reply_messages(
     input_text: str,
     recent_turns: list[dict],
     time_context: dict[str, Any],
-    affect_context: dict[str, list[dict[str, Any]]],
+    affect_context: dict[str, Any],
     recall_hint: dict,
     recall_pack: dict[str, Any],
     decision: dict,
@@ -189,15 +189,17 @@ def build_memory_interpretation_repair_prompt(validation_error: str) -> str:
         "前回の出力は memory_interpretation 契約を満たしていませんでした。\n"
         f"validator_error: {validation_error}\n"
         "同じ意味を保ったまま、JSON オブジェクト 1 個だけを返し直してください。\n"
-        "トップレベルキーは episode, candidate_memory_units, affect_updates の 3 つだけです。\n"
+        "トップレベルキーは episode, candidate_memory_units, episode_affects の 3 つだけです。\n"
         "episode には episode_type, episode_series_id, primary_scope_type, primary_scope_key, summary_text, outcome_text, open_loops, salience だけを入れてください。\n"
         "candidate_memory_units の各要素には memory_type, scope_type, scope_key, subject_ref, predicate, object_ref_or_value, summary_text, status, commitment_state, confidence, salience, valid_from, valid_to, qualifiers, reason だけを入れてください。\n"
-        "affect_updates の各要素には layer, target_scope_type, target_scope_key, affect_label, intensity だけを入れてください。\n"
-        "affect_updates.layer は surface または background だけです。\n"
+        "episode_affects の各要素には target_scope_type, target_scope_key, affect_label, vad, intensity, confidence, summary_text だけを入れてください。\n"
+        "episode_affects.vad は v, a, d の 3 キーを持つ object です。\n"
+        "同じ target_scope_type, target_scope_key, affect_label の組み合わせを重複して返してはいけません。\n"
+        "episode_affects は最大 4 件までです。\n"
         "scope_type は self, user, entity, topic, relationship, world だけを使ってください。\n"
         "scope_type=self なら scope_key=self、scope_type=user なら scope_key=user、scope_type=relationship なら scope_key は self|user のような正規化済みキーです。\n"
         "ai, agent, meta_communication, relation:default, user:default_to_ai などの独自表現は禁止です。\n"
-        "感情更新に自信がないなら affect_updates は空配列にしてください。\n"
+        "感情抽出に自信がないなら episode_affects は空配列にしてください。\n"
         "余計なキー、説明文、Markdown、コードフェンスは禁止です。"
     )
 
@@ -326,7 +328,7 @@ def _build_decision_user_prompt(
     input_text: str,
     recent_turns: list[dict],
     time_context: dict[str, Any],
-    affect_context: dict[str, list[dict[str, Any]]],
+    affect_context: dict[str, Any],
     recall_hint: dict,
     recall_pack: dict[str, Any],
 ) -> str:
@@ -366,7 +368,7 @@ def _build_reply_user_prompt(
     input_text: str,
     recent_turns: list[dict],
     time_context: dict[str, Any],
-    affect_context: dict[str, list[dict[str, Any]]],
+    affect_context: dict[str, Any],
     recall_hint: dict,
     recall_pack: dict[str, Any],
     decision: dict,
@@ -387,9 +389,9 @@ def _build_reply_user_prompt(
 def _build_memory_interpretation_system_prompt() -> str:
     return (
         "あなたは OtomeKairo の memory_interpretation です。\n"
-        "会話 1 サイクルから episode, candidate_memory_units, affect_updates を抽出し、JSON オブジェクト 1 個だけを返してください。\n"
+        "会話 1 サイクルから episode, candidate_memory_units, episode_affects を抽出し、JSON オブジェクト 1 個だけを返してください。\n"
         "Markdown、コードフェンス、説明文は禁止です。\n"
-        "返すトップレベルキーは episode, candidate_memory_units, affect_updates の 3 つだけです。\n"
+        "返すトップレベルキーは episode, candidate_memory_units, episode_affects の 3 つだけです。\n"
         "キー名は完全一致させ、余計なキーを足してはいけません。\n"
         "candidate_memory_units は、今後の会話や判断に効く継続理解だけを入れてください。\n"
         "弱い雑談断片や一時判断は memory_unit にしないでください。\n"
@@ -401,7 +403,7 @@ def _build_memory_interpretation_system_prompt() -> str:
         "qualifiers には必要なら source=explicit_statement|explicit_correction|inference, negates_previous, replace_prior, allow_parallel を入れてください。\n"
         "memory_type は fact, preference, relation, commitment, interpretation, summary のいずれかです。\n"
         "status は inferred, confirmed, superseded, revoked, dormant のいずれかです。\n"
-        "primary_scope_type, candidate_memory_units[].scope_type, affect_updates[].target_scope_type は self, user, entity, topic, relationship, world のいずれかだけを使ってください。\n"
+        "primary_scope_type, candidate_memory_units[].scope_type, episode_affects[].target_scope_type は self, user, entity, topic, relationship, world のいずれかだけを使ってください。\n"
         "scope_type=self のとき scope_key は self、scope_type=user のとき scope_key は user、scope_type=world のとき scope_key は world に固定してください。\n"
         "scope_type=topic のとき scope_key は topic:<normalized_name> にしてください。\n"
         "scope_type=relationship のとき scope_key は self|user や self|person:tanaka のような正規化済みキーにしてください。user|self, relation:default, user:default_to_ai のような独自キーは禁止です。\n"
@@ -411,12 +413,14 @@ def _build_memory_interpretation_system_prompt() -> str:
         "commitment_state は commitment のときだけ open, waiting_confirmation, on_hold, done, cancelled のいずれかを使い、それ以外では null にしてください。\n"
         "episode は episode_type, episode_series_id, primary_scope_type, primary_scope_key, summary_text, outcome_text, open_loops, salience の 8 キーだけを持つ object にしてください。\n"
         "candidate_memory_units の各要素は memory_type, scope_type, scope_key, subject_ref, predicate, object_ref_or_value, summary_text, status, commitment_state, confidence, salience, valid_from, valid_to, qualifiers, reason の 15 キーだけを持つ object にしてください。\n"
-        "affect_updates の各要素は layer, target_scope_type, target_scope_key, affect_label, intensity の 5 キーだけを持つ object にしてください。\n"
-        "affect_updates.layer は surface または background のどちらかだけを使ってください。\n"
-        "感情更新に自信がない場合や、軽い雑談で持続的な感情状態が読めない場合は affect_updates を空配列にしてください。\n"
+        "episode_affects の各要素は target_scope_type, target_scope_key, affect_label, vad, intensity, confidence, summary_text の 7 キーだけを持つ object にしてください。\n"
+        "episode_affects[].vad は v, a, d の 3 キーだけを持つ object にしてください。\n"
+        "同じ target_scope_type, target_scope_key, affect_label の組み合わせを重複して返してはいけません。\n"
+        "episode_affects は最大 4 件までにしてください。\n"
+        "感情抽出に自信がない場合や、軽い雑談で瞬間反応が読めない場合は episode_affects を空配列にしてください。\n"
         "episode.episode_series_id は通常 null にし、episode.open_loops は短い文字列の配列にしてください。\n"
         "outcome_text, object_ref_or_value, valid_from, valid_to は不要なら null を入れてください。\n"
-        "candidate_memory_units と affect_updates は不要なら空配列にしてください。\n"
+        "candidate_memory_units と episode_affects は不要なら空配列にしてください。\n"
         "例:\n"
         "{\n"
         '  "episode": {\n'
@@ -430,7 +434,7 @@ def _build_memory_interpretation_system_prompt() -> str:
         '    "salience": 0.35\n'
         "  },\n"
         '  "candidate_memory_units": [],\n'
-        '  "affect_updates": []\n'
+        '  "episode_affects": []\n'
         "}"
     )
 
@@ -556,7 +560,7 @@ def _build_pending_intent_selection_user_prompt(source_pack: dict[str, Any]) -> 
 # internal_context は token を増やしすぎないよう compact して渡す。
 def _format_internal_context(
     time_context: dict[str, Any],
-    affect_context: dict[str, list[dict[str, Any]]],
+    affect_context: dict[str, Any],
     recall_pack: dict[str, Any],
 ) -> str:
     payload = {

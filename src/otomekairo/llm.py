@@ -82,7 +82,7 @@ class LLMClient:
         input_text: str,
         recent_turns: list[dict],
         time_context: dict[str, Any],
-        affect_context: dict[str, list[dict[str, Any]]],
+        affect_context: dict[str, Any],
         recall_hint: dict,
         recall_pack: dict[str, Any],
     ) -> dict[str, Any]:
@@ -124,7 +124,7 @@ class LLMClient:
         input_text: str,
         recent_turns: list[dict],
         time_context: dict[str, Any],
-        affect_context: dict[str, list[dict[str, Any]]],
+        affect_context: dict[str, Any],
         recall_hint: dict,
         recall_pack: dict[str, Any],
         decision: dict,

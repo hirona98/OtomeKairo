@@ -77,21 +77,22 @@ class MemoryConsolidator:
                 )
             )
 
-        # affectUpdates生成
-        affect_updates = [
-            self._build_affect_update(
+        # episode affect群
+        episode_affects = [
+            self._build_episode_affect(
                 memory_set_id=selected_memory_set_id,
+                episode_id=episode["episode_id"],
                 finished_at=finished_at,
-                payload=affect_update,
+                payload=episode_affect,
             )
-            for affect_update in interpretation["affect_updates"]
+            for episode_affect in interpretation["episode_affects"]
         ]
 
         # 永続化
-        self.store.persist_turn_consolidation(
+        affect_persist_result = self.store.persist_turn_consolidation(
             episode=episode,
             memory_actions=memory_actions,
-            affect_updates=affect_updates,
+            episode_affects=episode_affects,
         )
 
         # 結果
@@ -103,22 +104,25 @@ class MemoryConsolidator:
                 "episode_series_id": episode.get("episode_series_id"),
                 "open_loops": episode.get("open_loops", []),
                 "memory_action_count": len(memory_actions),
-                "affect_update_count": len(affect_updates),
+                "episode_affect_count": len(episode_affects),
                 "updated_memory_unit_ids": [
                     action["memory_unit_id"]
                     for action in memory_actions
                     if action.get("memory_unit_id")
                 ],
-                "affect_updates": [
+                "episode_affects": [
                     {
-                        "layer": update["layer"],
-                        "target_scope_type": update["target_scope_type"],
-                        "target_scope_key": update["target_scope_key"],
-                        "affect_label": update["affect_label"],
-                        "intensity": update["intensity"],
+                        "target_scope_type": affect["target_scope_type"],
+                        "target_scope_key": affect["target_scope_key"],
+                        "affect_label": affect["affect_label"],
+                        "vad": affect["vad"],
+                        "intensity": affect["intensity"],
+                        "confidence": affect["confidence"],
                     }
-                    for update in affect_updates
+                    for affect in episode_affects
                 ],
+                "mood_state_update": affect_persist_result["mood_state_update"],
+                "affect_state_updates": affect_persist_result["affect_state_updates"],
                 "failure_reason": None,
                 "vector_index_sync": {
                     "result_status": "queued",
@@ -317,22 +321,44 @@ class MemoryConsolidator:
 
         return None
 
-    def _build_affect_update(
+    def _build_episode_affect(
         self,
         *,
         memory_set_id: str,
+        episode_id: str,
         finished_at: str,
         payload: dict[str, Any],
     ) -> dict[str, Any]:
         # 記録
         return {
-            "affect_state_id": f"affect_state:{uuid.uuid4().hex}",
+            "episode_affect_id": f"episode_affect:{uuid.uuid4().hex}",
             "memory_set_id": memory_set_id,
-            "layer": payload["layer"],
+            "episode_id": episode_id,
             "target_scope_type": payload["target_scope_type"],
             "target_scope_key": payload["target_scope_key"],
             "affect_label": payload["affect_label"],
+            "summary_text": optional_text(payload.get("summary_text")) or payload["affect_label"],
+            "vad": self._build_vad(payload.get("vad")),
             "intensity": clamp_score(payload["intensity"]),
+            "confidence": clamp_score(payload["confidence"]),
             "observed_at": finished_at,
-            "updated_at": finished_at,
+            "created_at": finished_at,
         }
+
+    def _build_vad(self, payload: Any) -> dict[str, float]:
+        # 正規化
+        if not isinstance(payload, dict):
+            return {"v": 0.0, "a": 0.0, "d": 0.0}
+
+        # 結果
+        return {
+            "v": self._clamp_vad_axis(payload.get("v")),
+            "a": self._clamp_vad_axis(payload.get("a")),
+            "d": self._clamp_vad_axis(payload.get("d")),
+        }
+
+    def _clamp_vad_axis(self, value: Any) -> float:
+        # 正規化
+        if not isinstance(value, (int, float)):
+            return 0.0
+        return max(-1.0, min(float(value), 1.0))

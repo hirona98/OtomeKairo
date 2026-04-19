@@ -142,6 +142,7 @@ class ServiceInputMixin:
         affect_context = self._build_affect_context(
             state=state,
             recall_hint=recall_hint,
+            current_time=started_at,
         )
 
         # decision生成
@@ -567,7 +568,7 @@ class ServiceInputMixin:
                 f"{self._short_cycle_id(cycle_id)} status={status} "
                 f"episode={memory_trace.get('episode_id') or '-'} "
                 f"memory_actions={memory_trace.get('memory_action_count', 0)} "
-                f"affect_updates={memory_trace.get('affect_update_count', 0)} "
+                f"episode_affects={memory_trace.get('episode_affect_count', 0)} "
                 f"vector={vector_sync.get('result_status', 'unknown')}"
             )
             message += f" reflection={reflective.get('result_status', 'unknown')}"
@@ -639,8 +640,17 @@ class ServiceInputMixin:
             "recall_pack": self._empty_recall_pack(),
             "time_context": self._build_time_context(current_time=started_at),
             "affect_context": {
-                "surface": [],
-                "background": [],
+                "mood_state": {
+                    "baseline_vad": {"v": 0.0, "a": 0.0, "d": 0.0},
+                    "residual_vad": {"v": 0.0, "a": 0.0, "d": 0.0},
+                    "current_vad": {"v": 0.0, "a": 0.0, "d": 0.0},
+                    "confidence": 0.0,
+                    "observed_at": None,
+                    "created_at": None,
+                    "updated_at": None,
+                },
+                "affect_states": [],
+                "recent_episode_affects": [],
             },
             "decision": {
                 "kind": "noop",
@@ -722,27 +732,28 @@ class ServiceInputMixin:
             "failure_reason": None,
         }
 
-    def _summarize_affect_context(self, affect_context: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
-        # 表層
-        surface_labels = [
-            item["affect_label"]
-            for item in affect_context.get("surface", [])
-            if isinstance(item.get("affect_label"), str)
-        ]
-
-        # 背景
-        background_labels = [
-            item["affect_label"]
-            for item in affect_context.get("background", [])
-            if isinstance(item.get("affect_label"), str)
-        ]
+    def _summarize_affect_context(self, affect_context: dict[str, Any]) -> dict[str, Any]:
+        # mood
+        mood_state = affect_context.get("mood_state") or {}
+        affect_states = affect_context.get("affect_states", [])
+        recent_episode_affects = affect_context.get("recent_episode_affects", [])
 
         # 結果
         return {
-            "surface_count": len(affect_context.get("surface", [])),
-            "background_count": len(affect_context.get("background", [])),
-            "surface_labels": surface_labels,
-            "background_labels": background_labels,
+            "mood_current_vad": mood_state.get("current_vad"),
+            "mood_confidence": mood_state.get("confidence"),
+            "affect_state_count": len(affect_states),
+            "affect_state_labels": [
+                item["affect_label"]
+                for item in affect_states
+                if isinstance(item, dict) and isinstance(item.get("affect_label"), str)
+            ],
+            "recent_episode_affect_count": len(recent_episode_affects),
+            "recent_episode_affect_labels": [
+                item["affect_label"]
+                for item in recent_episode_affects
+                if isinstance(item, dict) and isinstance(item.get("affect_label"), str)
+            ],
         }
 
     def _recall_adopted_reason_summary(self, recall_pack: dict[str, Any]) -> str:
@@ -817,42 +828,62 @@ class ServiceInputMixin:
         *,
         state: dict[str, Any],
         recall_hint: dict[str, Any],
-    ) -> dict[str, list[dict[str, Any]]]:
+        current_time: str,
+    ) -> dict[str, Any]:
         # クエリ
-        records = self.store.list_affect_states_for_context(
+        mood_state = self.store.get_mood_state(
+            memory_set_id=state["selected_memory_set_id"],
+            current_time=current_time,
+        )
+        affect_states = self.store.list_affect_states_for_context(
             memory_set_id=state["selected_memory_set_id"],
             scope_filters=self._build_context_scope_filters(recall_hint),
-            layers=["surface", "background"],
-            limit=6,
+            limit=3,
         )
+        recent_episode_affects = []
+        residual_vad = mood_state.get("residual_vad") or {"v": 0.0, "a": 0.0, "d": 0.0}
+        residual_strength = max(abs(residual_vad.get("v", 0.0)), abs(residual_vad.get("a", 0.0)), abs(residual_vad.get("d", 0.0)))
+        if residual_strength >= 0.15:
+            recent_episode_affects = self.store.list_recent_episode_affects_for_context(
+                memory_set_id=state["selected_memory_set_id"],
+                scope_filters=[("self", "self")],
+                limit=2,
+            )
 
-        # 選択
-        affect_context = {
-            "surface": [],
-            "background": [],
-        }
-        for record in records:
-            layer = record.get("layer")
-            if layer not in affect_context:
-                continue
-            if len(affect_context[layer]) >= 2:
-                continue
-            affect_context[layer].append(
+        # 結果
+        return {
+            "mood_state": mood_state,
+            "affect_states": [
                 {
                     "target_scope_type": record["target_scope_type"],
                     "target_scope_key": record["target_scope_key"],
                     "affect_label": record["affect_label"],
-                    "intensity": record["intensity"],
-                    "updated_at": record["updated_at"],
+                    "summary_text": record.get("summary_text"),
+                    "vad": record.get("vad"),
+                    "intensity": record.get("intensity"),
+                    "confidence": record.get("confidence"),
+                    "updated_at": record.get("updated_at"),
                 }
-            )
-
-        # 結果
-        return affect_context
+                for record in affect_states
+            ],
+            "recent_episode_affects": [
+                {
+                    "target_scope_type": record["target_scope_type"],
+                    "target_scope_key": record["target_scope_key"],
+                    "affect_label": record["affect_label"],
+                    "summary_text": record.get("summary_text"),
+                    "vad": record.get("vad"),
+                    "intensity": record.get("intensity"),
+                    "confidence": record.get("confidence"),
+                    "observed_at": record.get("observed_at"),
+                }
+                for record in recent_episode_affects
+            ],
+        }
 
     def _build_context_scope_filters(self, recall_hint: dict[str, Any]) -> list[tuple[str, str]]:
         # 既定値
-        filters: list[tuple[str, str]] = [("user", "user")]
+        filters: list[tuple[str, str]] = [("user", "user"), ("relationship", "self|user")]
         primary_intent = recall_hint["primary_intent"]
         if primary_intent in {"commitment_check", "consult", "meta_relationship"}:
             filters.append(("relationship", "self|user"))
@@ -1148,7 +1179,7 @@ class ServiceInputMixin:
         state: dict[str, Any],
         input_text: str,
         time_context: dict[str, Any],
-        affect_context: dict[str, list[dict[str, Any]]],
+        affect_context: dict[str, Any],
         recall_pack: dict[str, Any],
         decision: dict[str, Any],
         pending_intent_summary: dict[str, Any] | None,
@@ -1232,7 +1263,7 @@ class ServiceInputMixin:
         recall_hint: dict[str, Any],
         recall_pack: dict[str, Any],
         time_context: dict[str, Any],
-        affect_context: dict[str, list[dict[str, Any]]],
+        affect_context: dict[str, Any],
         decision: dict[str, Any],
         result_kind: str,
         reply_payload: dict[str, Any] | None,

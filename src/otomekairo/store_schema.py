@@ -8,7 +8,7 @@ import sqlite_vec
 
 # 定数
 MEMORY_DB_FILE_NAME = "memory.db"
-CURRENT_MEMORY_DB_VERSION = 8
+CURRENT_MEMORY_DB_VERSION = 10
 
 
 # スキーマMixin
@@ -190,21 +190,58 @@ class StoreSchemaMixin:
             CREATE INDEX IF NOT EXISTS idx_revisions_memory_set_occurred_at
             ON revisions(memory_set_id, occurred_at);
 
-            CREATE TABLE IF NOT EXISTS affect_state (
-                affect_state_id TEXT PRIMARY KEY,
+            CREATE TABLE IF NOT EXISTS episode_affects (
+                episode_affect_id TEXT PRIMARY KEY,
                 memory_set_id TEXT NOT NULL,
-                layer TEXT NOT NULL,
+                episode_id TEXT NOT NULL,
                 target_scope_type TEXT NOT NULL,
                 target_scope_key TEXT NOT NULL,
                 affect_label TEXT NOT NULL,
                 intensity REAL NOT NULL,
+                confidence REAL NOT NULL,
                 observed_at TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                payload_json TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_episode_affects_memory_set_observed_at
+            ON episode_affects(memory_set_id, observed_at);
+
+            CREATE INDEX IF NOT EXISTS idx_episode_affects_episode_id
+            ON episode_affects(episode_id);
+
+            CREATE INDEX IF NOT EXISTS idx_episode_affects_scope_recent
+            ON episode_affects(memory_set_id, target_scope_type, target_scope_key, observed_at);
+
+            CREATE TABLE IF NOT EXISTS mood_state (
+                mood_state_id TEXT PRIMARY KEY,
+                memory_set_id TEXT NOT NULL UNIQUE,
+                confidence REAL NOT NULL,
+                observed_at TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                payload_json TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS affect_state (
+                affect_state_id TEXT PRIMARY KEY,
+                memory_set_id TEXT NOT NULL,
+                target_scope_type TEXT NOT NULL,
+                target_scope_key TEXT NOT NULL,
+                affect_label TEXT NOT NULL,
+                intensity REAL NOT NULL,
+                confidence REAL NOT NULL,
+                observed_at TEXT NOT NULL,
+                created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 payload_json TEXT NOT NULL
             );
 
             CREATE UNIQUE INDEX IF NOT EXISTS idx_affect_state_identity
-            ON affect_state(memory_set_id, layer, target_scope_type, target_scope_key, affect_label);
+            ON affect_state(memory_set_id, target_scope_type, target_scope_key, affect_label);
+
+            CREATE INDEX IF NOT EXISTS idx_affect_state_scope_recent
+            ON affect_state(memory_set_id, target_scope_type, target_scope_key, updated_at);
 
             CREATE TABLE IF NOT EXISTS vector_index_entries (
                 vector_entry_id INTEGER PRIMARY KEY AUTOINCREMENT,

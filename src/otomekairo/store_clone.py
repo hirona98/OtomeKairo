@@ -16,6 +16,8 @@ class StoreCloneMixin:
             # 削除順序
             conn.execute("DELETE FROM memory_postprocess_jobs WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM revisions WHERE memory_set_id = ?", (memory_set_id,))
+            conn.execute("DELETE FROM episode_affects WHERE memory_set_id = ?", (memory_set_id,))
+            conn.execute("DELETE FROM mood_state WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM affect_state WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM memory_units WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM episodes WHERE memory_set_id = ?", (memory_set_id,))
@@ -57,6 +59,17 @@ class StoreCloneMixin:
                 target_memory_set_id=target_memory_set_id,
                 event_id_map=event_id_map,
                 memory_unit_id_map=memory_unit_id_map,
+            )
+            self._clone_episode_affect_records(
+                conn,
+                source_memory_set_id=source_memory_set_id,
+                target_memory_set_id=target_memory_set_id,
+                episode_id_map=episode_id_map,
+            )
+            self._clone_mood_state_records(
+                conn,
+                source_memory_set_id=source_memory_set_id,
+                target_memory_set_id=target_memory_set_id,
             )
             self._clone_affect_state_records(
                 conn,
@@ -221,6 +234,44 @@ class StoreCloneMixin:
                 {
                     **record,
                     "affect_state_id": f"affect_state:{uuid.uuid4().hex}",
+                    "memory_set_id": target_memory_set_id,
+                },
+            )
+
+    def _clone_episode_affect_records(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        source_memory_set_id: str,
+        target_memory_set_id: str,
+        episode_id_map: dict[str, str],
+    ) -> None:
+        source_episode_affects = self._load_payload_rows(conn, "episode_affects", source_memory_set_id)
+        for record in source_episode_affects:
+            self._insert_episode_affect(
+                conn,
+                {
+                    **record,
+                    "episode_affect_id": f"episode_affect:{uuid.uuid4().hex}",
+                    "memory_set_id": target_memory_set_id,
+                    "episode_id": episode_id_map.get(record["episode_id"], record["episode_id"]),
+                },
+            )
+
+    def _clone_mood_state_records(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        source_memory_set_id: str,
+        target_memory_set_id: str,
+    ) -> None:
+        source_mood_states = self._load_payload_rows(conn, "mood_state", source_memory_set_id)
+        for record in source_mood_states:
+            self._upsert_mood_state(
+                conn,
+                {
+                    **record,
+                    "mood_state_id": f"mood_state:{target_memory_set_id}",
                     "memory_set_id": target_memory_set_id,
                 },
             )

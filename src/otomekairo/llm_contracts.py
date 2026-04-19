@@ -57,11 +57,6 @@ COMMITMENT_STATE_VALUES = {
     "done",
     "cancelled",
 }
-
-AFFECT_LAYER_VALUES = {
-    "surface",
-    "background",
-}
 SCOPE_TYPE_VALUES = {
     "self",
     "user",
@@ -181,6 +176,17 @@ def _validate_scope_identity(*, scope_type: Any, scope_key: Any, label: str) -> 
             raise LLMError(f"{label}.scope_key must be normalized for relationship scope.")
 
 
+def _validate_vad(value: Any, label: str) -> None:
+    # 形状
+    _validate_exact_keys(value, {"v", "a", "d"}, label)
+
+    # 値
+    for axis in ("v", "a", "d"):
+        axis_value = value[axis]
+        if not isinstance(axis_value, (int, float)):
+            raise LLMError(f"{label}.{axis} must be numeric.")
+
+
 # recall_hint検証
 def validate_recall_hint_contract(payload: dict[str, Any]) -> None:
     # 必須キー群
@@ -284,7 +290,7 @@ def validate_memory_interpretation_contract(payload: dict[str, Any]) -> None:
     required_keys = {
         "episode",
         "candidate_memory_units",
-        "affect_updates",
+        "episode_affects",
     }
     _validate_exact_keys(payload, required_keys, "MemoryInterpretation")
 
@@ -373,32 +379,48 @@ def validate_memory_interpretation_contract(payload: dict[str, Any]) -> None:
         if not isinstance(candidate["reason"], str) or not candidate["reason"].strip():
             raise LLMError("MemoryInterpretation candidate_memory_unit.reason is invalid.")
 
-    # affect検証
-    if not isinstance(payload["affect_updates"], list):
-        raise LLMError("MemoryInterpretation affect_updates must be a list.")
-    for affect_update in payload["affect_updates"]:
+    # episode affect検証
+    episode_affects = payload["episode_affects"]
+    if not isinstance(episode_affects, list):
+        raise LLMError("MemoryInterpretation episode_affects must be a list.")
+    if len(episode_affects) > 4:
+        raise LLMError("MemoryInterpretation episode_affects must contain at most 4 items.")
+
+    seen_episode_affects: set[tuple[str, str, str]] = set()
+    for episode_affect in episode_affects:
         required_affect_keys = {
-            "layer",
             "target_scope_type",
             "target_scope_key",
             "affect_label",
+            "vad",
             "intensity",
+            "confidence",
+            "summary_text",
         }
-        _validate_exact_keys(affect_update, required_affect_keys, "MemoryInterpretation affect_update")
-        if affect_update["layer"] not in AFFECT_LAYER_VALUES:
-            raise LLMError(
-                "MemoryInterpretation affect_update.layer is invalid "
-                f"(got={affect_update['layer']!r}, expected=surface|background)."
-            )
+        _validate_exact_keys(episode_affect, required_affect_keys, "MemoryInterpretation episode_affect")
         _validate_scope_identity(
-            scope_type=affect_update["target_scope_type"],
-            scope_key=affect_update["target_scope_key"],
-            label="MemoryInterpretation affect_update",
+            scope_type=episode_affect["target_scope_type"],
+            scope_key=episode_affect["target_scope_key"],
+            label="MemoryInterpretation episode_affect",
         )
-        if not isinstance(affect_update["affect_label"], str) or not affect_update["affect_label"].strip():
-            raise LLMError("MemoryInterpretation affect_update.affect_label is invalid.")
-        if not isinstance(affect_update["intensity"], (int, float)):
-            raise LLMError("MemoryInterpretation affect_update.intensity must be numeric.")
+        if not isinstance(episode_affect["affect_label"], str) or not episode_affect["affect_label"].strip():
+            raise LLMError("MemoryInterpretation episode_affect.affect_label is invalid.")
+        if not isinstance(episode_affect["summary_text"], str) or not episode_affect["summary_text"].strip():
+            raise LLMError("MemoryInterpretation episode_affect.summary_text is invalid.")
+        _validate_vad(episode_affect["vad"], "MemoryInterpretation episode_affect.vad")
+        if not isinstance(episode_affect["intensity"], (int, float)):
+            raise LLMError("MemoryInterpretation episode_affect.intensity must be numeric.")
+        if not isinstance(episode_affect["confidence"], (int, float)):
+            raise LLMError("MemoryInterpretation episode_affect.confidence must be numeric.")
+
+        affect_key = (
+            episode_affect["target_scope_type"],
+            episode_affect["target_scope_key"],
+            episode_affect["affect_label"].strip(),
+        )
+        if affect_key in seen_episode_affects:
+            raise LLMError("MemoryInterpretation episode_affects must not contain duplicate target/label pairs.")
+        seen_episode_affects.add(affect_key)
 
 
 def validate_memory_reflection_summary_contract(payload: dict[str, Any]) -> None:

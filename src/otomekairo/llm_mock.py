@@ -143,7 +143,7 @@ class MockLLMClient:
         input_text: str,
         recent_turns: list[dict],
         time_context: dict[str, Any],
-        affect_context: dict[str, list[dict[str, Any]]],
+        affect_context: dict[str, Any],
         recall_hint: dict,
         recall_pack: dict[str, Any],
     ) -> dict[str, Any]:
@@ -160,7 +160,10 @@ class MockLLMClient:
         episodic_evidence = recall_pack.get("episodic_evidence", [])
         event_evidence = recall_pack.get("event_evidence", [])
         active_topics = recall_pack.get("active_topics", [])
-        surface_affects = affect_context.get("surface", [])
+        mood_state = affect_context.get("mood_state") or {}
+        recent_episode_affects = affect_context.get("recent_episode_affects", [])
+        current_vad = mood_state.get("current_vad") or {}
+        current_valence = float(current_vad.get("v", 0.0)) if isinstance(current_vad, dict) else 0.0
 
         # decisionルール
         if not normalized:
@@ -215,11 +218,19 @@ class MockLLMClient:
                 "requires_confirmation": False,
                 "pending_intent": None,
             }
-        elif surface_affects and surface_affects[0]["affect_label"] in {"不安", "緊張", "迷い", "concern"}:
+        elif recent_episode_affects and recent_episode_affects[0]["affect_label"] in {"不安", "緊張", "迷い", "concern"}:
             payload = {
                 "kind": "reply",
                 "reason_code": "affect_caution",
                 "reason_summary": "AffectContext に慎重さを要する感情があり、確認寄りに返す。",
+                "requires_confirmation": True,
+                "pending_intent": None,
+            }
+        elif current_valence <= -0.25:
+            payload = {
+                "kind": "reply",
+                "reason_code": "mood_caution",
+                "reason_summary": "AffectContext の現在機嫌がやや張っており、慎重寄りに返す。",
                 "requires_confirmation": True,
                 "pending_intent": None,
             }
@@ -243,7 +254,7 @@ class MockLLMClient:
         input_text: str,
         recent_turns: list[dict],
         time_context: dict[str, Any],
-        affect_context: dict[str, list[dict[str, Any]]],
+        affect_context: dict[str, Any],
         recall_hint: dict,
         recall_pack: dict[str, Any],
         decision: dict,
@@ -263,7 +274,8 @@ class MockLLMClient:
         topic_items = recall_pack.get("active_topics", [])
         episode_items = recall_pack.get("episodic_evidence", [])
         event_items = recall_pack.get("event_evidence", [])
-        surface_affects = affect_context.get("surface", [])
+        mood_state = affect_context.get("mood_state") or {}
+        recent_episode_affects = affect_context.get("recent_episode_affects", [])
         conflict_item = conflict_items[0] if conflict_items else None
         commitment_item = commitment_items[0] if commitment_items else None
         relationship_item = relationship_items[0] if relationship_items else None
@@ -271,15 +283,19 @@ class MockLLMClient:
         topic_item = topic_items[0] if topic_items else None
         episode_item = episode_items[0] if episode_items else None
         event_item = event_items[0] if event_items else None
-        surface_affect = surface_affects[0] if surface_affects else None
+        recent_episode_affect = recent_episode_affects[0] if recent_episode_affects else None
         event_basis = self._event_evidence_basis_text(event_item)
+        current_vad = mood_state.get("current_vad") or {}
+        current_valence = float(current_vad.get("v", 0.0)) if isinstance(current_vad, dict) else 0.0
 
         # 注意プレフィックス
         caution_prefix = ""
         if conflict_item is not None:
             caution_prefix = "今は少し慎重に受け取っている。"
-        elif surface_affect is not None and surface_affect["affect_label"] in {"不安", "緊張", "迷い", "concern"}:
+        elif recent_episode_affect is not None and recent_episode_affect["affect_label"] in {"不安", "緊張", "迷い", "concern"}:
             caution_prefix = "少し慎重に聞いているよ。"
+        elif current_valence <= -0.25:
+            caution_prefix = "少し気を引き締めて聞いているよ。"
 
         # 継続プレフィックス
         continuity_prefix = ""
@@ -485,14 +501,14 @@ class MockLLMClient:
         # 候補memory unit群
         candidate_memory_units = self._mock_candidate_memory_units(normalized)
 
-        # affectUpdates生成
-        affect_updates = self._mock_affect_updates(normalized)
+        # episode affect生成
+        episode_affects = self._mock_episode_affects(normalized)
 
         # payload作成
         payload = {
             "episode": episode,
             "candidate_memory_units": candidate_memory_units,
-            "affect_updates": affect_updates,
+            "episode_affects": episode_affects,
         }
         validate_memory_interpretation_contract(payload)
         return payload
@@ -971,27 +987,31 @@ class MockLLMClient:
             return "negative"
         return "positive"
 
-    def _mock_affect_updates(self, normalized: str) -> list[dict[str, Any]]:
+    def _mock_episode_affects(self, normalized: str) -> list[dict[str, Any]]:
         # 構築群
         updates: list[dict[str, Any]] = []
         if any(token in normalized for token in ("疲れ", "しんど", "つらい", "不安")):
             updates.append(
                 {
-                    "layer": "surface",
-                    "target_scope_type": "user",
-                    "target_scope_key": "user",
+                    "target_scope_type": "self",
+                    "target_scope_key": "self",
                     "affect_label": "concern",
+                    "vad": {"v": -0.34, "a": 0.42, "d": -0.18},
                     "intensity": 0.72,
+                    "confidence": 0.82,
+                    "summary_text": "相手のしんどさに反応して少し気が張った。",
                 }
             )
         if any(token in normalized for token in ("嬉しい", "楽しい", "安心")):
             updates.append(
                 {
-                    "layer": "surface",
-                    "target_scope_type": "user",
-                    "target_scope_key": "user",
+                    "target_scope_type": "self",
+                    "target_scope_key": "self",
                     "affect_label": "warmth",
+                    "vad": {"v": 0.48, "a": 0.18, "d": 0.22},
                     "intensity": 0.65,
+                    "confidence": 0.78,
+                    "summary_text": "明るいやり取りに少し気持ちがほぐれた。",
                 }
             )
         return updates

@@ -93,7 +93,8 @@ response:
 - `input_trace.pending_intent_selection` には `candidate_pool_count`、`eligible_candidate_count`、`selected_candidate_ref`、`selected_candidate_id`、`selection_reason`、`result_status`、`failure_reason` を含む
 - `memory_trace` には 生成した `episode` の要約、`episode_series_id`、`open_loops`、`memory_units` 更新要約、感情更新要約を含む
 - 感情更新要約には `episode_affect` 保存件数、`mood_state` 更新要約、必要時だけ `affect_state` 更新要約を含む
-- `mood_state` 更新要約には、必要時だけ `baseline_vad / residual_vad / current_vad` を含む
+- `mood_state` 更新要約には、必要時だけ `baseline_vad / residual_vad / current_vad / confidence` を含む
+- 当時の感情本文を追う場合は `mood_state` ではなく `episode_affect.summary_text` を見る
 - `memory_trace` には `vector_index_sync.result_status` と `reflective_consolidation.result_status` を含め、同期保存済み部分と後段 job の進行を分けて追う
 - `reflective_consolidation.summary_generation` には `requested_scope_count`、`succeeded_scope_count`、`failed_scopes` を含む
 - `episode_series_id` と `open_loops` は追跡用の inspection 情報として扱い、通常の状態面や設定面では返さない
