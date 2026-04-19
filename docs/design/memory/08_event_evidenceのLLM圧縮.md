@@ -255,19 +255,13 @@ inspection で追いやすくするため、`cycle_trace.recall_trace` に `even
 
 `docs/design/memory/03_想起と判断.md` は、`event_evidence` の意味と圧縮ルールを定める上位設計である。
 
-この文書は、その圧縮を LLM へ寄せるときの実装設計として次を具体化する。
+この文書は、その圧縮を LLM で行うための実装設計として次を具体化する。
 
 - role
 - source pack
 - structured output 契約
 - failure の閉じ込め方
 - inspection と audit への出し方
-
-## 移行計画との関係
-
-この文書は、Phase 2 の `event_evidence` LLM 化の機能設計である。
-
-移行順や phase 管理は [04_LLM寄せ移行計画.md](../../plan/04_LLM寄せ移行計画.md) を正とする。
 
 この機能で実装上やることは、要するに次である。
 

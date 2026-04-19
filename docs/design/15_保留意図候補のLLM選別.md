@@ -36,7 +36,7 @@ OtomeKairo では、保留意図キュー全体を LLM 任せにはしない。
 
 ## 目的
 
-- `wake` / background wake / `desktop_watch` の保留候補選択を oldest-first から意味的選別へ寄せる
+- `wake` / background wake / `desktop_watch` の保留候補選択を oldest-first ではなく意味的選別で行う
 - `trigger_kind`、`client_context`、直近会話、`intent_summary` を候補選択に効かせる
 - 候補があっても「今回は選ばない」を正常系として扱えるようにする
 - deterministic な queue 境界、scheduler、cooldown、監査構造は壊さない
@@ -292,7 +292,7 @@ inspection で追いやすくするため、`cycle_trace.observation_trace` に 
 
 `docs/design/05_判断と行動.md` は、保留意図の意味境界、自律判断、過剰介入抑制を定める上位設計である。
 
-この文書は、その中の **保留意図候補をどれだけ再評価に乗せるか** を LLM へ寄せるときの実装設計として次を具体化する。
+この文書は、その中の **保留意図候補をどれだけ再評価に乗せるか** を LLM で決めるための実装設計として次を具体化する。
 
 - role
 - source pack
@@ -300,8 +300,3 @@ inspection で追いやすくするため、`cycle_trace.observation_trace` に 
 - trigger ごとの適用差分
 - failure の扱い
 - inspection と監査への出し方
-
-## 移行計画との関係
-
-この文書は、Phase 4 の `wake` / `desktop_watch` における保留意図候補選択の機能設計である。
-上位の移行順と全体方針は `docs/plan/04_LLM寄せ移行計画.md` を正とする。

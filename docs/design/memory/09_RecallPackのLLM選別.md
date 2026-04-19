@@ -44,7 +44,7 @@ OtomeKairo では、`RecallPack` 全体を LLM 任せにはしない。
 
 ## 目的
 
-- `RecallPack` の採用順を fixed weight ではなく意味的な優先度へ寄せる
+- `RecallPack` の採用順を fixed weight ではなく意味的な優先度で決める
 - `primary_intent` / `secondary_intents` / `time_reference` を、硬い if 分岐ではなく文脈判断として効かせる
 - `association` 候補を補助レーンのまま保ちつつ、採否そのものは意味的に決められるようにする
 - `conflicts.summary_text` を固定文ではなく、競合の中身が分かる短い説明にする
@@ -189,7 +189,7 @@ LLM に渡すのは raw DB row 群ではなく、候補群を request-local ref 
 - section 名は canonical なものだけを使う
 - 各 candidate は `summary_text` と意味判断に効く最小の構造化項目に絞る
 - `retrieval_lane` は残し、`association` 候補が補助レーンであることは downstream にも保つ
-- 現行の `association_score` や query 種別は、移行初期は source pack に残してよいが、本命判断値としては育てない
+- 現行の `association_score` や query 種別は、source pack に残してよいが、本命判断値としては育てない
 - `conflicts` には compare key と variant の短い summary だけを入れ、memory unit の内部 ID は渡さない
 
 ## LLM 出力契約
@@ -267,7 +267,7 @@ user prompt では、観測文、`RecallHint`、constraint、候補 sections、c
 この設計では fallback 選別を入れない。
 LLM が失敗したときに、古い fixed section priority や fixed score へ戻すことはしない。
 
-この phase の失敗は、`event_evidence` と違って optional ではない。
+この設計の失敗は、`event_evidence` と違って optional ではない。
 `RecallPack` の中心選別そのものを置き換えるため、失敗時は recall step を失敗として扱う。
 
 - `recall_pack_selection` が repair 1 回後も parse / contract を満たせなければ、その cycle は `internal_failure` にする
@@ -306,19 +306,13 @@ inspection で追いやすくするため、`cycle_trace.recall_trace` に `reca
 
 `docs/design/memory/03_想起と判断.md` は、`RecallPack` の意味境界と section 構成を定める上位設計である。
 
-この文書は、その候補選別と section 配置を LLM へ寄せるときの実装設計として次を具体化する。
+この文書は、その候補選別と section 配置を LLM で行うための実装設計として次を具体化する。
 
 - role
 - source pack
 - structured output 契約
 - failure の扱い
 - inspection と監査への出し方
-
-## 移行計画との関係
-
-この文書は、Phase 3 の `RecallPack` LLM 選別の機能設計である。
-
-移行順や phase 管理は [04_LLM寄せ移行計画.md](../../plan/04_LLM寄せ移行計画.md) を正とする。
 
 この機能で実装上やることは、要するに次である。
 
