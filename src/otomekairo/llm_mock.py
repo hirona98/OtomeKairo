@@ -1370,7 +1370,7 @@ class MockLLMClient:
         # 空確認
         normalized = text.strip()
         if embedding_dimension <= 0:
-            raise LLMError("embedding_dimension must be positive.")
+            raise LLMError("embedding_dimension は正の値である必要があります。")
         if not normalized:
             return [0.0] * embedding_dimension
 
@@ -1402,4 +1402,4 @@ class MockLLMClient:
         model = role_definition.get("model")
         if isinstance(model, str) and model.strip().startswith("mock"):
             return
-        raise LLMError(f"Unsupported mock model: {model}")
+        raise LLMError(f"未対応の mock model です: {model}")

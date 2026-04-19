@@ -51,7 +51,7 @@ def complete_text(
     try:
         response = completion(**request_kwargs)
     except Exception as exc:  # noqa: BLE001
-        raise LLMError(f"LiteLLM call failed: {exc}") from exc
+        raise LLMError(f"LiteLLM の呼び出しに失敗しました: {exc}") from exc
     return extract_response_text(response)
 
 
@@ -86,7 +86,7 @@ def generate_embeddings(
     try:
         response = embedding(**request_kwargs)
     except Exception as exc:  # noqa: BLE001
-        raise LLMError(f"LiteLLM embedding call failed: {exc}") from exc
+        raise LLMError(f"LiteLLM の embedding 呼び出しに失敗しました: {exc}") from exc
     return extract_embedding_vectors(
         response,
         expected_count=len(texts),
@@ -99,7 +99,7 @@ def _load_litellm_completion() -> Callable[..., Any]:
     try:
         from litellm import completion
     except ImportError as exc:
-        raise LLMError("LiteLLM is not installed. Run ./scripts/setup_venv.sh to install dependencies.") from exc
+        raise LLMError("LiteLLM がインストールされていません。依存関係を入れるには ./scripts/setup_venv.sh を実行してください。") from exc
     return completion
 
 
@@ -107,7 +107,7 @@ def _load_litellm_embedding() -> Callable[..., Any]:
     try:
         from litellm import embedding
     except ImportError as exc:
-        raise LLMError("LiteLLM is not installed. Run ./scripts/setup_venv.sh to install dependencies.") from exc
+        raise LLMError("LiteLLM がインストールされていません。依存関係を入れるには ./scripts/setup_venv.sh を実行してください。") from exc
     return embedding
 
 
@@ -118,7 +118,7 @@ def _is_openrouter_embedding_role_definition(role_definition: dict) -> bool:
 def _resolve_litellm_model(role_definition: dict) -> str:
     model = role_definition.get("model")
     if not isinstance(model, str) or not model.strip():
-        raise LLMError("role_definition.model is missing.")
+        raise LLMError("role_definition.model が設定されていません。")
     return model.strip()
 
 
@@ -143,7 +143,7 @@ def _request_openrouter_embeddings(
 ) -> dict[str, Any]:
     api_key = _resolve_api_key(role_definition)
     if api_key is None:
-        raise LLMError("OpenRouter embedding requires auth token.")
+        raise LLMError("OpenRouter の embedding には認証トークンが必要です。")
 
     api_base = _resolve_openrouter_api_base(role_definition)
     payload = {
@@ -167,16 +167,16 @@ def _request_openrouter_embeddings(
     except urllib_error.HTTPError as exc:
         error_body = exc.read().decode("utf-8", errors="replace")
         detail = extract_http_error_detail(error_body)
-        raise LLMError(f"OpenRouter embedding call failed: {exc.code} {detail}") from exc
+        raise LLMError(f"OpenRouter の embedding 呼び出しに失敗しました: {exc.code} {detail}") from exc
     except urllib_error.URLError as exc:
-        raise LLMError(f"OpenRouter embedding call failed: {exc.reason}") from exc
+        raise LLMError(f"OpenRouter の embedding 呼び出しに失敗しました: {exc.reason}") from exc
 
     try:
         payload = json.loads(body)
     except json.JSONDecodeError as exc:
-        raise LLMError(f"OpenRouter embedding response was not valid JSON: {exc}") from exc
+        raise LLMError(f"OpenRouter の embedding 応答が正しい JSON ではありませんでした: {exc}") from exc
     if not isinstance(payload, dict):
-        raise LLMError("OpenRouter embedding response did not return an object.")
+        raise LLMError("OpenRouter の embedding 応答がオブジェクトを返しませんでした。")
     return payload
 
 

@@ -89,7 +89,7 @@ INTERNAL_IDENTIFIER_PATTERN = re.compile(
 def _validate_exact_keys(value: Any, required_keys: set[str], label: str) -> None:
     # 形状
     if not isinstance(value, dict):
-        raise LLMError(f"{label} must be an object.")
+        raise LLMError(f"{label} はオブジェクトである必要があります。")
 
     # キー確認
     actual_keys = set(value.keys())
@@ -101,10 +101,10 @@ def _validate_exact_keys(value: Any, required_keys: set[str], label: str) -> Non
     extra_keys = sorted(actual_keys - required_keys)
     details: list[str] = []
     if missing_keys:
-        details.append(f"missing={','.join(missing_keys)}")
+        details.append(f"不足={','.join(missing_keys)}")
     if extra_keys:
-        details.append(f"extra={','.join(extra_keys)}")
-    raise LLMError(f"{label} keys are invalid ({'; '.join(details)}).")
+        details.append(f"余計={','.join(extra_keys)}")
+    raise LLMError(f"{label} のキーが不正です（{'; '.join(details)}）。")
 
 
 def _has_named_ref_prefix(value: str) -> bool:
@@ -136,44 +136,44 @@ def _normalized_relationship_refs(values: list[str]) -> list[str]:
 def _validate_scope_identity(*, scope_type: Any, scope_key: Any, label: str) -> None:
     # 型確認
     if scope_type not in SCOPE_TYPE_VALUES:
-        raise LLMError(f"{label}.scope_type is invalid.")
+        raise LLMError(f"{label}.scope_type が不正です。")
     if not isinstance(scope_key, str) or not scope_key.strip():
-        raise LLMError(f"{label}.scope_key is invalid.")
+        raise LLMError(f"{label}.scope_key が不正です。")
 
     # 正規化済み
     normalized_scope_key = scope_key.strip()
 
     # 固定Scopes
     if scope_type == "self" and normalized_scope_key != "self":
-        raise LLMError(f"{label}.scope_key must be 'self' when scope_type is self.")
+        raise LLMError(f"{label}.scope_type が self のとき、scope_key は 'self' である必要があります。")
     if scope_type == "user" and normalized_scope_key != "user":
-        raise LLMError(f"{label}.scope_key must be 'user' when scope_type is user.")
+        raise LLMError(f"{label}.scope_type が user のとき、scope_key は 'user' である必要があります。")
     if scope_type == "world" and normalized_scope_key != "world":
-        raise LLMError(f"{label}.scope_key must be 'world' when scope_type is world.")
+        raise LLMError(f"{label}.scope_type が world のとき、scope_key は 'world' である必要があります。")
 
     # トピックスコープ
     if scope_type == "topic":
         if not normalized_scope_key.startswith("topic:") or normalized_scope_key == "topic:":
-            raise LLMError(f"{label}.scope_key must be topic:<name> when scope_type is topic.")
+            raise LLMError(f"{label}.scope_type が topic のとき、scope_key は topic:<name> 形式である必要があります。")
         return
 
     # エンティティスコープ
     if scope_type == "entity":
         if not _has_named_ref_prefix(normalized_scope_key):
-            raise LLMError(f"{label}.scope_key must be person:/place:/tool: when scope_type is entity.")
+            raise LLMError(f"{label}.scope_type が entity のとき、scope_key は person:/place:/tool: のいずれかで始まる必要があります。")
         return
 
     # 関係スコープ
     if scope_type == "relationship":
         refs = normalized_scope_key.split("|")
         if len(refs) < 2:
-            raise LLMError(f"{label}.scope_key must join two or more refs with '|'.")
+            raise LLMError(f"{label}.scope_key は 2 つ以上の ref を '|' で連結する必要があります。")
         if any(not _is_relationship_ref(ref) for ref in refs):
-            raise LLMError(f"{label}.scope_key contains an invalid relationship ref.")
+            raise LLMError(f"{label}.scope_key に不正な relationship ref が含まれています。")
         if len(refs) != len(set(refs)):
-            raise LLMError(f"{label}.scope_key contains duplicate relationship refs.")
+            raise LLMError(f"{label}.scope_key に重複した relationship ref が含まれています。")
         if refs != _normalized_relationship_refs(refs):
-            raise LLMError(f"{label}.scope_key must be normalized for relationship scope.")
+            raise LLMError(f"{label}.scope_key は relationship scope 用に正規化されている必要があります。")
 
 
 def _validate_vad(value: Any, label: str) -> None:
@@ -184,7 +184,7 @@ def _validate_vad(value: Any, label: str) -> None:
     for axis in ("v", "a", "d"):
         axis_value = value[axis]
         if not isinstance(axis_value, (int, float)):
-            raise LLMError(f"{label}.{axis} must be numeric.")
+            raise LLMError(f"{label}.{axis} は数値である必要があります。")
 
 
 # recall_hint検証
@@ -200,48 +200,48 @@ def validate_recall_hint_contract(payload: dict[str, Any]) -> None:
         "mentioned_topics",
     }
     if set(payload.keys()) != required_keys:
-        raise LLMError("RecallHint keys do not match the contract.")
+        raise LLMError("RecallHint のキーが契約と一致しません。")
 
     # 値Checks
     if payload["primary_intent"] not in INTENT_VALUES:
-        raise LLMError("RecallHint primary_intent is invalid.")
+        raise LLMError("RecallHint primary_intent が不正です。")
     if payload["time_reference"] not in TIME_REFERENCE_VALUES:
-        raise LLMError("RecallHint time_reference is invalid.")
+        raise LLMError("RecallHint time_reference が不正です。")
     if not isinstance(payload["secondary_intents"], list):
-        raise LLMError("RecallHint secondary_intents must be a list.")
+        raise LLMError("RecallHint secondary_intents は配列である必要があります。")
     if len(payload["secondary_intents"]) > MAX_SECONDARY_INTENTS:
-        raise LLMError("RecallHint secondary_intents exceed the maximum length.")
+        raise LLMError("RecallHint secondary_intents の件数が上限を超えています。")
     for intent in payload["secondary_intents"]:
         if not isinstance(intent, str) or not intent.strip():
-            raise LLMError("RecallHint secondary_intents entries must be non-empty strings.")
+            raise LLMError("RecallHint secondary_intents の各要素は空でない文字列である必要があります。")
         if intent not in INTENT_VALUES:
-            raise LLMError("RecallHint secondary_intent is invalid.")
+            raise LLMError("RecallHint secondary_intent が不正です。")
     if len(payload["secondary_intents"]) != len(set(payload["secondary_intents"])):
-        raise LLMError("RecallHint secondary_intents contain duplicates.")
+        raise LLMError("RecallHint secondary_intents に重複があります。")
     if payload["primary_intent"] in payload["secondary_intents"]:
-        raise LLMError("RecallHint duplicates primary intent.")
+        raise LLMError("RecallHint secondary_intents に primary_intent と同じ値を含めてはいけません。")
     if not isinstance(payload["focus_scopes"], list):
-        raise LLMError("RecallHint focus_scopes must be a list.")
+        raise LLMError("RecallHint focus_scopes は配列である必要があります。")
     if len(payload["focus_scopes"]) > MAX_HINT_SCOPE_VALUES:
-        raise LLMError("RecallHint focus_scopes exceed the maximum length.")
+        raise LLMError("RecallHint focus_scopes の件数が上限を超えています。")
     if any(not isinstance(scope, str) or not scope.strip() for scope in payload["focus_scopes"]):
-        raise LLMError("RecallHint focus_scopes entries must be non-empty strings.")
+        raise LLMError("RecallHint focus_scopes の各要素は空でない文字列である必要があります。")
     if not isinstance(payload["mentioned_entities"], list):
-        raise LLMError("RecallHint mentioned_entities must be a list.")
+        raise LLMError("RecallHint mentioned_entities は配列である必要があります。")
     if len(payload["mentioned_entities"]) > MAX_HINT_SCOPE_VALUES:
-        raise LLMError("RecallHint mentioned_entities exceed the maximum length.")
+        raise LLMError("RecallHint mentioned_entities の件数が上限を超えています。")
     if any(not isinstance(entity, str) or not entity.strip() for entity in payload["mentioned_entities"]):
-        raise LLMError("RecallHint mentioned_entities entries must be non-empty strings.")
+        raise LLMError("RecallHint mentioned_entities の各要素は空でない文字列である必要があります。")
     if not isinstance(payload["mentioned_topics"], list):
-        raise LLMError("RecallHint mentioned_topics must be a list.")
+        raise LLMError("RecallHint mentioned_topics は配列である必要があります。")
     if len(payload["mentioned_topics"]) > MAX_HINT_SCOPE_VALUES:
-        raise LLMError("RecallHint mentioned_topics exceed the maximum length.")
+        raise LLMError("RecallHint mentioned_topics の件数が上限を超えています。")
     if any(not isinstance(topic, str) or not topic.strip() for topic in payload["mentioned_topics"]):
-        raise LLMError("RecallHint mentioned_topics entries must be non-empty strings.")
+        raise LLMError("RecallHint mentioned_topics の各要素は空でない文字列である必要があります。")
     if not isinstance(payload["confidence"], (int, float)):
-        raise LLMError("RecallHint confidence must be numeric.")
+        raise LLMError("RecallHint confidence は数値である必要があります。")
     if not 0.0 <= float(payload["confidence"]) <= 1.0:
-        raise LLMError("RecallHint confidence must be between 0.0 and 1.0.")
+        raise LLMError("RecallHint confidence は 0.0 以上 1.0 以下である必要があります。")
 
 
 # decision検証
@@ -258,13 +258,13 @@ def validate_decision_contract(payload: dict[str, Any]) -> None:
 
     # 値Checks
     if payload["kind"] not in {"reply", "noop", "pending_intent"}:
-        raise LLMError("Decision kind is invalid.")
+        raise LLMError("Decision kind が不正です。")
     if not isinstance(payload["reason_code"], str) or not payload["reason_code"].strip():
-        raise LLMError("Decision reason_code must be a non-empty string.")
+        raise LLMError("Decision reason_code は空でない文字列である必要があります。")
     if not isinstance(payload["reason_summary"], str) or not payload["reason_summary"].strip():
-        raise LLMError("Decision reason_summary must be a non-empty string.")
+        raise LLMError("Decision reason_summary は空でない文字列である必要があります。")
     if not isinstance(payload["requires_confirmation"], bool):
-        raise LLMError("Decision requires_confirmation must be a boolean.")
+        raise LLMError("Decision requires_confirmation は真偽値である必要があります。")
     if payload["kind"] == "pending_intent":
         pending_intent = payload["pending_intent"]
         required_pending_keys = {
@@ -273,15 +273,15 @@ def validate_decision_contract(payload: dict[str, Any]) -> None:
             "dedupe_key",
         }
         if not isinstance(pending_intent, dict) or set(pending_intent.keys()) != required_pending_keys:
-            raise LLMError("Decision pending_intent is invalid.")
+            raise LLMError("Decision pending_intent が不正です。")
         for key in required_pending_keys:
             value = pending_intent.get(key)
             if not isinstance(value, str) or not value.strip():
-                raise LLMError(f"Decision pending_intent.{key} must be a non-empty string.")
+                raise LLMError(f"Decision pending_intent.{key} は空でない文字列である必要があります。")
         if payload["requires_confirmation"]:
-            raise LLMError("Decision pending_intent cannot require confirmation.")
+            raise LLMError("Decision pending_intent では requires_confirmation=true を指定できません。")
     elif payload["pending_intent"] is not None:
-        raise LLMError("Decision pending_intent must be null unless kind is pending_intent.")
+        raise LLMError("Decision kind が pending_intent 以外のとき、pending_intent は null である必要があります。")
 
 
 # memory interpretation検証
@@ -308,17 +308,17 @@ def validate_memory_interpretation_contract(payload: dict[str, Any]) -> None:
     }
     _validate_exact_keys(episode, required_episode_keys, "MemoryInterpretation episode")
     if not isinstance(episode["summary_text"], str) or not episode["summary_text"].strip():
-        raise LLMError("MemoryInterpretation episode.summary_text is invalid.")
+        raise LLMError("MemoryInterpretation episode.summary_text が不正です。")
     if episode["episode_series_id"] is not None and (
         not isinstance(episode["episode_series_id"], str) or not episode["episode_series_id"].strip()
     ):
-        raise LLMError("MemoryInterpretation episode.episode_series_id is invalid.")
+        raise LLMError("MemoryInterpretation episode.episode_series_id が不正です。")
     if episode["outcome_text"] is not None and not isinstance(episode["outcome_text"], str):
-        raise LLMError("MemoryInterpretation episode.outcome_text is invalid.")
+        raise LLMError("MemoryInterpretation episode.outcome_text が不正です。")
     if not isinstance(episode["open_loops"], list):
-        raise LLMError("MemoryInterpretation episode.open_loops must be a list.")
+        raise LLMError("MemoryInterpretation episode.open_loops は配列である必要があります。")
     if not isinstance(episode["salience"], (int, float)):
-        raise LLMError("MemoryInterpretation episode.salience must be numeric.")
+        raise LLMError("MemoryInterpretation episode.salience は数値である必要があります。")
     _validate_scope_identity(
         scope_type=episode["primary_scope_type"],
         scope_key=episode["primary_scope_key"],
@@ -327,7 +327,7 @@ def validate_memory_interpretation_contract(payload: dict[str, Any]) -> None:
 
     # 候補検証
     if not isinstance(payload["candidate_memory_units"], list):
-        raise LLMError("MemoryInterpretation candidate_memory_units must be a list.")
+        raise LLMError("MemoryInterpretation candidate_memory_units は配列である必要があります。")
     for candidate in payload["candidate_memory_units"]:
         required_candidate_keys = {
             "memory_type",
@@ -348,43 +348,43 @@ def validate_memory_interpretation_contract(payload: dict[str, Any]) -> None:
         }
         _validate_exact_keys(candidate, required_candidate_keys, "MemoryInterpretation candidate_memory_unit")
         if candidate["memory_type"] not in MEMORY_TYPE_VALUES:
-            raise LLMError("MemoryInterpretation candidate_memory_unit.memory_type is invalid.")
+            raise LLMError("MemoryInterpretation candidate_memory_unit.memory_type が不正です。")
         if candidate["status"] not in MEMORY_STATUS_VALUES:
-            raise LLMError("MemoryInterpretation candidate_memory_unit.status is invalid.")
+            raise LLMError("MemoryInterpretation candidate_memory_unit.status が不正です。")
         _validate_scope_identity(
             scope_type=candidate["scope_type"],
             scope_key=candidate["scope_key"],
             label="MemoryInterpretation candidate_memory_unit",
         )
         if not isinstance(candidate["subject_ref"], str) or not candidate["subject_ref"].strip():
-            raise LLMError("MemoryInterpretation candidate_memory_unit.subject_ref is invalid.")
+            raise LLMError("MemoryInterpretation candidate_memory_unit.subject_ref が不正です。")
         if not isinstance(candidate["predicate"], str) or not candidate["predicate"].strip():
-            raise LLMError("MemoryInterpretation candidate_memory_unit.predicate is invalid.")
+            raise LLMError("MemoryInterpretation candidate_memory_unit.predicate が不正です。")
         if candidate["object_ref_or_value"] is not None and not isinstance(candidate["object_ref_or_value"], str):
-            raise LLMError("MemoryInterpretation candidate_memory_unit.object_ref_or_value is invalid.")
+            raise LLMError("MemoryInterpretation candidate_memory_unit.object_ref_or_value が不正です。")
         if not isinstance(candidate["summary_text"], str) or not candidate["summary_text"].strip():
-            raise LLMError("MemoryInterpretation candidate_memory_unit.summary_text is invalid.")
+            raise LLMError("MemoryInterpretation candidate_memory_unit.summary_text が不正です。")
         if candidate["commitment_state"] is not None and candidate["commitment_state"] not in COMMITMENT_STATE_VALUES:
-            raise LLMError("MemoryInterpretation candidate_memory_unit.commitment_state is invalid.")
+            raise LLMError("MemoryInterpretation candidate_memory_unit.commitment_state が不正です。")
         if not isinstance(candidate["confidence"], (int, float)):
-            raise LLMError("MemoryInterpretation candidate_memory_unit.confidence must be numeric.")
+            raise LLMError("MemoryInterpretation candidate_memory_unit.confidence は数値である必要があります。")
         if not isinstance(candidate["salience"], (int, float)):
-            raise LLMError("MemoryInterpretation candidate_memory_unit.salience must be numeric.")
+            raise LLMError("MemoryInterpretation candidate_memory_unit.salience は数値である必要があります。")
         if candidate["valid_from"] is not None and not isinstance(candidate["valid_from"], str):
-            raise LLMError("MemoryInterpretation candidate_memory_unit.valid_from is invalid.")
+            raise LLMError("MemoryInterpretation candidate_memory_unit.valid_from が不正です。")
         if candidate["valid_to"] is not None and not isinstance(candidate["valid_to"], str):
-            raise LLMError("MemoryInterpretation candidate_memory_unit.valid_to is invalid.")
+            raise LLMError("MemoryInterpretation candidate_memory_unit.valid_to が不正です。")
         if not isinstance(candidate["qualifiers"], dict):
-            raise LLMError("MemoryInterpretation candidate_memory_unit.qualifiers must be an object.")
+            raise LLMError("MemoryInterpretation candidate_memory_unit.qualifiers はオブジェクトである必要があります。")
         if not isinstance(candidate["reason"], str) or not candidate["reason"].strip():
-            raise LLMError("MemoryInterpretation candidate_memory_unit.reason is invalid.")
+            raise LLMError("MemoryInterpretation candidate_memory_unit.reason が不正です。")
 
     # episode affect検証
     episode_affects = payload["episode_affects"]
     if not isinstance(episode_affects, list):
-        raise LLMError("MemoryInterpretation episode_affects must be a list.")
+        raise LLMError("MemoryInterpretation episode_affects は配列である必要があります。")
     if len(episode_affects) > 4:
-        raise LLMError("MemoryInterpretation episode_affects must contain at most 4 items.")
+        raise LLMError("MemoryInterpretation episode_affects は最大 4 件までである必要があります。")
 
     seen_episode_affects: set[tuple[str, str, str]] = set()
     for episode_affect in episode_affects:
@@ -404,14 +404,14 @@ def validate_memory_interpretation_contract(payload: dict[str, Any]) -> None:
             label="MemoryInterpretation episode_affect",
         )
         if not isinstance(episode_affect["affect_label"], str) or not episode_affect["affect_label"].strip():
-            raise LLMError("MemoryInterpretation episode_affect.affect_label is invalid.")
+            raise LLMError("MemoryInterpretation episode_affect.affect_label が不正です。")
         if not isinstance(episode_affect["summary_text"], str) or not episode_affect["summary_text"].strip():
-            raise LLMError("MemoryInterpretation episode_affect.summary_text is invalid.")
+            raise LLMError("MemoryInterpretation episode_affect.summary_text が不正です。")
         _validate_vad(episode_affect["vad"], "MemoryInterpretation episode_affect.vad")
         if not isinstance(episode_affect["intensity"], (int, float)):
-            raise LLMError("MemoryInterpretation episode_affect.intensity must be numeric.")
+            raise LLMError("MemoryInterpretation episode_affect.intensity は数値である必要があります。")
         if not isinstance(episode_affect["confidence"], (int, float)):
-            raise LLMError("MemoryInterpretation episode_affect.confidence must be numeric.")
+            raise LLMError("MemoryInterpretation episode_affect.confidence は数値である必要があります。")
 
         affect_key = (
             episode_affect["target_scope_type"],
@@ -419,7 +419,7 @@ def validate_memory_interpretation_contract(payload: dict[str, Any]) -> None:
             episode_affect["affect_label"].strip(),
         )
         if affect_key in seen_episode_affects:
-            raise LLMError("MemoryInterpretation episode_affects must not contain duplicate target/label pairs.")
+            raise LLMError("MemoryInterpretation episode_affects に重複した target/label の組を含めてはいけません。")
         seen_episode_affects.add(affect_key)
 
 
@@ -430,21 +430,21 @@ def validate_memory_reflection_summary_contract(payload: dict[str, Any]) -> None
     # summary_text
     summary_text = payload["summary_text"]
     if not isinstance(summary_text, str):
-        raise LLMError("MemoryReflectionSummary summary_text must be a string.")
+        raise LLMError("MemoryReflectionSummary summary_text は文字列である必要があります。")
 
     normalized = summary_text.strip()
     if not normalized:
-        raise LLMError("MemoryReflectionSummary summary_text must not be empty.")
+        raise LLMError("MemoryReflectionSummary summary_text は空にできません。")
     if "\n" in normalized or "\r" in normalized:
-        raise LLMError("MemoryReflectionSummary summary_text must not contain newlines.")
+        raise LLMError("MemoryReflectionSummary summary_text に改行を含めてはいけません。")
     if len(normalized) > MAX_MEMORY_REFLECTION_SUMMARY_LENGTH:
-        raise LLMError("MemoryReflectionSummary summary_text exceeds the maximum length.")
+        raise LLMError("MemoryReflectionSummary summary_text が最大長を超えています。")
     if INTERNAL_IDENTIFIER_PATTERN.search(normalized) is not None:
-        raise LLMError("MemoryReflectionSummary summary_text must not contain internal identifiers.")
+        raise LLMError("MemoryReflectionSummary summary_text に内部識別子を含めてはいけません。")
 
     sentence_count = len([part for part in re.split(r"[。!?！？]+", normalized) if part.strip()])
     if not 1 <= sentence_count <= MAX_MEMORY_REFLECTION_SUMMARY_SENTENCES:
-        raise LLMError("MemoryReflectionSummary summary_text must be one or two sentences.")
+        raise LLMError("MemoryReflectionSummary summary_text は 1 文または 2 文である必要があります。")
 
 
 def validate_event_evidence_contract(payload: dict[str, Any]) -> None:
@@ -464,28 +464,28 @@ def validate_event_evidence_contract(payload: dict[str, Any]) -> None:
         if value is None:
             continue
         if not isinstance(value, str):
-            raise LLMError(f"EventEvidence {slot_name} must be a string or null.")
+            raise LLMError(f"EventEvidence {slot_name} は文字列または null である必要があります。")
         normalized = value.strip()
         if not normalized:
-            raise LLMError(f"EventEvidence {slot_name} must not be empty when present.")
+            raise LLMError(f"EventEvidence {slot_name} は指定する場合、空にできません。")
         if "\n" in normalized or "\r" in normalized:
-            raise LLMError(f"EventEvidence {slot_name} must not contain newlines.")
+            raise LLMError(f"EventEvidence {slot_name} に改行を含めてはいけません。")
         if INTERNAL_IDENTIFIER_PATTERN.search(normalized) is not None:
-            raise LLMError(f"EventEvidence {slot_name} must not contain internal identifiers.")
+            raise LLMError(f"EventEvidence {slot_name} に内部識別子を含めてはいけません。")
         sentence_count = len([part for part in re.split(r"[。!?！？]+", normalized) if part.strip()])
         if sentence_count != MAX_EVENT_EVIDENCE_SLOT_SENTENCES:
-            raise LLMError(f"EventEvidence {slot_name} must be exactly one sentence when present.")
+            raise LLMError(f"EventEvidence {slot_name} は指定する場合、ちょうど 1 文である必要があります。")
         present_slot_count += 1
 
     if present_slot_count == 0:
-        raise LLMError("EventEvidence must include at least one non-null slot.")
+        raise LLMError("EventEvidence には少なくとも 1 つの null でない slot が必要です。")
 
 
 def _recall_pack_candidate_refs_by_section(source_pack: dict[str, Any]) -> dict[str, set[str]]:
     # source pack
     candidate_sections = source_pack.get("candidate_sections", [])
     if not isinstance(candidate_sections, list):
-        raise LLMError("RecallPackSelection source_pack.candidate_sections must be a list.")
+        raise LLMError("RecallPackSelection source_pack.candidate_sections は配列である必要があります。")
 
     # 収集
     refs_by_section = {
@@ -502,23 +502,23 @@ def _recall_pack_candidate_refs_by_section(source_pack: dict[str, Any]) -> dict[
         )
         section_name = section["section_name"]
         if section_name not in refs_by_section:
-            raise LLMError("RecallPackSelection source_pack section_name is invalid.")
+            raise LLMError("RecallPackSelection source_pack section_name が不正です。")
         if section_name in seen_sections:
-            raise LLMError("RecallPackSelection source_pack section_name must not repeat.")
+            raise LLMError("RecallPackSelection source_pack section_name は重複してはいけません。")
         seen_sections.add(section_name)
 
         candidates = section["candidates"]
         if not isinstance(candidates, list):
-            raise LLMError("RecallPackSelection source_pack candidates must be a list.")
+            raise LLMError("RecallPackSelection source_pack candidates は配列である必要があります。")
         for candidate in candidates:
             if not isinstance(candidate, dict):
-                raise LLMError("RecallPackSelection source_pack candidate must be an object.")
+                raise LLMError("RecallPackSelection source_pack candidate はオブジェクトである必要があります。")
             candidate_ref = candidate.get("candidate_ref")
             if not isinstance(candidate_ref, str) or not candidate_ref.strip():
-                raise LLMError("RecallPackSelection source_pack candidate_ref is invalid.")
+                raise LLMError("RecallPackSelection source_pack candidate_ref が不正です。")
             normalized_ref = candidate_ref.strip()
             if normalized_ref in seen_candidate_refs:
-                raise LLMError("RecallPackSelection source_pack candidate_ref must be unique.")
+                raise LLMError("RecallPackSelection source_pack candidate_ref は一意である必要があります。")
             refs_by_section[section_name].add(normalized_ref)
             seen_candidate_refs.add(normalized_ref)
 
@@ -530,19 +530,19 @@ def _recall_pack_conflict_refs(source_pack: dict[str, Any]) -> set[str]:
     # source pack
     conflicts = source_pack.get("conflicts", [])
     if not isinstance(conflicts, list):
-        raise LLMError("RecallPackSelection source_pack.conflicts must be a list.")
+        raise LLMError("RecallPackSelection source_pack.conflicts は配列である必要があります。")
 
     # 収集
     refs: set[str] = set()
     for conflict in conflicts:
         if not isinstance(conflict, dict):
-            raise LLMError("RecallPackSelection source_pack conflict must be an object.")
+            raise LLMError("RecallPackSelection source_pack conflict はオブジェクトである必要があります。")
         conflict_ref = conflict.get("conflict_ref")
         if not isinstance(conflict_ref, str) or not conflict_ref.strip():
-            raise LLMError("RecallPackSelection source_pack conflict_ref is invalid.")
+            raise LLMError("RecallPackSelection source_pack conflict_ref が不正です。")
         normalized_ref = conflict_ref.strip()
         if normalized_ref in refs:
-            raise LLMError("RecallPackSelection source_pack conflict_ref must be unique.")
+            raise LLMError("RecallPackSelection source_pack conflict_ref は一意である必要があります。")
         refs.add(normalized_ref)
 
     # 結果
@@ -560,7 +560,7 @@ def validate_recall_pack_selection_contract(payload: dict[str, Any], *, source_p
     # section_selection
     section_selection = payload["section_selection"]
     if not isinstance(section_selection, list):
-        raise LLMError("RecallPackSelection section_selection must be a list.")
+        raise LLMError("RecallPackSelection section_selection は配列である必要があります。")
 
     seen_sections: set[str] = set()
     seen_candidate_refs: set[str] = set()
@@ -572,33 +572,33 @@ def validate_recall_pack_selection_contract(payload: dict[str, Any], *, source_p
         )
         section_name = section_item["section_name"]
         if section_name not in valid_candidate_refs_by_section:
-            raise LLMError("RecallPackSelection section_name is invalid.")
+            raise LLMError("RecallPackSelection section_name が不正です。")
         if section_name in seen_sections:
-            raise LLMError("RecallPackSelection section_name must not repeat.")
+            raise LLMError("RecallPackSelection section_name は重複してはいけません。")
         seen_sections.add(section_name)
 
         candidate_refs = section_item["candidate_refs"]
         if not isinstance(candidate_refs, list) or not candidate_refs:
-            raise LLMError("RecallPackSelection candidate_refs must be a non-empty list.")
+            raise LLMError("RecallPackSelection candidate_refs は空でない配列である必要があります。")
 
         local_seen_refs: set[str] = set()
         for candidate_ref in candidate_refs:
             if not isinstance(candidate_ref, str) or not candidate_ref.strip():
-                raise LLMError("RecallPackSelection candidate_ref is invalid.")
+                raise LLMError("RecallPackSelection candidate_ref が不正です。")
             normalized_ref = candidate_ref.strip()
             if normalized_ref not in valid_candidate_refs_by_section[section_name]:
-                raise LLMError("RecallPackSelection candidate_ref must belong to its section in source_pack.")
+                raise LLMError("RecallPackSelection candidate_ref は source_pack 内の対応 section に属している必要があります。")
             if normalized_ref in local_seen_refs:
-                raise LLMError("RecallPackSelection candidate_refs must not repeat within a section.")
+                raise LLMError("RecallPackSelection candidate_refs は同じ section 内で重複してはいけません。")
             if normalized_ref in seen_candidate_refs:
-                raise LLMError("RecallPackSelection candidate_refs must not repeat across sections.")
+                raise LLMError("RecallPackSelection candidate_refs は section をまたいで重複してはいけません。")
             local_seen_refs.add(normalized_ref)
             seen_candidate_refs.add(normalized_ref)
 
     # conflict_summaries
     conflict_summaries = payload["conflict_summaries"]
     if not isinstance(conflict_summaries, list):
-        raise LLMError("RecallPackSelection conflict_summaries must be a list.")
+        raise LLMError("RecallPackSelection conflict_summaries は配列である必要があります。")
 
     seen_conflict_refs: set[str] = set()
     for conflict_item in conflict_summaries:
@@ -609,49 +609,49 @@ def validate_recall_pack_selection_contract(payload: dict[str, Any], *, source_p
         )
         conflict_ref = conflict_item["conflict_ref"]
         if not isinstance(conflict_ref, str) or not conflict_ref.strip():
-            raise LLMError("RecallPackSelection conflict_ref is invalid.")
+            raise LLMError("RecallPackSelection conflict_ref が不正です。")
         normalized_ref = conflict_ref.strip()
         if normalized_ref not in valid_conflict_refs:
-            raise LLMError("RecallPackSelection conflict_ref must exist in source_pack.")
+            raise LLMError("RecallPackSelection conflict_ref は source_pack に存在している必要があります。")
         if normalized_ref in seen_conflict_refs:
-            raise LLMError("RecallPackSelection conflict_ref must not repeat.")
+            raise LLMError("RecallPackSelection conflict_ref は重複してはいけません。")
         seen_conflict_refs.add(normalized_ref)
 
         summary_text = conflict_item["summary_text"]
         if not isinstance(summary_text, str):
-            raise LLMError("RecallPackSelection summary_text must be a string.")
+            raise LLMError("RecallPackSelection summary_text は文字列である必要があります。")
         normalized_summary = summary_text.strip()
         if not normalized_summary:
-            raise LLMError("RecallPackSelection summary_text must not be empty.")
+            raise LLMError("RecallPackSelection summary_text は空にできません。")
         if "\n" in normalized_summary or "\r" in normalized_summary:
-            raise LLMError("RecallPackSelection summary_text must not contain newlines.")
+            raise LLMError("RecallPackSelection summary_text に改行を含めてはいけません。")
         if INTERNAL_IDENTIFIER_PATTERN.search(normalized_summary) is not None:
-            raise LLMError("RecallPackSelection summary_text must not contain internal identifiers.")
+            raise LLMError("RecallPackSelection summary_text に内部識別子を含めてはいけません。")
         sentence_count = len([part for part in re.split(r"[。!?！？]+", normalized_summary) if part.strip()])
         if sentence_count != MAX_RECALL_PACK_CONFLICT_SUMMARY_SENTENCES:
-            raise LLMError("RecallPackSelection summary_text must be exactly one sentence.")
+            raise LLMError("RecallPackSelection summary_text はちょうど 1 文である必要があります。")
 
     if seen_conflict_refs != valid_conflict_refs:
-        raise LLMError("RecallPackSelection conflict_summaries must cover all conflict refs.")
+        raise LLMError("RecallPackSelection conflict_summaries はすべての conflict_ref を網羅する必要があります。")
 
 
 def _pending_intent_selection_candidate_refs(source_pack: dict[str, Any]) -> set[str]:
     # source pack
     candidates = source_pack.get("candidates", [])
     if not isinstance(candidates, list):
-        raise LLMError("PendingIntentSelection source_pack.candidates must be a list.")
+        raise LLMError("PendingIntentSelection source_pack.candidates は配列である必要があります。")
 
     # 収集
     refs: set[str] = set()
     for candidate in candidates:
         if not isinstance(candidate, dict):
-            raise LLMError("PendingIntentSelection source_pack candidate must be an object.")
+            raise LLMError("PendingIntentSelection source_pack candidate はオブジェクトである必要があります。")
         candidate_ref = candidate.get("candidate_ref")
         if not isinstance(candidate_ref, str) or not candidate_ref.strip():
-            raise LLMError("PendingIntentSelection source_pack candidate_ref is invalid.")
+            raise LLMError("PendingIntentSelection source_pack candidate_ref が不正です。")
         normalized_ref = candidate_ref.strip()
         if normalized_ref in refs:
-            raise LLMError("PendingIntentSelection source_pack candidate_ref must be unique.")
+            raise LLMError("PendingIntentSelection source_pack candidate_ref は一意である必要があります。")
         refs.add(normalized_ref)
 
     # 結果
@@ -668,22 +668,22 @@ def validate_pending_intent_selection_contract(payload: dict[str, Any], *, sourc
     # selected_candidate_ref
     selected_candidate_ref = payload["selected_candidate_ref"]
     if not isinstance(selected_candidate_ref, str) or not selected_candidate_ref.strip():
-        raise LLMError("PendingIntentSelection selected_candidate_ref is invalid.")
+        raise LLMError("PendingIntentSelection selected_candidate_ref が不正です。")
     normalized_ref = selected_candidate_ref.strip()
     if normalized_ref != "none" and normalized_ref not in valid_candidate_refs:
-        raise LLMError("PendingIntentSelection selected_candidate_ref must exist in source_pack or be 'none'.")
+        raise LLMError("PendingIntentSelection selected_candidate_ref は source_pack に存在するか 'none' である必要があります。")
 
     # selection_reason
     selection_reason = payload["selection_reason"]
     if not isinstance(selection_reason, str):
-        raise LLMError("PendingIntentSelection selection_reason must be a string.")
+        raise LLMError("PendingIntentSelection selection_reason は文字列である必要があります。")
     normalized_reason = selection_reason.strip()
     if not normalized_reason:
-        raise LLMError("PendingIntentSelection selection_reason must not be empty.")
+        raise LLMError("PendingIntentSelection selection_reason は空にできません。")
     if "\n" in normalized_reason or "\r" in normalized_reason:
-        raise LLMError("PendingIntentSelection selection_reason must not contain newlines.")
+        raise LLMError("PendingIntentSelection selection_reason に改行を含めてはいけません。")
     if INTERNAL_IDENTIFIER_PATTERN.search(normalized_reason) is not None:
-        raise LLMError("PendingIntentSelection selection_reason must not contain internal identifiers.")
+        raise LLMError("PendingIntentSelection selection_reason に内部識別子を含めてはいけません。")
     sentence_count = len([part for part in re.split(r"[。!?！？]+", normalized_reason) if part.strip()])
     if sentence_count != MAX_PENDING_INTENT_SELECTION_REASON_SENTENCES:
-        raise LLMError("PendingIntentSelection selection_reason must be exactly one sentence.")
+        raise LLMError("PendingIntentSelection selection_reason はちょうど 1 文である必要があります。")

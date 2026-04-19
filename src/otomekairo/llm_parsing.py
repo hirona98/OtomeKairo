@@ -19,13 +19,13 @@ def extract_response_text(response: Any) -> str:
     if choices is None and isinstance(response, dict):
         choices = response.get("choices")
     if not isinstance(choices, list) or not choices:
-        raise LLMError("LiteLLM response did not include choices.")
+        raise LLMError("LiteLLM の応答に choices が含まれていません。")
 
     message = getattr(choices[0], "message", None)
     if message is None and isinstance(choices[0], dict):
         message = choices[0].get("message")
     if message is None:
-        raise LLMError("LiteLLM response did not include message.")
+        raise LLMError("LiteLLM の応答に message が含まれていません。")
 
     content = getattr(message, "content", None)
     if content is None and isinstance(message, dict):
@@ -34,7 +34,7 @@ def extract_response_text(response: Any) -> str:
         return content
     if isinstance(content, list):
         return _flatten_content_parts(content)
-    raise LLMError("LiteLLM response content was empty.")
+    raise LLMError("LiteLLM の応答 content が空でした。")
 
 
 def _flatten_content_parts(content: list[Any]) -> str:
@@ -53,7 +53,7 @@ def _flatten_content_parts(content: list[Any]) -> str:
             continue
     result = "".join(text_parts).strip()
     if not result:
-        raise LLMError("LiteLLM response content parts were empty.")
+        raise LLMError("LiteLLM の応答 content parts が空でした。")
     return result
 
 
@@ -79,10 +79,10 @@ def parse_json_object(content: str) -> dict[str, Any]:
             try:
                 payload = json.loads(stripped[start : end + 1])
             except json.JSONDecodeError as exc:
-                raise LLMError(f"LiteLLM JSON parse failed: {exc}") from exc
+                raise LLMError(f"LiteLLM の JSON 解析に失敗しました: {exc}") from exc
 
     if not isinstance(payload, dict):
-        raise LLMError("LiteLLM did not return a JSON object.")
+        raise LLMError("LiteLLM が JSON オブジェクトを返しませんでした。")
     return payload
 
 
@@ -98,7 +98,7 @@ def extract_embedding_vectors(
     if data is None and isinstance(response, dict):
         data = response.get("data")
     if not isinstance(data, list) or len(data) != expected_count:
-        raise LLMError(f"{source_label} embedding response did not include expected data.")
+        raise LLMError(f"{source_label} の embedding 応答に期待した data が含まれていません。")
 
     vectors: list[list[float]] = []
     for item in data:
@@ -106,11 +106,11 @@ def extract_embedding_vectors(
         if vector is None and isinstance(item, dict):
             vector = item.get("embedding")
         if not isinstance(vector, list) or not vector:
-            raise LLMError(f"{source_label} embedding item did not include embedding.")
+            raise LLMError(f"{source_label} の embedding item に embedding が含まれていません。")
         parsed = [float(value) for value in vector]
         if expected_dimension is not None and len(parsed) != expected_dimension:
             raise LLMError(
-                f"{source_label} embedding dimension mismatch: expected {expected_dimension}, got {len(parsed)}."
+                f"{source_label} の embedding 次元が一致しません。期待値={expected_dimension}, 実際値={len(parsed)}"
             )
         vectors.append(parsed)
     return vectors

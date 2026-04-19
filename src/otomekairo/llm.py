@@ -72,7 +72,7 @@ class LLMClient:
         # 失敗
         if last_contract_error is not None:
             raise last_contract_error
-        raise LLMError("RecallHint generation failed without a parseable response.")
+        raise LLMError("RecallHint の生成に失敗しました。解析可能な応答が得られませんでした。")
 
     def generate_decision(
         self,
@@ -159,7 +159,7 @@ class LLMClient:
         content = complete_text(role_definition=role_definition, messages=messages)
         reply_text = content.strip()
         if not reply_text:
-            raise LLMError("Reply generation returned empty content.")
+            raise LLMError("Reply の生成結果が空でした。")
 
         # payload作成
         return {
@@ -201,7 +201,7 @@ class LLMClient:
             messages=messages,
             validator=validate_memory_interpretation_contract,
             repair_prompt_builder=build_memory_interpretation_repair_prompt,
-            failure_message="MemoryInterpretation generation failed without a parseable response.",
+            failure_message="MemoryInterpretation の生成に失敗しました。解析可能な応答が得られませんでした。",
         )
 
     def generate_memory_reflection_summary(
@@ -223,7 +223,7 @@ class LLMClient:
             messages=messages,
             validator=validate_memory_reflection_summary_contract,
             repair_prompt_builder=build_memory_reflection_summary_repair_prompt,
-            failure_message="MemoryReflectionSummary generation failed without a parseable response.",
+            failure_message="MemoryReflectionSummary の生成に失敗しました。解析可能な応答が得られませんでした。",
         )
 
     def generate_event_evidence(
@@ -245,7 +245,7 @@ class LLMClient:
             messages=messages,
             validator=validate_event_evidence_contract,
             repair_prompt_builder=build_event_evidence_repair_prompt,
-            failure_message="EventEvidence generation failed without a parseable response.",
+            failure_message="EventEvidence の生成に失敗しました。解析可能な応答が得られませんでした。",
             wrap_validation_error=True,
         )
 
@@ -268,7 +268,7 @@ class LLMClient:
             messages=messages,
             validator=lambda payload: validate_recall_pack_selection_contract(payload, source_pack=source_pack),
             repair_prompt_builder=build_recall_pack_selection_repair_prompt,
-            failure_message="RecallPackSelection generation failed without a parseable response.",
+            failure_message="RecallPackSelection の生成に失敗しました。解析可能な応答が得られませんでした。",
             wrap_validation_error=True,
         )
 
@@ -291,7 +291,7 @@ class LLMClient:
             messages=messages,
             validator=lambda payload: validate_pending_intent_selection_contract(payload, source_pack=source_pack),
             repair_prompt_builder=build_pending_intent_selection_repair_prompt,
-            failure_message="PendingIntentSelection generation failed without a parseable response.",
+            failure_message="PendingIntentSelection の生成に失敗しました。解析可能な応答が得られませんでした。",
             wrap_validation_error=True,
         )
 
@@ -308,7 +308,7 @@ class LLMClient:
         # 次元
         embedding_dimension = self._embedding_dimension(role_definition)
         if not isinstance(embedding_dimension, int) or embedding_dimension <= 0:
-            raise LLMError("embedding_dimension must be a positive integer.")
+            raise LLMError("embedding_dimension は正の整数である必要があります。")
 
         # モック経路
         if self._is_mock_role_definition(role_definition):

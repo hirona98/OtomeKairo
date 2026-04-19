@@ -226,10 +226,10 @@ class ReflectiveConsolidator:
         selected_model_preset = state["model_presets"][selected_model_preset_id]
         roles = selected_model_preset.get("roles")
         if not isinstance(roles, dict):
-            raise LLMError("reflection summary role is unavailable because roles is invalid.")
+            raise LLMError("roles が不正なため、reflection summary role を取得できません。")
         role_definition = roles.get("memory_reflection_summary")
         if not isinstance(role_definition, dict):
-            raise LLMError("reflection summary role is unavailable in the selected model preset.")
+            raise LLMError("選択中の model preset に reflection summary role がありません。")
         return role_definition
 
     def _reflective_trigger_reasons(
