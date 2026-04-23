@@ -144,6 +144,18 @@ class ServiceInputMixin:
             recall_hint=recall_hint,
             current_time=started_at,
         )
+        drive_state_summary = self._summarize_drive_states(
+            self._list_current_drive_states(
+                state=state,
+                current_time=started_at,
+            )
+        )
+        ongoing_action_summary = self._summarize_ongoing_action(
+            self._current_ongoing_action(
+                state=state,
+                current_time=started_at,
+            )
+        )
 
         # decision生成
         decision = self.llm.generate_decision(
@@ -153,6 +165,8 @@ class ServiceInputMixin:
             recent_turns=recent_turns,
             time_context=time_context,
             affect_context=affect_context,
+            drive_state_summary=drive_state_summary,
+            ongoing_action_summary=ongoing_action_summary,
             recall_hint=recall_hint,
             recall_pack=recall_pack,
         )
@@ -167,6 +181,8 @@ class ServiceInputMixin:
                 recent_turns=recent_turns,
                 time_context=time_context,
                 affect_context=affect_context,
+                drive_state_summary=drive_state_summary,
+                ongoing_action_summary=ongoing_action_summary,
                 recall_hint=recall_hint,
                 recall_pack=recall_pack,
                 decision=decision,
@@ -178,6 +194,8 @@ class ServiceInputMixin:
             "recall_pack": recall_pack,
             "time_context": time_context,
             "affect_context": affect_context,
+            "drive_state_summary": drive_state_summary,
+            "ongoing_action_summary": ongoing_action_summary,
             "decision": decision,
             "reply_payload": reply_payload,
         }
@@ -270,6 +288,9 @@ class ServiceInputMixin:
         input_event_role: str = "user",
         consolidate_memory: bool = True,
         pending_intent_selection: dict[str, Any] | None = None,
+        observation_summary: dict[str, Any] | None = None,
+        capability_request_summary: dict[str, Any] | None = None,
+        ongoing_action_transition_summary: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         # 結果選択
         decision = pipeline["decision"]
@@ -297,6 +318,8 @@ class ServiceInputMixin:
             recall_pack=pipeline["recall_pack"],
             time_context=pipeline["time_context"],
             affect_context=pipeline["affect_context"],
+            drive_state_summary=pipeline.get("drive_state_summary"),
+            ongoing_action_summary=pipeline.get("ongoing_action_summary"),
             decision=decision,
             result_kind=result_kind,
             reply_payload=reply_payload,
@@ -305,6 +328,9 @@ class ServiceInputMixin:
             input_event_kind=input_event_kind,
             input_event_role=input_event_role,
             pending_intent_selection=pending_intent_selection,
+            observation_summary=observation_summary,
+            capability_request_summary=capability_request_summary,
+            ongoing_action_transition_summary=ongoing_action_transition_summary,
         )
 
         # デバッグログ群
@@ -564,6 +590,7 @@ class ServiceInputMixin:
         else:
             vector_sync = memory_trace.get("vector_index_sync") or {}
             reflective = memory_trace.get("reflective_consolidation") or {}
+            drive_update = memory_trace.get("drive_state_update") or {}
             message = (
                 f"{self._short_cycle_id(cycle_id)} status={status} "
                 f"episode={memory_trace.get('episode_id') or '-'} "
@@ -572,6 +599,7 @@ class ServiceInputMixin:
                 f"vector={vector_sync.get('result_status', 'unknown')}"
             )
             message += f" reflection={reflective.get('result_status', 'unknown')}"
+            message += f" drive={drive_update.get('result_status', 'unknown')}"
             level = "INFO"
 
         # 送出
@@ -1115,18 +1143,25 @@ class ServiceInputMixin:
         result_trace: dict[str, Any],
         memory_trace: dict[str, Any] | None,
         pending_intent_selection: dict[str, Any] | None = None,
+        observation_summary: dict[str, Any] | None = None,
+        ongoing_action_summary: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        input_trace = {
+            "trigger_kind": cycle_summary["trigger_kind"],
+            "input_summary": self._clamp(input_text),
+            "client_context_summary": self._clamp(str(client_context)),
+            "normalized_input_summary": self._clamp(input_text.strip()),
+            "runtime_state_summary": runtime_summary,
+            "pending_intent_selection": pending_intent_selection or self._empty_pending_intent_selection_trace(),
+        }
+        if isinstance(observation_summary, dict):
+            input_trace["observation_summary"] = observation_summary
+        if isinstance(ongoing_action_summary, dict):
+            input_trace["ongoing_action_summary"] = ongoing_action_summary
         return {
             "cycle_id": cycle_id,
             "cycle_summary": cycle_summary,
-            "input_trace": {
-                "trigger_kind": cycle_summary["trigger_kind"],
-                "input_summary": self._clamp(input_text),
-                "client_context_summary": self._clamp(str(client_context)),
-                "normalized_input_summary": self._clamp(input_text.strip()),
-                "runtime_state_summary": runtime_summary,
-                "pending_intent_selection": pending_intent_selection or self._empty_pending_intent_selection_trace(),
-            },
+            "input_trace": input_trace,
             "recall_trace": recall_trace,
             "decision_trace": decision_trace,
             "result_trace": result_trace,
@@ -1180,11 +1215,13 @@ class ServiceInputMixin:
         input_text: str,
         time_context: dict[str, Any],
         affect_context: dict[str, Any],
+        drive_state_summary: list[dict[str, Any]] | None,
+        ongoing_action_summary: dict[str, Any] | None,
         recall_pack: dict[str, Any],
         decision: dict[str, Any],
         pending_intent_summary: dict[str, Any] | None,
     ) -> dict[str, Any]:
-        return {
+        trace = {
             "result_kind": decision["kind"],
             "reason_summary": decision["reason_summary"],
             "persona_summary": state["personas"][state["selected_persona_id"]]["display_name"],
@@ -1193,11 +1230,18 @@ class ServiceInputMixin:
             "internal_context_summary": {
                 "time_context": time_context,
                 "affect_context_summary": self._summarize_affect_context(affect_context),
+                "drive_state_summary": drive_state_summary,
+                "ongoing_action_summary": ongoing_action_summary,
                 "recall_pack_summary": self._summarize_recall_pack(recall_pack),
             },
             "primary_candidate_kind": decision["kind"],
             "pending_intent_candidate_summary": pending_intent_summary,
         }
+        if drive_state_summary:
+            trace["drive_state_summary"] = drive_state_summary
+        if isinstance(ongoing_action_summary, dict):
+            trace["ongoing_action_summary"] = ongoing_action_summary
+        return trace
 
     def _build_failure_decision_trace(
         self,
@@ -1205,8 +1249,10 @@ class ServiceInputMixin:
         state: dict[str, Any],
         input_text: str,
         failure_reason: str,
+        drive_state_summary: list[dict[str, Any]] | None = None,
+        ongoing_action_summary: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        return {
+        trace = {
             "result_kind": "internal_failure",
             "reason_summary": failure_reason,
             "persona_summary": state["personas"][state["selected_persona_id"]]["display_name"],
@@ -1214,6 +1260,11 @@ class ServiceInputMixin:
             "current_context_summary": self._clamp(input_text),
             "primary_candidate_kind": None,
         }
+        if drive_state_summary:
+            trace["drive_state_summary"] = drive_state_summary
+        if isinstance(ongoing_action_summary, dict):
+            trace["ongoing_action_summary"] = ongoing_action_summary
+        return trace
 
     def _build_success_result_trace(
         self,
@@ -1224,8 +1275,10 @@ class ServiceInputMixin:
         result_kind: str,
         reply_payload: dict[str, Any] | None,
         pending_intent_summary: dict[str, Any] | None,
+        capability_request_summary: dict[str, Any] | None = None,
+        ongoing_action_transition_summary: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        return {
+        trace = {
             "result_kind": result_kind,
             "reply_summary": self._clamp(reply_payload["reply_text"]) if reply_payload else None,
             "noop_reason_summary": decision["reason_summary"] if decision["kind"] == "noop" else None,
@@ -1233,6 +1286,11 @@ class ServiceInputMixin:
             "internal_failure_summary": None,
             "duration_ms": self._duration_ms(started_at, finished_at),
         }
+        if isinstance(capability_request_summary, dict):
+            trace["capability_request_summary"] = capability_request_summary
+        if isinstance(ongoing_action_transition_summary, dict):
+            trace["ongoing_action_transition_summary"] = ongoing_action_transition_summary
+        return trace
 
     def _build_failure_result_trace(
         self,
@@ -1240,8 +1298,10 @@ class ServiceInputMixin:
         started_at: str,
         finished_at: str,
         failure_reason: str,
+        capability_request_summary: dict[str, Any] | None = None,
+        ongoing_action_transition_summary: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        return {
+        trace = {
             "result_kind": "internal_failure",
             "reply_summary": None,
             "noop_reason_summary": None,
@@ -1249,6 +1309,11 @@ class ServiceInputMixin:
             "internal_failure_summary": failure_reason,
             "duration_ms": self._duration_ms(started_at, finished_at),
         }
+        if isinstance(capability_request_summary, dict):
+            trace["capability_request_summary"] = capability_request_summary
+        if isinstance(ongoing_action_transition_summary, dict):
+            trace["ongoing_action_transition_summary"] = ongoing_action_transition_summary
+        return trace
 
     def _persist_cycle_success(
         self,
@@ -1264,6 +1329,8 @@ class ServiceInputMixin:
         recall_pack: dict[str, Any],
         time_context: dict[str, Any],
         affect_context: dict[str, Any],
+        drive_state_summary: list[dict[str, Any]] | None,
+        ongoing_action_summary: dict[str, Any] | None,
         decision: dict[str, Any],
         result_kind: str,
         reply_payload: dict[str, Any] | None,
@@ -1272,6 +1339,9 @@ class ServiceInputMixin:
         input_event_kind: str,
         input_event_role: str,
         pending_intent_selection: dict[str, Any] | None = None,
+        observation_summary: dict[str, Any] | None = None,
+        capability_request_summary: dict[str, Any] | None = None,
+        ongoing_action_transition_summary: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         memory_set_id = state["selected_memory_set_id"]
         events = self._build_cycle_events(
@@ -1324,6 +1394,8 @@ class ServiceInputMixin:
                 input_text=input_text,
                 time_context=time_context,
                 affect_context=affect_context,
+                drive_state_summary=drive_state_summary,
+                ongoing_action_summary=ongoing_action_summary,
                 recall_pack=recall_pack,
                 decision=decision,
                 pending_intent_summary=pending_intent_summary,
@@ -1335,9 +1407,13 @@ class ServiceInputMixin:
                 result_kind=result_kind,
                 reply_payload=reply_payload,
                 pending_intent_summary=pending_intent_summary,
+                capability_request_summary=capability_request_summary,
+                ongoing_action_transition_summary=ongoing_action_transition_summary,
             ),
             memory_trace=self._pending_memory_trace(),
             pending_intent_selection=pending_intent_selection,
+            observation_summary=observation_summary,
+            ongoing_action_summary=ongoing_action_summary,
         )
         self.store.persist_cycle_records(
             events=events,
@@ -1365,6 +1441,11 @@ class ServiceInputMixin:
         failure_event_kind: str = "recall_hint_failure",
         failure_event_payload: dict[str, Any] | None = None,
         pending_intent_selection: dict[str, Any] | None = None,
+        drive_state_summary: list[dict[str, Any]] | None = None,
+        ongoing_action_summary: dict[str, Any] | None = None,
+        observation_summary: dict[str, Any] | None = None,
+        capability_request_summary: dict[str, Any] | None = None,
+        ongoing_action_transition_summary: dict[str, Any] | None = None,
     ) -> None:
         memory_set_id = state["selected_memory_set_id"]
         events = self._build_cycle_events(
@@ -1406,14 +1487,20 @@ class ServiceInputMixin:
                 state=state,
                 input_text=input_text,
                 failure_reason=failure_reason,
+                drive_state_summary=drive_state_summary,
+                ongoing_action_summary=ongoing_action_summary,
             ),
             result_trace=self._build_failure_result_trace(
                 started_at=started_at,
                 finished_at=finished_at,
                 failure_reason=failure_reason,
+                capability_request_summary=capability_request_summary,
+                ongoing_action_transition_summary=ongoing_action_transition_summary,
             ),
             memory_trace=None,
             pending_intent_selection=pending_intent_selection,
+            observation_summary=observation_summary,
+            ongoing_action_summary=ongoing_action_summary,
         )
         self.store.persist_cycle_records(
             events=events,

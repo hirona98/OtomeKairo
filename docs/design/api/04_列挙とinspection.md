@@ -100,6 +100,7 @@ response:
 - `result_trace` には、必要時だけ capability 実行要求の要約と `ongoing_action` の作成 / 継続 / 完了 / 中断の要約を含む
 - `memory_trace` には 生成した `episode` の要約、`episode_series_id`、`open_loops`、`memory_units` 更新要約、感情更新要約を含む
 - `memory_trace` には、必要時だけ `drive_state` 更新要約を含む
+- `memory_trace.drive_state_update` と `reflective_consolidation.drive_state_update` には `result_status`、`active_drive_ids`、`removed_drive_ids`、`drive_summaries` を含む
 - 感情更新要約には `episode_affect` 保存件数、`mood_state` 更新要約、必要時だけ `affect_state` 更新要約を含む
 - `mood_state` 更新要約には、必要時だけ `baseline_vad / residual_vad / current_vad / confidence` を含む
 - 当時の感情本文を追う場合は `mood_state` ではなく `episode_affect.summary_text` を見る

@@ -144,11 +144,15 @@ class MockLLMClient:
         recent_turns: list[dict],
         time_context: dict[str, Any],
         affect_context: dict[str, Any],
+        drive_state_summary: list[dict[str, Any]] | None,
+        ongoing_action_summary: dict[str, Any] | None,
         recall_hint: dict,
         recall_pack: dict[str, Any],
     ) -> dict[str, Any]:
         # model確認
         _ = persona
+        _ = drive_state_summary
+        _ = ongoing_action_summary
         self._assert_mock_model(role_definition)
 
         # コンテキスト
@@ -255,11 +259,15 @@ class MockLLMClient:
         recent_turns: list[dict],
         time_context: dict[str, Any],
         affect_context: dict[str, Any],
+        drive_state_summary: list[dict[str, Any]] | None,
+        ongoing_action_summary: dict[str, Any] | None,
         recall_hint: dict,
         recall_pack: dict[str, Any],
         decision: dict,
     ) -> dict[str, Any]:
         # model確認
+        _ = drive_state_summary
+        _ = ongoing_action_summary
         self._assert_mock_model(role_definition)
 
         # コンテキスト

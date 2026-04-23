@@ -309,6 +309,82 @@ class SQLiteMemoryStore(StoreCloneMixin, StoreVectorMixin, StoreSchemaMixin):
             return None
         return json.loads(row["payload_json"])
 
+    def list_drive_states(
+        self,
+        *,
+        memory_set_id: str,
+        current_time: str,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        # クエリ
+        with self._memory_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT payload_json
+                FROM drive_states
+                WHERE memory_set_id = ?
+                  AND expires_at > ?
+                ORDER BY salience DESC, updated_at DESC, rowid DESC
+                LIMIT ?
+                """,
+                (memory_set_id, current_time, limit),
+            ).fetchall()
+
+        # 結果
+        return [json.loads(row["payload_json"]) for row in rows]
+
+    def replace_drive_states(
+        self,
+        *,
+        memory_set_id: str,
+        drive_states: list[dict[str, Any]],
+    ) -> None:
+        # トランザクション
+        with self._memory_db() as conn:
+            conn.execute("DELETE FROM drive_states WHERE memory_set_id = ?", (memory_set_id,))
+            for drive_state in drive_states:
+                self._insert_drive_state(conn, drive_state)
+
+    def clear_drive_states(self, *, memory_set_id: str) -> None:
+        # トランザクション
+        with self._memory_db() as conn:
+            conn.execute("DELETE FROM drive_states WHERE memory_set_id = ?", (memory_set_id,))
+
+    def get_ongoing_action(
+        self,
+        *,
+        memory_set_id: str,
+        current_time: str,
+    ) -> dict[str, Any] | None:
+        # クエリ
+        with self._memory_db() as conn:
+            row = conn.execute(
+                """
+                SELECT payload_json
+                FROM ongoing_actions
+                WHERE memory_set_id = ?
+                  AND expires_at > ?
+                ORDER BY updated_at DESC, rowid DESC
+                LIMIT 1
+                """,
+                (memory_set_id, current_time),
+            ).fetchone()
+
+        # 結果
+        if row is None:
+            return None
+        return json.loads(row["payload_json"])
+
+    def upsert_ongoing_action(self, *, ongoing_action: dict[str, Any]) -> None:
+        # トランザクション
+        with self._memory_db() as conn:
+            self._insert_ongoing_action(conn, ongoing_action)
+
+    def clear_ongoing_action(self, *, memory_set_id: str) -> None:
+        # トランザクション
+        with self._memory_db() as conn:
+            conn.execute("DELETE FROM ongoing_actions WHERE memory_set_id = ?", (memory_set_id,))
+
     def get_latest_reflection_run(
         self,
         memory_set_id: str,
@@ -938,6 +1014,52 @@ class SQLiteMemoryStore(StoreCloneMixin, StoreVectorMixin, StoreSchemaMixin):
                 record["cycle_id"],
                 cycle_summary.get("started_at", ""),
                 cycle_summary.get("selected_memory_set_id", ""),
+                self._to_json(record),
+            ),
+        )
+
+    def _insert_drive_state(self, conn: sqlite3.Connection, record: dict[str, Any]) -> None:
+        # 追加
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO drive_states (
+                drive_id,
+                memory_set_id,
+                salience,
+                updated_at,
+                expires_at,
+                payload_json
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                record["drive_id"],
+                record["memory_set_id"],
+                record["salience"],
+                record["updated_at"],
+                record["expires_at"],
+                self._to_json(record),
+            ),
+        )
+
+    def _insert_ongoing_action(self, conn: sqlite3.Connection, record: dict[str, Any]) -> None:
+        # 追加
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO ongoing_actions (
+                action_id,
+                memory_set_id,
+                status,
+                updated_at,
+                expires_at,
+                payload_json
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                record["action_id"],
+                record["memory_set_id"],
+                record["status"],
+                record["updated_at"],
+                record["expires_at"],
                 self._to_json(record),
             ),
         )

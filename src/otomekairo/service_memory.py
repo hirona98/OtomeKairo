@@ -80,6 +80,7 @@ class ServiceMemoryMixin:
                     "succeeded_scope_count": 0,
                     "failed_scopes": [],
                 },
+                "drive_state_update": self._drive_state_update_trace("queued"),
                 "failure_reason": None,
             },
             emit_logs=False,
@@ -168,6 +169,7 @@ class ServiceMemoryMixin:
                         "succeeded_scope_count": 0,
                         "failed_scopes": [],
                     },
+                    "drive_state_update": self._drive_state_update_trace("not_started"),
                     "failure_reason": None,
                 },
             )
@@ -214,6 +216,10 @@ class ServiceMemoryMixin:
             memory_trace = self._pending_memory_trace()
         memory_trace["vector_index_sync"] = vector_index_sync
         memory_trace["reflective_consolidation"] = reflective_consolidation
+        memory_trace["drive_state_update"] = reflective_consolidation.get(
+            "drive_state_update",
+            self._drive_state_update_trace("not_started"),
+        )
         self.store.replace_cycle_trace(
             cycle_trace={
                 **cycle_trace,
@@ -346,8 +352,10 @@ class ServiceMemoryMixin:
                     "succeeded_scope_count": 0,
                     "failed_scopes": [],
                 },
+                "drive_state_update": self._drive_state_update_trace("not_started"),
                 "failure_reason": None,
             },
+            "drive_state_update": self._drive_state_update_trace("not_started"),
         }
 
     def _skipped_memory_trace(self, reason: str) -> dict[str, Any]:
@@ -380,8 +388,10 @@ class ServiceMemoryMixin:
                     "succeeded_scope_count": 0,
                     "failed_scopes": [],
                 },
+                "drive_state_update": self._drive_state_update_trace("skipped"),
                 "failure_reason": None,
             },
+            "drive_state_update": self._drive_state_update_trace("skipped"),
         }
 
     def _append_vector_index_failure_events(
@@ -501,8 +511,18 @@ class ServiceMemoryMixin:
                     "succeeded_scope_count": 0,
                     "failed_scopes": [],
                 },
+                "drive_state_update": self._drive_state_update_trace("not_started"),
                 "failure_reason": None,
             },
+            "drive_state_update": self._drive_state_update_trace("not_started"),
+        }
+
+    def _drive_state_update_trace(self, result_status: str) -> dict[str, Any]:
+        return {
+            "result_status": result_status,
+            "active_drive_ids": [],
+            "removed_drive_ids": [],
+            "drive_summaries": [],
         }
 
     def _update_cycle_trace_memory_trace(self, *, cycle_id: str, memory_trace: dict[str, Any]) -> None:

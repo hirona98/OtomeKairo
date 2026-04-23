@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from datetime import timedelta
 from typing import Any
 import uuid
 
@@ -12,6 +13,7 @@ from otomekairo.memory_utils import (
     days_since,
     hours_since,
     now_iso,
+    parse_iso,
     stable_json,
     timestamp_sort_key,
     unique_memory_unit_ids,
@@ -38,6 +40,11 @@ REFLECTION_SUMMARY_PACK_EPISODE_LIMIT = 6
 REFLECTION_SUMMARY_PACK_MEMORY_LIMIT = 8
 REFLECTION_TOPIC_DORMANT_AFTER_DAYS = 14
 REFLECTION_CONFIRMED_TOPIC_DORMANT_AFTER_DAYS = 30
+DRIVE_MAX_ACTIVE = 3
+DRIVE_COMMITMENT_STATES = ("open", "waiting_confirmation", "on_hold")
+DRIVE_SUMMARY_MIN_SALIENCE = 0.58
+DRIVE_SUMMARY_EXPIRY_HOURS = 48
+DRIVE_COMMITMENT_EXPIRY_HOURS = 72
 
 
 # 内省
@@ -67,6 +74,7 @@ class ReflectiveConsolidator:
         # トリガー確認
         memory_set_id = state["selected_memory_set_id"]
         summary_generation = self._empty_summary_generation()
+        drive_state_update = self._empty_drive_state_update()
         latest_run = self.store.get_latest_reflection_run(memory_set_id)
         latest_updated_run = self.store.get_latest_reflection_run(
             memory_set_id,
@@ -86,6 +94,7 @@ class ReflectiveConsolidator:
                 "trigger_reasons": [],
                 "affected_memory_unit_ids": [],
                 "summary_generation": summary_generation,
+                "drive_state_update": drive_state_update,
                 "failure_reason": None,
             }
 
@@ -160,6 +169,12 @@ class ReflectiveConsolidator:
                 result_status = "failed"
                 failure_reason = str(exc)
 
+            # 派生状態
+            drive_state_update = self._refresh_drive_states(
+                memory_set_id=memory_set_id,
+                finished_at=finished_reflection_at,
+            )
+
             # 内省実行
             affected_memory_unit_ids = unique_memory_unit_ids(reflection_actions)
             self.store.upsert_reflection_run(
@@ -174,6 +189,7 @@ class ReflectiveConsolidator:
                     "affected_memory_unit_ids": affected_memory_unit_ids,
                     "action_counts": action_counts(reflection_actions),
                     "summary_generation": summary_generation,
+                    "drive_state_update": drive_state_update,
                     "failure_reason": failure_reason,
                 }
             )
@@ -185,6 +201,7 @@ class ReflectiveConsolidator:
                 "trigger_reasons": trigger_reasons,
                 "affected_memory_unit_ids": affected_memory_unit_ids,
                 "summary_generation": summary_generation,
+                "drive_state_update": drive_state_update,
                 "failure_reason": failure_reason,
             }
         except Exception as exc:  # noqa: BLE001
@@ -203,6 +220,7 @@ class ReflectiveConsolidator:
                     "affected_memory_unit_ids": unique_memory_unit_ids(reflection_actions),
                     "action_counts": action_counts(reflection_actions),
                     "summary_generation": summary_generation,
+                    "drive_state_update": drive_state_update,
                     "failure_reason": failure_reason,
                 }
             )
@@ -212,6 +230,7 @@ class ReflectiveConsolidator:
                 "trigger_reasons": trigger_reasons,
                 "affected_memory_unit_ids": unique_memory_unit_ids(reflection_actions),
                 "summary_generation": summary_generation,
+                "drive_state_update": drive_state_update,
                 "failure_reason": failure_reason,
             }
 
@@ -220,6 +239,14 @@ class ReflectiveConsolidator:
             "requested_scope_count": 0,
             "succeeded_scope_count": 0,
             "failed_scopes": [],
+        }
+
+    def _empty_drive_state_update(self) -> dict[str, Any]:
+        return {
+            "result_status": "not_started",
+            "active_drive_ids": [],
+            "removed_drive_ids": [],
+            "drive_summaries": [],
         }
 
     def _reflection_summary_role_definition(self, *, state: dict[str, Any]) -> dict[str, Any]:
@@ -785,6 +812,161 @@ class ReflectiveConsolidator:
             "confidence": clamp_score(unit.get("confidence")),
             "salience": clamp_score(unit.get("salience")),
         }
+
+    def _refresh_drive_states(
+        self,
+        *,
+        memory_set_id: str,
+        finished_at: str,
+    ) -> dict[str, Any]:
+        existing_drive_states = self.store.list_drive_states(
+            memory_set_id=memory_set_id,
+            current_time=finished_at,
+            limit=DRIVE_MAX_ACTIVE * 4,
+        )
+        source_units = self.store.list_memory_units_for_reflection(
+            memory_set_id=memory_set_id,
+            statuses=list(ACTIVE_MEMORY_STATUSES),
+            include_memory_types=["commitment", "summary"],
+            limit=REFLECTION_MEMORY_LIMIT,
+        )
+        drive_states = self._build_drive_states(
+            memory_set_id=memory_set_id,
+            finished_at=finished_at,
+            source_units=source_units,
+        )
+        self.store.replace_drive_states(
+            memory_set_id=memory_set_id,
+            drive_states=drive_states,
+        )
+
+        existing_ids = {
+            drive_state["drive_id"]
+            for drive_state in existing_drive_states
+            if isinstance(drive_state, dict) and isinstance(drive_state.get("drive_id"), str)
+        }
+        current_ids = {
+            drive_state["drive_id"]
+            for drive_state in drive_states
+            if isinstance(drive_state, dict) and isinstance(drive_state.get("drive_id"), str)
+        }
+        result_status = "no_change"
+        if self._drive_state_signature(existing_drive_states) != self._drive_state_signature(drive_states):
+            result_status = "updated"
+
+        return {
+            "result_status": result_status,
+            "active_drive_ids": [drive_state["drive_id"] for drive_state in drive_states],
+            "removed_drive_ids": sorted(existing_ids - current_ids),
+            "drive_summaries": self._drive_state_summaries(drive_states),
+        }
+
+    def _build_drive_states(
+        self,
+        *,
+        memory_set_id: str,
+        finished_at: str,
+        source_units: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        drive_states: list[dict[str, Any]] = []
+        seen_drive_ids: set[str] = set()
+        for unit in source_units:
+            drive_state = self._build_drive_state_from_memory_unit(
+                memory_set_id=memory_set_id,
+                finished_at=finished_at,
+                unit=unit,
+            )
+            if drive_state is None:
+                continue
+            if drive_state["drive_id"] in seen_drive_ids:
+                continue
+            seen_drive_ids.add(drive_state["drive_id"])
+            drive_states.append(drive_state)
+
+        drive_states.sort(
+            key=lambda item: (
+                float(item.get("salience", 0.0)),
+                timestamp_sort_key(item.get("updated_at")),
+                item.get("drive_id", ""),
+            ),
+            reverse=True,
+        )
+        return drive_states[:DRIVE_MAX_ACTIVE]
+
+    def _build_drive_state_from_memory_unit(
+        self,
+        *,
+        memory_set_id: str,
+        finished_at: str,
+        unit: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        memory_unit_id = unit.get("memory_unit_id")
+        summary_text = str(unit.get("summary_text") or "").strip()
+        scope_type = unit.get("scope_type")
+        scope_key = unit.get("scope_key")
+        memory_type = unit.get("memory_type")
+        if not isinstance(memory_unit_id, str) or not memory_unit_id:
+            return None
+        if not summary_text:
+            return None
+        if not isinstance(scope_type, str) or not scope_type:
+            return None
+        if not isinstance(scope_key, str) or not scope_key:
+            return None
+
+        if memory_type == "commitment":
+            if unit.get("commitment_state") not in DRIVE_COMMITMENT_STATES:
+                return None
+            salience = clamp_score(float(unit.get("salience", 0.0)) + 0.12)
+            expires_at = self._drive_expires_at(
+                finished_at=finished_at,
+                hours=DRIVE_COMMITMENT_EXPIRY_HOURS,
+            )
+        elif memory_type == "summary":
+            if clamp_score(unit.get("salience")) < DRIVE_SUMMARY_MIN_SALIENCE:
+                return None
+            salience = clamp_score(unit.get("salience"))
+            expires_at = self._drive_expires_at(
+                finished_at=finished_at,
+                hours=DRIVE_SUMMARY_EXPIRY_HOURS,
+            )
+        else:
+            return None
+
+        return {
+            "drive_id": f"drive:{memory_unit_id}",
+            "memory_set_id": memory_set_id,
+            "summary_text": summary_text,
+            "salience": salience,
+            "related_scope_refs": [f"{scope_type}:{scope_key}"],
+            "supporting_memory_unit_ids": [memory_unit_id],
+            "updated_at": finished_at,
+            "expires_at": expires_at,
+        }
+
+    def _drive_expires_at(self, *, finished_at: str, hours: int) -> str:
+        return (parse_iso(finished_at) + timedelta(hours=hours)).isoformat()
+
+    def _drive_state_signature(self, drive_states: list[dict[str, Any]]) -> str:
+        return stable_json(self._drive_state_summaries(drive_states))
+
+    def _drive_state_summaries(self, drive_states: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        summaries: list[dict[str, Any]] = []
+        for drive_state in drive_states:
+            if not isinstance(drive_state, dict):
+                continue
+            summaries.append(
+                {
+                    "drive_id": drive_state.get("drive_id"),
+                    "summary_text": drive_state.get("summary_text"),
+                    "salience": drive_state.get("salience"),
+                    "related_scope_refs": drive_state.get("related_scope_refs", []),
+                    "supporting_memory_unit_ids": drive_state.get("supporting_memory_unit_ids", []),
+                    "updated_at": drive_state.get("updated_at"),
+                    "expires_at": drive_state.get("expires_at"),
+                }
+            )
+        return summaries
 
     def _append_summary_generation_failure(
         self,

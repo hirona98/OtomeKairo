@@ -140,7 +140,19 @@ class MemoryConsolidator:
                         "succeeded_scope_count": 0,
                         "failed_scopes": [],
                     },
+                    "drive_state_update": {
+                        "result_status": "queued",
+                        "active_drive_ids": [],
+                        "removed_drive_ids": [],
+                        "drive_summaries": [],
+                    },
                     "failure_reason": None,
+                },
+                "drive_state_update": {
+                    "result_status": "queued",
+                    "active_drive_ids": [],
+                    "removed_drive_ids": [],
+                    "drive_summaries": [],
                 },
             },
             self._build_postprocess_job(
@@ -182,6 +194,12 @@ class MemoryConsolidator:
                         "requested_scope_count": 0,
                         "succeeded_scope_count": 0,
                         "failed_scopes": [],
+                    },
+                    "drive_state_update": {
+                        "result_status": "not_started",
+                        "active_drive_ids": [],
+                        "removed_drive_ids": [],
+                        "drive_summaries": [],
                     },
                     "failure_reason": None,
                 },

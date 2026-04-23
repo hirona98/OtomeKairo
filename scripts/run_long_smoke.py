@@ -648,7 +648,7 @@ class LongSmokeRunner:
                 event=event,
             ),
         )
-        client.connect(client_id=client_id, caps=["vision.desktop"])
+        client.connect(client_id=client_id, caps=["vision.capture"])
         return client
 
     def _handle_server_event(
@@ -664,8 +664,11 @@ class LongSmokeRunner:
             if client_label != "primary":
                 raise SmokeError(f"{client_label} desktop client unexpectedly received capture_request.")
             request_id = data.get("request_id")
+            capability_id = data.get("capability_id")
             if not isinstance(request_id, str) or not request_id:
                 raise SmokeError("capture_request did not include request_id.")
+            if capability_id != "vision.capture":
+                raise SmokeError(f"capture_request capability_id was invalid: {capability_id}")
             with self._capture_lock:
                 sequence = self.capture_request_count
                 self.capture_request_count += 1
@@ -988,7 +991,7 @@ class LongSmokeRunner:
             self._assert_server_running()
             self._assert_event_clients_healthy()
             if self.capture_request_count != capture_request_baseline:
-                raise SmokeError("capture_request was emitted while multiple vision.desktop clients were connected.")
+                raise SmokeError("capture_request was emitted while multiple vision.capture clients were connected.")
             time.sleep(0.25)
         self.multiple_client_pause_verified = True
         log(

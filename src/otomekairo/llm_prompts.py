@@ -38,6 +38,8 @@ def build_decision_messages(
     recent_turns: list[dict],
     time_context: dict[str, Any],
     affect_context: dict[str, Any],
+    drive_state_summary: list[dict[str, Any]] | None,
+    ongoing_action_summary: dict[str, Any] | None,
     recall_hint: dict,
     recall_pack: dict[str, Any],
 ) -> list[dict[str, str]]:
@@ -53,6 +55,8 @@ def build_decision_messages(
                 recent_turns=recent_turns,
                 time_context=time_context,
                 affect_context=affect_context,
+                drive_state_summary=drive_state_summary,
+                ongoing_action_summary=ongoing_action_summary,
                 recall_hint=recall_hint,
                 recall_pack=recall_pack,
             ),
@@ -68,6 +72,8 @@ def build_reply_messages(
     recent_turns: list[dict],
     time_context: dict[str, Any],
     affect_context: dict[str, Any],
+    drive_state_summary: list[dict[str, Any]] | None,
+    ongoing_action_summary: dict[str, Any] | None,
     recall_hint: dict,
     recall_pack: dict[str, Any],
     decision: dict,
@@ -84,6 +90,8 @@ def build_reply_messages(
                 recent_turns=recent_turns,
                 time_context=time_context,
                 affect_context=affect_context,
+                drive_state_summary=drive_state_summary,
+                ongoing_action_summary=ongoing_action_summary,
                 recall_hint=recall_hint,
                 recall_pack=recall_pack,
                 decision=decision,
@@ -304,7 +312,7 @@ def _build_decision_system_prompt(persona: dict) -> str:
         "入力文に対して reply / noop / pending_intent のいずれかを決め、JSON オブジェクト 1 個だけを返してください。\n"
         "Markdown、コードフェンス、説明文は禁止です。\n"
         "入力には recent_turns と internal_context が含まれます。\n"
-        "internal_context には TimeContext, AffectContext, RecallPack が入ります。\n"
+        "internal_context には TimeContext, AffectContext, DriveStateSummary, OngoingActionSummary, RecallPack が入ります。\n"
         "recall_hint.secondary_intents は補助意図として、継続性や確認必要性の補助にだけ使ってください。\n"
         "RecallPack.conflicts があるときは requires_confirmation=true を優先してください。\n"
         "active_commitments, episodic_evidence, event_evidence は reply と pending_intent の継続根拠に使ってください。\n"
@@ -329,13 +337,15 @@ def _build_decision_user_prompt(
     recent_turns: list[dict],
     time_context: dict[str, Any],
     affect_context: dict[str, Any],
+    drive_state_summary: list[dict[str, Any]] | None,
+    ongoing_action_summary: dict[str, Any] | None,
     recall_hint: dict,
     recall_pack: dict[str, Any],
 ) -> str:
     return (
         f"recent_turns:\n{_format_recent_turns(recent_turns)}\n"
         "internal_context:\n"
-        f"{_format_internal_context(time_context, affect_context, recall_pack)}\n"
+        f"{_format_internal_context(time_context, affect_context, drive_state_summary, ongoing_action_summary, recall_pack)}\n"
         f"input_text:\n{input_text.strip()}\n"
         "recall_hint:\n"
         f"{json.dumps(recall_hint, ensure_ascii=False)}\n"
@@ -350,7 +360,7 @@ def _build_reply_system_prompt(persona: dict) -> str:
         f"あなたは {display_name} として話します。\n"
         "返答は自然な日本語の本文だけを返してください。JSON、箇条書き、見出し、引用符は禁止です。\n"
         "入力には recent_turns と internal_context が含まれます。\n"
-        "internal_context には TimeContext, AffectContext, RecallPack が入ります。\n"
+        "internal_context には TimeContext, AffectContext, DriveStateSummary, OngoingActionSummary, RecallPack が入ります。\n"
         "recall_hint.secondary_intents は話題継続や温度調整の補助にだけ使い、主方針は primary_intent に従ってください。\n"
         "RecallPack の内容だけを根拠に、必要な範囲で自然に思い出や継続文脈を混ぜてください。\n"
         "RecallPack.event_evidence は 1-3 件の短い証拠要約として扱い、必要なときだけ自然に参照してください。\n"
@@ -369,6 +379,8 @@ def _build_reply_user_prompt(
     recent_turns: list[dict],
     time_context: dict[str, Any],
     affect_context: dict[str, Any],
+    drive_state_summary: list[dict[str, Any]] | None,
+    ongoing_action_summary: dict[str, Any] | None,
     recall_hint: dict,
     recall_pack: dict[str, Any],
     decision: dict,
@@ -376,7 +388,7 @@ def _build_reply_user_prompt(
     return (
         f"recent_turns:\n{_format_recent_turns(recent_turns)}\n"
         "internal_context:\n"
-        f"{_format_internal_context(time_context, affect_context, recall_pack)}\n"
+        f"{_format_internal_context(time_context, affect_context, drive_state_summary, ongoing_action_summary, recall_pack)}\n"
         f"input_text:\n{input_text.strip()}\n"
         "recall_hint:\n"
         f"{json.dumps(recall_hint, ensure_ascii=False)}\n"
@@ -561,6 +573,8 @@ def _build_pending_intent_selection_user_prompt(source_pack: dict[str, Any]) -> 
 def _format_internal_context(
     time_context: dict[str, Any],
     affect_context: dict[str, Any],
+    drive_state_summary: list[dict[str, Any]] | None,
+    ongoing_action_summary: dict[str, Any] | None,
     recall_pack: dict[str, Any],
 ) -> str:
     payload = {
@@ -568,6 +582,10 @@ def _format_internal_context(
         "affect_context": affect_context,
         "recall_pack": _compact_recall_pack(recall_pack),
     }
+    if drive_state_summary:
+        payload["drive_state_summary"] = drive_state_summary
+    if ongoing_action_summary:
+        payload["ongoing_action_summary"] = ongoing_action_summary
     return json.dumps(localize_timestamp_fields(payload), ensure_ascii=False)
 
 

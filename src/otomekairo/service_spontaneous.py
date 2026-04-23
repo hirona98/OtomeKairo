@@ -86,7 +86,9 @@ class ServiceSpontaneousMixin:
             pending = self._pending_vision_capture_requests.get(normalized_request_id)
             if pending is None:
                 return {}
-            if pending.get("target_client_id") != normalized_client_id:
+            request_record = pending.get("request_record")
+            target_client_id = request_record.get("target_client_id") if isinstance(request_record, dict) else None
+            if target_client_id != normalized_client_id:
                 raise ServiceError(
                     409,
                     "capture_client_id_mismatch",
@@ -98,6 +100,7 @@ class ServiceSpontaneousMixin:
                 "images": normalized_images,
                 "client_context": client_context or {},
                 "error": error.strip() if isinstance(error, str) and error.strip() else None,
+                "request_record": dict(request_record) if isinstance(request_record, dict) else None,
             }
             pending["event"].set()
 
@@ -419,6 +422,8 @@ class ServiceSpontaneousMixin:
             self._set_last_desktop_watch_at(self._now_iso())
 
             client_context = self._build_desktop_watch_client_context(capture_response)
+            observation_summary = self._desktop_watch_observation_summary(capture_response)
+            capability_request_summary = self._capability_request_summary(capture_response.get("request_record"))
             input_text = self._build_desktop_watch_input_text(client_context=client_context, selected_candidate=None)
 
             # スナップショット
@@ -465,6 +470,8 @@ class ServiceSpontaneousMixin:
                     input_event_role="system",
                     consolidate_memory=False,
                     pending_intent_selection=pending_intent_selection,
+                    observation_summary=observation_summary,
+                    capability_request_summary=capability_request_summary,
                 )
                 self._record_wake_outcome(
                     current_time=started_at,
@@ -494,6 +501,8 @@ class ServiceSpontaneousMixin:
                         "failure_stage": exc.failure_stage,
                     },
                     pending_intent_selection=exc.pending_intent_selection,
+                    observation_summary=observation_summary,
+                    capability_request_summary=capability_request_summary,
                 )
                 self._emit_input_failure_logs(
                     cycle_id=cycle_id,
@@ -525,6 +534,8 @@ class ServiceSpontaneousMixin:
                         "failure_stage": exc.failure_stage,
                     },
                     pending_intent_selection=pending_intent_selection,
+                    observation_summary=observation_summary,
+                    capability_request_summary=capability_request_summary,
                 )
                 self._emit_input_failure_logs(
                     cycle_id=cycle_id,
@@ -548,6 +559,8 @@ class ServiceSpontaneousMixin:
                     input_event_kind="desktop_watch",
                     input_event_role="system",
                     pending_intent_selection=pending_intent_selection,
+                    observation_summary=observation_summary,
+                    capability_request_summary=capability_request_summary,
                 )
                 self._emit_input_failure_logs(
                     cycle_id=cycle_id,
@@ -616,6 +629,7 @@ class ServiceSpontaneousMixin:
         # source pack
         try:
             source_pack = self._build_pending_intent_selection_source_pack(
+                state=state,
                 trigger_kind=trigger_kind,
                 client_context=client_context,
                 recent_turns=recent_turns,
@@ -701,6 +715,7 @@ class ServiceSpontaneousMixin:
     def _build_pending_intent_selection_source_pack(
         self,
         *,
+        state: dict[str, Any],
         trigger_kind: str,
         client_context: dict[str, Any],
         recent_turns: list[dict[str, Any]],
@@ -710,8 +725,10 @@ class ServiceSpontaneousMixin:
         return {
             "trigger_kind": trigger_kind,
             "input_context": self._build_pending_intent_selection_input_context(
+                state=state,
                 trigger_kind=trigger_kind,
                 client_context=client_context,
+                current_time=current_time,
             ),
             "recent_turns": self._pending_intent_selection_recent_turns(recent_turns),
             "selection_policy": {
@@ -731,8 +748,10 @@ class ServiceSpontaneousMixin:
     def _build_pending_intent_selection_input_context(
         self,
         *,
+        state: dict[str, Any],
         trigger_kind: str,
         client_context: dict[str, Any],
+        current_time: str,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "source": self._client_context_text(client_context.get("source"), limit=48) or trigger_kind,
@@ -749,6 +768,22 @@ class ServiceSpontaneousMixin:
         image_count = client_context.get("image_count")
         if trigger_kind == "desktop_watch" and isinstance(image_count, int) and image_count >= 0:
             payload["image_count"] = image_count
+        drive_state_summary = self._summarize_drive_states(
+            self._list_current_drive_states(
+                state=state,
+                current_time=current_time,
+            )
+        )
+        if drive_state_summary:
+            payload["drive_state_summary"] = drive_state_summary
+        ongoing_action_summary = self._summarize_ongoing_action(
+            self._current_ongoing_action(
+                state=state,
+                current_time=current_time,
+            )
+        )
+        if isinstance(ongoing_action_summary, dict):
+            payload["ongoing_action_summary"] = ongoing_action_summary
         return payload
 
     def _pending_intent_selection_recent_turns(self, recent_turns: list[dict[str, Any]]) -> list[dict[str, str]]:
@@ -955,10 +990,19 @@ class ServiceSpontaneousMixin:
     def _request_desktop_watch_capture(self, *, target_client_id: str) -> dict[str, Any] | None:
         # リクエスト
         request_id = f"vision_capture_request:{uuid.uuid4().hex}"
+        request_record = {
+            "request_id": request_id,
+            "target_client_id": target_client_id,
+            "capability_id": "vision.capture",
+            "source": "desktop",
+            "mode": "still",
+            "timeout_ms": DESKTOP_WATCH_CAPTURE_TIMEOUT_MS,
+            "action_id": None,
+        }
         pending = {
             "event": threading.Event(),
             "response": None,
-            "target_client_id": target_client_id,
+            "request_record": request_record,
         }
         with self._vision_capture_lock:
             self._pending_vision_capture_requests[request_id] = pending
@@ -971,10 +1015,10 @@ class ServiceSpontaneousMixin:
                 "type": "vision.capture_request",
                 "data": {
                     "request_id": request_id,
-                    "source": "desktop",
-                    "mode": "still",
-                    "purpose": "desktop_watch",
-                    "timeout_ms": DESKTOP_WATCH_CAPTURE_TIMEOUT_MS,
+                    "capability_id": request_record["capability_id"],
+                    "source": request_record["source"],
+                    "mode": request_record["mode"],
+                    "timeout_ms": request_record["timeout_ms"],
                 },
             },
         )
@@ -1008,6 +1052,39 @@ class ServiceSpontaneousMixin:
             "window_title": client_context.get("window_title"),
             "locale": client_context.get("locale"),
             "image_count": len(capture_response.get("images", [])),
+        }
+
+    def _desktop_watch_observation_summary(self, capture_response: dict[str, Any]) -> dict[str, Any]:
+        request_record = capture_response.get("request_record")
+        summary = {
+            "source": "desktop_watch",
+            "capability_id": "vision.capture",
+            "image_count": len(capture_response.get("images", [])),
+            "image_interpreted": False,
+        }
+        if isinstance(request_record, dict) and isinstance(request_record.get("capability_id"), str):
+            summary["capability_id"] = request_record["capability_id"]
+        client_id = capture_response.get("client_id")
+        if isinstance(client_id, str) and client_id.strip():
+            summary["client_id"] = client_id.strip()
+        client_context = capture_response.get("client_context", {})
+        if isinstance(client_context, dict):
+            for key in ("active_app", "window_title", "locale"):
+                value = client_context.get(key)
+                if isinstance(value, str) and value.strip():
+                    summary[key] = value.strip()
+        return summary
+
+    def _capability_request_summary(self, request_record: Any) -> dict[str, Any] | None:
+        if not isinstance(request_record, dict):
+            return None
+        return {
+            "request_id": request_record.get("request_id"),
+            "capability_id": request_record.get("capability_id"),
+            "source": request_record.get("source"),
+            "mode": request_record.get("mode"),
+            "timeout_ms": request_record.get("timeout_ms"),
+            "action_id": request_record.get("action_id"),
         }
 
     def _build_desktop_watch_input_text(
@@ -1071,8 +1148,8 @@ class ServiceSpontaneousMixin:
         self._event_stream_registry.send_to_client(target_client_id.strip(), event)
 
     def _desktop_watch_target_client_id(self) -> str | None:
-        # 接続中で vision.desktop を持つ client が 1 台だけなら採用する
-        return self._event_stream_registry.find_single_client_with_capability("vision.desktop")
+        # 接続中で vision.capture を持つ client が 1 台だけなら採用する
+        return self._event_stream_registry.find_single_client_with_capability("vision.capture")
 
     def _next_stream_event_id(self) -> int:
         # カウンター

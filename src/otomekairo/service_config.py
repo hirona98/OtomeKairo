@@ -135,14 +135,17 @@ class ServiceConfigMixin:
     def patch_current(self, token: str | None, payload: dict[str, Any]) -> dict[str, Any]:
         # 状態
         state = self._require_token(token)
-        should_clear_pending_intents = False
+        should_clear_runtime_layers = False
+        should_clear_drive_states = False
 
         # 選択済みpersona
         if "selected_persona_id" in payload:
             persona_id = payload["selected_persona_id"]
             if persona_id not in state["personas"]:
                 raise ServiceError(404, "persona_not_found", "The requested persona_id does not exist.")
-            should_clear_pending_intents = should_clear_pending_intents or persona_id != state["selected_persona_id"]
+            persona_changed = persona_id != state["selected_persona_id"]
+            should_clear_runtime_layers = should_clear_runtime_layers or persona_changed
+            should_clear_drive_states = should_clear_drive_states or persona_changed
             state["selected_persona_id"] = persona_id
 
         # 選択済み記憶集合
@@ -150,7 +153,7 @@ class ServiceConfigMixin:
             memory_set_id = payload["selected_memory_set_id"]
             if memory_set_id not in state["memory_sets"]:
                 raise ServiceError(404, "memory_set_not_found", "The requested memory_set_id does not exist.")
-            should_clear_pending_intents = should_clear_pending_intents or memory_set_id != state["selected_memory_set_id"]
+            should_clear_runtime_layers = should_clear_runtime_layers or memory_set_id != state["selected_memory_set_id"]
             state["selected_memory_set_id"] = memory_set_id
 
         # 選択済みモデルプリセット
@@ -159,7 +162,7 @@ class ServiceConfigMixin:
             if model_preset_id not in state["model_presets"]:
                 raise ServiceError(404, "model_preset_not_found", "The requested model_preset_id does not exist.")
             self._validate_model_preset_definition(model_preset_id, state["model_presets"][model_preset_id])
-            should_clear_pending_intents = should_clear_pending_intents or model_preset_id != state["selected_model_preset_id"]
+            should_clear_runtime_layers = should_clear_runtime_layers or model_preset_id != state["selected_model_preset_id"]
             state["selected_model_preset_id"] = model_preset_id
 
         # 動作設定
@@ -173,8 +176,11 @@ class ServiceConfigMixin:
 
         # 永続化
         self.store.write_state(state)
-        if should_clear_pending_intents:
-            self._clear_pending_intent_candidates()
+        if should_clear_runtime_layers:
+            self._clear_runtime_state_layers(
+                memory_set_ids=list(state["memory_sets"].keys()),
+                clear_drive_states=should_clear_drive_states,
+            )
         return self.get_config(token=state["console_access_token"])
 
     def select_persona(self, token: str | None, persona_id: str) -> dict[str, Any]:
@@ -248,7 +254,10 @@ class ServiceConfigMixin:
         if self._embedding_definition_changed(previous_definition, stored_definition):
             self.store.reset_memory_set_vector_index(memory_set_id)
         if memory_set_id == state["selected_memory_set_id"]:
-            self._clear_pending_intent_candidates()
+            self._clear_runtime_state_layers(
+                memory_set_ids=[memory_set_id],
+                clear_drive_states=False,
+            )
 
         # 応答
         return {
@@ -408,7 +417,10 @@ class ServiceConfigMixin:
             previous_definition = previous_memory_sets.get(memory_set_id)
             if self._embedding_definition_changed(previous_definition, memory_set):
                 self.store.reset_memory_set_vector_index(memory_set_id)
-        self._clear_pending_intent_candidates()
+        self._clear_runtime_state_layers(
+            memory_set_ids=list(memory_sets.keys()),
+            clear_drive_states=True,
+        )
         return self._build_editor_state(state)
 
     def _require_token(self, token: str | None) -> dict[str, Any]:
@@ -441,18 +453,94 @@ class ServiceConfigMixin:
         }
 
     def _build_runtime_summary(self, state: dict[str, Any]) -> dict[str, Any]:
+        current_time = self._now_iso()
+        ongoing_action = self._current_ongoing_action(state=state, current_time=current_time)
         with self._runtime_state_lock:
             memory_job_in_progress = self._memory_postprocess_runtime_state.get("current_cycle_id") is not None
         return {
             "connection_state": "ready",
             "wake_scheduler_active": self._background_wake_scheduler_active() and state["wake_policy"]["mode"] == "interval",
-            "ongoing_action_exists": False,
+            "ongoing_action_exists": ongoing_action is not None,
             "memory_job_worker_active": self._background_memory_postprocess_worker_active(),
             "pending_memory_job_count": self.store.count_memory_postprocess_jobs(
                 result_statuses=["queued", "running"],
             ),
             "memory_job_in_progress": memory_job_in_progress,
         }
+
+    def _list_current_drive_states(
+        self,
+        *,
+        state: dict[str, Any],
+        current_time: str | None = None,
+        limit: int = 3,
+    ) -> list[dict[str, Any]]:
+        memory_set_id = state["selected_memory_set_id"]
+        query_time = current_time or self._now_iso()
+        return self.store.list_drive_states(
+            memory_set_id=memory_set_id,
+            current_time=query_time,
+            limit=limit,
+        )
+
+    def _summarize_drive_states(self, drive_states: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
+        summaries: list[dict[str, Any]] = []
+        for drive_state in drive_states[:3]:
+            if not isinstance(drive_state, dict):
+                continue
+            summaries.append(
+                {
+                    "drive_id": drive_state.get("drive_id"),
+                    "summary_text": drive_state.get("summary_text"),
+                    "salience": drive_state.get("salience"),
+                    "related_scope_refs": deepcopy(drive_state.get("related_scope_refs", [])),
+                    "supporting_memory_unit_ids": deepcopy(drive_state.get("supporting_memory_unit_ids", [])),
+                    "updated_at": drive_state.get("updated_at"),
+                    "expires_at": drive_state.get("expires_at"),
+                }
+            )
+        if not summaries:
+            return None
+        return summaries
+
+    def _current_ongoing_action(
+        self,
+        *,
+        state: dict[str, Any],
+        current_time: str | None = None,
+    ) -> dict[str, Any] | None:
+        memory_set_id = state["selected_memory_set_id"]
+        query_time = current_time or self._now_iso()
+        return self.store.get_ongoing_action(
+            memory_set_id=memory_set_id,
+            current_time=query_time,
+        )
+
+    def _summarize_ongoing_action(self, ongoing_action: dict[str, Any] | None) -> dict[str, Any] | None:
+        if not isinstance(ongoing_action, dict):
+            return None
+        return {
+            "action_id": ongoing_action.get("action_id"),
+            "goal_summary": ongoing_action.get("goal_summary"),
+            "step_summary": ongoing_action.get("step_summary"),
+            "status": ongoing_action.get("status"),
+            "episode_series_id": ongoing_action.get("episode_series_id"),
+            "last_capability_id": ongoing_action.get("last_capability_id"),
+            "updated_at": ongoing_action.get("updated_at"),
+            "expires_at": ongoing_action.get("expires_at"),
+        }
+
+    def _clear_runtime_state_layers(
+        self,
+        *,
+        memory_set_ids: list[str],
+        clear_drive_states: bool,
+    ) -> None:
+        self._clear_pending_intent_candidates()
+        for memory_set_id in memory_set_ids:
+            self.store.clear_ongoing_action(memory_set_id=memory_set_id)
+            if clear_drive_states:
+                self.store.clear_drive_states(memory_set_id=memory_set_id)
 
     def _background_wake_scheduler_active(self) -> bool:
         with self._runtime_state_lock:

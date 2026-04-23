@@ -114,6 +114,30 @@ class StoreSchemaMixin:
                 payload_json TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS drive_states (
+                drive_id TEXT PRIMARY KEY,
+                memory_set_id TEXT NOT NULL,
+                salience REAL NOT NULL,
+                updated_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                payload_json TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_drive_states_memory_set_expires_at
+            ON drive_states(memory_set_id, expires_at, salience, updated_at);
+
+            CREATE TABLE IF NOT EXISTS ongoing_actions (
+                action_id TEXT PRIMARY KEY,
+                memory_set_id TEXT NOT NULL UNIQUE,
+                status TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                payload_json TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_ongoing_actions_memory_set_expires_at
+            ON ongoing_actions(memory_set_id, expires_at, updated_at);
+
             CREATE TABLE IF NOT EXISTS episodes (
                 episode_id TEXT PRIMARY KEY,
                 cycle_id TEXT NOT NULL UNIQUE,
