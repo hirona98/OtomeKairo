@@ -95,7 +95,9 @@ response:
 - `recall_trace.recall_pack_selection` には `candidate_section_counts`、`selected_section_order`、`selected_candidate_refs`、`dropped_candidate_refs`、`conflict_summary_count`、`result_status`、`failure_reason` を含む
 - `input_trace` の観測要約には、capability ベースの観測時だけ `capability_id`、`image_count`、`image_interpreted` を含む
 - `input_trace.pending_intent_selection` には `candidate_pool_count`、`eligible_candidate_count`、`selected_candidate_ref`、`selected_candidate_id`、`selection_reason`、`result_status`、`failure_reason` を含む
+- `decision_trace` には、必要時だけ強く効いた `drive_state` の要約を含む
 - `memory_trace` には 生成した `episode` の要約、`episode_series_id`、`open_loops`、`memory_units` 更新要約、感情更新要約を含む
+- `memory_trace` には、必要時だけ `drive_state` 更新要約を含む
 - 感情更新要約には `episode_affect` 保存件数、`mood_state` 更新要約、必要時だけ `affect_state` 更新要約を含む
 - `mood_state` 更新要約には、必要時だけ `baseline_vad / residual_vad / current_vad / confidence` を含む
 - 当時の感情本文を追う場合は `mood_state` ではなく `episode_affect.summary_text` を見る
