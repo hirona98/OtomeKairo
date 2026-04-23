@@ -90,6 +90,9 @@ response:
 ```
 
 - `recall_trace` には `selected_memory_unit_ids`、`selected_episode_ids`、必要時だけ `selected_event_ids` を含む
+- `recall_trace.event_evidence_generation` には `requested_event_count`、`loaded_event_count`、`succeeded_event_count`、`failed_items` を含む
+- `recall_trace.event_evidence_generation.failed_items.*` には `event_id`、`kind`、`failure_stage`、`failure_reason` を含む
+- `recall_trace.recall_pack_selection` には `candidate_section_counts`、`selected_section_order`、`selected_candidate_refs`、`dropped_candidate_refs`、`conflict_summary_count`、`result_status`、`failure_reason` を含む
 - `input_trace` の観測要約には、capability ベースの観測時だけ `capability_id`、`image_count`、`image_interpreted` を含む
 - `input_trace.pending_intent_selection` には `candidate_pool_count`、`eligible_candidate_count`、`selected_candidate_ref`、`selected_candidate_id`、`selection_reason`、`result_status`、`failure_reason` を含む
 - `memory_trace` には 生成した `episode` の要約、`episode_series_id`、`open_loops`、`memory_units` 更新要約、感情更新要約を含む

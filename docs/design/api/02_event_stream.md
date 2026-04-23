@@ -23,12 +23,13 @@ client -> server:
 {
   "type": "hello",
   "client_id": "console-...",
-  "caps": ["vision.desktop", "vision.camera"]
+  "caps": ["vision.capture"]
 }
 ```
 
 - `client_id` は対象 client の安定識別子である
 - `caps` はその client が現在受けられる capability 一覧である
+- capability 識別子は `vision.capture` のような canonical 名を使う
 - 同じ `client_id` で再接続した場合、server は古い stream session を置き換える
 
 この設計では、client から受ける message は `hello` だけとする。

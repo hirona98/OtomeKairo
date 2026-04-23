@@ -123,7 +123,8 @@ LLM に渡すのは raw DB row 群ではなく、候補群を request-local ref 
     "time_reference": "past",
     "focus_scopes": ["relationship:self|user"],
     "mentioned_entities": [],
-    "mentioned_topics": []
+    "mentioned_topics": [],
+    "risk_flags": ["mixed_intent"]
   },
   "constraints": {
     "global_recall_limit": 14,
@@ -196,7 +197,7 @@ LLM に渡すのは raw DB row 群ではなく、候補群を request-local ref 
 - section 名は canonical なものだけを使う
 - 各 candidate は `summary_text` と意味判断に効く最小の構造化項目に絞る
 - `retrieval_lane` は残し、`association` 候補が補助レーンであることは downstream にも保つ
-- 現行の `association_score` や query 種別は、source pack に残してよいが、本命判断値としては育てない
+- 現行の `association_score` や query 種別は、source pack に残すが、本命判断値としては育てない
 - `conflicts` には compare key と variant の短い summary だけを入れ、memory unit の内部 ID は渡さない
 
 ## LLM 出力契約
@@ -246,6 +247,7 @@ system prompt では、少なくとも次を明示する。
 - 候補外のものを足さない
 - section 名を発明しない
 - `primary_recall_focus` を主軸にし、`secondary_recall_focuses` は軽い補助に留める
+- `risk_flags` があるときは、広く拾うより断定を抑える
 - `association` 候補は使えても、構造候補より無条件に優先しない
 - `primary_recall_focus=commitment` では open loop や active commitment を重く見やすくする
 - `primary_recall_focus=episodic` や `time_reference=past` では `episodic_evidence` を前へ置きやすくする

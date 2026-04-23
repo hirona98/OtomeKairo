@@ -99,7 +99,7 @@ OtomeKairo では、`event_evidence` 全体を LLM 任せにはしない。
 - prompt を変えても通常会話の判断 prompt へ波及しにくい
 - recall 用の短文化だけを個別に改善できる
 
-ただし、実際の設定値として同じ model を指定してよい。
+ただし、実際の設定値として同じ model を指定する。
 
 ## source pack の設計
 
@@ -113,6 +113,7 @@ LLM に渡すのは raw `events` 全文ではなく、selected event 1 件ぶん
   "primary_recall_focus": "commitment",
   "secondary_recall_focuses": ["episodic"],
   "time_reference": "past",
+  "risk_flags": ["ambiguous_reference"],
   "selection_basis": {
     "retrieval_sections": ["active_commitments", "episodic_evidence"],
     "source_summaries": [
@@ -190,6 +191,7 @@ system prompt では、少なくとも次を明示する。
 - `tone_or_note` は補助であり、主根拠の代わりにしない
 - `primary_recall_focus=commitment` では決定や継続性を優先しやすくする
 - `primary_recall_focus=episodic` や `time_reference=past` では `anchor / topic` を残しやすくする
+- `risk_flags` に曖昧さがあるときは `anchor / topic` を断定しすぎない
 - event kind に無い情報は `null` にする
 - 長い引用、言い直し、相槌をそのまま繰り返さない
 
