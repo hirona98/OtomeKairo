@@ -94,8 +94,10 @@ response:
 - `recall_trace.event_evidence_generation.failed_items.*` には `event_id`、`kind`、`failure_stage`、`failure_reason` を含む
 - `recall_trace.recall_pack_selection` には `candidate_section_counts`、`selected_section_order`、`selected_candidate_refs`、`dropped_candidate_refs`、`conflict_summary_count`、`result_status`、`failure_reason` を含む
 - `input_trace` の観測要約には、capability ベースの観測時だけ `capability_id`、`image_count`、`image_interpreted` を含む
+- `input_trace` の実行状態要約には `ongoing_action_exists` を含み、必要時だけ参照した `ongoing_action` の要約を含む
 - `input_trace.pending_intent_selection` には `candidate_pool_count`、`eligible_candidate_count`、`selected_candidate_ref`、`selected_candidate_id`、`selection_reason`、`result_status`、`failure_reason` を含む
-- `decision_trace` には、必要時だけ強く効いた `drive_state` の要約を含む
+- `decision_trace` には、必要時だけ強く効いた `drive_state` と参照した `ongoing_action` の要約を含む
+- `result_trace` には、必要時だけ capability 実行要求の要約と `ongoing_action` の作成 / 継続 / 完了 / 中断の要約を含む
 - `memory_trace` には 生成した `episode` の要約、`episode_series_id`、`open_loops`、`memory_units` 更新要約、感情更新要約を含む
 - `memory_trace` には、必要時だけ `drive_state` 更新要約を含む
 - 感情更新要約には `episode_affect` 保存件数、`mood_state` 更新要約、必要時だけ `affect_state` 更新要約を含む
