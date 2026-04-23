@@ -1,8 +1,14 @@
 # `event_evidence` の LLM 圧縮
 
+## 位置づけ
+
+この文書は `RecallPack.event_evidence` 生成の完成形を定める。
+現在地は [../../plan/01_現行計画.md](../../plan/01_現行計画.md) を正とする。
+背景で述べるロジック圧縮は、導入前の比較対象として扱う。
+
 ## 背景
 
-現在の `event_evidence` は、選ばれた `event_id` を最大 1-3 件だけ読み、
+導入前の `event_evidence` は、選ばれた `event_id` を最大 1-3 件だけ読み、
 `anchor / topic / decision_or_result / tone_or_note` をロジックで埋めている。
 
 この方式は、初期段階では次の点で有利だった。
@@ -16,7 +22,7 @@
 - `anchor` が「2026-04-12 10:30 の判断」のような固定文へ寄りやすい
 - `topic` が単なる短縮引用になりやすく、何が重要だったかが薄い
 - `decision` event の意味が `reason=...` のような記号的表現へ潰れやすい
-- `primary_intent` や、どの section からその event が選ばれたかを文面へ反映しにくい
+- `interaction_mode` や `primary_recall_focus`、どの section からその event が選ばれたかを文面へ反映しにくい
 - event kind ごとの分岐を手で増やすほど、repo 全体の LLM 判断優先方針に逆行する
 
 そのため、`event_evidence` のうち **短い証拠表現への圧縮** だけを LLM へ分離する。
@@ -36,7 +42,7 @@ OtomeKairo では、`event_evidence` 全体を LLM 任せにはしない。
 ## 目的
 
 - `RecallPack.event_evidence` を、固定ラベルではなく判断に効く短い証拠表現へする
-- `primary_intent`、`time_reference`、選定元 section を踏まえた強調点を自然に切り替えられるようにする
+- `interaction_mode`、`primary_recall_focus`、`time_reference`、選定元 section を踏まえた強調点を自然に切り替えられるようにする
 - event kind ごとの定型分岐を増やし続けないで済むようにする
 - `event_evidence` の shape と `RecallPack` の責務を崩さない
 - 失敗しても recall 本体を巻き込まず、inspection で追えるようにする
@@ -103,8 +109,9 @@ LLM に渡すのは raw `events` 全文ではなく、selected event 1 件ぶん
 
 ```json
 {
-  "primary_intent": "commitment_check",
-  "secondary_intents": ["reminisce"],
+  "interaction_mode": "conversation",
+  "primary_recall_focus": "commitment",
+  "secondary_recall_focuses": ["episodic"],
   "time_reference": "past",
   "selection_basis": {
     "retrieval_sections": ["active_commitments", "episodic_evidence"],
@@ -181,8 +188,8 @@ system prompt では、少なくとも次を明示する。
 - slot に無い新しい意味カテゴリを増やさない
 - `decision_or_result` は決定や結果があるときだけ書く
 - `tone_or_note` は補助であり、主根拠の代わりにしない
-- `primary_intent=commitment_check` では決定や継続性を優先しやすくする
-- `primary_intent=reminisce` や `time_reference=past` では `anchor / topic` を残しやすくする
+- `primary_recall_focus=commitment` では決定や継続性を優先しやすくする
+- `primary_recall_focus=episodic` や `time_reference=past` では `anchor / topic` を残しやすくする
 - event kind に無い情報は `null` にする
 - 長い引用、言い直し、相槌をそのまま繰り返さない
 

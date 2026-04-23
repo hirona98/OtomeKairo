@@ -5,7 +5,7 @@
 ### `GET /api/events/stream`
 
 - 認証: 必要
-- 役割: `desktop_watch` を含む server-driven event / command を WebSocket で配信する
+- 役割: capability 実行要求と観測通知を含む server-driven event / control を WebSocket で配信する
 
 handshake:
 
@@ -28,7 +28,7 @@ client -> server:
 ```
 
 - `client_id` は対象 client の安定識別子である
-- `caps` はその client が現在受けられる command capability 一覧である
+- `caps` はその client が現在受けられる capability 一覧である
 - 同じ `client_id` で再接続した場合、server は古い stream session を置き換える
 
 この設計では、client から受ける message は `hello` だけとする。
@@ -41,9 +41,9 @@ server -> client の代表例:
   "type": "vision.capture_request",
   "data": {
     "request_id": "vision_capture_request:...",
+    "capability_id": "vision.capture",
     "source": "desktop",
     "mode": "still",
-    "purpose": "desktop_watch",
     "timeout_ms": 5000
   }
 }
@@ -66,6 +66,10 @@ server -> client の代表例:
 - `vision.capture_request`
 - `desktop_watch`
 
+`vision.capture_request` は capability 実行要求である。
+`desktop_watch` は観測結果に基づく通知であり、capability 定義そのものではない。
+capability 実行要求と結果の対応は [05_実行連携.md](05_実行連携.md) を正とする。
+
 主な失敗:
 
 | HTTP | `error.code` | 意味 |
@@ -73,51 +77,3 @@ server -> client の代表例:
 | `400` | `invalid_websocket_upgrade` | `Upgrade: websocket` が不正 |
 | `400` | `missing_websocket_key` | `Sec-WebSocket-Key` が無い |
 | `400` | `invalid_websocket_version` | `Sec-WebSocket-Version` が `13` ではない |
-
-### `POST /api/v2/vision/capture-response`
-
-- 認証: 必要
-- 役割: `vision.capture_request` の結果を返す
-
-request:
-
-```json
-{
-  "request_id": "vision_capture_request:...",
-  "client_id": "console-...",
-  "images": ["data:image/png;base64,..."],
-  "client_context": {
-    "active_app": "Slack",
-    "window_title": "general | Slack",
-    "locale": "ja-JP"
-  },
-  "error": null
-}
-```
-
-- `images` は 0 件以上の Data URI 配列とする
-- `client_context` は object または `null` とする。値がないときは省略する
-- `error` は string または `null` とする。値がないときは省略する
-- `client_context.active_app / window_title / locale` は `desktop_watch` 観測の判断補助に使う
-
-response:
-
-```json
-{
-  "ok": true,
-  "data": {}
-}
-```
-
-遅延した capture response が来た場合は無視して成功で返す。
-
-主な失敗:
-
-| HTTP | `error.code` | 意味 |
-|------|--------------|------|
-| `400` | `invalid_request_id` | `request_id` が不正 |
-| `400` | `invalid_client_id` | `client_id` が不正 |
-| `400` | `invalid_images` | `images` が配列でない、または要素が不正 |
-| `400` | `invalid_client_context` | `client_context` が object ではない |
-| `400` | `invalid_capture_error` | `error` が string または `null` ではない |
-| `409` | `capture_client_id_mismatch` | `request_id` に紐づく `target_client_id` と `client_id` が一致しない |

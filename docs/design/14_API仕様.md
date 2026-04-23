@@ -14,7 +14,7 @@ API 仕様は、次のように分ける。
   - wake 起床要求
 - `design/api/02_event_stream.md`
   - `events/stream`
-  - `vision/capture-response`
+  - 接続 client の capability 提示
 - `design/api/03_状態と設定.md`
   - `status`
   - `config`
@@ -23,6 +23,9 @@ API 仕様は、次のように分ける。
   - `catalog`
   - `inspection`
   - `logs/stream`
+- `design/api/05_実行連携.md`
+  - capability 実行要求
+  - capability 実行結果
 
 ## 更新ルール
 

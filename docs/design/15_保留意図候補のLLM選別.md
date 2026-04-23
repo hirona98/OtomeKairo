@@ -1,11 +1,17 @@
 # 保留意図候補の LLM 選別
 
+## 位置づけ
+
+この文書は保留意図候補の最終選別の完成形を定める。
+現在地は [../plan/01_現行計画.md](../plan/01_現行計画.md) を正とする。
+背景で述べる oldest-first 選別は、導入前の比較対象として扱う。
+
 ## 背景
 
-現在の `wake` / `desktop_watch` では、runtime-only の `pending_intent_candidates` から期限内かつ due な候補を拾ったあと、
+導入前の `wake` / `desktop_watch` では、runtime-only の `pending_intent_candidates` から期限内かつ due な候補を拾ったあと、
 `_select_due_pending_intent_candidate()` が `updated_at / created_at` の昇順で 1 件だけ選んでいる。
 
-現行コードでは、少なくとも次が fixed logic である。
+導入前の実装では、少なくとも次が fixed logic だった。
 
 - 候補の最終選択が oldest-first である
 - `intent_summary` や `reason_summary` の意味差を選択へ使えていない
@@ -69,7 +75,7 @@ OtomeKairo では、保留意図キュー全体を LLM 任せにはしない。
 - `pending_intent` 自体の生成契約
 - `pending_intent_candidates` の upsert / dedupe / expiry 管理
 - wake scheduler の interval 制御
-- `desktop_watch` の画像意味理解
+- `vision.capture` の image payload 意味理解
 - `decision_generation` / `expression_generation`
 - 記憶更新と `turn consolidation`
 
@@ -99,7 +105,7 @@ OtomeKairo では、保留意図キュー全体を LLM 任せにはしない。
 
 ### `desktop_watch`
 
-- `vision.desktop` client の単独選択
+- `vision.capture` capability を持つ client の単独選択
 - capture request / response / timeout
 - `desktop_watch.enabled` と interval 制御
 - `memory_set_id` 一致

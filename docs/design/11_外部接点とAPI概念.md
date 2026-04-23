@@ -55,6 +55,7 @@ OtomeKairo の外部接点は、少なくとも次の面に分ける。
 
 ここでいう観測は、OtomeKairo が自分から取りに行った情報に限定する。
 外から届く対話入力や起床要求は観測面へ入れない。
+`desktop_watch` は観測機会を作る現在設定であり、実際の capture は実行連携面の capability を使って行う。
 
 ## 自律面
 
@@ -71,13 +72,18 @@ OtomeKairo の外部接点は、少なくとも次の面に分ける。
 ## 実行連携面
 
 OtomeKairo は、必要に応じて外部接点へ実行要求を出し、その結果を受け取る。
+実行連携の基本単位は capability とする。
 
 この面では次を分けて考える。
 
 - 何をしたいかという意図
 - どの能力を使うかという選択
+- capability ごとの request / result 契約
 - 実行要求として何を渡すか
 - 実行結果として何が返るか
+
+`desktop_watch` 自体は capability ではない。
+`desktop_watch` は観測方針として `vision.capture` のような capability を起動し、その結果を観測面へ戻す。
 
 内部で保留した意図を、そのまま外向き結果に露出する必要はない。
 外向きに返す結果と、内部で持ち越す判断結果は分ける。
@@ -120,7 +126,7 @@ OtomeKairo は、必要に応じて外部接点へ実行要求を出し、その
 
 列挙面は、正本のコピーではなく、選択に必要な要約を返す。
 現行の `GET /api/catalog` は、人格設定、記憶集合、モデルプリセットだけを返す。
-`desktop_watch` の capability は、汎用 catalog ではなく `GET /api/events/stream` の `hello.caps` で扱う。
+`vision.capture` のような接続中 client の capability は、汎用 catalog ではなく `GET /api/events/stream` の `hello.caps` で扱う。
 
 ## inspection 面
 

@@ -84,9 +84,9 @@ OtomeKairo では、次の分離を基本形にする。
 1. `reflective consolidation` の `summary_text`
 2. `event_evidence` の圧縮表現
 3. 想起候補の意味的 rerank と section 選別
-4. `wake` の pending-intent 候補選択
+4. `wake` / `desktop_watch` の pending-intent 候補選択
 
-`desktop_watch` の capture image を含む観測意味理解は、別の拡張テーマとして保留する。
+`vision.capture` の image payload を含む観測意味理解は、別の拡張テーマとして保留する。
 
 ## 個別設計との関係
 

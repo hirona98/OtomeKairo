@@ -1,14 +1,20 @@
 # `RecallPack` の LLM 選別
 
+## 位置づけ
+
+この文書は `RecallPack` 候補選別の完成形を定める。
+現在地は [../../plan/01_現行計画.md](../../plan/01_現行計画.md) を正とする。
+背景で述べる fixed priority / fixed boost は、導入前の比較対象として扱う。
+
 ## 背景
 
-現在の `RecallPack` は、候補収集までは `RecallHint` と deterministic な query / filter で絞り、
+導入前の `RecallPack` は、候補収集までは `RecallHint` と deterministic な query / filter で絞り、
 最終採用は固定ロジックで決めている。
 
-現行コードでは、少なくとも次がロジック主体である。
+導入前の実装では、少なくとも次がロジック主体だった。
 
-- `primary_intent` ごとの fixed な section priority
-- `secondary_intents` による fixed な section boost
+- `primary_recall_focus` ごとの fixed な section priority
+- `secondary_recall_focuses` による fixed な section boost
 - `association_query_weight()` による query 種別重み
 - `association_score()` による候補 score 補正
 - `conflicts.summary_text` の固定文
@@ -21,8 +27,8 @@
 
 一方で、このまま本命実装にすると次の問題が出る。
 
-- intent ごとの差が fixed priority に閉じ、文脈の細かな違いに追従しにくい
-- `secondary_intents` や `time_reference` の効き方が、固定 boost の足し算に潰れやすい
+- focus ごとの差が fixed priority に閉じ、文脈の細かな違いに追従しにくい
+- `secondary_recall_focuses` や `time_reference` の効き方が、固定 boost の足し算に潰れやすい
 - `association` 候補の意味的な良し悪しを、distance と手書き補正だけで扱い続けることになる
 - `conflicts.summary_text` が常に同じ文面になり、何が競合しているかが見えにくい
 - repo 全体の LLM 判断優先方針に対して、想起の中心選別だけがロジック寄りのまま残る
@@ -45,7 +51,7 @@ OtomeKairo では、`RecallPack` 全体を LLM 任せにはしない。
 ## 目的
 
 - `RecallPack` の採用順を fixed weight ではなく意味的な優先度で決める
-- `primary_intent` / `secondary_intents` / `time_reference` を、硬い if 分岐ではなく文脈判断として効かせる
+- `interaction_mode` / `primary_recall_focus` / `secondary_recall_focuses` / `time_reference` を、硬い if 分岐ではなく文脈判断として効かせる
 - `association` 候補を補助レーンのまま保ちつつ、採否そのものは意味的に決められるようにする
 - `conflicts.summary_text` を固定文ではなく、競合の中身が分かる短い説明にする
 - deterministic な境界、inspection、監査構造は壊さない
@@ -111,8 +117,9 @@ LLM に渡すのは raw DB row 群ではなく、候補群を request-local ref 
 {
   "input_text": "この前の続きだけど、どう進める？",
   "recall_hint": {
-    "primary_intent": "commitment_check",
-    "secondary_intents": ["reminisce"],
+    "interaction_mode": "conversation",
+    "primary_recall_focus": "commitment",
+    "secondary_recall_focuses": ["episodic"],
     "time_reference": "past",
     "focus_scopes": ["relationship:self|user"],
     "mentioned_entities": [],
@@ -238,10 +245,10 @@ system prompt では、少なくとも次を明示する。
 - あなたは `RecallPack` の候補選別だけを行う
 - 候補外のものを足さない
 - section 名を発明しない
-- `primary_intent` を主軸にし、`secondary_intents` は軽い補助に留める
+- `primary_recall_focus` を主軸にし、`secondary_recall_focuses` は軽い補助に留める
 - `association` 候補は使えても、構造候補より無条件に優先しない
-- `commitment_check` では open loop や active commitment を重く見やすくする
-- `reminisce` や `time_reference=past` では `episodic_evidence` を前へ置きやすくする
+- `primary_recall_focus=commitment` では open loop や active commitment を重く見やすくする
+- `primary_recall_focus=episodic` や `time_reference=past` では `episodic_evidence` を前へ置きやすくする
 - `conflicts.summary_text` では、何が競合しているかを短く説明する
 - 比較不能なら候補を広く並べるより、少なく選ぶ
 
