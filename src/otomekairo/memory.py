@@ -334,7 +334,7 @@ class MemoryConsolidator:
                     return episode.get("episode_series_id") or episode["episode_id"]
 
         # 明示 continuation 系だけ、最近の open loop episode を継続扱いにする。
-        if payload["episode_type"] in {"commitment_check", "action_result", "task_progress", "follow_up"}:
+        if payload["episode_type"] in {"commitment_followup", "action_result", "task_progress", "follow_up"}:
             for episode in recent_episodes:
                 if episode.get("open_loops"):
                     return episode.get("episode_series_id") or episode["episode_id"]

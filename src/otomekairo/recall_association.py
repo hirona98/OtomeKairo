@@ -90,7 +90,7 @@ class RecallAssociationMixin:
                     query_kind=spec["kind"],
                 ),
                 scope_filters=None,
-                require_open_loops=recall_hint["primary_intent"] == "commitment_check",
+                require_open_loops=recall_hint["primary_recall_focus"] == "commitment",
             )
 
             # 要約統合
@@ -200,13 +200,13 @@ class RecallAssociationMixin:
 
         # 部品群
         parts = [input_text]
-        primary_intent = recall_hint["primary_intent"]
-        secondary_intents = self._secondary_intents(recall_hint)
+        primary_recall_focus = recall_hint["primary_recall_focus"]
+        secondary_recall_focuses = self._secondary_recall_focuses(recall_hint)
         time_reference = str(recall_hint.get("time_reference", "none")).strip()
-        if primary_intent:
-            parts.append(f"意図: {primary_intent}")
-        if secondary_intents:
-            parts.append("補助意図: " + ", ".join(secondary_intents))
+        if primary_recall_focus:
+            parts.append(f"想起焦点: {primary_recall_focus}")
+        if secondary_recall_focuses:
+            parts.append("補助焦点: " + ", ".join(secondary_recall_focuses))
         if time_reference and time_reference != "none":
             parts.append(f"時間軸: {time_reference}")
 
@@ -247,24 +247,24 @@ class RecallAssociationMixin:
     ) -> float:
         # 基底
         weight = ASSOCIATION_QUERY_KIND_WEIGHTS.get(query_kind, 1.0)
-        primary_intent = recall_hint["primary_intent"]
-        secondary_intents = set(self._secondary_intents(recall_hint))
+        primary_recall_focus = recall_hint["primary_recall_focus"]
+        secondary_recall_focuses = set(self._secondary_recall_focuses(recall_hint))
         time_reference = recall_hint.get("time_reference")
 
-        # intent補正
-        if primary_intent == "reminisce" and query_kind == "input":
+        # focus補正
+        if primary_recall_focus == "episodic" and query_kind == "input":
             weight += 0.08
-        if primary_intent in {"commitment_check", "meta_relationship"} and query_kind == "entity":
+        if primary_recall_focus in {"commitment", "relationship"} and query_kind == "entity":
             weight += 0.12
-        if primary_intent in {"consult", "check_state", "preference_query"} and query_kind == "topic":
+        if primary_recall_focus in {"user", "state", "preference", "topic"} and query_kind == "topic":
             weight += 0.12
 
         # 副次補正
-        if "reminisce" in secondary_intents and query_kind == "input":
+        if "episodic" in secondary_recall_focuses and query_kind == "input":
             weight += 0.04
-        if "meta_relationship" in secondary_intents and query_kind == "entity":
+        if "relationship" in secondary_recall_focuses and query_kind == "entity":
             weight += 0.05
-        if {"consult", "check_state", "preference_query"} & secondary_intents and query_kind == "topic":
+        if {"user", "state", "preference", "topic"} & secondary_recall_focuses and query_kind == "topic":
             weight += 0.04
 
         # 時刻補正
@@ -351,8 +351,8 @@ class RecallAssociationMixin:
     ) -> float:
         # 基底
         score = query_weight * (1.0 / (1.0 + max(distance, 0.0)))
-        primary_intent = recall_hint["primary_intent"]
-        secondary_intents = set(self._secondary_intents(recall_hint))
+        primary_recall_focus = recall_hint["primary_recall_focus"]
+        secondary_recall_focuses = set(self._secondary_recall_focuses(recall_hint))
 
         # クエリ種別補正
         item_scope_type = self._association_item_scope_type(item)
@@ -365,30 +365,30 @@ class RecallAssociationMixin:
         if self._focus_scope_matches(recall_hint.get("focus_scopes", []), item):
             score += 0.08
 
-        # intent補正
-        if primary_intent == "reminisce" and item["source_kind"] == "episode":
+        # focus補正
+        if primary_recall_focus == "episodic" and item["source_kind"] == "episode":
             score += 0.12
-        if primary_intent == "commitment_check" and (
+        if primary_recall_focus == "commitment" and (
             item.get("has_open_loops") or item.get("commitment_state") in ACTIVE_COMMITMENT_STATES
         ):
             score += 0.12
-        if primary_intent == "meta_relationship" and item.get("scope_type") == "relationship":
+        if primary_recall_focus == "relationship" and item.get("scope_type") == "relationship":
             score += 0.1
-        if primary_intent in {"consult", "check_state"} and item.get("scope_type") in {"user", "topic"}:
+        if primary_recall_focus in {"user", "state"} and item.get("scope_type") in {"user", "topic"}:
             score += 0.08
-        if primary_intent == "preference_query" and item.get("memory_type") == "preference":
+        if primary_recall_focus == "preference" and item.get("memory_type") == "preference":
             score += 0.08
         if recall_hint.get("time_reference") == "past" and item["source_kind"] == "episode":
             score += 0.05
 
         # 副次補正
-        if "reminisce" in secondary_intents and item["source_kind"] == "episode":
+        if "episodic" in secondary_recall_focuses and item["source_kind"] == "episode":
             score += 0.04
-        if "meta_relationship" in secondary_intents and item_scope_type == "relationship":
+        if "relationship" in secondary_recall_focuses and item_scope_type == "relationship":
             score += 0.04
-        if {"consult", "check_state"} & secondary_intents and item_scope_type in {"user", "topic"}:
+        if {"user", "state"} & secondary_recall_focuses and item_scope_type in {"user", "topic"}:
             score += 0.03
-        if "preference_query" in secondary_intents and item.get("memory_type") == "preference":
+        if "preference" in secondary_recall_focuses and item.get("memory_type") == "preference":
             score += 0.03
 
         # 結果

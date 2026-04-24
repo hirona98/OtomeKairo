@@ -30,7 +30,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
     ) -> dict[str, Any]:
         # コンテキスト
         memory_set_id = state["selected_memory_set_id"]
-        primary_intent = recall_hint["primary_intent"]
+        primary_recall_focus = recall_hint["primary_recall_focus"]
         scope_context = self._build_scope_context(recall_hint)
         raw_candidate_ids: set[str] = set()
 
@@ -101,7 +101,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             raw_items=self._build_episodic_evidence(
                 memory_set_id=memory_set_id,
                 scope_filters=scope_context["episode_scope_filters"],
-                primary_intent=primary_intent,
+                primary_recall_focus=primary_recall_focus,
             ),
             limit=SECTION_LIMITS["episodic_evidence"],
         )
@@ -187,7 +187,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
         event_evidence_role = state["model_presets"][state["selected_model_preset_id"]]["roles"]["event_evidence_generation"]
         event_evidence_result = self._build_event_evidence(
             memory_set_id=memory_set_id,
-            primary_intent=primary_intent,
+            primary_recall_focus=primary_recall_focus,
             recall_hint=recall_hint,
             sections=sections,
             role_definition=event_evidence_role,
@@ -218,14 +218,14 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
         mentioned_topic_filters = self._parse_mentioned_topics(
             recall_hint.get("mentioned_topics", [])
         )
-        primary_intent = recall_hint["primary_intent"]
+        primary_recall_focus = recall_hint["primary_recall_focus"]
 
         # 基底scope群
         user_filters = self._merged_scope_filters([("user", "user")], focus_specs, allowed_scope_type="user")
         self_filters = self._merged_scope_filters([("self", "self")], focus_specs, allowed_scope_type="self")
         relationship_defaults = [("relationship", "self|user")]
         relationship_filters = self._merged_scope_filters(
-            relationship_defaults if primary_intent in {"commitment_check", "consult", "meta_relationship"} else [],
+            relationship_defaults if primary_recall_focus in {"commitment", "user", "relationship"} else [],
             focus_specs,
             allowed_scope_type="relationship",
         )
@@ -236,7 +236,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
         )
         world_filters = (
             [("world", "world")]
-            if primary_intent in {"check_state", "fact_query"}
+            if primary_recall_focus in {"state", "fact"}
             else []
         )
         episode_scope_filters = self._merged_scope_filters(
@@ -333,13 +333,13 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
         *,
         memory_set_id: str,
         scope_filters: list[tuple[str, str]],
-        primary_intent: str,
+        primary_recall_focus: str,
     ) -> list[dict[str, Any]]:
         # クエリ
         records = self.store.list_episodes_for_recall(
             memory_set_id=memory_set_id,
             scope_filters=scope_filters,
-            require_open_loops=primary_intent == "commitment_check",
+            require_open_loops=primary_recall_focus == "commitment",
             limit=SECTION_LIMITS["episodic_evidence"] * 4,
         )
 
@@ -348,12 +348,12 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
 
     def _section_priority(self, recall_hint: dict[str, Any]) -> list[str]:
         # 主順序
-        primary_intent = recall_hint["primary_intent"]
-        ordered = self._primary_section_priority(primary_intent)
+        primary_recall_focus = recall_hint["primary_recall_focus"]
+        ordered = self._primary_section_priority(primary_recall_focus)
 
         # 副次補正群
         boosted_sections = self._secondary_section_boosts(
-            self._secondary_intents(recall_hint),
+            self._secondary_recall_focuses(recall_hint),
         )
 
         # 統合
@@ -370,9 +370,9 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
         # 結果
         return merged
 
-    def _primary_section_priority(self, primary_intent: str) -> list[str]:
+    def _primary_section_priority(self, primary_recall_focus: str) -> list[str]:
         # マッピング
-        if primary_intent == "commitment_check":
+        if primary_recall_focus == "commitment":
             return [
                 "active_commitments",
                 "relationship_model",
@@ -381,7 +381,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
                 "active_topics",
                 "self_model",
             ]
-        if primary_intent == "meta_relationship":
+        if primary_recall_focus == "relationship":
             return [
                 "relationship_model",
                 "user_model",
@@ -390,7 +390,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
                 "active_topics",
                 "self_model",
             ]
-        if primary_intent == "consult":
+        if primary_recall_focus == "user":
             return [
                 "user_model",
                 "relationship_model",
@@ -399,7 +399,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
                 "active_commitments",
                 "self_model",
             ]
-        if primary_intent == "reminisce":
+        if primary_recall_focus == "episodic":
             return [
                 "episodic_evidence",
                 "active_topics",
@@ -408,7 +408,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
                 "active_commitments",
                 "self_model",
             ]
-        if primary_intent == "check_state":
+        if primary_recall_focus == "state":
             return [
                 "user_model",
                 "active_topics",
@@ -426,28 +426,28 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             "self_model",
         ]
 
-    def _secondary_section_boosts(self, secondary_intents: list[str]) -> list[str]:
+    def _secondary_section_boosts(self, secondary_recall_focuses: list[str]) -> list[str]:
         # 状態
         boosted: list[str] = []
 
         # 収集
-        for intent in secondary_intents:
-            for section_name in self._primary_section_priority(intent)[:2]:
+        for focus in secondary_recall_focuses:
+            for section_name in self._primary_section_priority(focus)[:2]:
                 if section_name not in boosted:
                     boosted.append(section_name)
 
         # 結果
         return boosted
 
-    def _secondary_intents(self, recall_hint: dict[str, Any]) -> list[str]:
+    def _secondary_recall_focuses(self, recall_hint: dict[str, Any]) -> list[str]:
         # 正規化
-        secondary_intents = normalized_text_list(
-            recall_hint.get("secondary_intents", []),
+        secondary_recall_focuses = normalized_text_list(
+            recall_hint.get("secondary_recall_focuses", []),
             limit=2,
         )
 
         # 結果
-        return secondary_intents
+        return secondary_recall_focuses
 
     def _limit_memory_section(
         self,

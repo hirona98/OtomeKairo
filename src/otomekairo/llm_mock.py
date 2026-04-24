@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from otomekairo.llm_contracts import (
-    INTENT_VALUES,
     RECALL_PACK_SECTION_NAMES,
+    RECALL_FOCUS_VALUES,
     LLMError,
     validate_decision_contract,
     validate_event_evidence_contract,
@@ -33,46 +33,54 @@ class MockLLMClient:
         # model確認
         self._assert_mock_model(role_definition)
 
-        # ヒューリスティックintent
+        # ヒューリスティックfocus
         normalized = input_text.strip()
         lower_text = normalized.lower()
 
-        primary_intent = "smalltalk"
-        secondary_intents: list[str] = []
+        interaction_mode = "conversation" if normalized else "autonomous"
+        primary_recall_focus = "user"
+        secondary_recall_focuses: list[str] = []
+        risk_flags: list[str] = []
         time_reference = "none"
 
         if any(token in normalized for token in ("この前", "昨日", "前に", "続き")):
-            primary_intent = "reminisce"
+            primary_recall_focus = "episodic"
             time_reference = "past"
         elif any(token in normalized for token in ("約束", "今度", "また話", "また今度")):
-            primary_intent = "commitment_check"
+            primary_recall_focus = "commitment"
             time_reference = "future"
         elif any(token in normalized for token in ("相談", "どうしたら", "悩", "困って")):
-            primary_intent = "consult"
+            primary_recall_focus = "user"
             time_reference = "recent"
         elif any(token in normalized for token in ("元気", "大丈夫", "調子", "眠れて")):
-            primary_intent = "check_state"
+            primary_recall_focus = "state"
             time_reference = "recent"
         elif any(token in normalized for token in ("好き", "嫌い", "食べたい", "食べ")):
-            primary_intent = "preference_query"
+            primary_recall_focus = "preference"
             time_reference = "persistent"
         elif any(token in normalized for token in ("関係", "距離", "話しにく")):
-            primary_intent = "meta_relationship"
+            primary_recall_focus = "relationship"
             time_reference = "recent"
         elif lower_text.endswith("?") or "?" in lower_text:
-            primary_intent = "fact_query"
+            primary_recall_focus = "fact"
 
-        # 副次intent
-        if primary_intent in {"consult", "check_state"} and recent_turns:
-            secondary_intents.append("reminisce")
+        # 副次focus
+        if primary_recall_focus in {"user", "state"} and recent_turns:
+            secondary_recall_focuses.append("episodic")
+        if secondary_recall_focuses:
+            risk_flags.append("mixed_intent")
+        if any(token in normalized for token in ("あれ", "あの", "その件", "例の")):
+            risk_flags.append("ambiguous_reference")
+        if any(token in normalized for token in ("いつか", "前", "この前")) and time_reference == "none":
+            risk_flags.append("time_ambiguous")
 
         # focus scope判定
         focus_scopes = ["user"]
-        if primary_intent == "meta_relationship":
+        if primary_recall_focus == "relationship":
             focus_scopes.append("relationship:self|user")
-        if primary_intent == "preference_query":
+        if primary_recall_focus == "preference":
             focus_scopes.append("topic:preference")
-        if primary_intent == "commitment_check":
+        if primary_recall_focus == "commitment":
             focus_scopes.append("relationship:self|user")
 
         # 言及hint群
@@ -81,13 +89,15 @@ class MockLLMClient:
 
         # payload作成
         payload = {
-            "primary_intent": primary_intent,
-            "secondary_intents": secondary_intents[:2],
+            "interaction_mode": interaction_mode,
+            "primary_recall_focus": primary_recall_focus,
+            "secondary_recall_focuses": secondary_recall_focuses[:2],
             "confidence": 0.7 if normalized else 0.1,
             "time_reference": time_reference,
             "focus_scopes": focus_scopes[:4],
             "mentioned_entities": mentioned_entities[:4],
             "mentioned_topics": mentioned_topics[:4],
+            "risk_flags": risk_flags[:3],
         }
         validate_recall_hint_contract(payload)
         return payload
@@ -157,8 +167,8 @@ class MockLLMClient:
 
         # コンテキスト
         normalized = input_text.strip()
-        primary_intent = recall_hint["primary_intent"]
-        secondary_intents = self._secondary_intents(recall_hint)
+        primary_recall_focus = recall_hint["primary_recall_focus"]
+        secondary_recall_focuses = self._secondary_recall_focuses(recall_hint)
         conflicts = recall_pack.get("conflicts", [])
         active_commitments = recall_pack.get("active_commitments", [])
         episodic_evidence = recall_pack.get("episodic_evidence", [])
@@ -191,7 +201,7 @@ class MockLLMClient:
                 "reason_summary": "継続価値はあるが、今は返さず後で触れたほうが自然。",
                 "requires_confirmation": False,
                 "pending_intent": self._mock_pending_intent_payload(
-                    primary_intent=primary_intent,
+                    primary_recall_focus=primary_recall_focus,
                     active_commitments=active_commitments,
                     episodic_evidence=episodic_evidence,
                     event_evidence=event_evidence,
@@ -206,7 +216,7 @@ class MockLLMClient:
                 "requires_confirmation": True,
                 "pending_intent": None,
             }
-        elif primary_intent == "commitment_check" and active_commitments:
+        elif primary_recall_focus == "commitment" and active_commitments:
             payload = {
                 "kind": "reply",
                 "reason_code": "active_commitment",
@@ -214,11 +224,11 @@ class MockLLMClient:
                 "requires_confirmation": False,
                 "pending_intent": None,
             }
-        elif "reminisce" in secondary_intents and episodic_evidence:
+        elif "episodic" in secondary_recall_focuses and episodic_evidence:
             payload = {
                 "kind": "reply",
-                "reason_code": "secondary_reminisce",
-                "reason_summary": "補助意図として回想があり、関連エピソードを踏まえて返答する。",
+                "reason_code": "secondary_episodic",
+                "reason_summary": "補助焦点として回想があり、関連エピソードを踏まえて返答する。",
                 "requires_confirmation": False,
                 "pending_intent": None,
             }
@@ -241,9 +251,9 @@ class MockLLMClient:
         else:
             payload = {
                 "kind": "reply",
-                "reason_code": f"intent:{primary_intent}",
+                "reason_code": f"focus:{primary_recall_focus}",
                 "reason_summary": "A normal conversation reply is appropriate for the current input.",
-                "requires_confirmation": primary_intent in {"fact_query", "meta_relationship"},
+                "requires_confirmation": primary_recall_focus in {"fact", "relationship"},
                 "pending_intent": None,
             }
 
@@ -272,8 +282,8 @@ class MockLLMClient:
 
         # コンテキスト
         persona_prompt = str(persona.get("persona_prompt", "")).strip()
-        primary_intent = recall_hint["primary_intent"]
-        secondary_intents = self._secondary_intents(recall_hint)
+        primary_recall_focus = recall_hint["primary_recall_focus"]
+        secondary_recall_focuses = self._secondary_recall_focuses(recall_hint)
         text = input_text.strip()
         conflict_items = recall_pack.get("conflicts", [])
         commitment_items = recall_pack.get("active_commitments", [])
@@ -307,7 +317,7 @@ class MockLLMClient:
 
         # 継続プレフィックス
         continuity_prefix = ""
-        if primary_intent != "reminisce" and "reminisce" in secondary_intents:
+        if primary_recall_focus != "episodic" and "episodic" in secondary_recall_focuses:
             if episode_item is not None or event_basis is not None or recent_turns:
                 continuity_prefix = "前の流れも踏まえると、"
 
@@ -329,12 +339,12 @@ class MockLLMClient:
                 )
             else:
                 reply_text = f"{caution_prefix}{text} の受け取りを断定せず確認したい。いまの理解で合っている？"
-        elif primary_intent == "consult":
+        elif primary_recall_focus == "user" and any(token in text for token in ("相談", "どうしたら", "悩", "困って")):
             if user_item is not None:
                 reply_text = f"{caution_prefix}{continuity_prefix}{user_item['summary_text']} も踏まえて聞くね。{text} の中で、今いちばん困っている点をもう少し教えて。"
             else:
                 reply_text = f"{caution_prefix}{continuity_prefix}状況は受け取ったよ。{text} の中で、今いちばん困っている点をもう少し教えて。"
-        elif primary_intent == "commitment_check":
+        elif primary_recall_focus == "commitment":
             if commitment_item is not None:
                 if "どこまで" in text:
                     reply_text = f"{commitment_item['summary_text']} の続きとして受け取ったよ。いまはどの範囲まで進めたい？"
@@ -344,14 +354,14 @@ class MockLLMClient:
                 reply_text = f"{event_basis} の続きとして受け取ったよ。{text} について、今回はどこまで進めたい？"
             else:
                 reply_text = f"{caution_prefix}その流れは覚えている前提で話すね。{text} に関して、今回どこまで進めたい？"
-        elif primary_intent == "reminisce":
+        elif primary_recall_focus == "episodic":
             if episode_item is not None:
                 reply_text = f"{episode_item['summary_text']} の流れとして受け取ったよ。{text} のどの部分からつなげたい？"
             elif event_basis is not None:
                 reply_text = f"{event_basis} の場面として受け取ったよ。{text} のどの部分からつなげたい？"
             else:
                 reply_text = f"{caution_prefix}その続きとして受け取ったよ。{text} のどの部分からつなげたい？"
-        elif primary_intent == "preference_query":
+        elif primary_recall_focus == "preference":
             reply_text = f"{caution_prefix}{continuity_prefix}好みの話として受け取ったよ。{text} について、今の気分も含めて聞かせて。"
         else:
             topic_prefix = ""
@@ -415,7 +425,7 @@ class MockLLMClient:
     def _mock_pending_intent_payload(
         self,
         *,
-        primary_intent: str,
+        primary_recall_focus: str,
         active_commitments: list[dict[str, Any]],
         episodic_evidence: list[dict[str, Any]],
         event_evidence: list[dict[str, Any]],
@@ -469,18 +479,18 @@ class MockLLMClient:
         return {
             "intent_kind": "conversation_follow_up",
             "intent_summary": "あとで会話を再開したい。",
-            "dedupe_key": f"pending_intent:intent:{primary_intent}",
+            "dedupe_key": f"pending_intent:focus:{primary_recall_focus}",
         }
 
-    def _secondary_intents(self, recall_hint: dict[str, Any]) -> set[str]:
+    def _secondary_recall_focuses(self, recall_hint: dict[str, Any]) -> set[str]:
         # 収集
-        secondary_intents: set[str] = set()
-        for intent in recall_hint.get("secondary_intents", []):
-            if isinstance(intent, str) and intent in INTENT_VALUES:
-                secondary_intents.add(intent)
+        secondary_recall_focuses: set[str] = set()
+        for focus in recall_hint.get("secondary_recall_focuses", []):
+            if isinstance(focus, str) and focus in RECALL_FOCUS_VALUES:
+                secondary_recall_focuses.add(focus)
 
         # 結果
-        return secondary_intents
+        return secondary_recall_focuses
 
     def generate_memory_interpretation(
         self,
@@ -496,13 +506,13 @@ class MockLLMClient:
         # Episode要約
         normalized = input_text.strip()
         episode = {
-            "episode_type": self._mock_episode_type(recall_hint["primary_intent"]),
+            "episode_type": self._mock_episode_type(recall_hint["primary_recall_focus"]),
             "episode_series_id": None,
-            "primary_scope_type": self._mock_primary_scope_type(recall_hint["primary_intent"]),
-            "primary_scope_key": self._mock_primary_scope_key(recall_hint["primary_intent"]),
+            "primary_scope_type": self._mock_primary_scope_type(recall_hint["primary_recall_focus"]),
+            "primary_scope_key": self._mock_primary_scope_key(recall_hint["primary_recall_focus"]),
             "summary_text": normalized or "空の入力だった。",
             "outcome_text": reply_text or decision["reason_summary"],
-            "open_loops": self._mock_open_loops(normalized, recall_hint["primary_intent"]),
+            "open_loops": self._mock_open_loops(normalized, recall_hint["primary_recall_focus"]),
             "salience": 0.72 if normalized else 0.2,
         }
 
@@ -580,7 +590,7 @@ class MockLLMClient:
         self._assert_mock_model(role_definition)
 
         # source pack
-        primary_intent = str(source_pack.get("primary_intent") or "smalltalk")
+        primary_recall_focus = str(source_pack.get("primary_recall_focus") or "user")
         time_reference = str(source_pack.get("time_reference") or "none")
         selection_basis = source_pack.get("selection_basis", {})
         event = source_pack.get("event", {})
@@ -594,7 +604,7 @@ class MockLLMClient:
         section_label = self._mock_event_evidence_section_label(retrieval_sections[0] if retrieval_sections else None)
 
         # slot 群
-        anchor_prefix = "前回の" if primary_intent == "reminisce" or time_reference == "past" else "そのときの"
+        anchor_prefix = "前回の" if primary_recall_focus == "episodic" or time_reference == "past" else "そのときの"
         if kind == "decision":
             anchor = f"{anchor_prefix}{section_label}の判断場面"
         elif kind == "reply":
@@ -618,7 +628,7 @@ class MockLLMClient:
             decision_or_result = f"{event_text} と返した。"
 
         tone_or_note = None
-        if primary_intent in {"consult", "check_state"}:
+        if primary_recall_focus in {"user", "state"}:
             tone_or_note = "様子を確かめながら進める空気だった。"
         elif kind == "decision" and result_kind == "pending_intent":
             tone_or_note = "その場では返さず、後で触れる含みを残した。"
@@ -779,33 +789,33 @@ class MockLLMClient:
             for text in texts
         ]
 
-    def _mock_episode_type(self, primary_intent: str) -> str:
+    def _mock_episode_type(self, primary_recall_focus: str) -> str:
         # マッピング
-        if primary_intent in {"consult", "check_state"}:
+        if primary_recall_focus in {"user", "state"}:
             return "consultation"
-        if primary_intent == "commitment_check":
+        if primary_recall_focus == "commitment":
             return "commitment_followup"
-        if primary_intent == "preference_query":
+        if primary_recall_focus == "preference":
             return "preference_talk"
-        if primary_intent == "meta_relationship":
+        if primary_recall_focus == "relationship":
             return "relationship_check"
         return "conversation"
 
-    def _mock_primary_scope_type(self, primary_intent: str) -> str:
+    def _mock_primary_scope_type(self, primary_recall_focus: str) -> str:
         # マッピング
-        if primary_intent in {"commitment_check", "meta_relationship"}:
+        if primary_recall_focus in {"commitment", "relationship"}:
             return "relationship"
         return "user"
 
-    def _mock_primary_scope_key(self, primary_intent: str) -> str:
+    def _mock_primary_scope_key(self, primary_recall_focus: str) -> str:
         # マッピング
-        if primary_intent in {"commitment_check", "meta_relationship"}:
+        if primary_recall_focus in {"commitment", "relationship"}:
             return "self|user"
         return "user"
 
-    def _mock_open_loops(self, normalized: str, primary_intent: str) -> list[str]:
+    def _mock_open_loops(self, normalized: str, primary_recall_focus: str) -> list[str]:
         # ループルール
-        if primary_intent in {"consult", "commitment_check", "reminisce"} and normalized:
+        if primary_recall_focus in {"user", "commitment", "episodic"} and normalized:
             return [normalized[:80]]
         return []
 
@@ -1075,13 +1085,13 @@ class MockLLMClient:
         ]
 
         # 主順序
-        primary_intent = str(recall_hint.get("primary_intent") or "smalltalk")
-        ordered = self._mock_recall_pack_primary_section_order(primary_intent)
+        primary_recall_focus = str(recall_hint.get("primary_recall_focus") or "user")
+        ordered = self._mock_recall_pack_primary_section_order(primary_recall_focus)
 
         # 副次補正
         boosted_sections: list[str] = []
-        for intent in self._secondary_intents(recall_hint):
-            for section_name in self._mock_recall_pack_primary_section_order(intent)[:2]:
+        for focus in self._secondary_recall_focuses(recall_hint):
+            for section_name in self._mock_recall_pack_primary_section_order(focus)[:2]:
                 if section_name not in boosted_sections:
                     boosted_sections.append(section_name)
         if recall_hint.get("time_reference") == "past" and "episodic_evidence" in available_sections:
@@ -1095,8 +1105,8 @@ class MockLLMClient:
             merged.append(section_name)
         return merged
 
-    def _mock_recall_pack_primary_section_order(self, primary_intent: str) -> list[str]:
-        if primary_intent == "commitment_check":
+    def _mock_recall_pack_primary_section_order(self, primary_recall_focus: str) -> list[str]:
+        if primary_recall_focus == "commitment":
             return [
                 "active_commitments",
                 "relationship_model",
@@ -1105,7 +1115,7 @@ class MockLLMClient:
                 "active_topics",
                 "self_model",
             ]
-        if primary_intent == "meta_relationship":
+        if primary_recall_focus == "relationship":
             return [
                 "relationship_model",
                 "user_model",
@@ -1114,7 +1124,7 @@ class MockLLMClient:
                 "active_topics",
                 "self_model",
             ]
-        if primary_intent == "consult":
+        if primary_recall_focus == "user":
             return [
                 "user_model",
                 "relationship_model",
@@ -1123,7 +1133,7 @@ class MockLLMClient:
                 "active_commitments",
                 "self_model",
             ]
-        if primary_intent == "reminisce":
+        if primary_recall_focus == "episodic":
             return [
                 "episodic_evidence",
                 "active_topics",
@@ -1132,7 +1142,7 @@ class MockLLMClient:
                 "active_commitments",
                 "self_model",
             ]
-        if primary_intent == "check_state":
+        if primary_recall_focus == "state":
             return [
                 "user_model",
                 "active_topics",
@@ -1164,22 +1174,22 @@ class MockLLMClient:
             score += float(association_score) * 0.03
 
         # 文脈補正
-        primary_intent = str(recall_hint.get("primary_intent") or "smalltalk")
+        primary_recall_focus = str(recall_hint.get("primary_recall_focus") or "user")
         time_reference = str(recall_hint.get("time_reference") or "none")
         source_kind = str(candidate.get("source_kind") or "")
         scope_type = str(candidate.get("scope_type") or candidate.get("primary_scope_type") or "")
-        if primary_intent == "commitment_check":
+        if primary_recall_focus == "commitment":
             if candidate.get("memory_type") == "commitment":
                 score += 0.12
             if candidate.get("commitment_state") in {"open", "waiting_confirmation", "on_hold"}:
                 score += 0.08
             if isinstance(candidate.get("open_loops"), list) and candidate["open_loops"]:
                 score += 0.06
-        if primary_intent == "reminisce" and source_kind == "episode":
+        if primary_recall_focus == "episodic" and source_kind == "episode":
             score += 0.12
-        if primary_intent == "meta_relationship" and scope_type == "relationship":
+        if primary_recall_focus == "relationship" and scope_type == "relationship":
             score += 0.08
-        if primary_intent in {"consult", "check_state"} and scope_type in {"user", "topic"}:
+        if primary_recall_focus in {"user", "state"} and scope_type in {"user", "topic"}:
             score += 0.06
         if time_reference == "past" and source_kind == "episode":
             score += 0.05

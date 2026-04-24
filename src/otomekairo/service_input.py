@@ -454,8 +454,10 @@ class ServiceInputMixin:
                 level="INFO",
                 component="RecallHint",
                 message=(
-                    f"{self._short_cycle_id(cycle_id)} primary={recall_hint['primary_intent']} "
-                    f"secondary={self._format_list_for_log(recall_hint['secondary_intents'])} "
+                    f"{self._short_cycle_id(cycle_id)} mode={recall_hint['interaction_mode']} "
+                    f"primary={recall_hint['primary_recall_focus']} "
+                    f"secondary={self._format_list_for_log(recall_hint['secondary_recall_focuses'])} "
+                    f"risk={self._format_list_for_log(recall_hint['risk_flags'])} "
                     f"time={recall_hint['time_reference']} confidence={recall_hint['confidence']}"
                 ),
             ),
@@ -693,13 +695,15 @@ class ServiceInputMixin:
     def _empty_recall_hint(self) -> dict[str, Any]:
         # 結果
         return {
-            "primary_intent": "smalltalk",
-            "secondary_intents": [],
+            "interaction_mode": "autonomous",
+            "primary_recall_focus": "user",
+            "secondary_recall_focuses": [],
             "confidence": 0.0,
             "time_reference": "none",
             "focus_scopes": [],
             "mentioned_entities": [],
             "mentioned_topics": [],
+            "risk_flags": [],
         }
 
     def _empty_recall_pack(self) -> dict[str, Any]:
@@ -912,8 +916,8 @@ class ServiceInputMixin:
     def _build_context_scope_filters(self, recall_hint: dict[str, Any]) -> list[tuple[str, str]]:
         # 既定値
         filters: list[tuple[str, str]] = [("user", "user"), ("relationship", "self|user")]
-        primary_intent = recall_hint["primary_intent"]
-        if primary_intent in {"commitment_check", "consult", "meta_relationship"}:
+        primary_recall_focus = recall_hint["primary_recall_focus"]
+        if primary_recall_focus in {"commitment", "user", "relationship"}:
             filters.append(("relationship", "self|user"))
 
         # focus scope群

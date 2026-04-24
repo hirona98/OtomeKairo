@@ -7,11 +7,11 @@ from otomekairo.llm_contracts import LLMContractError, LLMError
 
 # 定数
 EVENT_EVIDENCE_LIMIT = 3
-EVENT_EVIDENCE_INTENTS = {
-    "commitment_check",
-    "fact_query",
-    "meta_relationship",
-    "reminisce",
+EVENT_EVIDENCE_FOCUSES = {
+    "commitment",
+    "fact",
+    "relationship",
+    "episodic",
 }
 EVENT_EVIDENCE_SOURCE_SUMMARY_LIMIT = 2
 
@@ -22,7 +22,7 @@ class RecallEventEvidenceMixin:
         self,
         *,
         memory_set_id: str,
-        primary_intent: str,
+        primary_recall_focus: str,
         recall_hint: dict[str, Any],
         sections: dict[str, list[dict[str, Any]]],
         role_definition: dict[str, Any],
@@ -32,7 +32,7 @@ class RecallEventEvidenceMixin:
 
         # 確認
         if not self._should_load_event_evidence(
-            primary_intent=primary_intent,
+            primary_recall_focus=primary_recall_focus,
             recall_hint=recall_hint,
             sections=sections,
         ):
@@ -40,7 +40,7 @@ class RecallEventEvidenceMixin:
 
         # 選択済みID群
         selected_event_ids = self._select_event_evidence_ids(
-            primary_intent=primary_intent,
+            primary_recall_focus=primary_recall_focus,
             sections=sections,
         )
         result["selected_event_ids"] = selected_event_ids
@@ -80,7 +80,7 @@ class RecallEventEvidenceMixin:
             kind = self._event_evidence_kind(record)
             try:
                 source_pack = self._build_event_evidence_source_pack(
-                    primary_intent=primary_intent,
+                    primary_recall_focus=primary_recall_focus,
                     recall_hint=recall_hint,
                     sections=sections,
                     event_id=event_id,
@@ -190,16 +190,16 @@ class RecallEventEvidenceMixin:
     def _should_load_event_evidence(
         self,
         *,
-        primary_intent: str,
+        primary_recall_focus: str,
         recall_hint: dict[str, Any],
         sections: dict[str, list[dict[str, Any]]],
     ) -> bool:
         # source確認
-        if not self._has_event_evidence_sources(primary_intent=primary_intent, sections=sections):
+        if not self._has_event_evidence_sources(primary_recall_focus=primary_recall_focus, sections=sections):
             return False
 
-        # intent確認
-        if primary_intent in EVENT_EVIDENCE_INTENTS:
+        # focus確認
+        if primary_recall_focus in EVENT_EVIDENCE_FOCUSES:
             return True
 
         # 時刻確認
@@ -208,11 +208,11 @@ class RecallEventEvidenceMixin:
     def _has_event_evidence_sources(
         self,
         *,
-        primary_intent: str,
+        primary_recall_focus: str,
         sections: dict[str, list[dict[str, Any]]],
     ) -> bool:
         # 走査
-        for section_name in self._event_evidence_section_priority(primary_intent):
+        for section_name in self._event_evidence_section_priority(primary_recall_focus):
             for item in sections.get(section_name, []):
                 if self._prioritized_event_ids_for_item(item):
                     return True
@@ -221,12 +221,12 @@ class RecallEventEvidenceMixin:
     def _select_event_evidence_ids(
         self,
         *,
-        primary_intent: str,
+        primary_recall_focus: str,
         sections: dict[str, list[dict[str, Any]]],
     ) -> list[str]:
         # source群
         sources = self._event_evidence_sources(
-            primary_intent=primary_intent,
+            primary_recall_focus=primary_recall_focus,
             sections=sections,
         )
         if not sources:
@@ -259,14 +259,14 @@ class RecallEventEvidenceMixin:
     def _event_evidence_sources(
         self,
         *,
-        primary_intent: str,
+        primary_recall_focus: str,
         sections: dict[str, list[dict[str, Any]]],
     ) -> list[list[str]]:
         # 状態
         sources: list[list[str]] = []
 
         # 収集
-        for section_name in self._event_evidence_section_priority(primary_intent):
+        for section_name in self._event_evidence_section_priority(primary_recall_focus):
             for item in sections.get(section_name, []):
                 prioritized_event_ids = self._prioritized_event_ids_for_item(item)
                 if not prioritized_event_ids:
@@ -274,12 +274,19 @@ class RecallEventEvidenceMixin:
                 sources.append(prioritized_event_ids)
         return sources
 
-    def _event_evidence_section_priority(self, primary_intent: str) -> list[str]:
+    def _event_evidence_section_priority(self, primary_recall_focus: str) -> list[str]:
         # 基底順序
         ordered = ["episodic_evidence"]
         recall_hint = {
-            "primary_intent": primary_intent,
-            "secondary_intents": [],
+            "interaction_mode": "conversation",
+            "primary_recall_focus": primary_recall_focus,
+            "secondary_recall_focuses": [],
+            "confidence": 1.0,
+            "time_reference": "none",
+            "focus_scopes": [],
+            "mentioned_entities": [],
+            "mentioned_topics": [],
+            "risk_flags": [],
         }
         for section_name in self._section_priority(recall_hint):
             if section_name in {"episodic_evidence", "conflicts"}:
@@ -318,7 +325,7 @@ class RecallEventEvidenceMixin:
     def _build_event_evidence_source_pack(
         self,
         *,
-        primary_intent: str,
+        primary_recall_focus: str,
         recall_hint: dict[str, Any],
         sections: dict[str, list[dict[str, Any]]],
         event_id: str,
@@ -326,16 +333,18 @@ class RecallEventEvidenceMixin:
     ) -> dict[str, Any]:
         # source 群
         matched_sources = self._matched_event_evidence_sources(
-            primary_intent=primary_intent,
+            primary_recall_focus=primary_recall_focus,
             sections=sections,
             event_id=event_id,
         )
 
         # 結果
         return {
-            "primary_intent": primary_intent,
-            "secondary_intents": self._secondary_intents(recall_hint),
+            "interaction_mode": str(recall_hint.get("interaction_mode") or "conversation"),
+            "primary_recall_focus": primary_recall_focus,
+            "secondary_recall_focuses": self._secondary_recall_focuses(recall_hint),
             "time_reference": str(recall_hint.get("time_reference") or "none"),
+            "risk_flags": list(recall_hint.get("risk_flags") or []),
             "selection_basis": self._event_evidence_selection_basis(matched_sources),
             "event": self._event_evidence_source_event(record),
         }
@@ -343,13 +352,13 @@ class RecallEventEvidenceMixin:
     def _matched_event_evidence_sources(
         self,
         *,
-        primary_intent: str,
+        primary_recall_focus: str,
         sections: dict[str, list[dict[str, Any]]],
         event_id: str,
     ) -> list[tuple[str, dict[str, Any]]]:
         # 収集
         matched: list[tuple[str, dict[str, Any]]] = []
-        for section_name in self._event_evidence_section_priority(primary_intent):
+        for section_name in self._event_evidence_section_priority(primary_recall_focus):
             for item in sections.get(section_name, []):
                 if event_id not in self._prioritized_event_ids_for_item(item):
                     continue

@@ -14,15 +14,28 @@ class LLMContractError(LLMError):
 
 
 # 設定
-INTENT_VALUES = {
-    "smalltalk",
-    "reminisce",
-    "commitment_check",
-    "consult",
-    "check_state",
-    "preference_query",
-    "fact_query",
-    "meta_relationship",
+INTERACTION_MODE_VALUES = {
+    "conversation",
+    "action",
+    "observation",
+    "autonomous",
+}
+RECALL_FOCUS_VALUES = {
+    "self",
+    "user",
+    "relationship",
+    "commitment",
+    "topic",
+    "preference",
+    "fact",
+    "state",
+    "episodic",
+}
+RISK_FLAG_VALUES = {
+    "mixed_intent",
+    "ambiguous_reference",
+    "weak_memory_cue",
+    "time_ambiguous",
 }
 
 TIME_REFERENCE_VALUES = {
@@ -65,7 +78,8 @@ SCOPE_TYPE_VALUES = {
     "relationship",
     "world",
 }
-MAX_SECONDARY_INTENTS = 2
+MAX_SECONDARY_RECALL_FOCUSES = 2
+MAX_RISK_FLAGS = 3
 MAX_HINT_SCOPE_VALUES = 4
 MAX_MEMORY_REFLECTION_SUMMARY_SENTENCES = 2
 MAX_MEMORY_REFLECTION_SUMMARY_LENGTH = 140
@@ -110,6 +124,18 @@ def _validate_exact_keys(value: Any, required_keys: set[str], label: str) -> Non
 def _has_named_ref_prefix(value: str) -> bool:
     # 名前付き参照プレフィックス
     for prefix in ("person:", "place:", "tool:"):
+        if value.startswith(prefix) and value != prefix:
+            return True
+    return False
+
+
+def _has_focus_scope_shape(value: str) -> bool:
+    # 固定scope
+    if value in {"self", "user"}:
+        return True
+
+    # 関係・話題scope
+    for prefix in ("relationship:", "topic:"):
         if value.startswith(prefix) and value != prefix:
             return True
     return False
@@ -191,41 +217,53 @@ def _validate_vad(value: Any, label: str) -> None:
 def validate_recall_hint_contract(payload: dict[str, Any]) -> None:
     # 必須キー群
     required_keys = {
-        "primary_intent",
-        "secondary_intents",
+        "interaction_mode",
+        "primary_recall_focus",
+        "secondary_recall_focuses",
         "confidence",
         "time_reference",
         "focus_scopes",
         "mentioned_entities",
         "mentioned_topics",
+        "risk_flags",
     }
     if set(payload.keys()) != required_keys:
         raise LLMError("RecallHint のキーが契約と一致しません。")
 
-    # 値Checks
-    if payload["primary_intent"] not in INTENT_VALUES:
-        raise LLMError("RecallHint primary_intent が不正です。")
+    # 値検証
+    if not isinstance(payload["interaction_mode"], str) or not payload["interaction_mode"].strip():
+        raise LLMError("RecallHint interaction_mode は空でない文字列である必要があります。")
+    if not isinstance(payload["primary_recall_focus"], str) or not payload["primary_recall_focus"].strip():
+        raise LLMError("RecallHint primary_recall_focus は空でない文字列である必要があります。")
+    if not isinstance(payload["time_reference"], str) or not payload["time_reference"].strip():
+        raise LLMError("RecallHint time_reference は空でない文字列である必要があります。")
+    if payload["interaction_mode"] not in INTERACTION_MODE_VALUES:
+        raise LLMError("RecallHint interaction_mode が不正です。")
+    if payload["primary_recall_focus"] not in RECALL_FOCUS_VALUES:
+        raise LLMError("RecallHint primary_recall_focus が不正です。")
     if payload["time_reference"] not in TIME_REFERENCE_VALUES:
         raise LLMError("RecallHint time_reference が不正です。")
-    if not isinstance(payload["secondary_intents"], list):
-        raise LLMError("RecallHint secondary_intents は配列である必要があります。")
-    if len(payload["secondary_intents"]) > MAX_SECONDARY_INTENTS:
-        raise LLMError("RecallHint secondary_intents の件数が上限を超えています。")
-    for intent in payload["secondary_intents"]:
-        if not isinstance(intent, str) or not intent.strip():
-            raise LLMError("RecallHint secondary_intents の各要素は空でない文字列である必要があります。")
-        if intent not in INTENT_VALUES:
-            raise LLMError("RecallHint secondary_intent が不正です。")
-    if len(payload["secondary_intents"]) != len(set(payload["secondary_intents"])):
-        raise LLMError("RecallHint secondary_intents に重複があります。")
-    if payload["primary_intent"] in payload["secondary_intents"]:
-        raise LLMError("RecallHint secondary_intents に primary_intent と同じ値を含めてはいけません。")
+    if not isinstance(payload["secondary_recall_focuses"], list):
+        raise LLMError("RecallHint secondary_recall_focuses は配列である必要があります。")
+    if len(payload["secondary_recall_focuses"]) > MAX_SECONDARY_RECALL_FOCUSES:
+        raise LLMError("RecallHint secondary_recall_focuses の件数が上限を超えています。")
+    for focus in payload["secondary_recall_focuses"]:
+        if not isinstance(focus, str) or not focus.strip():
+            raise LLMError("RecallHint secondary_recall_focuses の各要素は空でない文字列である必要があります。")
+        if focus not in RECALL_FOCUS_VALUES:
+            raise LLMError("RecallHint secondary_recall_focus が不正です。")
+    if len(payload["secondary_recall_focuses"]) != len(set(payload["secondary_recall_focuses"])):
+        raise LLMError("RecallHint secondary_recall_focuses に重複があります。")
+    if payload["primary_recall_focus"] in payload["secondary_recall_focuses"]:
+        raise LLMError("RecallHint secondary_recall_focuses に primary_recall_focus と同じ値を含めてはいけません。")
     if not isinstance(payload["focus_scopes"], list):
         raise LLMError("RecallHint focus_scopes は配列である必要があります。")
     if len(payload["focus_scopes"]) > MAX_HINT_SCOPE_VALUES:
         raise LLMError("RecallHint focus_scopes の件数が上限を超えています。")
     if any(not isinstance(scope, str) or not scope.strip() for scope in payload["focus_scopes"]):
         raise LLMError("RecallHint focus_scopes の各要素は空でない文字列である必要があります。")
+    if any(not _has_focus_scope_shape(scope.strip()) for scope in payload["focus_scopes"]):
+        raise LLMError("RecallHint focus_scopes は self/user/relationship:<key>/topic:<key> 形式である必要があります。")
     if not isinstance(payload["mentioned_entities"], list):
         raise LLMError("RecallHint mentioned_entities は配列である必要があります。")
     if len(payload["mentioned_entities"]) > MAX_HINT_SCOPE_VALUES:
@@ -245,7 +283,18 @@ def validate_recall_hint_contract(payload: dict[str, Any]) -> None:
         for topic in payload["mentioned_topics"]
     ):
         raise LLMError("RecallHint mentioned_topics は topic:<name> 形式である必要があります。")
-    if not isinstance(payload["confidence"], (int, float)):
+    if not isinstance(payload["risk_flags"], list):
+        raise LLMError("RecallHint risk_flags は配列である必要があります。")
+    if len(payload["risk_flags"]) > MAX_RISK_FLAGS:
+        raise LLMError("RecallHint risk_flags の件数が上限を超えています。")
+    for risk_flag in payload["risk_flags"]:
+        if not isinstance(risk_flag, str) or not risk_flag.strip():
+            raise LLMError("RecallHint risk_flags の各要素は空でない文字列である必要があります。")
+        if risk_flag not in RISK_FLAG_VALUES:
+            raise LLMError("RecallHint risk_flag が不正です。")
+    if len(payload["risk_flags"]) != len(set(payload["risk_flags"])):
+        raise LLMError("RecallHint risk_flags に重複があります。")
+    if isinstance(payload["confidence"], bool) or not isinstance(payload["confidence"], (int, float)):
         raise LLMError("RecallHint confidence は数値である必要があります。")
     if not 0.0 <= float(payload["confidence"]) <= 1.0:
         raise LLMError("RecallHint confidence は 0.0 以上 1.0 以下である必要があります。")

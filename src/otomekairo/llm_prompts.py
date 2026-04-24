@@ -4,8 +4,10 @@ import json
 from typing import Any
 
 from otomekairo.llm_contracts import (
-    INTENT_VALUES,
+    INTERACTION_MODE_VALUES,
     RECALL_PACK_SECTION_NAMES,
+    RECALL_FOCUS_VALUES,
+    RISK_FLAG_VALUES,
     TIME_REFERENCE_VALUES,
 )
 from otomekairo.memory_utils import display_local_iso, localize_timestamp_fields
@@ -271,22 +273,31 @@ def _build_recall_hint_system_prompt() -> str:
         "あなたは OtomeKairo の input_interpretation です。\n"
         "入力文を分析し、JSON オブジェクト 1 個だけを返してください。\n"
         "Markdown、コードフェンス、説明文は禁止です。\n"
-        "primary_intent は次のいずれかです: "
-        + ", ".join(sorted(INTENT_VALUES))
+        "interaction_mode は次のいずれかです: "
+        + ", ".join(sorted(INTERACTION_MODE_VALUES))
+        + "\n"
+        "primary_recall_focus と secondary_recall_focuses は次のいずれかです: "
+        + ", ".join(sorted(RECALL_FOCUS_VALUES))
         + "\n"
         "time_reference は次のいずれかです: "
         + ", ".join(sorted(TIME_REFERENCE_VALUES))
         + "\n"
-        "返すキーは必ず次の 7 個です:\n"
-        "- primary_intent: string\n"
-        "- secondary_intents: string[] (最大2件。primary_intent を含めない)\n"
+        "risk_flags は次のいずれかです: "
+        + ", ".join(sorted(RISK_FLAG_VALUES))
+        + "\n"
+        "返すキーは必ず次の 9 個です:\n"
+        "- interaction_mode: string\n"
+        "- primary_recall_focus: string\n"
+        "- secondary_recall_focuses: string[] (最大2件。primary_recall_focus を含めない)\n"
         "- confidence: number\n"
         "- time_reference: string\n"
         "- focus_scopes: string[] (最大4件。self / user / relationship:<key> / topic:<key> に留める)\n"
         "- mentioned_entities: string[] (最大4件。person:<name> / place:<name> / tool:<name> の正規化済み参照)\n"
         "- mentioned_topics: string[] (最大4件。topic:<name> の正規化済み参照)\n"
+        "- risk_flags: string[] (最大3件)\n"
         "第三者名や固有名は focus_scopes ではなく mentioned_entities に入れてください。\n"
-        "不確実なときは conservative に smalltalk / none / 空配列を選んでください。"
+        "world は focus_scopes に入れず、世界条件が主題のとき primary_recall_focus=state または fact を選んでください。\n"
+        "不確実なときは conservative に conversation / user / none / 空配列を選んでください。"
     )
 
 
@@ -313,7 +324,7 @@ def _build_decision_system_prompt(persona: dict) -> str:
         "Markdown、コードフェンス、説明文は禁止です。\n"
         "入力には recent_turns と internal_context が含まれます。\n"
         "internal_context には TimeContext, AffectContext, DriveStateSummary, OngoingActionSummary, RecallPack が入ります。\n"
-        "recall_hint.secondary_intents は補助意図として、継続性や確認必要性の補助にだけ使ってください。\n"
+        "recall_hint.secondary_recall_focuses は補助焦点として、継続性や確認必要性の補助にだけ使ってください。\n"
         "RecallPack.conflicts があるときは requires_confirmation=true を優先してください。\n"
         "active_commitments, episodic_evidence, event_evidence は reply と pending_intent の継続根拠に使ってください。\n"
         "pending_intent は『今は返さないが、後で触れる価値がある』場合だけ選んでください。\n"
@@ -361,7 +372,7 @@ def _build_reply_system_prompt(persona: dict) -> str:
         "返答は自然な日本語の本文だけを返してください。JSON、箇条書き、見出し、引用符は禁止です。\n"
         "入力には recent_turns と internal_context が含まれます。\n"
         "internal_context には TimeContext, AffectContext, DriveStateSummary, OngoingActionSummary, RecallPack が入ります。\n"
-        "recall_hint.secondary_intents は話題継続や温度調整の補助にだけ使い、主方針は primary_intent に従ってください。\n"
+        "recall_hint.secondary_recall_focuses は話題継続や温度調整の補助にだけ使い、主方針は primary_recall_focus に従ってください。\n"
         "RecallPack の内容だけを根拠に、必要な範囲で自然に思い出や継続文脈を混ぜてください。\n"
         "RecallPack.event_evidence は 1-3 件の短い証拠要約として扱い、必要なときだけ自然に参照してください。\n"
         "RecallPack.conflicts があるときは断定を避け、短い確認質問に寄せてください。\n"
@@ -477,7 +488,7 @@ def _build_event_evidence_system_prompt() -> str:
         "source pack に無い事実を補ってはいけません。\n"
         "長い逐語引用、言い直し、相槌の再掲は避けてください。\n"
         "decision_or_result は決定や結果があるときだけ書き、tone_or_note は補助に留めてください。\n"
-        "primary_intent=commitment_check では決定や継続性を優先しやすくし、primary_intent=reminisce や time_reference=past では anchor と topic を残しやすくしてください。\n"
+        "primary_recall_focus=commitment では決定や継続性を優先しやすくし、primary_recall_focus=episodic や time_reference=past では anchor と topic を残しやすくしてください。\n"
         "event_id や cycle_id のような内部識別子を書いてはいけません。"
     )
 
@@ -498,9 +509,9 @@ def _build_recall_pack_selection_system_prompt() -> str:
         "source pack にある conflict_ref は、ある場合すべて 1 回ずつ返してください。\n"
         "summary_text は 1 文、改行なし、内部識別子なしで返してください。\n"
         "候補外のものを足してはいけません。section 名を発明してはいけません。\n"
-        "primary_intent を主軸にし、secondary_intents は軽い補助に留めてください。\n"
+        "primary_recall_focus を主軸にし、secondary_recall_focuses は軽い補助に留めてください。\n"
         "association 候補は使えても、構造候補より無条件に優先してはいけません。\n"
-        "commitment_check では open loop や active commitment を重く見やすくし、reminisce や time_reference=past では episodic_evidence を前へ置きやすくしてください。\n"
+        "primary_recall_focus=commitment では open loop や active commitment を重く見やすくし、primary_recall_focus=episodic や time_reference=past では episodic_evidence を前へ置きやすくしてください。\n"
         "比較不能なら候補を広く並べるより、少なく選んでください。"
     )
 
