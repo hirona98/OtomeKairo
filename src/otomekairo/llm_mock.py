@@ -129,7 +129,7 @@ class MockLLMClient:
         for topic_name, keywords in topic_keywords.items():
             if not any(keyword in normalized for keyword in keywords):
                 continue
-            topics.append(topic_name)
+            topics.append(f"topic:{topic_name}")
             if len(topics) >= 4:
                 break
 

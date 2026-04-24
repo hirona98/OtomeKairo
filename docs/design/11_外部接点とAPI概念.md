@@ -87,6 +87,8 @@ OtomeKairo は、必要に応じて外部接点へ実行要求を出し、その
 `desktop_watch` は観測方針として `vision.capture` のような capability を起動し、その結果を観測面へ戻す。
 移動機構やアクチュエータのような物理デバイスも、同じく capability として実行連携面で扱う。
 ここでは具体的なハードウェア名ではなく、request / result 契約を正とする。
+モデル role の `web_search_enabled` は、生成 provider へ渡す検索利用指示であり、実行連携面の capability ではない。
+OtomeKairo が外部サービスへ主体的にアクセスする機能は capability として定義し、provider 側検索 option と混同しない。
 
 内部で保留した意図を、そのまま外向き結果に露出する必要はない。
 外向きに返す結果と、内部で持ち越す判断結果は分ける。

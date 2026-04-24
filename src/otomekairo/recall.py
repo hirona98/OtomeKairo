@@ -82,6 +82,15 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             raw_items=self._build_active_topics(
                 memory_set_id=memory_set_id,
                 topic_scope_filters=scope_context["topic_filters"],
+            )
+            + self._build_scope_memory_section(
+                memory_set_id=memory_set_id,
+                scope_filters=(
+                    scope_context["entity_filters"]
+                    + scope_context["world_filters"]
+                ),
+                limit=SECTION_LIMITS["active_topics"] * 2,
+                exclude_memory_types=["commitment"],
             ),
             limit=SECTION_LIMITS["active_topics"],
         )
@@ -203,6 +212,12 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
     def _build_scope_context(self, recall_hint: dict[str, Any]) -> dict[str, list[tuple[str, str]]]:
         # focus scope群
         focus_specs = self._parse_focus_scopes(recall_hint.get("focus_scopes", []))
+        mentioned_entity_filters = self._parse_mentioned_entities(
+            recall_hint.get("mentioned_entities", [])
+        )
+        mentioned_topic_filters = self._parse_mentioned_topics(
+            recall_hint.get("mentioned_topics", [])
+        )
         primary_intent = recall_hint["primary_intent"]
 
         # 基底scope群
@@ -214,9 +229,23 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             focus_specs,
             allowed_scope_type="relationship",
         )
-        topic_filters = self._merged_scope_filters([], focus_specs, allowed_scope_type="topic")
+        topic_filters = self._merged_scope_filters(
+            mentioned_topic_filters,
+            focus_specs,
+            allowed_scope_type="topic",
+        )
+        world_filters = (
+            [("world", "world")]
+            if primary_intent in {"check_state", "fact_query"}
+            else []
+        )
         episode_scope_filters = self._merged_scope_filters(
-            user_filters + relationship_filters + self_filters + topic_filters,
+            user_filters
+            + relationship_filters
+            + self_filters
+            + topic_filters
+            + mentioned_entity_filters
+            + world_filters,
             [],
             allowed_scope_type=None,
         )
@@ -227,6 +256,8 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             "self_filters": self_filters,
             "relationship_filters": relationship_filters,
             "topic_filters": topic_filters,
+            "entity_filters": mentioned_entity_filters,
+            "world_filters": world_filters,
             "episode_scope_filters": episode_scope_filters,
         }
 
@@ -510,7 +541,55 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
                 continue
             if scope_type not in {"relationship", "topic"}:
                 continue
+            if scope_type == "topic":
+                parsed.append((scope_type, normalized))
+                continue
             parsed.append((scope_type, scope_key.strip()))
+
+        # 結果
+        return parsed
+
+    def _parse_mentioned_entities(self, entities: list[Any]) -> list[tuple[str, str]]:
+        # 解析
+        parsed: list[tuple[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        for entity in entities:
+            if not isinstance(entity, str):
+                continue
+            normalized = entity.strip()
+            if not normalized:
+                continue
+            prefix, separator, value = normalized.partition(":")
+            if not separator or not value:
+                continue
+            if prefix not in {"person", "place", "tool"}:
+                continue
+            scope_filter = ("entity", normalized)
+            if scope_filter in seen:
+                continue
+            parsed.append(scope_filter)
+            seen.add(scope_filter)
+
+        # 結果
+        return parsed
+
+    def _parse_mentioned_topics(self, topics: list[Any]) -> list[tuple[str, str]]:
+        # 解析
+        parsed: list[tuple[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        for topic in topics:
+            if not isinstance(topic, str):
+                continue
+            normalized = topic.strip()
+            if not normalized:
+                continue
+            if not normalized.startswith("topic:") or normalized == "topic:":
+                continue
+            scope_filter = ("topic", normalized)
+            if scope_filter in seen:
+                continue
+            parsed.append(scope_filter)
+            seen.add(scope_filter)
 
         # 結果
         return parsed

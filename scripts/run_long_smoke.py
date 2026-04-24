@@ -713,7 +713,7 @@ class LongSmokeRunner:
             )
             if should_inject_mismatch:
                 self.api.post_expect_error(
-                    "/api/v2/vision/capture-response",
+                    "/api/vision/capture-response",
                     {
                         "request_id": request_id,
                         "client_id": f"{connected_client_id}-mismatch",
@@ -727,7 +727,7 @@ class LongSmokeRunner:
                 log(f"capture-response mismatch verified request_id={request_id}")
             if should_inject_invalid_images:
                 self.api.post_expect_error(
-                    "/api/v2/vision/capture-response",
+                    "/api/vision/capture-response",
                     {
                         "request_id": request_id,
                         "client_id": connected_client_id,
@@ -741,7 +741,7 @@ class LongSmokeRunner:
                 log(f"capture-response invalid_images verified request_id={request_id}")
             if should_inject_invalid_error:
                 self.api.post_expect_error(
-                    "/api/v2/vision/capture-response",
+                    "/api/vision/capture-response",
                     {
                         "request_id": request_id,
                         "client_id": connected_client_id,
@@ -755,7 +755,7 @@ class LongSmokeRunner:
                 log(f"capture-response invalid_capture_error verified request_id={request_id}")
             if should_inject_unknown_request:
                 self.api.post_expect_success_empty_data(
-                    "/api/v2/vision/capture-response",
+                    "/api/vision/capture-response",
                     {
                         "request_id": f"{request_id}-unknown",
                         "client_id": connected_client_id,
@@ -766,7 +766,7 @@ class LongSmokeRunner:
                 )
                 log(f"capture-response unknown request ignored request_id={request_id}")
             self.api.post(
-                "/api/v2/vision/capture-response",
+                "/api/vision/capture-response",
                 {
                     "request_id": request_id,
                     "client_id": connected_client_id,

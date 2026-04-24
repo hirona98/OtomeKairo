@@ -283,8 +283,8 @@ def _build_recall_hint_system_prompt() -> str:
         "- confidence: number\n"
         "- time_reference: string\n"
         "- focus_scopes: string[] (最大4件。self / user / relationship:<key> / topic:<key> に留める)\n"
-        "- mentioned_entities: string[] (最大4件)\n"
-        "- mentioned_topics: string[] (最大4件)\n"
+        "- mentioned_entities: string[] (最大4件。person:<name> / place:<name> / tool:<name> の正規化済み参照)\n"
+        "- mentioned_topics: string[] (最大4件。topic:<name> の正規化済み参照)\n"
         "第三者名や固有名は focus_scopes ではなく mentioned_entities に入れてください。\n"
         "不確実なときは conservative に smalltalk / none / 空配列を選んでください。"
     )

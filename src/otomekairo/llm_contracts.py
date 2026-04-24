@@ -232,12 +232,19 @@ def validate_recall_hint_contract(payload: dict[str, Any]) -> None:
         raise LLMError("RecallHint mentioned_entities の件数が上限を超えています。")
     if any(not isinstance(entity, str) or not entity.strip() for entity in payload["mentioned_entities"]):
         raise LLMError("RecallHint mentioned_entities の各要素は空でない文字列である必要があります。")
+    if any(not _has_named_ref_prefix(entity.strip()) for entity in payload["mentioned_entities"]):
+        raise LLMError("RecallHint mentioned_entities は person:/place:/tool: 形式である必要があります。")
     if not isinstance(payload["mentioned_topics"], list):
         raise LLMError("RecallHint mentioned_topics は配列である必要があります。")
     if len(payload["mentioned_topics"]) > MAX_HINT_SCOPE_VALUES:
         raise LLMError("RecallHint mentioned_topics の件数が上限を超えています。")
     if any(not isinstance(topic, str) or not topic.strip() for topic in payload["mentioned_topics"]):
         raise LLMError("RecallHint mentioned_topics の各要素は空でない文字列である必要があります。")
+    if any(
+        not topic.strip().startswith("topic:") or topic.strip() == "topic:"
+        for topic in payload["mentioned_topics"]
+    ):
+        raise LLMError("RecallHint mentioned_topics は topic:<name> 形式である必要があります。")
     if not isinstance(payload["confidence"], (int, float)):
         raise LLMError("RecallHint confidence は数値である必要があります。")
     if not 0.0 <= float(payload["confidence"]) <= 1.0:

@@ -100,7 +100,7 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
                 payload = self._read_json_body()
                 self._write_success(HTTPStatus.OK, self.server.service.trigger_wake(token, payload))
                 return
-            if method == "POST" and parsed.path == "/api/v2/vision/capture-response":
+            if method == "POST" and parsed.path == "/api/vision/capture-response":
                 payload = self._read_json_body()
                 self._write_success(
                     HTTPStatus.OK,

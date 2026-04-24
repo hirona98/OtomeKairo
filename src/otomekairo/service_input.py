@@ -948,6 +948,9 @@ class ServiceInputMixin:
                 continue
             if scope_type not in {"relationship", "topic"}:
                 continue
+            if scope_type == "topic":
+                parsed.append((scope_type, normalized))
+                continue
             parsed.append((scope_type, scope_key.strip()))
 
         # 結果
