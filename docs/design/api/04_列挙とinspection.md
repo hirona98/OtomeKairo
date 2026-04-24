@@ -98,6 +98,7 @@ response:
 - `input_trace.pending_intent_selection` には `candidate_pool_count`、`eligible_candidate_count`、`selected_candidate_ref`、`selected_candidate_id`、`selection_reason`、`result_status`、`failure_reason` を含む
 - `decision_trace` には、必要時だけ強く効いた `drive_state` と参照した `ongoing_action` の要約を含む
 - `result_trace` には、必要時だけ capability 実行要求の要約と `ongoing_action` の作成 / 継続 / 完了 / 中断の要約を含む
+- `result_trace.ongoing_action_transition_summary` には、必要時だけ `action_id`、`transition_sequence`、`final_state`、`goal_summary`、`step_summary`、`episode_series_id`、`last_capability_id`、`reason_summary` を含む
 - `memory_trace` には 生成した `episode` の要約、`episode_series_id`、`open_loops`、`memory_units` 更新要約、感情更新要約を含む
 - `memory_trace` には、必要時だけ `drive_state` 更新要約を含む
 - `memory_trace.drive_state_update` と `reflective_consolidation.drive_state_update` には `result_status`、`active_drive_ids`、`removed_drive_ids`、`drive_summaries` を含む

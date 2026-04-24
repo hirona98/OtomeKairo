@@ -1099,6 +1099,17 @@ class LongSmokeRunner:
             trace = self.api.get(f"/api/inspection/cycles/{cycle_id}")
             restart_probe_traces.append(trace)
 
+        desktop_watch_reply_probe_trace = None
+        if isinstance(self.desktop_watch_reply_probe_cycle_id, str) and self.desktop_watch_reply_probe_cycle_id:
+            desktop_watch_reply_probe_trace = self.api.get(
+                f"/api/inspection/cycles/{self.desktop_watch_reply_probe_cycle_id}"
+            )
+        desktop_watch_no_reply_probe_trace = None
+        if isinstance(self.desktop_watch_no_reply_probe_cycle_id, str) and self.desktop_watch_no_reply_probe_cycle_id:
+            desktop_watch_no_reply_probe_trace = self.api.get(
+                f"/api/inspection/cycles/{self.desktop_watch_no_reply_probe_cycle_id}"
+            )
+
         return {
             "artifacts_dir": str(self.artifact_dir),
             "server_log_path": str(self.server_log_path),
@@ -1129,6 +1140,8 @@ class LongSmokeRunner:
             "desktop_watch_no_reply_probe_cycle_id": self.desktop_watch_no_reply_probe_cycle_id,
             "desktop_watch_reply_probe_verified": self.desktop_watch_reply_probe_verified,
             "desktop_watch_no_reply_probe_verified": self.desktop_watch_no_reply_probe_verified,
+            "desktop_watch_reply_probe_trace": desktop_watch_reply_probe_trace,
+            "desktop_watch_no_reply_probe_trace": desktop_watch_no_reply_probe_trace,
             "conversation_traces": conversation_traces,
             "restart_probe_traces": restart_probe_traces,
         }
@@ -1187,6 +1200,8 @@ class LongSmokeRunner:
             raise SmokeError("desktop_watch reply event boundary was not verified.")
         if not summary["desktop_watch_no_reply_probe_verified"]:
             raise SmokeError("desktop_watch no-reply boundary was not verified.")
+        self._assert_desktop_watch_probe_trace(summary.get("desktop_watch_reply_probe_trace"), "reply")
+        self._assert_desktop_watch_probe_trace(summary.get("desktop_watch_no_reply_probe_trace"), "no_reply")
 
         for trace in summary["conversation_traces"]:
             cycle_id = trace.get("cycle_id")
@@ -1208,6 +1223,32 @@ class LongSmokeRunner:
             vector_status = (memory_trace.get("vector_index_sync") or {}).get("result_status")
             if vector_status != "succeeded":
                 raise SmokeError(f"restart probe cycle {cycle_id} vector_index_sync was {vector_status}.")
+
+    def _assert_desktop_watch_probe_trace(self, trace: Any, label: str) -> None:
+        if not isinstance(trace, dict):
+            raise SmokeError(f"desktop_watch {label} probe trace was not collected.")
+        result_trace = trace.get("result_trace", {})
+        if not isinstance(result_trace, dict):
+            raise SmokeError(f"desktop_watch {label} probe result_trace was invalid.")
+        capability_request_summary = result_trace.get("capability_request_summary", {})
+        if not isinstance(capability_request_summary, dict):
+            raise SmokeError(f"desktop_watch {label} probe capability_request_summary was invalid.")
+        if capability_request_summary.get("capability_id") != "vision.capture":
+            raise SmokeError(f"desktop_watch {label} probe capability_id was invalid.")
+        if not isinstance(capability_request_summary.get("action_id"), str) or not capability_request_summary["action_id"]:
+            raise SmokeError(f"desktop_watch {label} probe action_id was not recorded.")
+        ongoing_action_transition_summary = result_trace.get("ongoing_action_transition_summary", {})
+        if not isinstance(ongoing_action_transition_summary, dict):
+            raise SmokeError(f"desktop_watch {label} probe ongoing_action_transition_summary was invalid.")
+        transition_sequence = ongoing_action_transition_summary.get("transition_sequence", [])
+        if not isinstance(transition_sequence, list) or len(transition_sequence) != 2:
+            raise SmokeError(f"desktop_watch {label} probe transition_sequence was invalid.")
+        if transition_sequence[0] not in {"started", "continued"}:
+            raise SmokeError(f"desktop_watch {label} probe first transition was invalid: {transition_sequence[0]}")
+        if transition_sequence[1] != "completed":
+            raise SmokeError(f"desktop_watch {label} probe final transition was invalid: {transition_sequence[1]}")
+        if ongoing_action_transition_summary.get("last_capability_id") != "vision.capture":
+            raise SmokeError(f"desktop_watch {label} probe last_capability_id was invalid.")
 
     def _write_summary(self, summary: dict[str, Any]) -> None:
         self.summary_path.write_text(

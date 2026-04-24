@@ -412,7 +412,11 @@ class ServiceSpontaneousMixin:
             started_at = self._now_iso()
 
             # キャプチャ
-            capture_response = self._request_desktop_watch_capture(target_client_id=target_client_id)
+            capture_response = self._request_desktop_watch_capture(
+                memory_set_id=state["selected_memory_set_id"],
+                target_client_id=target_client_id,
+                current_time=started_at,
+            )
             if capture_response is None:
                 return
             if not capture_response["images"]:
@@ -424,6 +428,7 @@ class ServiceSpontaneousMixin:
             client_context = self._build_desktop_watch_client_context(capture_response)
             observation_summary = self._desktop_watch_observation_summary(capture_response)
             capability_request_summary = self._capability_request_summary(capture_response.get("request_record"))
+            ongoing_action_transition_summary = capture_response.get("ongoing_action_transition_summary")
             input_text = self._build_desktop_watch_input_text(client_context=client_context, selected_candidate=None)
 
             # スナップショット
@@ -472,6 +477,7 @@ class ServiceSpontaneousMixin:
                     pending_intent_selection=pending_intent_selection,
                     observation_summary=observation_summary,
                     capability_request_summary=capability_request_summary,
+                    ongoing_action_transition_summary=ongoing_action_transition_summary,
                 )
                 self._record_wake_outcome(
                     current_time=started_at,
@@ -503,6 +509,7 @@ class ServiceSpontaneousMixin:
                     pending_intent_selection=exc.pending_intent_selection,
                     observation_summary=observation_summary,
                     capability_request_summary=capability_request_summary,
+                    ongoing_action_transition_summary=ongoing_action_transition_summary,
                 )
                 self._emit_input_failure_logs(
                     cycle_id=cycle_id,
@@ -536,6 +543,7 @@ class ServiceSpontaneousMixin:
                     pending_intent_selection=pending_intent_selection,
                     observation_summary=observation_summary,
                     capability_request_summary=capability_request_summary,
+                    ongoing_action_transition_summary=ongoing_action_transition_summary,
                 )
                 self._emit_input_failure_logs(
                     cycle_id=cycle_id,
@@ -561,6 +569,7 @@ class ServiceSpontaneousMixin:
                     pending_intent_selection=pending_intent_selection,
                     observation_summary=observation_summary,
                     capability_request_summary=capability_request_summary,
+                    ongoing_action_transition_summary=ongoing_action_transition_summary,
                 )
                 self._emit_input_failure_logs(
                     cycle_id=cycle_id,
@@ -987,17 +996,32 @@ class ServiceSpontaneousMixin:
         with self._runtime_state_lock:
             self._desktop_watch_runtime_state["last_watch_at"] = current_time
 
-    def _request_desktop_watch_capture(self, *, target_client_id: str) -> dict[str, Any] | None:
+    def _request_desktop_watch_capture(
+        self,
+        *,
+        memory_set_id: str,
+        target_client_id: str,
+        current_time: str,
+    ) -> dict[str, Any] | None:
         # リクエスト
         request_id = f"vision_capture_request:{uuid.uuid4().hex}"
+        action_seed = self._begin_desktop_watch_ongoing_action(
+            memory_set_id=memory_set_id,
+            current_time=current_time,
+        )
         request_record = {
             "request_id": request_id,
             "target_client_id": target_client_id,
+            "memory_set_id": memory_set_id,
             "capability_id": "vision.capture",
             "source": "desktop",
             "mode": "still",
             "timeout_ms": DESKTOP_WATCH_CAPTURE_TIMEOUT_MS,
-            "action_id": None,
+            "action_id": action_seed.get("action_id") if isinstance(action_seed, dict) else None,
+            "goal_summary": action_seed.get("goal_summary") if isinstance(action_seed, dict) else None,
+            "step_summary": action_seed.get("step_summary") if isinstance(action_seed, dict) else None,
+            "episode_series_id": action_seed.get("episode_series_id") if isinstance(action_seed, dict) else None,
+            "ongoing_action_transition_kind": action_seed.get("transition_kind") if isinstance(action_seed, dict) else None,
         }
         pending = {
             "event": threading.Event(),
@@ -1025,6 +1049,13 @@ class ServiceSpontaneousMixin:
         if not sent:
             with self._vision_capture_lock:
                 self._pending_vision_capture_requests.pop(request_id, None)
+            self._finish_desktop_watch_ongoing_action(
+                request_record=request_record,
+                current_time=self._now_iso(),
+                terminal_kind="interrupted",
+                terminal_reason="desktop_watch の vision.capture request を送れなかったため終了した。",
+                final_step_summary="vision.capture request の送信に失敗した。",
+            )
             return None
 
         # 待機
@@ -1035,7 +1066,21 @@ class ServiceSpontaneousMixin:
             result = pending["response"]
             self._pending_vision_capture_requests.pop(request_id, None)
             if not isinstance(result, dict):
+                self._finish_desktop_watch_ongoing_action(
+                    request_record=request_record,
+                    current_time=self._now_iso(),
+                    terminal_kind="interrupted",
+                    terminal_reason="desktop_watch の vision.capture が timeout したため終了した。",
+                    final_step_summary="vision.capture の結果待ちが timeout した。",
+                )
                 return None
+            result["ongoing_action_transition_summary"] = self._finish_desktop_watch_ongoing_action(
+                request_record=request_record,
+                current_time=self._now_iso(),
+                terminal_kind="completed" if result.get("error") in {None, ""} else "interrupted",
+                terminal_reason=self._desktop_watch_capture_terminal_reason(result),
+                final_step_summary=self._desktop_watch_capture_terminal_step_summary(result),
+            )
             return result
 
     def _build_desktop_watch_client_context(self, capture_response: dict[str, Any]) -> dict[str, Any]:
@@ -1086,6 +1131,109 @@ class ServiceSpontaneousMixin:
             "timeout_ms": request_record.get("timeout_ms"),
             "action_id": request_record.get("action_id"),
         }
+
+    def _begin_desktop_watch_ongoing_action(
+        self,
+        *,
+        memory_set_id: str,
+        current_time: str,
+    ) -> dict[str, Any] | None:
+        existing = self.store.get_ongoing_action(
+            memory_set_id=memory_set_id,
+            current_time=current_time,
+        )
+        goal_summary = "desktop_watch で現在の画面状況を観測する。"
+        step_summary = "vision.capture の結果を待機している。"
+        if isinstance(existing, dict):
+            last_capability_id = existing.get("last_capability_id")
+            if isinstance(last_capability_id, str) and last_capability_id not in {"vision.capture"}:
+                return None
+            action_id = str(existing.get("action_id") or f"ongoing_action:{uuid.uuid4().hex}")
+            episode_series_id = existing.get("episode_series_id")
+            transition_kind = "continued"
+        else:
+            action_id = f"ongoing_action:{uuid.uuid4().hex}"
+            episode_series_id = f"episode_series:{uuid.uuid4().hex}"
+            transition_kind = "started"
+        if not isinstance(episode_series_id, str) or not episode_series_id.strip():
+            episode_series_id = f"episode_series:{uuid.uuid4().hex}"
+        self.store.upsert_ongoing_action(
+            ongoing_action={
+                "action_id": action_id,
+                "memory_set_id": memory_set_id,
+                "goal_summary": goal_summary,
+                "step_summary": step_summary,
+                "status": "waiting_result",
+                "episode_series_id": episode_series_id,
+                "last_capability_id": "vision.capture",
+                "updated_at": current_time,
+                "expires_at": self._desktop_watch_ongoing_action_expires_at(current_time=current_time),
+            }
+        )
+        return {
+            "action_id": action_id,
+            "goal_summary": goal_summary,
+            "step_summary": step_summary,
+            "episode_series_id": episode_series_id,
+            "transition_kind": transition_kind,
+        }
+
+    def _finish_desktop_watch_ongoing_action(
+        self,
+        *,
+        request_record: Any,
+        current_time: str,
+        terminal_kind: str,
+        terminal_reason: str,
+        final_step_summary: str,
+    ) -> dict[str, Any] | None:
+        if not isinstance(request_record, dict):
+            return None
+        memory_set_id = request_record.get("memory_set_id")
+        action_id = request_record.get("action_id")
+        if not isinstance(memory_set_id, str) or not memory_set_id.strip():
+            return None
+        if not isinstance(action_id, str) or not action_id.strip():
+            return None
+        self.store.clear_ongoing_action(memory_set_id=memory_set_id)
+        transition_kind = request_record.get("ongoing_action_transition_kind")
+        if transition_kind not in {"started", "continued"}:
+            transition_kind = "started"
+        goal_summary = request_record.get("goal_summary") or "desktop_watch で現在の画面状況を観測する。"
+        episode_series_id = request_record.get("episode_series_id")
+        return {
+            "action_id": action_id,
+            "transition_sequence": [transition_kind, terminal_kind],
+            "final_state": terminal_kind,
+            "goal_summary": goal_summary,
+            "step_summary": final_step_summary,
+            "episode_series_id": episode_series_id,
+            "last_capability_id": request_record.get("capability_id"),
+            "reason_summary": terminal_reason,
+            "updated_at": current_time,
+        }
+
+    def _desktop_watch_ongoing_action_expires_at(self, *, current_time: str) -> str:
+        timeout_seconds = max(int(DESKTOP_WATCH_CAPTURE_TIMEOUT_MS / 1000), 1)
+        return (self._parse_iso(current_time) + timedelta(seconds=timeout_seconds + 30)).isoformat()
+
+    def _desktop_watch_capture_terminal_reason(self, capture_response: dict[str, Any]) -> str:
+        capture_error = capture_response.get("error")
+        if isinstance(capture_error, str) and capture_error.strip():
+            return f"desktop_watch の vision.capture が error で終了した。 error={capture_error.strip()}"
+        image_count = len(capture_response.get("images", []))
+        if image_count <= 0:
+            return "desktop_watch の vision.capture は空の結果で完了した。"
+        return "desktop_watch の vision.capture が完了し、観測結果を取り込んだ。"
+
+    def _desktop_watch_capture_terminal_step_summary(self, capture_response: dict[str, Any]) -> str:
+        capture_error = capture_response.get("error")
+        if isinstance(capture_error, str) and capture_error.strip():
+            return "vision.capture が error で終了した。"
+        image_count = len(capture_response.get("images", []))
+        if image_count <= 0:
+            return "vision.capture の結果は空だった。"
+        return "vision.capture の結果を受け取った。"
 
     def _build_desktop_watch_input_text(
         self,
