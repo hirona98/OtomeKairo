@@ -4,6 +4,7 @@
 
 この文書は `RecallPack.event_evidence` 生成の完成形を定める。
 現在地は [../../plan/01_現行計画.md](../../plan/01_現行計画.md) を正とする。
+LLM 補助処理の共通境界、source pack、出力、failure、inspection の共通ルールは [../19_LLM補助契約共通.md](../19_LLM補助契約共通.md) を正とする。
 背景で述べるロジック圧縮は、導入前の比較対象として扱う。
 
 ## 背景
