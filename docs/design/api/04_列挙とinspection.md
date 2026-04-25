@@ -44,7 +44,7 @@ response:
 - 認証: 必要
 - 役割: 最近の `cycle_summary` 一覧を返す
 - `limit` は省略時 `20`
-- `started_at` / `finished_at` は server のローカル時刻で返し、タイムゾーン表記は付けない
+- `started_at` / `finished_at` は OtomeKairo のローカルタイムゾーンに属する offset 付き timestamp で返す
 
 response:
 
@@ -57,8 +57,8 @@ response:
         "cycle_id": "cycle:...",
         "server_id": "server:...",
         "trigger_kind": "user_message",
-        "started_at": "2026-03-31T09:00:00",
-        "finished_at": "2026-03-31T09:00:00",
+        "started_at": "2026-03-31T09:00:00+09:00",
+        "finished_at": "2026-03-31T09:00:00+09:00",
         "result_kind": "reply",
         "failed": false
       }
@@ -71,7 +71,7 @@ response:
 
 - 認証: 必要
 - 役割: 指定した `cycle_id` の段階トレースを返す
-- 含まれる timestamp 系フィールドは server のローカル時刻で返し、タイムゾーン表記は付けない
+- 含まれる timestamp 系フィールドは OtomeKairo のローカルタイムゾーンに属する offset 付き timestamp で返す
 
 response:
 
@@ -122,14 +122,14 @@ response:
 - 役割: `CocoroConsole` のログビューアー向けに、判断サイクルの短い段階要約ログを WebSocket で流す
 - client から送る message は不要
 - 接続時には、直近の短いログを replay する
-- `ts` は server のローカル時刻で返し、タイムゾーン表記は付けない
+- `ts` は OtomeKairo のローカルタイムゾーンに属する offset 付き timestamp で返す
 
 message shape:
 
 ```json
 [
   {
-    "ts": "2026-04-06T09:00:00",
+    "ts": "2026-04-06T09:00:00+09:00",
     "level": "INFO",
     "logger": "RecallStructured",
     "msg": "cf09b49a3ce1 memory_units=memory_unit:1234abcd episodes=episode:5678efgh"

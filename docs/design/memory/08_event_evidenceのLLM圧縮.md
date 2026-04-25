@@ -124,7 +124,7 @@ LLM に渡すのは raw `events` 全文ではなく、selected event 1 件ぶん
   "event": {
     "kind": "decision",
     "role": "system",
-    "created_at": "2026-04-12T10:30:00",
+    "created_time_label": "2026年4月12日 10時30分（日本時間）",
     "text": null,
     "result_kind": "reply",
     "external_result_kind": "reply",
@@ -140,6 +140,7 @@ LLM に渡すのは raw `events` 全文ではなく、selected event 1 件ぶん
 - source pack は selected event 1 件だけを扱う
 - `selection_basis.source_summaries` は、その event を指していた `episode / memory_unit` の `summary_text` を最大 2 件だけ入れる
 - `retrieval_sections` は section 名だけを入れ、内部 ID は渡さない
+- `created_at` のような正本 timestamp は、生活文脈向けに整形した `created_time_label` として渡す
 - `event.text` は改行を畳み、必要なら長さを切り詰める
 - `decision` event では `reason_summary` と `result_kind` を優先して渡す
 - `reply` / `observation` event では `text` を主材料にし、不要なメタデータは増やさない
