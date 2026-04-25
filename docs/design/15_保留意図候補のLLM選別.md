@@ -187,7 +187,7 @@ LLM に渡すのは runtime candidate の生オブジェクトではなく、req
 
 - `candidate_ref` は request-local 参照であり、runtime の `candidate_id` をそのまま渡さない
 - `source_cycle_id` や `dedupe_key` は LLM に渡さない
-- `recent_turns` は現在 pipeline と同じ取得窓から、最大 4 発話までを短くクランプして渡す
+- `recent_turns` は `prompt_window` で取得した現在 pipeline の直近会話候補から、最大 4 発話だけを渡す
 - `desktop_watch` では image 本体を渡さず、`client_context` の text 項目と `image_count` だけを渡す
 - `minutes_since_*` / `minutes_until_expiry` は補助情報であり、古さだけで選ばせない
 

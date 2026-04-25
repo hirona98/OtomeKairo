@@ -11,6 +11,9 @@ from otomekairo.recall import RecallPackSelectionError
 from otomekairo.service_common import ServiceError
 
 
+RECALL_HINT_RECENT_TURN_LIMIT = 6
+
+
 class ServiceInputMixin:
     # 入力API
     def handle_conversation(self, token: str | None, payload: dict) -> dict[str, Any]:
@@ -123,10 +126,11 @@ class ServiceInputMixin:
         persona = state["personas"][state["selected_persona_id"]]
 
         # recall_hint生成
+        recall_hint_recent_turns = self._recall_hint_recent_turns(recent_turns)
         recall_hint = self.llm.generate_recall_hint(
             role_definition=recall_role,
             input_text=input_text,
-            recent_turns=recent_turns,
+            recent_turns=recall_hint_recent_turns,
             current_time=started_at,
         )
 
@@ -1530,6 +1534,10 @@ class ServiceInputMixin:
             since_iso=threshold.isoformat(),
             limit=turn_limit,
         )
+
+    def _recall_hint_recent_turns(self, recent_turns: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        # RecallHint は入口判断なので prompt_window 候補をさらに軽くする。
+        return recent_turns[-RECALL_HINT_RECENT_TURN_LIMIT:]
 
     def _new_console_token(self) -> str:
         # トークン
