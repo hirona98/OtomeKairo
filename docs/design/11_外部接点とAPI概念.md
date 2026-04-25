@@ -136,7 +136,8 @@ OtomeKairo が外部サービスへ主体的にアクセスする機能は capab
 
 列挙面は、正本のコピーではなく、選択に必要な要約を返す。
 現行の `GET /api/catalog` は、人格設定、記憶集合、モデルプリセットだけを返す。
-`vision.capture` のような接続中 client の capability availability は、汎用 catalog ではなく `GET /api/events/stream` の `hello.caps` で扱う。
+`vision.capture` のような接続中 client の `hello.caps` は、capability availability ではなく binding 候補として扱う。
+capability availability の外向き確認正本は `GET /api/inspection/capabilities` で扱う。
 capability manifest の正本は catalog へ混ぜず、判断、実行、権限、inspection の内部契約として扱う。
 
 ## inspection 面

@@ -22,6 +22,7 @@ API 仕様は、次のように分ける。
 - `design/api/04_列挙とinspection.md`
   - `catalog`
   - `inspection`
+  - capability availability の確認
   - `logs/stream`
 - `design/api/05_実行連携.md`
   - capability 実行要求

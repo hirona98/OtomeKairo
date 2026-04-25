@@ -6,7 +6,9 @@
 
 - 認証: 必要
 - 役割: 人格設定、記憶集合、モデルプリセットの一覧を返す
-- 現時点では capability manifest 一覧は返さない。接続中 client の capability availability は `GET /api/events/stream` の `hello.caps` で扱う
+- capability manifest 一覧と capability availability は返さない
+- 接続中 client の `hello.caps` は binding 候補であり、availability の正本ではない
+- capability availability は `GET /api/inspection/capabilities` で扱う
 - capability manifest は server 側の正本であり、catalog の選択肢とは分ける
 
 response:
@@ -38,6 +40,89 @@ response:
 ```
 
 ## inspection 面
+
+### `GET /api/inspection/capabilities`
+
+- 認証: 必要
+- 役割: server が manifest、binding、`capability_state`、権限から導出した現在の capability availability を返す
+- この response は capability availability の外向き確認正本である
+- `capabilities` は server が知っている manifest を基準に並べる
+- `rejected_bindings` は、接続 client が `hello.caps` で提示したが server が binding として受理しなかった候補を返す
+- token、credential、内部 URL、transport 詳細は返さない
+
+response:
+
+```json
+{
+  "ok": true,
+  "data": {
+    "generated_at": "2026-03-31T09:00:00+09:00",
+    "capabilities": [
+      {
+        "capability_id": "vision.capture",
+        "manifest_version": "1",
+        "kind": "observation",
+        "available": true,
+        "unavailable_reason": null,
+        "binding": {
+          "status": "bound",
+          "eligible_client_count": 1,
+          "bound_client_ids": ["console-..."]
+        },
+        "permissions": {
+          "required": ["observe_desktop"],
+          "missing": []
+        },
+        "state": {
+          "paused": false,
+          "cooldown_until": null,
+          "last_failure_at": null,
+          "last_failure_summary": null
+        }
+      }
+    ],
+    "rejected_bindings": [
+      {
+        "client_id": "console-...",
+        "capability_id": "vision.capture",
+        "offered_version": "0",
+        "rejection_reason": "unsupported_version",
+        "seen_at": "2026-03-31T09:00:00+09:00"
+      }
+    ]
+  }
+}
+```
+
+`unavailable_reason` は `available=true` のとき `null` である。
+`available=false` のとき、`unavailable_reason` は次のいずれかである。
+
+| 値 | 意味 |
+|----|------|
+| `no_binding` | 実行できる接続 client がない |
+| `permission_denied` | 必要権限を満たす接続主体がない |
+| `paused` | server 側で一時停止している |
+| `cooldown` | cooldown 中である |
+| `precondition_failed` | 実行前提を満たしていない |
+| `recent_failure` | 直近失敗により一時的に実行不可である |
+| `parallel_blocked` | 並列実行制限により実行不可である |
+| `transport_unavailable` | stream などの配送経路が利用できない |
+
+`binding.status` は次のいずれかである。
+
+| 値 | 意味 |
+|----|------|
+| `bound` | 実行候補として受理済みの接続 client がある |
+| `no_binding` | capability を実行できる接続 client がない |
+| `rejected_only` | 提示された候補はあるが、すべて拒否された |
+
+`rejected_bindings.rejection_reason` は次のいずれかである。
+
+| 値 | 意味 |
+|----|------|
+| `unknown_capability` | server が知らない capability id である |
+| `unsupported_version` | server が対応しない manifest version である |
+| `permission_denied` | 接続主体が必要権限を満たさない |
 
 ### `GET /api/inspection/cycle-summaries?limit=<n>`
 

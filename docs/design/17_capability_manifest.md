@@ -29,6 +29,23 @@ capability は次の三つを分けて扱う。
 client の `hello.caps` は `CapabilityBinding` の材料であり、manifest の正本ではない。
 未知の capability id、未対応の version、権限不足の binding は実行不可として `CapabilityState` に記録する。
 
+## availability の正本
+
+capability availability は、接続中 client の自己申告ではなく、server が導出した現在状態である。
+server は次を照合して capability availability を決める。
+
+- server が持つ `CapabilityManifest`
+- stream 接続から導出した `CapabilityBinding`
+- 認証済み client または接続主体の権限
+- `CapabilityState` にある一時停止、cooldown、直近失敗、並列制限、前提条件
+
+`hello.caps` は availability の正本ではない。
+`hello.caps` は `CapabilityBinding` を作る入力であり、server に受理されたあとも権限、状態、制約によって実行不可になる。
+外向きに現在の availability を確認する正本 API は `GET /api/inspection/capabilities` とする。
+`GET /api/catalog` は capability manifest 一覧や availability を返さない。
+判断 LLM に渡す decision view と inspection の capability availability は、同じ server 派生状態から作る。
+inspection には運用確認に必要な binding 要約を出すが、token、credential、内部 URL、transport 詳細は出さない。
+
 ## Manifest の最小構造
 
 1 件の `CapabilityManifest` は少なくとも次を持つ。
