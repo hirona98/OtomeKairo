@@ -72,13 +72,18 @@ OtomeKairo の外部接点は、少なくとも次の面に分ける。
 
 ## 実行連携面
 
-OtomeKairo は、必要に応じて外部接点へ実行要求を出し、その結果を受け取る。
+OtomeKairo は、判断で実行が必要だと決めたときに外部接点へ実行要求を出し、その結果を受け取る。
 実行連携の基本単位は capability とする。
+capability の正本は本体が持つ `CapabilityManifest` である。
+外部 client は manifest を定義せず、接続時に自分が実行可能な capability id と version を通知する。
 
 この面では次を分けて考える。
 
 - 何をしたいかという意図
 - どの能力を使うかという選択
+- capability manifest
+- 接続中 client との capability binding
+- その時点の capability state
 - capability ごとの request / result 契約
 - 実行要求として何を渡すか
 - 実行結果として何が返るか
@@ -131,7 +136,8 @@ OtomeKairo が外部サービスへ主体的にアクセスする機能は capab
 
 列挙面は、正本のコピーではなく、選択に必要な要約を返す。
 現行の `GET /api/catalog` は、人格設定、記憶集合、モデルプリセットだけを返す。
-`vision.capture` のような接続中 client の capability は、汎用 catalog ではなく `GET /api/events/stream` の `hello.caps` で扱う。
+`vision.capture` のような接続中 client の capability availability は、汎用 catalog ではなく `GET /api/events/stream` の `hello.caps` で扱う。
+capability manifest の正本は catalog へ混ぜず、判断、実行、権限、inspection の内部契約として扱う。
 
 ## inspection 面
 
