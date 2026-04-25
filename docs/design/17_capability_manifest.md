@@ -71,6 +71,9 @@ inspection には運用確認に必要な binding 要約を出すが、token、c
 利用可否、接続 client、直近失敗、cooldown、権限不足は manifest に入れない。
 これらは `CapabilityBinding` と `CapabilityState` に入れる。
 
+`risk_level` は分類、判断入力、inspection のための項目である。
+現時点では、`risk_level` に基づく承認フロー、禁止条件、追加確認の安全ポリシーは正本化しない。
+
 ## Manifest 例
 
 `vision.capture` の manifest は次の形を基準にする。
@@ -173,7 +176,7 @@ capability 実行は次の順序で行う。
 2. server が `hello.caps` と既知の manifest を照合し、`CapabilityBinding` を更新する。
 3. server が manifest、binding、state から判断用 decision view を作る。
 4. LLM が `capability_id` と入力 payload を含む実行要求案を返す。
-5. server が `input_schema`、権限、利用可否、`ongoing_action`、並列制限、risk policy を検証する。
+5. server が `input_schema`、権限、利用可否、`ongoing_action`、並列制限を検証し、`risk_level` を実行記録と inspection へ残す。
 6. server が binding から実行先 client を選び、stream で request を送る。
 7. client が result endpoint へ結果を返す。
 8. server が `request_id`、`target_client_id`、`result_schema` を検証する。

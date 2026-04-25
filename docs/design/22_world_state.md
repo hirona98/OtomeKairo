@@ -84,6 +84,88 @@ LLM は、観測や結果から `summary_text` と前景性を整理する。
 LLM が返した自由文をそのまま正本状態へ入れない。
 コードが source、期限、件数上限、失効を管理する。
 
+## LLM 更新契約
+
+`world_state` 更新に使う LLM 契約は、観測や実行結果から短期外界状態候補を抽出するための補助契約である。
+現行設計では専用のモデル role を増やさず、`model_preset.roles.input_interpretation` を使う。
+
+LLM に渡す source pack は少なくとも次を持つ。
+
+```json
+{
+  "trigger_kind": "desktop_watch",
+  "current_input_summary": "desktop_watch が Slack の general チャンネルを前景として観測した。",
+  "source_kind": "client_context",
+  "source_ref": "cycle:...",
+  "time_context": "2026年4月25日 土曜日 9時00分（日本時間）",
+  "client_context": {
+    "active_app": "Slack",
+    "window_title": "general | Slack",
+    "locale": "ja-JP"
+  },
+  "capability_result_summary": {
+    "capability_id": "vision.capture",
+    "image_count": 1,
+    "image_interpreted": false,
+    "error": null
+  },
+  "existing_foreground_world_state": [
+    {
+      "state_type": "screen",
+      "scope": "topic:current_work",
+      "summary_text": "画面では Discord の DM が前景にある。",
+      "age_label": "4分前"
+    }
+  ]
+}
+```
+
+source pack には、画像、音声、長い外部サービス応答、資格情報、内部 URL、配送先 client を含めない。
+画像や音声の意味理解が未実装の段階では、`image_count` と `image_interpreted=false` だけを渡す。
+
+LLM の出力は JSON object 1 個に固定する。
+
+```json
+{
+  "state_candidates": [
+    {
+      "state_type": "screen",
+      "scope": "topic:current_work",
+      "summary_text": "画面では Slack の general チャンネルが前景にある。",
+      "confidence_hint": "medium",
+      "salience_hint": "medium",
+      "ttl_hint": "short"
+    }
+  ]
+}
+```
+
+契約は次とする。
+
+- 必須トップレベルキーは `state_candidates` だけにする
+- `state_candidates` は配列にする
+- 各候補は `state_type / scope / summary_text / confidence_hint / salience_hint / ttl_hint` だけを持つ
+- `state_type` はこの文書の `state_type` enum だけを使う
+- `scope` は `self / user / entity:<key> / topic:<key> / relationship:<key> / world` のいずれかにする
+- `summary_text` は 1 文、改行なし、内部識別子なしにする
+- `confidence_hint` と `salience_hint` は `low / medium / high` のいずれかにする
+- `ttl_hint` は `short / medium / long` のいずれかにする
+- raw payload、資格情報、内部 URL、配送先 client を出力しない
+
+コードは LLM 出力を受けて次を決める。
+
+- `world_state_id`
+- `scope_type / scope_key`
+- `source_kind / source_ref`
+- 数値 `confidence / salience`
+- `observed_at / expires_at / updated_at`
+- 既存 state との統合、置換、失効
+- 件数上限と TTL
+
+validator 失敗時は 1 回だけ再生成する。
+再生成後も契約を満たさない場合は、そのサイクルの `world_state` 更新だけを失敗として扱い、判断サイクル本体は入力と想起が成立していれば継続する。
+失敗は `world_state_trace` と audit event に残す。
+
 ## 失効と整理
 
 `world_state` は、古い外界条件を残し続けない。

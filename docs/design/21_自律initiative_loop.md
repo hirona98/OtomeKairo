@@ -165,5 +165,5 @@ inspection では、少なくとも次を追えるようにする。
 - `pending_intent` がないと自発判断できない設計にすること
 - `drive_state` だけで能力実行を確定すること
 - `world_state` だけで人へ介入すること
-- 高リスク capability を LLM 判断だけで実行すること
+- `risk_level` から initiative loop 専用の安全ポリシーを作ること
 - 見送りを失敗として扱うこと

@@ -144,10 +144,32 @@ response:
 `result_kind` は次のいずれかを返す。
 
 - `reply`
+- `capability_request`
 - `noop`
 - `internal_failure`
 
-`result_kind=noop` または `result_kind=internal_failure` のとき、`reply` は `null` を返す。
+`result_kind=capability_request` のとき、server は capability request を `events/stream` へ配送済みであり、response には `capability_request` 要約を返す。
+`capability_request` 要約には `request_id`、`capability_id`、`status`、`timeout_ms` だけを含め、`target_client_id`、資格情報、内部 URL、transport 詳細は含めない。
+
+```json
+{
+  "ok": true,
+  "data": {
+    "cycle_id": "cycle:...",
+    "result_kind": "capability_request",
+    "reply": null,
+    "capability_request": {
+      "request_id": "vision_capture_request:...",
+      "capability_id": "vision.capture",
+      "status": "dispatched",
+      "timeout_ms": 5000
+    }
+  }
+}
+```
+
+`result_kind=noop`、`result_kind=capability_request`、`result_kind=internal_failure` のとき、`reply` は `null` を返す。
+`capability_request` が無い結果では、`capability_request` は `null` を返す。
 
 主な失敗:
 
@@ -196,11 +218,13 @@ response:
 `result_kind` は次のいずれかを返す。
 
 - `reply`
+- `capability_request`
 - `noop`
 - `internal_failure`
 
 保留意図は内部結果として扱い、外向きには返さない。
 そのため、wake で内部的に保留意図が選ばれた場合も、response の `result_kind` は `noop` とする。
+capability 実行を開始した場合は、`POST /api/conversation` と同じ `capability_request` 要約を返す。
 
 wake API は少なくとも次の挙動を持つ。
 
@@ -210,7 +234,8 @@ wake API は少なくとも次の挙動を持つ。
 
 server 内の background 起床スケジューラも、同じ wake 1 サイクルを内部的に使う。
 
-`result_kind=noop` または `result_kind=internal_failure` のとき、`reply` は `null` を返す。
+`result_kind=noop`、`result_kind=capability_request`、`result_kind=internal_failure` のとき、`reply` は `null` を返す。
+`capability_request` が無い結果では、`capability_request` は `null` を返す。
 
 主な失敗:
 
