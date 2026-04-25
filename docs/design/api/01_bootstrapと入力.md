@@ -15,12 +15,19 @@ response:
   "data": {
     "bootstrap_available": true,
     "https_required": true,
-    "bootstrap_state": "ready_for_first_console"
+    "bootstrap_state": "unregistered"
   }
 }
 ```
 
-この設計では `bootstrap_state` は `ready_for_first_console` を返す。
+`bootstrap_state` は次のいずれかを返す。
+
+| 値 | 意味 |
+|----|------|
+| `unregistered` | `console_access_token` が未発行であり、`register-first-console` が token を発行する |
+| `registered` | `console_access_token` は発行済みであり、通常 API は認証を要求する |
+
+`probe` は token 実値を返さない。
 
 ### `GET /api/bootstrap/server-identity`
 
@@ -36,16 +43,21 @@ response:
     "server_id": "server:...",
     "server_display_name": "OtomeKairo",
     "api_version": "0.1.0",
+    "bootstrap_state": "unregistered",
     "console_access_token_issued": false
   }
 }
 ```
 
+`server-identity` は接続先識別と bootstrap 状態だけを返す。
+`console_access_token_issued` は発行有無を示す boolean であり、token 実値は返さない。
+
 ### `POST /api/bootstrap/register-first-console`
 
 - 認証: 不要
-- 役割: 通常 API に入るための `console_access_token` を受け取る
+- 役割: 未発行状態の server に初回 console token を発行する
 - request body: `{}` とする
+- 実行条件: `console_access_token` が未発行であること
 
 response:
 
@@ -58,12 +70,20 @@ response:
 }
 ```
 
-未発行状態では新しいトークンを発行し、発行済み状態では現在のトークンを返す。
+未発行状態では新しい token を発行し、発行済み状態では既存 token を返さない。
+発行済み状態では `409 first_console_already_registered` を返す。
+この endpoint は既存 token の確認、再表示、復旧には使わない。
+
+主な失敗:
+
+| HTTP | `error.code` | 意味 |
+|------|--------------|------|
+| `409` | `first_console_already_registered` | 初回 console token は発行済み |
 
 ### `POST /api/bootstrap/reissue-console-access-token`
 
 - 認証: 必要
-- 役割: 現在のトークンを新しいトークンへ置き換える
+- 役割: 認証済みの console が現在の token を新しい token へ置き換える
 - request body: `{}` とする
 
 response:
@@ -76,6 +96,9 @@ response:
   }
 }
 ```
+
+再発行に成功したら旧 token は失効する。
+新 token の実値はこの response だけで返し、ログ、inspection、状態 API には残さない。
 
 ## 対話面
 
