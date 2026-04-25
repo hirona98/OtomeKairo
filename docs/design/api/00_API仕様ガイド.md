@@ -6,6 +6,8 @@ API 仕様ファミリー全体の入口と分割方針は `../14_API仕様.md` 
 この文書では、その配下にある詳細文書へ共通して適用するルールだけを扱う。
 
 API を変更するときは、該当する詳細文書に加えて `../14_API仕様.md` の見取り図と、この文書の共通ルールがずれていないかを同じ変更内で確認する。
+実装済み範囲は `../../plan/` 配下とコードを正とする。
+この API 仕様ファミリーは、現行設計の完成形に必要な wire 契約を含む。
 
 ## 共通ルール
 
@@ -47,6 +49,7 @@ timezone 表記のない timestamp は API response に出さない。
 | `400` | `invalid_json_shape` | request body が object ではない |
 | `401` | `bootstrap_required` | まだ `console_access_token` が発行されていない |
 | `401` | `invalid_token` | 認証トークンが無い、または不正 |
+| `403` | `permission_denied` | 認証済みだが必要な権限がない |
 | `404` | `route_not_found` | 未定義の route |
 | `409` | `first_console_already_registered` | 初回 console token は発行済み |
 | `409` | `last_resource_delete_forbidden` | 最後の 1 件を削除しようとした |

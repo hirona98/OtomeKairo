@@ -46,6 +46,7 @@ response:
 - 認証: 必要
 - 役割: server が manifest、binding、`capability_state`、権限から導出した現在の capability availability を返す
 - この response は capability availability の外向き確認正本である
+- この endpoint は現行設計の完成形における wire 契約である。実装状態は `../../plan/` 配下を正とする
 - `capabilities` は server が知っている manifest を基準に並べる
 - `rejected_bindings` は、接続 client が `hello.caps` で提示したが server が binding として受理しなかった候補を返す
 - token、credential、内部 URL、transport 詳細は返さない
@@ -167,6 +168,7 @@ response:
     "cycle_id": "cycle:...",
     "cycle_summary": {},
     "input_trace": {},
+    "world_state_trace": {},
     "recall_trace": {},
     "decision_trace": {},
     "result_trace": {},
@@ -176,6 +178,7 @@ response:
 ```
 
 - `recall_trace` には `selected_memory_unit_ids`、`selected_episode_ids`、必要時だけ `selected_event_ids` を含む
+- `world_state_trace` には判断入力へ入った `world_state` 件数、前景要約、更新件数、失効件数、source 要約、更新失敗理由を含む
 - `recall_trace.event_evidence_generation` には `requested_event_count`、`loaded_event_count`、`succeeded_event_count`、`failed_items` を含む
 - `recall_trace.event_evidence_generation.failed_items.*` には `event_id`、`kind`、`failure_stage`、`failure_reason` を含む
 - `recall_trace.recall_pack_selection` には `candidate_section_counts`、`selected_section_order`、`selected_candidate_refs`、`dropped_candidate_refs`、`conflict_summary_count`、`result_status`、`failure_reason` を含む
