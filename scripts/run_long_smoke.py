@@ -38,7 +38,7 @@ PROFILE_DEFAULTS: dict[str, dict[str, int | float]] = {
         "run_seconds": 75,
         "conversation_interval_seconds": 6.0,
         "desktop_watch_interval_seconds": 2,
-        "wake_interval_minutes": 1,
+        "wake_interval_seconds": 60,
         "min_conversation_cycles": 4,
         "capture_timeout_failures": 1,
         "capture_mismatch_failures": 1,
@@ -52,7 +52,7 @@ PROFILE_DEFAULTS: dict[str, dict[str, int | float]] = {
         "run_seconds": 600,
         "conversation_interval_seconds": 12.0,
         "desktop_watch_interval_seconds": 3,
-        "wake_interval_minutes": 1,
+        "wake_interval_seconds": 60,
         "min_conversation_cycles": 20,
         "capture_timeout_failures": 1,
         "capture_mismatch_failures": 1,
@@ -551,7 +551,7 @@ class LongSmokeRunner:
 
         current["wake_policy"] = {
             "mode": "interval",
-            "interval_minutes": self.args.wake_interval_minutes,
+            "interval_seconds": self.args.wake_interval_seconds,
         }
         current["desktop_watch"] = {
             "enabled": True,
@@ -1355,7 +1355,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--run-seconds", type=int, help="入力を流し続ける秒数")
     parser.add_argument("--conversation-interval-seconds", type=float, help="会話投入間隔")
     parser.add_argument("--desktop-watch-interval-seconds", type=int, help="desktop_watch 間隔")
-    parser.add_argument("--wake-interval-minutes", type=int, help="background wake 間隔")
+    parser.add_argument("--wake-interval-seconds", type=int, help="background wake 間隔")
     parser.add_argument("--min-conversation-cycles", type=int, help="最低会話サイクル数")
     parser.add_argument("--capture-timeout-failures", type=int, help="意図的に落とす capture-response 回数")
     parser.add_argument(

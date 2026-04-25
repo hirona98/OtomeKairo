@@ -342,9 +342,9 @@ class ServiceSpontaneousMixin:
             return 0.0
 
         # 残り
-        interval_minutes = int(wake_policy.get("interval_minutes", 1))
+        interval_seconds = int(wake_policy["interval_seconds"])
         current_dt = self._parse_iso(current_time)
-        due_at = self._parse_iso(last_wake_at) + timedelta(minutes=interval_minutes)
+        due_at = self._parse_iso(last_wake_at) + timedelta(seconds=interval_seconds)
         remaining_seconds = (due_at - current_dt).total_seconds()
         if remaining_seconds <= 0:
             return 0.0
@@ -1330,9 +1330,9 @@ class ServiceSpontaneousMixin:
             }
 
         # 間隔
-        interval_minutes = wake_policy.get("interval_minutes", 0)
+        interval_seconds = wake_policy["interval_seconds"]
         current_dt = self._parse_iso(current_time)
-        due_at = self._parse_iso(last_wake_at) + timedelta(minutes=int(interval_minutes))
+        due_at = self._parse_iso(last_wake_at) + timedelta(seconds=int(interval_seconds))
         if current_dt < due_at:
             return {
                 "should_skip": True,

@@ -675,10 +675,24 @@ class ServiceConfigMixin:
         if mode not in {"disabled", "interval"}:
             raise ServiceError(400, "invalid_wake_policy_mode", "wake_policy.mode must be disabled or interval.")
 
+        allowed_fields = {"mode"}
         if mode == "interval":
-            interval_minutes = wake_policy.get("interval_minutes")
-            if not isinstance(interval_minutes, int) or interval_minutes < 1:
-                raise ServiceError(400, "invalid_interval_minutes", "interval_minutes must be an integer >= 1.")
+            allowed_fields.add("interval_seconds")
+            interval_seconds = wake_policy.get("interval_seconds")
+            if not isinstance(interval_seconds, int) or interval_seconds < 1:
+                raise ServiceError(
+                    400,
+                    "invalid_wake_policy_interval_seconds",
+                    "wake_policy.interval_seconds must be an integer >= 1.",
+                )
+
+        unsupported_fields = sorted(set(wake_policy.keys()) - allowed_fields)
+        if unsupported_fields:
+            raise ServiceError(
+                400,
+                "unsupported_wake_policy_fields",
+                f"wake_policy has unsupported fields: {', '.join(unsupported_fields)}.",
+            )
 
     def _validate_desktop_watch(self, desktop_watch: Any) -> None:
         if not isinstance(desktop_watch, dict):
