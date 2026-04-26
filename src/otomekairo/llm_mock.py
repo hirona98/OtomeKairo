@@ -1334,7 +1334,7 @@ class MockLLMClient:
             return "直近のやり取りとの連続性があり、今はこの候補を再評価に乗せる自然さがある。"
 
         # 非選択
-        if trigger_kind == "wake":
+        if trigger_kind in {"wake", "background_wake"}:
             return "今の起床機会だけでは、この保留候補を前に出す自然さがまだ弱い。"
         if has_foreground_context:
             return "前景の文脈だけでは、この保留候補を前に出す決め手がまだ弱い。"

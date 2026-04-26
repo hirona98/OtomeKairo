@@ -1157,6 +1157,7 @@ class LongSmokeRunner:
 
     def _assert_summary(self, summary: dict[str, Any]) -> None:
         runtime_summary = summary["status"]["runtime_summary"]
+        wake_cycle_count = summary["trigger_counts"].get("wake", 0) + summary["trigger_counts"].get("background_wake", 0)
         if not runtime_summary.get("memory_job_worker_active"):
             raise SmokeError("memory worker was not active at the end of the smoke run.")
         if runtime_summary.get("pending_memory_job_count") != 0:
@@ -1168,8 +1169,8 @@ class LongSmokeRunner:
                 "conversation cycles were too few:"
                 f" {len(summary['conversation_cycle_ids'])} < {self.args.min_conversation_cycles}"
             )
-        if summary["trigger_counts"].get("wake", 0) < 1:
-            raise SmokeError("no wake cycle was recorded during the smoke run.")
+        if wake_cycle_count < 1:
+            raise SmokeError("no wake/background_wake cycle was recorded during the smoke run.")
         if summary["trigger_counts"].get("desktop_watch", 0) < 1:
             raise SmokeError("no desktop_watch cycle was recorded during the smoke run.")
         if summary["capture_request_count"] < 1:
@@ -1273,6 +1274,7 @@ class LongSmokeRunner:
             f" conversations={len(summary['conversation_cycle_ids'])}"
             f" restart_probe={len(summary['restart_probe_cycle_ids'])}"
             f" wake={summary['trigger_counts'].get('wake', 0)}"
+            f" background_wake={summary['trigger_counts'].get('background_wake', 0)}"
             f" desktop_watch={summary['trigger_counts'].get('desktop_watch', 0)}"
             f" captures={summary['capture_request_count']}"
             f" dropped={len(summary['capture_timeout_request_ids'])}"

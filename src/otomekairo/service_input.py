@@ -6,7 +6,14 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from otomekairo.llm import LLMError
-from otomekairo.memory_utils import display_local_iso, local_datetime, local_now, localize_timestamp_fields, now_iso
+from otomekairo.memory_utils import (
+    display_local_iso,
+    llm_local_time_text,
+    local_datetime,
+    local_now,
+    localize_timestamp_fields,
+    now_iso,
+)
 from otomekairo.recall import RecallPackSelectionError
 from otomekairo.service_common import ServiceError, debug_log
 
@@ -957,7 +964,7 @@ class ServiceInputMixin:
 
         # 結果
         return {
-            "current_time": current_time,
+            "current_time_text": llm_local_time_text(current_time).replace("\n", " / "),
             "weekday": current_dt.strftime("%A").lower(),
             "part_of_day": self._part_of_day(current_dt.hour),
         }

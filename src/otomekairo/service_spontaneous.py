@@ -129,6 +129,7 @@ class ServiceSpontaneousMixin:
     ) -> dict[str, Any]:
         # 直列化実行
         with self._wake_execution_lock:
+            input_event_kind = "background_wake" if trigger_kind == "background_wake" else "wake"
             cycle_id = self._new_cycle_id()
             started_at = self._now_iso()
             recent_turns = self._load_recent_turns(state)
@@ -165,7 +166,7 @@ class ServiceSpontaneousMixin:
                         client_context=client_context,
                         pipeline=pipeline,
                         trigger_kind=trigger_kind,
-                        input_event_kind="wake",
+                        input_event_kind=input_event_kind,
                         input_event_role="system",
                         consolidate_memory=False,
                         pending_intent_selection=pending_intent_selection,
@@ -190,7 +191,7 @@ class ServiceSpontaneousMixin:
                         client_context=client_context,
                         pipeline=pipeline,
                         trigger_kind=trigger_kind,
-                        input_event_kind="wake",
+                        input_event_kind=input_event_kind,
                         input_event_role="system",
                         consolidate_memory=False,
                         pending_intent_selection=pending_intent_selection,
@@ -235,7 +236,7 @@ class ServiceSpontaneousMixin:
                     client_context=client_context,
                     pipeline=pipeline,
                     trigger_kind=trigger_kind,
-                    input_event_kind="wake",
+                    input_event_kind=input_event_kind,
                     input_event_role="system",
                     consolidate_memory=False,
                     pending_intent_selection=pending_intent_selection,
@@ -272,7 +273,7 @@ class ServiceSpontaneousMixin:
                     client_context=client_context,
                     failure_reason=str(exc),
                     trigger_kind=trigger_kind,
-                    input_event_kind="wake",
+                    input_event_kind=input_event_kind,
                     input_event_role="system",
                     failure_event_kind="pending_intent_selection_failure",
                     failure_event_payload={
@@ -313,7 +314,7 @@ class ServiceSpontaneousMixin:
                     client_context=client_context,
                     failure_reason=str(exc),
                     trigger_kind=trigger_kind,
-                    input_event_kind="wake",
+                    input_event_kind=input_event_kind,
                     input_event_role="system",
                     recall_trace=self._build_failure_recall_trace(
                         recall_hint=exc.recall_hint_summary,
@@ -355,7 +356,7 @@ class ServiceSpontaneousMixin:
                     client_context=client_context,
                     failure_reason=str(exc),
                     trigger_kind=trigger_kind,
-                    input_event_kind="wake",
+                    input_event_kind=input_event_kind,
                     input_event_role="system",
                     pending_intent_selection=pending_intent_selection,
                 )
@@ -385,7 +386,7 @@ class ServiceSpontaneousMixin:
                 self._execute_wake_cycle(
                     state=state,
                     client_context={"source": "background_wake_scheduler"},
-                    trigger_kind="wake",
+                    trigger_kind="background_wake",
                 )
             except Exception as exc:  # noqa: BLE001
                 debug_log("Wake", f"background loop error={type(exc).__name__}: {self._clamp(str(exc))}")
