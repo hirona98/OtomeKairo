@@ -22,6 +22,7 @@ DEFAULT_EMBEDDING_DIMENSION = 3072
 DEFAULT_GEMINI_GENERATION_MODEL = "openrouter/google/gemini-3.1-flash-lite-preview"
 DEFAULT_GEMINI_EMBEDDING_MODEL = "openrouter/google/gemini-embedding-001"
 DEFAULT_PERSONA_DISPLAY_NAME = "標準人格設定"
+DEFAULT_PERSONA_INITIATIVE_BASELINE = "medium"
 DEFAULT_PERSONA_PROMPT = """人のそばで長く時間を重ねることを自然だと思っている。
 必要以上に媚びず、相手を一人の人間としてまっすぐ扱う。
 静かで落ち着いているが、相手の無理や雑さには小さく釘を刺す。
@@ -68,6 +69,7 @@ def build_default_state() -> dict:
             DEFAULT_PERSONA_ID: {
                 "persona_id": DEFAULT_PERSONA_ID,
                 "display_name": DEFAULT_PERSONA_DISPLAY_NAME,
+                "initiative_baseline": DEFAULT_PERSONA_INITIATIVE_BASELINE,
                 "persona_prompt": DEFAULT_PERSONA_PROMPT,
                 "expression_addon": DEFAULT_PERSONA_EXPRESSION_ADDON,
             }

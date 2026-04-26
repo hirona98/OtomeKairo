@@ -163,7 +163,7 @@ class EventStreamRegistry:
         self._lock = threading.RLock()
         self._sessions: dict[str, dict[str, Any]] = {}
 
-    def add_connection(self, websocket: ServerWebSocket) -> str:
+    def add_connection(self, websocket: ServerWebSocket, permissions: list[str] | None = None) -> str:
         # セッション
         session_id = f"event_stream_session:{uuid.uuid4().hex}"
         with self._lock:
@@ -172,11 +172,27 @@ class EventStreamRegistry:
                 "websocket": websocket,
                 "client_id": None,
                 "capabilities": {},
+                "permissions": sorted(set(permissions or [])),
                 "rejected_bindings": [],
             }
 
         # 結果
         return session_id
+
+    def session_permissions(self, session_id: str) -> list[str]:
+        # 接続主体に付与された capability 実行権限
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if session is None:
+                raise KeyError(session_id)
+            permissions = session.get("permissions", [])
+            if not isinstance(permissions, list):
+                return []
+            return [
+                permission
+                for permission in permissions
+                if isinstance(permission, str) and permission
+            ]
 
     def register_hello(
         self,

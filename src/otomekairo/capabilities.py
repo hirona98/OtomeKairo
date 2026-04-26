@@ -20,8 +20,54 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
             "現在の判断に画面情報が不要",
         ],
         "required_permissions": ["observe_desktop"],
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "source": {"type": "string", "enum": ["desktop"]},
+                "mode": {"type": "string", "enum": ["still"]},
+            },
+            "required": ["source", "mode"],
+            "additionalProperties": False,
+        },
+        "result_schema": {
+            "type": "object",
+            "properties": {
+                "images": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+                "client_context": {
+                    "type": ["object", "null"],
+                },
+                "error": {
+                    "type": ["string", "null"],
+                },
+            },
+            "required": ["images"],
+            "additionalProperties": False,
+        },
+        "side_effects": {
+            "external_world": False,
+            "user_visible": False,
+            "stores_raw_payload": False,
+        },
         "timeout_ms": 5000,
         "risk_level": "low",
+        "memory_policy": {
+            "record_result_event": True,
+            "allow_memory_update": True,
+        },
+        "state_policy": {
+            "creates_ongoing_action": True,
+            "blocks_parallel_capability": True,
+        },
+        "inspection_fields": [
+            "capability_id",
+            "target_client_id",
+            "image_count",
+            "image_interpreted",
+            "error",
+        ],
     },
 }
 

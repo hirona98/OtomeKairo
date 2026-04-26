@@ -122,6 +122,7 @@ class ServiceSpontaneousMixin:
             runtime_summary = self._build_runtime_summary(state)
             pending_intent_selection = self._empty_pending_intent_selection_trace()
             input_text = self._build_wake_input_text(
+                state=state,
                 client_context=client_context,
                 selected_candidate=None,
             )
@@ -1380,11 +1381,14 @@ class ServiceSpontaneousMixin:
     def _build_wake_input_text(
         self,
         *,
+        state: dict[str, Any],
         client_context: dict[str, Any],
         selected_candidate: dict[str, Any] | None,
     ) -> str:
         # プレフィックス
         parts = ["定期起床。"]
+        persona = state["personas"][state["selected_persona_id"]]
+        parts.append(f"initiative_baseline は {persona['initiative_baseline']}。")
         parts.extend(
             self._client_context_input_parts(
                 client_context=client_context,

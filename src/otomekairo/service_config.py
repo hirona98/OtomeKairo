@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from copy import deepcopy
 from typing import Any
 
@@ -8,11 +9,18 @@ from otomekairo.event_stream import ServerWebSocket
 from otomekairo.service_common import REQUIRED_MODEL_ROLE_NAMES, ServiceError
 
 
+EVENT_STREAM_CAPABILITY_PERMISSIONS = ("observe_desktop",)
+PERSONA_INITIATIVE_BASELINES = {"low", "medium", "high"}
+
+
 # 設定Mixin
 class ServiceConfigMixin:
     def register_event_stream_connection(self, websocket: ServerWebSocket) -> str:
         # レジストリ
-        return self._event_stream_registry.add_connection(websocket)
+        return self._event_stream_registry.add_connection(
+            websocket,
+            permissions=list(EVENT_STREAM_CAPABILITY_PERMISSIONS),
+        )
 
     def handle_event_stream_message(self, session_id: str, payload: dict[str, Any]) -> None:
         # 型
@@ -33,6 +41,7 @@ class ServiceConfigMixin:
         seen_at = self._now_iso()
         accepted_capabilities: dict[str, str] = {}
         rejected_bindings: list[dict[str, Any]] = []
+        granted_permissions = set(self._event_stream_registry.session_permissions(session_id))
         for cap in caps:
             if not isinstance(cap, dict):
                 raise ServiceError(400, "invalid_caps", "hello.caps must contain capability objects.")
@@ -64,6 +73,23 @@ class ServiceConfigMixin:
                         capability_id=capability_id,
                         offered_version=offered_version,
                         rejection_reason="unsupported_version",
+                        seen_at=seen_at,
+                    )
+                )
+                continue
+            required_permissions = [
+                permission
+                for permission in manifest.get("required_permissions", [])
+                if isinstance(permission, str)
+            ]
+            missing_permissions = sorted(set(required_permissions) - granted_permissions)
+            if missing_permissions:
+                rejected_bindings.append(
+                    self._build_rejected_capability_binding(
+                        client_id=client_id.strip(),
+                        capability_id=capability_id,
+                        offered_version=offered_version,
+                        rejection_reason="permission_denied",
                         seen_at=seen_at,
                     )
                 )
@@ -189,6 +215,7 @@ class ServiceConfigMixin:
     def get_editor_state(self, token: str | None) -> dict[str, Any]:
         # 認可
         state = self._require_token(token)
+        self._append_editor_state_audit_event(state=state, operation="read")
         return self._build_editor_state(state)
 
     def get_catalog(self, token: str | None) -> dict[str, Any]:
@@ -240,6 +267,11 @@ class ServiceConfigMixin:
 
         required_permissions = list(manifest.get("required_permissions", []))
         missing_permissions: list[str] = []
+        if not bound_client_ids and any(
+            binding.get("rejection_reason") == "permission_denied"
+            for binding in related_rejections
+        ):
+            missing_permissions = required_permissions
         available = bool(bound_client_ids) and not missing_permissions
         unavailable_reason = None
         if not available:
@@ -557,6 +589,7 @@ class ServiceConfigMixin:
             memory_set_ids=list(memory_sets.keys()),
             clear_drive_states=True,
         )
+        self._append_editor_state_audit_event(state=state, operation="write")
         return self._build_editor_state(state)
 
     def _require_token(self, token: str | None) -> dict[str, Any]:
@@ -860,7 +893,8 @@ class ServiceConfigMixin:
         if definition.get("persona_id") != persona_id:
             raise ServiceError(400, "persona_id_mismatch", "persona_id must match the path.")
         unsupported_fields = sorted(
-            set(definition.keys()) - {"persona_id", "display_name", "persona_prompt", "expression_addon"}
+            set(definition.keys())
+            - {"persona_id", "display_name", "initiative_baseline", "persona_prompt", "expression_addon"}
         )
         if unsupported_fields:
             raise ServiceError(
@@ -874,6 +908,13 @@ class ServiceConfigMixin:
         persona_prompt = definition.get("persona_prompt")
         if not isinstance(persona_prompt, str) or not persona_prompt.strip():
             raise ServiceError(400, "invalid_persona_prompt", "persona_prompt is required.")
+        initiative_baseline = definition.get("initiative_baseline")
+        if initiative_baseline not in PERSONA_INITIATIVE_BASELINES:
+            raise ServiceError(
+                400,
+                "invalid_initiative_baseline",
+                "initiative_baseline must be low, medium, or high.",
+            )
         expression_addon = definition.get("expression_addon")
         if expression_addon is not None and not isinstance(expression_addon, str):
             raise ServiceError(400, "invalid_expression_addon", "expression_addon must be a string.")
@@ -882,12 +923,33 @@ class ServiceConfigMixin:
         normalized = {
             **definition,
         }
-        for field_name in ("display_name", "persona_prompt", "expression_addon"):
+        for field_name in ("display_name", "initiative_baseline", "persona_prompt", "expression_addon"):
             value = normalized.get(field_name)
             if not isinstance(value, str):
                 continue
             normalized[field_name] = value.strip()
         return normalized
+
+    def _append_editor_state_audit_event(self, *, state: dict[str, Any], operation: str) -> None:
+        # 秘密値を含む editor-state 本文は audit に残さない。
+        self.store.append_events(
+            events=[
+                {
+                    "event_id": f"event:config_audit:{uuid.uuid4().hex}",
+                    "cycle_id": "config:editor-state",
+                    "memory_set_id": state["selected_memory_set_id"],
+                    "kind": f"editor_state_{operation}",
+                    "role": "system",
+                    "created_at": self._now_iso(),
+                    "selected_persona_id": state["selected_persona_id"],
+                    "selected_memory_set_id": state["selected_memory_set_id"],
+                    "selected_model_preset_id": state["selected_model_preset_id"],
+                    "persona_count": len(state["personas"]),
+                    "memory_set_count": len(state["memory_sets"]),
+                    "model_preset_count": len(state["model_presets"]),
+                }
+            ]
+        )
 
     def _validate_memory_set_definition(self, memory_set_id: Any, definition: dict[str, Any]) -> None:
         if not isinstance(memory_set_id, str) or not memory_set_id:

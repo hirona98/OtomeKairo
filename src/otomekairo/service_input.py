@@ -218,6 +218,7 @@ class ServiceInputMixin:
     ) -> tuple[dict[str, Any], str]:
         # 入力テキスト
         input_text = self._build_wake_input_text(
+            state=state,
             client_context=client_context,
             selected_candidate=selected_candidate,
         )
@@ -1178,8 +1179,9 @@ class ServiceInputMixin:
             "input_trace": input_trace,
             "recall_trace": recall_trace,
             "decision_trace": decision_trace,
+            "world_state_trace": {},
             "result_trace": result_trace,
-            "memory_trace": memory_trace,
+            "memory_trace": memory_trace or {},
         }
 
     def _build_success_recall_trace(self, recall_hint: dict[str, Any], recall_pack: dict[str, Any]) -> dict[str, Any]:
@@ -1511,7 +1513,7 @@ class ServiceInputMixin:
                 capability_request_summary=capability_request_summary,
                 ongoing_action_transition_summary=ongoing_action_transition_summary,
             ),
-            memory_trace=None,
+            memory_trace={},
             pending_intent_selection=pending_intent_selection,
             observation_summary=observation_summary,
             ongoing_action_summary=ongoing_action_summary,
