@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from otomekairo.capabilities import capability_manifests
 from otomekairo.event_stream import ServerWebSocket
 from otomekairo.service_common import REQUIRED_MODEL_ROLE_NAMES, ServiceError
 
@@ -27,19 +28,79 @@ class ServiceConfigMixin:
         if not isinstance(caps, list):
             raise ServiceError(400, "invalid_caps", "hello.caps must be an array.")
 
-        # 上限群
-        normalized_caps: list[str] = []
+        # binding 候補
+        manifests = capability_manifests()
+        seen_at = self._now_iso()
+        accepted_capabilities: dict[str, str] = {}
+        rejected_bindings: list[dict[str, Any]] = []
         for cap in caps:
-            if not isinstance(cap, str) or not cap.strip():
-                raise ServiceError(400, "invalid_caps", "hello.caps must contain non-empty strings.")
-            normalized_caps.append(cap.strip())
+            if not isinstance(cap, dict):
+                raise ServiceError(400, "invalid_caps", "hello.caps must contain capability objects.")
+            capability_id = cap.get("id")
+            offered_version = cap.get("version")
+            if not isinstance(capability_id, str) or not capability_id.strip():
+                raise ServiceError(400, "invalid_caps", "hello.caps[].id must be a non-empty string.")
+            if not isinstance(offered_version, str) or not offered_version.strip():
+                raise ServiceError(400, "invalid_caps", "hello.caps[].version must be a non-empty string.")
+
+            capability_id = capability_id.strip()
+            offered_version = offered_version.strip()
+            manifest = manifests.get(capability_id)
+            if manifest is None:
+                rejected_bindings.append(
+                    self._build_rejected_capability_binding(
+                        client_id=client_id.strip(),
+                        capability_id=capability_id,
+                        offered_version=offered_version,
+                        rejection_reason="unknown_capability",
+                        seen_at=seen_at,
+                    )
+                )
+                continue
+            if offered_version != manifest["version"]:
+                rejected_bindings.append(
+                    self._build_rejected_capability_binding(
+                        client_id=client_id.strip(),
+                        capability_id=capability_id,
+                        offered_version=offered_version,
+                        rejection_reason="unsupported_version",
+                        seen_at=seen_at,
+                    )
+                )
+                continue
+            accepted_capabilities[capability_id] = offered_version
 
         # 登録
         self._event_stream_registry.register_hello(
             session_id,
             client_id=client_id.strip(),
-            caps=normalized_caps,
+            capabilities=accepted_capabilities,
+            rejected_bindings=rejected_bindings,
         )
+
+    def get_capability_inspection(self, token: str | None) -> dict[str, Any]:
+        # 認可
+        self._require_token(token)
+
+        # 状態
+        manifests = capability_manifests()
+        bindings = self._event_stream_registry.list_capability_bindings()
+        accepted_bindings = bindings["accepted"]
+        rejected_bindings = bindings["rejected"]
+
+        # 応答
+        return {
+            "generated_at": self._now_iso(),
+            "capabilities": [
+                self._build_capability_availability(
+                    manifest=manifest,
+                    bound_client_ids=accepted_bindings.get(capability_id, []),
+                    rejected_bindings=rejected_bindings,
+                )
+                for capability_id, manifest in sorted(manifests.items())
+            ],
+            "rejected_bindings": rejected_bindings,
+        }
 
     def unregister_event_stream_connection(self, session_id: str) -> None:
         # レジストリ
@@ -51,11 +112,11 @@ class ServiceConfigMixin:
 
     def probe_bootstrap(self) -> dict[str, Any]:
         # 状態
-        self.store.read_state()
+        state = self.store.read_state()
         return {
             "bootstrap_available": True,
             "https_required": True,
-            "bootstrap_state": "ready_for_first_console",
+            "bootstrap_state": self._bootstrap_state(state),
         }
 
     def read_server_identity(self) -> dict[str, Any]:
@@ -65,6 +126,7 @@ class ServiceConfigMixin:
             "server_id": state["server_id"],
             "server_display_name": state["server_display_name"],
             "api_version": state["api_version"],
+            "bootstrap_state": self._bootstrap_state(state),
             "console_access_token_issued": state["console_access_token"] is not None,
         }
 
@@ -72,15 +134,23 @@ class ServiceConfigMixin:
         # 読み込み状態
         state = self.store.read_state()
 
-        # bootstrap では未発行なら新規発行し、発行済みなら現在値を返すだけにする。
-        if state["console_access_token"] is None:
-            state["console_access_token"] = self._new_console_token()
-            self.store.write_state(state)
+        # 初回登録済みの token は再表示しない。
+        if state["console_access_token"] is not None:
+            raise ServiceError(409, "first_console_already_registered", "The first console token has already been issued.")
+
+        state["console_access_token"] = self._new_console_token()
+        self.store.write_state(state)
 
         # 結果
         return {
             "console_access_token": state["console_access_token"],
         }
+
+    def _bootstrap_state(self, state: dict[str, Any]) -> str:
+        # token 発行有無だけを外向き状態にする。
+        if state["console_access_token"] is None:
+            return "unregistered"
+        return "registered"
 
     def reissue_console_access_token(self, token: str | None) -> dict[str, Any]:
         # 認可
@@ -130,6 +200,72 @@ class ServiceConfigMixin:
             "personas": self._catalog_entries(state["personas"], "persona_id"),
             "memory_sets": self._catalog_entries(state["memory_sets"], "memory_set_id"),
             "model_presets": self._catalog_entries(state["model_presets"], "model_preset_id"),
+        }
+
+    def _build_rejected_capability_binding(
+        self,
+        *,
+        client_id: str,
+        capability_id: str,
+        offered_version: str,
+        rejection_reason: str,
+        seen_at: str,
+    ) -> dict[str, Any]:
+        return {
+            "client_id": client_id,
+            "capability_id": capability_id,
+            "offered_version": offered_version,
+            "rejection_reason": rejection_reason,
+            "seen_at": seen_at,
+        }
+
+    def _build_capability_availability(
+        self,
+        *,
+        manifest: dict[str, Any],
+        bound_client_ids: list[str],
+        rejected_bindings: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        capability_id = manifest["id"]
+        related_rejections = [
+            binding
+            for binding in rejected_bindings
+            if binding.get("capability_id") == capability_id
+        ]
+        binding_status = "no_binding"
+        if bound_client_ids:
+            binding_status = "bound"
+        elif related_rejections:
+            binding_status = "rejected_only"
+
+        required_permissions = list(manifest.get("required_permissions", []))
+        missing_permissions: list[str] = []
+        available = bool(bound_client_ids) and not missing_permissions
+        unavailable_reason = None
+        if not available:
+            unavailable_reason = "permission_denied" if missing_permissions else "no_binding"
+
+        return {
+            "capability_id": capability_id,
+            "manifest_version": manifest["version"],
+            "kind": manifest["kind"],
+            "available": available,
+            "unavailable_reason": unavailable_reason,
+            "binding": {
+                "status": binding_status,
+                "eligible_client_count": len(bound_client_ids),
+                "bound_client_ids": list(bound_client_ids),
+            },
+            "permissions": {
+                "required": required_permissions,
+                "missing": missing_permissions,
+            },
+            "state": {
+                "paused": False,
+                "cooldown_until": None,
+                "last_failure_at": None,
+                "last_failure_summary": None,
+            },
         }
 
     def patch_current(self, token: str | None, payload: dict[str, Any]) -> dict[str, Any]:

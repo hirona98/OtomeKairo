@@ -387,53 +387,34 @@ def validate_memory_interpretation_contract(payload: dict[str, Any]) -> None:
     for candidate in payload["candidate_memory_units"]:
         required_candidate_keys = {
             "memory_type",
-            "scope_type",
-            "scope_key",
-            "subject_ref",
-            "predicate",
-            "object_ref_or_value",
+            "scope",
+            "subject_hint",
+            "predicate_hint",
+            "object_hint",
+            "qualifiers_hint",
             "summary_text",
-            "status",
-            "commitment_state",
-            "confidence",
-            "salience",
-            "valid_from",
-            "valid_to",
-            "qualifiers",
-            "reason",
+            "evidence_text",
+            "confidence_hint",
         }
         _validate_exact_keys(candidate, required_candidate_keys, "MemoryInterpretation candidate_memory_unit")
         if candidate["memory_type"] not in MEMORY_TYPE_VALUES:
             raise LLMError("MemoryInterpretation candidate_memory_unit.memory_type が不正です。")
-        if candidate["status"] not in MEMORY_STATUS_VALUES:
-            raise LLMError("MemoryInterpretation candidate_memory_unit.status が不正です。")
-        _validate_scope_identity(
-            scope_type=candidate["scope_type"],
-            scope_key=candidate["scope_key"],
-            label="MemoryInterpretation candidate_memory_unit",
-        )
-        if not isinstance(candidate["subject_ref"], str) or not candidate["subject_ref"].strip():
-            raise LLMError("MemoryInterpretation candidate_memory_unit.subject_ref が不正です。")
-        if not isinstance(candidate["predicate"], str) or not candidate["predicate"].strip():
-            raise LLMError("MemoryInterpretation candidate_memory_unit.predicate が不正です。")
-        if candidate["object_ref_or_value"] is not None and not isinstance(candidate["object_ref_or_value"], str):
-            raise LLMError("MemoryInterpretation candidate_memory_unit.object_ref_or_value が不正です。")
+        if candidate["scope"] not in SCOPE_TYPE_VALUES:
+            raise LLMError("MemoryInterpretation candidate_memory_unit.scope が不正です。")
+        if not isinstance(candidate["subject_hint"], str) or not candidate["subject_hint"].strip():
+            raise LLMError("MemoryInterpretation candidate_memory_unit.subject_hint が不正です。")
+        if not isinstance(candidate["predicate_hint"], str) or not candidate["predicate_hint"].strip():
+            raise LLMError("MemoryInterpretation candidate_memory_unit.predicate_hint が不正です。")
+        if not isinstance(candidate["object_hint"], str) or not candidate["object_hint"].strip():
+            raise LLMError("MemoryInterpretation candidate_memory_unit.object_hint が不正です。")
+        if not isinstance(candidate["qualifiers_hint"], dict):
+            raise LLMError("MemoryInterpretation candidate_memory_unit.qualifiers_hint はオブジェクトである必要があります。")
         if not isinstance(candidate["summary_text"], str) or not candidate["summary_text"].strip():
             raise LLMError("MemoryInterpretation candidate_memory_unit.summary_text が不正です。")
-        if candidate["commitment_state"] is not None and candidate["commitment_state"] not in COMMITMENT_STATE_VALUES:
-            raise LLMError("MemoryInterpretation candidate_memory_unit.commitment_state が不正です。")
-        if not isinstance(candidate["confidence"], (int, float)):
-            raise LLMError("MemoryInterpretation candidate_memory_unit.confidence は数値である必要があります。")
-        if not isinstance(candidate["salience"], (int, float)):
-            raise LLMError("MemoryInterpretation candidate_memory_unit.salience は数値である必要があります。")
-        if candidate["valid_from"] is not None and not isinstance(candidate["valid_from"], str):
-            raise LLMError("MemoryInterpretation candidate_memory_unit.valid_from が不正です。")
-        if candidate["valid_to"] is not None and not isinstance(candidate["valid_to"], str):
-            raise LLMError("MemoryInterpretation candidate_memory_unit.valid_to が不正です。")
-        if not isinstance(candidate["qualifiers"], dict):
-            raise LLMError("MemoryInterpretation candidate_memory_unit.qualifiers はオブジェクトである必要があります。")
-        if not isinstance(candidate["reason"], str) or not candidate["reason"].strip():
-            raise LLMError("MemoryInterpretation candidate_memory_unit.reason が不正です。")
+        if not isinstance(candidate["evidence_text"], str) or not candidate["evidence_text"].strip():
+            raise LLMError("MemoryInterpretation candidate_memory_unit.evidence_text が不正です。")
+        if candidate["confidence_hint"] not in {"low", "medium", "high"}:
+            raise LLMError("MemoryInterpretation candidate_memory_unit.confidence_hint が不正です。")
 
     # episode affect検証
     episode_affects = payload["episode_affects"]

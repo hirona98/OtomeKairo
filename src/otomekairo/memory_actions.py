@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 import uuid
 from typing import TYPE_CHECKING, Any
 
@@ -42,6 +43,17 @@ PARALLEL_MEMORY_TYPES = {
 }
 SEMANTIC_REFINE_THRESHOLD = 0.9
 SEMANTIC_REFINE_MEMORY_TYPES = {"interpretation"}
+COMMITMENT_STATE_VALUES = {"open", "waiting_confirmation", "on_hold", "done", "cancelled"}
+CONFIDENCE_HINT_SCORES = {
+    "low": 0.34,
+    "medium": 0.66,
+    "high": 0.86,
+}
+SALIENCE_HINT_SCORES = {
+    "low": 0.18,
+    "medium": 0.58,
+    "high": 0.78,
+}
 
 
 # 解決器
@@ -481,6 +493,9 @@ class MemoryActionResolver:
         )
 
     def _normalized_candidate(self, candidate: dict[str, Any]) -> dict[str, Any]:
+        if "scope" in candidate:
+            return self._normalized_candidate_memo(candidate)
+
         # 記録
         return {
             **candidate,
@@ -490,6 +505,166 @@ class MemoryActionResolver:
             "salience": clamp_score(candidate["salience"]),
             "qualifiers": dict(candidate.get("qualifiers", {})),
         }
+
+    def _normalized_candidate_memo(self, candidate: dict[str, Any]) -> dict[str, Any]:
+        # LLM の候補メモを memory_units の正本候補へ変換する。
+        memory_type = str(candidate["memory_type"]).strip()
+        scope_type = str(candidate["scope"]).strip()
+        subject_ref = self._normalize_ref_hint(candidate["subject_hint"], scope_type=scope_type)
+        object_ref_or_value = self._normalize_object_hint(candidate["object_hint"])
+        qualifiers = dict(candidate.get("qualifiers_hint", {}))
+        confidence_hint = str(candidate.get("confidence_hint", "low")).strip()
+        confidence = CONFIDENCE_HINT_SCORES.get(confidence_hint, CONFIDENCE_HINT_SCORES["low"])
+        salience = self._candidate_memo_salience(memory_type=memory_type, confidence_hint=confidence_hint)
+
+        commitment_state = None
+        if memory_type == "commitment":
+            raw_commitment_state = qualifiers.get("commitment_state")
+            commitment_state = raw_commitment_state if raw_commitment_state in COMMITMENT_STATE_VALUES else "open"
+
+        return {
+            "memory_type": memory_type,
+            "scope_type": scope_type,
+            "scope_key": self._scope_key_from_hints(
+                scope_type=scope_type,
+                subject_ref=subject_ref,
+                object_ref_or_value=object_ref_or_value,
+            ),
+            "subject_ref": subject_ref,
+            "predicate": self._normalize_predicate_hint(candidate["predicate_hint"]),
+            "object_ref_or_value": object_ref_or_value,
+            "summary_text": candidate["summary_text"].strip(),
+            "status": self._candidate_memo_status(
+                memory_type=memory_type,
+                confidence_hint=confidence_hint,
+                qualifiers=qualifiers,
+                object_ref_or_value=object_ref_or_value,
+            ),
+            "commitment_state": commitment_state,
+            "confidence": clamp_score(confidence),
+            "salience": clamp_score(salience),
+            "valid_from": self._optional_string_qualifier(qualifiers.get("valid_from")),
+            "valid_to": self._optional_string_qualifier(qualifiers.get("valid_to")),
+            "qualifiers": qualifiers,
+            "reason": candidate["evidence_text"].strip(),
+        }
+
+    def _candidate_memo_status(
+        self,
+        *,
+        memory_type: str,
+        confidence_hint: str,
+        qualifiers: dict[str, Any],
+        object_ref_or_value: str | None,
+    ) -> str:
+        # 明示的な否定だけで置換後の値が無い場合は revoke 候補にする。
+        if qualifiers.get("negates_previous") is True and object_ref_or_value is None:
+            return "revoked"
+        if qualifiers.get("dormant") is True:
+            return "dormant"
+        if qualifiers.get("source") in DIRECT_SOURCE_VALUES:
+            return "confirmed"
+        if memory_type in {"fact", "preference", "commitment"} and confidence_hint == "high":
+            return "confirmed"
+        return "inferred"
+
+    def _candidate_memo_salience(self, *, memory_type: str, confidence_hint: str) -> float:
+        salience = SALIENCE_HINT_SCORES.get(confidence_hint, SALIENCE_HINT_SCORES["low"])
+        if memory_type == "commitment":
+            return max(salience, 0.76)
+        if memory_type == "interpretation":
+            return max(salience, 0.62)
+        return salience
+
+    def _normalize_ref_hint(self, value: Any, *, scope_type: str) -> str:
+        text = str(value).strip()
+        if text in {"self", "user", "world"}:
+            return text
+        if "|" in text:
+            return self._normalize_relationship_key(text)
+        if self._looks_like_ref(text):
+            return text
+        if scope_type in {"self", "user", "world"}:
+            return scope_type
+        if scope_type == "topic":
+            return f"topic:{self._slug_hint(text)}"
+        if scope_type == "entity":
+            return f"entity:{self._slug_hint(text)}"
+        if scope_type == "relationship":
+            return self._normalize_relationship_key(text)
+        return self._slug_hint(text)
+
+    def _normalize_object_hint(self, value: Any) -> str | None:
+        text = str(value).strip()
+        if text.lower() in {"none", "null", "nothing", "n/a"} or text in {"なし", "不要", "未指定"}:
+            return None
+        if not text:
+            return None
+        if self._looks_like_ref(text):
+            return text
+        return self._slug_hint(text)
+
+    def _normalize_predicate_hint(self, value: Any) -> str:
+        return self._slug_hint(str(value).strip())
+
+    def _scope_key_from_hints(
+        self,
+        *,
+        scope_type: str,
+        subject_ref: str,
+        object_ref_or_value: str | None,
+    ) -> str:
+        if scope_type in {"self", "user", "world"}:
+            return scope_type
+        if scope_type == "relationship":
+            return self._normalize_relationship_key(subject_ref)
+        if scope_type == "topic":
+            for value in (subject_ref, object_ref_or_value):
+                if isinstance(value, str) and value.startswith("topic:"):
+                    return value
+            return f"topic:{self._slug_hint(subject_ref)}"
+        if scope_type == "entity":
+            for value in (subject_ref, object_ref_or_value):
+                if isinstance(value, str) and self._looks_like_ref(value) and value not in {"self", "user", "world"}:
+                    return value
+            return f"entity:{self._slug_hint(subject_ref)}"
+        return subject_ref
+
+    def _normalize_relationship_key(self, value: str) -> str:
+        refs = [
+            self._normalize_relationship_ref(part)
+            for part in value.split("|")
+            if part.strip()
+        ]
+        if not refs:
+            refs = ["self", "user"]
+        refs = sorted(set(refs))
+        if "self" in refs:
+            refs = ["self"] + [ref for ref in refs if ref != "self"]
+        return "|".join(refs)
+
+    def _normalize_relationship_ref(self, value: str) -> str:
+        text = value.strip()
+        if text in {"self", "user"} or self._looks_like_ref(text):
+            return text
+        return f"entity:{self._slug_hint(text)}"
+
+    def _looks_like_ref(self, value: str) -> bool:
+        return bool(
+            re.match(r"^(person|place|tool|topic|food|state|work|rhythm|preference|entity|commitment_state):", value)
+        )
+
+    def _slug_hint(self, value: str) -> str:
+        text = value.strip().lower()
+        text = re.sub(r"\s+", "_", text)
+        text = re.sub(r"[^\w:|.-]+", "_", text)
+        text = text.strip("_")
+        return text[:80] or "unknown"
+
+    def _optional_string_qualifier(self, value: Any) -> str | None:
+        if not isinstance(value, str) or not value.strip():
+            return None
+        return value.strip()
 
     def _ordered_matches(self, matches: list[dict[str, Any]]) -> list[dict[str, Any]]:
         # 結果

@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import secrets
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from otomekairo.llm import LLMError
-from otomekairo.memory_utils import display_local_iso, localize_timestamp_fields
+from otomekairo.memory_utils import display_local_iso, local_datetime, local_now, localize_timestamp_fields, now_iso
 from otomekairo.recall import RecallPackSelectionError
 from otomekairo.service_common import ServiceError
 
@@ -84,6 +84,7 @@ class ServiceInputMixin:
                 "cycle_id": cycle_id,
                 "result_kind": "internal_failure",
                 "reply": None,
+                "capability_request": None,
             }
         except (LLMError, KeyError, ValueError) as exc:
             # 失敗永続化
@@ -108,6 +109,7 @@ class ServiceInputMixin:
                 "cycle_id": cycle_id,
                 "result_kind": "internal_failure",
                 "reply": None,
+                "capability_request": None,
             }
 
     def _run_input_pipeline(
@@ -374,6 +376,7 @@ class ServiceInputMixin:
             "cycle_id": cycle_id,
             "result_kind": result_kind,
             "reply": {"text": reply_payload["reply_text"]} if reply_payload else None,
+            "capability_request": capability_request_summary if isinstance(capability_request_summary, dict) else None,
         }
 
     # 検査API群
@@ -850,7 +853,7 @@ class ServiceInputMixin:
 
     def _build_time_context(self, *, current_time: str) -> dict[str, Any]:
         # タイムスタンプ解析
-        current_dt = self._parse_iso(current_time)
+        current_dt = local_datetime(current_time)
 
         # 結果
         return {
@@ -1524,8 +1527,7 @@ class ServiceInputMixin:
         # ウィンドウ設定
         selected_preset = state["model_presets"][state["selected_model_preset_id"]]
         prompt_window = selected_preset["prompt_window"]
-        now = datetime.now(UTC)
-        threshold = now - timedelta(minutes=prompt_window["recent_turn_minutes"])
+        threshold = local_now() - timedelta(minutes=prompt_window["recent_turn_minutes"])
         turn_limit = prompt_window["recent_turn_limit"]
 
         # 検索
@@ -1549,11 +1551,11 @@ class ServiceInputMixin:
 
     def _now_iso(self) -> str:
         # タイムスタンプ
-        return datetime.now(UTC).isoformat()
+        return now_iso()
 
     def _parse_iso(self, value: str) -> datetime:
         # タイムスタンプ
-        return datetime.fromisoformat(value)
+        return local_datetime(value)
 
     def _duration_ms(self, started_at: str, finished_at: str) -> int:
         # 期間

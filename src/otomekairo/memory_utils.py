@@ -21,29 +21,59 @@ def stable_json(value: Any) -> str:
 
 
 # 時間
+def local_now() -> datetime:
+    # OtomeKairo が生活するローカルタイムゾーンの現在時刻を正本にする。
+    return datetime.now().astimezone()
+
+
 def now_iso() -> str:
     # タイムスタンプ
-    return datetime.now(UTC).isoformat()
+    return local_now().isoformat()
 
 
 def parse_iso(value: str) -> datetime:
-    # 正規化
+    # duration 計算用に UTC へ正規化する。
     parsed = datetime.fromisoformat(value)
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=UTC)
     return parsed.astimezone(UTC)
 
 
-def display_local_iso(value: str) -> str:
-    # 表示用にローカル時刻へそろえ、タイムゾーン表記は落とす。
+def local_datetime(value: str) -> datetime:
+    # API/inspection/LLM 表示用にローカルタイムゾーンへそろえる。
     parsed = datetime.fromisoformat(value)
     if parsed.tzinfo is None:
-        return parsed.isoformat()
-    return parsed.astimezone().replace(tzinfo=None).isoformat()
+        return parsed.astimezone()
+    return parsed.astimezone()
+
+
+def display_local_iso(value: str) -> str:
+    # API/inspection では offset 付きローカル timestamp を返す。
+    return local_datetime(value).isoformat()
+
+
+def llm_local_time_text(value: str) -> str:
+    # LLM には ISO timestamp ではなく生活文脈の自然文を渡す。
+    local_time = local_datetime(value)
+    weekdays = ("月曜日", "火曜日", "水曜日", "木曜日", "金曜日", "土曜日", "日曜日")
+    timezone_label = _local_timezone_label(local_time)
+    return (
+        f"現在時刻: {local_time.year}年{local_time.month}月{local_time.day}日 "
+        f"{weekdays[local_time.weekday()]} {local_time.hour}時{local_time.minute:02d}分\n"
+        f"生活タイムゾーン: {timezone_label}"
+    )
+
+
+def _local_timezone_label(value: datetime) -> str:
+    # 日本時間は判断文脈で読みやすい名称にする。
+    tz_name = value.tzname()
+    if tz_name in {"JST", "UTC+09:00", "+09"}:
+        return "日本時間"
+    return tz_name or "ローカル時刻"
 
 
 def localize_timestamp_fields(value: Any) -> Any:
-    # 表示面だけをローカル時刻へ変換する。
+    # 表示面だけを offset 付きローカル timestamp へ変換する。
     if isinstance(value, list):
         return [localize_timestamp_fields(item) for item in value]
     if not isinstance(value, dict):

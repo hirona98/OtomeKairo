@@ -10,7 +10,7 @@ from otomekairo.llm_contracts import (
     RISK_FLAG_VALUES,
     TIME_REFERENCE_VALUES,
 )
-from otomekairo.memory_utils import display_local_iso, localize_timestamp_fields
+from otomekairo.memory_utils import llm_local_time_text, localize_timestamp_fields
 
 
 # RecallHint 用の message 群を組み立てる。
@@ -201,13 +201,13 @@ def build_memory_interpretation_repair_prompt(validation_error: str) -> str:
         "同じ意味を保ったまま、JSON オブジェクト 1 個だけを返し直してください。\n"
         "トップレベルキーは episode, candidate_memory_units, episode_affects の 3 つだけです。\n"
         "episode には episode_type, episode_series_id, primary_scope_type, primary_scope_key, summary_text, outcome_text, open_loops, salience だけを入れてください。\n"
-        "candidate_memory_units の各要素には memory_type, scope_type, scope_key, subject_ref, predicate, object_ref_or_value, summary_text, status, commitment_state, confidence, salience, valid_from, valid_to, qualifiers, reason だけを入れてください。\n"
+        "candidate_memory_units の各要素には memory_type, scope, subject_hint, predicate_hint, object_hint, qualifiers_hint, summary_text, evidence_text, confidence_hint だけを入れてください。\n"
         "episode_affects の各要素には target_scope_type, target_scope_key, affect_label, vad, intensity, confidence, summary_text だけを入れてください。\n"
         "episode_affects.vad は v, a, d の 3 キーを持つ object です。\n"
         "同じ target_scope_type, target_scope_key, affect_label の組み合わせを重複して返してはいけません。\n"
         "episode_affects は最大 4 件までです。\n"
-        "scope_type は self, user, entity, topic, relationship, world だけを使ってください。\n"
-        "scope_type=self なら scope_key=self、scope_type=user なら scope_key=user、scope_type=relationship なら scope_key は self|user のような正規化済みキーです。\n"
+        "candidate_memory_units[].scope は self, user, entity, topic, relationship, world だけを使ってください。\n"
+        "candidate_memory_units は memory_units の DB 行ではなく、意味ヒントの候補メモだけを返してください。\n"
         "ai, agent, meta_communication, relation:default, user:default_to_ai などの独自表現は禁止です。\n"
         "感情抽出に自信がないなら episode_affects は空配列にしてください。\n"
         "余計なキー、説明文、Markdown、コードフェンスは禁止です。"
@@ -307,7 +307,7 @@ def _build_recall_hint_user_prompt(
     current_time: str,
 ) -> str:
     return (
-        f"current_time: {display_local_iso(current_time)}\n"
+        f"{llm_local_time_text(current_time)}\n"
         f"recent_turns:\n{_format_recent_turns(recent_turns)}\n"
         f"input_text:\n{input_text.strip()}\n"
     )
@@ -419,30 +419,28 @@ def _build_memory_interpretation_system_prompt() -> str:
         "candidate_memory_units は、今後の会話や判断に効く継続理解だけを入れてください。\n"
         "弱い雑談断片や一時判断は memory_unit にしないでください。\n"
         "明示された生活状況、習慣、役割、現在の継続状態は fact を優先してください。\n"
-        "明示訂正で以前の理解を置き換えるなら、replacement 候補を返し qualifiers.negates_previous=true を付けてください。\n"
-        "否定だけで置換内容がない場合だけ status=revoked を使ってください。\n"
-        "false ではないが前面に出さない理解だけを status=dormant にしてください。\n"
+        "明示訂正で以前の理解を置き換えるなら、置換後の候補メモを返し qualifiers_hint.negates_previous=true を付けてください。\n"
         "弱い単発推測や event に留めるべき断片は candidate_memory_units に入れず、結果として noop になってよいです。\n"
-        "qualifiers には必要なら source=explicit_statement|explicit_correction|inference, negates_previous, replace_prior, allow_parallel を入れてください。\n"
+        "qualifiers_hint には必要なら source=explicit_statement|explicit_correction|inference, negates_previous, replace_prior, allow_parallel, polarity を入れてください。\n"
         "memory_type は fact, preference, relation, commitment, interpretation, summary のいずれかです。\n"
-        "status は inferred, confirmed, superseded, revoked, dormant のいずれかです。\n"
-        "primary_scope_type, candidate_memory_units[].scope_type, episode_affects[].target_scope_type は self, user, entity, topic, relationship, world のいずれかだけを使ってください。\n"
-        "scope_type=self のとき scope_key は self、scope_type=user のとき scope_key は user、scope_type=world のとき scope_key は world に固定してください。\n"
-        "scope_type=topic のとき scope_key は topic:<normalized_name> にしてください。\n"
-        "scope_type=relationship のとき scope_key は self|user や self|person:tanaka のような正規化済みキーにしてください。user|self, relation:default, user:default_to_ai のような独自キーは禁止です。\n"
-        "自分自身の対話姿勢や自己認識は self / self / subject_ref=self を使ってください。\n"
-        "自分とユーザーの距離感、信頼、安心感、話しやすさ、支え方は relationship / self|user を使ってください。\n"
+        "candidate_memory_units は DB 行候補ではなく、意味ヒントだけを持つ記憶候補メモです。\n"
+        "episode.primary_scope_type, candidate_memory_units[].scope, episode_affects[].target_scope_type は self, user, entity, topic, relationship, world のいずれかだけを使ってください。\n"
+        "episode と episode_affects では scope_type=self のとき scope_key は self、scope_type=user のとき scope_key は user、scope_type=world のとき scope_key は world に固定してください。\n"
+        "episode と episode_affects では scope_type=topic のとき scope_key は topic:<normalized_name> にしてください。\n"
+        "episode と episode_affects では scope_type=relationship のとき scope_key は self|user や self|person:tanaka のような正規化済みキーにしてください。user|self, relation:default, user:default_to_ai のような独自キーは禁止です。\n"
+        "自分自身の対話姿勢や自己認識は scope=self, subject_hint=self を使ってください。\n"
+        "自分とユーザーの距離感、信頼、安心感、話しやすさ、支え方は scope=relationship, subject_hint=self|user を使ってください。\n"
         "ai, agent, meta_communication などの独自 scope_type は使ってはいけません。\n"
-        "commitment_state は commitment のときだけ open, waiting_confirmation, on_hold, done, cancelled のいずれかを使い、それ以外では null にしてください。\n"
+        "confidence_hint は low, medium, high のいずれかだけを使ってください。\n"
         "episode は episode_type, episode_series_id, primary_scope_type, primary_scope_key, summary_text, outcome_text, open_loops, salience の 8 キーだけを持つ object にしてください。\n"
-        "candidate_memory_units の各要素は memory_type, scope_type, scope_key, subject_ref, predicate, object_ref_or_value, summary_text, status, commitment_state, confidence, salience, valid_from, valid_to, qualifiers, reason の 15 キーだけを持つ object にしてください。\n"
+        "candidate_memory_units の各要素は memory_type, scope, subject_hint, predicate_hint, object_hint, qualifiers_hint, summary_text, evidence_text, confidence_hint の 9 キーだけを持つ object にしてください。\n"
         "episode_affects の各要素は target_scope_type, target_scope_key, affect_label, vad, intensity, confidence, summary_text の 7 キーだけを持つ object にしてください。\n"
         "episode_affects[].vad は v, a, d の 3 キーだけを持つ object にしてください。\n"
         "同じ target_scope_type, target_scope_key, affect_label の組み合わせを重複して返してはいけません。\n"
         "episode_affects は最大 4 件までにしてください。\n"
         "感情抽出に自信がない場合や、軽い雑談で瞬間反応が読めない場合は episode_affects を空配列にしてください。\n"
         "episode.episode_series_id は通常 null にし、episode.open_loops は短い文字列の配列にしてください。\n"
-        "outcome_text, object_ref_or_value, valid_from, valid_to は不要なら null を入れてください。\n"
+        "outcome_text は不要なら null を入れてください。\n"
         "candidate_memory_units と episode_affects は不要なら空配列にしてください。\n"
         "例:\n"
         "{\n"
@@ -541,7 +539,7 @@ def _build_memory_interpretation_user_prompt(
     current_time: str,
 ) -> str:
     return (
-        f"current_time: {display_local_iso(current_time)}\n"
+        f"{llm_local_time_text(current_time)}\n"
         f"input_text:\n{input_text.strip()}\n"
         "recall_hint:\n"
         f"{json.dumps(recall_hint, ensure_ascii=False)}\n"

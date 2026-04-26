@@ -905,7 +905,34 @@ class MockLLMClient:
                 }
             )
 
-        return candidates
+        return [self._mock_candidate_memo(candidate) for candidate in candidates]
+
+    def _mock_candidate_memo(self, candidate: dict[str, Any]) -> dict[str, Any]:
+        # mock 内部候補を memory_interpretation の候補メモ契約へ落とす。
+        qualifiers = dict(candidate.get("qualifiers", {}))
+        if candidate.get("commitment_state") is not None:
+            qualifiers["commitment_state"] = candidate["commitment_state"]
+        subject_hint = candidate.get("subject_ref")
+        if candidate.get("scope_type") == "relationship":
+            subject_hint = candidate.get("scope_key")
+        return {
+            "memory_type": candidate["memory_type"],
+            "scope": candidate["scope_type"],
+            "subject_hint": subject_hint,
+            "predicate_hint": candidate["predicate"],
+            "object_hint": candidate.get("object_ref_or_value") or "なし",
+            "qualifiers_hint": qualifiers,
+            "summary_text": candidate["summary_text"],
+            "evidence_text": candidate["reason"],
+            "confidence_hint": self._mock_confidence_hint(candidate["confidence"]),
+        }
+
+    def _mock_confidence_hint(self, confidence: Any) -> str:
+        if isinstance(confidence, (int, float)) and confidence >= 0.8:
+            return "high"
+        if isinstance(confidence, (int, float)) and confidence >= 0.55:
+            return "medium"
+        return "low"
 
     def _mock_fact_candidate(self, normalized: str, *, correction_signal: bool) -> dict[str, Any] | None:
         # 日次リズム

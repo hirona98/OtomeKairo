@@ -12,8 +12,8 @@ from otomekairo.memory_utils import (
     clamp_score,
     days_since,
     hours_since,
+    local_datetime,
     now_iso,
-    parse_iso,
     stable_json,
     timestamp_sort_key,
     unique_memory_unit_ids,
@@ -945,7 +945,7 @@ class ReflectiveConsolidator:
         }
 
     def _drive_expires_at(self, *, finished_at: str, hours: int) -> str:
-        return (parse_iso(finished_at) + timedelta(hours=hours)).isoformat()
+        return (local_datetime(finished_at) + timedelta(hours=hours)).isoformat()
 
     def _drive_state_signature(self, drive_states: list[dict[str, Any]]) -> str:
         return stable_json(self._drive_state_summaries(drive_states))

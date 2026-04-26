@@ -244,6 +244,7 @@ class ServiceSpontaneousMixin:
                     "cycle_id": cycle_id,
                     "result_kind": "internal_failure",
                     "reply": None,
+                    "capability_request": None,
                 }
             except RecallPackSelectionError as exc:
                 # 失敗永続化
@@ -281,6 +282,7 @@ class ServiceSpontaneousMixin:
                     "cycle_id": cycle_id,
                     "result_kind": "internal_failure",
                     "reply": None,
+                    "capability_request": None,
                 }
             except (LLMError, KeyError, ValueError) as exc:
                 # 失敗永続化
@@ -310,6 +312,7 @@ class ServiceSpontaneousMixin:
                     "cycle_id": cycle_id,
                     "result_kind": "internal_failure",
                     "reply": None,
+                    "capability_request": None,
                 }
 
     def _background_wake_loop(self, stop_event: threading.Event) -> None:
@@ -1126,10 +1129,8 @@ class ServiceSpontaneousMixin:
         return {
             "request_id": request_record.get("request_id"),
             "capability_id": request_record.get("capability_id"),
-            "source": request_record.get("source"),
-            "mode": request_record.get("mode"),
+            "status": "dispatched",
             "timeout_ms": request_record.get("timeout_ms"),
-            "action_id": request_record.get("action_id"),
         }
 
     def _begin_desktop_watch_ongoing_action(

@@ -171,13 +171,21 @@ class EventStreamRegistry:
                 "session_id": session_id,
                 "websocket": websocket,
                 "client_id": None,
-                "caps": set(),
+                "capabilities": {},
+                "rejected_bindings": [],
             }
 
         # 結果
         return session_id
 
-    def register_hello(self, session_id: str, *, client_id: str, caps: list[str]) -> None:
+    def register_hello(
+        self,
+        session_id: str,
+        *,
+        client_id: str,
+        capabilities: dict[str, str],
+        rejected_bindings: list[dict[str, Any]],
+    ) -> None:
         # スナップショット
         replaced_sessions: list[dict[str, Any]] = []
         with self._lock:
@@ -196,7 +204,8 @@ class EventStreamRegistry:
 
             # 更新
             session["client_id"] = client_id
-            session["caps"] = set(caps)
+            session["capabilities"] = dict(capabilities)
+            session["rejected_bindings"] = list(rejected_bindings)
 
         # 置換済み接続のクローズ
         for replaced_session in replaced_sessions:
@@ -216,8 +225,8 @@ class EventStreamRegistry:
             for session in self._sessions.values():
                 if session.get("client_id") != client_id:
                     continue
-                caps = session.get("caps", set())
-                if capability in caps:
+                capabilities = session.get("capabilities", {})
+                if capability in capabilities:
                     return True
 
         # 空
@@ -232,7 +241,7 @@ class EventStreamRegistry:
                     for session in self._sessions.values()
                     if isinstance((client_id := session.get("client_id")), str)
                     and client_id.strip()
-                    and capability in session.get("caps", set())
+                    and capability in session.get("capabilities", {})
                 }
             )
 
@@ -250,6 +259,29 @@ class EventStreamRegistry:
 
         # 空
         return False
+
+    def list_capability_bindings(self) -> dict[str, Any]:
+        # inspection 用に接続中 client の binding 状態を要約する。
+        accepted: dict[str, set[str]] = {}
+        rejected: list[dict[str, Any]] = []
+        with self._lock:
+            for session in self._sessions.values():
+                client_id = session.get("client_id")
+                if not isinstance(client_id, str) or not client_id.strip():
+                    continue
+                for capability_id in session.get("capabilities", {}):
+                    accepted.setdefault(capability_id, set()).add(client_id)
+                for rejected_binding in session.get("rejected_bindings", []):
+                    if isinstance(rejected_binding, dict):
+                        rejected.append(dict(rejected_binding))
+
+        return {
+            "accepted": {
+                capability_id: sorted(client_ids)
+                for capability_id, client_ids in accepted.items()
+            },
+            "rejected": rejected,
+        }
 
     def send_to_client(self, client_id: str, payload: dict[str, Any]) -> bool:
         # スナップショット

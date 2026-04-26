@@ -199,7 +199,7 @@ class SimpleWebSocketClient:
         self._reader_thread: threading.Thread | None = None
         self.error: str | None = None
 
-    def connect(self, *, client_id: str, caps: list[str]) -> None:
+    def connect(self, *, client_id: str, caps: list[dict[str, str]]) -> None:
         raw_socket = socket.create_connection((self.host, self.port), timeout=10.0)
         websocket = self.ssl_context.wrap_socket(raw_socket, server_hostname=self.host)
         websocket.settimeout(1.0)
@@ -516,6 +516,15 @@ class LongSmokeRunner:
 
     def _bootstrap(self) -> None:
         identity = self.api.get("/api/bootstrap/server-identity")
+        if identity.get("console_access_token_issued") is True:
+            if not isinstance(self.api.token, str) or not self.api.token:
+                raise SmokeError("server is already registered and the smoke client does not hold a token.")
+            log(
+                "bootstrap reused existing token"
+                f" server_id={identity.get('server_id')} token_issued=True"
+            )
+            return
+
         bootstrap = self.api.post("/api/bootstrap/register-first-console", {})
         token = bootstrap.get("console_access_token")
         if not isinstance(token, str) or not token:
@@ -648,7 +657,7 @@ class LongSmokeRunner:
                 event=event,
             ),
         )
-        client.connect(client_id=client_id, caps=["vision.capture"])
+        client.connect(client_id=client_id, caps=[{"id": "vision.capture", "version": "1"}])
         return client
 
     def _handle_server_event(
@@ -1235,8 +1244,12 @@ class LongSmokeRunner:
             raise SmokeError(f"desktop_watch {label} probe capability_request_summary was invalid.")
         if capability_request_summary.get("capability_id") != "vision.capture":
             raise SmokeError(f"desktop_watch {label} probe capability_id was invalid.")
-        if not isinstance(capability_request_summary.get("action_id"), str) or not capability_request_summary["action_id"]:
-            raise SmokeError(f"desktop_watch {label} probe action_id was not recorded.")
+        if capability_request_summary.get("status") != "dispatched":
+            raise SmokeError(f"desktop_watch {label} probe capability_request status was invalid.")
+        if not isinstance(capability_request_summary.get("request_id"), str) or not capability_request_summary["request_id"]:
+            raise SmokeError(f"desktop_watch {label} probe request_id was not recorded.")
+        if not isinstance(capability_request_summary.get("timeout_ms"), int):
+            raise SmokeError(f"desktop_watch {label} probe timeout_ms was not recorded.")
         ongoing_action_transition_summary = result_trace.get("ongoing_action_transition_summary", {})
         if not isinstance(ongoing_action_transition_summary, dict):
             raise SmokeError(f"desktop_watch {label} probe ongoing_action_transition_summary was invalid.")
