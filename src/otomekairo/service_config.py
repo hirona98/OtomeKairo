@@ -444,6 +444,8 @@ class ServiceConfigMixin:
             raise ServiceError(404, "source_memory_set_not_found", "The source memory_set_id does not exist.")
 
         memory_set_id = definition.get("memory_set_id")
+        if not isinstance(memory_set_id, str) or not memory_set_id:
+            raise ServiceError(400, "invalid_memory_set_id", "memory_set_id is required.")
         if memory_set_id in state["memory_sets"]:
             raise ServiceError(409, "memory_set_id_already_exists", "The destination memory_set_id already exists.")
 
