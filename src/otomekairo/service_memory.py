@@ -5,6 +5,8 @@ import threading
 import uuid
 from typing import Any
 
+from otomekairo.service_common import debug_log
+
 
 class ServiceMemoryMixin:
     def start_background_memory_postprocess_worker(self) -> None:
@@ -14,6 +16,7 @@ class ServiceMemoryMixin:
                 self._background_memory_postprocess_thread is not None
                 and self._background_memory_postprocess_thread.is_alive()
             ):
+                debug_log("MemoryWorker", "already running")
                 return
 
             # 再起動時も incomplete job を拾い直せるよう、永続状態からキューを復元する。
@@ -21,6 +24,7 @@ class ServiceMemoryMixin:
             restored_jobs = self.store.list_memory_postprocess_jobs(
                 result_statuses=["queued", "running"],
             )
+            debug_log("MemoryWorker", f"restoring jobs count={len(restored_jobs)}")
             for job in restored_jobs:
                 requeued_job = self._requeue_memory_postprocess_job(job)
                 self._memory_postprocess_queue.put(requeued_job)
@@ -38,6 +42,7 @@ class ServiceMemoryMixin:
 
         # 開始
         thread.start()
+        debug_log("MemoryWorker", f"started thread={thread.name}")
 
     def stop_background_memory_postprocess_worker(self) -> None:
         # スナップショット
@@ -54,6 +59,7 @@ class ServiceMemoryMixin:
         self._memory_postprocess_queue.put(None)
         if thread is not None and thread.is_alive():
             thread.join(timeout=5.0)
+        debug_log("MemoryWorker", "stopped")
 
     def _requeue_memory_postprocess_job(self, job: dict[str, Any]) -> dict[str, Any]:
         # 再投入
@@ -85,10 +91,12 @@ class ServiceMemoryMixin:
             },
             emit_logs=False,
         )
+        debug_log("MemoryWorker", f"requeued cycle={self._short_cycle_id(requeued_job['cycle_id'])}")
         return requeued_job
 
     def _background_memory_postprocess_loop(self, stop_event: threading.Event) -> None:
         # ループ
+        debug_log("MemoryWorker", "loop started")
         while True:
             if stop_event.is_set() and self._memory_postprocess_queue.empty():
                 break
@@ -104,11 +112,13 @@ class ServiceMemoryMixin:
                 continue
 
             self._run_memory_postprocess_job(job)
+        debug_log("MemoryWorker", "loop stopped")
 
     def _run_memory_postprocess_job(self, job: dict[str, Any]) -> None:
         # 削除済み job は走らせない。
         persisted_job = self.store.get_memory_postprocess_job(job["cycle_id"])
         if persisted_job is None:
+            debug_log("MemoryWorker", f"skip missing cycle={self._short_cycle_id(job['cycle_id'])}")
             return
 
         # job開始
@@ -121,6 +131,13 @@ class ServiceMemoryMixin:
         self.store.upsert_memory_postprocess_job(job=started_job)
         with self._runtime_state_lock:
             self._memory_postprocess_runtime_state["current_cycle_id"] = started_job["cycle_id"]
+        debug_log(
+            "MemoryWorker",
+            (
+                f"job start cycle={self._short_cycle_id(started_job['cycle_id'])} "
+                f"memory_set={self._short_identifier(started_job['memory_set_id'])}"
+            ),
+        )
 
         try:
             # 実行
@@ -150,9 +167,22 @@ class ServiceMemoryMixin:
                 ),
             }
             self.store.upsert_memory_postprocess_job(job=completed_job)
+            debug_log(
+                "MemoryWorker",
+                (
+                    f"job done cycle={self._short_cycle_id(started_job['cycle_id'])} "
+                    f"status={completed_job['result_status']} "
+                    f"vector={postprocess_result['vector_index_sync']['result_status']} "
+                    f"reflection={postprocess_result['reflective_consolidation']['result_status']}"
+                ),
+            )
         except Exception as exc:  # noqa: BLE001
             # 想定外失敗
             failure_reason = str(exc)
+            debug_log(
+                "MemoryWorker",
+                f"job failed cycle={self._short_cycle_id(started_job['cycle_id'])} error={type(exc).__name__}: {failure_reason}",
+            )
             self._update_memory_trace_postprocess(
                 cycle_id=started_job["cycle_id"],
                 vector_index_sync={
@@ -196,6 +226,13 @@ class ServiceMemoryMixin:
         # 永続化してから in-memory queue に載せる。
         self.store.upsert_memory_postprocess_job(job=job)
         self._memory_postprocess_queue.put(job)
+        debug_log(
+            "MemoryWorker",
+            (
+                f"queued cycle={self._short_cycle_id(job['cycle_id'])} "
+                f"memory_set={self._short_identifier(job['memory_set_id'])}"
+            ),
+        )
 
     def _update_memory_trace_postprocess(
         self,
@@ -252,6 +289,7 @@ class ServiceMemoryMixin:
         pipeline: dict[str, Any],
     ) -> None:
         # ターン統合
+        debug_log("Memory", f"turn consolidation start cycle={self._short_cycle_id(cycle_id)}")
         try:
             memory_trace, postprocess_job = self.memory.consolidate_turn(
                 state=state,
@@ -264,6 +302,10 @@ class ServiceMemoryMixin:
                 events=events,
             )
         except Exception as exc:  # noqa: BLE001
+            debug_log(
+                "Memory",
+                f"turn consolidation failed cycle={self._short_cycle_id(cycle_id)} error={type(exc).__name__}: {exc}",
+            )
             memory_trace = self._failed_memory_trace(str(exc))
             self.store.append_events(
                 events=[
@@ -286,10 +328,16 @@ class ServiceMemoryMixin:
 
         # 後段job投入
         if postprocess_job is None:
+            debug_log("Memory", f"turn consolidation done cycle={self._short_cycle_id(cycle_id)} postprocess=none")
             return
         try:
             self._queue_memory_postprocess_job(postprocess_job)
+            debug_log("Memory", f"turn consolidation done cycle={self._short_cycle_id(cycle_id)} postprocess=queued")
         except Exception as exc:  # noqa: BLE001
+            debug_log(
+                "Memory",
+                f"postprocess queue failed cycle={self._short_cycle_id(cycle_id)} error={type(exc).__name__}: {exc}",
+            )
             failed_postprocess_trace = {
                 **memory_trace,
                 "vector_index_sync": {

@@ -5,6 +5,8 @@ from contextlib import contextmanager
 
 import sqlite_vec
 
+from otomekairo.service_common import debug_log
+
 
 # 定数
 MEMORY_DB_FILE_NAME = "memory.db"
@@ -17,7 +19,12 @@ class StoreSchemaMixin:
         # 現行 schema 以外は受け付けない。
         with self._memory_db() as conn:
             version = conn.execute("PRAGMA user_version").fetchone()[0]
+            debug_log(
+                "Store",
+                f"memory_db open path={self.memory_db_path} user_version={version} expected={CURRENT_MEMORY_DB_VERSION}",
+            )
             if version not in {0, CURRENT_MEMORY_DB_VERSION}:
+                debug_log("Store", f"memory_db unsupported_schema user_version={version}")
                 raise RuntimeError(
                     f"Unsupported memory.db schema version: {version}. "
                     f"Expected {CURRENT_MEMORY_DB_VERSION}."
@@ -26,6 +33,9 @@ class StoreSchemaMixin:
             self._apply_current_schema(conn)
             if version == 0:
                 conn.execute(f"PRAGMA user_version = {CURRENT_MEMORY_DB_VERSION}")
+                debug_log("Store", f"memory_db initialized user_version={CURRENT_MEMORY_DB_VERSION}")
+            else:
+                debug_log("Store", f"memory_db schema ready user_version={version}")
 
     def _open_memory_db(self) -> sqlite3.Connection:
         # 接続

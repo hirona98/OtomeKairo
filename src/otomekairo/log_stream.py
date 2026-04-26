@@ -6,6 +6,7 @@ import uuid
 from typing import Any
 
 from otomekairo.event_stream import ServerWebSocket
+from otomekairo.service_common import debug_log
 
 
 # 定数
@@ -46,6 +47,13 @@ class LogStreamRegistry:
         # 空
         if not logs:
             return
+
+        # 標準出力にも流し、logs/stream 未接続でも判断過程を追えるようにする。
+        for log in logs:
+            level = str(log.get("level") or "INFO")
+            logger = str(log.get("logger") or "Log")
+            message = str(log.get("msg") or "")
+            debug_log(logger, f"{level} {message}")
 
         # スナップショット
         with self._lock:

@@ -7,6 +7,7 @@ from urllib.parse import parse_qs, urlparse
 
 from otomekairo.event_stream import ServerWebSocket, WebSocketProtocolError, build_websocket_accept
 from otomekairo.service import OtomeKairoService, ServiceError
+from otomekairo.service_common import debug_log
 
 
 # サーバー
@@ -51,6 +52,8 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
             parsed = urlparse(self.path)
             query = parse_qs(parsed.query)
             token = self._bearer_token()
+            if parsed.path not in {"/api/status", "/api/bootstrap/probe"}:
+                debug_log("HTTP", f"{method} {parsed.path} begin query_keys={sorted(query)} auth={bool(token)}")
 
             # 起動時ルート
             if method == "GET" and parsed.path == "/api/bootstrap/probe":
@@ -251,6 +254,7 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
         # 接続
         websocket = ServerWebSocket(self.connection)
         session_id = self.server.service.register_event_stream_connection(websocket)
+        debug_log("HTTP", f"events/stream connected session={session_id}")
         try:
             # 受信ループ
             while True:
@@ -263,6 +267,7 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
         finally:
             # 後始末
             self.server.service.unregister_event_stream_connection(session_id)
+            debug_log("HTTP", f"events/stream disconnected session={session_id}")
 
     def _handle_logs_stream(self, token: str | None) -> None:
         # 認可
@@ -292,6 +297,7 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
         # 接続
         websocket = ServerWebSocket(self.connection)
         session_id = self.server.service.register_log_stream_connection(websocket)
+        debug_log("HTTP", f"logs/stream connected session={session_id}")
         try:
             # 受信ループ
             while True:
@@ -303,6 +309,7 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
         finally:
             # 後始末
             self.server.service.remove_log_stream_connection(session_id)
+            debug_log("HTTP", f"logs/stream disconnected session={session_id}")
 
     # リクエスト補助
     def _read_json_body(self) -> dict:
@@ -311,6 +318,8 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
         payload = json.loads(raw_body.decode("utf-8"))
         if not isinstance(payload, dict):
             raise ServiceError(400, "invalid_json_shape", "The request body must be a JSON object.")
+        parsed = urlparse(self.path)
+        debug_log("HTTP", f"{self.command} {parsed.path} body_bytes={len(raw_body)} body_keys={sorted(payload)}")
         return payload
 
     def _bearer_token(self) -> str | None:
@@ -346,3 +355,18 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+        self._debug_log_response(status, payload)
+
+    def _debug_log_response(self, status: int, payload: dict) -> None:
+        # 高頻度ポーリングは成功時だけ抑制する。
+        parsed = urlparse(self.path)
+        if status < 400 and parsed.path in {"/api/status", "/api/bootstrap/probe"}:
+            return
+
+        if status >= 400:
+            error = payload.get("error", {})
+            error_code = error.get("code") if isinstance(error, dict) else None
+            debug_log("HTTP", f"{self.command} {parsed.path} -> {status} error={error_code or '-'}")
+            return
+
+        debug_log("HTTP", f"{self.command} {parsed.path} -> {status}")

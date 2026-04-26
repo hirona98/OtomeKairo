@@ -15,6 +15,7 @@ from otomekairo.service_common import (
     PENDING_INTENT_NOT_BEFORE_MINUTES,
     WAKE_REPLY_COOLDOWN_MINUTES,
     ServiceError,
+    debug_log,
 )
 
 
@@ -43,6 +44,7 @@ class ServiceSpontaneousMixin:
             raise ServiceError(400, "invalid_client_context", "The client_context field must be an object.")
 
         # 実行
+        debug_log("Wake", f"manual trigger context_keys={self._debug_context_keys(client_context)}")
         return self._execute_wake_cycle(
             state=state,
             client_context=client_context,
@@ -85,6 +87,10 @@ class ServiceSpontaneousMixin:
         with self._vision_capture_lock:
             pending = self._pending_vision_capture_requests.get(normalized_request_id)
             if pending is None:
+                debug_log(
+                    "DesktopWatch",
+                    f"capture response ignored request={normalized_request_id} client={normalized_client_id}",
+                )
                 return {}
             request_record = pending.get("request_record")
             target_client_id = request_record.get("target_client_id") if isinstance(request_record, dict) else None
@@ -103,6 +109,13 @@ class ServiceSpontaneousMixin:
                 "request_record": dict(request_record) if isinstance(request_record, dict) else None,
             }
             pending["event"].set()
+            debug_log(
+                "DesktopWatch",
+                (
+                    f"capture response accepted request={normalized_request_id} client={normalized_client_id} "
+                    f"images={len(normalized_images)} error={bool(error)}"
+                ),
+            )
 
         # 結果
         return {}
@@ -126,11 +139,19 @@ class ServiceSpontaneousMixin:
                 client_context=client_context,
                 selected_candidate=None,
             )
+            debug_log(
+                "Wake",
+                (
+                    f"{self._short_cycle_id(cycle_id)} start trigger={trigger_kind} "
+                    f"recent_turns={len(recent_turns)} context_keys={self._debug_context_keys(client_context)}"
+                ),
+            )
 
             try:
                 # due / cooldown
                 due = self._wake_is_due(state=state, current_time=started_at)
                 if due["should_skip"]:
+                    debug_log("Wake", f"{self._short_cycle_id(cycle_id)} skip due reason={self._clamp(due['reason_summary'])}")
                     pipeline = self._noop_pipeline(
                         started_at=started_at,
                         reason_summary=due["reason_summary"],
@@ -152,6 +173,10 @@ class ServiceSpontaneousMixin:
                 cooldown_reason = self._wake_cooldown_reason(current_time=started_at)
                 if cooldown_reason is not None:
                     self._set_last_wake_at(started_at)
+                    debug_log(
+                        "Wake",
+                        f"{self._short_cycle_id(cycle_id)} skip cooldown reason={self._clamp(cooldown_reason)}",
+                    )
                     pipeline = self._noop_pipeline(
                         started_at=started_at,
                         reason_summary=cooldown_reason,
@@ -181,6 +206,15 @@ class ServiceSpontaneousMixin:
                 )
                 selected_candidate = selection_result["selected_candidate"]
                 pending_intent_selection = selection_result["pending_intent_selection"]
+                debug_log(
+                    "Wake",
+                    (
+                        f"{self._short_cycle_id(cycle_id)} selection "
+                        f"pool={pending_intent_selection.get('candidate_pool_count', 0)} "
+                        f"eligible={pending_intent_selection.get('eligible_candidate_count', 0)} "
+                        f"selected={pending_intent_selection.get('selected_candidate_ref') or '-'}"
+                    ),
+                )
                 pipeline, input_text = self._run_wake_pipeline(
                     state=state,
                     started_at=started_at,
@@ -188,6 +222,7 @@ class ServiceSpontaneousMixin:
                     recent_turns=recent_turns,
                     selected_candidate=selected_candidate,
                     pending_intent_selection=pending_intent_selection,
+                    cycle_id=cycle_id,
                 )
 
                 # 成功
@@ -212,8 +247,19 @@ class ServiceSpontaneousMixin:
                     decision=pipeline["decision"],
                     selected_candidate=selected_candidate,
                 )
+                debug_log(
+                    "Wake",
+                    f"{self._short_cycle_id(cycle_id)} done result={response['result_kind']}",
+                )
                 return response
             except PendingIntentSelectionError as exc:
+                debug_log(
+                    "Wake",
+                    (
+                        f"{self._short_cycle_id(cycle_id)} failed stage={exc.failure_stage} "
+                        f"error={type(exc).__name__}: {self._clamp(str(exc))}"
+                    ),
+                )
                 # 失敗永続化
                 finished_at = self._now_iso()
                 self._persist_cycle_failure(
@@ -248,6 +294,13 @@ class ServiceSpontaneousMixin:
                     "capability_request": None,
                 }
             except RecallPackSelectionError as exc:
+                debug_log(
+                    "Wake",
+                    (
+                        f"{self._short_cycle_id(cycle_id)} failed stage={exc.failure_stage} "
+                        f"error={type(exc).__name__}: {self._clamp(str(exc))}"
+                    ),
+                )
                 # 失敗永続化
                 finished_at = self._now_iso()
                 self._persist_cycle_failure(
@@ -286,6 +339,10 @@ class ServiceSpontaneousMixin:
                     "capability_request": None,
                 }
             except (LLMError, KeyError, ValueError) as exc:
+                debug_log(
+                    "Wake",
+                    f"{self._short_cycle_id(cycle_id)} failed error={type(exc).__name__}: {self._clamp(str(exc))}",
+                )
                 # 失敗永続化
                 finished_at = self._now_iso()
                 self._persist_cycle_failure(
@@ -330,7 +387,8 @@ class ServiceSpontaneousMixin:
                     client_context={"source": "background_wake_scheduler"},
                     trigger_kind="wake",
                 )
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
+                debug_log("Wake", f"background loop error={type(exc).__name__}: {self._clamp(str(exc))}")
                 stop_event.wait(timeout=BACKGROUND_WAKE_POLL_SECONDS)
 
     def _background_wake_delay_seconds(self, *, state: dict[str, Any], current_time: str) -> float:
@@ -369,7 +427,8 @@ class ServiceSpontaneousMixin:
                     stop_event.wait(timeout=delay_seconds)
                     continue
                 self._execute_desktop_watch_cycle(state=state)
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
+                debug_log("DesktopWatch", f"background loop error={type(exc).__name__}: {self._clamp(str(exc))}")
                 stop_event.wait(timeout=BACKGROUND_DESKTOP_WATCH_POLL_SECONDS)
 
     def _background_desktop_watch_delay_seconds(
@@ -407,13 +466,16 @@ class ServiceSpontaneousMixin:
         with self._desktop_watch_execution_lock:
             desktop_watch = state.get("desktop_watch", {})
             if not isinstance(desktop_watch, dict) or not desktop_watch.get("enabled"):
+                debug_log("DesktopWatch", "cycle skipped disabled")
                 return
             target_client_id = self._desktop_watch_target_client_id()
             if target_client_id is None:
+                debug_log("DesktopWatch", "cycle skipped no_capture_client")
                 return
 
             # タイムスタンプ
             started_at = self._now_iso()
+            debug_log("DesktopWatch", f"cycle start target_client={target_client_id}")
 
             # キャプチャ
             capture_response = self._request_desktop_watch_capture(
@@ -422,8 +484,10 @@ class ServiceSpontaneousMixin:
                 current_time=started_at,
             )
             if capture_response is None:
+                debug_log("DesktopWatch", "cycle skipped capture_unavailable")
                 return
             if not capture_response["images"]:
+                debug_log("DesktopWatch", "cycle skipped no_images")
                 return
 
             # 成功タイムスタンプ
@@ -440,6 +504,13 @@ class ServiceSpontaneousMixin:
             recent_turns = self._load_recent_turns(state)
             runtime_summary = self._build_runtime_summary(state)
             pending_intent_selection = self._empty_pending_intent_selection_trace()
+            debug_log(
+                "DesktopWatch",
+                (
+                    f"{self._short_cycle_id(cycle_id)} pipeline start images={len(capture_response['images'])} "
+                    f"recent_turns={len(recent_turns)}"
+                ),
+            )
 
             try:
                 # 候補選択
@@ -452,6 +523,15 @@ class ServiceSpontaneousMixin:
                 )
                 selected_candidate = selection_result["selected_candidate"]
                 pending_intent_selection = selection_result["pending_intent_selection"]
+                debug_log(
+                    "DesktopWatch",
+                    (
+                        f"{self._short_cycle_id(cycle_id)} selection "
+                        f"pool={pending_intent_selection.get('candidate_pool_count', 0)} "
+                        f"eligible={pending_intent_selection.get('eligible_candidate_count', 0)} "
+                        f"selected={pending_intent_selection.get('selected_candidate_ref') or '-'}"
+                    ),
+                )
                 input_text = self._build_desktop_watch_input_text(
                     client_context=client_context,
                     selected_candidate=selected_candidate,
@@ -463,6 +543,7 @@ class ServiceSpontaneousMixin:
                     started_at=started_at,
                     input_text=input_text,
                     recent_turns=recent_turns,
+                    cycle_id=cycle_id,
                 )
 
                 # 成功
@@ -492,7 +573,18 @@ class ServiceSpontaneousMixin:
                     capture_response=capture_response,
                     pipeline=pipeline,
                 )
+                debug_log(
+                    "DesktopWatch",
+                    f"{self._short_cycle_id(cycle_id)} done decision={pipeline['decision']['kind']}",
+                )
             except PendingIntentSelectionError as exc:
+                debug_log(
+                    "DesktopWatch",
+                    (
+                        f"{self._short_cycle_id(cycle_id)} failed stage={exc.failure_stage} "
+                        f"error={type(exc).__name__}: {self._clamp(str(exc))}"
+                    ),
+                )
                 # 失敗
                 self._persist_cycle_failure(
                     cycle_id=cycle_id,
@@ -523,6 +615,13 @@ class ServiceSpontaneousMixin:
                     pending_intent_selection=exc.pending_intent_selection,
                 )
             except RecallPackSelectionError as exc:
+                debug_log(
+                    "DesktopWatch",
+                    (
+                        f"{self._short_cycle_id(cycle_id)} failed stage={exc.failure_stage} "
+                        f"error={type(exc).__name__}: {self._clamp(str(exc))}"
+                    ),
+                )
                 # 失敗
                 self._persist_cycle_failure(
                     cycle_id=cycle_id,
@@ -557,6 +656,10 @@ class ServiceSpontaneousMixin:
                     pending_intent_selection=pending_intent_selection,
                 )
             except (LLMError, KeyError, ValueError) as exc:
+                debug_log(
+                    "DesktopWatch",
+                    f"{self._short_cycle_id(cycle_id)} failed error={type(exc).__name__}: {self._clamp(str(exc))}",
+                )
                 # 失敗
                 self._persist_cycle_failure(
                     cycle_id=cycle_id,
@@ -633,7 +736,15 @@ class ServiceSpontaneousMixin:
             or self._parse_iso(candidate["not_before"]) <= current_dt
         ]
         trace["eligible_candidate_count"] = len(eligible_candidates)
+        debug_log(
+            "PendingIntent",
+            (
+                f"selection start trigger={trigger_kind} pool={len(candidate_pool)} "
+                f"eligible={len(eligible_candidates)}"
+            ),
+        )
         if not eligible_candidates:
+            debug_log("PendingIntent", f"selection skipped trigger={trigger_kind} reason=no_eligible_candidates")
             return {
                 "selected_candidate": None,
                 "pending_intent_selection": trace,
@@ -652,6 +763,10 @@ class ServiceSpontaneousMixin:
         except (KeyError, TypeError, ValueError) as exc:
             trace["result_status"] = "failed"
             trace["failure_reason"] = str(exc)
+            debug_log(
+                "PendingIntent",
+                f"selection failed trigger={trigger_kind} stage=build_source_pack error={self._clamp(str(exc))}",
+            )
             raise PendingIntentSelectionError(
                 str(exc),
                 pending_intent_selection=trace,
@@ -668,6 +783,10 @@ class ServiceSpontaneousMixin:
         except LLMContractError as exc:
             trace["result_status"] = "failed"
             trace["failure_reason"] = str(exc)
+            debug_log(
+                "PendingIntent",
+                f"selection failed trigger={trigger_kind} stage=contract_validation error={self._clamp(str(exc))}",
+            )
             raise PendingIntentSelectionError(
                 str(exc),
                 pending_intent_selection=trace,
@@ -676,6 +795,10 @@ class ServiceSpontaneousMixin:
         except LLMError as exc:
             trace["result_status"] = "failed"
             trace["failure_reason"] = str(exc)
+            debug_log(
+                "PendingIntent",
+                f"selection failed trigger={trigger_kind} stage=llm_generation error={self._clamp(str(exc))}",
+            )
             raise PendingIntentSelectionError(
                 str(exc),
                 pending_intent_selection=trace,
@@ -692,6 +815,10 @@ class ServiceSpontaneousMixin:
         except (KeyError, TypeError, ValueError) as exc:
             trace["result_status"] = "failed"
             trace["failure_reason"] = str(exc)
+            debug_log(
+                "PendingIntent",
+                f"selection failed trigger={trigger_kind} stage=apply_selection error={self._clamp(str(exc))}",
+            )
             raise PendingIntentSelectionError(
                 str(exc),
                 pending_intent_selection=trace,
@@ -705,6 +832,13 @@ class ServiceSpontaneousMixin:
         selected_candidate = selection_result["selected_candidate"]
         if selected_candidate is not None:
             trace["selected_candidate_id"] = selected_candidate.get("candidate_id")
+        debug_log(
+            "PendingIntent",
+            (
+                f"selection done trigger={trigger_kind} selected={trace.get('selected_candidate_ref') or '-'} "
+                f"candidate_id={trace.get('selected_candidate_id') or '-'}"
+            ),
+        )
         return {
             "selected_candidate": selected_candidate,
             "pending_intent_selection": trace,
@@ -1034,6 +1168,13 @@ class ServiceSpontaneousMixin:
         }
         with self._vision_capture_lock:
             self._pending_vision_capture_requests[request_id] = pending
+        debug_log(
+            "DesktopWatch",
+            (
+                f"capture request created request={request_id} target_client={target_client_id} "
+                f"action={request_record.get('action_id') or '-'}"
+            ),
+        )
 
         # コマンド
         sent = self._event_stream_registry.send_to_client(
@@ -1051,6 +1192,7 @@ class ServiceSpontaneousMixin:
             },
         )
         if not sent:
+            debug_log("DesktopWatch", f"capture dispatch failed request={request_id} target_client={target_client_id}")
             with self._vision_capture_lock:
                 self._pending_vision_capture_requests.pop(request_id, None)
             self._finish_desktop_watch_ongoing_action(
@@ -1061,6 +1203,13 @@ class ServiceSpontaneousMixin:
                 final_step_summary="vision.capture request の送信に失敗した。",
             )
             return None
+        debug_log(
+            "DesktopWatch",
+            (
+                f"capture dispatched request={request_id} target_client={target_client_id} "
+                f"timeout_ms={DESKTOP_WATCH_CAPTURE_TIMEOUT_MS}"
+            ),
+        )
 
         # 待機
         pending["event"].wait(timeout=(DESKTOP_WATCH_CAPTURE_TIMEOUT_MS / 1000.0) + 1.0)
@@ -1070,6 +1219,7 @@ class ServiceSpontaneousMixin:
             result = pending["response"]
             self._pending_vision_capture_requests.pop(request_id, None)
             if not isinstance(result, dict):
+                debug_log("DesktopWatch", f"capture timeout request={request_id} target_client={target_client_id}")
                 self._finish_desktop_watch_ongoing_action(
                     request_record=request_record,
                     current_time=self._now_iso(),
@@ -1078,6 +1228,14 @@ class ServiceSpontaneousMixin:
                     final_step_summary="vision.capture の結果待ちが timeout した。",
                 )
                 return None
+            debug_log(
+                "DesktopWatch",
+                (
+                    f"capture received request={request_id} target_client={target_client_id} "
+                    f"images={len(result.get('images', [])) if isinstance(result.get('images'), list) else 0} "
+                    f"error={bool(result.get('error'))}"
+                ),
+            )
             result["ongoing_action_transition_summary"] = self._finish_desktop_watch_ongoing_action(
                 request_record=request_record,
                 current_time=self._now_iso(),
@@ -1266,11 +1424,13 @@ class ServiceSpontaneousMixin:
         # 確認
         reply_payload = pipeline.get("reply_payload")
         if not isinstance(reply_payload, dict):
+            debug_log("DesktopWatch", "reply_event skipped no_reply")
             return
 
         # クライアント
         target_client_id = capture_response.get("client_id")
         if not isinstance(target_client_id, str) or not target_client_id.strip():
+            debug_log("DesktopWatch", "reply_event skipped no_client")
             return
 
         # コンテキスト
@@ -1295,7 +1455,14 @@ class ServiceSpontaneousMixin:
                 "images": capture_response.get("images", []),
             },
         }
-        self._event_stream_registry.send_to_client(target_client_id.strip(), event)
+        sent = self._event_stream_registry.send_to_client(target_client_id.strip(), event)
+        debug_log(
+            "DesktopWatch",
+            (
+                f"reply_event sent={sent} client={target_client_id.strip()} "
+                f"reply_chars={len(reply_payload['reply_text'])}"
+            ),
+        )
 
     def _desktop_watch_target_client_id(self) -> str | None:
         # 接続中で vision.capture を持つ client が 1 台だけなら採用する

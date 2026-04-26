@@ -8,7 +8,7 @@ from typing import Any
 from otomekairo.llm import LLMError
 from otomekairo.memory_utils import display_local_iso, local_datetime, local_now, localize_timestamp_fields, now_iso
 from otomekairo.recall import RecallPackSelectionError
-from otomekairo.service_common import ServiceError
+from otomekairo.service_common import ServiceError, debug_log
 
 
 RECALL_HINT_RECENT_TURN_LIMIT = 6
@@ -33,6 +33,13 @@ class ServiceInputMixin:
         started_at = self._now_iso()
         recent_turns = self._load_recent_turns(state)
         runtime_summary = self._build_runtime_summary(state)
+        debug_log(
+            "Conversation",
+            (
+                f"{self._short_cycle_id(cycle_id)} start input_chars={len(input_text)} "
+                f"recent_turns={len(recent_turns)} context_keys={self._debug_context_keys(client_context)}"
+            ),
+        )
 
         try:
             # パイプライン
@@ -41,10 +48,11 @@ class ServiceInputMixin:
                 started_at=started_at,
                 input_text=input_text,
                 recent_turns=recent_turns,
+                cycle_id=cycle_id,
             )
 
             # 成功
-            return self._complete_input_success(
+            response = self._complete_input_success(
                 cycle_id=cycle_id,
                 started_at=started_at,
                 state=state,
@@ -53,7 +61,19 @@ class ServiceInputMixin:
                 client_context=client_context,
                 pipeline=pipeline,
             )
+            debug_log(
+                "Conversation",
+                f"{self._short_cycle_id(cycle_id)} done result={response['result_kind']}",
+            )
+            return response
         except RecallPackSelectionError as exc:
+            debug_log(
+                "Conversation",
+                (
+                    f"{self._short_cycle_id(cycle_id)} failed stage={exc.failure_stage} "
+                    f"error={type(exc).__name__}: {self._clamp(str(exc))}"
+                ),
+            )
             # 失敗永続化
             finished_at = self._now_iso()
             self._persist_cycle_failure(
@@ -87,6 +107,10 @@ class ServiceInputMixin:
                 "capability_request": None,
             }
         except (LLMError, KeyError, ValueError) as exc:
+            debug_log(
+                "Conversation",
+                f"{self._short_cycle_id(cycle_id)} failed error={type(exc).__name__}: {self._clamp(str(exc))}",
+            )
             # 失敗永続化
             finished_at = self._now_iso()
             self._persist_cycle_failure(
@@ -119,7 +143,17 @@ class ServiceInputMixin:
         started_at: str,
         input_text: str,
         recent_turns: list[dict[str, Any]],
+        cycle_id: str | None = None,
     ) -> dict[str, Any]:
+        cycle_label = self._debug_cycle_label(cycle_id)
+        debug_log(
+            "Pipeline",
+            (
+                f"{cycle_label} start memory_set={self._short_identifier(state['selected_memory_set_id'])} "
+                f"persona={state['selected_persona_id']} preset={state['selected_model_preset_id']} "
+                f"input_chars={len(input_text)} recent_turns={len(recent_turns)}"
+            ),
+        )
         # モデル選択
         selected_preset = state["model_presets"][state["selected_model_preset_id"]]
         recall_role = selected_preset["roles"]["input_interpretation"]
@@ -129,21 +163,41 @@ class ServiceInputMixin:
 
         # recall_hint生成
         recall_hint_recent_turns = self._recall_hint_recent_turns(recent_turns)
+        debug_log("Pipeline", f"{cycle_label} recall_hint start recent_turns={len(recall_hint_recent_turns)}")
         recall_hint = self.llm.generate_recall_hint(
             role_definition=recall_role,
             input_text=input_text,
             recent_turns=recall_hint_recent_turns,
             current_time=started_at,
         )
+        debug_log(
+            "Pipeline",
+            (
+                f"{cycle_label} recall_hint done mode={recall_hint['interaction_mode']} "
+                f"focus={recall_hint['primary_recall_focus']} confidence={recall_hint['confidence']}"
+            ),
+        )
 
         # recall_pack構築
+        debug_log("Pipeline", f"{cycle_label} recall_pack start")
         recall_pack = self.recall.build_recall_pack(
             state=state,
             input_text=input_text,
             recall_hint=recall_hint,
         )
+        recall_summary = self._summarize_recall_pack(recall_pack)
+        debug_log(
+            "Pipeline",
+            (
+                f"{cycle_label} recall_pack done candidates={recall_pack['candidate_count']} "
+                f"selected_memory={len(recall_pack['selected_memory_ids'])} "
+                f"selected_episode={len(recall_pack['selected_episode_ids'])} "
+                f"sections={recall_summary}"
+            ),
+        )
 
         # 内部コンテキスト
+        debug_log("Pipeline", f"{cycle_label} context start")
         time_context = self._build_time_context(current_time=started_at)
         affect_context = self._build_affect_context(
             state=state,
@@ -162,8 +216,16 @@ class ServiceInputMixin:
                 current_time=started_at,
             )
         )
+        debug_log(
+            "Pipeline",
+            (
+                f"{cycle_label} context done affect_states={len(affect_context.get('affect_states', []))} "
+                f"drives={len(drive_state_summary or [])} ongoing_action={isinstance(ongoing_action_summary, dict)}"
+            ),
+        )
 
         # decision生成
+        debug_log("Pipeline", f"{cycle_label} decision start")
         decision = self.llm.generate_decision(
             role_definition=decision_role,
             persona=persona,
@@ -176,10 +238,15 @@ class ServiceInputMixin:
             recall_hint=recall_hint,
             recall_pack=recall_pack,
         )
+        debug_log(
+            "Pipeline",
+            f"{cycle_label} decision done kind={decision['kind']} reason={self._clamp(decision['reason_summary'])}",
+        )
 
         # 返信
         reply_payload: dict[str, Any] | None = None
         if decision["kind"] == "reply":
+            debug_log("Pipeline", f"{cycle_label} reply start")
             reply_payload = self.llm.generate_reply(
                 role_definition=reply_role,
                 persona=persona,
@@ -193,8 +260,12 @@ class ServiceInputMixin:
                 recall_pack=recall_pack,
                 decision=decision,
             )
+            debug_log("Pipeline", f"{cycle_label} reply done reply_chars={len(reply_payload['reply_text'])}")
+        else:
+            debug_log("Pipeline", f"{cycle_label} reply skipped decision_kind={decision['kind']}")
 
         # 結果
+        debug_log("Pipeline", f"{cycle_label} done")
         return {
             "recall_hint": recall_hint,
             "recall_pack": recall_pack,
@@ -215,23 +286,34 @@ class ServiceInputMixin:
         recent_turns: list[dict[str, Any]],
         selected_candidate: dict[str, Any] | None,
         pending_intent_selection: dict[str, Any] | None = None,
+        cycle_id: str | None = None,
     ) -> tuple[dict[str, Any], str]:
+        cycle_label = self._debug_cycle_label(cycle_id)
         # 入力テキスト
         input_text = self._build_wake_input_text(
             state=state,
             client_context=client_context,
             selected_candidate=selected_candidate,
         )
+        debug_log(
+            "Wake",
+            (
+                f"{cycle_label} pipeline start selected_candidate="
+                f"{selected_candidate.get('candidate_id') if isinstance(selected_candidate, dict) else '-'}"
+            ),
+        )
 
         # 起床ポリシー
         due = self._wake_is_due(state=state, current_time=started_at)
         if due["should_skip"]:
+            debug_log("Wake", f"{cycle_label} skipped reason={self._clamp(due['reason_summary'])}")
             return self._noop_pipeline(started_at=started_at, reason_summary=due["reason_summary"]), input_text
 
         # クールダウン
         cooldown_reason = self._wake_cooldown_reason(current_time=started_at)
         if cooldown_reason is not None:
             self._set_last_wake_at(started_at)
+            debug_log("Wake", f"{cycle_label} skipped cooldown={self._clamp(cooldown_reason)}")
             return self._noop_pipeline(started_at=started_at, reason_summary=cooldown_reason), input_text
 
         # 候補
@@ -246,6 +328,7 @@ class ServiceInputMixin:
                 reason_summary = pending_intent_selection["selection_reason"].strip()
             else:
                 reason_summary = "起床機会は来たが、再評価すべき pending_intent 候補はまだ無い。"
+            debug_log("Wake", f"{cycle_label} skipped no_candidate reason={self._clamp(reason_summary)}")
             return (
                 self._noop_pipeline(
                     started_at=started_at,
@@ -260,6 +343,10 @@ class ServiceInputMixin:
             current_time=started_at,
         ):
             self._set_last_wake_at(started_at)
+            debug_log(
+                "Wake",
+                f"{cycle_label} skipped recently_replied candidate={selected_candidate.get('candidate_id')}",
+            )
             return (
                 self._noop_pipeline(
                     started_at=started_at,
@@ -277,6 +364,7 @@ class ServiceInputMixin:
             started_at=started_at,
             input_text=input_text,
             recent_turns=recent_turns,
+            cycle_id=cycle_id,
         )
         return pipeline, input_text
 
@@ -639,6 +727,17 @@ class ServiceInputMixin:
 
         # 結果
         return cycle_id.split(":", 1)[1][:12]
+
+    def _debug_cycle_label(self, cycle_id: str | None) -> str:
+        # 未採番経路
+        if not isinstance(cycle_id, str) or not cycle_id:
+            return "-"
+        return self._short_cycle_id(cycle_id)
+
+    def _debug_context_keys(self, context: dict[str, Any]) -> str:
+        # 値は出さずキーだけに留める。
+        keys = sorted(str(key) for key in context.keys())[:8]
+        return ",".join(keys) if keys else "-"
 
     def _format_list_for_log(self, values: list[Any]) -> str:
         # 空

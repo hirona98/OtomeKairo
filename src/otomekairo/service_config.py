@@ -6,7 +6,7 @@ from typing import Any
 
 from otomekairo.capabilities import capability_manifests
 from otomekairo.event_stream import ServerWebSocket
-from otomekairo.service_common import REQUIRED_MODEL_ROLE_NAMES, ServiceError
+from otomekairo.service_common import REQUIRED_MODEL_ROLE_NAMES, ServiceError, debug_log
 
 
 EVENT_STREAM_CAPABILITY_PERMISSIONS = ("observe_desktop",)
@@ -102,6 +102,13 @@ class ServiceConfigMixin:
             client_id=client_id.strip(),
             capabilities=accepted_capabilities,
             rejected_bindings=rejected_bindings,
+        )
+        debug_log(
+            "EventStream",
+            (
+                f"hello client_id={client_id.strip()} "
+                f"accepted={sorted(accepted_capabilities)} rejected={len(rejected_bindings)}"
+            ),
         )
 
     def get_capability_inspection(self, token: str | None) -> dict[str, Any]:
@@ -601,8 +608,10 @@ class ServiceConfigMixin:
 
         # 検証
         if issued is None:
+            debug_log("Auth", "token rejected reason=bootstrap_required")
             raise ServiceError(401, "bootstrap_required", "A console_access_token has not been issued yet.")
         if token != issued:
+            debug_log("Auth", f"token rejected reason=invalid_token supplied={bool(token)}")
             raise ServiceError(401, "invalid_token", "The console_access_token is missing or invalid.")
         return state
 

@@ -10,7 +10,7 @@ from otomekairo.llm import LLMClient
 from otomekairo.log_stream import LogStreamRegistry
 from otomekairo.memory import MemoryConsolidator
 from otomekairo.recall import RecallBuilder
-from otomekairo.service_common import ServiceError
+from otomekairo.service_common import ServiceError, debug_log
 from otomekairo.service_config import ServiceConfigMixin
 from otomekairo.service_memory import ServiceMemoryMixin
 from otomekairo.service_input import ServiceInputMixin
@@ -27,6 +27,7 @@ class OtomeKairoService(
 ):
     def __init__(self, root_dir: Path) -> None:
         # 依存関係
+        debug_log("Service", f"initializing root_dir={root_dir}")
         self.store = FileStore(root_dir)
         self.llm = LLMClient()
         self.recall = RecallBuilder(store=self.store, llm=self.llm)
@@ -60,11 +61,13 @@ class OtomeKairoService(
         self._pending_vision_capture_requests: dict[str, dict[str, Any]] = {}
         self._stream_event_lock = threading.Lock()
         self._next_stream_event_value = 1
+        debug_log("Service", "initialized")
 
     def start_background_wake_scheduler(self) -> None:
         # 既存
         with self._runtime_state_lock:
             if self._background_wake_thread is not None and self._background_wake_thread.is_alive():
+                debug_log("Wake", "background scheduler already running")
                 return
 
             stop_event = threading.Event()
@@ -79,6 +82,7 @@ class OtomeKairoService(
 
         # 開始
         thread.start()
+        debug_log("Wake", f"background scheduler started thread={thread.name}")
 
     def stop_background_wake_scheduler(self) -> None:
         # スナップショット
@@ -93,11 +97,13 @@ class OtomeKairoService(
             stop_event.set()
         if thread is not None and thread.is_alive():
             thread.join(timeout=5.0)
+        debug_log("Wake", "background scheduler stopped")
 
     def start_background_desktop_watch(self) -> None:
         # 既存
         with self._runtime_state_lock:
             if self._background_desktop_watch_thread is not None and self._background_desktop_watch_thread.is_alive():
+                debug_log("DesktopWatch", "background scheduler already running")
                 return
 
             stop_event = threading.Event()
@@ -112,6 +118,7 @@ class OtomeKairoService(
 
         # 開始
         thread.start()
+        debug_log("DesktopWatch", f"background scheduler started thread={thread.name}")
 
     def stop_background_desktop_watch(self) -> None:
         # スナップショット
@@ -126,3 +133,4 @@ class OtomeKairoService(
             stop_event.set()
         if thread is not None and thread.is_alive():
             thread.join(timeout=5.0)
+        debug_log("DesktopWatch", "background scheduler stopped")

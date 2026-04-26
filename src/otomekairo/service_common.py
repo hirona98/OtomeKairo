@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 
 # 定数
 REQUIRED_MODEL_ROLE_NAMES = (
@@ -27,3 +29,9 @@ class ServiceError(Exception):
         self.status_code = status_code
         self.error_code = error_code
         self.message = message
+
+
+# デバッグ出力
+def debug_log(component: str, message: str) -> None:
+    timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+    print(f"{timestamp} [{component}] {message}", flush=True)
