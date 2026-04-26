@@ -1,5 +1,11 @@
 # 列挙とinspection
 
+## この文書の境界
+
+この文書は、列挙 API と inspection API の path、method、認証、request / response、error code を正本にする。
+capability availability の意味規則は [../17_capability_manifest.md](../17_capability_manifest.md)、段階トレースの意味規則は [../13_デバッグ可能性.md](../13_デバッグ可能性.md) を正とする。
+この文書では、各 endpoint の top-level field と wire 上の enum だけを定める。
+
 ## 列挙面
 
 ### `GET /api/catalog`
@@ -7,9 +13,7 @@
 - 認証: 必要
 - 役割: 人格設定、記憶集合、モデルプリセットの一覧を返す
 - capability manifest 一覧と capability availability は返さない
-- 接続中 client の `hello.caps` は binding 候補であり、availability の正本ではない
-- capability availability は `GET /api/inspection/capabilities` で扱う
-- capability manifest は server 側の正本であり、catalog の選択肢とは分ける
+- capability manifest と capability availability の境界は [../17_capability_manifest.md](../17_capability_manifest.md) を正とする
 
 response:
 
@@ -50,6 +54,7 @@ response:
 - `capabilities` は server が知っている manifest を基準に並べる
 - `rejected_bindings` は、接続 client が `hello.caps` で提示したが server が binding として受理しなかった候補を返す
 - token、credential、内部 URL、transport 詳細は返さない
+- availability 判定の入力と decision view との関係は [../17_capability_manifest.md](../17_capability_manifest.md) を正とする
 
 response:
 
@@ -177,26 +182,18 @@ response:
 }
 ```
 
-- `recall_trace` には `selected_memory_unit_ids`、`selected_episode_ids`、必要時だけ `selected_event_ids` を含む
-- `world_state_trace` には判断入力へ入った `world_state` 件数、前景要約、更新件数、失効件数、source 要約、更新失敗理由を含む
-- `recall_trace.event_evidence_generation` には `requested_event_count`、`loaded_event_count`、`succeeded_event_count`、`failed_items` を含む
-- `recall_trace.event_evidence_generation.failed_items.*` には `event_id`、`kind`、`failure_stage`、`failure_reason` を含む
-- `recall_trace.recall_pack_selection` には `candidate_section_counts`、`selected_section_order`、`selected_candidate_refs`、`dropped_candidate_refs`、`conflict_summary_count`、`result_status`、`failure_reason` を含む
-- `input_trace` の観測要約には、capability ベースの観測時だけ `capability_id`、`image_count`、`image_interpreted` を含む
-- `input_trace` の実行状態要約には `ongoing_action_exists` を含み、必要時だけ参照した `ongoing_action` の要約を含む
-- `input_trace.pending_intent_selection` には `candidate_pool_count`、`eligible_candidate_count`、`selected_candidate_ref`、`selected_candidate_id`、`selection_reason`、`result_status`、`failure_reason` を含む
-- `decision_trace` には、必要時だけ強く効いた `drive_state` と参照した `ongoing_action` の要約を含む
-- `result_trace` には、必要時だけ capability 実行要求の要約と `ongoing_action` の作成 / 継続 / 完了 / 中断の要約を含む
-- `result_trace.ongoing_action_transition_summary` には、必要時だけ `action_id`、`transition_sequence`、`final_state`、`goal_summary`、`step_summary`、`episode_series_id`、`last_capability_id`、`reason_summary` を含む
-- `memory_trace` には 生成した `episode` の要約、`episode_series_id`、`open_loops`、`memory_units` 更新要約、感情更新要約を含む
-- `memory_trace` には、必要時だけ `drive_state` 更新要約を含む
-- `memory_trace.drive_state_update` と `reflective_consolidation.drive_state_update` には `result_status`、`active_drive_ids`、`removed_drive_ids`、`drive_summaries` を含む
-- 感情更新要約には `episode_affect` 保存件数、`mood_state` 更新要約、必要時だけ `affect_state` 更新要約を含む
-- `mood_state` 更新要約には、必要時だけ `baseline_vad / residual_vad / current_vad / confidence` を含む
-- 当時の感情本文を追う場合は `mood_state` ではなく `episode_affect.summary_text` を見る
-- `memory_trace` には `vector_index_sync.result_status` と `reflective_consolidation.result_status` を含め、同期保存済み部分と後段 job の進行を分けて追う
-- `reflective_consolidation.summary_generation` には `requested_scope_count`、`succeeded_scope_count`、`failed_scopes` を含む
-- `episode_series_id` と `open_loops` は追跡用の inspection 情報として扱い、通常の状態面や設定面では返さない
+top-level の trace object は、存在しない段階でも空 object として返す。
+各 trace object の意味と標準的な含有内容は [../13_デバッグ可能性.md](../13_デバッグ可能性.md) を正とする。
+機能ごとの追加 field は、それぞれの設計文書を正とする。
+
+| trace | 詳細正本 |
+|-------|----------|
+| `input_trace` | [../13_デバッグ可能性.md](../13_デバッグ可能性.md)、[../21_自律initiative_loop.md](../21_自律initiative_loop.md)、[../15_保留意図候補のLLM選別.md](../15_保留意図候補のLLM選別.md) |
+| `world_state_trace` | [../22_world_state.md](../22_world_state.md) |
+| `recall_trace` | [../memory/03_想起と判断.md](../memory/03_想起と判断.md)、[../memory/08_event_evidenceのLLM圧縮.md](../memory/08_event_evidenceのLLM圧縮.md)、[../memory/09_RecallPackのLLM選別.md](../memory/09_RecallPackのLLM選別.md) |
+| `decision_trace` | [../05_判断と行動.md](../05_判断と行動.md)、[../21_自律initiative_loop.md](../21_自律initiative_loop.md) |
+| `result_trace` | [../05_判断と行動.md](../05_判断と行動.md)、[../17_capability_manifest.md](../17_capability_manifest.md) |
+| `memory_trace` | [../13_デバッグ可能性.md](../13_デバッグ可能性.md)、[../memory/04_記憶更新と再整理.md](../memory/04_記憶更新と再整理.md)、[../memory/07_内省要約のLLM生成.md](../memory/07_内省要約のLLM生成.md) |
 
 主な失敗:
 

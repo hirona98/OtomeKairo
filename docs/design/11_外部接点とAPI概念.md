@@ -125,6 +125,7 @@ OtomeKairo が外部サービスへ主体的にアクセスする機能は capab
 - 設定定義の作成、複製、差し替え、削除
 
 変更単位の意味境界は `08_設定変更.md` を正とする。
+記憶集合は選択と空集合作成の対象であり、既存の記憶本体の複製、削除、初期化、export は設定面へ入れない。
 
 ## 列挙面
 
@@ -138,9 +139,8 @@ OtomeKairo が外部サービスへ主体的にアクセスする機能は capab
 
 列挙面は、正本のコピーではなく、選択に必要な要約を返す。
 現行の `GET /api/catalog` は、人格設定、記憶集合、モデルプリセットだけを返す。
-`vision.capture` のような接続中 client の `hello.caps` は、capability availability ではなく binding 候補として扱う。
-capability availability の外向き確認正本は `GET /api/inspection/capabilities` で扱う。
-capability manifest の正本は catalog へ混ぜず、判断、実行、権限、inspection の内部契約として扱う。
+capability manifest、binding、availability の詳細は `17_capability_manifest.md` を正とする。
+capability manifest と availability は catalog へ混ぜない。
 
 ## inspection 面
 

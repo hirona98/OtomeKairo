@@ -38,8 +38,7 @@ client -> server:
 - `version` は server が持つ `CapabilityManifest` の版と照合する
 - client は capability manifest を送らない
 - 未知の capability id または非対応 version は実行不可として扱う
-- `hello.caps` は availability の正本ではなく binding 候補である
-- server が導出した availability は `GET /api/inspection/capabilities` で確認する
+- `hello.caps` と availability の意味境界は [../17_capability_manifest.md](../17_capability_manifest.md) を正とする
 - 同じ `client_id` で再接続した場合、server は古い stream session を置き換える
 
 この設計では、client から受ける message は `hello` だけとする。

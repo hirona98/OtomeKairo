@@ -40,6 +40,7 @@ timezone 表記のない timestamp は API response に出さない。
 発行済み状態では既存 token を返さない。
 
 それ以外の API は `Authorization: Bearer <console_access_token>` を必須とする。
+管理者権限は存在しない。
 
 ## 共通エラー
 

@@ -5,6 +5,8 @@
 capability manifest は、OtomeKairo が使える能力の安定契約である。
 本体が capability manifest の正本を持つ。
 外部 client は capability manifest を定義しない。
+capability manifest、binding、state、availability 判定、decision view の意味規則は、この文書を正本にする。
+API 文書は stream、result endpoint、inspection response の wire 契約だけを定める。
 
 capability は、観測、物理作用、外部サービス利用のいずれも同じ契約で扱う。
 具体的なセンサ、機器、アプリ、通信先は manifest の実行実体ではなく、能力を実現する接続先として扱う。
