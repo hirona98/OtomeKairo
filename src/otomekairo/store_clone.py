@@ -14,6 +14,7 @@ class StoreCloneMixin:
             self._delete_vector_index_entries(conn, memory_set_id)
 
             # 削除順序
+            conn.execute("DELETE FROM world_states WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM ongoing_actions WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM drive_states WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM memory_postprocess_jobs WHERE memory_set_id = ?", (memory_set_id,))

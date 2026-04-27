@@ -148,6 +148,24 @@ class StoreSchemaMixin:
             CREATE INDEX IF NOT EXISTS idx_ongoing_actions_memory_set_expires_at
             ON ongoing_actions(memory_set_id, expires_at, updated_at);
 
+            CREATE TABLE IF NOT EXISTS world_states (
+                world_state_id TEXT PRIMARY KEY,
+                memory_set_id TEXT NOT NULL,
+                state_type TEXT NOT NULL,
+                scope_type TEXT NOT NULL,
+                scope_key TEXT NOT NULL,
+                salience REAL NOT NULL,
+                updated_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                payload_json TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_world_states_memory_set_expires_at
+            ON world_states(memory_set_id, expires_at, salience, updated_at);
+
+            CREATE INDEX IF NOT EXISTS idx_world_states_identity
+            ON world_states(memory_set_id, state_type, scope_type, scope_key, updated_at);
+
             CREATE TABLE IF NOT EXISTS episodes (
                 episode_id TEXT PRIMARY KEY,
                 cycle_id TEXT NOT NULL UNIQUE,

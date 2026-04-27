@@ -741,6 +741,54 @@ class ServiceConfigMixin:
                     "updated_at": drive_state.get("updated_at"),
                     "expires_at": drive_state.get("expires_at"),
                 }
+        )
+        if not summaries:
+            return None
+        return summaries
+
+    def _list_current_world_states(
+        self,
+        *,
+        state: dict[str, Any],
+        current_time: str | None = None,
+        limit: int = 4,
+    ) -> list[dict[str, Any]]:
+        memory_set_id = state["selected_memory_set_id"]
+        query_time = current_time or self._now_iso()
+        return self.store.list_world_states(
+            memory_set_id=memory_set_id,
+            current_time=query_time,
+            limit=limit,
+        )
+
+    def _summarize_foreground_world_states(
+        self,
+        world_states: list[dict[str, Any]],
+        *,
+        current_time: str | None = None,
+    ) -> list[dict[str, Any]] | None:
+        reference_time = current_time or self._now_iso()
+        summaries: list[dict[str, Any]] = []
+        for world_state in world_states[:4]:
+            if not isinstance(world_state, dict):
+                continue
+            scope_type = world_state.get("scope_type")
+            scope_key = world_state.get("scope_key")
+            if not isinstance(scope_type, str) or not isinstance(scope_key, str):
+                continue
+            summaries.append(
+                {
+                    "state_type": world_state.get("state_type"),
+                    "scope": self._world_state_scope_ref(scope_type=scope_type, scope_key=scope_key),
+                    "summary_text": world_state.get("summary_text"),
+                    "confidence": world_state.get("confidence"),
+                    "salience": world_state.get("salience"),
+                    "age_label": self._world_state_age_label(
+                        reference_time=reference_time,
+                        observed_at=world_state.get("observed_at"),
+                        updated_at=world_state.get("updated_at"),
+                    ),
+                }
             )
         if not summaries:
             return None
@@ -781,9 +829,39 @@ class ServiceConfigMixin:
     ) -> None:
         self._clear_pending_intent_candidates()
         for memory_set_id in memory_set_ids:
+            self.store.clear_world_states(memory_set_id=memory_set_id)
             self.store.clear_ongoing_action(memory_set_id=memory_set_id)
             if clear_drive_states:
                 self.store.clear_drive_states(memory_set_id=memory_set_id)
+
+    def _world_state_scope_ref(self, *, scope_type: str, scope_key: str) -> str:
+        if scope_type in {"self", "user", "world"}:
+            return scope_key
+        if scope_type == "topic":
+            return scope_key
+        if scope_type in {"entity", "relationship"}:
+            return f"{scope_type}:{scope_key}"
+        return f"{scope_type}:{scope_key}"
+
+    def _world_state_age_label(
+        self,
+        *,
+        reference_time: str,
+        observed_at: Any,
+        updated_at: Any,
+    ) -> str | None:
+        timestamp = observed_at if isinstance(observed_at, str) and observed_at else updated_at
+        if not isinstance(timestamp, str) or not timestamp:
+            return None
+        delta_seconds = max(
+            0,
+            int((self._parse_iso(reference_time) - self._parse_iso(timestamp)).total_seconds()),
+        )
+        if delta_seconds < 60:
+            return "たった今"
+        if delta_seconds < 3600:
+            return f"{delta_seconds // 60}分前"
+        return f"{delta_seconds // 3600}時間前"
 
     def _background_wake_scheduler_active(self) -> bool:
         with self._runtime_state_lock:

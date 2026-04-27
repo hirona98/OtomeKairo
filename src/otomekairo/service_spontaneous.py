@@ -154,6 +154,7 @@ class ServiceSpontaneousMixin:
                 if due["should_skip"]:
                     debug_log("Wake", f"{self._short_cycle_id(cycle_id)} skip due reason={self._clamp(due['reason_summary'])}")
                     pipeline = self._noop_pipeline(
+                        state=state,
                         started_at=started_at,
                         reason_summary=due["reason_summary"],
                     )
@@ -179,6 +180,7 @@ class ServiceSpontaneousMixin:
                         f"{self._short_cycle_id(cycle_id)} skip cooldown reason={self._clamp(cooldown_reason)}",
                     )
                     pipeline = self._noop_pipeline(
+                        state=state,
                         started_at=started_at,
                         reason_summary=cooldown_reason,
                     )
@@ -550,6 +552,8 @@ class ServiceSpontaneousMixin:
                     client_context=client_context,
                     selected_candidate=selected_candidate,
                     pending_intent_selection=pending_intent_selection,
+                    observation_summary=observation_summary,
+                    capability_request_summary=capability_request_summary,
                 )
 
                 # 成功
@@ -1274,6 +1278,7 @@ class ServiceSpontaneousMixin:
             "capability_id": "vision.capture",
             "image_count": len(capture_response.get("images", [])),
             "image_interpreted": False,
+            "error": capture_response.get("error"),
         }
         if isinstance(request_record, dict) and isinstance(request_record.get("capability_id"), str):
             summary["capability_id"] = request_record["capability_id"]

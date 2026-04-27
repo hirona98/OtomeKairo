@@ -13,6 +13,7 @@ from otomekairo.llm_contracts import (
     validate_memory_reflection_summary_contract,
     validate_pending_intent_selection_contract,
     validate_recall_pack_selection_contract,
+    validate_world_state_contract,
 )
 from otomekairo.llm_mock import MockLLMClient
 from otomekairo.llm_parsing import parse_json_object, parse_recall_hint_payload
@@ -30,6 +31,8 @@ from otomekairo.llm_prompts import (
     build_recall_pack_selection_repair_prompt,
     build_recall_hint_messages,
     build_reply_messages,
+    build_world_state_messages,
+    build_world_state_repair_prompt,
 )
 from otomekairo.llm_transport import complete_text, generate_embeddings as transport_generate_embeddings
 from otomekairo.service_common import debug_log
@@ -125,6 +128,7 @@ class LLMClient:
         time_context: dict[str, Any],
         affect_context: dict[str, Any],
         drive_state_summary: list[dict[str, Any]] | None,
+        foreground_world_state: list[dict[str, Any]] | None,
         ongoing_action_summary: dict[str, Any] | None,
         capability_decision_view: list[dict[str, Any]] | None,
         initiative_context: dict[str, Any] | None,
@@ -151,6 +155,7 @@ class LLMClient:
                     time_context,
                     affect_context,
                     drive_state_summary,
+                    foreground_world_state,
                     ongoing_action_summary,
                     capability_decision_view,
                     initiative_context,
@@ -168,6 +173,7 @@ class LLMClient:
                 time_context=time_context,
                 affect_context=affect_context,
                 drive_state_summary=drive_state_summary,
+                foreground_world_state=foreground_world_state,
                 ongoing_action_summary=ongoing_action_summary,
                 capability_decision_view=capability_decision_view,
                 initiative_context=initiative_context,
@@ -198,6 +204,7 @@ class LLMClient:
         time_context: dict[str, Any],
         affect_context: dict[str, Any],
         drive_state_summary: list[dict[str, Any]] | None,
+        foreground_world_state: list[dict[str, Any]] | None,
         ongoing_action_summary: dict[str, Any] | None,
         capability_decision_view: list[dict[str, Any]] | None,
         initiative_context: dict[str, Any] | None,
@@ -224,6 +231,7 @@ class LLMClient:
                     time_context,
                     affect_context,
                     drive_state_summary,
+                    foreground_world_state,
                     ongoing_action_summary,
                     capability_decision_view,
                     initiative_context,
@@ -242,6 +250,7 @@ class LLMClient:
                 time_context=time_context,
                 affect_context=affect_context,
                 drive_state_summary=drive_state_summary,
+                foreground_world_state=foreground_world_state,
                 ongoing_action_summary=ongoing_action_summary,
                 capability_decision_view=capability_decision_view,
                 initiative_context=initiative_context,
@@ -453,6 +462,40 @@ class LLMClient:
             validator=lambda payload: validate_pending_intent_selection_contract(payload, source_pack=source_pack),
             repair_prompt_builder=build_pending_intent_selection_repair_prompt,
             failure_message="PendingIntentSelection の生成に失敗しました。解析可能な応答が得られませんでした。",
+            wrap_validation_error=True,
+            operation=operation,
+        )
+
+    def generate_world_state(
+        self,
+        *,
+        role_definition: dict,
+        source_pack: dict[str, Any],
+    ) -> dict[str, Any]:
+        operation = "world_state"
+        existing_states = source_pack.get("existing_foreground_world_state", []) if isinstance(source_pack, dict) else []
+        debug_log(
+            "LLM",
+            (
+                f"{operation} start mode={self._debug_mode(role_definition)} "
+                f"model={self._debug_model(role_definition)} existing_states="
+                f"{len(existing_states) if isinstance(existing_states, list) else 0}"
+            ),
+        )
+        if self._is_mock_role_definition(role_definition):
+            payload = self.mock_client.generate_world_state(role_definition, source_pack)
+            debug_log("LLM", f"{operation} done mode=mock keys={self._debug_payload_keys(payload)}")
+            return payload
+
+        messages = build_world_state_messages(
+            source_pack=source_pack,
+        )
+        return self._generate_structured_payload(
+            role_definition=role_definition,
+            messages=messages,
+            validator=validate_world_state_contract,
+            repair_prompt_builder=build_world_state_repair_prompt,
+            failure_message="WorldState の生成に失敗しました。解析可能な応答が得られませんでした。",
             wrap_validation_error=True,
             operation=operation,
         )

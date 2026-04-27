@@ -9,6 +9,9 @@ from otomekairo.llm_contracts import (
     RECALL_FOCUS_VALUES,
     RISK_FLAG_VALUES,
     TIME_REFERENCE_VALUES,
+    WORLD_STATE_HINT_VALUES,
+    WORLD_STATE_TTL_HINT_VALUES,
+    WORLD_STATE_TYPE_VALUES,
 )
 from otomekairo.memory_utils import llm_local_time_text, localize_timestamp_fields
 
@@ -41,6 +44,7 @@ def build_decision_messages(
     time_context: dict[str, Any],
     affect_context: dict[str, Any],
     drive_state_summary: list[dict[str, Any]] | None,
+    foreground_world_state: list[dict[str, Any]] | None,
     ongoing_action_summary: dict[str, Any] | None,
     capability_decision_view: list[dict[str, Any]] | None,
     initiative_context: dict[str, Any] | None,
@@ -60,6 +64,7 @@ def build_decision_messages(
                 time_context=time_context,
                 affect_context=affect_context,
                 drive_state_summary=drive_state_summary,
+                foreground_world_state=foreground_world_state,
                 ongoing_action_summary=ongoing_action_summary,
                 capability_decision_view=capability_decision_view,
                 initiative_context=initiative_context,
@@ -79,6 +84,7 @@ def build_reply_messages(
     time_context: dict[str, Any],
     affect_context: dict[str, Any],
     drive_state_summary: list[dict[str, Any]] | None,
+    foreground_world_state: list[dict[str, Any]] | None,
     ongoing_action_summary: dict[str, Any] | None,
     capability_decision_view: list[dict[str, Any]] | None,
     initiative_context: dict[str, Any] | None,
@@ -99,6 +105,7 @@ def build_reply_messages(
                 time_context=time_context,
                 affect_context=affect_context,
                 drive_state_summary=drive_state_summary,
+                foreground_world_state=foreground_world_state,
                 ongoing_action_summary=ongoing_action_summary,
                 capability_decision_view=capability_decision_view,
                 initiative_context=initiative_context,
@@ -201,6 +208,22 @@ def build_pending_intent_selection_messages(
     ]
 
 
+def build_world_state_messages(
+    *,
+    source_pack: dict[str, Any],
+) -> list[dict[str, str]]:
+    return [
+        {
+            "role": "system",
+            "content": _build_world_state_system_prompt(),
+        },
+        {
+            "role": "user",
+            "content": _build_world_state_user_prompt(source_pack),
+        },
+    ]
+
+
 # validator_error を元に repair prompt を返す。
 def build_memory_interpretation_repair_prompt(validation_error: str) -> str:
     return (
@@ -275,6 +298,28 @@ def build_pending_intent_selection_repair_prompt(validation_error: str) -> str:
     )
 
 
+def build_world_state_repair_prompt(validation_error: str) -> str:
+    return (
+        "前回の出力は world_state 契約を満たしていませんでした。\n"
+        f"validator_error: {validation_error}\n"
+        "同じ source pack だけを根拠に、JSON オブジェクト 1 個だけを返し直してください。\n"
+        "トップレベルキーは state_candidates だけです。\n"
+        "各候補は state_type, scope, summary_text, confidence_hint, salience_hint, ttl_hint だけを持つ object にしてください。\n"
+        "state_type は "
+        + " / ".join(sorted(WORLD_STATE_TYPE_VALUES))
+        + " のいずれかだけを使ってください。\n"
+        "scope は self / user / world / entity:<key> / topic:<key> / relationship:<key> 形式だけを使ってください。\n"
+        "summary_text は 1 文、改行なし、内部識別子なしで返してください。\n"
+        "confidence_hint と salience_hint は "
+        + " / ".join(sorted(WORLD_STATE_HINT_VALUES))
+        + " のいずれかです。\n"
+        "ttl_hint は "
+        + " / ".join(sorted(WORLD_STATE_TTL_HINT_VALUES))
+        + " のいずれかです。\n"
+        "新しい source や raw payload の創作、Markdown、コードフェンス、説明文は禁止です。"
+    )
+
+
 # RecallHint system prompt。
 def _build_recall_hint_system_prompt() -> str:
     return (
@@ -331,7 +376,7 @@ def _build_decision_system_prompt(persona: dict) -> str:
         "入力文に対して reply / noop / pending_intent のいずれかを決め、JSON オブジェクト 1 個だけを返してください。\n"
         "Markdown、コードフェンス、説明文は禁止です。\n"
         "入力には recent_turns と internal_context が含まれます。\n"
-        "internal_context には TimeContext, AffectContext, DriveStateSummary, OngoingActionSummary, CapabilityDecisionView, RecallPack が入ります。\n"
+        "internal_context には TimeContext, AffectContext, DriveStateSummary, ForegroundWorldState, OngoingActionSummary, CapabilityDecisionView, RecallPack が入ります。\n"
         "自律判断トリガー時だけ InitiativeContext も入ります。\n"
         "recall_hint.secondary_recall_focuses は補助焦点として、継続性や確認必要性の補助にだけ使ってください。\n"
         "RecallPack.conflicts があるときは requires_confirmation=true を優先してください。\n"
@@ -358,6 +403,7 @@ def _build_decision_user_prompt(
     time_context: dict[str, Any],
     affect_context: dict[str, Any],
     drive_state_summary: list[dict[str, Any]] | None,
+    foreground_world_state: list[dict[str, Any]] | None,
     ongoing_action_summary: dict[str, Any] | None,
     capability_decision_view: list[dict[str, Any]] | None,
     initiative_context: dict[str, Any] | None,
@@ -367,7 +413,7 @@ def _build_decision_user_prompt(
     return (
         f"recent_turns:\n{_format_recent_turns(recent_turns)}\n"
         "internal_context:\n"
-        f"{_format_internal_context(time_context, affect_context, drive_state_summary, ongoing_action_summary, capability_decision_view, initiative_context, recall_pack)}\n"
+        f"{_format_internal_context(time_context, affect_context, drive_state_summary, foreground_world_state, ongoing_action_summary, capability_decision_view, initiative_context, recall_pack)}\n"
         f"input_text:\n{input_text.strip()}\n"
         "recall_hint:\n"
         f"{json.dumps(recall_hint, ensure_ascii=False)}\n"
@@ -382,7 +428,7 @@ def _build_reply_system_prompt(persona: dict) -> str:
         f"あなたは {display_name} として話します。\n"
         "返答は自然な日本語の本文だけを返してください。JSON、箇条書き、見出し、引用符は禁止です。\n"
         "入力には recent_turns と internal_context が含まれます。\n"
-        "internal_context には TimeContext, AffectContext, DriveStateSummary, OngoingActionSummary, CapabilityDecisionView, RecallPack が入ります。\n"
+        "internal_context には TimeContext, AffectContext, DriveStateSummary, ForegroundWorldState, OngoingActionSummary, CapabilityDecisionView, RecallPack が入ります。\n"
         "自律判断トリガー時だけ InitiativeContext も入ります。\n"
         "recall_hint.secondary_recall_focuses は話題継続や温度調整の補助にだけ使い、主方針は primary_recall_focus に従ってください。\n"
         "RecallPack の内容だけを根拠に、必要な範囲で自然に思い出や継続文脈を混ぜてください。\n"
@@ -403,6 +449,7 @@ def _build_reply_user_prompt(
     time_context: dict[str, Any],
     affect_context: dict[str, Any],
     drive_state_summary: list[dict[str, Any]] | None,
+    foreground_world_state: list[dict[str, Any]] | None,
     ongoing_action_summary: dict[str, Any] | None,
     capability_decision_view: list[dict[str, Any]] | None,
     initiative_context: dict[str, Any] | None,
@@ -413,7 +460,7 @@ def _build_reply_user_prompt(
     return (
         f"recent_turns:\n{_format_recent_turns(recent_turns)}\n"
         "internal_context:\n"
-        f"{_format_internal_context(time_context, affect_context, drive_state_summary, ongoing_action_summary, capability_decision_view, initiative_context, recall_pack)}\n"
+        f"{_format_internal_context(time_context, affect_context, drive_state_summary, foreground_world_state, ongoing_action_summary, capability_decision_view, initiative_context, recall_pack)}\n"
         f"input_text:\n{input_text.strip()}\n"
         "recall_hint:\n"
         f"{json.dumps(recall_hint, ensure_ascii=False)}\n"
@@ -544,6 +591,31 @@ def _build_pending_intent_selection_system_prompt() -> str:
     )
 
 
+def _build_world_state_system_prompt() -> str:
+    return (
+        "あなたは OtomeKairo の input_interpretation で、短期外界状態を抽出する world_state 更新補助です。\n"
+        "source pack を読み、JSON オブジェクト 1 個だけを返してください。\n"
+        "Markdown、コードフェンス、説明文は禁止です。\n"
+        "返すトップレベルキーは state_candidates だけです。\n"
+        "各候補は state_type, scope, summary_text, confidence_hint, salience_hint, ttl_hint の 6 キーだけを持つ object にしてください。\n"
+        "state_type は "
+        + " / ".join(sorted(WORLD_STATE_TYPE_VALUES))
+        + " のいずれかだけを使ってください。\n"
+        "scope は self / user / world / entity:<key> / topic:<key> / relationship:<key> 形式だけを使ってください。\n"
+        "summary_text は 1 文、改行なし、内部識別子なしにしてください。\n"
+        "confidence_hint と salience_hint は "
+        + " / ".join(sorted(WORLD_STATE_HINT_VALUES))
+        + " のいずれかだけを使ってください。\n"
+        "ttl_hint は "
+        + " / ".join(sorted(WORLD_STATE_TTL_HINT_VALUES))
+        + " のいずれかだけを使ってください。\n"
+        "raw payload、資格情報、内部 URL、配送先 client、画像本文の意味内容を書いてはいけません。\n"
+        "image_interpreted=false のとき、画像の中身を想像してはいけません。\n"
+        "source pack に十分な短期状態が無いなら state_candidates は空配列にしてください。\n"
+        "state_candidates は最大 4 件までにしてください。"
+    )
+
+
 def _build_memory_interpretation_user_prompt(
     *,
     input_text: str,
@@ -592,11 +664,19 @@ def _build_pending_intent_selection_user_prompt(source_pack: dict[str, Any]) -> 
     )
 
 
+def _build_world_state_user_prompt(source_pack: dict[str, Any]) -> str:
+    return (
+        "source_pack:\n"
+        f"{json.dumps(localize_timestamp_fields(source_pack), ensure_ascii=False)}\n"
+    )
+
+
 # internal_context は token を増やしすぎないよう compact して渡す。
 def _format_internal_context(
     time_context: dict[str, Any],
     affect_context: dict[str, Any],
     drive_state_summary: list[dict[str, Any]] | None,
+    foreground_world_state: list[dict[str, Any]] | None,
     ongoing_action_summary: dict[str, Any] | None,
     capability_decision_view: list[dict[str, Any]] | None,
     initiative_context: dict[str, Any] | None,
@@ -609,6 +689,8 @@ def _format_internal_context(
     }
     if drive_state_summary:
         payload["drive_state_summary"] = drive_state_summary
+    if foreground_world_state:
+        payload["foreground_world_state"] = foreground_world_state
     if ongoing_action_summary:
         payload["ongoing_action_summary"] = ongoing_action_summary
     if capability_decision_view:

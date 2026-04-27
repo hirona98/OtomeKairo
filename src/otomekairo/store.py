@@ -380,6 +380,107 @@ class SQLiteMemoryStore(StoreCloneMixin, StoreVectorMixin, StoreSchemaMixin):
         with self._memory_db() as conn:
             self._insert_ongoing_action(conn, ongoing_action)
 
+    def list_world_states(
+        self,
+        *,
+        memory_set_id: str,
+        current_time: str,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        # クエリ
+        with self._memory_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT payload_json
+                FROM world_states
+                WHERE memory_set_id = ?
+                  AND expires_at > ?
+                ORDER BY salience DESC, updated_at DESC, rowid DESC
+                LIMIT ?
+                """,
+                (memory_set_id, current_time, limit),
+            ).fetchall()
+
+        # 結果
+        return [json.loads(row["payload_json"]) for row in rows]
+
+    def refresh_world_states(
+        self,
+        *,
+        memory_set_id: str,
+        current_time: str,
+        world_states: list[dict[str, Any]],
+        max_active: int,
+    ) -> dict[str, int]:
+        # トランザクション
+        with self._memory_db() as conn:
+            expired_cursor = conn.execute(
+                """
+                DELETE FROM world_states
+                WHERE memory_set_id = ?
+                  AND expires_at <= ?
+                """,
+                (memory_set_id, current_time),
+            )
+            expired_count = max(int(expired_cursor.rowcount or 0), 0)
+            replaced_count = 0
+            inserted_count = 0
+
+            for record in world_states:
+                replace_cursor = conn.execute(
+                    """
+                    DELETE FROM world_states
+                    WHERE memory_set_id = ?
+                      AND state_type = ?
+                      AND scope_type = ?
+                      AND scope_key = ?
+                    """,
+                    (
+                        memory_set_id,
+                        record["state_type"],
+                        record["scope_type"],
+                        record["scope_key"],
+                    ),
+                )
+                replaced_count += max(int(replace_cursor.rowcount or 0), 0)
+                self._insert_world_state(conn, record)
+                inserted_count += 1
+
+            dropped_count = 0
+            if max_active > 0:
+                rows = conn.execute(
+                    """
+                    SELECT world_state_id
+                    FROM world_states
+                    WHERE memory_set_id = ?
+                      AND expires_at > ?
+                    ORDER BY salience DESC, updated_at DESC, rowid DESC
+                    LIMIT -1 OFFSET ?
+                    """,
+                    (memory_set_id, current_time, max_active),
+                ).fetchall()
+                drop_ids = [row["world_state_id"] for row in rows]
+                if drop_ids:
+                    placeholders = ", ".join("?" for _ in drop_ids)
+                    conn.execute(
+                        f"DELETE FROM world_states WHERE world_state_id IN ({placeholders})",
+                        drop_ids,
+                    )
+                    dropped_count = len(drop_ids)
+
+        # 結果
+        return {
+            "expired_count": expired_count,
+            "updated_count": inserted_count,
+            "replaced_count": replaced_count,
+            "dropped_count": dropped_count,
+        }
+
+    def clear_world_states(self, *, memory_set_id: str) -> None:
+        # トランザクション
+        with self._memory_db() as conn:
+            conn.execute("DELETE FROM world_states WHERE memory_set_id = ?", (memory_set_id,))
+
     def clear_ongoing_action(self, *, memory_set_id: str) -> None:
         # トランザクション
         with self._memory_db() as conn:
@@ -1058,6 +1159,35 @@ class SQLiteMemoryStore(StoreCloneMixin, StoreVectorMixin, StoreSchemaMixin):
                 record["action_id"],
                 record["memory_set_id"],
                 record["status"],
+                record["updated_at"],
+                record["expires_at"],
+                self._to_json(record),
+            ),
+        )
+
+    def _insert_world_state(self, conn: sqlite3.Connection, record: dict[str, Any]) -> None:
+        # 追加
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO world_states (
+                world_state_id,
+                memory_set_id,
+                state_type,
+                scope_type,
+                scope_key,
+                salience,
+                updated_at,
+                expires_at,
+                payload_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                record["world_state_id"],
+                record["memory_set_id"],
+                record["state_type"],
+                record["scope_type"],
+                record["scope_key"],
+                record["salience"],
                 record["updated_at"],
                 record["expires_at"],
                 self._to_json(record),

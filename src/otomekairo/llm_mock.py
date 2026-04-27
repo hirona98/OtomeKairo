@@ -17,6 +17,7 @@ from otomekairo.llm_contracts import (
     validate_pending_intent_selection_contract,
     validate_recall_pack_selection_contract,
     validate_recall_hint_contract,
+    validate_world_state_contract,
 )
 
 
@@ -155,6 +156,7 @@ class MockLLMClient:
         time_context: dict[str, Any],
         affect_context: dict[str, Any],
         drive_state_summary: list[dict[str, Any]] | None,
+        foreground_world_state: list[dict[str, Any]] | None,
         ongoing_action_summary: dict[str, Any] | None,
         capability_decision_view: list[dict[str, Any]] | None,
         initiative_context: dict[str, Any] | None,
@@ -164,6 +166,7 @@ class MockLLMClient:
         # model確認
         _ = persona
         _ = drive_state_summary
+        _ = foreground_world_state
         _ = ongoing_action_summary
         _ = capability_decision_view
         _ = initiative_context
@@ -274,6 +277,7 @@ class MockLLMClient:
         time_context: dict[str, Any],
         affect_context: dict[str, Any],
         drive_state_summary: list[dict[str, Any]] | None,
+        foreground_world_state: list[dict[str, Any]] | None,
         ongoing_action_summary: dict[str, Any] | None,
         capability_decision_view: list[dict[str, Any]] | None,
         initiative_context: dict[str, Any] | None,
@@ -283,6 +287,7 @@ class MockLLMClient:
     ) -> dict[str, Any]:
         # model確認
         _ = drive_state_summary
+        _ = foreground_world_state
         _ = ongoing_action_summary
         _ = capability_decision_view
         _ = initiative_context
@@ -782,6 +787,84 @@ class MockLLMClient:
         validate_pending_intent_selection_contract(payload, source_pack=source_pack)
         return payload
 
+    def generate_world_state(
+        self,
+        role_definition: dict,
+        source_pack: dict[str, Any],
+    ) -> dict[str, Any]:
+        # model確認
+        self._assert_mock_model(role_definition)
+
+        # source pack
+        trigger_kind = str(source_pack.get("trigger_kind") or "user_message")
+        client_context = source_pack.get("client_context", {})
+        if not isinstance(client_context, dict):
+            client_context = {}
+        current_input_summary = str(source_pack.get("current_input_summary") or "").strip()
+        capability_result_summary = source_pack.get("capability_result_summary", {})
+        if not isinstance(capability_result_summary, dict):
+            capability_result_summary = {}
+
+        # 候補群
+        state_candidates: list[dict[str, Any]] = []
+        screen_summary = self._mock_world_state_screen_summary(client_context)
+        if screen_summary is not None:
+            state_candidates.append(
+                {
+                    "state_type": "screen",
+                    "scope": "topic:current_work",
+                    "summary_text": screen_summary,
+                    "confidence_hint": "high" if trigger_kind == "desktop_watch" else "medium",
+                    "salience_hint": "high",
+                    "ttl_hint": "short",
+                }
+            )
+
+        social_summary = self._mock_world_state_social_summary(client_context)
+        if social_summary is not None:
+            state_candidates.append(
+                {
+                    "state_type": "social_context",
+                    "scope": "relationship:self|user",
+                    "summary_text": social_summary,
+                    "confidence_hint": "medium",
+                    "salience_hint": "medium",
+                    "ttl_hint": "short",
+                }
+            )
+
+        user_state_summary = self._mock_world_state_user_summary(current_input_summary)
+        if user_state_summary is not None:
+            state_candidates.append(
+                {
+                    "state_type": "social_context",
+                    "scope": "user",
+                    "summary_text": user_state_summary,
+                    "confidence_hint": "medium",
+                    "salience_hint": "medium",
+                    "ttl_hint": "medium",
+                }
+            )
+
+        if capability_result_summary.get("image_count") and not state_candidates and trigger_kind == "desktop_watch":
+            state_candidates.append(
+                {
+                    "state_type": "screen",
+                    "scope": "topic:current_work",
+                    "summary_text": "画面の前景が変化している。",
+                    "confidence_hint": "low",
+                    "salience_hint": "medium",
+                    "ttl_hint": "short",
+                }
+            )
+
+        # payload
+        payload = {
+            "state_candidates": state_candidates[:4],
+        }
+        validate_world_state_contract(payload)
+        return payload
+
     def generate_embeddings(
         self,
         role_definition: dict,
@@ -820,6 +903,33 @@ class MockLLMClient:
         if primary_recall_focus in {"commitment", "relationship"}:
             return "self|user"
         return "user"
+
+    def _mock_world_state_screen_summary(self, client_context: dict[str, Any]) -> str | None:
+        window_title = client_context.get("window_title")
+        if isinstance(window_title, str) and window_title.strip():
+            return f"画面では {window_title.strip()} が前景にある。"
+        active_app = client_context.get("active_app")
+        if isinstance(active_app, str) and active_app.strip():
+            return f"画面では {active_app.strip()} が前景にある。"
+        return None
+
+    def _mock_world_state_social_summary(self, client_context: dict[str, Any]) -> str | None:
+        active_app = client_context.get("active_app")
+        if not isinstance(active_app, str) or not active_app.strip():
+            return None
+        lowered = active_app.strip().lower()
+        if any(token in lowered for token in ("slack", "discord", "teams", "zoom", "meet")):
+            return f"{active_app.strip()} 上のやり取りが近い判断文脈として前景にある。"
+        return None
+
+    def _mock_world_state_user_summary(self, current_input_summary: str) -> str | None:
+        if any(token in current_input_summary for token in ("会議中", "打ち合わせ", "ミーティング")):
+            return "ユーザーは会議や打ち合わせの文脈にいる。"
+        if any(token in current_input_summary for token in ("移動中", "電車", "外出")):
+            return "ユーザーは移動や外出の途中にいる。"
+        if any(token in current_input_summary for token in ("眠い", "寝る", "疲れた")):
+            return "ユーザーは休息が必要そうな状態にある。"
+        return None
 
     def _mock_open_loops(self, normalized: str, primary_recall_focus: str) -> list[str]:
         # ループルール

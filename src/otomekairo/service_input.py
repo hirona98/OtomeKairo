@@ -19,6 +19,23 @@ from otomekairo.service_common import ServiceError, debug_log
 
 
 RECALL_HINT_RECENT_TURN_LIMIT = 6
+WORLD_STATE_FOREGROUND_LIMIT = 4
+WORLD_STATE_MAX_ACTIVE = 12
+WORLD_STATE_HINT_SCORES = {
+    "low": 0.35,
+    "medium": 0.65,
+    "high": 0.85,
+}
+WORLD_STATE_TTL_SECONDS_BY_TYPE = {
+    "screen": {"short": 600, "medium": 1800, "long": 5400},
+    "environment": {"short": 900, "medium": 2400, "long": 7200},
+    "location": {"short": 1800, "medium": 3600, "long": 14400},
+    "external_service": {"short": 1800, "medium": 7200, "long": 21600},
+    "body": {"short": 1200, "medium": 3600, "long": 10800},
+    "device": {"short": 1200, "medium": 3600, "long": 10800},
+    "schedule": {"short": 1800, "medium": 7200, "long": 21600},
+    "social_context": {"short": 900, "medium": 2400, "long": 7200},
+}
 
 
 class ServiceInputMixin:
@@ -157,6 +174,8 @@ class ServiceInputMixin:
         client_context: dict[str, Any] | None = None,
         selected_candidate: dict[str, Any] | None = None,
         pending_intent_selection: dict[str, Any] | None = None,
+        observation_summary: dict[str, Any] | None = None,
+        capability_request_summary: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         cycle_label = self._debug_cycle_label(cycle_id)
         current_client_context = client_context or {}
@@ -224,6 +243,16 @@ class ServiceInputMixin:
                 current_time=started_at,
             )
         )
+        world_state_trace, foreground_world_state = self._refresh_world_state_context(
+            state=state,
+            started_at=started_at,
+            input_text=input_text,
+            trigger_kind=trigger_kind,
+            client_context=current_client_context,
+            cycle_id=cycle_id,
+            observation_summary=observation_summary,
+            capability_request_summary=capability_request_summary,
+        )
         ongoing_action_summary = self._summarize_ongoing_action(
             self._current_ongoing_action(
                 state=state,
@@ -235,6 +264,7 @@ class ServiceInputMixin:
             trigger_kind=trigger_kind,
             client_context=current_client_context,
             drive_state_summary=drive_state_summary,
+            foreground_world_state=foreground_world_state,
             ongoing_action_summary=ongoing_action_summary,
             capability_decision_view=capability_decision_view,
             selected_candidate=selected_candidate,
@@ -244,7 +274,8 @@ class ServiceInputMixin:
             "Pipeline",
             (
                 f"{cycle_label} context done affect_states={len(affect_context.get('affect_states', []))} "
-                f"drives={len(drive_state_summary or [])} ongoing_action={isinstance(ongoing_action_summary, dict)} "
+                f"drives={len(drive_state_summary or [])} world_states={len(foreground_world_state or [])} "
+                f"ongoing_action={isinstance(ongoing_action_summary, dict)} "
                 f"capabilities={len(capability_decision_view or [])} initiative={isinstance(initiative_context, dict)}"
             ),
         )
@@ -259,6 +290,7 @@ class ServiceInputMixin:
             time_context=time_context,
             affect_context=affect_context,
             drive_state_summary=drive_state_summary,
+            foreground_world_state=foreground_world_state,
             ongoing_action_summary=ongoing_action_summary,
             capability_decision_view=capability_decision_view,
             initiative_context=initiative_context,
@@ -282,6 +314,7 @@ class ServiceInputMixin:
                 time_context=time_context,
                 affect_context=affect_context,
                 drive_state_summary=drive_state_summary,
+                foreground_world_state=foreground_world_state,
                 ongoing_action_summary=ongoing_action_summary,
                 capability_decision_view=capability_decision_view,
                 initiative_context=initiative_context,
@@ -301,9 +334,11 @@ class ServiceInputMixin:
             "time_context": time_context,
             "affect_context": affect_context,
             "drive_state_summary": drive_state_summary,
+            "foreground_world_state": foreground_world_state,
             "ongoing_action_summary": ongoing_action_summary,
             "capability_decision_view": capability_decision_view,
             "initiative_context": initiative_context,
+            "world_state_trace": world_state_trace,
             "decision": decision,
             "reply_payload": reply_payload,
         }
@@ -314,6 +349,7 @@ class ServiceInputMixin:
         trigger_kind: str,
         client_context: dict[str, Any],
         drive_state_summary: list[dict[str, Any]] | None,
+        foreground_world_state: list[dict[str, Any]] | None,
         ongoing_action_summary: dict[str, Any] | None,
         capability_decision_view: list[dict[str, Any]] | None,
         selected_candidate: dict[str, Any] | None,
@@ -330,7 +366,7 @@ class ServiceInputMixin:
             ),
             "drive_summaries": self._initiative_drive_summaries(drive_state_summary),
             "pending_intent_summaries": self._initiative_pending_intent_summaries(selected_candidate),
-            "world_state_summary": "前景 world_state はまだ未実装。",
+            "world_state_summary": foreground_world_state or [],
             "ongoing_action_summary": ongoing_action_summary,
             "capability_summary": self._initiative_capability_summary(capability_decision_view),
             "intervention_risk_summary": self._initiative_intervention_risk_summary(
@@ -476,14 +512,14 @@ class ServiceInputMixin:
         due = self._wake_is_due(state=state, current_time=started_at)
         if due["should_skip"]:
             debug_log("Wake", f"{cycle_label} skipped reason={self._clamp(due['reason_summary'])}")
-            return self._noop_pipeline(started_at=started_at, reason_summary=due["reason_summary"]), input_text
+            return self._noop_pipeline(state=state, started_at=started_at, reason_summary=due["reason_summary"]), input_text
 
         # クールダウン
         cooldown_reason = self._wake_cooldown_reason(current_time=started_at)
         if cooldown_reason is not None:
             self._set_last_wake_at(started_at)
             debug_log("Wake", f"{cycle_label} skipped cooldown={self._clamp(cooldown_reason)}")
-            return self._noop_pipeline(started_at=started_at, reason_summary=cooldown_reason), input_text
+            return self._noop_pipeline(state=state, started_at=started_at, reason_summary=cooldown_reason), input_text
 
         # 候補
         if selected_candidate is None:
@@ -500,6 +536,7 @@ class ServiceInputMixin:
             debug_log("Wake", f"{cycle_label} skipped no_candidate reason={self._clamp(reason_summary)}")
             return (
                 self._noop_pipeline(
+                    state=state,
                     started_at=started_at,
                     reason_summary=reason_summary,
                 ),
@@ -518,6 +555,7 @@ class ServiceInputMixin:
             )
             return (
                 self._noop_pipeline(
+                    state=state,
                     started_at=started_at,
                     reason_summary="同じ pending_intent 候補には最近 reply 済みのため、今回は再介入しない。",
                 ),
@@ -587,6 +625,7 @@ class ServiceInputMixin:
             time_context=pipeline["time_context"],
             affect_context=pipeline["affect_context"],
             drive_state_summary=pipeline.get("drive_state_summary"),
+            foreground_world_state=pipeline.get("foreground_world_state"),
             ongoing_action_summary=pipeline.get("ongoing_action_summary"),
             decision=decision,
             result_kind=result_kind,
@@ -594,6 +633,7 @@ class ServiceInputMixin:
             pending_intent_summary=pending_intent_summary,
             capability_decision_view=pipeline.get("capability_decision_view"),
             initiative_context=pipeline.get("initiative_context"),
+            world_state_trace=pipeline.get("world_state_trace"),
             trigger_kind=trigger_kind,
             input_event_kind=input_event_kind,
             input_event_role=input_event_role,
@@ -945,7 +985,28 @@ class ServiceInputMixin:
             return "noop"
         return internal_result_kind
 
-    def _noop_pipeline(self, *, started_at: str, reason_summary: str) -> dict[str, Any]:
+    def _noop_pipeline(
+        self,
+        *,
+        state: dict[str, Any] | None,
+        started_at: str,
+        reason_summary: str,
+    ) -> dict[str, Any]:
+        # world_state
+        foreground_world_state: list[dict[str, Any]] = []
+        if isinstance(state, dict):
+            foreground_world_state = (
+                self._summarize_foreground_world_states(
+                    self._list_current_world_states(
+                        state=state,
+                        current_time=started_at,
+                        limit=WORLD_STATE_FOREGROUND_LIMIT,
+                    ),
+                    current_time=started_at,
+                )
+                or []
+            )
+
         # 結果
         return {
             "recall_hint": self._empty_recall_hint(),
@@ -964,6 +1025,12 @@ class ServiceInputMixin:
                 "affect_states": [],
                 "recent_episode_affects": [],
             },
+            "foreground_world_state": foreground_world_state,
+            "world_state_trace": self._empty_world_state_trace(
+                source_kind=None,
+                source_ref=None,
+                foreground_world_state=foreground_world_state,
+            ),
             "decision": {
                 "kind": "noop",
                 "reason_code": "wake_noop",
@@ -1193,6 +1260,292 @@ class ServiceInputMixin:
                 }
                 for record in recent_episode_affects
             ],
+        }
+
+    def _refresh_world_state_context(
+        self,
+        *,
+        state: dict[str, Any],
+        started_at: str,
+        input_text: str,
+        trigger_kind: str,
+        client_context: dict[str, Any],
+        cycle_id: str | None,
+        observation_summary: dict[str, Any] | None,
+        capability_request_summary: dict[str, Any] | None,
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        existing_foreground_world_state = (
+            self._summarize_foreground_world_states(
+                self._list_current_world_states(
+                    state=state,
+                    current_time=started_at,
+                    limit=WORLD_STATE_FOREGROUND_LIMIT,
+                ),
+                current_time=started_at,
+            )
+            or []
+        )
+        source_kind = self._world_state_source_kind(trigger_kind)
+        source_ref = self._world_state_source_ref(
+            cycle_id=cycle_id,
+            trigger_kind=trigger_kind,
+            started_at=started_at,
+            capability_request_summary=capability_request_summary,
+        )
+        try:
+            source_pack = self._build_world_state_source_pack(
+                started_at=started_at,
+                input_text=input_text,
+                trigger_kind=trigger_kind,
+                client_context=client_context,
+                source_kind=source_kind,
+                source_ref=source_ref,
+                observation_summary=observation_summary,
+                existing_foreground_world_state=existing_foreground_world_state,
+            )
+            role_definition = state["model_presets"][state["selected_model_preset_id"]]["roles"]["input_interpretation"]
+            payload = self.llm.generate_world_state(
+                role_definition=role_definition,
+                source_pack=source_pack,
+            )
+            world_states = self._normalize_world_state_candidates(
+                memory_set_id=state["selected_memory_set_id"],
+                observed_at=started_at,
+                source_kind=source_kind,
+                source_ref=source_ref,
+                payload=payload,
+            )
+            refresh_summary = self.store.refresh_world_states(
+                memory_set_id=state["selected_memory_set_id"],
+                current_time=started_at,
+                world_states=world_states,
+                max_active=WORLD_STATE_MAX_ACTIVE,
+            )
+            foreground_world_state = (
+                self._summarize_foreground_world_states(
+                    self._list_current_world_states(
+                        state=state,
+                        current_time=started_at,
+                        limit=WORLD_STATE_FOREGROUND_LIMIT,
+                    ),
+                    current_time=started_at,
+                )
+                or []
+            )
+            return (
+                {
+                    "result_status": "succeeded",
+                    "candidate_state_count": len(payload.get("state_candidates", [])),
+                    "input_world_state_count": len(foreground_world_state),
+                    "foreground_world_state": foreground_world_state,
+                    "updated_state_count": int(refresh_summary.get("updated_count", 0)),
+                    "expired_state_count": int(refresh_summary.get("expired_count", 0)),
+                    "dropped_state_count": int(refresh_summary.get("dropped_count", 0)),
+                    "source_kind": source_kind,
+                    "source_ref": source_ref,
+                    "failure_reason": None,
+                },
+                foreground_world_state,
+            )
+        except (LLMError, KeyError, TypeError, ValueError) as exc:
+            return (
+                {
+                    "result_status": "failed",
+                    "candidate_state_count": 0,
+                    "input_world_state_count": len(existing_foreground_world_state),
+                    "foreground_world_state": existing_foreground_world_state,
+                    "updated_state_count": 0,
+                    "expired_state_count": 0,
+                    "dropped_state_count": 0,
+                    "source_kind": source_kind,
+                    "source_ref": source_ref,
+                    "failure_reason": str(exc),
+                },
+                existing_foreground_world_state,
+            )
+
+    def _build_world_state_source_pack(
+        self,
+        *,
+        started_at: str,
+        input_text: str,
+        trigger_kind: str,
+        client_context: dict[str, Any],
+        source_kind: str,
+        source_ref: str,
+        observation_summary: dict[str, Any] | None,
+        existing_foreground_world_state: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "trigger_kind": trigger_kind,
+            "current_input_summary": self._clamp(input_text.strip(), limit=200) or "",
+            "source_kind": source_kind,
+            "source_ref": source_ref,
+            "time_context": llm_local_time_text(started_at).replace("\n", " / "),
+            "client_context": self._build_world_state_client_context(client_context),
+            "existing_foreground_world_state": existing_foreground_world_state,
+        }
+        capability_result_summary = self._build_world_state_capability_result_summary(observation_summary)
+        if capability_result_summary is not None:
+            payload["capability_result_summary"] = capability_result_summary
+        return payload
+
+    def _build_world_state_client_context(self, client_context: dict[str, Any]) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        for key, limit in (
+            ("source", 48),
+            ("active_app", 80),
+            ("window_title", 120),
+            ("locale", 32),
+        ):
+            value = client_context.get(key)
+            if isinstance(value, str) and value.strip():
+                payload[key] = self._clamp(value.strip(), limit=limit)
+        image_count = client_context.get("image_count")
+        if isinstance(image_count, int) and image_count >= 0:
+            payload["image_count"] = image_count
+        return payload
+
+    def _build_world_state_capability_result_summary(
+        self,
+        observation_summary: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if not isinstance(observation_summary, dict):
+            return None
+        payload: dict[str, Any] = {}
+        for key in ("capability_id", "image_count", "image_interpreted", "error"):
+            value = observation_summary.get(key)
+            if value is None:
+                continue
+            payload[key] = value
+        if not payload:
+            return None
+        return payload
+
+    def _normalize_world_state_candidates(
+        self,
+        *,
+        memory_set_id: str,
+        observed_at: str,
+        source_kind: str,
+        source_ref: str,
+        payload: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        normalized: list[dict[str, Any]] = []
+        seen_identity: set[tuple[str, str, str]] = set()
+        for candidate in payload.get("state_candidates", []):
+            if not isinstance(candidate, dict):
+                continue
+            scope_type, scope_key = self._parse_world_state_scope(str(candidate["scope"]).strip())
+            identity = (str(candidate["state_type"]).strip(), scope_type, scope_key)
+            if identity in seen_identity:
+                continue
+            seen_identity.add(identity)
+            normalized.append(
+                {
+                    "world_state_id": f"world_state:{uuid.uuid4().hex}",
+                    "memory_set_id": memory_set_id,
+                    "state_type": str(candidate["state_type"]).strip(),
+                    "scope_type": scope_type,
+                    "scope_key": scope_key,
+                    "summary_text": str(candidate["summary_text"]).strip(),
+                    "source_kind": source_kind,
+                    "source_ref": source_ref,
+                    "confidence": self._world_state_score_from_hint(candidate["confidence_hint"]),
+                    "salience": self._world_state_score_from_hint(candidate["salience_hint"]),
+                    "observed_at": observed_at,
+                    "expires_at": self._world_state_expires_at(
+                        current_time=observed_at,
+                        state_type=str(candidate["state_type"]).strip(),
+                        ttl_hint=str(candidate["ttl_hint"]).strip(),
+                    ),
+                    "updated_at": observed_at,
+                }
+            )
+        normalized.sort(key=lambda record: (record["salience"], record["updated_at"]), reverse=True)
+        return normalized
+
+    def _world_state_source_kind(self, trigger_kind: str) -> str:
+        if trigger_kind == "user_message":
+            return "user_input"
+        if trigger_kind == "desktop_watch":
+            return "system_observation"
+        return "client_context"
+
+    def _world_state_source_ref(
+        self,
+        *,
+        cycle_id: str | None,
+        trigger_kind: str,
+        started_at: str,
+        capability_request_summary: dict[str, Any] | None,
+    ) -> str:
+        if isinstance(capability_request_summary, dict):
+            request_id = capability_request_summary.get("request_id")
+            if isinstance(request_id, str) and request_id.strip():
+                return request_id.strip()
+        if isinstance(cycle_id, str) and cycle_id:
+            return cycle_id
+        return f"{trigger_kind}:{started_at}"
+
+    def _parse_world_state_scope(self, value: str) -> tuple[str, str]:
+        if value in {"self", "user", "world"}:
+            return value, value
+        scope_type, separator, scope_key = value.partition(":")
+        normalized_scope_key = scope_key.strip()
+        if not separator or not normalized_scope_key:
+            raise ValueError("world_state scope is invalid.")
+        if scope_type == "entity":
+            if not any(
+                normalized_scope_key.startswith(prefix) and normalized_scope_key != prefix
+                for prefix in ("person:", "place:", "tool:")
+            ):
+                raise ValueError("world_state entity scope is invalid.")
+            return "entity", normalized_scope_key
+        if scope_type == "topic":
+            return "topic", value
+        if scope_type == "relationship":
+            refs = normalized_scope_key.split("|")
+            if len(refs) < 2 or len(refs) != len(set(refs)):
+                raise ValueError("world_state relationship scope is invalid.")
+            if "self" in refs:
+                expected_refs = ["self", *sorted(ref for ref in refs if ref != "self")]
+            else:
+                expected_refs = sorted(refs)
+            if refs != expected_refs:
+                raise ValueError("world_state relationship scope must be normalized.")
+            return "relationship", normalized_scope_key
+        raise ValueError("world_state scope_type is invalid.")
+
+    def _world_state_score_from_hint(self, hint: Any) -> float:
+        if not isinstance(hint, str) or hint.strip() not in WORLD_STATE_HINT_SCORES:
+            raise ValueError("world_state hint score is invalid.")
+        return WORLD_STATE_HINT_SCORES[hint.strip()]
+
+    def _world_state_expires_at(self, *, current_time: str, state_type: str, ttl_hint: str) -> str:
+        ttl_table = WORLD_STATE_TTL_SECONDS_BY_TYPE.get(state_type)
+        if ttl_table is None or ttl_hint not in ttl_table:
+            raise ValueError("world_state ttl is invalid.")
+        return (self._parse_iso(current_time) + timedelta(seconds=ttl_table[ttl_hint])).isoformat()
+
+    def _empty_world_state_trace(
+        self,
+        *,
+        source_kind: str | None,
+        source_ref: str | None,
+        foreground_world_state: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        return {
+            "result_status": "not_requested",
+            "candidate_state_count": 0,
+            "input_world_state_count": len(foreground_world_state),
+            "foreground_world_state": foreground_world_state,
+            "updated_state_count": 0,
+            "expired_state_count": 0,
+            "dropped_state_count": 0,
+            "source_kind": source_kind,
+            "source_ref": source_ref,
+            "failure_reason": None,
         }
 
     def _build_context_scope_filters(self, recall_hint: dict[str, Any]) -> list[tuple[str, str]]:
@@ -1427,8 +1780,10 @@ class ServiceInputMixin:
         input_text: str,
         client_context: dict[str, Any],
         runtime_summary: dict[str, Any],
+        foreground_world_state: list[dict[str, Any]] | None,
         recall_trace: dict[str, Any],
         decision_trace: dict[str, Any],
+        world_state_trace: dict[str, Any] | None,
         result_trace: dict[str, Any],
         memory_trace: dict[str, Any] | None,
         pending_intent_selection: dict[str, Any] | None = None,
@@ -1444,6 +1799,8 @@ class ServiceInputMixin:
             "runtime_state_summary": runtime_summary,
             "pending_intent_selection": pending_intent_selection or self._empty_pending_intent_selection_trace(),
         }
+        if foreground_world_state:
+            input_trace["foreground_world_state"] = foreground_world_state
         if isinstance(observation_summary, dict):
             input_trace["observation_summary"] = observation_summary
         if isinstance(ongoing_action_summary, dict):
@@ -1456,7 +1813,7 @@ class ServiceInputMixin:
             "input_trace": input_trace,
             "recall_trace": recall_trace,
             "decision_trace": decision_trace,
-            "world_state_trace": {},
+            "world_state_trace": world_state_trace or {},
             "result_trace": result_trace,
             "memory_trace": memory_trace or {},
         }
@@ -1509,6 +1866,7 @@ class ServiceInputMixin:
         time_context: dict[str, Any],
         affect_context: dict[str, Any],
         drive_state_summary: list[dict[str, Any]] | None,
+        foreground_world_state: list[dict[str, Any]] | None,
         ongoing_action_summary: dict[str, Any] | None,
         capability_decision_view: list[dict[str, Any]] | None,
         initiative_context: dict[str, Any] | None,
@@ -1526,6 +1884,7 @@ class ServiceInputMixin:
                 "time_context": time_context,
                 "affect_context_summary": self._summarize_affect_context(affect_context),
                 "drive_state_summary": drive_state_summary,
+                "foreground_world_state": foreground_world_state,
                 "ongoing_action_summary": ongoing_action_summary,
                 "capability_decision_view": capability_decision_view,
                 "initiative_context": initiative_context,
@@ -1634,6 +1993,7 @@ class ServiceInputMixin:
         time_context: dict[str, Any],
         affect_context: dict[str, Any],
         drive_state_summary: list[dict[str, Any]] | None,
+        foreground_world_state: list[dict[str, Any]] | None,
         ongoing_action_summary: dict[str, Any] | None,
         decision: dict[str, Any],
         result_kind: str,
@@ -1641,6 +2001,7 @@ class ServiceInputMixin:
         pending_intent_summary: dict[str, Any] | None,
         capability_decision_view: list[dict[str, Any]] | None,
         initiative_context: dict[str, Any] | None,
+        world_state_trace: dict[str, Any] | None,
         trigger_kind: str,
         input_event_kind: str,
         input_event_role: str,
@@ -1694,6 +2055,7 @@ class ServiceInputMixin:
             input_text=input_text,
             client_context=client_context,
             runtime_summary=runtime_summary,
+            foreground_world_state=foreground_world_state,
             recall_trace=self._build_success_recall_trace(recall_hint, recall_pack),
             decision_trace=self._build_success_decision_trace(
                 state=state,
@@ -1701,6 +2063,7 @@ class ServiceInputMixin:
                 time_context=time_context,
                 affect_context=affect_context,
                 drive_state_summary=drive_state_summary,
+                foreground_world_state=foreground_world_state,
                 ongoing_action_summary=ongoing_action_summary,
                 capability_decision_view=capability_decision_view,
                 initiative_context=initiative_context,
@@ -1708,6 +2071,7 @@ class ServiceInputMixin:
                 decision=decision,
                 pending_intent_summary=pending_intent_summary,
             ),
+            world_state_trace=world_state_trace,
             result_trace=self._build_success_result_trace(
                 started_at=started_at,
                 finished_at=finished_at,
@@ -1793,6 +2157,7 @@ class ServiceInputMixin:
             input_text=input_text,
             client_context=client_context,
             runtime_summary=runtime_summary,
+            foreground_world_state=None,
             recall_trace=recall_trace or self._build_failure_recall_trace(),
             decision_trace=self._build_failure_decision_trace(
                 state=state,
@@ -1803,6 +2168,7 @@ class ServiceInputMixin:
                 capability_decision_view=capability_decision_view,
                 initiative_context=initiative_context,
             ),
+            world_state_trace={},
             result_trace=self._build_failure_result_trace(
                 started_at=started_at,
                 finished_at=finished_at,
