@@ -112,6 +112,7 @@ request:
 ```json
 {
   "text": "こんにちは",
+  "images": ["data:image/png;base64,..."],
   "client_context": {
     "source": "CocoroConsole",
     "client_id": "console-...",
@@ -123,8 +124,10 @@ request:
 ```
 
 - `text` は必須の文字列
+- `images` は任意の Data URI 配列とする。値がないときは省略する
 - `client_context` は object とする。値がないときは省略する
 - 標準の `client_context` には `source / client_id / active_app / window_title / locale` を含める
+- server は `images` を永続化せず、必要な場合だけ短い観測要約へ変換して shared pipeline に渡す
 
 response:
 
@@ -176,6 +179,7 @@ response:
 | HTTP | `error.code` | 意味 |
 |------|--------------|------|
 | `400` | `invalid_text` | `text` が文字列ではない |
+| `400` | `invalid_images` | `images` が配列でない、または要素が不正 |
 | `400` | `invalid_client_context` | `client_context` が object ではない |
 
 ## 自律面

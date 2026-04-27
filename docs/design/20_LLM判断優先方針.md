@@ -116,7 +116,7 @@ OtomeKairo では、次の分離を基本形にする。
 3. 想起候補の意味的 rerank と section 選別
 4. `wake` / `desktop_watch` の pending-intent 候補選択
 
-`vision.capture` の image payload を使う観測意味理解は、`desktop_watch` に対する第一段を適用済みとする。
+`vision.capture` の image payload を使う観測意味理解は、`desktop_watch` と通常会話画像入力に対する第一段を適用済みとする。
 この段階では raw image payload を保持せず、短い観測要約だけを判断入力へ渡す。
 
 ## 個別設計との関係

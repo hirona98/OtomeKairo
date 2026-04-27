@@ -1050,6 +1050,7 @@ class LongSmokeRunner:
                     client_id="long-smoke-conversation",
                     active_app="LongSmokeConversation",
                     window_title=f"Conversation {sent_count + 1}",
+                    images=[PNG_DATA_URI] if sent_count == 0 else None,
                 )
                 sent_count += 1
                 next_conversation_at = now + self.args.conversation_interval_seconds
@@ -1336,19 +1337,23 @@ class LongSmokeRunner:
         client_id: str,
         active_app: str,
         window_title: str,
+        images: list[str] | None = None,
     ) -> str:
+        payload = {
+            "text": text,
+            "client_context": {
+                "source": source,
+                "client_id": client_id,
+                "active_app": active_app,
+                "window_title": window_title,
+                "locale": "ja-JP",
+            },
+        }
+        if images:
+            payload["images"] = images
         response = self.api.post(
             "/api/conversation",
-            {
-                "text": text,
-                "client_context": {
-                    "source": source,
-                    "client_id": client_id,
-                    "active_app": active_app,
-                    "window_title": window_title,
-                    "locale": "ja-JP",
-                },
-            },
+            payload,
         )
         cycle_id = response.get("cycle_id")
         if not isinstance(cycle_id, str) or not cycle_id:

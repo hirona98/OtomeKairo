@@ -20,6 +20,7 @@ from otomekairo.service_common import ServiceError, debug_log
 
 
 RECALL_HINT_RECENT_TURN_LIMIT = 6
+VISUAL_OBSERVATION_IMAGE_LIMIT = 1
 WORLD_STATE_FOREGROUND_LIMIT = 4
 WORLD_STATE_MAX_ACTIVE = 12
 WORLD_STATE_HINT_SCORES = {
@@ -48,10 +49,14 @@ class ServiceInputMixin:
         # 検証
         input_text = payload.get("text")
         client_context = payload.get("client_context", {})
+        input_images = self._normalize_visual_observation_images(payload.get("images"), allow_missing=True)
         if not isinstance(input_text, str):
             raise ServiceError(400, "invalid_text", "The text field must be a string.")
         if not isinstance(client_context, dict):
             raise ServiceError(400, "invalid_client_context", "The client_context field must be an object.")
+
+        current_client_context = dict(client_context)
+        observation_summary: dict[str, Any] | None = None
 
         # スナップショット
         cycle_id = self._new_cycle_id()
@@ -67,6 +72,25 @@ class ServiceInputMixin:
         )
 
         try:
+            # 画像観測要約
+            if input_images:
+                current_client_context["image_count"] = len(input_images)
+                observation_summary = {
+                    "source": "conversation_input",
+                    "image_count": len(input_images),
+                    "image_interpreted": False,
+                    "error": None,
+                }
+                current_client_context, observation_summary = self._interpret_visual_observation(
+                    state=state,
+                    started_at=started_at,
+                    trigger_kind="user_message",
+                    client_context=current_client_context,
+                    observation_summary=observation_summary,
+                    input_text=input_text,
+                    images=input_images,
+                )
+
             # パイプライン
             pipeline = self._run_input_pipeline(
                 state=state,
@@ -75,7 +99,8 @@ class ServiceInputMixin:
                 recent_turns=recent_turns,
                 cycle_id=cycle_id,
                 trigger_kind="user_message",
-                client_context=client_context,
+                client_context=current_client_context,
+                observation_summary=observation_summary,
             )
 
             # 成功
@@ -85,8 +110,9 @@ class ServiceInputMixin:
                 state=state,
                 runtime_summary=runtime_summary,
                 input_text=input_text,
-                client_context=client_context,
+                client_context=current_client_context,
                 pipeline=pipeline,
+                observation_summary=observation_summary,
             )
             debug_log(
                 "Conversation",
@@ -110,7 +136,7 @@ class ServiceInputMixin:
                 state=state,
                 runtime_summary=runtime_summary,
                 input_text=input_text,
-                client_context=client_context,
+                client_context=current_client_context,
                 failure_reason=str(exc),
                 recall_trace=self._build_failure_recall_trace(
                     recall_hint=exc.recall_hint_summary,
@@ -120,6 +146,7 @@ class ServiceInputMixin:
                 failure_event_payload={
                     "failure_stage": exc.failure_stage,
                 },
+                observation_summary=observation_summary,
             )
             self._emit_input_failure_logs(
                 cycle_id=cycle_id,
@@ -147,8 +174,9 @@ class ServiceInputMixin:
                 state=state,
                 runtime_summary=runtime_summary,
                 input_text=input_text,
-                client_context=client_context,
+                client_context=current_client_context,
                 failure_reason=str(exc),
+                observation_summary=observation_summary,
             )
             self._emit_input_failure_logs(
                 cycle_id=cycle_id,
@@ -180,6 +208,11 @@ class ServiceInputMixin:
     ) -> dict[str, Any]:
         cycle_label = self._debug_cycle_label(cycle_id)
         current_client_context = client_context or {}
+        effective_input_text = self._pipeline_effective_input_text(
+            input_text=input_text,
+            trigger_kind=trigger_kind,
+            observation_summary=observation_summary,
+        )
         debug_log(
             "Pipeline",
             (
@@ -200,7 +233,7 @@ class ServiceInputMixin:
         debug_log("Pipeline", f"{cycle_label} recall_hint start recent_turns={len(recall_hint_recent_turns)}")
         recall_hint = self.llm.generate_recall_hint(
             role_definition=recall_role,
-            input_text=input_text,
+            input_text=effective_input_text,
             recent_turns=recall_hint_recent_turns,
             current_time=started_at,
         )
@@ -216,7 +249,7 @@ class ServiceInputMixin:
         debug_log("Pipeline", f"{cycle_label} recall_pack start")
         recall_pack = self.recall.build_recall_pack(
             state=state,
-            input_text=input_text,
+            input_text=effective_input_text,
             recall_hint=recall_hint,
         )
         recall_summary = self._summarize_recall_pack(recall_pack)
@@ -247,7 +280,7 @@ class ServiceInputMixin:
         world_state_trace, foreground_world_state = self._refresh_world_state_context(
             state=state,
             started_at=started_at,
-            input_text=input_text,
+            input_text=effective_input_text,
             trigger_kind=trigger_kind,
             client_context=current_client_context,
             cycle_id=cycle_id,
@@ -286,7 +319,7 @@ class ServiceInputMixin:
         decision = self.llm.generate_decision(
             role_definition=decision_role,
             persona=persona,
-            input_text=input_text,
+            input_text=effective_input_text,
             recent_turns=recent_turns,
             time_context=time_context,
             affect_context=affect_context,
@@ -310,7 +343,7 @@ class ServiceInputMixin:
             reply_payload = self.llm.generate_reply(
                 role_definition=reply_role,
                 persona=persona,
-                input_text=input_text,
+                input_text=effective_input_text,
                 recent_turns=recent_turns,
                 time_context=time_context,
                 affect_context=affect_context,
@@ -343,6 +376,103 @@ class ServiceInputMixin:
             "decision": decision,
             "reply_payload": reply_payload,
         }
+
+    def _normalize_visual_observation_images(
+        self,
+        images: Any,
+        *,
+        allow_missing: bool,
+    ) -> list[str]:
+        if images is None and allow_missing:
+            return []
+        if not isinstance(images, list):
+            raise ServiceError(400, "invalid_images", "images must be an array.")
+        normalized_images: list[str] = []
+        for image in images:
+            if not isinstance(image, str) or not image.strip():
+                raise ServiceError(400, "invalid_images", "images must contain non-empty strings.")
+            normalized_images.append(image.strip())
+            if len(normalized_images) >= VISUAL_OBSERVATION_IMAGE_LIMIT:
+                break
+        return normalized_images
+
+    def _interpret_visual_observation(
+        self,
+        *,
+        state: dict[str, Any],
+        started_at: str,
+        trigger_kind: str,
+        client_context: dict[str, Any],
+        observation_summary: dict[str, Any],
+        input_text: str,
+        images: list[str],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        if not images:
+            return client_context, observation_summary
+
+        # role/source pack
+        selected_preset = state["model_presets"][state["selected_model_preset_id"]]
+        interpretation_role = selected_preset["roles"]["input_interpretation"]
+        source_pack = {
+            "trigger_kind": trigger_kind,
+            "time_context": llm_local_time_text(started_at).replace("\n", " / "),
+            "client_context": self._build_world_state_client_context(client_context),
+            "observation_summary": self._build_world_state_capability_result_summary(observation_summary) or {},
+            "current_input_summary": self._clamp(input_text.strip(), limit=200) or "",
+        }
+
+        # 実行
+        try:
+            payload = self.llm.generate_visual_observation_summary(
+                role_definition=interpretation_role,
+                source_pack=source_pack,
+                images=images,
+            )
+        except (LLMError, KeyError, ValueError) as exc:
+            observation_summary["image_interpretation_error"] = str(exc)
+            raise
+
+        # 反映
+        visual_summary_text = str(payload["summary_text"]).strip()
+        visual_confidence_hint = str(payload["confidence_hint"]).strip()
+        enriched_client_context = {
+            **client_context,
+            "image_summary_text": visual_summary_text,
+        }
+        enriched_observation_summary = {
+            **observation_summary,
+            "image_interpreted": True,
+            "visual_summary_text": visual_summary_text,
+            "visual_confidence_hint": visual_confidence_hint,
+        }
+        return enriched_client_context, enriched_observation_summary
+
+    def _pipeline_effective_input_text(
+        self,
+        *,
+        input_text: str,
+        trigger_kind: str,
+        observation_summary: dict[str, Any] | None,
+    ) -> str:
+        if trigger_kind != "user_message":
+            return input_text
+        visual_summary_text = self._visual_observation_summary_text(observation_summary)
+        if visual_summary_text is None:
+            return input_text
+        normalized_input_text = input_text.strip()
+        if visual_summary_text in normalized_input_text:
+            return input_text
+        if not normalized_input_text:
+            return f"画像観測では、{visual_summary_text}"
+        return f"{normalized_input_text} 画像観測では、{visual_summary_text}"
+
+    def _visual_observation_summary_text(self, observation_summary: dict[str, Any] | None) -> str | None:
+        if not isinstance(observation_summary, dict):
+            return None
+        summary_text = observation_summary.get("visual_summary_text")
+        if not isinstance(summary_text, str) or not summary_text.strip():
+            return None
+        return summary_text.strip()
 
     def _build_initiative_context(
         self,
