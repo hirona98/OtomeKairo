@@ -224,6 +224,26 @@ def build_world_state_messages(
     ]
 
 
+def build_visual_observation_messages(
+    *,
+    source_pack: dict[str, Any],
+    images: list[str],
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "role": "system",
+            "content": _build_visual_observation_system_prompt(),
+        },
+        {
+            "role": "user",
+            "content": _build_visual_observation_user_prompt(
+                source_pack=source_pack,
+                images=images,
+            ),
+        },
+    ]
+
+
 # validator_error を元に repair prompt を返す。
 def build_memory_interpretation_repair_prompt(validation_error: str) -> str:
     return (
@@ -317,6 +337,20 @@ def build_world_state_repair_prompt(validation_error: str) -> str:
         + " / ".join(sorted(WORLD_STATE_TTL_HINT_VALUES))
         + " のいずれかです。\n"
         "新しい source や raw payload の創作、Markdown、コードフェンス、説明文は禁止です。"
+    )
+
+
+def build_visual_observation_repair_prompt(validation_error: str) -> str:
+    return (
+        "前回の出力は visual_observation 契約を満たしていませんでした。\n"
+        f"validator_error: {validation_error}\n"
+        "同じ画像と source pack だけを根拠に、JSON オブジェクト 1 個だけを返し直してください。\n"
+        "トップレベルキーは summary_text, confidence_hint の 2 つだけです。\n"
+        "summary_text は 1 文、改行なし、内部識別子なしで返してください。\n"
+        "confidence_hint は "
+        + " / ".join(sorted(WORLD_STATE_HINT_VALUES))
+        + " のいずれかです。\n"
+        "raw payload、資格情報、内部 URL、配送先 client、base64 本文、Markdown、コードフェンス、説明文は禁止です。"
     )
 
 
@@ -611,8 +645,25 @@ def _build_world_state_system_prompt() -> str:
         + " のいずれかだけを使ってください。\n"
         "raw payload、資格情報、内部 URL、配送先 client、画像本文の意味内容を書いてはいけません。\n"
         "image_interpreted=false のとき、画像の中身を想像してはいけません。\n"
+        "image_interpreted=true で visual_summary_text があるときは、その短い要約だけを根拠に使ってください。\n"
         "source pack に十分な短期状態が無いなら state_candidates は空配列にしてください。\n"
         "state_candidates は最大 4 件までにしてください。"
+    )
+
+
+def _build_visual_observation_system_prompt() -> str:
+    return (
+        "あなたは OtomeKairo の input_interpretation で、desktop_watch の image payload を短い観測要約へ圧縮する visual_observation です。\n"
+        "画像と source pack を読み、JSON オブジェクト 1 個だけを返してください。\n"
+        "Markdown、コードフェンス、説明文は禁止です。\n"
+        "返すトップレベルキーは summary_text, confidence_hint の 2 つだけです。\n"
+        "summary_text は 1 文、改行なし、内部識別子なしにしてください。\n"
+        "summary_text では、画面の前景として判断に効く内容だけを短く要約してください。\n"
+        "細かな OCR の全文、座標、UI 構造、資格情報、内部 URL、配送先 client、base64 本文を書いてはいけません。\n"
+        "画像に自信が持てない場合は、控えめな summary_text と low confidence を返してください。\n"
+        "confidence_hint は "
+        + " / ".join(sorted(WORLD_STATE_HINT_VALUES))
+        + " のいずれかだけを使ってください。"
     )
 
 
@@ -669,6 +720,32 @@ def _build_world_state_user_prompt(source_pack: dict[str, Any]) -> str:
         "source_pack:\n"
         f"{json.dumps(localize_timestamp_fields(source_pack), ensure_ascii=False)}\n"
     )
+
+
+def _build_visual_observation_user_prompt(
+    *,
+    source_pack: dict[str, Any],
+    images: list[str],
+) -> list[dict[str, Any]]:
+    content: list[dict[str, Any]] = [
+        {
+            "type": "text",
+            "text": (
+                "source_pack:\n"
+                f"{json.dumps(localize_timestamp_fields(source_pack), ensure_ascii=False)}\n"
+            ),
+        }
+    ]
+    for image in images:
+        content.append(
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": image,
+                },
+            }
+        )
+    return content
 
 
 # internal_context は token を増やしすぎないよう compact して渡す。

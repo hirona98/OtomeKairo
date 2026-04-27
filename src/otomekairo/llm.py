@@ -13,6 +13,7 @@ from otomekairo.llm_contracts import (
     validate_memory_reflection_summary_contract,
     validate_pending_intent_selection_contract,
     validate_recall_pack_selection_contract,
+    validate_visual_observation_contract,
     validate_world_state_contract,
 )
 from otomekairo.llm_mock import MockLLMClient
@@ -31,6 +32,8 @@ from otomekairo.llm_prompts import (
     build_recall_pack_selection_repair_prompt,
     build_recall_hint_messages,
     build_reply_messages,
+    build_visual_observation_messages,
+    build_visual_observation_repair_prompt,
     build_world_state_messages,
     build_world_state_repair_prompt,
 )
@@ -500,6 +503,44 @@ class LLMClient:
             operation=operation,
         )
 
+    def generate_visual_observation_summary(
+        self,
+        *,
+        role_definition: dict,
+        source_pack: dict[str, Any],
+        images: list[str],
+    ) -> dict[str, Any]:
+        operation = "visual_observation"
+        debug_log(
+            "LLM",
+            (
+                f"{operation} start mode={self._debug_mode(role_definition)} "
+                f"model={self._debug_model(role_definition)} images={len(images)}"
+            ),
+        )
+        if self._is_mock_role_definition(role_definition):
+            payload = self.mock_client.generate_visual_observation_summary(
+                role_definition,
+                source_pack,
+                images,
+            )
+            debug_log("LLM", f"{operation} done mode=mock keys={self._debug_payload_keys(payload)}")
+            return payload
+
+        messages = build_visual_observation_messages(
+            source_pack=source_pack,
+            images=images,
+        )
+        return self._generate_structured_payload(
+            role_definition=role_definition,
+            messages=messages,
+            validator=validate_visual_observation_contract,
+            repair_prompt_builder=build_visual_observation_repair_prompt,
+            failure_message="VisualObservation の生成に失敗しました。解析可能な応答が得られませんでした。",
+            wrap_validation_error=True,
+            operation=operation,
+        )
+
     def generate_embeddings(
         self,
         *,
@@ -567,12 +608,39 @@ class LLMClient:
     def _debug_text_preview(self, value: Any) -> str:
         # 元文字列の先頭 200 文字だけを出す。
         if not isinstance(value, str):
+            if isinstance(value, list):
+                parts: list[str] = []
+                for item in value[:3]:
+                    if not isinstance(item, dict):
+                        continue
+                    item_type = item.get("type")
+                    if item_type == "text":
+                        text = item.get("text")
+                        if isinstance(text, str):
+                            preview = text[:80].replace("\r", "\\r").replace("\n", "\\n")
+                            parts.append(f"text:{preview}")
+                            continue
+                    if item_type == "image_url":
+                        parts.append("image_url")
+                return " | ".join(parts) if parts else "-"
             return "-"
         return value[:LLM_DEBUG_TEXT_PREVIEW_LIMIT].replace("\r", "\\r").replace("\n", "\\n")
 
     def _debug_text_length(self, value: Any) -> int:
         # 文字列以外は 0 扱いにする。
         if not isinstance(value, str):
+            if isinstance(value, list):
+                length = 0
+                for item in value:
+                    if not isinstance(item, dict):
+                        continue
+                    text = item.get("text")
+                    if isinstance(text, str):
+                        length += len(text)
+                        continue
+                    if item.get("type") == "image_url":
+                        length += 16
+                return length
             return 0
         return len(value)
 

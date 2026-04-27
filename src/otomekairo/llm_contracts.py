@@ -106,6 +106,7 @@ MAX_MEMORY_REFLECTION_SUMMARY_LENGTH = 140
 MAX_EVENT_EVIDENCE_SLOT_SENTENCES = 1
 MAX_RECALL_PACK_CONFLICT_SUMMARY_SENTENCES = 1
 MAX_PENDING_INTENT_SELECTION_REASON_SENTENCES = 1
+MAX_VISUAL_OBSERVATION_SUMMARY_LENGTH = 140
 RECALL_PACK_SECTION_NAMES = (
     "self_model",
     "user_model",
@@ -631,6 +632,33 @@ def validate_world_state_contract(payload: dict[str, Any]) -> None:
         if dedupe_key in seen_keys:
             raise LLMError("WorldState state_candidates に重複した state_type/scope の組を含めてはいけません。")
         seen_keys.add(dedupe_key)
+
+
+def validate_visual_observation_contract(payload: dict[str, Any]) -> None:
+    # 必須キー群
+    _validate_exact_keys(payload, {"summary_text", "confidence_hint"}, "VisualObservation")
+
+    # summary_text
+    summary_text = payload["summary_text"]
+    if not isinstance(summary_text, str):
+        raise LLMError("VisualObservation summary_text は文字列である必要があります。")
+    normalized_summary = summary_text.strip()
+    if not normalized_summary:
+        raise LLMError("VisualObservation summary_text は空にできません。")
+    if "\n" in normalized_summary or "\r" in normalized_summary:
+        raise LLMError("VisualObservation summary_text に改行を含めてはいけません。")
+    if len(normalized_summary) > MAX_VISUAL_OBSERVATION_SUMMARY_LENGTH:
+        raise LLMError("VisualObservation summary_text が最大長を超えています。")
+    if INTERNAL_IDENTIFIER_PATTERN.search(normalized_summary) is not None:
+        raise LLMError("VisualObservation summary_text に内部識別子を含めてはいけません。")
+    sentence_count = len([part for part in re.split(r"[。!?！？]+", normalized_summary) if part.strip()])
+    if sentence_count != 1:
+        raise LLMError("VisualObservation summary_text はちょうど 1 文である必要があります。")
+
+    # confidence_hint
+    confidence_hint = payload["confidence_hint"]
+    if confidence_hint not in WORLD_STATE_HINT_VALUES:
+        raise LLMError("VisualObservation confidence_hint が不正です。")
 
 
 def _recall_pack_candidate_refs_by_section(source_pack: dict[str, Any]) -> dict[str, set[str]]:

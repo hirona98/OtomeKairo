@@ -6,6 +6,7 @@ from datetime import timedelta
 from typing import Any
 
 from otomekairo.llm import LLMContractError, LLMError
+from otomekairo.memory_utils import llm_local_time_text
 from otomekairo.recall import RecallPackSelectionError
 from otomekairo.service_common import (
     BACKGROUND_DESKTOP_WATCH_POLL_SECONDS,
@@ -17,6 +18,8 @@ from otomekairo.service_common import (
     ServiceError,
     debug_log,
 )
+
+DESKTOP_WATCH_INTERPRET_IMAGE_LIMIT = 1
 
 
 class PendingIntentSelectionError(LLMError):
@@ -521,6 +524,20 @@ class ServiceSpontaneousMixin:
             )
 
             try:
+                # 画像観測要約
+                client_context, observation_summary = self._interpret_desktop_watch_capture(
+                    state=state,
+                    started_at=started_at,
+                    client_context=client_context,
+                    observation_summary=observation_summary,
+                    input_text=input_text,
+                    capture_response=capture_response,
+                )
+                input_text = self._build_desktop_watch_input_text(
+                    client_context=client_context,
+                    selected_candidate=None,
+                )
+
                 # 候補選択
                 selection_result = self._select_due_pending_intent_candidate(
                     state=state,
@@ -1301,6 +1318,69 @@ class ServiceSpontaneousMixin:
                     summary[key] = value.strip()
         return summary
 
+    def _interpret_desktop_watch_capture(
+        self,
+        *,
+        state: dict[str, Any],
+        started_at: str,
+        client_context: dict[str, Any],
+        observation_summary: dict[str, Any],
+        input_text: str,
+        capture_response: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        images = self._desktop_watch_interpretation_images(capture_response.get("images", []))
+        if not images:
+            return client_context, observation_summary
+
+        # role/source pack
+        selected_preset = state["model_presets"][state["selected_model_preset_id"]]
+        interpretation_role = selected_preset["roles"]["input_interpretation"]
+        source_pack = {
+            "trigger_kind": "desktop_watch",
+            "time_context": llm_local_time_text(started_at).replace("\n", " / "),
+            "client_context": self._build_world_state_client_context(client_context),
+            "observation_summary": self._build_world_state_capability_result_summary(observation_summary) or {},
+            "current_input_summary": self._clamp(input_text.strip(), limit=200) or "",
+        }
+
+        # 実行
+        try:
+            payload = self.llm.generate_visual_observation_summary(
+                role_definition=interpretation_role,
+                source_pack=source_pack,
+                images=images,
+            )
+        except (LLMError, KeyError, ValueError) as exc:
+            observation_summary["image_interpretation_error"] = str(exc)
+            raise
+
+        # 反映
+        visual_summary_text = str(payload["summary_text"]).strip()
+        visual_confidence_hint = str(payload["confidence_hint"]).strip()
+        enriched_client_context = {
+            **client_context,
+            "image_summary_text": visual_summary_text,
+        }
+        enriched_observation_summary = {
+            **observation_summary,
+            "image_interpreted": True,
+            "visual_summary_text": visual_summary_text,
+            "visual_confidence_hint": visual_confidence_hint,
+        }
+        return enriched_client_context, enriched_observation_summary
+
+    def _desktop_watch_interpretation_images(self, images: Any) -> list[str]:
+        if not isinstance(images, list):
+            return []
+        normalized_images: list[str] = []
+        for image in images:
+            if not isinstance(image, str) or not image.strip():
+                continue
+            normalized_images.append(image.strip())
+            if len(normalized_images) >= DESKTOP_WATCH_INTERPRET_IMAGE_LIMIT:
+                break
+        return normalized_images
+
     def _capability_request_summary(self, request_record: Any) -> dict[str, Any] | None:
         if not isinstance(request_record, dict):
             return None
@@ -1623,6 +1703,9 @@ class ServiceSpontaneousMixin:
             image_count = client_context.get("image_count")
             if isinstance(image_count, int) and image_count > 0:
                 parts.append(f"キャプチャ画像を {image_count} 件受け取った。")
+            image_summary_text = self._client_context_text(client_context.get("image_summary_text"), limit=160)
+            if isinstance(image_summary_text, str):
+                parts.append(f"画像観測では、{image_summary_text}")
 
         # 結果
         return parts

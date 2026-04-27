@@ -17,6 +17,7 @@ from otomekairo.llm_contracts import (
     validate_pending_intent_selection_contract,
     validate_recall_pack_selection_contract,
     validate_recall_hint_contract,
+    validate_visual_observation_contract,
     validate_world_state_contract,
 )
 
@@ -24,6 +25,45 @@ from otomekairo.llm_contracts import (
 # モッククライアント
 @dataclass(slots=True)
 class MockLLMClient:
+    def generate_visual_observation_summary(
+        self,
+        role_definition: dict,
+        source_pack: dict[str, Any],
+        images: list[str],
+    ) -> dict[str, Any]:
+        # model確認
+        self._assert_mock_model(role_definition)
+
+        # context
+        _ = images
+        client_context = source_pack.get("client_context", {}) if isinstance(source_pack, dict) else {}
+        active_app = ""
+        window_title = ""
+        if isinstance(client_context, dict):
+            active_app = str(client_context.get("active_app") or "").strip()
+            window_title = str(client_context.get("window_title") or "").strip()
+
+        # summary
+        if active_app and window_title:
+            if active_app in {"Slack", "Discord", "Teams"}:
+                channel_name = window_title.split("|", 1)[0].strip()
+                summary_text = f"{active_app} の会話画面が前景で、{channel_name} のやり取りが見えている。"
+            else:
+                summary_text = f"{active_app} の画面が前景で、{window_title} が表示されている。"
+        elif active_app:
+            summary_text = f"{active_app} の画面が前景にある。"
+        elif window_title:
+            summary_text = f"{window_title} の画面が前景にある。"
+        else:
+            summary_text = "現在のデスクトップ画面の前景が見えている。"
+
+        payload = {
+            "summary_text": summary_text,
+            "confidence_hint": "medium",
+        }
+        validate_visual_observation_contract(payload)
+        return payload
+
     def generate_recall_hint(
         self,
         role_definition: dict,

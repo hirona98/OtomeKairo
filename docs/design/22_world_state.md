@@ -106,7 +106,9 @@ LLM に渡す source pack は少なくとも次を持つ。
   "capability_result_summary": {
     "capability_id": "vision.capture",
     "image_count": 1,
-    "image_interpreted": false,
+    "image_interpreted": true,
+    "visual_summary_text": "Slack の general チャンネルが前景で、会話一覧と現在のスレッドが見えている。",
+    "visual_confidence_hint": "medium",
     "error": null
   },
   "existing_foreground_world_state": [
@@ -121,7 +123,8 @@ LLM に渡す source pack は少なくとも次を持つ。
 ```
 
 source pack には、画像、音声、長い外部サービス応答、資格情報、内部 URL、配送先 client を含めない。
-画像や音声の意味理解が未実装の段階では、`image_count` と `image_interpreted=false` だけを渡す。
+画像意味理解を通した場合は `visual_summary_text` を短い補助要約として渡してよい。
+ただし raw image payload 自体は source pack に含めない。
 
 LLM の出力は JSON object 1 個に固定する。
 

@@ -66,6 +66,8 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
             "target_client_id",
             "image_count",
             "image_interpreted",
+            "visual_summary_text",
+            "visual_confidence_hint",
             "error",
         ],
     },

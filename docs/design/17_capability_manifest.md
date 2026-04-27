@@ -141,6 +141,8 @@ inspection には運用確認に必要な binding 要約を出すが、token、c
     "target_client_id",
     "image_count",
     "image_interpreted",
+    "visual_summary_text",
+    "visual_confidence_hint",
     "error"
   ]
 }

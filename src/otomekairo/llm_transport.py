@@ -18,7 +18,7 @@ OPENROUTER_DEFAULT_TIMEOUT_SECONDS = 600
 def complete_text(
     *,
     role_definition: dict,
-    messages: list[dict[str, str]],
+    messages: list[dict[str, Any]],
 ) -> str:
     completion = _load_litellm_completion()
     request_kwargs: dict[str, Any] = {

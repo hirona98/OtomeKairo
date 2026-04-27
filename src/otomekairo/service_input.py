@@ -1400,6 +1400,7 @@ class ServiceInputMixin:
             ("active_app", 80),
             ("window_title", 120),
             ("locale", 32),
+            ("image_summary_text", 160),
         ):
             value = client_context.get(key)
             if isinstance(value, str) and value.strip():
@@ -1416,7 +1417,14 @@ class ServiceInputMixin:
         if not isinstance(observation_summary, dict):
             return None
         payload: dict[str, Any] = {}
-        for key in ("capability_id", "image_count", "image_interpreted", "error"):
+        for key in (
+            "capability_id",
+            "image_count",
+            "image_interpreted",
+            "visual_summary_text",
+            "visual_confidence_hint",
+            "error",
+        ):
             value = observation_summary.get(key)
             if value is None:
                 continue
