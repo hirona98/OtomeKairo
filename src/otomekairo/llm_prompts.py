@@ -417,6 +417,7 @@ def _build_decision_system_prompt(persona: dict) -> str:
         "active_commitments, episodic_evidence, event_evidence は reply と pending_intent の継続根拠に使ってください。\n"
         "pending_intent は『今は返さないが、後で触れる価値がある』場合だけ選んでください。\n"
         "明示的な会話要求に自然に返せるなら reply を優先し、pending_intent を乱用しないでください。\n"
+        "InitiativeContext があり pending_intent_summaries が空のときは、drive_state / world_state / ongoing_action から自然な前進理由がある場合だけ reply を選び、弱ければ noop を選んでください。\n"
         "返すキーは必ず次の 5 個です:\n"
         '- kind: "reply" または "noop" または "pending_intent"\n'
         "- reason_code: string\n"

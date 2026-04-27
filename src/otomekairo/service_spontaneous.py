@@ -1474,6 +1474,8 @@ class ServiceSpontaneousMixin:
         if selected_candidate is not None:
             parts.append(self._wake_input_text(selected_candidate))
             parts.append("いま保留中の会話候補を再評価したい。")
+        else:
+            parts.append("drive_state と world_state を見て、今は前へ出る価値があるかを見たい。")
         return " ".join(parts)
 
     def _emit_desktop_watch_reply_event(
@@ -1627,6 +1629,8 @@ class ServiceSpontaneousMixin:
         if selected_candidate is not None:
             parts.append(self._wake_input_text(selected_candidate))
             parts.append("いま保留中の会話候補を再評価したい。")
+        else:
+            parts.append("drive_state と world_state を見て、今は前へ出る価値があるかを見たい。")
         return " ".join(parts)
 
     def _client_context_input_parts(

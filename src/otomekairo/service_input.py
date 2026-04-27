@@ -656,46 +656,49 @@ class ServiceInputMixin:
         # 候補
         if selected_candidate is None:
             self._set_last_wake_at(started_at)
-            if (
-                isinstance(pending_intent_selection, dict)
-                and pending_intent_selection.get("selected_candidate_ref") == "none"
-                and isinstance(pending_intent_selection.get("selection_reason"), str)
-                and pending_intent_selection["selection_reason"].strip()
-            ):
-                reason_summary = pending_intent_selection["selection_reason"].strip()
-            else:
-                reason_summary = "起床機会は来たが、再評価すべき pending_intent 候補はまだ無い。"
-            debug_log("Wake", f"{cycle_label} skipped no_candidate reason={self._clamp(reason_summary)}")
-            return (
-                self._noop_pipeline(
-                    state=state,
-                    started_at=started_at,
-                    reason_summary=reason_summary,
-                ),
-                input_text,
-            )
+            if not self._has_autonomous_initiative_context(state=state, current_time=started_at):
+                if (
+                    isinstance(pending_intent_selection, dict)
+                    and pending_intent_selection.get("selected_candidate_ref") == "none"
+                    and isinstance(pending_intent_selection.get("selection_reason"), str)
+                    and pending_intent_selection["selection_reason"].strip()
+                ):
+                    reason_summary = pending_intent_selection["selection_reason"].strip()
+                else:
+                    reason_summary = "起床機会は来たが、再評価すべき pending_intent 候補も自発評価に使う前景状態もまだ無い。"
+                debug_log("Wake", f"{cycle_label} skipped no_candidate reason={self._clamp(reason_summary)}")
+                return (
+                    self._noop_pipeline(
+                        state=state,
+                        started_at=started_at,
+                        reason_summary=reason_summary,
+                    ),
+                    input_text,
+                )
+            debug_log("Wake", f"{cycle_label} autonomous path no_selected_candidate")
 
         # 返信抑制
-        if self._was_recently_replied(
-            dedupe_key=selected_candidate["dedupe_key"],
-            current_time=started_at,
-        ):
-            self._set_last_wake_at(started_at)
-            debug_log(
-                "Wake",
-                f"{cycle_label} skipped recently_replied candidate={selected_candidate.get('candidate_id')}",
-            )
-            return (
-                self._noop_pipeline(
-                    state=state,
-                    started_at=started_at,
-                    reason_summary="同じ pending_intent 候補には最近 reply 済みのため、今回は再介入しない。",
-                ),
-                input_text,
-            )
+        if selected_candidate is not None:
+            if self._was_recently_replied(
+                dedupe_key=selected_candidate["dedupe_key"],
+                current_time=started_at,
+            ):
+                self._set_last_wake_at(started_at)
+                debug_log(
+                    "Wake",
+                    f"{cycle_label} skipped recently_replied candidate={selected_candidate.get('candidate_id')}",
+                )
+                return (
+                    self._noop_pipeline(
+                        state=state,
+                        started_at=started_at,
+                        reason_summary="同じ pending_intent 候補には最近 reply 済みのため、今回は再介入しない。",
+                    ),
+                    input_text,
+                )
 
-        # トリガー集計
-        self._set_last_wake_at(started_at)
+            # トリガー集計
+            self._set_last_wake_at(started_at)
 
         # 起床入力
         pipeline = self._run_input_pipeline(
@@ -710,6 +713,38 @@ class ServiceInputMixin:
             pending_intent_selection=pending_intent_selection,
         )
         return pipeline, input_text
+
+    def _has_autonomous_initiative_context(
+        self,
+        *,
+        state: dict[str, Any],
+        current_time: str,
+    ) -> bool:
+        drive_state_summary = self._summarize_drive_states(
+            self._list_current_drive_states(
+                state=state,
+                current_time=current_time,
+            )
+        )
+        if drive_state_summary:
+            return True
+        foreground_world_state = self._summarize_foreground_world_states(
+            self._list_current_world_states(
+                state=state,
+                current_time=current_time,
+                limit=WORLD_STATE_FOREGROUND_LIMIT,
+            ),
+            current_time=current_time,
+        )
+        if foreground_world_state:
+            return True
+        ongoing_action_summary = self._summarize_ongoing_action(
+            self._current_ongoing_action(
+                state=state,
+                current_time=current_time,
+            )
+        )
+        return isinstance(ongoing_action_summary, dict)
 
     def _complete_input_success(
         self,

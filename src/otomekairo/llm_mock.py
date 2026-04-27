@@ -209,7 +209,6 @@ class MockLLMClient:
         _ = foreground_world_state
         _ = ongoing_action_summary
         _ = capability_decision_view
-        _ = initiative_context
         self._assert_mock_model(role_definition)
 
         # コンテキスト
@@ -227,7 +226,26 @@ class MockLLMClient:
         current_valence = float(current_vad.get("v", 0.0)) if isinstance(current_vad, dict) else 0.0
 
         # decisionルール
-        if not normalized:
+        initiative_trigger = initiative_context.get("trigger_kind") if isinstance(initiative_context, dict) else None
+        initiative_pending = initiative_context.get("pending_intent_summaries", []) if isinstance(initiative_context, dict) else []
+        if initiative_trigger in {"wake", "background_wake"} and not initiative_pending:
+            if self._should_mock_autonomous_initiative_reply(initiative_context):
+                payload = {
+                    "kind": "reply",
+                    "reason_code": "initiative_context",
+                    "reason_summary": "現在の drive_state や world_state から自発的に前へ出る理由がある。",
+                    "requires_confirmation": False,
+                    "pending_intent": None,
+                }
+            else:
+                payload = {
+                    "kind": "noop",
+                    "reason_code": "initiative_wait",
+                    "reason_summary": "現在の前景だけでは自発的に前へ出る理由がまだ弱い。",
+                    "requires_confirmation": False,
+                    "pending_intent": None,
+                }
+        elif not normalized:
             payload = {
                 "kind": "noop",
                 "reason_code": "empty_input",
@@ -330,7 +348,6 @@ class MockLLMClient:
         _ = foreground_world_state
         _ = ongoing_action_summary
         _ = capability_decision_view
-        _ = initiative_context
         self._assert_mock_model(role_definition)
 
         # コンテキスト
@@ -374,8 +391,15 @@ class MockLLMClient:
             if episode_item is not None or event_basis is not None or recent_turns:
                 continuity_prefix = "前の流れも踏まえると、"
 
+        initiative_reply = self._mock_initiative_reply_text(
+            initiative_context=initiative_context,
+            decision=decision,
+        )
+
         # 返信ルール
-        if decision["requires_confirmation"]:
+        if initiative_reply is not None:
+            reply_text = initiative_reply
+        elif decision["requires_confirmation"]:
             basis_text = None
             if relationship_item is not None:
                 basis_text = relationship_item["summary_text"]
@@ -446,6 +470,61 @@ class MockLLMClient:
 
         # 結果
         return None
+
+    def _should_mock_autonomous_initiative_reply(self, initiative_context: dict[str, Any] | None) -> bool:
+        if not isinstance(initiative_context, dict):
+            return False
+        drive_summaries = initiative_context.get("drive_summaries", [])
+        if isinstance(drive_summaries, list) and drive_summaries:
+            return True
+        world_state_summary = initiative_context.get("world_state_summary", [])
+        if isinstance(world_state_summary, list):
+            for item in world_state_summary:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("state_type") in {"schedule", "social_context", "body"}:
+                    return True
+        ongoing_action_summary = initiative_context.get("ongoing_action_summary")
+        if isinstance(ongoing_action_summary, dict):
+            status = str(ongoing_action_summary.get("status") or "").strip()
+            if status and status != "waiting_result":
+                return True
+        return False
+
+    def _mock_initiative_reply_text(
+        self,
+        *,
+        initiative_context: dict[str, Any] | None,
+        decision: dict[str, Any],
+    ) -> str | None:
+        if not isinstance(initiative_context, dict) or decision.get("kind") != "reply":
+            return None
+        if initiative_context.get("trigger_kind") not in {"wake", "background_wake"}:
+            return None
+        pending_intent_summaries = initiative_context.get("pending_intent_summaries", [])
+        if isinstance(pending_intent_summaries, list) and pending_intent_summaries:
+            return None
+        world_state_summary = initiative_context.get("world_state_summary", [])
+        if isinstance(world_state_summary, list):
+            for item in world_state_summary:
+                if not isinstance(item, dict):
+                    continue
+                summary_text = item.get("summary_text")
+                if not isinstance(summary_text, str) or not summary_text.strip():
+                    continue
+                if item.get("state_type") == "schedule":
+                    return f"{summary_text.strip()} という前景があるから、今のうちにそっと声をかけておくね。"
+                if item.get("state_type") in {"social_context", "body"}:
+                    return f"{summary_text.strip()} と見えているから、今の様子に少し触れてみるね。"
+        drive_summaries = initiative_context.get("drive_summaries", [])
+        if isinstance(drive_summaries, list):
+            for item in drive_summaries:
+                if not isinstance(item, dict):
+                    continue
+                summary_text = item.get("summary_text")
+                if isinstance(summary_text, str) and summary_text.strip():
+                    return f"{summary_text.strip()} が前景にあるから、今のうちに少しだけ前へ出てみるね。"
+        return "今の文脈には少し前へ出る理由があると見て、そっと声をかけるね。"
 
     def _should_mock_pending_intent(
         self,
