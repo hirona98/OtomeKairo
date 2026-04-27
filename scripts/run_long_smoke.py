@@ -1051,6 +1051,15 @@ class LongSmokeRunner:
                     active_app="LongSmokeConversation",
                     window_title=f"Conversation {sent_count + 1}",
                     images=[PNG_DATA_URI] if sent_count == 0 else None,
+                    extra_client_context=(
+                        {
+                            "external_service_summary": "GitHub の通知に未確認の更新がある。",
+                            "device_state_summary": "デスクトップ client は利用可能な状態で接続中。",
+                            "schedule_summary": "このあと long smoke の確認を続ける予定が近い。",
+                        }
+                        if sent_count == 0
+                        else None
+                    ),
                 )
                 sent_count += 1
                 next_conversation_at = now + self.args.conversation_interval_seconds
@@ -1338,6 +1347,7 @@ class LongSmokeRunner:
         active_app: str,
         window_title: str,
         images: list[str] | None = None,
+        extra_client_context: dict[str, str] | None = None,
     ) -> str:
         payload = {
             "text": text,
@@ -1349,6 +1359,8 @@ class LongSmokeRunner:
                 "locale": "ja-JP",
             },
         }
+        if isinstance(extra_client_context, dict):
+            payload["client_context"].update(extra_client_context)
         if images:
             payload["images"] = images
         response = self.api.post(

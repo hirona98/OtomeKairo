@@ -284,6 +284,7 @@ class ServiceInputMixin:
             trigger_kind=trigger_kind,
             client_context=current_client_context,
             cycle_id=cycle_id,
+            selected_candidate=selected_candidate,
             observation_summary=observation_summary,
             capability_request_summary=capability_request_summary,
         )
@@ -1402,6 +1403,7 @@ class ServiceInputMixin:
         trigger_kind: str,
         client_context: dict[str, Any],
         cycle_id: str | None,
+        selected_candidate: dict[str, Any] | None,
         observation_summary: dict[str, Any] | None,
         capability_request_summary: dict[str, Any] | None,
     ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
@@ -1431,6 +1433,7 @@ class ServiceInputMixin:
                 client_context=client_context,
                 source_kind=source_kind,
                 source_ref=source_ref,
+                selected_candidate=selected_candidate,
                 observation_summary=observation_summary,
                 existing_foreground_world_state=existing_foreground_world_state,
             )
@@ -1506,6 +1509,7 @@ class ServiceInputMixin:
         client_context: dict[str, Any],
         source_kind: str,
         source_ref: str,
+        selected_candidate: dict[str, Any] | None,
         observation_summary: dict[str, Any] | None,
         existing_foreground_world_state: list[dict[str, Any]],
     ) -> dict[str, Any]:
@@ -1518,6 +1522,41 @@ class ServiceInputMixin:
             "client_context": self._build_world_state_client_context(client_context),
             "existing_foreground_world_state": existing_foreground_world_state,
         }
+        for key, value in (
+            (
+                "external_service_context",
+                self._build_world_state_summary_context(
+                    client_context=client_context,
+                    summary_key="external_service_summary",
+                    limit=160,
+                ),
+            ),
+            (
+                "body_context",
+                self._build_world_state_summary_context(
+                    client_context=client_context,
+                    summary_key="body_state_summary",
+                    limit=160,
+                ),
+            ),
+            (
+                "device_context",
+                self._build_world_state_summary_context(
+                    client_context=client_context,
+                    summary_key="device_state_summary",
+                    limit=160,
+                ),
+            ),
+            (
+                "schedule_context",
+                self._build_world_state_schedule_context(
+                    client_context=client_context,
+                    selected_candidate=selected_candidate,
+                ),
+            ),
+        ):
+            if value is not None:
+                payload[key] = value
         capability_result_summary = self._build_world_state_capability_result_summary(observation_summary)
         if capability_result_summary is not None:
             payload["capability_result_summary"] = capability_result_summary
@@ -1538,6 +1577,60 @@ class ServiceInputMixin:
         image_count = client_context.get("image_count")
         if isinstance(image_count, int) and image_count >= 0:
             payload["image_count"] = image_count
+        return payload
+
+    def _build_world_state_summary_context(
+        self,
+        *,
+        client_context: dict[str, Any],
+        summary_key: str,
+        limit: int,
+    ) -> dict[str, Any] | None:
+        summary_text = self._client_context_text(client_context.get(summary_key), limit=limit)
+        if summary_text is None:
+            return None
+        return {
+            "summary_text": summary_text,
+        }
+
+    def _build_world_state_schedule_context(
+        self,
+        *,
+        client_context: dict[str, Any],
+        selected_candidate: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        payload: dict[str, Any] = {}
+        summary_text = self._client_context_text(client_context.get("schedule_summary"), limit=160)
+        if summary_text is not None:
+            payload["summary_text"] = summary_text
+        pending_intent = self._build_world_state_pending_intent_context(selected_candidate)
+        if pending_intent is not None:
+            payload["pending_intent"] = pending_intent
+        if not payload:
+            return None
+        return payload
+
+    def _build_world_state_pending_intent_context(
+        self,
+        selected_candidate: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if not isinstance(selected_candidate, dict):
+            return None
+        payload: dict[str, Any] = {}
+        for key, limit in (
+            ("intent_kind", 48),
+            ("intent_summary", 120),
+            ("reason_summary", 160),
+        ):
+            value = self._client_context_text(selected_candidate.get(key), limit=limit)
+            if value is not None:
+                payload[key] = value
+        for key in ("not_before", "expires_at"):
+            value = selected_candidate.get(key)
+            if isinstance(value, str) and value.strip():
+                payload[key] = value.strip()
+        if not payload:
+            return None
         return payload
 
     def _build_world_state_capability_result_summary(

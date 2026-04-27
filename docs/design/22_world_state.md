@@ -122,6 +122,9 @@ LLM に渡す source pack は少なくとも次を持つ。
 }
 ```
 
+外部サービス、身体、機器、予定の短い summary がある場合は、`external_service_context / body_context / device_context / schedule_context` を追加してよい。
+`schedule_context` には `summary_text` に加えて、wake や `desktop_watch` が再評価対象として選んだ pending-intent の `intent_summary / reason_summary / not_before / expires_at` を含めてよい。
+
 source pack には、画像、音声、長い外部サービス応答、資格情報、内部 URL、配送先 client を含めない。
 画像意味理解を通した場合は `visual_summary_text` を短い補助要約として渡してよい。
 ただし raw image payload 自体は source pack に含めない。

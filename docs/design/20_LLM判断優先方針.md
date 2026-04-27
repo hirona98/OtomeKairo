@@ -119,6 +119,8 @@ OtomeKairo では、次の分離を基本形にする。
 `vision.capture` の image payload を使う観測意味理解は、`desktop_watch` と通常会話画像入力に対する第一段を適用済みとする。
 この段階では raw image payload を保持せず、短い観測要約だけを判断入力へ渡す。
 
+`world_state` 更新では、画面要約に加えて `external_service / body / device / schedule` の短い structured context と wake の pending-intent 時刻ヒントを source pack に入れ、状態候補の意味抽出を LLM に寄せる。
+
 ## 個別設計との関係
 
 この文書は repo 全体の判断原則を定める。

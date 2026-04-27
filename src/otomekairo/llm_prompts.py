@@ -644,6 +644,7 @@ def _build_world_state_system_prompt() -> str:
         + " / ".join(sorted(WORLD_STATE_TTL_HINT_VALUES))
         + " のいずれかだけを使ってください。\n"
         "raw payload、資格情報、内部 URL、配送先 client、画像本文の意味内容を書いてはいけません。\n"
+        "external_service_context / body_context / device_context / schedule_context があるときは、その短い summary_text と時刻だけを根拠に使ってください。\n"
         "image_interpreted=false のとき、画像の中身を想像してはいけません。\n"
         "image_interpreted=true で visual_summary_text があるときは、その短い要約だけを根拠に使ってください。\n"
         "source pack に十分な短期状態が無いなら state_candidates は空配列にしてください。\n"

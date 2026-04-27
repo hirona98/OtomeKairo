@@ -127,7 +127,9 @@ request:
 - `images` は任意の Data URI 配列とする。値がないときは省略する
 - `client_context` は object とする。値がないときは省略する
 - 標準の `client_context` には `source / client_id / active_app / window_title / locale` を含める
+- `client_context` には任意で `external_service_summary / body_state_summary / device_state_summary / schedule_summary` を含めてよい。いずれも raw payload ではなく短い要約だけを渡す
 - server は `images` を永続化せず、必要な場合だけ短い観測要約へ変換して shared pipeline に渡す
+- server は上記 summary をそのまま永続化せず、必要な場合だけ `world_state` source pack の補助文脈へ使う
 
 response:
 
@@ -205,6 +207,7 @@ request:
 
 - `client_context` は object とする。値がないときは省略する
 - wake でも `client_context` の `source / active_app / window_title / locale` を起床入力の整形に使う
+- wake でも `client_context` の `external_service_summary / body_state_summary / device_state_summary / schedule_summary` があれば、`world_state` source pack の補助文脈へ使う
 
 response:
 

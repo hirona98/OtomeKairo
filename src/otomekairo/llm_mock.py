@@ -886,6 +886,49 @@ class MockLLMClient:
                 }
             )
 
+        schedule_summary = self._mock_world_state_schedule_summary(source_pack.get("schedule_context"))
+        if schedule_summary is not None:
+            state_candidates.append(
+                {
+                    "state_type": "schedule",
+                    "scope": "self",
+                    "summary_text": schedule_summary,
+                    "confidence_hint": "medium",
+                    "salience_hint": "high" if trigger_kind in {"wake", "background_wake"} else "medium",
+                    "ttl_hint": "medium",
+                }
+            )
+
+        for state_type, scope, summary_text in (
+            (
+                "external_service",
+                "world",
+                self._mock_world_state_structured_summary(source_pack.get("external_service_context")),
+            ),
+            (
+                "body",
+                "self",
+                self._mock_world_state_structured_summary(source_pack.get("body_context")),
+            ),
+            (
+                "device",
+                "world",
+                self._mock_world_state_structured_summary(source_pack.get("device_context")),
+            ),
+        ):
+            if summary_text is None:
+                continue
+            state_candidates.append(
+                {
+                    "state_type": state_type,
+                    "scope": scope,
+                    "summary_text": summary_text,
+                    "confidence_hint": "medium",
+                    "salience_hint": "medium",
+                    "ttl_hint": "medium",
+                }
+            )
+
         if capability_result_summary.get("image_count") and not state_candidates and trigger_kind == "desktop_watch":
             state_candidates.append(
                 {
@@ -969,6 +1012,31 @@ class MockLLMClient:
             return "ユーザーは移動や外出の途中にいる。"
         if any(token in current_input_summary for token in ("眠い", "寝る", "疲れた")):
             return "ユーザーは休息が必要そうな状態にある。"
+        return None
+
+    def _mock_world_state_structured_summary(self, context: Any) -> str | None:
+        if not isinstance(context, dict):
+            return None
+        summary_text = context.get("summary_text")
+        if not isinstance(summary_text, str) or not summary_text.strip():
+            return None
+        return summary_text.strip()
+
+    def _mock_world_state_schedule_summary(self, schedule_context: Any) -> str | None:
+        if not isinstance(schedule_context, dict):
+            return None
+        summary_text = schedule_context.get("summary_text")
+        if isinstance(summary_text, str) and summary_text.strip():
+            return summary_text.strip()
+        pending_intent = schedule_context.get("pending_intent")
+        if not isinstance(pending_intent, dict):
+            return None
+        intent_summary = pending_intent.get("intent_summary")
+        if isinstance(intent_summary, str) and intent_summary.strip():
+            return f"近いうちに {intent_summary.strip()} を見直す予定が前景にある。"
+        reason_summary = pending_intent.get("reason_summary")
+        if isinstance(reason_summary, str) and reason_summary.strip():
+            return f"近い予定として {reason_summary.strip()}"
         return None
 
     def _mock_open_loops(self, normalized: str, primary_recall_focus: str) -> list[str]:

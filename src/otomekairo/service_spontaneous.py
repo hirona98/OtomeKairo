@@ -1291,6 +1291,10 @@ class ServiceSpontaneousMixin:
             "window_title": client_context.get("window_title"),
             "locale": client_context.get("locale"),
             "image_count": len(capture_response.get("images", [])),
+            "external_service_summary": client_context.get("external_service_summary"),
+            "body_state_summary": client_context.get("body_state_summary"),
+            "device_state_summary": client_context.get("device_state_summary"),
+            "schedule_summary": client_context.get("schedule_summary"),
         }
 
     def _desktop_watch_observation_summary(self, capture_response: dict[str, Any]) -> dict[str, Any]:
