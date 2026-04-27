@@ -241,7 +241,11 @@ class ServiceSpontaneousMixin:
                     trigger_kind=trigger_kind,
                     input_event_kind=input_event_kind,
                     input_event_role="system",
-                    consolidate_memory=False,
+                    consolidate_memory=self._should_consolidate_spontaneous_cycle(
+                        trigger_kind=trigger_kind,
+                        pipeline=pipeline,
+                        observation_summary=None,
+                    ),
                     pending_intent_selection=pending_intent_selection,
                 )
 
@@ -568,7 +572,11 @@ class ServiceSpontaneousMixin:
                     trigger_kind="desktop_watch",
                     input_event_kind="desktop_watch",
                     input_event_role="system",
-                    consolidate_memory=False,
+                    consolidate_memory=self._should_consolidate_spontaneous_cycle(
+                        trigger_kind="desktop_watch",
+                        pipeline=pipeline,
+                        observation_summary=observation_summary,
+                    ),
                     pending_intent_selection=pending_intent_selection,
                     observation_summary=observation_summary,
                     capability_request_summary=capability_request_summary,

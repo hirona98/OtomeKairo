@@ -13,6 +13,7 @@ from otomekairo.memory_utils import (
     local_now,
     localize_timestamp_fields,
     now_iso,
+    stable_json,
 )
 from otomekairo.recall import RecallPackSelectionError
 from otomekairo.service_common import ServiceError, debug_log
@@ -1337,6 +1338,7 @@ class ServiceInputMixin:
                     "result_status": "succeeded",
                     "candidate_state_count": len(payload.get("state_candidates", [])),
                     "input_world_state_count": len(foreground_world_state),
+                    "previous_foreground_world_state": existing_foreground_world_state,
                     "foreground_world_state": foreground_world_state,
                     "updated_state_count": int(refresh_summary.get("updated_count", 0)),
                     "expired_state_count": int(refresh_summary.get("expired_count", 0)),
@@ -1353,6 +1355,7 @@ class ServiceInputMixin:
                     "result_status": "failed",
                     "candidate_state_count": 0,
                     "input_world_state_count": len(existing_foreground_world_state),
+                    "previous_foreground_world_state": existing_foreground_world_state,
                     "foreground_world_state": existing_foreground_world_state,
                     "updated_state_count": 0,
                     "expired_state_count": 0,
@@ -1539,6 +1542,7 @@ class ServiceInputMixin:
             "result_status": "not_requested",
             "candidate_state_count": 0,
             "input_world_state_count": len(foreground_world_state),
+            "previous_foreground_world_state": foreground_world_state,
             "foreground_world_state": foreground_world_state,
             "updated_state_count": 0,
             "expired_state_count": 0,
@@ -1547,6 +1551,68 @@ class ServiceInputMixin:
             "source_ref": source_ref,
             "failure_reason": None,
         }
+
+    def _should_consolidate_spontaneous_cycle(
+        self,
+        *,
+        trigger_kind: str,
+        pipeline: dict[str, Any],
+        observation_summary: dict[str, Any] | None,
+    ) -> bool:
+        if trigger_kind not in {"wake", "background_wake", "desktop_watch"}:
+            return False
+
+        decision = pipeline.get("decision")
+        if isinstance(decision, dict):
+            decision_kind = decision.get("kind")
+            if decision_kind in {"reply", "pending_intent"}:
+                return True
+
+        if self._observation_capability_failed(observation_summary):
+            return True
+
+        return self._foreground_world_state_changed(pipeline)
+
+    def _observation_capability_failed(self, observation_summary: dict[str, Any] | None) -> bool:
+        if not isinstance(observation_summary, dict):
+            return False
+        error = observation_summary.get("error")
+        return isinstance(error, str) and bool(error.strip())
+
+    def _foreground_world_state_changed(self, pipeline: dict[str, Any]) -> bool:
+        if not isinstance(pipeline, dict):
+            return False
+        world_state_trace = pipeline.get("world_state_trace")
+        if not isinstance(world_state_trace, dict):
+            return False
+        previous = world_state_trace.get("previous_foreground_world_state") or []
+        current = pipeline.get("foreground_world_state") or world_state_trace.get("foreground_world_state") or []
+        if not previous and not current:
+            return False
+        return self._foreground_world_state_signature(previous) != self._foreground_world_state_signature(current)
+
+    def _foreground_world_state_signature(self, foreground_world_state: Any) -> str:
+        if not isinstance(foreground_world_state, list):
+            return "[]"
+        signature_items: list[dict[str, Any]] = []
+        for summary in foreground_world_state:
+            if not isinstance(summary, dict):
+                continue
+            signature_items.append(
+                {
+                    "state_type": summary.get("state_type"),
+                    "scope": summary.get("scope"),
+                    "summary_text": summary.get("summary_text"),
+                }
+            )
+        signature_items.sort(
+            key=lambda item: (
+                str(item.get("state_type") or ""),
+                str(item.get("scope") or ""),
+                str(item.get("summary_text") or ""),
+            )
+        )
+        return stable_json(signature_items)
 
     def _build_context_scope_filters(self, recall_hint: dict[str, Any]) -> list[tuple[str, str]]:
         # 既定値
