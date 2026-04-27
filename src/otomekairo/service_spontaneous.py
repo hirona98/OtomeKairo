@@ -219,6 +219,7 @@ class ServiceSpontaneousMixin:
                 pipeline, input_text = self._run_wake_pipeline(
                     state=state,
                     started_at=started_at,
+                    trigger_kind=trigger_kind,
                     client_context=client_context,
                     recent_turns=recent_turns,
                     selected_candidate=selected_candidate,
@@ -545,6 +546,10 @@ class ServiceSpontaneousMixin:
                     input_text=input_text,
                     recent_turns=recent_turns,
                     cycle_id=cycle_id,
+                    trigger_kind="desktop_watch",
+                    client_context=client_context,
+                    selected_candidate=selected_candidate,
+                    pending_intent_selection=pending_intent_selection,
                 )
 
                 # 成功

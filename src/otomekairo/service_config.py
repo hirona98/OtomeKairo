@@ -307,6 +307,69 @@ class ServiceConfigMixin:
             },
         }
 
+    def _build_capability_decision_view(self) -> list[dict[str, Any]] | None:
+        manifests = capability_manifests()
+        bindings = self._event_stream_registry.list_capability_bindings()
+        accepted_bindings = bindings["accepted"]
+        rejected_bindings = bindings["rejected"]
+        decision_view: list[dict[str, Any]] = []
+        for capability_id, manifest in sorted(manifests.items()):
+            availability = self._build_capability_availability(
+                manifest=manifest,
+                bound_client_ids=accepted_bindings.get(capability_id, []),
+                rejected_bindings=rejected_bindings,
+            )
+            decision_view.append(
+                {
+                    "id": capability_id,
+                    "version": manifest["version"],
+                    "available": availability["available"],
+                    "kind": manifest["kind"],
+                    "what_it_does": self._clamp(str(manifest.get("decision_description") or "").strip(), limit=80),
+                    "when_to_use": [
+                        self._clamp(str(item).strip(), limit=80)
+                        for item in manifest.get("when_to_use", [])
+                        if isinstance(item, str) and item.strip()
+                    ][:3],
+                    "do_not_use_when": [
+                        self._clamp(str(item).strip(), limit=80)
+                        for item in manifest.get("do_not_use_when", [])
+                        if isinstance(item, str) and item.strip()
+                    ][:3],
+                    "required_input": self._capability_required_input_summary(manifest),
+                    "risk_level": manifest.get("risk_level"),
+                    "unavailable_reason": availability["unavailable_reason"],
+                }
+            )
+        if not decision_view:
+            return None
+        return decision_view
+
+    def _capability_required_input_summary(self, manifest: dict[str, Any]) -> str | None:
+        input_schema = manifest.get("input_schema")
+        if not isinstance(input_schema, dict):
+            return None
+        properties = input_schema.get("properties", {})
+        required_names = input_schema.get("required", [])
+        if not isinstance(properties, dict) or not isinstance(required_names, list):
+            return None
+        parts: list[str] = []
+        for field_name in required_names[:4]:
+            if not isinstance(field_name, str) or not field_name.strip():
+                continue
+            property_schema = properties.get(field_name, {})
+            if (
+                isinstance(property_schema, dict)
+                and isinstance(property_schema.get("enum"), list)
+                and len(property_schema["enum"]) == 1
+            ):
+                parts.append(f"{field_name}={property_schema['enum'][0]}")
+            else:
+                parts.append(field_name)
+        if not parts:
+            return None
+        return ", ".join(parts)
+
     def patch_current(self, token: str | None, payload: dict[str, Any]) -> dict[str, Any]:
         # 状態
         state = self._require_token(token)

@@ -56,6 +56,8 @@ class ServiceInputMixin:
                 input_text=input_text,
                 recent_turns=recent_turns,
                 cycle_id=cycle_id,
+                trigger_kind="user_message",
+                client_context=client_context,
             )
 
             # 成功
@@ -151,8 +153,13 @@ class ServiceInputMixin:
         input_text: str,
         recent_turns: list[dict[str, Any]],
         cycle_id: str | None = None,
+        trigger_kind: str = "user_message",
+        client_context: dict[str, Any] | None = None,
+        selected_candidate: dict[str, Any] | None = None,
+        pending_intent_selection: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         cycle_label = self._debug_cycle_label(cycle_id)
+        current_client_context = client_context or {}
         debug_log(
             "Pipeline",
             (
@@ -223,11 +230,22 @@ class ServiceInputMixin:
                 current_time=started_at,
             )
         )
+        capability_decision_view = self._build_capability_decision_view()
+        initiative_context = self._build_initiative_context(
+            trigger_kind=trigger_kind,
+            client_context=current_client_context,
+            drive_state_summary=drive_state_summary,
+            ongoing_action_summary=ongoing_action_summary,
+            capability_decision_view=capability_decision_view,
+            selected_candidate=selected_candidate,
+            pending_intent_selection=pending_intent_selection,
+        )
         debug_log(
             "Pipeline",
             (
                 f"{cycle_label} context done affect_states={len(affect_context.get('affect_states', []))} "
-                f"drives={len(drive_state_summary or [])} ongoing_action={isinstance(ongoing_action_summary, dict)}"
+                f"drives={len(drive_state_summary or [])} ongoing_action={isinstance(ongoing_action_summary, dict)} "
+                f"capabilities={len(capability_decision_view or [])} initiative={isinstance(initiative_context, dict)}"
             ),
         )
 
@@ -242,6 +260,8 @@ class ServiceInputMixin:
             affect_context=affect_context,
             drive_state_summary=drive_state_summary,
             ongoing_action_summary=ongoing_action_summary,
+            capability_decision_view=capability_decision_view,
+            initiative_context=initiative_context,
             recall_hint=recall_hint,
             recall_pack=recall_pack,
         )
@@ -263,6 +283,8 @@ class ServiceInputMixin:
                 affect_context=affect_context,
                 drive_state_summary=drive_state_summary,
                 ongoing_action_summary=ongoing_action_summary,
+                capability_decision_view=capability_decision_view,
+                initiative_context=initiative_context,
                 recall_hint=recall_hint,
                 recall_pack=recall_pack,
                 decision=decision,
@@ -280,15 +302,155 @@ class ServiceInputMixin:
             "affect_context": affect_context,
             "drive_state_summary": drive_state_summary,
             "ongoing_action_summary": ongoing_action_summary,
+            "capability_decision_view": capability_decision_view,
+            "initiative_context": initiative_context,
             "decision": decision,
             "reply_payload": reply_payload,
         }
+
+    def _build_initiative_context(
+        self,
+        *,
+        trigger_kind: str,
+        client_context: dict[str, Any],
+        drive_state_summary: list[dict[str, Any]] | None,
+        ongoing_action_summary: dict[str, Any] | None,
+        capability_decision_view: list[dict[str, Any]] | None,
+        selected_candidate: dict[str, Any] | None,
+        pending_intent_selection: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if trigger_kind not in {"wake", "background_wake", "desktop_watch"}:
+            return None
+        return {
+            "trigger_kind": trigger_kind,
+            "opportunity_summary": self._initiative_opportunity_summary(
+                trigger_kind=trigger_kind,
+                client_context=client_context,
+                selected_candidate=selected_candidate,
+            ),
+            "drive_summaries": self._initiative_drive_summaries(drive_state_summary),
+            "pending_intent_summaries": self._initiative_pending_intent_summaries(selected_candidate),
+            "world_state_summary": "前景 world_state はまだ未実装。",
+            "ongoing_action_summary": ongoing_action_summary,
+            "capability_summary": self._initiative_capability_summary(capability_decision_view),
+            "intervention_risk_summary": self._initiative_intervention_risk_summary(
+                trigger_kind=trigger_kind,
+                ongoing_action_summary=ongoing_action_summary,
+                capability_decision_view=capability_decision_view,
+                selected_candidate=selected_candidate,
+                pending_intent_selection=pending_intent_selection,
+            ),
+        }
+
+    def _initiative_opportunity_summary(
+        self,
+        *,
+        trigger_kind: str,
+        client_context: dict[str, Any],
+        selected_candidate: dict[str, Any] | None,
+    ) -> str:
+        if trigger_kind == "background_wake":
+            if isinstance(selected_candidate, dict):
+                return "background wake が来ており、保留中の候補を再評価する機会がある。"
+            return "background wake が来ており、直近入力なしで前進可否を見直す機会がある。"
+        if trigger_kind == "wake":
+            if isinstance(selected_candidate, dict):
+                return "manual wake が呼ばれ、保留中の候補を再評価する機会がある。"
+            return "manual wake が呼ばれ、今の前進可否を見直す機会がある。"
+        active_app = self._client_context_text(client_context.get("active_app"), limit=48)
+        if active_app:
+            return f"desktop_watch が前景変化を観測しており、{active_app} を中心に今の判断機会がある。"
+        return "desktop_watch が前景変化を観測しており、今の判断機会がある。"
+
+    def _initiative_drive_summaries(
+        self,
+        drive_state_summary: list[dict[str, Any]] | None,
+    ) -> list[dict[str, Any]]:
+        summaries: list[dict[str, Any]] = []
+        for drive_state in drive_state_summary or []:
+            if not isinstance(drive_state, dict):
+                continue
+            summaries.append(
+                {
+                    "drive_id": drive_state.get("drive_id"),
+                    "summary_text": drive_state.get("summary_text"),
+                    "salience": drive_state.get("salience"),
+                }
+            )
+        return summaries
+
+    def _initiative_pending_intent_summaries(self, selected_candidate: dict[str, Any] | None) -> list[dict[str, Any]]:
+        if not isinstance(selected_candidate, dict):
+            return []
+        return [
+            {
+                "intent_kind": selected_candidate.get("intent_kind"),
+                "intent_summary": selected_candidate.get("intent_summary"),
+                "reason_summary": selected_candidate.get("reason_summary"),
+            }
+        ]
+
+    def _initiative_capability_summary(
+        self,
+        capability_decision_view: list[dict[str, Any]] | None,
+    ) -> dict[str, Any]:
+        available_ids: list[str] = []
+        unavailable_items: list[dict[str, Any]] = []
+        for item in capability_decision_view or []:
+            if not isinstance(item, dict):
+                continue
+            capability_id = item.get("id")
+            if not isinstance(capability_id, str) or not capability_id:
+                continue
+            if item.get("available"):
+                available_ids.append(capability_id)
+                continue
+            unavailable_items.append(
+                {
+                    "id": capability_id,
+                    "reason": item.get("unavailable_reason"),
+                }
+            )
+        return {
+            "available_count": len(available_ids),
+            "available_ids": available_ids,
+            "unavailable_count": len(unavailable_items),
+            "unavailable_items": unavailable_items[:3],
+        }
+
+    def _initiative_intervention_risk_summary(
+        self,
+        *,
+        trigger_kind: str,
+        ongoing_action_summary: dict[str, Any] | None,
+        capability_decision_view: list[dict[str, Any]] | None,
+        selected_candidate: dict[str, Any] | None,
+        pending_intent_selection: dict[str, Any] | None,
+    ) -> str | None:
+        reasons: list[str] = []
+        if trigger_kind == "background_wake":
+            reasons.append("直近入力のない定期 wake なので、過剰介入は避けたい。")
+        if isinstance(ongoing_action_summary, dict) and ongoing_action_summary.get("status") == "waiting_result":
+            reasons.append("ongoing_action が結果待ちで、重複介入は抑えたい。")
+        capability_summary = self._initiative_capability_summary(capability_decision_view)
+        if capability_summary["available_count"] == 0:
+            reasons.append("現時点で使える capability が見当たらない。")
+        if not isinstance(selected_candidate, dict):
+            pool_count = 0
+            if isinstance(pending_intent_selection, dict):
+                pool_count = int(pending_intent_selection.get("candidate_pool_count", 0))
+            if pool_count == 0:
+                reasons.append("前景に出す pending_intent 候補はまだ見当たらない。")
+        if not reasons:
+            return None
+        return " / ".join(reasons)
 
     def _run_wake_pipeline(
         self,
         *,
         state: dict[str, Any],
         started_at: str,
+        trigger_kind: str,
         client_context: dict[str, Any],
         recent_turns: list[dict[str, Any]],
         selected_candidate: dict[str, Any] | None,
@@ -372,6 +534,10 @@ class ServiceInputMixin:
             input_text=input_text,
             recent_turns=recent_turns,
             cycle_id=cycle_id,
+            trigger_kind=trigger_kind,
+            client_context=client_context,
+            selected_candidate=selected_candidate,
+            pending_intent_selection=pending_intent_selection,
         )
         return pipeline, input_text
 
@@ -426,6 +592,8 @@ class ServiceInputMixin:
             result_kind=result_kind,
             reply_payload=reply_payload,
             pending_intent_summary=pending_intent_summary,
+            capability_decision_view=pipeline.get("capability_decision_view"),
+            initiative_context=pipeline.get("initiative_context"),
             trigger_kind=trigger_kind,
             input_event_kind=input_event_kind,
             input_event_role=input_event_role,
@@ -1266,6 +1434,7 @@ class ServiceInputMixin:
         pending_intent_selection: dict[str, Any] | None = None,
         observation_summary: dict[str, Any] | None = None,
         ongoing_action_summary: dict[str, Any] | None = None,
+        initiative_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         input_trace = {
             "trigger_kind": cycle_summary["trigger_kind"],
@@ -1279,6 +1448,8 @@ class ServiceInputMixin:
             input_trace["observation_summary"] = observation_summary
         if isinstance(ongoing_action_summary, dict):
             input_trace["ongoing_action_summary"] = ongoing_action_summary
+        if isinstance(initiative_context, dict):
+            input_trace["initiative_context"] = initiative_context
         return {
             "cycle_id": cycle_id,
             "cycle_summary": cycle_summary,
@@ -1339,6 +1510,8 @@ class ServiceInputMixin:
         affect_context: dict[str, Any],
         drive_state_summary: list[dict[str, Any]] | None,
         ongoing_action_summary: dict[str, Any] | None,
+        capability_decision_view: list[dict[str, Any]] | None,
+        initiative_context: dict[str, Any] | None,
         recall_pack: dict[str, Any],
         decision: dict[str, Any],
         pending_intent_summary: dict[str, Any] | None,
@@ -1354,6 +1527,8 @@ class ServiceInputMixin:
                 "affect_context_summary": self._summarize_affect_context(affect_context),
                 "drive_state_summary": drive_state_summary,
                 "ongoing_action_summary": ongoing_action_summary,
+                "capability_decision_view": capability_decision_view,
+                "initiative_context": initiative_context,
                 "recall_pack_summary": self._summarize_recall_pack(recall_pack),
             },
             "primary_candidate_kind": decision["kind"],
@@ -1373,6 +1548,8 @@ class ServiceInputMixin:
         failure_reason: str,
         drive_state_summary: list[dict[str, Any]] | None = None,
         ongoing_action_summary: dict[str, Any] | None = None,
+        capability_decision_view: list[dict[str, Any]] | None = None,
+        initiative_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         trace = {
             "result_kind": "internal_failure",
@@ -1382,6 +1559,11 @@ class ServiceInputMixin:
             "current_context_summary": self._clamp(input_text),
             "primary_candidate_kind": None,
         }
+        if capability_decision_view or initiative_context:
+            trace["internal_context_summary"] = {
+                "capability_decision_view": capability_decision_view,
+                "initiative_context": initiative_context,
+            }
         if drive_state_summary:
             trace["drive_state_summary"] = drive_state_summary
         if isinstance(ongoing_action_summary, dict):
@@ -1457,6 +1639,8 @@ class ServiceInputMixin:
         result_kind: str,
         reply_payload: dict[str, Any] | None,
         pending_intent_summary: dict[str, Any] | None,
+        capability_decision_view: list[dict[str, Any]] | None,
+        initiative_context: dict[str, Any] | None,
         trigger_kind: str,
         input_event_kind: str,
         input_event_role: str,
@@ -1518,6 +1702,8 @@ class ServiceInputMixin:
                 affect_context=affect_context,
                 drive_state_summary=drive_state_summary,
                 ongoing_action_summary=ongoing_action_summary,
+                capability_decision_view=capability_decision_view,
+                initiative_context=initiative_context,
                 recall_pack=recall_pack,
                 decision=decision,
                 pending_intent_summary=pending_intent_summary,
@@ -1536,6 +1722,7 @@ class ServiceInputMixin:
             pending_intent_selection=pending_intent_selection,
             observation_summary=observation_summary,
             ongoing_action_summary=ongoing_action_summary,
+            initiative_context=initiative_context,
         )
         self.store.persist_cycle_records(
             events=events,
@@ -1565,6 +1752,8 @@ class ServiceInputMixin:
         pending_intent_selection: dict[str, Any] | None = None,
         drive_state_summary: list[dict[str, Any]] | None = None,
         ongoing_action_summary: dict[str, Any] | None = None,
+        capability_decision_view: list[dict[str, Any]] | None = None,
+        initiative_context: dict[str, Any] | None = None,
         observation_summary: dict[str, Any] | None = None,
         capability_request_summary: dict[str, Any] | None = None,
         ongoing_action_transition_summary: dict[str, Any] | None = None,
@@ -1611,6 +1800,8 @@ class ServiceInputMixin:
                 failure_reason=failure_reason,
                 drive_state_summary=drive_state_summary,
                 ongoing_action_summary=ongoing_action_summary,
+                capability_decision_view=capability_decision_view,
+                initiative_context=initiative_context,
             ),
             result_trace=self._build_failure_result_trace(
                 started_at=started_at,
@@ -1623,6 +1814,7 @@ class ServiceInputMixin:
             pending_intent_selection=pending_intent_selection,
             observation_summary=observation_summary,
             ongoing_action_summary=ongoing_action_summary,
+            initiative_context=initiative_context,
         )
         self.store.persist_cycle_records(
             events=events,
