@@ -10,6 +10,7 @@ from otomekairo.llm import LLMClient
 from otomekairo.log_stream import LogStreamRegistry
 from otomekairo.memory import MemoryConsolidator
 from otomekairo.recall import RecallBuilder
+from otomekairo.service_capability import ServiceCapabilityMixin
 from otomekairo.service_common import ServiceError, debug_log
 from otomekairo.service_config import ServiceConfigMixin
 from otomekairo.service_memory import ServiceMemoryMixin
@@ -20,6 +21,7 @@ from otomekairo.store import FileStore
 
 # サービス
 class OtomeKairoService(
+    ServiceCapabilityMixin,
     ServiceSpontaneousMixin,
     ServiceConfigMixin,
     ServiceInputMixin,
@@ -57,8 +59,8 @@ class OtomeKairoService(
         }
         self._event_stream_registry = EventStreamRegistry()
         self._log_stream_registry = LogStreamRegistry()
-        self._vision_capture_lock = threading.RLock()
-        self._pending_vision_capture_requests: dict[str, dict[str, Any]] = {}
+        self._capability_request_lock = threading.RLock()
+        self._pending_capability_requests: dict[str, dict[str, Any]] = {}
         self._stream_event_lock = threading.Lock()
         self._next_stream_event_value = 1
         debug_log("Service", "initialized")

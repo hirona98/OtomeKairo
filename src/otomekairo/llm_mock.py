@@ -207,8 +207,6 @@ class MockLLMClient:
         _ = persona
         _ = drive_state_summary
         _ = foreground_world_state
-        _ = ongoing_action_summary
-        _ = capability_decision_view
         self._assert_mock_model(role_definition)
 
         # コンテキスト
@@ -252,6 +250,25 @@ class MockLLMClient:
                 "reason_summary": "Input text was empty after normalization.",
                 "requires_confirmation": False,
                 "pending_intent": None,
+            }
+        elif self._should_mock_vision_capture_request(
+            normalized=normalized,
+            ongoing_action_summary=ongoing_action_summary,
+            capability_decision_view=capability_decision_view,
+        ):
+            payload = {
+                "kind": "capability_request",
+                "reason_code": "capability:vision.capture",
+                "reason_summary": "現在の画面状態を観測する必要がある。",
+                "requires_confirmation": False,
+                "pending_intent": None,
+                "capability_request": {
+                    "capability_id": "vision.capture",
+                    "input": {
+                        "source": "desktop",
+                        "mode": "still",
+                    },
+                },
             }
         elif self._should_mock_pending_intent(
             normalized=normalized,
@@ -323,6 +340,7 @@ class MockLLMClient:
             }
 
         # 検証
+        payload.setdefault("capability_request", None)
         validate_decision_contract(payload)
         return payload
 
@@ -525,6 +543,52 @@ class MockLLMClient:
                 if isinstance(summary_text, str) and summary_text.strip():
                     return f"{summary_text.strip()} が前景にあるから、今のうちに少しだけ前へ出てみるね。"
         return "今の文脈には少し前へ出る理由があると見て、そっと声をかけるね。"
+
+    def _should_mock_vision_capture_request(
+        self,
+        *,
+        normalized: str,
+        ongoing_action_summary: dict[str, Any] | None,
+        capability_decision_view: list[dict[str, Any]] | None,
+    ) -> bool:
+        if isinstance(ongoing_action_summary, dict) and ongoing_action_summary.get("status") == "waiting_result":
+            return False
+        if not self._mock_capability_available(capability_decision_view, "vision.capture"):
+            return False
+        markers = (
+            "画面",
+            "スクリーン",
+            "今見えて",
+            "見えている",
+            "表示",
+            "ウィンドウ",
+            "キャプチャ",
+            "デスクトップ",
+        )
+        if not any(marker in normalized for marker in markers):
+            return False
+        action_markers = (
+            "見て",
+            "見える",
+            "確認",
+            "読んで",
+            "教えて",
+            "何",
+            "どう",
+        )
+        return any(marker in normalized for marker in action_markers)
+
+    def _mock_capability_available(
+        self,
+        capability_decision_view: list[dict[str, Any]] | None,
+        capability_id: str,
+    ) -> bool:
+        for item in capability_decision_view or []:
+            if not isinstance(item, dict):
+                continue
+            if item.get("id") == capability_id and item.get("available") is True:
+                return True
+        return False
 
     def _should_mock_pending_intent(
         self,

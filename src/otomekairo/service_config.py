@@ -113,22 +113,28 @@ class ServiceConfigMixin:
 
     def get_capability_inspection(self, token: str | None) -> dict[str, Any]:
         # 認可
-        self._require_token(token)
+        state = self._require_token(token)
 
         # 状態
+        generated_at = self._now_iso()
         manifests = capability_manifests()
         bindings = self._event_stream_registry.list_capability_bindings()
         accepted_bindings = bindings["accepted"]
         rejected_bindings = bindings["rejected"]
+        active_ongoing_action = self._current_ongoing_action(
+            state=state,
+            current_time=generated_at,
+        )
 
         # 応答
         return {
-            "generated_at": self._now_iso(),
+            "generated_at": generated_at,
             "capabilities": [
                 self._build_capability_availability(
                     manifest=manifest,
                     bound_client_ids=accepted_bindings.get(capability_id, []),
                     rejected_bindings=rejected_bindings,
+                    active_ongoing_action=active_ongoing_action,
                 )
                 for capability_id, manifest in sorted(manifests.items())
             ],
@@ -259,6 +265,7 @@ class ServiceConfigMixin:
         manifest: dict[str, Any],
         bound_client_ids: list[str],
         rejected_bindings: list[dict[str, Any]],
+        active_ongoing_action: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         capability_id = manifest["id"]
         related_rejections = [
@@ -279,10 +286,22 @@ class ServiceConfigMixin:
             for binding in related_rejections
         ):
             missing_permissions = required_permissions
-        available = bool(bound_client_ids) and not missing_permissions
+        state_policy = manifest.get("state_policy", {})
+        parallel_blocked = (
+            isinstance(state_policy, dict)
+            and bool(state_policy.get("blocks_parallel_capability"))
+            and isinstance(active_ongoing_action, dict)
+            and active_ongoing_action.get("status") == "waiting_result"
+        )
+        available = bool(bound_client_ids) and not missing_permissions and not parallel_blocked
         unavailable_reason = None
         if not available:
-            unavailable_reason = "permission_denied" if missing_permissions else "no_binding"
+            if missing_permissions:
+                unavailable_reason = "permission_denied"
+            elif not bound_client_ids:
+                unavailable_reason = "no_binding"
+            elif parallel_blocked:
+                unavailable_reason = "parallel_blocked"
 
         return {
             "capability_id": capability_id,
@@ -304,20 +323,37 @@ class ServiceConfigMixin:
                 "cooldown_until": None,
                 "last_failure_at": None,
                 "last_failure_summary": None,
+                "parallel_blocked_by_action_id": (
+                    active_ongoing_action.get("action_id")
+                    if parallel_blocked and isinstance(active_ongoing_action, dict)
+                    else None
+                ),
             },
         }
 
-    def _build_capability_decision_view(self) -> list[dict[str, Any]] | None:
+    def _build_capability_decision_view(
+        self,
+        *,
+        state: dict[str, Any] | None = None,
+        current_time: str | None = None,
+    ) -> list[dict[str, Any]] | None:
         manifests = capability_manifests()
         bindings = self._event_stream_registry.list_capability_bindings()
         accepted_bindings = bindings["accepted"]
         rejected_bindings = bindings["rejected"]
+        active_ongoing_action = None
+        if isinstance(state, dict):
+            active_ongoing_action = self._current_ongoing_action(
+                state=state,
+                current_time=current_time or self._now_iso(),
+            )
         decision_view: list[dict[str, Any]] = []
         for capability_id, manifest in sorted(manifests.items()):
             availability = self._build_capability_availability(
                 manifest=manifest,
                 bound_client_ids=accepted_bindings.get(capability_id, []),
                 rejected_bindings=rejected_bindings,
+                active_ongoing_action=active_ongoing_action,
             )
             decision_view.append(
                 {

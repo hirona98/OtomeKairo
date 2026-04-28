@@ -186,6 +186,9 @@ capability 実行は次の順序で行う。
 8. server が `request_id`、`target_client_id`、`result_schema` を検証する。
 9. server が `memory_policy`、`state_policy`、`inspection_fields` に従って記憶、状態、inspection を更新する。
 
+現行実装は 1 から 8 と、`state_policy.creates_ongoing_action` に基づく `ongoing_action` の開始、結果待ち、完了、timeout 終了を実装する。
+非同期 capability result から共有判断パイプラインを再実行する処理、capability ごとの詳細な `capability_state` 更新、`inspection_fields` による result 展開は後続拡張で扱う。
+
 LLM が実行要求案を出しても、server の検証を通らない要求は実行しない。
 検証失敗は判断サイクルの `internal_failure` または capability failure として記録する。
 

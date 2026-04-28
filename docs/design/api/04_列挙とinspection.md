@@ -83,7 +83,8 @@ response:
           "paused": false,
           "cooldown_until": null,
           "last_failure_at": null,
-          "last_failure_summary": null
+          "last_failure_summary": null,
+          "parallel_blocked_by_action_id": null
         }
       }
     ],

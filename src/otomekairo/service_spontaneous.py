@@ -10,7 +10,6 @@ from otomekairo.recall import RecallPackSelectionError
 from otomekairo.service_common import (
     BACKGROUND_DESKTOP_WATCH_POLL_SECONDS,
     BACKGROUND_WAKE_POLL_SECONDS,
-    DESKTOP_WATCH_CAPTURE_TIMEOUT_MS,
     PENDING_INTENT_EXPIRES_HOURS,
     PENDING_INTENT_NOT_BEFORE_MINUTES,
     WAKE_REPLY_COOLDOWN_MINUTES,
@@ -84,38 +83,40 @@ class ServiceSpontaneousMixin:
         # 応答保存
         normalized_request_id = request_id.strip()
         normalized_client_id = client_id.strip()
-        with self._vision_capture_lock:
-            pending = self._pending_vision_capture_requests.get(normalized_request_id)
-            if pending is None:
-                debug_log(
-                    "DesktopWatch",
-                    f"capture response ignored request={normalized_request_id} client={normalized_client_id}",
-                )
-                return {}
-            request_record = pending.get("request_record")
-            target_client_id = request_record.get("target_client_id") if isinstance(request_record, dict) else None
-            if target_client_id != normalized_client_id:
+        result_payload = {
+            "images": normalized_images,
+            "client_context": client_context or {},
+            "error": error.strip() if isinstance(error, str) and error.strip() else None,
+        }
+        try:
+            response = self._accept_capability_result(
+                capability_id="vision.capture",
+                request_id=normalized_request_id,
+                client_id=normalized_client_id,
+                result_payload=result_payload,
+                current_time=self._now_iso(),
+            )
+        except ValueError as exc:
+            if "client_id" in str(exc):
                 raise ServiceError(
                     409,
                     "capture_client_id_mismatch",
                     "client_id does not match the pending capture target.",
-                )
-            pending["response"] = {
-                "request_id": normalized_request_id,
-                "client_id": normalized_client_id,
-                "images": normalized_images,
-                "client_context": client_context or {},
-                "error": error.strip() if isinstance(error, str) and error.strip() else None,
-                "request_record": dict(request_record) if isinstance(request_record, dict) else None,
-            }
-            pending["event"].set()
+                ) from exc
+            raise ServiceError(400, "invalid_capture_result", str(exc)) from exc
+        if response is None:
             debug_log(
                 "DesktopWatch",
-                (
-                    f"capture response accepted request={normalized_request_id} client={normalized_client_id} "
-                    f"images={len(normalized_images)} error={bool(error)}"
-                ),
+                f"capture response ignored request={normalized_request_id} client={normalized_client_id}",
             )
+            return {}
+        debug_log(
+            "DesktopWatch",
+            (
+                f"capture response accepted request={normalized_request_id} client={normalized_client_id} "
+                f"images={len(normalized_images)} error={bool(error)}"
+            ),
+        )
 
         # 結果
         return {}
@@ -1174,108 +1175,43 @@ class ServiceSpontaneousMixin:
         current_time: str,
     ) -> dict[str, Any] | None:
         # リクエスト
-        request_id = f"vision_capture_request:{uuid.uuid4().hex}"
-        action_seed = self._begin_desktop_watch_ongoing_action(
-            memory_set_id=memory_set_id,
-            current_time=current_time,
-        )
-        request_record = {
-            "request_id": request_id,
-            "target_client_id": target_client_id,
-            "memory_set_id": memory_set_id,
-            "capability_id": "vision.capture",
-            "source": "desktop",
-            "mode": "still",
-            "timeout_ms": DESKTOP_WATCH_CAPTURE_TIMEOUT_MS,
-            "action_id": action_seed.get("action_id") if isinstance(action_seed, dict) else None,
-            "goal_summary": action_seed.get("goal_summary") if isinstance(action_seed, dict) else None,
-            "step_summary": action_seed.get("step_summary") if isinstance(action_seed, dict) else None,
-            "episode_series_id": action_seed.get("episode_series_id") if isinstance(action_seed, dict) else None,
-            "ongoing_action_transition_kind": action_seed.get("transition_kind") if isinstance(action_seed, dict) else None,
-        }
-        pending = {
-            "event": threading.Event(),
-            "response": None,
-            "request_record": request_record,
-        }
-        with self._vision_capture_lock:
-            self._pending_vision_capture_requests[request_id] = pending
-        debug_log(
-            "DesktopWatch",
-            (
-                f"capture request created request={request_id} target_client={target_client_id} "
-                f"action={request_record.get('action_id') or '-'}"
-            ),
-        )
-
-        # コマンド
-        sent = self._event_stream_registry.send_to_client(
-            target_client_id,
-            {
-                "event_id": 0,
-                "type": "vision.capture_request",
-                "data": {
-                    "request_id": request_id,
-                    "capability_id": request_record["capability_id"],
-                    "source": request_record["source"],
-                    "mode": request_record["mode"],
-                    "timeout_ms": request_record["timeout_ms"],
-                },
-            },
-        )
-        if not sent:
-            debug_log("DesktopWatch", f"capture dispatch failed request={request_id} target_client={target_client_id}")
-            with self._vision_capture_lock:
-                self._pending_vision_capture_requests.pop(request_id, None)
-            self._finish_desktop_watch_ongoing_action(
-                request_record=request_record,
-                current_time=self._now_iso(),
-                terminal_kind="interrupted",
-                terminal_reason="desktop_watch の vision.capture request を送れなかったため終了した。",
-                final_step_summary="vision.capture request の送信に失敗した。",
-            )
+        try:
+            selected_client_id = self._select_capability_target_client(capability_id="vision.capture")
+        except ValueError:
             return None
+        if target_client_id != selected_client_id:
+            return None
+        result = self._dispatch_capability_request(
+            memory_set_id=memory_set_id,
+            capability_id="vision.capture",
+            input_payload={
+                "source": "desktop",
+                "mode": "still",
+            },
+            current_time=current_time,
+            goal_summary="desktop_watch で現在の画面状況を観測する。",
+            wait_for_response=True,
+            component="DesktopWatch",
+        )
+        if not isinstance(result, dict):
+            return None
+        request_record = result.get("request_record")
         debug_log(
             "DesktopWatch",
             (
-                f"capture dispatched request={request_id} target_client={target_client_id} "
-                f"timeout_ms={DESKTOP_WATCH_CAPTURE_TIMEOUT_MS}"
+                f"capture received request={result.get('request_id')} target_client={target_client_id} "
+                f"images={len(result.get('images', [])) if isinstance(result.get('images'), list) else 0} "
+                f"error={bool(result.get('error'))}"
             ),
         )
-
-        # 待機
-        pending["event"].wait(timeout=(DESKTOP_WATCH_CAPTURE_TIMEOUT_MS / 1000.0) + 1.0)
-
-        # 結果
-        with self._vision_capture_lock:
-            result = pending["response"]
-            self._pending_vision_capture_requests.pop(request_id, None)
-            if not isinstance(result, dict):
-                debug_log("DesktopWatch", f"capture timeout request={request_id} target_client={target_client_id}")
-                self._finish_desktop_watch_ongoing_action(
-                    request_record=request_record,
-                    current_time=self._now_iso(),
-                    terminal_kind="interrupted",
-                    terminal_reason="desktop_watch の vision.capture が timeout したため終了した。",
-                    final_step_summary="vision.capture の結果待ちが timeout した。",
-                )
-                return None
-            debug_log(
-                "DesktopWatch",
-                (
-                    f"capture received request={request_id} target_client={target_client_id} "
-                    f"images={len(result.get('images', [])) if isinstance(result.get('images'), list) else 0} "
-                    f"error={bool(result.get('error'))}"
-                ),
-            )
-            result["ongoing_action_transition_summary"] = self._finish_desktop_watch_ongoing_action(
-                request_record=request_record,
-                current_time=self._now_iso(),
-                terminal_kind="completed" if result.get("error") in {None, ""} else "interrupted",
-                terminal_reason=self._desktop_watch_capture_terminal_reason(result),
-                final_step_summary=self._desktop_watch_capture_terminal_step_summary(result),
-            )
-            return result
+        result["ongoing_action_transition_summary"] = self._finish_capability_ongoing_action(
+            request_record=request_record,
+            current_time=self._now_iso(),
+            terminal_kind="completed" if result.get("error") in {None, ""} else "interrupted",
+            terminal_reason=self._desktop_watch_capture_terminal_reason(result),
+            final_step_summary=self._desktop_watch_capture_terminal_step_summary(result),
+        )
+        return result
 
     def _build_desktop_watch_client_context(self, capture_response: dict[str, Any]) -> dict[str, Any]:
         # source取得
@@ -1342,101 +1278,6 @@ class ServiceSpontaneousMixin:
             input_text=input_text,
             images=images,
         )
-
-    def _capability_request_summary(self, request_record: Any) -> dict[str, Any] | None:
-        if not isinstance(request_record, dict):
-            return None
-        return {
-            "request_id": request_record.get("request_id"),
-            "capability_id": request_record.get("capability_id"),
-            "status": "dispatched",
-            "timeout_ms": request_record.get("timeout_ms"),
-        }
-
-    def _begin_desktop_watch_ongoing_action(
-        self,
-        *,
-        memory_set_id: str,
-        current_time: str,
-    ) -> dict[str, Any] | None:
-        existing = self.store.get_ongoing_action(
-            memory_set_id=memory_set_id,
-            current_time=current_time,
-        )
-        goal_summary = "desktop_watch で現在の画面状況を観測する。"
-        step_summary = "vision.capture の結果を待機している。"
-        if isinstance(existing, dict):
-            last_capability_id = existing.get("last_capability_id")
-            if isinstance(last_capability_id, str) and last_capability_id not in {"vision.capture"}:
-                return None
-            action_id = str(existing.get("action_id") or f"ongoing_action:{uuid.uuid4().hex}")
-            episode_series_id = existing.get("episode_series_id")
-            transition_kind = "continued"
-        else:
-            action_id = f"ongoing_action:{uuid.uuid4().hex}"
-            episode_series_id = f"episode_series:{uuid.uuid4().hex}"
-            transition_kind = "started"
-        if not isinstance(episode_series_id, str) or not episode_series_id.strip():
-            episode_series_id = f"episode_series:{uuid.uuid4().hex}"
-        self.store.upsert_ongoing_action(
-            ongoing_action={
-                "action_id": action_id,
-                "memory_set_id": memory_set_id,
-                "goal_summary": goal_summary,
-                "step_summary": step_summary,
-                "status": "waiting_result",
-                "episode_series_id": episode_series_id,
-                "last_capability_id": "vision.capture",
-                "updated_at": current_time,
-                "expires_at": self._desktop_watch_ongoing_action_expires_at(current_time=current_time),
-            }
-        )
-        return {
-            "action_id": action_id,
-            "goal_summary": goal_summary,
-            "step_summary": step_summary,
-            "episode_series_id": episode_series_id,
-            "transition_kind": transition_kind,
-        }
-
-    def _finish_desktop_watch_ongoing_action(
-        self,
-        *,
-        request_record: Any,
-        current_time: str,
-        terminal_kind: str,
-        terminal_reason: str,
-        final_step_summary: str,
-    ) -> dict[str, Any] | None:
-        if not isinstance(request_record, dict):
-            return None
-        memory_set_id = request_record.get("memory_set_id")
-        action_id = request_record.get("action_id")
-        if not isinstance(memory_set_id, str) or not memory_set_id.strip():
-            return None
-        if not isinstance(action_id, str) or not action_id.strip():
-            return None
-        self.store.clear_ongoing_action(memory_set_id=memory_set_id)
-        transition_kind = request_record.get("ongoing_action_transition_kind")
-        if transition_kind not in {"started", "continued"}:
-            transition_kind = "started"
-        goal_summary = request_record.get("goal_summary") or "desktop_watch で現在の画面状況を観測する。"
-        episode_series_id = request_record.get("episode_series_id")
-        return {
-            "action_id": action_id,
-            "transition_sequence": [transition_kind, terminal_kind],
-            "final_state": terminal_kind,
-            "goal_summary": goal_summary,
-            "step_summary": final_step_summary,
-            "episode_series_id": episode_series_id,
-            "last_capability_id": request_record.get("capability_id"),
-            "reason_summary": terminal_reason,
-            "updated_at": current_time,
-        }
-
-    def _desktop_watch_ongoing_action_expires_at(self, *, current_time: str) -> str:
-        timeout_seconds = max(int(DESKTOP_WATCH_CAPTURE_TIMEOUT_MS / 1000), 1)
-        return (self._parse_iso(current_time) + timedelta(seconds=timeout_seconds + 30)).isoformat()
 
     def _desktop_watch_capture_terminal_reason(self, capture_response: dict[str, Any]) -> str:
         capture_error = capture_response.get("error")

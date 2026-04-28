@@ -294,7 +294,10 @@ class ServiceInputMixin:
                 current_time=started_at,
             )
         )
-        capability_decision_view = self._build_capability_decision_view()
+        capability_decision_view = self._build_capability_decision_view(
+            state=state,
+            current_time=started_at,
+        )
         initiative_context = self._build_initiative_context(
             trigger_kind=trigger_kind,
             client_context=current_client_context,
@@ -337,6 +340,27 @@ class ServiceInputMixin:
             f"{cycle_label} decision done kind={decision['kind']} reason={self._clamp(decision['reason_summary'])}",
         )
 
+        # capability request
+        dispatched_capability_request_summary: dict[str, Any] | None = None
+        ongoing_action_transition_summary: dict[str, Any] | None = None
+        if decision["kind"] == "capability_request":
+            dispatch_result = self._dispatch_decision_capability_request(
+                state=state,
+                current_time=started_at,
+                decision=decision,
+            )
+            dispatched_capability_request_summary = dispatch_result.get("capability_request_summary")
+            transition_summary = dispatch_result.get("ongoing_action_transition_summary")
+            if isinstance(transition_summary, dict):
+                ongoing_action_transition_summary = transition_summary
+            debug_log(
+                "Pipeline",
+                (
+                    f"{cycle_label} capability dispatched "
+                    f"request={dispatched_capability_request_summary.get('request_id') if isinstance(dispatched_capability_request_summary, dict) else '-'}"
+                ),
+            )
+
         # 返信
         reply_payload: dict[str, Any] | None = None
         if decision["kind"] == "reply":
@@ -376,6 +400,8 @@ class ServiceInputMixin:
             "world_state_trace": world_state_trace,
             "decision": decision,
             "reply_payload": reply_payload,
+            "capability_request_summary": dispatched_capability_request_summary,
+            "ongoing_action_transition_summary": ongoing_action_transition_summary,
         }
 
     def _normalize_visual_observation_images(
@@ -768,6 +794,14 @@ class ServiceInputMixin:
         # 結果選択
         decision = pipeline["decision"]
         reply_payload = pipeline["reply_payload"]
+        if capability_request_summary is None:
+            candidate_summary = pipeline.get("capability_request_summary")
+            if isinstance(candidate_summary, dict):
+                capability_request_summary = candidate_summary
+        if ongoing_action_transition_summary is None:
+            candidate_transition = pipeline.get("ongoing_action_transition_summary")
+            if isinstance(candidate_transition, dict):
+                ongoing_action_transition_summary = candidate_transition
         internal_result_kind = decision["kind"]
         result_kind = self._external_result_kind(internal_result_kind)
         finished_at = self._now_iso()
@@ -1204,6 +1238,7 @@ class ServiceInputMixin:
                 "reason_summary": reason_summary,
                 "requires_confirmation": False,
                 "pending_intent": None,
+                "capability_request": None,
             },
             "reply_payload": None,
         }
@@ -1831,7 +1866,7 @@ class ServiceInputMixin:
         decision = pipeline.get("decision")
         if isinstance(decision, dict):
             decision_kind = decision.get("kind")
-            if decision_kind in {"reply", "pending_intent"}:
+            if decision_kind in {"reply", "pending_intent", "capability_request"}:
                 return True
 
         if self._observation_capability_failed(observation_summary):
@@ -2224,12 +2259,26 @@ class ServiceInputMixin:
             },
             "primary_candidate_kind": decision["kind"],
             "pending_intent_candidate_summary": pending_intent_summary,
+            "capability_request_candidate_summary": self._decision_capability_request_summary(decision),
         }
         if drive_state_summary:
             trace["drive_state_summary"] = drive_state_summary
         if isinstance(ongoing_action_summary, dict):
             trace["ongoing_action_summary"] = ongoing_action_summary
         return trace
+
+    def _decision_capability_request_summary(self, decision: dict[str, Any]) -> dict[str, Any] | None:
+        capability_request = decision.get("capability_request")
+        if not isinstance(capability_request, dict):
+            return None
+        capability_id = capability_request.get("capability_id")
+        input_payload = capability_request.get("input")
+        if not isinstance(capability_id, str) or not isinstance(input_payload, dict):
+            return None
+        return {
+            "capability_id": capability_id,
+            "input": input_payload,
+        }
 
     def _build_failure_decision_trace(
         self,

@@ -372,11 +372,12 @@ def validate_decision_contract(payload: dict[str, Any]) -> None:
         "reason_summary",
         "requires_confirmation",
         "pending_intent",
+        "capability_request",
     }
     _validate_exact_keys(payload, required_keys, "Decision")
 
     # 値Checks
-    if payload["kind"] not in {"reply", "noop", "pending_intent"}:
+    if payload["kind"] not in {"reply", "noop", "pending_intent", "capability_request"}:
         raise LLMError("Decision kind が不正です。")
     if not isinstance(payload["reason_code"], str) or not payload["reason_code"].strip():
         raise LLMError("Decision reason_code は空でない文字列である必要があります。")
@@ -401,6 +402,26 @@ def validate_decision_contract(payload: dict[str, Any]) -> None:
             raise LLMError("Decision pending_intent では requires_confirmation=true を指定できません。")
     elif payload["pending_intent"] is not None:
         raise LLMError("Decision kind が pending_intent 以外のとき、pending_intent は null である必要があります。")
+    if payload["kind"] == "capability_request":
+        capability_request = payload["capability_request"]
+        required_capability_request_keys = {
+            "capability_id",
+            "input",
+        }
+        if (
+            not isinstance(capability_request, dict)
+            or set(capability_request.keys()) != required_capability_request_keys
+        ):
+            raise LLMError("Decision capability_request が不正です。")
+        capability_id = capability_request.get("capability_id")
+        if not isinstance(capability_id, str) or not capability_id.strip():
+            raise LLMError("Decision capability_request.capability_id は空でない文字列である必要があります。")
+        if not isinstance(capability_request.get("input"), dict):
+            raise LLMError("Decision capability_request.input は object である必要があります。")
+        if payload["requires_confirmation"]:
+            raise LLMError("Decision capability_request では requires_confirmation=true を指定できません。")
+    elif payload["capability_request"] is not None:
+        raise LLMError("Decision kind が capability_request 以外のとき、capability_request は null である必要があります。")
 
 
 # memory interpretation検証
