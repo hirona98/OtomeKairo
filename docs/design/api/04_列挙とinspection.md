@@ -186,6 +186,7 @@ response:
 top-level の trace object は、存在しない段階でも空 object として返す。
 各 trace object の意味と標準的な含有内容は [../13_デバッグ可能性.md](../13_デバッグ可能性.md) を正とする。
 機能ごとの追加 field は、それぞれの設計文書を正とする。
+`world_state_trace` には、sanitized context summary に加えて `source_pack_state_type_hooks` を含めてよい。
 trigger をまたいだ比較用に、`result_trace.trigger_compact_summary` に共通 outer shape の compact summary を含めてよい。
 capability dispatch が起きた cycle では、`result_trace.capability_dispatch_summary` に capability family 共通で比較しやすい compact summary を含めてよい。
 `trigger_kind=capability_result` の cycle では、`result_trace.capability_result_followup_summary` に capability family 共通で比較しやすい compact summary を含めてよい。

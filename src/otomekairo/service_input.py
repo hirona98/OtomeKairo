@@ -1507,6 +1507,7 @@ class ServiceInputMixin:
             capability_request_summary=capability_request_summary,
         )
         source_pack_contexts: dict[str, Any] = {}
+        source_pack_state_type_hooks: dict[str, Any] = {}
         try:
             source_pack = self._build_world_state_source_pack(
                 started_at=started_at,
@@ -1520,6 +1521,7 @@ class ServiceInputMixin:
                 existing_foreground_world_state=existing_foreground_world_state,
             )
             source_pack_contexts = self._summarize_world_state_source_pack_contexts(source_pack)
+            source_pack_state_type_hooks = self._summarize_world_state_state_type_hooks(source_pack)
             role_definition = state["model_presets"][state["selected_model_preset_id"]]["roles"]["input_interpretation"]
             payload = self.llm.generate_world_state(
                 role_definition=role_definition,
@@ -1562,6 +1564,7 @@ class ServiceInputMixin:
                     "source_kind": source_kind,
                     "source_ref": source_ref,
                     "source_pack_contexts": source_pack_contexts,
+                    "source_pack_state_type_hooks": source_pack_state_type_hooks,
                     "failure_reason": None,
                 },
                 foreground_world_state,
@@ -1580,6 +1583,7 @@ class ServiceInputMixin:
                     "source_kind": source_kind,
                     "source_ref": source_ref,
                     "source_pack_contexts": source_pack_contexts,
+                    "source_pack_state_type_hooks": source_pack_state_type_hooks,
                     "failure_reason": str(exc),
                 },
                 existing_foreground_world_state,
@@ -1909,6 +1913,120 @@ class ServiceInputMixin:
             if isinstance(value, dict) and value:
                 summary[key] = value
         return summary
+
+    def _summarize_world_state_state_type_hooks(self, source_pack: dict[str, Any]) -> dict[str, Any]:
+        hooks: dict[str, Any] = {}
+        for state_type, context_key in (
+            ("screen", "screen_context"),
+            ("external_service", "external_service_context"),
+            ("body", "body_context"),
+            ("device", "device_context"),
+            ("schedule", "schedule_context"),
+        ):
+            context = source_pack.get(context_key)
+            if not isinstance(context, dict) or not context:
+                continue
+            hook = self._build_world_state_state_type_hook(state_type=state_type, context=context)
+            if hook is not None:
+                hooks[state_type] = hook
+        return hooks
+
+    def _build_world_state_state_type_hook(
+        self,
+        *,
+        state_type: str,
+        context: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        summary_text = self._client_context_text(context.get("summary_text"), limit=160)
+        if summary_text is None:
+            return None
+        payload: dict[str, Any] = {
+            "summary_text": summary_text,
+            "summary_source": self._world_state_hook_summary_source(state_type=state_type, context=context),
+            "signal_fields": self._world_state_hook_signal_fields(state_type=state_type, context=context),
+        }
+        capability_id = self._client_context_text(context.get("capability_id"), limit=80)
+        if capability_id is not None:
+            payload["capability_id"] = capability_id
+        if state_type == "screen":
+            for key, limit in (("active_app", 80), ("window_title", 120)):
+                value = self._client_context_text(context.get(key), limit=limit)
+                if value is not None:
+                    payload[key] = value
+        elif state_type == "external_service":
+            service = self._client_context_text(context.get("service"), limit=80)
+            if service is not None:
+                payload["service"] = service
+        elif state_type == "schedule":
+            pending_intent = context.get("pending_intent")
+            if isinstance(pending_intent, dict):
+                pending_summary = self._client_context_text(pending_intent.get("intent_summary"), limit=120)
+                if pending_summary is not None:
+                    payload["pending_intent_summary"] = pending_summary
+        return payload
+
+    def _world_state_hook_summary_source(self, *, state_type: str, context: dict[str, Any]) -> str:
+        if state_type == "screen":
+            if isinstance(context.get("visual_summary_text"), str) and context["visual_summary_text"].strip():
+                return "visual_summary_text"
+            if isinstance(context.get("window_title"), str) and context["window_title"].strip():
+                return "window_title"
+            if isinstance(context.get("active_app"), str) and context["active_app"].strip():
+                return "active_app"
+            return "summary_text"
+        if state_type == "external_service":
+            if isinstance(context.get("status_text"), str) and context["status_text"].strip():
+                return "status_text"
+            return "external_service_summary"
+        if state_type == "body":
+            return "body_state_summary"
+        if state_type == "device":
+            return "device_state_summary"
+        if state_type == "schedule":
+            if isinstance(context.get("schedule_summary"), str) and context["schedule_summary"].strip():
+                return "schedule_summary"
+            if isinstance(context.get("pending_intent"), dict):
+                return "pending_intent"
+        return "summary_text"
+
+    def _world_state_hook_signal_fields(self, *, state_type: str, context: dict[str, Any]) -> list[str]:
+        keys_by_state_type = {
+            "screen": (
+                "visual_summary_text",
+                "image_interpreted",
+                "visual_confidence_hint",
+                "image_count",
+                "active_app",
+                "window_title",
+                "locale",
+            ),
+            "external_service": (
+                "service",
+                "status_text",
+            ),
+            "body": (
+                "body_state_summary",
+            ),
+            "device": (
+                "device_state_summary",
+            ),
+            "schedule": (
+                "schedule_summary",
+                "pending_intent",
+            ),
+        }
+        signal_fields: list[str] = []
+        for key in keys_by_state_type.get(state_type, ()):
+            value = context.get(key)
+            if isinstance(value, str):
+                if value.strip():
+                    signal_fields.append(key)
+            elif isinstance(value, dict):
+                if value:
+                    signal_fields.append(key)
+            elif isinstance(value, (int, float, bool)):
+                signal_fields.append(key)
+        return signal_fields
 
     def _normalize_world_state_candidates(
         self,

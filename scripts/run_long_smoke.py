@@ -1445,6 +1445,22 @@ class LongSmokeRunner:
             raise SmokeError(f"desktop_watch {label} probe final transition was invalid: {transition_sequence[1]}")
         if ongoing_action_transition_summary.get("last_capability_id") != "vision.capture":
             raise SmokeError(f"desktop_watch {label} probe last_capability_id was invalid.")
+        world_state_trace = trace.get("world_state_trace", {})
+        if not isinstance(world_state_trace, dict):
+            raise SmokeError(f"desktop_watch {label} probe world_state_trace was invalid.")
+        state_type_hooks = world_state_trace.get("source_pack_state_type_hooks", {})
+        if not isinstance(state_type_hooks, dict):
+            raise SmokeError(f"desktop_watch {label} probe source_pack_state_type_hooks was invalid.")
+        screen_hook = state_type_hooks.get("screen", {})
+        if not isinstance(screen_hook, dict):
+            raise SmokeError(f"desktop_watch {label} probe screen hook was not recorded.")
+        if screen_hook.get("capability_id") != "vision.capture":
+            raise SmokeError(f"desktop_watch {label} probe screen hook capability_id was invalid.")
+        if screen_hook.get("summary_source") != "visual_summary_text":
+            raise SmokeError(f"desktop_watch {label} probe screen hook summary_source was invalid.")
+        signal_fields = screen_hook.get("signal_fields", [])
+        if not isinstance(signal_fields, list) or "visual_summary_text" not in signal_fields:
+            raise SmokeError(f"desktop_watch {label} probe screen hook signal_fields was invalid.")
 
     def _assert_external_status_probe_trace(
         self,
@@ -1506,11 +1522,36 @@ class LongSmokeRunner:
         source_pack_contexts = world_state_trace.get("source_pack_contexts", {})
         if not isinstance(source_pack_contexts, dict):
             raise SmokeError("external.status probe follow-up source_pack_contexts was invalid.")
+        state_type_hooks = world_state_trace.get("source_pack_state_type_hooks", {})
+        if not isinstance(state_type_hooks, dict):
+            raise SmokeError("external.status probe follow-up source_pack_state_type_hooks was invalid.")
         external_service_context = source_pack_contexts.get("external_service_context", {})
         if not isinstance(external_service_context, dict):
             raise SmokeError("external.status probe follow-up external_service_context was invalid.")
         if external_service_context.get("status_text") != status_text:
             raise SmokeError("external.status probe follow-up external_service_context.status_text was invalid.")
+        external_service_hook = state_type_hooks.get("external_service", {})
+        if not isinstance(external_service_hook, dict):
+            raise SmokeError("external.status probe follow-up external_service hook was invalid.")
+        if external_service_hook.get("capability_id") != "external.status":
+            raise SmokeError("external.status probe follow-up external_service hook capability_id was invalid.")
+        if external_service_hook.get("summary_source") != "status_text":
+            raise SmokeError("external.status probe follow-up external_service hook summary_source was invalid.")
+        if external_service_hook.get("service") != "github":
+            raise SmokeError("external.status probe follow-up external_service hook service was invalid.")
+        external_signal_fields = external_service_hook.get("signal_fields", [])
+        if not isinstance(external_signal_fields, list) or "status_text" not in external_signal_fields:
+            raise SmokeError("external.status probe follow-up external_service hook signal_fields was invalid.")
+        device_hook = state_type_hooks.get("device", {})
+        if not isinstance(device_hook, dict):
+            raise SmokeError("external.status probe follow-up device hook was invalid.")
+        if device_hook.get("summary_source") != "device_state_summary":
+            raise SmokeError("external.status probe follow-up device hook summary_source was invalid.")
+        schedule_hook = state_type_hooks.get("schedule", {})
+        if not isinstance(schedule_hook, dict):
+            raise SmokeError("external.status probe follow-up schedule hook was invalid.")
+        if schedule_hook.get("summary_source") != "schedule_summary":
+            raise SmokeError("external.status probe follow-up schedule hook summary_source was invalid.")
         foreground_world_state = input_trace.get("foreground_world_state", [])
         if not isinstance(foreground_world_state, list):
             raise SmokeError("external.status probe follow-up foreground_world_state was invalid.")
