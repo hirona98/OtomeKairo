@@ -1145,7 +1145,9 @@ class MockLLMClient:
                 }
             )
 
-        social_summary = self._mock_world_state_social_summary(client_context)
+        social_summary = self._mock_world_state_structured_summary(source_pack.get("social_context_context"))
+        if social_summary is None:
+            social_summary = self._mock_world_state_social_summary(client_context)
         if social_summary is not None:
             state_candidates.append(
                 {
@@ -1199,6 +1201,31 @@ class MockLLMClient:
                 "device",
                 "world",
                 self._mock_world_state_structured_summary(source_pack.get("device_context")),
+            ),
+        ):
+            if summary_text is None:
+                continue
+            state_candidates.append(
+                {
+                    "state_type": state_type,
+                    "scope": scope,
+                    "summary_text": summary_text,
+                    "confidence_hint": "medium",
+                    "salience_hint": "medium",
+                    "ttl_hint": "medium",
+                }
+            )
+
+        for state_type, scope, summary_text in (
+            (
+                "environment",
+                "world",
+                self._mock_world_state_structured_summary(source_pack.get("environment_context")),
+            ),
+            (
+                "location",
+                "world",
+                self._mock_world_state_structured_summary(source_pack.get("location_context")),
             ),
         ):
             if summary_text is None:
@@ -1318,6 +1345,9 @@ class MockLLMClient:
             "body_state_summary",
             "device_state_summary",
             "schedule_summary",
+            "social_context_summary",
+            "environment_summary",
+            "location_summary",
         ):
             summary_text = context.get(key)
             if isinstance(summary_text, str) and summary_text.strip():

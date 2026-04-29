@@ -2401,6 +2401,24 @@ class ServiceInputMixin:
                     selected_candidate=selected_candidate,
                 ),
             ),
+            (
+                "social_context_context",
+                self._build_world_state_social_context_context(
+                    client_context=client_context,
+                ),
+            ),
+            (
+                "environment_context",
+                self._build_world_state_environment_context(
+                    client_context=client_context,
+                ),
+            ),
+            (
+                "location_context",
+                self._build_world_state_location_context(
+                    client_context=client_context,
+                ),
+            ),
         ):
             if value is not None:
                 payload[key] = value
@@ -2564,13 +2582,51 @@ class ServiceInputMixin:
         client_context: dict[str, Any],
         summary_key: str,
         limit: int,
+        explicit_field_name: str,
     ) -> dict[str, Any] | None:
         summary_text = self._client_context_text(client_context.get(summary_key), limit=limit)
         if summary_text is None:
             return None
         return {
             "summary_text": summary_text,
+            explicit_field_name: summary_text,
         }
+
+    def _build_world_state_social_context_context(
+        self,
+        *,
+        client_context: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        return self._build_world_state_summary_context(
+            client_context=client_context,
+            summary_key="social_context_summary",
+            limit=160,
+            explicit_field_name="social_context_summary",
+        )
+
+    def _build_world_state_environment_context(
+        self,
+        *,
+        client_context: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        return self._build_world_state_summary_context(
+            client_context=client_context,
+            summary_key="environment_summary",
+            limit=160,
+            explicit_field_name="environment_summary",
+        )
+
+    def _build_world_state_location_context(
+        self,
+        *,
+        client_context: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        return self._build_world_state_summary_context(
+            client_context=client_context,
+            summary_key="location_summary",
+            limit=160,
+            explicit_field_name="location_summary",
+        )
 
     def _build_world_state_schedule_context(
         self,
@@ -2664,6 +2720,9 @@ class ServiceInputMixin:
             "body_context",
             "device_context",
             "schedule_context",
+            "social_context_context",
+            "environment_context",
+            "location_context",
             "capability_result_summary",
         ):
             value = source_pack.get(key)
@@ -2679,6 +2738,9 @@ class ServiceInputMixin:
             ("body", "body_context"),
             ("device", "device_context"),
             ("schedule", "schedule_context"),
+            ("social_context", "social_context_context"),
+            ("environment", "environment_context"),
+            ("location", "location_context"),
         ):
             context = source_pack.get(context_key)
             if not isinstance(context, dict) or not context:
@@ -2747,6 +2809,12 @@ class ServiceInputMixin:
                 return "schedule_summary"
             if isinstance(context.get("pending_intent"), dict):
                 return "pending_intent"
+        if state_type == "social_context":
+            return "social_context_summary"
+        if state_type == "environment":
+            return "environment_summary"
+        if state_type == "location":
+            return "location_summary"
         return "summary_text"
 
     def _world_state_hook_signal_fields(self, *, state_type: str, context: dict[str, Any]) -> list[str]:
@@ -2773,6 +2841,15 @@ class ServiceInputMixin:
             "schedule": (
                 "schedule_summary",
                 "pending_intent",
+            ),
+            "social_context": (
+                "social_context_summary",
+            ),
+            "environment": (
+                "environment_summary",
+            ),
+            "location": (
+                "location_summary",
             ),
         }
         signal_fields: list[str] = []
@@ -2865,6 +2942,9 @@ class ServiceInputMixin:
             "body": "body_context",
             "device": "device_context",
             "schedule": "schedule_context",
+            "social_context": "social_context_context",
+            "environment": "environment_context",
+            "location": "location_context",
         }.get(state_type)
         if context_key is None:
             return None
@@ -2921,7 +3001,16 @@ class ServiceInputMixin:
     ) -> str:
         if not isinstance(context, dict) or not context:
             return "summary_text"
-        if state_type in {"screen", "external_service", "body", "device", "schedule"}:
+        if state_type in {
+            "screen",
+            "external_service",
+            "body",
+            "device",
+            "schedule",
+            "social_context",
+            "environment",
+            "location",
+        }:
             return self._world_state_hook_summary_source(state_type=state_type, context=context)
         return "summary_text"
 

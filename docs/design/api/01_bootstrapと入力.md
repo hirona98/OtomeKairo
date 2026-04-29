@@ -207,7 +207,7 @@ request:
 
 - `client_context` は object とする。値がないときは省略する
 - wake でも `client_context` の `source / active_app / window_title / locale` を起床入力の整形に使う
-- wake でも `client_context` の `external_service_summary / body_state_summary / device_state_summary / schedule_summary` があれば、`world_state` source pack の補助文脈へ使う
+- wake でも `client_context` の `social_context_summary / environment_summary / location_summary / external_service_summary / body_state_summary / device_state_summary / schedule_summary` があれば、`world_state` source pack の補助文脈へ使う
 
 response:
 

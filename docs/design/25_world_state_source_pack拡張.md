@@ -3,7 +3,7 @@
 ## 目的
 
 `world_state` 第一段では、主に `client_context` の画面前景と `desktop_watch` の観測要約を source pack に入れていた。
-この phase では、画面前景の補助要約と、外部サービス、身体、機器、予定の短い current summary も state-type 別 context として同じ source pack に入れ、LLM が `world_state` 候補を選びやすくする。
+この phase では、画面前景の補助要約と、対人文脈、周囲環境、場所、外部サービス、身体、機器、予定の短い current summary も state-type 別 context として同じ source pack に入れ、LLM が `world_state` 候補を選びやすくする。
 
 ここで扱うのは **短い structured summary だけ** である。
 新しい capability、raw payload 保存、長い OCR、配送先 client の露出は入れない。
@@ -13,6 +13,9 @@
 `world_state` source pack に追加してよい入力は次に限る。
 
 - `vision.capture` result から得た短い `visual_summary_text / image_interpreted / visual_confidence_hint / image_count`
+- `client_context.social_context_summary`
+- `client_context.environment_summary`
+- `client_context.location_summary`
 - `client_context.external_service_summary`
 - `external.status` result から得た短い `service / status_text`
 - capability result の `client_context` から得た短い `body_state_summary`
@@ -49,6 +52,18 @@ raw response body、client 固有 ID、資格情報、内部 URL、base64 本文
     "image_count": 1,
     "capability_id": "vision.capture"
   },
+  "social_context_context": {
+    "summary_text": "Slack 上のやり取りが近い判断文脈として前景にある。",
+    "social_context_summary": "Slack 上のやり取りが近い判断文脈として前景にある。"
+  },
+  "environment_context": {
+    "summary_text": "作業部屋は静かで、集中しやすい環境にある。",
+    "environment_summary": "作業部屋は静かで、集中しやすい環境にある。"
+  },
+  "location_context": {
+    "summary_text": "自宅デスクで作業している。",
+    "location_summary": "自宅デスクで作業している。"
+  },
   "external_service_context": {
     "summary_text": "GitHub の通知に未確認レビューが 1 件ある。",
     "service": "github",
@@ -84,6 +99,7 @@ raw response body、client 固有 ID、資格情報、内部 URL、base64 本文
 
 source pack では、標準の `client_context` と state-type 別の structured context を分ける。
 画面前景は `client_context` に加えて `screen_context` へ補助要約を載せ、その他の短い current summary は dedicated context へ載せる。
+`social_context_context / environment_context / location_context` は、`client_context` から取った短い summary をそのまま dedicated context へ写す。
 `external.status` のような capability result は、`external_service_context.summary_text` に加えて `service / status_text` を載せる。
 `body_context / device_context / schedule_context` でも、capability result 由来のときは `capability_id` と state-type 別 summary field を載せる。
 
@@ -91,6 +107,7 @@ source pack では、標準の `client_context` と state-type 別の structured
 
 - request / capture response の `client_context` から短い summary を抜き出す
 - `vision.capture` result の短い visual summary を `screen_context` へ投影する
+- `client_context.social_context_summary / environment_summary / location_summary` を対応する dedicated context へ投影する
 - `external.status` result の `service / status_text` を `external_service_context` へ投影する
 - capability result の `body_state_summary / device_state_summary / schedule_summary` を対応する state-type context へ投影する
 - wake / `desktop_watch` の selected pending-intent があるときだけ `schedule_context.pending_intent` を作り、`slot_key` を付ける
