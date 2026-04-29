@@ -270,6 +270,22 @@ class MockLLMClient:
                     },
                 },
             }
+        elif self._should_mock_external_status_request(
+            normalized=normalized,
+            ongoing_action_summary=ongoing_action_summary,
+            capability_decision_view=capability_decision_view,
+        ):
+            payload = {
+                "kind": "capability_request",
+                "reason_code": "capability:external.status",
+                "reason_summary": "外部サービスの現在状態を確認する必要がある。",
+                "requires_confirmation": False,
+                "pending_intent": None,
+                "capability_request": {
+                    "capability_id": "external.status",
+                    "input": self._mock_external_status_input(normalized),
+                },
+            }
         elif self._should_mock_pending_intent(
             normalized=normalized,
             active_commitments=active_commitments,
@@ -577,6 +593,50 @@ class MockLLMClient:
             "どう",
         )
         return any(marker in normalized for marker in action_markers)
+
+    def _should_mock_external_status_request(
+        self,
+        *,
+        normalized: str,
+        ongoing_action_summary: dict[str, Any] | None,
+        capability_decision_view: list[dict[str, Any]] | None,
+    ) -> bool:
+        if isinstance(ongoing_action_summary, dict):
+            status = str(ongoing_action_summary.get("status") or "").strip()
+            if status in {"active", "waiting_result"}:
+                return False
+        if normalized.startswith("capability result を受信"):
+            return False
+        if not self._mock_capability_available(capability_decision_view, "external.status"):
+            return False
+        if self._mock_external_status_service(normalized) is None:
+            return False
+        action_markers = (
+            "確認",
+            "教えて",
+            "見て",
+            "チェック",
+            "状況",
+            "状態",
+            "知りたい",
+        )
+        return any(marker in normalized for marker in action_markers)
+
+    def _mock_external_status_input(self, normalized: str) -> dict[str, str]:
+        service = self._mock_external_status_service(normalized)
+        if service is None:
+            service = "external_service"
+        return {
+            "service": service,
+        }
+
+    def _mock_external_status_service(self, normalized: str) -> str | None:
+        lowered = normalized.lower()
+        if "github" in lowered or any(token in normalized for token in ("GitHub", "プルリク", "レビュー")):
+            return "github"
+        if "calendar" in lowered or any(token in normalized for token in ("カレンダー", "スケジュール")):
+            return "calendar"
+        return None
 
     def _mock_capability_available(
         self,
@@ -990,7 +1050,10 @@ class MockLLMClient:
 
         # 候補群
         state_candidates: list[dict[str, Any]] = []
-        screen_summary = self._mock_world_state_screen_summary(client_context)
+        screen_summary = self._mock_world_state_screen_summary(
+            screen_context=source_pack.get("screen_context"),
+            client_context=client_context,
+        )
         if screen_summary is not None:
             state_candidates.append(
                 {
@@ -1130,7 +1193,17 @@ class MockLLMClient:
             return "self|user"
         return "user"
 
-    def _mock_world_state_screen_summary(self, client_context: dict[str, Any]) -> str | None:
+    def _mock_world_state_screen_summary(
+        self,
+        *,
+        screen_context: Any,
+        client_context: dict[str, Any],
+    ) -> str | None:
+        if isinstance(screen_context, dict):
+            for key in ("summary_text", "visual_summary_text"):
+                summary_text = screen_context.get(key)
+                if isinstance(summary_text, str) and summary_text.strip():
+                    return summary_text.strip()
         window_title = client_context.get("window_title")
         if isinstance(window_title, str) and window_title.strip():
             return f"画面では {window_title.strip()} が前景にある。"
@@ -1160,10 +1233,17 @@ class MockLLMClient:
     def _mock_world_state_structured_summary(self, context: Any) -> str | None:
         if not isinstance(context, dict):
             return None
-        summary_text = context.get("summary_text")
-        if not isinstance(summary_text, str) or not summary_text.strip():
-            return None
-        return summary_text.strip()
+        for key in (
+            "summary_text",
+            "status_text",
+            "body_state_summary",
+            "device_state_summary",
+            "schedule_summary",
+        ):
+            summary_text = context.get(key)
+            if isinstance(summary_text, str) and summary_text.strip():
+                return summary_text.strip()
+        return None
 
     def _mock_world_state_schedule_summary(self, schedule_context: Any) -> str | None:
         if not isinstance(schedule_context, dict):

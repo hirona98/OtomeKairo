@@ -68,6 +68,71 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
             "image_interpreted",
             "visual_summary_text",
             "visual_confidence_hint",
+            "body_state_summary",
+            "device_state_summary",
+            "schedule_summary",
+            "error",
+        ],
+    },
+    "external.status": {
+        "id": "external.status",
+        "version": "1",
+        "kind": "external_service",
+        "decision_description": "外部サービスの現在状態を確認する",
+        "when_to_use": [
+            "判断に外部サービスの現在状態が必要",
+            "最新のサービス状態を短く確認したい",
+        ],
+        "do_not_use_when": [
+            "現在の判断に外部サービス状態が不要",
+            "すでに十分新しい状態要約が手元にある",
+        ],
+        "required_permissions": [],
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "service": {"type": "string"},
+            },
+            "required": ["service"],
+            "additionalProperties": False,
+        },
+        "result_schema": {
+            "type": "object",
+            "properties": {
+                "status_text": {"type": "string"},
+                "client_context": {
+                    "type": ["object", "null"],
+                },
+                "error": {
+                    "type": ["string", "null"],
+                },
+            },
+            "required": ["status_text"],
+            "additionalProperties": False,
+        },
+        "side_effects": {
+            "external_world": False,
+            "user_visible": False,
+            "stores_raw_payload": False,
+        },
+        "timeout_ms": 5000,
+        "risk_level": "low",
+        "memory_policy": {
+            "record_result_event": True,
+            "allow_memory_update": True,
+        },
+        "state_policy": {
+            "creates_ongoing_action": True,
+            "blocks_parallel_capability": True,
+        },
+        "inspection_fields": [
+            "capability_id",
+            "target_client_id",
+            "service",
+            "status_text",
+            "body_state_summary",
+            "device_state_summary",
+            "schedule_summary",
             "error",
         ],
     },

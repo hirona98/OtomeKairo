@@ -5,6 +5,7 @@ import uuid
 from datetime import timedelta
 from typing import Any
 
+from otomekairo.capabilities import capability_manifests
 from otomekairo.llm import LLMContractError, LLMError
 from otomekairo.recall import RecallPackSelectionError
 from otomekairo.service_common import (
@@ -52,7 +53,7 @@ class ServiceSpontaneousMixin:
 
     def submit_vision_capture_response(self, token: str | None, payload: dict[str, Any]) -> dict[str, Any]:
         # 認可
-        self._require_token(token)
+        state = self._require_token(token)
 
         # 項目
         request_id = payload.get("request_id")
@@ -83,43 +84,704 @@ class ServiceSpontaneousMixin:
         # 応答保存
         normalized_request_id = request_id.strip()
         normalized_client_id = client_id.strip()
+        accepted_at = self._now_iso()
         result_payload = {
             "images": normalized_images,
             "client_context": client_context or {},
             "error": error.strip() if isinstance(error, str) and error.strip() else None,
         }
+        return self._submit_async_capability_result_response(
+            state=state,
+            capability_id="vision.capture",
+            request_id=normalized_request_id,
+            client_id=normalized_client_id,
+            result_payload=result_payload,
+            accepted_at=accepted_at,
+            log_channel="DesktopWatch",
+            client_mismatch_code="capture_client_id_mismatch",
+            client_mismatch_message="client_id does not match the pending capture target.",
+            invalid_result_code="invalid_capture_result",
+            accepted_detail=f"images={len(normalized_images)} error={bool(error)}",
+        )
+
+    def submit_external_status_response(self, token: str | None, payload: dict[str, Any]) -> dict[str, Any]:
+        state = self._require_token(token)
+
+        request_id = payload.get("request_id")
+        client_id = payload.get("client_id")
+        status_text = payload.get("status_text")
+        client_context = payload.get("client_context")
+        error = payload.get("error")
+
+        if not isinstance(request_id, str) or not request_id.strip():
+            raise ServiceError(400, "invalid_request_id", "request_id must be a non-empty string.")
+        if not isinstance(client_id, str) or not client_id.strip():
+            raise ServiceError(400, "invalid_client_id", "client_id must be a non-empty string.")
+        if not isinstance(status_text, str) or not status_text.strip():
+            raise ServiceError(400, "invalid_status_text", "status_text must be a non-empty string.")
+        if client_context is not None and not isinstance(client_context, dict):
+            raise ServiceError(400, "invalid_client_context", "client_context must be an object.")
+        if error is not None and not isinstance(error, str):
+            raise ServiceError(400, "invalid_status_error", "error must be a string or null.")
+
+        normalized_request_id = request_id.strip()
+        normalized_client_id = client_id.strip()
+        normalized_status_text = status_text.strip()
+        accepted_at = self._now_iso()
+        result_payload = {
+            "status_text": normalized_status_text,
+            "client_context": client_context or {},
+            "error": error.strip() if isinstance(error, str) and error.strip() else None,
+        }
+        return self._submit_async_capability_result_response(
+            state=state,
+            capability_id="external.status",
+            request_id=normalized_request_id,
+            client_id=normalized_client_id,
+            result_payload=result_payload,
+            accepted_at=accepted_at,
+            log_channel="CapabilityResult",
+            client_mismatch_code="external_status_client_id_mismatch",
+            client_mismatch_message="client_id does not match the pending external.status target.",
+            invalid_result_code="invalid_external_status_result",
+            accepted_detail=f"status_chars={len(normalized_status_text)} error={bool(error)}",
+        )
+
+    def _submit_async_capability_result_response(
+        self,
+        *,
+        state: dict[str, Any],
+        capability_id: str,
+        request_id: str,
+        client_id: str,
+        result_payload: dict[str, Any],
+        accepted_at: str,
+        log_channel: str,
+        client_mismatch_code: str,
+        client_mismatch_message: str,
+        invalid_result_code: str,
+        accepted_detail: str,
+    ) -> dict[str, Any]:
         try:
             response = self._accept_capability_result(
-                capability_id="vision.capture",
-                request_id=normalized_request_id,
-                client_id=normalized_client_id,
+                capability_id=capability_id,
+                request_id=request_id,
+                client_id=client_id,
                 result_payload=result_payload,
-                current_time=self._now_iso(),
+                current_time=accepted_at,
             )
         except ValueError as exc:
             if "client_id" in str(exc):
-                raise ServiceError(
-                    409,
-                    "capture_client_id_mismatch",
-                    "client_id does not match the pending capture target.",
-                ) from exc
-            raise ServiceError(400, "invalid_capture_result", str(exc)) from exc
+                raise ServiceError(409, client_mismatch_code, client_mismatch_message) from exc
+            raise ServiceError(400, invalid_result_code, str(exc)) from exc
         if response is None:
             debug_log(
-                "DesktopWatch",
-                f"capture response ignored request={normalized_request_id} client={normalized_client_id}",
+                log_channel,
+                f"capability response ignored request={request_id} capability={capability_id} client={client_id}",
             )
             return {}
         debug_log(
-            "DesktopWatch",
+            log_channel,
             (
-                f"capture response accepted request={normalized_request_id} client={normalized_client_id} "
-                f"images={len(normalized_images)} error={bool(error)}"
+                f"capability response accepted request={request_id} capability={capability_id} client={client_id} "
+                f"{accepted_detail}"
+            ),
+        )
+        request_record = response.get("request_record")
+        if isinstance(request_record, dict) and request_record.get("wait_for_response"):
+            return {}
+        self._execute_async_capability_result_cycle(
+            state=state,
+            capability_response=response,
+            started_at=accepted_at,
+        )
+
+        return {}
+
+    def _execute_async_capability_result_cycle(
+        self,
+        *,
+        state: dict[str, Any],
+        capability_response: dict[str, Any],
+        started_at: str,
+    ) -> None:
+        request_record = capability_response.get("request_record")
+        capability_id = self._capability_result_capability_id(capability_response)
+        image_count = self._capability_result_payload_image_count(capability_response)
+        capability_request_summary = self._capability_request_summary(request_record)
+        self._activate_capability_ongoing_action(
+            request_record=request_record,
+            current_time=started_at,
+            active_step_summary=self._capability_result_active_step_summary(
+                capability_id=capability_id,
+                result_payload=capability_response,
+            ),
+        )
+        cycle_id = self._new_cycle_id()
+        recent_turns = self._load_recent_turns(state)
+        runtime_summary = self._build_runtime_summary(state)
+        pending_intent_selection = self._empty_pending_intent_selection_trace()
+        client_context = self._build_capability_result_client_context(capability_response)
+        observation_summary = self._capability_result_observation_summary(capability_response)
+        input_text = self._build_capability_result_input_text(
+            client_context=client_context,
+            capability_response=capability_response,
+        )
+        pipeline: dict[str, Any] | None = None
+        ongoing_action_transition_summary: dict[str, Any] | None = None
+        image_count_summary = f"images={image_count} " if image_count is not None else ""
+        debug_log(
+            "CapabilityResult",
+            (
+                f"{self._short_cycle_id(cycle_id)} start capability={capability_id} "
+                f"recent_turns={len(recent_turns)} {image_count_summary}"
+                f"error={bool(capability_response.get('error'))}"
             ),
         )
 
-        # 結果
-        return {}
+        try:
+            client_context, observation_summary, input_text = self._prepare_capability_result_context(
+                state=state,
+                started_at=started_at,
+                capability_id=capability_id,
+                client_context=client_context,
+                observation_summary=observation_summary,
+                input_text=input_text,
+                capability_response=capability_response,
+            )
+            pipeline = self._run_input_pipeline(
+                state=state,
+                started_at=started_at,
+                input_text=input_text,
+                recent_turns=recent_turns,
+                cycle_id=cycle_id,
+                trigger_kind="capability_result",
+                client_context=client_context,
+                observation_summary=observation_summary,
+                capability_request_summary=capability_request_summary,
+            )
+            ongoing_action_transition_summary = self._resolve_capability_result_followup_ongoing_action(
+                request_record=request_record,
+                current_time=self._now_iso(),
+                capability_id=capability_id,
+                result_payload=capability_response,
+                decision=pipeline["decision"],
+                pipeline_ongoing_action_transition=pipeline.get("ongoing_action_transition_summary"),
+            )
+            response = self._complete_input_success(
+                cycle_id=cycle_id,
+                started_at=started_at,
+                state=state,
+                runtime_summary=runtime_summary,
+                input_text=input_text,
+                client_context=client_context,
+                pipeline=pipeline,
+                trigger_kind="capability_result",
+                input_event_kind="capability_result",
+                input_event_role="system",
+                consolidate_memory=self._should_consolidate_spontaneous_cycle(
+                    trigger_kind="capability_result",
+                    pipeline=pipeline,
+                    observation_summary=observation_summary,
+                ),
+                pending_intent_selection=pending_intent_selection,
+                observation_summary=observation_summary,
+                capability_request_summary=capability_request_summary,
+                ongoing_action_transition_summary=ongoing_action_transition_summary,
+            )
+            self._emit_capability_result_reply_event(
+                capability_response=capability_response,
+                pipeline=pipeline,
+            )
+            debug_log(
+                "CapabilityResult",
+                f"{self._short_cycle_id(cycle_id)} done result={response['result_kind']}",
+            )
+        except RecallPackSelectionError as exc:
+            if ongoing_action_transition_summary is None:
+                ongoing_action_transition_summary = self._interrupt_capability_result_ongoing_action(
+                    request_record=request_record,
+                    current_time=self._now_iso(),
+                    failure_reason=str(exc),
+                )
+            debug_log(
+                "CapabilityResult",
+                (
+                    f"{self._short_cycle_id(cycle_id)} failed stage={exc.failure_stage} "
+                    f"error={type(exc).__name__}: {self._clamp(str(exc))}"
+                ),
+            )
+            self._persist_cycle_failure(
+                cycle_id=cycle_id,
+                started_at=started_at,
+                finished_at=self._now_iso(),
+                state=state,
+                runtime_summary=runtime_summary,
+                input_text=input_text,
+                client_context=client_context,
+                failure_reason=str(exc),
+                trigger_kind="capability_result",
+                input_event_kind="capability_result",
+                input_event_role="system",
+                recall_trace=self._build_failure_recall_trace(
+                    recall_hint=exc.recall_hint_summary,
+                    recall_pack_selection=exc.recall_pack_selection,
+                ),
+                failure_event_kind="recall_pack_selection_failure",
+                failure_event_payload={
+                    "failure_stage": exc.failure_stage,
+                },
+                pending_intent_selection=pending_intent_selection,
+                observation_summary=observation_summary,
+                capability_request_summary=capability_request_summary,
+                ongoing_action_transition_summary=ongoing_action_transition_summary,
+            )
+            self._emit_input_failure_logs(
+                cycle_id=cycle_id,
+                trigger_kind="capability_result",
+                input_text=input_text,
+                failure_reason=str(exc),
+                pending_intent_selection=pending_intent_selection,
+            )
+        except (LLMError, KeyError, ValueError) as exc:
+            failed_followup_capability_request_summary, failed_transition_summary = (
+                self._exception_capability_dispatch_trace(exc)
+            )
+            if ongoing_action_transition_summary is None:
+                if isinstance(failed_transition_summary, dict):
+                    ongoing_action_transition_summary = failed_transition_summary
+                else:
+                    ongoing_action_transition_summary = self._interrupt_capability_result_ongoing_action(
+                        request_record=request_record,
+                        current_time=self._now_iso(),
+                        failure_reason=str(exc),
+                    )
+            debug_log(
+                "CapabilityResult",
+                f"{self._short_cycle_id(cycle_id)} failed error={type(exc).__name__}: {self._clamp(str(exc))}",
+            )
+            self._persist_cycle_failure(
+                cycle_id=cycle_id,
+                started_at=started_at,
+                finished_at=self._now_iso(),
+                state=state,
+                runtime_summary=runtime_summary,
+                input_text=input_text,
+                client_context=client_context,
+                failure_reason=str(exc),
+                trigger_kind="capability_result",
+                input_event_kind="capability_result",
+                input_event_role="system",
+                pending_intent_selection=pending_intent_selection,
+                observation_summary=observation_summary,
+                capability_request_summary=capability_request_summary,
+                followup_capability_request_summary=failed_followup_capability_request_summary,
+                ongoing_action_transition_summary=ongoing_action_transition_summary,
+            )
+            self._emit_input_failure_logs(
+                cycle_id=cycle_id,
+                trigger_kind="capability_result",
+                input_text=input_text,
+                failure_reason=str(exc),
+                pending_intent_selection=pending_intent_selection,
+            )
+
+    def _resolve_capability_result_followup_ongoing_action(
+        self,
+        *,
+        request_record: Any,
+        current_time: str,
+        capability_id: str,
+        result_payload: dict[str, Any],
+        decision: dict[str, Any],
+        pipeline_ongoing_action_transition: Any,
+    ) -> dict[str, Any] | None:
+        if isinstance(pipeline_ongoing_action_transition, dict):
+            return pipeline_ongoing_action_transition
+
+        decision_kind = str(decision.get("kind") or "").strip()
+        if decision_kind == "pending_intent":
+            result_error = result_payload.get("error") not in {None, ""}
+            return self._finish_capability_ongoing_action(
+                request_record=request_record,
+                current_time=current_time,
+                terminal_kind="on_hold",
+                reason_code="followup_pending_intent",
+                terminal_reason=self._capability_terminal_transition_reason_summary(
+                    reason_code="followup_pending_intent",
+                    result_error=result_error,
+                ),
+                final_step_summary="後で再評価するため pending_intent に切り替えた。",
+                transition_source="capability_result_followup",
+                decision_kind=decision_kind,
+                result_error=result_error,
+                detail_summary=self._capability_result_followup_detail_summary(decision=decision),
+            )
+
+        terminal_kind = "interrupted" if result_payload.get("error") not in {None, ""} else "completed"
+        reason_code = self._capability_result_followup_reason_code(
+            decision=decision,
+            result_payload=result_payload,
+        )
+        return self._finish_capability_ongoing_action(
+            request_record=request_record,
+            current_time=current_time,
+            terminal_kind=terminal_kind,
+            reason_code=reason_code,
+            terminal_reason=self._capability_result_followup_terminal_reason(
+                capability_id=capability_id,
+                result_payload=result_payload,
+                decision=decision,
+            ),
+            final_step_summary=self._capability_result_followup_terminal_step_summary(
+                capability_id=capability_id,
+                result_payload=result_payload,
+                decision=decision,
+            ),
+            transition_source="capability_result_followup",
+            decision_kind=decision_kind or None,
+            result_error=result_payload.get("error") not in {None, ""},
+            detail_summary=self._capability_result_followup_detail_summary(
+                decision=decision,
+                result_payload=result_payload,
+            ),
+        )
+
+    def _interrupt_capability_result_ongoing_action(
+        self,
+        *,
+        request_record: Any,
+        current_time: str,
+        failure_reason: str,
+    ) -> dict[str, Any] | None:
+        return self._finish_capability_ongoing_action(
+            request_record=request_record,
+            current_time=current_time,
+            terminal_kind="interrupted",
+            reason_code="followup_failed",
+            terminal_reason=self._capability_terminal_transition_reason_summary(
+                reason_code="followup_failed",
+                result_error=True,
+            ),
+            final_step_summary="result 後の判断に失敗したため終了した。",
+            transition_source="capability_result_followup",
+            result_error=True,
+            detail_summary=failure_reason,
+        )
+
+    def _capability_result_capability_id(self, capability_response: dict[str, Any]) -> str:
+        capability_id = capability_response.get("capability_id")
+        if isinstance(capability_id, str) and capability_id.strip():
+            return capability_id.strip()
+        request_record = capability_response.get("request_record")
+        if isinstance(request_record, dict):
+            capability_id = request_record.get("capability_id")
+            if isinstance(capability_id, str) and capability_id.strip():
+                return capability_id.strip()
+        return "unknown_capability"
+
+    def _capability_result_payload_image_count(self, capability_response: dict[str, Any]) -> int | None:
+        images = capability_response.get("images")
+        if not isinstance(images, list):
+            return None
+        return len(images)
+
+    def _capability_result_status_text(self, capability_response: dict[str, Any]) -> str | None:
+        status_text = capability_response.get("status_text")
+        if not isinstance(status_text, str) or not status_text.strip():
+            return None
+        return self._clamp(status_text.strip(), limit=160)
+
+    def _build_capability_result_client_context(self, capability_response: dict[str, Any]) -> dict[str, Any]:
+        client_context = capability_response.get("client_context", {})
+        if not isinstance(client_context, dict):
+            client_context = {}
+
+        summary = {
+            "source": "capability_result",
+            "capability_id": self._capability_result_capability_id(capability_response),
+            "client_id": capability_response.get("client_id"),
+            "active_app": client_context.get("active_app"),
+            "window_title": client_context.get("window_title"),
+            "locale": client_context.get("locale"),
+            "external_service_summary": client_context.get("external_service_summary"),
+            "body_state_summary": client_context.get("body_state_summary"),
+            "device_state_summary": client_context.get("device_state_summary"),
+            "schedule_summary": client_context.get("schedule_summary"),
+        }
+        image_count = self._capability_result_payload_image_count(capability_response)
+        if image_count is not None:
+            summary["image_count"] = image_count
+        return summary
+
+    def _capability_result_observation_summary(self, capability_response: dict[str, Any]) -> dict[str, Any]:
+        request_record = capability_response.get("request_record")
+        capability_id = self._capability_result_capability_id(capability_response)
+        summary = {
+            "source": "capability_result",
+            "capability_id": capability_id,
+            "error": capability_response.get("error"),
+        }
+        image_count = self._capability_result_payload_image_count(capability_response)
+        if image_count is not None:
+            summary["image_count"] = image_count
+        if capability_id == "vision.capture":
+            summary["image_interpreted"] = False
+        client_id = capability_response.get("client_id")
+        if isinstance(client_id, str) and client_id.strip():
+            summary["client_id"] = client_id.strip()
+        client_context = capability_response.get("client_context", {})
+        if isinstance(client_context, dict):
+            for key in ("active_app", "window_title", "locale"):
+                value = client_context.get(key)
+                if isinstance(value, str) and value.strip():
+                    summary[key] = value.strip()
+        manifest = capability_manifests().get(capability_id, {})
+        inspection_fields = manifest.get("inspection_fields", [])
+        if isinstance(inspection_fields, list):
+            request_input = request_record.get("input") if isinstance(request_record, dict) else {}
+            if not isinstance(request_input, dict):
+                request_input = {}
+            for field in inspection_fields:
+                if not isinstance(field, str) or field in summary:
+                    continue
+                if field == "target_client_id":
+                    value = request_record.get("target_client_id") if isinstance(request_record, dict) else None
+                else:
+                    value = capability_response.get(field)
+                    if value is None:
+                        value = request_input.get(field)
+                    if value is None and isinstance(client_context, dict):
+                        value = client_context.get(field)
+                if isinstance(value, str):
+                    normalized = value.strip()
+                    if not normalized:
+                        continue
+                    summary[field] = self._clamp(normalized, limit=160)
+                elif isinstance(value, (int, float, bool)):
+                    summary[field] = value
+        return summary
+
+    def _prepare_capability_result_context(
+        self,
+        *,
+        state: dict[str, Any],
+        started_at: str,
+        capability_id: str,
+        client_context: dict[str, Any],
+        observation_summary: dict[str, Any],
+        input_text: str,
+        capability_response: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any], str]:
+        if capability_id == "vision.capture":
+            client_context, observation_summary = self._interpret_capability_result_capture(
+                state=state,
+                started_at=started_at,
+                client_context=client_context,
+                observation_summary=observation_summary,
+                input_text=input_text,
+                capability_response=capability_response,
+            )
+            input_text = self._build_capability_result_input_text(
+                client_context=client_context,
+                capability_response=capability_response,
+            )
+        elif capability_id == "external.status":
+            client_context, observation_summary, input_text = self._prepare_external_status_result_context(
+                client_context=client_context,
+                observation_summary=observation_summary,
+                capability_response=capability_response,
+            )
+        return client_context, observation_summary, input_text
+
+    def _prepare_external_status_result_context(
+        self,
+        *,
+        client_context: dict[str, Any],
+        observation_summary: dict[str, Any],
+        capability_response: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any], str]:
+        status_text = self._capability_result_status_text(capability_response)
+        enriched_client_context = dict(client_context)
+        if status_text is not None and self._client_context_text(enriched_client_context.get("external_service_summary"), limit=160) is None:
+            enriched_client_context["external_service_summary"] = status_text
+        enriched_observation_summary = dict(observation_summary)
+        if status_text is not None:
+            enriched_observation_summary["status_text"] = status_text
+        input_text = self._build_capability_result_input_text(
+            client_context=enriched_client_context,
+            capability_response=capability_response,
+        )
+        return enriched_client_context, enriched_observation_summary, input_text
+
+    def _interpret_capability_result_capture(
+        self,
+        *,
+        state: dict[str, Any],
+        started_at: str,
+        client_context: dict[str, Any],
+        observation_summary: dict[str, Any],
+        input_text: str,
+        capability_response: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        images = self._normalize_visual_observation_images(
+            capability_response.get("images", []),
+            allow_missing=True,
+        )
+        return self._interpret_visual_observation(
+            state=state,
+            started_at=started_at,
+            trigger_kind="capability_result",
+            client_context=client_context,
+            observation_summary=observation_summary,
+            input_text=input_text,
+            images=images,
+        )
+
+    def _build_capability_result_input_text(
+        self,
+        *,
+        client_context: dict[str, Any],
+        capability_response: dict[str, Any],
+    ) -> str:
+        parts = ["capability result を受信。"]
+        capability_id = self._capability_result_capability_id(capability_response)
+        source = self._client_context_text(client_context.get("source"), limit=48)
+        image_count = self._capability_result_payload_image_count(capability_response)
+        parts.append(f"{capability_id} の非同期結果を受け取った。")
+        if isinstance(source, str):
+            parts.append(f"入力源は {source}。")
+        error = capability_response.get("error")
+        if isinstance(error, str) and error.strip():
+            parts.append(f"結果は error だった。 error={self._clamp(error, limit=120)}")
+        status_text = self._capability_result_status_text(capability_response)
+        if status_text is not None:
+            parts.append(f"結果要約は {status_text}")
+        elif capability_id == "vision.capture" and image_count is not None and image_count <= 0:
+            parts.append("観測結果は空だった。")
+        else:
+            parts.append("受け取った結果を踏まえて返答や次の行動を決めたい。")
+        return " ".join(parts)
+
+    def _capability_result_active_step_summary(self, *, capability_id: str, result_payload: dict[str, Any]) -> str:
+        error = result_payload.get("error")
+        if isinstance(error, str) and error.strip():
+            return f"{capability_id} の error 結果を受け、次の1手を判断中。"
+        return f"{capability_id} の結果を受け、次の1手を判断中。"
+
+    def _capability_result_followup_terminal_reason(
+        self,
+        *,
+        capability_id: str,
+        result_payload: dict[str, Any],
+        decision: dict[str, Any],
+    ) -> str:
+        has_error = result_payload.get("error") not in {None, ""}
+        reason_code = self._capability_result_followup_reason_code(
+            decision=decision,
+            result_payload=result_payload,
+        )
+        if reason_code in {"followup_reply", "followup_noop"}:
+            return self._capability_terminal_transition_reason_summary(
+                reason_code=reason_code,
+                result_error=has_error,
+            )
+        return self._capability_result_terminal_reason(
+            capability_id=capability_id,
+            result_payload=result_payload,
+        )
+
+    def _capability_result_followup_reason_code(
+        self,
+        *,
+        decision: dict[str, Any],
+        result_payload: dict[str, Any],
+    ) -> str:
+        decision_kind = str(decision.get("kind") or "").strip()
+        if decision_kind == "reply":
+            return "followup_reply"
+        if decision_kind == "noop":
+            return "followup_noop"
+        if result_payload.get("error") not in {None, ""}:
+            return "result_error"
+        return "result_received"
+
+    def _capability_result_followup_detail_summary(
+        self,
+        *,
+        decision: dict[str, Any],
+        result_payload: dict[str, Any] | None = None,
+    ) -> str | None:
+        decision_reason = self._clamp(str(decision.get("reason_summary") or "").strip(), limit=160)
+        if decision_reason:
+            return decision_reason
+        if isinstance(result_payload, dict):
+            error = result_payload.get("error")
+            if isinstance(error, str) and error.strip():
+                return self._clamp(error.strip(), limit=160)
+        return None
+
+    def _capability_result_followup_terminal_step_summary(
+        self,
+        *,
+        capability_id: str,
+        result_payload: dict[str, Any],
+        decision: dict[str, Any],
+    ) -> str:
+        decision_kind = str(decision.get("kind") or "").strip()
+        has_error = result_payload.get("error") not in {None, ""}
+        if decision_kind == "reply":
+            if has_error:
+                return f"{capability_id} の error を受けて reply した。"
+            return f"{capability_id} の結果を受けて reply した。"
+        if decision_kind == "noop":
+            if has_error:
+                return f"{capability_id} の error を受けて継続を中断した。"
+            return f"{capability_id} の結果を受けて継続を完了した。"
+        return self._capability_result_terminal_step_summary(
+            capability_id=capability_id,
+            result_payload=result_payload,
+        )
+
+    def _emit_capability_result_reply_event(
+        self,
+        *,
+        capability_response: dict[str, Any],
+        pipeline: dict[str, Any],
+    ) -> None:
+        reply_payload = pipeline.get("reply_payload")
+        if not isinstance(reply_payload, dict):
+            debug_log("CapabilityResult", "reply_event skipped no_reply")
+            return
+
+        target_client_id = capability_response.get("client_id")
+        if not isinstance(target_client_id, str) or not target_client_id.strip():
+            debug_log("CapabilityResult", "reply_event skipped no_client")
+            return
+
+        request_record = capability_response.get("request_record")
+        request_id = capability_response.get("request_id")
+        capability_id = self._capability_result_capability_id(capability_response)
+        if isinstance(request_record, dict):
+            request_id = request_record.get("request_id", request_id)
+        event = {
+            "event_id": self._next_stream_event_id(),
+            "type": "capability_result",
+            "data": {
+                "request_id": request_id,
+                "capability_id": capability_id,
+                "system_text": f"[capability_result] {capability_id}",
+                "message": reply_payload["reply_text"],
+            },
+        }
+        sent = self._event_stream_registry.send_to_client(target_client_id.strip(), event)
+        debug_log(
+            "CapabilityResult",
+            (
+                f"reply_event sent={sent} client={target_client_id.strip()} "
+                f"reply_chars={len(reply_payload['reply_text'])}"
+            ),
+        )
 
     def _execute_wake_cycle(
         self,
@@ -348,6 +1010,9 @@ class ServiceSpontaneousMixin:
                     "capability_request": None,
                 }
             except (LLMError, KeyError, ValueError) as exc:
+                capability_request_summary, ongoing_action_transition_summary = self._exception_capability_dispatch_trace(
+                    exc
+                )
                 debug_log(
                     "Wake",
                     f"{self._short_cycle_id(cycle_id)} failed error={type(exc).__name__}: {self._clamp(str(exc))}",
@@ -367,6 +1032,8 @@ class ServiceSpontaneousMixin:
                     input_event_kind=input_event_kind,
                     input_event_role="system",
                     pending_intent_selection=pending_intent_selection,
+                    capability_request_summary=capability_request_summary,
+                    ongoing_action_transition_summary=ongoing_action_transition_summary,
                 )
                 self._emit_input_failure_logs(
                     cycle_id=cycle_id,
@@ -485,13 +1152,57 @@ class ServiceSpontaneousMixin:
             # タイムスタンプ
             started_at = self._now_iso()
             debug_log("DesktopWatch", f"cycle start target_client={target_client_id}")
+            cycle_id = self._new_cycle_id()
+            runtime_summary = self._build_runtime_summary(state)
+            pending_intent_selection = self._empty_pending_intent_selection_trace()
+            client_context = {
+                "source": "desktop_watch",
+                "client_id": target_client_id,
+            }
+            input_text = self._build_desktop_watch_input_text(
+                client_context=client_context,
+                selected_candidate=None,
+            )
 
             # キャプチャ
-            capture_response = self._request_desktop_watch_capture(
-                memory_set_id=state["selected_memory_set_id"],
-                target_client_id=target_client_id,
-                current_time=started_at,
-            )
+            try:
+                capture_response = self._request_desktop_watch_capture(
+                    memory_set_id=state["selected_memory_set_id"],
+                    target_client_id=target_client_id,
+                    current_time=started_at,
+                )
+            except ValueError as exc:
+                capability_request_summary, ongoing_action_transition_summary = (
+                    self._exception_capability_dispatch_trace(exc)
+                )
+                debug_log(
+                    "DesktopWatch",
+                    f"{self._short_cycle_id(cycle_id)} capture failed error={type(exc).__name__}: {self._clamp(str(exc))}",
+                )
+                self._persist_cycle_failure(
+                    cycle_id=cycle_id,
+                    started_at=started_at,
+                    finished_at=self._now_iso(),
+                    state=state,
+                    runtime_summary=runtime_summary,
+                    input_text=input_text,
+                    client_context=client_context,
+                    failure_reason=str(exc),
+                    trigger_kind="desktop_watch",
+                    input_event_kind="desktop_watch",
+                    input_event_role="system",
+                    pending_intent_selection=pending_intent_selection,
+                    capability_request_summary=capability_request_summary,
+                    ongoing_action_transition_summary=ongoing_action_transition_summary,
+                )
+                self._emit_input_failure_logs(
+                    cycle_id=cycle_id,
+                    trigger_kind="desktop_watch",
+                    input_text=input_text,
+                    failure_reason=str(exc),
+                    pending_intent_selection=pending_intent_selection,
+                )
+                return
             if capture_response is None:
                 debug_log("DesktopWatch", "cycle skipped capture_unavailable")
                 return
@@ -509,10 +1220,7 @@ class ServiceSpontaneousMixin:
             input_text = self._build_desktop_watch_input_text(client_context=client_context, selected_candidate=None)
 
             # スナップショット
-            cycle_id = self._new_cycle_id()
             recent_turns = self._load_recent_turns(state)
-            runtime_summary = self._build_runtime_summary(state)
-            pending_intent_selection = self._empty_pending_intent_selection_trace()
             debug_log(
                 "DesktopWatch",
                 (
@@ -689,6 +1397,11 @@ class ServiceSpontaneousMixin:
                     pending_intent_selection=pending_intent_selection,
                 )
             except (LLMError, KeyError, ValueError) as exc:
+                failed_capability_request_summary, failed_transition_summary = self._exception_capability_dispatch_trace(
+                    exc
+                )
+                if isinstance(failed_transition_summary, dict):
+                    ongoing_action_transition_summary = failed_transition_summary
                 debug_log(
                     "DesktopWatch",
                     f"{self._short_cycle_id(cycle_id)} failed error={type(exc).__name__}: {self._clamp(str(exc))}",
@@ -708,7 +1421,7 @@ class ServiceSpontaneousMixin:
                     input_event_role="system",
                     pending_intent_selection=pending_intent_selection,
                     observation_summary=observation_summary,
-                    capability_request_summary=capability_request_summary,
+                    capability_request_summary=failed_capability_request_summary or capability_request_summary,
                     ongoing_action_transition_summary=ongoing_action_transition_summary,
                 )
                 self._emit_input_failure_logs(
@@ -1208,8 +1921,12 @@ class ServiceSpontaneousMixin:
             request_record=request_record,
             current_time=self._now_iso(),
             terminal_kind="completed" if result.get("error") in {None, ""} else "interrupted",
+            reason_code=self._desktop_watch_capture_reason_code(result),
             terminal_reason=self._desktop_watch_capture_terminal_reason(result),
             final_step_summary=self._desktop_watch_capture_terminal_step_summary(result),
+            transition_source="capability_result",
+            result_error=result.get("error") not in {None, ""},
+            detail_summary=self._desktop_watch_capture_detail_summary(result),
         )
         return result
 
@@ -1280,13 +1997,29 @@ class ServiceSpontaneousMixin:
         )
 
     def _desktop_watch_capture_terminal_reason(self, capture_response: dict[str, Any]) -> str:
+        reason_code = self._desktop_watch_capture_reason_code(capture_response)
+        return self._capability_terminal_transition_reason_summary(
+            reason_code=reason_code,
+            result_error=reason_code == "result_error",
+        )
+
+    def _desktop_watch_capture_reason_code(self, capture_response: dict[str, Any]) -> str:
         capture_error = capture_response.get("error")
         if isinstance(capture_error, str) and capture_error.strip():
-            return f"desktop_watch の vision.capture が error で終了した。 error={capture_error.strip()}"
+            return "result_error"
         image_count = len(capture_response.get("images", []))
         if image_count <= 0:
-            return "desktop_watch の vision.capture は空の結果で完了した。"
-        return "desktop_watch の vision.capture が完了し、観測結果を取り込んだ。"
+            return "result_empty"
+        return "result_received"
+
+    def _desktop_watch_capture_detail_summary(self, capture_response: dict[str, Any]) -> str | None:
+        capture_error = capture_response.get("error")
+        if isinstance(capture_error, str) and capture_error.strip():
+            return self._clamp(capture_error.strip(), limit=160)
+        image_count = len(capture_response.get("images", []))
+        if image_count <= 0:
+            return "vision.capture の結果は空だった。"
+        return None
 
     def _desktop_watch_capture_terminal_step_summary(self, capture_response: dict[str, Any]) -> str:
         capture_error = capture_response.get("error")

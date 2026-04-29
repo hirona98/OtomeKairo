@@ -79,6 +79,8 @@ inspection には運用確認に必要な binding 要約を出すが、token、c
 ## Manifest 例
 
 `vision.capture` の manifest は次の形を基準にする。
+現行の concrete capability は `vision.capture` と `external.status` であり、後者は短い外部状態要約を result として返す。
+現行では両 capability とも、optional な `client_context.body_state_summary / device_state_summary / schedule_summary` を inspection_fields 経由で短い観測要約へ投影してよい。
 
 ```json
 {
@@ -182,12 +184,12 @@ capability 実行は次の順序で行う。
 4. LLM が `capability_id` と入力 payload を含む実行要求案を返す。
 5. server が `input_schema`、権限、利用可否、`ongoing_action`、並列制限を検証し、`risk_level` を実行記録と inspection へ残す。
 6. server が binding から実行先 client を選び、stream で request を送る。
-7. client が result endpoint へ結果を返す。
+7. client が capability ごとの result endpoint へ結果を返す。
 8. server が `request_id`、`target_client_id`、`result_schema` を検証する。
-9. server が `memory_policy`、`state_policy`、`inspection_fields` に従って記憶、状態、inspection を更新する。
+9. server が `capability_id` ごとの follow-up pipeline で `memory_policy`、`state_policy`、`inspection_fields` に従って記憶、状態、inspection を更新する。
 
-現行実装は 1 から 8 と、`state_policy.creates_ongoing_action` に基づく `ongoing_action` の開始、結果待ち、完了、timeout 終了を実装する。
-非同期 capability result から共有判断パイプラインを再実行する処理、capability ごとの詳細な `capability_state` 更新、`inspection_fields` による result 展開は後続拡張で扱う。
+現行実装は 1 から 9 のうち、`state_policy.creates_ongoing_action` に基づく `ongoing_action` の開始、結果待ち、完了、timeout 終了と、accepted async result を `capability_id` ベースの共通 follow-up pipeline で shared pipeline へ戻す第一段までを実装する。
+ただし concrete な result endpoint と意味付け hook はまだ `vision.capture` 中心であり、capability ごとの詳細な `capability_state` 更新と `inspection_fields` による result 展開の拡張は後続拡張で扱う。
 
 LLM が実行要求案を出しても、server の検証を通らない要求は実行しない。
 検証失敗は判断サイクルの `internal_failure` または capability failure として記録する。

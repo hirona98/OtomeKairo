@@ -5,6 +5,7 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Any
 
+from otomekairo.capabilities import capability_manifests
 from otomekairo.llm import LLMError
 from otomekairo.memory_utils import (
     display_local_iso,
@@ -16,6 +17,7 @@ from otomekairo.memory_utils import (
     stable_json,
 )
 from otomekairo.recall import RecallPackSelectionError
+from otomekairo.service_capability import CapabilityDispatchError
 from otomekairo.service_common import ServiceError, debug_log
 
 
@@ -165,6 +167,9 @@ class ServiceInputMixin:
                 "Conversation",
                 f"{self._short_cycle_id(cycle_id)} failed error={type(exc).__name__}: {self._clamp(str(exc))}",
             )
+            capability_request_summary, ongoing_action_transition_summary = self._exception_capability_dispatch_trace(
+                exc
+            )
             # 失敗永続化
             finished_at = self._now_iso()
             self._persist_cycle_failure(
@@ -177,6 +182,8 @@ class ServiceInputMixin:
                 client_context=current_client_context,
                 failure_reason=str(exc),
                 observation_summary=observation_summary,
+                capability_request_summary=capability_request_summary,
+                ongoing_action_transition_summary=ongoing_action_transition_summary,
             )
             self._emit_input_failure_logs(
                 cycle_id=cycle_id,
@@ -802,6 +809,9 @@ class ServiceInputMixin:
             candidate_transition = pipeline.get("ongoing_action_transition_summary")
             if isinstance(candidate_transition, dict):
                 ongoing_action_transition_summary = candidate_transition
+        followup_capability_request_summary = pipeline.get("capability_request_summary")
+        if not isinstance(followup_capability_request_summary, dict):
+            followup_capability_request_summary = None
         internal_result_kind = decision["kind"]
         result_kind = self._external_result_kind(internal_result_kind)
         finished_at = self._now_iso()
@@ -841,6 +851,7 @@ class ServiceInputMixin:
             pending_intent_selection=pending_intent_selection,
             observation_summary=observation_summary,
             capability_request_summary=capability_request_summary,
+            followup_capability_request_summary=followup_capability_request_summary,
             ongoing_action_transition_summary=ongoing_action_transition_summary,
         )
 
@@ -866,7 +877,7 @@ class ServiceInputMixin:
                 pipeline=pipeline,
             )
         else:
-            skipped_memory_trace = self._skipped_memory_trace("wake_cycle")
+            skipped_memory_trace = self._skipped_memory_trace(f"{trigger_kind}_cycle")
             self._update_cycle_trace_memory_trace(
                 cycle_id=cycle_id,
                 memory_trace=skipped_memory_trace,
@@ -1495,6 +1506,7 @@ class ServiceInputMixin:
             started_at=started_at,
             capability_request_summary=capability_request_summary,
         )
+        source_pack_contexts: dict[str, Any] = {}
         try:
             source_pack = self._build_world_state_source_pack(
                 started_at=started_at,
@@ -1507,6 +1519,7 @@ class ServiceInputMixin:
                 observation_summary=observation_summary,
                 existing_foreground_world_state=existing_foreground_world_state,
             )
+            source_pack_contexts = self._summarize_world_state_source_pack_contexts(source_pack)
             role_definition = state["model_presets"][state["selected_model_preset_id"]]["roles"]["input_interpretation"]
             payload = self.llm.generate_world_state(
                 role_definition=role_definition,
@@ -1548,6 +1561,7 @@ class ServiceInputMixin:
                     "dropped_state_count": int(refresh_summary.get("dropped_count", 0)),
                     "source_kind": source_kind,
                     "source_ref": source_ref,
+                    "source_pack_contexts": source_pack_contexts,
                     "failure_reason": None,
                 },
                 foreground_world_state,
@@ -1565,6 +1579,7 @@ class ServiceInputMixin:
                     "dropped_state_count": 0,
                     "source_kind": source_kind,
                     "source_ref": source_ref,
+                    "source_pack_contexts": source_pack_contexts,
                     "failure_reason": str(exc),
                 },
                 existing_foreground_world_state,
@@ -1592,35 +1607,39 @@ class ServiceInputMixin:
             "client_context": self._build_world_state_client_context(client_context),
             "existing_foreground_world_state": existing_foreground_world_state,
         }
+        screen_context = self._build_world_state_screen_context(
+            client_context=client_context,
+            observation_summary=observation_summary,
+        )
+        if screen_context is not None:
+            payload["screen_context"] = screen_context
         for key, value in (
             (
                 "external_service_context",
-                self._build_world_state_summary_context(
+                self._build_world_state_external_service_context(
                     client_context=client_context,
-                    summary_key="external_service_summary",
-                    limit=160,
+                    observation_summary=observation_summary,
                 ),
             ),
             (
                 "body_context",
-                self._build_world_state_summary_context(
+                self._build_world_state_body_context(
                     client_context=client_context,
-                    summary_key="body_state_summary",
-                    limit=160,
+                    observation_summary=observation_summary,
                 ),
             ),
             (
                 "device_context",
-                self._build_world_state_summary_context(
+                self._build_world_state_device_context(
                     client_context=client_context,
-                    summary_key="device_state_summary",
-                    limit=160,
+                    observation_summary=observation_summary,
                 ),
             ),
             (
                 "schedule_context",
                 self._build_world_state_schedule_context(
                     client_context=client_context,
+                    observation_summary=observation_summary,
                     selected_candidate=selected_candidate,
                 ),
             ),
@@ -1630,6 +1649,138 @@ class ServiceInputMixin:
         capability_result_summary = self._build_world_state_capability_result_summary(observation_summary)
         if capability_result_summary is not None:
             payload["capability_result_summary"] = capability_result_summary
+        return payload
+
+    def _build_world_state_screen_context(
+        self,
+        *,
+        client_context: dict[str, Any],
+        observation_summary: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        payload: dict[str, Any] = {}
+        visual_summary_text = None
+        capability_id_text = None
+        if isinstance(observation_summary, dict):
+            visual_summary_text = self._client_context_text(observation_summary.get("visual_summary_text"), limit=160)
+            if visual_summary_text is not None:
+                payload["summary_text"] = visual_summary_text
+                payload["visual_summary_text"] = visual_summary_text
+            image_interpreted = observation_summary.get("image_interpreted")
+            if isinstance(image_interpreted, bool):
+                payload["image_interpreted"] = image_interpreted
+            visual_confidence_hint = observation_summary.get("visual_confidence_hint")
+            if isinstance(visual_confidence_hint, str) and visual_confidence_hint.strip():
+                payload["visual_confidence_hint"] = visual_confidence_hint.strip()
+            image_count = observation_summary.get("image_count")
+            if isinstance(image_count, int) and image_count >= 0:
+                payload["image_count"] = image_count
+            capability_id = observation_summary.get("capability_id")
+            if isinstance(capability_id, str) and capability_id.strip():
+                capability_id_text = capability_id.strip()
+        for key, limit in (("active_app", 80), ("window_title", 120), ("locale", 32)):
+            value = self._client_context_text(client_context.get(key), limit=limit)
+            if value is not None:
+                payload[key] = value
+        if "summary_text" not in payload:
+            window_title = payload.get("window_title")
+            active_app = payload.get("active_app")
+            if isinstance(window_title, str):
+                payload["summary_text"] = f"画面では {window_title} が前景にある。"
+            elif isinstance(active_app, str):
+                payload["summary_text"] = f"画面では {active_app} が前景にある。"
+        has_screen_signal = any(
+            key in payload
+            for key in ("summary_text", "visual_summary_text", "active_app", "window_title", "image_count", "image_interpreted")
+        )
+        if not has_screen_signal:
+            return None
+        if capability_id_text is not None:
+            payload["capability_id"] = capability_id_text
+        return payload
+
+    def _build_world_state_external_service_context(
+        self,
+        *,
+        client_context: dict[str, Any],
+        observation_summary: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        payload: dict[str, Any] = {}
+        summary_text = self._client_context_text(client_context.get("external_service_summary"), limit=160)
+        capability_id_text = None
+        if isinstance(observation_summary, dict):
+            status_text = self._client_context_text(observation_summary.get("status_text"), limit=160)
+            if summary_text is None:
+                summary_text = status_text
+            if status_text is not None:
+                payload["status_text"] = status_text
+            service = self._client_context_text(observation_summary.get("service"), limit=80)
+            if service is not None:
+                payload["service"] = service
+            capability_id = observation_summary.get("capability_id")
+            if isinstance(capability_id, str) and capability_id.strip():
+                capability_id_text = capability_id.strip()
+        has_external_signal = summary_text is not None or "status_text" in payload or "service" in payload
+        if not has_external_signal:
+            return None
+        if summary_text is not None:
+            payload["summary_text"] = summary_text
+        if capability_id_text is not None:
+            payload["capability_id"] = capability_id_text
+        return payload
+
+    def _build_world_state_body_context(
+        self,
+        *,
+        client_context: dict[str, Any],
+        observation_summary: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        return self._build_world_state_capability_state_context(
+            client_context=client_context,
+            observation_summary=observation_summary,
+            client_summary_key="body_state_summary",
+            observation_summary_key="body_state_summary",
+            explicit_field_name="body_state_summary",
+        )
+
+    def _build_world_state_device_context(
+        self,
+        *,
+        client_context: dict[str, Any],
+        observation_summary: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        return self._build_world_state_capability_state_context(
+            client_context=client_context,
+            observation_summary=observation_summary,
+            client_summary_key="device_state_summary",
+            observation_summary_key="device_state_summary",
+            explicit_field_name="device_state_summary",
+        )
+
+    def _build_world_state_capability_state_context(
+        self,
+        *,
+        client_context: dict[str, Any],
+        observation_summary: dict[str, Any] | None,
+        client_summary_key: str,
+        observation_summary_key: str,
+        explicit_field_name: str,
+    ) -> dict[str, Any] | None:
+        payload: dict[str, Any] = {}
+        summary_text = self._client_context_text(client_context.get(client_summary_key), limit=160)
+        capability_id_text = None
+        if isinstance(observation_summary, dict):
+            observation_text = self._client_context_text(observation_summary.get(observation_summary_key), limit=160)
+            if summary_text is None:
+                summary_text = observation_text
+            capability_id = observation_summary.get("capability_id")
+            if isinstance(capability_id, str) and capability_id.strip():
+                capability_id_text = capability_id.strip()
+        if summary_text is None:
+            return None
+        payload["summary_text"] = summary_text
+        payload[explicit_field_name] = summary_text
+        if capability_id_text is not None:
+            payload["capability_id"] = capability_id_text
         return payload
 
     def _build_world_state_client_context(self, client_context: dict[str, Any]) -> dict[str, Any]:
@@ -1667,15 +1818,27 @@ class ServiceInputMixin:
         self,
         *,
         client_context: dict[str, Any],
+        observation_summary: dict[str, Any] | None,
         selected_candidate: dict[str, Any] | None,
     ) -> dict[str, Any] | None:
         payload: dict[str, Any] = {}
         summary_text = self._client_context_text(client_context.get("schedule_summary"), limit=160)
+        capability_id_text = None
+        if isinstance(observation_summary, dict):
+            observation_text = self._client_context_text(observation_summary.get("schedule_summary"), limit=160)
+            if summary_text is None:
+                summary_text = observation_text
+            capability_id = observation_summary.get("capability_id")
+            if isinstance(capability_id, str) and capability_id.strip():
+                capability_id_text = capability_id.strip()
         if summary_text is not None:
             payload["summary_text"] = summary_text
+            payload["schedule_summary"] = summary_text
         pending_intent = self._build_world_state_pending_intent_context(selected_candidate)
         if pending_intent is not None:
             payload["pending_intent"] = pending_intent
+        if capability_id_text is not None and summary_text is not None:
+            payload["capability_id"] = capability_id_text
         if not payload:
             return None
         return payload
@@ -1716,6 +1879,11 @@ class ServiceInputMixin:
             "image_interpreted",
             "visual_summary_text",
             "visual_confidence_hint",
+            "service",
+            "status_text",
+            "body_state_summary",
+            "device_state_summary",
+            "schedule_summary",
             "error",
         ):
             value = observation_summary.get(key)
@@ -1725,6 +1893,22 @@ class ServiceInputMixin:
         if not payload:
             return None
         return payload
+
+    def _summarize_world_state_source_pack_contexts(self, source_pack: dict[str, Any]) -> dict[str, Any]:
+        summary: dict[str, Any] = {}
+        for key in (
+            "client_context",
+            "screen_context",
+            "external_service_context",
+            "body_context",
+            "device_context",
+            "schedule_context",
+            "capability_result_summary",
+        ):
+            value = source_pack.get(key)
+            if isinstance(value, dict) and value:
+                summary[key] = value
+        return summary
 
     def _normalize_world_state_candidates(
         self,
@@ -1774,6 +1958,8 @@ class ServiceInputMixin:
             return "user_input"
         if trigger_kind == "desktop_watch":
             return "system_observation"
+        if trigger_kind == "capability_result":
+            return "capability_result"
         return "client_context"
 
     def _world_state_source_ref(
@@ -1860,7 +2046,7 @@ class ServiceInputMixin:
         pipeline: dict[str, Any],
         observation_summary: dict[str, Any] | None,
     ) -> bool:
-        if trigger_kind not in {"wake", "background_wake", "desktop_watch"}:
+        if trigger_kind not in {"wake", "background_wake", "desktop_watch", "capability_result"}:
             return False
 
         decision = pipeline.get("decision")
@@ -2313,13 +2499,19 @@ class ServiceInputMixin:
     def _build_success_result_trace(
         self,
         *,
+        trigger_kind: str,
+        input_text: str,
         started_at: str,
         finished_at: str,
         decision: dict[str, Any],
         result_kind: str,
         reply_payload: dict[str, Any] | None,
         pending_intent_summary: dict[str, Any] | None,
+        pending_intent_selection: dict[str, Any] | None = None,
+        initiative_context: dict[str, Any] | None = None,
+        observation_summary: dict[str, Any] | None = None,
         capability_request_summary: dict[str, Any] | None = None,
+        followup_capability_request_summary: dict[str, Any] | None = None,
         ongoing_action_transition_summary: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         trace = {
@@ -2334,15 +2526,57 @@ class ServiceInputMixin:
             trace["capability_request_summary"] = capability_request_summary
         if isinstance(ongoing_action_transition_summary, dict):
             trace["ongoing_action_transition_summary"] = ongoing_action_transition_summary
+        trace["trigger_compact_summary"] = self._build_trigger_compact_summary(
+            trigger_kind=trigger_kind,
+            input_text=input_text,
+            observation_summary=observation_summary,
+            capability_request_summary=capability_request_summary,
+            followup_capability_request_summary=followup_capability_request_summary,
+            decision=decision,
+            result_kind=result_kind,
+            reply_payload=reply_payload,
+            pending_intent_summary=pending_intent_summary,
+            pending_intent_selection=pending_intent_selection,
+            initiative_context=initiative_context,
+            ongoing_action_transition_summary=ongoing_action_transition_summary,
+        )
+        capability_dispatch_summary = self._build_capability_dispatch_summary(
+            trigger_kind=trigger_kind,
+            capability_request_summary=capability_request_summary,
+            followup_capability_request_summary=followup_capability_request_summary,
+            decision=decision,
+            ongoing_action_transition_summary=ongoing_action_transition_summary,
+        )
+        if isinstance(capability_dispatch_summary, dict):
+            trace["capability_dispatch_summary"] = capability_dispatch_summary
+        capability_result_followup_summary = self._build_capability_result_followup_summary(
+            trigger_kind=trigger_kind,
+            observation_summary=observation_summary,
+            source_capability_request_summary=capability_request_summary,
+            followup_capability_request_summary=followup_capability_request_summary,
+            decision=decision,
+            result_kind=result_kind,
+            reply_payload=reply_payload,
+            pending_intent_summary=pending_intent_summary,
+            ongoing_action_transition_summary=ongoing_action_transition_summary,
+        )
+        if isinstance(capability_result_followup_summary, dict):
+            trace["capability_result_followup_summary"] = capability_result_followup_summary
         return trace
 
     def _build_failure_result_trace(
         self,
         *,
+        trigger_kind: str,
+        input_text: str,
         started_at: str,
         finished_at: str,
         failure_reason: str,
+        pending_intent_selection: dict[str, Any] | None = None,
+        initiative_context: dict[str, Any] | None = None,
+        observation_summary: dict[str, Any] | None = None,
         capability_request_summary: dict[str, Any] | None = None,
+        followup_capability_request_summary: dict[str, Any] | None = None,
         ongoing_action_transition_summary: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         trace = {
@@ -2357,7 +2591,455 @@ class ServiceInputMixin:
             trace["capability_request_summary"] = capability_request_summary
         if isinstance(ongoing_action_transition_summary, dict):
             trace["ongoing_action_transition_summary"] = ongoing_action_transition_summary
+        trace["trigger_compact_summary"] = self._build_trigger_compact_summary(
+            trigger_kind=trigger_kind,
+            input_text=input_text,
+            observation_summary=observation_summary,
+            capability_request_summary=capability_request_summary,
+            followup_capability_request_summary=followup_capability_request_summary,
+            decision=None,
+            result_kind="internal_failure",
+            reply_payload=None,
+            pending_intent_summary=None,
+            pending_intent_selection=pending_intent_selection,
+            initiative_context=initiative_context,
+            ongoing_action_transition_summary=ongoing_action_transition_summary,
+            failure_reason=failure_reason,
+        )
+        capability_dispatch_summary = self._build_capability_dispatch_summary(
+            trigger_kind=trigger_kind,
+            capability_request_summary=capability_request_summary,
+            followup_capability_request_summary=followup_capability_request_summary,
+            decision=None,
+            ongoing_action_transition_summary=ongoing_action_transition_summary,
+        )
+        if isinstance(capability_dispatch_summary, dict):
+            trace["capability_dispatch_summary"] = capability_dispatch_summary
+        capability_result_followup_summary = self._build_capability_result_followup_summary(
+            trigger_kind=trigger_kind,
+            observation_summary=observation_summary,
+            source_capability_request_summary=capability_request_summary,
+            followup_capability_request_summary=followup_capability_request_summary,
+            decision=None,
+            result_kind="internal_failure",
+            reply_payload=None,
+            pending_intent_summary=None,
+            ongoing_action_transition_summary=ongoing_action_transition_summary,
+            failure_reason=failure_reason,
+        )
+        if isinstance(capability_result_followup_summary, dict):
+            trace["capability_result_followup_summary"] = capability_result_followup_summary
         return trace
+
+    def _build_trigger_compact_summary(
+        self,
+        *,
+        trigger_kind: str,
+        input_text: str,
+        observation_summary: dict[str, Any] | None,
+        capability_request_summary: dict[str, Any] | None,
+        followup_capability_request_summary: dict[str, Any] | None,
+        decision: dict[str, Any] | None,
+        result_kind: str,
+        reply_payload: dict[str, Any] | None,
+        pending_intent_summary: dict[str, Any] | None,
+        pending_intent_selection: dict[str, Any] | None,
+        initiative_context: dict[str, Any] | None,
+        ongoing_action_transition_summary: dict[str, Any] | None,
+        failure_reason: str | None = None,
+    ) -> dict[str, Any]:
+        dispatch_request_summary = (
+            followup_capability_request_summary
+            if trigger_kind == "capability_result"
+            else capability_request_summary
+        )
+        return {
+            "trigger_kind": trigger_kind,
+            "trigger_family": self._trigger_compact_family(trigger_kind),
+            "entry_summary": self._build_trigger_compact_entry_summary(
+                trigger_kind=trigger_kind,
+                input_text=input_text,
+                observation_summary=observation_summary,
+                capability_request_summary=capability_request_summary,
+                pending_intent_selection=pending_intent_selection,
+                initiative_context=initiative_context,
+            ),
+            "decision_summary": self._compact_capability_followup_decision_summary(decision),
+            "result_summary": self._compact_trigger_result_summary(
+                result_kind=result_kind,
+                reply_payload=reply_payload,
+                pending_intent_summary=pending_intent_summary,
+                capability_request_summary=dispatch_request_summary,
+                failure_reason=failure_reason,
+            ),
+            "transition_summary": self._compact_capability_followup_transition_summary(
+                ongoing_action_transition_summary,
+            ),
+        }
+
+    def _trigger_compact_family(self, trigger_kind: str) -> str:
+        if trigger_kind == "capability_result":
+            return "capability_result_followup"
+        if trigger_kind in {"wake", "background_wake", "desktop_watch"}:
+            return "initiative"
+        if trigger_kind == "user_message":
+            return "conversation"
+        return "system"
+
+    def _build_trigger_compact_entry_summary(
+        self,
+        *,
+        trigger_kind: str,
+        input_text: str,
+        observation_summary: dict[str, Any] | None,
+        capability_request_summary: dict[str, Any] | None,
+        pending_intent_selection: dict[str, Any] | None,
+        initiative_context: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        normalized_input = self._clamp(input_text.strip(), limit=160)
+        if normalized_input is not None:
+            payload["input_summary"] = normalized_input
+        compact_observation_summary = self._compact_capability_followup_observation_summary(observation_summary)
+        if trigger_kind == "capability_result":
+            payload["source_request_summary"] = self._compact_capability_request_summary(capability_request_summary)
+            payload["observation_summary"] = compact_observation_summary
+            return payload
+        if trigger_kind in {"wake", "background_wake", "desktop_watch"}:
+            payload.update(
+                self._compact_initiative_entry_summary(
+                    initiative_context=initiative_context,
+                    pending_intent_selection=pending_intent_selection,
+                )
+            )
+            if isinstance(compact_observation_summary, dict):
+                payload["observation_summary"] = compact_observation_summary
+            return payload
+        if isinstance(compact_observation_summary, dict):
+            payload["observation_summary"] = compact_observation_summary
+        return payload
+
+    def _compact_initiative_entry_summary(
+        self,
+        *,
+        initiative_context: dict[str, Any] | None,
+        pending_intent_selection: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        if isinstance(initiative_context, dict):
+            opportunity_summary = initiative_context.get("opportunity_summary")
+            if isinstance(opportunity_summary, str) and opportunity_summary.strip():
+                payload["opportunity_summary"] = self._clamp(opportunity_summary.strip(), limit=160)
+            compact_pending_intent_summaries = self._compact_initiative_pending_intent_summaries(
+                initiative_context.get("pending_intent_summaries")
+            )
+            if compact_pending_intent_summaries:
+                payload["pending_intent_summaries"] = compact_pending_intent_summaries
+            compact_world_state_summaries = self._compact_initiative_world_state_summaries(
+                initiative_context.get("world_state_summary")
+            )
+            if compact_world_state_summaries:
+                payload["world_state_summaries"] = compact_world_state_summaries
+            intervention_risk_summary = initiative_context.get("intervention_risk_summary")
+            if isinstance(intervention_risk_summary, str) and intervention_risk_summary.strip():
+                payload["intervention_risk_summary"] = self._clamp(intervention_risk_summary.strip(), limit=160)
+        compact_pending_intent_selection = self._compact_pending_intent_selection_summary(
+            pending_intent_selection
+        )
+        if isinstance(compact_pending_intent_selection, dict):
+            payload["pending_intent_selection_summary"] = compact_pending_intent_selection
+        return payload
+
+    def _compact_initiative_pending_intent_summaries(self, summaries: Any) -> list[dict[str, Any]]:
+        payload: list[dict[str, Any]] = []
+        if not isinstance(summaries, list):
+            return payload
+        for summary in summaries[:3]:
+            if not isinstance(summary, dict):
+                continue
+            item: dict[str, Any] = {}
+            for key in ("intent_kind", "intent_summary", "reason_summary"):
+                value = summary.get(key)
+                if not isinstance(value, str) or not value.strip():
+                    continue
+                item[key] = self._clamp(value.strip(), limit=160)
+            if item:
+                payload.append(item)
+        return payload
+
+    def _compact_initiative_world_state_summaries(self, summaries: Any) -> list[dict[str, Any]]:
+        payload: list[dict[str, Any]] = []
+        if not isinstance(summaries, list):
+            return payload
+        for summary in summaries[:3]:
+            if not isinstance(summary, dict):
+                continue
+            item: dict[str, Any] = {}
+            state_type = summary.get("state_type")
+            summary_text = summary.get("summary_text")
+            if isinstance(state_type, str) and state_type.strip():
+                item["state_type"] = state_type.strip()
+            if isinstance(summary_text, str) and summary_text.strip():
+                item["summary_text"] = self._clamp(summary_text.strip(), limit=160)
+            if item:
+                payload.append(item)
+        return payload
+
+    def _compact_pending_intent_selection_summary(
+        self,
+        pending_intent_selection: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if not isinstance(pending_intent_selection, dict):
+            return None
+        payload: dict[str, Any] = {}
+        for key in (
+            "candidate_pool_count",
+            "eligible_candidate_count",
+            "selected_candidate_ref",
+            "selected_candidate_id",
+            "result_status",
+        ):
+            value = pending_intent_selection.get(key)
+            if value is None:
+                continue
+            payload[key] = value
+        for key in ("selection_reason", "failure_reason"):
+            value = pending_intent_selection.get(key)
+            if not isinstance(value, str) or not value.strip():
+                continue
+            payload[key] = self._clamp(value.strip(), limit=160)
+        if not payload:
+            return None
+        return payload
+
+    def _build_capability_dispatch_summary(
+        self,
+        *,
+        trigger_kind: str,
+        capability_request_summary: dict[str, Any] | None,
+        followup_capability_request_summary: dict[str, Any] | None,
+        decision: dict[str, Any] | None,
+        ongoing_action_transition_summary: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        dispatch_request_summary = followup_capability_request_summary if trigger_kind == "capability_result" else capability_request_summary
+        compact_request_summary = self._compact_capability_request_summary(dispatch_request_summary)
+        if not isinstance(compact_request_summary, dict):
+            return None
+        capability_id = compact_request_summary.get("capability_id")
+        if not isinstance(capability_id, str) or not capability_id.strip():
+            return None
+        payload: dict[str, Any] = {
+            "capability_id": capability_id.strip(),
+            "capability_kind": self._capability_followup_capability_kind(capability_id.strip()),
+            "request_summary": compact_request_summary,
+            "transition_summary": self._compact_capability_followup_transition_summary(
+                ongoing_action_transition_summary,
+            ),
+        }
+        decision_summary = self._compact_capability_dispatch_decision_summary(decision)
+        if isinstance(decision_summary, dict):
+            payload["decision_summary"] = decision_summary
+        return payload
+
+    def _build_capability_result_followup_summary(
+        self,
+        *,
+        trigger_kind: str,
+        observation_summary: dict[str, Any] | None,
+        source_capability_request_summary: dict[str, Any] | None,
+        followup_capability_request_summary: dict[str, Any] | None,
+        decision: dict[str, Any] | None,
+        result_kind: str,
+        reply_payload: dict[str, Any] | None,
+        pending_intent_summary: dict[str, Any] | None,
+        ongoing_action_transition_summary: dict[str, Any] | None,
+        failure_reason: str | None = None,
+    ) -> dict[str, Any] | None:
+        if trigger_kind != "capability_result":
+            return None
+        capability_id = self._capability_followup_capability_id(
+            observation_summary=observation_summary,
+            source_capability_request_summary=source_capability_request_summary,
+            ongoing_action_transition_summary=ongoing_action_transition_summary,
+        )
+        if capability_id is None:
+            return None
+        payload: dict[str, Any] = {
+            "capability_id": capability_id,
+            "capability_kind": self._capability_followup_capability_kind(capability_id),
+            "source_request_summary": self._compact_capability_request_summary(source_capability_request_summary),
+            "observation_summary": self._compact_capability_followup_observation_summary(observation_summary),
+            "decision_summary": self._compact_capability_followup_decision_summary(decision),
+            "followup_result_summary": self._compact_capability_followup_result_summary(
+                result_kind=result_kind,
+                reply_payload=reply_payload,
+                pending_intent_summary=pending_intent_summary,
+                followup_capability_request_summary=followup_capability_request_summary,
+                failure_reason=failure_reason,
+            ),
+            "transition_summary": self._compact_capability_followup_transition_summary(
+                ongoing_action_transition_summary,
+            ),
+        }
+        return payload
+
+    def _capability_followup_capability_id(
+        self,
+        *,
+        observation_summary: dict[str, Any] | None,
+        source_capability_request_summary: dict[str, Any] | None,
+        ongoing_action_transition_summary: dict[str, Any] | None,
+    ) -> str | None:
+        for value in (
+            observation_summary.get("capability_id") if isinstance(observation_summary, dict) else None,
+            source_capability_request_summary.get("capability_id")
+            if isinstance(source_capability_request_summary, dict)
+            else None,
+            ongoing_action_transition_summary.get("last_capability_id")
+            if isinstance(ongoing_action_transition_summary, dict)
+            else None,
+        ):
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return None
+
+    def _capability_followup_capability_kind(self, capability_id: str) -> str | None:
+        manifest = capability_manifests().get(capability_id, {})
+        capability_kind = manifest.get("kind")
+        if isinstance(capability_kind, str) and capability_kind.strip():
+            return capability_kind.strip()
+        return None
+
+    def _compact_capability_request_summary(self, summary: dict[str, Any] | None) -> dict[str, Any] | None:
+        if not isinstance(summary, dict):
+            return None
+        payload: dict[str, Any] = {}
+        for key in ("request_id", "capability_id", "status", "timeout_ms"):
+            value = summary.get(key)
+            if value is None:
+                continue
+            payload[key] = value
+        if not payload:
+            return None
+        return payload
+
+    def _compact_capability_dispatch_decision_summary(
+        self,
+        decision: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        compact = self._compact_capability_followup_decision_summary(decision)
+        if not isinstance(compact, dict):
+            return None
+        if compact.get("kind") != "capability_request":
+            return None
+        return compact
+
+    def _compact_capability_followup_observation_summary(
+        self,
+        observation_summary: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if not isinstance(observation_summary, dict):
+            return None
+        payload: dict[str, Any] = {}
+        for key, value in observation_summary.items():
+            if value is None:
+                continue
+            if isinstance(value, str):
+                normalized = value.strip()
+                if not normalized:
+                    continue
+                payload[key] = self._clamp(normalized, limit=160)
+                continue
+            if isinstance(value, (int, float, bool)):
+                payload[key] = value
+        if not payload:
+            return None
+        return payload
+
+    def _compact_capability_followup_decision_summary(
+        self,
+        decision: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if not isinstance(decision, dict):
+            return None
+        payload: dict[str, Any] = {}
+        for key in ("kind", "reason_code", "reason_summary"):
+            value = decision.get(key)
+            if not isinstance(value, str) or not value.strip():
+                continue
+            payload[key] = self._clamp(value.strip(), limit=160)
+        if not payload:
+            return None
+        return payload
+
+    def _compact_trigger_result_summary(
+        self,
+        *,
+        result_kind: str,
+        reply_payload: dict[str, Any] | None,
+        pending_intent_summary: dict[str, Any] | None,
+        capability_request_summary: dict[str, Any] | None,
+        failure_reason: str | None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "result_kind": result_kind,
+        }
+        if isinstance(reply_payload, dict) and isinstance(reply_payload.get("reply_text"), str):
+            payload["reply_summary"] = self._clamp(reply_payload["reply_text"].strip(), limit=160)
+        if isinstance(pending_intent_summary, dict):
+            payload["pending_intent_summary"] = pending_intent_summary
+        compact_capability_request = self._compact_capability_request_summary(capability_request_summary)
+        if isinstance(compact_capability_request, dict):
+            payload["capability_request_summary"] = compact_capability_request
+        if isinstance(failure_reason, str) and failure_reason.strip():
+            payload["internal_failure_summary"] = self._clamp(failure_reason.strip(), limit=160)
+        return payload
+
+    def _compact_capability_followup_result_summary(
+        self,
+        *,
+        result_kind: str,
+        reply_payload: dict[str, Any] | None,
+        pending_intent_summary: dict[str, Any] | None,
+        followup_capability_request_summary: dict[str, Any] | None,
+        failure_reason: str | None,
+    ) -> dict[str, Any]:
+        payload = self._compact_trigger_result_summary(
+            result_kind=result_kind,
+            reply_payload=reply_payload,
+            pending_intent_summary=pending_intent_summary,
+            capability_request_summary=followup_capability_request_summary,
+            failure_reason=failure_reason,
+        )
+        compact_followup_request = payload.pop("capability_request_summary", None)
+        if isinstance(compact_followup_request, dict):
+            payload["followup_capability_request_summary"] = compact_followup_request
+        return payload
+
+    def _compact_capability_followup_transition_summary(
+        self,
+        ongoing_action_transition_summary: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if not isinstance(ongoing_action_transition_summary, dict):
+            return None
+        payload: dict[str, Any] = {}
+        for key in (
+            "transition_sequence",
+            "final_state",
+            "reason_code",
+            "reason_summary",
+            "transition_source",
+            "decision_kind",
+            "result_error",
+            "detail_summary",
+        ):
+            value = ongoing_action_transition_summary.get(key)
+            if value is None:
+                continue
+            payload[key] = value
+        if not payload:
+            return None
+        return payload
 
     def _persist_cycle_success(
         self,
@@ -2389,6 +3071,7 @@ class ServiceInputMixin:
         pending_intent_selection: dict[str, Any] | None = None,
         observation_summary: dict[str, Any] | None = None,
         capability_request_summary: dict[str, Any] | None = None,
+        followup_capability_request_summary: dict[str, Any] | None = None,
         ongoing_action_transition_summary: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         memory_set_id = state["selected_memory_set_id"]
@@ -2454,13 +3137,19 @@ class ServiceInputMixin:
             ),
             world_state_trace=world_state_trace,
             result_trace=self._build_success_result_trace(
+                trigger_kind=trigger_kind,
+                input_text=input_text,
                 started_at=started_at,
                 finished_at=finished_at,
                 decision=decision,
                 result_kind=result_kind,
                 reply_payload=reply_payload,
                 pending_intent_summary=pending_intent_summary,
+                pending_intent_selection=pending_intent_selection,
+                initiative_context=initiative_context,
+                observation_summary=observation_summary,
                 capability_request_summary=capability_request_summary,
+                followup_capability_request_summary=followup_capability_request_summary,
                 ongoing_action_transition_summary=ongoing_action_transition_summary,
             ),
             memory_trace=self._pending_memory_trace(),
@@ -2501,6 +3190,7 @@ class ServiceInputMixin:
         initiative_context: dict[str, Any] | None = None,
         observation_summary: dict[str, Any] | None = None,
         capability_request_summary: dict[str, Any] | None = None,
+        followup_capability_request_summary: dict[str, Any] | None = None,
         ongoing_action_transition_summary: dict[str, Any] | None = None,
     ) -> None:
         memory_set_id = state["selected_memory_set_id"]
@@ -2551,10 +3241,16 @@ class ServiceInputMixin:
             ),
             world_state_trace={},
             result_trace=self._build_failure_result_trace(
+                trigger_kind=trigger_kind,
+                input_text=input_text,
                 started_at=started_at,
                 finished_at=finished_at,
                 failure_reason=failure_reason,
+                pending_intent_selection=pending_intent_selection,
+                initiative_context=initiative_context,
+                observation_summary=observation_summary,
                 capability_request_summary=capability_request_summary,
+                followup_capability_request_summary=followup_capability_request_summary,
                 ongoing_action_transition_summary=ongoing_action_transition_summary,
             ),
             memory_trace={},
@@ -2569,6 +3265,20 @@ class ServiceInputMixin:
             cycle_summary=cycle_summary,
             cycle_trace=cycle_trace,
         )
+
+    def _exception_capability_dispatch_trace(
+        self,
+        exc: Exception,
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        if not isinstance(exc, CapabilityDispatchError):
+            return None, None
+        capability_request_summary = exc.capability_request_summary
+        ongoing_action_transition_summary = exc.ongoing_action_transition_summary
+        if not isinstance(capability_request_summary, dict):
+            capability_request_summary = None
+        if not isinstance(ongoing_action_transition_summary, dict):
+            ongoing_action_transition_summary = None
+        return capability_request_summary, ongoing_action_transition_summary
 
     def _load_recent_turns(self, state: dict) -> list[dict]:
         # ウィンドウ設定

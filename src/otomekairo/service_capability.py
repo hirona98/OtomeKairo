@@ -10,6 +10,19 @@ from otomekairo.capabilities import capability_manifests
 from otomekairo.service_common import debug_log
 
 
+class CapabilityDispatchError(ValueError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        capability_request_summary: dict[str, Any] | None = None,
+        ongoing_action_transition_summary: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.capability_request_summary = capability_request_summary
+        self.ongoing_action_transition_summary = ongoing_action_transition_summary
+
+
 class ServiceCapabilityMixin:
     # LLM の capability_request decision を実行境界へ渡す。
     def _dispatch_decision_capability_request(
@@ -111,18 +124,33 @@ class ServiceCapabilityMixin:
         if not sent:
             with self._capability_request_lock:
                 self._pending_capability_requests.pop(request_record["request_id"], None)
-            self._finish_capability_ongoing_action(
+            transition_summary = self._finish_capability_ongoing_action(
                 request_record=request_record,
                 current_time=self._now_iso(),
                 terminal_kind="interrupted",
-                terminal_reason=f"{capability_id} request を送れなかったため終了した。",
+                reason_code="dispatch_failed",
+                terminal_reason=self._capability_dispatch_transition_reason_summary(
+                    reason_code="dispatch_failed",
+                ),
                 final_step_summary=f"{capability_id} request の送信に失敗した。",
+                transition_source="capability_dispatch",
+                detail_summary=self._capability_dispatch_transition_detail_summary(
+                    capability_id=capability_id,
+                    reason_code="dispatch_failed",
+                ),
             )
             debug_log(
                 component,
                 f"capability dispatch failed request={request_record['request_id']} capability={capability_id}",
             )
-            return None
+            raise CapabilityDispatchError(
+                f"Capability request dispatch failed: {capability_id}",
+                capability_request_summary=self._capability_request_summary(
+                    request_record,
+                    status="dispatch_failed",
+                ),
+                ongoing_action_transition_summary=transition_summary,
+            )
 
         debug_log(
             component,
@@ -139,7 +167,11 @@ class ServiceCapabilityMixin:
                     request_record=request_record,
                     current_time=current_time,
                     final_state="waiting_result",
-                    reason_summary="capability request を配送し、結果待ちに入った。",
+                    reason_summary=self._capability_dispatch_transition_reason_summary(
+                        reason_code="request_dispatched",
+                    ),
+                    reason_code="request_dispatched",
+                    transition_source="capability_dispatch",
                 ),
             }
 
@@ -149,18 +181,33 @@ class ServiceCapabilityMixin:
             result = pending["response"]
             self._pending_capability_requests.pop(request_record["request_id"], None)
         if not isinstance(result, dict):
-            self._finish_capability_ongoing_action(
+            transition_summary = self._finish_capability_ongoing_action(
                 request_record=request_record,
                 current_time=self._now_iso(),
                 terminal_kind="interrupted",
-                terminal_reason=f"{capability_id} が timeout したため終了した。",
+                reason_code="request_timeout",
+                terminal_reason=self._capability_dispatch_transition_reason_summary(
+                    reason_code="request_timeout",
+                ),
                 final_step_summary=f"{capability_id} の結果待ちが timeout した。",
+                transition_source="capability_dispatch",
+                detail_summary=self._capability_dispatch_transition_detail_summary(
+                    capability_id=capability_id,
+                    reason_code="request_timeout",
+                ),
             )
             debug_log(
                 component,
                 f"capability timeout request={request_record['request_id']} capability={capability_id}",
             )
-            return None
+            raise CapabilityDispatchError(
+                f"Capability request timed out: {capability_id}",
+                capability_request_summary=self._capability_request_summary(
+                    request_record,
+                    status="request_timeout",
+                ),
+                ongoing_action_transition_summary=transition_summary,
+            )
         return result
 
     def _accept_capability_result(
@@ -200,6 +247,7 @@ class ServiceCapabilityMixin:
 
             response = {
                 "request_id": request_id,
+                "capability_id": capability_id,
                 "client_id": client_id,
                 **result_payload,
                 "request_record": dict(request_record),
@@ -212,20 +260,6 @@ class ServiceCapabilityMixin:
                 return response
             self._pending_capability_requests.pop(request_id, None)
 
-        # 非同期 result は現行第一段では ongoing_action の終了まで処理する。
-        response["ongoing_action_transition_summary"] = self._finish_capability_ongoing_action(
-            request_record=request_record,
-            current_time=current_time,
-            terminal_kind="completed" if result_payload.get("error") in {None, ""} else "interrupted",
-            terminal_reason=self._capability_result_terminal_reason(
-                capability_id=capability_id,
-                result_payload=result_payload,
-            ),
-            final_step_summary=self._capability_result_terminal_step_summary(
-                capability_id=capability_id,
-                result_payload=result_payload,
-            ),
-        )
         return response
 
     def _select_capability_target_client(self, *, capability_id: str) -> str:
@@ -256,13 +290,44 @@ class ServiceCapabilityMixin:
             memory_set_id=memory_set_id,
             current_time=current_time,
         )
-        if isinstance(existing, dict) and state_policy.get("blocks_parallel_capability"):
-            raise ValueError("Another ongoing_action is already active.")
+        normalized_goal_summary = goal_summary or str(manifest.get("decision_description") or capability_id).strip()
+        step_summary = f"{capability_id} の結果を待機している。"
+        expires_at = self._capability_ongoing_action_expires_at(
+            current_time=current_time,
+            timeout_ms=timeout_ms,
+        )
+        if isinstance(existing, dict):
+            if state_policy.get("blocks_parallel_capability") and existing.get("status") == "waiting_result":
+                raise ValueError("Another ongoing_action is already active.")
+            action_id = str(existing.get("action_id") or "").strip() or f"ongoing_action:{uuid.uuid4().hex}"
+            episode_series_id = (
+                str(existing.get("episode_series_id") or "").strip() or f"episode_series:{uuid.uuid4().hex}"
+            )
+            continued_goal_summary = str(existing.get("goal_summary") or normalized_goal_summary).strip() or normalized_goal_summary
+            self.store.upsert_ongoing_action(
+                ongoing_action={
+                    **existing,
+                    "action_id": action_id,
+                    "memory_set_id": memory_set_id,
+                    "goal_summary": continued_goal_summary,
+                    "step_summary": step_summary,
+                    "status": "waiting_result",
+                    "episode_series_id": episode_series_id,
+                    "last_capability_id": capability_id,
+                    "updated_at": current_time,
+                    "expires_at": expires_at,
+                }
+            )
+            return {
+                "action_id": action_id,
+                "goal_summary": continued_goal_summary,
+                "step_summary": step_summary,
+                "episode_series_id": episode_series_id,
+                "transition_kind": "continued",
+            }
 
         action_id = f"ongoing_action:{uuid.uuid4().hex}"
         episode_series_id = f"episode_series:{uuid.uuid4().hex}"
-        normalized_goal_summary = goal_summary or str(manifest.get("decision_description") or capability_id).strip()
-        step_summary = f"{capability_id} の結果を待機している。"
         self.store.upsert_ongoing_action(
             ongoing_action={
                 "action_id": action_id,
@@ -273,10 +338,7 @@ class ServiceCapabilityMixin:
                 "episode_series_id": episode_series_id,
                 "last_capability_id": capability_id,
                 "updated_at": current_time,
-                "expires_at": self._capability_ongoing_action_expires_at(
-                    current_time=current_time,
-                    timeout_ms=timeout_ms,
-                ),
+                "expires_at": expires_at,
             }
         )
         return {
@@ -287,14 +349,51 @@ class ServiceCapabilityMixin:
             "transition_kind": "started",
         }
 
+    def _activate_capability_ongoing_action(
+        self,
+        *,
+        request_record: Any,
+        current_time: str,
+        active_step_summary: str,
+    ) -> dict[str, Any] | None:
+        if not isinstance(request_record, dict):
+            return None
+        memory_set_id = request_record.get("memory_set_id")
+        action_id = request_record.get("action_id")
+        if not isinstance(memory_set_id, str) or not memory_set_id.strip():
+            return None
+        if not isinstance(action_id, str) or not action_id.strip():
+            return None
+
+        current_action = self.store.get_ongoing_action(
+            memory_set_id=memory_set_id,
+            current_time=current_time,
+        )
+        if not isinstance(current_action, dict) or current_action.get("action_id") != action_id:
+            return None
+
+        updated_action = {
+            **current_action,
+            "status": "active",
+            "step_summary": active_step_summary,
+            "updated_at": current_time,
+        }
+        self.store.upsert_ongoing_action(ongoing_action=updated_action)
+        return updated_action
+
     def _finish_capability_ongoing_action(
         self,
         *,
         request_record: Any,
         current_time: str,
         terminal_kind: str,
+        reason_code: str | None = None,
         terminal_reason: str,
         final_step_summary: str,
+        transition_source: str | None = None,
+        decision_kind: str | None = None,
+        result_error: bool | None = None,
+        detail_summary: str | None = None,
     ) -> dict[str, Any] | None:
         # 別 action を誤って消さないよう action_id が一致するときだけ閉じる。
         if not isinstance(request_record, dict):
@@ -318,7 +417,12 @@ class ServiceCapabilityMixin:
             current_time=current_time,
             final_state=terminal_kind,
             reason_summary=terminal_reason,
+            reason_code=reason_code,
             step_summary=final_step_summary,
+            transition_source=transition_source,
+            decision_kind=decision_kind,
+            result_error=result_error,
+            detail_summary=detail_summary,
         )
 
     def _build_capability_request_record(
@@ -370,13 +474,18 @@ class ServiceCapabilityMixin:
             payload.update(deepcopy(input_payload))
         return payload
 
-    def _capability_request_summary(self, request_record: Any) -> dict[str, Any] | None:
+    def _capability_request_summary(
+        self,
+        request_record: Any,
+        *,
+        status: str = "dispatched",
+    ) -> dict[str, Any] | None:
         if not isinstance(request_record, dict):
             return None
         return {
             "request_id": request_record.get("request_id"),
             "capability_id": request_record.get("capability_id"),
-            "status": "dispatched",
+            "status": status,
             "timeout_ms": request_record.get("timeout_ms"),
         }
 
@@ -387,7 +496,12 @@ class ServiceCapabilityMixin:
         current_time: str,
         final_state: str,
         reason_summary: str,
+        reason_code: str | None = None,
         step_summary: str | None = None,
+        transition_source: str | None = None,
+        decision_kind: str | None = None,
+        result_error: bool | None = None,
+        detail_summary: str | None = None,
     ) -> dict[str, Any] | None:
         action_id = request_record.get("action_id")
         if not isinstance(action_id, str) or not action_id.strip():
@@ -398,7 +512,7 @@ class ServiceCapabilityMixin:
         transition_sequence = [transition_kind]
         if final_state != "waiting_result":
             transition_sequence.append(final_state)
-        return {
+        payload = {
             "action_id": action_id,
             "transition_sequence": transition_sequence,
             "final_state": final_state,
@@ -409,6 +523,78 @@ class ServiceCapabilityMixin:
             "reason_summary": reason_summary,
             "updated_at": current_time,
         }
+        normalized_reason_code = self._capability_transition_reason_code(reason_code)
+        if normalized_reason_code is not None:
+            payload["reason_code"] = normalized_reason_code
+        normalized_source = self._capability_transition_source(transition_source)
+        if normalized_source is not None:
+            payload["transition_source"] = normalized_source
+        if isinstance(decision_kind, str) and decision_kind.strip():
+            payload["decision_kind"] = decision_kind.strip()
+        if isinstance(result_error, bool):
+            payload["result_error"] = result_error
+        normalized_detail = self._capability_transition_detail_summary(detail_summary)
+        if normalized_detail is not None:
+            payload["detail_summary"] = normalized_detail
+        return payload
+
+    def _capability_transition_reason_code(self, reason_code: Any) -> str | None:
+        if not isinstance(reason_code, str) or not reason_code.strip():
+            return None
+        return reason_code.strip()
+
+    def _capability_transition_source(self, transition_source: Any) -> str | None:
+        if not isinstance(transition_source, str) or not transition_source.strip():
+            return None
+        return transition_source.strip()
+
+    def _capability_transition_detail_summary(self, detail_summary: Any) -> str | None:
+        if not isinstance(detail_summary, str) or not detail_summary.strip():
+            return None
+        return self._clamp(detail_summary.strip(), limit=160)
+
+    def _capability_dispatch_transition_reason_summary(self, *, reason_code: str) -> str:
+        if reason_code == "dispatch_failed":
+            return "capability request の配送に失敗し、継続を中断した。"
+        if reason_code == "request_timeout":
+            return "capability result の待機が timeout し、継続を中断した。"
+        return "capability request を配送し、結果待ちに入った。"
+
+    def _capability_dispatch_transition_detail_summary(
+        self,
+        *,
+        capability_id: str,
+        reason_code: str,
+    ) -> str | None:
+        if reason_code == "dispatch_failed":
+            return f"{capability_id} request の送信に失敗した。"
+        if reason_code == "request_timeout":
+            return f"{capability_id} の結果待ちが timeout した。"
+        return None
+
+    def _capability_terminal_transition_reason_summary(
+        self,
+        *,
+        reason_code: str,
+        result_error: bool,
+    ) -> str:
+        if reason_code == "followup_pending_intent":
+            return "capability result を受け、今は pending_intent へ切り替えて後で再評価する。"
+        if reason_code == "followup_reply":
+            if result_error:
+                return "capability result の error を受け、reply で継続を中断した。"
+            return "capability result を受け、reply で継続を完了した。"
+        if reason_code == "followup_noop":
+            if result_error:
+                return "capability result の error を受け、noop で継続を中断した。"
+            return "capability result を受け、noop で継続を完了した。"
+        if reason_code == "followup_failed":
+            return "capability result 後の判断に失敗し、継続を中断した。"
+        if reason_code == "result_empty":
+            return "capability result が空で、継続を完了した。"
+        if reason_code == "result_error":
+            return "capability result の error を受け、継続を中断した。"
+        return "capability result を受けて継続を完了した。"
 
     def _capability_ongoing_action_expires_at(self, *, current_time: str, timeout_ms: int) -> str:
         timeout_seconds = max(int(timeout_ms / 1000), 1)
@@ -417,8 +603,21 @@ class ServiceCapabilityMixin:
     def _capability_result_terminal_reason(self, *, capability_id: str, result_payload: dict[str, Any]) -> str:
         error = result_payload.get("error")
         if isinstance(error, str) and error.strip():
-            return f"{capability_id} が error で終了した。 error={error.strip()}"
-        return f"{capability_id} の結果を受け取った。"
+            return self._capability_terminal_transition_reason_summary(
+                reason_code="result_error",
+                result_error=True,
+            )
+        if capability_id == "vision.capture":
+            image_count = result_payload.get("images")
+            if isinstance(image_count, list) and not image_count:
+                return self._capability_terminal_transition_reason_summary(
+                    reason_code="result_empty",
+                    result_error=False,
+                )
+        return self._capability_terminal_transition_reason_summary(
+            reason_code="result_received",
+            result_error=False,
+        )
 
     def _capability_result_terminal_step_summary(self, *, capability_id: str, result_payload: dict[str, Any]) -> str:
         error = result_payload.get("error")
@@ -445,8 +644,16 @@ class ServiceCapabilityMixin:
                 request_record=request_record,
                 current_time=current_time,
                 terminal_kind="interrupted",
-                terminal_reason=f"{request_record.get('capability_id')} が timeout したため終了した。",
+                reason_code="request_timeout",
+                terminal_reason=self._capability_dispatch_transition_reason_summary(
+                    reason_code="request_timeout",
+                ),
                 final_step_summary=f"{request_record.get('capability_id')} の結果待ちが timeout した。",
+                transition_source="capability_dispatch",
+                detail_summary=self._capability_dispatch_transition_detail_summary(
+                    capability_id=str(request_record.get("capability_id") or ""),
+                    reason_code="request_timeout",
+                ),
             )
 
     def _validate_capability_payload(self, *, payload: Any, schema: Any, label: str) -> None:

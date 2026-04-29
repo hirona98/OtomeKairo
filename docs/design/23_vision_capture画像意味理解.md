@@ -2,7 +2,7 @@
 
 ## 目的
 
-`desktop_watch` が取得した `vision.capture` の image payload を、raw payload のままではなく、共有判断パイプラインへ渡せる短い観測要約へ変換する。
+`desktop_watch` または非同期 capability result が取得した `vision.capture` の image payload を、raw payload のままではなく、共有判断パイプラインへ渡せる短い観測要約へ変換する。
 
 この段階の目的は、画像から万能な構造理解を作ることではない。
 `client_context` だけでは落ちる「今の画面で何が前景か」を、判断、`world_state`、inspection に反映できるようにすることに絞る。
@@ -11,7 +11,7 @@
 
 この段階で行うこと:
 
-- `desktop_watch` の image payload を `model_preset.roles.input_interpretation` で要約する
+- `desktop_watch` と非同期 capability result の image payload を `model_preset.roles.input_interpretation` で要約する
 - 要約結果を `input_text` と `observation_summary` に反映する
 - 要約結果を `world_state` 更新の入力へ渡す
 - inspection で `image_interpreted=true` と観測要約を見られるようにする
@@ -85,7 +85,7 @@ LLM の出力は JSON object 1 個に固定する。
 
 ## パイプライン統合
 
-`desktop_watch` では、共有判断パイプラインへ入る前に画像意味理解を行う。
+`desktop_watch` と非同期 capability result では、共有判断パイプラインへ入る前に画像意味理解を行う。
 
 1. `vision.capture` の response を受ける
 2. image payload を LLM で短い `summary_text` へ変換する
@@ -98,10 +98,10 @@ LLM の出力は JSON object 1 個に固定する。
 
 ## failure の扱い
 
-画像意味理解は、`desktop_watch` サイクルの中で明示的に扱う。
+画像意味理解は、`desktop_watch` と capability result サイクルの中で明示的に扱う。
 
 - validator 失敗時は 1 回だけ再生成する
-- 再生成後も契約を満たさない場合は、その `desktop_watch` サイクルを failure として残す
+- 再生成後も契約を満たさない場合は、その `desktop_watch` または capability result サイクルを failure として残す
 - silent fallback で `client_context` 主体へ戻さない
 - 失敗理由は `observation_summary` と `cycle_trace` に残す
 
