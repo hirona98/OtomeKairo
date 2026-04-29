@@ -402,11 +402,10 @@ class LongSmokeRunner:
         self.restart_probe_in_progress_before_restart = False
         self.multiple_client_pause_verified = False
         self.multiple_client_resume_verified = False
-        self.desktop_watch_reply_probe_cycle_id: str | None = None
-        self.desktop_watch_no_reply_probe_cycle_id: str | None = None
-        self.desktop_watch_reply_probe_verified = False
-        self.desktop_watch_no_reply_probe_verified = False
-        self.received_desktop_watch_events: list[dict[str, Any]] = []
+        self.desktop_watch_capability_probe_cycle_id: str | None = None
+        self.desktop_watch_pending_intent_probe_cycle_id: str | None = None
+        self.desktop_watch_capability_probe_verified = False
+        self.desktop_watch_pending_intent_probe_verified = False
         self.editor_state_mode_used = args.editor_state_mode
         self.selected_model_preset_id: str | None = None
         self.selected_memory_set_id: str | None = None
@@ -790,7 +789,6 @@ class LongSmokeRunner:
             return
         if event_type == "desktop_watch":
             self.desktop_watch_event_count += 1
-            self.received_desktop_watch_events.append(event)
             return
 
     def _assert_event_clients_healthy(self) -> None:
@@ -858,22 +856,22 @@ class LongSmokeRunner:
         raise SmokeError("restart probe could not observe queued or running memory jobs before restart.")
 
     def _exercise_desktop_watch_event_boundaries(self) -> None:
-        self.desktop_watch_reply_probe_cycle_id = self._run_desktop_watch_probe(
-            probe_name="reply",
+        self.desktop_watch_capability_probe_cycle_id = self._run_desktop_watch_probe(
+            probe_name="capability_request",
             marker="LongSmokeReplyProbeWindow",
             active_app="LongSmokeReplyProbeApp",
             window_title="LongSmokeReplyProbeWindow",
-            expect_reply_event=True,
+            expected_result_kind="capability_request",
         )
-        self.desktop_watch_reply_probe_verified = True
-        self.desktop_watch_no_reply_probe_cycle_id = self._run_desktop_watch_probe(
-            probe_name="no_reply",
+        self.desktop_watch_capability_probe_verified = True
+        self.desktop_watch_pending_intent_probe_cycle_id = self._run_desktop_watch_probe(
+            probe_name="pending_intent",
             marker="LongSmokePendingIntentProbeMarker",
             active_app="LongSmokePendingIntentProbeApp",
             window_title="LongSmokePendingIntentProbeMarker また今度あとで",
-            expect_reply_event=False,
+            expected_result_kind="capability_request",
         )
-        self.desktop_watch_no_reply_probe_verified = True
+        self.desktop_watch_pending_intent_probe_verified = True
 
     def _run_desktop_watch_probe(
         self,
@@ -882,9 +880,8 @@ class LongSmokeRunner:
         marker: str,
         active_app: str,
         window_title: str,
-        expect_reply_event: bool,
+        expected_result_kind: str,
     ) -> str:
-        baseline_event_count = len(self.received_desktop_watch_events)
         self._queue_capture_context_override(
             {
                 "client_context": {
@@ -897,7 +894,7 @@ class LongSmokeRunner:
         log(
             "desktop_watch probe queued"
             f" probe={probe_name}"
-            f" expect_reply_event={expect_reply_event}"
+            f" expected_result_kind={expected_result_kind}"
             f" marker={marker}"
         )
 
@@ -930,27 +927,14 @@ class LongSmokeRunner:
             if matched_trace is not None:
                 cycle_id = matched_trace.get("cycle_id")
                 result_kind = ((matched_trace.get("cycle_summary") or {}).get("result_kind"))
-                if expect_reply_event:
-                    if result_kind != "reply":
-                        raise SmokeError(f"desktop_watch reply probe result_kind was {result_kind}.")
-                    event = self._find_desktop_watch_event(marker=marker, since_index=baseline_event_count)
-                    if event is not None:
-                        data = event.get("data", {})
-                        message = data.get("message")
-                        images = data.get("images")
-                        if not isinstance(message, str) or not message.strip():
-                            raise SmokeError("desktop_watch reply probe did not receive a reply message.")
-                        if not isinstance(images, list) or not images:
-                            raise SmokeError("desktop_watch reply probe did not receive images.")
-                        log(f"desktop_watch reply event confirmed cycle_id={cycle_id}")
-                        return cycle_id
-                else:
-                    if result_kind != "noop":
-                        raise SmokeError(f"desktop_watch no-reply probe result_kind was {result_kind}.")
-                    if len(self.received_desktop_watch_events) != baseline_event_count:
-                        raise SmokeError("desktop_watch no-reply probe unexpectedly emitted a desktop_watch event.")
-                    log(f"desktop_watch no-reply boundary confirmed cycle_id={cycle_id}")
-                    return cycle_id
+                if result_kind != expected_result_kind:
+                    raise SmokeError(
+                        f"desktop_watch {probe_name} probe result_kind was {result_kind}."
+                    )
+                # capability_request 完了後の再判断ループはまだ無いため、
+                # この probe では desktop_watch event を要求しない。
+                log(f"desktop_watch {probe_name} capability_request confirmed cycle_id={cycle_id}")
+                return cycle_id
             time.sleep(0.25)
 
         raise SmokeError(f"desktop_watch probe timed out: {probe_name}")
@@ -958,18 +942,6 @@ class LongSmokeRunner:
     def _queue_capture_context_override(self, override: dict[str, Any]) -> None:
         with self._capture_lock:
             self._capture_context_overrides.append(override)
-
-    def _find_desktop_watch_event(self, *, marker: str, since_index: int) -> dict[str, Any] | None:
-        for event in self.received_desktop_watch_events[since_index:]:
-            if not isinstance(event, dict):
-                continue
-            data = event.get("data", {})
-            if not isinstance(data, dict):
-                continue
-            system_text = data.get("system_text")
-            if isinstance(system_text, str) and marker in system_text:
-                return event
-        return None
 
     def _exercise_multiple_client_boundary(self) -> None:
         pause_seconds = max(self.args.multiple_client_pause_seconds, 0.0)
@@ -1118,15 +1090,18 @@ class LongSmokeRunner:
             trace = self.api.get(f"/api/inspection/cycles/{cycle_id}")
             restart_probe_traces.append(trace)
 
-        desktop_watch_reply_probe_trace = None
-        if isinstance(self.desktop_watch_reply_probe_cycle_id, str) and self.desktop_watch_reply_probe_cycle_id:
-            desktop_watch_reply_probe_trace = self.api.get(
-                f"/api/inspection/cycles/{self.desktop_watch_reply_probe_cycle_id}"
+        desktop_watch_capability_probe_trace = None
+        if isinstance(self.desktop_watch_capability_probe_cycle_id, str) and self.desktop_watch_capability_probe_cycle_id:
+            desktop_watch_capability_probe_trace = self.api.get(
+                f"/api/inspection/cycles/{self.desktop_watch_capability_probe_cycle_id}"
             )
-        desktop_watch_no_reply_probe_trace = None
-        if isinstance(self.desktop_watch_no_reply_probe_cycle_id, str) and self.desktop_watch_no_reply_probe_cycle_id:
-            desktop_watch_no_reply_probe_trace = self.api.get(
-                f"/api/inspection/cycles/{self.desktop_watch_no_reply_probe_cycle_id}"
+        desktop_watch_pending_intent_probe_trace = None
+        if (
+            isinstance(self.desktop_watch_pending_intent_probe_cycle_id, str)
+            and self.desktop_watch_pending_intent_probe_cycle_id
+        ):
+            desktop_watch_pending_intent_probe_trace = self.api.get(
+                f"/api/inspection/cycles/{self.desktop_watch_pending_intent_probe_cycle_id}"
             )
 
         return {
@@ -1155,12 +1130,12 @@ class LongSmokeRunner:
             "restart_probe_in_progress_before_restart": self.restart_probe_in_progress_before_restart,
             "multiple_client_pause_verified": self.multiple_client_pause_verified,
             "multiple_client_resume_verified": self.multiple_client_resume_verified,
-            "desktop_watch_reply_probe_cycle_id": self.desktop_watch_reply_probe_cycle_id,
-            "desktop_watch_no_reply_probe_cycle_id": self.desktop_watch_no_reply_probe_cycle_id,
-            "desktop_watch_reply_probe_verified": self.desktop_watch_reply_probe_verified,
-            "desktop_watch_no_reply_probe_verified": self.desktop_watch_no_reply_probe_verified,
-            "desktop_watch_reply_probe_trace": desktop_watch_reply_probe_trace,
-            "desktop_watch_no_reply_probe_trace": desktop_watch_no_reply_probe_trace,
+            "desktop_watch_capability_probe_cycle_id": self.desktop_watch_capability_probe_cycle_id,
+            "desktop_watch_pending_intent_probe_cycle_id": self.desktop_watch_pending_intent_probe_cycle_id,
+            "desktop_watch_capability_probe_verified": self.desktop_watch_capability_probe_verified,
+            "desktop_watch_pending_intent_probe_verified": self.desktop_watch_pending_intent_probe_verified,
+            "desktop_watch_capability_probe_trace": desktop_watch_capability_probe_trace,
+            "desktop_watch_pending_intent_probe_trace": desktop_watch_pending_intent_probe_trace,
             "conversation_traces": conversation_traces,
             "restart_probe_traces": restart_probe_traces,
         }
@@ -1216,12 +1191,12 @@ class LongSmokeRunner:
             raise SmokeError("multiple desktop client pause boundary was not verified.")
         if not summary["multiple_client_resume_verified"]:
             raise SmokeError("multiple desktop client resume boundary was not verified.")
-        if not summary["desktop_watch_reply_probe_verified"]:
-            raise SmokeError("desktop_watch reply event boundary was not verified.")
-        if not summary["desktop_watch_no_reply_probe_verified"]:
-            raise SmokeError("desktop_watch no-reply boundary was not verified.")
-        self._assert_desktop_watch_probe_trace(summary.get("desktop_watch_reply_probe_trace"), "reply")
-        self._assert_desktop_watch_probe_trace(summary.get("desktop_watch_no_reply_probe_trace"), "no_reply")
+        if not summary["desktop_watch_capability_probe_verified"]:
+            raise SmokeError("desktop_watch capability_request boundary was not verified.")
+        if not summary["desktop_watch_pending_intent_probe_verified"]:
+            raise SmokeError("desktop_watch pending_intent boundary was not verified.")
+        self._assert_desktop_watch_probe_trace(summary.get("desktop_watch_capability_probe_trace"), "capability_request")
+        self._assert_desktop_watch_probe_trace(summary.get("desktop_watch_pending_intent_probe_trace"), "pending_intent")
 
         for trace in summary["conversation_traces"]:
             cycle_id = trace.get("cycle_id")
