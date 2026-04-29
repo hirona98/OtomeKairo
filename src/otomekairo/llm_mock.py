@@ -227,7 +227,20 @@ class MockLLMClient:
         initiative_trigger = initiative_context.get("trigger_kind") if isinstance(initiative_context, dict) else None
         initiative_pending = initiative_context.get("pending_intent_summaries", []) if isinstance(initiative_context, dict) else []
         if initiative_trigger in {"wake", "background_wake"} and not initiative_pending:
-            if self._should_mock_autonomous_initiative_reply(initiative_context):
+            capability_request = self._mock_autonomous_initiative_capability_request(
+                initiative_context=initiative_context,
+                capability_decision_view=capability_decision_view,
+            )
+            if capability_request is not None:
+                payload = {
+                    "kind": "capability_request",
+                    "reason_code": f"initiative:{capability_request['capability_id']}",
+                    "reason_summary": "継続中の initiative 候補から capability follow-up を進める。",
+                    "requires_confirmation": False,
+                    "pending_intent": None,
+                    "capability_request": capability_request,
+                }
+            elif self._should_mock_autonomous_initiative_reply(initiative_context):
                 payload = {
                     "kind": "reply",
                     "reason_code": "initiative_context",
@@ -508,6 +521,11 @@ class MockLLMClient:
     def _should_mock_autonomous_initiative_reply(self, initiative_context: dict[str, Any] | None) -> bool:
         if not isinstance(initiative_context, dict):
             return False
+        selected_family = self._selected_initiative_family_entry(initiative_context)
+        if isinstance(selected_family, dict):
+            preferred_result_kind = str(selected_family.get("preferred_result_kind") or "").strip()
+            if preferred_result_kind in {"noop", "capability_request"}:
+                return False
         drive_summaries = initiative_context.get("drive_summaries", [])
         if isinstance(drive_summaries, list) and drive_summaries:
             return True
@@ -525,6 +543,49 @@ class MockLLMClient:
                 return True
         return False
 
+    def _mock_autonomous_initiative_capability_request(
+        self,
+        *,
+        initiative_context: dict[str, Any] | None,
+        capability_decision_view: list[dict[str, Any]] | None,
+    ) -> dict[str, Any] | None:
+        if not isinstance(initiative_context, dict):
+            return None
+        selected_family = self._selected_initiative_family_entry(initiative_context)
+        if not isinstance(selected_family, dict):
+            return None
+        preferred_result_kind = str(selected_family.get("preferred_result_kind") or "").strip()
+        if preferred_result_kind != "capability_request":
+            return None
+        ongoing_action_summary = initiative_context.get("ongoing_action_summary")
+        if not isinstance(ongoing_action_summary, dict):
+            return None
+        capability_id = str(ongoing_action_summary.get("last_capability_id") or "").strip()
+        if capability_id == "vision.capture" and self._mock_capability_available(capability_decision_view, capability_id):
+            return {
+                "capability_id": capability_id,
+                "input": {
+                    "source": "desktop",
+                    "mode": "still",
+                },
+            }
+        return None
+
+    def _selected_initiative_family_entry(self, initiative_context: dict[str, Any]) -> dict[str, Any] | None:
+        candidate_families = initiative_context.get("candidate_families")
+        selected_candidate_family = initiative_context.get("selected_candidate_family")
+        if not isinstance(candidate_families, list):
+            return None
+        for family in candidate_families:
+            if not isinstance(family, dict):
+                continue
+            if family.get("selected") is True:
+                return family
+            family_name = family.get("family")
+            if isinstance(selected_candidate_family, str) and family_name == selected_candidate_family:
+                return family
+        return None
+
     def _mock_initiative_reply_text(
         self,
         *,
@@ -538,6 +599,13 @@ class MockLLMClient:
         pending_intent_summaries = initiative_context.get("pending_intent_summaries", [])
         if isinstance(pending_intent_summaries, list) and pending_intent_summaries:
             return None
+        selected_family = self._selected_initiative_family_entry(initiative_context)
+        if isinstance(selected_family, dict) and selected_family.get("family") == "ongoing_action":
+            ongoing_action_summary = initiative_context.get("ongoing_action_summary")
+            if isinstance(ongoing_action_summary, dict):
+                step_summary = ongoing_action_summary.get("step_summary")
+                if isinstance(step_summary, str) and step_summary.strip():
+                    return f"{step_summary.strip()} が前景にあるから、ここは続きとして少し前へ進めるね。"
         world_state_summary = initiative_context.get("world_state_summary", [])
         if isinstance(world_state_summary, list):
             for item in world_state_summary:
