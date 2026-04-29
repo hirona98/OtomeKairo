@@ -770,14 +770,21 @@ class ServiceConfigMixin:
             summaries.append(
                 {
                     "drive_id": drive_state.get("drive_id"),
+                    "drive_kind": drive_state.get("drive_kind"),
                     "summary_text": drive_state.get("summary_text"),
                     "salience": drive_state.get("salience"),
                     "related_scope_refs": deepcopy(drive_state.get("related_scope_refs", [])),
                     "supporting_memory_unit_ids": deepcopy(drive_state.get("supporting_memory_unit_ids", [])),
+                    "supporting_memory_types": deepcopy(drive_state.get("supporting_memory_types", [])),
+                    "focus_scope_type": drive_state.get("focus_scope_type"),
+                    "focus_scope_key": drive_state.get("focus_scope_key"),
+                    "support_count": drive_state.get("support_count"),
+                    "freshness_hint": drive_state.get("freshness_hint"),
+                    "source_updated_at": drive_state.get("source_updated_at"),
                     "updated_at": drive_state.get("updated_at"),
                     "expires_at": drive_state.get("expires_at"),
                 }
-        )
+            )
         if not summaries:
             return None
         return summaries

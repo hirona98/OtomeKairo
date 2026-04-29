@@ -43,8 +43,31 @@ REFLECTION_CONFIRMED_TOPIC_DORMANT_AFTER_DAYS = 30
 DRIVE_MAX_ACTIVE = 3
 DRIVE_COMMITMENT_STATES = ("open", "waiting_confirmation", "on_hold")
 DRIVE_SUMMARY_MIN_SALIENCE = 0.58
-DRIVE_SUMMARY_EXPIRY_HOURS = 48
-DRIVE_COMMITMENT_EXPIRY_HOURS = 72
+DRIVE_KIND_EXPIRY_HOURS = {
+    "follow_through": 72,
+    "resume_when_ready": 48,
+    "relationship_attunement": 60,
+    "user_attention": 48,
+    "self_regulation": 36,
+    "topic_continuation": 36,
+}
+DRIVE_SCOPE_SALIENCE_BOOSTS = {
+    "relationship": 0.08,
+    "self": 0.06,
+    "user": 0.05,
+    "topic": 0.03,
+}
+DRIVE_SUPPORT_SALIENCE_STEP = 0.04
+DRIVE_MAX_SUPPORT_BONUS = 0.12
+DRIVE_MAX_SIGNAL_BONUS = 0.12
+DRIVE_MAX_SUPPORTING_MEMORY_UNITS = 8
+DRIVE_MAX_SUPPORTING_EVENT_IDS = 12
+DRIVE_FRESH_HOURS = 12
+DRIVE_WARM_HOURS = 36
+DRIVE_MOOD_SIGNAL_LOW = 0.25
+DRIVE_MOOD_SIGNAL_HIGH = 0.45
+DRIVE_RELATIONSHIP_SIGNAL_LOW = 0.2
+DRIVE_RELATIONSHIP_SIGNAL_HIGH = 0.45
 
 
 # 内省
@@ -830,10 +853,20 @@ class ReflectiveConsolidator:
             include_memory_types=["commitment", "summary"],
             limit=REFLECTION_MEMORY_LIMIT,
         )
+        mood_state = self.store.get_mood_state(
+            memory_set_id=memory_set_id,
+            current_time=finished_at,
+        )
+        affect_states = self.store.list_affect_states_for_context(
+            memory_set_id=memory_set_id,
+            limit=12,
+        )
         drive_states = self._build_drive_states(
             memory_set_id=memory_set_id,
             finished_at=finished_at,
             source_units=source_units,
+            mood_state=mood_state,
+            affect_states=affect_states,
         )
         self.store.replace_drive_states(
             memory_set_id=memory_set_id,
@@ -867,20 +900,37 @@ class ReflectiveConsolidator:
         memory_set_id: str,
         finished_at: str,
         source_units: list[dict[str, Any]],
+        mood_state: dict[str, Any],
+        affect_states: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        drive_states: list[dict[str, Any]] = []
-        seen_drive_ids: set[str] = set()
+        # commitment は継続単位ごと、summary は scope ごとに drive 候補を集約する。
+        grouped_candidates: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        group_order: list[str] = []
+        seen_group_keys: set[str] = set()
         for unit in source_units:
-            drive_state = self._build_drive_state_from_memory_unit(
-                memory_set_id=memory_set_id,
+            candidate = self._build_drive_candidate_from_memory_unit(
                 finished_at=finished_at,
                 unit=unit,
             )
+            if candidate is None:
+                continue
+            group_key = candidate["group_key"]
+            grouped_candidates[group_key].append(candidate)
+            if group_key not in seen_group_keys:
+                seen_group_keys.add(group_key)
+                group_order.append(group_key)
+
+        drive_states: list[dict[str, Any]] = []
+        for group_key in group_order:
+            drive_state = self._build_drive_state_from_candidates(
+                memory_set_id=memory_set_id,
+                finished_at=finished_at,
+                candidates=grouped_candidates[group_key],
+                mood_state=mood_state,
+                affect_states=affect_states,
+            )
             if drive_state is None:
                 continue
-            if drive_state["drive_id"] in seen_drive_ids:
-                continue
-            seen_drive_ids.add(drive_state["drive_id"])
             drive_states.append(drive_state)
 
         drive_states.sort(
@@ -893,10 +943,9 @@ class ReflectiveConsolidator:
         )
         return drive_states[:DRIVE_MAX_ACTIVE]
 
-    def _build_drive_state_from_memory_unit(
+    def _build_drive_candidate_from_memory_unit(
         self,
         *,
-        memory_set_id: str,
         finished_at: str,
         unit: dict[str, Any],
     ) -> dict[str, Any] | None:
@@ -914,38 +963,249 @@ class ReflectiveConsolidator:
         if not isinstance(scope_key, str) or not scope_key:
             return None
 
-        if memory_type == "commitment":
-            if unit.get("commitment_state") not in DRIVE_COMMITMENT_STATES:
-                return None
-            salience = clamp_score(float(unit.get("salience", 0.0)) + 0.12)
-            expires_at = self._drive_expires_at(
-                finished_at=finished_at,
-                hours=DRIVE_COMMITMENT_EXPIRY_HOURS,
-            )
-        elif memory_type == "summary":
-            if clamp_score(unit.get("salience")) < DRIVE_SUMMARY_MIN_SALIENCE:
-                return None
-            salience = clamp_score(unit.get("salience"))
-            expires_at = self._drive_expires_at(
-                finished_at=finished_at,
-                hours=DRIVE_SUMMARY_EXPIRY_HOURS,
-            )
-        else:
+        drive_kind = self._drive_kind_from_memory_unit(unit)
+        if drive_kind is None:
             return None
-
+        base_salience = self._drive_candidate_base_salience(
+            drive_kind=drive_kind,
+            unit=unit,
+        )
+        source_updated_at = self._drive_source_updated_at(unit=unit, finished_at=finished_at)
+        supporting_event_ids = [
+            event_id
+            for event_id in unit.get("evidence_event_ids", [])
+            if isinstance(event_id, str) and event_id
+        ]
+        group_key = self._drive_candidate_group_key(
+            drive_kind=drive_kind,
+            unit=unit,
+        )
         return {
-            "drive_id": f"drive:{memory_unit_id}",
-            "memory_set_id": memory_set_id,
+            "group_key": group_key,
+            "drive_kind": drive_kind,
+            "scope_type": scope_type,
+            "scope_key": scope_key,
             "summary_text": summary_text,
-            "salience": salience,
-            "related_scope_refs": [f"{scope_type}:{scope_key}"],
-            "supporting_memory_unit_ids": [memory_unit_id],
-            "updated_at": finished_at,
-            "expires_at": expires_at,
+            "salience": base_salience,
+            "memory_unit_id": memory_unit_id,
+            "memory_type": memory_type,
+            "commitment_state": unit.get("commitment_state"),
+            "source_updated_at": source_updated_at,
+            "supporting_event_ids": supporting_event_ids[:DRIVE_MAX_SUPPORTING_EVENT_IDS],
         }
 
     def _drive_expires_at(self, *, finished_at: str, hours: int) -> str:
         return (local_datetime(finished_at) + timedelta(hours=hours)).isoformat()
+
+    def _build_drive_state_from_candidates(
+        self,
+        *,
+        memory_set_id: str,
+        finished_at: str,
+        candidates: list[dict[str, Any]],
+        mood_state: dict[str, Any],
+        affect_states: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        if not candidates:
+            return None
+
+        ordered_candidates = sorted(
+            candidates,
+            key=lambda item: (
+                float(item.get("salience", 0.0)),
+                timestamp_sort_key(item.get("source_updated_at")),
+                item.get("memory_unit_id", ""),
+            ),
+            reverse=True,
+        )
+        lead = ordered_candidates[0]
+        drive_kind = lead["drive_kind"]
+        focus_scope_type = lead["scope_type"]
+        focus_scope_key = lead["scope_key"]
+
+        supporting_memory_unit_ids: list[str] = []
+        supporting_memory_types: list[str] = []
+        supporting_event_ids: list[str] = []
+        related_scope_refs: list[str] = []
+        freshest_support_at = lead["source_updated_at"]
+        for candidate in ordered_candidates:
+            memory_unit_id = candidate.get("memory_unit_id")
+            if isinstance(memory_unit_id, str) and memory_unit_id and memory_unit_id not in supporting_memory_unit_ids:
+                supporting_memory_unit_ids.append(memory_unit_id)
+            memory_type = candidate.get("memory_type")
+            if isinstance(memory_type, str) and memory_type and memory_type not in supporting_memory_types:
+                supporting_memory_types.append(memory_type)
+            for event_id in candidate.get("supporting_event_ids", []):
+                if event_id not in supporting_event_ids:
+                    supporting_event_ids.append(event_id)
+                if len(supporting_event_ids) >= DRIVE_MAX_SUPPORTING_EVENT_IDS:
+                    break
+            scope_ref = f"{candidate['scope_type']}:{candidate['scope_key']}"
+            if scope_ref not in related_scope_refs:
+                related_scope_refs.append(scope_ref)
+            candidate_updated_at = candidate.get("source_updated_at")
+            if timestamp_sort_key(candidate_updated_at) > timestamp_sort_key(freshest_support_at):
+                freshest_support_at = candidate_updated_at
+
+        support_count = len(ordered_candidates)
+        freshness_hint = self._drive_freshness_hint(
+            source_updated_at=freshest_support_at,
+            finished_at=finished_at,
+        )
+        salience = clamp_score(
+            float(lead.get("salience", 0.0))
+            + min(DRIVE_MAX_SUPPORT_BONUS, DRIVE_SUPPORT_SALIENCE_STEP * max(0, support_count - 1))
+            + self._drive_signal_bonus(
+                drive_kind=drive_kind,
+                focus_scope_type=focus_scope_type,
+                focus_scope_key=focus_scope_key,
+                mood_state=mood_state,
+                affect_states=affect_states,
+            )
+        )
+        expires_at = self._drive_expires_at(
+            finished_at=finished_at,
+            hours=DRIVE_KIND_EXPIRY_HOURS.get(drive_kind, 48),
+        )
+        drive_signature = {
+            "drive_kind": drive_kind,
+            "focus_scope_type": focus_scope_type,
+            "focus_scope_key": focus_scope_key,
+            "supporting_memory_unit_ids": supporting_memory_unit_ids[:DRIVE_MAX_SUPPORTING_MEMORY_UNITS],
+        }
+        return {
+            "drive_id": f"drive:{stable_json(drive_signature)[:20]}",
+            "memory_set_id": memory_set_id,
+            "drive_kind": drive_kind,
+            "summary_text": lead["summary_text"],
+            "salience": salience,
+            "related_scope_refs": related_scope_refs,
+            "supporting_memory_unit_ids": supporting_memory_unit_ids[:DRIVE_MAX_SUPPORTING_MEMORY_UNITS],
+            "supporting_memory_types": supporting_memory_types,
+            "supporting_evidence_event_ids": supporting_event_ids,
+            "focus_scope_type": focus_scope_type,
+            "focus_scope_key": focus_scope_key,
+            "support_count": support_count,
+            "freshness_hint": freshness_hint,
+            "source_updated_at": freshest_support_at,
+            "updated_at": finished_at,
+            "expires_at": expires_at,
+        }
+
+    def _drive_kind_from_memory_unit(self, unit: dict[str, Any]) -> str | None:
+        memory_type = unit.get("memory_type")
+        scope_type = unit.get("scope_type")
+        if memory_type == "commitment":
+            commitment_state = unit.get("commitment_state")
+            if commitment_state == "on_hold":
+                return "resume_when_ready"
+            if commitment_state in {"open", "waiting_confirmation"}:
+                return "follow_through"
+            return None
+        if memory_type != "summary":
+            return None
+        if clamp_score(unit.get("salience")) < DRIVE_SUMMARY_MIN_SALIENCE:
+            return None
+        if scope_type == "relationship":
+            return "relationship_attunement"
+        if scope_type == "user":
+            return "user_attention"
+        if scope_type == "self":
+            return "self_regulation"
+        if scope_type == "topic":
+            return "topic_continuation"
+        return None
+
+    def _drive_candidate_base_salience(
+        self,
+        *,
+        drive_kind: str,
+        unit: dict[str, Any],
+    ) -> float:
+        memory_type = unit.get("memory_type")
+        base_salience = clamp_score(unit.get("salience"))
+        if memory_type == "commitment":
+            commitment_state = unit.get("commitment_state")
+            if commitment_state == "waiting_confirmation":
+                return clamp_score(base_salience + 0.18)
+            if commitment_state == "on_hold":
+                return clamp_score(base_salience + 0.08)
+            return clamp_score(base_salience + 0.14)
+        scope_type = unit.get("scope_type")
+        return clamp_score(base_salience + DRIVE_SCOPE_SALIENCE_BOOSTS.get(scope_type, 0.0))
+
+    def _drive_candidate_group_key(
+        self,
+        *,
+        drive_kind: str,
+        unit: dict[str, Any],
+    ) -> str:
+        if unit.get("memory_type") == "summary":
+            return f"{drive_kind}:{unit['scope_type']}:{unit['scope_key']}"
+        return f"{drive_kind}:{unit['memory_unit_id']}"
+
+    def _drive_source_updated_at(self, *, unit: dict[str, Any], finished_at: str) -> str:
+        for key in ("last_confirmed_at", "formed_at"):
+            value = unit.get(key)
+            if isinstance(value, str) and value:
+                return value
+        return finished_at
+
+    def _drive_freshness_hint(
+        self,
+        *,
+        source_updated_at: str,
+        finished_at: str,
+    ) -> str:
+        age_hours = hours_since(source_updated_at, finished_at)
+        if age_hours <= DRIVE_FRESH_HOURS:
+            return "fresh"
+        if age_hours <= DRIVE_WARM_HOURS:
+            return "warm"
+        return "stale"
+
+    def _drive_signal_bonus(
+        self,
+        *,
+        drive_kind: str,
+        focus_scope_type: str,
+        focus_scope_key: str,
+        mood_state: dict[str, Any],
+        affect_states: list[dict[str, Any]],
+    ) -> float:
+        if drive_kind == "self_regulation":
+            current_vad = mood_state.get("current_vad")
+            if isinstance(current_vad, dict):
+                mood_signal = max(
+                    abs(float(current_vad.get("v", 0.0))),
+                    abs(float(current_vad.get("a", 0.0))),
+                    abs(float(current_vad.get("d", 0.0))),
+                )
+                if mood_signal >= DRIVE_MOOD_SIGNAL_HIGH:
+                    return min(DRIVE_MAX_SIGNAL_BONUS, 0.08)
+                if mood_signal >= DRIVE_MOOD_SIGNAL_LOW:
+                    return min(DRIVE_MAX_SIGNAL_BONUS, 0.04)
+            return 0.0
+
+        if focus_scope_type not in {"relationship", "user"}:
+            return 0.0
+        affect_signal = 0.0
+        for record in affect_states:
+            if not isinstance(record, dict):
+                continue
+            if record.get("target_scope_type") != focus_scope_type:
+                continue
+            if record.get("target_scope_key") != focus_scope_key:
+                continue
+            affect_signal = max(
+                affect_signal,
+                clamp_score(record.get("intensity")) * clamp_score(record.get("confidence")),
+            )
+        if affect_signal >= DRIVE_RELATIONSHIP_SIGNAL_HIGH:
+            return min(DRIVE_MAX_SIGNAL_BONUS, 0.08)
+        if affect_signal >= DRIVE_RELATIONSHIP_SIGNAL_LOW:
+            return min(DRIVE_MAX_SIGNAL_BONUS, 0.04)
+        return 0.0
 
     def _drive_state_signature(self, drive_states: list[dict[str, Any]]) -> str:
         return stable_json(self._drive_state_summaries(drive_states))
@@ -958,10 +1218,17 @@ class ReflectiveConsolidator:
             summaries.append(
                 {
                     "drive_id": drive_state.get("drive_id"),
+                    "drive_kind": drive_state.get("drive_kind"),
                     "summary_text": drive_state.get("summary_text"),
                     "salience": drive_state.get("salience"),
                     "related_scope_refs": drive_state.get("related_scope_refs", []),
                     "supporting_memory_unit_ids": drive_state.get("supporting_memory_unit_ids", []),
+                    "supporting_memory_types": drive_state.get("supporting_memory_types", []),
+                    "focus_scope_type": drive_state.get("focus_scope_type"),
+                    "focus_scope_key": drive_state.get("focus_scope_key"),
+                    "support_count": drive_state.get("support_count"),
+                    "freshness_hint": drive_state.get("freshness_hint"),
+                    "source_updated_at": drive_state.get("source_updated_at"),
                     "updated_at": drive_state.get("updated_at"),
                     "expires_at": drive_state.get("expires_at"),
                 }
