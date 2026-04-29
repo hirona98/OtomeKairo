@@ -1897,6 +1897,9 @@ class ServiceInputMixin:
             value = selected_candidate.get(key)
             if isinstance(value, str) and value.strip():
                 payload[key] = value.strip()
+        slot_key = self._world_state_schedule_slot_key(selected_candidate)
+        if slot_key is not None:
+            payload["slot_key"] = slot_key
         if not payload:
             return None
         return payload
@@ -1994,6 +1997,9 @@ class ServiceInputMixin:
                 pending_summary = self._client_context_text(pending_intent.get("intent_summary"), limit=120)
                 if pending_summary is not None:
                     payload["pending_intent_summary"] = pending_summary
+                slot_key = self._client_context_text(pending_intent.get("slot_key"), limit=160)
+                if slot_key is not None:
+                    payload["pending_intent_slot_key"] = slot_key
         return payload
 
     def _world_state_hook_summary_source(self, *, state_type: str, context: dict[str, Any]) -> str:
@@ -2254,6 +2260,9 @@ class ServiceInputMixin:
         if state_type == "device":
             return {"mode": "device_foreground", "key": "device:foreground"}
         if state_type == "schedule":
+            schedule_slot_key = self._world_state_schedule_context_slot_key(context)
+            if schedule_slot_key is not None:
+                return {"mode": "schedule_slot", "key": f"schedule:{schedule_slot_key}"}
             return {"mode": "schedule_foreground", "key": "schedule:self"}
         return {"mode": "scope", "key": f"{state_type}:{scope_type}:{scope_key}"}
 
@@ -2265,6 +2274,29 @@ class ServiceInputMixin:
             return None
         normalized = "".join(character if character.isalnum() else "_" for character in service.lower()).strip("_")
         return normalized or None
+
+    def _world_state_schedule_context_slot_key(self, context: dict[str, Any] | None) -> str | None:
+        if not isinstance(context, dict):
+            return None
+        pending_intent = context.get("pending_intent")
+        if not isinstance(pending_intent, dict):
+            return None
+        slot_key = self._client_context_text(pending_intent.get("slot_key"), limit=160)
+        if slot_key is None:
+            return None
+        return slot_key
+
+    def _world_state_schedule_slot_key(self, selected_candidate: dict[str, Any]) -> str | None:
+        dedupe_key = self._client_context_text(selected_candidate.get("dedupe_key"), limit=160)
+        if dedupe_key is not None:
+            return dedupe_key
+        not_before = selected_candidate.get("not_before")
+        if isinstance(not_before, str) and not_before.strip():
+            return f"at:{not_before.strip()}"
+        intent_summary = self._client_context_text(selected_candidate.get("intent_summary"), limit=120)
+        if intent_summary is not None:
+            return f"summary:{intent_summary}"
+        return None
 
     def _summarize_world_state_candidate_policies(
         self,

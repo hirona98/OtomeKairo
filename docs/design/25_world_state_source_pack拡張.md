@@ -73,6 +73,7 @@ raw response body、client 固有 ID、資格情報、内部 URL、base64 本文
       "intent_kind": "conversation_follow_up",
       "intent_summary": "レビュー状況に合わせてまた声をかける。",
       "reason_summary": "あとで続きに触れる価値がある。",
+      "slot_key": "pending_intent:topic:review",
       "not_before": "2026-04-25T09:10:00+09:00",
       "expires_at": "2026-04-25T15:00:00+09:00"
     }
@@ -83,8 +84,8 @@ raw response body、client 固有 ID、資格情報、内部 URL、base64 本文
 
 source pack では、標準の `client_context` と state-type 別の structured context を分ける。
 画面前景は `client_context` に加えて `screen_context` へ補助要約を載せ、その他の短い current summary は dedicated context へ載せる。
-`external.status` のような capability result は、`external_service_context.summary_text` に加えて `service / status_text` を載せてよい。
-`body_context / device_context / schedule_context` でも、capability result 由来なら `capability_id` と state-type 別 summary field を載せてよい。
+`external.status` のような capability result は、`external_service_context.summary_text` に加えて `service / status_text` を載せる。
+`body_context / device_context / schedule_context` でも、capability result 由来のときは `capability_id` と state-type 別 summary field を載せる。
 
 ## コード責務
 
@@ -92,7 +93,7 @@ source pack では、標準の `client_context` と state-type 別の structured
 - `vision.capture` result の短い visual summary を `screen_context` へ投影する
 - `external.status` result の `service / status_text` を `external_service_context` へ投影する
 - capability result の `body_state_summary / device_state_summary / schedule_summary` を対応する state-type context へ投影する
-- wake / `desktop_watch` の selected pending-intent があるときだけ `schedule_context.pending_intent` を作る
+- wake / `desktop_watch` の selected pending-intent があるときだけ `schedule_context.pending_intent` を作り、`slot_key` を付ける
 - LLM が返した `state_type / scope / summary_text / hint` を validator で検証する
 - TTL は `summary_source` と state_type ごとの規則で決める
 - `external_service` の統合単位は `service` を使う

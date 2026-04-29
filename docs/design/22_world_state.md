@@ -130,15 +130,15 @@ LLM に渡す source pack は少なくとも次を持つ。
 }
 ```
 
-画面前景の補助要約がある場合は `screen_context` を追加してよい。
-外部サービス、身体、機器、予定の短い summary がある場合は、`external_service_context / body_context / device_context / schedule_context` を追加してよい。
-`schedule_context` には `summary_text` に加えて、wake や `desktop_watch` が再評価対象として選んだ pending-intent の `intent_summary / reason_summary / not_before / expires_at` を含めてよい。
-`external_service_context` には `summary_text` に加えて、`service / status_text / capability_id` のような短い補助 field を含めてよい。
-`screen_context` には `visual_summary_text / image_interpreted / visual_confidence_hint / image_count / capability_id` を含めてよい。
-`body_context` には `body_state_summary / capability_id`、`device_context` には `device_state_summary / capability_id`、`schedule_context` には `schedule_summary / capability_id` を含めてよい。
+画面前景の補助要約がある場合は `screen_context` を追加する。
+外部サービス、身体、機器、予定の短い summary がある場合は、`external_service_context / body_context / device_context / schedule_context` を追加する。
+`schedule_context` には `summary_text` に加えて、wake や `desktop_watch` が再評価対象として選んだ pending-intent の `intent_summary / reason_summary / slot_key / not_before / expires_at` を含める。
+`external_service_context` には `summary_text` に加えて、`service / status_text / capability_id` のような短い補助 field を含める。
+`screen_context` には `visual_summary_text / image_interpreted / visual_confidence_hint / image_count / capability_id` を含める。
+`body_context` には `body_state_summary / capability_id`、`device_context` には `device_state_summary / capability_id`、`schedule_context` には `schedule_summary / capability_id` を含める。
 
 source pack には、画像、音声、長い外部サービス応答、資格情報、内部 URL、配送先 client を含めない。
-画像意味理解を通した場合は `visual_summary_text` を短い補助要約として渡してよい。
+画像意味理解を通した場合は `visual_summary_text` を短い補助要約として渡す。
 ただし raw image payload 自体は source pack に含めない。
 
 LLM の出力は JSON object 1 個に固定する。
@@ -191,8 +191,9 @@ validator 失敗時は 1 回だけ再生成する。
 少なくとも次の規則を持つ。
 
 - `expires_at` を過ぎた state は判断文脈へ出さない
-- `screen / body / device / schedule` は state_type ごとの foreground slot 単位で置換する
+- `screen / body / device` は state_type ごとの foreground slot 単位で置換する
 - `external_service` は `service` 単位で統合または置換する
+- `schedule` は generic summary を `schedule:self` へ置き、selected pending-intent がある場合は `slot_key` 単位で統合または置換する
 - それ以外は同じ `state_type / scope_type / scope_key` の近い状態を統合または置換する
 - `screen` と `environment` は短い TTL を標準にする
 - `external_service` は `status_text` と client summary のどちらを正本にしたかで TTL を変える
