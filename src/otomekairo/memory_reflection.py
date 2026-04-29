@@ -11,9 +11,11 @@ from otomekairo.memory_utils import (
     action_counts,
     clamp_score,
     days_since,
+    display_scope_key,
     hours_since,
     local_datetime,
     now_iso,
+    optional_text,
     stable_json,
     timestamp_sort_key,
     unique_memory_unit_ids,
@@ -38,6 +40,8 @@ REFLECTION_CONFIRMED_SUMMARY_EVIDENCE = 7
 REFLECTION_CONFIRMED_SUMMARY_EPISODES = 4
 REFLECTION_SUMMARY_PACK_EPISODE_LIMIT = 6
 REFLECTION_SUMMARY_PACK_MEMORY_LIMIT = 8
+REFLECTION_SCOPE_AFFECT_LIMIT = 4
+REFLECTION_PERSONA_PROMPT_LIMIT = 240
 REFLECTION_TOPIC_DORMANT_AFTER_DAYS = 14
 REFLECTION_CONFIRMED_TOPIC_DORMANT_AFTER_DAYS = 30
 DRIVE_MAX_ACTIVE = 3
@@ -143,6 +147,22 @@ class ReflectiveConsolidator:
             )
             embedding_definition = state["memory_sets"][memory_set_id]["embedding"]
             reflection_summary_role = self._reflection_summary_role_definition(state=state)
+            selected_persona = self._selected_persona_definition(state=state)
+            mood_state = self.store.get_mood_state(
+                memory_set_id=memory_set_id,
+                current_time=finished_at,
+            )
+            affect_states = self.store.list_affect_states_for_context(
+                memory_set_id=memory_set_id,
+                limit=12,
+            )
+            scope_support_index = self._build_reflective_scope_support_index(
+                episodes=episodes,
+                active_units=active_units,
+                selected_persona=selected_persona,
+                mood_state=mood_state,
+                affect_states=affect_states,
+            )
 
             # アクション構築
             summary_actions, summary_generation = self._build_reflective_summary_actions(
@@ -152,6 +172,7 @@ class ReflectiveConsolidator:
                 active_units=active_units,
                 embedding_definition=embedding_definition,
                 reflection_summary_role=reflection_summary_role,
+                scope_support_index=scope_support_index,
             )
             reflection_actions.extend(summary_actions)
             reflection_actions.extend(
@@ -193,9 +214,14 @@ class ReflectiveConsolidator:
                 failure_reason = str(exc)
 
             # 派生状態
+            summary_update_index = self._summary_update_index(summary_actions)
             drive_state_update = self._refresh_drive_states(
                 memory_set_id=memory_set_id,
                 finished_at=finished_reflection_at,
+                mood_state=mood_state,
+                affect_states=affect_states,
+                scope_support_index=scope_support_index,
+                summary_update_index=summary_update_index,
             )
 
             # 内省実行
@@ -270,6 +296,7 @@ class ReflectiveConsolidator:
             "active_drive_ids": [],
             "removed_drive_ids": [],
             "drive_summaries": [],
+            "scope_supports": [],
         }
 
     def _reflection_summary_role_definition(self, *, state: dict[str, Any]) -> dict[str, Any]:
@@ -283,6 +310,18 @@ class ReflectiveConsolidator:
         if not isinstance(role_definition, dict):
             raise LLMError("選択中の model preset に reflection summary role がありません。")
         return role_definition
+
+    def _selected_persona_definition(self, *, state: dict[str, Any]) -> dict[str, Any]:
+        selected_persona_id = state.get("selected_persona_id")
+        personas = state.get("personas")
+        if not isinstance(selected_persona_id, str) or not selected_persona_id:
+            raise ValueError("selected_persona_id snapshot が不正です。")
+        if not isinstance(personas, dict):
+            raise ValueError("personas snapshot が不正です。")
+        persona = personas.get(selected_persona_id)
+        if not isinstance(persona, dict):
+            raise ValueError("選択中の persona snapshot がありません。")
+        return persona
 
     def _reflective_trigger_reasons(
         self,
@@ -354,6 +393,7 @@ class ReflectiveConsolidator:
         active_units: list[dict[str, Any]],
         embedding_definition: dict[str, Any],
         reflection_summary_role: dict[str, Any],
+        scope_support_index: dict[tuple[str, str], dict[str, Any]],
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         # グループ化
         episode_groups: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
@@ -403,6 +443,7 @@ class ReflectiveConsolidator:
                     scope_episodes=scope_episodes,
                     scope_units=scope_units,
                     existing_summary_units=summary_groups.get((scope_type, scope_key), []),
+                    scope_support=scope_support_index.get((scope_type, scope_key)),
                 )
             except Exception as exc:  # noqa: BLE001
                 self._append_summary_generation_failure(
@@ -618,6 +659,98 @@ class ReflectiveConsolidator:
             for action in memory_actions
         )
 
+    def _build_reflective_scope_support_index(
+        self,
+        *,
+        episodes: list[dict[str, Any]],
+        active_units: list[dict[str, Any]],
+        selected_persona: dict[str, Any],
+        mood_state: dict[str, Any],
+        affect_states: list[dict[str, Any]],
+    ) -> dict[tuple[str, str], dict[str, Any]]:
+        episode_groups: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+        memory_groups: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+        for episode in episodes:
+            scope_type = episode.get("primary_scope_type")
+            scope_key = episode.get("primary_scope_key")
+            if scope_type not in REFLECTIVE_SCOPE_TYPES:
+                continue
+            if not isinstance(scope_key, str) or not scope_key:
+                continue
+            episode_groups[(scope_type, scope_key)].append(episode)
+        for unit in active_units:
+            scope_type = unit.get("scope_type")
+            scope_key = unit.get("scope_key")
+            if scope_type not in REFLECTIVE_SCOPE_TYPES:
+                continue
+            if not isinstance(scope_key, str) or not scope_key:
+                continue
+            if unit.get("memory_type") in {"summary", "commitment"}:
+                continue
+            memory_groups[(scope_type, scope_key)].append(unit)
+
+        scope_support_index: dict[tuple[str, str], dict[str, Any]] = {}
+        for scope_type, scope_key in sorted(set(episode_groups.keys()) | set(memory_groups.keys())):
+            scope_support_index[(scope_type, scope_key)] = self._build_reflective_scope_support(
+                scope_type=scope_type,
+                scope_key=scope_key,
+                scope_episodes=episode_groups.get((scope_type, scope_key), []),
+                scope_units=memory_groups.get((scope_type, scope_key), []),
+                selected_persona=selected_persona,
+                mood_state=mood_state,
+                affect_states=affect_states,
+            )
+        return scope_support_index
+
+    def _build_reflective_scope_support(
+        self,
+        *,
+        scope_type: str,
+        scope_key: str,
+        scope_episodes: list[dict[str, Any]],
+        scope_units: list[dict[str, Any]],
+        selected_persona: dict[str, Any],
+        mood_state: dict[str, Any],
+        affect_states: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        support_kinds: list[str] = []
+        if scope_episodes:
+            support_kinds.append("episodes")
+        if scope_units:
+            support_kinds.append("memory_units")
+
+        persona_context = None
+        if scope_type in {"self", "relationship"}:
+            persona_context = self._reflective_persona_context(selected_persona)
+            if persona_context is not None:
+                support_kinds.append("persona")
+
+        mood_context = None
+        if scope_type == "self":
+            mood_context = self._reflective_mood_context(mood_state)
+            if mood_context is not None:
+                support_kinds.append("mood_state")
+
+        affect_context: list[dict[str, Any]] = []
+        if scope_type in {"relationship", "user"}:
+            affect_context = self._reflective_affect_context(
+                scope_type=scope_type,
+                scope_key=scope_key,
+                affect_states=affect_states,
+            )
+            if affect_context:
+                support_kinds.append("affect_state")
+
+        return {
+            "scope_type": scope_type,
+            "scope_key": scope_key,
+            "scope_label": self._reflective_scope_label(scope_type=scope_type, scope_key=scope_key),
+            "support_kinds": support_kinds,
+            "persona": persona_context,
+            "mood_state": mood_context,
+            "affect_state": affect_context,
+        }
+
     def _build_reflective_dormant_actions(
         self,
         *,
@@ -752,6 +885,7 @@ class ReflectiveConsolidator:
         scope_units: list[dict[str, Any]],
         scope_episodes: list[dict[str, Any]],
         existing_summary_units: list[dict[str, Any]],
+        scope_support: dict[str, Any] | None,
     ) -> dict[str, Any]:
         # counts
         memory_types = self._dominant_memory_types(scope_units)
@@ -768,9 +902,10 @@ class ReflectiveConsolidator:
             open_loop_count=open_loop_count,
         )
 
-        return {
+        payload = {
             "scope_type": scope_type,
             "scope_key": scope_key,
+            "scope_label": self._reflective_scope_label(scope_type=scope_type, scope_key=scope_key),
             "summary_status_candidate": summary_status,
             "dominant_memory_types": memory_types,
             "evidence_counts": {
@@ -789,6 +924,24 @@ class ReflectiveConsolidator:
                 for item in self._summary_pack_memory_units(scope_units)
             ],
         }
+        support = scope_support or {}
+        support_kinds = support.get("support_kinds", [])
+        if isinstance(support_kinds, list):
+            payload["support_kinds"] = [
+                value
+                for value in support_kinds
+                if isinstance(value, str) and value
+            ]
+        persona_context = support.get("persona")
+        if isinstance(persona_context, dict) and persona_context:
+            payload["persona"] = persona_context
+        mood_context = support.get("mood_state")
+        if isinstance(mood_context, dict) and mood_context:
+            payload["mood_state"] = mood_context
+        affect_context = support.get("affect_state")
+        if isinstance(affect_context, list) and affect_context:
+            payload["affect_state"] = affect_context
+        return payload
 
     def _existing_summary_text(self, existing_summary_units: list[dict[str, Any]]) -> str | None:
         # 既存 summary の先頭だけを使う。
@@ -818,7 +971,7 @@ class ReflectiveConsolidator:
 
     def _summary_pack_episode_item(self, episode: dict[str, Any]) -> dict[str, Any]:
         return {
-            "formed_at": episode.get("formed_at"),
+            "formed_time_label": self._reflective_time_label(episode.get("formed_at")),
             "summary_text": episode.get("summary_text"),
             "outcome_text": episode.get("outcome_text"),
             "open_loops": episode.get("open_loops", []),
@@ -841,6 +994,10 @@ class ReflectiveConsolidator:
         *,
         memory_set_id: str,
         finished_at: str,
+        mood_state: dict[str, Any],
+        affect_states: list[dict[str, Any]],
+        scope_support_index: dict[tuple[str, str], dict[str, Any]],
+        summary_update_index: dict[tuple[str, str], dict[str, Any]],
     ) -> dict[str, Any]:
         existing_drive_states = self.store.list_drive_states(
             memory_set_id=memory_set_id,
@@ -852,14 +1009,6 @@ class ReflectiveConsolidator:
             statuses=list(ACTIVE_MEMORY_STATUSES),
             include_memory_types=["commitment", "summary"],
             limit=REFLECTION_MEMORY_LIMIT,
-        )
-        mood_state = self.store.get_mood_state(
-            memory_set_id=memory_set_id,
-            current_time=finished_at,
-        )
-        affect_states = self.store.list_affect_states_for_context(
-            memory_set_id=memory_set_id,
-            limit=12,
         )
         drive_states = self._build_drive_states(
             memory_set_id=memory_set_id,
@@ -892,6 +1041,11 @@ class ReflectiveConsolidator:
             "active_drive_ids": [drive_state["drive_id"] for drive_state in drive_states],
             "removed_drive_ids": sorted(existing_ids - current_ids),
             "drive_summaries": self._drive_state_summaries(drive_states),
+            "scope_supports": self._build_drive_scope_support_summaries(
+                drive_states=drive_states,
+                scope_support_index=scope_support_index,
+                summary_update_index=summary_update_index,
+            ),
         }
 
     def _build_drive_states(
@@ -1234,6 +1388,190 @@ class ReflectiveConsolidator:
                 }
             )
         return summaries
+
+    def _build_drive_scope_support_summaries(
+        self,
+        *,
+        drive_states: list[dict[str, Any]],
+        scope_support_index: dict[tuple[str, str], dict[str, Any]],
+        summary_update_index: dict[tuple[str, str], dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        tracked_scope_keys: set[tuple[str, str]] = set()
+        drive_ids_by_scope: dict[tuple[str, str], list[str]] = defaultdict(list)
+        for drive_state in drive_states:
+            if not isinstance(drive_state, dict):
+                continue
+            scope_type = drive_state.get("focus_scope_type")
+            scope_key = drive_state.get("focus_scope_key")
+            drive_id = drive_state.get("drive_id")
+            if not isinstance(scope_type, str) or not scope_type:
+                continue
+            if not isinstance(scope_key, str) or not scope_key:
+                continue
+            tracked_scope_keys.add((scope_type, scope_key))
+            if isinstance(drive_id, str) and drive_id:
+                drive_ids_by_scope[(scope_type, scope_key)].append(drive_id)
+        tracked_scope_keys.update(summary_update_index.keys())
+
+        summaries: list[dict[str, Any]] = []
+        for scope_type, scope_key in sorted(tracked_scope_keys):
+            scope_support = scope_support_index.get((scope_type, scope_key), {})
+            summary_update = summary_update_index.get((scope_type, scope_key), {})
+            support_kinds: list[str] = []
+            if isinstance(scope_support, dict):
+                for value in scope_support.get("support_kinds", []):
+                    if isinstance(value, str) and value and value not in support_kinds:
+                        support_kinds.append(value)
+            if not support_kinds and drive_ids_by_scope.get((scope_type, scope_key)):
+                support_kinds.append("memory_units")
+
+            item: dict[str, Any] = {
+                "scope_type": scope_type,
+                "scope_key": scope_key,
+                "support_kinds": support_kinds,
+                "summary_updated": bool(summary_update.get("summary_updated")),
+            }
+            scope_label = scope_support.get("scope_label") if isinstance(scope_support, dict) else None
+            if isinstance(scope_label, str) and scope_label:
+                item["scope_label"] = scope_label
+            if drive_ids_by_scope.get((scope_type, scope_key)):
+                item["active_drive_ids"] = drive_ids_by_scope[(scope_type, scope_key)]
+            operations = summary_update.get("operations")
+            if isinstance(operations, list) and operations:
+                item["summary_update_operations"] = [
+                    value
+                    for value in operations
+                    if isinstance(value, str) and value
+                ]
+            summaries.append(item)
+        return summaries
+
+    def _summary_update_index(self, summary_actions: list[dict[str, Any]]) -> dict[tuple[str, str], dict[str, Any]]:
+        updates: dict[tuple[str, str], dict[str, Any]] = {}
+        for action in summary_actions:
+            if not isinstance(action, dict):
+                continue
+            memory_unit = action.get("after_snapshot")
+            if not isinstance(memory_unit, dict):
+                memory_unit = action.get("memory_unit")
+            if not isinstance(memory_unit, dict):
+                continue
+            if memory_unit.get("memory_type") != "summary":
+                continue
+            scope_type = memory_unit.get("scope_type")
+            scope_key = memory_unit.get("scope_key")
+            if not isinstance(scope_type, str) or not scope_type:
+                continue
+            if not isinstance(scope_key, str) or not scope_key:
+                continue
+            update = updates.setdefault(
+                (scope_type, scope_key),
+                {
+                    "summary_updated": True,
+                    "operations": [],
+                },
+            )
+            operation = action.get("operation")
+            if isinstance(operation, str) and operation and operation not in update["operations"]:
+                update["operations"].append(operation)
+        return updates
+
+    def _reflective_scope_label(self, *, scope_type: str, scope_key: str) -> str:
+        if scope_type == "self":
+            return "自分自身"
+        if scope_type == "user":
+            return "ユーザー"
+        if scope_type == "topic":
+            return display_scope_key(scope_key)
+        if scope_type == "relationship":
+            if scope_key == "self|user":
+                return "あなたとの関係"
+            return f"{scope_key} の関係文脈"
+        return display_scope_key(scope_key)
+
+    def _reflective_persona_context(self, persona: dict[str, Any]) -> dict[str, Any] | None:
+        payload: dict[str, Any] = {}
+        display_name = optional_text(persona.get("display_name"))
+        if display_name is not None:
+            payload["display_name"] = display_name
+        initiative_baseline = optional_text(persona.get("initiative_baseline"))
+        if initiative_baseline is not None:
+            payload["initiative_baseline"] = initiative_baseline
+        persona_prompt = optional_text(persona.get("persona_prompt"))
+        if persona_prompt is not None:
+            prompt_excerpt = " ".join(persona_prompt.split())
+            payload["persona_prompt_excerpt"] = prompt_excerpt[:REFLECTION_PERSONA_PROMPT_LIMIT]
+        return payload or None
+
+    def _reflective_mood_context(self, mood_state: dict[str, Any]) -> dict[str, Any] | None:
+        current_vad = mood_state.get("current_vad")
+        if not isinstance(current_vad, dict):
+            return None
+        vad = {
+            "v": round(float(current_vad.get("v", 0.0) or 0.0), 2),
+            "a": round(float(current_vad.get("a", 0.0) or 0.0), 2),
+            "d": round(float(current_vad.get("d", 0.0) or 0.0), 2),
+        }
+        signal = max(abs(vad["v"]), abs(vad["a"]), abs(vad["d"]))
+        confidence = clamp_score(mood_state.get("confidence"))
+        if signal < 0.12 and confidence <= 0.0:
+            return None
+        return {
+            "summary_text": self._reflective_mood_summary_text(vad=vad),
+            "current_vad": vad,
+            "confidence": confidence,
+        }
+
+    def _reflective_mood_summary_text(self, *, vad: dict[str, float]) -> str:
+        valence = vad["v"]
+        arousal = vad["a"]
+        dominance = vad["d"]
+        if valence <= -0.25 and arousal >= 0.25:
+            return "緊張や負荷に気を配りながら応答を整えたい状態が残っている。"
+        if valence <= -0.2:
+            return "慎重さや張りを抱えながら応答を整えている。"
+        if valence >= 0.25 and dominance >= 0.1:
+            return "落ち着いて前向きに応じやすい状態が続いている。"
+        if arousal <= -0.2 and dominance <= -0.15:
+            return "力を抜いて静かに整えたい状態が続いている。"
+        return "感情の振れを見ながら応答を整えている。"
+
+    def _reflective_affect_context(
+        self,
+        *,
+        scope_type: str,
+        scope_key: str,
+        affect_states: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        for record in affect_states:
+            if not isinstance(record, dict):
+                continue
+            if record.get("target_scope_type") != scope_type:
+                continue
+            if record.get("target_scope_key") != scope_key:
+                continue
+            affect_label = optional_text(record.get("affect_label"))
+            if affect_label is None:
+                continue
+            item: dict[str, Any] = {
+                "affect_label": affect_label,
+                "intensity": clamp_score(record.get("intensity")),
+                "confidence": clamp_score(record.get("confidence")),
+            }
+            summary_text = optional_text(record.get("summary_text"))
+            if summary_text is not None:
+                item["summary_text"] = summary_text
+            items.append(item)
+            if len(items) >= REFLECTION_SCOPE_AFFECT_LIMIT:
+                break
+        return items
+
+    def _reflective_time_label(self, value: Any) -> str | None:
+        if not isinstance(value, str) or not value:
+            return None
+        local_time = local_datetime(value)
+        return f"{local_time.year}年{local_time.month}月{local_time.day}日 {local_time.hour}時{local_time.minute:02d}分"
 
     def _append_summary_generation_failure(
         self,

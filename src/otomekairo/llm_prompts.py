@@ -580,6 +580,8 @@ def _build_memory_reflection_summary_system_prompt() -> str:
         "渡された evidence pack の外を推測で埋めないでください。\n"
         "単発出来事の説明ではなく、反復して見えている傾向として要約してください。\n"
         "summary_status_candidate=inferred のときは断定しすぎず、confirmed のときも過剰な人格断定は避けてください。\n"
+        "persona は言い回しと注目点の補助に留め、episodes と memory_units の外側を上書きする根拠にしてはいけません。\n"
+        "mood_state や affect_state は、episodes と memory_units に整合する範囲だけで補助的に使ってください。\n"
         "open_loops は長期傾向に効くときだけ自然に触れてください。\n"
         "event_id や memory_unit_id のような内部識別子を書いてはいけません。"
     )

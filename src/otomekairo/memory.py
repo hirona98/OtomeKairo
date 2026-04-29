@@ -145,6 +145,7 @@ class MemoryConsolidator:
                         "active_drive_ids": [],
                         "removed_drive_ids": [],
                         "drive_summaries": [],
+                        "scope_supports": [],
                     },
                     "failure_reason": None,
                 },
@@ -153,6 +154,7 @@ class MemoryConsolidator:
                     "active_drive_ids": [],
                     "removed_drive_ids": [],
                     "drive_summaries": [],
+                    "scope_supports": [],
                 },
             },
             self._build_postprocess_job(
@@ -200,6 +202,7 @@ class MemoryConsolidator:
                         "active_drive_ids": [],
                         "removed_drive_ids": [],
                         "drive_summaries": [],
+                        "scope_supports": [],
                     },
                     "failure_reason": None,
                 },
@@ -233,6 +236,7 @@ class MemoryConsolidator:
     ) -> dict[str, Any]:
         selected_memory_set_id = state["selected_memory_set_id"]
         selected_model_preset_id = state["selected_model_preset_id"]
+        selected_persona_id = state["selected_persona_id"]
         selected_model_preset = state["model_presets"][selected_model_preset_id]
         reflection_summary_role = selected_model_preset["roles"]["memory_reflection_summary"]
         return {
@@ -244,8 +248,12 @@ class MemoryConsolidator:
             "result_status": "queued",
             "turn_finished_at": finished_at,
             "state_snapshot": {
+                "selected_persona_id": selected_persona_id,
                 "selected_memory_set_id": selected_memory_set_id,
                 "selected_model_preset_id": selected_model_preset_id,
+                "personas": {
+                    selected_persona_id: deepcopy(state["personas"][selected_persona_id]),
+                },
                 "memory_sets": {
                     selected_memory_set_id: {
                         "embedding": deepcopy(

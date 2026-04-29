@@ -571,6 +571,7 @@ class ServiceMemoryMixin:
             "active_drive_ids": [],
             "removed_drive_ids": [],
             "drive_summaries": [],
+            "scope_supports": [],
         }
 
     def _update_cycle_trace_memory_trace(self, *, cycle_id: str, memory_trace: dict[str, Any]) -> None:

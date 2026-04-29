@@ -880,7 +880,15 @@ class MockLLMClient:
         counts = evidence_pack.get("evidence_counts", {})
         open_loop_count = counts.get("open_loops", 0) if isinstance(counts, dict) else 0
         summary_status = str(evidence_pack.get("summary_status_candidate") or "inferred")
-        theme = self._mock_reflection_theme(evidence_pack.get("memory_units"))
+        persona = evidence_pack.get("persona")
+        mood_state = evidence_pack.get("mood_state")
+        affect_state = evidence_pack.get("affect_state")
+        theme = self._mock_reflection_theme(
+            evidence_pack.get("memory_units"),
+            mood_state=mood_state,
+            affect_state=affect_state,
+        )
+        persona_lead = self._mock_reflection_persona_lead(persona)
 
         # 文面
         if scope_type == "topic":
@@ -896,16 +904,16 @@ class MockLLMClient:
                 else f"{self._mock_reflection_scope_label(scope_key)} の関係文脈"
             )
             if int(open_loop_count) > 0:
-                summary_text = f"最近の{relation_label}では、{theme}を気にかけながら続きを確かめる流れが続いている。"
+                summary_text = f"最近の{relation_label}では、{persona_lead}{theme}がありつつ、続きを確かめる流れが続いている。"
             elif summary_status == "confirmed":
-                summary_text = f"最近の{relation_label}では、{theme}に関する理解が少しずつ安定している。"
+                summary_text = f"最近の{relation_label}では、{persona_lead}{theme}が少しずつ安定している。"
             else:
-                summary_text = f"最近の{relation_label}では、{theme}に関する流れがゆるやかに積み上がっている。"
+                summary_text = f"最近の{relation_label}では、{persona_lead}{theme}がゆるやかに積み上がっている。"
         elif scope_type == "self":
             if int(open_loop_count) > 0:
-                summary_text = f"最近の自分側の応答では、{theme}を保ちながら継続中の確認事項も抱えている。"
+                summary_text = f"最近の自分側の応答では、{persona_lead}{theme}があり、継続中の確認事項も抱えている。"
             else:
-                summary_text = f"最近の自分側の応答では、{theme}に一定の傾向が見えている。"
+                summary_text = f"最近の自分側の応答では、{persona_lead}{theme}が続いている。"
         else:
             summary_text = f"最近のあなたに関するやり取りでは、{theme}の理解が少しずつ積み上がっている。"
 
@@ -1619,7 +1627,20 @@ class MockLLMClient:
             )
         return updates
 
-    def _mock_reflection_theme(self, memory_units: Any) -> str:
+    def _mock_reflection_theme(
+        self,
+        memory_units: Any,
+        *,
+        mood_state: Any = None,
+        affect_state: Any = None,
+    ) -> str:
+        mood_summary = self._mock_reflection_support_summary(mood_state)
+        if mood_summary is not None:
+            return mood_summary
+        affect_summary = self._mock_reflection_affect_summary(affect_state)
+        if affect_summary is not None:
+            return affect_summary
+
         # 既存 memory unit から主題を拾う。
         if isinstance(memory_units, list):
             for unit in memory_units:
@@ -1647,6 +1668,53 @@ class MockLLMClient:
 
         # 既定
         return "やり取りの傾向"
+
+    def _mock_reflection_support_summary(self, mood_state: Any) -> str | None:
+        if not isinstance(mood_state, dict):
+            return None
+        summary_text = mood_state.get("summary_text")
+        if not isinstance(summary_text, str):
+            return None
+        normalized = summary_text.strip().rstrip("。")
+        if not normalized:
+            return None
+        if "緊張" in normalized or "慎重" in normalized:
+            return "慎重さ"
+        if "落ち着" in normalized or "前向き" in normalized:
+            return "落ち着き"
+        if "力を抜" in normalized or "静か" in normalized:
+            return "静かな整え方"
+        return normalized[:18]
+
+    def _mock_reflection_affect_summary(self, affect_state: Any) -> str | None:
+        if not isinstance(affect_state, list):
+            return None
+        for item in affect_state:
+            if not isinstance(item, dict):
+                continue
+            affect_label = str(item.get("affect_label") or "").strip()
+            if affect_label in {"安心", "信頼", "好意"}:
+                return "信頼感"
+            if affect_label in {"不安", "緊張", "concern"}:
+                return "気がかり"
+            summary_text = item.get("summary_text")
+            if isinstance(summary_text, str):
+                normalized = summary_text.strip().rstrip("。")
+                if "負担" in normalized or "気にかけ" in normalized:
+                    return "相手の負担への気がかり"
+                if normalized:
+                    return normalized[:24]
+        return None
+
+    def _mock_reflection_persona_lead(self, persona: Any) -> str:
+        if not isinstance(persona, dict):
+            return ""
+        initiative_baseline = str(persona.get("initiative_baseline") or "").strip()
+        if initiative_baseline == "low":
+            return "無理を押しすぎず、"
+        if initiative_baseline == "high":
+            return "必要なら一歩前へ出ながら、"
+        return ""
 
     def _mock_reflection_scope_label(self, scope_key: str) -> str:
         # 簡易表示
