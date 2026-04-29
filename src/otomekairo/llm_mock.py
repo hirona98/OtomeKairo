@@ -557,6 +557,17 @@ class MockLLMClient:
         preferred_result_kind = str(selected_family.get("preferred_result_kind") or "").strip()
         if preferred_result_kind != "capability_request":
             return None
+        preferred_capability_id = str(selected_family.get("preferred_capability_id") or "").strip()
+        preferred_capability_input = selected_family.get("preferred_capability_input")
+        if (
+            preferred_capability_id
+            and isinstance(preferred_capability_input, dict)
+            and self._mock_capability_available(capability_decision_view, preferred_capability_id)
+        ):
+            return {
+                "capability_id": preferred_capability_id,
+                "input": preferred_capability_input,
+            }
         ongoing_action_summary = initiative_context.get("ongoing_action_summary")
         if not isinstance(ongoing_action_summary, dict):
             return None

@@ -30,6 +30,21 @@ INITIATIVE_BASELINE_SCORES = {
     "medium": 0.3,
     "high": 0.42,
 }
+INITIATIVE_DRIVE_KIND_SCORES = {
+    "follow_through": 0.2,
+    "relationship_attunement": 0.18,
+    "user_attention": 0.16,
+    "self_regulation": 0.14,
+    "topic_continuation": 0.12,
+    "resume_when_ready": 0.1,
+}
+INITIATIVE_DRIVE_FRESHNESS_ADJUSTMENTS = {
+    "fresh": 0.06,
+    "warm": 0.03,
+    "stale": -0.02,
+}
+INITIATIVE_AUTONOMOUS_PROBE_SCORE = 0.08
+INITIATIVE_AUTONOMOUS_PROBE_THRESHOLD = 0.34
 WORLD_STATE_HINT_SCORES = {
     "low": 0.35,
     "medium": 0.65,
@@ -644,14 +659,135 @@ class ServiceInputMixin:
         for drive_state in drive_state_summary or []:
             if not isinstance(drive_state, dict):
                 continue
-            summaries.append(
-                {
-                    "drive_id": drive_state.get("drive_id"),
-                    "summary_text": drive_state.get("summary_text"),
-                    "salience": drive_state.get("salience"),
-                }
-            )
+            item: dict[str, Any] = {
+                "drive_id": drive_state.get("drive_id"),
+                "summary_text": drive_state.get("summary_text"),
+                "salience": drive_state.get("salience"),
+            }
+            for key in ("drive_kind", "focus_scope_type", "focus_scope_key", "freshness_hint", "source_updated_at"):
+                value = drive_state.get(key)
+                if isinstance(value, str) and value.strip():
+                    item[key] = value.strip()
+            support_count = drive_state.get("support_count")
+            if isinstance(support_count, int) and support_count > 0:
+                item["support_count"] = support_count
+            supporting_memory_types = drive_state.get("supporting_memory_types")
+            if isinstance(supporting_memory_types, list):
+                item["supporting_memory_types"] = [
+                    value.strip()
+                    for value in supporting_memory_types
+                    if isinstance(value, str) and value.strip()
+                ][:4]
+            summaries.append(item)
         return summaries
+
+    def _initiative_drive_priority_score(self, drive_summary: dict[str, Any]) -> float:
+        drive_kind = self._client_context_text(drive_summary.get("drive_kind"), limit=48)
+        salience = drive_summary.get("salience")
+        support_count = drive_summary.get("support_count")
+        freshness_hint = self._client_context_text(drive_summary.get("freshness_hint"), limit=16)
+        score = INITIATIVE_DRIVE_KIND_SCORES.get(drive_kind or "", 0.08)
+        if isinstance(salience, (int, float)):
+            score += max(0.0, min(float(salience), 1.0)) * 0.18
+        if isinstance(support_count, int) and support_count > 1:
+            score += min(0.08, 0.02 * (support_count - 1))
+        if freshness_hint is not None:
+            score += INITIATIVE_DRIVE_FRESHNESS_ADJUSTMENTS.get(freshness_hint, 0.0)
+        return max(0.0, score)
+
+    def _initiative_strongest_drive_summary(
+        self,
+        drive_summaries: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        strongest: dict[str, Any] | None = None
+        strongest_score = -1.0
+        for drive_summary in drive_summaries:
+            if not isinstance(drive_summary, dict):
+                continue
+            score = self._initiative_drive_priority_score(drive_summary)
+            if score <= strongest_score:
+                continue
+            strongest = drive_summary
+            strongest_score = score
+        return strongest
+
+    def _initiative_drive_signal_score(
+        self,
+        drive_summaries: list[dict[str, Any]],
+    ) -> float:
+        score = 0.0
+        for drive_summary in drive_summaries[:3]:
+            if not isinstance(drive_summary, dict):
+                continue
+            score += min(0.18, self._initiative_drive_priority_score(drive_summary))
+        return min(score, 0.34)
+
+    def _initiative_drive_world_alignment_bonus(
+        self,
+        *,
+        strongest_drive: dict[str, Any] | None,
+        world_state_summary: list[dict[str, Any]],
+    ) -> float:
+        if not isinstance(strongest_drive, dict) or not world_state_summary:
+            return 0.0
+        drive_kind = self._client_context_text(strongest_drive.get("drive_kind"), limit=48)
+        state_types = {
+            item.get("state_type")
+            for item in world_state_summary
+            if isinstance(item, dict) and isinstance(item.get("state_type"), str)
+        }
+        if drive_kind == "follow_through" and "schedule" in state_types:
+            return 0.06
+        if drive_kind in {"relationship_attunement", "user_attention"} and state_types.intersection(
+            {"social_context", "screen", "external_service"}
+        ):
+            return 0.05
+        if drive_kind == "self_regulation" and "body" in state_types:
+            return 0.05
+        if drive_kind == "topic_continuation" and state_types.intersection({"screen", "external_service"}):
+            return 0.04
+        return 0.0
+
+    def _initiative_autonomous_probe_preference(
+        self,
+        *,
+        trigger_kind: str,
+        drive_summaries: list[dict[str, Any]],
+        world_state_summary: list[dict[str, Any]],
+        initiative_baseline: dict[str, Any],
+        capability_summary: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        if trigger_kind not in {"wake", "background_wake"}:
+            return None
+        available_ids = capability_summary.get("available_ids", [])
+        if not isinstance(available_ids, list) or "vision.capture" not in available_ids:
+            return None
+        strongest_drive = self._initiative_strongest_drive_summary(drive_summaries)
+        if not isinstance(strongest_drive, dict):
+            return None
+        if self._initiative_drive_priority_score(strongest_drive) < INITIATIVE_AUTONOMOUS_PROBE_THRESHOLD:
+            return None
+        level = self._client_context_text(initiative_baseline.get("level"), limit=16) or "medium"
+        if trigger_kind == "background_wake" and level == "low":
+            return None
+        state_types = {
+            item.get("state_type")
+            for item in world_state_summary
+            if isinstance(item, dict) and isinstance(item.get("state_type"), str)
+        }
+        if state_types.intersection({"screen", "body", "schedule"}):
+            return None
+        drive_kind = self._client_context_text(strongest_drive.get("drive_kind"), limit=48)
+        if drive_kind not in {"follow_through", "relationship_attunement", "user_attention", "topic_continuation"}:
+            return None
+        return {
+            "capability_id": "vision.capture",
+            "input": {
+                "source": "desktop",
+                "mode": "still",
+            },
+            "reason_summary": "強い drive はあるが現在の前景観測が薄いため、先に画面観測を当てたい。",
+        }
 
     def _initiative_baseline_summary(self, persona: dict[str, Any]) -> dict[str, Any]:
         level = self._client_context_text(persona.get("initiative_baseline"), limit=16)
@@ -969,10 +1105,15 @@ class ServiceInputMixin:
         if not available:
             payload["blocking_reason_summary"] = "drive_state / world_state / 直近会話の前景がまだ弱い。"
             return payload
+        strongest_drive = self._initiative_strongest_drive_summary(drive_summaries)
         level = self._client_context_text(initiative_baseline.get("level"), limit=16) or "medium"
         priority_score = INITIATIVE_BASELINE_SCORES.get(level, INITIATIVE_BASELINE_SCORES["medium"])
-        priority_score += min(0.24, 0.12 * len(drive_summaries))
+        priority_score += self._initiative_drive_signal_score(drive_summaries)
         priority_score += self._initiative_world_state_signal_score(world_state_summary)
+        priority_score += self._initiative_drive_world_alignment_bonus(
+            strongest_drive=strongest_drive,
+            world_state_summary=world_state_summary,
+        )
         if recent_turn_summary:
             priority_score += 0.08
         if int(capability_summary.get("available_count", 0)) > 0:
@@ -981,23 +1122,40 @@ class ServiceInputMixin:
             priority_score -= 0.06
         if intervention_state.get("cooldown_active") is True:
             priority_score -= 0.12
+        probe_preference = self._initiative_autonomous_probe_preference(
+            trigger_kind=trigger_kind,
+            drive_summaries=drive_summaries,
+            world_state_summary=world_state_summary,
+            initiative_baseline=initiative_baseline,
+            capability_summary=capability_summary,
+        )
+        preferred_result_kind = "reply"
+        if isinstance(probe_preference, dict):
+            preferred_result_kind = "capability_request"
+            priority_score += INITIATIVE_AUTONOMOUS_PROBE_SCORE
         payload.update(
             {
                 "available": True,
                 "priority_score": round(max(0.0, min(priority_score, 0.9)), 2),
                 "reason_summary": self._initiative_autonomous_family_reason(
                     drive_summaries=drive_summaries,
+                    strongest_drive=strongest_drive,
                     world_state_summary=world_state_summary,
                     recent_turn_summary=recent_turn_summary,
                     initiative_baseline=initiative_baseline,
                     capability_summary=capability_summary,
+                    probe_preference=probe_preference,
                 ),
-                "preferred_result_kind": "reply",
+                "preferred_result_kind": preferred_result_kind,
             }
         )
+        if isinstance(probe_preference, dict):
+            payload["preferred_capability_id"] = probe_preference["capability_id"]
+            payload["preferred_capability_input"] = probe_preference["input"]
         blocking_reason = self._initiative_autonomous_blocking_reason(
             trigger_kind=trigger_kind,
             drive_summaries=drive_summaries,
+            strongest_drive=strongest_drive,
             world_state_summary=world_state_summary,
             initiative_baseline=initiative_baseline,
             capability_summary=capability_summary,
@@ -1039,6 +1197,7 @@ class ServiceInputMixin:
         *,
         trigger_kind: str,
         drive_summaries: list[dict[str, Any]],
+        strongest_drive: dict[str, Any] | None,
         world_state_summary: list[dict[str, Any]],
         initiative_baseline: dict[str, Any],
         capability_summary: dict[str, Any],
@@ -1059,6 +1218,12 @@ class ServiceInputMixin:
                 reasons.append("前景が画面や外部状態中心")
         if int(capability_summary.get("available_count", 0)) == 0:
             reasons.append("使える capability が見当たらない")
+        freshness_hint = self._client_context_text(
+            strongest_drive.get("freshness_hint") if isinstance(strongest_drive, dict) else None,
+            limit=16,
+        )
+        if freshness_hint == "stale":
+            reasons.append("前景に出る drive が stale")
         if not reasons:
             return None
         return " / ".join(reasons) + " ため、押し出しは慎重にする。"
@@ -1153,14 +1318,27 @@ class ServiceInputMixin:
         self,
         *,
         drive_summaries: list[dict[str, Any]],
+        strongest_drive: dict[str, Any] | None,
         world_state_summary: list[dict[str, Any]],
         recent_turn_summary: list[dict[str, str]],
         initiative_baseline: dict[str, Any],
         capability_summary: dict[str, Any],
+        probe_preference: dict[str, Any] | None,
     ) -> str | None:
         parts: list[str] = []
         if drive_summaries:
             parts.append(f"drive_state {len(drive_summaries)} 件")
+        if isinstance(strongest_drive, dict):
+            strongest_summary = self._client_context_text(strongest_drive.get("summary_text"), limit=120)
+            strongest_kind = self._client_context_text(strongest_drive.get("drive_kind"), limit=48)
+            freshness_hint = self._client_context_text(strongest_drive.get("freshness_hint"), limit=16)
+            if strongest_summary is not None:
+                if strongest_kind is not None:
+                    parts.append(f"strongest drive={strongest_kind}:{strongest_summary}")
+                else:
+                    parts.append(f"strongest drive={strongest_summary}")
+            if freshness_hint is not None:
+                parts.append(f"drive freshness={freshness_hint}")
         if world_state_summary:
             parts.append(f"foreground_world_state {len(world_state_summary)} 件")
         if recent_turn_summary:
@@ -1168,6 +1346,10 @@ class ServiceInputMixin:
         available_count = int(capability_summary.get("available_count", 0))
         if available_count > 0:
             parts.append(f"available capability {available_count} 件")
+        if isinstance(probe_preference, dict):
+            capability_id = self._client_context_text(probe_preference.get("capability_id"), limit=64)
+            if capability_id is not None:
+                parts.append(f"{capability_id} で前景確認したい")
         baseline_level = self._client_context_text(initiative_baseline.get("level"), limit=16)
         if baseline_level is not None:
             parts.append(f"initiative_baseline={baseline_level}")
@@ -3666,6 +3848,11 @@ class ServiceInputMixin:
                     "ongoing_action_exists": runtime_state_summary.get("ongoing_action_exists"),
                     "pending_memory_job_count": runtime_state_summary.get("pending_memory_job_count"),
                 }
+            compact_drive_summaries = self._compact_initiative_drive_summaries(
+                initiative_context.get("drive_summaries")
+            )
+            if compact_drive_summaries:
+                payload["drive_summaries"] = compact_drive_summaries
             compact_recent_turn_summary = self._compact_initiative_recent_turn_summary(
                 initiative_context.get("recent_turn_summary")
             )
@@ -3689,6 +3876,29 @@ class ServiceInputMixin:
         )
         if isinstance(compact_pending_intent_selection, dict):
             payload["pending_intent_selection_summary"] = compact_pending_intent_selection
+        return payload
+
+    def _compact_initiative_drive_summaries(self, summaries: Any) -> list[dict[str, Any]]:
+        payload: list[dict[str, Any]] = []
+        if not isinstance(summaries, list):
+            return payload
+        for summary in summaries[:2]:
+            if not isinstance(summary, dict):
+                continue
+            item: dict[str, Any] = {}
+            for key in ("drive_kind", "summary_text", "freshness_hint"):
+                value = summary.get(key)
+                if not isinstance(value, str) or not value.strip():
+                    continue
+                item[key] = self._clamp(value.strip(), limit=160)
+            salience = summary.get("salience")
+            if isinstance(salience, (int, float)):
+                item["salience"] = round(float(salience), 2)
+            support_count = summary.get("support_count")
+            if isinstance(support_count, int) and support_count > 0:
+                item["support_count"] = support_count
+            if item:
+                payload.append(item)
         return payload
 
     def _compact_initiative_pending_intent_summaries(self, summaries: Any) -> list[dict[str, Any]]:
@@ -3732,9 +3942,15 @@ class ServiceInputMixin:
             preferred_result_kind = family.get("preferred_result_kind")
             if isinstance(preferred_result_kind, str) and preferred_result_kind.strip():
                 item["preferred_result_kind"] = preferred_result_kind.strip()
+            preferred_capability_id = family.get("preferred_capability_id")
+            if isinstance(preferred_capability_id, str) and preferred_capability_id.strip():
+                item["preferred_capability_id"] = preferred_capability_id.strip()
             blocking_reason_summary = family.get("blocking_reason_summary")
             if isinstance(blocking_reason_summary, str) and blocking_reason_summary.strip():
                 item["blocking_reason_summary"] = self._clamp(blocking_reason_summary.strip(), limit=160)
+            preferred_capability_input = family.get("preferred_capability_input")
+            if isinstance(preferred_capability_input, dict) and preferred_capability_input:
+                item["preferred_capability_input"] = preferred_capability_input
             if item:
                 payload.append(item)
         return payload

@@ -64,6 +64,8 @@ initiative loop は、判断サイクル内の作業文脈として `initiative_
 
 `initiative_context` は inspection へ要約を残す。
 `initiative_context` そのものを永続的な状態正本にしない。
+`drive_summaries` は `drive_kind / support_count / freshness_hint` を含みうる。
+`candidate_families` は `preferred_result_kind` に加えて、必要なら `preferred_capability_id / preferred_capability_input` を持ってよい。
 
 ## 候補の作り方
 
@@ -111,6 +113,7 @@ LLM は次を担う。
 - 期限切れ候補の除外
 - capability availability と権限の検証
 - 1 サイクル 1 主結果の制約
+- 現在文脈が薄い `wake / background_wake` で、低リスクの観測 capability を先に当てるかの優先形を組み立てる
 - `pending_intent`、`ongoing_action`、`world_state` の状態遷移
 - inspection と audit への記録
 
