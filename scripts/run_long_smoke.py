@@ -9,6 +9,7 @@ import json
 import os
 import shutil
 import socket
+import sqlite3
 import ssl
 import struct
 import subprocess
@@ -413,6 +414,8 @@ class LongSmokeRunner:
         self.external_status_probe_conversation_cycle_id: str | None = None
         self.external_status_probe_followup_cycle_id: str | None = None
         self.external_status_probe_verified = False
+        self.external_status_multi_service_verified = False
+        self.external_status_persisted_integration_keys: list[str] = []
         self.editor_state_mode_used = args.editor_state_mode
         self.selected_model_preset_id: str | None = None
         self.selected_memory_set_id: str | None = None
@@ -1004,28 +1007,25 @@ class LongSmokeRunner:
         with self._external_status_lock:
             self._external_status_overrides.append(override)
 
-    def _exercise_external_status_followup(self) -> None:
-        marker = "LongSmokeExternalStatusProbeMarker"
-        status_text = f"{marker}: GitHub の未確認レビューが 1 件ある。"
-        self._queue_external_status_override(
-            {
-                "status_text": status_text,
-                "client_context": {
-                    "external_service_summary": status_text,
-                    "device_state_summary": "external.status を返せる desktop client が接続中。",
-                    "schedule_summary": "GitHub の通知確認をこのまま進められる。",
-                },
-            }
-        )
+    def _run_external_status_probe(
+        self,
+        *,
+        marker: str,
+        conversation_text: str,
+        source: str,
+        client_id: str,
+        active_app: str,
+        window_title: str,
+        override: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        self._queue_external_status_override(override)
         conversation_cycle_id = self._post_conversation(
-            text=f"GitHub の通知の状態を確認して教えて。{marker}",
-            source="long_smoke_external_status_probe",
-            client_id="long-smoke-external-status-probe",
-            active_app="LongSmokeExternalStatusProbe",
-            window_title=marker,
+            text=conversation_text,
+            source=source,
+            client_id=client_id,
+            active_app=active_app,
+            window_title=window_title,
         )
-        self.external_status_probe_conversation_cycle_id = conversation_cycle_id
-
         deadline = time.monotonic() + WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS
         conversation_trace: dict[str, Any] | None = None
         request_id: str | None = None
@@ -1087,10 +1087,87 @@ class LongSmokeRunner:
         if followup_trace is None:
             raise SmokeError("external.status probe did not produce a capability_result follow-up cycle.")
 
+        return conversation_trace, followup_trace
+
+    def _list_persisted_world_states(self, *, state_type: str) -> list[dict[str, Any]]:
+        if not isinstance(self.selected_memory_set_id, str) or not self.selected_memory_set_id:
+            raise SmokeError("selected_memory_set_id was not initialized.")
+        memory_db_path = self.data_dir / "memory.db"
+        if not memory_db_path.exists():
+            raise SmokeError("memory.db was not created.")
+        conn = sqlite3.connect(memory_db_path)
+        try:
+            rows = conn.execute(
+                """
+                SELECT payload_json
+                FROM world_states
+                WHERE memory_set_id = ?
+                  AND state_type = ?
+                """,
+                (self.selected_memory_set_id, state_type),
+            ).fetchall()
+        finally:
+            conn.close()
+        return [json.loads(row[0]) for row in rows]
+
+    def _exercise_external_status_followup(self) -> None:
+        github_marker = "LongSmokeExternalStatusProbeMarker"
+        github_status_text = f"{github_marker}: GitHub の未確認レビューが 1 件ある。"
+        conversation_trace, followup_trace = self._run_external_status_probe(
+            marker=github_marker,
+            conversation_text=f"GitHub の通知の状態を確認して教えて。{github_marker}",
+            source="long_smoke_external_status_probe",
+            client_id="long-smoke-external-status-probe",
+            active_app="LongSmokeExternalStatusProbe",
+            window_title=github_marker,
+            override={
+                "status_text": github_status_text,
+                "client_context": {
+                    "external_service_summary": github_status_text,
+                    "device_state_summary": "external.status を返せる desktop client が接続中。",
+                    "schedule_summary": "GitHub の通知確認をこのまま進められる。",
+                },
+            },
+        )
+        conversation_cycle_id = conversation_trace.get("cycle_id")
+        if not isinstance(conversation_cycle_id, str) or not conversation_cycle_id:
+            raise SmokeError("external.status probe conversation cycle_id was not recorded.")
+        self.external_status_probe_conversation_cycle_id = conversation_cycle_id
         followup_cycle_id = followup_trace.get("cycle_id")
         if not isinstance(followup_cycle_id, str) or not followup_cycle_id:
             raise SmokeError("external.status follow-up cycle_id was not recorded.")
         self.external_status_probe_followup_cycle_id = followup_cycle_id
+
+        calendar_marker = "LongSmokeCalendarStatusProbeMarker"
+        calendar_status_text = f"{calendar_marker}: カレンダーに 30 分後の予定がある。"
+        self._run_external_status_probe(
+            marker=calendar_marker,
+            conversation_text=f"カレンダーの状態を確認して教えて。{calendar_marker}",
+            source="long_smoke_calendar_status_probe",
+            client_id="long-smoke-calendar-status-probe",
+            active_app="LongSmokeCalendarStatusProbe",
+            window_title=calendar_marker,
+            override={
+                "status_text": calendar_status_text,
+                "client_context": {
+                    "external_service_summary": calendar_status_text,
+                    "device_state_summary": "external.status を返せる desktop client が接続中。",
+                    "schedule_summary": "このあとカレンダーの予定確認を進められる。",
+                },
+            },
+        )
+        persisted_external_service_states = self._list_persisted_world_states(state_type="external_service")
+        integration_keys = sorted(
+            {
+                str(record.get("integration_key") or "").strip()
+                for record in persisted_external_service_states
+                if isinstance(record, dict) and isinstance(record.get("integration_key"), str) and record.get("integration_key", "").strip()
+            }
+        )
+        self.external_status_persisted_integration_keys = integration_keys
+        if "external_service:github" not in integration_keys or "external_service:calendar" not in integration_keys:
+            raise SmokeError("external.status multi-service world_state integration was not persisted.")
+        self.external_status_multi_service_verified = True
         self.external_status_probe_verified = True
         log(
             "external.status followup confirmed"
@@ -1309,6 +1386,8 @@ class LongSmokeRunner:
             "external_status_probe_conversation_cycle_id": self.external_status_probe_conversation_cycle_id,
             "external_status_probe_followup_cycle_id": self.external_status_probe_followup_cycle_id,
             "external_status_probe_verified": self.external_status_probe_verified,
+            "external_status_multi_service_verified": self.external_status_multi_service_verified,
+            "external_status_persisted_integration_keys": self.external_status_persisted_integration_keys,
             "desktop_watch_capability_probe_trace": desktop_watch_capability_probe_trace,
             "desktop_watch_pending_intent_probe_trace": desktop_watch_pending_intent_probe_trace,
             "external_status_probe_conversation_trace": external_status_probe_conversation_trace,
@@ -1388,6 +1467,8 @@ class LongSmokeRunner:
             raise SmokeError("desktop_watch pending_intent boundary was not verified.")
         if not summary["external_status_probe_verified"]:
             raise SmokeError("external.status follow-up boundary was not verified.")
+        if not summary["external_status_multi_service_verified"]:
+            raise SmokeError("external.status multi-service integration boundary was not verified.")
         self._assert_desktop_watch_probe_trace(summary.get("desktop_watch_capability_probe_trace"), "capability_request")
         self._assert_desktop_watch_probe_trace(summary.get("desktop_watch_pending_intent_probe_trace"), "pending_intent")
         self._assert_external_status_probe_trace(
@@ -1451,6 +1532,9 @@ class LongSmokeRunner:
         state_type_hooks = world_state_trace.get("source_pack_state_type_hooks", {})
         if not isinstance(state_type_hooks, dict):
             raise SmokeError(f"desktop_watch {label} probe source_pack_state_type_hooks was invalid.")
+        normalized_candidate_policies = world_state_trace.get("normalized_candidate_policies", [])
+        if not isinstance(normalized_candidate_policies, list):
+            raise SmokeError(f"desktop_watch {label} probe normalized_candidate_policies was invalid.")
         screen_hook = state_type_hooks.get("screen", {})
         if not isinstance(screen_hook, dict):
             raise SmokeError(f"desktop_watch {label} probe screen hook was not recorded.")
@@ -1461,6 +1545,22 @@ class LongSmokeRunner:
         signal_fields = screen_hook.get("signal_fields", [])
         if not isinstance(signal_fields, list) or "visual_summary_text" not in signal_fields:
             raise SmokeError(f"desktop_watch {label} probe screen hook signal_fields was invalid.")
+        screen_policy = next(
+            (
+                item
+                for item in normalized_candidate_policies
+                if isinstance(item, dict) and item.get("state_type") == "screen"
+            ),
+            None,
+        )
+        if not isinstance(screen_policy, dict):
+            raise SmokeError(f"desktop_watch {label} probe screen policy was not recorded.")
+        if screen_policy.get("summary_source") != "visual_summary_text":
+            raise SmokeError(f"desktop_watch {label} probe screen policy summary_source was invalid.")
+        if screen_policy.get("effective_ttl_seconds") != 600:
+            raise SmokeError(f"desktop_watch {label} probe screen policy TTL was invalid.")
+        if screen_policy.get("integration_key") != "screen:foreground":
+            raise SmokeError(f"desktop_watch {label} probe screen policy integration_key was invalid.")
 
     def _assert_external_status_probe_trace(
         self,
@@ -1525,6 +1625,9 @@ class LongSmokeRunner:
         state_type_hooks = world_state_trace.get("source_pack_state_type_hooks", {})
         if not isinstance(state_type_hooks, dict):
             raise SmokeError("external.status probe follow-up source_pack_state_type_hooks was invalid.")
+        normalized_candidate_policies = world_state_trace.get("normalized_candidate_policies", [])
+        if not isinstance(normalized_candidate_policies, list):
+            raise SmokeError("external.status probe follow-up normalized_candidate_policies was invalid.")
         external_service_context = source_pack_contexts.get("external_service_context", {})
         if not isinstance(external_service_context, dict):
             raise SmokeError("external.status probe follow-up external_service_context was invalid.")
@@ -1542,6 +1645,24 @@ class LongSmokeRunner:
         external_signal_fields = external_service_hook.get("signal_fields", [])
         if not isinstance(external_signal_fields, list) or "status_text" not in external_signal_fields:
             raise SmokeError("external.status probe follow-up external_service hook signal_fields was invalid.")
+        external_service_policy = next(
+            (
+                item
+                for item in normalized_candidate_policies
+                if isinstance(item, dict) and item.get("state_type") == "external_service"
+            ),
+            None,
+        )
+        if not isinstance(external_service_policy, dict):
+            raise SmokeError("external.status probe follow-up external_service policy was invalid.")
+        if external_service_policy.get("summary_source") != "status_text":
+            raise SmokeError("external.status probe follow-up external_service policy summary_source was invalid.")
+        if external_service_policy.get("effective_ttl_seconds") != 7200:
+            raise SmokeError("external.status probe follow-up external_service policy TTL was invalid.")
+        if external_service_policy.get("integration_mode") != "external_service_service":
+            raise SmokeError("external.status probe follow-up external_service policy integration_mode was invalid.")
+        if external_service_policy.get("integration_key") != "external_service:github":
+            raise SmokeError("external.status probe follow-up external_service policy integration_key was invalid.")
         device_hook = state_type_hooks.get("device", {})
         if not isinstance(device_hook, dict):
             raise SmokeError("external.status probe follow-up device hook was invalid.")
@@ -1552,6 +1673,22 @@ class LongSmokeRunner:
             raise SmokeError("external.status probe follow-up schedule hook was invalid.")
         if schedule_hook.get("summary_source") != "schedule_summary":
             raise SmokeError("external.status probe follow-up schedule hook summary_source was invalid.")
+        schedule_policy = next(
+            (
+                item
+                for item in normalized_candidate_policies
+                if isinstance(item, dict) and item.get("state_type") == "schedule"
+            ),
+            None,
+        )
+        if not isinstance(schedule_policy, dict):
+            raise SmokeError("external.status probe follow-up schedule policy was invalid.")
+        if schedule_policy.get("summary_source") != "schedule_summary":
+            raise SmokeError("external.status probe follow-up schedule policy summary_source was invalid.")
+        if schedule_policy.get("effective_ttl_seconds") != 5400:
+            raise SmokeError("external.status probe follow-up schedule policy TTL was invalid.")
+        if schedule_policy.get("integration_key") != "schedule:self":
+            raise SmokeError("external.status probe follow-up schedule policy integration_key was invalid.")
         foreground_world_state = input_trace.get("foreground_world_state", [])
         if not isinstance(foreground_world_state, list):
             raise SmokeError("external.status probe follow-up foreground_world_state was invalid.")

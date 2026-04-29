@@ -94,7 +94,10 @@ source pack では、標準の `client_context` と state-type 別の structured
 - capability result の `body_state_summary / device_state_summary / schedule_summary` を対応する state-type context へ投影する
 - wake / `desktop_watch` の selected pending-intent があるときだけ `schedule_context.pending_intent` を作る
 - LLM が返した `state_type / scope / summary_text / hint` を validator で検証する
-- TTL、件数上限、統合、失効、永続化は従来どおりコード側が決める
+- TTL は `summary_source` と state_type ごとの規則で決める
+- `external_service` の統合単位は `service` を使う
+- `schedule` の TTL は pending-intent の `expires_at` を上限に使う
+- 件数上限、統合、失効、永続化はコード側が決める
 
 ## やらないこと
 

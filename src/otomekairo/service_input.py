@@ -31,14 +31,39 @@ WORLD_STATE_HINT_SCORES = {
     "high": 0.85,
 }
 WORLD_STATE_TTL_SECONDS_BY_TYPE = {
-    "screen": {"short": 600, "medium": 1800, "long": 5400},
-    "environment": {"short": 900, "medium": 2400, "long": 7200},
-    "location": {"short": 1800, "medium": 3600, "long": 14400},
-    "external_service": {"short": 1800, "medium": 7200, "long": 21600},
-    "body": {"short": 1200, "medium": 3600, "long": 10800},
-    "device": {"short": 1200, "medium": 3600, "long": 10800},
-    "schedule": {"short": 1800, "medium": 7200, "long": 21600},
-    "social_context": {"short": 900, "medium": 2400, "long": 7200},
+    "screen": {
+        "visual_summary_text": {"short": 600, "medium": 900, "long": 1800},
+        "window_title": {"short": 300, "medium": 600, "long": 1200},
+        "active_app": {"short": 300, "medium": 600, "long": 900},
+        "summary_text": {"short": 300, "medium": 600, "long": 900},
+    },
+    "environment": {
+        "summary_text": {"short": 900, "medium": 2400, "long": 7200},
+    },
+    "location": {
+        "summary_text": {"short": 1800, "medium": 3600, "long": 14400},
+    },
+    "external_service": {
+        "status_text": {"short": 1800, "medium": 7200, "long": 21600},
+        "external_service_summary": {"short": 1200, "medium": 3600, "long": 10800},
+        "summary_text": {"short": 1200, "medium": 3600, "long": 10800},
+    },
+    "body": {
+        "body_state_summary": {"short": 900, "medium": 2400, "long": 7200},
+        "summary_text": {"short": 900, "medium": 2400, "long": 7200},
+    },
+    "device": {
+        "device_state_summary": {"short": 1200, "medium": 3600, "long": 10800},
+        "summary_text": {"short": 900, "medium": 2400, "long": 7200},
+    },
+    "schedule": {
+        "schedule_summary": {"short": 1800, "medium": 5400, "long": 14400},
+        "pending_intent": {"short": 900, "medium": 3600, "long": 10800},
+        "summary_text": {"short": 1800, "medium": 5400, "long": 14400},
+    },
+    "social_context": {
+        "summary_text": {"short": 900, "medium": 2400, "long": 7200},
+    },
 }
 
 
@@ -1533,7 +1558,9 @@ class ServiceInputMixin:
                 source_kind=source_kind,
                 source_ref=source_ref,
                 payload=payload,
+                source_pack=source_pack,
             )
+            normalized_candidate_policies = self._summarize_world_state_candidate_policies(world_states)
             refresh_summary = self.store.refresh_world_states(
                 memory_set_id=state["selected_memory_set_id"],
                 current_time=started_at,
@@ -1559,12 +1586,14 @@ class ServiceInputMixin:
                     "previous_foreground_world_state": existing_foreground_world_state,
                     "foreground_world_state": foreground_world_state,
                     "updated_state_count": int(refresh_summary.get("updated_count", 0)),
+                    "replaced_state_count": int(refresh_summary.get("replaced_count", 0)),
                     "expired_state_count": int(refresh_summary.get("expired_count", 0)),
                     "dropped_state_count": int(refresh_summary.get("dropped_count", 0)),
                     "source_kind": source_kind,
                     "source_ref": source_ref,
                     "source_pack_contexts": source_pack_contexts,
                     "source_pack_state_type_hooks": source_pack_state_type_hooks,
+                    "normalized_candidate_policies": normalized_candidate_policies,
                     "failure_reason": None,
                 },
                 foreground_world_state,
@@ -1578,12 +1607,14 @@ class ServiceInputMixin:
                     "previous_foreground_world_state": existing_foreground_world_state,
                     "foreground_world_state": existing_foreground_world_state,
                     "updated_state_count": 0,
+                    "replaced_state_count": 0,
                     "expired_state_count": 0,
                     "dropped_state_count": 0,
                     "source_kind": source_kind,
                     "source_ref": source_ref,
                     "source_pack_contexts": source_pack_contexts,
                     "source_pack_state_type_hooks": source_pack_state_type_hooks,
+                    "normalized_candidate_policies": [],
                     "failure_reason": str(exc),
                 },
                 existing_foreground_world_state,
@@ -2036,22 +2067,41 @@ class ServiceInputMixin:
         source_kind: str,
         source_ref: str,
         payload: dict[str, Any],
+        source_pack: dict[str, Any],
     ) -> list[dict[str, Any]]:
         normalized: list[dict[str, Any]] = []
         seen_identity: set[tuple[str, str, str]] = set()
         for candidate in payload.get("state_candidates", []):
             if not isinstance(candidate, dict):
                 continue
+            state_type = str(candidate["state_type"]).strip()
             scope_type, scope_key = self._parse_world_state_scope(str(candidate["scope"]).strip())
-            identity = (str(candidate["state_type"]).strip(), scope_type, scope_key)
+            identity = (state_type, scope_type, scope_key)
             if identity in seen_identity:
                 continue
             seen_identity.add(identity)
+            source_context = self._world_state_source_context(
+                state_type=state_type,
+                source_pack=source_pack,
+            )
+            ttl_hint = str(candidate["ttl_hint"]).strip()
+            ttl_policy = self._world_state_ttl_policy(
+                current_time=observed_at,
+                state_type=state_type,
+                ttl_hint=ttl_hint,
+                context=source_context,
+            )
+            integration_policy = self._world_state_integration_policy(
+                state_type=state_type,
+                scope_type=scope_type,
+                scope_key=scope_key,
+                context=source_context,
+            )
             normalized.append(
                 {
                     "world_state_id": f"world_state:{uuid.uuid4().hex}",
                     "memory_set_id": memory_set_id,
-                    "state_type": str(candidate["state_type"]).strip(),
+                    "state_type": state_type,
                     "scope_type": scope_type,
                     "scope_key": scope_key,
                     "summary_text": str(candidate["summary_text"]).strip(),
@@ -2060,16 +2110,188 @@ class ServiceInputMixin:
                     "confidence": self._world_state_score_from_hint(candidate["confidence_hint"]),
                     "salience": self._world_state_score_from_hint(candidate["salience_hint"]),
                     "observed_at": observed_at,
-                    "expires_at": self._world_state_expires_at(
-                        current_time=observed_at,
-                        state_type=str(candidate["state_type"]).strip(),
-                        ttl_hint=str(candidate["ttl_hint"]).strip(),
-                    ),
+                    "expires_at": ttl_policy["expires_at"],
                     "updated_at": observed_at,
+                    "summary_source": ttl_policy["summary_source"],
+                    "ttl_hint": ttl_hint,
+                    "ttl_seconds": ttl_policy["ttl_seconds"],
+                    "integration_mode": integration_policy["mode"],
+                    "integration_key": integration_policy["key"],
                 }
             )
+            if ttl_policy.get("capped_by") is not None:
+                normalized[-1]["ttl_capped_by"] = ttl_policy["capped_by"]
         normalized.sort(key=lambda record: (record["salience"], record["updated_at"]), reverse=True)
         return normalized
+
+    def _world_state_source_context(
+        self,
+        *,
+        state_type: str,
+        source_pack: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        context_key = {
+            "screen": "screen_context",
+            "external_service": "external_service_context",
+            "body": "body_context",
+            "device": "device_context",
+            "schedule": "schedule_context",
+        }.get(state_type)
+        if context_key is None:
+            return None
+        context = source_pack.get(context_key)
+        if not isinstance(context, dict) or not context:
+            return None
+        return context
+
+    def _world_state_ttl_policy(
+        self,
+        *,
+        current_time: str,
+        state_type: str,
+        ttl_hint: str,
+        context: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        summary_source = self._world_state_candidate_summary_source(
+            state_type=state_type,
+            context=context,
+        )
+        ttl_profiles = WORLD_STATE_TTL_SECONDS_BY_TYPE.get(state_type)
+        if ttl_profiles is None:
+            raise ValueError("world_state ttl is invalid.")
+        ttl_table = ttl_profiles.get(summary_source) or ttl_profiles.get("summary_text")
+        if ttl_table is None or ttl_hint not in ttl_table:
+            raise ValueError("world_state ttl is invalid.")
+        ttl_seconds = ttl_table[ttl_hint]
+        ttl_capped_by = self._world_state_ttl_cap_source(
+            current_time=current_time,
+            state_type=state_type,
+            context=context,
+        )
+        if ttl_capped_by is not None:
+            ttl_seconds = min(
+                ttl_seconds,
+                self._world_state_capped_ttl_seconds(
+                    current_time=current_time,
+                    state_type=state_type,
+                    context=context,
+                ),
+            )
+        return {
+            "summary_source": summary_source,
+            "ttl_seconds": ttl_seconds,
+            "expires_at": (self._parse_iso(current_time) + timedelta(seconds=ttl_seconds)).isoformat(),
+            "capped_by": ttl_capped_by,
+        }
+
+    def _world_state_candidate_summary_source(
+        self,
+        *,
+        state_type: str,
+        context: dict[str, Any] | None,
+    ) -> str:
+        if not isinstance(context, dict) or not context:
+            return "summary_text"
+        if state_type in {"screen", "external_service", "body", "device", "schedule"}:
+            return self._world_state_hook_summary_source(state_type=state_type, context=context)
+        return "summary_text"
+
+    def _world_state_ttl_cap_source(
+        self,
+        *,
+        current_time: str,
+        state_type: str,
+        context: dict[str, Any] | None,
+    ) -> str | None:
+        if state_type != "schedule" or not isinstance(context, dict):
+            return None
+        pending_intent = context.get("pending_intent")
+        if not isinstance(pending_intent, dict):
+            return None
+        expires_at = pending_intent.get("expires_at")
+        if not isinstance(expires_at, str) or not expires_at.strip():
+            return None
+        remaining_seconds = int((self._parse_iso(expires_at.strip()) - self._parse_iso(current_time)).total_seconds())
+        if remaining_seconds <= 0:
+            return "pending_intent.expires_at"
+        return "pending_intent.expires_at"
+
+    def _world_state_capped_ttl_seconds(
+        self,
+        *,
+        current_time: str,
+        state_type: str,
+        context: dict[str, Any] | None,
+    ) -> int:
+        if state_type != "schedule" or not isinstance(context, dict):
+            raise ValueError("world_state ttl cap is invalid.")
+        pending_intent = context.get("pending_intent")
+        if not isinstance(pending_intent, dict):
+            raise ValueError("world_state ttl cap is invalid.")
+        expires_at = pending_intent.get("expires_at")
+        if not isinstance(expires_at, str) or not expires_at.strip():
+            raise ValueError("world_state ttl cap is invalid.")
+        remaining_seconds = int((self._parse_iso(expires_at.strip()) - self._parse_iso(current_time)).total_seconds())
+        return max(1, remaining_seconds)
+
+    def _world_state_integration_policy(
+        self,
+        *,
+        state_type: str,
+        scope_type: str,
+        scope_key: str,
+        context: dict[str, Any] | None,
+    ) -> dict[str, str]:
+        if state_type == "screen":
+            return {"mode": "foreground_screen", "key": "screen:foreground"}
+        if state_type == "external_service":
+            service_key = self._world_state_service_key(context)
+            if service_key is not None:
+                return {"mode": "external_service_service", "key": f"external_service:{service_key}"}
+            return {"mode": "scope", "key": f"{state_type}:{scope_type}:{scope_key}"}
+        if state_type == "body":
+            return {"mode": "body_foreground", "key": "body:self"}
+        if state_type == "device":
+            return {"mode": "device_foreground", "key": "device:foreground"}
+        if state_type == "schedule":
+            return {"mode": "schedule_foreground", "key": "schedule:self"}
+        return {"mode": "scope", "key": f"{state_type}:{scope_type}:{scope_key}"}
+
+    def _world_state_service_key(self, context: dict[str, Any] | None) -> str | None:
+        if not isinstance(context, dict):
+            return None
+        service = self._client_context_text(context.get("service"), limit=80)
+        if service is None:
+            return None
+        normalized = "".join(character if character.isalnum() else "_" for character in service.lower()).strip("_")
+        return normalized or None
+
+    def _summarize_world_state_candidate_policies(
+        self,
+        world_states: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        summaries: list[dict[str, Any]] = []
+        for world_state in world_states:
+            if not isinstance(world_state, dict):
+                continue
+            scope_type = world_state.get("scope_type")
+            scope_key = world_state.get("scope_key")
+            if not isinstance(scope_type, str) or not isinstance(scope_key, str):
+                continue
+            summary = {
+                "state_type": world_state.get("state_type"),
+                "scope": self._world_state_scope_ref(scope_type=scope_type, scope_key=scope_key),
+                "summary_source": world_state.get("summary_source"),
+                "ttl_hint": world_state.get("ttl_hint"),
+                "effective_ttl_seconds": world_state.get("ttl_seconds"),
+                "integration_mode": world_state.get("integration_mode"),
+                "integration_key": world_state.get("integration_key"),
+            }
+            ttl_capped_by = world_state.get("ttl_capped_by")
+            if isinstance(ttl_capped_by, str) and ttl_capped_by.strip():
+                summary["ttl_capped_by"] = ttl_capped_by.strip()
+            summaries.append(summary)
+        return summaries
 
     def _world_state_source_kind(self, trigger_kind: str) -> str:
         if trigger_kind == "user_message":
@@ -2130,12 +2352,6 @@ class ServiceInputMixin:
             raise ValueError("world_state hint score is invalid.")
         return WORLD_STATE_HINT_SCORES[hint.strip()]
 
-    def _world_state_expires_at(self, *, current_time: str, state_type: str, ttl_hint: str) -> str:
-        ttl_table = WORLD_STATE_TTL_SECONDS_BY_TYPE.get(state_type)
-        if ttl_table is None or ttl_hint not in ttl_table:
-            raise ValueError("world_state ttl is invalid.")
-        return (self._parse_iso(current_time) + timedelta(seconds=ttl_table[ttl_hint])).isoformat()
-
     def _empty_world_state_trace(
         self,
         *,
@@ -2150,10 +2366,14 @@ class ServiceInputMixin:
             "previous_foreground_world_state": foreground_world_state,
             "foreground_world_state": foreground_world_state,
             "updated_state_count": 0,
+            "replaced_state_count": 0,
             "expired_state_count": 0,
             "dropped_state_count": 0,
             "source_kind": source_kind,
             "source_ref": source_ref,
+            "source_pack_contexts": {},
+            "source_pack_state_type_hooks": {},
+            "normalized_candidate_policies": [],
             "failure_reason": None,
         }
 

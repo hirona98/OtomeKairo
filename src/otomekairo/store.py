@@ -427,22 +427,11 @@ class SQLiteMemoryStore(StoreCloneMixin, StoreVectorMixin, StoreSchemaMixin):
             inserted_count = 0
 
             for record in world_states:
-                replace_cursor = conn.execute(
-                    """
-                    DELETE FROM world_states
-                    WHERE memory_set_id = ?
-                      AND state_type = ?
-                      AND scope_type = ?
-                      AND scope_key = ?
-                    """,
-                    (
-                        memory_set_id,
-                        record["state_type"],
-                        record["scope_type"],
-                        record["scope_key"],
-                    ),
+                replaced_count += self._delete_conflicting_world_states(
+                    conn,
+                    memory_set_id=memory_set_id,
+                    record=record,
                 )
-                replaced_count += max(int(replace_cursor.rowcount or 0), 0)
                 self._insert_world_state(conn, record)
                 inserted_count += 1
 
@@ -475,6 +464,51 @@ class SQLiteMemoryStore(StoreCloneMixin, StoreVectorMixin, StoreSchemaMixin):
             "replaced_count": replaced_count,
             "dropped_count": dropped_count,
         }
+
+    def _delete_conflicting_world_states(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        memory_set_id: str,
+        record: dict[str, Any],
+    ) -> int:
+        rows = conn.execute(
+            """
+            SELECT world_state_id, payload_json
+            FROM world_states
+            WHERE memory_set_id = ?
+              AND state_type = ?
+            """,
+            (memory_set_id, record["state_type"]),
+        ).fetchall()
+        delete_ids: list[str] = []
+        for row in rows:
+            existing = json.loads(row["payload_json"])
+            if self._world_state_records_conflict(existing=existing, incoming=record):
+                delete_ids.append(row["world_state_id"])
+        if not delete_ids:
+            return 0
+        placeholders = ", ".join("?" for _ in delete_ids)
+        conn.execute(
+            f"DELETE FROM world_states WHERE world_state_id IN ({placeholders})",
+            delete_ids,
+        )
+        return len(delete_ids)
+
+    def _world_state_records_conflict(
+        self,
+        *,
+        existing: dict[str, Any],
+        incoming: dict[str, Any],
+    ) -> bool:
+        existing_key = str(existing.get("integration_key") or "").strip()
+        incoming_key = str(incoming.get("integration_key") or "").strip()
+        if existing_key and incoming_key:
+            return existing_key == incoming_key
+        return (
+            existing.get("scope_type") == incoming.get("scope_type")
+            and existing.get("scope_key") == incoming.get("scope_key")
+        )
 
     def clear_world_states(self, *, memory_set_id: str) -> None:
         # トランザクション
