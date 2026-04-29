@@ -33,6 +33,7 @@ WAIT_QUEUE_DRAIN_TIMEOUT_SECONDS = 30.0
 WAIT_CAPTURE_RECOVERY_TIMEOUT_SECONDS = 20.0
 WAIT_RESTART_PENDING_TIMEOUT_SECONDS = 8.0
 WAIT_DESKTOP_WATCH_PROBE_TIMEOUT_SECONDS = 20.0
+WAIT_PENDING_INTENT_SEED_TIMEOUT_SECONDS = 20.0
 WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS = 20.0
 
 PROFILE_DEFAULTS: dict[str, dict[str, int | float]] = {
@@ -390,6 +391,7 @@ class LongSmokeRunner:
         self.desktop_watch_event_count = 0
         self.conversation_cycle_ids: list[str] = []
         self.restart_probe_cycle_ids: list[str] = []
+        self.pending_intent_seed_cycle_ids: list[str] = []
         self.capture_timeout_request_ids: list[str] = []
         self.capture_mismatch_request_ids: list[str] = []
         self.capture_invalid_images_request_ids: list[str] = []
@@ -502,6 +504,8 @@ class LongSmokeRunner:
         env["OTOMEKAIRO_TLS_CERT_FILE"] = str(self.cert_file)
         env["OTOMEKAIRO_TLS_KEY_FILE"] = str(self.key_file)
         env["OTOMEKAIRO_DATA_DIR"] = str(self.data_dir)
+        # smoke では selected pending-intent を決定的に踏むため、再評価待機を短縮する。
+        env["OTOMEKAIRO_PENDING_INTENT_NOT_BEFORE_MINUTES"] = "0"
         env["PYTHONPATH"] = str(self.repo_root / "src")
         self.server_process = subprocess.Popen(
             [str(python_bin), "-m", "otomekairo.run"],
@@ -924,12 +928,16 @@ class LongSmokeRunner:
             expected_result_kind="capability_request",
         )
         self.desktop_watch_capability_probe_verified = True
+        pending_intent_marker = self._seed_pending_intent_probe_candidate()
         self.desktop_watch_pending_intent_probe_cycle_id = self._run_desktop_watch_probe(
             probe_name="pending_intent",
-            marker="LongSmokePendingIntentProbeMarker",
+            marker=pending_intent_marker,
             active_app="LongSmokePendingIntentProbeApp",
-            window_title="LongSmokePendingIntentProbeMarker また今度あとで",
-            expected_result_kind="capability_request",
+            window_title=f"{pending_intent_marker} また今度あとで",
+            expected_result_kind=None,
+            extra_client_context={
+                "schedule_summary": f"{pending_intent_marker} の見直し予定が近い。",
+            },
         )
         self.desktop_watch_pending_intent_probe_verified = True
 
@@ -940,21 +948,25 @@ class LongSmokeRunner:
         marker: str,
         active_app: str,
         window_title: str,
-        expected_result_kind: str,
+        expected_result_kind: str | None,
+        extra_client_context: dict[str, str] | None = None,
     ) -> str:
+        override_client_context = {
+            "active_app": active_app,
+            "window_title": window_title,
+            "locale": "ja-JP",
+        }
+        if isinstance(extra_client_context, dict):
+            override_client_context.update(extra_client_context)
         self._queue_capture_context_override(
             {
-                "client_context": {
-                    "active_app": active_app,
-                    "window_title": window_title,
-                    "locale": "ja-JP",
-                }
+                "client_context": override_client_context,
             }
         )
         log(
             "desktop_watch probe queued"
             f" probe={probe_name}"
-            f" expected_result_kind={expected_result_kind}"
+            f" expected_result_kind={expected_result_kind or 'any'}"
             f" marker={marker}"
         )
 
@@ -986,18 +998,68 @@ class LongSmokeRunner:
 
             if matched_trace is not None:
                 cycle_id = matched_trace.get("cycle_id")
-                result_kind = ((matched_trace.get("cycle_summary") or {}).get("result_kind"))
-                if result_kind != expected_result_kind:
+                result_kind = (matched_trace.get("cycle_summary") or {}).get("result_kind")
+                if expected_result_kind is not None and result_kind != expected_result_kind:
                     raise SmokeError(
                         f"desktop_watch {probe_name} probe result_kind was {result_kind}."
                     )
-                # capability_request 完了後の再判断ループはまだ無いため、
-                # この probe では desktop_watch event を要求しない。
-                log(f"desktop_watch {probe_name} capability_request confirmed cycle_id={cycle_id}")
+                if expected_result_kind is None:
+                    log(f"desktop_watch {probe_name} trace matched cycle_id={cycle_id} result_kind={result_kind}")
+                else:
+                    log(
+                        f"desktop_watch {probe_name} {expected_result_kind} confirmed"
+                        f" cycle_id={cycle_id}"
+                    )
                 return cycle_id
             time.sleep(0.25)
 
         raise SmokeError(f"desktop_watch probe timed out: {probe_name}")
+
+    def _seed_pending_intent_probe_candidate(self) -> str:
+        marker = "LongSmokePendingIntentProbeMarker"
+        first_cycle_id = self._post_conversation(
+            text=f"{marker} のレビュー相談を続けたいです。",
+            source="long_smoke_pending_intent_seed",
+            client_id="long-smoke-pending-intent-seed",
+            active_app="LongSmokePendingIntentSeed",
+            window_title=f"{marker} seed-1",
+        )
+        self.pending_intent_seed_cycle_ids.append(first_cycle_id)
+        self._wait_for_memory_jobs_to_drain()
+
+        second_cycle_id = self._post_conversation(
+            text=f"{marker} の件はまた今度あとで確認したいです。",
+            source="long_smoke_pending_intent_seed",
+            client_id="long-smoke-pending-intent-seed",
+            active_app="LongSmokePendingIntentSeed",
+            window_title=f"{marker} seed-2",
+        )
+        self.pending_intent_seed_cycle_ids.append(second_cycle_id)
+
+        deadline = time.monotonic() + WAIT_PENDING_INTENT_SEED_TIMEOUT_SECONDS
+        while time.monotonic() < deadline:
+            self._assert_server_running()
+            self._assert_event_clients_healthy()
+            trace = self.api.get(f"/api/inspection/cycles/{second_cycle_id}")
+            decision_trace = trace.get("decision_trace", {})
+            result_trace = trace.get("result_trace", {})
+            if not isinstance(decision_trace, dict) or not isinstance(result_trace, dict):
+                time.sleep(0.25)
+                continue
+            if decision_trace.get("result_kind") != "pending_intent":
+                time.sleep(0.25)
+                continue
+            pending_intent_summary = result_trace.get("pending_intent_summary")
+            if not isinstance(pending_intent_summary, dict):
+                time.sleep(0.25)
+                continue
+            log(
+                "pending_intent seed confirmed"
+                f" cycle_id={second_cycle_id}"
+                f" dedupe_key={pending_intent_summary.get('dedupe_key')}"
+            )
+            return marker
+        raise SmokeError("pending_intent probe seed did not create a pending_intent candidate.")
 
     def _queue_capture_context_override(self, override: dict[str, Any]) -> None:
         with self._capture_lock:
@@ -1360,6 +1422,7 @@ class LongSmokeRunner:
             "status": status,
             "conversation_cycle_ids": self.conversation_cycle_ids,
             "restart_probe_cycle_ids": self.restart_probe_cycle_ids,
+            "pending_intent_seed_cycle_ids": self.pending_intent_seed_cycle_ids,
             "trigger_counts": trigger_counts,
             "failed_cycle_ids": failed_cycle_ids,
             "capture_request_count": self.capture_request_count,
@@ -1500,32 +1563,15 @@ class LongSmokeRunner:
     def _assert_desktop_watch_probe_trace(self, trace: Any, label: str) -> None:
         if not isinstance(trace, dict):
             raise SmokeError(f"desktop_watch {label} probe trace was not collected.")
+        input_trace = trace.get("input_trace", {})
+        if not isinstance(input_trace, dict):
+            raise SmokeError(f"desktop_watch {label} probe input_trace was invalid.")
+        cycle_summary = trace.get("cycle_summary", {})
+        if not isinstance(cycle_summary, dict):
+            raise SmokeError(f"desktop_watch {label} probe cycle_summary was invalid.")
         result_trace = trace.get("result_trace", {})
         if not isinstance(result_trace, dict):
             raise SmokeError(f"desktop_watch {label} probe result_trace was invalid.")
-        capability_request_summary = result_trace.get("capability_request_summary", {})
-        if not isinstance(capability_request_summary, dict):
-            raise SmokeError(f"desktop_watch {label} probe capability_request_summary was invalid.")
-        if capability_request_summary.get("capability_id") != "vision.capture":
-            raise SmokeError(f"desktop_watch {label} probe capability_id was invalid.")
-        if capability_request_summary.get("status") != "dispatched":
-            raise SmokeError(f"desktop_watch {label} probe capability_request status was invalid.")
-        if not isinstance(capability_request_summary.get("request_id"), str) or not capability_request_summary["request_id"]:
-            raise SmokeError(f"desktop_watch {label} probe request_id was not recorded.")
-        if not isinstance(capability_request_summary.get("timeout_ms"), int):
-            raise SmokeError(f"desktop_watch {label} probe timeout_ms was not recorded.")
-        ongoing_action_transition_summary = result_trace.get("ongoing_action_transition_summary", {})
-        if not isinstance(ongoing_action_transition_summary, dict):
-            raise SmokeError(f"desktop_watch {label} probe ongoing_action_transition_summary was invalid.")
-        transition_sequence = ongoing_action_transition_summary.get("transition_sequence", [])
-        if not isinstance(transition_sequence, list) or len(transition_sequence) != 2:
-            raise SmokeError(f"desktop_watch {label} probe transition_sequence was invalid.")
-        if transition_sequence[0] not in {"started", "continued"}:
-            raise SmokeError(f"desktop_watch {label} probe first transition was invalid: {transition_sequence[0]}")
-        if transition_sequence[1] != "completed":
-            raise SmokeError(f"desktop_watch {label} probe final transition was invalid: {transition_sequence[1]}")
-        if ongoing_action_transition_summary.get("last_capability_id") != "vision.capture":
-            raise SmokeError(f"desktop_watch {label} probe last_capability_id was invalid.")
         world_state_trace = trace.get("world_state_trace", {})
         if not isinstance(world_state_trace, dict):
             raise SmokeError(f"desktop_watch {label} probe world_state_trace was invalid.")
@@ -1561,6 +1607,79 @@ class LongSmokeRunner:
             raise SmokeError(f"desktop_watch {label} probe screen policy TTL was invalid.")
         if screen_policy.get("integration_key") != "screen:foreground":
             raise SmokeError(f"desktop_watch {label} probe screen policy integration_key was invalid.")
+        if label == "capability_request":
+            capability_request_summary = result_trace.get("capability_request_summary", {})
+            if not isinstance(capability_request_summary, dict):
+                raise SmokeError("desktop_watch capability_request probe capability_request_summary was invalid.")
+            if capability_request_summary.get("capability_id") != "vision.capture":
+                raise SmokeError("desktop_watch capability_request probe capability_id was invalid.")
+            if capability_request_summary.get("status") != "dispatched":
+                raise SmokeError("desktop_watch capability_request probe capability_request status was invalid.")
+            if not isinstance(capability_request_summary.get("request_id"), str) or not capability_request_summary["request_id"]:
+                raise SmokeError("desktop_watch capability_request probe request_id was not recorded.")
+            if not isinstance(capability_request_summary.get("timeout_ms"), int):
+                raise SmokeError("desktop_watch capability_request probe timeout_ms was not recorded.")
+            ongoing_action_transition_summary = result_trace.get("ongoing_action_transition_summary", {})
+            if not isinstance(ongoing_action_transition_summary, dict):
+                raise SmokeError("desktop_watch capability_request probe ongoing_action_transition_summary was invalid.")
+            transition_sequence = ongoing_action_transition_summary.get("transition_sequence", [])
+            if not isinstance(transition_sequence, list) or len(transition_sequence) != 2:
+                raise SmokeError("desktop_watch capability_request probe transition_sequence was invalid.")
+            if transition_sequence[0] not in {"started", "continued"}:
+                raise SmokeError(
+                    "desktop_watch capability_request probe first transition was invalid:"
+                    f" {transition_sequence[0]}"
+                )
+            if transition_sequence[1] != "completed":
+                raise SmokeError("desktop_watch capability_request probe final transition was invalid.")
+            if ongoing_action_transition_summary.get("last_capability_id") != "vision.capture":
+                raise SmokeError("desktop_watch capability_request probe last_capability_id was invalid.")
+            return
+        pending_intent_selection = input_trace.get("pending_intent_selection", {})
+        if not isinstance(pending_intent_selection, dict):
+            raise SmokeError("desktop_watch pending_intent probe selection trace was invalid.")
+        if int(pending_intent_selection.get("candidate_pool_count", 0)) < 1:
+            raise SmokeError("desktop_watch pending_intent probe candidate_pool_count was invalid.")
+        if int(pending_intent_selection.get("eligible_candidate_count", 0)) < 1:
+            raise SmokeError("desktop_watch pending_intent probe eligible_candidate_count was invalid.")
+        if pending_intent_selection.get("result_status") != "succeeded":
+            raise SmokeError("desktop_watch pending_intent probe selection result_status was invalid.")
+        if pending_intent_selection.get("selected_candidate_ref") == "none":
+            raise SmokeError("desktop_watch pending_intent probe did not select a candidate.")
+        schedule_hook = state_type_hooks.get("schedule", {})
+        if not isinstance(schedule_hook, dict):
+            raise SmokeError("desktop_watch pending_intent probe schedule hook was not recorded.")
+        pending_slot_key = schedule_hook.get("pending_intent_slot_key")
+        if not isinstance(pending_slot_key, str) or not pending_slot_key.strip():
+            raise SmokeError("desktop_watch pending_intent probe pending_intent_slot_key was invalid.")
+        schedule_signal_fields = schedule_hook.get("signal_fields", [])
+        if not isinstance(schedule_signal_fields, list) or "pending_intent" not in schedule_signal_fields:
+            raise SmokeError("desktop_watch pending_intent probe schedule signal_fields were invalid.")
+        schedule_policy = next(
+            (
+                item
+                for item in normalized_candidate_policies
+                if isinstance(item, dict) and item.get("state_type") == "schedule"
+            ),
+            None,
+        )
+        if not isinstance(schedule_policy, dict):
+            raise SmokeError("desktop_watch pending_intent probe schedule policy was not recorded.")
+        if schedule_policy.get("integration_mode") != "schedule_slot":
+            raise SmokeError("desktop_watch pending_intent probe schedule integration_mode was invalid.")
+        if schedule_policy.get("integration_key") != f"schedule:{pending_slot_key}":
+            raise SmokeError("desktop_watch pending_intent probe schedule integration_key was invalid.")
+        if schedule_policy.get("ttl_capped_by") != "pending_intent.expires_at":
+            raise SmokeError("desktop_watch pending_intent probe schedule TTL cap was invalid.")
+        persisted_schedule_keys = sorted(
+            {
+                str(state.get("integration_key") or "").strip()
+                for state in self._list_persisted_world_states(state_type="schedule")
+                if isinstance(state, dict) and str(state.get("integration_key") or "").strip()
+            }
+        )
+        if f"schedule:{pending_slot_key}" not in persisted_schedule_keys:
+            raise SmokeError("desktop_watch pending_intent probe schedule integration_key was not persisted.")
 
     def _assert_external_status_probe_trace(
         self,

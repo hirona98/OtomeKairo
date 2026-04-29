@@ -1,6 +1,20 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime
+
+
+def _read_non_negative_int_env(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise SystemExit(f"{name} must be an integer >= 0.") from exc
+    if value < 0:
+        raise SystemExit(f"{name} must be an integer >= 0.")
+    return value
 
 
 # 定数
@@ -14,7 +28,10 @@ REQUIRED_MODEL_ROLE_NAMES = (
     "recall_pack_selection",
     "pending_intent_selection",
 )
-PENDING_INTENT_NOT_BEFORE_MINUTES = 30
+PENDING_INTENT_NOT_BEFORE_MINUTES = _read_non_negative_int_env(
+    "OTOMEKAIRO_PENDING_INTENT_NOT_BEFORE_MINUTES",
+    30,
+)
 PENDING_INTENT_EXPIRES_HOURS = 24
 WAKE_REPLY_COOLDOWN_MINUTES = 30
 BACKGROUND_WAKE_POLL_SECONDS = 5.0
