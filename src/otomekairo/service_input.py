@@ -547,6 +547,17 @@ class ServiceInputMixin:
     ) -> dict[str, Any] | None:
         if trigger_kind not in {"wake", "background_wake", "desktop_watch"}:
             return None
+        drive_summaries = self._initiative_drive_summaries(drive_state_summary)
+        pending_intent_summaries = self._initiative_pending_intent_summaries(selected_candidate)
+        world_state_summary = foreground_world_state or []
+        capability_summary = self._initiative_capability_summary(capability_decision_view)
+        candidate_families = self._initiative_candidate_families(
+            drive_summaries=drive_summaries,
+            world_state_summary=world_state_summary,
+            ongoing_action_summary=ongoing_action_summary,
+            selected_candidate=selected_candidate,
+            pending_intent_selection=pending_intent_selection,
+        )
         return {
             "trigger_kind": trigger_kind,
             "opportunity_summary": self._initiative_opportunity_summary(
@@ -554,11 +565,13 @@ class ServiceInputMixin:
                 client_context=client_context,
                 selected_candidate=selected_candidate,
             ),
-            "drive_summaries": self._initiative_drive_summaries(drive_state_summary),
-            "pending_intent_summaries": self._initiative_pending_intent_summaries(selected_candidate),
-            "world_state_summary": foreground_world_state or [],
+            "drive_summaries": drive_summaries,
+            "pending_intent_summaries": pending_intent_summaries,
+            "world_state_summary": world_state_summary,
             "ongoing_action_summary": ongoing_action_summary,
-            "capability_summary": self._initiative_capability_summary(capability_decision_view),
+            "capability_summary": capability_summary,
+            "candidate_families": candidate_families,
+            "selected_candidate_family": self._initiative_selected_candidate_family(candidate_families),
             "intervention_risk_summary": self._initiative_intervention_risk_summary(
                 trigger_kind=trigger_kind,
                 ongoing_action_summary=ongoing_action_summary,
@@ -643,6 +656,144 @@ class ServiceInputMixin:
             "unavailable_count": len(unavailable_items),
             "unavailable_items": unavailable_items[:3],
         }
+
+    def _initiative_candidate_families(
+        self,
+        *,
+        drive_summaries: list[dict[str, Any]],
+        world_state_summary: list[dict[str, Any]],
+        ongoing_action_summary: dict[str, Any] | None,
+        selected_candidate: dict[str, Any] | None,
+        pending_intent_selection: dict[str, Any] | None,
+    ) -> list[dict[str, Any]]:
+        pending_pool_count = 0
+        pending_eligible_count = 0
+        if isinstance(pending_intent_selection, dict):
+            pending_pool_count = int(pending_intent_selection.get("candidate_pool_count", 0))
+            pending_eligible_count = int(pending_intent_selection.get("eligible_candidate_count", 0))
+        ongoing_available = self._initiative_has_ongoing_action_candidate(ongoing_action_summary)
+        pending_available = isinstance(selected_candidate, dict) or pending_pool_count > 0
+        autonomous_available = bool(drive_summaries or world_state_summary or ongoing_available)
+        selected_family = self._initiative_selected_candidate_family_name(
+            drive_summaries=drive_summaries,
+            world_state_summary=world_state_summary,
+            ongoing_action_summary=ongoing_action_summary,
+            selected_candidate=selected_candidate,
+        )
+        return [
+            {
+                "family": "ongoing_action",
+                "available": ongoing_available,
+                "selected": selected_family == "ongoing_action",
+                "reason_summary": self._initiative_ongoing_action_family_reason(ongoing_action_summary),
+            },
+            {
+                "family": "pending_intent",
+                "available": pending_available,
+                "selected": selected_family == "pending_intent",
+                "reason_summary": self._initiative_pending_intent_family_reason(
+                    selected_candidate=selected_candidate,
+                    pool_count=pending_pool_count,
+                    eligible_count=pending_eligible_count,
+                ),
+            },
+            {
+                "family": "autonomous",
+                "available": autonomous_available,
+                "selected": selected_family == "autonomous",
+                "reason_summary": self._initiative_autonomous_family_reason(
+                    drive_summaries=drive_summaries,
+                    world_state_summary=world_state_summary,
+                    ongoing_action_summary=ongoing_action_summary,
+                ),
+            },
+        ]
+
+    def _initiative_selected_candidate_family_name(
+        self,
+        *,
+        drive_summaries: list[dict[str, Any]],
+        world_state_summary: list[dict[str, Any]],
+        ongoing_action_summary: dict[str, Any] | None,
+        selected_candidate: dict[str, Any] | None,
+    ) -> str | None:
+        if isinstance(selected_candidate, dict):
+            return "pending_intent"
+        if self._initiative_has_ongoing_action_candidate(ongoing_action_summary):
+            return "ongoing_action"
+        if drive_summaries or world_state_summary:
+            return "autonomous"
+        return None
+
+    def _initiative_selected_candidate_family(self, candidate_families: list[dict[str, Any]]) -> str | None:
+        for family in candidate_families:
+            if not isinstance(family, dict) or family.get("selected") is not True:
+                continue
+            family_name = family.get("family")
+            if isinstance(family_name, str) and family_name.strip():
+                return family_name.strip()
+        return None
+
+    def _initiative_has_ongoing_action_candidate(
+        self,
+        ongoing_action_summary: dict[str, Any] | None,
+    ) -> bool:
+        if not isinstance(ongoing_action_summary, dict):
+            return False
+        status = ongoing_action_summary.get("status")
+        return isinstance(status, str) and status.strip() != ""
+
+    def _initiative_ongoing_action_family_reason(
+        self,
+        ongoing_action_summary: dict[str, Any] | None,
+    ) -> str | None:
+        if not isinstance(ongoing_action_summary, dict):
+            return None
+        status = self._client_context_text(ongoing_action_summary.get("status"), limit=48)
+        step_summary = self._client_context_text(ongoing_action_summary.get("step_summary"), limit=120)
+        if status is None and step_summary is None:
+            return None
+        if status is not None and step_summary is not None:
+            return f"ongoing_action は status={status} で、{step_summary}"
+        if status is not None:
+            return f"ongoing_action は status={status} で継続候補に上がる。"
+        return step_summary
+
+    def _initiative_pending_intent_family_reason(
+        self,
+        *,
+        selected_candidate: dict[str, Any] | None,
+        pool_count: int,
+        eligible_count: int,
+    ) -> str | None:
+        if isinstance(selected_candidate, dict):
+            intent_summary = self._client_context_text(selected_candidate.get("intent_summary"), limit=120)
+            if intent_summary is not None:
+                return f"selected pending_intent は {intent_summary}"
+            return "selected pending_intent 候補が前景にある。"
+        if eligible_count > 0:
+            return f"再評価できる pending_intent 候補が {eligible_count} 件ある。"
+        if pool_count > 0:
+            return f"pending_intent 候補は {pool_count} 件あるが、まだ due ではない。"
+        return None
+
+    def _initiative_autonomous_family_reason(
+        self,
+        *,
+        drive_summaries: list[dict[str, Any]],
+        world_state_summary: list[dict[str, Any]],
+        ongoing_action_summary: dict[str, Any] | None,
+    ) -> str | None:
+        parts: list[str] = []
+        if drive_summaries:
+            parts.append(f"drive_state {len(drive_summaries)} 件")
+        if world_state_summary:
+            parts.append(f"foreground_world_state {len(world_state_summary)} 件")
+        if self._initiative_has_ongoing_action_candidate(ongoing_action_summary):
+            parts.append("ongoing_action 1 件")
+        if not parts:
+            return None
+        return " / ".join(parts) + " が自発判断の前景候補にある。"
 
     def _initiative_intervention_risk_summary(
         self,
@@ -3100,11 +3251,19 @@ class ServiceInputMixin:
             opportunity_summary = initiative_context.get("opportunity_summary")
             if isinstance(opportunity_summary, str) and opportunity_summary.strip():
                 payload["opportunity_summary"] = self._clamp(opportunity_summary.strip(), limit=160)
+            selected_candidate_family = initiative_context.get("selected_candidate_family")
+            if isinstance(selected_candidate_family, str) and selected_candidate_family.strip():
+                payload["selected_candidate_family"] = selected_candidate_family.strip()
             compact_pending_intent_summaries = self._compact_initiative_pending_intent_summaries(
                 initiative_context.get("pending_intent_summaries")
             )
             if compact_pending_intent_summaries:
                 payload["pending_intent_summaries"] = compact_pending_intent_summaries
+            compact_candidate_families = self._compact_initiative_candidate_families(
+                initiative_context.get("candidate_families")
+            )
+            if compact_candidate_families:
+                payload["candidate_families"] = compact_candidate_families
             compact_world_state_summaries = self._compact_initiative_world_state_summaries(
                 initiative_context.get("world_state_summary")
             )
@@ -3133,6 +3292,28 @@ class ServiceInputMixin:
                 if not isinstance(value, str) or not value.strip():
                     continue
                 item[key] = self._clamp(value.strip(), limit=160)
+            if item:
+                payload.append(item)
+        return payload
+
+    def _compact_initiative_candidate_families(self, candidate_families: Any) -> list[dict[str, Any]]:
+        payload: list[dict[str, Any]] = []
+        if not isinstance(candidate_families, list):
+            return payload
+        for family in candidate_families[:3]:
+            if not isinstance(family, dict):
+                continue
+            item: dict[str, Any] = {}
+            family_name = family.get("family")
+            if isinstance(family_name, str) and family_name.strip():
+                item["family"] = family_name.strip()
+            for key in ("available", "selected"):
+                value = family.get(key)
+                if isinstance(value, bool):
+                    item[key] = value
+            reason_summary = family.get("reason_summary")
+            if isinstance(reason_summary, str) and reason_summary.strip():
+                item["reason_summary"] = self._clamp(reason_summary.strip(), limit=160)
             if item:
                 payload.append(item)
         return payload

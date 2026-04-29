@@ -55,6 +55,8 @@ initiative loop は、判断サイクル内の作業文脈として `initiative_
 | `opportunity_summary` | なぜ今評価機会があるか |
 | `drive_summaries` | 前景に出す `drive_state` 要約 |
 | `pending_intent_summaries` | 再評価対象の保留意図要約 |
+| `candidate_families` | `ongoing_action / pending_intent / autonomous` の候補系統ごとの availability と理由要約 |
+| `selected_candidate_family` | その回で前景候補として最も強く立っている系統 |
 | `world_state_summary` | 現在文脈として効く外界状態の要約 |
 | `ongoing_action_summary` | 継続中の実行列がある場合の要約 |
 | `capability_summary` | 使える能力と使えない能力の判断用要約 |
@@ -150,6 +152,7 @@ inspection では、少なくとも次を追えるようにする。
 - `pending_intent` 候補件数
 - `ongoing_action` 参照有無
 - `world_state` 前景要約の有無
+- `candidate_families` の availability 要約
 - 選ばれた候補系統
 - 見送り理由または前進理由
 - 過剰介入抑制に効いた要素
