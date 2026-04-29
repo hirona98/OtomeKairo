@@ -188,8 +188,7 @@ capability 実行は次の順序で行う。
 8. server が `request_id`、`target_client_id`、`result_schema` を検証する。
 9. server が `capability_id` ごとの follow-up pipeline で `memory_policy`、`state_policy`、`inspection_fields` に従って記憶、状態、inspection を更新する。
 
-現行実装は 1 から 9 のうち、`state_policy.creates_ongoing_action` に基づく `ongoing_action` の開始、結果待ち、完了、timeout 終了と、accepted async result を `capability_id` ベースの共通 follow-up pipeline で shared pipeline へ戻す第一段までを実装する。
-ただし concrete な result endpoint と意味付け hook はまだ `vision.capture` 中心であり、capability ごとの詳細な `capability_state` 更新と `inspection_fields` による result 展開の拡張は後続拡張で扱う。
+どこまで実装済みか、どの result endpoint が concrete に開いているか、follow-up pipeline の現在地がどこまで進んでいるかは [../plan/01_現行計画.md](../plan/01_現行計画.md) を正とする。
 
 LLM が実行要求案を出しても、server の検証を通らない要求は実行しない。
 検証失敗は判断サイクルの `internal_failure` または capability failure として記録する。

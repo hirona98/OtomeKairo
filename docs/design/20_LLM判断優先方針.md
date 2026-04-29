@@ -107,19 +107,10 @@ OtomeKairo では、次の分離を基本形にする。
 - 失敗を silent に正常系へ丸める
 - 安全境界や実行権限を LLM に持たせる
 
-## 現在の主要適用済み項目
+## 現状参照
 
-現在の実装で、意味判断を LLM で行っている主要項目は次である。
-
-1. `reflective consolidation` の `summary_text`
-2. `event_evidence` の圧縮表現
-3. 想起候補の意味的 rerank と section 選別
-4. `wake` / `desktop_watch` の pending-intent 候補選択
-
-`vision.capture` の image payload を使う観測意味理解は、`desktop_watch`、通常会話画像入力、非同期 capability result に対する第一段を適用済みとする。
-この段階では raw image payload を保持せず、短い観測要約だけを判断入力へ渡す。
-
-`world_state` 更新では、画面要約に加えて `external_service / body / device / schedule` の短い structured context と wake の pending-intent 時刻ヒントを source pack に入れ、状態候補の意味抽出を LLM に寄せる。
+どの意味判断が現時点で実装済みか、どこまで第一段が入っているかは [../plan/01_現行計画.md](../plan/01_現行計画.md) を正とする。
+この文書では「何を LLM に寄せるべきか」という原則だけを扱い、現在地の列挙は持たない。
 
 ## 個別設計との関係
 
@@ -135,4 +126,4 @@ OtomeKairo では、次の分離を基本形にする。
 - inspection と監査への露出
 
 `reflective consolidation` の summary 文面については [07_内省要約のLLM生成.md](memory/07_内省要約のLLM生成.md) を正とする。
-現在地の整理は [01_現行計画.md](../plan/01_現行計画.md) を正とする。
+現在地の整理は [../plan/01_現行計画.md](../plan/01_現行計画.md) を正とする。
