@@ -61,9 +61,58 @@ DRIVE_SCOPE_SALIENCE_BOOSTS = {
     "user": 0.05,
     "topic": 0.03,
 }
+DRIVE_FRESHNESS_SALIENCE_ADJUSTMENTS = {
+    "fresh": 0.04,
+    "warm": 0.01,
+    "stale": -0.06,
+}
+DRIVE_CANDIDATE_FRESHNESS_WEIGHTS = {
+    "fresh": 1.0,
+    "warm": 0.76,
+    "stale": 0.48,
+}
+DRIVE_SUMMARY_STATUS_WEIGHTS = {
+    "confirmed": 1.0,
+    "inferred": 0.84,
+}
+DRIVE_COMMITMENT_STATE_WEIGHTS = {
+    "waiting_confirmation": 1.0,
+    "open": 0.92,
+    "on_hold": 0.68,
+}
+DRIVE_PERSONA_ALIGNMENT_BY_BASELINE = {
+    "low": {
+        "follow_through": 0.68,
+        "resume_when_ready": 0.58,
+        "relationship_attunement": 0.44,
+        "user_attention": 0.46,
+        "self_regulation": 0.72,
+        "topic_continuation": 0.38,
+    },
+    "medium": {
+        "follow_through": 0.64,
+        "resume_when_ready": 0.56,
+        "relationship_attunement": 0.58,
+        "user_attention": 0.56,
+        "self_regulation": 0.62,
+        "topic_continuation": 0.52,
+    },
+    "high": {
+        "follow_through": 0.66,
+        "resume_when_ready": 0.5,
+        "relationship_attunement": 0.74,
+        "user_attention": 0.7,
+        "self_regulation": 0.58,
+        "topic_continuation": 0.66,
+    },
+}
 DRIVE_SUPPORT_SALIENCE_STEP = 0.04
 DRIVE_MAX_SUPPORT_BONUS = 0.12
 DRIVE_MAX_SIGNAL_BONUS = 0.12
+DRIVE_MAX_SCOPE_SUPPORT_BONUS = 0.08
+DRIVE_PERSONA_ALIGNMENT_SALIENCE_RANGE = 0.08
+DRIVE_MAX_MIXED_PENALTY = 0.16
+DRIVE_WEAK_STABILITY_PENALTY = 0.22
 DRIVE_MAX_SUPPORTING_MEMORY_UNITS = 8
 DRIVE_MAX_SUPPORTING_EVENT_IDS = 12
 DRIVE_FRESH_HOURS = 12
@@ -72,6 +121,9 @@ DRIVE_MOOD_SIGNAL_LOW = 0.25
 DRIVE_MOOD_SIGNAL_HIGH = 0.45
 DRIVE_RELATIONSHIP_SIGNAL_LOW = 0.2
 DRIVE_RELATIONSHIP_SIGNAL_HIGH = 0.45
+DRIVE_STALE_SUMMARY_SUPPORT_FLOOR = 0.42
+DRIVE_STALE_SUMMARY_SIGNAL_FLOOR = 0.18
+DRIVE_MIN_SUMMARY_DRIVE_SALIENCE = 0.46
 
 
 # 内省
@@ -218,6 +270,7 @@ class ReflectiveConsolidator:
             drive_state_update = self._refresh_drive_states(
                 memory_set_id=memory_set_id,
                 finished_at=finished_reflection_at,
+                selected_persona=selected_persona,
                 mood_state=mood_state,
                 affect_states=affect_states,
                 scope_support_index=scope_support_index,
@@ -994,6 +1047,7 @@ class ReflectiveConsolidator:
         *,
         memory_set_id: str,
         finished_at: str,
+        selected_persona: dict[str, Any],
         mood_state: dict[str, Any],
         affect_states: list[dict[str, Any]],
         scope_support_index: dict[tuple[str, str], dict[str, Any]],
@@ -1014,8 +1068,10 @@ class ReflectiveConsolidator:
             memory_set_id=memory_set_id,
             finished_at=finished_at,
             source_units=source_units,
+            selected_persona=selected_persona,
             mood_state=mood_state,
             affect_states=affect_states,
+            scope_support_index=scope_support_index,
         )
         self.store.replace_drive_states(
             memory_set_id=memory_set_id,
@@ -1054,8 +1110,10 @@ class ReflectiveConsolidator:
         memory_set_id: str,
         finished_at: str,
         source_units: list[dict[str, Any]],
+        selected_persona: dict[str, Any],
         mood_state: dict[str, Any],
         affect_states: list[dict[str, Any]],
+        scope_support_index: dict[tuple[str, str], dict[str, Any]],
     ) -> list[dict[str, Any]]:
         # commitment は継続単位ごと、summary は scope ごとに drive 候補を集約する。
         grouped_candidates: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -1080,8 +1138,10 @@ class ReflectiveConsolidator:
                 memory_set_id=memory_set_id,
                 finished_at=finished_at,
                 candidates=grouped_candidates[group_key],
+                selected_persona=selected_persona,
                 mood_state=mood_state,
                 affect_states=affect_states,
+                scope_support_index=scope_support_index,
             )
             if drive_state is None:
                 continue
@@ -1143,6 +1203,7 @@ class ReflectiveConsolidator:
             "salience": base_salience,
             "memory_unit_id": memory_unit_id,
             "memory_type": memory_type,
+            "status": unit.get("status"),
             "commitment_state": unit.get("commitment_state"),
             "source_updated_at": source_updated_at,
             "supporting_event_ids": supporting_event_ids[:DRIVE_MAX_SUPPORTING_EVENT_IDS],
@@ -1157,8 +1218,10 @@ class ReflectiveConsolidator:
         memory_set_id: str,
         finished_at: str,
         candidates: list[dict[str, Any]],
+        selected_persona: dict[str, Any],
         mood_state: dict[str, Any],
         affect_states: list[dict[str, Any]],
+        scope_support_index: dict[tuple[str, str], dict[str, Any]],
     ) -> dict[str, Any] | None:
         if not candidates:
             return None
@@ -1176,6 +1239,7 @@ class ReflectiveConsolidator:
         drive_kind = lead["drive_kind"]
         focus_scope_type = lead["scope_type"]
         focus_scope_key = lead["scope_key"]
+        scope_support = scope_support_index.get((focus_scope_type, focus_scope_key), {})
 
         supporting_memory_unit_ids: list[str] = []
         supporting_memory_types: list[str] = []
@@ -1202,24 +1266,87 @@ class ReflectiveConsolidator:
                 freshest_support_at = candidate_updated_at
 
         support_count = len(ordered_candidates)
+        scope_support_kinds = self._drive_scope_support_kinds(
+            drive_kind=drive_kind,
+            scope_support=scope_support,
+        )
         freshness_hint = self._drive_freshness_hint(
             source_updated_at=freshest_support_at,
             finished_at=finished_at,
         )
-        salience = clamp_score(
-            float(lead.get("salience", 0.0))
-            + min(DRIVE_MAX_SUPPORT_BONUS, DRIVE_SUPPORT_SALIENCE_STEP * max(0, support_count - 1))
-            + self._drive_signal_bonus(
+        support_strength = round(
+            self._drive_support_strength(
+                candidates=ordered_candidates,
+                finished_at=finished_at,
+                scope_support_kinds=scope_support_kinds,
+            ),
+            3,
+        )
+        scope_alignment = round(
+            self._drive_scope_alignment(
+                focus_scope_type=focus_scope_type,
+                focus_scope_key=focus_scope_key,
+                candidates=ordered_candidates,
+                scope_support=scope_support,
+            ),
+            3,
+        )
+        signal_strength = round(
+            self._drive_signal_strength(
                 drive_kind=drive_kind,
                 focus_scope_type=focus_scope_type,
                 focus_scope_key=focus_scope_key,
                 mood_state=mood_state,
                 affect_states=affect_states,
-            )
+            ),
+            3,
         )
+        persona_alignment = round(
+            self._drive_persona_alignment(
+                drive_kind=drive_kind,
+                selected_persona=selected_persona,
+                scope_support_kinds=scope_support_kinds,
+            ),
+            3,
+        )
+        mixed_penalty = self._drive_mixed_penalty(
+            candidates=ordered_candidates,
+            finished_at=finished_at,
+            freshness_hint=freshness_hint,
+        )
+        stability_hint = self._drive_stability_hint(
+            freshness_hint=freshness_hint,
+            support_strength=support_strength,
+            signal_strength=signal_strength,
+            mixed_penalty=mixed_penalty,
+        )
+        salience = clamp_score(
+            float(lead.get("salience", 0.0))
+            + min(DRIVE_MAX_SUPPORT_BONUS, DRIVE_SUPPORT_SALIENCE_STEP * max(0, support_count - 1) + support_strength * 0.06)
+            + min(DRIVE_MAX_SCOPE_SUPPORT_BONUS, max(0.0, (scope_alignment - 0.5) * 0.08) + 0.02 * max(0, len(scope_support_kinds) - 1))
+            + DRIVE_FRESHNESS_SALIENCE_ADJUSTMENTS.get(freshness_hint, 0.0)
+            + min(DRIVE_MAX_SIGNAL_BONUS, signal_strength * DRIVE_MAX_SIGNAL_BONUS)
+            + ((persona_alignment - 0.5) * DRIVE_PERSONA_ALIGNMENT_SALIENCE_RANGE)
+            - mixed_penalty
+            - self._drive_stability_penalty(stability_hint=stability_hint)
+        )
+        if self._should_skip_drive_state(
+            lead=lead,
+            salience=salience,
+            freshness_hint=freshness_hint,
+            support_strength=support_strength,
+            signal_strength=signal_strength,
+            stability_hint=stability_hint,
+        ):
+            return None
         expires_at = self._drive_expires_at(
             finished_at=finished_at,
-            hours=DRIVE_KIND_EXPIRY_HOURS.get(drive_kind, 48),
+            hours=self._drive_expiry_hours(
+                drive_kind=drive_kind,
+                lead=lead,
+                freshness_hint=freshness_hint,
+                stability_hint=stability_hint,
+            ),
         )
         drive_signature = {
             "drive_kind": drive_kind,
@@ -1237,10 +1364,16 @@ class ReflectiveConsolidator:
             "supporting_memory_unit_ids": supporting_memory_unit_ids[:DRIVE_MAX_SUPPORTING_MEMORY_UNITS],
             "supporting_memory_types": supporting_memory_types,
             "supporting_evidence_event_ids": supporting_event_ids,
+            "scope_support_kinds": scope_support_kinds,
             "focus_scope_type": focus_scope_type,
             "focus_scope_key": focus_scope_key,
             "support_count": support_count,
+            "support_strength": support_strength,
+            "scope_alignment": scope_alignment,
             "freshness_hint": freshness_hint,
+            "signal_strength": signal_strength,
+            "persona_alignment": persona_alignment,
+            "stability_hint": stability_hint,
             "source_updated_at": freshest_support_at,
             "updated_at": finished_at,
             "expires_at": expires_at,
@@ -1318,7 +1451,87 @@ class ReflectiveConsolidator:
             return "warm"
         return "stale"
 
-    def _drive_signal_bonus(
+    def _drive_scope_support_kinds(
+        self,
+        *,
+        drive_kind: str,
+        scope_support: dict[str, Any],
+    ) -> list[str]:
+        support_kinds: list[str] = []
+        if isinstance(scope_support, dict):
+            for value in scope_support.get("support_kinds", []):
+                if isinstance(value, str) and value and value not in support_kinds:
+                    support_kinds.append(value)
+        if "memory_units" not in support_kinds:
+            support_kinds.append("memory_units")
+        return support_kinds
+
+    def _drive_candidate_weight(
+        self,
+        *,
+        candidate: dict[str, Any],
+        finished_at: str,
+    ) -> float:
+        freshness_hint = self._drive_freshness_hint(
+            source_updated_at=candidate.get("source_updated_at") or finished_at,
+            finished_at=finished_at,
+        )
+        freshness_weight = DRIVE_CANDIDATE_FRESHNESS_WEIGHTS.get(freshness_hint, 0.48)
+        memory_type = candidate.get("memory_type")
+        if memory_type == "commitment":
+            state_weight = DRIVE_COMMITMENT_STATE_WEIGHTS.get(candidate.get("commitment_state"), 0.62)
+        else:
+            state_weight = DRIVE_SUMMARY_STATUS_WEIGHTS.get(candidate.get("status"), 0.8)
+        return clamp_score(candidate.get("salience")) * freshness_weight * state_weight
+
+    def _drive_support_strength(
+        self,
+        *,
+        candidates: list[dict[str, Any]],
+        finished_at: str,
+        scope_support_kinds: list[str],
+    ) -> float:
+        if not candidates:
+            return 0.0
+        weighted_support = sum(
+            self._drive_candidate_weight(candidate=candidate, finished_at=finished_at)
+            for candidate in candidates
+        )
+        support_strength = clamp_score(weighted_support / 1.35)
+        support_strength += 0.03 * max(0, len(scope_support_kinds) - 1)
+        return clamp_score(support_strength)
+
+    def _drive_scope_alignment(
+        self,
+        *,
+        focus_scope_type: str,
+        focus_scope_key: str,
+        candidates: list[dict[str, Any]],
+        scope_support: dict[str, Any],
+    ) -> float:
+        if not candidates:
+            return 0.0
+        aligned_count = sum(
+            1
+            for candidate in candidates
+            if candidate.get("scope_type") == focus_scope_type and candidate.get("scope_key") == focus_scope_key
+        )
+        alignment = aligned_count / max(1, len(candidates))
+        support_kinds = scope_support.get("support_kinds", []) if isinstance(scope_support, dict) else []
+        if any(value in {"episodes", "memory_units"} for value in support_kinds if isinstance(value, str)):
+            alignment += 0.18
+        elif support_kinds:
+            alignment += 0.08
+        related_scope_refs = {
+            f"{candidate.get('scope_type')}:{candidate.get('scope_key')}"
+            for candidate in candidates
+            if isinstance(candidate.get("scope_type"), str) and isinstance(candidate.get("scope_key"), str)
+        }
+        if len(related_scope_refs) > 1:
+            alignment -= min(0.3, 0.15 * (len(related_scope_refs) - 1))
+        return clamp_score(alignment)
+
+    def _drive_signal_strength(
         self,
         *,
         drive_kind: str,
@@ -1335,10 +1548,8 @@ class ReflectiveConsolidator:
                     abs(float(current_vad.get("a", 0.0))),
                     abs(float(current_vad.get("d", 0.0))),
                 )
-                if mood_signal >= DRIVE_MOOD_SIGNAL_HIGH:
-                    return min(DRIVE_MAX_SIGNAL_BONUS, 0.08)
-                if mood_signal >= DRIVE_MOOD_SIGNAL_LOW:
-                    return min(DRIVE_MAX_SIGNAL_BONUS, 0.04)
+                confidence = clamp_score(mood_state.get("confidence"))
+                return clamp_score(mood_signal * max(0.45, confidence))
             return 0.0
 
         if focus_scope_type not in {"relationship", "user"}:
@@ -1355,11 +1566,112 @@ class ReflectiveConsolidator:
                 affect_signal,
                 clamp_score(record.get("intensity")) * clamp_score(record.get("confidence")),
             )
-        if affect_signal >= DRIVE_RELATIONSHIP_SIGNAL_HIGH:
-            return min(DRIVE_MAX_SIGNAL_BONUS, 0.08)
-        if affect_signal >= DRIVE_RELATIONSHIP_SIGNAL_LOW:
-            return min(DRIVE_MAX_SIGNAL_BONUS, 0.04)
+        return clamp_score(affect_signal)
+
+    def _drive_persona_alignment(
+        self,
+        *,
+        drive_kind: str,
+        selected_persona: dict[str, Any],
+        scope_support_kinds: list[str],
+    ) -> float:
+        baseline = optional_text(selected_persona.get("initiative_baseline")) or "medium"
+        table = DRIVE_PERSONA_ALIGNMENT_BY_BASELINE.get(baseline, DRIVE_PERSONA_ALIGNMENT_BY_BASELINE["medium"])
+        alignment = float(table.get(drive_kind, 0.5))
+        if "persona" in scope_support_kinds:
+            alignment += 0.06
+        return clamp_score(alignment)
+
+    def _drive_mixed_penalty(
+        self,
+        *,
+        candidates: list[dict[str, Any]],
+        finished_at: str,
+        freshness_hint: str,
+    ) -> float:
+        if len(candidates) <= 1:
+            return 0.0
+        weighted_candidates = [
+            self._drive_candidate_weight(candidate=candidate, finished_at=finished_at)
+            for candidate in candidates
+        ]
+        lead_weight = weighted_candidates[0]
+        second_weight = weighted_candidates[1] if len(weighted_candidates) > 1 else 0.0
+        if lead_weight <= 0.0 or second_weight < lead_weight * 0.6:
+            return 0.0
+        variant_signatures = {
+            (
+                candidate.get("memory_type"),
+                optional_text(candidate.get("summary_text")) or optional_text(candidate.get("commitment_state")) or "",
+            )
+            for candidate in candidates
+        }
+        if len(variant_signatures) <= 1:
+            return 0.0
+        total_weight = sum(weighted_candidates)
+        lead_share = lead_weight / total_weight if total_weight > 0.0 else 1.0
+        penalty = 0.05 + max(0.0, 0.72 - lead_share) * 0.35
+        if freshness_hint == "stale":
+            penalty += 0.04
+        return min(DRIVE_MAX_MIXED_PENALTY, penalty)
+
+    def _drive_stability_hint(
+        self,
+        *,
+        freshness_hint: str,
+        support_strength: float,
+        signal_strength: float,
+        mixed_penalty: float,
+    ) -> str:
+        if mixed_penalty >= 0.05:
+            return "mixed"
+        if freshness_hint == "stale" and support_strength < DRIVE_STALE_SUMMARY_SUPPORT_FLOOR and signal_strength < DRIVE_STALE_SUMMARY_SIGNAL_FLOOR:
+            return "weak"
+        return "stable"
+
+    def _drive_stability_penalty(self, *, stability_hint: str) -> float:
+        if stability_hint == "weak":
+            return DRIVE_WEAK_STABILITY_PENALTY
         return 0.0
+
+    def _should_skip_drive_state(
+        self,
+        *,
+        lead: dict[str, Any],
+        salience: float,
+        freshness_hint: str,
+        support_strength: float,
+        signal_strength: float,
+        stability_hint: str,
+    ) -> bool:
+        if lead.get("memory_type") != "summary":
+            return False
+        if salience >= DRIVE_MIN_SUMMARY_DRIVE_SALIENCE:
+            return False
+        if stability_hint != "weak":
+            return False
+        return freshness_hint == "stale" and support_strength < DRIVE_STALE_SUMMARY_SUPPORT_FLOOR and signal_strength < DRIVE_STALE_SUMMARY_SIGNAL_FLOOR
+
+    def _drive_expiry_hours(
+        self,
+        *,
+        drive_kind: str,
+        lead: dict[str, Any],
+        freshness_hint: str,
+        stability_hint: str,
+    ) -> int:
+        base_hours = DRIVE_KIND_EXPIRY_HOURS.get(drive_kind, 48)
+        if lead.get("memory_type") != "summary":
+            return base_hours
+        if stability_hint == "weak":
+            return max(12, min(base_hours, 18))
+        if stability_hint == "mixed":
+            return max(18, min(base_hours, 24))
+        if freshness_hint == "stale":
+            return max(18, min(base_hours, 24))
+        if freshness_hint == "warm":
+            return max(18, min(base_hours, base_hours - 6))
+        return base_hours
 
     def _drive_state_signature(self, drive_states: list[dict[str, Any]]) -> str:
         return stable_json(self._drive_state_summaries(drive_states))
@@ -1378,10 +1690,16 @@ class ReflectiveConsolidator:
                     "related_scope_refs": drive_state.get("related_scope_refs", []),
                     "supporting_memory_unit_ids": drive_state.get("supporting_memory_unit_ids", []),
                     "supporting_memory_types": drive_state.get("supporting_memory_types", []),
+                    "scope_support_kinds": drive_state.get("scope_support_kinds", []),
                     "focus_scope_type": drive_state.get("focus_scope_type"),
                     "focus_scope_key": drive_state.get("focus_scope_key"),
                     "support_count": drive_state.get("support_count"),
+                    "support_strength": drive_state.get("support_strength"),
+                    "scope_alignment": drive_state.get("scope_alignment"),
                     "freshness_hint": drive_state.get("freshness_hint"),
+                    "signal_strength": drive_state.get("signal_strength"),
+                    "persona_alignment": drive_state.get("persona_alignment"),
+                    "stability_hint": drive_state.get("stability_hint"),
                     "source_updated_at": drive_state.get("source_updated_at"),
                     "updated_at": drive_state.get("updated_at"),
                     "expires_at": drive_state.get("expires_at"),

@@ -64,7 +64,7 @@ initiative loop は、判断サイクル内の作業文脈として `initiative_
 
 `initiative_context` は inspection へ要約を残す。
 `initiative_context` そのものを永続的な状態正本にしない。
-`drive_summaries` は `drive_kind / support_count / freshness_hint` を含みうる。
+`drive_summaries` は `drive_kind / support_count / support_strength / freshness_hint / scope_alignment / signal_strength / persona_alignment / stability_hint` を含みうる。
 `candidate_families` は `preferred_result_kind` に加えて、必要なら `preferred_capability_id / preferred_capability_input` を持ってよい。
 
 ## 候補の作り方

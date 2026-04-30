@@ -664,13 +664,17 @@ class ServiceInputMixin:
                 "summary_text": drive_state.get("summary_text"),
                 "salience": drive_state.get("salience"),
             }
-            for key in ("drive_kind", "focus_scope_type", "focus_scope_key", "freshness_hint", "source_updated_at"):
+            for key in ("drive_kind", "focus_scope_type", "focus_scope_key", "freshness_hint", "source_updated_at", "stability_hint"):
                 value = drive_state.get(key)
                 if isinstance(value, str) and value.strip():
                     item[key] = value.strip()
             support_count = drive_state.get("support_count")
             if isinstance(support_count, int) and support_count > 0:
                 item["support_count"] = support_count
+            for key in ("support_strength", "scope_alignment", "signal_strength", "persona_alignment"):
+                value = drive_state.get(key)
+                if isinstance(value, (int, float)):
+                    item[key] = round(max(0.0, min(float(value), 1.0)), 2)
             supporting_memory_types = drive_state.get("supporting_memory_types")
             if isinstance(supporting_memory_types, list):
                 item["supporting_memory_types"] = [
@@ -678,6 +682,13 @@ class ServiceInputMixin:
                     for value in supporting_memory_types
                     if isinstance(value, str) and value.strip()
                 ][:4]
+            scope_support_kinds = drive_state.get("scope_support_kinds")
+            if isinstance(scope_support_kinds, list):
+                item["scope_support_kinds"] = [
+                    value.strip()
+                    for value in scope_support_kinds
+                    if isinstance(value, str) and value.strip()
+                ][:5]
             summaries.append(item)
         return summaries
 
@@ -685,14 +696,33 @@ class ServiceInputMixin:
         drive_kind = self._client_context_text(drive_summary.get("drive_kind"), limit=48)
         salience = drive_summary.get("salience")
         support_count = drive_summary.get("support_count")
+        support_strength = drive_summary.get("support_strength")
+        scope_alignment = drive_summary.get("scope_alignment")
         freshness_hint = self._client_context_text(drive_summary.get("freshness_hint"), limit=16)
+        signal_strength = drive_summary.get("signal_strength")
+        persona_alignment = drive_summary.get("persona_alignment")
+        stability_hint = self._client_context_text(drive_summary.get("stability_hint"), limit=16)
         score = INITIATIVE_DRIVE_KIND_SCORES.get(drive_kind or "", 0.08)
         if isinstance(salience, (int, float)):
             score += max(0.0, min(float(salience), 1.0)) * 0.18
         if isinstance(support_count, int) and support_count > 1:
-            score += min(0.08, 0.02 * (support_count - 1))
+            score += min(0.04, 0.01 * (support_count - 1))
+        if isinstance(support_strength, (int, float)):
+            score += min(0.08, max(0.0, min(float(support_strength), 1.0)) * 0.08)
+        if isinstance(scope_alignment, (int, float)):
+            score += max(0.0, min(float(scope_alignment), 1.0) - 0.5) * 0.08
         if freshness_hint is not None:
             score += INITIATIVE_DRIVE_FRESHNESS_ADJUSTMENTS.get(freshness_hint, 0.0)
+        if isinstance(signal_strength, (int, float)):
+            score += min(0.08, max(0.0, min(float(signal_strength), 1.0)) * 0.08)
+        if isinstance(persona_alignment, (int, float)):
+            score += (max(0.0, min(float(persona_alignment), 1.0)) - 0.5) * 0.06
+        if stability_hint == "stable":
+            score += 0.04
+        elif stability_hint == "mixed":
+            score -= 0.03
+        elif stability_hint == "weak":
+            score -= 0.07
         return max(0.0, score)
 
     def _initiative_strongest_drive_summary(
@@ -1332,6 +1362,9 @@ class ServiceInputMixin:
             strongest_summary = self._client_context_text(strongest_drive.get("summary_text"), limit=120)
             strongest_kind = self._client_context_text(strongest_drive.get("drive_kind"), limit=48)
             freshness_hint = self._client_context_text(strongest_drive.get("freshness_hint"), limit=16)
+            stability_hint = self._client_context_text(strongest_drive.get("stability_hint"), limit=16)
+            support_strength = strongest_drive.get("support_strength")
+            signal_strength = strongest_drive.get("signal_strength")
             if strongest_summary is not None:
                 if strongest_kind is not None:
                     parts.append(f"strongest drive={strongest_kind}:{strongest_summary}")
@@ -1339,6 +1372,12 @@ class ServiceInputMixin:
                     parts.append(f"strongest drive={strongest_summary}")
             if freshness_hint is not None:
                 parts.append(f"drive freshness={freshness_hint}")
+            if stability_hint is not None:
+                parts.append(f"drive stability={stability_hint}")
+            if isinstance(support_strength, (int, float)):
+                parts.append(f"drive support={round(max(0.0, min(float(support_strength), 1.0)), 2)}")
+            if isinstance(signal_strength, (int, float)) and float(signal_strength) > 0.0:
+                parts.append(f"drive signal={round(max(0.0, min(float(signal_strength), 1.0)), 2)}")
         if world_state_summary:
             parts.append(f"foreground_world_state {len(world_state_summary)} 件")
         if recent_turn_summary:
@@ -3975,7 +4014,7 @@ class ServiceInputMixin:
             if not isinstance(summary, dict):
                 continue
             item: dict[str, Any] = {}
-            for key in ("drive_kind", "summary_text", "freshness_hint"):
+            for key in ("drive_kind", "summary_text", "freshness_hint", "stability_hint"):
                 value = summary.get(key)
                 if not isinstance(value, str) or not value.strip():
                     continue
@@ -3986,6 +4025,10 @@ class ServiceInputMixin:
             support_count = summary.get("support_count")
             if isinstance(support_count, int) and support_count > 0:
                 item["support_count"] = support_count
+            for key in ("support_strength", "scope_alignment", "signal_strength", "persona_alignment"):
+                value = summary.get(key)
+                if isinstance(value, (int, float)):
+                    item[key] = round(max(0.0, min(float(value), 1.0)), 2)
             if item:
                 payload.append(item)
         return payload

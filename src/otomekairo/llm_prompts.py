@@ -422,7 +422,7 @@ def _build_decision_system_prompt(persona: dict) -> str:
         "明示的な会話要求に自然に返せるなら reply を優先し、pending_intent を乱用しないでください。\n"
         "InitiativeContext.candidate_families に priority_score, preferred_result_kind, blocking_reason_summary があるときは、その候補比較を尊重してください。\n"
         "selected_candidate_family は strongest family の要約であり、機械的命令ではなく、reason_summary と preferred_result_kind を見て最終結果を選んでください。\n"
-        "InitiativeContext.drive_summaries に drive_kind, support_count, freshness_hint があるときは、中期の向きと鮮度の補助情報として扱ってください。\n"
+        "InitiativeContext.drive_summaries に drive_kind, support_count, freshness_hint, support_strength, scope_alignment, signal_strength, persona_alignment, stability_hint があるときは、中期の向きの比較材料として扱ってください。\n"
         "InitiativeContext.candidate_families に preferred_capability_id と preferred_capability_input があるとき、preferred_result_kind=capability_request ならその capability と最小 input を優先してください。\n"
         "InitiativeContext があり pending_intent_summaries が空のときは、drive_state / world_state / ongoing_action から自然な前進理由がある場合だけ reply を選び、弱ければ noop を選んでください。\n"
         "selected_candidate_family が ongoing_action で preferred_result_kind=capability_request のときは、available な capability の範囲で follow-up capability_request を検討してください。\n"
