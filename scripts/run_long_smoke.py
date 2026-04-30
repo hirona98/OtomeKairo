@@ -19,6 +19,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -50,13 +51,16 @@ PROFILE_DEFAULTS: dict[str, dict[str, int | float]] = {
         "capture_unknown_request_failures": 1,
         "restart_burst_conversations": 8,
         "multiple_client_pause_seconds": 7.0,
+        "status_log_interval_seconds": 5.0,
+        "inspection_cycle_summary_limit": 240,
+        "max_memory_job_lag_seconds": 120.0,
     },
-    "soak": {
-        "run_seconds": 600,
-        "conversation_interval_seconds": 12.0,
+    "short-soak": {
+        "run_seconds": 1800,
+        "conversation_interval_seconds": 15.0,
         "desktop_watch_interval_seconds": 3,
         "wake_interval_seconds": 60,
-        "min_conversation_cycles": 20,
+        "min_conversation_cycles": 80,
         "capture_timeout_failures": 1,
         "capture_mismatch_failures": 1,
         "capture_invalid_images_failures": 1,
@@ -64,6 +68,26 @@ PROFILE_DEFAULTS: dict[str, dict[str, int | float]] = {
         "capture_unknown_request_failures": 1,
         "restart_burst_conversations": 12,
         "multiple_client_pause_seconds": 20.0,
+        "status_log_interval_seconds": 30.0,
+        "inspection_cycle_summary_limit": 1200,
+        "max_memory_job_lag_seconds": 300.0,
+    },
+    "long-soak": {
+        "run_seconds": 21600,
+        "conversation_interval_seconds": 30.0,
+        "desktop_watch_interval_seconds": 5,
+        "wake_interval_seconds": 120,
+        "min_conversation_cycles": 500,
+        "capture_timeout_failures": 1,
+        "capture_mismatch_failures": 1,
+        "capture_invalid_images_failures": 1,
+        "capture_invalid_error_failures": 1,
+        "capture_unknown_request_failures": 1,
+        "restart_burst_conversations": 16,
+        "multiple_client_pause_seconds": 30.0,
+        "status_log_interval_seconds": 120.0,
+        "inspection_cycle_summary_limit": 5000,
+        "max_memory_job_lag_seconds": 1800.0,
     },
 }
 
@@ -421,6 +445,10 @@ class LongSmokeRunner:
         self.editor_state_mode_used = args.editor_state_mode
         self.selected_model_preset_id: str | None = None
         self.selected_memory_set_id: str | None = None
+        self.runtime_sample_count = 0
+        self.max_pending_memory_job_count = 0
+        self.max_memory_job_lag_seconds = 0.0
+        self._memory_job_lag_started_at: float | None = None
         self._capture_context_overrides: list[dict[str, Any]] = []
         self._external_status_overrides: list[dict[str, Any]] = []
         self._capture_lock = threading.Lock()
@@ -530,6 +558,29 @@ class LongSmokeRunner:
                 time.sleep(0.5)
         raise SmokeError(f"server did not become ready within {WAIT_SERVER_TIMEOUT_SECONDS:.0f}s: {last_error}")
 
+    def _get_status(self) -> dict[str, Any]:
+        status = self.api.get("/api/status")
+        runtime_summary = status.get("runtime_summary")
+        if isinstance(runtime_summary, dict):
+            self._record_runtime_summary(runtime_summary)
+        return status
+
+    def _record_runtime_summary(self, runtime_summary: dict[str, Any]) -> None:
+        self.runtime_sample_count += 1
+        pending_count = max(int(runtime_summary.get("pending_memory_job_count", 0)), 0)
+        memory_job_in_progress = bool(runtime_summary.get("memory_job_in_progress"))
+        self.max_pending_memory_job_count = max(self.max_pending_memory_job_count, pending_count)
+        now = time.monotonic()
+        if pending_count > 0 or memory_job_in_progress:
+            if self._memory_job_lag_started_at is None:
+                self._memory_job_lag_started_at = now
+            self.max_memory_job_lag_seconds = max(
+                self.max_memory_job_lag_seconds,
+                now - self._memory_job_lag_started_at,
+            )
+            return
+        self._memory_job_lag_started_at = None
+
     def _bootstrap(self) -> None:
         identity = self.api.get("/api/bootstrap/server-identity")
         if identity.get("console_access_token_issued") is True:
@@ -584,7 +635,7 @@ class LongSmokeRunner:
         }
         self.api.put("/api/config/editor-state", editor_state)
 
-        status = self.api.get("/api/status")
+        status = self._get_status()
         runtime_summary = status["runtime_summary"]
         if not runtime_summary.get("wake_scheduler_active"):
             raise SmokeError("wake scheduler did not become active after editor-state update.")
@@ -919,7 +970,7 @@ class LongSmokeRunner:
         while time.monotonic() < deadline:
             self._assert_server_running()
             self._assert_event_clients_healthy()
-            status = self.api.get("/api/status")
+            status = self._get_status()
             runtime_summary = status["runtime_summary"]
             pending_count = int(runtime_summary.get("pending_memory_job_count", 0))
             in_progress = bool(runtime_summary.get("memory_job_in_progress"))
@@ -1350,8 +1401,8 @@ class LongSmokeRunner:
                 sent_count += 1
                 next_conversation_at = now + self.args.conversation_interval_seconds
 
-            if now - last_status_log_at >= 5.0:
-                status = self.api.get("/api/status")
+            if now - last_status_log_at >= self.args.status_log_interval_seconds:
+                status = self._get_status()
                 runtime_summary = status["runtime_summary"]
                 log(
                     "runtime"
@@ -1370,7 +1421,7 @@ class LongSmokeRunner:
         while time.monotonic() < deadline:
             self._assert_server_running()
             self._assert_event_clients_healthy()
-            status = self.api.get("/api/status")
+            status = self._get_status()
             runtime_summary = status["runtime_summary"]
             if runtime_summary.get("pending_memory_job_count") == 0 and not runtime_summary.get("memory_job_in_progress"):
                 return
@@ -1378,8 +1429,10 @@ class LongSmokeRunner:
         raise SmokeError("memory postprocess queue did not drain within the timeout.")
 
     def _collect_summary(self) -> dict[str, Any]:
-        status = self.api.get("/api/status")
-        cycle_summaries = self.api.get("/api/inspection/cycle-summaries?limit=200").get("cycle_summaries", [])
+        status = self._get_status()
+        cycle_summaries = self.api.get(
+            f"/api/inspection/cycle-summaries?limit={int(self.args.inspection_cycle_summary_limit)}"
+        ).get("cycle_summaries", [])
         if not isinstance(cycle_summaries, list):
             raise SmokeError("cycle_summaries response was invalid.")
 
@@ -1431,6 +1484,24 @@ class LongSmokeRunner:
             external_status_probe_followup_trace = self.api.get(
                 f"/api/inspection/cycles/{self.external_status_probe_followup_cycle_id}"
             )
+        capability_result_traces: list[dict[str, Any]] = []
+        for cycle_summary in cycle_summaries:
+            if not isinstance(cycle_summary, dict):
+                continue
+            if cycle_summary.get("trigger_kind") != "capability_result":
+                continue
+            cycle_id = cycle_summary.get("cycle_id")
+            if not isinstance(cycle_id, str) or not cycle_id:
+                continue
+            capability_result_traces.append(self.api.get(f"/api/inspection/cycles/{cycle_id}"))
+        soak_observability = self._collect_soak_observability(
+            trigger_counts=trigger_counts,
+            capability_result_traces=capability_result_traces,
+        )
+        scenario_matrix = self._build_scenario_matrix(
+            trigger_counts=trigger_counts,
+            soak_observability=soak_observability,
+        )
 
         return {
             "artifacts_dir": str(self.artifact_dir),
@@ -1477,11 +1548,171 @@ class LongSmokeRunner:
             "external_status_probe_followup_trace": external_status_probe_followup_trace,
             "conversation_traces": conversation_traces,
             "restart_probe_traces": restart_probe_traces,
+            "capability_result_traces": capability_result_traces,
+            "soak_observability": soak_observability,
+            "scenario_matrix": scenario_matrix,
         }
+
+    def _collect_soak_observability(
+        self,
+        *,
+        trigger_counts: dict[str, int],
+        capability_result_traces: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        active_ongoing_actions = self._list_active_ongoing_actions()
+        stale_world_states = self._list_stale_world_states()
+        followed_request_ids: set[str] = set()
+        for trace in capability_result_traces:
+            followup_summary = ((trace.get("result_trace") or {}).get("capability_result_followup_summary"))
+            if not isinstance(followup_summary, dict):
+                continue
+            source_request_summary = followup_summary.get("source_request_summary")
+            if not isinstance(source_request_summary, dict):
+                continue
+            request_id = source_request_summary.get("request_id")
+            if isinstance(request_id, str) and request_id:
+                followed_request_ids.add(request_id)
+        capability_followup_missing_request_ids = [
+            request_id
+            for request_id in self.external_status_request_ids
+            if request_id not in followed_request_ids
+        ]
+        return {
+            "runtime_sample_count": self.runtime_sample_count,
+            "max_pending_memory_job_count": self.max_pending_memory_job_count,
+            "max_memory_job_lag_seconds": round(self.max_memory_job_lag_seconds, 3),
+            "wake_cycle_count": trigger_counts.get("wake", 0),
+            "background_wake_cycle_count": trigger_counts.get("background_wake", 0),
+            "desktop_watch_cycle_count": trigger_counts.get("desktop_watch", 0),
+            "capability_result_cycle_count": trigger_counts.get("capability_result", 0),
+            "active_ongoing_action_count": len(active_ongoing_actions),
+            "active_ongoing_action_ids": [
+                action.get("action_id")
+                for action in active_ongoing_actions
+                if isinstance(action.get("action_id"), str) and action.get("action_id")
+            ],
+            "stale_world_state_count": len(stale_world_states),
+            "stale_world_state_ids": [
+                state.get("world_state_id")
+                for state in stale_world_states
+                if isinstance(state.get("world_state_id"), str) and state.get("world_state_id")
+            ],
+            "capability_followup_missing_request_ids": capability_followup_missing_request_ids,
+            "capability_followup_missing_count": len(capability_followup_missing_request_ids),
+        }
+
+    def _build_scenario_matrix(
+        self,
+        *,
+        trigger_counts: dict[str, int],
+        soak_observability: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        wake_family_count = trigger_counts.get("wake", 0) + trigger_counts.get("background_wake", 0)
+        capability_result_count = trigger_counts.get("capability_result", 0)
+        return [
+            {
+                "scenario_id": "wake-family",
+                "trigger_kinds": ["wake", "background_wake"],
+                "observed_cycle_count": wake_family_count,
+                "verified": wake_family_count >= 1,
+            },
+            {
+                "scenario_id": "desktop-watch",
+                "trigger_kinds": ["desktop_watch"],
+                "observed_cycle_count": trigger_counts.get("desktop_watch", 0),
+                "verified": bool(
+                    self.desktop_watch_capability_probe_verified and self.desktop_watch_pending_intent_probe_verified
+                ),
+            },
+            {
+                "scenario_id": "capability-result-followup",
+                "trigger_kinds": ["capability_result"],
+                "observed_cycle_count": capability_result_count,
+                "verified": (
+                    capability_result_count >= 1
+                    and self.external_status_probe_verified
+                    and int(soak_observability.get("capability_followup_missing_count", 0)) == 0
+                ),
+            },
+        ]
+
+    def _list_active_ongoing_actions(self) -> list[dict[str, Any]]:
+        memory_db_path = self.data_dir / "memory.db"
+        if not memory_db_path.exists():
+            return []
+        current_time = datetime.now(timezone.utc)
+        conn = sqlite3.connect(memory_db_path)
+        try:
+            rows = conn.execute(
+                """
+                SELECT payload_json
+                FROM ongoing_actions
+                WHERE memory_set_id = ?
+                """,
+                (self._require_selected_memory_set_id(),),
+            ).fetchall()
+        finally:
+            conn.close()
+        actions: list[dict[str, Any]] = []
+        for row in rows:
+            payload = json.loads(row[0])
+            expires_at = self._parse_iso_datetime(payload.get("expires_at"))
+            if expires_at is None or expires_at <= current_time:
+                continue
+            actions.append(payload)
+        return actions
+
+    def _list_stale_world_states(self) -> list[dict[str, Any]]:
+        memory_db_path = self.data_dir / "memory.db"
+        if not memory_db_path.exists():
+            return []
+        current_time = datetime.now(timezone.utc)
+        conn = sqlite3.connect(memory_db_path)
+        try:
+            rows = conn.execute(
+                """
+                SELECT payload_json
+                FROM world_states
+                WHERE memory_set_id = ?
+                """,
+                (self._require_selected_memory_set_id(),),
+            ).fetchall()
+        finally:
+            conn.close()
+        states: list[dict[str, Any]] = []
+        for row in rows:
+            payload = json.loads(row[0])
+            expires_at = self._parse_iso_datetime(payload.get("expires_at"))
+            if expires_at is None or expires_at > current_time:
+                continue
+            states.append(payload)
+        return states
+
+    def _parse_iso_datetime(self, value: Any) -> datetime | None:
+        if not isinstance(value, str) or not value:
+            return None
+        try:
+            parsed = datetime.fromisoformat(value)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+
+    def _require_selected_memory_set_id(self) -> str:
+        if not isinstance(self.selected_memory_set_id, str) or not self.selected_memory_set_id:
+            raise SmokeError("selected_memory_set_id was not initialized.")
+        return self.selected_memory_set_id
 
     def _assert_summary(self, summary: dict[str, Any]) -> None:
         runtime_summary = summary["status"]["runtime_summary"]
         wake_cycle_count = summary["trigger_counts"].get("wake", 0) + summary["trigger_counts"].get("background_wake", 0)
+        soak_observability = summary.get("soak_observability", {})
+        if not isinstance(soak_observability, dict):
+            raise SmokeError("soak_observability was not recorded.")
+        scenario_matrix = summary.get("scenario_matrix", [])
+        if not isinstance(scenario_matrix, list):
+            raise SmokeError("scenario_matrix was not recorded.")
         if not runtime_summary.get("memory_job_worker_active"):
             raise SmokeError("memory worker was not active at the end of the smoke run.")
         if runtime_summary.get("pending_memory_job_count") != 0:
@@ -1497,6 +1728,8 @@ class LongSmokeRunner:
             raise SmokeError("no wake/background_wake cycle was recorded during the smoke run.")
         if summary["trigger_counts"].get("desktop_watch", 0) < 1:
             raise SmokeError("no desktop_watch cycle was recorded during the smoke run.")
+        if summary["trigger_counts"].get("capability_result", 0) < 1:
+            raise SmokeError("no capability_result cycle was recorded during the smoke run.")
         if summary["capture_request_count"] < 1:
             raise SmokeError("no vision.capture_request event was received.")
         if summary["external_status_request_count"] < 1:
@@ -1552,6 +1785,23 @@ class LongSmokeRunner:
             raise SmokeError("external.status follow-up boundary was not verified.")
         if not summary["external_status_multi_service_verified"]:
             raise SmokeError("external.status multi-service integration boundary was not verified.")
+        if int(soak_observability.get("active_ongoing_action_count", 0)) != 0:
+            raise SmokeError("ongoing_action remained active at the end of the soak run.")
+        if int(soak_observability.get("stale_world_state_count", 0)) != 0:
+            raise SmokeError("stale world_state records remained in memory.db after the soak run.")
+        if int(soak_observability.get("capability_followup_missing_count", 0)) != 0:
+            missing = soak_observability.get("capability_followup_missing_request_ids", [])
+            raise SmokeError(f"capability_result follow-up was missing for request_ids={missing}")
+        if float(soak_observability.get("max_memory_job_lag_seconds", 0.0)) > self.args.max_memory_job_lag_seconds:
+            raise SmokeError(
+                "memory worker lag exceeded the allowed threshold:"
+                f" {soak_observability.get('max_memory_job_lag_seconds')} > {self.args.max_memory_job_lag_seconds}"
+            )
+        for scenario in scenario_matrix:
+            if not isinstance(scenario, dict):
+                raise SmokeError("scenario_matrix entry was invalid.")
+            if not scenario.get("verified"):
+                raise SmokeError(f"scenario matrix verification failed: {scenario.get('scenario_id')}")
         self._assert_desktop_watch_probe_trace(summary.get("desktop_watch_capability_probe_trace"), "capability_request")
         self._assert_desktop_watch_probe_trace(summary.get("desktop_watch_pending_intent_probe_trace"), "pending_intent")
         self._assert_external_status_probe_trace(
@@ -1901,6 +2151,7 @@ class LongSmokeRunner:
             f" wake={summary['trigger_counts'].get('wake', 0)}"
             f" background_wake={summary['trigger_counts'].get('background_wake', 0)}"
             f" desktop_watch={summary['trigger_counts'].get('desktop_watch', 0)}"
+            f" capability_result={summary['trigger_counts'].get('capability_result', 0)}"
             f" captures={summary['capture_request_count']}"
             f" external_status={summary['external_status_request_count']}"
             f" dropped={len(summary['capture_timeout_request_ids'])}"
@@ -1908,6 +2159,10 @@ class LongSmokeRunner:
             f" invalid_images={len(summary['capture_invalid_images_request_ids'])}"
             f" invalid_error={len(summary['capture_invalid_error_request_ids'])}"
             f" unknown={len(summary['capture_unknown_request_ids'])}"
+            f" max_job_lag={summary['soak_observability']['max_memory_job_lag_seconds']}"
+            f" lingering_actions={summary['soak_observability']['active_ongoing_action_count']}"
+            f" stale_world_states={summary['soak_observability']['stale_world_state_count']}"
+            f" followup_missing={summary['soak_observability']['capability_followup_missing_count']}"
         )
 
     def _stop_server(self) -> None:
@@ -1945,7 +2200,7 @@ class LongSmokeRunner:
         self._start_server()
         self._wait_server_ready()
         self._bootstrap()
-        status = self.api.get("/api/status")
+        status = self._get_status()
         runtime_summary = status["runtime_summary"]
         if not runtime_summary.get("wake_scheduler_active"):
             raise SmokeError("wake scheduler did not become active after restart.")
@@ -2005,6 +2260,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--desktop-watch-interval-seconds", type=int, help="desktop_watch 間隔")
     parser.add_argument("--wake-interval-seconds", type=int, help="background wake 間隔")
     parser.add_argument("--min-conversation-cycles", type=int, help="最低会話サイクル数")
+    parser.add_argument("--status-log-interval-seconds", type=float, help="runtime status のログ間隔")
+    parser.add_argument("--inspection-cycle-summary-limit", type=int, help="inspection から回収する cycle_summaries 上限")
+    parser.add_argument("--max-memory-job-lag-seconds", type=float, help="許容する memory worker 最大滞留秒数")
     parser.add_argument("--capture-timeout-failures", type=int, help="意図的に落とす capture-response 回数")
     parser.add_argument(
         "--capture-mismatch-failures",
