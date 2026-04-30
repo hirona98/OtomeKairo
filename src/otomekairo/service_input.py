@@ -64,19 +64,31 @@ WORLD_STATE_TTL_SECONDS_BY_TYPE = {
         "summary_text": {"short": 1800, "medium": 3600, "long": 14400},
     },
     "external_service": {
+        "capability_result.status_text": {"short": 1800, "medium": 7200, "long": 21600},
+        "client_context.external_service_summary": {"short": 1200, "medium": 3600, "long": 10800},
+        "capability_result.client_context.external_service_summary": {"short": 1200, "medium": 3600, "long": 10800},
         "status_text": {"short": 1800, "medium": 7200, "long": 21600},
         "external_service_summary": {"short": 1200, "medium": 3600, "long": 10800},
         "summary_text": {"short": 1200, "medium": 3600, "long": 10800},
     },
     "body": {
+        "capability_result.body_state_summary": {"short": 900, "medium": 2400, "long": 7200},
+        "client_context.body_state_summary": {"short": 900, "medium": 2400, "long": 7200},
+        "capability_result.client_context.body_state_summary": {"short": 900, "medium": 2400, "long": 7200},
         "body_state_summary": {"short": 900, "medium": 2400, "long": 7200},
         "summary_text": {"short": 900, "medium": 2400, "long": 7200},
     },
     "device": {
+        "capability_result.device_state_summary": {"short": 1200, "medium": 3600, "long": 10800},
+        "client_context.device_state_summary": {"short": 1200, "medium": 3600, "long": 10800},
+        "capability_result.client_context.device_state_summary": {"short": 1200, "medium": 3600, "long": 10800},
         "device_state_summary": {"short": 1200, "medium": 3600, "long": 10800},
         "summary_text": {"short": 900, "medium": 2400, "long": 7200},
     },
     "schedule": {
+        "capability_result.schedule_summary": {"short": 1800, "medium": 5400, "long": 14400},
+        "client_context.schedule_summary": {"short": 1800, "medium": 5400, "long": 14400},
+        "capability_result.client_context.schedule_summary": {"short": 1800, "medium": 5400, "long": 14400},
         "schedule_summary": {"short": 1800, "medium": 5400, "long": 14400},
         "pending_intent": {"short": 900, "medium": 3600, "long": 10800},
         "summary_text": {"short": 1800, "medium": 5400, "long": 14400},
@@ -2620,6 +2632,7 @@ class ServiceInputMixin:
                 self._build_world_state_external_service_context(
                     client_context=client_context,
                     observation_summary=observation_summary,
+                    source_kind=source_kind,
                 ),
             ),
             (
@@ -2627,6 +2640,7 @@ class ServiceInputMixin:
                 self._build_world_state_body_context(
                     client_context=client_context,
                     observation_summary=observation_summary,
+                    source_kind=source_kind,
                 ),
             ),
             (
@@ -2634,6 +2648,7 @@ class ServiceInputMixin:
                 self._build_world_state_device_context(
                     client_context=client_context,
                     observation_summary=observation_summary,
+                    source_kind=source_kind,
                 ),
             ),
             (
@@ -2641,6 +2656,7 @@ class ServiceInputMixin:
                 self._build_world_state_schedule_context(
                     client_context=client_context,
                     observation_summary=observation_summary,
+                    source_kind=source_kind,
                     selected_candidate=selected_candidate,
                 ),
             ),
@@ -2722,16 +2738,22 @@ class ServiceInputMixin:
         *,
         client_context: dict[str, Any],
         observation_summary: dict[str, Any] | None,
+        source_kind: str,
     ) -> dict[str, Any] | None:
         payload: dict[str, Any] = {}
-        summary_text = self._client_context_text(client_context.get("external_service_summary"), limit=160)
+        client_summary_text = self._client_context_text(client_context.get("external_service_summary"), limit=160)
+        summary_text = client_summary_text
         capability_id_text = None
+        result_summary_text = None
+        if client_summary_text is not None:
+            payload["external_service_summary"] = client_summary_text
+            payload["client_summary_text"] = client_summary_text
         if isinstance(observation_summary, dict):
-            status_text = self._client_context_text(observation_summary.get("status_text"), limit=160)
-            if summary_text is None:
-                summary_text = status_text
-            if status_text is not None:
-                payload["status_text"] = status_text
+            result_summary_text = self._client_context_text(observation_summary.get("status_text"), limit=160)
+            if result_summary_text is not None:
+                summary_text = result_summary_text
+                payload["status_text"] = result_summary_text
+                payload["result_summary_text"] = result_summary_text
             service = self._client_context_text(observation_summary.get("service"), limit=80)
             if service is not None:
                 payload["service"] = service
@@ -2743,6 +2765,13 @@ class ServiceInputMixin:
             return None
         if summary_text is not None:
             payload["summary_text"] = summary_text
+        if result_summary_text is not None:
+            payload["summary_source_hint"] = "capability_result.status_text"
+        elif client_summary_text is not None:
+            payload["summary_source_hint"] = self._world_state_client_context_summary_source(
+                source_kind=source_kind,
+                field_name="external_service_summary",
+            )
         if capability_id_text is not None:
             payload["capability_id"] = capability_id_text
         return payload
@@ -2752,10 +2781,12 @@ class ServiceInputMixin:
         *,
         client_context: dict[str, Any],
         observation_summary: dict[str, Any] | None,
+        source_kind: str,
     ) -> dict[str, Any] | None:
         return self._build_world_state_capability_state_context(
             client_context=client_context,
             observation_summary=observation_summary,
+            source_kind=source_kind,
             client_summary_key="body_state_summary",
             observation_summary_key="body_state_summary",
             explicit_field_name="body_state_summary",
@@ -2766,10 +2797,12 @@ class ServiceInputMixin:
         *,
         client_context: dict[str, Any],
         observation_summary: dict[str, Any] | None,
+        source_kind: str,
     ) -> dict[str, Any] | None:
         return self._build_world_state_capability_state_context(
             client_context=client_context,
             observation_summary=observation_summary,
+            source_kind=source_kind,
             client_summary_key="device_state_summary",
             observation_summary_key="device_state_summary",
             explicit_field_name="device_state_summary",
@@ -2780,17 +2813,23 @@ class ServiceInputMixin:
         *,
         client_context: dict[str, Any],
         observation_summary: dict[str, Any] | None,
+        source_kind: str,
         client_summary_key: str,
         observation_summary_key: str,
         explicit_field_name: str,
     ) -> dict[str, Any] | None:
         payload: dict[str, Any] = {}
-        summary_text = self._client_context_text(client_context.get(client_summary_key), limit=160)
+        client_summary_text = self._client_context_text(client_context.get(client_summary_key), limit=160)
+        summary_text = client_summary_text
         capability_id_text = None
+        observation_text = None
+        if client_summary_text is not None:
+            payload["client_summary_text"] = client_summary_text
         if isinstance(observation_summary, dict):
             observation_text = self._client_context_text(observation_summary.get(observation_summary_key), limit=160)
-            if summary_text is None:
+            if observation_text is not None:
                 summary_text = observation_text
+                payload["result_summary_text"] = observation_text
             capability_id = observation_summary.get("capability_id")
             if isinstance(capability_id, str) and capability_id.strip():
                 capability_id_text = capability_id.strip()
@@ -2798,6 +2837,13 @@ class ServiceInputMixin:
             return None
         payload["summary_text"] = summary_text
         payload[explicit_field_name] = summary_text
+        if observation_text is not None:
+            payload["summary_source_hint"] = f"capability_result.{observation_summary_key}"
+        elif client_summary_text is not None:
+            payload["summary_source_hint"] = self._world_state_client_context_summary_source(
+                source_kind=source_kind,
+                field_name=client_summary_key,
+            )
         if capability_id_text is not None:
             payload["capability_id"] = capability_id_text
         return payload
@@ -2876,21 +2922,34 @@ class ServiceInputMixin:
         *,
         client_context: dict[str, Any],
         observation_summary: dict[str, Any] | None,
+        source_kind: str,
         selected_candidate: dict[str, Any] | None,
     ) -> dict[str, Any] | None:
         payload: dict[str, Any] = {}
-        summary_text = self._client_context_text(client_context.get("schedule_summary"), limit=160)
+        client_summary_text = self._client_context_text(client_context.get("schedule_summary"), limit=160)
+        summary_text = client_summary_text
         capability_id_text = None
+        observation_text = None
+        if client_summary_text is not None:
+            payload["client_summary_text"] = client_summary_text
         if isinstance(observation_summary, dict):
             observation_text = self._client_context_text(observation_summary.get("schedule_summary"), limit=160)
-            if summary_text is None:
+            if observation_text is not None:
                 summary_text = observation_text
+                payload["result_summary_text"] = observation_text
             capability_id = observation_summary.get("capability_id")
             if isinstance(capability_id, str) and capability_id.strip():
                 capability_id_text = capability_id.strip()
         if summary_text is not None:
             payload["summary_text"] = summary_text
             payload["schedule_summary"] = summary_text
+            if observation_text is not None:
+                payload["summary_source_hint"] = "capability_result.schedule_summary"
+            elif client_summary_text is not None:
+                payload["summary_source_hint"] = self._world_state_client_context_summary_source(
+                    source_kind=source_kind,
+                    field_name="schedule_summary",
+                )
         pending_intent = self._build_world_state_pending_intent_context(selected_candidate)
         if pending_intent is not None:
             payload["pending_intent"] = pending_intent
@@ -2925,6 +2984,11 @@ class ServiceInputMixin:
         if not payload:
             return None
         return payload
+
+    def _world_state_client_context_summary_source(self, *, source_kind: str, field_name: str) -> str:
+        if source_kind == "capability_result":
+            return f"capability_result.client_context.{field_name}"
+        return f"client_context.{field_name}"
 
     def _build_world_state_capability_result_summary(
         self,
@@ -3031,6 +3095,9 @@ class ServiceInputMixin:
         return payload
 
     def _world_state_hook_summary_source(self, *, state_type: str, context: dict[str, Any]) -> str:
+        summary_source_hint = self._client_context_text(context.get("summary_source_hint"), limit=120)
+        if summary_source_hint is not None:
+            return summary_source_hint
         if state_type == "screen":
             if isinstance(context.get("visual_summary_text"), str) and context["visual_summary_text"].strip():
                 return "visual_summary_text"
@@ -3074,6 +3141,7 @@ class ServiceInputMixin:
             "external_service": (
                 "service",
                 "status_text",
+                "external_service_summary",
             ),
             "body": (
                 "body_state_summary",

@@ -101,7 +101,9 @@ source pack では、標準の `client_context` と state-type 別の structured
 画面前景は `client_context` に加えて `screen_context` へ補助要約を載せ、その他の短い current summary は dedicated context へ載せる。
 `social_context_context / environment_context / location_context` は、`client_context` から取った短い summary をそのまま dedicated context へ写す。
 `external.status` のような capability result は、`external_service_context.summary_text` に加えて `service / status_text` を載せる。
+同時に client 側 summary もあるときは、`client_summary_text / result_summary_text / summary_source_hint` を追加して境界を残してよい。
 `body_context / device_context / schedule_context` でも、capability result 由来のときは `capability_id` と state-type 別 summary field を載せる。
+client summary と result summary が両方あるときは、同様に `client_summary_text / result_summary_text / summary_source_hint` を追加してよい。
 
 ## コード責務
 
@@ -110,6 +112,7 @@ source pack では、標準の `client_context` と state-type 別の structured
 - `client_context.social_context_summary / environment_summary / location_summary` を対応する dedicated context へ投影する
 - `external.status` result の `service / status_text` を `external_service_context` へ投影する
 - capability result の `body_state_summary / device_state_summary / schedule_summary` を対応する state-type context へ投影する
+- `summary_source` が `capability_result.<field>` と `client_context.<field>` を区別できるように context へ source hint を残す
 - wake / `desktop_watch` の selected pending-intent があるときだけ `schedule_context.pending_intent` を作り、`slot_key` を付ける
 - LLM が返した `state_type / scope / summary_text / hint` を validator で検証する
 - TTL は `summary_source` と state_type ごとの規則で決める

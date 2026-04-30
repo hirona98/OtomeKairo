@@ -1204,6 +1204,7 @@ class LongSmokeRunner:
                 "status_text": github_status_text,
                 "client_context": {
                     "external_service_summary": github_status_text,
+                    "body_state_summary": "少し肩に疲れがある。",
                     "device_state_summary": "external.status を返せる desktop client が接続中。",
                     "schedule_summary": "GitHub の通知確認をこのまま進められる。",
                 },
@@ -1231,6 +1232,7 @@ class LongSmokeRunner:
                 "status_text": calendar_status_text,
                 "client_context": {
                     "external_service_summary": calendar_status_text,
+                    "body_state_summary": "少し肩に疲れがある。",
                     "device_state_summary": "external.status を返せる desktop client が接続中。",
                     "schedule_summary": "このあとカレンダーの予定確認を進められる。",
                 },
@@ -1770,12 +1772,14 @@ class LongSmokeRunner:
             raise SmokeError("external.status probe follow-up external_service_context was invalid.")
         if external_service_context.get("status_text") != status_text:
             raise SmokeError("external.status probe follow-up external_service_context.status_text was invalid.")
+        if external_service_context.get("summary_source_hint") != "capability_result.status_text":
+            raise SmokeError("external.status probe follow-up external_service_context.summary_source_hint was invalid.")
         external_service_hook = state_type_hooks.get("external_service", {})
         if not isinstance(external_service_hook, dict):
             raise SmokeError("external.status probe follow-up external_service hook was invalid.")
         if external_service_hook.get("capability_id") != "external.status":
             raise SmokeError("external.status probe follow-up external_service hook capability_id was invalid.")
-        if external_service_hook.get("summary_source") != "status_text":
+        if external_service_hook.get("summary_source") != "capability_result.status_text":
             raise SmokeError("external.status probe follow-up external_service hook summary_source was invalid.")
         if external_service_hook.get("service") != "github":
             raise SmokeError("external.status probe follow-up external_service hook service was invalid.")
@@ -1792,7 +1796,7 @@ class LongSmokeRunner:
         )
         if not isinstance(external_service_policy, dict):
             raise SmokeError("external.status probe follow-up external_service policy was invalid.")
-        if external_service_policy.get("summary_source") != "status_text":
+        if external_service_policy.get("summary_source") != "capability_result.status_text":
             raise SmokeError("external.status probe follow-up external_service policy summary_source was invalid.")
         if external_service_policy.get("effective_ttl_seconds") != 7200:
             raise SmokeError("external.status probe follow-up external_service policy TTL was invalid.")
@@ -1800,15 +1804,20 @@ class LongSmokeRunner:
             raise SmokeError("external.status probe follow-up external_service policy integration_mode was invalid.")
         if external_service_policy.get("integration_key") != "external_service:github":
             raise SmokeError("external.status probe follow-up external_service policy integration_key was invalid.")
+        body_hook = state_type_hooks.get("body", {})
+        if not isinstance(body_hook, dict):
+            raise SmokeError("external.status probe follow-up body hook was invalid.")
+        if body_hook.get("summary_source") != "capability_result.body_state_summary":
+            raise SmokeError("external.status probe follow-up body hook summary_source was invalid.")
         device_hook = state_type_hooks.get("device", {})
         if not isinstance(device_hook, dict):
             raise SmokeError("external.status probe follow-up device hook was invalid.")
-        if device_hook.get("summary_source") != "device_state_summary":
+        if device_hook.get("summary_source") != "capability_result.device_state_summary":
             raise SmokeError("external.status probe follow-up device hook summary_source was invalid.")
         schedule_hook = state_type_hooks.get("schedule", {})
         if not isinstance(schedule_hook, dict):
             raise SmokeError("external.status probe follow-up schedule hook was invalid.")
-        if schedule_hook.get("summary_source") != "schedule_summary":
+        if schedule_hook.get("summary_source") != "capability_result.schedule_summary":
             raise SmokeError("external.status probe follow-up schedule hook summary_source was invalid.")
         schedule_policy = next(
             (
@@ -1820,7 +1829,7 @@ class LongSmokeRunner:
         )
         if not isinstance(schedule_policy, dict):
             raise SmokeError("external.status probe follow-up schedule policy was invalid.")
-        if schedule_policy.get("summary_source") != "schedule_summary":
+        if schedule_policy.get("summary_source") != "capability_result.schedule_summary":
             raise SmokeError("external.status probe follow-up schedule policy summary_source was invalid.")
         if schedule_policy.get("effective_ttl_seconds") != 5400:
             raise SmokeError("external.status probe follow-up schedule policy TTL was invalid.")

@@ -145,10 +145,11 @@ LLM に渡す source pack は少なくとも次を持つ。
 画面前景の補助要約がある場合は `screen_context` を追加する。
 対人文脈、周囲環境、場所、外部サービス、身体、機器、予定の短い summary がある場合は、`social_context_context / environment_context / location_context / external_service_context / body_context / device_context / schedule_context` を追加する。
 `schedule_context` には `summary_text` に加えて、wake や `desktop_watch` が再評価対象として選んだ pending-intent の `intent_summary / reason_summary / slot_key / not_before / expires_at` を含める。
-`external_service_context` には `summary_text` に加えて、`service / status_text / capability_id` のような短い補助 field を含める。
+`external_service_context` には `summary_text` に加えて、`service / status_text / capability_id` と、必要なら `client_summary_text / result_summary_text / summary_source_hint` のような短い境界補助 field を含める。
 `screen_context` には `visual_summary_text / image_interpreted / visual_confidence_hint / image_count / capability_id` を含める。
 `social_context_context` には `social_context_summary`、`environment_context` には `environment_summary`、`location_context` には `location_summary` を含める。
 `body_context` には `body_state_summary / capability_id`、`device_context` には `device_state_summary / capability_id`、`schedule_context` には `schedule_summary / capability_id` を含める。
+real source と client summary が両方あるときは、`body / device / schedule` でも `client_summary_text / result_summary_text / summary_source_hint` を持ってよい。
 
 source pack には、画像、音声、長い外部サービス応答、資格情報、内部 URL、配送先 client を含めない。
 画像意味理解を通した場合は `visual_summary_text` を短い補助要約として渡す。
@@ -209,9 +210,19 @@ validator 失敗時は 1 回だけ再生成する。
 - `schedule` は generic summary を `schedule:self` へ置き、selected pending-intent がある場合は `slot_key` 単位で統合または置換する
 - それ以外は同じ `state_type / scope_type / scope_key` の近い状態を統合または置換する
 - `screen` と `environment` は短い TTL を標準にする
-- `external_service` は `status_text` と client summary のどちらを正本にしたかで TTL を変える
+- `external_service` は `capability_result.status_text` と `client_context.external_service_summary` のどちらを正本にしたかで TTL を変える
 - `schedule` は `schedule_summary` を基準に TTL を決め、pending-intent の `expires_at` があればそれを上限にする
 - 長期理解へ育てる条件を満たす出来事は、`turn consolidation` で記憶へ渡す
+
+Phase 7 以降は、`summary_source` として少なくとも次を区別してよい。
+
+- `capability_result.status_text`
+- `capability_result.body_state_summary`
+- `capability_result.device_state_summary`
+- `capability_result.schedule_summary`
+- `capability_result.client_context.<field>`
+- `client_context.<field>`
+- `pending_intent`
 
 古い `world_state` は記憶更新の根拠として扱わない。
 根拠は `events` と capability result 側へ辿る。
