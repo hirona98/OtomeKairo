@@ -60,6 +60,11 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
         "state_policy": {
             "creates_ongoing_action": True,
             "blocks_parallel_capability": True,
+            "result_context_hook": "vision_capture",
+            "followup_hint_hook": "vision_capture",
+            "error_cooldown_seconds": 15,
+            "unavailable_seconds_on_dispatch_failure": 15,
+            "unavailable_seconds_on_timeout": 15,
         },
         "inspection_fields": [
             "capability_id",
@@ -124,6 +129,12 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
         "state_policy": {
             "creates_ongoing_action": True,
             "blocks_parallel_capability": True,
+            "result_context_hook": "external_status",
+            "followup_hint_hook": "external_status",
+            "success_cooldown_seconds": 60,
+            "error_cooldown_seconds": 60,
+            "unavailable_seconds_on_dispatch_failure": 60,
+            "unavailable_seconds_on_timeout": 60,
         },
         "inspection_fields": [
             "capability_id",

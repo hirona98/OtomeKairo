@@ -178,6 +178,18 @@ class ServiceSpontaneousMixin:
             return f"status_chars={status_chars} error={bool(result_payload.get('error'))}"
         return f"result_keys={len(result_payload)} error={bool(result_payload.get('error'))}"
 
+    def _capability_result_context_hook_name(self, capability_id: str) -> str | None:
+        hook_name = self._capability_state_policy(capability_id).get("result_context_hook")
+        if isinstance(hook_name, str) and hook_name.strip():
+            return hook_name.strip()
+        return None
+
+    def _capability_followup_hint_hook_name(self, capability_id: str) -> str | None:
+        hook_name = self._capability_state_policy(capability_id).get("followup_hint_hook")
+        if isinstance(hook_name, str) and hook_name.strip():
+            return hook_name.strip()
+        return None
+
     def _submit_async_capability_result_response(
         self,
         *,
@@ -189,7 +201,7 @@ class ServiceSpontaneousMixin:
         accepted_at: str,
         log_channel: str,
         accepted_detail: str,
-    ) -> dict[str, Any]:
+        ) -> dict[str, Any]:
         try:
             response = self._accept_capability_result(
                 capability_id=capability_id,
@@ -199,6 +211,13 @@ class ServiceSpontaneousMixin:
                 current_time=accepted_at,
             )
         except ValueError as exc:
+            cooldown_seconds = int(self._capability_state_policy(capability_id).get("error_cooldown_seconds") or 0)
+            self._mark_capability_runtime_failure(
+                capability_id=capability_id,
+                current_time=accepted_at,
+                failure_summary=str(exc),
+                cooldown_seconds=cooldown_seconds,
+            )
             if "client_id" in str(exc):
                 raise ServiceError(
                     409,
@@ -325,6 +344,13 @@ class ServiceSpontaneousMixin:
                 capability_response=capability_response,
                 pipeline=pipeline,
             )
+            self._apply_capability_runtime_state_followup(
+                capability_id=capability_id,
+                current_time=self._now_iso(),
+                observation_summary=observation_summary,
+                result_payload=capability_response,
+                ongoing_action_transition_summary=ongoing_action_transition_summary,
+            )
             debug_log(
                 "CapabilityResult",
                 f"{self._short_cycle_id(cycle_id)} done result={response['result_kind']}",
@@ -375,6 +401,14 @@ class ServiceSpontaneousMixin:
                 failure_reason=str(exc),
                 pending_intent_selection=pending_intent_selection,
             )
+            self._apply_capability_runtime_state_followup(
+                capability_id=capability_id,
+                current_time=self._now_iso(),
+                observation_summary=observation_summary,
+                result_payload=capability_response,
+                ongoing_action_transition_summary=ongoing_action_transition_summary,
+                failure_reason=str(exc),
+            )
         except (LLMError, KeyError, ValueError) as exc:
             failed_followup_capability_request_summary, failed_transition_summary = (
                 self._exception_capability_dispatch_trace(exc)
@@ -417,6 +451,14 @@ class ServiceSpontaneousMixin:
                 failure_reason=str(exc),
                 pending_intent_selection=pending_intent_selection,
             )
+            self._apply_capability_runtime_state_followup(
+                capability_id=capability_id,
+                current_time=self._now_iso(),
+                observation_summary=observation_summary,
+                result_payload=capability_response,
+                ongoing_action_transition_summary=ongoing_action_transition_summary,
+                failure_reason=str(exc),
+            )
 
     def _resolve_capability_result_followup_ongoing_action(
         self,
@@ -447,7 +489,11 @@ class ServiceSpontaneousMixin:
                 transition_source="capability_result_followup",
                 decision_kind=decision_kind,
                 result_error=result_error,
-                detail_summary=self._capability_result_followup_detail_summary(decision=decision),
+                detail_summary=self._capability_result_followup_detail_summary(
+                    capability_id=capability_id,
+                    decision=decision,
+                    result_payload=result_payload,
+                ),
             )
 
         terminal_kind = "interrupted" if result_payload.get("error") not in {None, ""} else "completed"
@@ -474,7 +520,9 @@ class ServiceSpontaneousMixin:
             decision_kind=decision_kind or None,
             result_error=result_payload.get("error") not in {None, ""},
             detail_summary=self._capability_result_followup_detail_summary(
+                capability_id=capability_id,
                 decision=decision,
+                observation_summary=None,
                 result_payload=result_payload,
             ),
         )
@@ -605,7 +653,8 @@ class ServiceSpontaneousMixin:
         input_text: str,
         capability_response: dict[str, Any],
     ) -> tuple[dict[str, Any], dict[str, Any], str]:
-        if capability_id == "vision.capture":
+        hook_name = self._capability_result_context_hook_name(capability_id)
+        if hook_name == "vision_capture":
             client_context, observation_summary = self._interpret_capability_result_capture(
                 state=state,
                 started_at=started_at,
@@ -618,7 +667,7 @@ class ServiceSpontaneousMixin:
                 client_context=client_context,
                 capability_response=capability_response,
             )
-        elif capability_id == "external.status":
+        elif hook_name == "external_status":
             client_context, observation_summary, input_text = self._prepare_external_status_result_context(
                 client_context=client_context,
                 observation_summary=observation_summary,
@@ -645,6 +694,37 @@ class ServiceSpontaneousMixin:
             capability_response=capability_response,
         )
         return enriched_client_context, enriched_observation_summary, input_text
+
+    def _capability_result_followup_hint_summary(
+        self,
+        *,
+        capability_id: str,
+        observation_summary: dict[str, Any] | None,
+        result_payload: dict[str, Any] | None,
+    ) -> str | None:
+        hook_name = self._capability_followup_hint_hook_name(capability_id)
+        if hook_name == "vision_capture":
+            visual_summary_text = None
+            if isinstance(observation_summary, dict):
+                visual_summary_text = observation_summary.get("visual_summary_text")
+            if isinstance(visual_summary_text, str) and visual_summary_text.strip():
+                return self._clamp(f"画面観測では {visual_summary_text.strip()}", limit=160)
+            image_count = self._capability_result_payload_image_count(result_payload or {})
+            if image_count is not None and image_count <= 0:
+                return "画面観測は空で、追加の手掛かりを得られなかった。"
+            return None
+        if hook_name == "external_status":
+            status_text = None
+            service = None
+            if isinstance(observation_summary, dict):
+                status_text = observation_summary.get("status_text")
+                service = observation_summary.get("service")
+            if isinstance(status_text, str) and status_text.strip():
+                if isinstance(service, str) and service.strip():
+                    return self._clamp(f"{service.strip()} の状態要約: {status_text.strip()}", limit=160)
+                return self._clamp(status_text.strip(), limit=160)
+            return None
+        return None
 
     def _interpret_capability_result_capture(
         self,
@@ -741,17 +821,64 @@ class ServiceSpontaneousMixin:
     def _capability_result_followup_detail_summary(
         self,
         *,
+        capability_id: str,
         decision: dict[str, Any],
+        observation_summary: dict[str, Any] | None = None,
         result_payload: dict[str, Any] | None = None,
     ) -> str | None:
         decision_reason = self._clamp(str(decision.get("reason_summary") or "").strip(), limit=160)
         if decision_reason:
             return decision_reason
+        hook_summary = self._capability_result_followup_hint_summary(
+            capability_id=capability_id,
+            observation_summary=observation_summary,
+            result_payload=result_payload,
+        )
+        if hook_summary is not None:
+            return hook_summary
         if isinstance(result_payload, dict):
             error = result_payload.get("error")
             if isinstance(error, str) and error.strip():
                 return self._clamp(error.strip(), limit=160)
         return None
+
+    def _apply_capability_runtime_state_followup(
+        self,
+        *,
+        capability_id: str,
+        current_time: str,
+        observation_summary: dict[str, Any] | None,
+        result_payload: dict[str, Any],
+        ongoing_action_transition_summary: dict[str, Any] | None,
+        failure_reason: str | None = None,
+    ) -> None:
+        if not isinstance(ongoing_action_transition_summary, dict):
+            return
+        final_state = str(ongoing_action_transition_summary.get("final_state") or "").strip()
+        if final_state == "waiting_result":
+            return
+        hook_summary = self._capability_result_followup_hint_summary(
+            capability_id=capability_id,
+            observation_summary=observation_summary,
+            result_payload=result_payload,
+        )
+        summary_text = hook_summary or str(ongoing_action_transition_summary.get("reason_summary") or "").strip() or failure_reason or capability_id
+        state_policy = self._capability_state_policy(capability_id)
+        if ongoing_action_transition_summary.get("result_error") is True or final_state == "interrupted":
+            self._mark_capability_runtime_failure(
+                capability_id=capability_id,
+                current_time=current_time,
+                failure_summary=summary_text,
+                cooldown_seconds=int(state_policy.get("error_cooldown_seconds") or 0),
+            )
+            return
+        if final_state in {"completed", "on_hold"}:
+            self._mark_capability_runtime_success(
+                capability_id=capability_id,
+                current_time=current_time,
+                result_summary=summary_text,
+                cooldown_seconds=int(state_policy.get("success_cooldown_seconds") or 0),
+            )
 
     def _capability_result_followup_terminal_step_summary(
         self,

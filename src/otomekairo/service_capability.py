@@ -71,6 +71,7 @@ class ServiceCapabilityMixin:
         manifest = manifests.get(capability_id)
         if manifest is None:
             raise ValueError(f"Unknown capability: {capability_id}")
+        state_policy = self._capability_state_policy(capability_id)
         self._validate_capability_payload(
             payload=input_payload,
             schema=manifest.get("input_schema"),
@@ -79,7 +80,18 @@ class ServiceCapabilityMixin:
         self._prune_pending_capability_requests(current_time=current_time)
 
         # binding と ongoing_action を検証し、内部実行記録を作る。
-        target_client_id = self._select_capability_target_client(capability_id=capability_id)
+        try:
+            target_client_id = self._select_capability_target_client(capability_id=capability_id)
+        except ValueError as exc:
+            unavailable_reason = "no_binding" if "no_binding" in str(exc) else "unavailable"
+            self._mark_capability_runtime_failure(
+                capability_id=capability_id,
+                current_time=current_time,
+                failure_summary=str(exc),
+                unavailable_reason=unavailable_reason,
+                unavailable_seconds=int(state_policy.get("unavailable_seconds_on_dispatch_failure") or 0),
+            )
+            raise
         timeout_ms = int(manifest.get("timeout_ms") or 0)
         if timeout_ms <= 0:
             raise ValueError(f"Capability timeout_ms is invalid: {capability_id}")
@@ -124,6 +136,18 @@ class ServiceCapabilityMixin:
         if not sent:
             with self._capability_request_lock:
                 self._pending_capability_requests.pop(request_record["request_id"], None)
+            self._clear_capability_runtime_busy(
+                capability_id=capability_id,
+                request_id=request_record["request_id"],
+                action_id=request_record.get("action_id"),
+            )
+            self._mark_capability_runtime_failure(
+                capability_id=capability_id,
+                current_time=self._now_iso(),
+                failure_summary=self._capability_dispatch_transition_reason_summary(reason_code="dispatch_failed"),
+                unavailable_reason="dispatch_failed",
+                unavailable_seconds=int(state_policy.get("unavailable_seconds_on_dispatch_failure") or 0),
+            )
             transition_summary = self._finish_capability_ongoing_action(
                 request_record=request_record,
                 current_time=self._now_iso(),
@@ -159,6 +183,7 @@ class ServiceCapabilityMixin:
                 f"capability={capability_id} target_client={target_client_id} timeout_ms={timeout_ms}"
             ),
         )
+        self._set_capability_runtime_busy(request_record=request_record)
         if not wait_for_response:
             return {
                 "request_record": request_record,
@@ -181,6 +206,18 @@ class ServiceCapabilityMixin:
             result = pending["response"]
             self._pending_capability_requests.pop(request_record["request_id"], None)
         if not isinstance(result, dict):
+            self._clear_capability_runtime_busy(
+                capability_id=capability_id,
+                request_id=request_record["request_id"],
+                action_id=request_record.get("action_id"),
+            )
+            self._mark_capability_runtime_failure(
+                capability_id=capability_id,
+                current_time=self._now_iso(),
+                failure_summary=self._capability_dispatch_transition_reason_summary(reason_code="request_timeout"),
+                unavailable_reason="request_timeout",
+                unavailable_seconds=int(state_policy.get("unavailable_seconds_on_timeout") or 0),
+            )
             transition_summary = self._finish_capability_ongoing_action(
                 request_record=request_record,
                 current_time=self._now_iso(),
@@ -245,6 +282,11 @@ class ServiceCapabilityMixin:
             if request_record.get("capability_id") != capability_id:
                 raise ValueError("capability_id does not match the pending request.")
 
+            self._clear_capability_runtime_busy(
+                capability_id=capability_id,
+                request_id=request_id,
+                action_id=request_record.get("action_id"),
+            )
             response = {
                 "request_id": request_id,
                 "capability_id": capability_id,
@@ -489,6 +531,137 @@ class ServiceCapabilityMixin:
             "timeout_ms": request_record.get("timeout_ms"),
         }
 
+    def _capability_state_policy(self, capability_id: str) -> dict[str, Any]:
+        manifest = capability_manifests().get(capability_id, {})
+        state_policy = manifest.get("state_policy", {})
+        if not isinstance(state_policy, dict):
+            return {}
+        return state_policy
+
+    def _capability_runtime_state_entry(self, capability_id: str) -> dict[str, Any]:
+        with self._runtime_state_lock:
+            return self._capability_runtime_state.setdefault(
+                capability_id,
+                {
+                    "paused": False,
+                    "busy_request_id": None,
+                    "busy_action_id": None,
+                    "cooldown_until": None,
+                    "last_failure_at": None,
+                    "last_failure_summary": None,
+                    "last_result_at": None,
+                    "last_result_summary": None,
+                    "unavailable_reason": None,
+                    "unavailable_until": None,
+                },
+            )
+
+    def _capability_runtime_state_snapshot(
+        self,
+        *,
+        capability_id: str,
+        current_time: str,
+        active_ongoing_action: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        with self._runtime_state_lock:
+            entry = dict(self._capability_runtime_state_entry(capability_id))
+            cooldown_until = entry.get("cooldown_until")
+            if isinstance(cooldown_until, str) and cooldown_until and cooldown_until <= current_time:
+                entry["cooldown_until"] = None
+            unavailable_until = entry.get("unavailable_until")
+            if isinstance(unavailable_until, str) and unavailable_until and unavailable_until <= current_time:
+                entry["unavailable_until"] = None
+                entry["unavailable_reason"] = None
+            self._capability_runtime_state[capability_id] = dict(entry)
+        if (
+            isinstance(active_ongoing_action, dict)
+            and active_ongoing_action.get("status") == "waiting_result"
+            and active_ongoing_action.get("last_capability_id") == capability_id
+        ):
+            if not isinstance(entry.get("busy_action_id"), str) or not entry.get("busy_action_id"):
+                entry["busy_action_id"] = active_ongoing_action.get("action_id")
+        entry["busy"] = bool(entry.get("busy_request_id") or entry.get("busy_action_id"))
+        cooldown_until = entry.get("cooldown_until")
+        entry["cooldown_active"] = isinstance(cooldown_until, str) and bool(cooldown_until) and cooldown_until > current_time
+        unavailable_until = entry.get("unavailable_until")
+        entry["unavailable_active"] = (
+            isinstance(unavailable_until, str) and bool(unavailable_until) and unavailable_until > current_time
+        )
+        return entry
+
+    def _set_capability_runtime_busy(self, *, request_record: dict[str, Any]) -> None:
+        capability_id = str(request_record.get("capability_id") or "").strip()
+        if not capability_id:
+            return
+        request_id = str(request_record.get("request_id") or "").strip() or None
+        action_id = str(request_record.get("action_id") or "").strip() or None
+        with self._runtime_state_lock:
+            entry = self._capability_runtime_state_entry(capability_id)
+            entry["busy_request_id"] = request_id
+            entry["busy_action_id"] = action_id
+
+    def _clear_capability_runtime_busy(
+        self,
+        *,
+        capability_id: str,
+        request_id: str | None = None,
+        action_id: str | None = None,
+    ) -> None:
+        with self._runtime_state_lock:
+            entry = self._capability_runtime_state_entry(capability_id)
+            if request_id is None or entry.get("busy_request_id") == request_id:
+                entry["busy_request_id"] = None
+            if action_id is None or entry.get("busy_action_id") == action_id:
+                entry["busy_action_id"] = None
+
+    def _mark_capability_runtime_failure(
+        self,
+        *,
+        capability_id: str,
+        current_time: str,
+        failure_summary: str,
+        cooldown_seconds: int = 0,
+        unavailable_reason: str | None = None,
+        unavailable_seconds: int = 0,
+    ) -> None:
+        with self._runtime_state_lock:
+            entry = self._capability_runtime_state_entry(capability_id)
+            entry["last_failure_at"] = current_time
+            entry["last_failure_summary"] = self._clamp(failure_summary, limit=160)
+            if cooldown_seconds > 0:
+                entry["cooldown_until"] = (self._parse_iso(current_time) + timedelta(seconds=cooldown_seconds)).isoformat()
+            if unavailable_reason and unavailable_seconds > 0:
+                entry["unavailable_reason"] = unavailable_reason
+                entry["unavailable_until"] = (
+                    self._parse_iso(current_time) + timedelta(seconds=unavailable_seconds)
+                ).isoformat()
+
+    def _mark_capability_runtime_success(
+        self,
+        *,
+        capability_id: str,
+        current_time: str,
+        result_summary: str,
+        cooldown_seconds: int = 0,
+    ) -> None:
+        with self._runtime_state_lock:
+            entry = self._capability_runtime_state_entry(capability_id)
+            entry["last_result_at"] = current_time
+            entry["last_result_summary"] = self._clamp(result_summary, limit=160)
+            entry["unavailable_reason"] = None
+            entry["unavailable_until"] = None
+            if cooldown_seconds > 0:
+                entry["cooldown_until"] = (self._parse_iso(current_time) + timedelta(seconds=cooldown_seconds)).isoformat()
+
+    def _capability_transition_kind(self, *, final_state: str) -> str:
+        if final_state == "waiting_result":
+            return "continued"
+        if final_state == "on_hold":
+            return "on_hold"
+        if final_state == "interrupted":
+            return "interrupted"
+        return "finished"
+
     def _capability_ongoing_action_transition_summary(
         self,
         *,
@@ -515,6 +688,7 @@ class ServiceCapabilityMixin:
         payload = {
             "action_id": action_id,
             "transition_sequence": transition_sequence,
+            "transition_kind": self._capability_transition_kind(final_state=final_state),
             "final_state": final_state,
             "goal_summary": request_record.get("goal_summary"),
             "step_summary": step_summary or request_record.get("step_summary"),
@@ -640,6 +814,21 @@ class ServiceCapabilityMixin:
                 self._pending_capability_requests.pop(request_id, None)
                 expired.append(dict(request_record))
         for request_record in expired:
+            capability_id = str(request_record.get("capability_id") or "").strip()
+            if capability_id:
+                self._clear_capability_runtime_busy(
+                    capability_id=capability_id,
+                    request_id=request_record.get("request_id"),
+                    action_id=request_record.get("action_id"),
+                )
+                state_policy = self._capability_state_policy(capability_id)
+                self._mark_capability_runtime_failure(
+                    capability_id=capability_id,
+                    current_time=current_time,
+                    failure_summary=self._capability_dispatch_transition_reason_summary(reason_code="request_timeout"),
+                    unavailable_reason="request_timeout",
+                    unavailable_seconds=int(state_policy.get("unavailable_seconds_on_timeout") or 0),
+                )
             self._finish_capability_ongoing_action(
                 request_record=request_record,
                 current_time=current_time,

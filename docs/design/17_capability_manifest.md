@@ -39,7 +39,7 @@ server は次を照合して capability availability を決める。
 - server が持つ `CapabilityManifest`
 - stream 接続から導出した `CapabilityBinding`
 - 認証済み client または接続主体の権限
-- `CapabilityState` にある一時停止、cooldown、直近失敗、並列制限、前提条件
+- `CapabilityState` にある一時停止、busy、cooldown、直近成功/失敗、動的一時 unavailable、並列制限、前提条件
 
 `hello.caps` は availability の正本ではない。
 `hello.caps` は `CapabilityBinding` を作る入力であり、server に受理されたあとも権限、状態、制約によって実行不可になる。
@@ -67,7 +67,7 @@ inspection には運用確認に必要な binding 要約を出すが、token、c
 | `risk_level` | `low`、`medium`、`high` のいずれか |
 | `timeout_ms` | 標準 timeout |
 | `memory_policy` | 結果を記憶更新候補へ渡す条件 |
-| `state_policy` | `ongoing_action` や並列実行制限への反映 |
+| `state_policy` | `ongoing_action`、result/follow-up hook、cooldown/unavailable 反映 |
 | `inspection_fields` | inspection に残す要約項目 |
 
 利用可否、接続 client、直近失敗、cooldown、権限不足は manifest に入れない。
@@ -136,7 +136,12 @@ inspection には運用確認に必要な binding 要約を出すが、token、c
   },
   "state_policy": {
     "creates_ongoing_action": true,
-    "blocks_parallel_capability": true
+    "blocks_parallel_capability": true,
+    "result_context_hook": "vision_capture",
+    "followup_hint_hook": "vision_capture",
+    "error_cooldown_seconds": 15,
+    "unavailable_seconds_on_dispatch_failure": 15,
+    "unavailable_seconds_on_timeout": 15
   },
   "inspection_fields": [
     "capability_id",
@@ -149,6 +154,15 @@ inspection には運用確認に必要な binding 要約を出すが、token、c
   ]
 }
 ```
+
+`state_policy` では少なくとも次を持ってよい。
+
+- `creates_ongoing_action`: capability request を `ongoing_action` に結びつけるか
+- `blocks_parallel_capability`: 同系統の result 待ち中に並列実行を止めるか
+- `result_context_hook`: accepted async result を follow-up 入力へ意味付けするときの hook 名
+- `followup_hint_hook`: follow-up 結果要約や runtime state 要約を作る hook 名
+- `success_cooldown_seconds` / `error_cooldown_seconds`: 直近成功または失敗後に inspection state へ残す cooldown 秒数
+- `unavailable_seconds_on_dispatch_failure` / `unavailable_seconds_on_timeout`: dispatch failure や timeout を一時 unavailable として残す秒数
 
 ## LLM へ渡す decision view
 
@@ -173,6 +187,18 @@ decision view は少なくとも次を持つ。
 decision view には token、credential、内部 URL、`target_client_id`、transport 詳細、raw schema の秘密値を入れない。
 LLM は decision view に基づいて `capability_id` と capability 固有入力を提案する。
 server は manifest、binding、state、権限で提案を検証する。
+busy、権限不足、動的一時 unavailable は decision view の `available: false` に反映する。
+cooldown、直近成功、直近失敗は inspection の `CapabilityState` へ残し、明示的な capability 要求まで一律に遮断する理由にはしない。
+
+inspection の `CapabilityState` は少なくとも次を持ってよい。
+
+- `paused`
+- `busy` / `busy_request_id` / `busy_action_id`
+- `cooldown_active` / `cooldown_until`
+- `last_failure_at` / `last_failure_summary`
+- `last_result_at` / `last_result_summary`
+- `unavailable_active` / `unavailable_reason` / `unavailable_until`
+- `parallel_blocked_by_action_id`
 
 ## 実行時の流れ
 

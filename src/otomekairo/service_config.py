@@ -132,6 +132,7 @@ class ServiceConfigMixin:
             "capabilities": [
                 self._build_capability_availability(
                     manifest=manifest,
+                    current_time=generated_at,
                     bound_client_ids=accepted_bindings.get(capability_id, []),
                     rejected_bindings=rejected_bindings,
                     active_ongoing_action=active_ongoing_action,
@@ -263,6 +264,7 @@ class ServiceConfigMixin:
         self,
         *,
         manifest: dict[str, Any],
+        current_time: str,
         bound_client_ids: list[str],
         rejected_bindings: list[dict[str, Any]],
         active_ongoing_action: dict[str, Any] | None = None,
@@ -287,17 +289,47 @@ class ServiceConfigMixin:
         ):
             missing_permissions = required_permissions
         state_policy = manifest.get("state_policy", {})
+        runtime_state = self._capability_runtime_state_snapshot(
+            capability_id=capability_id,
+            current_time=current_time,
+            active_ongoing_action=active_ongoing_action,
+        )
+        same_capability_waiting = (
+            isinstance(state_policy, dict)
+            and bool(state_policy.get("blocks_parallel_capability"))
+            and isinstance(active_ongoing_action, dict)
+            and active_ongoing_action.get("status") == "waiting_result"
+            and active_ongoing_action.get("last_capability_id") == capability_id
+        )
         parallel_blocked = (
             isinstance(state_policy, dict)
             and bool(state_policy.get("blocks_parallel_capability"))
             and isinstance(active_ongoing_action, dict)
             and active_ongoing_action.get("status") == "waiting_result"
+            and active_ongoing_action.get("last_capability_id") != capability_id
         )
-        available = bool(bound_client_ids) and not missing_permissions and not parallel_blocked
+        paused = runtime_state.get("paused") is True
+        busy = runtime_state.get("busy") is True or same_capability_waiting
+        cooldown_active = runtime_state.get("cooldown_active") is True
+        unavailable_active = runtime_state.get("unavailable_active") is True
+        available = (
+            bool(bound_client_ids)
+            and not missing_permissions
+            and not paused
+            and not busy
+            and not unavailable_active
+            and not parallel_blocked
+        )
         unavailable_reason = None
         if not available:
             if missing_permissions:
                 unavailable_reason = "permission_denied"
+            elif paused:
+                unavailable_reason = "paused"
+            elif unavailable_active:
+                unavailable_reason = runtime_state.get("unavailable_reason") or "unavailable"
+            elif busy:
+                unavailable_reason = "busy"
             elif not bound_client_ids:
                 unavailable_reason = "no_binding"
             elif parallel_blocked:
@@ -319,10 +351,19 @@ class ServiceConfigMixin:
                 "missing": missing_permissions,
             },
             "state": {
-                "paused": False,
-                "cooldown_until": None,
-                "last_failure_at": None,
-                "last_failure_summary": None,
+                "paused": paused,
+                "busy": busy,
+                "busy_request_id": runtime_state.get("busy_request_id"),
+                "busy_action_id": runtime_state.get("busy_action_id"),
+                "cooldown_active": cooldown_active,
+                "cooldown_until": runtime_state.get("cooldown_until"),
+                "last_failure_at": runtime_state.get("last_failure_at"),
+                "last_failure_summary": runtime_state.get("last_failure_summary"),
+                "last_result_at": runtime_state.get("last_result_at"),
+                "last_result_summary": runtime_state.get("last_result_summary"),
+                "unavailable_active": unavailable_active,
+                "unavailable_reason": runtime_state.get("unavailable_reason"),
+                "unavailable_until": runtime_state.get("unavailable_until"),
                 "parallel_blocked_by_action_id": (
                     active_ongoing_action.get("action_id")
                     if parallel_blocked and isinstance(active_ongoing_action, dict)
@@ -351,6 +392,7 @@ class ServiceConfigMixin:
         for capability_id, manifest in sorted(manifests.items()):
             availability = self._build_capability_availability(
                 manifest=manifest,
+                current_time=current_time or self._now_iso(),
                 bound_client_ids=accepted_bindings.get(capability_id, []),
                 rejected_bindings=rejected_bindings,
                 active_ongoing_action=active_ongoing_action,

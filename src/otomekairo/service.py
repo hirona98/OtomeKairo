@@ -61,6 +61,7 @@ class OtomeKairoService(
         self._log_stream_registry = LogStreamRegistry()
         self._capability_request_lock = threading.RLock()
         self._pending_capability_requests: dict[str, dict[str, Any]] = {}
+        self._capability_runtime_state: dict[str, dict[str, Any]] = {}
         self._stream_event_lock = threading.Lock()
         self._next_stream_event_value = 1
         debug_log("Service", "initialized")

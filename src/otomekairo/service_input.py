@@ -4648,6 +4648,7 @@ class ServiceInputMixin:
         payload: dict[str, Any] = {}
         for key in (
             "transition_sequence",
+            "transition_kind",
             "final_state",
             "reason_code",
             "reason_summary",
