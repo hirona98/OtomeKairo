@@ -664,6 +664,7 @@ def _build_world_state_system_prompt() -> str:
         "screen_context / external_service_context / body_context / device_context / schedule_context / social_context_context / environment_context / location_context があるときは、その短い summary_text と補助 field だけを根拠に使ってください。\n"
         "screen_context.visual_summary_text は画面前景の短い補助要約として使ってよく、external_service_context.status_text / service は外部状態の補助情報として使ってよいです。\n"
         "external_service_context / body_context / device_context / schedule_context に client_summary_text や result_summary_text があるときは、summary_text と整合する補助比較用としてだけ使ってください。\n"
+        "schedule_context.schedule_slots があるときは、各 slot の summary_text / slot_key / not_before / expires_at を短期予定の補助根拠として使ってよいです。\n"
         "body_context.body_state_summary、device_context.device_state_summary、schedule_context.schedule_summary、social_context_context.social_context_summary、environment_context.environment_summary、location_context.location_summary は各 state_type の短い補助要約として使ってよいです。\n"
         "image_interpreted=false のとき、画像の中身を想像してはいけません。\n"
         "image_interpreted=true で visual_summary_text があるときは、その短い要約だけを根拠に使ってください。\n"

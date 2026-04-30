@@ -187,6 +187,8 @@ top-level の trace object は、存在しない段階でも空 object として
 各 trace object の意味と標準的な含有内容は [../13_デバッグ可能性.md](../13_デバッグ可能性.md) を正とする。
 機能ごとの追加 field は、それぞれの設計文書を正とする。
 `world_state_trace` には、sanitized context summary に加えて `source_pack_state_type_hooks`、`normalized_candidate_policies`、`replaced_state_count` を含めてよい。
+`world_state_trace.source_pack_state_type_hooks.schedule` には、必要なら `pending_intent_slot_key` に加えて `real_schedule_slot_count / schedule_slot_keys` を含めてよい。
+`world_state_trace.normalized_candidate_policies` では、`schedule:self` と `schedule:<slot_key>` の両方を比較でき、real schedule slot 由来の candidate では `ttl_capped_by = schedule_slot.expires_at` を含めてよい。
 trigger をまたいだ比較用に、`result_trace.trigger_compact_summary` に共通 outer shape の compact summary を含めてよい。
 capability dispatch が起きた cycle では、`result_trace.capability_dispatch_summary` に capability family 共通で比較しやすい compact summary を含めてよい。
 `trigger_kind=capability_result` の cycle では、`result_trace.capability_result_followup_summary` に capability family 共通で比較しやすい compact summary を含めてよい。

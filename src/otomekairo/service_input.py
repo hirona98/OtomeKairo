@@ -86,6 +86,8 @@ WORLD_STATE_TTL_SECONDS_BY_TYPE = {
         "summary_text": {"short": 900, "medium": 2400, "long": 7200},
     },
     "schedule": {
+        "capability_result.client_context.schedule_slots": {"short": 3600, "medium": 10800, "long": 21600},
+        "client_context.schedule_slots": {"short": 2400, "medium": 7200, "long": 18000},
         "capability_result.schedule_summary": {"short": 1800, "medium": 5400, "long": 14400},
         "client_context.schedule_summary": {"short": 1800, "medium": 5400, "long": 14400},
         "capability_result.client_context.schedule_summary": {"short": 1800, "medium": 5400, "long": 14400},
@@ -2538,6 +2540,15 @@ class ServiceInputMixin:
                 payload=payload,
                 source_pack=source_pack,
             )
+            world_states.extend(
+                self._normalize_world_state_schedule_slot_records(
+                    memory_set_id=state["selected_memory_set_id"],
+                    observed_at=started_at,
+                    source_kind=source_kind,
+                    source_ref=source_ref,
+                    source_pack=source_pack,
+                )
+            )
             normalized_candidate_policies = self._summarize_world_state_candidate_policies(world_states)
             refresh_summary = self.store.refresh_world_states(
                 memory_set_id=state["selected_memory_set_id"],
@@ -2930,6 +2941,10 @@ class ServiceInputMixin:
         summary_text = client_summary_text
         capability_id_text = None
         observation_text = None
+        schedule_slots = self._build_world_state_schedule_slots(
+            client_context=client_context,
+            source_kind=source_kind,
+        )
         if client_summary_text is not None:
             payload["client_summary_text"] = client_summary_text
         if isinstance(observation_summary, dict):
@@ -2950,6 +2965,18 @@ class ServiceInputMixin:
                     source_kind=source_kind,
                     field_name="schedule_summary",
                 )
+        elif schedule_slots:
+            payload["summary_text"] = (
+                schedule_slots[0]["summary_text"]
+                if len(schedule_slots) == 1
+                else f"近い予定が {len(schedule_slots)} 件ある。"
+            )
+            payload["summary_source_hint"] = self._world_state_client_context_summary_source(
+                source_kind=source_kind,
+                field_name="schedule_slots",
+            )
+        if schedule_slots:
+            payload["schedule_slots"] = schedule_slots
         pending_intent = self._build_world_state_pending_intent_context(selected_candidate)
         if pending_intent is not None:
             payload["pending_intent"] = pending_intent
@@ -2958,6 +2985,41 @@ class ServiceInputMixin:
         if not payload:
             return None
         return payload
+
+    def _build_world_state_schedule_slots(
+        self,
+        *,
+        client_context: dict[str, Any],
+        source_kind: str,
+    ) -> list[dict[str, Any]]:
+        raw_slots = client_context.get("schedule_slots")
+        if not isinstance(raw_slots, list):
+            return []
+        normalized_slots: list[dict[str, Any]] = []
+        seen_slot_keys: set[str] = set()
+        summary_source = self._world_state_client_context_summary_source(
+            source_kind=source_kind,
+            field_name="schedule_slots",
+        )
+        for item in raw_slots:
+            if not isinstance(item, dict):
+                continue
+            slot_key = self._client_context_text(item.get("slot_key"), limit=160)
+            summary_text = self._client_context_text(item.get("summary_text"), limit=160)
+            if slot_key is None or summary_text is None or slot_key in seen_slot_keys:
+                continue
+            seen_slot_keys.add(slot_key)
+            slot_payload: dict[str, Any] = {
+                "slot_key": slot_key,
+                "summary_text": summary_text,
+                "summary_source": summary_source,
+            }
+            for key in ("not_before", "expires_at"):
+                value = item.get(key)
+                if isinstance(value, str) and value.strip():
+                    slot_payload[key] = value.strip()
+            normalized_slots.append(slot_payload)
+        return normalized_slots[:4]
 
     def _build_world_state_pending_intent_context(
         self,
@@ -3092,6 +3154,15 @@ class ServiceInputMixin:
                 slot_key = self._client_context_text(pending_intent.get("slot_key"), limit=160)
                 if slot_key is not None:
                     payload["pending_intent_slot_key"] = slot_key
+            schedule_slots = context.get("schedule_slots")
+            if isinstance(schedule_slots, list) and schedule_slots:
+                slot_keys = [
+                    self._client_context_text(item.get("slot_key"), limit=160)
+                    for item in schedule_slots
+                    if isinstance(item, dict)
+                ]
+                payload["real_schedule_slot_count"] = len(schedule_slots)
+                payload["schedule_slot_keys"] = [value for value in slot_keys if value is not None][:4]
         return payload
 
     def _world_state_hook_summary_source(self, *, state_type: str, context: dict[str, Any]) -> str:
@@ -3151,6 +3222,7 @@ class ServiceInputMixin:
             ),
             "schedule": (
                 "schedule_summary",
+                "schedule_slots",
                 "pending_intent",
             ),
             "social_context": (
@@ -3324,6 +3396,100 @@ class ServiceInputMixin:
         }:
             return self._world_state_hook_summary_source(state_type=state_type, context=context)
         return "summary_text"
+
+    def _normalize_world_state_schedule_slot_records(
+        self,
+        *,
+        memory_set_id: str,
+        observed_at: str,
+        source_kind: str,
+        source_ref: str,
+        source_pack: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        context = self._world_state_source_context(state_type="schedule", source_pack=source_pack)
+        if not isinstance(context, dict):
+            return []
+        schedule_slots = context.get("schedule_slots")
+        if not isinstance(schedule_slots, list):
+            return []
+        normalized_records: list[dict[str, Any]] = []
+        seen_slot_keys: set[str] = set()
+        for item in schedule_slots:
+            if not isinstance(item, dict):
+                continue
+            slot_key = self._client_context_text(item.get("slot_key"), limit=160)
+            summary_text = self._client_context_text(item.get("summary_text"), limit=160)
+            if slot_key is None or summary_text is None or slot_key in seen_slot_keys:
+                continue
+            ttl_policy = self._world_state_schedule_slot_ttl_policy(
+                current_time=observed_at,
+                source_kind=source_kind,
+                schedule_slot=item,
+            )
+            if ttl_policy is None:
+                continue
+            seen_slot_keys.add(slot_key)
+            record: dict[str, Any] = {
+                "world_state_id": f"world_state:{uuid.uuid4().hex}",
+                "memory_set_id": memory_set_id,
+                "state_type": "schedule",
+                "scope_type": "self",
+                "scope_key": "self",
+                "summary_text": summary_text,
+                "source_kind": source_kind,
+                "source_ref": source_ref,
+                "confidence": self._world_state_score_from_hint("high"),
+                "salience": self._world_state_score_from_hint("medium"),
+                "observed_at": observed_at,
+                "expires_at": ttl_policy["expires_at"],
+                "updated_at": observed_at,
+                "summary_source": ttl_policy["summary_source"],
+                "ttl_hint": "medium",
+                "ttl_seconds": ttl_policy["ttl_seconds"],
+                "integration_mode": "schedule_slot",
+                "integration_key": f"schedule:{slot_key}",
+                "slot_key": slot_key,
+            }
+            not_before = item.get("not_before")
+            if isinstance(not_before, str) and not_before.strip():
+                record["slot_not_before"] = not_before.strip()
+            slot_expires_at = item.get("expires_at")
+            if isinstance(slot_expires_at, str) and slot_expires_at.strip():
+                record["slot_expires_at"] = slot_expires_at.strip()
+            if ttl_policy.get("capped_by") is not None:
+                record["ttl_capped_by"] = ttl_policy["capped_by"]
+            normalized_records.append(record)
+        return normalized_records
+
+    def _world_state_schedule_slot_ttl_policy(
+        self,
+        *,
+        current_time: str,
+        source_kind: str,
+        schedule_slot: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        summary_source = self._world_state_client_context_summary_source(
+            source_kind=source_kind,
+            field_name="schedule_slots",
+        )
+        ttl_table = WORLD_STATE_TTL_SECONDS_BY_TYPE["schedule"].get(summary_source)
+        if ttl_table is None:
+            raise ValueError("world_state schedule slot ttl is invalid.")
+        ttl_seconds = int(ttl_table["medium"])
+        capped_by = None
+        expires_at = schedule_slot.get("expires_at")
+        if isinstance(expires_at, str) and expires_at.strip():
+            remaining_seconds = int((self._parse_iso(expires_at.strip()) - self._parse_iso(current_time)).total_seconds())
+            if remaining_seconds <= 0:
+                return None
+            ttl_seconds = min(ttl_seconds, max(1, remaining_seconds))
+            capped_by = "schedule_slot.expires_at"
+        return {
+            "summary_source": summary_source,
+            "ttl_seconds": ttl_seconds,
+            "expires_at": (self._parse_iso(current_time) + timedelta(seconds=ttl_seconds)).isoformat(),
+            "capped_by": capped_by,
+        }
 
     def _world_state_ttl_cap_source(
         self,

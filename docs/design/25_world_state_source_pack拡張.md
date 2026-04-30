@@ -80,13 +80,21 @@ raw response body、client 固有 ID、資格情報、内部 URL、base64 本文
     "device_state_summary": "デスクトップ client は利用可能な状態で接続中。",
     "capability_id": "vision.capture"
   },
-  "schedule_context": {
-    "summary_text": "このあとレビュー確認を続ける予定が近い。",
-    "schedule_summary": "このあとレビュー確認を続ける予定が近い。",
-    "capability_id": "vision.capture",
-    "pending_intent": {
-      "intent_kind": "conversation_follow_up",
-      "intent_summary": "レビュー状況に合わせてまた声をかける。",
+    "schedule_context": {
+      "summary_text": "このあとレビュー確認を続ける予定が近い。",
+      "schedule_summary": "このあとレビュー確認を続ける予定が近い。",
+      "capability_id": "vision.capture",
+      "schedule_slots": [
+        {
+          "slot_key": "calendar:review",
+          "summary_text": "12:20 にレビュー確認がある。",
+          "not_before": "2026-04-25T12:20:00+09:00",
+          "expires_at": "2026-04-25T12:35:00+09:00"
+        }
+      ],
+      "pending_intent": {
+        "intent_kind": "conversation_follow_up",
+        "intent_summary": "レビュー状況に合わせてまた声をかける。",
       "reason_summary": "あとで続きに触れる価値がある。",
       "slot_key": "pending_intent:topic:review",
       "not_before": "2026-04-25T09:10:00+09:00",
@@ -104,6 +112,7 @@ source pack では、標準の `client_context` と state-type 別の structured
 同時に client 側 summary もあるときは、`client_summary_text / result_summary_text / summary_source_hint` を追加して境界を残してよい。
 `body_context / device_context / schedule_context` でも、capability result 由来のときは `capability_id` と state-type 別 summary field を載せる。
 client summary と result summary が両方あるときは、同様に `client_summary_text / result_summary_text / summary_source_hint` を追加してよい。
+real schedule source が複数あるときは、`schedule_context.schedule_slots` に複数 slot を載せてよい。
 
 ## コード責務
 
@@ -113,6 +122,7 @@ client summary と result summary が両方あるときは、同様に `client_s
 - `external.status` result の `service / status_text` を `external_service_context` へ投影する
 - capability result の `body_state_summary / device_state_summary / schedule_summary` を対応する state-type context へ投影する
 - `summary_source` が `capability_result.<field>` と `client_context.<field>` を区別できるように context へ source hint を残す
+- `schedule_context.schedule_slots` があるときは deterministic な slot state を追加し、`schedule:self` と `schedule:<slot_key>` を併存させる
 - wake / `desktop_watch` の selected pending-intent があるときだけ `schedule_context.pending_intent` を作り、`slot_key` を付ける
 - LLM が返した `state_type / scope / summary_text / hint` を validator で検証する
 - TTL は `summary_source` と state_type ごとの規則で決める

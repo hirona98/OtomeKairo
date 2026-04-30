@@ -589,10 +589,43 @@ class ServiceSpontaneousMixin:
             "device_state_summary": client_context.get("device_state_summary"),
             "schedule_summary": client_context.get("schedule_summary"),
         }
+        schedule_slots = self._capability_result_schedule_slots(capability_response)
+        if schedule_slots is not None:
+            summary["schedule_slots"] = schedule_slots
         image_count = self._capability_result_payload_image_count(capability_response)
         if image_count is not None:
             summary["image_count"] = image_count
         return summary
+
+    def _capability_result_schedule_slots(self, capability_response: dict[str, Any]) -> list[dict[str, Any]] | None:
+        client_context = capability_response.get("client_context", {})
+        if not isinstance(client_context, dict):
+            return None
+        raw_slots = client_context.get("schedule_slots")
+        if not isinstance(raw_slots, list):
+            return None
+        normalized_slots: list[dict[str, Any]] = []
+        seen_slot_keys: set[str] = set()
+        for item in raw_slots:
+            if not isinstance(item, dict):
+                continue
+            slot_key = self._client_context_text(item.get("slot_key"), limit=160)
+            summary_text = self._client_context_text(item.get("summary_text"), limit=160)
+            if slot_key is None or summary_text is None or slot_key in seen_slot_keys:
+                continue
+            seen_slot_keys.add(slot_key)
+            slot_payload: dict[str, Any] = {
+                "slot_key": slot_key,
+                "summary_text": summary_text,
+            }
+            for key in ("not_before", "expires_at"):
+                value = item.get(key)
+                if isinstance(value, str) and value.strip():
+                    slot_payload[key] = value.strip()
+            normalized_slots.append(slot_payload)
+        if not normalized_slots:
+            return None
+        return normalized_slots[:4]
 
     def _capability_result_observation_summary(self, capability_response: dict[str, Any]) -> dict[str, Any]:
         request_record = capability_response.get("request_record")
