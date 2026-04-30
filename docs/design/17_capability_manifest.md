@@ -184,7 +184,7 @@ capability 実行は次の順序で行う。
 4. LLM が `capability_id` と入力 payload を含む実行要求案を返す。
 5. server が `input_schema`、権限、利用可否、`ongoing_action`、並列制限を検証し、`risk_level` を実行記録と inspection へ残す。
 6. server が binding から実行先 client を選び、stream で request を送る。
-7. client が capability ごとの result endpoint へ結果を返す。
+7. client が capability family 共通の result endpoint へ結果を返す。
 8. server が `request_id`、`target_client_id`、`result_schema` を検証する。
 9. server が `capability_id` ごとの follow-up pipeline で `memory_policy`、`state_policy`、`inspection_fields` に従って記憶、状態、inspection を更新する。
 

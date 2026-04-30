@@ -741,66 +741,81 @@ class LongSmokeRunner:
             )
             if should_inject_mismatch:
                 self.api.post_expect_error(
-                    "/api/vision/capture-response",
+                    "/api/capability/result",
                     {
                         "request_id": request_id,
                         "client_id": f"{connected_client_id}-mismatch",
-                        "images": [PNG_DATA_URI],
-                        "client_context": client_context,
-                        "error": None,
+                        "capability_id": "vision.capture",
+                        "result": {
+                            "images": [PNG_DATA_URI],
+                            "client_context": client_context,
+                            "error": None,
+                        },
                     },
                     status_code=409,
-                    error_code="capture_client_id_mismatch",
+                    error_code="capability_result_client_id_mismatch",
                 )
                 log(f"capture-response mismatch verified request_id={request_id}")
             if should_inject_invalid_images:
                 self.api.post_expect_error(
-                    "/api/vision/capture-response",
+                    "/api/capability/result",
                     {
                         "request_id": request_id,
                         "client_id": connected_client_id,
-                        "images": [""],
-                        "client_context": client_context,
-                        "error": None,
+                        "capability_id": "vision.capture",
+                        "result": {
+                            "images": [""],
+                            "client_context": client_context,
+                            "error": None,
+                        },
                     },
                     status_code=400,
-                    error_code="invalid_images",
+                    error_code="invalid_capability_result",
                 )
                 log(f"capture-response invalid_images verified request_id={request_id}")
             if should_inject_invalid_error:
                 self.api.post_expect_error(
-                    "/api/vision/capture-response",
+                    "/api/capability/result",
                     {
                         "request_id": request_id,
                         "client_id": connected_client_id,
-                        "images": [PNG_DATA_URI],
-                        "client_context": client_context,
-                        "error": 123,
+                        "capability_id": "vision.capture",
+                        "result": {
+                            "images": [PNG_DATA_URI],
+                            "client_context": client_context,
+                            "error": 123,
+                        },
                     },
                     status_code=400,
-                    error_code="invalid_capture_error",
+                    error_code="invalid_capability_result",
                 )
-                log(f"capture-response invalid_capture_error verified request_id={request_id}")
+                log(f"capability-result invalid_capability_result verified request_id={request_id}")
             if should_inject_unknown_request:
                 self.api.post_expect_success_empty_data(
-                    "/api/vision/capture-response",
+                    "/api/capability/result",
                     {
                         "request_id": f"{request_id}-unknown",
                         "client_id": connected_client_id,
-                        "images": [PNG_DATA_URI],
-                        "client_context": client_context,
-                        "error": None,
+                        "capability_id": "vision.capture",
+                        "result": {
+                            "images": [PNG_DATA_URI],
+                            "client_context": client_context,
+                            "error": None,
+                        },
                     },
                 )
                 log(f"capture-response unknown request ignored request_id={request_id}")
             self.api.post(
-                "/api/vision/capture-response",
+                "/api/capability/result",
                 {
                     "request_id": request_id,
                     "client_id": connected_client_id,
-                    "images": [PNG_DATA_URI],
-                    "client_context": client_context,
-                    "error": None,
+                    "capability_id": "vision.capture",
+                    "result": {
+                        "images": [PNG_DATA_URI],
+                        "client_context": client_context,
+                        "error": None,
+                    },
                 },
             )
             self.capture_response_count += 1
@@ -840,13 +855,16 @@ class LongSmokeRunner:
             if not isinstance(client_context.get("schedule_summary"), str) or not client_context["schedule_summary"].strip():
                 client_context["schedule_summary"] = f"{service.strip()} の状態確認をこのまま進められる。"
             self.api.post(
-                "/api/external/status-response",
+                "/api/capability/result",
                 {
                     "request_id": request_id,
                     "client_id": connected_client_id,
-                    "status_text": status_text,
-                    "client_context": client_context,
-                    "error": None,
+                    "capability_id": "external.status",
+                    "result": {
+                        "status_text": status_text,
+                        "client_context": client_context,
+                        "error": None,
+                    },
                 },
             )
             self.external_status_response_count += 1
@@ -1511,7 +1529,7 @@ class LongSmokeRunner:
                 raise SmokeError("capture invalid_images injection count did not match the requested failure count.")
         if self.args.capture_invalid_error_failures > 0:
             if len(summary["capture_invalid_error_request_ids"]) != self.args.capture_invalid_error_failures:
-                raise SmokeError("capture invalid_capture_error injection count did not match the requested failure count.")
+                raise SmokeError("capture invalid_capability_result injection count did not match the requested failure count.")
         if self.args.capture_unknown_request_failures > 0:
             if len(summary["capture_unknown_request_ids"]) != self.args.capture_unknown_request_failures:
                 raise SmokeError("capture unknown request injection count did not match the requested failure count.")
@@ -1982,17 +2000,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--capture-mismatch-failures",
         type=int,
-        help="意図的に 409 capture_client_id_mismatch を起こす回数",
+        help="意図的に 409 capability_result_client_id_mismatch を起こす回数",
     )
     parser.add_argument(
         "--capture-invalid-images-failures",
         type=int,
-        help="意図的に 400 invalid_images を起こす回数",
+        help="意図的に 400 invalid_capability_result を起こす回数",
     )
     parser.add_argument(
         "--capture-invalid-error-failures",
         type=int,
-        help="意図的に 400 invalid_capture_error を起こす回数",
+        help="意図的に 400 invalid_capability_result を起こす回数",
     )
     parser.add_argument(
         "--capture-unknown-request-failures",

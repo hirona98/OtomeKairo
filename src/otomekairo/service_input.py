@@ -354,6 +354,7 @@ class ServiceInputMixin:
             state=state,
             persona=persona,
             current_time=started_at,
+            time_context=time_context,
             recent_turns=recent_turns,
             trigger_kind=trigger_kind,
             client_context=current_client_context,
@@ -563,6 +564,7 @@ class ServiceInputMixin:
         state: dict[str, Any],
         persona: dict[str, Any],
         current_time: str,
+        time_context: dict[str, Any],
         recent_turns: list[dict[str, Any]],
         trigger_kind: str,
         client_context: dict[str, Any],
@@ -584,17 +586,37 @@ class ServiceInputMixin:
             ongoing_action_summary=ongoing_action_summary,
         )
         recent_turn_summary = self._initiative_recent_turn_summary(recent_turns)
+        foreground_signal_summary = self._initiative_foreground_signal_summary(
+            trigger_kind=trigger_kind,
+            client_context=client_context,
+            world_state_summary=world_state_summary,
+        )
         intervention_state = self._initiative_intervention_state(
             current_time=current_time,
             trigger_kind=trigger_kind,
             selected_candidate=selected_candidate,
         )
         capability_summary = self._initiative_capability_summary(capability_decision_view)
+        intervention_risk_summary = self._initiative_intervention_risk_summary(
+            initiative_baseline=initiative_baseline,
+            intervention_state=intervention_state,
+            trigger_kind=trigger_kind,
+            ongoing_action_summary=ongoing_action_summary,
+            capability_summary=capability_summary,
+            selected_candidate=selected_candidate,
+            pending_intent_selection=pending_intent_selection,
+        )
+        suppression_summary = self._initiative_suppression_summary(
+            intervention_state=intervention_state,
+            intervention_risk_summary=intervention_risk_summary,
+        )
         candidate_families = self._initiative_candidate_families(
             trigger_kind=trigger_kind,
             drive_summaries=drive_summaries,
             world_state_summary=world_state_summary,
             recent_turn_summary=recent_turn_summary,
+            foreground_signal_summary=foreground_signal_summary,
+            suppression_summary=suppression_summary,
             ongoing_action_summary=ongoing_action_summary,
             selected_candidate=selected_candidate,
             pending_intent_selection=pending_intent_selection,
@@ -609,6 +631,8 @@ class ServiceInputMixin:
                 client_context=client_context,
                 selected_candidate=selected_candidate,
             ),
+            "time_context_summary": self._initiative_time_context_summary(time_context=time_context),
+            "foreground_signal_summary": foreground_signal_summary,
             "initiative_baseline": initiative_baseline,
             "runtime_state_summary": runtime_state_summary,
             "recent_turn_summary": recent_turn_summary,
@@ -620,15 +644,8 @@ class ServiceInputMixin:
             "candidate_families": candidate_families,
             "selected_candidate_family": self._initiative_selected_candidate_family(candidate_families),
             "intervention_state": intervention_state,
-            "intervention_risk_summary": self._initiative_intervention_risk_summary(
-                initiative_baseline=initiative_baseline,
-                intervention_state=intervention_state,
-                trigger_kind=trigger_kind,
-                ongoing_action_summary=ongoing_action_summary,
-                capability_summary=capability_summary,
-                selected_candidate=selected_candidate,
-                pending_intent_selection=pending_intent_selection,
-            ),
+            "suppression_summary": suppression_summary,
+            "intervention_risk_summary": intervention_risk_summary,
         }
 
     def _initiative_opportunity_summary(
@@ -650,6 +667,87 @@ class ServiceInputMixin:
         if active_app:
             return f"desktop_watch が前景変化を観測しており、{active_app} を中心に今の判断機会がある。"
         return "desktop_watch が前景変化を観測しており、今の判断機会がある。"
+
+    def _initiative_time_context_summary(self, *, time_context: dict[str, Any]) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        current_time_text = self._client_context_text(time_context.get("current_time_text"), limit=120)
+        if current_time_text is not None:
+            payload["current_time_text"] = current_time_text
+        part_of_day = self._client_context_text(time_context.get("part_of_day"), limit=16)
+        if part_of_day is not None:
+            payload["part_of_day"] = part_of_day
+            payload["time_band_summary"] = self._initiative_time_band_summary(part_of_day=part_of_day)
+        weekday = self._client_context_text(time_context.get("weekday"), limit=16)
+        if weekday is not None:
+            payload["weekday"] = weekday
+        return payload
+
+    def _initiative_time_band_summary(self, *, part_of_day: str) -> str:
+        if part_of_day == "morning":
+            return "朝の立ち上がり帯で、軽い前進か様子見かを決めたい時間帯。"
+        if part_of_day == "daytime":
+            return "日中の活動帯で、前景理由があれば動きやすい時間帯。"
+        if part_of_day == "evening":
+            return "夕方から夜への移行帯で、流れの整理や軽い声かけが自然な時間帯。"
+        return "夜間で、押し出しすぎず静かな前進可否を見たい時間帯。"
+
+    def _initiative_foreground_signal_summary(
+        self,
+        *,
+        trigger_kind: str,
+        client_context: dict[str, Any],
+        world_state_summary: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        state_types = sorted(
+            {
+                item.get("state_type")
+                for item in world_state_summary
+                if isinstance(item, dict) and isinstance(item.get("state_type"), str)
+            }
+        )
+        active_app = self._client_context_text(client_context.get("active_app"), limit=48)
+        if not world_state_summary:
+            payload = {
+                "foreground_thinness": "thin",
+                "reason_summary": "前景 world_state がまだ薄く、画面や周辺状況の追加観測が欲しい。",
+                "world_state_count": 0,
+            }
+            if trigger_kind == "desktop_watch":
+                payload["reason_summary"] = "desktop_watch 起点だが、まだ前景 world_state が薄く意味づけは限定的。"
+            if active_app is not None:
+                payload["active_app"] = active_app
+            return payload
+
+        grounded_types = {"schedule", "social_context", "body"}
+        if grounded_types.intersection(state_types):
+            thinness = "grounded"
+            reason_summary = "予定・対人・身体の前景があり、いまの状況は比較的具体的に見えている。"
+        elif set(state_types).issubset({"screen", "external_service", "device"}):
+            thinness = "thin"
+            reason_summary = "画面や外部状態は見えているが、生活文脈や対人文脈はまだ薄い。"
+        else:
+            thinness = "mixed"
+            reason_summary = "前景 world はあるが、画面中心の信号と生活文脈が混在している。"
+        payload = {
+            "foreground_thinness": thinness,
+            "reason_summary": reason_summary,
+            "world_state_count": len(world_state_summary),
+        }
+        if state_types:
+            payload["state_types"] = state_types[:4]
+        if active_app is not None:
+            payload["active_app"] = active_app
+        return payload
+
+    def _initiative_foreground_thinness(self, foreground_signal_summary: dict[str, Any] | None) -> str | None:
+        if not isinstance(foreground_signal_summary, dict):
+            return None
+        return self._client_context_text(foreground_signal_summary.get("foreground_thinness"), limit=16)
+
+    def _initiative_suppression_level(self, suppression_summary: dict[str, Any] | None) -> str | None:
+        if not isinstance(suppression_summary, dict):
+            return None
+        return self._client_context_text(suppression_summary.get("suppression_level"), limit=16)
 
     def _initiative_drive_summaries(
         self,
@@ -784,10 +882,13 @@ class ServiceInputMixin:
         trigger_kind: str,
         drive_summaries: list[dict[str, Any]],
         world_state_summary: list[dict[str, Any]],
+        foreground_signal_summary: dict[str, Any],
         initiative_baseline: dict[str, Any],
         capability_summary: dict[str, Any],
     ) -> dict[str, Any] | None:
         if trigger_kind not in {"wake", "background_wake"}:
+            return None
+        if self._initiative_foreground_thinness(foreground_signal_summary) != "thin":
             return None
         available_ids = capability_summary.get("available_ids", [])
         if not isinstance(available_ids, list) or "vision.capture" not in available_ids:
@@ -962,6 +1063,8 @@ class ServiceInputMixin:
         drive_summaries: list[dict[str, Any]],
         world_state_summary: list[dict[str, Any]],
         recent_turn_summary: list[dict[str, str]],
+        foreground_signal_summary: dict[str, Any],
+        suppression_summary: dict[str, Any],
         ongoing_action_summary: dict[str, Any] | None,
         selected_candidate: dict[str, Any] | None,
         pending_intent_selection: dict[str, Any] | None,
@@ -995,6 +1098,8 @@ class ServiceInputMixin:
                 drive_summaries=drive_summaries,
                 world_state_summary=world_state_summary,
                 recent_turn_summary=recent_turn_summary,
+                foreground_signal_summary=foreground_signal_summary,
+                suppression_summary=suppression_summary,
                 initiative_baseline=initiative_baseline,
                 intervention_state=intervention_state,
                 capability_summary=capability_summary,
@@ -1025,24 +1130,36 @@ class ServiceInputMixin:
         available_ids = capability_summary.get("available_ids", [])
         capability_available = isinstance(last_capability_id, str) and last_capability_id in available_ids
         preferred_result_kind = "reply"
+        preferred_result_reason: str | None = None
         priority_score = 0.56
         blocking_reason: str | None = None
         if status == "waiting_result":
-            priority_score = 0.58
+            priority_score = 0.74
             preferred_result_kind = "noop"
-            blocking_reason = "ongoing_action が結果待ちで、いまは新しい介入より待機を優先する。"
+            preferred_result_reason = "ongoing_action が結果待ちで、今は新しい介入より待機を優先する。"
+            blocking_reason = preferred_result_reason
         elif status in {"active", "continued"}:
             if capability_available:
-                priority_score = 0.76
+                priority_score = 0.82
                 preferred_result_kind = "capability_request"
+                if last_capability_id is not None:
+                    preferred_result_reason = f"{last_capability_id} の follow-up を継続できる。"
+                else:
+                    preferred_result_reason = "利用可能な follow-up capability があり、そのまま継続できる。"
             elif last_capability_id is not None:
-                priority_score = 0.66
-                blocking_reason = f"{last_capability_id} の follow-up を考えたいが、現時点では利用できない。"
+                priority_score = 0.48
+                preferred_result_kind = "noop"
+                preferred_result_reason = f"{last_capability_id} の follow-up を考えたいが、現時点では利用できない。"
+                blocking_reason = preferred_result_reason
             else:
                 priority_score = 0.68
+                preferred_result_reason = "継続中の流れが残っており、短い reply で続きを整えられる。"
         elif status == "on_hold":
             priority_score = 0.42
             preferred_result_kind = "pending_intent"
+            preferred_result_reason = "進行中の流れはいったん保留扱いで、pending_intent として持つのが自然。"
+        else:
+            preferred_result_reason = "継続中の流れが残っており、状況に応じて続きを選びたい。"
         payload.update(
             {
                 "available": True,
@@ -1052,6 +1169,7 @@ class ServiceInputMixin:
                     capability_available=capability_available,
                 ),
                 "preferred_result_kind": preferred_result_kind,
+                "preferred_result_reason_summary": preferred_result_reason,
             }
         )
         if blocking_reason is not None:
@@ -1084,6 +1202,7 @@ class ServiceInputMixin:
                         selection_reason=selection_reason,
                     ),
                     "preferred_result_kind": "reply",
+                    "preferred_result_reason_summary": "due になった pending_intent 候補があり、今回は表に出してよい。",
                 }
             )
             return payload
@@ -1099,6 +1218,7 @@ class ServiceInputMixin:
                         selection_reason=selection_reason,
                     ),
                     "preferred_result_kind": "pending_intent",
+                    "preferred_result_reason_summary": "再評価対象はあるが、今回は pending_intent として保持するのが自然。",
                 }
             )
             return payload
@@ -1121,6 +1241,8 @@ class ServiceInputMixin:
         drive_summaries: list[dict[str, Any]],
         world_state_summary: list[dict[str, Any]],
         recent_turn_summary: list[dict[str, str]],
+        foreground_signal_summary: dict[str, Any],
+        suppression_summary: dict[str, Any],
         initiative_baseline: dict[str, Any],
         intervention_state: dict[str, Any],
         capability_summary: dict[str, Any],
@@ -1137,6 +1259,8 @@ class ServiceInputMixin:
             return payload
         strongest_drive = self._initiative_strongest_drive_summary(drive_summaries)
         level = self._client_context_text(initiative_baseline.get("level"), limit=16) or "medium"
+        foreground_thinness = self._initiative_foreground_thinness(foreground_signal_summary)
+        suppression_level = self._initiative_suppression_level(suppression_summary)
         priority_score = INITIATIVE_BASELINE_SCORES.get(level, INITIATIVE_BASELINE_SCORES["medium"])
         priority_score += self._initiative_drive_signal_score(drive_summaries)
         priority_score += self._initiative_world_state_signal_score(world_state_summary)
@@ -1144,25 +1268,44 @@ class ServiceInputMixin:
             strongest_drive=strongest_drive,
             world_state_summary=world_state_summary,
         )
+        if foreground_thinness == "ready":
+            priority_score += 0.04
+        elif foreground_thinness == "thin":
+            priority_score -= 0.08
         if recent_turn_summary:
             priority_score += 0.08
         if int(capability_summary.get("available_count", 0)) > 0:
             priority_score += 0.06
         if trigger_kind == "background_wake":
             priority_score -= 0.06
-        if intervention_state.get("cooldown_active") is True:
-            priority_score -= 0.12
+        if suppression_level == "high":
+            priority_score -= 0.18
+        elif suppression_level == "medium":
+            priority_score -= 0.08
         probe_preference = self._initiative_autonomous_probe_preference(
             trigger_kind=trigger_kind,
             drive_summaries=drive_summaries,
             world_state_summary=world_state_summary,
+            foreground_signal_summary=foreground_signal_summary,
             initiative_baseline=initiative_baseline,
             capability_summary=capability_summary,
         )
         preferred_result_kind = "reply"
+        preferred_result_reason = self._initiative_autonomous_preferred_result_reason(
+            strongest_drive=strongest_drive,
+            world_state_summary=world_state_summary,
+            recent_turn_summary=recent_turn_summary,
+        )
         if isinstance(probe_preference, dict):
             preferred_result_kind = "capability_request"
+            preferred_result_reason = self._client_context_text(probe_preference.get("reason_summary"), limit=160)
             priority_score += INITIATIVE_AUTONOMOUS_PROBE_SCORE
+        elif suppression_level == "high":
+            preferred_result_kind = "noop"
+            preferred_result_reason = "suppression が high で、今回は押し出さず見送るほうが自然。"
+        elif foreground_thinness == "thin" and not world_state_summary and not recent_turn_summary:
+            preferred_result_kind = "noop"
+            preferred_result_reason = "前景文脈が薄く、いまは reply より様子見を優先したい。"
         payload.update(
             {
                 "available": True,
@@ -1172,11 +1315,14 @@ class ServiceInputMixin:
                     strongest_drive=strongest_drive,
                     world_state_summary=world_state_summary,
                     recent_turn_summary=recent_turn_summary,
+                    foreground_signal_summary=foreground_signal_summary,
+                    suppression_summary=suppression_summary,
                     initiative_baseline=initiative_baseline,
                     capability_summary=capability_summary,
                     probe_preference=probe_preference,
                 ),
                 "preferred_result_kind": preferred_result_kind,
+                "preferred_result_reason_summary": preferred_result_reason,
             }
         )
         if isinstance(probe_preference, dict):
@@ -1187,6 +1333,8 @@ class ServiceInputMixin:
             drive_summaries=drive_summaries,
             strongest_drive=strongest_drive,
             world_state_summary=world_state_summary,
+            foreground_signal_summary=foreground_signal_summary,
+            suppression_summary=suppression_summary,
             initiative_baseline=initiative_baseline,
             capability_summary=capability_summary,
         )
@@ -1229,6 +1377,8 @@ class ServiceInputMixin:
         drive_summaries: list[dict[str, Any]],
         strongest_drive: dict[str, Any] | None,
         world_state_summary: list[dict[str, Any]],
+        foreground_signal_summary: dict[str, Any],
+        suppression_summary: dict[str, Any],
         initiative_baseline: dict[str, Any],
         capability_summary: dict[str, Any],
     ) -> str | None:
@@ -1238,6 +1388,14 @@ class ServiceInputMixin:
             reasons.append("initiative_baseline が low")
         if trigger_kind == "background_wake":
             reasons.append("background wake")
+        foreground_thinness = self._initiative_foreground_thinness(foreground_signal_summary)
+        if foreground_thinness == "thin":
+            reasons.append("前景文脈が thin")
+        suppression_level = self._initiative_suppression_level(suppression_summary)
+        if suppression_level == "high":
+            reasons.append("suppression が high")
+        elif suppression_level == "medium":
+            reasons.append("抑制要因が残る")
         if not drive_summaries and world_state_summary:
             state_types = {
                 item.get("state_type")
@@ -1351,6 +1509,8 @@ class ServiceInputMixin:
         strongest_drive: dict[str, Any] | None,
         world_state_summary: list[dict[str, Any]],
         recent_turn_summary: list[dict[str, str]],
+        foreground_signal_summary: dict[str, Any],
+        suppression_summary: dict[str, Any],
         initiative_baseline: dict[str, Any],
         capability_summary: dict[str, Any],
         probe_preference: dict[str, Any] | None,
@@ -1382,6 +1542,12 @@ class ServiceInputMixin:
             parts.append(f"foreground_world_state {len(world_state_summary)} 件")
         if recent_turn_summary:
             parts.append(f"recent_turn {len(recent_turn_summary)} 件")
+        foreground_thinness = self._initiative_foreground_thinness(foreground_signal_summary)
+        if foreground_thinness is not None:
+            parts.append(f"foreground={foreground_thinness}")
+        suppression_level = self._initiative_suppression_level(suppression_summary)
+        if suppression_level in {"medium", "high"}:
+            parts.append(f"suppression={suppression_level}")
         available_count = int(capability_summary.get("available_count", 0))
         if available_count > 0:
             parts.append(f"available capability {available_count} 件")
@@ -1395,6 +1561,23 @@ class ServiceInputMixin:
         if not parts:
             return None
         return " / ".join(parts) + " が自発判断の前景候補にある。"
+
+    def _initiative_autonomous_preferred_result_reason(
+        self,
+        *,
+        strongest_drive: dict[str, Any] | None,
+        world_state_summary: list[dict[str, Any]],
+        recent_turn_summary: list[dict[str, str]],
+    ) -> str:
+        if isinstance(strongest_drive, dict) and world_state_summary:
+            return "strongest drive と前景 world が噛み合っており、短い reply が自然。"
+        if isinstance(strongest_drive, dict) and recent_turn_summary:
+            return "strongest drive と直近文脈がつながっており、短い reply が自然。"
+        if world_state_summary:
+            return "前景 world が見えており、短い reply で触れられる。"
+        if recent_turn_summary:
+            return "直近文脈が残っており、軽い reply で前へ出られる。"
+        return "自発判断の前景が残っており、短い reply を返せる。"
 
     def _initiative_intervention_risk_summary(
         self,
@@ -1432,6 +1615,27 @@ class ServiceInputMixin:
         if not reasons:
             return None
         return " / ".join(reasons)
+
+    def _initiative_suppression_summary(
+        self,
+        *,
+        intervention_state: dict[str, Any],
+        intervention_risk_summary: str | None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        suppression_level = "low"
+        if intervention_state.get("cooldown_active") is True or intervention_state.get("same_dedupe_recently_replied") is True:
+            suppression_level = "high"
+        elif intervention_state.get("background_trigger") is True or intervention_risk_summary is not None:
+            suppression_level = "medium"
+        payload["suppression_level"] = suppression_level
+        if intervention_risk_summary is not None:
+            payload["reason_summary"] = intervention_risk_summary
+        for key in ("background_trigger", "cooldown_active", "same_dedupe_recently_replied"):
+            value = intervention_state.get(key)
+            if isinstance(value, bool):
+                payload[key] = value
+        return payload
 
     def _run_wake_pipeline(
         self,
@@ -3580,7 +3784,10 @@ class ServiceInputMixin:
         if isinstance(ongoing_action_summary, dict):
             input_trace["ongoing_action_summary"] = ongoing_action_summary
         if isinstance(initiative_context, dict):
-            input_trace["initiative_context"] = initiative_context
+            input_trace["initiative_context"] = self._compact_initiative_context_summary(
+                initiative_context=initiative_context,
+                pending_intent_selection=pending_intent_selection,
+            )
         return {
             "cycle_id": cycle_id,
             "cycle_summary": cycle_summary,
@@ -3946,11 +4153,53 @@ class ServiceInputMixin:
         initiative_context: dict[str, Any] | None,
         pending_intent_selection: dict[str, Any] | None,
     ) -> dict[str, Any]:
+        return self._compact_initiative_context_summary(
+            initiative_context=initiative_context,
+            pending_intent_selection=pending_intent_selection,
+        )
+
+    def _compact_initiative_context_summary(
+        self,
+        *,
+        initiative_context: dict[str, Any] | None,
+        pending_intent_selection: dict[str, Any] | None,
+    ) -> dict[str, Any]:
         payload: dict[str, Any] = {}
         if isinstance(initiative_context, dict):
+            trigger_kind = initiative_context.get("trigger_kind")
+            if isinstance(trigger_kind, str) and trigger_kind.strip():
+                payload["trigger_kind"] = trigger_kind.strip()
             opportunity_summary = initiative_context.get("opportunity_summary")
             if isinstance(opportunity_summary, str) and opportunity_summary.strip():
                 payload["opportunity_summary"] = self._clamp(opportunity_summary.strip(), limit=160)
+            time_context_summary = initiative_context.get("time_context_summary")
+            if isinstance(time_context_summary, dict):
+                compact_time_context: dict[str, Any] = {}
+                for key in ("current_time_text", "part_of_day", "weekday", "time_band_summary"):
+                    value = time_context_summary.get(key)
+                    if isinstance(value, str) and value.strip():
+                        compact_time_context[key] = self._clamp(value.strip(), limit=120)
+                if compact_time_context:
+                    payload["time_context_summary"] = compact_time_context
+            foreground_signal_summary = initiative_context.get("foreground_signal_summary")
+            if isinstance(foreground_signal_summary, dict):
+                compact_foreground_signal: dict[str, Any] = {}
+                for key in ("foreground_thinness", "reason_summary", "active_app"):
+                    value = foreground_signal_summary.get(key)
+                    if isinstance(value, str) and value.strip():
+                        compact_foreground_signal[key] = self._clamp(value.strip(), limit=120)
+                world_state_count = foreground_signal_summary.get("world_state_count")
+                if isinstance(world_state_count, int):
+                    compact_foreground_signal["world_state_count"] = world_state_count
+                state_types = foreground_signal_summary.get("state_types")
+                if isinstance(state_types, list):
+                    compact_foreground_signal["state_types"] = [
+                        value.strip()
+                        for value in state_types
+                        if isinstance(value, str) and value.strip()
+                    ][:4]
+                if compact_foreground_signal:
+                    payload["foreground_signal_summary"] = compact_foreground_signal
             selected_candidate_family = initiative_context.get("selected_candidate_family")
             if isinstance(selected_candidate_family, str) and selected_candidate_family.strip():
                 payload["selected_candidate_family"] = selected_candidate_family.strip()
@@ -3996,6 +4245,19 @@ class ServiceInputMixin:
             )
             if compact_intervention_state:
                 payload["intervention_state"] = compact_intervention_state
+            suppression_summary = initiative_context.get("suppression_summary")
+            if isinstance(suppression_summary, dict):
+                compact_suppression: dict[str, Any] = {}
+                for key in ("suppression_level", "reason_summary"):
+                    value = suppression_summary.get(key)
+                    if isinstance(value, str) and value.strip():
+                        compact_suppression[key] = self._clamp(value.strip(), limit=160)
+                for key in ("background_trigger", "cooldown_active", "same_dedupe_recently_replied"):
+                    value = suppression_summary.get(key)
+                    if isinstance(value, bool):
+                        compact_suppression[key] = value
+                if compact_suppression:
+                    payload["suppression_summary"] = compact_suppression
             intervention_risk_summary = initiative_context.get("intervention_risk_summary")
             if isinstance(intervention_risk_summary, str) and intervention_risk_summary.strip():
                 payload["intervention_risk_summary"] = self._clamp(intervention_risk_summary.strip(), limit=160)
@@ -4074,6 +4336,12 @@ class ServiceInputMixin:
             preferred_result_kind = family.get("preferred_result_kind")
             if isinstance(preferred_result_kind, str) and preferred_result_kind.strip():
                 item["preferred_result_kind"] = preferred_result_kind.strip()
+            preferred_result_reason_summary = family.get("preferred_result_reason_summary")
+            if isinstance(preferred_result_reason_summary, str) and preferred_result_reason_summary.strip():
+                item["preferred_result_reason_summary"] = self._clamp(
+                    preferred_result_reason_summary.strip(),
+                    limit=160,
+                )
             preferred_capability_id = family.get("preferred_capability_id")
             if isinstance(preferred_capability_id, str) and preferred_capability_id.strip():
                 item["preferred_capability_id"] = preferred_capability_id.strip()

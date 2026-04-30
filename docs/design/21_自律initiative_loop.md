@@ -53,6 +53,8 @@ initiative loop は、判断サイクル内の作業文脈として `initiative_
 |------|------|
 | `trigger_kind` | `wake`、`background_wake`、`desktop_watch` などの起点 |
 | `opportunity_summary` | なぜ今評価機会があるか |
+| `time_context_summary` | 生活ローカル時刻と時刻帯の要約 |
+| `foreground_signal_summary` | 前景 world の薄さと見えている文脈の要約 |
 | `drive_summaries` | 前景に出す `drive_state` 要約 |
 | `pending_intent_summaries` | 再評価対象の保留意図要約 |
 | `candidate_families` | `ongoing_action / pending_intent / autonomous` の候補系統ごとの availability と理由要約 |
@@ -60,12 +62,17 @@ initiative loop は、判断サイクル内の作業文脈として `initiative_
 | `world_state_summary` | 現在文脈として効く外界状態の要約 |
 | `ongoing_action_summary` | 継続中の実行列がある場合の要約 |
 | `capability_summary` | 使える能力と使えない能力の判断用要約 |
+| `suppression_summary` | 押し出し抑制の強さと主理由の要約 |
 | `intervention_risk_summary` | 過剰介入、重複、タイミング不自然さの要約 |
 
 `initiative_context` は inspection へ要約を残す。
 `initiative_context` そのものを永続的な状態正本にしない。
 `drive_summaries` は `drive_kind / support_count / support_strength / freshness_hint / scope_alignment / signal_strength / persona_alignment / stability_hint` を含みうる。
-`candidate_families` は `preferred_result_kind` に加えて、必要なら `preferred_capability_id / preferred_capability_input` を持ってよい。
+`time_context_summary` は `current_time_text / part_of_day / time_band_summary` を持ちうる。
+`foreground_signal_summary` は `foreground_thinness / reason_summary / world_state_count` を持ちうる。
+`suppression_summary` は `suppression_level / reason_summary` を持ちうる。
+`candidate_families` は `preferred_result_kind / preferred_result_reason_summary / blocking_reason_summary` を持ちうる。
+`candidate_families` は `preferred_result_kind=capability_request` のときだけ、必要なら `preferred_capability_id / preferred_capability_input` を持ってよい。
 
 ## 候補の作り方
 
@@ -157,6 +164,7 @@ inspection では、少なくとも次を追えるようにする。
 - `world_state` 前景要約の有無
 - `candidate_families` の availability 要約
 - 選ばれた候補系統
+- 候補系統ごとの `preferred_result_kind` とその理由
 - 見送り理由または前進理由
 - 過剰介入抑制に効いた要素
 - 失敗理由

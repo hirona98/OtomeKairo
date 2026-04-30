@@ -51,101 +51,132 @@ class ServiceSpontaneousMixin:
             trigger_kind="wake",
         )
 
-    def submit_vision_capture_response(self, token: str | None, payload: dict[str, Any]) -> dict[str, Any]:
-        # 認可
-        state = self._require_token(token)
-
-        # 項目
-        request_id = payload.get("request_id")
-        client_id = payload.get("client_id")
-        images = payload.get("images", [])
-        client_context = payload.get("client_context")
-        error = payload.get("error")
-
-        # 検証
-        if not isinstance(request_id, str) or not request_id.strip():
-            raise ServiceError(400, "invalid_request_id", "request_id must be a non-empty string.")
-        if not isinstance(client_id, str) or not client_id.strip():
-            raise ServiceError(400, "invalid_client_id", "client_id must be a non-empty string.")
-        if not isinstance(images, list):
-            raise ServiceError(400, "invalid_images", "images must be an array.")
-        if client_context is not None and not isinstance(client_context, dict):
-            raise ServiceError(400, "invalid_client_context", "client_context must be an object.")
-        if error is not None and not isinstance(error, str):
-            raise ServiceError(400, "invalid_capture_error", "error must be a string or null.")
-
-        # 画像検証
-        normalized_images: list[str] = []
-        for image in images:
-            if not isinstance(image, str) or not image.strip():
-                raise ServiceError(400, "invalid_images", "images must contain non-empty strings.")
-            normalized_images.append(image.strip())
-
-        # 応答保存
-        normalized_request_id = request_id.strip()
-        normalized_client_id = client_id.strip()
-        accepted_at = self._now_iso()
-        result_payload = {
-            "images": normalized_images,
-            "client_context": client_context or {},
-            "error": error.strip() if isinstance(error, str) and error.strip() else None,
-        }
-        return self._submit_async_capability_result_response(
-            state=state,
-            capability_id="vision.capture",
-            request_id=normalized_request_id,
-            client_id=normalized_client_id,
-            result_payload=result_payload,
-            accepted_at=accepted_at,
-            log_channel="DesktopWatch",
-            client_mismatch_code="capture_client_id_mismatch",
-            client_mismatch_message="client_id does not match the pending capture target.",
-            invalid_result_code="invalid_capture_result",
-            accepted_detail=f"images={len(normalized_images)} error={bool(error)}",
-        )
-
-    def submit_external_status_response(self, token: str | None, payload: dict[str, Any]) -> dict[str, Any]:
+    def submit_capability_result(self, token: str | None, payload: dict[str, Any]) -> dict[str, Any]:
         state = self._require_token(token)
 
         request_id = payload.get("request_id")
         client_id = payload.get("client_id")
-        status_text = payload.get("status_text")
-        client_context = payload.get("client_context")
-        error = payload.get("error")
+        capability_id = payload.get("capability_id")
+        result_payload = payload.get("result")
 
         if not isinstance(request_id, str) or not request_id.strip():
             raise ServiceError(400, "invalid_request_id", "request_id must be a non-empty string.")
         if not isinstance(client_id, str) or not client_id.strip():
             raise ServiceError(400, "invalid_client_id", "client_id must be a non-empty string.")
-        if not isinstance(status_text, str) or not status_text.strip():
-            raise ServiceError(400, "invalid_status_text", "status_text must be a non-empty string.")
-        if client_context is not None and not isinstance(client_context, dict):
-            raise ServiceError(400, "invalid_client_context", "client_context must be an object.")
-        if error is not None and not isinstance(error, str):
-            raise ServiceError(400, "invalid_status_error", "error must be a string or null.")
+        if not isinstance(capability_id, str) or not capability_id.strip():
+            raise ServiceError(400, "invalid_capability_id", "capability_id must be a non-empty string.")
+        if not isinstance(result_payload, dict):
+            raise ServiceError(400, "invalid_result_payload", "result must be an object.")
 
         normalized_request_id = request_id.strip()
         normalized_client_id = client_id.strip()
-        normalized_status_text = status_text.strip()
+        normalized_capability_id = capability_id.strip()
+        if capability_manifests().get(normalized_capability_id) is None:
+            raise ServiceError(400, "invalid_capability_id", "capability_id is unknown.")
+        normalized_result_payload = self._normalize_capability_result_payload(
+            capability_id=normalized_capability_id,
+            result_payload=result_payload,
+        )
         accepted_at = self._now_iso()
-        result_payload = {
-            "status_text": normalized_status_text,
-            "client_context": client_context or {},
-            "error": error.strip() if isinstance(error, str) and error.strip() else None,
-        }
         return self._submit_async_capability_result_response(
             state=state,
-            capability_id="external.status",
+            capability_id=normalized_capability_id,
             request_id=normalized_request_id,
             client_id=normalized_client_id,
-            result_payload=result_payload,
+            result_payload=normalized_result_payload,
             accepted_at=accepted_at,
-            log_channel="CapabilityResult",
-            client_mismatch_code="external_status_client_id_mismatch",
-            client_mismatch_message="client_id does not match the pending external.status target.",
-            invalid_result_code="invalid_external_status_result",
-            accepted_detail=f"status_chars={len(normalized_status_text)} error={bool(error)}",
+            log_channel=self._capability_result_log_channel(normalized_capability_id),
+            accepted_detail=self._capability_result_accepted_detail(
+                capability_id=normalized_capability_id,
+                result_payload=normalized_result_payload,
+            ),
         )
+
+    def _normalize_capability_result_payload(
+        self,
+        *,
+        capability_id: str,
+        result_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        if capability_id == "vision.capture":
+            images = result_payload.get("images", [])
+            client_context = result_payload.get("client_context")
+            error = result_payload.get("error")
+            if not isinstance(images, list):
+                raise ServiceError(400, "invalid_capability_result", "vision.capture result.images must be an array.")
+            if client_context is not None and not isinstance(client_context, dict):
+                raise ServiceError(400, "invalid_capability_result", "vision.capture result.client_context must be an object.")
+            if error is not None and not isinstance(error, str):
+                raise ServiceError(400, "invalid_capability_result", "vision.capture result.error must be a string or null.")
+            normalized_images: list[str] = []
+            for image in images:
+                if not isinstance(image, str) or not image.strip():
+                    raise ServiceError(
+                        400,
+                        "invalid_capability_result",
+                        "vision.capture result.images must contain non-empty strings.",
+                    )
+                normalized_images.append(image.strip())
+            return {
+                "images": normalized_images,
+                "client_context": client_context or {},
+                "error": error.strip() if isinstance(error, str) and error.strip() else None,
+            }
+        if capability_id == "external.status":
+            status_text = result_payload.get("status_text")
+            client_context = result_payload.get("client_context")
+            error = result_payload.get("error")
+            if not isinstance(status_text, str) or not status_text.strip():
+                raise ServiceError(
+                    400,
+                    "invalid_capability_result",
+                    "external.status result.status_text must be a non-empty string.",
+                )
+            if client_context is not None and not isinstance(client_context, dict):
+                raise ServiceError(
+                    400,
+                    "invalid_capability_result",
+                    "external.status result.client_context must be an object.",
+                )
+            if error is not None and not isinstance(error, str):
+                raise ServiceError(
+                    400,
+                    "invalid_capability_result",
+                    "external.status result.error must be a string or null.",
+                )
+            return {
+                "status_text": status_text.strip(),
+                "client_context": client_context or {},
+                "error": error.strip() if isinstance(error, str) and error.strip() else None,
+            }
+        payload = dict(result_payload)
+        client_context = payload.get("client_context")
+        if client_context is not None and not isinstance(client_context, dict):
+            raise ServiceError(400, "invalid_capability_result", "result.client_context must be an object.")
+        error = payload.get("error")
+        if error is not None and not isinstance(error, str):
+            raise ServiceError(400, "invalid_capability_result", "result.error must be a string or null.")
+        if isinstance(client_context, dict):
+            payload["client_context"] = client_context
+        if "error" in payload:
+            payload["error"] = error.strip() if isinstance(error, str) and error.strip() else None
+        return payload
+
+    def _capability_result_log_channel(self, capability_id: str) -> str:
+        if capability_id == "vision.capture":
+            return "DesktopWatch"
+        return "CapabilityResult"
+
+    def _capability_result_accepted_detail(self, *, capability_id: str, result_payload: dict[str, Any]) -> str:
+        if capability_id == "vision.capture":
+            images = result_payload.get("images")
+            image_count = len(images) if isinstance(images, list) else 0
+            return f"images={image_count} error={bool(result_payload.get('error'))}"
+        if capability_id == "external.status":
+            status_text = result_payload.get("status_text")
+            status_chars = len(status_text) if isinstance(status_text, str) else 0
+            return f"status_chars={status_chars} error={bool(result_payload.get('error'))}"
+        return f"result_keys={len(result_payload)} error={bool(result_payload.get('error'))}"
 
     def _submit_async_capability_result_response(
         self,
@@ -157,9 +188,6 @@ class ServiceSpontaneousMixin:
         result_payload: dict[str, Any],
         accepted_at: str,
         log_channel: str,
-        client_mismatch_code: str,
-        client_mismatch_message: str,
-        invalid_result_code: str,
         accepted_detail: str,
     ) -> dict[str, Any]:
         try:
@@ -172,8 +200,12 @@ class ServiceSpontaneousMixin:
             )
         except ValueError as exc:
             if "client_id" in str(exc):
-                raise ServiceError(409, client_mismatch_code, client_mismatch_message) from exc
-            raise ServiceError(400, invalid_result_code, str(exc)) from exc
+                raise ServiceError(
+                    409,
+                    "capability_result_client_id_mismatch",
+                    "client_id does not match the pending capability target.",
+                ) from exc
+            raise ServiceError(400, "invalid_capability_result", str(exc)) from exc
         if response is None:
             debug_log(
                 log_channel,

@@ -190,6 +190,7 @@ top-level の trace object は、存在しない段階でも空 object として
 trigger をまたいだ比較用に、`result_trace.trigger_compact_summary` に共通 outer shape の compact summary を含めてよい。
 capability dispatch が起きた cycle では、`result_trace.capability_dispatch_summary` に capability family 共通で比較しやすい compact summary を含めてよい。
 `trigger_kind=capability_result` の cycle では、`result_trace.capability_result_followup_summary` に capability family 共通で比較しやすい compact summary を含めてよい。
+initiative 系 trigger の `entry_summary.candidate_families` には、`preferred_result_kind / preferred_result_reason_summary / blocking_reason_summary` を含めてよい。
 
 | trace | 詳細正本 |
 |-------|----------|
