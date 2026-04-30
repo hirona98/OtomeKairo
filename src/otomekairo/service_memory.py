@@ -614,7 +614,28 @@ class ServiceMemoryMixin:
     ) -> list[dict[str, Any]]:
         generation = recall_pack.get("event_evidence_generation", {})
         failed_items = generation.get("failed_items", []) if isinstance(generation, dict) else []
-        events: list[dict[str, Any]] = []
+        precise_selected_event_ids = (
+            generation.get("precise_selected_event_ids", [])
+            if isinstance(generation, dict)
+            else []
+        )
+        events: list[dict[str, Any]] = [
+            self._build_memory_audit_event(
+                cycle_id=cycle_id,
+                memory_set_id=memory_set_id,
+                kind="event_evidence_precise_check",
+                created_at=created_at,
+                payload={
+                    "precise_evidence_used": bool(generation.get("precise_evidence_used", False)),
+                    "precise_reason_codes": generation.get("precise_reason_codes", []),
+                    "precise_reason_summary": generation.get("precise_reason_summary"),
+                    "selected_event_ids": recall_pack.get("selected_event_ids", []),
+                    "precise_selected_event_ids": precise_selected_event_ids,
+                    "precise_requested_event_count": int(generation.get("precise_requested_event_count", 0)),
+                    "precise_loaded_event_count": int(generation.get("precise_loaded_event_count", 0)),
+                },
+            )
+        ]
         for failed_item in failed_items:
             if not isinstance(failed_item, dict):
                 continue

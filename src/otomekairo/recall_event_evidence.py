@@ -14,6 +14,22 @@ EVENT_EVIDENCE_FOCUSES = {
     "episodic",
 }
 EVENT_EVIDENCE_SOURCE_SUMMARY_LIMIT = 2
+PRECISE_EVENT_EVIDENCE_LIMIT = 3
+PRECISE_EVENT_EVIDENCE_FOCUS_HISTORY = {
+    "commitment",
+    "relationship",
+    "fact",
+}
+PRECISE_EVENT_EVIDENCE_HISTORY_TIME_REFERENCES = {
+    "past",
+    "persistent",
+}
+PRECISE_EVENT_EVIDENCE_RISK_FLAGS = {
+    "ambiguous_reference",
+    "mixed_intent",
+    "time_ambiguous",
+    "weak_memory_cue",
+}
 
 
 # イベント根拠Mixin
@@ -44,8 +60,24 @@ class RecallEventEvidenceMixin:
             sections=sections,
         )
         result["selected_event_ids"] = selected_event_ids
-        result["event_evidence_generation"]["requested_event_count"] = len(selected_event_ids)
-        if not selected_event_ids:
+        precise_plan = self._plan_precise_event_evidence(
+            primary_recall_focus=primary_recall_focus,
+            recall_hint=recall_hint,
+            sections=sections,
+            selected_event_ids=selected_event_ids,
+        )
+        generation = result["event_evidence_generation"]
+        generation["precise_evidence_used"] = precise_plan["used"]
+        generation["precise_reason_codes"] = precise_plan["reason_codes"]
+        generation["precise_reason_summary"] = precise_plan["reason_summary"]
+        generation["precise_selected_event_ids"] = precise_plan["selected_event_ids"]
+        generation["precise_requested_event_count"] = len(precise_plan["selected_event_ids"])
+        requested_event_ids = [
+            *selected_event_ids,
+            *precise_plan["selected_event_ids"],
+        ]
+        generation["requested_event_count"] = len(requested_event_ids)
+        if not requested_event_ids:
             return result
 
         # 読み込み
@@ -59,12 +91,25 @@ class RecallEventEvidenceMixin:
             for record in records
             if isinstance(record, dict) and isinstance(record.get("event_id"), str)
         }
-        result["event_evidence_generation"]["loaded_event_count"] = len(records_by_id)
+        precise_records = self.store.load_events_for_evidence(
+            memory_set_id=memory_set_id,
+            event_ids=precise_plan["selected_event_ids"],
+            limit=PRECISE_EVENT_EVIDENCE_LIMIT,
+        )
+        precise_records_by_id = {
+            record["event_id"]: record
+            for record in precise_records
+            if isinstance(record, dict) and isinstance(record.get("event_id"), str)
+        }
+        records_by_id.update(precise_records_by_id)
+        generation["loaded_event_count"] = len(records_by_id)
+        generation["precise_loaded_event_count"] = len(precise_records_by_id)
 
         # event 単位生成
         event_evidence: list[dict[str, Any]] = []
         failed_items: list[dict[str, Any]] = []
-        for event_id in selected_event_ids:
+        precise_selected_set = set(precise_plan["selected_event_ids"])
+        for event_id in requested_event_ids:
             record = records_by_id.get(event_id)
             if record is None:
                 failed_items.append(
@@ -85,6 +130,10 @@ class RecallEventEvidenceMixin:
                     sections=sections,
                     event_id=event_id,
                     record=record,
+                    selection_mode="precise" if event_id in precise_selected_set else "standard",
+                    precise_reason_summary=(
+                        precise_plan["reason_summary"] if event_id in precise_selected_set else None
+                    ),
                 )
             except Exception as exc:  # noqa: BLE001
                 failed_items.append(
@@ -170,6 +219,12 @@ class RecallEventEvidenceMixin:
             "loaded_event_count": 0,
             "succeeded_event_count": 0,
             "failed_items": [],
+            "precise_evidence_used": False,
+            "precise_reason_codes": [],
+            "precise_reason_summary": None,
+            "precise_selected_event_ids": [],
+            "precise_requested_event_count": 0,
+            "precise_loaded_event_count": 0,
         }
 
     def _event_evidence_failure_item(
@@ -274,6 +329,182 @@ class RecallEventEvidenceMixin:
                 sources.append(prioritized_event_ids)
         return sources
 
+    def _plan_precise_event_evidence(
+        self,
+        *,
+        primary_recall_focus: str,
+        recall_hint: dict[str, Any],
+        sections: dict[str, list[dict[str, Any]]],
+        selected_event_ids: list[str],
+    ) -> dict[str, Any]:
+        # selected event 不在
+        if not selected_event_ids:
+            return {
+                "used": False,
+                "reason_codes": ["no_selected_events"],
+                "reason_summary": "selected event が無いため、追加 event の確認は行わない。",
+                "selected_event_ids": [],
+            }
+
+        # ゲート理由
+        reason_codes = self._precise_event_evidence_reason_codes(
+            primary_recall_focus=primary_recall_focus,
+            recall_hint=recall_hint,
+            sections=sections,
+            selected_event_ids=selected_event_ids,
+        )
+        if not reason_codes:
+            return {
+                "used": False,
+                "reason_codes": ["not_needed"],
+                "reason_summary": "曖昧性や継続確認の条件が無いため、圧縮済み event_evidence だけを使う。",
+                "selected_event_ids": [],
+            }
+
+        # selected source にぶら下がる追加 event だけを限定で開く。
+        precise_event_ids = self._select_precise_event_evidence_ids(
+            primary_recall_focus=primary_recall_focus,
+            sections=sections,
+            selected_event_ids=selected_event_ids,
+        )
+        if not precise_event_ids:
+            merged_reason_codes = [*reason_codes, "no_additional_candidates"]
+            return {
+                "used": False,
+                "reason_codes": merged_reason_codes,
+                "reason_summary": self._precise_event_evidence_reason_summary(
+                    reason_codes=merged_reason_codes,
+                    used=False,
+                ),
+                "selected_event_ids": [],
+            }
+
+        return {
+            "used": True,
+            "reason_codes": reason_codes,
+            "reason_summary": self._precise_event_evidence_reason_summary(
+                reason_codes=reason_codes,
+                used=True,
+            ),
+            "selected_event_ids": precise_event_ids,
+        }
+
+    def _precise_event_evidence_reason_codes(
+        self,
+        *,
+        primary_recall_focus: str,
+        recall_hint: dict[str, Any],
+        sections: dict[str, list[dict[str, Any]]],
+        selected_event_ids: list[str],
+    ) -> list[str]:
+        # 判定理由群
+        reason_codes: list[str] = []
+        risk_flags = {
+            str(value)
+            for value in (recall_hint.get("risk_flags") or [])
+            if isinstance(value, str)
+        }
+        if risk_flags & PRECISE_EVENT_EVIDENCE_RISK_FLAGS:
+            reason_codes.append("risk_flags_present")
+
+        time_reference = str(recall_hint.get("time_reference") or "none")
+        if (
+            primary_recall_focus in PRECISE_EVENT_EVIDENCE_FOCUS_HISTORY
+            and time_reference in PRECISE_EVENT_EVIDENCE_HISTORY_TIME_REFERENCES
+        ):
+            reason_codes.append("focus_requires_history")
+
+        if (
+            len(selected_event_ids) <= 1
+            and self._selected_sources_have_additional_events(
+                primary_recall_focus=primary_recall_focus,
+                sections=sections,
+                selected_event_ids=selected_event_ids,
+            )
+        ):
+            reason_codes.append("thin_selected_coverage")
+        return reason_codes
+
+    def _selected_sources_have_additional_events(
+        self,
+        *,
+        primary_recall_focus: str,
+        sections: dict[str, list[dict[str, Any]]],
+        selected_event_ids: list[str],
+    ) -> bool:
+        selected_event_set = {event_id for event_id in selected_event_ids if isinstance(event_id, str)}
+        if not selected_event_set:
+            return False
+
+        # selected 済み source に sibling event が残るかだけを見る。
+        for section_name in self._event_evidence_section_priority(primary_recall_focus):
+            for item in sections.get(section_name, []):
+                prioritized_event_ids = self._prioritized_event_ids_for_item(item)
+                if len(prioritized_event_ids) <= 1:
+                    continue
+                if any(event_id in selected_event_set for event_id in prioritized_event_ids):
+                    return True
+        return False
+
+    def _select_precise_event_evidence_ids(
+        self,
+        *,
+        primary_recall_focus: str,
+        sections: dict[str, list[dict[str, Any]]],
+        selected_event_ids: list[str],
+    ) -> list[str]:
+        # selected source の sibling event だけを追加候補にする。
+        selected_event_set = {event_id for event_id in selected_event_ids if isinstance(event_id, str)}
+        if not selected_event_set:
+            return []
+
+        precise_event_ids: list[str] = []
+        seen = set(selected_event_set)
+        for section_name in self._event_evidence_section_priority(primary_recall_focus):
+            for item in sections.get(section_name, []):
+                prioritized_event_ids = self._prioritized_event_ids_for_item(item)
+                if len(prioritized_event_ids) <= 1:
+                    continue
+                if not any(event_id in selected_event_set for event_id in prioritized_event_ids):
+                    continue
+                for event_id in prioritized_event_ids:
+                    if event_id in seen:
+                        continue
+                    precise_event_ids.append(event_id)
+                    seen.add(event_id)
+                    if len(precise_event_ids) >= PRECISE_EVENT_EVIDENCE_LIMIT:
+                        return precise_event_ids
+        return precise_event_ids
+
+    def _precise_event_evidence_reason_summary(
+        self,
+        *,
+        reason_codes: list[str],
+        used: bool,
+    ) -> str:
+        if "no_selected_events" in reason_codes:
+            return "selected event が無いため、追加 event の確認は行わない。"
+        if reason_codes == ["not_needed"]:
+            return "曖昧性や継続確認の条件が無いため、圧縮済み event_evidence だけを使う。"
+
+        reason_texts: list[str] = []
+        for code in reason_codes:
+            if code == "risk_flags_present":
+                reason_texts.append("曖昧参照や弱い手掛かりが含まれる")
+            elif code == "focus_requires_history":
+                reason_texts.append("継続判断で前後 event の確認価値が高い")
+            elif code == "thin_selected_coverage":
+                reason_texts.append("selected event が薄く同じ source の別 event を確認したい")
+
+        if "no_additional_candidates" in reason_codes:
+            base = "、".join(reason_texts) if reason_texts else "追加確認の条件はあった"
+            return f"{base}が、selected source から追加で開ける event が無かった。"
+
+        base = "、".join(reason_texts) if reason_texts else "追加確認の条件がある"
+        if used:
+            return f"{base}ため、selected source の sibling event を限定ロードして確認する。"
+        return f"{base}が、今回は追加 event を開かない。"
+
     def _event_evidence_section_priority(self, primary_recall_focus: str) -> list[str]:
         # 基底順序
         ordered = ["episodic_evidence"]
@@ -330,6 +561,8 @@ class RecallEventEvidenceMixin:
         sections: dict[str, list[dict[str, Any]]],
         event_id: str,
         record: dict[str, Any],
+        selection_mode: str = "standard",
+        precise_reason_summary: str | None = None,
     ) -> dict[str, Any]:
         # source 群
         matched_sources = self._matched_event_evidence_sources(
@@ -337,6 +570,10 @@ class RecallEventEvidenceMixin:
             sections=sections,
             event_id=event_id,
         )
+        selection_basis = self._event_evidence_selection_basis(matched_sources)
+        selection_basis["selection_mode"] = selection_mode
+        if precise_reason_summary is not None:
+            selection_basis["precise_reason_summary"] = precise_reason_summary
 
         # 結果
         return {
@@ -345,7 +582,7 @@ class RecallEventEvidenceMixin:
             "secondary_recall_focuses": self._secondary_recall_focuses(recall_hint),
             "time_reference": str(recall_hint.get("time_reference") or "none"),
             "risk_flags": list(recall_hint.get("risk_flags") or []),
-            "selection_basis": self._event_evidence_selection_basis(matched_sources),
+            "selection_basis": selection_basis,
             "event": self._event_evidence_source_event(record),
         }
 
@@ -368,7 +605,7 @@ class RecallEventEvidenceMixin:
     def _event_evidence_selection_basis(
         self,
         matched_sources: list[tuple[str, dict[str, Any]]],
-    ) -> dict[str, list[str]]:
+    ) -> dict[str, Any]:
         # section 群
         retrieval_sections: list[str] = []
         source_summaries: list[str] = []

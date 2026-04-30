@@ -2300,6 +2300,12 @@ class ServiceInputMixin:
             "loaded_event_count": 0,
             "succeeded_event_count": 0,
             "failed_items": [],
+            "precise_evidence_used": False,
+            "precise_reason_codes": [],
+            "precise_reason_summary": None,
+            "precise_selected_event_ids": [],
+            "precise_requested_event_count": 0,
+            "precise_loaded_event_count": 0,
         }
 
     def _empty_recall_pack_selection_trace(self) -> dict[str, Any]:
@@ -3928,8 +3934,18 @@ class ServiceInputMixin:
             "selected_memory_ids": recall_pack["selected_memory_ids"],
             "event_evidence_generation": {
                 "requested_event_count": int(event_evidence_generation.get("requested_event_count", 0)),
+                "loaded_event_count": int(event_evidence_generation.get("loaded_event_count", 0)),
                 "succeeded_event_count": int(event_evidence_generation.get("succeeded_event_count", 0)),
                 "failed_count": len(event_evidence_generation.get("failed_items", [])),
+                "precise_evidence_used": bool(event_evidence_generation.get("precise_evidence_used", False)),
+                "precise_selected_event_ids": event_evidence_generation.get("precise_selected_event_ids", []),
+                "precise_requested_event_count": int(
+                    event_evidence_generation.get("precise_requested_event_count", 0)
+                ),
+                "precise_loaded_event_count": int(
+                    event_evidence_generation.get("precise_loaded_event_count", 0)
+                ),
+                "precise_reason_summary": event_evidence_generation.get("precise_reason_summary"),
             },
             "recall_pack_selection": {
                 "result_status": str(recall_pack_selection.get("result_status", "succeeded")),
