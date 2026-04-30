@@ -420,12 +420,14 @@ class LongSmokeRunner:
         self.restart_probe_cycle_ids: list[str] = []
         self.pending_intent_seed_cycle_ids: list[str] = []
         self.capture_timeout_request_ids: list[str] = []
+        self.capture_timeout_failure_cycle_ids: list[str] = []
         self.capture_empty_result_request_ids: list[str] = []
         self.capture_mismatch_request_ids: list[str] = []
         self.capture_invalid_images_request_ids: list[str] = []
         self.capture_invalid_error_request_ids: list[str] = []
         self.capture_unknown_request_ids: list[str] = []
         self.external_status_request_ids: list[str] = []
+        self.external_status_followup_verified_request_ids: list[str] = []
         self.capture_timeout_recovered = False
         self.remaining_capture_timeouts = args.capture_timeout_failures
         self.remaining_capture_empty_results = 0
@@ -975,19 +977,59 @@ class LongSmokeRunner:
         while time.monotonic() < deadline:
             self._assert_server_running()
             self._assert_event_clients_healthy()
+            self._record_capture_timeout_failure_cycles()
             if (
                 len(self.capture_timeout_request_ids) >= self.args.capture_timeout_failures
+                and len(self.capture_timeout_failure_cycle_ids) >= self.args.capture_timeout_failures
                 and self.capture_timeout_recovered
                 and self.capture_response_count >= 1
             ):
                 log(
                     "capture timeout recovery confirmed"
                     f" dropped={len(self.capture_timeout_request_ids)}"
+                    f" failed_cycles={len(self.capture_timeout_failure_cycle_ids)}"
                     f" recovered_responses={self.capture_response_count}"
                 )
                 return
             time.sleep(0.25)
         raise SmokeError("desktop_watch did not recover after the injected capture timeout.")
+
+    def _record_capture_timeout_failure_cycles(self) -> None:
+        if not self.capture_timeout_request_ids:
+            return
+        cycle_summaries = self.api.get("/api/inspection/cycle-summaries?limit=120").get("cycle_summaries", [])
+        if not isinstance(cycle_summaries, list):
+            raise SmokeError("cycle_summaries response was invalid while recording timeout failures.")
+        recorded_cycle_ids = set(self.capture_timeout_failure_cycle_ids)
+        expected_request_ids = set(self.capture_timeout_request_ids)
+        for cycle_summary in cycle_summaries:
+            if not isinstance(cycle_summary, dict) or not cycle_summary.get("failed"):
+                continue
+            cycle_id = cycle_summary.get("cycle_id")
+            if not isinstance(cycle_id, str) or not cycle_id or cycle_id in recorded_cycle_ids:
+                continue
+            trace = self.api.get(f"/api/inspection/cycles/{cycle_id}")
+            if not self._is_expected_capture_timeout_failure_trace(trace):
+                continue
+            request_id = self._capture_failure_request_id(trace)
+            if request_id not in expected_request_ids:
+                continue
+            self.capture_timeout_failure_cycle_ids.append(cycle_id)
+            recorded_cycle_ids.add(cycle_id)
+
+    def _capture_failure_request_id(self, trace: Any) -> str | None:
+        if not isinstance(trace, dict):
+            return None
+        capability_dispatch_summary = ((trace.get("result_trace") or {}).get("capability_dispatch_summary"))
+        if not isinstance(capability_dispatch_summary, dict):
+            return None
+        request_summary = capability_dispatch_summary.get("request_summary")
+        if not isinstance(request_summary, dict):
+            return None
+        request_id = request_summary.get("request_id")
+        if isinstance(request_id, str) and request_id:
+            return request_id
+        return None
 
     def _run_restart_probe(self) -> None:
         if self.args.restart_burst_conversations <= 0:
@@ -1290,6 +1332,8 @@ class LongSmokeRunner:
             time.sleep(0.25)
         if followup_trace is None:
             raise SmokeError("external.status probe did not produce a capability_result follow-up cycle.")
+        if request_id not in self.external_status_followup_verified_request_ids:
+            self.external_status_followup_verified_request_ids.append(request_id)
 
         return conversation_trace, followup_trace
 
@@ -1617,8 +1661,10 @@ class LongSmokeRunner:
             "external_status_request_count": self.external_status_request_count,
             "external_status_response_count": self.external_status_response_count,
             "external_status_request_ids": self.external_status_request_ids,
+            "external_status_followup_verified_request_ids": self.external_status_followup_verified_request_ids,
             "desktop_watch_event_count": self.desktop_watch_event_count,
             "capture_timeout_request_ids": self.capture_timeout_request_ids,
+            "capture_timeout_failure_cycle_ids": self.capture_timeout_failure_cycle_ids,
             "capture_empty_result_request_ids": self.capture_empty_result_request_ids,
             "capture_empty_result_skip_count": self.capture_empty_result_skip_count,
             "capture_mismatch_request_ids": self.capture_mismatch_request_ids,
@@ -1661,7 +1707,7 @@ class LongSmokeRunner:
     ) -> dict[str, Any]:
         active_ongoing_actions = self._list_active_ongoing_actions()
         stale_world_states = self._list_stale_world_states()
-        followed_request_ids: set[str] = set()
+        followed_request_ids: set[str] = set(self.external_status_followup_verified_request_ids)
         for trace in capability_result_traces:
             followup_summary = ((trace.get("result_trace") or {}).get("capability_result_followup_summary"))
             if not isinstance(followup_summary, dict):
@@ -1920,12 +1966,13 @@ class LongSmokeRunner:
             raise SmokeError("capture request / response counts did not match the injected timeout count.")
         if summary["external_status_response_count"] != summary["external_status_request_count"]:
             raise SmokeError("external.status request / response counts did not match.")
-        expected_failed_cycle_ids: list[str] = []
+        recorded_timeout_failure_cycle_ids = summary.get("capture_timeout_failure_cycle_ids", [])
+        if not isinstance(recorded_timeout_failure_cycle_ids, list):
+            raise SmokeError("capture_timeout_failure_cycle_ids was invalid.")
         unexpected_failed_cycle_ids: list[str] = []
         for cycle_id in summary["failed_cycle_ids"]:
             trace = self.api.get(f"/api/inspection/cycles/{cycle_id}")
             if self._is_expected_capture_timeout_failure_trace(trace):
-                expected_failed_cycle_ids.append(cycle_id)
                 continue
             unexpected_failed_cycle_ids.append(cycle_id)
         if unexpected_failed_cycle_ids:
@@ -1935,7 +1982,7 @@ class LongSmokeRunner:
                 raise SmokeError("capture timeout injection count did not match the requested failure count.")
             if not summary["capture_timeout_recovered"]:
                 raise SmokeError("desktop_watch did not recover after the injected capture timeout.")
-            if len(expected_failed_cycle_ids) != self.args.capture_timeout_failures:
+            if len(recorded_timeout_failure_cycle_ids) != self.args.capture_timeout_failures:
                 raise SmokeError("desktop_watch timeout failure cycles did not match the injected timeout count.")
         if self.args.capture_empty_result_failures > 0:
             if len(summary["capture_empty_result_request_ids"]) != self.args.capture_empty_result_failures:
