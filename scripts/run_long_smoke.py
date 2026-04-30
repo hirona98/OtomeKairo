@@ -45,6 +45,7 @@ PROFILE_DEFAULTS: dict[str, dict[str, int | float]] = {
         "wake_interval_seconds": 60,
         "min_conversation_cycles": 4,
         "capture_timeout_failures": 1,
+        "capture_empty_result_failures": 1,
         "capture_mismatch_failures": 1,
         "capture_invalid_images_failures": 1,
         "capture_invalid_error_failures": 1,
@@ -62,6 +63,7 @@ PROFILE_DEFAULTS: dict[str, dict[str, int | float]] = {
         "wake_interval_seconds": 60,
         "min_conversation_cycles": 80,
         "capture_timeout_failures": 1,
+        "capture_empty_result_failures": 1,
         "capture_mismatch_failures": 1,
         "capture_invalid_images_failures": 1,
         "capture_invalid_error_failures": 1,
@@ -79,6 +81,7 @@ PROFILE_DEFAULTS: dict[str, dict[str, int | float]] = {
         "wake_interval_seconds": 120,
         "min_conversation_cycles": 500,
         "capture_timeout_failures": 1,
+        "capture_empty_result_failures": 1,
         "capture_mismatch_failures": 1,
         "capture_invalid_images_failures": 1,
         "capture_invalid_error_failures": 1,
@@ -417,6 +420,7 @@ class LongSmokeRunner:
         self.restart_probe_cycle_ids: list[str] = []
         self.pending_intent_seed_cycle_ids: list[str] = []
         self.capture_timeout_request_ids: list[str] = []
+        self.capture_empty_result_request_ids: list[str] = []
         self.capture_mismatch_request_ids: list[str] = []
         self.capture_invalid_images_request_ids: list[str] = []
         self.capture_invalid_error_request_ids: list[str] = []
@@ -424,6 +428,7 @@ class LongSmokeRunner:
         self.external_status_request_ids: list[str] = []
         self.capture_timeout_recovered = False
         self.remaining_capture_timeouts = args.capture_timeout_failures
+        self.remaining_capture_empty_results = 0
         self.remaining_capture_mismatches = args.capture_mismatch_failures
         self.remaining_invalid_images_failures = args.capture_invalid_images_failures
         self.remaining_invalid_error_failures = args.capture_invalid_error_failures
@@ -449,6 +454,8 @@ class LongSmokeRunner:
         self.max_pending_memory_job_count = 0
         self.max_memory_job_lag_seconds = 0.0
         self._memory_job_lag_started_at: float | None = None
+        self.background_wake_count_before_restart = 0
+        self.capture_empty_result_skip_count = 0
         self._capture_context_overrides: list[dict[str, Any]] = []
         self._external_status_overrides: list[dict[str, Any]] = []
         self._capture_lock = threading.Lock()
@@ -468,6 +475,7 @@ class LongSmokeRunner:
             self._exercise_capture_timeout_recovery()
             self._run_restart_probe()
             self._exercise_desktop_watch_event_boundaries()
+            self._exercise_capture_empty_result()
             self._exercise_multiple_client_boundary()
             self._exercise_external_status_followup()
             self._run_conversations()
@@ -756,25 +764,35 @@ class LongSmokeRunner:
                     self.capture_timeout_request_ids.append(request_id)
                     log(f"intentionally dropped capture-response request_id={request_id}")
                     return
-                should_inject_mismatch = self.remaining_capture_mismatches > 0
+                should_inject_empty_result = self.remaining_capture_empty_results > 0
+                if should_inject_empty_result:
+                    self.remaining_capture_empty_results -= 1
+                    self.capture_empty_result_request_ids.append(request_id)
+                should_inject_mismatch = not should_inject_empty_result and self.remaining_capture_mismatches > 0
                 if should_inject_mismatch:
                     self.remaining_capture_mismatches -= 1
                     self.capture_mismatch_request_ids.append(request_id)
                 else:
                     should_inject_mismatch = False
-                should_inject_invalid_images = self.remaining_invalid_images_failures > 0
+                should_inject_invalid_images = (
+                    not should_inject_empty_result and self.remaining_invalid_images_failures > 0
+                )
                 if should_inject_invalid_images:
                     self.remaining_invalid_images_failures -= 1
                     self.capture_invalid_images_request_ids.append(request_id)
                 else:
                     should_inject_invalid_images = False
-                should_inject_invalid_error = self.remaining_invalid_error_failures > 0
+                should_inject_invalid_error = (
+                    not should_inject_empty_result and self.remaining_invalid_error_failures > 0
+                )
                 if should_inject_invalid_error:
                     self.remaining_invalid_error_failures -= 1
                     self.capture_invalid_error_request_ids.append(request_id)
                 else:
                     should_inject_invalid_error = False
-                should_inject_unknown_request = self.remaining_unknown_request_failures > 0
+                should_inject_unknown_request = (
+                    not should_inject_empty_result and self.remaining_unknown_request_failures > 0
+                )
                 if should_inject_unknown_request:
                     self.remaining_unknown_request_failures -= 1
                     self.capture_unknown_request_ids.append(request_id)
@@ -790,6 +808,25 @@ class LongSmokeRunner:
                     "locale": "ja-JP",
                 }
             )
+            if should_inject_empty_result:
+                self.api.post(
+                    "/api/capability/result",
+                    {
+                        "request_id": request_id,
+                        "client_id": connected_client_id,
+                        "capability_id": "vision.capture",
+                        "result": {
+                            "images": [],
+                            "client_context": client_context,
+                            "error": None,
+                        },
+                    },
+                )
+                self.capture_response_count += 1
+                if self.capture_timeout_request_ids:
+                    self.capture_timeout_recovered = True
+                log(f"capture-response empty_result verified request_id={request_id}")
+                return
             if should_inject_mismatch:
                 self.api.post_expect_error(
                     "/api/capability/result",
@@ -987,6 +1024,42 @@ class LongSmokeRunner:
                 return
             time.sleep(0.25)
         raise SmokeError("restart probe could not observe queued or running memory jobs before restart.")
+
+    def _exercise_capture_empty_result(self) -> None:
+        if self.args.capture_empty_result_failures <= 0:
+            return
+
+        for index in range(self.args.capture_empty_result_failures):
+            marker = f"LongSmokeEmptyResultProbe-{index + 1}"
+            self._queue_capture_context_override(
+                {
+                    "client_context": {
+                        "active_app": "LongSmokeEmptyResultProbeApp",
+                        "window_title": marker,
+                        "locale": "ja-JP",
+                    }
+                }
+            )
+            with self._capture_lock:
+                self.remaining_capture_empty_results += 1
+            expected_count = index + 1
+            expected_skip_count = self._count_server_log_occurrences("[DesktopWatch] cycle skipped no_images") + 1
+            deadline = time.monotonic() + WAIT_DESKTOP_WATCH_PROBE_TIMEOUT_SECONDS
+            while time.monotonic() < deadline:
+                self._assert_server_running()
+                self._assert_event_clients_healthy()
+                if (
+                    len(self.capture_empty_result_request_ids) < expected_count
+                    or self._count_server_log_occurrences("[DesktopWatch] cycle skipped no_images") < expected_skip_count
+                ):
+                    time.sleep(0.25)
+                    continue
+                request_id = self.capture_empty_result_request_ids[index]
+                self.capture_empty_result_skip_count = expected_skip_count
+                log(f"capture empty_result confirmed request_id={request_id} skipped_cycle_count={expected_skip_count}")
+                break
+            else:
+                raise SmokeError("desktop_watch did not produce the injected empty result trace.")
 
     def _exercise_desktop_watch_event_boundaries(self) -> None:
         self.desktop_watch_capability_probe_cycle_id = self._run_desktop_watch_probe(
@@ -1240,6 +1313,21 @@ class LongSmokeRunner:
         finally:
             conn.close()
         return [json.loads(row[0]) for row in rows]
+
+    def _count_cycles_by_trigger_kind(self, trigger_kind: str) -> int:
+        cycle_summaries = self.api.get("/api/inspection/cycle-summaries?limit=120").get("cycle_summaries", [])
+        if not isinstance(cycle_summaries, list):
+            raise SmokeError("cycle_summaries response was invalid while counting triggers.")
+        return sum(
+            1
+            for cycle_summary in cycle_summaries
+            if isinstance(cycle_summary, dict) and cycle_summary.get("trigger_kind") == trigger_kind
+        )
+
+    def _count_server_log_occurrences(self, needle: str) -> int:
+        if not self.server_log_path.exists():
+            return 0
+        return self.server_log_path.read_text(encoding="utf-8").count(needle)
 
     def _exercise_external_status_followup(self) -> None:
         github_marker = "LongSmokeExternalStatusProbeMarker"
@@ -1498,9 +1586,17 @@ class LongSmokeRunner:
             trigger_counts=trigger_counts,
             capability_result_traces=capability_result_traces,
         )
+        background_wake_after_restart_count = max(
+            trigger_counts.get("background_wake", 0) - self.background_wake_count_before_restart,
+            0,
+        )
         scenario_matrix = self._build_scenario_matrix(
             trigger_counts=trigger_counts,
             soak_observability=soak_observability,
+        )
+        failure_case_matrix = self._build_failure_case_matrix(
+            soak_observability=soak_observability,
+            background_wake_after_restart_count=background_wake_after_restart_count,
         )
 
         return {
@@ -1523,6 +1619,8 @@ class LongSmokeRunner:
             "external_status_request_ids": self.external_status_request_ids,
             "desktop_watch_event_count": self.desktop_watch_event_count,
             "capture_timeout_request_ids": self.capture_timeout_request_ids,
+            "capture_empty_result_request_ids": self.capture_empty_result_request_ids,
+            "capture_empty_result_skip_count": self.capture_empty_result_skip_count,
             "capture_mismatch_request_ids": self.capture_mismatch_request_ids,
             "capture_invalid_images_request_ids": self.capture_invalid_images_request_ids,
             "capture_invalid_error_request_ids": self.capture_invalid_error_request_ids,
@@ -1550,7 +1648,9 @@ class LongSmokeRunner:
             "restart_probe_traces": restart_probe_traces,
             "capability_result_traces": capability_result_traces,
             "soak_observability": soak_observability,
+            "background_wake_after_restart_count": background_wake_after_restart_count,
             "scenario_matrix": scenario_matrix,
+            "failure_case_matrix": failure_case_matrix,
         }
 
     def _collect_soak_observability(
@@ -1636,6 +1736,84 @@ class LongSmokeRunner:
             },
         ]
 
+    def _build_failure_case_matrix(
+        self,
+        *,
+        soak_observability: dict[str, Any],
+        background_wake_after_restart_count: int,
+    ) -> list[dict[str, Any]]:
+        validator_failure_requested = self.args.capture_invalid_images_failures + self.args.capture_invalid_error_failures
+        validator_failure_observed = (
+            len(self.capture_invalid_images_request_ids) + len(self.capture_invalid_error_request_ids)
+        )
+        return [
+            {
+                "case_id": "capability-timeout",
+                "expected_trace": "desktop_watch internal_failure with request_timeout transition",
+                "recovery_condition": "subsequent capture response succeeds",
+                "requested_count": self.args.capture_timeout_failures,
+                "observed_count": len(self.capture_timeout_request_ids),
+                "recovery_verified": self.capture_timeout_recovered,
+                "verified": (
+                    self.args.capture_timeout_failures <= 0
+                    or (
+                        len(self.capture_timeout_request_ids) == self.args.capture_timeout_failures
+                        and self.capture_timeout_recovered
+                    )
+                ),
+            },
+            {
+                "case_id": "capability-empty-result",
+                "expected_trace": "desktop_watch capture trace records image_count=0 and result_empty transition",
+                "recovery_condition": "desktop_watch logs cycle skipped no_images and proceeds without lingering ongoing_action",
+                "requested_count": self.args.capture_empty_result_failures,
+                "observed_count": len(self.capture_empty_result_request_ids),
+                "recovery_verified": self.capture_empty_result_skip_count == self.args.capture_empty_result_failures,
+                "verified": (
+                    self.args.capture_empty_result_failures <= 0
+                    or (
+                        len(self.capture_empty_result_request_ids) == self.args.capture_empty_result_failures
+                        and self.capture_empty_result_skip_count == self.args.capture_empty_result_failures
+                    )
+                ),
+            },
+            {
+                "case_id": "validator-failure",
+                "expected_trace": "POST /api/capability/result returns 400 invalid_capability_result before valid retry",
+                "recovery_condition": "later valid result still completes and no follow-up is lost",
+                "requested_count": validator_failure_requested,
+                "observed_count": validator_failure_observed,
+                "recovery_verified": int(soak_observability.get("capability_followup_missing_count", 0)) == 0,
+                "verified": validator_failure_requested <= 0 or validator_failure_observed == validator_failure_requested,
+            },
+            {
+                "case_id": "background-wake-restart",
+                "expected_trace": "background_wake cycles continue after server restart",
+                "recovery_condition": "wake scheduler resumes and emits background_wake again",
+                "requested_count": 1 if self.args.restart_burst_conversations > 0 else 0,
+                "observed_count": background_wake_after_restart_count,
+                "recovery_verified": background_wake_after_restart_count >= 1,
+                "verified": self.args.restart_burst_conversations <= 0 or background_wake_after_restart_count >= 1,
+            },
+            {
+                "case_id": "memory-worker-lag",
+                "expected_trace": "runtime_summary observes pending jobs or in-progress work while worker drains backlog",
+                "recovery_condition": "queue drains to zero and worker stays active",
+                "requested_count": 1,
+                "observed_count": int(soak_observability.get("max_pending_memory_job_count", 0)),
+                "recovery_verified": (
+                    int(soak_observability.get("max_pending_memory_job_count", 0)) >= 1
+                    or self.restart_probe_pending_before_restart is not None
+                    or self.restart_probe_in_progress_before_restart
+                ),
+                "verified": (
+                    int(soak_observability.get("max_pending_memory_job_count", 0)) >= 1
+                    or self.restart_probe_pending_before_restart is not None
+                    or self.restart_probe_in_progress_before_restart
+                ),
+            },
+        ]
+
     def _list_active_ongoing_actions(self) -> list[dict[str, Any]]:
         memory_db_path = self.data_dir / "memory.db"
         if not memory_db_path.exists():
@@ -1713,6 +1891,9 @@ class LongSmokeRunner:
         scenario_matrix = summary.get("scenario_matrix", [])
         if not isinstance(scenario_matrix, list):
             raise SmokeError("scenario_matrix was not recorded.")
+        failure_case_matrix = summary.get("failure_case_matrix", [])
+        if not isinstance(failure_case_matrix, list):
+            raise SmokeError("failure_case_matrix was not recorded.")
         if not runtime_summary.get("memory_job_worker_active"):
             raise SmokeError("memory worker was not active at the end of the smoke run.")
         if runtime_summary.get("pending_memory_job_count") != 0:
@@ -1756,6 +1937,11 @@ class LongSmokeRunner:
                 raise SmokeError("desktop_watch did not recover after the injected capture timeout.")
             if len(expected_failed_cycle_ids) != self.args.capture_timeout_failures:
                 raise SmokeError("desktop_watch timeout failure cycles did not match the injected timeout count.")
+        if self.args.capture_empty_result_failures > 0:
+            if len(summary["capture_empty_result_request_ids"]) != self.args.capture_empty_result_failures:
+                raise SmokeError("capture empty_result injection count did not match the requested failure count.")
+            if int(summary.get("capture_empty_result_skip_count", 0)) != self.args.capture_empty_result_failures:
+                raise SmokeError("capture empty_result skip count did not match the requested failure count.")
         if self.args.capture_mismatch_failures > 0:
             if len(summary["capture_mismatch_request_ids"]) != self.args.capture_mismatch_failures:
                 raise SmokeError("capture client_id mismatch injection count did not match the requested failure count.")
@@ -1773,6 +1959,8 @@ class LongSmokeRunner:
                 raise SmokeError("restart probe did not restart the server.")
             if summary["restart_probe_pending_before_restart"] is None and not summary["restart_probe_in_progress_before_restart"]:
                 raise SmokeError("restart probe did not observe a queued or running memory job before restart.")
+            if int(summary.get("background_wake_after_restart_count", 0)) < 1:
+                raise SmokeError("background_wake did not resume after the restart probe.")
         if not summary["multiple_client_pause_verified"]:
             raise SmokeError("multiple desktop client pause boundary was not verified.")
         if not summary["multiple_client_resume_verified"]:
@@ -1802,6 +1990,11 @@ class LongSmokeRunner:
                 raise SmokeError("scenario_matrix entry was invalid.")
             if not scenario.get("verified"):
                 raise SmokeError(f"scenario matrix verification failed: {scenario.get('scenario_id')}")
+        for failure_case in failure_case_matrix:
+            if not isinstance(failure_case, dict):
+                raise SmokeError("failure_case_matrix entry was invalid.")
+            if not failure_case.get("verified"):
+                raise SmokeError(f"failure case verification failed: {failure_case.get('case_id')}")
         self._assert_desktop_watch_probe_trace(summary.get("desktop_watch_capability_probe_trace"), "capability_request")
         self._assert_desktop_watch_probe_trace(summary.get("desktop_watch_pending_intent_probe_trace"), "pending_intent")
         self._assert_external_status_probe_trace(
@@ -2155,6 +2348,7 @@ class LongSmokeRunner:
             f" captures={summary['capture_request_count']}"
             f" external_status={summary['external_status_request_count']}"
             f" dropped={len(summary['capture_timeout_request_ids'])}"
+            f" empty_result={len(summary['capture_empty_result_request_ids'])}"
             f" mismatch={len(summary['capture_mismatch_request_ids'])}"
             f" invalid_images={len(summary['capture_invalid_images_request_ids'])}"
             f" invalid_error={len(summary['capture_invalid_error_request_ids'])}"
@@ -2194,6 +2388,7 @@ class LongSmokeRunner:
             raise SmokeError(f"server process exited unexpectedly with code {return_code}.")
 
     def _restart_server_preserving_state(self) -> None:
+        self.background_wake_count_before_restart = self._count_cycles_by_trigger_kind("background_wake")
         self._stop_server()
         self.restart_count += 1
         time.sleep(0.5)
@@ -2264,6 +2459,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--inspection-cycle-summary-limit", type=int, help="inspection から回収する cycle_summaries 上限")
     parser.add_argument("--max-memory-job-lag-seconds", type=float, help="許容する memory worker 最大滞留秒数")
     parser.add_argument("--capture-timeout-failures", type=int, help="意図的に落とす capture-response 回数")
+    parser.add_argument(
+        "--capture-empty-result-failures",
+        type=int,
+        help="意図的に空 images の accepted capability_result を起こす回数",
+    )
     parser.add_argument(
         "--capture-mismatch-failures",
         type=int,
