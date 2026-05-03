@@ -2144,16 +2144,47 @@ class LongSmokeRunner:
         self.schedule_status_probe_followup_cycle_id = schedule_followup_cycle_id
         self.schedule_status_probe_verified = True
 
+        device_marker = "RealLLMDeviceStatusProbeMarker"
+        device_state_summary = f"{device_marker}: ネットワーク接続は安定し、電源も利用可能。"
+        device_conversation_trace, device_followup_trace = self._run_device_status_probe(
+            marker=device_marker,
+            conversation_text=f"この端末の接続状態を確認して教えて。{device_marker}",
+            source="real_llm_smoke_device_status",
+            client_id="real-llm-smoke-device-status",
+            active_app="RealLLMSmokeDeviceStatus",
+            window_title=device_marker,
+            override={
+                "device_state_summary": device_state_summary,
+                "client_context": {
+                    "body_state_summary": "少し肩に疲れがある。",
+                    "schedule_summary": "端末状態確認をこのまま進められる。",
+                },
+            },
+        )
+        device_conversation_cycle_id = device_conversation_trace.get("cycle_id")
+        device_followup_cycle_id = device_followup_trace.get("cycle_id")
+        if not isinstance(device_conversation_cycle_id, str) or not device_conversation_cycle_id:
+            raise SmokeError("real-llm-smoke device.status conversation cycle_id was not recorded.")
+        if not isinstance(device_followup_cycle_id, str) or not device_followup_cycle_id:
+            raise SmokeError("real-llm-smoke device.status follow-up cycle_id was not recorded.")
+        self.device_status_probe_conversation_cycle_id = device_conversation_cycle_id
+        self.device_status_probe_followup_cycle_id = device_followup_cycle_id
+        self.device_status_probe_verified = True
+
         capability_conversation_trace = self._wait_for_cycle_memory_to_finish(capability_conversation_cycle_id)
         followup_trace = self._wait_for_cycle_memory_to_finish(followup_cycle_id)
         schedule_conversation_trace = self._wait_for_cycle_memory_to_finish(schedule_conversation_cycle_id)
         schedule_followup_trace = self._wait_for_cycle_memory_to_finish(schedule_followup_cycle_id)
+        device_conversation_trace = self._wait_for_cycle_memory_to_finish(device_conversation_cycle_id)
+        device_followup_trace = self._wait_for_cycle_memory_to_finish(device_followup_cycle_id)
         self._wait_for_memory_jobs_to_drain()
         conversation_trace = self.api.get(f"/api/inspection/cycles/{conversation_cycle_id}")
         capability_conversation_trace = self.api.get(f"/api/inspection/cycles/{capability_conversation_cycle_id}")
         followup_trace = self.api.get(f"/api/inspection/cycles/{followup_cycle_id}")
         schedule_conversation_trace = self.api.get(f"/api/inspection/cycles/{schedule_conversation_cycle_id}")
         schedule_followup_trace = self.api.get(f"/api/inspection/cycles/{schedule_followup_cycle_id}")
+        device_conversation_trace = self.api.get(f"/api/inspection/cycles/{device_conversation_cycle_id}")
+        device_followup_trace = self.api.get(f"/api/inspection/cycles/{device_followup_cycle_id}")
 
         status = self._get_status()
         summary = {
@@ -2181,6 +2212,14 @@ class LongSmokeRunner:
             "schedule_status_response_count": self.schedule_status_response_count,
             "schedule_status_request_ids": self.schedule_status_request_ids,
             "schedule_status_followup_verified_request_ids": self.schedule_status_followup_verified_request_ids,
+            "device_status_conversation_cycle_id": device_conversation_cycle_id,
+            "device_status_conversation_trace": device_conversation_trace,
+            "device_status_followup_cycle_id": device_followup_cycle_id,
+            "device_status_followup_trace": device_followup_trace,
+            "device_status_request_count": self.device_status_request_count,
+            "device_status_response_count": self.device_status_response_count,
+            "device_status_request_ids": self.device_status_request_ids,
+            "device_status_followup_verified_request_ids": self.device_status_followup_verified_request_ids,
         }
         self._write_summary(summary)
         self._assert_real_llm_smoke_summary(summary)
@@ -2622,6 +2661,10 @@ class LongSmokeRunner:
             raise SmokeError("real-llm-smoke schedule.status request count was not 1.")
         if summary.get("schedule_status_response_count") != 1:
             raise SmokeError("real-llm-smoke schedule.status response count was not 1.")
+        if summary.get("device_status_request_count") != 1:
+            raise SmokeError("real-llm-smoke device.status request count was not 1.")
+        if summary.get("device_status_response_count") != 1:
+            raise SmokeError("real-llm-smoke device.status response count was not 1.")
 
         conversation_trace = summary.get("conversation_trace")
         if not isinstance(conversation_trace, dict):
@@ -2710,6 +2753,28 @@ class LongSmokeRunner:
         if schedule_slot_policy.get("summary_source") != "capability_result.schedule_slots":
             raise SmokeError("real-llm-smoke schedule.status schedule slot summary_source was invalid.")
         self._assert_memory_trace_succeeded(schedule_followup_trace, "real-llm-smoke schedule.status follow-up")
+
+        device_conversation_trace = summary.get("device_status_conversation_trace")
+        if not isinstance(device_conversation_trace, dict):
+            raise SmokeError("real-llm-smoke device.status conversation trace was not recorded.")
+        device_summary = device_conversation_trace.get("cycle_summary", {})
+        if not isinstance(device_summary, dict) or device_summary.get("result_kind") != "capability_request":
+            raise SmokeError("real-llm-smoke device.status conversation did not dispatch capability_request.")
+        device_request_summary = ((device_conversation_trace.get("result_trace") or {}).get("capability_request_summary"))
+        if not isinstance(device_request_summary, dict) or device_request_summary.get("capability_id") != "device.status":
+            raise SmokeError("real-llm-smoke device.status request summary was invalid.")
+        if device_request_summary.get("status") != "dispatched":
+            raise SmokeError("real-llm-smoke device.status request was not dispatched.")
+        self._assert_memory_trace_succeeded(device_conversation_trace, "real-llm-smoke device.status conversation")
+
+        device_followup_trace = summary.get("device_status_followup_trace")
+        self._assert_device_status_probe_trace(
+            device_conversation_trace,
+            device_followup_trace,
+            marker="RealLLMDeviceStatusProbeMarker",
+        )
+        if isinstance(device_followup_trace, dict):
+            self._assert_memory_trace_succeeded(device_followup_trace, "real-llm-smoke device.status follow-up")
 
     def _assert_memory_trace_succeeded(self, trace: dict[str, Any], label: str) -> None:
         cycle_id = trace.get("cycle_id")
@@ -3293,6 +3358,8 @@ class LongSmokeRunner:
         self,
         conversation_trace: Any,
         followup_trace: Any,
+        *,
+        marker: str = "LongSmokeDeviceStatusProbeMarker",
     ) -> None:
         if not isinstance(conversation_trace, dict):
             raise SmokeError("device.status probe conversation trace was not collected.")
@@ -3329,7 +3396,7 @@ class LongSmokeRunner:
         if observation_summary.get("capability_id") != "device.status":
             raise SmokeError("device.status probe follow-up observation capability_id was invalid.")
         device_state_summary = observation_summary.get("device_state_summary")
-        if not isinstance(device_state_summary, str) or "LongSmokeDeviceStatusProbeMarker" not in device_state_summary:
+        if not isinstance(device_state_summary, str) or marker not in device_state_summary:
             raise SmokeError("device.status probe follow-up device_state_summary was invalid.")
 
         world_state_trace = followup_trace.get("world_state_trace", {})
@@ -3418,14 +3485,19 @@ class LongSmokeRunner:
         )
         if self.args.profile == "real-llm-smoke":
             conversation_summary = (summary.get("conversation_trace") or {}).get("cycle_summary") or {}
-            capability_summary = (summary.get("external_status_conversation_trace") or {}).get("cycle_summary") or {}
-            followup_summary = (summary.get("external_status_followup_trace") or {}).get("cycle_summary") or {}
+            external_summary = (summary.get("external_status_conversation_trace") or {}).get("cycle_summary") or {}
+            external_followup_summary = (summary.get("external_status_followup_trace") or {}).get("cycle_summary") or {}
+            schedule_summary = (summary.get("schedule_status_conversation_trace") or {}).get("cycle_summary") or {}
+            schedule_followup_summary = (summary.get("schedule_status_followup_trace") or {}).get("cycle_summary") or {}
+            device_summary = (summary.get("device_status_conversation_trace") or {}).get("cycle_summary") or {}
+            device_followup_summary = (summary.get("device_status_followup_trace") or {}).get("cycle_summary") or {}
             runtime_summary = (summary.get("status") or {}).get("runtime_summary") or {}
             log(
                 "summary"
                 f" conversation={conversation_summary.get('result_kind')}"
-                f" external_status={capability_summary.get('result_kind')}"
-                f" followup={followup_summary.get('result_kind')}"
+                f" external_status={external_summary.get('result_kind')}/{external_followup_summary.get('result_kind')}"
+                f" schedule_status={schedule_summary.get('result_kind')}/{schedule_followup_summary.get('result_kind')}"
+                f" device_status={device_summary.get('result_kind')}/{device_followup_summary.get('result_kind')}"
                 f" pending_jobs={runtime_summary.get('pending_memory_job_count')}"
                 f" in_progress={runtime_summary.get('memory_job_in_progress')}"
             )
