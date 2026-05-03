@@ -212,7 +212,7 @@ validator 失敗時は 1 回だけ再生成する。
 - それ以外は同じ `state_type / scope_type / scope_key` の近い状態を統合または置換する
 - `screen` と `environment` は短い TTL を標準にする
 - `external_service` は `capability_result.status_text` と `client_context.external_service_summary` のどちらを正本にしたかで TTL を変える
-- `schedule` は `schedule_summary`、`client_context.schedule_slots`、`capability_result.client_context.schedule_slots` を基準に TTL を決め、pending-intent または schedule slot の `expires_at` があればそれを上限にする
+- `schedule` は `schedule_summary`、`capability_result.schedule_slots`、`client_context.schedule_slots`、`capability_result.client_context.schedule_slots` を基準に TTL を決め、pending-intent または schedule slot の `expires_at` があればそれを上限にする
 - 長期理解へ育てる条件を満たす出来事は、`turn consolidation` で記憶へ渡す
 
 `summary_source` は少なくとも次を区別する。
@@ -221,6 +221,7 @@ validator 失敗時は 1 回だけ再生成する。
 - `capability_result.body_state_summary`
 - `capability_result.device_state_summary`
 - `capability_result.schedule_summary`
+- `capability_result.schedule_slots`
 - `capability_result.client_context.<field>`
 - `client_context.<field>`
 - `pending_intent`

@@ -448,6 +448,8 @@ class LongSmokeRunner:
         self.capture_response_count = 0
         self.external_status_request_count = 0
         self.external_status_response_count = 0
+        self.schedule_status_request_count = 0
+        self.schedule_status_response_count = 0
         self.desktop_watch_event_count = 0
         self.conversation_cycle_ids: list[str] = []
         self.restart_probe_cycle_ids: list[str] = []
@@ -461,6 +463,8 @@ class LongSmokeRunner:
         self.capture_unknown_request_ids: list[str] = []
         self.external_status_request_ids: list[str] = []
         self.external_status_followup_verified_request_ids: list[str] = []
+        self.schedule_status_request_ids: list[str] = []
+        self.schedule_status_followup_verified_request_ids: list[str] = []
         self.capture_timeout_recovered = False
         self.remaining_capture_timeouts = args.capture_timeout_failures
         self.remaining_capture_empty_results = 0
@@ -481,7 +485,10 @@ class LongSmokeRunner:
         self.desktop_watch_pending_intent_schedule_persisted_verified = False
         self.external_status_probe_conversation_cycle_id: str | None = None
         self.external_status_probe_followup_cycle_id: str | None = None
+        self.schedule_status_probe_conversation_cycle_id: str | None = None
+        self.schedule_status_probe_followup_cycle_id: str | None = None
         self.external_status_probe_verified = False
+        self.schedule_status_probe_verified = False
         self.external_status_multi_service_verified = False
         self.external_status_persisted_integration_keys: list[str] = []
         self.editor_state_mode_used = args.editor_state_mode
@@ -495,8 +502,10 @@ class LongSmokeRunner:
         self.capture_empty_result_skip_count = 0
         self._capture_context_overrides: list[dict[str, Any]] = []
         self._external_status_overrides: list[dict[str, Any]] = []
+        self._schedule_status_overrides: list[dict[str, Any]] = []
         self._capture_lock = threading.Lock()
         self._external_status_lock = threading.Lock()
+        self._schedule_status_lock = threading.Lock()
 
     def run(self) -> dict[str, Any]:
         self.artifact_dir.mkdir(parents=True, exist_ok=True)
@@ -845,6 +854,7 @@ class LongSmokeRunner:
         caps = [{"id": "vision.capture", "version": "1"}]
         if client_label == "primary":
             caps.append({"id": "external.status", "version": "1"})
+            caps.append({"id": "schedule.status", "version": "1"})
         client.connect(client_id=client_id, caps=caps)
         return client
 
@@ -1066,6 +1076,62 @@ class LongSmokeRunner:
                 },
             )
             self.external_status_response_count += 1
+            return
+        if event_type == "schedule.status_request":
+            if client_label != "primary":
+                raise SmokeError(f"{client_label} desktop client unexpectedly received schedule.status_request.")
+            request_id = data.get("request_id")
+            capability_id = data.get("capability_id")
+            requested_range = data.get("range")
+            if not isinstance(request_id, str) or not request_id:
+                raise SmokeError("schedule.status_request did not include request_id.")
+            if capability_id != "schedule.status":
+                raise SmokeError(f"schedule.status_request capability_id was invalid: {capability_id}")
+            if not isinstance(requested_range, str) or not requested_range.strip():
+                raise SmokeError("schedule.status_request did not include range.")
+            with self._schedule_status_lock:
+                self.schedule_status_request_count += 1
+                self.schedule_status_request_ids.append(request_id)
+                override = self._schedule_status_overrides.pop(0) if self._schedule_status_overrides else None
+            schedule_summary = (
+                str(override.get("schedule_summary")).strip()
+                if isinstance(override, dict)
+                and isinstance(override.get("schedule_summary"), str)
+                and override.get("schedule_summary", "").strip()
+                else f"{requested_range.strip()} の近い予定は 1 件ある。"
+            )
+            schedule_slots = (
+                list(override["schedule_slots"])
+                if isinstance(override, dict) and isinstance(override.get("schedule_slots"), list)
+                else [
+                    {
+                        "slot_key": "schedule-status-default",
+                        "summary_text": schedule_summary,
+                    }
+                ]
+            )
+            client_context = (
+                dict(override["client_context"])
+                if isinstance(override, dict) and isinstance(override.get("client_context"), dict)
+                else {}
+            )
+            if not isinstance(client_context.get("device_state_summary"), str) or not client_context["device_state_summary"].strip():
+                client_context["device_state_summary"] = "schedule.status を返せる desktop client が接続中。"
+            self.api.post(
+                "/api/capability/result",
+                {
+                    "request_id": request_id,
+                    "client_id": connected_client_id,
+                    "capability_id": "schedule.status",
+                    "result": {
+                        "schedule_summary": schedule_summary,
+                        "schedule_slots": schedule_slots,
+                        "client_context": client_context,
+                        "error": None,
+                    },
+                },
+            )
+            self.schedule_status_response_count += 1
             return
         if event_type == "desktop_watch":
             self.desktop_watch_event_count += 1
@@ -1365,6 +1431,10 @@ class LongSmokeRunner:
         with self._external_status_lock:
             self._external_status_overrides.append(override)
 
+    def _queue_schedule_status_override(self, override: dict[str, Any]) -> None:
+        with self._schedule_status_lock:
+            self._schedule_status_overrides.append(override)
+
     def _run_external_status_probe(
         self,
         *,
@@ -1446,6 +1516,86 @@ class LongSmokeRunner:
             raise SmokeError("external.status probe did not produce a capability_result follow-up cycle.")
         if request_id not in self.external_status_followup_verified_request_ids:
             self.external_status_followup_verified_request_ids.append(request_id)
+
+        return conversation_trace, followup_trace
+
+    def _run_schedule_status_probe(
+        self,
+        *,
+        marker: str,
+        conversation_text: str,
+        source: str,
+        client_id: str,
+        active_app: str,
+        window_title: str,
+        override: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        self._queue_schedule_status_override(override)
+        conversation_cycle_id = self._post_conversation(
+            text=conversation_text,
+            source=source,
+            client_id=client_id,
+            active_app=active_app,
+            window_title=window_title,
+        )
+        deadline = time.monotonic() + WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS
+        conversation_trace: dict[str, Any] | None = None
+        request_id: str | None = None
+        while time.monotonic() < deadline:
+            self._assert_server_running()
+            self._assert_event_clients_healthy()
+            candidate = self.api.get(f"/api/inspection/cycles/{conversation_cycle_id}")
+            request_summary = ((candidate.get("result_trace") or {}).get("capability_request_summary"))
+            if (
+                isinstance(request_summary, dict)
+                and request_summary.get("capability_id") == "schedule.status"
+                and request_summary.get("status") == "dispatched"
+            ):
+                request_id = request_summary.get("request_id")
+                if isinstance(request_id, str) and request_id:
+                    conversation_trace = candidate
+                    break
+            time.sleep(0.25)
+        if conversation_trace is None or request_id is None:
+            raise SmokeError("schedule.status probe did not dispatch a request.")
+
+        followup_trace: dict[str, Any] | None = None
+        inspected_cycle_ids: set[str] = set()
+        while time.monotonic() < deadline:
+            self._assert_server_running()
+            self._assert_event_clients_healthy()
+            cycle_summaries = self.api.get("/api/inspection/cycle-summaries?limit=80").get("cycle_summaries", [])
+            if not isinstance(cycle_summaries, list):
+                raise SmokeError("cycle_summaries response was invalid during schedule.status probe.")
+            for cycle_summary in cycle_summaries:
+                if not isinstance(cycle_summary, dict) or cycle_summary.get("trigger_kind") != "capability_result":
+                    continue
+                cycle_id = cycle_summary.get("cycle_id")
+                if not isinstance(cycle_id, str) or not cycle_id or cycle_id in inspected_cycle_ids:
+                    continue
+                inspected_cycle_ids.add(cycle_id)
+                trace = self.api.get(f"/api/inspection/cycles/{cycle_id}")
+                followup_summary = ((trace.get("result_trace") or {}).get("capability_result_followup_summary"))
+                if not isinstance(followup_summary, dict):
+                    continue
+                source_request_summary = followup_summary.get("source_request_summary")
+                if not isinstance(source_request_summary, dict) or source_request_summary.get("request_id") != request_id:
+                    continue
+                observation_summary = ((trace.get("input_trace") or {}).get("observation_summary"))
+                if not isinstance(observation_summary, dict):
+                    continue
+                observed_schedule_summary = observation_summary.get("schedule_summary")
+                if not isinstance(observed_schedule_summary, str) or marker not in observed_schedule_summary:
+                    continue
+                followup_trace = trace
+                break
+            if followup_trace is not None:
+                break
+            time.sleep(0.25)
+        if followup_trace is None:
+            raise SmokeError("schedule.status probe did not produce a capability_result follow-up cycle.")
+        if request_id not in self.schedule_status_followup_verified_request_ids:
+            self.schedule_status_followup_verified_request_ids.append(request_id)
 
         return conversation_trace, followup_trace
 
@@ -1750,12 +1900,49 @@ class LongSmokeRunner:
         if not isinstance(followup_cycle_id, str) or not followup_cycle_id:
             raise SmokeError("real-llm-smoke external.status follow-up cycle_id was not recorded.")
 
+        schedule_marker = "RealLLMScheduleStatusProbeMarker"
+        schedule_summary = f"{schedule_marker}: 30 分後に実 LLM smoke の予定確認がある。"
+        schedule_conversation_trace, schedule_followup_trace = self._run_schedule_status_probe(
+            marker=schedule_marker,
+            conversation_text=f"このあとの予定を確認して教えて。{schedule_marker}",
+            source="real_llm_smoke_schedule_status",
+            client_id="real-llm-smoke-schedule-status",
+            active_app="RealLLMSmokeScheduleStatus",
+            window_title=schedule_marker,
+            override={
+                "schedule_summary": schedule_summary,
+                "schedule_slots": [
+                    {
+                        "slot_key": "real-llm-smoke-schedule",
+                        "summary_text": schedule_summary,
+                    }
+                ],
+                "client_context": {
+                    "body_state_summary": "少し肩に疲れがある。",
+                    "device_state_summary": "schedule.status を返せる desktop client が接続中。",
+                },
+            },
+        )
+        schedule_conversation_cycle_id = schedule_conversation_trace.get("cycle_id")
+        schedule_followup_cycle_id = schedule_followup_trace.get("cycle_id")
+        if not isinstance(schedule_conversation_cycle_id, str) or not schedule_conversation_cycle_id:
+            raise SmokeError("real-llm-smoke schedule.status conversation cycle_id was not recorded.")
+        if not isinstance(schedule_followup_cycle_id, str) or not schedule_followup_cycle_id:
+            raise SmokeError("real-llm-smoke schedule.status follow-up cycle_id was not recorded.")
+        self.schedule_status_probe_conversation_cycle_id = schedule_conversation_cycle_id
+        self.schedule_status_probe_followup_cycle_id = schedule_followup_cycle_id
+        self.schedule_status_probe_verified = True
+
         capability_conversation_trace = self._wait_for_cycle_memory_to_finish(capability_conversation_cycle_id)
         followup_trace = self._wait_for_cycle_memory_to_finish(followup_cycle_id)
+        schedule_conversation_trace = self._wait_for_cycle_memory_to_finish(schedule_conversation_cycle_id)
+        schedule_followup_trace = self._wait_for_cycle_memory_to_finish(schedule_followup_cycle_id)
         self._wait_for_memory_jobs_to_drain()
         conversation_trace = self.api.get(f"/api/inspection/cycles/{conversation_cycle_id}")
         capability_conversation_trace = self.api.get(f"/api/inspection/cycles/{capability_conversation_cycle_id}")
         followup_trace = self.api.get(f"/api/inspection/cycles/{followup_cycle_id}")
+        schedule_conversation_trace = self.api.get(f"/api/inspection/cycles/{schedule_conversation_cycle_id}")
+        schedule_followup_trace = self.api.get(f"/api/inspection/cycles/{schedule_followup_cycle_id}")
 
         status = self._get_status()
         summary = {
@@ -1775,6 +1962,14 @@ class LongSmokeRunner:
             "external_status_response_count": self.external_status_response_count,
             "external_status_request_ids": self.external_status_request_ids,
             "external_status_followup_verified_request_ids": self.external_status_followup_verified_request_ids,
+            "schedule_status_conversation_cycle_id": schedule_conversation_cycle_id,
+            "schedule_status_conversation_trace": schedule_conversation_trace,
+            "schedule_status_followup_cycle_id": schedule_followup_cycle_id,
+            "schedule_status_followup_trace": schedule_followup_trace,
+            "schedule_status_request_count": self.schedule_status_request_count,
+            "schedule_status_response_count": self.schedule_status_response_count,
+            "schedule_status_request_ids": self.schedule_status_request_ids,
+            "schedule_status_followup_verified_request_ids": self.schedule_status_followup_verified_request_ids,
         }
         self._write_summary(summary)
         self._assert_real_llm_smoke_summary(summary)
@@ -2169,6 +2364,10 @@ class LongSmokeRunner:
             raise SmokeError("real-llm-smoke external.status request count was not 1.")
         if summary.get("external_status_response_count") != 1:
             raise SmokeError("real-llm-smoke external.status response count was not 1.")
+        if summary.get("schedule_status_request_count") != 1:
+            raise SmokeError("real-llm-smoke schedule.status request count was not 1.")
+        if summary.get("schedule_status_response_count") != 1:
+            raise SmokeError("real-llm-smoke schedule.status response count was not 1.")
 
         conversation_trace = summary.get("conversation_trace")
         if not isinstance(conversation_trace, dict):
@@ -2205,6 +2404,58 @@ class LongSmokeRunner:
         if not isinstance(transition_summary, dict) or transition_summary.get("final_state") != "completed":
             raise SmokeError("real-llm-smoke external.status follow-up did not complete ongoing_action.")
         self._assert_memory_trace_succeeded(followup_trace, "real-llm-smoke external.status follow-up")
+
+        schedule_conversation_trace = summary.get("schedule_status_conversation_trace")
+        if not isinstance(schedule_conversation_trace, dict):
+            raise SmokeError("real-llm-smoke schedule.status conversation trace was not recorded.")
+        schedule_summary = schedule_conversation_trace.get("cycle_summary", {})
+        if not isinstance(schedule_summary, dict) or schedule_summary.get("result_kind") != "capability_request":
+            raise SmokeError("real-llm-smoke schedule.status conversation did not dispatch capability_request.")
+        schedule_request_summary = ((schedule_conversation_trace.get("result_trace") or {}).get("capability_request_summary"))
+        if not isinstance(schedule_request_summary, dict) or schedule_request_summary.get("capability_id") != "schedule.status":
+            raise SmokeError("real-llm-smoke schedule.status request summary was invalid.")
+        if schedule_request_summary.get("status") != "dispatched":
+            raise SmokeError("real-llm-smoke schedule.status request was not dispatched.")
+        self._assert_memory_trace_succeeded(schedule_conversation_trace, "real-llm-smoke schedule.status conversation")
+
+        schedule_followup_trace = summary.get("schedule_status_followup_trace")
+        if not isinstance(schedule_followup_trace, dict):
+            raise SmokeError("real-llm-smoke schedule.status follow-up trace was not recorded.")
+        schedule_followup_summary = schedule_followup_trace.get("cycle_summary", {})
+        if not isinstance(schedule_followup_summary, dict) or schedule_followup_summary.get("trigger_kind") != "capability_result":
+            raise SmokeError("real-llm-smoke schedule.status follow-up trigger was invalid.")
+        if schedule_followup_summary.get("result_kind") != "reply" or schedule_followup_summary.get("failed"):
+            raise SmokeError("real-llm-smoke schedule.status follow-up did not produce reply.")
+        schedule_transition_summary = ((schedule_followup_trace.get("result_trace") or {}).get("ongoing_action_transition_summary"))
+        if not isinstance(schedule_transition_summary, dict) or schedule_transition_summary.get("final_state") != "completed":
+            raise SmokeError("real-llm-smoke schedule.status follow-up did not complete ongoing_action.")
+        schedule_observation_summary = ((schedule_followup_trace.get("input_trace") or {}).get("observation_summary"))
+        if not isinstance(schedule_observation_summary, dict):
+            raise SmokeError("real-llm-smoke schedule.status observation_summary was not recorded.")
+        if schedule_observation_summary.get("capability_id") != "schedule.status":
+            raise SmokeError("real-llm-smoke schedule.status observation capability_id was invalid.")
+        observed_slots = schedule_observation_summary.get("schedule_slots")
+        if not isinstance(observed_slots, list) or not observed_slots:
+            raise SmokeError("real-llm-smoke schedule.status schedule_slots were not recorded.")
+        schedule_world_state_trace = schedule_followup_trace.get("world_state_trace", {})
+        if not isinstance(schedule_world_state_trace, dict):
+            raise SmokeError("real-llm-smoke schedule.status world_state_trace was not recorded.")
+        schedule_policies = schedule_world_state_trace.get("normalized_candidate_policies", [])
+        if not isinstance(schedule_policies, list):
+            raise SmokeError("real-llm-smoke schedule.status normalized_candidate_policies were not recorded.")
+        schedule_slot_policy = next(
+            (
+                item
+                for item in schedule_policies
+                if isinstance(item, dict) and item.get("integration_key") == "schedule:real-llm-smoke-schedule"
+            ),
+            None,
+        )
+        if not isinstance(schedule_slot_policy, dict):
+            raise SmokeError("real-llm-smoke schedule.status schedule slot policy was not recorded.")
+        if schedule_slot_policy.get("summary_source") != "capability_result.schedule_slots":
+            raise SmokeError("real-llm-smoke schedule.status schedule slot summary_source was invalid.")
+        self._assert_memory_trace_succeeded(schedule_followup_trace, "real-llm-smoke schedule.status follow-up")
 
     def _assert_memory_trace_succeeded(self, trace: dict[str, Any], label: str) -> None:
         cycle_id = trace.get("cycle_id")

@@ -147,6 +147,88 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
             "error",
         ],
     },
+    "schedule.status": {
+        "id": "schedule.status",
+        "version": "1",
+        "kind": "external_service",
+        "decision_description": "近い予定やカレンダー状態を確認する",
+        "when_to_use": [
+            "判断に近い予定やカレンダー状態が必要",
+            "このあと、今日、近日の予定を短く確認したい",
+        ],
+        "do_not_use_when": [
+            "現在の判断に予定情報が不要",
+            "すでに十分新しい予定要約が手元にある",
+        ],
+        "required_permissions": [],
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "range": {"type": "string"},
+            },
+            "required": ["range"],
+            "additionalProperties": False,
+        },
+        "result_schema": {
+            "type": "object",
+            "properties": {
+                "schedule_summary": {"type": "string"},
+                "schedule_slots": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "slot_key": {"type": "string"},
+                            "summary_text": {"type": "string"},
+                            "not_before": {"type": "string"},
+                            "expires_at": {"type": "string"},
+                        },
+                        "required": ["slot_key", "summary_text"],
+                        "additionalProperties": False,
+                    },
+                },
+                "client_context": {
+                    "type": ["object", "null"],
+                },
+                "error": {
+                    "type": ["string", "null"],
+                },
+            },
+            "required": ["schedule_summary", "schedule_slots"],
+            "additionalProperties": False,
+        },
+        "side_effects": {
+            "external_world": False,
+            "user_visible": False,
+            "stores_raw_payload": False,
+        },
+        "timeout_ms": 5000,
+        "risk_level": "low",
+        "memory_policy": {
+            "record_result_event": True,
+            "allow_memory_update": True,
+        },
+        "state_policy": {
+            "creates_ongoing_action": True,
+            "blocks_parallel_capability": True,
+            "result_context_hook": "schedule_status",
+            "followup_hint_hook": "schedule_status",
+            "success_cooldown_seconds": 60,
+            "error_cooldown_seconds": 60,
+            "unavailable_seconds_on_dispatch_failure": 60,
+            "unavailable_seconds_on_timeout": 60,
+        },
+        "inspection_fields": [
+            "capability_id",
+            "target_client_id",
+            "range",
+            "schedule_summary",
+            "schedule_slots",
+            "body_state_summary",
+            "device_state_summary",
+            "error",
+        ],
+    },
 }
 
 

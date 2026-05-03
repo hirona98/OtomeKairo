@@ -149,6 +149,41 @@ class ServiceSpontaneousMixin:
                 "client_context": client_context or {},
                 "error": error.strip() if isinstance(error, str) and error.strip() else None,
             }
+        if capability_id == "schedule.status":
+            schedule_summary = result_payload.get("schedule_summary")
+            schedule_slots = result_payload.get("schedule_slots")
+            client_context = result_payload.get("client_context")
+            error = result_payload.get("error")
+            if not isinstance(schedule_summary, str) or not schedule_summary.strip():
+                raise ServiceError(
+                    400,
+                    "invalid_capability_result",
+                    "schedule.status result.schedule_summary must be a non-empty string.",
+                )
+            if not isinstance(schedule_slots, list):
+                raise ServiceError(
+                    400,
+                    "invalid_capability_result",
+                    "schedule.status result.schedule_slots must be an array.",
+                )
+            if client_context is not None and not isinstance(client_context, dict):
+                raise ServiceError(
+                    400,
+                    "invalid_capability_result",
+                    "schedule.status result.client_context must be an object.",
+                )
+            if error is not None and not isinstance(error, str):
+                raise ServiceError(
+                    400,
+                    "invalid_capability_result",
+                    "schedule.status result.error must be a string or null.",
+                )
+            return {
+                "schedule_summary": schedule_summary.strip(),
+                "schedule_slots": self._normalize_capability_result_schedule_slots(schedule_slots),
+                "client_context": client_context or {},
+                "error": error.strip() if isinstance(error, str) and error.strip() else None,
+            }
         payload = dict(result_payload)
         client_context = payload.get("client_context")
         if client_context is not None and not isinstance(client_context, dict):
@@ -161,6 +196,45 @@ class ServiceSpontaneousMixin:
         if "error" in payload:
             payload["error"] = error.strip() if isinstance(error, str) and error.strip() else None
         return payload
+
+    def _normalize_capability_result_schedule_slots(self, raw_slots: list[Any]) -> list[dict[str, Any]]:
+        normalized_slots: list[dict[str, Any]] = []
+        seen_slot_keys: set[str] = set()
+        for item in raw_slots:
+            if not isinstance(item, dict):
+                raise ServiceError(
+                    400,
+                    "invalid_capability_result",
+                    "schedule.status result.schedule_slots must contain objects.",
+                )
+            slot_key = item.get("slot_key")
+            summary_text = item.get("summary_text")
+            if not isinstance(slot_key, str) or not slot_key.strip():
+                raise ServiceError(
+                    400,
+                    "invalid_capability_result",
+                    "schedule.status result.schedule_slots[].slot_key must be a non-empty string.",
+                )
+            if not isinstance(summary_text, str) or not summary_text.strip():
+                raise ServiceError(
+                    400,
+                    "invalid_capability_result",
+                    "schedule.status result.schedule_slots[].summary_text must be a non-empty string.",
+                )
+            normalized_slot_key = self._clamp(slot_key.strip(), limit=160)
+            if normalized_slot_key in seen_slot_keys:
+                continue
+            seen_slot_keys.add(normalized_slot_key)
+            slot_payload: dict[str, Any] = {
+                "slot_key": normalized_slot_key,
+                "summary_text": self._clamp(summary_text.strip(), limit=160),
+            }
+            for key in ("not_before", "expires_at"):
+                value = item.get(key)
+                if isinstance(value, str) and value.strip():
+                    slot_payload[key] = value.strip()
+            normalized_slots.append(slot_payload)
+        return normalized_slots[:4]
 
     def _capability_result_log_channel(self, capability_id: str) -> str:
         if capability_id == "vision.capture":
@@ -598,12 +672,18 @@ class ServiceSpontaneousMixin:
         return summary
 
     def _capability_result_schedule_slots(self, capability_response: dict[str, Any]) -> list[dict[str, Any]] | None:
+        raw_slots = capability_response.get("schedule_slots")
+        if isinstance(raw_slots, list):
+            return self._normalize_capability_result_summary_schedule_slots(raw_slots)
         client_context = capability_response.get("client_context", {})
         if not isinstance(client_context, dict):
             return None
         raw_slots = client_context.get("schedule_slots")
         if not isinstance(raw_slots, list):
             return None
+        return self._normalize_capability_result_summary_schedule_slots(raw_slots)
+
+    def _normalize_capability_result_summary_schedule_slots(self, raw_slots: list[Any]) -> list[dict[str, Any]] | None:
         normalized_slots: list[dict[str, Any]] = []
         seen_slot_keys: set[str] = set()
         for item in raw_slots:
@@ -673,6 +753,10 @@ class ServiceSpontaneousMixin:
                     summary[field] = self._clamp(normalized, limit=160)
                 elif isinstance(value, (int, float, bool)):
                     summary[field] = value
+                elif field == "schedule_slots" and isinstance(value, list):
+                    normalized_slots = self._normalize_capability_result_summary_schedule_slots(value)
+                    if normalized_slots is not None:
+                        summary[field] = normalized_slots
         return summary
 
     def _prepare_capability_result_context(
@@ -706,6 +790,12 @@ class ServiceSpontaneousMixin:
                 observation_summary=observation_summary,
                 capability_response=capability_response,
             )
+        elif hook_name == "schedule_status":
+            client_context, observation_summary, input_text = self._prepare_schedule_status_result_context(
+                client_context=client_context,
+                observation_summary=observation_summary,
+                capability_response=capability_response,
+            )
         return client_context, observation_summary, input_text
 
     def _prepare_external_status_result_context(
@@ -722,6 +812,31 @@ class ServiceSpontaneousMixin:
         enriched_observation_summary = dict(observation_summary)
         if status_text is not None:
             enriched_observation_summary["status_text"] = status_text
+        input_text = self._build_capability_result_input_text(
+            client_context=enriched_client_context,
+            capability_response=capability_response,
+        )
+        return enriched_client_context, enriched_observation_summary, input_text
+
+    def _prepare_schedule_status_result_context(
+        self,
+        *,
+        client_context: dict[str, Any],
+        observation_summary: dict[str, Any],
+        capability_response: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any], str]:
+        schedule_summary = self._client_context_text(capability_response.get("schedule_summary"), limit=160)
+        schedule_slots = self._capability_result_schedule_slots(capability_response)
+        enriched_client_context = dict(client_context)
+        if schedule_summary is not None:
+            enriched_client_context["schedule_summary"] = schedule_summary
+        if schedule_slots is not None:
+            enriched_client_context["schedule_slots"] = schedule_slots
+        enriched_observation_summary = dict(observation_summary)
+        if schedule_summary is not None:
+            enriched_observation_summary["schedule_summary"] = schedule_summary
+        if schedule_slots is not None:
+            enriched_observation_summary["schedule_slots"] = schedule_slots
         input_text = self._build_capability_result_input_text(
             client_context=enriched_client_context,
             capability_response=capability_response,
@@ -756,6 +871,19 @@ class ServiceSpontaneousMixin:
                 if isinstance(service, str) and service.strip():
                     return self._clamp(f"{service.strip()} の状態要約: {status_text.strip()}", limit=160)
                 return self._clamp(status_text.strip(), limit=160)
+            return None
+        if hook_name == "schedule_status":
+            schedule_summary = None
+            slot_count = None
+            if isinstance(observation_summary, dict):
+                schedule_summary = observation_summary.get("schedule_summary")
+                schedule_slots = observation_summary.get("schedule_slots")
+                if isinstance(schedule_slots, list):
+                    slot_count = len(schedule_slots)
+            if isinstance(schedule_summary, str) and schedule_summary.strip():
+                return self._clamp(f"予定要約: {schedule_summary.strip()}", limit=160)
+            if isinstance(slot_count, int) and slot_count > 0:
+                return f"近い予定が {slot_count} 件ある。"
             return None
         return None
 
@@ -802,6 +930,12 @@ class ServiceSpontaneousMixin:
         status_text = self._capability_result_status_text(capability_response)
         if status_text is not None:
             parts.append(f"結果要約は {status_text}")
+        elif capability_id == "schedule.status":
+            schedule_summary = self._client_context_text(capability_response.get("schedule_summary"), limit=160)
+            if schedule_summary is not None:
+                parts.append(f"予定要約は {schedule_summary}")
+            else:
+                parts.append("予定確認の結果を踏まえて返答や次の行動を決めたい。")
         elif capability_id == "vision.capture" and image_count is not None and image_count <= 0:
             parts.append("観測結果は空だった。")
         else:

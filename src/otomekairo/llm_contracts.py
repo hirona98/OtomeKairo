@@ -484,7 +484,10 @@ def validate_memory_interpretation_contract(payload: dict[str, Any]) -> None:
         if candidate["memory_type"] not in MEMORY_TYPE_VALUES:
             raise LLMError("MemoryInterpretation candidate_memory_unit.memory_type が不正です。")
         if candidate["scope"] not in SCOPE_TYPE_VALUES:
-            raise LLMError("MemoryInterpretation candidate_memory_unit.scope が不正です。")
+            raise LLMError(
+                "MemoryInterpretation candidate_memory_unit.scope が不正です。"
+                f" scope={candidate['scope']!r}。self, user, entity, topic, relationship, world のいずれかだけを使ってください。"
+            )
         if not isinstance(candidate["subject_hint"], str) or not candidate["subject_hint"].strip():
             raise LLMError("MemoryInterpretation candidate_memory_unit.subject_hint が不正です。")
         if not isinstance(candidate["predicate_hint"], str) or not candidate["predicate_hint"].strip():
@@ -529,10 +532,14 @@ def validate_memory_interpretation_contract(payload: dict[str, Any]) -> None:
         if not isinstance(episode_affect["summary_text"], str) or not episode_affect["summary_text"].strip():
             raise LLMError("MemoryInterpretation episode_affect.summary_text が不正です。")
         _validate_vad(episode_affect["vad"], "MemoryInterpretation episode_affect.vad")
-        if not isinstance(episode_affect["intensity"], (int, float)):
+        if isinstance(episode_affect["intensity"], bool) or not isinstance(episode_affect["intensity"], (int, float)):
             raise LLMError("MemoryInterpretation episode_affect.intensity は数値である必要があります。")
-        if not isinstance(episode_affect["confidence"], (int, float)):
+        if isinstance(episode_affect["confidence"], bool) or not isinstance(episode_affect["confidence"], (int, float)):
             raise LLMError("MemoryInterpretation episode_affect.confidence は数値である必要があります。")
+        if not 0.0 <= float(episode_affect["intensity"]) <= 1.0:
+            raise LLMError("MemoryInterpretation episode_affect.intensity は 0.0 以上 1.0 以下である必要があります。")
+        if not 0.0 <= float(episode_affect["confidence"]) <= 1.0:
+            raise LLMError("MemoryInterpretation episode_affect.confidence は 0.0 以上 1.0 以下である必要があります。")
 
         affect_key = (
             episode_affect["target_scope_type"],

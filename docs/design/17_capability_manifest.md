@@ -80,8 +80,9 @@ inspection には運用確認に必要な binding 要約を出すが、token、c
 ## Manifest 例
 
 `vision.capture` の manifest は次の形を基準にする。
-現行の concrete capability は `vision.capture` と `external.status` であり、後者は短い外部状態要約を result として返す。
-現行では両 capability とも、optional な `client_context.body_state_summary / device_state_summary / schedule_summary` を inspection_fields 経由で短い観測要約へ投影する。
+現行の concrete capability は `vision.capture`、`external.status`、`schedule.status` である。
+`external.status` は短い外部状態要約を result として返し、`schedule.status` は短い予定要約と deterministic な schedule slot を result として返す。
+現行では各 capability の `client_context.body_state_summary / device_state_summary / schedule_summary` と `schedule.status.schedule_slots` を inspection_fields 経由で短い観測要約へ投影する。
 
 ```json
 {

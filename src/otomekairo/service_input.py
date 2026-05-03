@@ -86,6 +86,7 @@ WORLD_STATE_TTL_SECONDS_BY_TYPE = {
         "summary_text": {"short": 900, "medium": 2400, "long": 7200},
     },
     "schedule": {
+        "capability_result.schedule_slots": {"short": 3600, "medium": 10800, "long": 21600},
         "capability_result.client_context.schedule_slots": {"short": 3600, "medium": 10800, "long": 21600},
         "client_context.schedule_slots": {"short": 2400, "medium": 7200, "long": 18000},
         "capability_result.schedule_summary": {"short": 1800, "medium": 5400, "long": 14400},
@@ -2949,6 +2950,7 @@ class ServiceInputMixin:
         observation_text = None
         schedule_slots = self._build_world_state_schedule_slots(
             client_context=client_context,
+            observation_summary=observation_summary,
             source_kind=source_kind,
         )
         if client_summary_text is not None:
@@ -2980,6 +2982,9 @@ class ServiceInputMixin:
             payload["summary_source_hint"] = self._world_state_client_context_summary_source(
                 source_kind=source_kind,
                 field_name="schedule_slots",
+                from_observation=isinstance(observation_summary, dict)
+                and isinstance(observation_summary.get("schedule_slots"), list)
+                and bool(observation_summary.get("schedule_slots")),
             )
         if schedule_slots:
             payload["schedule_slots"] = schedule_slots
@@ -2996,9 +3001,17 @@ class ServiceInputMixin:
         self,
         *,
         client_context: dict[str, Any],
+        observation_summary: dict[str, Any] | None,
         source_kind: str,
     ) -> list[dict[str, Any]]:
-        raw_slots = client_context.get("schedule_slots")
+        raw_slots: Any = None
+        from_observation = False
+        if isinstance(observation_summary, dict):
+            raw_slots = observation_summary.get("schedule_slots")
+            from_observation = isinstance(raw_slots, list)
+        if not isinstance(raw_slots, list):
+            raw_slots = client_context.get("schedule_slots")
+            from_observation = False
         if not isinstance(raw_slots, list):
             return []
         normalized_slots: list[dict[str, Any]] = []
@@ -3006,6 +3019,7 @@ class ServiceInputMixin:
         summary_source = self._world_state_client_context_summary_source(
             source_kind=source_kind,
             field_name="schedule_slots",
+            from_observation=from_observation,
         )
         for item in raw_slots:
             if not isinstance(item, dict):
@@ -3053,7 +3067,15 @@ class ServiceInputMixin:
             return None
         return payload
 
-    def _world_state_client_context_summary_source(self, *, source_kind: str, field_name: str) -> str:
+    def _world_state_client_context_summary_source(
+        self,
+        *,
+        source_kind: str,
+        field_name: str,
+        from_observation: bool = False,
+    ) -> str:
+        if source_kind == "capability_result" and from_observation:
+            return f"capability_result.{field_name}"
         if source_kind == "capability_result":
             return f"capability_result.client_context.{field_name}"
         return f"client_context.{field_name}"
@@ -3076,6 +3098,7 @@ class ServiceInputMixin:
             "body_state_summary",
             "device_state_summary",
             "schedule_summary",
+            "schedule_slots",
             "error",
         ):
             value = observation_summary.get(key)
@@ -3474,10 +3497,14 @@ class ServiceInputMixin:
         source_kind: str,
         schedule_slot: dict[str, Any],
     ) -> dict[str, Any] | None:
-        summary_source = self._world_state_client_context_summary_source(
-            source_kind=source_kind,
-            field_name="schedule_slots",
-        )
+        raw_summary_source = schedule_slot.get("summary_source")
+        if isinstance(raw_summary_source, str) and raw_summary_source.strip():
+            summary_source = raw_summary_source.strip()
+        else:
+            summary_source = self._world_state_client_context_summary_source(
+                source_kind=source_kind,
+                field_name="schedule_slots",
+            )
         ttl_table = WORLD_STATE_TTL_SECONDS_BY_TYPE["schedule"].get(summary_source)
         if ttl_table is None:
             raise ValueError("world_state schedule slot ttl is invalid.")
