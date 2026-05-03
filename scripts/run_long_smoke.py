@@ -526,6 +526,7 @@ class LongSmokeRunner:
             self._exercise_capture_empty_result()
             self._exercise_multiple_client_boundary()
             self._exercise_external_status_followup()
+            self._exercise_schedule_status_followup()
             self._run_conversations()
             self._wait_for_memory_jobs_to_drain()
             summary = self._collect_summary()
@@ -1692,7 +1693,7 @@ class LongSmokeRunner:
         calendar_status_text = f"{calendar_marker}: カレンダーに 30 分後の予定がある。"
         self._run_external_status_probe(
             marker=calendar_marker,
-            conversation_text=f"カレンダーの状態を確認して教えて。{calendar_marker}",
+            conversation_text=f"calendar service の状態を確認して教えて。{calendar_marker}",
             source="long_smoke_calendar_status_probe",
             client_id="long-smoke-calendar-status-probe",
             active_app="LongSmokeCalendarStatusProbe",
@@ -1722,6 +1723,45 @@ class LongSmokeRunner:
         self.external_status_probe_verified = True
         log(
             "external.status followup confirmed"
+            f" conversation_cycle_id={conversation_cycle_id}"
+            f" followup_cycle_id={followup_cycle_id}"
+        )
+
+    def _exercise_schedule_status_followup(self) -> None:
+        marker = "LongSmokeScheduleStatusProbeMarker"
+        schedule_summary = f"{marker}: 45 分後に long smoke の予定確認がある。"
+        conversation_trace, followup_trace = self._run_schedule_status_probe(
+            marker=marker,
+            conversation_text=f"このあとの予定を確認して教えて。{marker}",
+            source="long_smoke_schedule_status_probe",
+            client_id="long-smoke-schedule-status-probe",
+            active_app="LongSmokeScheduleStatusProbe",
+            window_title=marker,
+            override={
+                "schedule_summary": schedule_summary,
+                "schedule_slots": [
+                    {
+                        "slot_key": "long-smoke-schedule",
+                        "summary_text": schedule_summary,
+                    }
+                ],
+                "client_context": {
+                    "body_state_summary": "少し肩に疲れがある。",
+                    "device_state_summary": "schedule.status を返せる desktop client が接続中。",
+                },
+            },
+        )
+        conversation_cycle_id = conversation_trace.get("cycle_id")
+        if not isinstance(conversation_cycle_id, str) or not conversation_cycle_id:
+            raise SmokeError("schedule.status probe conversation cycle_id was not recorded.")
+        self.schedule_status_probe_conversation_cycle_id = conversation_cycle_id
+        followup_cycle_id = followup_trace.get("cycle_id")
+        if not isinstance(followup_cycle_id, str) or not followup_cycle_id:
+            raise SmokeError("schedule.status follow-up cycle_id was not recorded.")
+        self.schedule_status_probe_followup_cycle_id = followup_cycle_id
+        self.schedule_status_probe_verified = True
+        log(
+            "schedule.status followup confirmed"
             f" conversation_cycle_id={conversation_cycle_id}"
             f" followup_cycle_id={followup_cycle_id}"
         )
@@ -2031,6 +2071,19 @@ class LongSmokeRunner:
             external_status_probe_followup_trace = self.api.get(
                 f"/api/inspection/cycles/{self.external_status_probe_followup_cycle_id}"
             )
+        schedule_status_probe_conversation_trace = None
+        if (
+            isinstance(self.schedule_status_probe_conversation_cycle_id, str)
+            and self.schedule_status_probe_conversation_cycle_id
+        ):
+            schedule_status_probe_conversation_trace = self.api.get(
+                f"/api/inspection/cycles/{self.schedule_status_probe_conversation_cycle_id}"
+            )
+        schedule_status_probe_followup_trace = None
+        if isinstance(self.schedule_status_probe_followup_cycle_id, str) and self.schedule_status_probe_followup_cycle_id:
+            schedule_status_probe_followup_trace = self.api.get(
+                f"/api/inspection/cycles/{self.schedule_status_probe_followup_cycle_id}"
+            )
         capability_result_traces: list[dict[str, Any]] = []
         for cycle_summary in cycle_summaries:
             if not isinstance(cycle_summary, dict):
@@ -2080,6 +2133,10 @@ class LongSmokeRunner:
             "external_status_response_count": self.external_status_response_count,
             "external_status_request_ids": self.external_status_request_ids,
             "external_status_followup_verified_request_ids": self.external_status_followup_verified_request_ids,
+            "schedule_status_request_count": self.schedule_status_request_count,
+            "schedule_status_response_count": self.schedule_status_response_count,
+            "schedule_status_request_ids": self.schedule_status_request_ids,
+            "schedule_status_followup_verified_request_ids": self.schedule_status_followup_verified_request_ids,
             "desktop_watch_event_count": self.desktop_watch_event_count,
             "capture_timeout_request_ids": self.capture_timeout_request_ids,
             "capture_timeout_failure_cycle_ids": self.capture_timeout_failure_cycle_ids,
@@ -2104,12 +2161,17 @@ class LongSmokeRunner:
             "external_status_probe_conversation_cycle_id": self.external_status_probe_conversation_cycle_id,
             "external_status_probe_followup_cycle_id": self.external_status_probe_followup_cycle_id,
             "external_status_probe_verified": self.external_status_probe_verified,
+            "schedule_status_probe_conversation_cycle_id": self.schedule_status_probe_conversation_cycle_id,
+            "schedule_status_probe_followup_cycle_id": self.schedule_status_probe_followup_cycle_id,
+            "schedule_status_probe_verified": self.schedule_status_probe_verified,
             "external_status_multi_service_verified": self.external_status_multi_service_verified,
             "external_status_persisted_integration_keys": self.external_status_persisted_integration_keys,
             "desktop_watch_capability_probe_trace": desktop_watch_capability_probe_trace,
             "desktop_watch_pending_intent_probe_trace": desktop_watch_pending_intent_probe_trace,
             "external_status_probe_conversation_trace": external_status_probe_conversation_trace,
             "external_status_probe_followup_trace": external_status_probe_followup_trace,
+            "schedule_status_probe_conversation_trace": schedule_status_probe_conversation_trace,
+            "schedule_status_probe_followup_trace": schedule_status_probe_followup_trace,
             "conversation_traces": conversation_traces,
             "restart_probe_traces": restart_probe_traces,
             "capability_result_traces": capability_result_traces,
@@ -2128,6 +2190,7 @@ class LongSmokeRunner:
         active_ongoing_actions = self._list_active_ongoing_actions()
         stale_world_states = self._list_stale_world_states()
         followed_request_ids: set[str] = set(self.external_status_followup_verified_request_ids)
+        followed_request_ids.update(self.schedule_status_followup_verified_request_ids)
         for trace in capability_result_traces:
             followup_summary = ((trace.get("result_trace") or {}).get("capability_result_followup_summary"))
             if not isinstance(followup_summary, dict):
@@ -2140,7 +2203,7 @@ class LongSmokeRunner:
                 followed_request_ids.add(request_id)
         capability_followup_missing_request_ids = [
             request_id
-            for request_id in self.external_status_request_ids
+            for request_id in [*self.external_status_request_ids, *self.schedule_status_request_ids]
             if request_id not in followed_request_ids
         ]
         return {
@@ -2501,6 +2564,8 @@ class LongSmokeRunner:
             raise SmokeError("no vision.capture_request event was received.")
         if summary["external_status_request_count"] < 1:
             raise SmokeError("no external.status_request event was received.")
+        if summary["schedule_status_request_count"] < 1:
+            raise SmokeError("no schedule.status_request event was received.")
         expected_responses = summary["capture_request_count"] - len(summary["capture_timeout_request_ids"])
         server_log_capture_response_count = summary.get("server_log_capture_response_count")
         if not isinstance(server_log_capture_response_count, int):
@@ -2509,6 +2574,8 @@ class LongSmokeRunner:
             raise SmokeError("capture request / response counts did not match the injected timeout count.")
         if summary["external_status_response_count"] != summary["external_status_request_count"]:
             raise SmokeError("external.status request / response counts did not match.")
+        if summary["schedule_status_response_count"] != summary["schedule_status_request_count"]:
+            raise SmokeError("schedule.status request / response counts did not match.")
         recorded_timeout_failure_cycle_ids = summary.get("capture_timeout_failure_cycle_ids", [])
         if not isinstance(recorded_timeout_failure_cycle_ids, list):
             raise SmokeError("capture_timeout_failure_cycle_ids was invalid.")
@@ -2567,6 +2634,8 @@ class LongSmokeRunner:
             raise SmokeError("desktop_watch pending_intent probe persisted integration_key was not recorded.")
         if not summary["external_status_probe_verified"]:
             raise SmokeError("external.status follow-up boundary was not verified.")
+        if not summary["schedule_status_probe_verified"]:
+            raise SmokeError("schedule.status follow-up boundary was not verified.")
         if not summary["external_status_multi_service_verified"]:
             raise SmokeError("external.status multi-service integration boundary was not verified.")
         if int(soak_observability.get("active_ongoing_action_count", 0)) != 0:
@@ -2596,6 +2665,10 @@ class LongSmokeRunner:
         self._assert_external_status_probe_trace(
             summary.get("external_status_probe_conversation_trace"),
             summary.get("external_status_probe_followup_trace"),
+        )
+        self._assert_schedule_status_probe_trace(
+            summary.get("schedule_status_probe_conversation_trace"),
+            summary.get("schedule_status_probe_followup_trace"),
         )
 
         for trace in summary["conversation_traces"]:
@@ -2899,6 +2972,121 @@ class LongSmokeRunner:
             raise SmokeError("external.status probe follow-up reason_code was invalid.")
         if transition_summary.get("final_state") != "completed":
             raise SmokeError("external.status probe follow-up final_state was invalid.")
+
+    def _assert_schedule_status_probe_trace(
+        self,
+        conversation_trace: Any,
+        followup_trace: Any,
+    ) -> None:
+        if not isinstance(conversation_trace, dict):
+            raise SmokeError("schedule.status probe conversation trace was not collected.")
+        if not isinstance(followup_trace, dict):
+            raise SmokeError("schedule.status probe follow-up trace was not collected.")
+
+        result_trace = conversation_trace.get("result_trace", {})
+        if not isinstance(result_trace, dict):
+            raise SmokeError("schedule.status probe conversation result_trace was invalid.")
+        capability_request_summary = result_trace.get("capability_request_summary", {})
+        if not isinstance(capability_request_summary, dict):
+            raise SmokeError("schedule.status probe conversation capability_request_summary was invalid.")
+        if capability_request_summary.get("capability_id") != "schedule.status":
+            raise SmokeError("schedule.status probe conversation capability_id was invalid.")
+        if capability_request_summary.get("status") != "dispatched":
+            raise SmokeError("schedule.status probe conversation capability_request status was invalid.")
+        request_id = capability_request_summary.get("request_id")
+        if not isinstance(request_id, str) or not request_id:
+            raise SmokeError("schedule.status probe conversation request_id was not recorded.")
+
+        followup_cycle_summary = followup_trace.get("cycle_summary", {})
+        if not isinstance(followup_cycle_summary, dict):
+            raise SmokeError("schedule.status probe follow-up cycle_summary was invalid.")
+        if followup_cycle_summary.get("trigger_kind") != "capability_result":
+            raise SmokeError("schedule.status probe follow-up trigger_kind was invalid.")
+        if followup_cycle_summary.get("result_kind") != "reply":
+            raise SmokeError("schedule.status probe follow-up result_kind was invalid.")
+        input_trace = followup_trace.get("input_trace", {})
+        if not isinstance(input_trace, dict):
+            raise SmokeError("schedule.status probe follow-up input_trace was invalid.")
+        observation_summary = input_trace.get("observation_summary", {})
+        if not isinstance(observation_summary, dict):
+            raise SmokeError("schedule.status probe follow-up observation_summary was invalid.")
+        if observation_summary.get("capability_id") != "schedule.status":
+            raise SmokeError("schedule.status probe follow-up observation capability_id was invalid.")
+        schedule_summary = observation_summary.get("schedule_summary")
+        if not isinstance(schedule_summary, str) or "LongSmokeScheduleStatusProbeMarker" not in schedule_summary:
+            raise SmokeError("schedule.status probe follow-up schedule_summary was invalid.")
+        schedule_slots = observation_summary.get("schedule_slots")
+        if not isinstance(schedule_slots, list) or not schedule_slots:
+            raise SmokeError("schedule.status probe follow-up schedule_slots were invalid.")
+
+        world_state_trace = followup_trace.get("world_state_trace", {})
+        if not isinstance(world_state_trace, dict):
+            raise SmokeError("schedule.status probe follow-up world_state_trace was invalid.")
+        source_pack_contexts = world_state_trace.get("source_pack_contexts", {})
+        if not isinstance(source_pack_contexts, dict):
+            raise SmokeError("schedule.status probe follow-up source_pack_contexts was invalid.")
+        schedule_context = source_pack_contexts.get("schedule_context", {})
+        if not isinstance(schedule_context, dict):
+            raise SmokeError("schedule.status probe follow-up schedule_context was invalid.")
+        context_slots = schedule_context.get("schedule_slots")
+        if not isinstance(context_slots, list) or not context_slots:
+            raise SmokeError("schedule.status probe follow-up schedule_context.schedule_slots was invalid.")
+        if context_slots[0].get("summary_source") != "capability_result.schedule_slots":
+            raise SmokeError("schedule.status probe follow-up slot summary_source was invalid.")
+        state_type_hooks = world_state_trace.get("source_pack_state_type_hooks", {})
+        if not isinstance(state_type_hooks, dict):
+            raise SmokeError("schedule.status probe follow-up source_pack_state_type_hooks was invalid.")
+        schedule_hook = state_type_hooks.get("schedule", {})
+        if not isinstance(schedule_hook, dict):
+            raise SmokeError("schedule.status probe follow-up schedule hook was invalid.")
+        if schedule_hook.get("capability_id") != "schedule.status":
+            raise SmokeError("schedule.status probe follow-up schedule hook capability_id was invalid.")
+        if schedule_hook.get("summary_source") != "capability_result.schedule_summary":
+            raise SmokeError("schedule.status probe follow-up schedule hook summary_source was invalid.")
+        if schedule_hook.get("real_schedule_slot_count") != 1:
+            raise SmokeError("schedule.status probe follow-up schedule hook slot count was invalid.")
+
+        normalized_candidate_policies = world_state_trace.get("normalized_candidate_policies", [])
+        if not isinstance(normalized_candidate_policies, list):
+            raise SmokeError("schedule.status probe follow-up normalized_candidate_policies was invalid.")
+        slot_policy = next(
+            (
+                item
+                for item in normalized_candidate_policies
+                if isinstance(item, dict) and item.get("integration_key") == "schedule:long-smoke-schedule"
+            ),
+            None,
+        )
+        if not isinstance(slot_policy, dict):
+            raise SmokeError("schedule.status probe follow-up schedule slot policy was invalid.")
+        if slot_policy.get("integration_mode") != "schedule_slot":
+            raise SmokeError("schedule.status probe follow-up schedule slot integration_mode was invalid.")
+        if slot_policy.get("summary_source") != "capability_result.schedule_slots":
+            raise SmokeError("schedule.status probe follow-up schedule slot summary_source was invalid.")
+        if slot_policy.get("effective_ttl_seconds") != 10800:
+            raise SmokeError("schedule.status probe follow-up schedule slot TTL was invalid.")
+
+        followup_result_trace = followup_trace.get("result_trace", {})
+        if not isinstance(followup_result_trace, dict):
+            raise SmokeError("schedule.status probe follow-up result_trace was invalid.")
+        capability_result_followup_summary = followup_result_trace.get("capability_result_followup_summary", {})
+        if not isinstance(capability_result_followup_summary, dict):
+            raise SmokeError("schedule.status probe follow-up summary was invalid.")
+        if capability_result_followup_summary.get("capability_id") != "schedule.status":
+            raise SmokeError("schedule.status probe follow-up summary capability_id was invalid.")
+        source_request_summary = capability_result_followup_summary.get("source_request_summary", {})
+        if not isinstance(source_request_summary, dict) or source_request_summary.get("request_id") != request_id:
+            raise SmokeError("schedule.status probe follow-up source_request_summary was invalid.")
+        followup_result_summary = capability_result_followup_summary.get("followup_result_summary", {})
+        if not isinstance(followup_result_summary, dict) or followup_result_summary.get("result_kind") != "reply":
+            raise SmokeError("schedule.status probe follow-up result summary was invalid.")
+        transition_summary = capability_result_followup_summary.get("transition_summary", {})
+        if not isinstance(transition_summary, dict):
+            raise SmokeError("schedule.status probe follow-up transition summary was invalid.")
+        if transition_summary.get("reason_code") != "followup_reply":
+            raise SmokeError("schedule.status probe follow-up reason_code was invalid.")
+        if transition_summary.get("final_state") != "completed":
+            raise SmokeError("schedule.status probe follow-up final_state was invalid.")
 
     def _is_expected_capture_timeout_failure_trace(self, trace: Any) -> bool:
         if not isinstance(trace, dict):

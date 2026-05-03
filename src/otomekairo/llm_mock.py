@@ -283,6 +283,22 @@ class MockLLMClient:
                     },
                 },
             }
+        elif self._should_mock_schedule_status_request(
+            normalized=normalized,
+            ongoing_action_summary=ongoing_action_summary,
+            capability_decision_view=capability_decision_view,
+        ):
+            payload = {
+                "kind": "capability_request",
+                "reason_code": "capability:schedule.status",
+                "reason_summary": "近い予定やカレンダー状態を確認する必要がある。",
+                "requires_confirmation": False,
+                "pending_intent": None,
+                "capability_request": {
+                    "capability_id": "schedule.status",
+                    "input": self._mock_schedule_status_input(normalized),
+                },
+            }
         elif self._should_mock_external_status_request(
             normalized=normalized,
             ongoing_action_summary=ongoing_action_summary,
@@ -700,6 +716,47 @@ class MockLLMClient:
             "知りたい",
         )
         return any(marker in normalized for marker in action_markers)
+
+    def _should_mock_schedule_status_request(
+        self,
+        *,
+        normalized: str,
+        ongoing_action_summary: dict[str, Any] | None,
+        capability_decision_view: list[dict[str, Any]] | None,
+    ) -> bool:
+        if isinstance(ongoing_action_summary, dict):
+            status = str(ongoing_action_summary.get("status") or "").strip()
+            if status in {"active", "waiting_result"}:
+                return False
+        if normalized.startswith("capability result を受信"):
+            return False
+        if not self._mock_capability_available(capability_decision_view, "schedule.status"):
+            return False
+        schedule_markers = (
+            "予定",
+            "カレンダー",
+            "スケジュール",
+            "このあと",
+            "今日",
+            "近日",
+        )
+        action_markers = (
+            "確認",
+            "教えて",
+            "見て",
+            "チェック",
+            "知りたい",
+        )
+        return any(marker in normalized for marker in schedule_markers) and any(
+            marker in normalized for marker in action_markers
+        )
+
+    def _mock_schedule_status_input(self, normalized: str) -> dict[str, str]:
+        if "今日" in normalized:
+            return {"range": "today"}
+        if "このあと" in normalized:
+            return {"range": "upcoming"}
+        return {"range": "near_future"}
 
     def _mock_external_status_input(self, normalized: str) -> dict[str, str]:
         service = self._mock_external_status_service(normalized)
