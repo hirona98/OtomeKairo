@@ -20,6 +20,7 @@ from otomekairo.llm_mock import MockLLMClient
 from otomekairo.llm_parsing import parse_json_object, parse_recall_hint_payload
 from otomekairo.llm_prompts import (
     build_decision_messages,
+    build_decision_repair_prompt,
     build_event_evidence_messages,
     build_event_evidence_repair_prompt,
     build_memory_interpretation_messages,
@@ -184,15 +185,14 @@ class LLMClient:
                 recall_pack=recall_pack,
             )
 
-            # 補完
-            debug_log("LLM", f"{operation} request messages={len(messages)}")
-            self._debug_messages_preview(operation=operation, attempt=1, messages=messages)
-            content = complete_text(role_definition=role_definition, messages=messages)
-            self._debug_response_preview(operation=operation, attempt=1, content=content)
-            payload = parse_json_object(content)
-            validate_decision_contract(payload)
-            debug_log("LLM", f"{operation} done response_chars={len(content)} kind={payload.get('kind')}")
-            return payload
+            return self._generate_structured_payload(
+                role_definition=role_definition,
+                messages=messages,
+                validator=validate_decision_contract,
+                repair_prompt_builder=build_decision_repair_prompt,
+                failure_message="Decision の生成に失敗しました。解析可能な応答が得られませんでした。",
+                operation=operation,
+            )
         except Exception as exc:
             debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc)}")
             raise

@@ -83,6 +83,17 @@ OtomeKairo は、HTTPS API サーバとして bootstrap、観測、設定、insp
 
 通常は `CocoroConsole` の設定画面からこれらを編集する。詳細は `docs/design/07_設定モデル.md` と `docs/design/10_モデルプリセット詳細.md` を参照する。
 
+## 実 LLM smoke
+
+保存済みの `var/otomekairo/server_state.json` に実 LLM 用の API key が入っている場合、隔離データディレクトリへ model/memory 設定だけをコピーして、短い実 LLM smoke を実行できる。
+
+```bash
+.venv/bin/python scripts/run_long_smoke.py --profile real-llm-smoke --keep-artifacts
+```
+
+この profile は通常会話 1 回、`external.status` の capability request / result follow-up 1 回、memory postprocess drain を確認する。
+full smoke と違い、`wake` と `desktop_watch` は無効化する。
+
 ## VSCode から起動
 
 VSCode では `F5` で `OtomeKairo: Debug Server` を起動できる。

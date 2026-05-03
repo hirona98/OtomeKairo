@@ -19,6 +19,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -36,8 +37,29 @@ WAIT_RESTART_PENDING_TIMEOUT_SECONDS = 8.0
 WAIT_DESKTOP_WATCH_PROBE_TIMEOUT_SECONDS = 20.0
 WAIT_PENDING_INTENT_SEED_TIMEOUT_SECONDS = 20.0
 WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS = 20.0
+DEFAULT_REQUEST_TIMEOUT_SECONDS = 10.0
+REAL_LLM_REQUEST_TIMEOUT_SECONDS = 120.0
 
 PROFILE_DEFAULTS: dict[str, dict[str, int | float]] = {
+    "real-llm-smoke": {
+        "run_seconds": 0,
+        "conversation_interval_seconds": 999.0,
+        "desktop_watch_interval_seconds": 60,
+        "wake_interval_seconds": 3600,
+        "min_conversation_cycles": 1,
+        "capture_timeout_failures": 0,
+        "capture_empty_result_failures": 0,
+        "capture_mismatch_failures": 0,
+        "capture_invalid_images_failures": 0,
+        "capture_invalid_error_failures": 0,
+        "capture_unknown_request_failures": 0,
+        "restart_burst_conversations": 0,
+        "multiple_client_pause_seconds": 0.0,
+        "status_log_interval_seconds": 5.0,
+        "inspection_cycle_summary_limit": 120,
+        "max_memory_job_lag_seconds": 120.0,
+        "request_timeout_seconds": REAL_LLM_REQUEST_TIMEOUT_SECONDS,
+    },
     "smoke": {
         "run_seconds": 75,
         "conversation_interval_seconds": 6.0,
@@ -55,6 +77,7 @@ PROFILE_DEFAULTS: dict[str, dict[str, int | float]] = {
         "status_log_interval_seconds": 5.0,
         "inspection_cycle_summary_limit": 240,
         "max_memory_job_lag_seconds": 120.0,
+        "request_timeout_seconds": DEFAULT_REQUEST_TIMEOUT_SECONDS,
     },
     "short-soak": {
         "run_seconds": 1800,
@@ -73,6 +96,7 @@ PROFILE_DEFAULTS: dict[str, dict[str, int | float]] = {
         "status_log_interval_seconds": 30.0,
         "inspection_cycle_summary_limit": 1200,
         "max_memory_job_lag_seconds": 300.0,
+        "request_timeout_seconds": DEFAULT_REQUEST_TIMEOUT_SECONDS,
     },
     "long-soak": {
         "run_seconds": 21600,
@@ -91,6 +115,7 @@ PROFILE_DEFAULTS: dict[str, dict[str, int | float]] = {
         "status_log_interval_seconds": 120.0,
         "inspection_cycle_summary_limit": 5000,
         "max_memory_job_lag_seconds": 1800.0,
+        "request_timeout_seconds": DEFAULT_REQUEST_TIMEOUT_SECONDS,
     },
 }
 
@@ -104,9 +129,10 @@ def log(message: str) -> None:
 
 
 class JsonApiClient:
-    def __init__(self, *, host: str, port: int) -> None:
+    def __init__(self, *, host: str, port: int, request_timeout_seconds: float = DEFAULT_REQUEST_TIMEOUT_SECONDS) -> None:
         self.base_url = f"https://{host}:{port}"
         self.token: str | None = None
+        self.request_timeout_seconds = request_timeout_seconds
         self.ssl_context = ssl.create_default_context()
         self.ssl_context.check_hostname = False
         self.ssl_context.verify_mode = ssl.CERT_NONE
@@ -189,7 +215,7 @@ class JsonApiClient:
         raw_body: str
         status_code: int
         try:
-            with urllib.request.urlopen(request, context=self.ssl_context, timeout=10.0) as response:
+            with urllib.request.urlopen(request, context=self.ssl_context, timeout=self.request_timeout_seconds) as response:
                 status_code = int(response.getcode())
                 raw_body = response.read().decode("utf-8")
         except urllib.error.HTTPError as exc:
@@ -405,10 +431,17 @@ class LongSmokeRunner:
         self.key_file = artifact_dir / "key.pem"
         self.server_log_path = artifact_dir / "server.log"
         self.summary_path = artifact_dir / "summary.json"
-        self.api = JsonApiClient(host=self.host, port=self.port)
+        self.api = JsonApiClient(
+            host=self.host,
+            port=self.port,
+            request_timeout_seconds=float(args.request_timeout_seconds),
+        )
         self.server_process: subprocess.Popen[str] | None = None
         self.server_log_handle: Any | None = None
         self.seed_data_dir: Path | None = args.seed_data_dir.resolve() if args.seed_data_dir is not None else None
+        self.real_llm_config_data_dir: Path | None = (
+            args.real_llm_config_data_dir.resolve() if args.real_llm_config_data_dir is not None else None
+        )
         self.event_client: SimpleWebSocketClient | None = None
         self.secondary_event_client: SimpleWebSocketClient | None = None
         self.capture_request_count = 0
@@ -475,6 +508,8 @@ class LongSmokeRunner:
             self._wait_server_ready()
             self._bootstrap()
             self._configure_editor_state()
+            if self.args.profile == "real-llm-smoke":
+                return self._run_real_llm_smoke()
             self._connect_desktop_client()
             self._exercise_capture_timeout_recovery()
             self._run_restart_probe()
@@ -635,21 +670,30 @@ class LongSmokeRunner:
                 embedding["model"] = "mock-embedding"
                 embedding["api_key"] = ""
         else:
+            if self.args.profile == "real-llm-smoke":
+                self._apply_real_llm_config(editor_state)
             self._assert_current_editor_state_ready(editor_state)
 
-        current["wake_policy"] = {
-            "mode": "interval",
-            "interval_seconds": self.args.wake_interval_seconds,
-        }
-        current["desktop_watch"] = {
-            "enabled": True,
-            "interval_seconds": self.args.desktop_watch_interval_seconds,
-        }
+        if self.args.profile == "real-llm-smoke":
+            current["wake_policy"] = {"mode": "disabled"}
+            current["desktop_watch"] = {
+                "enabled": False,
+                "interval_seconds": self.args.desktop_watch_interval_seconds,
+            }
+        else:
+            current["wake_policy"] = {
+                "mode": "interval",
+                "interval_seconds": self.args.wake_interval_seconds,
+            }
+            current["desktop_watch"] = {
+                "enabled": True,
+                "interval_seconds": self.args.desktop_watch_interval_seconds,
+            }
         self.api.put("/api/config/editor-state", editor_state)
 
         status = self._get_status()
         runtime_summary = status["runtime_summary"]
-        if not runtime_summary.get("wake_scheduler_active"):
+        if self.args.profile != "real-llm-smoke" and not runtime_summary.get("wake_scheduler_active"):
             raise SmokeError("wake scheduler did not become active after editor-state update.")
         if not runtime_summary.get("memory_job_worker_active"):
             raise SmokeError("memory worker is not active after server startup.")
@@ -660,6 +704,68 @@ class LongSmokeRunner:
             f" selected_model_preset_id={self.selected_model_preset_id}"
             f" selected_memory_set_id={self.selected_memory_set_id}"
         )
+
+    def _apply_real_llm_config(self, editor_state: dict[str, Any]) -> None:
+        config_data_dir = self.real_llm_config_data_dir
+        if config_data_dir is None:
+            config_data_dir = self.repo_root / "var" / "otomekairo"
+        state_path = config_data_dir / "server_state.json"
+        if not state_path.exists():
+            raise SmokeError(f"real LLM config state was not found: {state_path}")
+
+        try:
+            source_state = json.loads(state_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise SmokeError(f"real LLM config state was invalid JSON: {state_path}") from exc
+
+        source_model_preset_id = source_state.get("selected_model_preset_id")
+        source_memory_set_id = source_state.get("selected_memory_set_id")
+        source_model_presets = source_state.get("model_presets")
+        source_memory_sets = source_state.get("memory_sets")
+        if not isinstance(source_model_preset_id, str) or not isinstance(source_memory_set_id, str):
+            raise SmokeError("real LLM config state does not have selected model/memory ids.")
+        if not isinstance(source_model_presets, dict) or not isinstance(source_memory_sets, dict):
+            raise SmokeError("real LLM config state does not have model_presets or memory_sets.")
+        source_model_preset = source_model_presets.get(source_model_preset_id)
+        source_memory_set = source_memory_sets.get(source_memory_set_id)
+        if not isinstance(source_model_preset, dict) or not isinstance(source_memory_set, dict):
+            raise SmokeError("real LLM config state selected model/memory definitions were not found.")
+
+        current = editor_state["current"]
+        current["wake_policy"] = {"mode": "disabled"}
+        current["desktop_watch"] = {"enabled": False, "interval_seconds": self.args.desktop_watch_interval_seconds}
+
+        for model_preset in editor_state["model_presets"]:
+            if model_preset.get("model_preset_id") != self.selected_model_preset_id:
+                continue
+            if isinstance(source_model_preset.get("display_name"), str):
+                model_preset["display_name"] = source_model_preset["display_name"]
+            if isinstance(source_model_preset.get("prompt_window"), dict):
+                model_preset["prompt_window"] = deepcopy(source_model_preset["prompt_window"])
+            source_roles = source_model_preset.get("roles")
+            if not isinstance(source_roles, dict):
+                raise SmokeError("real LLM config selected model preset has invalid roles.")
+            for role_name, role_definition in model_preset["roles"].items():
+                source_role = source_roles.get(role_name)
+                if not isinstance(source_role, dict):
+                    raise SmokeError(f"real LLM config selected model preset is missing role: {role_name}")
+                role_definition.update(deepcopy(source_role))
+            break
+        else:
+            raise SmokeError("current editor-state selected model preset was not found.")
+
+        for memory_set in editor_state["memory_sets"]:
+            if memory_set.get("memory_set_id") != self.selected_memory_set_id:
+                continue
+            source_embedding = source_memory_set.get("embedding")
+            if not isinstance(source_embedding, dict):
+                raise SmokeError("real LLM config selected memory set has invalid embedding.")
+            memory_set["embedding"].update(deepcopy(source_embedding))
+            break
+        else:
+            raise SmokeError("current editor-state selected memory set was not found.")
+
+        log(f"real LLM config copied from {state_path}")
 
     def _assert_current_editor_state_ready(self, editor_state: dict[str, Any]) -> None:
         selected_model_preset_id = self.selected_model_preset_id
@@ -1590,6 +1696,90 @@ class LongSmokeRunner:
             time.sleep(0.5)
         raise SmokeError("memory postprocess queue did not drain within the timeout.")
 
+    def _wait_for_cycle_memory_to_finish(self, cycle_id: str) -> dict[str, Any]:
+        deadline = time.monotonic() + max(WAIT_QUEUE_DRAIN_TIMEOUT_SECONDS, self.api.request_timeout_seconds)
+        last_trace: dict[str, Any] | None = None
+        while time.monotonic() < deadline:
+            self._assert_server_running()
+            self._assert_event_clients_healthy()
+            trace = self.api.get(f"/api/inspection/cycles/{cycle_id}")
+            last_trace = trace
+            memory_trace = trace.get("memory_trace", {})
+            if isinstance(memory_trace, dict):
+                status = memory_trace.get("turn_consolidation_status")
+                if isinstance(status, str) and status != "pending":
+                    return trace
+            time.sleep(0.5)
+        raise SmokeError(f"cycle memory did not finish: cycle_id={cycle_id} trace={last_trace}")
+
+    def _run_real_llm_smoke(self) -> dict[str, Any]:
+        self._connect_desktop_client()
+
+        conversation_cycle_id = self._post_conversation(
+            text="こんにちは。サーバ経由の実LLM動作確認です。短く返してね。",
+            source="real_llm_smoke_conversation",
+            client_id="real-llm-smoke-conversation",
+            active_app="RealLLMSmoke",
+            window_title="Real LLM smoke conversation",
+        )
+        conversation_trace = self._wait_for_cycle_memory_to_finish(conversation_cycle_id)
+
+        marker = "RealLLMExternalStatusProbeMarker"
+        status_text = f"{marker}: GitHub の未確認レビューが 1 件ある。"
+        capability_conversation_trace, followup_trace = self._run_external_status_probe(
+            marker=marker,
+            conversation_text=f"GitHub の通知の状態を確認して教えて。{marker}",
+            source="real_llm_smoke_external_status",
+            client_id="real-llm-smoke-external-status",
+            active_app="RealLLMSmokeExternalStatus",
+            window_title=marker,
+            override={
+                "status_text": status_text,
+                "client_context": {
+                    "external_service_summary": status_text,
+                    "body_state_summary": "少し肩に疲れがある。",
+                    "device_state_summary": "external.status を返せる desktop client が接続中。",
+                    "schedule_summary": "GitHub の通知確認をこのまま進められる。",
+                },
+            },
+        )
+        capability_conversation_cycle_id = capability_conversation_trace.get("cycle_id")
+        followup_cycle_id = followup_trace.get("cycle_id")
+        if not isinstance(capability_conversation_cycle_id, str) or not capability_conversation_cycle_id:
+            raise SmokeError("real-llm-smoke external.status conversation cycle_id was not recorded.")
+        if not isinstance(followup_cycle_id, str) or not followup_cycle_id:
+            raise SmokeError("real-llm-smoke external.status follow-up cycle_id was not recorded.")
+
+        capability_conversation_trace = self._wait_for_cycle_memory_to_finish(capability_conversation_cycle_id)
+        followup_trace = self._wait_for_cycle_memory_to_finish(followup_cycle_id)
+        self._wait_for_memory_jobs_to_drain()
+        conversation_trace = self.api.get(f"/api/inspection/cycles/{conversation_cycle_id}")
+        capability_conversation_trace = self.api.get(f"/api/inspection/cycles/{capability_conversation_cycle_id}")
+        followup_trace = self.api.get(f"/api/inspection/cycles/{followup_cycle_id}")
+
+        status = self._get_status()
+        summary = {
+            "artifacts_dir": str(self.artifact_dir),
+            "server_log_path": str(self.server_log_path),
+            "editor_state_mode": self.editor_state_mode_used,
+            "selected_model_preset_id": self.selected_model_preset_id,
+            "selected_memory_set_id": self.selected_memory_set_id,
+            "status": status,
+            "conversation_cycle_id": conversation_cycle_id,
+            "conversation_trace": conversation_trace,
+            "external_status_conversation_cycle_id": capability_conversation_cycle_id,
+            "external_status_conversation_trace": capability_conversation_trace,
+            "external_status_followup_cycle_id": followup_cycle_id,
+            "external_status_followup_trace": followup_trace,
+            "external_status_request_count": self.external_status_request_count,
+            "external_status_response_count": self.external_status_response_count,
+            "external_status_request_ids": self.external_status_request_ids,
+            "external_status_followup_verified_request_ids": self.external_status_followup_verified_request_ids,
+        }
+        self._write_summary(summary)
+        self._assert_real_llm_smoke_summary(summary)
+        return summary
+
     def _collect_summary(self) -> dict[str, Any]:
         status = self._get_status()
         cycle_summaries = self.api.get(
@@ -1962,6 +2152,70 @@ class LongSmokeRunner:
         if not isinstance(self.selected_memory_set_id, str) or not self.selected_memory_set_id:
             raise SmokeError("selected_memory_set_id was not initialized.")
         return self.selected_memory_set_id
+
+    def _assert_real_llm_smoke_summary(self, summary: dict[str, Any]) -> None:
+        runtime_summary = (summary.get("status") or {}).get("runtime_summary")
+        if not isinstance(runtime_summary, dict):
+            raise SmokeError("real-llm-smoke runtime_summary was not recorded.")
+        if not runtime_summary.get("memory_job_worker_active"):
+            raise SmokeError("real-llm-smoke memory worker was not active.")
+        if runtime_summary.get("pending_memory_job_count") != 0:
+            raise SmokeError("real-llm-smoke pending_memory_job_count was not drained to zero.")
+        if runtime_summary.get("memory_job_in_progress"):
+            raise SmokeError("real-llm-smoke memory worker was still processing a job.")
+        if runtime_summary.get("ongoing_action_exists"):
+            raise SmokeError("real-llm-smoke ongoing_action remained active.")
+        if summary.get("external_status_request_count") != 1:
+            raise SmokeError("real-llm-smoke external.status request count was not 1.")
+        if summary.get("external_status_response_count") != 1:
+            raise SmokeError("real-llm-smoke external.status response count was not 1.")
+
+        conversation_trace = summary.get("conversation_trace")
+        if not isinstance(conversation_trace, dict):
+            raise SmokeError("real-llm-smoke conversation_trace was not recorded.")
+        conversation_summary = conversation_trace.get("cycle_summary", {})
+        if not isinstance(conversation_summary, dict) or conversation_summary.get("result_kind") != "reply":
+            raise SmokeError("real-llm-smoke initial conversation did not produce reply.")
+        if conversation_summary.get("failed"):
+            raise SmokeError("real-llm-smoke initial conversation failed.")
+        self._assert_memory_trace_succeeded(conversation_trace, "real-llm-smoke initial conversation")
+
+        capability_conversation_trace = summary.get("external_status_conversation_trace")
+        if not isinstance(capability_conversation_trace, dict):
+            raise SmokeError("real-llm-smoke external.status conversation trace was not recorded.")
+        capability_summary = capability_conversation_trace.get("cycle_summary", {})
+        if not isinstance(capability_summary, dict) or capability_summary.get("result_kind") != "capability_request":
+            raise SmokeError("real-llm-smoke external.status conversation did not dispatch capability_request.")
+        request_summary = ((capability_conversation_trace.get("result_trace") or {}).get("capability_request_summary"))
+        if not isinstance(request_summary, dict) or request_summary.get("capability_id") != "external.status":
+            raise SmokeError("real-llm-smoke external.status request summary was invalid.")
+        if request_summary.get("status") != "dispatched":
+            raise SmokeError("real-llm-smoke external.status request was not dispatched.")
+        self._assert_memory_trace_succeeded(capability_conversation_trace, "real-llm-smoke external.status conversation")
+
+        followup_trace = summary.get("external_status_followup_trace")
+        if not isinstance(followup_trace, dict):
+            raise SmokeError("real-llm-smoke external.status follow-up trace was not recorded.")
+        followup_summary = followup_trace.get("cycle_summary", {})
+        if not isinstance(followup_summary, dict) or followup_summary.get("trigger_kind") != "capability_result":
+            raise SmokeError("real-llm-smoke external.status follow-up trigger was invalid.")
+        if followup_summary.get("result_kind") != "reply" or followup_summary.get("failed"):
+            raise SmokeError("real-llm-smoke external.status follow-up did not produce reply.")
+        transition_summary = ((followup_trace.get("result_trace") or {}).get("ongoing_action_transition_summary"))
+        if not isinstance(transition_summary, dict) or transition_summary.get("final_state") != "completed":
+            raise SmokeError("real-llm-smoke external.status follow-up did not complete ongoing_action.")
+        self._assert_memory_trace_succeeded(followup_trace, "real-llm-smoke external.status follow-up")
+
+    def _assert_memory_trace_succeeded(self, trace: dict[str, Any], label: str) -> None:
+        cycle_id = trace.get("cycle_id")
+        memory_trace = trace.get("memory_trace", {})
+        if not isinstance(memory_trace, dict):
+            raise SmokeError(f"{label} memory_trace was invalid.")
+        if memory_trace.get("turn_consolidation_status") != "succeeded":
+            raise SmokeError(f"{label} cycle {cycle_id} did not complete turn consolidation.")
+        vector_status = (memory_trace.get("vector_index_sync") or {}).get("result_status")
+        if vector_status != "succeeded":
+            raise SmokeError(f"{label} cycle {cycle_id} vector_index_sync was {vector_status}.")
 
     def _assert_summary(self, summary: dict[str, Any]) -> None:
         runtime_summary = summary["status"]["runtime_summary"]
@@ -2422,6 +2676,20 @@ class LongSmokeRunner:
             json.dumps(summary, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+        if self.args.profile == "real-llm-smoke":
+            conversation_summary = (summary.get("conversation_trace") or {}).get("cycle_summary") or {}
+            capability_summary = (summary.get("external_status_conversation_trace") or {}).get("cycle_summary") or {}
+            followup_summary = (summary.get("external_status_followup_trace") or {}).get("cycle_summary") or {}
+            runtime_summary = (summary.get("status") or {}).get("runtime_summary") or {}
+            log(
+                "summary"
+                f" conversation={conversation_summary.get('result_kind')}"
+                f" external_status={capability_summary.get('result_kind')}"
+                f" followup={followup_summary.get('result_kind')}"
+                f" pending_jobs={runtime_summary.get('pending_memory_job_count')}"
+                f" in_progress={runtime_summary.get('memory_job_in_progress')}"
+            )
+            return
         log(
             "summary"
             f" conversations={len(summary['conversation_cycle_ids'])}"
@@ -2543,6 +2811,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--status-log-interval-seconds", type=float, help="runtime status のログ間隔")
     parser.add_argument("--inspection-cycle-summary-limit", type=int, help="inspection から回収する cycle_summaries 上限")
     parser.add_argument("--max-memory-job-lag-seconds", type=float, help="許容する memory worker 最大滞留秒数")
+    parser.add_argument("--request-timeout-seconds", type=float, help="JSON API request timeout 秒数")
     parser.add_argument("--capture-timeout-failures", type=int, help="意図的に落とす capture-response 回数")
     parser.add_argument(
         "--capture-empty-result-failures",
@@ -2586,6 +2855,11 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         help="isolated data dir の初期内容としてコピーする既存 data dir",
     )
+    parser.add_argument(
+        "--real-llm-config-data-dir",
+        type=Path,
+        help="real-llm-smoke で model/memory の実LLM設定だけをコピーする data dir",
+    )
     parser.add_argument("--desktop-client-id", default="long-smoke-desktop-client", help="擬似 desktop client_id")
     parser.add_argument("--artifact-dir", type=Path, help="成果物を残すディレクトリ")
     parser.add_argument("--keep-artifacts", action="store_true", help="成功時も成果物を削除しない")
@@ -2595,6 +2869,8 @@ def parse_args() -> argparse.Namespace:
     for key, value in profile_defaults.items():
         if getattr(args, key) is None:
             setattr(args, key, value)
+    if args.profile == "real-llm-smoke" and args.editor_state_mode == "mock":
+        args.editor_state_mode = "current"
     return args
 
 

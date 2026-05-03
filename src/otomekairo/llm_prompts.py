@@ -276,6 +276,24 @@ def build_memory_reflection_summary_repair_prompt(validation_error: str) -> str:
     )
 
 
+def build_decision_repair_prompt(validation_error: str) -> str:
+    return (
+        "前回の出力は decision_generation 契約を満たしていませんでした。\n"
+        f"validator_error: {validation_error}\n"
+        "同じ入力だけを根拠に、JSON オブジェクト 1 個だけを返し直してください。\n"
+        "トップレベルキーは kind, reason_code, reason_summary, requires_confirmation, pending_intent, capability_request の 6 つだけです。\n"
+        "reply_text, text, message, content, output などの返信本文キーは禁止です。\n"
+        "kind は reply, noop, pending_intent, capability_request のいずれかだけです。\n"
+        "kind=reply のときは pending_intent と capability_request を null にしてください。\n"
+        "kind=noop のときは pending_intent と capability_request を null にしてください。\n"
+        "kind=pending_intent のときだけ pending_intent を object にし、requires_confirmation は false にしてください。\n"
+        "pending_intent object のキーは intent_kind, intent_summary, dedupe_key の 3 つだけです。\n"
+        "kind=capability_request のときだけ capability_request を object にし、requires_confirmation は false にしてください。\n"
+        "capability_request object のキーは capability_id, input の 2 つだけです。\n"
+        "Markdown、コードフェンス、説明文は禁止です。"
+    )
+
+
 def build_event_evidence_repair_prompt(validation_error: str) -> str:
     return (
         "前回の出力は event_evidence_generation 契約を満たしていませんでした。\n"
@@ -435,6 +453,8 @@ def _build_decision_system_prompt(persona: dict) -> str:
         "- requires_confirmation: boolean\n"
         "- pending_intent: null または object\n"
         "- capability_request: null または object\n"
+        "この role は返信本文を生成しません。reply_text, text, message, content, output などの本文キーは禁止です。\n"
+        "返信本文は後続の expression_generation が生成します。\n"
         "kind が pending_intent のときだけ pending_intent object を返してください。\n"
         "pending_intent object のキーは intent_kind, intent_summary, dedupe_key の 3 個に固定してください。\n"
         "kind が pending_intent のとき requires_confirmation は false にしてください。\n"
