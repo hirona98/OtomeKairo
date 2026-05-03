@@ -184,6 +184,33 @@ class ServiceSpontaneousMixin:
                 "client_context": client_context or {},
                 "error": error.strip() if isinstance(error, str) and error.strip() else None,
             }
+        if capability_id == "device.status":
+            device_state_summary = result_payload.get("device_state_summary")
+            client_context = result_payload.get("client_context")
+            error = result_payload.get("error")
+            if not isinstance(device_state_summary, str) or not device_state_summary.strip():
+                raise ServiceError(
+                    400,
+                    "invalid_capability_result",
+                    "device.status result.device_state_summary must be a non-empty string.",
+                )
+            if client_context is not None and not isinstance(client_context, dict):
+                raise ServiceError(
+                    400,
+                    "invalid_capability_result",
+                    "device.status result.client_context must be an object.",
+                )
+            if error is not None and not isinstance(error, str):
+                raise ServiceError(
+                    400,
+                    "invalid_capability_result",
+                    "device.status result.error must be a string or null.",
+                )
+            return {
+                "device_state_summary": device_state_summary.strip(),
+                "client_context": client_context or {},
+                "error": error.strip() if isinstance(error, str) and error.strip() else None,
+            }
         payload = dict(result_payload)
         client_context = payload.get("client_context")
         if client_context is not None and not isinstance(client_context, dict):
@@ -250,6 +277,10 @@ class ServiceSpontaneousMixin:
             status_text = result_payload.get("status_text")
             status_chars = len(status_text) if isinstance(status_text, str) else 0
             return f"status_chars={status_chars} error={bool(result_payload.get('error'))}"
+        if capability_id == "device.status":
+            summary_text = result_payload.get("device_state_summary")
+            summary_chars = len(summary_text) if isinstance(summary_text, str) else 0
+            return f"device_summary_chars={summary_chars} error={bool(result_payload.get('error'))}"
         return f"result_keys={len(result_payload)} error={bool(result_payload.get('error'))}"
 
     def _capability_result_context_hook_name(self, capability_id: str) -> str | None:
@@ -796,6 +827,12 @@ class ServiceSpontaneousMixin:
                 observation_summary=observation_summary,
                 capability_response=capability_response,
             )
+        elif hook_name == "device_status":
+            client_context, observation_summary, input_text = self._prepare_device_status_result_context(
+                client_context=client_context,
+                observation_summary=observation_summary,
+                capability_response=capability_response,
+            )
         return client_context, observation_summary, input_text
 
     def _prepare_external_status_result_context(
@@ -843,6 +880,26 @@ class ServiceSpontaneousMixin:
         )
         return enriched_client_context, enriched_observation_summary, input_text
 
+    def _prepare_device_status_result_context(
+        self,
+        *,
+        client_context: dict[str, Any],
+        observation_summary: dict[str, Any],
+        capability_response: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any], str]:
+        device_state_summary = self._client_context_text(capability_response.get("device_state_summary"), limit=160)
+        enriched_client_context = dict(client_context)
+        if device_state_summary is not None:
+            enriched_client_context["device_state_summary"] = device_state_summary
+        enriched_observation_summary = dict(observation_summary)
+        if device_state_summary is not None:
+            enriched_observation_summary["device_state_summary"] = device_state_summary
+        input_text = self._build_capability_result_input_text(
+            client_context=enriched_client_context,
+            capability_response=capability_response,
+        )
+        return enriched_client_context, enriched_observation_summary, input_text
+
     def _capability_result_followup_hint_summary(
         self,
         *,
@@ -884,6 +941,13 @@ class ServiceSpontaneousMixin:
                 return self._clamp(f"予定要約: {schedule_summary.strip()}", limit=160)
             if isinstance(slot_count, int) and slot_count > 0:
                 return f"近い予定が {slot_count} 件ある。"
+            return None
+        if hook_name == "device_status":
+            device_state_summary = None
+            if isinstance(observation_summary, dict):
+                device_state_summary = observation_summary.get("device_state_summary")
+            if isinstance(device_state_summary, str) and device_state_summary.strip():
+                return self._clamp(f"端末状態: {device_state_summary.strip()}", limit=160)
             return None
         return None
 

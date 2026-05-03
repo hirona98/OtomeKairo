@@ -299,6 +299,22 @@ class MockLLMClient:
                     "input": self._mock_schedule_status_input(normalized),
                 },
             }
+        elif self._should_mock_device_status_request(
+            normalized=normalized,
+            ongoing_action_summary=ongoing_action_summary,
+            capability_decision_view=capability_decision_view,
+        ):
+            payload = {
+                "kind": "capability_request",
+                "reason_code": "capability:device.status",
+                "reason_summary": "端末や接続の現在状態を確認する必要がある。",
+                "requires_confirmation": False,
+                "pending_intent": None,
+                "capability_request": {
+                    "capability_id": "device.status",
+                    "input": self._mock_device_status_input(normalized),
+                },
+            }
         elif self._should_mock_external_status_request(
             normalized=normalized,
             ongoing_action_summary=ongoing_action_summary,
@@ -757,6 +773,49 @@ class MockLLMClient:
         if "このあと" in normalized:
             return {"range": "upcoming"}
         return {"range": "near_future"}
+
+    def _should_mock_device_status_request(
+        self,
+        *,
+        normalized: str,
+        ongoing_action_summary: dict[str, Any] | None,
+        capability_decision_view: list[dict[str, Any]] | None,
+    ) -> bool:
+        if isinstance(ongoing_action_summary, dict):
+            status = str(ongoing_action_summary.get("status") or "").strip()
+            if status in {"active", "waiting_result"}:
+                return False
+        if normalized.startswith("capability result を受信"):
+            return False
+        if not self._mock_capability_available(capability_decision_view, "device.status"):
+            return False
+        device_markers = (
+            "デバイス",
+            "端末",
+            "PC",
+            "パソコン",
+            "接続",
+            "電源",
+            "バッテリー",
+            "ネットワーク",
+        )
+        action_markers = (
+            "確認",
+            "教えて",
+            "見て",
+            "チェック",
+            "知りたい",
+        )
+        return any(marker in normalized for marker in device_markers) and any(
+            marker in normalized for marker in action_markers
+        )
+
+    def _mock_device_status_input(self, normalized: str) -> dict[str, str]:
+        if "バッテリー" in normalized or "電源" in normalized:
+            return {"scope": "power"}
+        if "ネットワーク" in normalized or "接続" in normalized:
+            return {"scope": "connectivity"}
+        return {"scope": "device"}
 
     def _mock_external_status_input(self, normalized: str) -> dict[str, str]:
         service = self._mock_external_status_service(normalized)

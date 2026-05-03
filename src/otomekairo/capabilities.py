@@ -229,6 +229,73 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
             "error",
         ],
     },
+    "device.status": {
+        "id": "device.status",
+        "version": "1",
+        "kind": "observation",
+        "decision_description": "端末や接続状態を確認する",
+        "when_to_use": [
+            "判断に端末や接続の現在状態が必要",
+            "ユーザーが端末、接続、電源、バッテリー状態を短く確認したい",
+        ],
+        "do_not_use_when": [
+            "現在の判断に端末状態が不要",
+            "すでに十分新しい端末状態要約が手元にある",
+        ],
+        "required_permissions": [],
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "scope": {"type": "string"},
+            },
+            "required": ["scope"],
+            "additionalProperties": False,
+        },
+        "result_schema": {
+            "type": "object",
+            "properties": {
+                "device_state_summary": {"type": "string"},
+                "client_context": {
+                    "type": ["object", "null"],
+                },
+                "error": {
+                    "type": ["string", "null"],
+                },
+            },
+            "required": ["device_state_summary"],
+            "additionalProperties": False,
+        },
+        "side_effects": {
+            "external_world": False,
+            "user_visible": False,
+            "stores_raw_payload": False,
+        },
+        "timeout_ms": 5000,
+        "risk_level": "low",
+        "memory_policy": {
+            "record_result_event": True,
+            "allow_memory_update": True,
+        },
+        "state_policy": {
+            "creates_ongoing_action": True,
+            "blocks_parallel_capability": True,
+            "result_context_hook": "device_status",
+            "followup_hint_hook": "device_status",
+            "success_cooldown_seconds": 60,
+            "error_cooldown_seconds": 60,
+            "unavailable_seconds_on_dispatch_failure": 60,
+            "unavailable_seconds_on_timeout": 60,
+        },
+        "inspection_fields": [
+            "capability_id",
+            "target_client_id",
+            "scope",
+            "device_state_summary",
+            "body_state_summary",
+            "schedule_summary",
+            "error",
+        ],
+    },
 }
 
 

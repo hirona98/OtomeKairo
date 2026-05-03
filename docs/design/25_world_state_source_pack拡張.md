@@ -19,6 +19,7 @@
 - `client_context.external_service_summary`
 - `external.status` result から得た短い `service / status_text`
 - `schedule.status` result から得た短い `schedule_summary / schedule_slots`
+- `device.status` result から得た短い `device_state_summary`
 - capability result の `client_context` から得た短い `body_state_summary`
 - capability result の `client_context` から得た短い `device_state_summary`
 - capability result の `client_context` から得た短い `schedule_summary`
@@ -51,7 +52,7 @@ raw response body、client 固有 ID、資格情報、内部 URL、base64 本文
     "image_interpreted": true,
     "visual_confidence_hint": "medium",
     "image_count": 1,
-    "capability_id": "vision.capture"
+    "capability_id": "device.status"
   },
   "social_context_context": {
     "summary_text": "Slack 上のやり取りが近い判断文脈として前景にある。",
@@ -111,6 +112,7 @@ source pack では、標準の `client_context` と state-type 別の structured
 `social_context_context / environment_context / location_context` は、`client_context` から取った短い summary をそのまま dedicated context へ写す。
 `external.status` のような capability result は、`external_service_context.summary_text` に加えて `service / status_text` を載せる。
 `schedule.status` result は、`schedule_context.summary_text / schedule_summary / schedule_slots` へ投影する。
+`device.status` result は、`device_context.summary_text / device_state_summary` へ投影する。
 同時に client 側 summary もあるときは、`client_summary_text / result_summary_text / summary_source_hint` を追加して境界を残す。
 `body_context / device_context / schedule_context` でも、capability result 由来のときは `capability_id` と state-type 別 summary field を載せる。
 client summary と result summary が両方あるときは、同様に `client_summary_text / result_summary_text / summary_source_hint` を追加する。
@@ -123,6 +125,7 @@ real schedule source が複数あるときは、`schedule_context.schedule_slots
 - `client_context.social_context_summary / environment_summary / location_summary` を対応する dedicated context へ投影する
 - `external.status` result の `service / status_text` を `external_service_context` へ投影する
 - `schedule.status` result の `schedule_summary / schedule_slots` を `schedule_context` へ投影する
+- `device.status` result の `device_state_summary` を `device_context` へ投影する
 - capability result の `body_state_summary / device_state_summary / schedule_summary` を対応する state-type context へ投影する
 - `summary_source` が `capability_result.<field>` と `client_context.<field>` を区別できるように context へ source hint を残す
 - `schedule_context.schedule_slots` があるときは deterministic な slot state を追加し、`schedule:self` と `schedule:<slot_key>` を併存させる
