@@ -2688,6 +2688,8 @@ class ServiceInputMixin:
                 "environment_context",
                 self._build_world_state_environment_context(
                     client_context=client_context,
+                    observation_summary=observation_summary,
+                    source_kind=source_kind,
                 ),
             ),
             (
@@ -2915,11 +2917,15 @@ class ServiceInputMixin:
         self,
         *,
         client_context: dict[str, Any],
+        observation_summary: dict[str, Any] | None,
+        source_kind: str,
     ) -> dict[str, Any] | None:
-        return self._build_world_state_summary_context(
+        return self._build_world_state_capability_state_context(
             client_context=client_context,
-            summary_key="environment_summary",
-            limit=160,
+            observation_summary=observation_summary,
+            source_kind=source_kind,
+            client_summary_key="environment_summary",
+            observation_summary_key="environment_summary",
             explicit_field_name="environment_summary",
         )
 

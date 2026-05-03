@@ -299,6 +299,22 @@ class MockLLMClient:
                     "input": self._mock_schedule_status_input(normalized),
                 },
             }
+        elif self._should_mock_environment_status_request(
+            normalized=normalized,
+            ongoing_action_summary=ongoing_action_summary,
+            capability_decision_view=capability_decision_view,
+        ):
+            payload = {
+                "kind": "capability_request",
+                "reason_code": "capability:environment.status",
+                "reason_summary": "周囲や作業環境の現在状態を確認する必要がある。",
+                "requires_confirmation": False,
+                "pending_intent": None,
+                "capability_request": {
+                    "capability_id": "environment.status",
+                    "input": self._mock_environment_status_input(normalized),
+                },
+            }
         elif self._should_mock_device_status_request(
             normalized=normalized,
             ongoing_action_summary=ongoing_action_summary,
@@ -773,6 +789,49 @@ class MockLLMClient:
         if "このあと" in normalized:
             return {"range": "upcoming"}
         return {"range": "near_future"}
+
+    def _should_mock_environment_status_request(
+        self,
+        *,
+        normalized: str,
+        ongoing_action_summary: dict[str, Any] | None,
+        capability_decision_view: list[dict[str, Any]] | None,
+    ) -> bool:
+        if isinstance(ongoing_action_summary, dict):
+            status = str(ongoing_action_summary.get("status") or "").strip()
+            if status in {"active", "waiting_result"}:
+                return False
+        if normalized.startswith("capability result を受信"):
+            return False
+        if not self._mock_capability_available(capability_decision_view, "environment.status"):
+            return False
+        environment_markers = (
+            "環境",
+            "周囲",
+            "部屋",
+            "作業環境",
+            "騒音",
+            "静か",
+            "明るさ",
+            "照明",
+        )
+        action_markers = (
+            "確認",
+            "教えて",
+            "見て",
+            "チェック",
+            "知りたい",
+        )
+        return any(marker in normalized for marker in environment_markers) and any(
+            marker in normalized for marker in action_markers
+        )
+
+    def _mock_environment_status_input(self, normalized: str) -> dict[str, str]:
+        if "騒音" in normalized or "静か" in normalized:
+            return {"scope": "noise"}
+        if "明るさ" in normalized or "照明" in normalized:
+            return {"scope": "lighting"}
+        return {"scope": "workspace"}
 
     def _should_mock_device_status_request(
         self,
