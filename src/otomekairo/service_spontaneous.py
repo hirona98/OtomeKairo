@@ -211,6 +211,33 @@ class ServiceSpontaneousMixin:
                 "client_context": client_context or {},
                 "error": error.strip() if isinstance(error, str) and error.strip() else None,
             }
+        if capability_id == "body.status":
+            body_state_summary = result_payload.get("body_state_summary")
+            client_context = result_payload.get("client_context")
+            error = result_payload.get("error")
+            if not isinstance(body_state_summary, str) or not body_state_summary.strip():
+                raise ServiceError(
+                    400,
+                    "invalid_capability_result",
+                    "body.status result.body_state_summary must be a non-empty string.",
+                )
+            if client_context is not None and not isinstance(client_context, dict):
+                raise ServiceError(
+                    400,
+                    "invalid_capability_result",
+                    "body.status result.client_context must be an object.",
+                )
+            if error is not None and not isinstance(error, str):
+                raise ServiceError(
+                    400,
+                    "invalid_capability_result",
+                    "body.status result.error must be a string or null.",
+                )
+            return {
+                "body_state_summary": body_state_summary.strip(),
+                "client_context": client_context or {},
+                "error": error.strip() if isinstance(error, str) and error.strip() else None,
+            }
         if capability_id == "environment.status":
             environment_summary = result_payload.get("environment_summary")
             client_context = result_payload.get("client_context")
@@ -308,6 +335,10 @@ class ServiceSpontaneousMixin:
             summary_text = result_payload.get("device_state_summary")
             summary_chars = len(summary_text) if isinstance(summary_text, str) else 0
             return f"device_summary_chars={summary_chars} error={bool(result_payload.get('error'))}"
+        if capability_id == "body.status":
+            summary_text = result_payload.get("body_state_summary")
+            summary_chars = len(summary_text) if isinstance(summary_text, str) else 0
+            return f"body_summary_chars={summary_chars} error={bool(result_payload.get('error'))}"
         if capability_id == "environment.status":
             summary_text = result_payload.get("environment_summary")
             summary_chars = len(summary_text) if isinstance(summary_text, str) else 0
@@ -865,6 +896,12 @@ class ServiceSpontaneousMixin:
                 observation_summary=observation_summary,
                 capability_response=capability_response,
             )
+        elif hook_name == "body_status":
+            client_context, observation_summary, input_text = self._prepare_body_status_result_context(
+                client_context=client_context,
+                observation_summary=observation_summary,
+                capability_response=capability_response,
+            )
         elif hook_name == "environment_status":
             client_context, observation_summary, input_text = self._prepare_environment_status_result_context(
                 client_context=client_context,
@@ -932,6 +969,26 @@ class ServiceSpontaneousMixin:
         enriched_observation_summary = dict(observation_summary)
         if device_state_summary is not None:
             enriched_observation_summary["device_state_summary"] = device_state_summary
+        input_text = self._build_capability_result_input_text(
+            client_context=enriched_client_context,
+            capability_response=capability_response,
+        )
+        return enriched_client_context, enriched_observation_summary, input_text
+
+    def _prepare_body_status_result_context(
+        self,
+        *,
+        client_context: dict[str, Any],
+        observation_summary: dict[str, Any],
+        capability_response: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any], str]:
+        body_state_summary = self._client_context_text(capability_response.get("body_state_summary"), limit=160)
+        enriched_client_context = dict(client_context)
+        if body_state_summary is not None:
+            enriched_client_context["body_state_summary"] = body_state_summary
+        enriched_observation_summary = dict(observation_summary)
+        if body_state_summary is not None:
+            enriched_observation_summary["body_state_summary"] = body_state_summary
         input_text = self._build_capability_result_input_text(
             client_context=enriched_client_context,
             capability_response=capability_response,
@@ -1007,6 +1064,13 @@ class ServiceSpontaneousMixin:
             if isinstance(device_state_summary, str) and device_state_summary.strip():
                 return self._clamp(f"端末状態: {device_state_summary.strip()}", limit=160)
             return None
+        if hook_name == "body_status":
+            body_state_summary = None
+            if isinstance(observation_summary, dict):
+                body_state_summary = observation_summary.get("body_state_summary")
+            if isinstance(body_state_summary, str) and body_state_summary.strip():
+                return self._clamp(f"身体状態: {body_state_summary.strip()}", limit=160)
+            return None
         if hook_name == "environment_status":
             environment_summary = None
             if isinstance(observation_summary, dict):
@@ -1071,6 +1135,12 @@ class ServiceSpontaneousMixin:
                 parts.append(f"端末状態要約は {device_state_summary}")
             else:
                 parts.append("端末状態確認の結果を踏まえて返答や次の行動を決めたい。")
+        elif capability_id == "body.status":
+            body_state_summary = self._client_context_text(capability_response.get("body_state_summary"), limit=160)
+            if body_state_summary is not None:
+                parts.append(f"身体状態要約は {body_state_summary}")
+            else:
+                parts.append("身体状態確認の結果を踏まえて返答や次の行動を決めたい。")
         elif capability_id == "environment.status":
             environment_summary = self._client_context_text(capability_response.get("environment_summary"), limit=160)
             if environment_summary is not None:

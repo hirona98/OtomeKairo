@@ -299,6 +299,22 @@ class MockLLMClient:
                     "input": self._mock_schedule_status_input(normalized),
                 },
             }
+        elif self._should_mock_body_status_request(
+            normalized=normalized,
+            ongoing_action_summary=ongoing_action_summary,
+            capability_decision_view=capability_decision_view,
+        ):
+            payload = {
+                "kind": "capability_request",
+                "reason_code": "capability:body.status",
+                "reason_summary": "身体や体調の現在状態を確認する必要がある。",
+                "requires_confirmation": False,
+                "pending_intent": None,
+                "capability_request": {
+                    "capability_id": "body.status",
+                    "input": self._mock_body_status_input(normalized),
+                },
+            }
         elif self._should_mock_environment_status_request(
             normalized=normalized,
             ongoing_action_summary=ongoing_action_summary,
@@ -789,6 +805,50 @@ class MockLLMClient:
         if "このあと" in normalized:
             return {"range": "upcoming"}
         return {"range": "near_future"}
+
+    def _should_mock_body_status_request(
+        self,
+        *,
+        normalized: str,
+        ongoing_action_summary: dict[str, Any] | None,
+        capability_decision_view: list[dict[str, Any]] | None,
+    ) -> bool:
+        if isinstance(ongoing_action_summary, dict):
+            status = str(ongoing_action_summary.get("status") or "").strip()
+            if status in {"active", "waiting_result"}:
+                return False
+        if normalized.startswith("capability result を受信"):
+            return False
+        if not self._mock_capability_available(capability_decision_view, "body.status"):
+            return False
+        body_markers = (
+            "身体",
+            "体",
+            "体調",
+            "疲れ",
+            "眠気",
+            "眠い",
+            "姿勢",
+            "肩",
+            "首",
+        )
+        action_markers = (
+            "確認",
+            "教えて",
+            "見て",
+            "チェック",
+            "知りたい",
+        )
+        return any(marker in normalized for marker in body_markers) and any(
+            marker in normalized for marker in action_markers
+        )
+
+    def _mock_body_status_input(self, normalized: str) -> dict[str, str]:
+        if "眠" in normalized:
+            return {"scope": "sleepiness"}
+        if "肩" in normalized or "首" in normalized or "姿勢" in normalized:
+            return {"scope": "posture"}
+        return {"scope": "body"}
 
     def _should_mock_environment_status_request(
         self,

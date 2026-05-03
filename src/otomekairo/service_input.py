@@ -58,6 +58,10 @@ WORLD_STATE_TTL_SECONDS_BY_TYPE = {
         "summary_text": {"short": 300, "medium": 600, "long": 900},
     },
     "environment": {
+        "capability_result.environment_summary": {"short": 900, "medium": 2400, "long": 7200},
+        "client_context.environment_summary": {"short": 900, "medium": 2400, "long": 7200},
+        "capability_result.client_context.environment_summary": {"short": 900, "medium": 2400, "long": 7200},
+        "environment_summary": {"short": 900, "medium": 2400, "long": 7200},
         "summary_text": {"short": 900, "medium": 2400, "long": 7200},
     },
     "location": {
@@ -3104,6 +3108,7 @@ class ServiceInputMixin:
             "body_state_summary",
             "device_state_summary",
             "schedule_summary",
+            "environment_summary",
             "schedule_slots",
             "error",
         ):

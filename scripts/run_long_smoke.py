@@ -452,6 +452,8 @@ class LongSmokeRunner:
         self.schedule_status_response_count = 0
         self.device_status_request_count = 0
         self.device_status_response_count = 0
+        self.body_status_request_count = 0
+        self.body_status_response_count = 0
         self.environment_status_request_count = 0
         self.environment_status_response_count = 0
         self.desktop_watch_event_count = 0
@@ -471,6 +473,8 @@ class LongSmokeRunner:
         self.schedule_status_followup_verified_request_ids: list[str] = []
         self.device_status_request_ids: list[str] = []
         self.device_status_followup_verified_request_ids: list[str] = []
+        self.body_status_request_ids: list[str] = []
+        self.body_status_followup_verified_request_ids: list[str] = []
         self.environment_status_request_ids: list[str] = []
         self.environment_status_followup_verified_request_ids: list[str] = []
         self.capture_timeout_recovered = False
@@ -497,11 +501,14 @@ class LongSmokeRunner:
         self.schedule_status_probe_followup_cycle_id: str | None = None
         self.device_status_probe_conversation_cycle_id: str | None = None
         self.device_status_probe_followup_cycle_id: str | None = None
+        self.body_status_probe_conversation_cycle_id: str | None = None
+        self.body_status_probe_followup_cycle_id: str | None = None
         self.environment_status_probe_conversation_cycle_id: str | None = None
         self.environment_status_probe_followup_cycle_id: str | None = None
         self.external_status_probe_verified = False
         self.schedule_status_probe_verified = False
         self.device_status_probe_verified = False
+        self.body_status_probe_verified = False
         self.environment_status_probe_verified = False
         self.external_status_multi_service_verified = False
         self.external_status_persisted_integration_keys: list[str] = []
@@ -518,11 +525,13 @@ class LongSmokeRunner:
         self._external_status_overrides: list[dict[str, Any]] = []
         self._schedule_status_overrides: list[dict[str, Any]] = []
         self._device_status_overrides: list[dict[str, Any]] = []
+        self._body_status_overrides: list[dict[str, Any]] = []
         self._environment_status_overrides: list[dict[str, Any]] = []
         self._capture_lock = threading.Lock()
         self._external_status_lock = threading.Lock()
         self._schedule_status_lock = threading.Lock()
         self._device_status_lock = threading.Lock()
+        self._body_status_lock = threading.Lock()
         self._environment_status_lock = threading.Lock()
 
     def run(self) -> dict[str, Any]:
@@ -876,6 +885,7 @@ class LongSmokeRunner:
             caps.append({"id": "external.status", "version": "1"})
             caps.append({"id": "schedule.status", "version": "1"})
             caps.append({"id": "device.status", "version": "1"})
+            caps.append({"id": "body.status", "version": "1"})
             caps.append({"id": "environment.status", "version": "1"})
         client.connect(client_id=client_id, caps=caps)
         return client
@@ -1197,6 +1207,49 @@ class LongSmokeRunner:
                 },
             )
             self.device_status_response_count += 1
+            return
+        if event_type == "body.status_request":
+            if client_label != "primary":
+                raise SmokeError(f"{client_label} desktop client unexpectedly received body.status_request.")
+            request_id = data.get("request_id")
+            capability_id = data.get("capability_id")
+            requested_scope = data.get("scope")
+            if not isinstance(request_id, str) or not request_id:
+                raise SmokeError("body.status_request did not include request_id.")
+            if capability_id != "body.status":
+                raise SmokeError(f"body.status_request capability_id was invalid: {capability_id}")
+            if not isinstance(requested_scope, str) or not requested_scope.strip():
+                raise SmokeError("body.status_request did not include scope.")
+            with self._body_status_lock:
+                self.body_status_request_count += 1
+                self.body_status_request_ids.append(request_id)
+                override = self._body_status_overrides.pop(0) if self._body_status_overrides else None
+            body_state_summary = (
+                str(override.get("body_state_summary")).strip()
+                if isinstance(override, dict)
+                and isinstance(override.get("body_state_summary"), str)
+                and override.get("body_state_summary", "").strip()
+                else f"{requested_scope.strip()} は大きな支障が少ない状態。"
+            )
+            client_context = (
+                dict(override["client_context"])
+                if isinstance(override, dict) and isinstance(override.get("client_context"), dict)
+                else {}
+            )
+            self.api.post(
+                "/api/capability/result",
+                {
+                    "request_id": request_id,
+                    "client_id": connected_client_id,
+                    "capability_id": "body.status",
+                    "result": {
+                        "body_state_summary": body_state_summary,
+                        "client_context": client_context,
+                        "error": None,
+                    },
+                },
+            )
+            self.body_status_response_count += 1
             return
         if event_type == "environment.status_request":
             if client_label != "primary":
@@ -1547,6 +1600,10 @@ class LongSmokeRunner:
         with self._device_status_lock:
             self._device_status_overrides.append(override)
 
+    def _queue_body_status_override(self, override: dict[str, Any]) -> None:
+        with self._body_status_lock:
+            self._body_status_overrides.append(override)
+
     def _queue_environment_status_override(self, override: dict[str, Any]) -> None:
         with self._environment_status_lock:
             self._environment_status_overrides.append(override)
@@ -1712,6 +1769,86 @@ class LongSmokeRunner:
             raise SmokeError("device.status probe did not produce a capability_result follow-up cycle.")
         if request_id not in self.device_status_followup_verified_request_ids:
             self.device_status_followup_verified_request_ids.append(request_id)
+
+        return conversation_trace, followup_trace
+
+    def _run_body_status_probe(
+        self,
+        *,
+        marker: str,
+        conversation_text: str,
+        source: str,
+        client_id: str,
+        active_app: str,
+        window_title: str,
+        override: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        self._queue_body_status_override(override)
+        conversation_cycle_id = self._post_conversation(
+            text=conversation_text,
+            source=source,
+            client_id=client_id,
+            active_app=active_app,
+            window_title=window_title,
+        )
+        deadline = time.monotonic() + WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS
+        conversation_trace: dict[str, Any] | None = None
+        request_id: str | None = None
+        while time.monotonic() < deadline:
+            self._assert_server_running()
+            self._assert_event_clients_healthy()
+            candidate = self.api.get(f"/api/inspection/cycles/{conversation_cycle_id}")
+            request_summary = ((candidate.get("result_trace") or {}).get("capability_request_summary"))
+            if (
+                isinstance(request_summary, dict)
+                and request_summary.get("capability_id") == "body.status"
+                and request_summary.get("status") == "dispatched"
+            ):
+                request_id = request_summary.get("request_id")
+                if isinstance(request_id, str) and request_id:
+                    conversation_trace = candidate
+                    break
+            time.sleep(0.25)
+        if conversation_trace is None or request_id is None:
+            raise SmokeError("body.status probe did not dispatch a request.")
+
+        followup_trace: dict[str, Any] | None = None
+        inspected_cycle_ids: set[str] = set()
+        while time.monotonic() < deadline:
+            self._assert_server_running()
+            self._assert_event_clients_healthy()
+            cycle_summaries = self.api.get("/api/inspection/cycle-summaries?limit=80").get("cycle_summaries", [])
+            if not isinstance(cycle_summaries, list):
+                raise SmokeError("cycle_summaries response was invalid during body.status probe.")
+            for cycle_summary in cycle_summaries:
+                if not isinstance(cycle_summary, dict) or cycle_summary.get("trigger_kind") != "capability_result":
+                    continue
+                cycle_id = cycle_summary.get("cycle_id")
+                if not isinstance(cycle_id, str) or not cycle_id or cycle_id in inspected_cycle_ids:
+                    continue
+                inspected_cycle_ids.add(cycle_id)
+                trace = self.api.get(f"/api/inspection/cycles/{cycle_id}")
+                followup_summary = ((trace.get("result_trace") or {}).get("capability_result_followup_summary"))
+                if not isinstance(followup_summary, dict):
+                    continue
+                source_request_summary = followup_summary.get("source_request_summary")
+                if not isinstance(source_request_summary, dict) or source_request_summary.get("request_id") != request_id:
+                    continue
+                observation_summary = ((trace.get("input_trace") or {}).get("observation_summary"))
+                if not isinstance(observation_summary, dict):
+                    continue
+                observed_body_summary = observation_summary.get("body_state_summary")
+                if not isinstance(observed_body_summary, str) or marker not in observed_body_summary:
+                    continue
+                followup_trace = trace
+                break
+            if followup_trace is not None:
+                break
+            time.sleep(0.25)
+        if followup_trace is None:
+            raise SmokeError("body.status probe did not produce a capability_result follow-up cycle.")
+        if request_id not in self.body_status_followup_verified_request_ids:
+            self.body_status_followup_verified_request_ids.append(request_id)
 
         return conversation_trace, followup_trace
 
@@ -2308,6 +2445,33 @@ class LongSmokeRunner:
         self.device_status_probe_followup_cycle_id = device_followup_cycle_id
         self.device_status_probe_verified = True
 
+        body_marker = "RealLLMBodyStatusProbeMarker"
+        body_state_summary = f"{body_marker}: 肩に少し疲れがあり、短い休憩を挟むとよい状態。"
+        body_conversation_trace, body_followup_trace = self._run_body_status_probe(
+            marker=body_marker,
+            conversation_text=f"今の体調や身体の状態を確認して教えて。{body_marker}",
+            source="real_llm_smoke_body_status",
+            client_id="real-llm-smoke-body-status",
+            active_app="RealLLMSmokeBodyStatus",
+            window_title=body_marker,
+            override={
+                "body_state_summary": body_state_summary,
+                "client_context": {
+                    "device_state_summary": "body.status を返せる desktop client が接続中。",
+                    "schedule_summary": "身体状態確認をこのまま進められる。",
+                },
+            },
+        )
+        body_conversation_cycle_id = body_conversation_trace.get("cycle_id")
+        body_followup_cycle_id = body_followup_trace.get("cycle_id")
+        if not isinstance(body_conversation_cycle_id, str) or not body_conversation_cycle_id:
+            raise SmokeError("real-llm-smoke body.status conversation cycle_id was not recorded.")
+        if not isinstance(body_followup_cycle_id, str) or not body_followup_cycle_id:
+            raise SmokeError("real-llm-smoke body.status follow-up cycle_id was not recorded.")
+        self.body_status_probe_conversation_cycle_id = body_conversation_cycle_id
+        self.body_status_probe_followup_cycle_id = body_followup_cycle_id
+        self.body_status_probe_verified = True
+
         environment_marker = "RealLLMEnvironmentStatusProbeMarker"
         environment_summary = f"{environment_marker}: 作業部屋は静かで、集中しやすい環境。"
         environment_conversation_trace, environment_followup_trace = self._run_environment_status_probe(
@@ -2342,6 +2506,8 @@ class LongSmokeRunner:
         schedule_followup_trace = self._wait_for_cycle_memory_to_finish(schedule_followup_cycle_id)
         device_conversation_trace = self._wait_for_cycle_memory_to_finish(device_conversation_cycle_id)
         device_followup_trace = self._wait_for_cycle_memory_to_finish(device_followup_cycle_id)
+        body_conversation_trace = self._wait_for_cycle_memory_to_finish(body_conversation_cycle_id)
+        body_followup_trace = self._wait_for_cycle_memory_to_finish(body_followup_cycle_id)
         environment_conversation_trace = self._wait_for_cycle_memory_to_finish(environment_conversation_cycle_id)
         environment_followup_trace = self._wait_for_cycle_memory_to_finish(environment_followup_cycle_id)
         self._wait_for_memory_jobs_to_drain()
@@ -2352,6 +2518,8 @@ class LongSmokeRunner:
         schedule_followup_trace = self.api.get(f"/api/inspection/cycles/{schedule_followup_cycle_id}")
         device_conversation_trace = self.api.get(f"/api/inspection/cycles/{device_conversation_cycle_id}")
         device_followup_trace = self.api.get(f"/api/inspection/cycles/{device_followup_cycle_id}")
+        body_conversation_trace = self.api.get(f"/api/inspection/cycles/{body_conversation_cycle_id}")
+        body_followup_trace = self.api.get(f"/api/inspection/cycles/{body_followup_cycle_id}")
         environment_conversation_trace = self.api.get(f"/api/inspection/cycles/{environment_conversation_cycle_id}")
         environment_followup_trace = self.api.get(f"/api/inspection/cycles/{environment_followup_cycle_id}")
 
@@ -2389,6 +2557,14 @@ class LongSmokeRunner:
             "device_status_response_count": self.device_status_response_count,
             "device_status_request_ids": self.device_status_request_ids,
             "device_status_followup_verified_request_ids": self.device_status_followup_verified_request_ids,
+            "body_status_conversation_cycle_id": body_conversation_cycle_id,
+            "body_status_conversation_trace": body_conversation_trace,
+            "body_status_followup_cycle_id": body_followup_cycle_id,
+            "body_status_followup_trace": body_followup_trace,
+            "body_status_request_count": self.body_status_request_count,
+            "body_status_response_count": self.body_status_response_count,
+            "body_status_request_ids": self.body_status_request_ids,
+            "body_status_followup_verified_request_ids": self.body_status_followup_verified_request_ids,
             "environment_status_conversation_cycle_id": environment_conversation_cycle_id,
             "environment_status_conversation_trace": environment_conversation_trace,
             "environment_status_followup_cycle_id": environment_followup_cycle_id,
@@ -2481,6 +2657,16 @@ class LongSmokeRunner:
             device_status_probe_followup_trace = self.api.get(
                 f"/api/inspection/cycles/{self.device_status_probe_followup_cycle_id}"
             )
+        body_status_probe_conversation_trace = None
+        if isinstance(self.body_status_probe_conversation_cycle_id, str) and self.body_status_probe_conversation_cycle_id:
+            body_status_probe_conversation_trace = self.api.get(
+                f"/api/inspection/cycles/{self.body_status_probe_conversation_cycle_id}"
+            )
+        body_status_probe_followup_trace = None
+        if isinstance(self.body_status_probe_followup_cycle_id, str) and self.body_status_probe_followup_cycle_id:
+            body_status_probe_followup_trace = self.api.get(
+                f"/api/inspection/cycles/{self.body_status_probe_followup_cycle_id}"
+            )
         environment_status_probe_conversation_trace = None
         if (
             isinstance(self.environment_status_probe_conversation_cycle_id, str)
@@ -2554,6 +2740,10 @@ class LongSmokeRunner:
             "device_status_response_count": self.device_status_response_count,
             "device_status_request_ids": self.device_status_request_ids,
             "device_status_followup_verified_request_ids": self.device_status_followup_verified_request_ids,
+            "body_status_request_count": self.body_status_request_count,
+            "body_status_response_count": self.body_status_response_count,
+            "body_status_request_ids": self.body_status_request_ids,
+            "body_status_followup_verified_request_ids": self.body_status_followup_verified_request_ids,
             "environment_status_request_count": self.environment_status_request_count,
             "environment_status_response_count": self.environment_status_response_count,
             "environment_status_request_ids": self.environment_status_request_ids,
@@ -2588,6 +2778,9 @@ class LongSmokeRunner:
             "device_status_probe_conversation_cycle_id": self.device_status_probe_conversation_cycle_id,
             "device_status_probe_followup_cycle_id": self.device_status_probe_followup_cycle_id,
             "device_status_probe_verified": self.device_status_probe_verified,
+            "body_status_probe_conversation_cycle_id": self.body_status_probe_conversation_cycle_id,
+            "body_status_probe_followup_cycle_id": self.body_status_probe_followup_cycle_id,
+            "body_status_probe_verified": self.body_status_probe_verified,
             "environment_status_probe_conversation_cycle_id": self.environment_status_probe_conversation_cycle_id,
             "environment_status_probe_followup_cycle_id": self.environment_status_probe_followup_cycle_id,
             "environment_status_probe_verified": self.environment_status_probe_verified,
@@ -2601,6 +2794,8 @@ class LongSmokeRunner:
             "schedule_status_probe_followup_trace": schedule_status_probe_followup_trace,
             "device_status_probe_conversation_trace": device_status_probe_conversation_trace,
             "device_status_probe_followup_trace": device_status_probe_followup_trace,
+            "body_status_probe_conversation_trace": body_status_probe_conversation_trace,
+            "body_status_probe_followup_trace": body_status_probe_followup_trace,
             "environment_status_probe_conversation_trace": environment_status_probe_conversation_trace,
             "environment_status_probe_followup_trace": environment_status_probe_followup_trace,
             "conversation_traces": conversation_traces,
@@ -2623,6 +2818,7 @@ class LongSmokeRunner:
         followed_request_ids: set[str] = set(self.external_status_followup_verified_request_ids)
         followed_request_ids.update(self.schedule_status_followup_verified_request_ids)
         followed_request_ids.update(self.device_status_followup_verified_request_ids)
+        followed_request_ids.update(self.body_status_followup_verified_request_ids)
         followed_request_ids.update(self.environment_status_followup_verified_request_ids)
         for trace in capability_result_traces:
             followup_summary = ((trace.get("result_trace") or {}).get("capability_result_followup_summary"))
@@ -2640,6 +2836,7 @@ class LongSmokeRunner:
                 *self.external_status_request_ids,
                 *self.schedule_status_request_ids,
                 *self.device_status_request_ids,
+                *self.body_status_request_ids,
                 *self.environment_status_request_ids,
             ]
             if request_id not in followed_request_ids
@@ -2873,6 +3070,10 @@ class LongSmokeRunner:
             raise SmokeError("real-llm-smoke device.status request count was not 1.")
         if summary.get("device_status_response_count") != 1:
             raise SmokeError("real-llm-smoke device.status response count was not 1.")
+        if summary.get("body_status_request_count") != 1:
+            raise SmokeError("real-llm-smoke body.status request count was not 1.")
+        if summary.get("body_status_response_count") != 1:
+            raise SmokeError("real-llm-smoke body.status response count was not 1.")
         if summary.get("environment_status_request_count") != 1:
             raise SmokeError("real-llm-smoke environment.status request count was not 1.")
         if summary.get("environment_status_response_count") != 1:
@@ -2987,6 +3188,28 @@ class LongSmokeRunner:
         )
         if isinstance(device_followup_trace, dict):
             self._assert_memory_trace_succeeded(device_followup_trace, "real-llm-smoke device.status follow-up")
+
+        body_conversation_trace = summary.get("body_status_conversation_trace")
+        if not isinstance(body_conversation_trace, dict):
+            raise SmokeError("real-llm-smoke body.status conversation trace was not recorded.")
+        body_summary = body_conversation_trace.get("cycle_summary", {})
+        if not isinstance(body_summary, dict) or body_summary.get("result_kind") != "capability_request":
+            raise SmokeError("real-llm-smoke body.status conversation did not dispatch capability_request.")
+        body_request_summary = ((body_conversation_trace.get("result_trace") or {}).get("capability_request_summary"))
+        if not isinstance(body_request_summary, dict) or body_request_summary.get("capability_id") != "body.status":
+            raise SmokeError("real-llm-smoke body.status request summary was invalid.")
+        if body_request_summary.get("status") != "dispatched":
+            raise SmokeError("real-llm-smoke body.status request was not dispatched.")
+        self._assert_memory_trace_succeeded(body_conversation_trace, "real-llm-smoke body.status conversation")
+
+        body_followup_trace = summary.get("body_status_followup_trace")
+        self._assert_body_status_probe_trace(
+            body_conversation_trace,
+            body_followup_trace,
+            marker="RealLLMBodyStatusProbeMarker",
+        )
+        if isinstance(body_followup_trace, dict):
+            self._assert_memory_trace_succeeded(body_followup_trace, "real-llm-smoke body.status follow-up")
 
         environment_conversation_trace = summary.get("environment_status_conversation_trace")
         if not isinstance(environment_conversation_trace, dict):
@@ -3698,6 +3921,108 @@ class LongSmokeRunner:
         if transition_summary.get("final_state") != "completed":
             raise SmokeError("device.status probe follow-up final_state was invalid.")
 
+    def _assert_body_status_probe_trace(
+        self,
+        conversation_trace: Any,
+        followup_trace: Any,
+        *,
+        marker: str = "LongSmokeBodyStatusProbeMarker",
+    ) -> None:
+        if not isinstance(conversation_trace, dict):
+            raise SmokeError("body.status probe conversation trace was not collected.")
+        if not isinstance(followup_trace, dict):
+            raise SmokeError("body.status probe follow-up trace was not collected.")
+
+        result_trace = conversation_trace.get("result_trace", {})
+        if not isinstance(result_trace, dict):
+            raise SmokeError("body.status probe conversation result_trace was invalid.")
+        capability_request_summary = result_trace.get("capability_request_summary", {})
+        if not isinstance(capability_request_summary, dict):
+            raise SmokeError("body.status probe conversation capability_request_summary was invalid.")
+        if capability_request_summary.get("capability_id") != "body.status":
+            raise SmokeError("body.status probe conversation capability_id was invalid.")
+        if capability_request_summary.get("status") != "dispatched":
+            raise SmokeError("body.status probe conversation capability_request status was invalid.")
+        request_id = capability_request_summary.get("request_id")
+        if not isinstance(request_id, str) or not request_id:
+            raise SmokeError("body.status probe conversation request_id was not recorded.")
+
+        followup_cycle_summary = followup_trace.get("cycle_summary", {})
+        if not isinstance(followup_cycle_summary, dict):
+            raise SmokeError("body.status probe follow-up cycle_summary was invalid.")
+        if followup_cycle_summary.get("trigger_kind") != "capability_result":
+            raise SmokeError("body.status probe follow-up trigger_kind was invalid.")
+        if followup_cycle_summary.get("result_kind") != "reply":
+            raise SmokeError("body.status probe follow-up result_kind was invalid.")
+        input_trace = followup_trace.get("input_trace", {})
+        if not isinstance(input_trace, dict):
+            raise SmokeError("body.status probe follow-up input_trace was invalid.")
+        observation_summary = input_trace.get("observation_summary", {})
+        if not isinstance(observation_summary, dict):
+            raise SmokeError("body.status probe follow-up observation_summary was invalid.")
+        if observation_summary.get("capability_id") != "body.status":
+            raise SmokeError("body.status probe follow-up observation capability_id was invalid.")
+        body_state_summary = observation_summary.get("body_state_summary")
+        if not isinstance(body_state_summary, str) or marker not in body_state_summary:
+            raise SmokeError("body.status probe follow-up body_state_summary was invalid.")
+
+        world_state_trace = followup_trace.get("world_state_trace", {})
+        if not isinstance(world_state_trace, dict):
+            raise SmokeError("body.status probe follow-up world_state_trace was invalid.")
+        source_pack_contexts = world_state_trace.get("source_pack_contexts", {})
+        if not isinstance(source_pack_contexts, dict):
+            raise SmokeError("body.status probe follow-up source_pack_contexts was invalid.")
+        body_context = source_pack_contexts.get("body_context", {})
+        if not isinstance(body_context, dict):
+            raise SmokeError("body.status probe follow-up body_context was invalid.")
+        if body_context.get("summary_source_hint") != "capability_result.body_state_summary":
+            raise SmokeError("body.status probe follow-up summary_source_hint was invalid.")
+        state_type_hooks = world_state_trace.get("source_pack_state_type_hooks", {})
+        if not isinstance(state_type_hooks, dict):
+            raise SmokeError("body.status probe follow-up source_pack_state_type_hooks was invalid.")
+        body_hook = state_type_hooks.get("body", {})
+        if not isinstance(body_hook, dict):
+            raise SmokeError("body.status probe follow-up body hook was invalid.")
+        if body_hook.get("capability_id") != "body.status":
+            raise SmokeError("body.status probe follow-up body hook capability_id was invalid.")
+        if body_hook.get("summary_source") != "capability_result.body_state_summary":
+            raise SmokeError("body.status probe follow-up body hook summary_source was invalid.")
+
+        normalized_candidate_policies = world_state_trace.get("normalized_candidate_policies", [])
+        if not isinstance(normalized_candidate_policies, list):
+            raise SmokeError("body.status probe follow-up normalized_candidate_policies was invalid.")
+        body_policy = next(
+            (
+                item
+                for item in normalized_candidate_policies
+                if isinstance(item, dict) and item.get("state_type") == "body"
+            ),
+            None,
+        )
+        if not isinstance(body_policy, dict):
+            raise SmokeError("body.status probe follow-up body policy was invalid.")
+        if body_policy.get("summary_source") != "capability_result.body_state_summary":
+            raise SmokeError("body.status probe follow-up body policy summary_source was invalid.")
+
+        followup_result_trace = followup_trace.get("result_trace", {})
+        if not isinstance(followup_result_trace, dict):
+            raise SmokeError("body.status probe follow-up result_trace was invalid.")
+        capability_result_followup_summary = followup_result_trace.get("capability_result_followup_summary", {})
+        if not isinstance(capability_result_followup_summary, dict):
+            raise SmokeError("body.status probe follow-up summary was invalid.")
+        if capability_result_followup_summary.get("capability_id") != "body.status":
+            raise SmokeError("body.status probe follow-up summary capability_id was invalid.")
+        source_request_summary = capability_result_followup_summary.get("source_request_summary", {})
+        if not isinstance(source_request_summary, dict) or source_request_summary.get("request_id") != request_id:
+            raise SmokeError("body.status probe follow-up source_request_summary was invalid.")
+        transition_summary = capability_result_followup_summary.get("transition_summary", {})
+        if not isinstance(transition_summary, dict):
+            raise SmokeError("body.status probe follow-up transition summary was invalid.")
+        if transition_summary.get("reason_code") != "followup_reply":
+            raise SmokeError("body.status probe follow-up reason_code was invalid.")
+        if transition_summary.get("final_state") != "completed":
+            raise SmokeError("body.status probe follow-up final_state was invalid.")
+
     def _assert_environment_status_probe_trace(
         self,
         conversation_trace: Any,
@@ -3835,6 +4160,8 @@ class LongSmokeRunner:
             schedule_followup_summary = (summary.get("schedule_status_followup_trace") or {}).get("cycle_summary") or {}
             device_summary = (summary.get("device_status_conversation_trace") or {}).get("cycle_summary") or {}
             device_followup_summary = (summary.get("device_status_followup_trace") or {}).get("cycle_summary") or {}
+            body_summary = (summary.get("body_status_conversation_trace") or {}).get("cycle_summary") or {}
+            body_followup_summary = (summary.get("body_status_followup_trace") or {}).get("cycle_summary") or {}
             environment_summary = (summary.get("environment_status_conversation_trace") or {}).get("cycle_summary") or {}
             environment_followup_summary = (summary.get("environment_status_followup_trace") or {}).get("cycle_summary") or {}
             runtime_summary = (summary.get("status") or {}).get("runtime_summary") or {}
@@ -3844,6 +4171,7 @@ class LongSmokeRunner:
                 f" external_status={external_summary.get('result_kind')}/{external_followup_summary.get('result_kind')}"
                 f" schedule_status={schedule_summary.get('result_kind')}/{schedule_followup_summary.get('result_kind')}"
                 f" device_status={device_summary.get('result_kind')}/{device_followup_summary.get('result_kind')}"
+                f" body_status={body_summary.get('result_kind')}/{body_followup_summary.get('result_kind')}"
                 f" environment_status={environment_summary.get('result_kind')}/{environment_followup_summary.get('result_kind')}"
                 f" pending_jobs={runtime_summary.get('pending_memory_job_count')}"
                 f" in_progress={runtime_summary.get('memory_job_in_progress')}"

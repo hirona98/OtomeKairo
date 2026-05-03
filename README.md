@@ -91,7 +91,7 @@ OtomeKairo は、HTTPS API サーバとして bootstrap、観測、設定、insp
 .venv/bin/python scripts/run_long_smoke.py --profile real-llm-smoke --keep-artifacts
 ```
 
-この profile は通常会話 1 回、`external.status` の capability request / result follow-up 1 回、memory postprocess drain を確認する。
+この profile は通常会話 1 回、`external.status / schedule.status / device.status / body.status / environment.status` の capability request / result follow-up、memory postprocess drain を確認する。
 full smoke と違い、`wake` と `desktop_watch` は無効化する。
 
 ## VSCode から起動

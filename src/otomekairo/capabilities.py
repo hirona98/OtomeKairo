@@ -296,6 +296,74 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
             "error",
         ],
     },
+    "body.status": {
+        "id": "body.status",
+        "version": "1",
+        "kind": "observation",
+        "decision_description": "身体や体調の現在状態を確認する",
+        "when_to_use": [
+            "判断に身体や体調の現在状態が必要",
+            "ユーザーが疲労、眠気、姿勢、体調を短く確認したい",
+        ],
+        "do_not_use_when": [
+            "現在の判断に身体状態が不要",
+            "すでに十分新しい身体状態要約が手元にある",
+        ],
+        "required_permissions": [],
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "scope": {"type": "string"},
+            },
+            "required": ["scope"],
+            "additionalProperties": False,
+        },
+        "result_schema": {
+            "type": "object",
+            "properties": {
+                "body_state_summary": {"type": "string"},
+                "client_context": {
+                    "type": ["object", "null"],
+                },
+                "error": {
+                    "type": ["string", "null"],
+                },
+            },
+            "required": ["body_state_summary"],
+            "additionalProperties": False,
+        },
+        "side_effects": {
+            "external_world": False,
+            "user_visible": False,
+            "stores_raw_payload": False,
+        },
+        "timeout_ms": 5000,
+        "risk_level": "low",
+        "memory_policy": {
+            "record_result_event": True,
+            "allow_memory_update": True,
+        },
+        "state_policy": {
+            "creates_ongoing_action": True,
+            "blocks_parallel_capability": True,
+            "result_context_hook": "body_status",
+            "followup_hint_hook": "body_status",
+            "success_cooldown_seconds": 60,
+            "error_cooldown_seconds": 60,
+            "unavailable_seconds_on_dispatch_failure": 60,
+            "unavailable_seconds_on_timeout": 60,
+        },
+        "inspection_fields": [
+            "capability_id",
+            "target_client_id",
+            "scope",
+            "body_state_summary",
+            "device_state_summary",
+            "schedule_summary",
+            "environment_summary",
+            "error",
+        ],
+    },
     "environment.status": {
         "id": "environment.status",
         "version": "1",

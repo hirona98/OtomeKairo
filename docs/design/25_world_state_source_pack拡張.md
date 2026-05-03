@@ -6,7 +6,8 @@
 この拡張では、画面前景の補助要約と、対人文脈、周囲環境、場所、外部サービス、身体、機器、予定の短い current summary も state-type 別 context として同じ source pack に入れ、LLM が `world_state` 候補を選びやすくする。
 
 ここで扱うのは **短い structured summary だけ** である。
-新しい capability、raw payload 保存、長い OCR、配送先 client の露出は入れない。
+capability 自体の安定契約は `17_capability_manifest.md` と API 文書を正本にし、この文書は source pack に入れる summary 境界だけを扱う。
+raw payload 保存、長い OCR、配送先 client の露出は入れない。
 
 ## 入力境界
 
@@ -20,6 +21,7 @@
 - `external.status` result から得た短い `service / status_text`
 - `schedule.status` result から得た短い `schedule_summary / schedule_slots`
 - `device.status` result から得た短い `device_state_summary`
+- `body.status` result から得た短い `body_state_summary`
 - `environment.status` result から得た短い `environment_summary`
 - capability result の `client_context` から得た短い `body_state_summary`
 - capability result の `client_context` から得た短い `device_state_summary`
@@ -77,7 +79,7 @@ raw response body、client 固有 ID、資格情報、内部 URL、base64 本文
   "body_context": {
     "summary_text": "肩や首に疲れがありそう。",
     "body_state_summary": "肩や首に疲れがありそう。",
-    "capability_id": "vision.capture"
+    "capability_id": "body.status"
   },
   "device_context": {
     "summary_text": "デスクトップ client は利用可能な状態で接続中。",
@@ -115,6 +117,7 @@ source pack では、標準の `client_context` と state-type 別の structured
 `external.status` のような capability result は、`external_service_context.summary_text` に加えて `service / status_text` を載せる。
 `schedule.status` result は、`schedule_context.summary_text / schedule_summary / schedule_slots` へ投影する。
 `device.status` result は、`device_context.summary_text / device_state_summary` へ投影する。
+`body.status` result は、`body_context.summary_text / body_state_summary` へ投影する。
 `environment.status` result は、`environment_context.summary_text / environment_summary` へ投影する。
 同時に client 側 summary もあるときは、`client_summary_text / result_summary_text / summary_source_hint` を追加して境界を残す。
 `body_context / device_context / schedule_context` でも、capability result 由来のときは `capability_id` と state-type 別 summary field を載せる。
@@ -129,6 +132,7 @@ real schedule source が複数あるときは、`schedule_context.schedule_slots
 - `external.status` result の `service / status_text` を `external_service_context` へ投影する
 - `schedule.status` result の `schedule_summary / schedule_slots` を `schedule_context` へ投影する
 - `device.status` result の `device_state_summary` を `device_context` へ投影する
+- `body.status` result の `body_state_summary` を `body_context` へ投影する
 - `environment.status` result の `environment_summary` を `environment_context` へ投影する
 - capability result の `body_state_summary / device_state_summary / schedule_summary` を対応する state-type context へ投影する
 - `summary_source` が `capability_result.<field>` と `client_context.<field>` を区別できるように context へ source hint を残す
