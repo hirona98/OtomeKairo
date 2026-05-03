@@ -78,6 +78,12 @@ class ServiceCapabilityMixin:
             label=f"{capability_id} input",
         )
         self._prune_pending_capability_requests(current_time=current_time)
+        self._validate_capability_runtime_dispatchable(
+            memory_set_id=memory_set_id,
+            capability_id=capability_id,
+            current_time=current_time,
+            state_policy=state_policy,
+        )
 
         # binding と ongoing_action を検証し、内部実行記録を作る。
         try:
@@ -588,6 +594,66 @@ class ServiceCapabilityMixin:
             isinstance(unavailable_until, str) and bool(unavailable_until) and unavailable_until > current_time
         )
         return entry
+
+    def _set_capability_runtime_paused(
+        self,
+        *,
+        capability_id: str,
+        paused: bool,
+    ) -> None:
+        with self._runtime_state_lock:
+            entry = self._capability_runtime_state_entry(capability_id)
+            entry["paused"] = paused
+
+    def _validate_capability_runtime_dispatchable(
+        self,
+        *,
+        memory_set_id: str,
+        capability_id: str,
+        current_time: str,
+        state_policy: dict[str, Any],
+    ) -> None:
+        dispatch_block = self._capability_runtime_dispatch_block(
+            memory_set_id=memory_set_id,
+            capability_id=capability_id,
+            current_time=current_time,
+            state_policy=state_policy,
+        )
+        if dispatch_block is None:
+            return
+        reason_code, detail = dispatch_block
+        if reason_code == "paused":
+            raise ValueError(f"Capability is paused: {capability_id}")
+        if reason_code == "temporarily_unavailable":
+            raise ValueError(f"Capability is temporarily unavailable: {capability_id} {detail}")
+        if reason_code == "busy":
+            raise ValueError(f"Capability is busy: {capability_id}")
+
+    def _capability_runtime_dispatch_block(
+        self,
+        *,
+        memory_set_id: str,
+        capability_id: str,
+        current_time: str,
+        state_policy: dict[str, Any],
+    ) -> tuple[str, str | None] | None:
+        active_ongoing_action = self.store.get_ongoing_action(
+            memory_set_id=memory_set_id,
+            current_time=current_time,
+        )
+        runtime_state = self._capability_runtime_state_snapshot(
+            capability_id=capability_id,
+            current_time=current_time,
+            active_ongoing_action=active_ongoing_action,
+        )
+        if runtime_state.get("paused") is True:
+            return ("paused", None)
+        if runtime_state.get("unavailable_active") is True:
+            unavailable_reason = str(runtime_state.get("unavailable_reason") or "unavailable").strip()
+            return ("temporarily_unavailable", unavailable_reason)
+        if bool(state_policy.get("blocks_parallel_capability")) and runtime_state.get("busy") is True:
+            return ("busy", None)
+        return None
 
     def _set_capability_runtime_busy(self, *, request_record: dict[str, Any]) -> None:
         capability_id = str(request_record.get("capability_id") or "").strip()

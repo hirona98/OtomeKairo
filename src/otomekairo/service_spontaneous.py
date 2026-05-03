@@ -1394,9 +1394,11 @@ class ServiceSpontaneousMixin:
                     failure_reason=str(exc),
                     pending_intent_selection=pending_intent_selection,
                 )
+                self._set_last_desktop_watch_at(self._now_iso())
                 return
             if capture_response is None:
                 debug_log("DesktopWatch", "cycle skipped capture_unavailable")
+                self._set_last_desktop_watch_at(self._now_iso())
                 return
             if not capture_response["images"]:
                 debug_log("DesktopWatch", "cycle skipped no_images")
@@ -2085,6 +2087,18 @@ class ServiceSpontaneousMixin:
         except ValueError:
             return None
         if target_client_id != selected_client_id:
+            return None
+        state_policy = self._capability_state_policy("vision.capture")
+        dispatch_block = self._capability_runtime_dispatch_block(
+            memory_set_id=memory_set_id,
+            capability_id="vision.capture",
+            current_time=current_time,
+            state_policy=state_policy,
+        )
+        if dispatch_block is not None:
+            reason_code, detail = dispatch_block
+            detail_suffix = f" {detail}" if detail else ""
+            debug_log("DesktopWatch", f"cycle skipped capability_state {reason_code}{detail_suffix}")
             return None
         result = self._dispatch_capability_request(
             memory_set_id=memory_set_id,

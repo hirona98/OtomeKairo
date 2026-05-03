@@ -142,6 +142,55 @@ class ServiceConfigMixin:
             "rejected_bindings": rejected_bindings,
         }
 
+    def patch_capability_state(
+        self,
+        token: str | None,
+        capability_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        # 認可
+        state = self._require_token(token)
+
+        # 入力
+        normalized_capability_id = capability_id.strip() if isinstance(capability_id, str) else ""
+        if not normalized_capability_id:
+            raise ServiceError(400, "invalid_capability_id", "capability_id must be a non-empty string.")
+        manifest = capability_manifests().get(normalized_capability_id)
+        if manifest is None:
+            raise ServiceError(404, "capability_not_found", "The requested capability_id does not exist.")
+        if set(payload.keys()) != {"paused"}:
+            raise ServiceError(400, "invalid_capability_state", "capability state patch requires only paused.")
+        paused = payload.get("paused")
+        if not isinstance(paused, bool):
+            raise ServiceError(400, "invalid_capability_paused", "paused must be a boolean.")
+
+        # runtime state を更新する。in-flight request は破棄せず、以後の新規 dispatch だけを止める。
+        self._set_capability_runtime_paused(
+            capability_id=normalized_capability_id,
+            paused=paused,
+        )
+        generated_at = self._now_iso()
+        bindings = self._event_stream_registry.list_capability_bindings()
+        active_ongoing_action = self._current_ongoing_action(
+            state=state,
+            current_time=generated_at,
+        )
+        availability = self._build_capability_availability(
+            manifest=manifest,
+            current_time=generated_at,
+            bound_client_ids=bindings["accepted"].get(normalized_capability_id, []),
+            rejected_bindings=bindings["rejected"],
+            active_ongoing_action=active_ongoing_action,
+        )
+        debug_log(
+            "Capability",
+            f"state patched capability={normalized_capability_id} paused={paused}",
+        )
+        return {
+            "generated_at": generated_at,
+            "capability": availability,
+        }
+
     def unregister_event_stream_connection(self, session_id: str) -> None:
         # レジストリ
         self._event_stream_registry.remove_connection(session_id)

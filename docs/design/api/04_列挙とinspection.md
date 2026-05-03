@@ -81,9 +81,18 @@ response:
         },
         "state": {
           "paused": false,
+          "busy": false,
+          "busy_request_id": null,
+          "busy_action_id": null,
+          "cooldown_active": false,
           "cooldown_until": null,
           "last_failure_at": null,
           "last_failure_summary": null,
+          "last_result_at": null,
+          "last_result_summary": null,
+          "unavailable_active": false,
+          "unavailable_reason": null,
+          "unavailable_until": null,
           "parallel_blocked_by_action_id": null
         }
       }
@@ -109,11 +118,14 @@ response:
 | `no_binding` | 実行できる接続 client がない |
 | `permission_denied` | 必要権限を満たす接続主体がない |
 | `paused` | server 側で一時停止している |
-| `cooldown` | cooldown 中である |
-| `precondition_failed` | 実行前提を満たしていない |
-| `recent_failure` | 直近失敗により一時的に実行不可である |
+| `busy` | 同じ capability が結果待ちである |
+| `unavailable` | 動的一時 unavailable の理由が詳細化されていない |
+| `dispatch_failed` | 直近の配送失敗により一時的に実行不可である |
+| `request_timeout` | 直近の result timeout により一時的に実行不可である |
 | `parallel_blocked` | 並列実行制限により実行不可である |
-| `transport_unavailable` | stream などの配送経路が利用できない |
+
+cooldown は `state.cooldown_active / state.cooldown_until` に残す。
+cooldown は availability を単独で false にしない。
 
 `binding.status` は次のいずれかである。
 
@@ -186,13 +198,13 @@ response:
 top-level の trace object は、存在しない段階でも空 object として返す。
 各 trace object の意味と標準的な含有内容は [../13_デバッグ可能性.md](../13_デバッグ可能性.md) を正とする。
 機能ごとの追加 field は、それぞれの設計文書を正とする。
-`world_state_trace` には、sanitized context summary に加えて `source_pack_state_type_hooks`、`normalized_candidate_policies`、`replaced_state_count` を含めてよい。
-`world_state_trace.source_pack_state_type_hooks.schedule` には、必要なら `pending_intent_slot_key` に加えて `real_schedule_slot_count / schedule_slot_keys` を含めてよい。
-`world_state_trace.normalized_candidate_policies` では、`schedule:self` と `schedule:<slot_key>` の両方を比較でき、real schedule slot 由来の candidate では `ttl_capped_by = schedule_slot.expires_at` を含めてよい。
-trigger をまたいだ比較用に、`result_trace.trigger_compact_summary` に共通 outer shape の compact summary を含めてよい。
-capability dispatch が起きた cycle では、`result_trace.capability_dispatch_summary` に capability family 共通で比較しやすい compact summary を含めてよい。
-`trigger_kind=capability_result` の cycle では、`result_trace.capability_result_followup_summary` に capability family 共通で比較しやすい compact summary を含めてよい。
-initiative 系 trigger の `entry_summary.candidate_families` には、`preferred_result_kind / preferred_result_reason_summary / blocking_reason_summary` を含めてよい。
+`world_state_trace` には、sanitized context summary に加えて `source_pack_state_type_hooks`、`normalized_candidate_policies`、`replaced_state_count` を含める。
+`world_state_trace.source_pack_state_type_hooks.schedule` には、必要な場合に `pending_intent_slot_key` に加えて `real_schedule_slot_count / schedule_slot_keys` を含める。
+`world_state_trace.normalized_candidate_policies` では、`schedule:self` と `schedule:<slot_key>` の両方を比較でき、real schedule slot 由来の candidate では `ttl_capped_by = schedule_slot.expires_at` を含める。
+trigger をまたいだ比較用に、`result_trace.trigger_compact_summary` に共通 outer shape の compact summary を含める。
+capability dispatch が起きた cycle では、`result_trace.capability_dispatch_summary` に capability family 共通で比較しやすい compact summary を含める。
+`trigger_kind=capability_result` の cycle では、`result_trace.capability_result_followup_summary` に capability family 共通で比較しやすい compact summary を含める。
+initiative 系 trigger の `entry_summary.candidate_families` には、`preferred_result_kind / preferred_result_reason_summary / blocking_reason_summary` を含める。
 
 | trace | 詳細正本 |
 |-------|----------|

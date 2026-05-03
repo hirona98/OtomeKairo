@@ -28,6 +28,7 @@ API 仕様は、次のように分ける。
   - capability 実行要求
   - capability 実行結果
   - capability binding と wire 契約
+  - capability state 操作
 
 ## 更新ルール
 

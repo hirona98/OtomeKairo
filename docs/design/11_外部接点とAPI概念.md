@@ -89,6 +89,7 @@ capability の正本は本体が持つ `CapabilityManifest` である。
 - capability ごとの request / result 契約
 - 実行要求として何を渡すか
 - 実行結果として何が返るか
+- server 側で新規 dispatch を止める capability state 操作
 
 `desktop_watch` 自体は capability ではない。
 `desktop_watch` は観測方針として `vision.capture` のような capability を起動し、その結果を観測面へ戻す。
@@ -96,6 +97,7 @@ capability の正本は本体が持つ `CapabilityManifest` である。
 ここでは具体的なハードウェア名ではなく、request / result 契約を正とする。
 モデル role の `web_search_enabled` は、生成 provider へ渡す検索利用指示であり、実行連携面の capability ではない。
 OtomeKairo が外部サービスへ主体的にアクセスする機能は capability として定義し、provider 側検索 option と混同しない。
+capability state の pause は runtime の実行連携操作であり、現在設定や capability manifest の変更ではない。
 
 内部で保留した意図を、そのまま外向き結果に露出する必要はない。
 外向きに返す結果と、内部で持ち越す判断結果は分ける。

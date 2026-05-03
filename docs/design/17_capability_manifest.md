@@ -45,6 +45,7 @@ server は次を照合して capability availability を決める。
 `hello.caps` は `CapabilityBinding` を作る入力であり、server に受理されたあとも権限、状態、制約によって実行不可になる。
 外向きに現在の availability を確認する正本 API は `GET /api/inspection/capabilities` とする。
 `GET /api/catalog` は capability manifest 一覧や availability を返さない。
+`CapabilityState.paused` の切替 API は `PATCH /api/capabilities/{capability_id}/state` とし、manifest と binding は変更しない。
 判断 LLM に渡す decision view と inspection の capability availability は、同じ server 派生状態から作る。
 inspection には運用確認に必要な binding 要約を出すが、token、credential、内部 URL、transport 詳細は出さない。
 
@@ -80,7 +81,7 @@ inspection には運用確認に必要な binding 要約を出すが、token、c
 
 `vision.capture` の manifest は次の形を基準にする。
 現行の concrete capability は `vision.capture` と `external.status` であり、後者は短い外部状態要約を result として返す。
-現行では両 capability とも、optional な `client_context.body_state_summary / device_state_summary / schedule_summary` を inspection_fields 経由で短い観測要約へ投影してよい。
+現行では両 capability とも、optional な `client_context.body_state_summary / device_state_summary / schedule_summary` を inspection_fields 経由で短い観測要約へ投影する。
 
 ```json
 {
@@ -155,7 +156,7 @@ inspection には運用確認に必要な binding 要約を出すが、token、c
 }
 ```
 
-`state_policy` では少なくとも次を持ってよい。
+`state_policy` は少なくとも次を持つ。
 
 - `creates_ongoing_action`: capability request を `ongoing_action` に結びつけるか
 - `blocks_parallel_capability`: 同系統の result 待ち中に並列実行を止めるか
@@ -190,7 +191,7 @@ server は manifest、binding、state、権限で提案を検証する。
 busy、権限不足、動的一時 unavailable は decision view の `available: false` に反映する。
 cooldown、直近成功、直近失敗は inspection の `CapabilityState` へ残し、明示的な capability 要求まで一律に遮断する理由にはしない。
 
-inspection の `CapabilityState` は少なくとも次を持ってよい。
+inspection の `CapabilityState` は少なくとも次を持つ。
 
 - `paused`
 - `busy` / `busy_request_id` / `busy_action_id`

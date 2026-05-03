@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from otomekairo.event_stream import ServerWebSocket, WebSocketProtocolError, build_websocket_accept
 from otomekairo.service import OtomeKairoService, ServiceError
@@ -108,6 +108,17 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
                 self._write_success(
                     HTTPStatus.OK,
                     self.server.service.submit_capability_result(token, payload),
+                )
+                return
+            if method == "PATCH" and parsed.path.startswith("/api/capabilities/") and parsed.path.endswith("/state"):
+                path_parts = parsed.path.split("/")
+                if len(path_parts) != 5 or path_parts[4] != "state":
+                    raise ServiceError(404, "route_not_found", "The requested route does not exist.")
+                capability_id = unquote(path_parts[3])
+                payload = self._read_json_body()
+                self._write_success(
+                    HTTPStatus.OK,
+                    self.server.service.patch_capability_state(token, capability_id, payload),
                 )
                 return
 
