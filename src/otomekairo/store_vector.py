@@ -301,13 +301,27 @@ class StoreVectorMixin:
 
         # 作成
         if schema_row is None:
-            conn.execute(
-                f"""
-                CREATE VIRTUAL TABLE {table_name}
-                USING vec0(id INTEGER PRIMARY KEY, embedding FLOAT[{embedding_dimension}])
+            try:
+                conn.execute(
+                    f"""
+                    CREATE VIRTUAL TABLE {table_name}
+                    USING vec0(id INTEGER PRIMARY KEY, embedding FLOAT[{embedding_dimension}])
+                    """
+                )
+            except sqlite3.OperationalError as exc:
+                if str(exc).endswith("already exists") is False:
+                    raise
+            schema_row = conn.execute(
                 """
-            )
-            return
+                SELECT sql
+                FROM sqlite_schema
+                WHERE type = 'table'
+                  AND name = ?
+                """,
+                (table_name,),
+            ).fetchone()
+            if schema_row is None:
+                raise RuntimeError(f"{table_name} was not available after creation attempt.")
 
         # 検証
         schema_sql = schema_row["sql"] or ""

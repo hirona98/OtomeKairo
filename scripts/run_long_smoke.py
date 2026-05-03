@@ -444,6 +444,8 @@ class LongSmokeRunner:
         self.desktop_watch_pending_intent_probe_cycle_id: str | None = None
         self.desktop_watch_capability_probe_verified = False
         self.desktop_watch_pending_intent_probe_verified = False
+        self.desktop_watch_pending_intent_persisted_integration_key: str | None = None
+        self.desktop_watch_pending_intent_schedule_persisted_verified = False
         self.external_status_probe_conversation_cycle_id: str | None = None
         self.external_status_probe_followup_cycle_id: str | None = None
         self.external_status_probe_verified = False
@@ -1123,6 +1125,10 @@ class LongSmokeRunner:
                 "schedule_summary": f"{pending_intent_marker} の見直し予定が近い。",
             },
         )
+        pending_intent_probe_trace = self.api.get(
+            f"/api/inspection/cycles/{self.desktop_watch_pending_intent_probe_cycle_id}"
+        )
+        self._record_pending_intent_probe_persistence(pending_intent_probe_trace)
         self.desktop_watch_pending_intent_probe_verified = True
 
     def _run_desktop_watch_probe(
@@ -1357,6 +1363,30 @@ class LongSmokeRunner:
         finally:
             conn.close()
         return [json.loads(row[0]) for row in rows]
+
+    def _record_pending_intent_probe_persistence(self, trace: dict[str, Any]) -> None:
+        world_state_trace = trace.get("world_state_trace", {})
+        if not isinstance(world_state_trace, dict):
+            raise SmokeError("desktop_watch pending_intent probe world_state_trace was invalid.")
+        state_type_hooks = world_state_trace.get("source_pack_state_type_hooks", {})
+        if not isinstance(state_type_hooks, dict):
+            raise SmokeError("desktop_watch pending_intent probe source_pack_state_type_hooks was invalid.")
+        schedule_hook = state_type_hooks.get("schedule", {})
+        if not isinstance(schedule_hook, dict):
+            raise SmokeError("desktop_watch pending_intent probe schedule hook was not recorded.")
+        pending_slot_key = schedule_hook.get("pending_intent_slot_key")
+        if not isinstance(pending_slot_key, str) or not pending_slot_key.strip():
+            raise SmokeError("desktop_watch pending_intent probe pending_intent_slot_key was invalid.")
+        integration_key = f"schedule:{pending_slot_key}"
+        persisted_schedule_keys = {
+            str(state.get("integration_key") or "").strip()
+            for state in self._list_persisted_world_states(state_type="schedule")
+            if isinstance(state, dict) and str(state.get("integration_key") or "").strip()
+        }
+        if integration_key not in persisted_schedule_keys:
+            raise SmokeError("desktop_watch pending_intent probe schedule integration_key was not persisted.")
+        self.desktop_watch_pending_intent_persisted_integration_key = integration_key
+        self.desktop_watch_pending_intent_schedule_persisted_verified = True
 
     def _count_cycles_by_trigger_kind(self, trigger_kind: str) -> int:
         cycle_summaries = self.api.get("/api/inspection/cycle-summaries?limit=120").get("cycle_summaries", [])
@@ -1658,6 +1688,9 @@ class LongSmokeRunner:
             "failed_cycle_ids": failed_cycle_ids,
             "capture_request_count": self.capture_request_count,
             "capture_response_count": self.capture_response_count,
+            "server_log_capture_response_count": self._count_server_log_occurrences(
+                "[DesktopWatch] capability response accepted request="
+            ),
             "external_status_request_count": self.external_status_request_count,
             "external_status_response_count": self.external_status_response_count,
             "external_status_request_ids": self.external_status_request_ids,
@@ -1681,6 +1714,8 @@ class LongSmokeRunner:
             "desktop_watch_pending_intent_probe_cycle_id": self.desktop_watch_pending_intent_probe_cycle_id,
             "desktop_watch_capability_probe_verified": self.desktop_watch_capability_probe_verified,
             "desktop_watch_pending_intent_probe_verified": self.desktop_watch_pending_intent_probe_verified,
+            "desktop_watch_pending_intent_persisted_integration_key": self.desktop_watch_pending_intent_persisted_integration_key,
+            "desktop_watch_pending_intent_schedule_persisted_verified": self.desktop_watch_pending_intent_schedule_persisted_verified,
             "external_status_probe_conversation_cycle_id": self.external_status_probe_conversation_cycle_id,
             "external_status_probe_followup_cycle_id": self.external_status_probe_followup_cycle_id,
             "external_status_probe_verified": self.external_status_probe_verified,
@@ -1962,7 +1997,10 @@ class LongSmokeRunner:
         if summary["external_status_request_count"] < 1:
             raise SmokeError("no external.status_request event was received.")
         expected_responses = summary["capture_request_count"] - len(summary["capture_timeout_request_ids"])
-        if summary["capture_response_count"] != expected_responses:
+        server_log_capture_response_count = summary.get("server_log_capture_response_count")
+        if not isinstance(server_log_capture_response_count, int):
+            raise SmokeError("server_log_capture_response_count was not recorded.")
+        if server_log_capture_response_count != expected_responses:
             raise SmokeError("capture request / response counts did not match the injected timeout count.")
         if summary["external_status_response_count"] != summary["external_status_request_count"]:
             raise SmokeError("external.status request / response counts did not match.")
@@ -2016,6 +2054,12 @@ class LongSmokeRunner:
             raise SmokeError("desktop_watch capability_request boundary was not verified.")
         if not summary["desktop_watch_pending_intent_probe_verified"]:
             raise SmokeError("desktop_watch pending_intent boundary was not verified.")
+        if not summary.get("desktop_watch_pending_intent_schedule_persisted_verified"):
+            raise SmokeError("desktop_watch pending_intent probe schedule persistence was not verified.")
+        if not isinstance(summary.get("desktop_watch_pending_intent_persisted_integration_key"), str) or not summary.get(
+            "desktop_watch_pending_intent_persisted_integration_key"
+        ):
+            raise SmokeError("desktop_watch pending_intent probe persisted integration_key was not recorded.")
         if not summary["external_status_probe_verified"]:
             raise SmokeError("external.status follow-up boundary was not verified.")
         if not summary["external_status_multi_service_verified"]:
@@ -2177,19 +2221,13 @@ class LongSmokeRunner:
             raise SmokeError("desktop_watch pending_intent probe schedule policy was not recorded.")
         if schedule_policy.get("integration_mode") != "schedule_slot":
             raise SmokeError("desktop_watch pending_intent probe schedule integration_mode was invalid.")
-        if schedule_policy.get("integration_key") != f"schedule:{pending_slot_key}":
+        expected_integration_key = f"schedule:{pending_slot_key}"
+        if schedule_policy.get("integration_key") != expected_integration_key:
             raise SmokeError("desktop_watch pending_intent probe schedule integration_key was invalid.")
         if schedule_policy.get("ttl_capped_by") != "pending_intent.expires_at":
             raise SmokeError("desktop_watch pending_intent probe schedule TTL cap was invalid.")
-        persisted_schedule_keys = sorted(
-            {
-                str(state.get("integration_key") or "").strip()
-                for state in self._list_persisted_world_states(state_type="schedule")
-                if isinstance(state, dict) and str(state.get("integration_key") or "").strip()
-            }
-        )
-        if f"schedule:{pending_slot_key}" not in persisted_schedule_keys:
-            raise SmokeError("desktop_watch pending_intent probe schedule integration_key was not persisted.")
+        if self.desktop_watch_pending_intent_persisted_integration_key != expected_integration_key:
+            raise SmokeError("desktop_watch pending_intent probe persisted integration_key was inconsistent.")
 
     def _assert_external_status_probe_trace(
         self,
