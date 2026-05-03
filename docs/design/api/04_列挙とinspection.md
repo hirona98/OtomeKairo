@@ -50,7 +50,7 @@ response:
 - 認証: 必要
 - 役割: server が manifest、binding、`capability_state`、権限から導出した現在の capability availability を返す
 - この response は capability availability の外向き確認正本である
-- この endpoint は現行設計の完成形における wire 契約である。実装状態と直近マイルストーンの現在地は [../../plan/01_現行計画.md](../../plan/01_現行計画.md) を正とする
+- この endpoint は現行設計の完成形における wire 契約である。実装状態と次の主作業は [../../plan/01_現行計画.md](../../plan/01_現行計画.md) を正とする
 - `capabilities` は server が知っている manifest を基準に並べる
 - `rejected_bindings` は、接続 client が `hello.caps` で提示したが server が binding として受理しなかった候補を返す
 - token、credential、内部 URL、transport 詳細は返さない

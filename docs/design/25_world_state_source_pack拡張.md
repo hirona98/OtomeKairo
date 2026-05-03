@@ -3,14 +3,14 @@
 ## 目的
 
 `world_state` 第一段では、主に `client_context` の画面前景と `desktop_watch` の観測要約を source pack に入れていた。
-この phase では、画面前景の補助要約と、対人文脈、周囲環境、場所、外部サービス、身体、機器、予定の短い current summary も state-type 別 context として同じ source pack に入れ、LLM が `world_state` 候補を選びやすくする。
+この拡張では、画面前景の補助要約と、対人文脈、周囲環境、場所、外部サービス、身体、機器、予定の短い current summary も state-type 別 context として同じ source pack に入れ、LLM が `world_state` 候補を選びやすくする。
 
 ここで扱うのは **短い structured summary だけ** である。
 新しい capability、raw payload 保存、長い OCR、配送先 client の露出は入れない。
 
 ## 入力境界
 
-`world_state` source pack に追加してよい入力は次に限る。
+`world_state` source pack に追加する入力は次に限る。
 
 - `vision.capture` result から得た短い `visual_summary_text / image_interpreted / visual_confidence_hint / image_count`
 - `client_context.social_context_summary`
@@ -109,10 +109,10 @@ source pack では、標準の `client_context` と state-type 別の structured
 画面前景は `client_context` に加えて `screen_context` へ補助要約を載せ、その他の短い current summary は dedicated context へ載せる。
 `social_context_context / environment_context / location_context` は、`client_context` から取った短い summary をそのまま dedicated context へ写す。
 `external.status` のような capability result は、`external_service_context.summary_text` に加えて `service / status_text` を載せる。
-同時に client 側 summary もあるときは、`client_summary_text / result_summary_text / summary_source_hint` を追加して境界を残してよい。
+同時に client 側 summary もあるときは、`client_summary_text / result_summary_text / summary_source_hint` を追加して境界を残す。
 `body_context / device_context / schedule_context` でも、capability result 由来のときは `capability_id` と state-type 別 summary field を載せる。
-client summary と result summary が両方あるときは、同様に `client_summary_text / result_summary_text / summary_source_hint` を追加してよい。
-real schedule source が複数あるときは、`schedule_context.schedule_slots` に複数 slot を載せてよい。
+client summary と result summary が両方あるときは、同様に `client_summary_text / result_summary_text / summary_source_hint` を追加する。
+real schedule source が複数あるときは、`schedule_context.schedule_slots` に複数 slot を載せる。
 
 ## コード責務
 

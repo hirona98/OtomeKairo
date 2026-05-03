@@ -72,7 +72,7 @@ initiative loop は、判断サイクル内の作業文脈として `initiative_
 `foreground_signal_summary` は `foreground_thinness / reason_summary / world_state_count` を持ちうる。
 `suppression_summary` は `suppression_level / reason_summary` を持ちうる。
 `candidate_families` は `preferred_result_kind / preferred_result_reason_summary / blocking_reason_summary` を持ちうる。
-`candidate_families` は `preferred_result_kind=capability_request` のときだけ、必要なら `preferred_capability_id / preferred_capability_input` を持ってよい。
+`candidate_families` は `preferred_result_kind=capability_request` のときだけ、`preferred_capability_id / preferred_capability_input` を持つ。
 
 ## 候補の作り方
 
