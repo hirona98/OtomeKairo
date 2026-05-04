@@ -91,7 +91,7 @@ OtomeKairo は、HTTPS API サーバとして bootstrap、観測、設定、insp
 .venv/bin/python scripts/run_long_smoke.py --profile real-llm-smoke --keep-artifacts
 ```
 
-この profile は通常会話 1 回、`external.status / schedule.status / social.status / device.status / body.status / environment.status / location.status` の capability request / result follow-up、manual wake 自律判断 scenario matrix、background wake 起床制御 matrix、memory postprocess drain を確認する。status capability の全体件数は存在確認に留め、専用 probe の request / follow-up は cycle trace の request id で確認する。manual wake 自律判断 matrix の結果は `summary.json` の `real_llm_initiative_probe_case_results`、background wake matrix の結果は `real_llm_background_wake_probe_case_results` で確認する。
+この profile は通常会話 1 回、`external.status / schedule.status / social.status / device.status / body.status / environment.status / location.status` の capability request / result follow-up、manual wake 自律判断 scenario matrix、`vision.capture` result follow-up の追加 request 制御、background wake 起床制御 matrix、memory postprocess drain を確認する。status capability の全体件数は存在確認に留め、専用 probe の request / follow-up は cycle trace の request id で確認する。manual wake 自律判断 matrix の結果は `summary.json` の `real_llm_initiative_probe_case_results`、capability result follow-up の結果は `real_llm_capability_result_probe_case_results`、background wake matrix の結果は `real_llm_background_wake_probe_case_results` で確認する。
 full smoke と違い、`desktop_watch` は無効化する。`wake_policy` は各 matrix の実行中だけ一時的に有効化する。
 
 ## VSCode から起動

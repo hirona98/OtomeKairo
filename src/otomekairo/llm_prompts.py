@@ -48,6 +48,7 @@ def build_decision_messages(
     ongoing_action_summary: dict[str, Any] | None,
     capability_decision_view: list[dict[str, Any]] | None,
     initiative_context: dict[str, Any] | None,
+    capability_result_context: dict[str, Any] | None,
     recall_hint: dict,
     recall_pack: dict[str, Any],
 ) -> list[dict[str, str]]:
@@ -68,6 +69,7 @@ def build_decision_messages(
                 ongoing_action_summary=ongoing_action_summary,
                 capability_decision_view=capability_decision_view,
                 initiative_context=initiative_context,
+                capability_result_context=capability_result_context,
                 recall_hint=recall_hint,
                 recall_pack=recall_pack,
             ),
@@ -432,7 +434,10 @@ def _build_decision_system_prompt(persona: dict) -> str:
         "入力には recent_turns と internal_context が含まれます。\n"
         "internal_context には TimeContext, AffectContext, DriveStateSummary, ForegroundWorldState, OngoingActionSummary, CapabilityDecisionView, RecallPack が入ります。\n"
         "自律判断トリガー時だけ InitiativeContext も入ります。\n"
+        "capability_result トリガー時だけ CapabilityResultContext も入ります。\n"
         "InitiativeContext には opportunity_summary, time_context_summary, foreground_signal_summary, initiative_baseline, runtime_state_summary, recent_turn_summary, candidate_families, selected_candidate_family, intervention_state, suppression_summary が入りえます。\n"
+        "CapabilityResultContext があるときは、source capability の結果を受けた follow-up として判断してください。\n"
+        "CapabilityResultContext.allowed_followup_capability_ids に含まれない capability_request は選ばず、受け取った結果への reply / noop / pending_intent で閉じてください。\n"
         "recall_hint.secondary_recall_focuses は補助焦点として、継続性や確認必要性の補助にだけ使ってください。\n"
         "RecallPack.conflicts があるときは requires_confirmation=true を優先してください。\n"
         "active_commitments, episodic_evidence, event_evidence は reply と pending_intent の継続根拠に使ってください。\n"
@@ -482,13 +487,14 @@ def _build_decision_user_prompt(
     ongoing_action_summary: dict[str, Any] | None,
     capability_decision_view: list[dict[str, Any]] | None,
     initiative_context: dict[str, Any] | None,
+    capability_result_context: dict[str, Any] | None,
     recall_hint: dict,
     recall_pack: dict[str, Any],
 ) -> str:
     return (
         f"recent_turns:\n{_format_recent_turns(recent_turns)}\n"
         "internal_context:\n"
-        f"{_format_internal_context(time_context, affect_context, drive_state_summary, foreground_world_state, ongoing_action_summary, capability_decision_view, initiative_context, recall_pack)}\n"
+        f"{_format_internal_context(time_context, affect_context, drive_state_summary, foreground_world_state, ongoing_action_summary, capability_decision_view, initiative_context, capability_result_context, recall_pack)}\n"
         f"input_text:\n{input_text.strip()}\n"
         "recall_hint:\n"
         f"{json.dumps(recall_hint, ensure_ascii=False)}\n"
@@ -535,7 +541,7 @@ def _build_reply_user_prompt(
     return (
         f"recent_turns:\n{_format_recent_turns(recent_turns)}\n"
         "internal_context:\n"
-        f"{_format_internal_context(time_context, affect_context, drive_state_summary, foreground_world_state, ongoing_action_summary, capability_decision_view, initiative_context, recall_pack)}\n"
+        f"{_format_internal_context(time_context, affect_context, drive_state_summary, foreground_world_state, ongoing_action_summary, capability_decision_view, initiative_context, None, recall_pack)}\n"
         f"input_text:\n{input_text.strip()}\n"
         "recall_hint:\n"
         f"{json.dumps(recall_hint, ensure_ascii=False)}\n"
@@ -814,6 +820,7 @@ def _format_internal_context(
     ongoing_action_summary: dict[str, Any] | None,
     capability_decision_view: list[dict[str, Any]] | None,
     initiative_context: dict[str, Any] | None,
+    capability_result_context: dict[str, Any] | None,
     recall_pack: dict[str, Any],
 ) -> str:
     payload = {
@@ -831,6 +838,8 @@ def _format_internal_context(
         payload["capability_decision_view"] = capability_decision_view
     if initiative_context:
         payload["initiative_context"] = initiative_context
+    if capability_result_context:
+        payload["capability_result_context"] = capability_result_context
     return json.dumps(localize_timestamp_fields(payload), ensure_ascii=False)
 
 

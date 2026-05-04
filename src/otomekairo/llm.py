@@ -136,6 +136,7 @@ class LLMClient:
         ongoing_action_summary: dict[str, Any] | None,
         capability_decision_view: list[dict[str, Any]] | None,
         initiative_context: dict[str, Any] | None,
+        capability_result_context: dict[str, Any] | None,
         recall_hint: dict,
         recall_pack: dict[str, Any],
     ) -> dict[str, Any]:
@@ -181,6 +182,7 @@ class LLMClient:
                 ongoing_action_summary=ongoing_action_summary,
                 capability_decision_view=capability_decision_view,
                 initiative_context=initiative_context,
+                capability_result_context=capability_result_context,
                 recall_hint=recall_hint,
                 recall_pack=recall_pack,
             )
@@ -191,6 +193,7 @@ class LLMClient:
                 validator=lambda payload: self._validate_decision_contract_for_context(
                     payload=payload,
                     initiative_context=initiative_context,
+                    capability_result_context=capability_result_context,
                 ),
                 repair_prompt_builder=build_decision_repair_prompt,
                 failure_message="Decision の生成に失敗しました。解析可能な応答が得られませんでした。",
@@ -205,8 +208,14 @@ class LLMClient:
         *,
         payload: dict[str, Any],
         initiative_context: dict[str, Any] | None,
+        capability_result_context: dict[str, Any] | None,
     ) -> None:
         validate_decision_contract(payload)
+        if isinstance(capability_result_context, dict):
+            self._validate_decision_capability_result_context(
+                payload=payload,
+                capability_result_context=capability_result_context,
+            )
         if not isinstance(initiative_context, dict):
             return
         selected_family = self._selected_initiative_family_entry(initiative_context)
@@ -261,6 +270,44 @@ class LLMClient:
                     "foreground_signal_summary.foreground_thinness=grounded です。"
                     "cooldown_active=true ではないため noop は不正です。kind=reply を返してください。"
                 )
+
+    def _validate_decision_capability_result_context(
+        self,
+        *,
+        payload: dict[str, Any],
+        capability_result_context: dict[str, Any],
+    ) -> None:
+        if payload.get("kind") != "capability_request":
+            return
+        request_payload = payload.get("capability_request")
+        request_capability_id = (
+            request_payload.get("capability_id")
+            if isinstance(request_payload, dict)
+            else None
+        )
+        if not isinstance(request_capability_id, str) or not request_capability_id.strip():
+            return
+        allowed_capability_ids = capability_result_context.get("allowed_followup_capability_ids")
+        if not isinstance(allowed_capability_ids, list):
+            allowed_capability_ids = []
+        normalized_allowed = {
+            capability_id.strip()
+            for capability_id in allowed_capability_ids
+            if isinstance(capability_id, str) and capability_id.strip()
+        }
+        if request_capability_id.strip() in normalized_allowed:
+            return
+        source_capability_id = capability_result_context.get("source_capability_id")
+        if not isinstance(source_capability_id, str) or not source_capability_id.strip():
+            source_capability_id = "unknown"
+        allowed_summary = ", ".join(sorted(normalized_allowed)) if normalized_allowed else "なし"
+        raise LLMError(
+            "CapabilityResultContext は "
+            f"source_capability_id={source_capability_id} の follow-up です。"
+            f"allowed_followup_capability_ids={allowed_summary} に含まれない "
+            f"{request_capability_id.strip()} の capability_request は不正です。"
+            "受け取った result に基づく reply / noop / pending_intent を返してください。"
+        )
 
     def _selected_initiative_family_entry(self, initiative_context: dict[str, Any]) -> dict[str, Any] | None:
         selected_family = initiative_context.get("selected_candidate_family")

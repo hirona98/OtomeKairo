@@ -128,7 +128,7 @@ LLM に実行権限、資格情報、配送先 client、秘密値を渡さない
 LLM の自由文をそのまま状態遷移へ使わない。
 `wake / background_wake` の「定期起床」「wake」という入力文言は判断機会の説明であり、身体状態の根拠にしない。
 `current_time_text`、interval、wake の時刻情報だけから予定状態を作らない。予定状態は schedule context、schedule capability result、明示的な予定 source を根拠にする。
-system wake 起点で明示 source context が無い `body / schedule / social_context / environment / location` 候補は、推測候補として正規化時に破棄する。
+system wake 起点で明示 source context が無い `screen / body / schedule / social_context / environment / location` 候補は、推測候補として正規化時に破棄する。
 
 ## 過剰介入抑制
 
@@ -179,6 +179,7 @@ inspection では、少なくとも次を追えるようにする。
 自律判断品質は `real-llm-smoke` profile の scenario matrix で確認する。
 確認対象は LLM の自然文ではなく、`initiative_context`、候補系統、最終 `decision.kind`、capability request の有無である。
 `summary.json` には `real_llm_initiative_probe_case_results` と `real_llm_background_wake_probe_case_results` を compact digest として残し、case ごとの `trigger_kind / result_kind / selected_candidate_family / preferred_result_kind / foreground_thinness / capability_id / wake_scheduler_active / turn_consolidation_status` を trace 全文なしで確認する。
+`vision.capture` result follow-up の追加 request 制御は `real_llm_capability_result_probe_case_results` に分け、source capability と異なる capability request が dispatch されていないことを確認する。
 各 probe は `drive_state / world_state / ongoing_action` と recent conversation turns を消してから seed を入れ、直前の status 確認会話に判断を引っ張られない状態で実行する。
 status capability の全体 request / response 件数は存在確認に留める。専用 probe の request / follow-up 成功は cycle trace 内の request id、source request summary、transition summary で確認する。
 

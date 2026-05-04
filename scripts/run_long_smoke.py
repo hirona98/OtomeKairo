@@ -519,6 +519,9 @@ class LongSmokeRunner:
         self.social_status_probe_followup_cycle_id: str | None = None
         self.real_llm_initiative_probe_cycle_ids: dict[str, str] = {}
         self.real_llm_initiative_probe_verified = False
+        self.real_llm_capability_result_probe_cycle_ids: dict[str, str] = {}
+        self.real_llm_capability_result_probe_case_results: dict[str, dict[str, Any]] = {}
+        self.real_llm_capability_result_probe_verified = False
         self.real_llm_background_wake_probe_cycle_ids: dict[str, str] = {}
         self.real_llm_background_wake_probe_verified = False
         self.external_status_probe_verified = False
@@ -2651,7 +2654,12 @@ class LongSmokeRunner:
         request_id = request_summary.get("request_id")
         if not isinstance(request_id, str) or not request_id:
             raise SmokeError("real-llm initiative thin-drive probe request_id was not recorded.")
-        self._wait_for_capability_result_followup_by_request_id(request_id=request_id)
+        followup_trace = self._wait_for_capability_result_followup_by_request_id(request_id=request_id)
+        self._assert_capability_result_followup_request_policy(
+            trace=followup_trace,
+            case_id="vision-capture-followup-no-unrelated-request",
+            expected_source_capability_id="vision.capture",
+        )
         return case_id, trace
 
     def _run_real_llm_initiative_probe_schedule_reply(self) -> tuple[str, dict[str, Any]]:
@@ -3028,6 +3036,67 @@ class LongSmokeRunner:
                 return self._wait_for_cycle_memory_to_finish(cycle_id)
             time.sleep(0.25)
         raise SmokeError(f"capability_result follow-up was not observed: request_id={request_id}")
+
+    def _assert_capability_result_followup_request_policy(
+        self,
+        *,
+        trace: dict[str, Any],
+        case_id: str,
+        expected_source_capability_id: str,
+    ) -> None:
+        cycle_summary = trace.get("cycle_summary", {})
+        if not isinstance(cycle_summary, dict) or cycle_summary.get("trigger_kind") != "capability_result":
+            raise SmokeError(f"real-llm capability_result probe trigger_kind was invalid: {case_id}")
+        cycle_id = trace.get("cycle_id")
+        if not isinstance(cycle_id, str) or not cycle_id:
+            raise SmokeError(f"real-llm capability_result probe cycle_id was invalid: {case_id}")
+        result_trace = trace.get("result_trace", {})
+        if not isinstance(result_trace, dict):
+            raise SmokeError(f"real-llm capability_result probe result_trace was invalid: {case_id}")
+        followup_summary = result_trace.get("capability_result_followup_summary", {})
+        if not isinstance(followup_summary, dict):
+            raise SmokeError(f"real-llm capability_result probe followup summary was invalid: {case_id}")
+        if followup_summary.get("capability_id") != expected_source_capability_id:
+            raise SmokeError(f"real-llm capability_result probe source capability was invalid: {case_id}")
+        decision_summary = followup_summary.get("decision_summary", {})
+        if not isinstance(decision_summary, dict):
+            raise SmokeError(f"real-llm capability_result probe decision summary was invalid: {case_id}")
+        dispatch_summary = result_trace.get("capability_dispatch_summary")
+        followup_capability_id: str | None = None
+        if isinstance(dispatch_summary, dict):
+            dispatched_capability_id = dispatch_summary.get("capability_id")
+            if not isinstance(dispatched_capability_id, str) or not dispatched_capability_id.strip():
+                raise SmokeError(f"real-llm capability_result probe dispatch capability was invalid: {case_id}")
+            followup_capability_id = dispatched_capability_id.strip()
+            if followup_capability_id != expected_source_capability_id:
+                raise SmokeError(f"real-llm capability_result probe dispatched unrelated capability: {case_id}")
+        decision_trace = trace.get("decision_trace", {})
+        internal_context = (
+            decision_trace.get("internal_context_summary")
+            if isinstance(decision_trace, dict)
+            else None
+        )
+        capability_result_context = (
+            internal_context.get("capability_result_context")
+            if isinstance(internal_context, dict)
+            else None
+        )
+        if not isinstance(capability_result_context, dict):
+            raise SmokeError(f"real-llm capability_result probe decision context was missing: {case_id}")
+        if capability_result_context.get("source_capability_id") != expected_source_capability_id:
+            raise SmokeError(f"real-llm capability_result probe decision source was invalid: {case_id}")
+        allowed_ids = capability_result_context.get("allowed_followup_capability_ids")
+        if not isinstance(allowed_ids, list) or expected_source_capability_id not in allowed_ids:
+            raise SmokeError(f"real-llm capability_result probe allowed ids were invalid: {case_id}")
+        self.real_llm_capability_result_probe_cycle_ids[case_id] = cycle_id
+        self.real_llm_capability_result_probe_case_results[case_id] = {
+            "trigger_kind": cycle_summary.get("trigger_kind"),
+            "result_kind": cycle_summary.get("result_kind"),
+            "source_capability_id": expected_source_capability_id,
+            "decision_kind": decision_summary.get("kind"),
+            "followup_capability_id": followup_capability_id,
+        }
+        self.real_llm_capability_result_probe_verified = True
 
     def _assert_initiative_probe_trace(
         self,
@@ -3770,6 +3839,9 @@ class LongSmokeRunner:
             "real_llm_initiative_probe_case_results": initiative_probe_case_results,
             "real_llm_initiative_probe_traces": initiative_probe_traces,
             "real_llm_initiative_probe_verified": self.real_llm_initiative_probe_verified,
+            "real_llm_capability_result_probe_cycle_ids": self.real_llm_capability_result_probe_cycle_ids,
+            "real_llm_capability_result_probe_case_results": self.real_llm_capability_result_probe_case_results,
+            "real_llm_capability_result_probe_verified": self.real_llm_capability_result_probe_verified,
             "real_llm_background_wake_probe_cycle_ids": self.real_llm_background_wake_probe_cycle_ids,
             "real_llm_background_wake_probe_case_results": background_wake_probe_case_results,
             "real_llm_background_wake_probe_traces": background_wake_probe_traces,
@@ -4621,6 +4693,34 @@ class LongSmokeRunner:
         for case_id, trace in initiative_traces.items():
             if not isinstance(trace, dict):
                 raise SmokeError(f"real-llm-smoke initiative probe trace was invalid: {case_id}")
+
+        expected_capability_result_cases = {"vision-capture-followup-no-unrelated-request"}
+        if summary.get("real_llm_capability_result_probe_verified") is not True:
+            raise SmokeError("real-llm-smoke capability_result probe was not verified.")
+        capability_result_cycle_ids = summary.get("real_llm_capability_result_probe_cycle_ids")
+        if (
+            not isinstance(capability_result_cycle_ids, dict)
+            or set(capability_result_cycle_ids) != expected_capability_result_cases
+        ):
+            raise SmokeError("real-llm-smoke capability_result probe cycle ids were incomplete.")
+        capability_result_case_results = summary.get("real_llm_capability_result_probe_case_results")
+        if (
+            not isinstance(capability_result_case_results, dict)
+            or set(capability_result_case_results) != expected_capability_result_cases
+        ):
+            raise SmokeError("real-llm-smoke capability_result probe compact results were incomplete.")
+        capability_result_case = capability_result_case_results.get(
+            "vision-capture-followup-no-unrelated-request"
+        )
+        if not isinstance(capability_result_case, dict):
+            raise SmokeError("real-llm-smoke vision.capture follow-up compact result was invalid.")
+        if capability_result_case.get("trigger_kind") != "capability_result":
+            raise SmokeError("real-llm-smoke vision.capture follow-up trigger_kind was invalid.")
+        if capability_result_case.get("source_capability_id") != "vision.capture":
+            raise SmokeError("real-llm-smoke vision.capture follow-up source capability was invalid.")
+        followup_capability_id = capability_result_case.get("followup_capability_id")
+        if isinstance(followup_capability_id, str) and followup_capability_id != "vision.capture":
+            raise SmokeError("real-llm-smoke vision.capture follow-up dispatched unrelated capability.")
 
         expected_background_cases = {
             "background-no-context-skip",
@@ -5845,6 +5945,8 @@ class LongSmokeRunner:
             social_followup_summary = (summary.get("social_status_followup_trace") or {}).get("cycle_summary") or {}
             initiative_cycle_ids = summary.get("real_llm_initiative_probe_cycle_ids") or {}
             initiative_case_results = summary.get("real_llm_initiative_probe_case_results") or {}
+            capability_result_cycle_ids = summary.get("real_llm_capability_result_probe_cycle_ids") or {}
+            capability_result_case_results = summary.get("real_llm_capability_result_probe_case_results") or {}
             background_wake_cycle_ids = summary.get("real_llm_background_wake_probe_cycle_ids") or {}
             background_wake_case_results = summary.get("real_llm_background_wake_probe_case_results") or {}
             initiative_result_log = "-"
@@ -5855,6 +5957,16 @@ class LongSmokeRunner:
                         f"{case_result.get('selected_candidate_family') or '-'}"
                     )
                     for case_id, case_result in sorted(initiative_case_results.items())
+                    if isinstance(case_result, dict)
+                ) or "-"
+            capability_result_log = "-"
+            if isinstance(capability_result_case_results, dict):
+                capability_result_log = ",".join(
+                    (
+                        f"{case_id}={case_result.get('decision_kind')}/"
+                        f"{case_result.get('followup_capability_id') or '-'}"
+                    )
+                    for case_id, case_result in sorted(capability_result_case_results.items())
                     if isinstance(case_result, dict)
                 ) or "-"
             background_wake_result_log = "-"
@@ -5880,6 +5992,8 @@ class LongSmokeRunner:
                 f" social_status={social_summary.get('result_kind')}/{social_followup_summary.get('result_kind')}"
                 f" initiative_cases={len(initiative_cycle_ids) if isinstance(initiative_cycle_ids, dict) else 0}"
                 f" initiative_results={initiative_result_log}"
+                f" capability_result_cases={len(capability_result_cycle_ids) if isinstance(capability_result_cycle_ids, dict) else 0}"
+                f" capability_result_results={capability_result_log}"
                 f" background_wake_cycles={len(background_wake_cycle_ids) if isinstance(background_wake_cycle_ids, dict) else 0}"
                 f" background_wake_cases={len(background_wake_case_results) if isinstance(background_wake_case_results, dict) else 0}"
                 f" background_wake_results={background_wake_result_log}"

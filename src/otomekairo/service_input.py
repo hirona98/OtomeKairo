@@ -440,6 +440,11 @@ class ServiceInputMixin:
             selected_candidate=selected_candidate,
             pending_intent_selection=pending_intent_selection,
         )
+        capability_result_context = self._build_capability_result_decision_context(
+            trigger_kind=trigger_kind,
+            observation_summary=observation_summary,
+            capability_request_summary=capability_request_summary,
+        )
         debug_log(
             "Pipeline",
             (
@@ -464,6 +469,7 @@ class ServiceInputMixin:
             ongoing_action_summary=ongoing_action_summary,
             capability_decision_view=capability_decision_view,
             initiative_context=initiative_context,
+            capability_result_context=capability_result_context,
             recall_hint=recall_hint,
             recall_pack=recall_pack,
         )
@@ -529,6 +535,7 @@ class ServiceInputMixin:
             "ongoing_action_summary": ongoing_action_summary,
             "capability_decision_view": capability_decision_view,
             "initiative_context": initiative_context,
+            "capability_result_context": capability_result_context,
             "world_state_trace": world_state_trace,
             "decision": decision,
             "reply_payload": reply_payload,
@@ -632,6 +639,53 @@ class ServiceInputMixin:
         if not isinstance(summary_text, str) or not summary_text.strip():
             return None
         return summary_text.strip()
+
+    def _build_capability_result_decision_context(
+        self,
+        *,
+        trigger_kind: str,
+        observation_summary: dict[str, Any] | None,
+        capability_request_summary: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if trigger_kind != "capability_result":
+            return None
+        source_capability_id = self._capability_result_source_capability_id(
+            observation_summary=observation_summary,
+            capability_request_summary=capability_request_summary,
+        )
+        if source_capability_id is None:
+            return None
+        payload: dict[str, Any] = {
+            "source_capability_id": source_capability_id,
+            "allowed_followup_capability_ids": [source_capability_id],
+            "followup_policy_summary": (
+                "source capability と異なる capability_request は出さず、"
+                "受け取った result への reply / noop / pending_intent で閉じる。"
+            ),
+        }
+        source_request_summary = self._compact_capability_request_summary(capability_request_summary)
+        if isinstance(source_request_summary, dict):
+            payload["source_request_summary"] = source_request_summary
+        compact_observation_summary = self._compact_capability_followup_observation_summary(observation_summary)
+        if isinstance(compact_observation_summary, dict):
+            payload["observation_summary"] = compact_observation_summary
+        return payload
+
+    def _capability_result_source_capability_id(
+        self,
+        *,
+        observation_summary: dict[str, Any] | None,
+        capability_request_summary: dict[str, Any] | None,
+    ) -> str | None:
+        for value in (
+            observation_summary.get("capability_id") if isinstance(observation_summary, dict) else None,
+            capability_request_summary.get("capability_id")
+            if isinstance(capability_request_summary, dict)
+            else None,
+        ):
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return None
 
     def _build_initiative_context(
         self,
@@ -1926,6 +1980,7 @@ class ServiceInputMixin:
             pending_intent_summary=pending_intent_summary,
             capability_decision_view=pipeline.get("capability_decision_view"),
             initiative_context=pipeline.get("initiative_context"),
+            capability_result_context=pipeline.get("capability_result_context"),
             world_state_trace=pipeline.get("world_state_trace"),
             trigger_kind=trigger_kind,
             input_event_kind=input_event_kind,
@@ -3467,7 +3522,7 @@ class ServiceInputMixin:
             return False
         if source_context is not None:
             return False
-        return state_type in {"body", "schedule", "social_context", "environment", "location"}
+        return state_type in {"screen", "body", "schedule", "social_context", "environment", "location"}
 
     def _contains_any_text(self, text: str, terms: tuple[str, ...]) -> bool:
         return any(term in text for term in terms)
@@ -4258,6 +4313,7 @@ class ServiceInputMixin:
         ongoing_action_summary: dict[str, Any] | None,
         capability_decision_view: list[dict[str, Any]] | None,
         initiative_context: dict[str, Any] | None,
+        capability_result_context: dict[str, Any] | None,
         recall_pack: dict[str, Any],
         decision: dict[str, Any],
         pending_intent_summary: dict[str, Any] | None,
@@ -4276,6 +4332,7 @@ class ServiceInputMixin:
                 "ongoing_action_summary": ongoing_action_summary,
                 "capability_decision_view": capability_decision_view,
                 "initiative_context": initiative_context,
+                "capability_result_context": capability_result_context,
                 "recall_pack_summary": self._summarize_recall_pack(recall_pack),
             },
             "primary_candidate_kind": decision["kind"],
@@ -4286,6 +4343,8 @@ class ServiceInputMixin:
             trace["drive_state_summary"] = drive_state_summary
         if isinstance(ongoing_action_summary, dict):
             trace["ongoing_action_summary"] = ongoing_action_summary
+        if isinstance(capability_result_context, dict):
+            trace["capability_result_context"] = capability_result_context
         return trace
 
     def _decision_capability_request_summary(self, decision: dict[str, Any]) -> dict[str, Any] | None:
@@ -5095,6 +5154,7 @@ class ServiceInputMixin:
         pending_intent_summary: dict[str, Any] | None,
         capability_decision_view: list[dict[str, Any]] | None,
         initiative_context: dict[str, Any] | None,
+        capability_result_context: dict[str, Any] | None,
         world_state_trace: dict[str, Any] | None,
         trigger_kind: str,
         input_event_kind: str,
@@ -5162,6 +5222,7 @@ class ServiceInputMixin:
                 ongoing_action_summary=ongoing_action_summary,
                 capability_decision_view=capability_decision_view,
                 initiative_context=initiative_context,
+                capability_result_context=capability_result_context,
                 recall_pack=recall_pack,
                 decision=decision,
                 pending_intent_summary=pending_intent_summary,
