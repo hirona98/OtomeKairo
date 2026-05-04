@@ -188,7 +188,10 @@ class LLMClient:
             return self._generate_structured_payload(
                 role_definition=role_definition,
                 messages=messages,
-                validator=validate_decision_contract,
+                validator=lambda payload: self._validate_decision_contract_for_context(
+                    payload=payload,
+                    initiative_context=initiative_context,
+                ),
                 repair_prompt_builder=build_decision_repair_prompt,
                 failure_message="Decision の生成に失敗しました。解析可能な応答が得られませんでした。",
                 operation=operation,
@@ -196,6 +199,80 @@ class LLMClient:
         except Exception as exc:
             debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc)}")
             raise
+
+    def _validate_decision_contract_for_context(
+        self,
+        *,
+        payload: dict[str, Any],
+        initiative_context: dict[str, Any] | None,
+    ) -> None:
+        validate_decision_contract(payload)
+        if not isinstance(initiative_context, dict):
+            return
+        selected_family = self._selected_initiative_family_entry(initiative_context)
+        if not isinstance(selected_family, dict):
+            return
+        preferred_result_kind = selected_family.get("preferred_result_kind")
+        if not isinstance(preferred_result_kind, str) or not preferred_result_kind:
+            return
+        decision_kind = payload.get("kind")
+        if decision_kind == "capability_request" and preferred_result_kind != "capability_request":
+            raise LLMError(
+                "Initiative selected candidate entry は "
+                f"preferred_result_kind={preferred_result_kind} です。"
+                "preferred_result_kind=capability_request ではないため capability_request は不正です。"
+                f"kind={preferred_result_kind} を返してください。"
+            )
+        if decision_kind == "capability_request":
+            preferred_capability_id = selected_family.get("preferred_capability_id")
+            request_payload = payload.get("capability_request")
+            request_capability_id = (
+                request_payload.get("capability_id")
+                if isinstance(request_payload, dict)
+                else None
+            )
+            if isinstance(preferred_capability_id, str) and request_capability_id != preferred_capability_id:
+                raise LLMError(
+                    "Initiative selected candidate entry の preferred_capability_id と "
+                    "capability_request.capability_id が一致していません。"
+                )
+            return
+        if decision_kind == "noop" and preferred_result_kind == "reply":
+            foreground_summary = initiative_context.get("foreground_signal_summary")
+            suppression_summary = initiative_context.get("suppression_summary")
+            foreground_thinness = (
+                foreground_summary.get("foreground_thinness")
+                if isinstance(foreground_summary, dict)
+                else None
+            )
+            suppression_level = (
+                suppression_summary.get("suppression_level")
+                if isinstance(suppression_summary, dict)
+                else None
+            )
+            cooldown_active = (
+                suppression_summary.get("cooldown_active")
+                if isinstance(suppression_summary, dict)
+                else None
+            )
+            if foreground_thinness == "grounded" and suppression_level != "high" and cooldown_active is not True:
+                raise LLMError(
+                    "Initiative selected candidate entry は preferred_result_kind=reply で、"
+                    "foreground_signal_summary.foreground_thinness=grounded です。"
+                    "cooldown_active=true ではないため noop は不正です。kind=reply を返してください。"
+                )
+
+    def _selected_initiative_family_entry(self, initiative_context: dict[str, Any]) -> dict[str, Any] | None:
+        selected_family = initiative_context.get("selected_candidate_family")
+        candidate_families = initiative_context.get("candidate_families")
+        if not isinstance(selected_family, str) or not isinstance(candidate_families, list):
+            return None
+        for family in candidate_families:
+            if not isinstance(family, dict):
+                continue
+            if family.get("selected") is True or family.get("family") == selected_family:
+                return family
+        return None
 
     def generate_reply(
         self,

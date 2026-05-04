@@ -126,6 +126,9 @@ LLM は次を担う。
 
 LLM に実行権限、資格情報、配送先 client、秘密値を渡さない。
 LLM の自由文をそのまま状態遷移へ使わない。
+`wake / background_wake` の「定期起床」「wake」という入力文言は判断機会の説明であり、身体状態の根拠にしない。
+`current_time_text`、interval、wake の時刻情報だけから予定状態を作らない。予定状態は schedule context、schedule capability result、明示的な予定 source を根拠にする。
+system wake 起点で明示 source context が無い `body / schedule / social_context / environment / location` 候補は、推測候補として正規化時に破棄する。
 
 ## 過剰介入抑制
 
@@ -175,20 +178,35 @@ inspection では、少なくとも次を追えるようにする。
 
 自律判断品質は `real-llm-smoke` profile の scenario matrix で確認する。
 確認対象は LLM の自然文ではなく、`initiative_context`、候補系統、最終 `decision.kind`、capability request の有無である。
-`summary.json` には `real_llm_initiative_probe_case_results` を compact digest として残し、case ごとの `trigger_kind / result_kind / selected_candidate_family / preferred_result_kind / foreground_thinness / capability_id` を trace 全文なしで確認する。
+`summary.json` には `real_llm_initiative_probe_case_results` と `real_llm_background_wake_probe_case_results` を compact digest として残し、case ごとの `trigger_kind / result_kind / selected_candidate_family / preferred_result_kind / foreground_thinness / capability_id / wake_scheduler_active / turn_consolidation_status` を trace 全文なしで確認する。
+各 probe は `drive_state / world_state / ongoing_action` と recent conversation turns を消してから seed を入れ、直前の status 確認会話に判断を引っ張られない状態で実行する。
+status capability の全体 request / response 件数は存在確認に留める。専用 probe の request / follow-up 成功は cycle trace 内の request id、source request summary、transition summary で確認する。
 
-最小 scenario matrix は次の 5 件に固定する。
+manual wake 自律判断 matrix は次の 4 件に固定する。
 
 | case | 入力条件 | 期待する構造 |
 | --- | --- | --- |
 | `thin-drive-vision-probe` | 前景 `world_state` が薄く、強い `drive_state` がある | `selected_candidate_family=autonomous`、`preferred_result_kind=capability_request`、`vision.capture` request |
 | `schedule-grounded-reply` | 近い予定の `world_state` と整合する `drive_state` がある | `foreground_thinness=grounded`、`selected_candidate_family=autonomous`、`decision.kind=reply` |
 | `social-grounded-reply` | 対人文脈の `world_state` と整合する `drive_state` がある | `foreground_thinness=grounded`、`selected_candidate_family=autonomous`、`decision.kind=reply` |
-| `background-weak-noop` | background wake で、前景候補がない | `decision.kind=noop` |
 | `ongoing-waiting-noop` | `ongoing_action.status=waiting_result` がある | `selected_candidate_family=ongoing_action`、`preferred_result_kind=noop`、`decision.kind=noop` |
+
+background wake 起床制御 matrix は次の 5 件に固定する。
+
+| case | 入力条件 | 期待する構造 |
+| --- | --- | --- |
+| `background-no-context-skip` | interval 初回起床で `drive_state / world_state / ongoing_action` が空 | background wake cycle を作り、`initiative_context` なしの `decision.kind=noop` と `memory_trace=skipped` を残す |
+| `background-weak-foreground-noop` | interval 初回起床で `screen` 系の薄い `world_state` だけがある | `foreground_thinness=thin`、`selected_candidate_family=autonomous`、`preferred_result_kind=noop`、`decision.kind=noop`、`memory_trace=skipped` |
+| `background-grounded-reply` | interval 初回起床で予定 `world_state` と整合する `drive_state` がある | `wake_scheduler_active=true`、`foreground_thinness=grounded`、`selected_candidate_family=autonomous`、`decision.kind=reply`、`memory_trace=succeeded` |
+| `background-cooldown-skip` | background reply 直後の cooldown 中に interval 起床が来る | background wake cycle を作り、cooldown 理由の `decision.kind=noop` と `memory_trace=skipped` を残す |
+| `background-interval-not-due` | `last_wake_at` 相当の直後に長い interval を設定する | `wake_scheduler_active=true` を観測し、新しい background wake cycle を作らない |
 
 `screen` だけの前景は thin foreground として扱う。
 強い `drive_state` があり、予定、対人文脈、身体状態の grounded foreground がない場合、`vision.capture` による観測を短い reply より優先する。
+background wake では、強い `drive_state` が無く `screen / external_service / device` だけが見えている場合、薄い前景として `noop` を優先する。
+grounded foreground の `world_state` が既にある場合、candidate entry に `preferred_capability_id` が無い限り、同じ情報を再取得する capability request より `preferred_result_kind` の `reply / noop` を優先する。
+`suppression_summary.cooldown_active` が true ではない場合、直近 turn だけから cooldown 中とは扱わない。background wake でも grounded foreground かつ `preferred_result_kind=reply` なら、`suppression_level=medium` だけを理由に `noop` へ倒さない。
+decision contract validation は、initiative の selected candidate entry が `preferred_result_kind=capability_request` ではない場合の `capability_request` を repair 対象にする。grounded foreground かつ `preferred_result_kind=reply` で cooldown が無い `noop` も repair 対象にする。
 
 この matrix が失敗した場合、修正先を次の順に切り分ける。
 

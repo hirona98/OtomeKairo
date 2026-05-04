@@ -519,6 +519,8 @@ class LongSmokeRunner:
         self.social_status_probe_followup_cycle_id: str | None = None
         self.real_llm_initiative_probe_cycle_ids: dict[str, str] = {}
         self.real_llm_initiative_probe_verified = False
+        self.real_llm_background_wake_probe_cycle_ids: dict[str, str] = {}
+        self.real_llm_background_wake_probe_verified = False
         self.external_status_probe_verified = False
         self.schedule_status_probe_verified = False
         self.device_status_probe_verified = False
@@ -1779,6 +1781,10 @@ class LongSmokeRunner:
             conn.execute("DELETE FROM drive_states WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM world_states WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM ongoing_actions WHERE memory_set_id = ?", (memory_set_id,))
+            conn.execute(
+                "DELETE FROM events WHERE memory_set_id = ? AND kind IN ('conversation_input', 'reply')",
+                (memory_set_id,),
+            )
             conn.commit()
         finally:
             conn.close()
@@ -1961,7 +1967,7 @@ class LongSmokeRunner:
             active_app=active_app,
             window_title=window_title,
         )
-        deadline = time.monotonic() + WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS
+        deadline = time.monotonic() + WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS + self.api.request_timeout_seconds
         conversation_trace: dict[str, Any] | None = None
         request_id: str | None = None
         while time.monotonic() < deadline:
@@ -2045,7 +2051,7 @@ class LongSmokeRunner:
             active_app=active_app,
             window_title=window_title,
         )
-        deadline = time.monotonic() + WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS
+        deadline = time.monotonic() + WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS + self.api.request_timeout_seconds
         conversation_trace: dict[str, Any] | None = None
         request_id: str | None = None
         while time.monotonic() < deadline:
@@ -2125,7 +2131,7 @@ class LongSmokeRunner:
             active_app=active_app,
             window_title=window_title,
         )
-        deadline = time.monotonic() + WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS
+        deadline = time.monotonic() + WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS + self.api.request_timeout_seconds
         conversation_trace: dict[str, Any] | None = None
         request_id: str | None = None
         while time.monotonic() < deadline:
@@ -2205,7 +2211,7 @@ class LongSmokeRunner:
             active_app=active_app,
             window_title=window_title,
         )
-        deadline = time.monotonic() + WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS
+        deadline = time.monotonic() + WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS + self.api.request_timeout_seconds
         conversation_trace: dict[str, Any] | None = None
         request_id: str | None = None
         while time.monotonic() < deadline:
@@ -2285,7 +2291,7 @@ class LongSmokeRunner:
             active_app=active_app,
             window_title=window_title,
         )
-        deadline = time.monotonic() + WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS
+        deadline = time.monotonic() + WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS + self.api.request_timeout_seconds
         conversation_trace: dict[str, Any] | None = None
         request_id: str | None = None
         while time.monotonic() < deadline:
@@ -2365,7 +2371,7 @@ class LongSmokeRunner:
             active_app=active_app,
             window_title=window_title,
         )
-        deadline = time.monotonic() + WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS
+        deadline = time.monotonic() + WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS + self.api.request_timeout_seconds
         conversation_trace: dict[str, Any] | None = None
         request_id: str | None = None
         while time.monotonic() < deadline:
@@ -2445,7 +2451,7 @@ class LongSmokeRunner:
             active_app=active_app,
             window_title=window_title,
         )
-        deadline = time.monotonic() + WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS
+        deadline = time.monotonic() + WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS + self.api.request_timeout_seconds
         conversation_trace: dict[str, Any] | None = None
         request_id: str | None = None
         while time.monotonic() < deadline:
@@ -2585,7 +2591,6 @@ class LongSmokeRunner:
             self._run_real_llm_initiative_probe_drive_thin_capability,
             self._run_real_llm_initiative_probe_schedule_reply,
             self._run_real_llm_initiative_probe_social_reply,
-            self._run_real_llm_initiative_probe_background_weak_noop,
             self._run_real_llm_initiative_probe_ongoing_waiting_noop,
         ]
         traces: dict[str, dict[str, Any]] = {}
@@ -2723,40 +2728,243 @@ class LongSmokeRunner:
         )
         return case_id, trace
 
-    def _run_real_llm_initiative_probe_background_weak_noop(self) -> tuple[str, dict[str, Any]]:
-        case_id = "background-weak-noop"
-        existing_cycle_ids = self._cycle_ids_by_trigger_kind("background_wake")
-        self._set_wake_policy_interval(interval_seconds=1)
-        deadline = time.monotonic() + WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS
-        matched_trace: dict[str, Any] | None = None
-        while time.monotonic() < deadline:
-            self._assert_server_running()
-            self._assert_event_clients_healthy()
-            cycle_ids = self._cycle_ids_by_trigger_kind("background_wake")
-            for cycle_id in sorted(cycle_ids - existing_cycle_ids):
-                trace = self.api.get(f"/api/inspection/cycles/{cycle_id}")
-                cycle_summary = trace.get("cycle_summary", {})
-                if isinstance(cycle_summary, dict) and cycle_summary.get("trigger_kind") == "background_wake":
-                    matched_trace = self._wait_for_cycle_memory_to_finish(cycle_id)
-                    break
-            if matched_trace is not None:
-                break
-            time.sleep(0.25)
+    def _run_real_llm_background_wake_matrix(
+        self,
+    ) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+        log("real LLM background wake matrix started")
+        traces: dict[str, dict[str, Any]] = {}
+        case_results: dict[str, dict[str, Any]] = {}
+
+        for run_case in (
+            self._run_real_llm_background_wake_probe_no_context_skip,
+            self._run_real_llm_background_wake_probe_weak_foreground_noop,
+        ):
+            self._set_wake_policy_disabled()
+            self._restart_server_for_real_llm_probe()
+            self._clear_initiative_probe_state()
+            case_id, trace = run_case()
+            traces[case_id] = trace
+            case_results[case_id] = self._real_llm_background_wake_trace_result(
+                case_id=case_id,
+                trace=trace,
+            )
+            self._set_wake_policy_disabled()
+            self._clear_initiative_probe_state()
+            self._wait_for_memory_jobs_to_drain()
+
         self._set_wake_policy_disabled()
-        if matched_trace is None:
-            raise SmokeError("real-llm initiative background weak probe did not produce background_wake.")
-        cycle_id = matched_trace.get("cycle_id")
-        if not isinstance(cycle_id, str) or not cycle_id:
-            raise SmokeError("real-llm initiative background weak probe cycle_id was invalid.")
-        self.real_llm_initiative_probe_cycle_ids[case_id] = cycle_id
+        self._restart_server_for_real_llm_probe()
+        self._clear_initiative_probe_state()
+        for run_case in (
+            self._run_real_llm_background_wake_probe_grounded_reply,
+            self._run_real_llm_background_wake_probe_cooldown_skip,
+        ):
+            case_id, trace = run_case()
+            traces[case_id] = trace
+            case_results[case_id] = self._real_llm_background_wake_trace_result(
+                case_id=case_id,
+                trace=trace,
+            )
+            self._wait_for_memory_jobs_to_drain()
+        case_id, interval_result = self._run_real_llm_background_wake_probe_interval_not_due()
+        case_results[case_id] = interval_result
+        self._set_wake_policy_disabled()
+        self._clear_initiative_probe_state()
+        self._wait_for_memory_jobs_to_drain()
+
+        self.real_llm_background_wake_probe_verified = True
+        log("real LLM background wake matrix completed")
+        return traces, case_results
+
+    def _run_real_llm_background_wake_probe_no_context_skip(self) -> tuple[str, dict[str, Any]]:
+        case_id = "background-no-context-skip"
+        trace = self._run_background_wake_probe(case_id=case_id)
         self._assert_initiative_probe_trace(
-            matched_trace,
+            trace,
             case_id=case_id,
             expected_trigger_kind="background_wake",
             expected_result_kind="noop",
             allow_missing_initiative_context=True,
         )
-        return case_id, matched_trace
+        self._assert_background_wake_memory_status(
+            trace=trace,
+            case_id=case_id,
+            expected_status="skipped",
+        )
+        return case_id, trace
+
+    def _run_real_llm_background_wake_probe_weak_foreground_noop(self) -> tuple[str, dict[str, Any]]:
+        case_id = "background-weak-foreground-noop"
+        marker = "RealLLMBackgroundWeakForegroundMarker"
+        self._seed_initiative_probe_world_state(
+            world_state_id=f"world:{case_id}",
+            state_type="screen",
+            scope_key=marker,
+            summary_text=f"{marker}: 画面は前景にあるが、予定・対人・身体文脈はまだ薄い。",
+            salience=0.35,
+        )
+        trace = self._run_background_wake_probe(case_id=case_id)
+        self._assert_initiative_probe_trace(
+            trace,
+            case_id=case_id,
+            expected_trigger_kind="background_wake",
+            expected_result_kind="noop",
+            expected_selected_family="autonomous",
+            expected_preferred_result_kind="noop",
+            expected_foreground_thinness="thin",
+            expected_suppression_level="medium",
+            expected_world_state_type="screen",
+        )
+        self._assert_background_wake_memory_status(
+            trace=trace,
+            case_id=case_id,
+            expected_status="skipped",
+        )
+        return case_id, trace
+
+    def _run_real_llm_background_wake_probe_grounded_reply(self) -> tuple[str, dict[str, Any]]:
+        case_id = "background-grounded-reply"
+        marker = "RealLLMBackgroundGroundedReplyMarker"
+        self._seed_initiative_probe_drive(
+            drive_id=f"drive:{case_id}",
+            drive_kind="follow_through",
+            summary_text=f"{marker}: 近い予定に向けて短く整える理由がある。",
+            focus_scope_key=marker,
+        )
+        self._seed_initiative_probe_world_state(
+            world_state_id=f"world:{case_id}",
+            state_type="schedule",
+            scope_key=marker,
+            summary_text=f"{marker}: 20 分後に軽く準備確認が必要な予定がある。",
+        )
+        trace = self._run_background_wake_probe(case_id=case_id)
+        self._assert_initiative_probe_trace(
+            trace,
+            case_id=case_id,
+            expected_trigger_kind="background_wake",
+            expected_result_kind="reply",
+            expected_selected_family="autonomous",
+            expected_preferred_result_kind="reply",
+            expected_foreground_thinness="grounded",
+            expected_suppression_level="medium",
+            expected_world_state_type="schedule",
+        )
+        self._assert_background_wake_memory_status(
+            trace=trace,
+            case_id=case_id,
+            expected_status="succeeded",
+        )
+        return case_id, trace
+
+    def _run_real_llm_background_wake_probe_cooldown_skip(self) -> tuple[str, dict[str, Any]]:
+        case_id = "background-cooldown-skip"
+        trace = self._run_background_wake_probe(case_id=case_id)
+        self._assert_initiative_probe_trace(
+            trace,
+            case_id=case_id,
+            expected_trigger_kind="background_wake",
+            expected_result_kind="noop",
+            allow_missing_initiative_context=True,
+        )
+        self._assert_background_wake_memory_status(
+            trace=trace,
+            case_id=case_id,
+            expected_status="skipped",
+        )
+        self._assert_background_wake_noop_reason_contains(
+            trace=trace,
+            case_id=case_id,
+            expected_text="cooldown",
+        )
+        return case_id, trace
+
+    def _run_real_llm_background_wake_probe_interval_not_due(self) -> tuple[str, dict[str, Any]]:
+        case_id = "background-interval-not-due"
+        existing_cycle_ids = self._cycle_ids_by_trigger_kind("background_wake")
+        observed_seconds = 0.0
+        wake_scheduler_active_seen = False
+        started_at = time.monotonic()
+        try:
+            self._set_wake_policy_interval(interval_seconds=60)
+            deadline = time.monotonic() + 6.0
+            while time.monotonic() < deadline:
+                self._assert_server_running()
+                self._assert_event_clients_healthy()
+                status = self._get_status()
+                runtime_summary = status["runtime_summary"]
+                if runtime_summary.get("wake_scheduler_active") is True:
+                    wake_scheduler_active_seen = True
+                new_cycle_ids = self._cycle_ids_by_trigger_kind("background_wake") - existing_cycle_ids
+                if new_cycle_ids:
+                    raise SmokeError(
+                        f"real-llm background wake interval not-due probe produced unexpected cycles: {sorted(new_cycle_ids)}"
+                    )
+                time.sleep(0.25)
+            observed_seconds = time.monotonic() - started_at
+        finally:
+            self._set_wake_policy_disabled()
+        if not wake_scheduler_active_seen:
+            raise SmokeError("real-llm background wake interval not-due probe did not observe active scheduler.")
+        return case_id, {
+            "observed_cycle": False,
+            "trigger_kind": "background_wake",
+            "result_kind": "not_due_no_cycle",
+            "decision_kind": "not_due_no_cycle",
+            "failed": False,
+            "wake_policy_mode": "interval",
+            "wake_policy_interval_seconds": 60,
+            "wake_scheduler_active": True,
+            "observed_seconds": round(observed_seconds, 2),
+        }
+
+    def _run_background_wake_probe(self, *, case_id: str, interval_seconds: int = 1) -> dict[str, Any]:
+        existing_cycle_ids = self._cycle_ids_by_trigger_kind("background_wake")
+        cycle_id: str | None = None
+        try:
+            self._set_wake_policy_interval(interval_seconds=interval_seconds)
+            deadline = time.monotonic() + WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS + self.api.request_timeout_seconds
+            while time.monotonic() < deadline:
+                self._assert_server_running()
+                self._assert_event_clients_healthy()
+                cycle_ids = self._cycle_ids_by_trigger_kind("background_wake")
+                for candidate_cycle_id in sorted(cycle_ids - existing_cycle_ids):
+                    trace = self.api.get(f"/api/inspection/cycles/{candidate_cycle_id}")
+                    cycle_summary = trace.get("cycle_summary", {})
+                    if isinstance(cycle_summary, dict) and cycle_summary.get("trigger_kind") == "background_wake":
+                        cycle_id = candidate_cycle_id
+                        break
+                if cycle_id is not None:
+                    break
+                time.sleep(0.25)
+        finally:
+            self._set_wake_policy_disabled()
+        if cycle_id is None:
+            raise SmokeError(f"real-llm background wake probe did not produce background_wake: {case_id}")
+        self.real_llm_background_wake_probe_cycle_ids[case_id] = cycle_id
+        return self._wait_for_cycle_memory_to_finish(cycle_id)
+
+    def _assert_background_wake_memory_status(
+        self,
+        *,
+        trace: dict[str, Any],
+        case_id: str,
+        expected_status: str,
+    ) -> None:
+        memory_trace = trace.get("memory_trace", {})
+        if not isinstance(memory_trace, dict) or memory_trace.get("turn_consolidation_status") != expected_status:
+            raise SmokeError(f"real-llm background wake {case_id} memory status was invalid.")
+
+    def _assert_background_wake_noop_reason_contains(
+        self,
+        *,
+        trace: dict[str, Any],
+        case_id: str,
+        expected_text: str,
+    ) -> None:
+        result_trace = trace.get("result_trace", {})
+        reason_summary = result_trace.get("noop_reason_summary") if isinstance(result_trace, dict) else None
+        if not isinstance(reason_summary, str) or expected_text not in reason_summary:
+            raise SmokeError(f"real-llm background wake {case_id} noop reason was invalid.")
 
     def _run_real_llm_initiative_probe_ongoing_waiting_noop(self) -> tuple[str, dict[str, Any]]:
         case_id = "ongoing-waiting-noop"
@@ -2795,7 +3003,7 @@ class LongSmokeRunner:
         return self._wait_for_cycle_memory_to_finish(cycle_id)
 
     def _wait_for_capability_result_followup_by_request_id(self, *, request_id: str) -> dict[str, Any]:
-        deadline = time.monotonic() + WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS
+        deadline = time.monotonic() + WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS + self.api.request_timeout_seconds
         inspected_cycle_ids: set[str] = set()
         while time.monotonic() < deadline:
             self._assert_server_running()
@@ -2942,6 +3150,66 @@ class LongSmokeRunner:
                 "capability_request_status": request_summary.get("status"),
             }
         return case_results
+
+    def _real_llm_background_wake_trace_result(
+        self,
+        *,
+        case_id: str,
+        trace: dict[str, Any],
+    ) -> dict[str, Any]:
+        cycle_summary = trace.get("cycle_summary", {})
+        if not isinstance(cycle_summary, dict):
+            raise SmokeError(f"real-llm background wake {case_id} cycle_summary was invalid for compact digest.")
+        input_trace = trace.get("input_trace", {})
+        if not isinstance(input_trace, dict):
+            input_trace = {}
+        runtime_summary = input_trace.get("runtime_state_summary", {})
+        if not isinstance(runtime_summary, dict):
+            runtime_summary = {}
+        initiative_context = input_trace.get("initiative_context")
+        selected_family: dict[str, Any] | None = None
+        foreground_summary: dict[str, Any] = {}
+        suppression_summary: dict[str, Any] = {}
+        if isinstance(initiative_context, dict):
+            selected_family = self._initiative_probe_selected_family(initiative_context)
+            foreground_candidate = initiative_context.get("foreground_signal_summary")
+            if isinstance(foreground_candidate, dict):
+                foreground_summary = foreground_candidate
+            suppression_candidate = initiative_context.get("suppression_summary")
+            if isinstance(suppression_candidate, dict):
+                suppression_summary = suppression_candidate
+        result_trace = trace.get("result_trace", {})
+        if not isinstance(result_trace, dict):
+            result_trace = {}
+        decision_trace = trace.get("decision_trace", {})
+        if not isinstance(decision_trace, dict):
+            decision_trace = {}
+        memory_trace = trace.get("memory_trace", {})
+        if not isinstance(memory_trace, dict):
+            memory_trace = {}
+        return {
+            "cycle_id": cycle_summary.get("cycle_id") or trace.get("cycle_id"),
+            "observed_cycle": True,
+            "trigger_kind": cycle_summary.get("trigger_kind"),
+            "result_kind": cycle_summary.get("result_kind"),
+            "decision_kind": decision_trace.get("result_kind") or cycle_summary.get("result_kind"),
+            "failed": bool(cycle_summary.get("failed")),
+            "wake_scheduler_active": runtime_summary.get("wake_scheduler_active"),
+            "selected_candidate_family": (
+                initiative_context.get("selected_candidate_family")
+                if isinstance(initiative_context, dict)
+                else None
+            ),
+            "preferred_result_kind": (
+                selected_family.get("preferred_result_kind")
+                if isinstance(selected_family, dict)
+                else None
+            ),
+            "foreground_thinness": foreground_summary.get("foreground_thinness"),
+            "suppression_level": suppression_summary.get("suppression_level"),
+            "turn_consolidation_status": memory_trace.get("turn_consolidation_status"),
+            "noop_reason_summary": result_trace.get("noop_reason_summary"),
+        }
 
     def _exercise_external_status_followup(self) -> None:
         github_marker = "LongSmokeExternalStatusProbeMarker"
@@ -3414,6 +3682,8 @@ class LongSmokeRunner:
         initiative_probe_traces = self._run_real_llm_initiative_matrix()
         initiative_probe_case_results = self._real_llm_initiative_probe_case_results(initiative_probe_traces)
         self._wait_for_memory_jobs_to_drain()
+        background_wake_probe_traces, background_wake_probe_case_results = self._run_real_llm_background_wake_matrix()
+        self._wait_for_memory_jobs_to_drain()
         conversation_trace = self.api.get(f"/api/inspection/cycles/{conversation_cycle_id}")
         capability_conversation_trace = self.api.get(f"/api/inspection/cycles/{capability_conversation_cycle_id}")
         followup_trace = self.api.get(f"/api/inspection/cycles/{followup_cycle_id}")
@@ -3500,6 +3770,10 @@ class LongSmokeRunner:
             "real_llm_initiative_probe_case_results": initiative_probe_case_results,
             "real_llm_initiative_probe_traces": initiative_probe_traces,
             "real_llm_initiative_probe_verified": self.real_llm_initiative_probe_verified,
+            "real_llm_background_wake_probe_cycle_ids": self.real_llm_background_wake_probe_cycle_ids,
+            "real_llm_background_wake_probe_case_results": background_wake_probe_case_results,
+            "real_llm_background_wake_probe_traces": background_wake_probe_traces,
+            "real_llm_background_wake_probe_verified": self.real_llm_background_wake_probe_verified,
         }
         self._write_summary(summary)
         self._assert_real_llm_smoke_summary(summary)
@@ -4039,34 +4313,26 @@ class LongSmokeRunner:
             raise SmokeError("real-llm-smoke memory worker was still processing a job.")
         if runtime_summary.get("ongoing_action_exists"):
             raise SmokeError("real-llm-smoke ongoing_action remained active.")
-        if summary.get("external_status_request_count") != 1:
-            raise SmokeError("real-llm-smoke external.status request count was not 1.")
-        if summary.get("external_status_response_count") != 1:
-            raise SmokeError("real-llm-smoke external.status response count was not 1.")
-        if summary.get("schedule_status_request_count") != 1:
-            raise SmokeError("real-llm-smoke schedule.status request count was not 1.")
-        if summary.get("schedule_status_response_count") != 1:
-            raise SmokeError("real-llm-smoke schedule.status response count was not 1.")
-        if summary.get("device_status_request_count") != 1:
-            raise SmokeError("real-llm-smoke device.status request count was not 1.")
-        if summary.get("device_status_response_count") != 1:
-            raise SmokeError("real-llm-smoke device.status response count was not 1.")
-        if summary.get("body_status_request_count") != 1:
-            raise SmokeError("real-llm-smoke body.status request count was not 1.")
-        if summary.get("body_status_response_count") != 1:
-            raise SmokeError("real-llm-smoke body.status response count was not 1.")
-        if summary.get("environment_status_request_count") != 1:
-            raise SmokeError("real-llm-smoke environment.status request count was not 1.")
-        if summary.get("environment_status_response_count") != 1:
-            raise SmokeError("real-llm-smoke environment.status response count was not 1.")
-        if summary.get("location_status_request_count") != 1:
-            raise SmokeError("real-llm-smoke location.status request count was not 1.")
-        if summary.get("location_status_response_count") != 1:
-            raise SmokeError("real-llm-smoke location.status response count was not 1.")
-        if summary.get("social_status_request_count") != 1:
-            raise SmokeError("real-llm-smoke social.status request count was not 1.")
-        if summary.get("social_status_response_count") != 1:
-            raise SmokeError("real-llm-smoke social.status response count was not 1.")
+        def assert_status_event_observed(field_prefix: str, capability_id: str) -> None:
+            request_count = summary.get(f"{field_prefix}_request_count")
+            if not isinstance(request_count, int) or request_count < 1:
+                raise SmokeError(f"real-llm-smoke {capability_id} request was not observed.")
+            response_count = summary.get(f"{field_prefix}_response_count")
+            if not isinstance(response_count, int) or response_count < 1:
+                raise SmokeError(f"real-llm-smoke {capability_id} response was not observed.")
+
+        # 自律 follow-up が同じ capability を追加で呼ぶため、全体件数は存在確認に留める。
+        status_event_checks = [
+            ("external_status", "external.status"),
+            ("schedule_status", "schedule.status"),
+            ("device_status", "device.status"),
+            ("body_status", "body.status"),
+            ("environment_status", "environment.status"),
+            ("location_status", "location.status"),
+            ("social_status", "social.status"),
+        ]
+        for field_prefix, capability_id in status_event_checks:
+            assert_status_event_observed(field_prefix, capability_id)
 
         conversation_trace = summary.get("conversation_trace")
         if not isinstance(conversation_trace, dict):
@@ -4293,7 +4559,6 @@ class LongSmokeRunner:
             "thin-drive-vision-probe",
             "schedule-grounded-reply",
             "social-grounded-reply",
-            "background-weak-noop",
             "ongoing-waiting-noop",
         }
         if summary.get("real_llm_initiative_probe_verified") is not True:
@@ -4329,10 +4594,6 @@ class LongSmokeRunner:
                 "preferred_result_kind": "reply",
                 "foreground_thinness": "grounded",
             },
-            "background-weak-noop": {
-                "trigger_kind": "background_wake",
-                "result_kind": "noop",
-            },
             "ongoing-waiting-noop": {
                 "trigger_kind": "wake",
                 "result_kind": "noop",
@@ -4360,6 +4621,96 @@ class LongSmokeRunner:
         for case_id, trace in initiative_traces.items():
             if not isinstance(trace, dict):
                 raise SmokeError(f"real-llm-smoke initiative probe trace was invalid: {case_id}")
+
+        expected_background_cases = {
+            "background-no-context-skip",
+            "background-weak-foreground-noop",
+            "background-grounded-reply",
+            "background-cooldown-skip",
+            "background-interval-not-due",
+        }
+        expected_background_trace_cases = expected_background_cases - {"background-interval-not-due"}
+        if summary.get("real_llm_background_wake_probe_verified") is not True:
+            raise SmokeError("real-llm-smoke background wake probe matrix was not verified.")
+        background_cycle_ids = summary.get("real_llm_background_wake_probe_cycle_ids")
+        if not isinstance(background_cycle_ids, dict) or set(background_cycle_ids) != expected_background_trace_cases:
+            raise SmokeError("real-llm-smoke background wake probe cycle ids were incomplete.")
+        background_case_results = summary.get("real_llm_background_wake_probe_case_results")
+        if not isinstance(background_case_results, dict) or set(background_case_results) != expected_background_cases:
+            raise SmokeError("real-llm-smoke background wake compact results were incomplete.")
+        expected_background_case_results = {
+            "background-no-context-skip": {
+                "observed_cycle": True,
+                "trigger_kind": "background_wake",
+                "result_kind": "noop",
+                "decision_kind": "noop",
+                "wake_scheduler_active": True,
+                "turn_consolidation_status": "skipped",
+            },
+            "background-weak-foreground-noop": {
+                "observed_cycle": True,
+                "trigger_kind": "background_wake",
+                "result_kind": "noop",
+                "decision_kind": "noop",
+                "wake_scheduler_active": True,
+                "selected_candidate_family": "autonomous",
+                "preferred_result_kind": "noop",
+                "foreground_thinness": "thin",
+                "suppression_level": "medium",
+                "turn_consolidation_status": "skipped",
+            },
+            "background-grounded-reply": {
+                "observed_cycle": True,
+                "trigger_kind": "background_wake",
+                "result_kind": "reply",
+                "decision_kind": "reply",
+                "wake_scheduler_active": True,
+                "selected_candidate_family": "autonomous",
+                "preferred_result_kind": "reply",
+                "foreground_thinness": "grounded",
+                "suppression_level": "medium",
+                "turn_consolidation_status": "succeeded",
+            },
+            "background-cooldown-skip": {
+                "observed_cycle": True,
+                "trigger_kind": "background_wake",
+                "result_kind": "noop",
+                "decision_kind": "noop",
+                "wake_scheduler_active": True,
+                "turn_consolidation_status": "skipped",
+            },
+            "background-interval-not-due": {
+                "observed_cycle": False,
+                "trigger_kind": "background_wake",
+                "result_kind": "not_due_no_cycle",
+                "decision_kind": "not_due_no_cycle",
+                "wake_scheduler_active": True,
+                "wake_policy_mode": "interval",
+                "wake_policy_interval_seconds": 60,
+            },
+        }
+        for case_id, expected_items in expected_background_case_results.items():
+            case_result = background_case_results.get(case_id)
+            if not isinstance(case_result, dict):
+                raise SmokeError(f"real-llm-smoke background wake compact result was invalid: {case_id}")
+            if case_result.get("failed"):
+                raise SmokeError(f"real-llm-smoke background wake compact result failed: {case_id}")
+            for key, expected_value in expected_items.items():
+                if case_result.get(key) != expected_value:
+                    raise SmokeError(
+                        f"real-llm-smoke background wake compact result {case_id}.{key} "
+                        f"was {case_result.get(key)}, expected {expected_value}."
+                    )
+        cooldown_result = background_case_results.get("background-cooldown-skip")
+        cooldown_reason = cooldown_result.get("noop_reason_summary") if isinstance(cooldown_result, dict) else None
+        if not isinstance(cooldown_reason, str) or "cooldown" not in cooldown_reason:
+            raise SmokeError("real-llm-smoke background wake cooldown compact reason was invalid.")
+        background_traces = summary.get("real_llm_background_wake_probe_traces")
+        if not isinstance(background_traces, dict) or set(background_traces) != expected_background_trace_cases:
+            raise SmokeError("real-llm-smoke background wake probe traces were incomplete.")
+        for case_id, trace in background_traces.items():
+            if not isinstance(trace, dict):
+                raise SmokeError(f"real-llm-smoke background wake probe trace was invalid: {case_id}")
 
     def _assert_memory_trace_succeeded(self, trace: dict[str, Any], label: str) -> None:
         cycle_id = trace.get("cycle_id")
@@ -5494,6 +5845,8 @@ class LongSmokeRunner:
             social_followup_summary = (summary.get("social_status_followup_trace") or {}).get("cycle_summary") or {}
             initiative_cycle_ids = summary.get("real_llm_initiative_probe_cycle_ids") or {}
             initiative_case_results = summary.get("real_llm_initiative_probe_case_results") or {}
+            background_wake_cycle_ids = summary.get("real_llm_background_wake_probe_cycle_ids") or {}
+            background_wake_case_results = summary.get("real_llm_background_wake_probe_case_results") or {}
             initiative_result_log = "-"
             if isinstance(initiative_case_results, dict):
                 initiative_result_log = ",".join(
@@ -5502,6 +5855,16 @@ class LongSmokeRunner:
                         f"{case_result.get('selected_candidate_family') or '-'}"
                     )
                     for case_id, case_result in sorted(initiative_case_results.items())
+                    if isinstance(case_result, dict)
+                ) or "-"
+            background_wake_result_log = "-"
+            if isinstance(background_wake_case_results, dict):
+                background_wake_result_log = ",".join(
+                    (
+                        f"{case_id}={case_result.get('result_kind')}/"
+                        f"{case_result.get('selected_candidate_family') or '-'}"
+                    )
+                    for case_id, case_result in sorted(background_wake_case_results.items())
                     if isinstance(case_result, dict)
                 ) or "-"
             runtime_summary = (summary.get("status") or {}).get("runtime_summary") or {}
@@ -5517,6 +5880,9 @@ class LongSmokeRunner:
                 f" social_status={social_summary.get('result_kind')}/{social_followup_summary.get('result_kind')}"
                 f" initiative_cases={len(initiative_cycle_ids) if isinstance(initiative_cycle_ids, dict) else 0}"
                 f" initiative_results={initiative_result_log}"
+                f" background_wake_cycles={len(background_wake_cycle_ids) if isinstance(background_wake_cycle_ids, dict) else 0}"
+                f" background_wake_cases={len(background_wake_case_results) if isinstance(background_wake_case_results, dict) else 0}"
+                f" background_wake_results={background_wake_result_log}"
                 f" pending_jobs={runtime_summary.get('pending_memory_job_count')}"
                 f" in_progress={runtime_summary.get('memory_job_in_progress')}"
             )

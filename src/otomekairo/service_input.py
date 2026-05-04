@@ -951,6 +951,14 @@ class ServiceInputMixin:
             return 0.04
         return 0.0
 
+    def _initiative_world_state_is_weak_foreground(self, world_state_summary: list[dict[str, Any]]) -> bool:
+        state_types = {
+            item.get("state_type")
+            for item in world_state_summary
+            if isinstance(item, dict) and isinstance(item.get("state_type"), str)
+        }
+        return bool(state_types) and state_types.issubset({"screen", "external_service", "device"})
+
     def _initiative_autonomous_probe_preference(
         self,
         *,
@@ -1378,6 +1386,14 @@ class ServiceInputMixin:
         elif suppression_level == "high":
             preferred_result_kind = "noop"
             preferred_result_reason = "suppression が high で、今回は押し出さず見送るほうが自然。"
+        elif (
+            trigger_kind == "background_wake"
+            and foreground_thinness == "thin"
+            and not drive_summaries
+            and self._initiative_world_state_is_weak_foreground(world_state_summary)
+        ):
+            preferred_result_kind = "noop"
+            preferred_result_reason = "background wake で画面や外部状態だけが薄く見えており、drive なしでは見送るほうが自然。"
         elif foreground_thinness == "thin" and not world_state_summary and not recent_turn_summary:
             preferred_result_kind = "noop"
             preferred_result_reason = "前景文脈が薄く、いまは reply より様子見を優先したい。"
@@ -3374,6 +3390,12 @@ class ServiceInputMixin:
                 source_pack=source_pack,
             ):
                 continue
+            if self._should_skip_system_wake_inferred_state_candidate(
+                state_type=state_type,
+                source_context=source_context,
+                source_pack=source_pack,
+            ):
+                continue
             ttl_hint = str(candidate["ttl_hint"]).strip()
             ttl_policy = self._world_state_ttl_policy(
                 current_time=observed_at,
@@ -3433,6 +3455,19 @@ class ServiceInputMixin:
         if not self._contains_any_text(current_input, WORLD_STATE_USER_INPUT_REQUEST_TERMS):
             return False
         return self._contains_any_text(current_input, state_terms)
+
+    def _should_skip_system_wake_inferred_state_candidate(
+        self,
+        *,
+        state_type: str,
+        source_context: dict[str, Any] | None,
+        source_pack: dict[str, Any],
+    ) -> bool:
+        if source_pack.get("trigger_kind") not in {"wake", "background_wake"}:
+            return False
+        if source_context is not None:
+            return False
+        return state_type in {"body", "schedule", "social_context", "environment", "location"}
 
     def _contains_any_text(self, text: str, terms: tuple[str, ...]) -> bool:
         return any(term in text for term in terms)
