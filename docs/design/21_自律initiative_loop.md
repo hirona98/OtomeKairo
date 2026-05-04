@@ -171,6 +171,31 @@ inspection では、少なくとも次を追えるようにする。
 
 `input_trace.initiative_context` に要約を残し、`decision_trace` には最終判断に効いた initiative 要素だけを残す。
 
+## 実 LLM 品質確認
+
+自律判断品質は `real-llm-smoke` profile の scenario matrix で確認する。
+確認対象は LLM の自然文ではなく、`initiative_context`、候補系統、最終 `decision.kind`、capability request の有無である。
+`summary.json` には `real_llm_initiative_probe_case_results` を compact digest として残し、case ごとの `trigger_kind / result_kind / selected_candidate_family / preferred_result_kind / foreground_thinness / capability_id` を trace 全文なしで確認する。
+
+最小 scenario matrix は次の 5 件に固定する。
+
+| case | 入力条件 | 期待する構造 |
+| --- | --- | --- |
+| `thin-drive-vision-probe` | 前景 `world_state` が薄く、強い `drive_state` がある | `selected_candidate_family=autonomous`、`preferred_result_kind=capability_request`、`vision.capture` request |
+| `schedule-grounded-reply` | 近い予定の `world_state` と整合する `drive_state` がある | `foreground_thinness=grounded`、`selected_candidate_family=autonomous`、`decision.kind=reply` |
+| `social-grounded-reply` | 対人文脈の `world_state` と整合する `drive_state` がある | `foreground_thinness=grounded`、`selected_candidate_family=autonomous`、`decision.kind=reply` |
+| `background-weak-noop` | background wake で、前景候補がない | `decision.kind=noop` |
+| `ongoing-waiting-noop` | `ongoing_action.status=waiting_result` がある | `selected_candidate_family=ongoing_action`、`preferred_result_kind=noop`、`decision.kind=noop` |
+
+`screen` だけの前景は thin foreground として扱う。
+強い `drive_state` があり、予定、対人文脈、身体状態の grounded foreground がない場合、`vision.capture` による観測を短い reply より優先する。
+
+この matrix が失敗した場合、修正先を次の順に切り分ける。
+
+- `initiative_context` の候補、前景、抑制要約が期待構造を持たない場合は、context 構築を修正する
+- `initiative_context` は期待構造を持つが LLM の `decision.kind` が外れる場合は、`decision_generation` prompt を修正する
+- 実行境界、payload、状態遷移の不整合は capability validator と runtime state を修正する
+
 ## やらないこと
 
 次は採らない。

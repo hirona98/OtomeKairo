@@ -20,7 +20,7 @@ import time
 import urllib.error
 import urllib.request
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -517,6 +517,8 @@ class LongSmokeRunner:
         self.location_status_probe_followup_cycle_id: str | None = None
         self.social_status_probe_conversation_cycle_id: str | None = None
         self.social_status_probe_followup_cycle_id: str | None = None
+        self.real_llm_initiative_probe_cycle_ids: dict[str, str] = {}
+        self.real_llm_initiative_probe_verified = False
         self.external_status_probe_verified = False
         self.schedule_status_probe_verified = False
         self.device_status_probe_verified = False
@@ -1108,12 +1110,16 @@ class LongSmokeRunner:
                 if isinstance(override, dict) and isinstance(override.get("client_context"), dict)
                 else {}
             )
-            if not isinstance(client_context.get("external_service_summary"), str) or not client_context["external_service_summary"].strip():
-                client_context["external_service_summary"] = status_text
-            if not isinstance(client_context.get("device_state_summary"), str) or not client_context["device_state_summary"].strip():
-                client_context["device_state_summary"] = "external.status を返せる desktop client が接続中。"
-            if not isinstance(client_context.get("schedule_summary"), str) or not client_context["schedule_summary"].strip():
-                client_context["schedule_summary"] = f"{service.strip()} の状態確認をこのまま進められる。"
+            suppress_default_client_context = (
+                isinstance(override, dict) and override.get("suppress_default_client_context") is True
+            )
+            if not suppress_default_client_context:
+                if not isinstance(client_context.get("external_service_summary"), str) or not client_context["external_service_summary"].strip():
+                    client_context["external_service_summary"] = status_text
+                if not isinstance(client_context.get("device_state_summary"), str) or not client_context["device_state_summary"].strip():
+                    client_context["device_state_summary"] = "external.status を返せる desktop client が接続中。"
+                if not isinstance(client_context.get("schedule_summary"), str) or not client_context["schedule_summary"].strip():
+                    client_context["schedule_summary"] = f"{service.strip()} の状態確認をこのまま進められる。"
             self.api.post(
                 "/api/capability/result",
                 {
@@ -1167,7 +1173,16 @@ class LongSmokeRunner:
                 if isinstance(override, dict) and isinstance(override.get("client_context"), dict)
                 else {}
             )
-            if not isinstance(client_context.get("device_state_summary"), str) or not client_context["device_state_summary"].strip():
+            suppress_default_client_context = (
+                isinstance(override, dict) and override.get("suppress_default_client_context") is True
+            )
+            if (
+                not suppress_default_client_context
+                and (
+                    not isinstance(client_context.get("device_state_summary"), str)
+                    or not client_context["device_state_summary"].strip()
+                )
+            ):
                 client_context["device_state_summary"] = "schedule.status を返せる desktop client が接続中。"
             self.api.post(
                 "/api/capability/result",
@@ -1721,6 +1736,211 @@ class LongSmokeRunner:
     def _queue_social_status_override(self, override: dict[str, Any]) -> None:
         with self._social_status_lock:
             self._social_status_overrides.append(override)
+
+    def _set_wake_policy_disabled(self) -> None:
+        self.api.post("/api/config/update-wake-policy", {"wake_policy": {"mode": "disabled"}})
+
+    def _set_wake_policy_interval(self, *, interval_seconds: int) -> None:
+        self.api.post(
+            "/api/config/update-wake-policy",
+            {
+                "wake_policy": {
+                    "mode": "interval",
+                    "interval_seconds": interval_seconds,
+                }
+            },
+        )
+
+    def _restart_server_for_real_llm_probe(self) -> None:
+        self._stop_server()
+        self.restart_count += 1
+        time.sleep(0.5)
+        self._start_server()
+        self._wait_server_ready()
+        self._bootstrap()
+        status = self._get_status()
+        runtime_summary = status["runtime_summary"]
+        if not runtime_summary.get("memory_job_worker_active"):
+            raise SmokeError("memory worker is not active after real LLM initiative probe restart.")
+        self._connect_desktop_client()
+        log("server restarted for real LLM initiative probe")
+
+    def _initiative_probe_timestamp_pair(self, *, expires_in_hours: int = 2) -> tuple[str, str]:
+        now = datetime.now().astimezone()
+        return now.isoformat(), (now + timedelta(hours=expires_in_hours)).isoformat()
+
+    def _clear_initiative_probe_state(self) -> None:
+        memory_db_path = self.data_dir / "memory.db"
+        if not memory_db_path.exists():
+            return
+        memory_set_id = self._require_selected_memory_set_id()
+        conn = sqlite3.connect(memory_db_path)
+        try:
+            conn.execute("DELETE FROM drive_states WHERE memory_set_id = ?", (memory_set_id,))
+            conn.execute("DELETE FROM world_states WHERE memory_set_id = ?", (memory_set_id,))
+            conn.execute("DELETE FROM ongoing_actions WHERE memory_set_id = ?", (memory_set_id,))
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _seed_initiative_probe_drive(
+        self,
+        *,
+        drive_id: str,
+        drive_kind: str,
+        summary_text: str,
+        focus_scope_key: str,
+        salience: float = 0.9,
+    ) -> None:
+        updated_at, expires_at = self._initiative_probe_timestamp_pair()
+        memory_set_id = self._require_selected_memory_set_id()
+        record = {
+            "drive_id": drive_id,
+            "memory_set_id": memory_set_id,
+            "drive_kind": drive_kind,
+            "summary_text": summary_text,
+            "salience": salience,
+            "related_scope_refs": [{"scope_type": "topic", "scope_key": focus_scope_key}],
+            "supporting_memory_unit_ids": [],
+            "supporting_memory_types": ["probe_seed"],
+            "scope_support_kinds": ["probe_seed"],
+            "focus_scope_type": "topic",
+            "focus_scope_key": focus_scope_key,
+            "support_count": 4,
+            "support_strength": 0.95,
+            "scope_alignment": 0.95,
+            "freshness_hint": "fresh",
+            "signal_strength": 0.95,
+            "persona_alignment": 0.95,
+            "stability_hint": "stable",
+            "source_updated_at": updated_at,
+            "updated_at": updated_at,
+            "expires_at": expires_at,
+        }
+        conn = sqlite3.connect(self.data_dir / "memory.db")
+        try:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO drive_states (
+                    drive_id,
+                    memory_set_id,
+                    salience,
+                    updated_at,
+                    expires_at,
+                    payload_json
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record["drive_id"],
+                    record["memory_set_id"],
+                    record["salience"],
+                    record["updated_at"],
+                    record["expires_at"],
+                    json.dumps(record, ensure_ascii=False, sort_keys=True),
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _seed_initiative_probe_world_state(
+        self,
+        *,
+        world_state_id: str,
+        state_type: str,
+        scope_key: str,
+        summary_text: str,
+        salience: float = 0.9,
+    ) -> None:
+        updated_at, expires_at = self._initiative_probe_timestamp_pair()
+        memory_set_id = self._require_selected_memory_set_id()
+        record = {
+            "world_state_id": world_state_id,
+            "memory_set_id": memory_set_id,
+            "state_type": state_type,
+            "scope_type": "topic",
+            "scope_key": scope_key,
+            "summary_text": summary_text,
+            "confidence": 0.9,
+            "salience": salience,
+            "source_kind": "real_llm_initiative_probe",
+            "summary_source": "probe_seed",
+            "integration_key": f"{state_type}:{scope_key}",
+            "observed_at": updated_at,
+            "updated_at": updated_at,
+            "expires_at": expires_at,
+        }
+        conn = sqlite3.connect(self.data_dir / "memory.db")
+        try:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO world_states (
+                    world_state_id,
+                    memory_set_id,
+                    state_type,
+                    scope_type,
+                    scope_key,
+                    salience,
+                    updated_at,
+                    expires_at,
+                    payload_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record["world_state_id"],
+                    record["memory_set_id"],
+                    record["state_type"],
+                    record["scope_type"],
+                    record["scope_key"],
+                    record["salience"],
+                    record["updated_at"],
+                    record["expires_at"],
+                    json.dumps(record, ensure_ascii=False, sort_keys=True),
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _seed_initiative_probe_ongoing_action(self, *, action_id: str, marker: str) -> None:
+        updated_at, expires_at = self._initiative_probe_timestamp_pair()
+        memory_set_id = self._require_selected_memory_set_id()
+        record = {
+            "action_id": action_id,
+            "memory_set_id": memory_set_id,
+            "goal_summary": f"{marker} の capability result を待っている。",
+            "step_summary": f"{marker} の結果待ちで、新しい介入は抑える。",
+            "status": "waiting_result",
+            "episode_series_id": f"series:{action_id}",
+            "last_capability_id": "external.status",
+            "updated_at": updated_at,
+            "expires_at": expires_at,
+        }
+        conn = sqlite3.connect(self.data_dir / "memory.db")
+        try:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO ongoing_actions (
+                    action_id,
+                    memory_set_id,
+                    status,
+                    updated_at,
+                    expires_at,
+                    payload_json
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record["action_id"],
+                    record["memory_set_id"],
+                    record["status"],
+                    record["updated_at"],
+                    record["expires_at"],
+                    json.dumps(record, ensure_ascii=False, sort_keys=True),
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
 
     def _run_external_status_probe(
         self,
@@ -2341,10 +2561,387 @@ class LongSmokeRunner:
             if isinstance(cycle_summary, dict) and cycle_summary.get("trigger_kind") == trigger_kind
         )
 
+    def _cycle_ids_by_trigger_kind(self, trigger_kind: str) -> set[str]:
+        cycle_summaries = self.api.get("/api/inspection/cycle-summaries?limit=160").get("cycle_summaries", [])
+        if not isinstance(cycle_summaries, list):
+            raise SmokeError("cycle_summaries response was invalid while listing trigger ids.")
+        cycle_ids: set[str] = set()
+        for cycle_summary in cycle_summaries:
+            if not isinstance(cycle_summary, dict) or cycle_summary.get("trigger_kind") != trigger_kind:
+                continue
+            cycle_id = cycle_summary.get("cycle_id")
+            if isinstance(cycle_id, str) and cycle_id:
+                cycle_ids.add(cycle_id)
+        return cycle_ids
+
     def _count_server_log_occurrences(self, needle: str) -> int:
         if not self.server_log_path.exists():
             return 0
         return self.server_log_path.read_text(encoding="utf-8").count(needle)
+
+    def _run_real_llm_initiative_matrix(self) -> dict[str, dict[str, Any]]:
+        log("real LLM initiative matrix started")
+        cases = [
+            self._run_real_llm_initiative_probe_drive_thin_capability,
+            self._run_real_llm_initiative_probe_schedule_reply,
+            self._run_real_llm_initiative_probe_social_reply,
+            self._run_real_llm_initiative_probe_background_weak_noop,
+            self._run_real_llm_initiative_probe_ongoing_waiting_noop,
+        ]
+        traces: dict[str, dict[str, Any]] = {}
+        for run_case in cases:
+            self._set_wake_policy_disabled()
+            self._restart_server_for_real_llm_probe()
+            self._clear_initiative_probe_state()
+            case_id, trace = run_case()
+            traces[case_id] = trace
+            self._set_wake_policy_disabled()
+            self._clear_initiative_probe_state()
+            self._wait_for_memory_jobs_to_drain()
+        self.real_llm_initiative_probe_verified = True
+        log("real LLM initiative matrix completed")
+        return traces
+
+    def _run_real_llm_initiative_probe_drive_thin_capability(self) -> tuple[str, dict[str, Any]]:
+        case_id = "thin-drive-vision-probe"
+        marker = "RealLLMInitiativeThinDriveProbeMarker"
+        self._seed_initiative_probe_drive(
+            drive_id=f"drive:{case_id}",
+            drive_kind="follow_through",
+            summary_text=f"{marker}: 継続確認したい強い流れがある。",
+            focus_scope_key=marker,
+        )
+        self._queue_capture_context_override(
+            {
+                "client_context": {
+                    "active_app": "RealLLMInitiativeThinDrive",
+                    "window_title": marker,
+                    "locale": "ja-JP",
+                }
+            }
+        )
+        trace = self._run_manual_wake_probe(
+            case_id=case_id,
+            client_context={
+                "source": "real_llm_initiative_matrix",
+                "client_id": "real-llm-initiative-thin-drive",
+                "active_app": "RealLLMInitiativeThinDrive",
+                "window_title": marker,
+                "locale": "ja-JP",
+            },
+        )
+        self._assert_initiative_probe_trace(
+            trace,
+            case_id=case_id,
+            expected_trigger_kind="wake",
+            expected_result_kind="capability_request",
+            expected_selected_family="autonomous",
+            expected_preferred_result_kind="capability_request",
+            expected_preferred_capability_id="vision.capture",
+            expected_foreground_thinness="thin",
+        )
+        request_summary = ((trace.get("result_trace") or {}).get("capability_request_summary"))
+        if not isinstance(request_summary, dict) or request_summary.get("capability_id") != "vision.capture":
+            raise SmokeError("real-llm initiative thin-drive probe capability request was invalid.")
+        request_id = request_summary.get("request_id")
+        if not isinstance(request_id, str) or not request_id:
+            raise SmokeError("real-llm initiative thin-drive probe request_id was not recorded.")
+        self._wait_for_capability_result_followup_by_request_id(request_id=request_id)
+        return case_id, trace
+
+    def _run_real_llm_initiative_probe_schedule_reply(self) -> tuple[str, dict[str, Any]]:
+        case_id = "schedule-grounded-reply"
+        marker = "RealLLMInitiativeScheduleReplyMarker"
+        self._seed_initiative_probe_drive(
+            drive_id=f"drive:{case_id}",
+            drive_kind="follow_through",
+            summary_text=f"{marker}: 近い予定に向けて軽く整えたい。",
+            focus_scope_key=marker,
+        )
+        self._seed_initiative_probe_world_state(
+            world_state_id=f"world:{case_id}",
+            state_type="schedule",
+            scope_key=marker,
+            summary_text=f"{marker}: 20 分後に確認が必要な予定がある。",
+        )
+        trace = self._run_manual_wake_probe(
+            case_id=case_id,
+            client_context={
+                "source": "real_llm_initiative_matrix",
+                "client_id": "real-llm-initiative-schedule",
+                "active_app": "RealLLMInitiativeSchedule",
+                "window_title": marker,
+                "locale": "ja-JP",
+            },
+        )
+        self._assert_initiative_probe_trace(
+            trace,
+            case_id=case_id,
+            expected_trigger_kind="wake",
+            expected_result_kind="reply",
+            expected_selected_family="autonomous",
+            expected_preferred_result_kind="reply",
+            expected_foreground_thinness="grounded",
+            expected_world_state_type="schedule",
+        )
+        return case_id, trace
+
+    def _run_real_llm_initiative_probe_social_reply(self) -> tuple[str, dict[str, Any]]:
+        case_id = "social-grounded-reply"
+        marker = "RealLLMInitiativeSocialReplyMarker"
+        self._seed_initiative_probe_drive(
+            drive_id=f"drive:{case_id}",
+            drive_kind="relationship_attunement",
+            summary_text=f"{marker}: 対人文脈に合わせて短く気遣う流れがある。",
+            focus_scope_key=marker,
+        )
+        self._seed_initiative_probe_world_state(
+            world_state_id=f"world:{case_id}",
+            state_type="social_context",
+            scope_key=marker,
+            summary_text=f"{marker}: 会話文脈は落ち着いており、短い声かけが自然。",
+        )
+        trace = self._run_manual_wake_probe(
+            case_id=case_id,
+            client_context={
+                "source": "real_llm_initiative_matrix",
+                "client_id": "real-llm-initiative-social",
+                "active_app": "RealLLMInitiativeSocial",
+                "window_title": marker,
+                "locale": "ja-JP",
+            },
+        )
+        self._assert_initiative_probe_trace(
+            trace,
+            case_id=case_id,
+            expected_trigger_kind="wake",
+            expected_result_kind="reply",
+            expected_selected_family="autonomous",
+            expected_preferred_result_kind="reply",
+            expected_foreground_thinness="grounded",
+            expected_world_state_type="social_context",
+        )
+        return case_id, trace
+
+    def _run_real_llm_initiative_probe_background_weak_noop(self) -> tuple[str, dict[str, Any]]:
+        case_id = "background-weak-noop"
+        existing_cycle_ids = self._cycle_ids_by_trigger_kind("background_wake")
+        self._set_wake_policy_interval(interval_seconds=1)
+        deadline = time.monotonic() + WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS
+        matched_trace: dict[str, Any] | None = None
+        while time.monotonic() < deadline:
+            self._assert_server_running()
+            self._assert_event_clients_healthy()
+            cycle_ids = self._cycle_ids_by_trigger_kind("background_wake")
+            for cycle_id in sorted(cycle_ids - existing_cycle_ids):
+                trace = self.api.get(f"/api/inspection/cycles/{cycle_id}")
+                cycle_summary = trace.get("cycle_summary", {})
+                if isinstance(cycle_summary, dict) and cycle_summary.get("trigger_kind") == "background_wake":
+                    matched_trace = self._wait_for_cycle_memory_to_finish(cycle_id)
+                    break
+            if matched_trace is not None:
+                break
+            time.sleep(0.25)
+        self._set_wake_policy_disabled()
+        if matched_trace is None:
+            raise SmokeError("real-llm initiative background weak probe did not produce background_wake.")
+        cycle_id = matched_trace.get("cycle_id")
+        if not isinstance(cycle_id, str) or not cycle_id:
+            raise SmokeError("real-llm initiative background weak probe cycle_id was invalid.")
+        self.real_llm_initiative_probe_cycle_ids[case_id] = cycle_id
+        self._assert_initiative_probe_trace(
+            matched_trace,
+            case_id=case_id,
+            expected_trigger_kind="background_wake",
+            expected_result_kind="noop",
+            allow_missing_initiative_context=True,
+        )
+        return case_id, matched_trace
+
+    def _run_real_llm_initiative_probe_ongoing_waiting_noop(self) -> tuple[str, dict[str, Any]]:
+        case_id = "ongoing-waiting-noop"
+        marker = "RealLLMInitiativeOngoingWaitingMarker"
+        self._seed_initiative_probe_ongoing_action(action_id=f"action:{case_id}", marker=marker)
+        trace = self._run_manual_wake_probe(
+            case_id=case_id,
+            client_context={
+                "source": "real_llm_initiative_matrix",
+                "client_id": "real-llm-initiative-ongoing",
+                "active_app": "RealLLMInitiativeOngoing",
+                "window_title": marker,
+                "locale": "ja-JP",
+            },
+        )
+        self._assert_initiative_probe_trace(
+            trace,
+            case_id=case_id,
+            expected_trigger_kind="wake",
+            expected_result_kind="noop",
+            expected_selected_family="ongoing_action",
+            expected_preferred_result_kind="noop",
+            expected_foreground_thinness="thin",
+            expected_suppression_level="medium",
+        )
+        return case_id, trace
+
+    def _run_manual_wake_probe(self, *, case_id: str, client_context: dict[str, Any]) -> dict[str, Any]:
+        self._set_wake_policy_interval(interval_seconds=3600)
+        response = self.api.post("/api/wake", {"client_context": client_context})
+        self._set_wake_policy_disabled()
+        cycle_id = response.get("cycle_id")
+        if not isinstance(cycle_id, str) or not cycle_id:
+            raise SmokeError(f"real-llm initiative probe did not return cycle_id: {case_id}")
+        self.real_llm_initiative_probe_cycle_ids[case_id] = cycle_id
+        return self._wait_for_cycle_memory_to_finish(cycle_id)
+
+    def _wait_for_capability_result_followup_by_request_id(self, *, request_id: str) -> dict[str, Any]:
+        deadline = time.monotonic() + WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS
+        inspected_cycle_ids: set[str] = set()
+        while time.monotonic() < deadline:
+            self._assert_server_running()
+            self._assert_event_clients_healthy()
+            cycle_summaries = self.api.get("/api/inspection/cycle-summaries?limit=120").get("cycle_summaries", [])
+            if not isinstance(cycle_summaries, list):
+                raise SmokeError("cycle_summaries response was invalid while waiting capability_result follow-up.")
+            for cycle_summary in cycle_summaries:
+                if not isinstance(cycle_summary, dict) or cycle_summary.get("trigger_kind") != "capability_result":
+                    continue
+                cycle_id = cycle_summary.get("cycle_id")
+                if not isinstance(cycle_id, str) or not cycle_id or cycle_id in inspected_cycle_ids:
+                    continue
+                inspected_cycle_ids.add(cycle_id)
+                trace = self.api.get(f"/api/inspection/cycles/{cycle_id}")
+                followup_summary = ((trace.get("result_trace") or {}).get("capability_result_followup_summary"))
+                if not isinstance(followup_summary, dict):
+                    continue
+                source_request_summary = followup_summary.get("source_request_summary")
+                if not isinstance(source_request_summary, dict) or source_request_summary.get("request_id") != request_id:
+                    continue
+                return self._wait_for_cycle_memory_to_finish(cycle_id)
+            time.sleep(0.25)
+        raise SmokeError(f"capability_result follow-up was not observed: request_id={request_id}")
+
+    def _assert_initiative_probe_trace(
+        self,
+        trace: dict[str, Any],
+        *,
+        case_id: str,
+        expected_trigger_kind: str,
+        expected_result_kind: str,
+        expected_selected_family: str | None = None,
+        expected_preferred_result_kind: str | None = None,
+        expected_preferred_capability_id: str | None = None,
+        expected_foreground_thinness: str | None = None,
+        expected_suppression_level: str | None = None,
+        expected_world_state_type: str | None = None,
+        allow_missing_initiative_context: bool = False,
+    ) -> None:
+        cycle_summary = trace.get("cycle_summary", {})
+        if not isinstance(cycle_summary, dict):
+            raise SmokeError(f"real-llm initiative {case_id} cycle_summary was invalid.")
+        if cycle_summary.get("trigger_kind") != expected_trigger_kind:
+            raise SmokeError(f"real-llm initiative {case_id} trigger_kind was invalid.")
+        if cycle_summary.get("result_kind") != expected_result_kind:
+            raise SmokeError(
+                f"real-llm initiative {case_id} result_kind was {cycle_summary.get('result_kind')}, "
+                f"expected {expected_result_kind}."
+            )
+        if cycle_summary.get("failed"):
+            raise SmokeError(f"real-llm initiative {case_id} cycle failed.")
+        initiative_context = ((trace.get("input_trace") or {}).get("initiative_context"))
+        if not isinstance(initiative_context, dict):
+            if allow_missing_initiative_context:
+                return
+            raise SmokeError(f"real-llm initiative {case_id} initiative_context was not recorded.")
+        if expected_selected_family is not None and initiative_context.get("selected_candidate_family") != expected_selected_family:
+            raise SmokeError(f"real-llm initiative {case_id} selected_candidate_family was invalid.")
+        foreground_summary = initiative_context.get("foreground_signal_summary", {})
+        if expected_foreground_thinness is not None:
+            if not isinstance(foreground_summary, dict) or foreground_summary.get("foreground_thinness") != expected_foreground_thinness:
+                raise SmokeError(f"real-llm initiative {case_id} foreground_thinness was invalid.")
+        suppression_summary = initiative_context.get("suppression_summary", {})
+        if expected_suppression_level is not None:
+            if not isinstance(suppression_summary, dict) or suppression_summary.get("suppression_level") != expected_suppression_level:
+                raise SmokeError(f"real-llm initiative {case_id} suppression_level was invalid.")
+        if expected_world_state_type is not None:
+            world_state_summaries = initiative_context.get("world_state_summaries", [])
+            if not isinstance(world_state_summaries, list) or not any(
+                isinstance(item, dict) and item.get("state_type") == expected_world_state_type
+                for item in world_state_summaries
+            ):
+                raise SmokeError(f"real-llm initiative {case_id} world_state_summaries did not include expected type.")
+        if expected_selected_family is None:
+            return
+        candidate = self._initiative_probe_selected_family(initiative_context)
+        if not isinstance(candidate, dict):
+            raise SmokeError(f"real-llm initiative {case_id} selected candidate family was not found.")
+        if expected_preferred_result_kind is not None and candidate.get("preferred_result_kind") != expected_preferred_result_kind:
+            raise SmokeError(f"real-llm initiative {case_id} preferred_result_kind was invalid.")
+        if expected_preferred_capability_id is not None and candidate.get("preferred_capability_id") != expected_preferred_capability_id:
+            raise SmokeError(f"real-llm initiative {case_id} preferred_capability_id was invalid.")
+
+    def _initiative_probe_selected_family(self, initiative_context: dict[str, Any]) -> dict[str, Any] | None:
+        selected_family = initiative_context.get("selected_candidate_family")
+        candidate_families = initiative_context.get("candidate_families")
+        if not isinstance(selected_family, str) or not isinstance(candidate_families, list):
+            return None
+        for family in candidate_families:
+            if not isinstance(family, dict):
+                continue
+            if family.get("selected") is True or family.get("family") == selected_family:
+                return family
+        return None
+
+    def _real_llm_initiative_probe_case_results(
+        self,
+        traces: dict[str, dict[str, Any]],
+    ) -> dict[str, dict[str, Any]]:
+        case_results: dict[str, dict[str, Any]] = {}
+        for case_id, trace in traces.items():
+            cycle_summary = trace.get("cycle_summary", {})
+            if not isinstance(cycle_summary, dict):
+                raise SmokeError(f"real-llm initiative {case_id} cycle_summary was invalid for compact digest.")
+            initiative_context = ((trace.get("input_trace") or {}).get("initiative_context"))
+            selected_family: dict[str, Any] | None = None
+            foreground_summary: dict[str, Any] = {}
+            suppression_summary: dict[str, Any] = {}
+            if isinstance(initiative_context, dict):
+                selected_family = self._initiative_probe_selected_family(initiative_context)
+                foreground_candidate = initiative_context.get("foreground_signal_summary")
+                if isinstance(foreground_candidate, dict):
+                    foreground_summary = foreground_candidate
+                suppression_candidate = initiative_context.get("suppression_summary")
+                if isinstance(suppression_candidate, dict):
+                    suppression_summary = suppression_candidate
+            request_summary = ((trace.get("result_trace") or {}).get("capability_request_summary"))
+            if not isinstance(request_summary, dict):
+                request_summary = {}
+            case_results[case_id] = {
+                "cycle_id": cycle_summary.get("cycle_id") or trace.get("cycle_id"),
+                "trigger_kind": cycle_summary.get("trigger_kind"),
+                "result_kind": cycle_summary.get("result_kind"),
+                "failed": bool(cycle_summary.get("failed")),
+                "selected_candidate_family": (
+                    initiative_context.get("selected_candidate_family")
+                    if isinstance(initiative_context, dict)
+                    else None
+                ),
+                "preferred_result_kind": (
+                    selected_family.get("preferred_result_kind")
+                    if isinstance(selected_family, dict)
+                    else None
+                ),
+                "preferred_capability_id": (
+                    selected_family.get("preferred_capability_id")
+                    if isinstance(selected_family, dict)
+                    else None
+                ),
+                "foreground_thinness": foreground_summary.get("foreground_thinness"),
+                "suppression_level": suppression_summary.get("suppression_level"),
+                "capability_id": request_summary.get("capability_id"),
+                "capability_request_status": request_summary.get("status"),
+            }
+        return case_results
 
     def _exercise_external_status_followup(self) -> None:
         github_marker = "LongSmokeExternalStatusProbeMarker"
@@ -2644,12 +3241,7 @@ class LongSmokeRunner:
             window_title=marker,
             override={
                 "status_text": status_text,
-                "client_context": {
-                    "external_service_summary": status_text,
-                    "body_state_summary": "少し肩に疲れがある。",
-                    "device_state_summary": "external.status を返せる desktop client が接続中。",
-                    "schedule_summary": "GitHub の通知確認をこのまま進められる。",
-                },
+                "suppress_default_client_context": True,
             },
         )
         capability_conversation_cycle_id = capability_conversation_trace.get("cycle_id")
@@ -2676,10 +3268,7 @@ class LongSmokeRunner:
                         "summary_text": schedule_summary,
                     }
                 ],
-                "client_context": {
-                    "body_state_summary": "少し肩に疲れがある。",
-                    "device_state_summary": "schedule.status を返せる desktop client が接続中。",
-                },
+                "suppress_default_client_context": True,
             },
         )
         schedule_conversation_cycle_id = schedule_conversation_trace.get("cycle_id")
@@ -2703,10 +3292,6 @@ class LongSmokeRunner:
             window_title=social_marker,
             override={
                 "social_context_summary": social_context_summary,
-                "client_context": {
-                    "device_state_summary": "social.status を返せる desktop client が接続中。",
-                    "schedule_summary": "対人文脈確認をこのまま進められる。",
-                },
             },
         )
         social_conversation_cycle_id = social_conversation_trace.get("cycle_id")
@@ -2730,10 +3315,6 @@ class LongSmokeRunner:
             window_title=device_marker,
             override={
                 "device_state_summary": device_state_summary,
-                "client_context": {
-                    "body_state_summary": "少し肩に疲れがある。",
-                    "schedule_summary": "端末状態確認をこのまま進められる。",
-                },
             },
         )
         device_conversation_cycle_id = device_conversation_trace.get("cycle_id")
@@ -2750,17 +3331,13 @@ class LongSmokeRunner:
         body_state_summary = f"{body_marker}: 肩に少し疲れがあり、短い休憩を挟むとよい状態。"
         body_conversation_trace, body_followup_trace = self._run_body_status_probe(
             marker=body_marker,
-            conversation_text=f"今の体調や身体の状態を確認して教えて。{body_marker}",
+            conversation_text=f"記憶や既存文脈から推測せず、クライアント側の現在の身体状態として確認して教えて。{body_marker}",
             source="real_llm_smoke_body_status",
             client_id="real-llm-smoke-body-status",
             active_app="RealLLMSmokeBodyStatus",
             window_title=body_marker,
             override={
                 "body_state_summary": body_state_summary,
-                "client_context": {
-                    "device_state_summary": "body.status を返せる desktop client が接続中。",
-                    "schedule_summary": "身体状態確認をこのまま進められる。",
-                },
             },
         )
         body_conversation_cycle_id = body_conversation_trace.get("cycle_id")
@@ -2784,11 +3361,6 @@ class LongSmokeRunner:
             window_title=environment_marker,
             override={
                 "environment_summary": environment_summary,
-                "client_context": {
-                    "body_state_summary": "少し肩に疲れがある。",
-                    "device_state_summary": "environment.status を返せる desktop client が接続中。",
-                    "schedule_summary": "環境確認をこのまま進められる。",
-                },
             },
         )
         environment_conversation_cycle_id = environment_conversation_trace.get("cycle_id")
@@ -2812,10 +3384,6 @@ class LongSmokeRunner:
             window_title=location_marker,
             override={
                 "location_summary": location_summary,
-                "client_context": {
-                    "device_state_summary": "location.status を返せる desktop client が接続中。",
-                    "schedule_summary": "場所確認をこのまま進められる。",
-                },
             },
         )
         location_conversation_cycle_id = location_conversation_trace.get("cycle_id")
@@ -2842,6 +3410,9 @@ class LongSmokeRunner:
         environment_followup_trace = self._wait_for_cycle_memory_to_finish(environment_followup_cycle_id)
         location_conversation_trace = self._wait_for_cycle_memory_to_finish(location_conversation_cycle_id)
         location_followup_trace = self._wait_for_cycle_memory_to_finish(location_followup_cycle_id)
+        self._wait_for_memory_jobs_to_drain()
+        initiative_probe_traces = self._run_real_llm_initiative_matrix()
+        initiative_probe_case_results = self._real_llm_initiative_probe_case_results(initiative_probe_traces)
         self._wait_for_memory_jobs_to_drain()
         conversation_trace = self.api.get(f"/api/inspection/cycles/{conversation_cycle_id}")
         capability_conversation_trace = self.api.get(f"/api/inspection/cycles/{capability_conversation_cycle_id}")
@@ -2925,6 +3496,10 @@ class LongSmokeRunner:
             "location_status_response_count": self.location_status_response_count,
             "location_status_request_ids": self.location_status_request_ids,
             "location_status_followup_verified_request_ids": self.location_status_followup_verified_request_ids,
+            "real_llm_initiative_probe_cycle_ids": self.real_llm_initiative_probe_cycle_ids,
+            "real_llm_initiative_probe_case_results": initiative_probe_case_results,
+            "real_llm_initiative_probe_traces": initiative_probe_traces,
+            "real_llm_initiative_probe_verified": self.real_llm_initiative_probe_verified,
         }
         self._write_summary(summary)
         self._assert_real_llm_smoke_summary(summary)
@@ -3714,6 +4289,77 @@ class LongSmokeRunner:
                 social_followup_trace,
                 "real-llm-smoke social.status follow-up",
             )
+        expected_initiative_cases = {
+            "thin-drive-vision-probe",
+            "schedule-grounded-reply",
+            "social-grounded-reply",
+            "background-weak-noop",
+            "ongoing-waiting-noop",
+        }
+        if summary.get("real_llm_initiative_probe_verified") is not True:
+            raise SmokeError("real-llm-smoke initiative probe matrix was not verified.")
+        initiative_cycle_ids = summary.get("real_llm_initiative_probe_cycle_ids")
+        if not isinstance(initiative_cycle_ids, dict) or set(initiative_cycle_ids) != expected_initiative_cases:
+            raise SmokeError("real-llm-smoke initiative probe cycle ids were incomplete.")
+        initiative_case_results = summary.get("real_llm_initiative_probe_case_results")
+        if not isinstance(initiative_case_results, dict) or set(initiative_case_results) != expected_initiative_cases:
+            raise SmokeError("real-llm-smoke initiative probe compact results were incomplete.")
+        expected_case_results = {
+            "thin-drive-vision-probe": {
+                "trigger_kind": "wake",
+                "result_kind": "capability_request",
+                "selected_candidate_family": "autonomous",
+                "preferred_result_kind": "capability_request",
+                "preferred_capability_id": "vision.capture",
+                "foreground_thinness": "thin",
+                "capability_id": "vision.capture",
+                "capability_request_status": "dispatched",
+            },
+            "schedule-grounded-reply": {
+                "trigger_kind": "wake",
+                "result_kind": "reply",
+                "selected_candidate_family": "autonomous",
+                "preferred_result_kind": "reply",
+                "foreground_thinness": "grounded",
+            },
+            "social-grounded-reply": {
+                "trigger_kind": "wake",
+                "result_kind": "reply",
+                "selected_candidate_family": "autonomous",
+                "preferred_result_kind": "reply",
+                "foreground_thinness": "grounded",
+            },
+            "background-weak-noop": {
+                "trigger_kind": "background_wake",
+                "result_kind": "noop",
+            },
+            "ongoing-waiting-noop": {
+                "trigger_kind": "wake",
+                "result_kind": "noop",
+                "selected_candidate_family": "ongoing_action",
+                "preferred_result_kind": "noop",
+                "foreground_thinness": "thin",
+                "suppression_level": "medium",
+            },
+        }
+        for case_id, expected_items in expected_case_results.items():
+            case_result = initiative_case_results.get(case_id)
+            if not isinstance(case_result, dict):
+                raise SmokeError(f"real-llm-smoke initiative probe compact result was invalid: {case_id}")
+            if case_result.get("failed"):
+                raise SmokeError(f"real-llm-smoke initiative probe compact result failed: {case_id}")
+            for key, expected_value in expected_items.items():
+                if case_result.get(key) != expected_value:
+                    raise SmokeError(
+                        f"real-llm-smoke initiative probe compact result {case_id}.{key} "
+                        f"was {case_result.get(key)}, expected {expected_value}."
+                    )
+        initiative_traces = summary.get("real_llm_initiative_probe_traces")
+        if not isinstance(initiative_traces, dict) or set(initiative_traces) != expected_initiative_cases:
+            raise SmokeError("real-llm-smoke initiative probe traces were incomplete.")
+        for case_id, trace in initiative_traces.items():
+            if not isinstance(trace, dict):
+                raise SmokeError(f"real-llm-smoke initiative probe trace was invalid: {case_id}")
 
     def _assert_memory_trace_succeeded(self, trace: dict[str, Any], label: str) -> None:
         cycle_id = trace.get("cycle_id")
@@ -4846,6 +5492,18 @@ class LongSmokeRunner:
             location_followup_summary = (summary.get("location_status_followup_trace") or {}).get("cycle_summary") or {}
             social_summary = (summary.get("social_status_conversation_trace") or {}).get("cycle_summary") or {}
             social_followup_summary = (summary.get("social_status_followup_trace") or {}).get("cycle_summary") or {}
+            initiative_cycle_ids = summary.get("real_llm_initiative_probe_cycle_ids") or {}
+            initiative_case_results = summary.get("real_llm_initiative_probe_case_results") or {}
+            initiative_result_log = "-"
+            if isinstance(initiative_case_results, dict):
+                initiative_result_log = ",".join(
+                    (
+                        f"{case_id}={case_result.get('result_kind')}/"
+                        f"{case_result.get('selected_candidate_family') or '-'}"
+                    )
+                    for case_id, case_result in sorted(initiative_case_results.items())
+                    if isinstance(case_result, dict)
+                ) or "-"
             runtime_summary = (summary.get("status") or {}).get("runtime_summary") or {}
             log(
                 "summary"
@@ -4857,6 +5515,8 @@ class LongSmokeRunner:
                 f" environment_status={environment_summary.get('result_kind')}/{environment_followup_summary.get('result_kind')}"
                 f" location_status={location_summary.get('result_kind')}/{location_followup_summary.get('result_kind')}"
                 f" social_status={social_summary.get('result_kind')}/{social_followup_summary.get('result_kind')}"
+                f" initiative_cases={len(initiative_cycle_ids) if isinstance(initiative_cycle_ids, dict) else 0}"
+                f" initiative_results={initiative_result_log}"
                 f" pending_jobs={runtime_summary.get('pending_memory_job_count')}"
                 f" in_progress={runtime_summary.get('memory_job_in_progress')}"
             )

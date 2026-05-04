@@ -981,7 +981,7 @@ class ServiceInputMixin:
             for item in world_state_summary
             if isinstance(item, dict) and isinstance(item.get("state_type"), str)
         }
-        if state_types.intersection({"screen", "body", "schedule"}):
+        if state_types.intersection({"body", "schedule", "social_context"}):
             return None
         drive_kind = self._client_context_text(strongest_drive.get("drive_kind"), limit=48)
         if drive_kind not in {"follow_through", "relationship_attunement", "user_attention", "topic_continuation"}:

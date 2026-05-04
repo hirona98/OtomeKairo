@@ -91,8 +91,8 @@ OtomeKairo は、HTTPS API サーバとして bootstrap、観測、設定、insp
 .venv/bin/python scripts/run_long_smoke.py --profile real-llm-smoke --keep-artifacts
 ```
 
-この profile は通常会話 1 回、`external.status / schedule.status / social.status / device.status / body.status / environment.status / location.status` の capability request / result follow-up、memory postprocess drain を確認する。
-full smoke と違い、`wake` と `desktop_watch` は無効化する。
+この profile は通常会話 1 回、`external.status / schedule.status / social.status / device.status / body.status / environment.status / location.status` の capability request / result follow-up、自律判断 scenario matrix、memory postprocess drain を確認する。自律判断 matrix の結果は `summary.json` の `real_llm_initiative_probe_case_results` でも確認する。
+full smoke と違い、`desktop_watch` は無効化する。`wake` は自律判断 scenario matrix の実行中だけ一時的に有効化する。
 
 ## VSCode から起動
 
