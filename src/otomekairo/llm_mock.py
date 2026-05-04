@@ -315,6 +315,22 @@ class MockLLMClient:
                     "input": self._mock_body_status_input(normalized),
                 },
             }
+        elif self._should_mock_social_status_request(
+            normalized=normalized,
+            ongoing_action_summary=ongoing_action_summary,
+            capability_decision_view=capability_decision_view,
+        ):
+            payload = {
+                "kind": "capability_request",
+                "reason_code": "capability:social.status",
+                "reason_summary": "対人文脈や連絡状況の現在状態を確認する必要がある。",
+                "requires_confirmation": False,
+                "pending_intent": None,
+                "capability_request": {
+                    "capability_id": "social.status",
+                    "input": self._mock_social_status_input(normalized),
+                },
+            }
         elif self._should_mock_environment_status_request(
             normalized=normalized,
             ongoing_action_summary=ongoing_action_summary,
@@ -865,6 +881,53 @@ class MockLLMClient:
         if "肩" in normalized or "首" in normalized or "姿勢" in normalized:
             return {"scope": "posture"}
         return {"scope": "body"}
+
+    def _should_mock_social_status_request(
+        self,
+        *,
+        normalized: str,
+        ongoing_action_summary: dict[str, Any] | None,
+        capability_decision_view: list[dict[str, Any]] | None,
+    ) -> bool:
+        if isinstance(ongoing_action_summary, dict):
+            status = str(ongoing_action_summary.get("status") or "").strip()
+            if status in {"active", "waiting_result"}:
+                return False
+        if normalized.startswith("capability result を受信"):
+            return False
+        if not self._mock_capability_available(capability_decision_view, "social.status"):
+            return False
+        if self._mock_external_status_service(normalized) is not None:
+            return False
+        social_markers = (
+            "会話",
+            "連絡",
+            "通知",
+            "チャット",
+            "Slack",
+            "Discord",
+            "Teams",
+            "会議",
+            "打ち合わせ",
+            "やり取り",
+        )
+        action_markers = (
+            "確認",
+            "教えて",
+            "見て",
+            "チェック",
+            "知りたい",
+        )
+        return any(marker in normalized for marker in social_markers) and any(
+            marker in normalized for marker in action_markers
+        )
+
+    def _mock_social_status_input(self, normalized: str) -> dict[str, str]:
+        if "通知" in normalized or "連絡" in normalized:
+            return {"scope": "messages"}
+        if "会議" in normalized or "打ち合わせ" in normalized:
+            return {"scope": "meeting"}
+        return {"scope": "current_social_context"}
 
     def _should_mock_environment_status_request(
         self,

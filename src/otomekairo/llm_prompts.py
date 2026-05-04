@@ -688,6 +688,7 @@ def _build_world_state_system_prompt() -> str:
         "screen_context / external_service_context / body_context / device_context / schedule_context / social_context_context / environment_context / location_context があるときは、その短い summary_text と補助 field だけを根拠に使ってください。\n"
         "current_input_summary が状態確認の依頼だけで具体的な状態値を明示していない場合は、その依頼文から現在状態を推測してはいけません。\n"
         "特に場所確認の依頼文から現在地を推測せず、location_context.location_summary などの明示 source がある場合だけ location state を作ってください。\n"
+        "対人文脈や連絡状況の確認依頼から会話状態を推測せず、social_context_context.social_context_summary などの明示 source がある場合だけ social_context state を作ってください。\n"
         "screen_context.visual_summary_text は画面前景の短い補助要約として使い、external_service_context.status_text / service は外部状態の補助情報として使ってください。\n"
         "external_service_context / body_context / device_context / schedule_context に client_summary_text や result_summary_text があるときは、summary_text と整合する補助比較用としてだけ使ってください。\n"
         "schedule_context.schedule_slots があるときは、各 slot の summary_text / slot_key / not_before / expires_at を短期予定の補助根拠として使ってください。\n"

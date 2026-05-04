@@ -501,6 +501,76 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
             "error",
         ],
     },
+    "social.status": {
+        "id": "social.status",
+        "version": "1",
+        "kind": "observation",
+        "decision_description": "対人文脈や連絡状況の現在状態を確認する",
+        "when_to_use": [
+            "判断に現在の対人文脈や連絡状況が必要",
+            "ユーザーが会話、連絡、通知、会議文脈を短く確認したい",
+        ],
+        "do_not_use_when": [
+            "現在の判断に対人文脈が不要",
+            "すでに十分新しい対人文脈要約が手元にある",
+        ],
+        "required_permissions": [],
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "scope": {"type": "string"},
+            },
+            "required": ["scope"],
+            "additionalProperties": False,
+        },
+        "result_schema": {
+            "type": "object",
+            "properties": {
+                "social_context_summary": {"type": "string"},
+                "client_context": {
+                    "type": ["object", "null"],
+                },
+                "error": {
+                    "type": ["string", "null"],
+                },
+            },
+            "required": ["social_context_summary"],
+            "additionalProperties": False,
+        },
+        "side_effects": {
+            "external_world": False,
+            "user_visible": False,
+            "stores_raw_payload": False,
+        },
+        "timeout_ms": 5000,
+        "risk_level": "low",
+        "memory_policy": {
+            "record_result_event": True,
+            "allow_memory_update": True,
+        },
+        "state_policy": {
+            "creates_ongoing_action": True,
+            "blocks_parallel_capability": True,
+            "result_context_hook": "social_status",
+            "followup_hint_hook": "social_status",
+            "success_cooldown_seconds": 60,
+            "error_cooldown_seconds": 60,
+            "unavailable_seconds_on_dispatch_failure": 60,
+            "unavailable_seconds_on_timeout": 60,
+        },
+        "inspection_fields": [
+            "capability_id",
+            "target_client_id",
+            "scope",
+            "social_context_summary",
+            "environment_summary",
+            "location_summary",
+            "body_state_summary",
+            "device_state_summary",
+            "schedule_summary",
+            "error",
+        ],
+    },
 }
 
 

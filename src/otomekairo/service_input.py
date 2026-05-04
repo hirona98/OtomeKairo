@@ -61,6 +61,17 @@ WORLD_STATE_USER_INPUT_CURRENT_STATE_TERMS_BY_TYPE = {
         "作業場所",
         "どこ",
     ),
+    "social_context": (
+        "会話",
+        "連絡",
+        "通知",
+        "チャット",
+        "Slack",
+        "Discord",
+        "会議",
+        "打ち合わせ",
+        "やり取り",
+    ),
 }
 INITIATIVE_BASELINE_SCORES = {
     "low": 0.18,
@@ -142,6 +153,10 @@ WORLD_STATE_TTL_SECONDS_BY_TYPE = {
         "summary_text": {"short": 1800, "medium": 5400, "long": 14400},
     },
     "social_context": {
+        "capability_result.social_context_summary": {"short": 900, "medium": 2400, "long": 7200},
+        "client_context.social_context_summary": {"short": 900, "medium": 2400, "long": 7200},
+        "capability_result.client_context.social_context_summary": {"short": 900, "medium": 2400, "long": 7200},
+        "social_context_summary": {"short": 900, "medium": 2400, "long": 7200},
         "summary_text": {"short": 900, "medium": 2400, "long": 7200},
     },
 }
@@ -2727,6 +2742,8 @@ class ServiceInputMixin:
                 "social_context_context",
                 self._build_world_state_social_context_context(
                     client_context=client_context,
+                    observation_summary=observation_summary,
+                    source_kind=source_kind,
                 ),
             ),
             (
@@ -2932,31 +2949,19 @@ class ServiceInputMixin:
             payload["image_count"] = image_count
         return payload
 
-    def _build_world_state_summary_context(
-        self,
-        *,
-        client_context: dict[str, Any],
-        summary_key: str,
-        limit: int,
-        explicit_field_name: str,
-    ) -> dict[str, Any] | None:
-        summary_text = self._client_context_text(client_context.get(summary_key), limit=limit)
-        if summary_text is None:
-            return None
-        return {
-            "summary_text": summary_text,
-            explicit_field_name: summary_text,
-        }
-
     def _build_world_state_social_context_context(
         self,
         *,
         client_context: dict[str, Any],
+        observation_summary: dict[str, Any] | None,
+        source_kind: str,
     ) -> dict[str, Any] | None:
-        return self._build_world_state_summary_context(
+        return self._build_world_state_capability_state_context(
             client_context=client_context,
-            summary_key="social_context_summary",
-            limit=160,
+            observation_summary=observation_summary,
+            source_kind=source_kind,
+            client_summary_key="social_context_summary",
+            observation_summary_key="social_context_summary",
             explicit_field_name="social_context_summary",
         )
 
@@ -3152,6 +3157,7 @@ class ServiceInputMixin:
             "visual_confidence_hint",
             "service",
             "status_text",
+            "social_context_summary",
             "body_state_summary",
             "device_state_summary",
             "schedule_summary",

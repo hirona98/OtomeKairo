@@ -79,7 +79,7 @@
 - 実行結果が次の判断条件を変えた場合
 
 人からの入力が状態確認の依頼だけで具体的な状態値を含まない場合、その入力は `world_state` の現在状態 source にしない。
-現在場所、身体状態、端末状態、周囲環境の確認依頼は、対応 capability の result または `client_context` に明示 summary がある場合だけ短期状態へ反映する。
+現在場所、身体状態、端末状態、周囲環境、対人文脈の確認依頼は、対応 capability の result または `client_context` に明示 summary がある場合だけ短期状態へ反映する。
 
 LLM は、観測や結果から `summary_text` と前景性を整理する。
 コードは、契約検証、`state_type`、`scope`、`source_ref`、`confidence`、`salience`、`summary_source`、`expires_at`、統合単位、状態遷移を決める。
@@ -116,7 +116,8 @@ LLM に渡す source pack は少なくとも次を持つ。
   },
   "social_context_context": {
     "summary_text": "Slack 上のやり取りが近い判断文脈として前景にある。",
-    "social_context_summary": "Slack 上のやり取りが近い判断文脈として前景にある。"
+    "social_context_summary": "Slack 上のやり取りが近い判断文脈として前景にある。",
+    "capability_id": "social.status"
   },
   "environment_context": {
     "summary_text": "作業部屋は静かで、集中しやすい環境にある。",
@@ -152,13 +153,14 @@ LLM に渡す source pack は少なくとも次を持つ。
 real schedule source がある場合は `schedule_slots` を持ち、各 slot は `slot_key / summary_text / not_before / expires_at` を持つ短い object にする。
 `external_service_context` には `summary_text` に加えて、`service / status_text / capability_id` と、必要なら `client_summary_text / result_summary_text / summary_source_hint` のような短い境界補助 field を含める。
 `screen_context` には `visual_summary_text / image_interpreted / visual_confidence_hint / image_count / capability_id` を含める。
-`social_context_context` には `social_context_summary`、`environment_context` には `environment_summary`、`location_context` には `location_summary` を含める。
+`social_context_context` には `social_context_summary / capability_id`、`environment_context` には `environment_summary`、`location_context` には `location_summary` を含める。
 `body_context` には `body_state_summary / capability_id`、`device_context` には `device_state_summary / capability_id`、`schedule_context` には `schedule_summary / capability_id` を含める。
+`social.status` result は `social_context_context.social_context_summary` に投影し、raw social payload は `world_state` に入れない。
 `body.status` result は `body_context.body_state_summary` に投影し、raw body payload は `world_state` に入れない。
 `device.status` result は `device_context.device_state_summary` に投影し、raw device payload は `world_state` に入れない。
 `environment.status` result は `environment_context.environment_summary` に投影し、raw environment payload は `world_state` に入れない。
 `location.status` result は `location_context.location_summary` に投影し、raw location payload は `world_state` に入れない。
-real source と client summary が両方あるときは、`body / device / schedule / environment / location` でも `client_summary_text / result_summary_text / summary_source_hint` を持つ。
+real source と client summary が両方あるときは、`body / device / schedule / social_context / environment / location` でも `client_summary_text / result_summary_text / summary_source_hint` を持つ。
 
 source pack には、画像、音声、長い外部サービス応答、資格情報、内部 URL、配送先 client を含めない。
 画像意味理解を通した場合は `visual_summary_text` を短い補助要約として渡す。
@@ -228,6 +230,7 @@ validator 失敗時は 1 回だけ再生成する。
 - `capability_result.status_text`
 - `capability_result.body_state_summary`
 - `capability_result.device_state_summary`
+- `capability_result.social_context_summary`
 - `capability_result.environment_summary`
 - `capability_result.location_summary`
 - `capability_result.schedule_summary`

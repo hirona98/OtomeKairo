@@ -292,6 +292,33 @@ class ServiceSpontaneousMixin:
                 "client_context": client_context or {},
                 "error": error.strip() if isinstance(error, str) and error.strip() else None,
             }
+        if capability_id == "social.status":
+            social_context_summary = result_payload.get("social_context_summary")
+            client_context = result_payload.get("client_context")
+            error = result_payload.get("error")
+            if not isinstance(social_context_summary, str) or not social_context_summary.strip():
+                raise ServiceError(
+                    400,
+                    "invalid_capability_result",
+                    "social.status result.social_context_summary must be a non-empty string.",
+                )
+            if client_context is not None and not isinstance(client_context, dict):
+                raise ServiceError(
+                    400,
+                    "invalid_capability_result",
+                    "social.status result.client_context must be an object.",
+                )
+            if error is not None and not isinstance(error, str):
+                raise ServiceError(
+                    400,
+                    "invalid_capability_result",
+                    "social.status result.error must be a string or null.",
+                )
+            return {
+                "social_context_summary": social_context_summary.strip(),
+                "client_context": client_context or {},
+                "error": error.strip() if isinstance(error, str) and error.strip() else None,
+            }
         payload = dict(result_payload)
         client_context = payload.get("client_context")
         if client_context is not None and not isinstance(client_context, dict):
@@ -374,6 +401,10 @@ class ServiceSpontaneousMixin:
             summary_text = result_payload.get("location_summary")
             summary_chars = len(summary_text) if isinstance(summary_text, str) else 0
             return f"location_summary_chars={summary_chars} error={bool(result_payload.get('error'))}"
+        if capability_id == "social.status":
+            summary_text = result_payload.get("social_context_summary")
+            summary_chars = len(summary_text) if isinstance(summary_text, str) else 0
+            return f"social_context_summary_chars={summary_chars} error={bool(result_payload.get('error'))}"
         return f"result_keys={len(result_payload)} error={bool(result_payload.get('error'))}"
 
     def _capability_result_context_hook_name(self, capability_id: str) -> str | None:
@@ -783,6 +814,7 @@ class ServiceSpontaneousMixin:
             "window_title": client_context.get("window_title"),
             "locale": client_context.get("locale"),
             "external_service_summary": client_context.get("external_service_summary"),
+            "social_context_summary": client_context.get("social_context_summary"),
             "environment_summary": client_context.get("environment_summary"),
             "location_summary": client_context.get("location_summary"),
             "body_state_summary": client_context.get("body_state_summary"),
@@ -946,6 +978,12 @@ class ServiceSpontaneousMixin:
                 observation_summary=observation_summary,
                 capability_response=capability_response,
             )
+        elif hook_name == "social_status":
+            client_context, observation_summary, input_text = self._prepare_social_status_result_context(
+                client_context=client_context,
+                observation_summary=observation_summary,
+                capability_response=capability_response,
+            )
         return client_context, observation_summary, input_text
 
     def _prepare_external_status_result_context(
@@ -1073,6 +1111,26 @@ class ServiceSpontaneousMixin:
         )
         return enriched_client_context, enriched_observation_summary, input_text
 
+    def _prepare_social_status_result_context(
+        self,
+        *,
+        client_context: dict[str, Any],
+        observation_summary: dict[str, Any],
+        capability_response: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any], str]:
+        social_context_summary = self._client_context_text(capability_response.get("social_context_summary"), limit=160)
+        enriched_client_context = dict(client_context)
+        if social_context_summary is not None:
+            enriched_client_context["social_context_summary"] = social_context_summary
+        enriched_observation_summary = dict(observation_summary)
+        if social_context_summary is not None:
+            enriched_observation_summary["social_context_summary"] = social_context_summary
+        input_text = self._build_capability_result_input_text(
+            client_context=enriched_client_context,
+            capability_response=capability_response,
+        )
+        return enriched_client_context, enriched_observation_summary, input_text
+
     def _capability_result_followup_hint_summary(
         self,
         *,
@@ -1142,6 +1200,13 @@ class ServiceSpontaneousMixin:
                 location_summary = observation_summary.get("location_summary")
             if isinstance(location_summary, str) and location_summary.strip():
                 return self._clamp(f"場所状態: {location_summary.strip()}", limit=160)
+            return None
+        if hook_name == "social_status":
+            social_context_summary = None
+            if isinstance(observation_summary, dict):
+                social_context_summary = observation_summary.get("social_context_summary")
+            if isinstance(social_context_summary, str) and social_context_summary.strip():
+                return self._clamp(f"対人文脈: {social_context_summary.strip()}", limit=160)
             return None
         return None
 
@@ -1218,6 +1283,15 @@ class ServiceSpontaneousMixin:
                 parts.append(f"場所状態要約は {location_summary}")
             else:
                 parts.append("場所状態確認の結果を踏まえて返答や次の行動を決めたい。")
+        elif capability_id == "social.status":
+            social_context_summary = self._client_context_text(
+                capability_response.get("social_context_summary"),
+                limit=160,
+            )
+            if social_context_summary is not None:
+                parts.append(f"対人文脈要約は {social_context_summary}")
+            else:
+                parts.append("対人文脈確認の結果を踏まえて返答や次の行動を決めたい。")
         elif capability_id == "vision.capture" and image_count is not None and image_count <= 0:
             parts.append("観測結果は空だった。")
         else:
@@ -2567,6 +2641,7 @@ class ServiceSpontaneousMixin:
             "locale": client_context.get("locale"),
             "image_count": len(capture_response.get("images", [])),
             "external_service_summary": client_context.get("external_service_summary"),
+            "social_context_summary": client_context.get("social_context_summary"),
             "environment_summary": client_context.get("environment_summary"),
             "location_summary": client_context.get("location_summary"),
             "body_state_summary": client_context.get("body_state_summary"),
