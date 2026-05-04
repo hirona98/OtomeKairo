@@ -331,6 +331,22 @@ class MockLLMClient:
                     "input": self._mock_environment_status_input(normalized),
                 },
             }
+        elif self._should_mock_location_status_request(
+            normalized=normalized,
+            ongoing_action_summary=ongoing_action_summary,
+            capability_decision_view=capability_decision_view,
+        ):
+            payload = {
+                "kind": "capability_request",
+                "reason_code": "capability:location.status",
+                "reason_summary": "場所や移動に関わる現在状態を確認する必要がある。",
+                "requires_confirmation": False,
+                "pending_intent": None,
+                "capability_request": {
+                    "capability_id": "location.status",
+                    "input": self._mock_location_status_input(normalized),
+                },
+            }
         elif self._should_mock_device_status_request(
             normalized=normalized,
             ongoing_action_summary=ongoing_action_summary,
@@ -892,6 +908,49 @@ class MockLLMClient:
         if "明るさ" in normalized or "照明" in normalized:
             return {"scope": "lighting"}
         return {"scope": "workspace"}
+
+    def _should_mock_location_status_request(
+        self,
+        *,
+        normalized: str,
+        ongoing_action_summary: dict[str, Any] | None,
+        capability_decision_view: list[dict[str, Any]] | None,
+    ) -> bool:
+        if isinstance(ongoing_action_summary, dict):
+            status = str(ongoing_action_summary.get("status") or "").strip()
+            if status in {"active", "waiting_result"}:
+                return False
+        if normalized.startswith("capability result を受信"):
+            return False
+        if not self._mock_capability_available(capability_decision_view, "location.status"):
+            return False
+        location_markers = (
+            "場所",
+            "居場所",
+            "位置",
+            "移動",
+            "外出",
+            "自宅",
+            "作業場所",
+            "どこ",
+        )
+        action_markers = (
+            "確認",
+            "教えて",
+            "見て",
+            "チェック",
+            "知りたい",
+        )
+        return any(marker in normalized for marker in location_markers) and any(
+            marker in normalized for marker in action_markers
+        )
+
+    def _mock_location_status_input(self, normalized: str) -> dict[str, str]:
+        if "移動" in normalized or "外出" in normalized:
+            return {"scope": "mobility"}
+        if "作業場所" in normalized:
+            return {"scope": "workspace"}
+        return {"scope": "current"}
 
     def _should_mock_device_status_request(
         self,

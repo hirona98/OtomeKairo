@@ -25,6 +25,43 @@ RECALL_HINT_RECENT_TURN_LIMIT = 6
 VISUAL_OBSERVATION_IMAGE_LIMIT = 1
 WORLD_STATE_FOREGROUND_LIMIT = 4
 WORLD_STATE_MAX_ACTIVE = 12
+WORLD_STATE_USER_INPUT_REQUEST_TERMS = (
+    "確認",
+    "教えて",
+    "知りたい",
+    "チェック",
+)
+WORLD_STATE_USER_INPUT_CURRENT_STATE_TERMS_BY_TYPE = {
+    "body": (
+        "体調",
+        "身体",
+        "疲労",
+        "眠気",
+        "姿勢",
+    ),
+    "device": (
+        "端末",
+        "接続",
+        "電源",
+        "バッテリー",
+        "ネットワーク",
+    ),
+    "environment": (
+        "環境",
+        "周囲",
+        "部屋",
+        "騒音",
+        "明るさ",
+        "作業環境",
+    ),
+    "location": (
+        "場所",
+        "居場所",
+        "現在地",
+        "作業場所",
+        "どこ",
+    ),
+}
 INITIATIVE_BASELINE_SCORES = {
     "low": 0.18,
     "medium": 0.3,
@@ -65,6 +102,10 @@ WORLD_STATE_TTL_SECONDS_BY_TYPE = {
         "summary_text": {"short": 900, "medium": 2400, "long": 7200},
     },
     "location": {
+        "capability_result.location_summary": {"short": 1800, "medium": 3600, "long": 14400},
+        "client_context.location_summary": {"short": 1800, "medium": 3600, "long": 14400},
+        "capability_result.client_context.location_summary": {"short": 1800, "medium": 3600, "long": 14400},
+        "location_summary": {"short": 1800, "medium": 3600, "long": 14400},
         "summary_text": {"short": 1800, "medium": 3600, "long": 14400},
     },
     "external_service": {
@@ -2700,6 +2741,8 @@ class ServiceInputMixin:
                 "location_context",
                 self._build_world_state_location_context(
                     client_context=client_context,
+                    observation_summary=observation_summary,
+                    source_kind=source_kind,
                 ),
             ),
         ):
@@ -2937,11 +2980,15 @@ class ServiceInputMixin:
         self,
         *,
         client_context: dict[str, Any],
+        observation_summary: dict[str, Any] | None,
+        source_kind: str,
     ) -> dict[str, Any] | None:
-        return self._build_world_state_summary_context(
+        return self._build_world_state_capability_state_context(
             client_context=client_context,
-            summary_key="location_summary",
-            limit=160,
+            observation_summary=observation_summary,
+            source_kind=source_kind,
+            client_summary_key="location_summary",
+            observation_summary_key="location_summary",
             explicit_field_name="location_summary",
         )
 
@@ -3109,6 +3156,7 @@ class ServiceInputMixin:
             "device_state_summary",
             "schedule_summary",
             "environment_summary",
+            "location_summary",
             "schedule_slots",
             "error",
         ):
@@ -3313,6 +3361,13 @@ class ServiceInputMixin:
                 state_type=state_type,
                 source_pack=source_pack,
             )
+            if self._should_skip_user_input_current_state_candidate(
+                state_type=state_type,
+                source_kind=source_kind,
+                source_context=source_context,
+                source_pack=source_pack,
+            ):
+                continue
             ttl_hint = str(candidate["ttl_hint"]).strip()
             ttl_policy = self._world_state_ttl_policy(
                 current_time=observed_at,
@@ -3352,6 +3407,29 @@ class ServiceInputMixin:
                 normalized[-1]["ttl_capped_by"] = ttl_policy["capped_by"]
         normalized.sort(key=lambda record: (record["salience"], record["updated_at"]), reverse=True)
         return normalized
+
+    def _should_skip_user_input_current_state_candidate(
+        self,
+        *,
+        state_type: str,
+        source_kind: str,
+        source_context: dict[str, Any] | None,
+        source_pack: dict[str, Any],
+    ) -> bool:
+        if source_kind != "user_input" or source_context is not None:
+            return False
+        state_terms = WORLD_STATE_USER_INPUT_CURRENT_STATE_TERMS_BY_TYPE.get(state_type)
+        if not state_terms:
+            return False
+        current_input = str(source_pack.get("current_input_summary") or "").strip()
+        if not current_input:
+            return False
+        if not self._contains_any_text(current_input, WORLD_STATE_USER_INPUT_REQUEST_TERMS):
+            return False
+        return self._contains_any_text(current_input, state_terms)
+
+    def _contains_any_text(self, text: str, terms: tuple[str, ...]) -> bool:
+        return any(term in text for term in terms)
 
     def _world_state_source_context(
         self,

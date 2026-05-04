@@ -23,9 +23,12 @@ raw payload 保存、長い OCR、配送先 client の露出は入れない。
 - `device.status` result から得た短い `device_state_summary`
 - `body.status` result から得た短い `body_state_summary`
 - `environment.status` result から得た短い `environment_summary`
+- `location.status` result から得た短い `location_summary`
 - capability result の `client_context` から得た短い `body_state_summary`
 - capability result の `client_context` から得た短い `device_state_summary`
 - capability result の `client_context` から得た短い `schedule_summary`
+- capability result の `client_context` から得た短い `environment_summary`
+- capability result の `client_context` から得た短い `location_summary`
 - wake / `desktop_watch` で再評価対象として選ばれた pending-intent の
   `intent_kind / intent_summary / reason_summary / not_before / expires_at`
 
@@ -68,7 +71,8 @@ raw response body、client 固有 ID、資格情報、内部 URL、base64 本文
   },
   "location_context": {
     "summary_text": "自宅デスクで作業している。",
-    "location_summary": "自宅デスクで作業している。"
+    "location_summary": "自宅デスクで作業している。",
+    "capability_id": "location.status"
   },
   "external_service_context": {
     "summary_text": "GitHub の通知に未確認レビューが 1 件ある。",
@@ -113,12 +117,15 @@ raw response body、client 固有 ID、資格情報、内部 URL、base64 本文
 
 source pack では、標準の `client_context` と state-type 別の structured context を分ける。
 画面前景は `client_context` に加えて `screen_context` へ補助要約を載せ、その他の短い current summary は dedicated context へ載せる。
+`current_input_summary` は入力意図と、人が明示した状態値だけを補助する。
+確認依頼だけの入力から現在場所、身体状態、端末状態、周囲環境を推測して state 候補を作らない。
 `social_context_context / environment_context / location_context` は、`client_context` から取った短い summary をそのまま dedicated context へ写す。
 `external.status` のような capability result は、`external_service_context.summary_text` に加えて `service / status_text` を載せる。
 `schedule.status` result は、`schedule_context.summary_text / schedule_summary / schedule_slots` へ投影する。
 `device.status` result は、`device_context.summary_text / device_state_summary` へ投影する。
 `body.status` result は、`body_context.summary_text / body_state_summary` へ投影する。
 `environment.status` result は、`environment_context.summary_text / environment_summary` へ投影する。
+`location.status` result は、`location_context.summary_text / location_summary` へ投影する。
 同時に client 側 summary もあるときは、`client_summary_text / result_summary_text / summary_source_hint` を追加して境界を残す。
 `body_context / device_context / schedule_context` でも、capability result 由来のときは `capability_id` と state-type 別 summary field を載せる。
 client summary と result summary が両方あるときは、同様に `client_summary_text / result_summary_text / summary_source_hint` を追加する。
@@ -134,10 +141,12 @@ real schedule source が複数あるときは、`schedule_context.schedule_slots
 - `device.status` result の `device_state_summary` を `device_context` へ投影する
 - `body.status` result の `body_state_summary` を `body_context` へ投影する
 - `environment.status` result の `environment_summary` を `environment_context` へ投影する
-- capability result の `body_state_summary / device_state_summary / schedule_summary` を対応する state-type context へ投影する
+- `location.status` result の `location_summary` を `location_context` へ投影する
+- capability result の `body_state_summary / device_state_summary / schedule_summary / environment_summary / location_summary` を対応する state-type context へ投影する
 - `summary_source` が `capability_result.<field>` と `client_context.<field>` を区別できるように context へ source hint を残す
 - `schedule_context.schedule_slots` があるときは deterministic な slot state を追加し、`schedule:self` と `schedule:<slot_key>` を併存させる
 - wake / `desktop_watch` の selected pending-intent があるときだけ `schedule_context.pending_intent` を作り、`slot_key` を付ける
+- user input の確認依頼だけから作られた現在状態候補は、対応 structured context が無い場合に正規化で落とす
 - LLM が返した `state_type / scope / summary_text / hint` を validator で検証する
 - TTL は `summary_source` と state_type ごとの規則で決める
 - `external_service` の統合単位は `service` を使う
