@@ -183,13 +183,15 @@ inspection では、少なくとも次を追えるようにする。
 各 probe は `drive_state / world_state / ongoing_action` と recent conversation turns を消してから seed を入れ、直前の status 確認会話に判断を引っ張られない状態で実行する。
 status capability の全体 request / response 件数は存在確認に留める。専用 probe の request / follow-up 成功は cycle trace 内の request id、source request summary、transition summary で確認する。
 
-manual wake 自律判断 matrix は次の 6 件に固定する。
+manual wake 自律判断 matrix は次の 8 件に固定する。
 
 | case | 入力条件 | 期待する構造 |
 | --- | --- | --- |
 | `thin-drive-vision-probe` | 前景 `world_state` が薄く、強い `drive_state` がある | `selected_candidate_family=autonomous`、`preferred_result_kind=capability_request`、`vision.capture` request |
 | `stale-schedule-status-probe` | 予定に関わる強い `drive_state` と古い予定 `world_state` がある | `selected_candidate_family=autonomous`、`preferred_result_kind=capability_request`、`schedule.status` request |
 | `missing-social-status-probe` | 対人文脈に関わる強い `drive_state` があり、対人 `world_state` が無い | `selected_candidate_family=autonomous`、`preferred_result_kind=capability_request`、`social.status` request |
+| `stale-external-status-probe` | 外部サービスに関わる強い `drive_state` と古い外部サービス `world_state` がある | `selected_candidate_family=autonomous`、`preferred_result_kind=capability_request`、`external.status` request |
+| `missing-device-status-probe` | 端末状態に関わる強い `drive_state` があり、端末 `world_state` が無い | `selected_candidate_family=autonomous`、`preferred_result_kind=capability_request`、`device.status` request |
 | `schedule-grounded-reply` | 近い予定の `world_state` と整合する `drive_state` がある | `foreground_thinness=grounded`、`selected_candidate_family=autonomous`、`decision.kind=reply` |
 | `social-grounded-reply` | 対人文脈の `world_state` と整合する `drive_state` がある | `foreground_thinness=grounded`、`selected_candidate_family=autonomous`、`decision.kind=reply` |
 | `ongoing-waiting-noop` | `ongoing_action.status=waiting_result` がある | `selected_candidate_family=ongoing_action`、`preferred_result_kind=noop`、`decision.kind=noop` |
@@ -205,8 +207,9 @@ background wake 起床制御 matrix は次の 5 件に固定する。
 | `background-interval-not-due` | `last_wake_at` 相当の直後に長い interval を設定する | `wake_scheduler_active=true` を観測し、新しい background wake cycle を作らない |
 
 `screen` だけの前景は thin foreground として扱う。
-強い `drive_state` があり、予定、対人文脈、身体状態の grounded foreground がない場合、`vision.capture` による観測を短い reply より優先する。
+強い `drive_state` があり、対応する grounded foreground がない場合、`vision.capture` による観測を短い reply より優先する。
 ただし、強い `drive_state` が特定の status family を要求し、対応 state type が不足または古い場合は、`vision.capture` より対応 status capability を優先する。
+status refresh の鮮度判定は判断前から存在した foreground `world_state` だけを使い、現在の wake 入力から推測生成された `world_state` では再取得を抑止しない。
 background wake では、強い `drive_state` が無く `screen / external_service / device` だけが見えている場合、薄い前景として `noop` を優先する。
 grounded foreground の `world_state` が既にある場合、candidate entry に `preferred_capability_id` が無い限り、同じ情報を再取得する capability request より `preferred_result_kind` の `reply / noop` を優先する。
 非ユーザー起点の判断では、判断前から存在する同じ state type の新鮮な foreground `world_state` がある capability に `fresh_world_state_available=true` を付け、実 LLM の compact digest で request しなかった境界を確認する。

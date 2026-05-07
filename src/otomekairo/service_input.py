@@ -441,6 +441,7 @@ class ServiceInputMixin:
             client_context=current_client_context,
             drive_state_summary=drive_state_summary,
             foreground_world_state=foreground_world_state,
+            world_state_trace=world_state_trace,
             ongoing_action_summary=ongoing_action_summary,
             capability_decision_view=capability_decision_view,
             selected_candidate=selected_candidate,
@@ -837,6 +838,7 @@ class ServiceInputMixin:
         client_context: dict[str, Any],
         drive_state_summary: list[dict[str, Any]] | None,
         foreground_world_state: list[dict[str, Any]] | None,
+        world_state_trace: dict[str, Any] | None,
         ongoing_action_summary: dict[str, Any] | None,
         capability_decision_view: list[dict[str, Any]] | None,
         selected_candidate: dict[str, Any] | None,
@@ -847,6 +849,11 @@ class ServiceInputMixin:
         drive_summaries = self._initiative_drive_summaries(drive_state_summary)
         pending_intent_summaries = self._initiative_pending_intent_summaries(selected_candidate)
         world_state_summary = foreground_world_state or []
+        status_refresh_world_state_summary = self._initiative_status_refresh_world_state_summary(
+            foreground_world_state=foreground_world_state,
+            world_state_trace=world_state_trace,
+            trigger_kind=trigger_kind,
+        )
         initiative_baseline = self._initiative_baseline_summary(persona)
         runtime_state_summary = self._initiative_runtime_state_summary(
             state=state,
@@ -881,6 +888,7 @@ class ServiceInputMixin:
             trigger_kind=trigger_kind,
             drive_summaries=drive_summaries,
             world_state_summary=world_state_summary,
+            status_refresh_world_state_summary=status_refresh_world_state_summary,
             recent_turn_summary=recent_turn_summary,
             foreground_signal_summary=foreground_signal_summary,
             suppression_summary=suppression_summary,
@@ -914,6 +922,23 @@ class ServiceInputMixin:
             "suppression_summary": suppression_summary,
             "intervention_risk_summary": intervention_risk_summary,
         }
+
+    def _initiative_status_refresh_world_state_summary(
+        self,
+        *,
+        foreground_world_state: list[dict[str, Any]] | None,
+        world_state_trace: dict[str, Any] | None,
+        trigger_kind: str,
+    ) -> list[dict[str, Any]]:
+        if trigger_kind in {"wake", "background_wake", "desktop_watch"}:
+            previous = (
+                world_state_trace.get("previous_foreground_world_state")
+                if isinstance(world_state_trace, dict)
+                else None
+            )
+            if isinstance(previous, list):
+                return [item for item in previous if isinstance(item, dict)]
+        return foreground_world_state or []
 
     def _initiative_opportunity_summary(
         self,
@@ -1157,6 +1182,7 @@ class ServiceInputMixin:
         trigger_kind: str,
         drive_summaries: list[dict[str, Any]],
         world_state_summary: list[dict[str, Any]],
+        status_refresh_world_state_summary: list[dict[str, Any]],
         foreground_signal_summary: dict[str, Any],
         initiative_baseline: dict[str, Any],
         capability_summary: dict[str, Any],
@@ -1168,7 +1194,7 @@ class ServiceInputMixin:
             return None
         status_preference = self._initiative_autonomous_status_refresh_preference(
             strongest_drive=strongest_drive,
-            world_state_summary=world_state_summary,
+            world_state_summary=status_refresh_world_state_summary,
             capability_summary=capability_summary,
         )
         if isinstance(status_preference, dict):
@@ -1245,6 +1271,46 @@ class ServiceInputMixin:
                 "state_type": "social_context",
                 "input": {"scope": "social_context"},
                 "label": "対人文脈",
+            }
+        if drive_kind in {"topic_continuation", "follow_through", "user_attention"} and self._contains_any_text(
+            summary_text,
+            ("外部サービス", "GitHub", "github", "レビュー", "issue", "Issue", "PR", "pull request"),
+        ):
+            return {
+                "capability_id": "external.status",
+                "state_type": "external_service",
+                "input": {"service": "github"},
+                "label": "外部サービス",
+            }
+        if drive_kind in {"user_attention", "topic_continuation"} and self._contains_any_text(
+            summary_text,
+            ("端末", "デバイス", "接続", "電源", "バッテリー"),
+        ):
+            return {
+                "capability_id": "device.status",
+                "state_type": "device",
+                "input": {"scope": "device"},
+                "label": "端末状態",
+            }
+        if drive_kind in {"self_regulation", "user_attention", "topic_continuation"} and self._contains_any_text(
+            summary_text,
+            ("作業環境", "周囲", "部屋", "騒音", "明るさ", "環境"),
+        ):
+            return {
+                "capability_id": "environment.status",
+                "state_type": "environment",
+                "input": {"scope": "environment"},
+                "label": "周囲環境",
+            }
+        if drive_kind in {"follow_through", "user_attention", "topic_continuation"} and self._contains_any_text(
+            summary_text,
+            ("場所", "居場所", "移動", "作業場所", "出先"),
+        ):
+            return {
+                "capability_id": "location.status",
+                "state_type": "location",
+                "input": {"scope": "location"},
+                "label": "場所状態",
             }
         if drive_kind == "user_attention" and self._contains_any_text(
             summary_text,
@@ -1417,6 +1483,7 @@ class ServiceInputMixin:
         trigger_kind: str,
         drive_summaries: list[dict[str, Any]],
         world_state_summary: list[dict[str, Any]],
+        status_refresh_world_state_summary: list[dict[str, Any]],
         recent_turn_summary: list[dict[str, str]],
         foreground_signal_summary: dict[str, Any],
         suppression_summary: dict[str, Any],
@@ -1452,6 +1519,7 @@ class ServiceInputMixin:
                 trigger_kind=trigger_kind,
                 drive_summaries=drive_summaries,
                 world_state_summary=world_state_summary,
+                status_refresh_world_state_summary=status_refresh_world_state_summary,
                 recent_turn_summary=recent_turn_summary,
                 foreground_signal_summary=foreground_signal_summary,
                 suppression_summary=suppression_summary,
@@ -1595,6 +1663,7 @@ class ServiceInputMixin:
         trigger_kind: str,
         drive_summaries: list[dict[str, Any]],
         world_state_summary: list[dict[str, Any]],
+        status_refresh_world_state_summary: list[dict[str, Any]],
         recent_turn_summary: list[dict[str, str]],
         foreground_signal_summary: dict[str, Any],
         suppression_summary: dict[str, Any],
@@ -1641,6 +1710,7 @@ class ServiceInputMixin:
             trigger_kind=trigger_kind,
             drive_summaries=drive_summaries,
             world_state_summary=world_state_summary,
+            status_refresh_world_state_summary=status_refresh_world_state_summary,
             foreground_signal_summary=foreground_signal_summary,
             initiative_baseline=initiative_baseline,
             capability_summary=capability_summary,

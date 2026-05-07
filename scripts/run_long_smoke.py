@@ -2599,6 +2599,8 @@ class LongSmokeRunner:
             self._run_real_llm_initiative_probe_drive_thin_capability,
             self._run_real_llm_initiative_probe_stale_schedule_status,
             self._run_real_llm_initiative_probe_missing_social_status,
+            self._run_real_llm_initiative_probe_stale_external_status,
+            self._run_real_llm_initiative_probe_missing_device_status,
             self._run_real_llm_initiative_probe_schedule_reply,
             self._run_real_llm_initiative_probe_social_reply,
             self._run_real_llm_initiative_probe_ongoing_waiting_noop,
@@ -2779,6 +2781,115 @@ class LongSmokeRunner:
             trace=followup_trace,
             case_id=case_id,
             expected_source_capability_id="social.status",
+        )
+        return case_id, trace
+
+    def _run_real_llm_initiative_probe_stale_external_status(self) -> tuple[str, dict[str, Any]]:
+        case_id = "stale-external-status-probe"
+        marker = "RealLLMInitiativeStaleExternalStatusMarker"
+        status_text = f"{marker}: GitHub の未確認レビューは 1 件ある。"
+        self._seed_initiative_probe_drive(
+            drive_id=f"drive:{case_id}",
+            drive_kind="topic_continuation",
+            summary_text=f"{marker}: GitHub レビューの外部サービス状態を確認してから続けたい。",
+            focus_scope_key=marker,
+        )
+        self._seed_initiative_probe_world_state(
+            world_state_id=f"world:{case_id}",
+            state_type="external_service",
+            scope_key=marker,
+            summary_text=f"{marker}: 90 分前時点では GitHub の未確認レビューがあった。",
+            age_minutes=12,
+        )
+        self._queue_external_status_override(
+            {
+                "status_text": status_text,
+                "client_context": {
+                    "external_service_summary": status_text,
+                },
+            }
+        )
+        trace = self._run_manual_wake_probe(
+            case_id=case_id,
+            client_context={
+                "source": "real_llm_initiative_matrix",
+                "client_id": "real-llm-initiative-stale-external",
+                "active_app": "RealLLMInitiativeStaleExternal",
+                "window_title": marker,
+                "locale": "ja-JP",
+            },
+        )
+        self._assert_initiative_probe_trace(
+            trace,
+            case_id=case_id,
+            expected_trigger_kind="wake",
+            expected_result_kind="capability_request",
+            expected_selected_family="autonomous",
+            expected_preferred_result_kind="capability_request",
+            expected_preferred_capability_id="external.status",
+            expected_foreground_thinness="thin",
+            expected_world_state_type="external_service",
+        )
+        request_summary = ((trace.get("result_trace") or {}).get("capability_request_summary"))
+        if not isinstance(request_summary, dict) or request_summary.get("capability_id") != "external.status":
+            raise SmokeError("real-llm initiative stale-external probe capability request was invalid.")
+        request_id = request_summary.get("request_id")
+        if not isinstance(request_id, str) or not request_id:
+            raise SmokeError("real-llm initiative stale-external probe request_id was not recorded.")
+        followup_trace = self._wait_for_capability_result_followup_by_request_id(request_id=request_id)
+        self._assert_status_refresh_probe_followup(
+            trace=followup_trace,
+            case_id=case_id,
+            expected_source_capability_id="external.status",
+        )
+        return case_id, trace
+
+    def _run_real_llm_initiative_probe_missing_device_status(self) -> tuple[str, dict[str, Any]]:
+        case_id = "missing-device-status-probe"
+        marker = "RealLLMInitiativeMissingDeviceStatusMarker"
+        device_state_summary = f"{marker}: 端末接続は安定しており、作業を続けられる。"
+        self._seed_initiative_probe_drive(
+            drive_id=f"drive:{case_id}",
+            drive_kind="user_attention",
+            summary_text=f"{marker}: 端末の接続状態を確認してから短く判断したい。",
+            focus_scope_key=marker,
+        )
+        self._queue_device_status_override(
+            {
+                "device_state_summary": device_state_summary,
+            }
+        )
+        trace = self._run_manual_wake_probe(
+            case_id=case_id,
+            client_context={
+                "source": "real_llm_initiative_matrix",
+                "client_id": "real-llm-initiative-missing-device",
+                "active_app": "RealLLMInitiativeMissingDevice",
+                "window_title": marker,
+                "locale": "ja-JP",
+            },
+        )
+        self._assert_initiative_probe_trace(
+            trace,
+            case_id=case_id,
+            expected_trigger_kind="wake",
+            expected_result_kind="capability_request",
+            expected_selected_family="autonomous",
+            expected_preferred_result_kind="capability_request",
+            expected_preferred_capability_id="device.status",
+            expected_foreground_thinness="thin",
+        )
+        request_summary = ((trace.get("result_trace") or {}).get("capability_request_summary"))
+        if not isinstance(request_summary, dict) or request_summary.get("capability_id") != "device.status":
+            raise SmokeError("real-llm initiative missing-device probe capability request was invalid.")
+        request_id = request_summary.get("request_id")
+        if not isinstance(request_id, str) or not request_id:
+            raise SmokeError("real-llm initiative missing-device probe request_id was not recorded.")
+        followup_trace = self._wait_for_capability_result_followup_by_request_id(request_id=request_id)
+        self._assert_status_refresh_probe_followup(
+            trace=followup_trace,
+            case_id=case_id,
+            expected_source_capability_id="device.status",
         )
         return case_id, trace
 
@@ -4820,6 +4931,8 @@ class LongSmokeRunner:
             "thin-drive-vision-probe",
             "stale-schedule-status-probe",
             "missing-social-status-probe",
+            "stale-external-status-probe",
+            "missing-device-status-probe",
             "schedule-grounded-reply",
             "social-grounded-reply",
             "ongoing-waiting-noop",
@@ -4862,6 +4975,28 @@ class LongSmokeRunner:
                 "preferred_capability_id": "social.status",
                 "foreground_thinness": "thin",
                 "capability_id": "social.status",
+                "capability_request_status": "dispatched",
+                "fresh_world_state_capability_ids": [],
+            },
+            "stale-external-status-probe": {
+                "trigger_kind": "wake",
+                "result_kind": "capability_request",
+                "selected_candidate_family": "autonomous",
+                "preferred_result_kind": "capability_request",
+                "preferred_capability_id": "external.status",
+                "foreground_thinness": "thin",
+                "capability_id": "external.status",
+                "capability_request_status": "dispatched",
+                "fresh_world_state_capability_ids": [],
+            },
+            "missing-device-status-probe": {
+                "trigger_kind": "wake",
+                "result_kind": "capability_request",
+                "selected_candidate_family": "autonomous",
+                "preferred_result_kind": "capability_request",
+                "preferred_capability_id": "device.status",
+                "foreground_thinness": "thin",
+                "capability_id": "device.status",
                 "capability_request_status": "dispatched",
                 "fresh_world_state_capability_ids": [],
             },
