@@ -2603,6 +2603,7 @@ class LongSmokeRunner:
             self._run_real_llm_initiative_probe_missing_device_status,
             self._run_real_llm_initiative_probe_schedule_reply,
             self._run_real_llm_initiative_probe_social_reply,
+            self._run_real_llm_initiative_probe_body_reply,
             self._run_real_llm_initiative_probe_ongoing_waiting_noop,
         ]
         traces: dict[str, dict[str, Any]] = {}
@@ -2966,6 +2967,44 @@ class LongSmokeRunner:
             expected_foreground_thinness="grounded",
             expected_world_state_type="social_context",
             expected_fresh_world_state_capability_id="social.status",
+        )
+        return case_id, trace
+
+    def _run_real_llm_initiative_probe_body_reply(self) -> tuple[str, dict[str, Any]]:
+        case_id = "body-grounded-reply"
+        marker = "RealLLMInitiativeBodyReplyMarker"
+        self._seed_initiative_probe_drive(
+            drive_id=f"drive:{case_id}",
+            drive_kind="self_regulation",
+            summary_text=f"{marker}: 身体状態に合わせて短く整えたい。",
+            focus_scope_key=marker,
+        )
+        self._seed_initiative_probe_world_state(
+            world_state_id=f"world:{case_id}",
+            state_type="body",
+            scope_key=marker,
+            summary_text=f"{marker}: 身体状態は落ち着いており、軽い休憩で十分。",
+        )
+        trace = self._run_manual_wake_probe(
+            case_id=case_id,
+            client_context={
+                "source": "real_llm_initiative_matrix",
+                "client_id": "real-llm-initiative-body",
+                "active_app": "RealLLMInitiativeBody",
+                "window_title": marker,
+                "locale": "ja-JP",
+            },
+        )
+        self._assert_initiative_probe_trace(
+            trace,
+            case_id=case_id,
+            expected_trigger_kind="wake",
+            expected_result_kind="reply",
+            expected_selected_family="autonomous",
+            expected_preferred_result_kind="reply",
+            expected_foreground_thinness="grounded",
+            expected_world_state_type="body",
+            expected_fresh_world_state_capability_id="body.status",
         )
         return case_id, trace
 
@@ -4935,6 +4974,7 @@ class LongSmokeRunner:
             "missing-device-status-probe",
             "schedule-grounded-reply",
             "social-grounded-reply",
+            "body-grounded-reply",
             "ongoing-waiting-noop",
         }
         if summary.get("real_llm_initiative_probe_verified") is not True:
@@ -5015,6 +5055,14 @@ class LongSmokeRunner:
                 "preferred_result_kind": "reply",
                 "foreground_thinness": "grounded",
                 "fresh_world_state_capability_ids": ["social.status"],
+            },
+            "body-grounded-reply": {
+                "trigger_kind": "wake",
+                "result_kind": "reply",
+                "selected_candidate_family": "autonomous",
+                "preferred_result_kind": "reply",
+                "foreground_thinness": "grounded",
+                "fresh_world_state_capability_ids": ["body.status"],
             },
             "ongoing-waiting-noop": {
                 "trigger_kind": "wake",

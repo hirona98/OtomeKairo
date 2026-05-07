@@ -183,7 +183,7 @@ inspection では、少なくとも次を追えるようにする。
 各 probe は `drive_state / world_state / ongoing_action` と recent conversation turns を消してから seed を入れ、直前の status 確認会話に判断を引っ張られない状態で実行する。
 status capability の全体 request / response 件数は存在確認に留める。専用 probe の request / follow-up 成功は cycle trace 内の request id、source request summary、transition summary で確認する。
 
-manual wake 自律判断 matrix は次の 8 件に固定する。
+manual wake 自律判断 matrix は次の 9 件に固定する。
 
 | case | 入力条件 | 期待する構造 |
 | --- | --- | --- |
@@ -194,6 +194,7 @@ manual wake 自律判断 matrix は次の 8 件に固定する。
 | `missing-device-status-probe` | 端末状態に関わる強い `drive_state` があり、端末 `world_state` が無い | `selected_candidate_family=autonomous`、`preferred_result_kind=capability_request`、`device.status` request |
 | `schedule-grounded-reply` | 近い予定の `world_state` と整合する `drive_state` がある | `foreground_thinness=grounded`、`selected_candidate_family=autonomous`、`decision.kind=reply` |
 | `social-grounded-reply` | 対人文脈の `world_state` と整合する `drive_state` がある | `foreground_thinness=grounded`、`selected_candidate_family=autonomous`、`decision.kind=reply` |
+| `body-grounded-reply` | 身体状態の `world_state` と整合する `drive_state` がある | `foreground_thinness=grounded`、`selected_candidate_family=autonomous`、`decision.kind=reply`、`fresh_world_state_capability_ids=["body.status"]` |
 | `ongoing-waiting-noop` | `ongoing_action.status=waiting_result` がある | `selected_candidate_family=ongoing_action`、`preferred_result_kind=noop`、`decision.kind=noop` |
 
 background wake 起床制御 matrix は次の 5 件に固定する。
