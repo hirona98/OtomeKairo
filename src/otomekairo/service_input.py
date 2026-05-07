@@ -1199,6 +1199,12 @@ class ServiceInputMixin:
         )
         if isinstance(status_preference, dict):
             return status_preference
+        status_target = self._initiative_status_refresh_target(strongest_drive)
+        if isinstance(status_target, dict) and self._initiative_status_refresh_target_has_fresh_world_state(
+            target=status_target,
+            world_state_summary=status_refresh_world_state_summary,
+        ):
+            return None
         if self._initiative_foreground_thinness(foreground_signal_summary) != "thin":
             return None
         available_ids = capability_summary.get("available_ids", [])
@@ -1250,7 +1256,10 @@ class ServiceInputMixin:
             for item in world_state_summary
             if isinstance(item, dict) and item.get("state_type") == state_type
         ]
-        if any(self._foreground_world_state_is_fresh(item) for item in matching_states):
+        if self._initiative_status_refresh_target_has_fresh_world_state(
+            target=target,
+            world_state_summary=world_state_summary,
+        ):
             return None
         if matching_states:
             reason_summary = f"{target['label']}の前景 world_state はあるが新鮮ではないため、現在状態を確認する。"
@@ -1261,6 +1270,22 @@ class ServiceInputMixin:
             "input": target["input"],
             "reason_summary": reason_summary,
         }
+
+    def _initiative_status_refresh_target_has_fresh_world_state(
+        self,
+        *,
+        target: dict[str, Any],
+        world_state_summary: list[dict[str, Any]],
+    ) -> bool:
+        state_type = self._client_context_text(target.get("state_type"), limit=48)
+        if state_type is None:
+            return False
+        return any(
+            isinstance(item, dict)
+            and item.get("state_type") == state_type
+            and self._foreground_world_state_is_fresh(item)
+            for item in world_state_summary
+        )
 
     def _initiative_status_refresh_target(self, strongest_drive: dict[str, Any]) -> dict[str, Any] | None:
         drive_kind = self._client_context_text(strongest_drive.get("drive_kind"), limit=48)

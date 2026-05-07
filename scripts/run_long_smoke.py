@@ -2604,6 +2604,10 @@ class LongSmokeRunner:
             self._run_real_llm_initiative_probe_schedule_reply,
             self._run_real_llm_initiative_probe_social_reply,
             self._run_real_llm_initiative_probe_body_reply,
+            self._run_real_llm_initiative_probe_external_reply,
+            self._run_real_llm_initiative_probe_device_reply,
+            self._run_real_llm_initiative_probe_environment_reply,
+            self._run_real_llm_initiative_probe_location_reply,
             self._run_real_llm_initiative_probe_ongoing_waiting_noop,
         ]
         traces: dict[str, dict[str, Any]] = {}
@@ -3005,6 +3009,111 @@ class LongSmokeRunner:
             expected_foreground_thinness="grounded",
             expected_world_state_type="body",
             expected_fresh_world_state_capability_id="body.status",
+        )
+        return case_id, trace
+
+    def _run_real_llm_initiative_probe_external_reply(self) -> tuple[str, dict[str, Any]]:
+        return self._run_real_llm_initiative_probe_fresh_status_reply(
+            case_id="external-fresh-reply",
+            marker="RealLLMInitiativeExternalReplyMarker",
+            drive_kind="topic_continuation",
+            drive_summary="GitHub レビューの外部サービス状態に合わせて短く続けたい。",
+            world_state_type="external_service",
+            world_summary="GitHub の未確認レビューは無く、いまは作業を続けられる。",
+            client_id="real-llm-initiative-external",
+            active_app="RealLLMInitiativeExternal",
+            expected_foreground_thinness="thin",
+            expected_fresh_world_state_capability_id="external.status",
+        )
+
+    def _run_real_llm_initiative_probe_device_reply(self) -> tuple[str, dict[str, Any]]:
+        return self._run_real_llm_initiative_probe_fresh_status_reply(
+            case_id="device-fresh-reply",
+            marker="RealLLMInitiativeDeviceReplyMarker",
+            drive_kind="user_attention",
+            drive_summary="端末の接続状態に合わせて短く判断したい。",
+            world_state_type="device",
+            world_summary="端末接続は安定しており、電源も利用できる。",
+            client_id="real-llm-initiative-device",
+            active_app="RealLLMInitiativeDevice",
+            expected_foreground_thinness="thin",
+            expected_fresh_world_state_capability_id="device.status",
+        )
+
+    def _run_real_llm_initiative_probe_environment_reply(self) -> tuple[str, dict[str, Any]]:
+        return self._run_real_llm_initiative_probe_fresh_status_reply(
+            case_id="environment-fresh-reply",
+            marker="RealLLMInitiativeEnvironmentReplyMarker",
+            drive_kind="self_regulation",
+            drive_summary="作業環境に合わせて短く整えたい。",
+            world_state_type="environment",
+            world_summary="周囲は静かで、明るさも作業に十分。",
+            client_id="real-llm-initiative-environment",
+            active_app="RealLLMInitiativeEnvironment",
+            expected_foreground_thinness="mixed",
+            expected_fresh_world_state_capability_id="environment.status",
+        )
+
+    def _run_real_llm_initiative_probe_location_reply(self) -> tuple[str, dict[str, Any]]:
+        return self._run_real_llm_initiative_probe_fresh_status_reply(
+            case_id="location-fresh-reply",
+            marker="RealLLMInitiativeLocationReplyMarker",
+            drive_kind="follow_through",
+            drive_summary="今の作業場所に合わせて短く続けたい。",
+            world_state_type="location",
+            world_summary="現在は自宅デスクで作業しており、移動は不要。",
+            client_id="real-llm-initiative-location",
+            active_app="RealLLMInitiativeLocation",
+            expected_foreground_thinness="mixed",
+            expected_fresh_world_state_capability_id="location.status",
+        )
+
+    def _run_real_llm_initiative_probe_fresh_status_reply(
+        self,
+        *,
+        case_id: str,
+        marker: str,
+        drive_kind: str,
+        drive_summary: str,
+        world_state_type: str,
+        world_summary: str,
+        client_id: str,
+        active_app: str,
+        expected_foreground_thinness: str,
+        expected_fresh_world_state_capability_id: str,
+    ) -> tuple[str, dict[str, Any]]:
+        self._seed_initiative_probe_drive(
+            drive_id=f"drive:{case_id}",
+            drive_kind=drive_kind,
+            summary_text=f"{marker}: {drive_summary}",
+            focus_scope_key=marker,
+        )
+        self._seed_initiative_probe_world_state(
+            world_state_id=f"world:{case_id}",
+            state_type=world_state_type,
+            scope_key=marker,
+            summary_text=f"{marker}: {world_summary}",
+        )
+        trace = self._run_manual_wake_probe(
+            case_id=case_id,
+            client_context={
+                "source": "real_llm_initiative_matrix",
+                "client_id": client_id,
+                "active_app": active_app,
+                "window_title": marker,
+                "locale": "ja-JP",
+            },
+        )
+        self._assert_initiative_probe_trace(
+            trace,
+            case_id=case_id,
+            expected_trigger_kind="wake",
+            expected_result_kind="reply",
+            expected_selected_family="autonomous",
+            expected_preferred_result_kind="reply",
+            expected_foreground_thinness=expected_foreground_thinness,
+            expected_world_state_type=world_state_type,
+            expected_fresh_world_state_capability_id=expected_fresh_world_state_capability_id,
         )
         return case_id, trace
 
@@ -4975,6 +5084,10 @@ class LongSmokeRunner:
             "schedule-grounded-reply",
             "social-grounded-reply",
             "body-grounded-reply",
+            "external-fresh-reply",
+            "device-fresh-reply",
+            "environment-fresh-reply",
+            "location-fresh-reply",
             "ongoing-waiting-noop",
         }
         if summary.get("real_llm_initiative_probe_verified") is not True:
@@ -5063,6 +5176,38 @@ class LongSmokeRunner:
                 "preferred_result_kind": "reply",
                 "foreground_thinness": "grounded",
                 "fresh_world_state_capability_ids": ["body.status"],
+            },
+            "external-fresh-reply": {
+                "trigger_kind": "wake",
+                "result_kind": "reply",
+                "selected_candidate_family": "autonomous",
+                "preferred_result_kind": "reply",
+                "foreground_thinness": "thin",
+                "fresh_world_state_capability_ids": ["external.status"],
+            },
+            "device-fresh-reply": {
+                "trigger_kind": "wake",
+                "result_kind": "reply",
+                "selected_candidate_family": "autonomous",
+                "preferred_result_kind": "reply",
+                "foreground_thinness": "thin",
+                "fresh_world_state_capability_ids": ["device.status"],
+            },
+            "environment-fresh-reply": {
+                "trigger_kind": "wake",
+                "result_kind": "reply",
+                "selected_candidate_family": "autonomous",
+                "preferred_result_kind": "reply",
+                "foreground_thinness": "mixed",
+                "fresh_world_state_capability_ids": ["environment.status"],
+            },
+            "location-fresh-reply": {
+                "trigger_kind": "wake",
+                "result_kind": "reply",
+                "selected_candidate_family": "autonomous",
+                "preferred_result_kind": "reply",
+                "foreground_thinness": "mixed",
+                "fresh_world_state_capability_ids": ["location.status"],
             },
             "ongoing-waiting-noop": {
                 "trigger_kind": "wake",

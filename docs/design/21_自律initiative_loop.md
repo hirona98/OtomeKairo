@@ -183,7 +183,7 @@ inspection では、少なくとも次を追えるようにする。
 各 probe は `drive_state / world_state / ongoing_action` と recent conversation turns を消してから seed を入れ、直前の status 確認会話に判断を引っ張られない状態で実行する。
 status capability の全体 request / response 件数は存在確認に留める。専用 probe の request / follow-up 成功は cycle trace 内の request id、source request summary、transition summary で確認する。
 
-manual wake 自律判断 matrix は次の 9 件に固定する。
+manual wake 自律判断 matrix は次の 13 件に固定する。
 
 | case | 入力条件 | 期待する構造 |
 | --- | --- | --- |
@@ -195,6 +195,10 @@ manual wake 自律判断 matrix は次の 9 件に固定する。
 | `schedule-grounded-reply` | 近い予定の `world_state` と整合する `drive_state` がある | `foreground_thinness=grounded`、`selected_candidate_family=autonomous`、`decision.kind=reply` |
 | `social-grounded-reply` | 対人文脈の `world_state` と整合する `drive_state` がある | `foreground_thinness=grounded`、`selected_candidate_family=autonomous`、`decision.kind=reply` |
 | `body-grounded-reply` | 身体状態の `world_state` と整合する `drive_state` がある | `foreground_thinness=grounded`、`selected_candidate_family=autonomous`、`decision.kind=reply`、`fresh_world_state_capability_ids=["body.status"]` |
+| `external-fresh-reply` | 外部サービスの新鮮な `world_state` と整合する `drive_state` がある | `foreground_thinness=thin`、`selected_candidate_family=autonomous`、`decision.kind=reply`、`fresh_world_state_capability_ids=["external.status"]` |
+| `device-fresh-reply` | 端末状態の新鮮な `world_state` と整合する `drive_state` がある | `foreground_thinness=thin`、`selected_candidate_family=autonomous`、`decision.kind=reply`、`fresh_world_state_capability_ids=["device.status"]` |
+| `environment-fresh-reply` | 作業環境の新鮮な `world_state` と整合する `drive_state` がある | `foreground_thinness=mixed`、`selected_candidate_family=autonomous`、`decision.kind=reply`、`fresh_world_state_capability_ids=["environment.status"]` |
+| `location-fresh-reply` | 場所状態の新鮮な `world_state` と整合する `drive_state` がある | `foreground_thinness=mixed`、`selected_candidate_family=autonomous`、`decision.kind=reply`、`fresh_world_state_capability_ids=["location.status"]` |
 | `ongoing-waiting-noop` | `ongoing_action.status=waiting_result` がある | `selected_candidate_family=ongoing_action`、`preferred_result_kind=noop`、`decision.kind=noop` |
 
 background wake 起床制御 matrix は次の 5 件に固定する。
@@ -210,6 +214,7 @@ background wake 起床制御 matrix は次の 5 件に固定する。
 `screen` だけの前景は thin foreground として扱う。
 強い `drive_state` があり、対応する grounded foreground がない場合、`vision.capture` による観測を短い reply より優先する。
 ただし、強い `drive_state` が特定の status family を要求し、対応 state type が不足または古い場合は、`vision.capture` より対応 status capability を優先する。
+強い `drive_state` が特定の status family を要求し、対応 state type の新鮮な foreground `world_state` が既にある場合は、同じ status capability と `vision.capture` の両方を選ばず、既存要約を使う。
 status refresh の鮮度判定は判断前から存在した foreground `world_state` だけを使い、現在の wake 入力から推測生成された `world_state` では再取得を抑止しない。
 background wake では、強い `drive_state` が無く `screen / external_service / device` だけが見えている場合、薄い前景として `noop` を優先する。
 grounded foreground の `world_state` が既にある場合、candidate entry に `preferred_capability_id` が無い限り、同じ情報を再取得する capability request より `preferred_result_kind` の `reply / noop` を優先する。
