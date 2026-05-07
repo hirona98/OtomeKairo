@@ -185,12 +185,21 @@ decision view は少なくとも次を持つ。
 | `required_input` | LLM が組み立てる入力の要約 |
 | `risk_level` | 判断上のリスク |
 | `unavailable_reason` | 実行不可の場合の理由 |
+| `fresh_world_state_available` | 非ユーザー起点で同じ state type の新鮮な foreground `world_state` があるか |
+| `fresh_world_state` | 再取得せず判断根拠に使う短い `world_state` 要約 |
+| `fresh_world_state_policy` | 新鮮な `world_state` があるときの再取得禁止理由 |
 
 decision view には token、credential、内部 URL、`target_client_id`、transport 詳細、raw schema の秘密値を入れない。
 LLM は decision view に基づいて `capability_id` と capability 固有入力を提案する。
 server は manifest、binding、state、権限で提案を検証する。
 busy、権限不足、動的一時 unavailable は decision view の `available: false` に反映する。
 cooldown、直近成功、直近失敗は inspection の `CapabilityState` へ残し、明示的な capability 要求まで一律に遮断する理由にはしない。
+非ユーザー起点の判断では、`vision.capture / external.status / schedule.status / device.status / body.status / environment.status / location.status / social.status` が見る state type に、判断前から存在する新鮮な foreground `world_state` がある場合、server は該当 decision view 項目に `fresh_world_state_available=true` を付ける。
+`capability_result` follow-up では、受け取った result から作った current foreground `world_state` も同じ再利用対象にする。
+この項目が付いた capability request は、同じ現在状態の再取得として decision contract validation の repair 対象にする。
+通常会話でユーザーが明示的に現在状態確認を依頼した場合、この freshness による遮断は適用しない。
+通常会話でユーザーが `status` 系または観測系 capability に対応する現在状態確認を明示した場合、対応 capability が `available=true` なら decision contract validation は `capability_request` 以外の判断を repair 対象にする。
+自律判断で強い `drive_state` が特定の status family を要求し、対応 state type が不足または古い場合、server は `initiative_context.candidate_families` の selected autonomous entry に `preferred_result_kind=capability_request` と対応 `preferred_capability_id` を入れる。
 
 inspection の `CapabilityState` は少なくとも次を持つ。
 

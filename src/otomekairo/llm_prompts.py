@@ -443,6 +443,8 @@ def _build_decision_system_prompt(persona: dict) -> str:
         "active_commitments, episodic_evidence, event_evidence は reply と pending_intent の継続根拠に使ってください。\n"
         "pending_intent は『今は返さないが、後で触れる価値がある』場合だけ選んでください。\n"
         "capability_request は CapabilityDecisionView に available=true で載っている能力が必要な場合だけ選んでください。\n"
+        "ユーザーが現在状態の確認を明示的に依頼し、対応する status / observation capability が available=true のときは、入力から推測した foreground_world_state だけで答えず capability_request を選んでください。\n"
+        "CapabilityDecisionView の項目に fresh_world_state_available=true がある場合、明示的なユーザー依頼なしに同じ現在状態を再取得する capability_request は選ばず、fresh_world_state を根拠に reply / noop / pending_intent を選んでください。\n"
         "capability_request.input は required_input に従う最小 object にしてください。target_client_id や資格情報は入れないでください。\n"
         "明示的な会話要求に自然に返せるなら reply を優先し、pending_intent を乱用しないでください。\n"
         "InitiativeContext.candidate_families に priority_score, preferred_result_kind, preferred_result_reason_summary, blocking_reason_summary があるときは、その候補比較を尊重してください。\n"

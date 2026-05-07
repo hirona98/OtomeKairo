@@ -3,12 +3,13 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from otomekairo.llm_contracts import LLMError, validate_recall_hint_contract
+from otomekairo.llm_contracts import LLMError, normalize_recall_hint_payload, validate_recall_hint_contract
 
 
-# RecallHint payload を validator 付きで解析する。
+# RecallHint payload を正規化し、validator 付きで解析する。
 def parse_recall_hint_payload(content: str) -> dict[str, Any]:
     payload = parse_json_object(content)
+    payload = normalize_recall_hint_payload(payload)
     validate_recall_hint_contract(payload)
     return payload
 

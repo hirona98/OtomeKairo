@@ -425,6 +425,12 @@ class ServiceInputMixin:
             state=state,
             current_time=started_at,
         )
+        capability_decision_view = self._annotate_capability_decision_view_with_fresh_world_state(
+            capability_decision_view=capability_decision_view,
+            foreground_world_state=foreground_world_state,
+            world_state_trace=world_state_trace,
+            trigger_kind=trigger_kind,
+        )
         initiative_context = self._build_initiative_context(
             state=state,
             persona=persona,
@@ -461,6 +467,7 @@ class ServiceInputMixin:
             role_definition=decision_role,
             persona=persona,
             input_text=effective_input_text,
+            trigger_kind=trigger_kind,
             recent_turns=recent_turns,
             time_context=time_context,
             affect_context=affect_context,
@@ -639,6 +646,137 @@ class ServiceInputMixin:
         if not isinstance(summary_text, str) or not summary_text.strip():
             return None
         return summary_text.strip()
+
+    def _annotate_capability_decision_view_with_fresh_world_state(
+        self,
+        *,
+        capability_decision_view: list[dict[str, Any]] | None,
+        foreground_world_state: list[dict[str, Any]] | None,
+        world_state_trace: dict[str, Any] | None,
+        trigger_kind: str,
+    ) -> list[dict[str, Any]] | None:
+        if not capability_decision_view:
+            return capability_decision_view
+        if trigger_kind == "user_message":
+            return capability_decision_view
+        reuse_world_state = self._foreground_world_state_for_capability_reuse(
+            foreground_world_state=foreground_world_state,
+            world_state_trace=world_state_trace,
+            trigger_kind=trigger_kind,
+        )
+        if not reuse_world_state:
+            return capability_decision_view
+        fresh_state_by_type = self._fresh_foreground_world_state_by_type(reuse_world_state)
+        if not fresh_state_by_type:
+            return capability_decision_view
+
+        annotated: list[dict[str, Any]] = []
+        changed = False
+        for item in capability_decision_view:
+            if not isinstance(item, dict):
+                annotated.append(item)
+                continue
+            capability_id = item.get("id")
+            state_type = (
+                self._capability_fresh_world_state_type(capability_id)
+                if isinstance(capability_id, str)
+                else None
+            )
+            fresh_state = fresh_state_by_type.get(state_type) if state_type is not None else None
+            if item.get("available") is not True or fresh_state is None:
+                annotated.append(item)
+                continue
+            annotated_item = {
+                **item,
+                "fresh_world_state_available": True,
+                "fresh_world_state": fresh_state,
+                "fresh_world_state_policy": "明示的なユーザー依頼なしでは同じ現在状態を再取得しない。",
+            }
+            annotated.append(annotated_item)
+            changed = True
+        return annotated if changed else capability_decision_view
+
+    def _foreground_world_state_for_capability_reuse(
+        self,
+        *,
+        foreground_world_state: list[dict[str, Any]] | None,
+        world_state_trace: dict[str, Any] | None,
+        trigger_kind: str,
+    ) -> list[dict[str, Any]]:
+        if trigger_kind == "capability_result":
+            return foreground_world_state or []
+        previous = (
+            world_state_trace.get("previous_foreground_world_state")
+            if isinstance(world_state_trace, dict)
+            else None
+        )
+        if isinstance(previous, list):
+            return [item for item in previous if isinstance(item, dict)]
+        return []
+
+    def _fresh_foreground_world_state_by_type(
+        self,
+        foreground_world_state: list[dict[str, Any]],
+    ) -> dict[str, dict[str, Any]]:
+        fresh_state_by_type: dict[str, dict[str, Any]] = {}
+        for summary in foreground_world_state:
+            if not isinstance(summary, dict) or not self._foreground_world_state_is_fresh(summary):
+                continue
+            state_type = summary.get("state_type")
+            if not isinstance(state_type, str) or not state_type.strip():
+                continue
+            summary_text = summary.get("summary_text")
+            if not isinstance(summary_text, str) or not summary_text.strip():
+                continue
+            compact_summary = {
+                "state_type": state_type.strip(),
+                "scope": summary.get("scope"),
+                "summary_text": self._clamp(summary_text.strip(), limit=120),
+                "age_label": summary.get("age_label"),
+                "confidence": summary.get("confidence"),
+                "salience": summary.get("salience"),
+            }
+            existing = fresh_state_by_type.get(state_type.strip())
+            if existing is None or (
+                self._world_state_reuse_rank(compact_summary) > self._world_state_reuse_rank(existing)
+            ):
+                fresh_state_by_type[state_type.strip()] = compact_summary
+        return fresh_state_by_type
+
+    def _foreground_world_state_is_fresh(self, summary: dict[str, Any]) -> bool:
+        age_label = summary.get("age_label")
+        if age_label == "たった今":
+            return True
+        if not isinstance(age_label, str) or not age_label.endswith("分前"):
+            return False
+        minute_text = age_label[:-2]
+        if not minute_text.isdigit():
+            return False
+        return int(minute_text) <= 5
+
+    def _world_state_reuse_rank(self, summary: dict[str, Any]) -> float:
+        salience = summary.get("salience")
+        confidence = summary.get("confidence")
+        score = 0.0
+        if isinstance(salience, (int, float)):
+            score += float(salience)
+        if isinstance(confidence, (int, float)):
+            score += float(confidence)
+        if summary.get("age_label") == "たった今":
+            score += 0.2
+        return score
+
+    def _capability_fresh_world_state_type(self, capability_id: str) -> str | None:
+        return {
+            "vision.capture": "screen",
+            "external.status": "external_service",
+            "schedule.status": "schedule",
+            "device.status": "device",
+            "body.status": "body",
+            "environment.status": "environment",
+            "location.status": "location",
+            "social.status": "social_context",
+        }.get(capability_id)
 
     def _build_capability_result_decision_context(
         self,
@@ -1025,13 +1163,20 @@ class ServiceInputMixin:
     ) -> dict[str, Any] | None:
         if trigger_kind not in {"wake", "background_wake"}:
             return None
+        strongest_drive = self._initiative_strongest_drive_summary(drive_summaries)
+        if not isinstance(strongest_drive, dict):
+            return None
+        status_preference = self._initiative_autonomous_status_refresh_preference(
+            strongest_drive=strongest_drive,
+            world_state_summary=world_state_summary,
+            capability_summary=capability_summary,
+        )
+        if isinstance(status_preference, dict):
+            return status_preference
         if self._initiative_foreground_thinness(foreground_signal_summary) != "thin":
             return None
         available_ids = capability_summary.get("available_ids", [])
         if not isinstance(available_ids, list) or "vision.capture" not in available_ids:
-            return None
-        strongest_drive = self._initiative_strongest_drive_summary(drive_summaries)
-        if not isinstance(strongest_drive, dict):
             return None
         if self._initiative_drive_priority_score(strongest_drive) < INITIATIVE_AUTONOMOUS_PROBE_THRESHOLD:
             return None
@@ -1056,6 +1201,79 @@ class ServiceInputMixin:
             },
             "reason_summary": "強い drive はあるが現在の前景観測が薄いため、先に画面観測を当てたい。",
         }
+
+    def _initiative_autonomous_status_refresh_preference(
+        self,
+        *,
+        strongest_drive: dict[str, Any],
+        world_state_summary: list[dict[str, Any]],
+        capability_summary: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        if self._initiative_drive_priority_score(strongest_drive) < INITIATIVE_AUTONOMOUS_PROBE_THRESHOLD:
+            return None
+        target = self._initiative_status_refresh_target(strongest_drive)
+        if target is None:
+            return None
+        available_ids = capability_summary.get("available_ids", [])
+        capability_id = target["capability_id"]
+        if not isinstance(available_ids, list) or capability_id not in available_ids:
+            return None
+        state_type = target["state_type"]
+        matching_states = [
+            item
+            for item in world_state_summary
+            if isinstance(item, dict) and item.get("state_type") == state_type
+        ]
+        if any(self._foreground_world_state_is_fresh(item) for item in matching_states):
+            return None
+        if matching_states:
+            reason_summary = f"{target['label']}の前景 world_state はあるが新鮮ではないため、現在状態を確認する。"
+        else:
+            reason_summary = f"{target['label']}の前景 world_state が不足しているため、現在状態を確認する。"
+        return {
+            "capability_id": capability_id,
+            "input": target["input"],
+            "reason_summary": reason_summary,
+        }
+
+    def _initiative_status_refresh_target(self, strongest_drive: dict[str, Any]) -> dict[str, Any] | None:
+        drive_kind = self._client_context_text(strongest_drive.get("drive_kind"), limit=48)
+        summary_text = self._client_context_text(strongest_drive.get("summary_text"), limit=240) or ""
+        if drive_kind == "relationship_attunement":
+            return {
+                "capability_id": "social.status",
+                "state_type": "social_context",
+                "input": {"scope": "social_context"},
+                "label": "対人文脈",
+            }
+        if drive_kind == "user_attention" and self._contains_any_text(
+            summary_text,
+            ("対人", "会話", "連絡", "通知", "会議", "やり取り"),
+        ):
+            return {
+                "capability_id": "social.status",
+                "state_type": "social_context",
+                "input": {"scope": "social_context"},
+                "label": "対人文脈",
+            }
+        if drive_kind == "follow_through" and self._contains_any_text(
+            summary_text,
+            ("予定", "スケジュール", "カレンダー", "このあと", "近日"),
+        ):
+            return {
+                "capability_id": "schedule.status",
+                "state_type": "schedule",
+                "input": {"range": "near_term"},
+                "label": "予定",
+            }
+        if drive_kind == "self_regulation":
+            return {
+                "capability_id": "body.status",
+                "state_type": "body",
+                "input": {"scope": "body"},
+                "label": "身体状態",
+            }
+        return None
 
     def _initiative_baseline_summary(self, persona: dict[str, Any]) -> dict[str, Any]:
         level = self._client_context_text(persona.get("initiative_baseline"), limit=16)

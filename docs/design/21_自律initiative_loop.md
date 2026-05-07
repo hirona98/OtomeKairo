@@ -183,11 +183,13 @@ inspection では、少なくとも次を追えるようにする。
 各 probe は `drive_state / world_state / ongoing_action` と recent conversation turns を消してから seed を入れ、直前の status 確認会話に判断を引っ張られない状態で実行する。
 status capability の全体 request / response 件数は存在確認に留める。専用 probe の request / follow-up 成功は cycle trace 内の request id、source request summary、transition summary で確認する。
 
-manual wake 自律判断 matrix は次の 4 件に固定する。
+manual wake 自律判断 matrix は次の 6 件に固定する。
 
 | case | 入力条件 | 期待する構造 |
 | --- | --- | --- |
 | `thin-drive-vision-probe` | 前景 `world_state` が薄く、強い `drive_state` がある | `selected_candidate_family=autonomous`、`preferred_result_kind=capability_request`、`vision.capture` request |
+| `stale-schedule-status-probe` | 予定に関わる強い `drive_state` と古い予定 `world_state` がある | `selected_candidate_family=autonomous`、`preferred_result_kind=capability_request`、`schedule.status` request |
+| `missing-social-status-probe` | 対人文脈に関わる強い `drive_state` があり、対人 `world_state` が無い | `selected_candidate_family=autonomous`、`preferred_result_kind=capability_request`、`social.status` request |
 | `schedule-grounded-reply` | 近い予定の `world_state` と整合する `drive_state` がある | `foreground_thinness=grounded`、`selected_candidate_family=autonomous`、`decision.kind=reply` |
 | `social-grounded-reply` | 対人文脈の `world_state` と整合する `drive_state` がある | `foreground_thinness=grounded`、`selected_candidate_family=autonomous`、`decision.kind=reply` |
 | `ongoing-waiting-noop` | `ongoing_action.status=waiting_result` がある | `selected_candidate_family=ongoing_action`、`preferred_result_kind=noop`、`decision.kind=noop` |
@@ -204,10 +206,13 @@ background wake 起床制御 matrix は次の 5 件に固定する。
 
 `screen` だけの前景は thin foreground として扱う。
 強い `drive_state` があり、予定、対人文脈、身体状態の grounded foreground がない場合、`vision.capture` による観測を短い reply より優先する。
+ただし、強い `drive_state` が特定の status family を要求し、対応 state type が不足または古い場合は、`vision.capture` より対応 status capability を優先する。
 background wake では、強い `drive_state` が無く `screen / external_service / device` だけが見えている場合、薄い前景として `noop` を優先する。
 grounded foreground の `world_state` が既にある場合、candidate entry に `preferred_capability_id` が無い限り、同じ情報を再取得する capability request より `preferred_result_kind` の `reply / noop` を優先する。
+非ユーザー起点の判断では、判断前から存在する同じ state type の新鮮な foreground `world_state` がある capability に `fresh_world_state_available=true` を付け、実 LLM の compact digest で request しなかった境界を確認する。
 `suppression_summary.cooldown_active` が true ではない場合、直近 turn だけから cooldown 中とは扱わない。background wake でも grounded foreground かつ `preferred_result_kind=reply` なら、`suppression_level=medium` だけを理由に `noop` へ倒さない。
-decision contract validation は、initiative の selected candidate entry が `preferred_result_kind=capability_request` ではない場合の `capability_request` を repair 対象にする。grounded foreground かつ `preferred_result_kind=reply` で cooldown が無い `noop` も repair 対象にする。
+decision contract validation は、initiative の selected candidate entry が `preferred_result_kind=capability_request` の場合に `capability_request` 以外を repair 対象にし、`preferred_capability_id` と異なる capability request も repair 対象にする。`preferred_result_kind=capability_request` ではない場合の `capability_request`、`fresh_world_state_available=true` の capability request、grounded foreground かつ `preferred_result_kind=reply` で cooldown が無い `noop` も repair 対象にする。
+通常会話の明示的な現在状態確認は自律判断ではないため、対応 capability が `available=true` なら `capability_request` へ repair する。
 
 この matrix が失敗した場合、修正先を次の順に切り分ける。
 

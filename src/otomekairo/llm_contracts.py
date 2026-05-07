@@ -162,6 +162,31 @@ def _has_focus_scope_shape(value: str) -> bool:
     return False
 
 
+def normalize_recall_hint_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    # 不正な focus scope は意味補完せず検索ヒントから外す。
+    normalized = dict(payload)
+    focus_scopes = normalized.get("focus_scopes")
+    if isinstance(focus_scopes, list):
+        normalized["focus_scopes"] = _normalized_recall_focus_scopes(focus_scopes)
+    return normalized
+
+
+def _normalized_recall_focus_scopes(scopes: list[Any]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for scope in scopes:
+        if not isinstance(scope, str):
+            continue
+        value = scope.strip()
+        if not value or not _has_focus_scope_shape(value) or value in seen:
+            continue
+        normalized.append(value)
+        seen.add(value)
+        if len(normalized) >= MAX_HINT_SCOPE_VALUES:
+            break
+    return normalized
+
+
 def _is_relationship_ref(value: str) -> bool:
     # 中核参照
     if value in {"self", "user"}:
