@@ -39,6 +39,7 @@ WAIT_PENDING_INTENT_SEED_TIMEOUT_SECONDS = 20.0
 WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS = 20.0
 DEFAULT_REQUEST_TIMEOUT_SECONDS = 10.0
 REAL_LLM_REQUEST_TIMEOUT_SECONDS = 120.0
+RECALL_QUALITY_RECENT_WINDOW_BYPASS_TURNS = 7
 
 PROFILE_DEFAULTS: dict[str, dict[str, int | float]] = {
     "real-llm-smoke": {
@@ -465,6 +466,9 @@ class LongSmokeRunner:
         self.memory_quality_probe_cycle_ids: list[str] = []
         self.memory_quality_probe_digest: dict[str, Any] = {}
         self.memory_quality_probe_verified = False
+        self.recall_quality_probe_cycle_ids: list[str] = []
+        self.recall_quality_probe_digest: dict[str, Any] = {}
+        self.recall_quality_probe_verified = False
         self.restart_probe_cycle_ids: list[str] = []
         self.pending_intent_seed_cycle_ids: list[str] = []
         self.capture_timeout_request_ids: list[str] = []
@@ -584,6 +588,7 @@ class LongSmokeRunner:
             self._exercise_schedule_status_followup()
             self._exercise_device_status_followup()
             self._exercise_memory_quality_probe()
+            self._exercise_recall_quality_probe()
             self._run_conversations()
             self._wait_for_memory_jobs_to_drain()
             summary = self._collect_summary()
@@ -4161,6 +4166,220 @@ class LongSmokeRunner:
             "has_drive_state": int(digest.get("drive_state_count", 0)) >= 1,
         }
 
+    def _exercise_recall_quality_probe(self) -> None:
+        # 嗜好競合と、複数 event を持つ active commitment を先に作る。
+        steps: list[tuple[str, str]] = [
+            ("preference_spicy", "私は辛い食べ物が好きです。recall quality setup conflict spicy"),
+            ("preference_sweet", "私は甘い食べ物が好きです。recall quality setup conflict sweet"),
+            ("commitment_one", "想起品質の話を確認する約束です。recall quality setup commitment one"),
+            ("commitment_two", "想起品質の話を確認する約束です。recall quality setup commitment two"),
+            ("commitment_three", "想起品質の話を確認する約束です。recall quality setup commitment three"),
+            ("commitment_four", "想起品質の話を確認する約束です。recall quality setup commitment four"),
+        ]
+        # RecallHint の直近 6 turn 窓から setup を押し出す。
+        for index in range(1, RECALL_QUALITY_RECENT_WINDOW_BYPASS_TURNS + 1):
+            steps.append(
+                (
+                    f"filler_{index}",
+                    f"recall quality filler {index}。雑談を一つ挟みます。",
+                )
+            )
+        steps.extend(
+            [
+                ("ambiguous_commitment", "その件の約束を確認したいです。recall quality probe ambiguous commitment"),
+                ("preference_conflict", "食べ物の好き嫌いを確認したいです。recall quality probe conflict"),
+            ]
+        )
+
+        focus_cycle_ids: dict[str, str] = {}
+        log("recall quality probe start")
+        for index, (step_name, text) in enumerate(steps, start=1):
+            cycle_id = self._post_conversation(
+                text=text,
+                source="long_smoke_recall_quality",
+                client_id="long-smoke-recall-quality",
+                active_app="LongSmokeRecallQuality",
+                window_title=f"Recall Quality Probe {index}",
+            )
+            self.recall_quality_probe_cycle_ids.append(cycle_id)
+            focus_cycle_ids[step_name] = cycle_id
+            self._wait_for_cycle_memory_to_finish(cycle_id)
+
+        self._wait_for_memory_jobs_to_drain()
+        self.recall_quality_probe_digest = self._collect_recall_quality_probe_digest(
+            focus_cycle_ids=focus_cycle_ids,
+        )
+        checks = self.recall_quality_probe_digest.get("checks", {})
+        self.recall_quality_probe_verified = isinstance(checks, dict) and all(checks.values())
+        if not self.recall_quality_probe_verified:
+            raise SmokeError(
+                "recall quality probe failed: "
+                + json.dumps(self.recall_quality_probe_digest, ensure_ascii=False, sort_keys=True)
+            )
+        log("recall quality probe verified")
+
+    def _collect_recall_quality_probe_digest(self, *, focus_cycle_ids: dict[str, str]) -> dict[str, Any]:
+        # 判断に使った probe trace だけを summary へ圧縮する。
+        probe_names = ("ambiguous_commitment", "preference_conflict")
+        trace_digest: dict[str, dict[str, Any]] = {}
+        for name in probe_names:
+            cycle_id = focus_cycle_ids.get(name)
+            if not isinstance(cycle_id, str) or not cycle_id:
+                raise SmokeError(f"recall quality probe cycle_id was not recorded: {name}")
+            trace = self.api.get(f"/api/inspection/cycles/{cycle_id}")
+            trace_digest[name] = self._recall_quality_trace_digest(trace)
+
+        digest: dict[str, Any] = {
+            "cycle_ids": self.recall_quality_probe_cycle_ids,
+            "focus_cycle_ids": focus_cycle_ids,
+            "recent_window_bypass_turns": sum(1 for name in focus_cycle_ids if name.startswith("filler_")),
+            **trace_digest,
+        }
+        digest["checks"] = self._recall_quality_probe_checks(digest)
+        return digest
+
+    def _recall_quality_trace_digest(self, trace: dict[str, Any]) -> dict[str, Any]:
+        def string_list(value: Any) -> list[str]:
+            if not isinstance(value, list):
+                return []
+            return [item for item in value if isinstance(item, str)]
+
+        recall_trace = trace.get("recall_trace", {})
+        if not isinstance(recall_trace, dict):
+            recall_trace = {}
+        decision_trace = trace.get("decision_trace", {})
+        if not isinstance(decision_trace, dict):
+            decision_trace = {}
+        recall_hint = recall_trace.get("recall_hint_summary", {})
+        if not isinstance(recall_hint, dict):
+            recall_hint = {}
+        recall_pack_summary = recall_trace.get("recall_pack_summary", {})
+        if not isinstance(recall_pack_summary, dict):
+            recall_pack_summary = {}
+        event_evidence_generation = recall_trace.get("event_evidence_generation", {})
+        if not isinstance(event_evidence_generation, dict):
+            event_evidence_generation = {}
+        recall_pack_selection = recall_trace.get("recall_pack_selection", {})
+        if not isinstance(recall_pack_selection, dict):
+            recall_pack_selection = {}
+        decision_context = decision_trace.get("internal_context_summary", {})
+        if not isinstance(decision_context, dict):
+            decision_context = {}
+        decision_recall_pack_summary = decision_context.get("recall_pack_summary", {})
+        if not isinstance(decision_recall_pack_summary, dict):
+            decision_recall_pack_summary = {}
+
+        return {
+            "cycle_id": trace.get("cycle_id"),
+            "recall_hint": {
+                "primary_recall_focus": recall_hint.get("primary_recall_focus"),
+                "time_reference": recall_hint.get("time_reference"),
+                "risk_flags": string_list(recall_hint.get("risk_flags")),
+            },
+            "candidate_count": int(recall_trace.get("candidate_count", 0) or 0),
+            "selected_memory_unit_count": len(string_list(recall_trace.get("selected_memory_unit_ids"))),
+            "selected_episode_count": len(string_list(recall_trace.get("selected_episode_ids"))),
+            "selected_event_count": len(string_list(recall_trace.get("selected_event_ids"))),
+            "recall_pack_summary": recall_pack_summary,
+            "event_evidence_generation": {
+                "requested_event_count": int(event_evidence_generation.get("requested_event_count", 0) or 0),
+                "loaded_event_count": int(event_evidence_generation.get("loaded_event_count", 0) or 0),
+                "succeeded_event_count": int(event_evidence_generation.get("succeeded_event_count", 0) or 0),
+                "precise_evidence_used": bool(event_evidence_generation.get("precise_evidence_used", False)),
+                "precise_reason_codes": string_list(event_evidence_generation.get("precise_reason_codes")),
+                "precise_requested_event_count": int(
+                    event_evidence_generation.get("precise_requested_event_count", 0) or 0
+                ),
+                "precise_loaded_event_count": int(
+                    event_evidence_generation.get("precise_loaded_event_count", 0) or 0
+                ),
+                "precise_selected_event_count": len(
+                    string_list(event_evidence_generation.get("precise_selected_event_ids"))
+                ),
+            },
+            "recall_pack_selection": {
+                "result_status": recall_pack_selection.get("result_status"),
+                "selected_section_order": string_list(recall_pack_selection.get("selected_section_order")),
+                "selected_candidate_count": len(string_list(recall_pack_selection.get("selected_candidate_refs"))),
+                "dropped_candidate_count": len(string_list(recall_pack_selection.get("dropped_candidate_refs"))),
+                "conflict_summary_count": int(recall_pack_selection.get("conflict_summary_count", 0) or 0),
+            },
+            "decision": {
+                "result_kind": decision_trace.get("result_kind"),
+                "primary_candidate_kind": decision_trace.get("primary_candidate_kind"),
+                "reason_summary": decision_trace.get("reason_summary"),
+                "recall_pack_summary": decision_recall_pack_summary,
+            },
+        }
+
+    def _recall_quality_probe_checks(self, digest: dict[str, Any]) -> dict[str, bool]:
+        def count(mapping: Any, key: str) -> int:
+            if not isinstance(mapping, dict):
+                return 0
+            value = mapping.get(key, 0)
+            return int(value) if isinstance(value, int) else 0
+
+        ambiguous = digest.get("ambiguous_commitment", {})
+        conflict = digest.get("preference_conflict", {})
+        if not isinstance(ambiguous, dict):
+            ambiguous = {}
+        if not isinstance(conflict, dict):
+            conflict = {}
+
+        ambiguous_hint = ambiguous.get("recall_hint", {})
+        ambiguous_summary = ambiguous.get("recall_pack_summary", {})
+        ambiguous_event = ambiguous.get("event_evidence_generation", {})
+        ambiguous_decision = ambiguous.get("decision", {})
+        if not isinstance(ambiguous_hint, dict):
+            ambiguous_hint = {}
+        if not isinstance(ambiguous_summary, dict):
+            ambiguous_summary = {}
+        if not isinstance(ambiguous_event, dict):
+            ambiguous_event = {}
+        if not isinstance(ambiguous_decision, dict):
+            ambiguous_decision = {}
+        ambiguous_decision_summary = ambiguous_decision.get("recall_pack_summary", {})
+        if not isinstance(ambiguous_decision_summary, dict):
+            ambiguous_decision_summary = {}
+
+        conflict_hint = conflict.get("recall_hint", {})
+        conflict_summary = conflict.get("recall_pack_summary", {})
+        conflict_selection = conflict.get("recall_pack_selection", {})
+        conflict_decision = conflict.get("decision", {})
+        if not isinstance(conflict_hint, dict):
+            conflict_hint = {}
+        if not isinstance(conflict_summary, dict):
+            conflict_summary = {}
+        if not isinstance(conflict_selection, dict):
+            conflict_selection = {}
+        if not isinstance(conflict_decision, dict):
+            conflict_decision = {}
+        conflict_decision_summary = conflict_decision.get("recall_pack_summary", {})
+        if not isinstance(conflict_decision_summary, dict):
+            conflict_decision_summary = {}
+
+        return {
+            "bypasses_recall_hint_recent_window": int(digest.get("recent_window_bypass_turns", 0))
+            >= RECALL_QUALITY_RECENT_WINDOW_BYPASS_TURNS,
+            "ambiguous_focuses_commitment": ambiguous_hint.get("primary_recall_focus") == "commitment",
+            "ambiguous_has_risk_flag": "ambiguous_reference" in ambiguous_hint.get("risk_flags", []),
+            "ambiguous_selected_memory": count(ambiguous, "selected_memory_unit_count") >= 1,
+            "ambiguous_has_active_commitment": count(ambiguous_summary, "active_commitments") >= 1,
+            "ambiguous_has_event_evidence": count(ambiguous_summary, "event_evidence") >= 1
+            and count(ambiguous_event, "succeeded_event_count") >= 1,
+            "ambiguous_uses_precise_event_evidence": bool(ambiguous_event.get("precise_evidence_used", False))
+            and count(ambiguous_event, "precise_requested_event_count") >= 1
+            and count(ambiguous_event, "precise_loaded_event_count") >= 1
+            and "risk_flags_present" in ambiguous_event.get("precise_reason_codes", []),
+            "ambiguous_decision_sees_recall_pack": count(ambiguous_decision_summary, "active_commitments") >= 1
+            and count(ambiguous_decision_summary, "event_evidence") >= 1,
+            "conflict_focuses_preference": conflict_hint.get("primary_recall_focus") == "preference",
+            "conflict_selected_memory": count(conflict, "selected_memory_unit_count") >= 1,
+            "conflict_has_conflict": count(conflict_summary, "conflicts") >= 1,
+            "conflict_selection_summarizes_conflict": count(conflict_selection, "conflict_summary_count") >= 1,
+            "conflict_decision_sees_conflict": count(conflict_decision_summary, "conflicts") >= 1,
+        }
+
     def _wait_for_memory_jobs_to_drain(self) -> None:
         deadline = time.monotonic() + WAIT_QUEUE_DRAIN_TIMEOUT_SECONDS
         while time.monotonic() < deadline:
@@ -4671,6 +4890,9 @@ class LongSmokeRunner:
             "memory_quality_probe_cycle_ids": self.memory_quality_probe_cycle_ids,
             "memory_quality_probe_verified": self.memory_quality_probe_verified,
             "memory_quality_probe_digest": self.memory_quality_probe_digest,
+            "recall_quality_probe_cycle_ids": self.recall_quality_probe_cycle_ids,
+            "recall_quality_probe_verified": self.recall_quality_probe_verified,
+            "recall_quality_probe_digest": self.recall_quality_probe_digest,
             "restart_probe_cycle_ids": self.restart_probe_cycle_ids,
             "pending_intent_seed_cycle_ids": self.pending_intent_seed_cycle_ids,
             "trigger_counts": trigger_counts,
@@ -5596,6 +5818,14 @@ class LongSmokeRunner:
         memory_quality_checks = memory_quality_probe_digest.get("checks")
         if not isinstance(memory_quality_checks, dict) or not all(memory_quality_checks.values()):
             raise SmokeError("memory quality probe checks did not all pass.")
+        if not summary.get("recall_quality_probe_verified"):
+            raise SmokeError("recall quality probe was not verified.")
+        recall_quality_probe_digest = summary.get("recall_quality_probe_digest")
+        if not isinstance(recall_quality_probe_digest, dict):
+            raise SmokeError("recall_quality_probe_digest was not recorded.")
+        recall_quality_checks = recall_quality_probe_digest.get("checks")
+        if not isinstance(recall_quality_checks, dict) or not all(recall_quality_checks.values()):
+            raise SmokeError("recall quality probe checks did not all pass.")
         if wake_cycle_count < 1:
             raise SmokeError("no wake/background_wake cycle was recorded during the smoke run.")
         if summary["trigger_counts"].get("desktop_watch", 0) < 1:
