@@ -462,6 +462,9 @@ class LongSmokeRunner:
         self.social_status_response_count = 0
         self.desktop_watch_event_count = 0
         self.conversation_cycle_ids: list[str] = []
+        self.memory_quality_probe_cycle_ids: list[str] = []
+        self.memory_quality_probe_digest: dict[str, Any] = {}
+        self.memory_quality_probe_verified = False
         self.restart_probe_cycle_ids: list[str] = []
         self.pending_intent_seed_cycle_ids: list[str] = []
         self.capture_timeout_request_ids: list[str] = []
@@ -580,6 +583,7 @@ class LongSmokeRunner:
             self._exercise_external_status_followup()
             self._exercise_schedule_status_followup()
             self._exercise_device_status_followup()
+            self._exercise_memory_quality_probe()
             self._run_conversations()
             self._wait_for_memory_jobs_to_drain()
             summary = self._collect_summary()
@@ -3965,6 +3969,198 @@ class LongSmokeRunner:
 
             time.sleep(0.25)
 
+    def _exercise_memory_quality_probe(self) -> None:
+        messages = [
+            "私は辛い食べ物が好きです。memory quality probe",
+            "私は辛い食べ物が好きです。memory quality probe repeat",
+            "いや、辛い食べ物は苦手です。memory quality probe correction",
+            "私は朝型です。memory quality probe",
+            "いや、私は夜型です。memory quality probe correction",
+            "最近疲れていて少し不安です。memory quality probe affect one",
+            "最近疲れていて少し不安です。memory quality probe affect two",
+            "また今度この話の続きを約束しましょう。memory quality probe commitment open",
+            "また今度この話の続きを約束した件は確認待ちです。memory quality probe commitment waiting",
+            "また今度この話の続きを約束した件は保留です。memory quality probe commitment on hold",
+            "また今度この話の続きを約束した件は完了しました。memory quality probe commitment done",
+            "また今度この話の続きを約束した件はキャンセルします。memory quality probe commitment cancelled",
+            "辛い食べ物の話は今後あまり扱わないで。memory quality probe dormant",
+        ]
+        log("memory quality probe start")
+        for index, text in enumerate(messages, start=1):
+            cycle_id = self._post_conversation(
+                text=text,
+                source="long_smoke_memory_quality",
+                client_id="long-smoke-memory-quality",
+                active_app="LongSmokeMemoryQuality",
+                window_title=f"Memory Quality Probe {index}",
+            )
+            self.memory_quality_probe_cycle_ids.append(cycle_id)
+            self._wait_for_cycle_memory_to_finish(cycle_id)
+        self._wait_for_memory_jobs_to_drain()
+        self.memory_quality_probe_digest = self._collect_memory_quality_probe_digest()
+        checks = self.memory_quality_probe_digest.get("checks", {})
+        self.memory_quality_probe_verified = isinstance(checks, dict) and all(checks.values())
+        if not self.memory_quality_probe_verified:
+            raise SmokeError(
+                "memory quality probe failed: "
+                + json.dumps(self.memory_quality_probe_digest, ensure_ascii=False, sort_keys=True)
+            )
+        log("memory quality probe verified")
+
+    def _collect_memory_quality_probe_digest(self) -> dict[str, Any]:
+        if not isinstance(self.selected_memory_set_id, str) or not self.selected_memory_set_id:
+            raise SmokeError("selected_memory_set_id was not recorded before memory quality probe.")
+        db_path = self.data_dir / "memory.db"
+        if not db_path.exists():
+            raise SmokeError(f"memory db was not created: {db_path}")
+
+        with sqlite3.connect(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            operation_counts = {
+                row["operation"]: int(row["count"])
+                for row in conn.execute(
+                    """
+                    SELECT operation, COUNT(*) AS count
+                    FROM revisions
+                    WHERE memory_set_id = ?
+                    GROUP BY operation
+                    """,
+                    (self.selected_memory_set_id,),
+                ).fetchall()
+            }
+            memory_link_label_counts = {
+                row["label"]: int(row["count"])
+                for row in conn.execute(
+                    """
+                    SELECT label, COUNT(*) AS count
+                    FROM memory_links
+                    WHERE memory_set_id = ?
+                    GROUP BY label
+                    """,
+                    (self.selected_memory_set_id,),
+                ).fetchall()
+            }
+            affect_state_label_counts = {
+                row["affect_label"]: int(row["count"])
+                for row in conn.execute(
+                    """
+                    SELECT affect_label, COUNT(*) AS count
+                    FROM affect_state
+                    WHERE memory_set_id = ?
+                    GROUP BY affect_label
+                    """,
+                    (self.selected_memory_set_id,),
+                ).fetchall()
+            }
+            current_commitment_state_counts = {
+                row["commitment_state"]: int(row["count"])
+                for row in conn.execute(
+                    """
+                    SELECT COALESCE(commitment_state, 'none') AS commitment_state, COUNT(*) AS count
+                    FROM memory_units
+                    WHERE memory_set_id = ?
+                      AND memory_type = 'commitment'
+                    GROUP BY COALESCE(commitment_state, 'none')
+                    """,
+                    (self.selected_memory_set_id,),
+                ).fetchall()
+            }
+            revision_payload_rows = conn.execute(
+                """
+                SELECT payload_json
+                FROM revisions
+                WHERE memory_set_id = ?
+                ORDER BY occurred_at ASC, rowid ASC
+                """,
+                (self.selected_memory_set_id,),
+            ).fetchall()
+            affect_state_count = int(
+                conn.execute(
+                    """
+                    SELECT COUNT(*) AS count
+                    FROM affect_state
+                    WHERE memory_set_id = ?
+                    """,
+                    (self.selected_memory_set_id,),
+                ).fetchone()["count"]
+            )
+            drive_state_count = int(
+                conn.execute(
+                    """
+                    SELECT COUNT(*) AS count
+                    FROM drive_states
+                    WHERE memory_set_id = ?
+                    """,
+                    (self.selected_memory_set_id,),
+                ).fetchone()["count"]
+            )
+            latest_reflection_row = conn.execute(
+                """
+                SELECT payload_json
+                FROM reflection_runs
+                WHERE memory_set_id = ?
+                ORDER BY finished_at DESC, rowid DESC
+                LIMIT 1
+                """,
+                (self.selected_memory_set_id,),
+            ).fetchone()
+
+        commitment_state_history: list[str] = []
+        for row in revision_payload_rows:
+            payload = json.loads(row["payload_json"])
+            after_snapshot = payload.get("after_snapshot")
+            if not isinstance(after_snapshot, dict):
+                continue
+            if after_snapshot.get("memory_type") != "commitment":
+                continue
+            commitment_state = after_snapshot.get("commitment_state")
+            if isinstance(commitment_state, str) and commitment_state and commitment_state not in commitment_state_history:
+                commitment_state_history.append(commitment_state)
+
+        latest_reflection: dict[str, Any] = {}
+        if latest_reflection_row is not None:
+            latest_reflection = json.loads(latest_reflection_row["payload_json"])
+
+        digest = {
+            "cycle_ids": self.memory_quality_probe_cycle_ids,
+            "operation_counts": operation_counts,
+            "commitment_state_history": commitment_state_history,
+            "current_commitment_state_counts": current_commitment_state_counts,
+            "memory_link_label_counts": memory_link_label_counts,
+            "affect_state_count": affect_state_count,
+            "affect_state_label_counts": affect_state_label_counts,
+            "drive_state_count": drive_state_count,
+            "latest_reflection_status": latest_reflection.get("result_status"),
+            "latest_reflection_affect_state_update": latest_reflection.get("affect_state_update"),
+            "latest_reflection_memory_link_update": latest_reflection.get("memory_link_update"),
+        }
+        digest["checks"] = self._memory_quality_probe_checks(digest)
+        return digest
+
+    def _memory_quality_probe_checks(self, digest: dict[str, Any]) -> dict[str, bool]:
+        operation_counts = digest.get("operation_counts", {})
+        commitment_state_history = digest.get("commitment_state_history", [])
+        memory_link_label_counts = digest.get("memory_link_label_counts", {})
+        affect_state_label_counts = digest.get("affect_state_label_counts", {})
+        return {
+            "has_create": int(operation_counts.get("create", 0)) >= 1,
+            "has_reinforce": int(operation_counts.get("reinforce", 0)) >= 1,
+            "has_refine": int(operation_counts.get("refine", 0)) >= 1,
+            "has_supersede": int(operation_counts.get("supersede", 0)) >= 1,
+            "has_revoke": int(operation_counts.get("revoke", 0)) >= 1,
+            "has_dormant": int(operation_counts.get("dormant", 0)) >= 1,
+            "has_commitment_open": "open" in commitment_state_history,
+            "has_commitment_waiting_confirmation": "waiting_confirmation" in commitment_state_history,
+            "has_commitment_on_hold": "on_hold" in commitment_state_history,
+            "has_commitment_done": "done" in commitment_state_history,
+            "has_commitment_cancelled": "cancelled" in commitment_state_history,
+            "has_contradicts_link": int(memory_link_label_counts.get("contradicts", 0)) >= 1,
+            "has_derived_from_link": int(memory_link_label_counts.get("derived_from", 0)) >= 1,
+            "has_affect_state": int(digest.get("affect_state_count", 0)) >= 1,
+            "has_concern_affect_state": int(affect_state_label_counts.get("concern", 0)) >= 1,
+            "has_drive_state": int(digest.get("drive_state_count", 0)) >= 1,
+        }
+
     def _wait_for_memory_jobs_to_drain(self) -> None:
         deadline = time.monotonic() + WAIT_QUEUE_DRAIN_TIMEOUT_SECONDS
         while time.monotonic() < deadline:
@@ -4472,6 +4668,9 @@ class LongSmokeRunner:
             "selected_memory_set_id": self.selected_memory_set_id,
             "status": status,
             "conversation_cycle_ids": self.conversation_cycle_ids,
+            "memory_quality_probe_cycle_ids": self.memory_quality_probe_cycle_ids,
+            "memory_quality_probe_verified": self.memory_quality_probe_verified,
+            "memory_quality_probe_digest": self.memory_quality_probe_digest,
             "restart_probe_cycle_ids": self.restart_probe_cycle_ids,
             "pending_intent_seed_cycle_ids": self.pending_intent_seed_cycle_ids,
             "trigger_counts": trigger_counts,
@@ -5389,6 +5588,14 @@ class LongSmokeRunner:
                 "conversation cycles were too few:"
                 f" {len(summary['conversation_cycle_ids'])} < {self.args.min_conversation_cycles}"
             )
+        if not summary.get("memory_quality_probe_verified"):
+            raise SmokeError("memory quality probe was not verified.")
+        memory_quality_probe_digest = summary.get("memory_quality_probe_digest")
+        if not isinstance(memory_quality_probe_digest, dict):
+            raise SmokeError("memory_quality_probe_digest was not recorded.")
+        memory_quality_checks = memory_quality_probe_digest.get("checks")
+        if not isinstance(memory_quality_checks, dict) or not all(memory_quality_checks.values()):
+            raise SmokeError("memory quality probe checks did not all pass.")
         if wake_cycle_count < 1:
             raise SmokeError("no wake/background_wake cycle was recorded during the smoke run.")
         if summary["trigger_counts"].get("desktop_watch", 0) < 1:

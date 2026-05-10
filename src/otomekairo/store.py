@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -157,6 +158,8 @@ class SQLiteMemoryStore(StoreCloneMixin, StoreVectorMixin, StoreSchemaMixin):
         memory_actions: list[dict[str, Any]],
         episode_affects: list[dict[str, Any]],
     ) -> dict[str, Any]:
+        memory_link_records: list[dict[str, Any]] = []
+
         # トランザクション
         with self._memory_db() as conn:
             # episode追加
@@ -165,7 +168,7 @@ class SQLiteMemoryStore(StoreCloneMixin, StoreVectorMixin, StoreSchemaMixin):
 
             # 記憶アクション群
             for action in memory_actions:
-                self._apply_memory_action(conn, action)
+                memory_link_records.extend(self._apply_memory_action(conn, action))
 
             # episode affect群
             for episode_affect in episode_affects:
@@ -182,17 +185,44 @@ class SQLiteMemoryStore(StoreCloneMixin, StoreVectorMixin, StoreSchemaMixin):
         return {
             "mood_state_update": mood_state_update,
             "affect_state_updates": [],
+            "memory_link_update": self._memory_link_update_summary(memory_link_records),
         }
 
-    def persist_memory_actions(self, *, memory_actions: list[dict[str, Any]]) -> None:
+    def persist_memory_actions(self, *, memory_actions: list[dict[str, Any]]) -> dict[str, Any]:
         # 空
         if not memory_actions:
-            return
+            return self._memory_link_update_summary([])
 
         # トランザクション
+        memory_link_records: list[dict[str, Any]] = []
         with self._memory_db() as conn:
             for action in memory_actions:
-                self._apply_memory_action(conn, action)
+                memory_link_records.extend(self._apply_memory_action(conn, action))
+
+        # 結果
+        return self._memory_link_update_summary(memory_link_records)
+
+    def persist_affect_state_updates(self, *, affect_state_updates: list[dict[str, Any]]) -> dict[str, Any]:
+        # 空
+        if not affect_state_updates:
+            return self._affect_state_update_summary([], [])
+
+        # トランザクション
+        persisted_records: list[dict[str, Any]] = []
+        touched_targets: set[tuple[str, str]] = set()
+        with self._memory_db() as conn:
+            for record in affect_state_updates:
+                persisted = self._upsert_affect_state(conn, record)
+                persisted_records.append(persisted)
+                touched_targets.add((persisted["target_scope_type"], persisted["target_scope_key"]))
+            pruned_affect_state_ids = self._prune_affect_states_for_targets(
+                conn,
+                memory_set_id=affect_state_updates[0]["memory_set_id"],
+                target_refs=touched_targets,
+            )
+
+        # 結果
+        return self._affect_state_update_summary(persisted_records, pruned_affect_state_ids)
 
     def upsert_reflection_run(self, *, reflection_run: dict[str, Any]) -> None:
         # トランザクション
@@ -1048,6 +1078,35 @@ class SQLiteMemoryStore(StoreCloneMixin, StoreVectorMixin, StoreSchemaMixin):
         # 結果
         return [json.loads(row["payload_json"]) for row in rows]
 
+    def list_episode_affects_for_reflection(
+        self,
+        *,
+        memory_set_id: str,
+        since_iso: str | None,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        # Query部品群
+        clauses = ["memory_set_id = ?"]
+        params: list[Any] = [memory_set_id]
+        if isinstance(since_iso, str) and since_iso:
+            clauses.append("observed_at > ?")
+            params.append(since_iso)
+
+        query = f"""
+            SELECT payload_json
+            FROM episode_affects
+            WHERE {" AND ".join(clauses)}
+            ORDER BY observed_at DESC, intensity DESC, rowid DESC
+            LIMIT ?
+        """
+
+        # クエリ
+        with self._memory_db() as conn:
+            rows = conn.execute(query, (*params, limit)).fetchall()
+
+        # 結果
+        return [json.loads(row["payload_json"]) for row in rows]
+
     def _insert_event(self, conn: sqlite3.Connection, record: dict[str, Any]) -> None:
         # 追加
         conn.execute(
@@ -1326,14 +1385,14 @@ class SQLiteMemoryStore(StoreCloneMixin, StoreVectorMixin, StoreSchemaMixin):
             ),
         )
 
-    def _apply_memory_action(self, conn: sqlite3.Connection, action: dict[str, Any]) -> None:
+    def _apply_memory_action(self, conn: sqlite3.Connection, action: dict[str, Any]) -> list[dict[str, Any]]:
         # 操作読み取り
         operation = action["operation"]
         memory_unit = action.get("memory_unit")
 
         # 何もしない処理
         if operation == "noop":
-            return
+            return []
 
         # memory unit upsert実行
         if memory_unit is not None:
@@ -1341,6 +1400,9 @@ class SQLiteMemoryStore(StoreCloneMixin, StoreVectorMixin, StoreSchemaMixin):
 
         # 改訂追加
         self._insert_revision(conn, action)
+
+        # 関係追加
+        return self._upsert_memory_links_from_action(conn, action)
 
     def _upsert_memory_unit(self, conn: sqlite3.Connection, record: dict[str, Any]) -> None:
         # 追加
@@ -1439,6 +1501,107 @@ class SQLiteMemoryStore(StoreCloneMixin, StoreVectorMixin, StoreSchemaMixin):
                 self._to_json(revision),
             ),
         )
+
+    def _upsert_memory_links_from_action(
+        self,
+        conn: sqlite3.Connection,
+        action: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        # related_memory_unit_ids は更新履歴の監査、memory_links は理解同士の関係を保持する。
+        related_memory_unit_ids = [
+            value
+            for value in action.get("related_memory_unit_ids", [])
+            if isinstance(value, str) and value and value != action.get("memory_unit_id")
+        ]
+        if not related_memory_unit_ids:
+            return []
+
+        operation = action.get("operation")
+        if operation == "create":
+            label = "derived_from"
+            confidence = 0.72
+        elif operation in {"revoke", "supersede"}:
+            label = "contradicts"
+            confidence = 0.86
+        else:
+            return []
+
+        records: list[dict[str, Any]] = []
+        for target_memory_unit_id in related_memory_unit_ids:
+            record = self._upsert_memory_link(
+                conn,
+                {
+                    "memory_link_id": f"memory_link:{uuid.uuid4().hex}",
+                    "memory_set_id": action["memory_set_id"],
+                    "source_memory_unit_id": action["memory_unit_id"],
+                    "target_memory_unit_id": target_memory_unit_id,
+                    "label": label,
+                    "confidence": confidence,
+                    "evidence_revision_id": action["revision_id"],
+                    "created_at": action["occurred_at"],
+                    "updated_at": action["occurred_at"],
+                    "operation": operation,
+                    "reason": action.get("reason"),
+                },
+            )
+            records.append(record)
+        return records
+
+    def _upsert_memory_link(self, conn: sqlite3.Connection, record: dict[str, Any]) -> dict[str, Any]:
+        # 既存検索
+        existing_row = conn.execute(
+            """
+            SELECT memory_link_id, created_at
+            FROM memory_links
+            WHERE memory_set_id = ?
+              AND source_memory_unit_id = ?
+              AND target_memory_unit_id = ?
+              AND label = ?
+            """,
+            (
+                record["memory_set_id"],
+                record["source_memory_unit_id"],
+                record["target_memory_unit_id"],
+                record["label"],
+            ),
+        ).fetchone()
+
+        # 識別解決
+        payload = dict(record)
+        if existing_row is not None:
+            payload["memory_link_id"] = existing_row["memory_link_id"]
+            payload["created_at"] = existing_row["created_at"]
+
+        # 保存
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO memory_links (
+                memory_link_id,
+                memory_set_id,
+                source_memory_unit_id,
+                target_memory_unit_id,
+                label,
+                confidence,
+                evidence_revision_id,
+                created_at,
+                updated_at,
+                payload_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                payload["memory_link_id"],
+                payload["memory_set_id"],
+                payload["source_memory_unit_id"],
+                payload["target_memory_unit_id"],
+                payload["label"],
+                payload["confidence"],
+                payload["evidence_revision_id"],
+                payload["created_at"],
+                payload["updated_at"],
+                self._to_json(payload),
+            ),
+        )
+        return payload
 
     def _insert_episode_affect(self, conn: sqlite3.Connection, record: dict[str, Any]) -> None:
         # 追加
@@ -1620,7 +1783,7 @@ class SQLiteMemoryStore(StoreCloneMixin, StoreVectorMixin, StoreSchemaMixin):
             "current_vad": current_vad,
         }
 
-    def _upsert_affect_state(self, conn: sqlite3.Connection, record: dict[str, Any]) -> None:
+    def _upsert_affect_state(self, conn: sqlite3.Connection, record: dict[str, Any]) -> dict[str, Any]:
         # 既存検索
         existing_row = conn.execute(
             """
@@ -1641,17 +1804,14 @@ class SQLiteMemoryStore(StoreCloneMixin, StoreVectorMixin, StoreSchemaMixin):
 
         # 識別解決
         affect_state_id = record["affect_state_id"]
-        observed_at = record["observed_at"]
         created_at = record["created_at"]
         if existing_row is not None:
             affect_state_id = existing_row["affect_state_id"]
-            observed_at = existing_row["observed_at"]
             created_at = existing_row["created_at"]
 
         payload = {
             **record,
             "affect_state_id": affect_state_id,
-            "observed_at": observed_at,
             "created_at": created_at,
         }
 
@@ -1686,6 +1846,86 @@ class SQLiteMemoryStore(StoreCloneMixin, StoreVectorMixin, StoreSchemaMixin):
                 self._to_json(payload),
             ),
         )
+        return payload
+
+    def _prune_affect_states_for_targets(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        memory_set_id: str,
+        target_refs: set[tuple[str, str]],
+        keep_limit: int = 2,
+    ) -> list[str]:
+        # 対象ごとに強い持続感情だけを残す。
+        pruned_ids: list[str] = []
+        for target_scope_type, target_scope_key in sorted(target_refs):
+            rows = conn.execute(
+                """
+                SELECT affect_state_id
+                FROM affect_state
+                WHERE memory_set_id = ?
+                  AND target_scope_type = ?
+                  AND target_scope_key = ?
+                ORDER BY intensity DESC, confidence DESC, updated_at DESC, rowid DESC
+                """,
+                (memory_set_id, target_scope_type, target_scope_key),
+            ).fetchall()
+            for row in rows[keep_limit:]:
+                affect_state_id = row["affect_state_id"]
+                conn.execute(
+                    """
+                    DELETE FROM affect_state
+                    WHERE affect_state_id = ?
+                    """,
+                    (affect_state_id,),
+                )
+                pruned_ids.append(affect_state_id)
+        return pruned_ids
+
+    def _memory_link_update_summary(self, records: list[dict[str, Any]]) -> dict[str, Any]:
+        # trace向け要約
+        labels: dict[str, int] = {}
+        memory_link_ids: list[str] = []
+        for record in records:
+            label = str(record.get("label") or "unknown")
+            labels[label] = labels.get(label, 0) + 1
+            memory_link_id = record.get("memory_link_id")
+            if isinstance(memory_link_id, str) and memory_link_id:
+                memory_link_ids.append(memory_link_id)
+        return {
+            "result_status": "updated" if records else "no_change",
+            "link_count": len(records),
+            "labels": labels,
+            "memory_link_ids": memory_link_ids,
+        }
+
+    def _affect_state_update_summary(
+        self,
+        records: list[dict[str, Any]],
+        pruned_affect_state_ids: list[str],
+    ) -> dict[str, Any]:
+        # trace向け要約
+        return {
+            "result_status": "updated" if records or pruned_affect_state_ids else "no_change",
+            "updated_affect_state_ids": [
+                record["affect_state_id"]
+                for record in records
+                if isinstance(record.get("affect_state_id"), str)
+            ],
+            "pruned_affect_state_ids": pruned_affect_state_ids,
+            "affect_states": [
+                {
+                    "affect_state_id": record["affect_state_id"],
+                    "target_scope_type": record["target_scope_type"],
+                    "target_scope_key": record["target_scope_key"],
+                    "affect_label": record["affect_label"],
+                    "intensity": record["intensity"],
+                    "confidence": record["confidence"],
+                    "updated_at": record["updated_at"],
+                }
+                for record in records
+            ],
+        }
 
     def _to_json(self, payload: Any) -> str:
         # 直列化

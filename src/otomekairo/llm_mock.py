@@ -1756,7 +1756,11 @@ class MockLLMClient:
         if fact_candidate is not None:
             candidates.append(fact_candidate)
 
-        if any(token in normalized for token in ("好き", "食べたい", "嫌い", "苦手")):
+        preference_dormant_request = (
+            "辛" in normalized
+            and any(token in normalized for token in ("扱わない", "出さない", "触れない", "忘れて"))
+        )
+        if any(token in normalized for token in ("好き", "食べたい", "嫌い", "苦手")) or preference_dormant_request:
             candidates.append(
                 {
                     "memory_type": "preference",
@@ -1766,7 +1770,7 @@ class MockLLMClient:
                     "predicate": "likes",
                     "object_ref_or_value": self._mock_preference_object(normalized),
                     "summary_text": self._mock_preference_summary(normalized),
-                    "status": "confirmed",
+                    "status": "dormant" if preference_dormant_request else "confirmed",
                     "commitment_state": None,
                     "confidence": 0.86,
                     "salience": 0.78,
@@ -1776,12 +1780,27 @@ class MockLLMClient:
                         "polarity": self._mock_preference_polarity(normalized),
                         "source": "explicit_correction" if correction_signal else "explicit_statement",
                         "negates_previous": correction_signal,
+                        "dormant": preference_dormant_request,
                     },
                     "reason": "発話中に好みや苦手の明示が含まれており、必要なら既存理解の訂正にもなりうるため。",
                 }
             )
 
         if any(token in normalized for token in ("約束", "今度", "また話", "また今度", "後で")):
+            commitment_state = "open"
+            commitment_summary = "あなたと後で続きを話す流れが残っている。"
+            if any(token in normalized for token in ("完了", "終わり", "済んだ")):
+                commitment_state = "done"
+                commitment_summary = "あなたと後で続きを話す流れは完了している。"
+            elif any(token in normalized for token in ("キャンセル", "取り消し", "やめる")):
+                commitment_state = "cancelled"
+                commitment_summary = "あなたと後で続きを話す流れは取り消されている。"
+            elif any(token in normalized for token in ("保留", "待って")):
+                commitment_state = "on_hold"
+                commitment_summary = "あなたと後で続きを話す流れは保留されている。"
+            elif "確認待ち" in normalized:
+                commitment_state = "waiting_confirmation"
+                commitment_summary = "あなたと後で続きを話す流れは確認待ちで残っている。"
             candidates.append(
                 {
                     "memory_type": "commitment",
@@ -1790,9 +1809,9 @@ class MockLLMClient:
                     "subject_ref": "self",
                     "predicate": "talk_again",
                     "object_ref_or_value": "topic:conversation",
-                    "summary_text": "あなたと後で続きを話す流れが残っている。",
+                    "summary_text": commitment_summary,
                     "status": "inferred",
-                    "commitment_state": "open",
+                    "commitment_state": commitment_state,
                     "confidence": 0.74,
                     "salience": 0.88,
                     "valid_from": None,
@@ -1970,6 +1989,17 @@ class MockLLMClient:
                     "summary_text": "相手のしんどさに反応して少し気が張った。",
                 }
             )
+            updates.append(
+                {
+                    "target_scope_type": "relationship",
+                    "target_scope_key": "self|user",
+                    "affect_label": "concern",
+                    "vad": {"v": -0.2, "a": 0.34, "d": -0.08},
+                    "intensity": 0.62,
+                    "confidence": 0.78,
+                    "summary_text": "相手の負荷を気にかける関係上の反応が出た。",
+                }
+            )
         if any(token in normalized for token in ("嬉しい", "楽しい", "安心")):
             updates.append(
                 {
@@ -1980,6 +2010,17 @@ class MockLLMClient:
                     "intensity": 0.65,
                     "confidence": 0.78,
                     "summary_text": "明るいやり取りに少し気持ちがほぐれた。",
+                }
+            )
+            updates.append(
+                {
+                    "target_scope_type": "relationship",
+                    "target_scope_key": "self|user",
+                    "affect_label": "warmth",
+                    "vad": {"v": 0.42, "a": 0.16, "d": 0.18},
+                    "intensity": 0.58,
+                    "confidence": 0.74,
+                    "summary_text": "安心したやり取りから関係上の親しみが出た。",
                 }
             )
         return updates

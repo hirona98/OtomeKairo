@@ -87,6 +87,8 @@ class ServiceMemoryMixin:
                     "failed_scopes": [],
                 },
                 "drive_state_update": self._drive_state_update_trace("queued"),
+                "affect_state_update": self._affect_state_update_trace("queued"),
+                "memory_link_update": self._memory_link_update_trace("queued"),
                 "failure_reason": None,
             },
             emit_logs=False,
@@ -200,6 +202,8 @@ class ServiceMemoryMixin:
                         "failed_scopes": [],
                     },
                     "drive_state_update": self._drive_state_update_trace("not_started"),
+                    "affect_state_update": self._affect_state_update_trace("not_started"),
+                    "memory_link_update": self._memory_link_update_trace("not_started"),
                     "failure_reason": None,
                 },
             )
@@ -354,6 +358,9 @@ class ServiceMemoryMixin:
                         "succeeded_scope_count": 0,
                         "failed_scopes": [],
                     },
+                    "drive_state_update": self._drive_state_update_trace("not_started"),
+                    "affect_state_update": self._affect_state_update_trace("not_started"),
+                    "memory_link_update": self._memory_link_update_trace("not_started"),
                     "failure_reason": None,
                 },
             }
@@ -385,6 +392,7 @@ class ServiceMemoryMixin:
             "episode_affects": [],
             "mood_state_update": None,
             "affect_state_updates": [],
+            "memory_link_update": self._memory_link_update_trace("not_started"),
             "failure_reason": failure_reason,
             "vector_index_sync": {
                 "result_status": "not_started",
@@ -401,6 +409,8 @@ class ServiceMemoryMixin:
                     "failed_scopes": [],
                 },
                 "drive_state_update": self._drive_state_update_trace("not_started"),
+                "affect_state_update": self._affect_state_update_trace("not_started"),
+                "memory_link_update": self._memory_link_update_trace("not_started"),
                 "failure_reason": None,
             },
             "drive_state_update": self._drive_state_update_trace("not_started"),
@@ -420,6 +430,7 @@ class ServiceMemoryMixin:
             "episode_affects": [],
             "mood_state_update": None,
             "affect_state_updates": [],
+            "memory_link_update": self._memory_link_update_trace("skipped"),
             "failure_reason": None,
             "skip_reason": reason,
             "vector_index_sync": {
@@ -437,6 +448,8 @@ class ServiceMemoryMixin:
                     "failed_scopes": [],
                 },
                 "drive_state_update": self._drive_state_update_trace("skipped"),
+                "affect_state_update": self._affect_state_update_trace("skipped"),
+                "memory_link_update": self._memory_link_update_trace("skipped"),
                 "failure_reason": None,
             },
             "drive_state_update": self._drive_state_update_trace("skipped"),
@@ -544,6 +557,7 @@ class ServiceMemoryMixin:
             "episode_affects": [],
             "mood_state_update": None,
             "affect_state_updates": [],
+            "memory_link_update": self._memory_link_update_trace("not_started"),
             "failure_reason": None,
             "vector_index_sync": {
                 "result_status": "not_started",
@@ -560,6 +574,8 @@ class ServiceMemoryMixin:
                     "failed_scopes": [],
                 },
                 "drive_state_update": self._drive_state_update_trace("not_started"),
+                "affect_state_update": self._affect_state_update_trace("not_started"),
+                "memory_link_update": self._memory_link_update_trace("not_started"),
                 "failure_reason": None,
             },
             "drive_state_update": self._drive_state_update_trace("not_started"),
@@ -572,6 +588,24 @@ class ServiceMemoryMixin:
             "removed_drive_ids": [],
             "drive_summaries": [],
             "scope_supports": [],
+        }
+
+    def _affect_state_update_trace(self, result_status: str) -> dict[str, Any]:
+        return {
+            "result_status": result_status,
+            "created_affect_state_ids": [],
+            "updated_affect_state_ids": [],
+            "weakened_affect_state_ids": [],
+            "pruned_affect_state_ids": [],
+            "affect_state_summaries": [],
+        }
+
+    def _memory_link_update_trace(self, result_status: str) -> dict[str, Any]:
+        return {
+            "result_status": result_status,
+            "link_count": 0,
+            "labels": {},
+            "memory_link_ids": [],
         }
 
     def _update_cycle_trace_memory_trace(self, *, cycle_id: str, memory_trace: dict[str, Any]) -> None:

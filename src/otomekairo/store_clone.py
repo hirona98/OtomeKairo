@@ -18,6 +18,7 @@ class StoreCloneMixin:
             conn.execute("DELETE FROM ongoing_actions WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM drive_states WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM memory_postprocess_jobs WHERE memory_set_id = ?", (memory_set_id,))
+            conn.execute("DELETE FROM memory_links WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM revisions WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM episode_affects WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM mood_state WHERE memory_set_id = ?", (memory_set_id,))
@@ -56,12 +57,19 @@ class StoreCloneMixin:
                 target_memory_set_id=target_memory_set_id,
                 event_id_map=event_id_map,
             )
-            self._clone_revision_records(
+            revision_id_map = self._clone_revision_records(
                 conn,
                 source_memory_set_id=source_memory_set_id,
                 target_memory_set_id=target_memory_set_id,
                 event_id_map=event_id_map,
                 memory_unit_id_map=memory_unit_id_map,
+            )
+            self._clone_memory_link_records(
+                conn,
+                source_memory_set_id=source_memory_set_id,
+                target_memory_set_id=target_memory_set_id,
+                memory_unit_id_map=memory_unit_id_map,
+                revision_id_map=revision_id_map,
             )
             self._clone_episode_affect_records(
                 conn,
@@ -192,14 +200,17 @@ class StoreCloneMixin:
         target_memory_set_id: str,
         event_id_map: dict[str, str],
         memory_unit_id_map: dict[str, str],
-    ) -> None:
+    ) -> dict[str, str]:
+        revision_id_map: dict[str, str] = {}
         source_revisions = self._load_payload_rows(conn, "revisions", source_memory_set_id)
         for record in source_revisions:
+            old_revision_id = record["revision_id"]
+            revision_id_map[old_revision_id] = f"revision:{uuid.uuid4().hex}"
             self._insert_revision(
                 conn,
                 {
                     **record,
-                    "revision_id": f"revision:{uuid.uuid4().hex}",
+                    "revision_id": revision_id_map[old_revision_id],
                     "memory_set_id": target_memory_set_id,
                     "memory_unit_id": memory_unit_id_map.get(record["memory_unit_id"], record["memory_unit_id"]),
                     "related_memory_unit_ids": [
@@ -220,6 +231,37 @@ class StoreCloneMixin:
                         event_id_map.get(event_id, event_id)
                         for event_id in record.get("evidence_event_ids", [])
                     ],
+                },
+            )
+        return revision_id_map
+
+    def _clone_memory_link_records(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        source_memory_set_id: str,
+        target_memory_set_id: str,
+        memory_unit_id_map: dict[str, str],
+        revision_id_map: dict[str, str],
+    ) -> None:
+        source_memory_links = self._load_payload_rows(conn, "memory_links", source_memory_set_id)
+        for record in source_memory_links:
+            source_memory_unit_id = memory_unit_id_map.get(record["source_memory_unit_id"])
+            target_memory_unit_id = memory_unit_id_map.get(record["target_memory_unit_id"])
+            if source_memory_unit_id is None or target_memory_unit_id is None:
+                continue
+            self._upsert_memory_link(
+                conn,
+                {
+                    **record,
+                    "memory_link_id": f"memory_link:{uuid.uuid4().hex}",
+                    "memory_set_id": target_memory_set_id,
+                    "source_memory_unit_id": source_memory_unit_id,
+                    "target_memory_unit_id": target_memory_unit_id,
+                    "evidence_revision_id": revision_id_map.get(
+                        record["evidence_revision_id"],
+                        record["evidence_revision_id"],
+                    ),
                 },
             )
 

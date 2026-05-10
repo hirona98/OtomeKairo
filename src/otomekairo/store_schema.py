@@ -10,7 +10,7 @@ from otomekairo.service_common import debug_log
 
 # 定数
 MEMORY_DB_FILE_NAME = "memory.db"
-CURRENT_MEMORY_DB_VERSION = 10
+CURRENT_MEMORY_DB_VERSION = 11
 
 
 # スキーマMixin
@@ -241,6 +241,28 @@ class StoreSchemaMixin:
 
             CREATE INDEX IF NOT EXISTS idx_revisions_memory_set_occurred_at
             ON revisions(memory_set_id, occurred_at);
+
+            CREATE TABLE IF NOT EXISTS memory_links (
+                memory_link_id TEXT PRIMARY KEY,
+                memory_set_id TEXT NOT NULL,
+                source_memory_unit_id TEXT NOT NULL,
+                target_memory_unit_id TEXT NOT NULL,
+                label TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                evidence_revision_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                payload_json TEXT NOT NULL
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_links_identity
+            ON memory_links(memory_set_id, source_memory_unit_id, target_memory_unit_id, label);
+
+            CREATE INDEX IF NOT EXISTS idx_memory_links_source
+            ON memory_links(memory_set_id, source_memory_unit_id, updated_at);
+
+            CREATE INDEX IF NOT EXISTS idx_memory_links_target
+            ON memory_links(memory_set_id, target_memory_unit_id, updated_at);
 
             CREATE TABLE IF NOT EXISTS episode_affects (
                 episode_affect_id TEXT PRIMARY KEY,
