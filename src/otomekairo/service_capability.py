@@ -24,6 +24,39 @@ class CapabilityDispatchError(ValueError):
 
 
 class ServiceCapabilityMixin:
+    def recover_capability_runtime_state_after_startup(self) -> None:
+        # capability request の照合表は process-local なので、再起動後に結果待ちは成立しない。
+        current_time = self._now_iso()
+        state = self.store.read_state()
+        memory_sets = state.get("memory_sets")
+        if not isinstance(memory_sets, dict):
+            return
+
+        cleared_actions: list[str] = []
+        for memory_set_id in memory_sets:
+            if not isinstance(memory_set_id, str) or not memory_set_id.strip():
+                continue
+            ongoing_action = self.store.get_ongoing_action(
+                memory_set_id=memory_set_id,
+                current_time=current_time,
+            )
+            if not isinstance(ongoing_action, dict):
+                continue
+            if ongoing_action.get("status") != "waiting_result":
+                continue
+            capability_id = str(ongoing_action.get("last_capability_id") or "").strip()
+            if not capability_id:
+                continue
+            self.store.clear_ongoing_action(memory_set_id=memory_set_id)
+            action_id = str(ongoing_action.get("action_id") or "").strip()
+            cleared_actions.append(action_id or memory_set_id)
+
+        if cleared_actions:
+            debug_log(
+                "Capability",
+                f"startup cleared orphaned waiting ongoing_actions count={len(cleared_actions)}",
+            )
+
     # LLM の capability_request decision を実行境界へ渡す。
     def _dispatch_decision_capability_request(
         self,

@@ -547,7 +547,6 @@ class LongSmokeRunner:
         self.runtime_sample_count = 0
         self.max_pending_memory_job_count = 0
         self.max_memory_job_lag_seconds = 0.0
-        self._memory_job_lag_started_at: float | None = None
         self.background_wake_count_before_restart = 0
         self.capture_empty_result_skip_count = 0
         self._capture_context_overrides: list[dict[str, Any]] = []
@@ -690,18 +689,41 @@ class LongSmokeRunner:
     def _record_runtime_summary(self, runtime_summary: dict[str, Any]) -> None:
         self.runtime_sample_count += 1
         pending_count = max(int(runtime_summary.get("pending_memory_job_count", 0)), 0)
-        memory_job_in_progress = bool(runtime_summary.get("memory_job_in_progress"))
         self.max_pending_memory_job_count = max(self.max_pending_memory_job_count, pending_count)
-        now = time.monotonic()
-        if pending_count > 0 or memory_job_in_progress:
-            if self._memory_job_lag_started_at is None:
-                self._memory_job_lag_started_at = now
+        if pending_count > 0:
             self.max_memory_job_lag_seconds = max(
                 self.max_memory_job_lag_seconds,
-                now - self._memory_job_lag_started_at,
+                self._oldest_pending_memory_job_age_seconds(),
             )
-            return
-        self._memory_job_lag_started_at = None
+
+    def _oldest_pending_memory_job_age_seconds(self) -> float:
+        db_path = self.data_dir / "memory.db"
+        if not db_path.exists():
+            return 0.0
+        try:
+            with sqlite3.connect(db_path, timeout=1.0) as conn:
+                row = conn.execute(
+                    """
+                    SELECT queued_at
+                    FROM memory_postprocess_jobs
+                    WHERE result_status = 'queued'
+                    ORDER BY queued_at ASC, rowid ASC
+                    LIMIT 1
+                    """
+                ).fetchone()
+        except sqlite3.Error:
+            return 0.0
+        if row is None or not isinstance(row[0], str) or not row[0]:
+            return 0.0
+        try:
+            queued_at = datetime.fromisoformat(row[0])
+        except ValueError:
+            return 0.0
+        if queued_at.tzinfo is None:
+            current_time = datetime.now()
+        else:
+            current_time = datetime.now(queued_at.tzinfo)
+        return max((current_time - queued_at).total_seconds(), 0.0)
 
     def _bootstrap(self) -> None:
         identity = self.api.get("/api/bootstrap/server-identity")
@@ -1150,6 +1172,11 @@ class LongSmokeRunner:
                     },
                 },
             )
+            self._remember_capability_result_followup_from_recent_cycles(
+                request_id=request_id,
+                capability_id="external.status",
+                verified_request_ids=self.external_status_followup_verified_request_ids,
+            )
             self.external_status_response_count += 1
             return
         if event_type == "schedule.status_request":
@@ -1215,6 +1242,11 @@ class LongSmokeRunner:
                     },
                 },
             )
+            self._remember_capability_result_followup_from_recent_cycles(
+                request_id=request_id,
+                capability_id="schedule.status",
+                verified_request_ids=self.schedule_status_followup_verified_request_ids,
+            )
             self.schedule_status_response_count += 1
             return
         if event_type == "device.status_request":
@@ -1257,6 +1289,11 @@ class LongSmokeRunner:
                         "error": None,
                     },
                 },
+            )
+            self._remember_capability_result_followup_from_recent_cycles(
+                request_id=request_id,
+                capability_id="device.status",
+                verified_request_ids=self.device_status_followup_verified_request_ids,
             )
             self.device_status_response_count += 1
             return
@@ -1301,6 +1338,11 @@ class LongSmokeRunner:
                     },
                 },
             )
+            self._remember_capability_result_followup_from_recent_cycles(
+                request_id=request_id,
+                capability_id="body.status",
+                verified_request_ids=self.body_status_followup_verified_request_ids,
+            )
             self.body_status_response_count += 1
             return
         if event_type == "environment.status_request":
@@ -1343,6 +1385,11 @@ class LongSmokeRunner:
                         "error": None,
                     },
                 },
+            )
+            self._remember_capability_result_followup_from_recent_cycles(
+                request_id=request_id,
+                capability_id="environment.status",
+                verified_request_ids=self.environment_status_followup_verified_request_ids,
             )
             self.environment_status_response_count += 1
             return
@@ -1387,6 +1434,11 @@ class LongSmokeRunner:
                     },
                 },
             )
+            self._remember_capability_result_followup_from_recent_cycles(
+                request_id=request_id,
+                capability_id="location.status",
+                verified_request_ids=self.location_status_followup_verified_request_ids,
+            )
             self.location_status_response_count += 1
             return
         if event_type == "social.status_request":
@@ -1429,6 +1481,11 @@ class LongSmokeRunner:
                         "error": None,
                     },
                 },
+            )
+            self._remember_capability_result_followup_from_recent_cycles(
+                request_id=request_id,
+                capability_id="social.status",
+                verified_request_ids=self.social_status_followup_verified_request_ids,
             )
             self.social_status_response_count += 1
             return
@@ -1753,6 +1810,34 @@ class LongSmokeRunner:
     def _queue_social_status_override(self, override: dict[str, Any]) -> None:
         with self._social_status_lock:
             self._social_status_overrides.append(override)
+
+    def _remember_capability_result_followup_from_recent_cycles(
+        self,
+        *,
+        request_id: str,
+        capability_id: str,
+        verified_request_ids: list[str],
+    ) -> None:
+        # soak の最終 summary は最新 N 件だけを集めるため、応答直後にも request_id の follow-up 到達を記録する。
+        cycle_summaries = self.api.get("/api/inspection/cycle-summaries?limit=160").get("cycle_summaries", [])
+        if not isinstance(cycle_summaries, list):
+            raise SmokeError("cycle_summaries response was invalid while remembering capability_result follow-up.")
+        for cycle_summary in cycle_summaries:
+            if not isinstance(cycle_summary, dict) or cycle_summary.get("trigger_kind") != "capability_result":
+                continue
+            cycle_id = cycle_summary.get("cycle_id")
+            if not isinstance(cycle_id, str) or not cycle_id:
+                continue
+            trace = self.api.get(f"/api/inspection/cycles/{cycle_id}")
+            followup_summary = ((trace.get("result_trace") or {}).get("capability_result_followup_summary"))
+            if not isinstance(followup_summary, dict) or followup_summary.get("capability_id") != capability_id:
+                continue
+            source_request_summary = followup_summary.get("source_request_summary")
+            if not isinstance(source_request_summary, dict) or source_request_summary.get("request_id") != request_id:
+                continue
+            if request_id not in verified_request_ids:
+                verified_request_ids.append(request_id)
+            return
 
     def _set_wake_policy_disabled(self) -> None:
         self.api.post("/api/config/update-wake-policy", {"wake_policy": {"mode": "disabled"}})
@@ -5172,7 +5257,7 @@ class LongSmokeRunner:
             },
             {
                 "case_id": "memory-worker-lag",
-                "expected_trace": "runtime_summary observes pending jobs or in-progress work while worker drains backlog",
+                "expected_trace": "runtime_summary observes pending jobs while worker drains backlog, or restart probe observes in-progress work",
                 "recovery_condition": "queue drains to zero and worker stays active",
                 "requested_count": 1,
                 "observed_count": int(soak_observability.get("max_pending_memory_job_count", 0)),

@@ -64,6 +64,7 @@ class OtomeKairoService(
         self._capability_runtime_state: dict[str, dict[str, Any]] = {}
         self._stream_event_lock = threading.Lock()
         self._next_stream_event_value = 1
+        self.recover_capability_runtime_state_after_startup()
         debug_log("Service", "initialized")
 
     def start_background_wake_scheduler(self) -> None:
