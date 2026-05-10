@@ -37,6 +37,7 @@ WAIT_RESTART_PENDING_TIMEOUT_SECONDS = 8.0
 WAIT_DESKTOP_WATCH_PROBE_TIMEOUT_SECONDS = 20.0
 WAIT_PENDING_INTENT_SEED_TIMEOUT_SECONDS = 20.0
 WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS = 20.0
+WAIT_ONGOING_ACTION_CLEAR_TIMEOUT_SECONDS = 20.0
 DEFAULT_REQUEST_TIMEOUT_SECONDS = 10.0
 REAL_LLM_REQUEST_TIMEOUT_SECONDS = 120.0
 RECALL_QUALITY_RECENT_WINDOW_BYPASS_TURNS = 7
@@ -580,7 +581,9 @@ class LongSmokeRunner:
                 return self._run_real_llm_smoke()
             self._connect_desktop_client()
             self._exercise_capture_timeout_recovery()
+            self._wait_for_no_ongoing_action(label="capture timeout recovery")
             self._run_restart_probe()
+            self._wait_for_no_ongoing_action(label="restart probe")
             self._exercise_desktop_watch_event_boundaries()
             self._exercise_capture_empty_result()
             self._exercise_multiple_client_boundary()
@@ -4391,6 +4394,18 @@ class LongSmokeRunner:
                 return
             time.sleep(0.5)
         raise SmokeError("memory postprocess queue did not drain within the timeout.")
+
+    def _wait_for_no_ongoing_action(self, *, label: str) -> None:
+        deadline = time.monotonic() + WAIT_ONGOING_ACTION_CLEAR_TIMEOUT_SECONDS
+        while time.monotonic() < deadline:
+            self._assert_server_running()
+            self._assert_event_clients_healthy()
+            status = self._get_status()
+            runtime_summary = status["runtime_summary"]
+            if not runtime_summary.get("ongoing_action_exists"):
+                return
+            time.sleep(0.5)
+        raise SmokeError(f"ongoing_action did not clear after {label}.")
 
     def _wait_for_cycle_memory_to_finish(
         self,
