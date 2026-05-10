@@ -2698,6 +2698,9 @@ class LongSmokeRunner:
             self._run_real_llm_initiative_probe_missing_social_status,
             self._run_real_llm_initiative_probe_stale_external_status,
             self._run_real_llm_initiative_probe_missing_device_status,
+            self._run_real_llm_initiative_probe_missing_body_status,
+            self._run_real_llm_initiative_probe_missing_environment_status,
+            self._run_real_llm_initiative_probe_missing_location_status,
             self._run_real_llm_initiative_probe_schedule_reply,
             self._run_real_llm_initiative_probe_social_reply,
             self._run_real_llm_initiative_probe_body_reply,
@@ -2833,6 +2836,7 @@ class LongSmokeRunner:
             trace=followup_trace,
             case_id=case_id,
             expected_source_capability_id="schedule.status",
+            expected_world_state_type="schedule",
         )
         return case_id, trace
 
@@ -2883,6 +2887,7 @@ class LongSmokeRunner:
             trace=followup_trace,
             case_id=case_id,
             expected_source_capability_id="social.status",
+            expected_world_state_type="social_context",
         )
         return case_id, trace
 
@@ -2943,6 +2948,7 @@ class LongSmokeRunner:
             trace=followup_trace,
             case_id=case_id,
             expected_source_capability_id="external.status",
+            expected_world_state_type="external_service",
         )
         return case_id, trace
 
@@ -2992,8 +2998,129 @@ class LongSmokeRunner:
             trace=followup_trace,
             case_id=case_id,
             expected_source_capability_id="device.status",
+            expected_world_state_type="device",
         )
         return case_id, trace
+
+    def _run_real_llm_initiative_probe_missing_body_status(self) -> tuple[str, dict[str, Any]]:
+        return self._run_real_llm_initiative_probe_missing_status(
+            case_id="missing-body-status-probe",
+            marker="RealLLMInitiativeMissingBodyStatusMarker",
+            capability_id="body.status",
+            world_state_type="body",
+            drive_kind="self_regulation",
+            drive_summary="身体状態が不明なので、体調を確認してから短く整えたい。",
+            override={
+                "body_state_summary": "身体状態は大きな支障がなく、短い休憩で整えられる。",
+            },
+            client_id="real-llm-initiative-missing-body",
+            active_app="RealLLMInitiativeMissingBody",
+        )
+
+    def _run_real_llm_initiative_probe_missing_environment_status(self) -> tuple[str, dict[str, Any]]:
+        return self._run_real_llm_initiative_probe_missing_status(
+            case_id="missing-environment-status-probe",
+            marker="RealLLMInitiativeMissingEnvironmentStatusMarker",
+            capability_id="environment.status",
+            world_state_type="environment",
+            drive_kind="self_regulation",
+            drive_summary="作業環境が不明なので、周囲の状態を確認してから短く整えたい。",
+            override={
+                "environment_summary": "周囲は静かで、作業を続けるには十分な環境である。",
+            },
+            client_id="real-llm-initiative-missing-environment",
+            active_app="RealLLMInitiativeMissingEnvironment",
+        )
+
+    def _run_real_llm_initiative_probe_missing_location_status(self) -> tuple[str, dict[str, Any]]:
+        return self._run_real_llm_initiative_probe_missing_status(
+            case_id="missing-location-status-probe",
+            marker="RealLLMInitiativeMissingLocationStatusMarker",
+            capability_id="location.status",
+            world_state_type="location",
+            drive_kind="follow_through",
+            drive_summary="現在地が不明なので、作業場所を確認してから短く続けたい。",
+            override={
+                "location_summary": "現在は自宅デスクで作業しており、移動は不要である。",
+            },
+            client_id="real-llm-initiative-missing-location",
+            active_app="RealLLMInitiativeMissingLocation",
+        )
+
+    def _run_real_llm_initiative_probe_missing_status(
+        self,
+        *,
+        case_id: str,
+        marker: str,
+        capability_id: str,
+        world_state_type: str,
+        drive_kind: str,
+        drive_summary: str,
+        override: dict[str, Any],
+        client_id: str,
+        active_app: str,
+    ) -> tuple[str, dict[str, Any]]:
+        self._seed_initiative_probe_drive(
+            drive_id=f"drive:{case_id}",
+            drive_kind=drive_kind,
+            summary_text=f"{marker}: {drive_summary}",
+            focus_scope_key=marker,
+        )
+        self._queue_initiative_probe_status_override(
+            capability_id=capability_id,
+            override=override,
+        )
+        trace = self._run_manual_wake_probe(
+            case_id=case_id,
+            client_context={
+                "source": "real_llm_initiative_matrix",
+                "client_id": client_id,
+                "active_app": active_app,
+                "window_title": marker,
+                "locale": "ja-JP",
+            },
+        )
+        self._assert_initiative_probe_trace(
+            trace,
+            case_id=case_id,
+            expected_trigger_kind="wake",
+            expected_result_kind="capability_request",
+            expected_selected_family="autonomous",
+            expected_preferred_result_kind="capability_request",
+            expected_preferred_capability_id=capability_id,
+            expected_foreground_thinness="thin",
+        )
+        request_summary = ((trace.get("result_trace") or {}).get("capability_request_summary"))
+        if not isinstance(request_summary, dict) or request_summary.get("capability_id") != capability_id:
+            raise SmokeError(f"real-llm initiative {case_id} capability request was invalid.")
+        request_id = request_summary.get("request_id")
+        if not isinstance(request_id, str) or not request_id:
+            raise SmokeError(f"real-llm initiative {case_id} request_id was not recorded.")
+        followup_trace = self._wait_for_capability_result_followup_by_request_id(request_id=request_id)
+        self._assert_status_refresh_probe_followup(
+            trace=followup_trace,
+            case_id=case_id,
+            expected_source_capability_id=capability_id,
+            expected_world_state_type=world_state_type,
+        )
+        return case_id, trace
+
+    def _queue_initiative_probe_status_override(
+        self,
+        *,
+        capability_id: str,
+        override: dict[str, Any],
+    ) -> None:
+        if capability_id == "body.status":
+            self._queue_body_status_override(override)
+            return
+        if capability_id == "environment.status":
+            self._queue_environment_status_override(override)
+            return
+        if capability_id == "location.status":
+            self._queue_location_status_override(override)
+            return
+        raise SmokeError(f"unsupported initiative status override capability: {capability_id}")
 
     def _run_real_llm_initiative_probe_schedule_reply(self) -> tuple[str, dict[str, Any]]:
         case_id = "schedule-grounded-reply"
@@ -3582,6 +3709,7 @@ class LongSmokeRunner:
         trace: dict[str, Any],
         case_id: str,
         expected_source_capability_id: str,
+        expected_world_state_type: str | None = None,
     ) -> None:
         cycle_summary = trace.get("cycle_summary", {})
         if not isinstance(cycle_summary, dict) or cycle_summary.get("trigger_kind") != "capability_result":
@@ -3594,6 +3722,18 @@ class LongSmokeRunner:
             raise SmokeError(f"real-llm status refresh probe follow-up summary was invalid: {case_id}")
         if followup_summary.get("capability_id") != expected_source_capability_id:
             raise SmokeError(f"real-llm status refresh probe follow-up source capability was invalid: {case_id}")
+        if expected_world_state_type is not None:
+            world_state_trace = trace.get("world_state_trace", {})
+            foreground_world_state = (
+                world_state_trace.get("foreground_world_state")
+                if isinstance(world_state_trace, dict)
+                else None
+            )
+            if not isinstance(foreground_world_state, list) or not any(
+                isinstance(item, dict) and item.get("state_type") == expected_world_state_type
+                for item in foreground_world_state
+            ):
+                raise SmokeError(f"real-llm status refresh probe follow-up world_state was invalid: {case_id}")
         self._assert_memory_trace_succeeded(
             trace,
             f"real-llm initiative {case_id} status refresh follow-up",
@@ -5602,6 +5742,9 @@ class LongSmokeRunner:
             "missing-social-status-probe",
             "stale-external-status-probe",
             "missing-device-status-probe",
+            "missing-body-status-probe",
+            "missing-environment-status-probe",
+            "missing-location-status-probe",
             "schedule-grounded-reply",
             "social-grounded-reply",
             "body-grounded-reply",
@@ -5671,6 +5814,39 @@ class LongSmokeRunner:
                 "preferred_capability_id": "device.status",
                 "foreground_thinness": "thin",
                 "capability_id": "device.status",
+                "capability_request_status": "dispatched",
+                "fresh_world_state_capability_ids": [],
+            },
+            "missing-body-status-probe": {
+                "trigger_kind": "wake",
+                "result_kind": "capability_request",
+                "selected_candidate_family": "autonomous",
+                "preferred_result_kind": "capability_request",
+                "preferred_capability_id": "body.status",
+                "foreground_thinness": "thin",
+                "capability_id": "body.status",
+                "capability_request_status": "dispatched",
+                "fresh_world_state_capability_ids": [],
+            },
+            "missing-environment-status-probe": {
+                "trigger_kind": "wake",
+                "result_kind": "capability_request",
+                "selected_candidate_family": "autonomous",
+                "preferred_result_kind": "capability_request",
+                "preferred_capability_id": "environment.status",
+                "foreground_thinness": "thin",
+                "capability_id": "environment.status",
+                "capability_request_status": "dispatched",
+                "fresh_world_state_capability_ids": [],
+            },
+            "missing-location-status-probe": {
+                "trigger_kind": "wake",
+                "result_kind": "capability_request",
+                "selected_candidate_family": "autonomous",
+                "preferred_result_kind": "capability_request",
+                "preferred_capability_id": "location.status",
+                "foreground_thinness": "thin",
+                "capability_id": "location.status",
                 "capability_request_status": "dispatched",
                 "fresh_world_state_capability_ids": [],
             },
