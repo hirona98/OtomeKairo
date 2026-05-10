@@ -16,6 +16,7 @@ from otomekairo.store_vector import StoreVectorMixin
 MOOD_BASELINE_HALFLIFE_SECONDS = 86400.0
 MOOD_RESIDUAL_HALFLIFE_SECONDS = 21600.0
 MOOD_RESIDUAL_ALPHA = 0.75
+INACTIVE_MEMORY_LINK_TARGET_STATUSES = {"revoked", "superseded"}
 
 
 def _zero_vad() -> dict[str, float]:
@@ -1517,35 +1518,185 @@ class SQLiteMemoryStore(StoreCloneMixin, StoreVectorMixin, StoreSchemaMixin):
             return []
 
         operation = action.get("operation")
-        if operation == "create":
-            label = "derived_from"
-            confidence = 0.72
-        elif operation in {"revoke", "supersede"}:
-            label = "contradicts"
-            confidence = 0.86
-        else:
-            return []
-
         records: list[dict[str, Any]] = []
         for target_memory_unit_id in related_memory_unit_ids:
-            record = self._upsert_memory_link(
-                conn,
-                {
-                    "memory_link_id": f"memory_link:{uuid.uuid4().hex}",
-                    "memory_set_id": action["memory_set_id"],
-                    "source_memory_unit_id": action["memory_unit_id"],
-                    "target_memory_unit_id": target_memory_unit_id,
-                    "label": label,
-                    "confidence": confidence,
-                    "evidence_revision_id": action["revision_id"],
-                    "created_at": action["occurred_at"],
-                    "updated_at": action["occurred_at"],
-                    "operation": operation,
-                    "reason": action.get("reason"),
-                },
-            )
-            records.append(record)
+            for link_spec in self._memory_link_specs_for_action(
+                conn=conn,
+                action=action,
+                target_memory_unit_id=target_memory_unit_id,
+            ):
+                record = self._upsert_memory_link(
+                    conn,
+                    {
+                        "memory_link_id": f"memory_link:{uuid.uuid4().hex}",
+                        "memory_set_id": action["memory_set_id"],
+                        "source_memory_unit_id": link_spec["source_memory_unit_id"],
+                        "target_memory_unit_id": link_spec["target_memory_unit_id"],
+                        "label": link_spec["label"],
+                        "confidence": link_spec["confidence"],
+                        "evidence_revision_id": action["revision_id"],
+                        "created_at": action["occurred_at"],
+                        "updated_at": action["occurred_at"],
+                        "operation": operation,
+                        "reason": action.get("reason"),
+                    },
+                )
+                records.append(record)
         return records
+
+    def _memory_link_specs_for_action(
+        self,
+        *,
+        conn: sqlite3.Connection,
+        action: dict[str, Any],
+        target_memory_unit_id: str,
+    ) -> list[dict[str, Any]]:
+        # revision の関連 ID を、検索しやすい意味リンクへ最小展開する。
+        operation = action.get("operation")
+        source_memory_unit_id = action["memory_unit_id"]
+        source_unit = action.get("memory_unit") if isinstance(action.get("memory_unit"), dict) else {}
+        target_unit = self._load_memory_unit_for_link(
+            conn,
+            memory_set_id=action["memory_set_id"],
+            memory_unit_id=target_memory_unit_id,
+        )
+        target_status = target_unit.get("status") if isinstance(target_unit, dict) else None
+
+        specs: list[dict[str, Any]] = []
+        if operation == "create":
+            specs.append(
+                self._memory_link_spec(
+                    source_memory_unit_id=source_memory_unit_id,
+                    target_memory_unit_id=target_memory_unit_id,
+                    label="derived_from",
+                    confidence=0.72,
+                )
+            )
+            if target_status in INACTIVE_MEMORY_LINK_TARGET_STATUSES:
+                specs.append(
+                    self._memory_link_spec(
+                        source_memory_unit_id=source_memory_unit_id,
+                        target_memory_unit_id=target_memory_unit_id,
+                        label="affects",
+                        confidence=0.74,
+                    )
+                )
+            elif target_unit is not None:
+                specs.append(
+                    self._memory_link_spec(
+                        source_memory_unit_id=target_memory_unit_id,
+                        target_memory_unit_id=source_memory_unit_id,
+                        label="supports",
+                        confidence=0.68,
+                    )
+                )
+            if self._same_memory_link_scope(source_unit, target_unit):
+                specs.append(
+                    self._memory_link_spec(
+                        source_memory_unit_id=source_memory_unit_id,
+                        target_memory_unit_id=target_memory_unit_id,
+                        label="about_same_scope",
+                        confidence=0.62,
+                    )
+                )
+        elif operation in {"revoke", "supersede"}:
+            specs.append(
+                self._memory_link_spec(
+                    source_memory_unit_id=source_memory_unit_id,
+                    target_memory_unit_id=target_memory_unit_id,
+                    label="contradicts",
+                    confidence=0.86,
+                )
+            )
+        elif (
+            operation in {"reinforce", "refine"}
+            and target_unit is not None
+            and target_status not in INACTIVE_MEMORY_LINK_TARGET_STATUSES
+        ):
+            specs.append(
+                self._memory_link_spec(
+                    source_memory_unit_id=source_memory_unit_id,
+                    target_memory_unit_id=target_memory_unit_id,
+                    label="derived_from",
+                    confidence=0.7,
+                )
+            )
+            specs.append(
+                self._memory_link_spec(
+                    source_memory_unit_id=target_memory_unit_id,
+                    target_memory_unit_id=source_memory_unit_id,
+                    label="supports",
+                    confidence=0.66,
+                )
+            )
+            if self._same_memory_link_scope(source_unit, target_unit):
+                specs.append(
+                    self._memory_link_spec(
+                        source_memory_unit_id=source_memory_unit_id,
+                        target_memory_unit_id=target_memory_unit_id,
+                        label="about_same_scope",
+                        confidence=0.6,
+                    )
+                )
+
+        return [
+            spec
+            for spec in specs
+            if spec["source_memory_unit_id"] != spec["target_memory_unit_id"]
+        ]
+
+    def _memory_link_spec(
+        self,
+        *,
+        source_memory_unit_id: str,
+        target_memory_unit_id: str,
+        label: str,
+        confidence: float,
+    ) -> dict[str, Any]:
+        # リンク仕様
+        return {
+            "source_memory_unit_id": source_memory_unit_id,
+            "target_memory_unit_id": target_memory_unit_id,
+            "label": label,
+            "confidence": confidence,
+        }
+
+    def _load_memory_unit_for_link(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        memory_set_id: str,
+        memory_unit_id: str,
+    ) -> dict[str, Any] | None:
+        # related target の状態を使って supports/affects の境界を決める。
+        row = conn.execute(
+            """
+            SELECT payload_json
+            FROM memory_units
+            WHERE memory_set_id = ?
+              AND memory_unit_id = ?
+            """,
+            (memory_set_id, memory_unit_id),
+        ).fetchone()
+        if row is None:
+            return None
+        payload = json.loads(row["payload_json"])
+        return payload if isinstance(payload, dict) else None
+
+    def _same_memory_link_scope(
+        self,
+        source_unit: dict[str, Any] | None,
+        target_unit: dict[str, Any] | None,
+    ) -> bool:
+        # 同一 scope の別理解だけを about_same_scope とする。
+        if not isinstance(source_unit, dict) or not isinstance(target_unit, dict):
+            return False
+        return (
+            isinstance(source_unit.get("scope_type"), str)
+            and isinstance(source_unit.get("scope_key"), str)
+            and source_unit.get("scope_type") == target_unit.get("scope_type")
+            and source_unit.get("scope_key") == target_unit.get("scope_key")
+        )
 
     def _upsert_memory_link(self, conn: sqlite3.Connection, record: dict[str, Any]) -> dict[str, Any]:
         # 既存検索

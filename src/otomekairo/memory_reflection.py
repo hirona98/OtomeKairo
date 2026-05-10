@@ -856,21 +856,68 @@ class ReflectiveConsolidator:
                 scope_units=scope_units,
                 limit=12,
             )
-            actions.extend(
-                self.action_resolver.resolve_memory_actions(
-                    memory_set_id=memory_set_id,
-                    finished_at=finished_at,
-                    event_ids=evidence_event_ids,
-                    cycle_ids=self._reflective_cycle_ids(scope_episodes=scope_episodes, limit=12),
-                    candidate=candidate,
-                    embedding_definition=embedding_definition,
-                    allow_summary=True,
-                )
+            summary_actions = self.action_resolver.resolve_memory_actions(
+                memory_set_id=memory_set_id,
+                finished_at=finished_at,
+                event_ids=evidence_event_ids,
+                cycle_ids=self._reflective_cycle_ids(scope_episodes=scope_episodes, limit=12),
+                candidate=candidate,
+                embedding_definition=embedding_definition,
+                allow_summary=True,
             )
+            self._attach_reflective_summary_related_units(
+                actions=summary_actions,
+                scope_units=scope_units,
+            )
+            actions.extend(summary_actions)
             summary_generation["succeeded_scope_count"] += 1
 
         # 結果
         return actions, summary_generation
+
+    def _attach_reflective_summary_related_units(
+        self,
+        *,
+        actions: list[dict[str, Any]],
+        scope_units: list[dict[str, Any]],
+    ) -> None:
+        # 要約 memory_unit は根拠になった同一 scope の active units から派生する。
+        related_memory_unit_ids: list[str] = []
+        for unit in scope_units:
+            memory_unit_id = unit.get("memory_unit_id")
+            if not isinstance(memory_unit_id, str) or not memory_unit_id:
+                continue
+            if memory_unit_id in related_memory_unit_ids:
+                continue
+            related_memory_unit_ids.append(memory_unit_id)
+            if len(related_memory_unit_ids) >= REFLECTION_SUMMARY_PACK_MEMORY_LIMIT:
+                break
+
+        if not related_memory_unit_ids:
+            return
+
+        for action in actions:
+            memory_unit = action.get("memory_unit")
+            if not isinstance(memory_unit, dict) or memory_unit.get("memory_type") != "summary":
+                continue
+            existing_related = [
+                value
+                for value in action.get("related_memory_unit_ids", [])
+                if isinstance(value, str) and value
+            ]
+            action["related_memory_unit_ids"] = self._merge_memory_unit_ids(
+                existing_related,
+                related_memory_unit_ids,
+            )
+
+    def _merge_memory_unit_ids(self, existing_ids: list[str], new_ids: list[str]) -> list[str]:
+        # 順序を保った重複排除
+        merged: list[str] = []
+        for memory_unit_id in existing_ids + new_ids:
+            if memory_unit_id in merged:
+                continue
+            merged.append(memory_unit_id)
+        return merged
 
     def _should_build_reflective_summary(
         self,

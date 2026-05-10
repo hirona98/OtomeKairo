@@ -4273,6 +4273,21 @@ class LongSmokeRunner:
                     (self.selected_memory_set_id,),
                 ).fetchall()
             }
+            memory_link_rows = conn.execute(
+                """
+                SELECT
+                    memory_link_id,
+                    label,
+                    source_memory_unit_id,
+                    target_memory_unit_id,
+                    evidence_revision_id,
+                    payload_json
+                FROM memory_links
+                WHERE memory_set_id = ?
+                ORDER BY label ASC, updated_at DESC, rowid DESC
+                """,
+                (self.selected_memory_set_id,),
+            ).fetchall()
             affect_state_label_counts = {
                 row["affect_label"]: int(row["count"])
                 for row in conn.execute(
@@ -4350,6 +4365,20 @@ class LongSmokeRunner:
             if isinstance(commitment_state, str) and commitment_state and commitment_state not in commitment_state_history:
                 commitment_state_history.append(commitment_state)
 
+        memory_link_examples: dict[str, dict[str, Any]] = {}
+        for row in memory_link_rows:
+            label = row["label"]
+            if label in memory_link_examples:
+                continue
+            payload = json.loads(row["payload_json"])
+            memory_link_examples[label] = {
+                "memory_link_id": row["memory_link_id"],
+                "source_memory_unit_id": row["source_memory_unit_id"],
+                "target_memory_unit_id": row["target_memory_unit_id"],
+                "evidence_revision_id": row["evidence_revision_id"],
+                "operation": payload.get("operation") if isinstance(payload, dict) else None,
+            }
+
         latest_reflection: dict[str, Any] = {}
         if latest_reflection_row is not None:
             latest_reflection = json.loads(latest_reflection_row["payload_json"])
@@ -4360,6 +4389,7 @@ class LongSmokeRunner:
             "commitment_state_history": commitment_state_history,
             "current_commitment_state_counts": current_commitment_state_counts,
             "memory_link_label_counts": memory_link_label_counts,
+            "memory_link_examples": memory_link_examples,
             "affect_state_count": affect_state_count,
             "affect_state_label_counts": affect_state_label_counts,
             "drive_state_count": drive_state_count,
@@ -4374,7 +4404,15 @@ class LongSmokeRunner:
         operation_counts = digest.get("operation_counts", {})
         commitment_state_history = digest.get("commitment_state_history", [])
         memory_link_label_counts = digest.get("memory_link_label_counts", {})
+        memory_link_examples = digest.get("memory_link_examples", {})
         affect_state_label_counts = digest.get("affect_state_label_counts", {})
+        required_memory_link_labels = (
+            "contradicts",
+            "derived_from",
+            "supports",
+            "about_same_scope",
+            "affects",
+        )
         return {
             "has_create": int(operation_counts.get("create", 0)) >= 1,
             "has_reinforce": int(operation_counts.get("reinforce", 0)) >= 1,
@@ -4389,6 +4427,17 @@ class LongSmokeRunner:
             "has_commitment_cancelled": "cancelled" in commitment_state_history,
             "has_contradicts_link": int(memory_link_label_counts.get("contradicts", 0)) >= 1,
             "has_derived_from_link": int(memory_link_label_counts.get("derived_from", 0)) >= 1,
+            "has_supports_link": int(memory_link_label_counts.get("supports", 0)) >= 1,
+            "has_about_same_scope_link": int(memory_link_label_counts.get("about_same_scope", 0)) >= 1,
+            "has_affects_link": int(memory_link_label_counts.get("affects", 0)) >= 1,
+            "has_memory_link_representative_trace": all(
+                isinstance(memory_link_examples.get(label), dict)
+                and isinstance(memory_link_examples[label].get("memory_link_id"), str)
+                and isinstance(memory_link_examples[label].get("source_memory_unit_id"), str)
+                and isinstance(memory_link_examples[label].get("target_memory_unit_id"), str)
+                and isinstance(memory_link_examples[label].get("evidence_revision_id"), str)
+                for label in required_memory_link_labels
+            ),
             "has_affect_state": int(digest.get("affect_state_count", 0)) >= 1,
             "has_concern_affect_state": int(affect_state_label_counts.get("concern", 0)) >= 1,
             "has_drive_state": int(digest.get("drive_state_count", 0)) >= 1,
