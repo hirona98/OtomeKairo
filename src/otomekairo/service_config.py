@@ -4,7 +4,10 @@ import uuid
 from copy import deepcopy
 from typing import Any
 
-from otomekairo.capabilities import capability_manifests
+from otomekairo.capabilities import (
+    capability_decision_readiness_from_manifest,
+    capability_manifests,
+)
 from otomekairo.event_stream import ServerWebSocket
 from otomekairo.service_common import REQUIRED_MODEL_ROLE_NAMES, ServiceError, debug_log
 
@@ -384,7 +387,7 @@ class ServiceConfigMixin:
             elif parallel_blocked:
                 unavailable_reason = "parallel_blocked"
 
-        return {
+        result = {
             "capability_id": capability_id,
             "manifest_version": manifest["version"],
             "kind": manifest["kind"],
@@ -420,6 +423,10 @@ class ServiceConfigMixin:
                 ),
             },
         }
+        readiness = capability_decision_readiness_from_manifest(manifest)
+        if readiness is not None:
+            result["readiness"] = readiness
+        return result
 
     def _build_capability_decision_view(
         self,
@@ -446,28 +453,30 @@ class ServiceConfigMixin:
                 rejected_bindings=rejected_bindings,
                 active_ongoing_action=active_ongoing_action,
             )
-            decision_view.append(
-                {
-                    "id": capability_id,
-                    "version": manifest["version"],
-                    "available": availability["available"],
-                    "kind": manifest["kind"],
-                    "what_it_does": self._clamp(str(manifest.get("decision_description") or "").strip(), limit=80),
-                    "when_to_use": [
-                        self._clamp(str(item).strip(), limit=80)
-                        for item in manifest.get("when_to_use", [])
-                        if isinstance(item, str) and item.strip()
-                    ][:3],
-                    "do_not_use_when": [
-                        self._clamp(str(item).strip(), limit=80)
-                        for item in manifest.get("do_not_use_when", [])
-                        if isinstance(item, str) and item.strip()
-                    ][:3],
-                    "required_input": self._capability_required_input_summary(manifest),
-                    "risk_level": manifest.get("risk_level"),
-                    "unavailable_reason": availability["unavailable_reason"],
-                }
-            )
+            item = {
+                "id": capability_id,
+                "version": manifest["version"],
+                "available": availability["available"],
+                "kind": manifest["kind"],
+                "what_it_does": self._clamp(str(manifest.get("decision_description") or "").strip(), limit=80),
+                "when_to_use": [
+                    self._clamp(str(entry).strip(), limit=80)
+                    for entry in manifest.get("when_to_use", [])
+                    if isinstance(entry, str) and entry.strip()
+                ][:3],
+                "do_not_use_when": [
+                    self._clamp(str(entry).strip(), limit=80)
+                    for entry in manifest.get("do_not_use_when", [])
+                    if isinstance(entry, str) and entry.strip()
+                ][:3],
+                "required_input": self._capability_required_input_summary(manifest),
+                "risk_level": manifest.get("risk_level"),
+                "unavailable_reason": availability["unavailable_reason"],
+            }
+            readiness = capability_decision_readiness_from_manifest(manifest)
+            if readiness is not None:
+                item["readiness"] = readiness
+            decision_view.append(item)
         if not decision_view:
             return None
         return decision_view

@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Any
 
-from otomekairo.capabilities import capability_manifests
+from otomekairo.capabilities import capability_manifests, capability_world_state_type
 from otomekairo.llm import LLMError
 from otomekairo.memory_utils import (
     display_local_iso,
@@ -768,16 +768,7 @@ class ServiceInputMixin:
         return score
 
     def _capability_fresh_world_state_type(self, capability_id: str) -> str | None:
-        return {
-            "vision.capture": "screen",
-            "external.status": "external_service",
-            "schedule.status": "schedule",
-            "device.status": "device",
-            "body.status": "body",
-            "environment.status": "environment",
-            "location.status": "location",
-            "social.status": "social_context",
-        }.get(capability_id)
+        return capability_world_state_type(capability_id)
 
     def _build_capability_result_decision_context(
         self,

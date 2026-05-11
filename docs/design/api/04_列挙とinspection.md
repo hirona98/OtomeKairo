@@ -70,6 +70,12 @@ response:
         "kind": "observation",
         "available": true,
         "unavailable_reason": null,
+        "readiness": {
+          "family": "screen_observation",
+          "world_state_type": "screen",
+          "input_keys": ["source", "mode"],
+          "result_summary_keys": ["visual_summary_text"]
+        },
         "binding": {
           "status": "bound",
           "eligible_client_count": 1,
@@ -126,6 +132,8 @@ response:
 
 cooldown は `state.cooldown_active / state.cooldown_until` に残す。
 cooldown は availability を単独で false にしない。
+`readiness` は manifest 由来の family 前提条件であり、`family / world_state_type / input_keys / result_summary_keys / result_item_keys` を持つ。
+`readiness` は token、credential、内部 URL、transport 詳細を含まない。
 
 `binding.status` は次のいずれかである。
 

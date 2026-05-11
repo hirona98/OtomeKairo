@@ -66,6 +66,12 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
             "unavailable_seconds_on_dispatch_failure": 15,
             "unavailable_seconds_on_timeout": 15,
         },
+        "decision_readiness": {
+            "family": "screen_observation",
+            "world_state_type": "screen",
+            "input_keys": ["source", "mode"],
+            "result_summary_keys": ["visual_summary_text"],
+        },
         "inspection_fields": [
             "capability_id",
             "target_client_id",
@@ -135,6 +141,12 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
             "error_cooldown_seconds": 60,
             "unavailable_seconds_on_dispatch_failure": 60,
             "unavailable_seconds_on_timeout": 60,
+        },
+        "decision_readiness": {
+            "family": "external_status",
+            "world_state_type": "external_service",
+            "input_keys": ["service"],
+            "result_summary_keys": ["status_text"],
         },
         "inspection_fields": [
             "capability_id",
@@ -218,6 +230,13 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
             "unavailable_seconds_on_dispatch_failure": 60,
             "unavailable_seconds_on_timeout": 60,
         },
+        "decision_readiness": {
+            "family": "schedule_status",
+            "world_state_type": "schedule",
+            "input_keys": ["range"],
+            "result_summary_keys": ["schedule_summary"],
+            "result_item_keys": ["schedule_slots"],
+        },
         "inspection_fields": [
             "capability_id",
             "target_client_id",
@@ -286,6 +305,12 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
             "unavailable_seconds_on_dispatch_failure": 60,
             "unavailable_seconds_on_timeout": 60,
         },
+        "decision_readiness": {
+            "family": "device_status",
+            "world_state_type": "device",
+            "input_keys": ["scope"],
+            "result_summary_keys": ["device_state_summary"],
+        },
         "inspection_fields": [
             "capability_id",
             "target_client_id",
@@ -352,6 +377,12 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
             "error_cooldown_seconds": 60,
             "unavailable_seconds_on_dispatch_failure": 60,
             "unavailable_seconds_on_timeout": 60,
+        },
+        "decision_readiness": {
+            "family": "body_status",
+            "world_state_type": "body",
+            "input_keys": ["scope"],
+            "result_summary_keys": ["body_state_summary"],
         },
         "inspection_fields": [
             "capability_id",
@@ -421,6 +452,12 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
             "unavailable_seconds_on_dispatch_failure": 60,
             "unavailable_seconds_on_timeout": 60,
         },
+        "decision_readiness": {
+            "family": "environment_status",
+            "world_state_type": "environment",
+            "input_keys": ["scope"],
+            "result_summary_keys": ["environment_summary"],
+        },
         "inspection_fields": [
             "capability_id",
             "target_client_id",
@@ -488,6 +525,12 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
             "error_cooldown_seconds": 60,
             "unavailable_seconds_on_dispatch_failure": 60,
             "unavailable_seconds_on_timeout": 60,
+        },
+        "decision_readiness": {
+            "family": "location_status",
+            "world_state_type": "location",
+            "input_keys": ["scope"],
+            "result_summary_keys": ["location_summary"],
         },
         "inspection_fields": [
             "capability_id",
@@ -558,6 +601,12 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
             "unavailable_seconds_on_dispatch_failure": 60,
             "unavailable_seconds_on_timeout": 60,
         },
+        "decision_readiness": {
+            "family": "social_status",
+            "world_state_type": "social_context",
+            "input_keys": ["scope"],
+            "result_summary_keys": ["social_context_summary"],
+        },
         "inspection_fields": [
             "capability_id",
             "target_client_id",
@@ -577,3 +626,24 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
 def capability_manifests() -> dict[str, dict[str, Any]]:
     # 呼び出し側が静的定義を変更しないよう複製する。
     return deepcopy(CAPABILITY_MANIFESTS)
+
+
+# decision view / inspection と fresh world_state 再利用の対応を manifest に集約する。
+def capability_decision_readiness_from_manifest(manifest: dict[str, Any]) -> dict[str, Any] | None:
+    readiness = manifest.get("decision_readiness")
+    if not isinstance(readiness, dict):
+        return None
+    return deepcopy(readiness)
+
+
+def capability_world_state_type(capability_id: str) -> str | None:
+    manifest = CAPABILITY_MANIFESTS.get(capability_id)
+    if not isinstance(manifest, dict):
+        return None
+    readiness = manifest.get("decision_readiness")
+    if not isinstance(readiness, dict):
+        return None
+    world_state_type = readiness.get("world_state_type")
+    if not isinstance(world_state_type, str) or not world_state_type.strip():
+        return None
+    return world_state_type.strip()
