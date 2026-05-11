@@ -470,6 +470,8 @@ class LongSmokeRunner:
         self.recall_quality_probe_cycle_ids: list[str] = []
         self.recall_quality_probe_digest: dict[str, Any] = {}
         self.recall_quality_probe_verified = False
+        self.real_llm_memory_trace_shape_digest: dict[str, Any] = {}
+        self.real_llm_memory_trace_shape_verified = False
         self.restart_probe_cycle_ids: list[str] = []
         self.pending_intent_seed_cycle_ids: list[str] = []
         self.capture_timeout_request_ids: list[str] = []
@@ -4202,7 +4204,7 @@ class LongSmokeRunner:
 
             time.sleep(0.25)
 
-    def _exercise_memory_quality_probe(self) -> None:
+    def _exercise_memory_quality_probe(self, *, require_semantic_checks: bool = True) -> None:
         messages = [
             "私は辛い食べ物が好きです。memory quality probe",
             "私は辛い食べ物が好きです。memory quality probe repeat",
@@ -4233,12 +4235,19 @@ class LongSmokeRunner:
         self.memory_quality_probe_digest = self._collect_memory_quality_probe_digest()
         checks = self.memory_quality_probe_digest.get("checks", {})
         self.memory_quality_probe_verified = isinstance(checks, dict) and all(checks.values())
-        if not self.memory_quality_probe_verified:
+        shape_checks = self._memory_quality_probe_shape_checks(self.memory_quality_probe_digest)
+        shape_verified = all(shape_checks.values())
+        if require_semantic_checks and not self.memory_quality_probe_verified:
             raise SmokeError(
                 "memory quality probe failed: "
                 + json.dumps(self.memory_quality_probe_digest, ensure_ascii=False, sort_keys=True)
             )
-        log("memory quality probe verified")
+        if not require_semantic_checks and not shape_verified:
+            raise SmokeError(
+                "memory quality probe trace shape failed: "
+                + json.dumps(shape_checks, ensure_ascii=False, sort_keys=True)
+            )
+        log("memory quality probe verified" if require_semantic_checks else "memory quality probe shape verified")
 
     def _collect_memory_quality_probe_digest(self) -> dict[str, Any]:
         if not isinstance(self.selected_memory_set_id, str) or not self.selected_memory_set_id:
@@ -4443,7 +4452,41 @@ class LongSmokeRunner:
             "has_drive_state": int(digest.get("drive_state_count", 0)) >= 1,
         }
 
-    def _exercise_recall_quality_probe(self) -> None:
+    def _memory_quality_probe_shape_checks(self, digest: dict[str, Any]) -> dict[str, bool]:
+        memory_link_label_counts = digest.get("memory_link_label_counts")
+        memory_link_examples = digest.get("memory_link_examples")
+        affect_state_label_counts = digest.get("affect_state_label_counts")
+        latest_affect_update = digest.get("latest_reflection_affect_state_update")
+        latest_memory_link_update = digest.get("latest_reflection_memory_link_update")
+        affect_state_summaries = (
+            latest_affect_update.get("affect_state_summaries")
+            if isinstance(latest_affect_update, dict)
+            else None
+        )
+        memory_link_labels = (
+            latest_memory_link_update.get("labels")
+            if isinstance(latest_memory_link_update, dict)
+            else None
+        )
+        return {
+            "cycle_ids_recorded": self._string_list_present(digest.get("cycle_ids")),
+            "operation_counts_shape": self._string_int_mapping(digest.get("operation_counts")),
+            "commitment_state_history_shape": isinstance(digest.get("commitment_state_history"), list),
+            "memory_link_label_counts_shape": self._string_int_mapping(memory_link_label_counts),
+            "memory_link_labels_observed": self._mapping_total(memory_link_label_counts) >= 1,
+            "memory_link_examples_shape": isinstance(memory_link_examples, dict),
+            "affect_state_count_shape": isinstance(digest.get("affect_state_count"), int),
+            "affect_state_label_counts_shape": self._string_int_mapping(affect_state_label_counts),
+            "affect_state_lookback_observed": int(digest.get("affect_state_count", 0) or 0) >= 1
+            and isinstance(latest_affect_update, dict)
+            and latest_affect_update.get("result_status") in {"updated", "no_change"},
+            "affect_state_summary_shape": isinstance(affect_state_summaries, list),
+            "reflection_memory_link_update_shape": isinstance(latest_memory_link_update, dict)
+            and isinstance(latest_memory_link_update.get("link_count"), int)
+            and self._string_int_mapping(memory_link_labels),
+        }
+
+    def _exercise_recall_quality_probe(self, *, require_semantic_checks: bool = True) -> None:
         # 嗜好競合と、複数 event を持つ active commitment を先に作る。
         steps: list[tuple[str, str]] = [
             ("preference_spicy", "私は辛い食べ物が好きです。recall quality setup conflict spicy"),
@@ -4488,12 +4531,19 @@ class LongSmokeRunner:
         )
         checks = self.recall_quality_probe_digest.get("checks", {})
         self.recall_quality_probe_verified = isinstance(checks, dict) and all(checks.values())
-        if not self.recall_quality_probe_verified:
+        shape_checks = self._recall_quality_probe_shape_checks(self.recall_quality_probe_digest)
+        shape_verified = all(shape_checks.values())
+        if require_semantic_checks and not self.recall_quality_probe_verified:
             raise SmokeError(
                 "recall quality probe failed: "
                 + json.dumps(self.recall_quality_probe_digest, ensure_ascii=False, sort_keys=True)
             )
-        log("recall quality probe verified")
+        if not require_semantic_checks and not shape_verified:
+            raise SmokeError(
+                "recall quality probe trace shape failed: "
+                + json.dumps(shape_checks, ensure_ascii=False, sort_keys=True)
+            )
+        log("recall quality probe verified" if require_semantic_checks else "recall quality probe shape verified")
 
     def _collect_recall_quality_probe_digest(self, *, focus_cycle_ids: dict[str, str]) -> dict[str, Any]:
         # 判断に使った probe trace だけを summary へ圧縮する。
@@ -4527,19 +4577,22 @@ class LongSmokeRunner:
         decision_trace = trace.get("decision_trace", {})
         if not isinstance(decision_trace, dict):
             decision_trace = {}
+        raw_event_evidence_generation = recall_trace.get("event_evidence_generation")
+        raw_recall_pack_selection = recall_trace.get("recall_pack_selection")
+        raw_memory_link_context = recall_trace.get("memory_link_context")
         recall_hint = recall_trace.get("recall_hint_summary", {})
         if not isinstance(recall_hint, dict):
             recall_hint = {}
         recall_pack_summary = recall_trace.get("recall_pack_summary", {})
         if not isinstance(recall_pack_summary, dict):
             recall_pack_summary = {}
-        event_evidence_generation = recall_trace.get("event_evidence_generation", {})
+        event_evidence_generation = raw_event_evidence_generation
         if not isinstance(event_evidence_generation, dict):
             event_evidence_generation = {}
-        recall_pack_selection = recall_trace.get("recall_pack_selection", {})
+        recall_pack_selection = raw_recall_pack_selection
         if not isinstance(recall_pack_selection, dict):
             recall_pack_selection = {}
-        memory_link_context = recall_trace.get("memory_link_context", {})
+        memory_link_context = raw_memory_link_context
         if not isinstance(memory_link_context, dict):
             memory_link_context = {}
         decision_context = decision_trace.get("internal_context_summary", {})
@@ -4548,12 +4601,23 @@ class LongSmokeRunner:
         decision_recall_pack_summary = decision_context.get("recall_pack_summary", {})
         if not isinstance(decision_recall_pack_summary, dict):
             decision_recall_pack_summary = {}
-        decision_memory_link_context = decision_context.get("memory_link_context", {})
+        raw_decision_memory_link_context = decision_context.get("memory_link_context")
+        decision_memory_link_context = raw_decision_memory_link_context
         if not isinstance(decision_memory_link_context, dict):
             decision_memory_link_context = {}
 
         return {
             "cycle_id": trace.get("cycle_id"),
+            "trace_shape": {
+                "has_event_evidence_generation": isinstance(raw_event_evidence_generation, dict),
+                "has_recall_pack_selection": isinstance(raw_recall_pack_selection, dict),
+                "has_memory_link_context": isinstance(raw_memory_link_context, dict),
+                "has_selection_memory_link_fields": isinstance(raw_recall_pack_selection, dict)
+                and "memory_link_count" in raw_recall_pack_selection
+                and "memory_link_label_counts" in raw_recall_pack_selection
+                and "memory_link_representative_links" in raw_recall_pack_selection,
+                "has_decision_memory_link_context": isinstance(raw_decision_memory_link_context, dict),
+            },
             "recall_hint": {
                 "primary_recall_focus": recall_hint.get("primary_recall_focus"),
                 "time_reference": recall_hint.get("time_reference"),
@@ -4637,6 +4701,111 @@ class LongSmokeRunner:
             label: int(count)
             for label, count in value.items()
             if isinstance(label, str) and isinstance(count, int)
+        }
+
+    def _string_int_mapping(self, value: Any) -> bool:
+        if not isinstance(value, dict):
+            return False
+        return all(isinstance(key, str) and isinstance(count, int) for key, count in value.items())
+
+    def _mapping_total(self, value: Any) -> int:
+        if not isinstance(value, dict):
+            return 0
+        return sum(count for count in value.values() if isinstance(count, int))
+
+    def _string_list_present(self, value: Any) -> bool:
+        return isinstance(value, list) and any(isinstance(item, str) and item for item in value)
+
+    def _recall_quality_probe_shape_checks(self, digest: dict[str, Any]) -> dict[str, bool]:
+        focus_cycle_ids = digest.get("focus_cycle_ids")
+        ambiguous = digest.get("ambiguous_commitment")
+        conflict = digest.get("preference_conflict")
+        return {
+            "cycle_ids_recorded": self._string_list_present(digest.get("cycle_ids")),
+            "focus_cycle_ids_shape": isinstance(focus_cycle_ids, dict)
+            and all(isinstance(value, str) and value for value in focus_cycle_ids.values()),
+            "ambiguous_trace_shape": self._recall_quality_entry_shape(ambiguous),
+            "conflict_trace_shape": self._recall_quality_entry_shape(conflict),
+            "ambiguous_event_evidence_shape": self._recall_quality_event_shape(ambiguous),
+            "conflict_event_evidence_shape": self._recall_quality_event_shape(conflict),
+            "conflict_memory_link_context_shape": self._recall_quality_memory_link_shape(
+                conflict,
+                "memory_link_context",
+            ),
+            "conflict_selection_memory_link_shape": self._recall_quality_memory_link_shape(
+                conflict,
+                "recall_pack_selection",
+            ),
+            "conflict_decision_memory_link_shape": self._recall_quality_memory_link_shape(
+                (conflict or {}).get("decision") if isinstance(conflict, dict) else None,
+                "memory_link_context",
+            ),
+        }
+
+    def _recall_quality_entry_shape(self, entry: Any) -> bool:
+        if not isinstance(entry, dict):
+            return False
+        trace_shape = entry.get("trace_shape")
+        if not isinstance(trace_shape, dict):
+            return False
+        return (
+            trace_shape.get("has_event_evidence_generation") is True
+            and trace_shape.get("has_recall_pack_selection") is True
+            and trace_shape.get("has_memory_link_context") is True
+            and trace_shape.get("has_selection_memory_link_fields") is True
+            and trace_shape.get("has_decision_memory_link_context") is True
+        )
+
+    def _recall_quality_event_shape(self, entry: Any) -> bool:
+        event_evidence_generation = (
+            entry.get("event_evidence_generation")
+            if isinstance(entry, dict)
+            else None
+        )
+        if not isinstance(event_evidence_generation, dict):
+            return False
+        return (
+            isinstance(event_evidence_generation.get("requested_event_count"), int)
+            and isinstance(event_evidence_generation.get("loaded_event_count"), int)
+            and isinstance(event_evidence_generation.get("succeeded_event_count"), int)
+            and isinstance(event_evidence_generation.get("precise_evidence_used"), bool)
+            and isinstance(event_evidence_generation.get("precise_reason_codes"), list)
+        )
+
+    def _recall_quality_memory_link_shape(self, entry: Any, key: str) -> bool:
+        memory_link_context = entry.get(key) if isinstance(entry, dict) else None
+        if not isinstance(memory_link_context, dict):
+            return False
+        count_key = "link_count" if key == "memory_link_context" else "memory_link_count"
+        representative_key = (
+            "representative_link_count"
+            if key == "memory_link_context"
+            else "memory_link_representative_count"
+        )
+        label_counts = memory_link_context.get("label_counts")
+        if label_counts is None:
+            label_counts = memory_link_context.get("memory_link_label_counts")
+        return (
+            isinstance(memory_link_context.get(count_key), int)
+            and self._string_int_mapping(label_counts)
+            and isinstance(memory_link_context.get(representative_key), int)
+        )
+
+    def _collect_real_llm_memory_trace_shape_digest(self) -> dict[str, Any]:
+        memory_shape_checks = self._memory_quality_probe_shape_checks(self.memory_quality_probe_digest)
+        recall_shape_checks = self._recall_quality_probe_shape_checks(self.recall_quality_probe_digest)
+        checks = {
+            **{f"memory_{key}": value for key, value in memory_shape_checks.items()},
+            **{f"recall_{key}": value for key, value in recall_shape_checks.items()},
+        }
+        return {
+            "memory_quality_cycle_count": len(self.memory_quality_probe_cycle_ids),
+            "recall_quality_cycle_count": len(self.recall_quality_probe_cycle_ids),
+            "memory_quality_semantic_checks_passed": self.memory_quality_probe_verified,
+            "recall_quality_semantic_checks_passed": self.recall_quality_probe_verified,
+            "memory_shape_checks": memory_shape_checks,
+            "recall_shape_checks": recall_shape_checks,
+            "checks": checks,
         }
 
     def _recall_quality_probe_checks(self, digest: dict[str, Any]) -> dict[str, bool]:
@@ -4967,6 +5136,16 @@ class LongSmokeRunner:
         self._wait_for_memory_jobs_to_drain()
         background_wake_probe_traces, background_wake_probe_case_results = self._run_real_llm_background_wake_matrix()
         self._wait_for_memory_jobs_to_drain()
+        self._exercise_memory_quality_probe(require_semantic_checks=False)
+        self._exercise_recall_quality_probe(require_semantic_checks=False)
+        self.real_llm_memory_trace_shape_digest = self._collect_real_llm_memory_trace_shape_digest()
+        shape_checks = self.real_llm_memory_trace_shape_digest.get("checks", {})
+        self.real_llm_memory_trace_shape_verified = isinstance(shape_checks, dict) and all(shape_checks.values())
+        if not self.real_llm_memory_trace_shape_verified:
+            raise SmokeError(
+                "real-llm-smoke memory trace shape failed: "
+                + json.dumps(self.real_llm_memory_trace_shape_digest, ensure_ascii=False, sort_keys=True)
+            )
         conversation_trace = self.api.get(f"/api/inspection/cycles/{conversation_cycle_id}")
         capability_conversation_trace = self.api.get(f"/api/inspection/cycles/{capability_conversation_cycle_id}")
         followup_trace = self.api.get(f"/api/inspection/cycles/{followup_cycle_id}")
@@ -5060,6 +5239,14 @@ class LongSmokeRunner:
             "real_llm_background_wake_probe_case_results": background_wake_probe_case_results,
             "real_llm_background_wake_probe_traces": background_wake_probe_traces,
             "real_llm_background_wake_probe_verified": self.real_llm_background_wake_probe_verified,
+            "memory_quality_probe_cycle_ids": self.memory_quality_probe_cycle_ids,
+            "memory_quality_probe_verified": self.memory_quality_probe_verified,
+            "memory_quality_probe_digest": self.memory_quality_probe_digest,
+            "recall_quality_probe_cycle_ids": self.recall_quality_probe_cycle_ids,
+            "recall_quality_probe_verified": self.recall_quality_probe_verified,
+            "recall_quality_probe_digest": self.recall_quality_probe_digest,
+            "real_llm_memory_trace_shape_verified": self.real_llm_memory_trace_shape_verified,
+            "real_llm_memory_trace_shape_digest": self.real_llm_memory_trace_shape_digest,
         }
         self._write_summary(summary)
         self._assert_real_llm_smoke_summary(summary)
@@ -6162,6 +6349,14 @@ class LongSmokeRunner:
         for case_id, trace in background_traces.items():
             if not isinstance(trace, dict):
                 raise SmokeError(f"real-llm-smoke background wake probe trace was invalid: {case_id}")
+        if summary.get("real_llm_memory_trace_shape_verified") is not True:
+            raise SmokeError("real-llm-smoke memory trace shape was not verified.")
+        memory_trace_shape_digest = summary.get("real_llm_memory_trace_shape_digest")
+        if not isinstance(memory_trace_shape_digest, dict):
+            raise SmokeError("real-llm-smoke memory trace shape digest was not recorded.")
+        memory_trace_shape_checks = memory_trace_shape_digest.get("checks")
+        if not isinstance(memory_trace_shape_checks, dict) or not all(memory_trace_shape_checks.values()):
+            raise SmokeError("real-llm-smoke memory trace shape checks did not all pass.")
 
     def _assert_memory_trace_succeeded(self, trace: dict[str, Any], label: str) -> None:
         cycle_id = trace.get("cycle_id")
@@ -7316,6 +7511,7 @@ class LongSmokeRunner:
             capability_result_case_results = summary.get("real_llm_capability_result_probe_case_results") or {}
             background_wake_cycle_ids = summary.get("real_llm_background_wake_probe_cycle_ids") or {}
             background_wake_case_results = summary.get("real_llm_background_wake_probe_case_results") or {}
+            memory_shape_digest = summary.get("real_llm_memory_trace_shape_digest") or {}
             initiative_result_log = "-"
             if isinstance(initiative_case_results, dict):
                 initiative_result_log = ",".join(
@@ -7364,6 +7560,9 @@ class LongSmokeRunner:
                 f" background_wake_cycles={len(background_wake_cycle_ids) if isinstance(background_wake_cycle_ids, dict) else 0}"
                 f" background_wake_cases={len(background_wake_case_results) if isinstance(background_wake_case_results, dict) else 0}"
                 f" background_wake_results={background_wake_result_log}"
+                f" memory_shape={summary.get('real_llm_memory_trace_shape_verified')}"
+                f" memory_probe_cycles={memory_shape_digest.get('memory_quality_cycle_count') if isinstance(memory_shape_digest, dict) else '-'}"
+                f" recall_probe_cycles={memory_shape_digest.get('recall_quality_cycle_count') if isinstance(memory_shape_digest, dict) else '-'}"
                 f" pending_jobs={runtime_summary.get('pending_memory_job_count')}"
                 f" in_progress={runtime_summary.get('memory_job_in_progress')}"
             )
