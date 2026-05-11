@@ -2385,6 +2385,53 @@ class ServiceInputMixin:
             "episodic_evidence": len(recall_pack["episodic_evidence"]),
             "event_evidence": len(recall_pack["event_evidence"]),
             "conflicts": len(recall_pack["conflicts"]),
+            "memory_links": int(
+                (recall_pack.get("memory_link_context") or {}).get("link_count", 0)
+                if isinstance(recall_pack.get("memory_link_context"), dict)
+                else 0
+            ),
+        }
+
+    def _empty_memory_link_context_trace(self) -> dict[str, Any]:
+        # 結果
+        return {
+            "selected_memory_unit_count": 0,
+            "link_count": 0,
+            "label_counts": {},
+            "representative_links": [],
+            "result_status": "empty",
+        }
+
+    def _summarize_memory_link_context(self, value: Any) -> dict[str, Any]:
+        # 形状
+        if not isinstance(value, dict):
+            return self._empty_memory_link_context_trace()
+
+        # 代表 link
+        representative_links: list[dict[str, Any]] = []
+        for item in value.get("representative_links", []):
+            if not isinstance(item, dict):
+                continue
+            representative_links.append(
+                {
+                    "memory_link_id": item.get("memory_link_id"),
+                    "label": item.get("label"),
+                    "selected_endpoint": item.get("selected_endpoint"),
+                    "source_memory_unit_id": item.get("source_memory_unit_id"),
+                    "target_memory_unit_id": item.get("target_memory_unit_id"),
+                    "summary_text": item.get("summary_text"),
+                }
+            )
+            if len(representative_links) >= 5:
+                break
+
+        # 結果
+        return {
+            "selected_memory_unit_count": int(value.get("selected_memory_unit_count", 0) or 0),
+            "link_count": int(value.get("link_count", 0) or 0),
+            "label_counts": value.get("label_counts", {}),
+            "representative_links": representative_links,
+            "result_status": value.get("result_status", "empty"),
         }
 
     def _emit_input_success_logs(
@@ -2736,6 +2783,7 @@ class ServiceInputMixin:
             "association_selected_memory_ids": [],
             "association_selected_episode_ids": [],
             "selected_event_ids": [],
+            "memory_link_context": self._empty_memory_link_context_trace(),
             "candidate_count": 0,
         }
 
@@ -2767,6 +2815,9 @@ class ServiceInputMixin:
             "selected_candidate_refs": [],
             "dropped_candidate_refs": [],
             "conflict_summary_count": 0,
+            "memory_link_count": 0,
+            "memory_link_label_counts": {},
+            "memory_link_representative_links": [],
             "result_status": "succeeded",
             "failure_reason": None,
         }
@@ -4457,6 +4508,9 @@ class ServiceInputMixin:
             "recall_pack_summary": self._summarize_recall_pack(recall_pack),
             "candidate_count": recall_pack["candidate_count"],
             "selected_memory_ids": recall_pack["selected_memory_ids"],
+            "memory_link_context": self._summarize_memory_link_context(
+                recall_pack.get("memory_link_context")
+            ),
             "event_evidence_generation": {
                 "requested_event_count": int(event_evidence_generation.get("requested_event_count", 0)),
                 "loaded_event_count": int(event_evidence_generation.get("loaded_event_count", 0)),
@@ -4477,6 +4531,12 @@ class ServiceInputMixin:
                 "selected_section_order": recall_pack_selection.get("selected_section_order", []),
                 "selected_candidate_count": len(recall_pack_selection.get("selected_candidate_refs", [])),
                 "dropped_candidate_count": len(recall_pack_selection.get("dropped_candidate_refs", [])),
+                "memory_link_count": int(recall_pack_selection.get("memory_link_count", 0) or 0),
+                "memory_link_label_counts": recall_pack_selection.get("memory_link_label_counts", {}),
+                "memory_link_representative_links": recall_pack_selection.get(
+                    "memory_link_representative_links",
+                    [],
+                ),
             },
         }
 
@@ -4586,6 +4646,9 @@ class ServiceInputMixin:
                 "event_evidence_generation",
                 self._empty_event_evidence_generation_trace(),
             ),
+            "memory_link_context": self._summarize_memory_link_context(
+                recall_pack.get("memory_link_context")
+            ),
             "recall_pack_selection": recall_pack.get(
                 "recall_pack_selection",
                 self._empty_recall_pack_selection_trace(),
@@ -4608,6 +4671,7 @@ class ServiceInputMixin:
             "selected_episode_ids": [],
             "selected_event_ids": [],
             "event_evidence_generation": self._empty_event_evidence_generation_trace(),
+            "memory_link_context": self._empty_memory_link_context_trace(),
             "recall_pack_selection": recall_pack_selection or self._empty_recall_pack_selection_trace(),
             "recall_pack_summary": None,
             "adopted_reason_summary": None,
@@ -4647,6 +4711,9 @@ class ServiceInputMixin:
                 "initiative_context": initiative_context,
                 "capability_result_context": capability_result_context,
                 "recall_pack_summary": self._summarize_recall_pack(recall_pack),
+                "memory_link_context": self._summarize_memory_link_context(
+                    recall_pack.get("memory_link_context")
+                ),
             },
             "primary_candidate_kind": decision["kind"],
             "pending_intent_candidate_summary": pending_intent_summary,

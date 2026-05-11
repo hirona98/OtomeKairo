@@ -64,6 +64,8 @@ OtomeKairo では、`RecallPack` 全体を LLM 任せにはしない。
 - `RecallPack` 候補群の最終採用
 - section ごとの優先配置
 - `conflicts.summary_text`
+- 候補 `memory_units` に付く `memory_link_summary`
+- 選定後の `memory_link_context` trace
 - source pack 構築
 - LLM 入出力契約
 - 失敗時の扱いと観測
@@ -78,6 +80,7 @@ OtomeKairo では、`RecallPack` 全体を LLM 任せにはしない。
 - `active_commitments` や `episodic_evidence` の候補条件
 - section 名の集合
 - `event_evidence` の生成
+- `memory_links` をたどった候補外 `memory_unit` の追加
 - `decision_generation` と `expression_generation`
 - `MemoryActionResolver` や記憶更新の状態遷移
 
@@ -152,7 +155,20 @@ LLM に渡すのは raw DB row 群ではなく、候補群を request-local ref 
           "scope_type": "relationship",
           "scope_key": "self|user",
           "commitment_state": "open",
-          "salience": 0.88
+          "salience": 0.88,
+          "memory_link_summary": {
+            "label_counts": {
+              "supports": 1,
+              "about_same_scope": 1
+            },
+            "representative_links": [
+              {
+                "label": "supports",
+                "direction": "incoming",
+                "summary_text": "supports/incoming: 体調の話を続ける約束が確認済みである。"
+              }
+            ]
+          }
         }
       ]
     },
@@ -199,6 +215,8 @@ LLM に渡すのは raw DB row 群ではなく、候補群を request-local ref 
 - 各 candidate は `summary_text` と意味判断に効く最小の構造化項目に絞る
 - `retrieval_lane` は残し、`association` 候補が補助レーンであることは downstream にも保つ
 - 現行の `association_score` や query 種別は、source pack に残すが、本命判断値としては育てない
+- `memory_link_summary` は label count と代表関係だけを持ち、永続 ID を含めない
+- `memory_link_summary` は `supports / contradicts / derived_from / about_same_scope / affects` の関係を選別補助として渡す
 - `conflicts` には compare key と variant の短い summary だけを入れ、memory unit の内部 ID は渡さない
 
 ## LLM 出力契約
@@ -263,14 +281,16 @@ user prompt では、入力文、`RecallHint`、constraint、候補 sections、c
 
 1. 既存ロジックで構造候補と連想候補を集める
 2. 既存ロジックで `conflicts` 候補を検出する
-3. source pack 用に candidate ref / conflict ref を振る
-4. `recall_pack_selection` role を呼ぶ
-5. parse / contract が崩れたときだけ repair prompt で 1 回だけ再試行する
-6. `section_selection` を実 candidate へ戻す
-7. コード側で dedupe / section limit / global limit を強制する
-8. `conflict_summaries` を対応する conflict 候補へ反映する
-9. `selected_memory_ids` / `selected_episode_ids` / `selected_event_ids` を既存どおり計算する
-10. trace と retrieval run へ結果を記録する
+3. 候補 `memory_units` の周辺 `memory_links` を読み、candidate へ `memory_link_summary` を付ける
+4. source pack 用に candidate ref / conflict ref を振る
+5. `recall_pack_selection` role を呼ぶ
+6. parse / contract が崩れたときだけ repair prompt で 1 回だけ再試行する
+7. `section_selection` を実 candidate へ戻す
+8. コード側で dedupe / section limit / global limit を強制する
+9. `conflict_summaries` を対応する conflict 候補へ反映する
+10. `selected_memory_ids` / `selected_episode_ids` / `selected_event_ids` を既存どおり計算する
+11. 選定済み `memory_units` の周辺 `memory_links` を `memory_link_context` として読み直す
+12. trace と retrieval run へ結果を記録する
 
 ## 失敗時の扱い
 
@@ -299,6 +319,9 @@ inspection で追いやすくするため、`cycle_trace.recall_trace` に `reca
 - `selected_candidate_refs`
 - `dropped_candidate_refs`
 - `conflict_summary_count`
+- `memory_link_count`
+- `memory_link_label_counts`
+- `memory_link_representative_links`
 - `result_status`
 - `failure_reason`
 
@@ -308,6 +331,10 @@ inspection で追いやすくするため、`cycle_trace.recall_trace` に `reca
 - `recall_pack_selection.selected_section_order`
 - `recall_pack_selection.selected_candidate_count`
 - `recall_pack_selection.dropped_candidate_count`
+- `recall_pack_selection.memory_link_count`
+- `recall_pack_selection.memory_link_label_counts`
+- `memory_link_context.link_count`
+- `memory_link_context.label_counts`
 
 監査 event として `recall_pack_selection_failure` を追加する。
 この event は `RecallHint` failure と同様に、cycle 単位の失敗理由を追えるようにする。

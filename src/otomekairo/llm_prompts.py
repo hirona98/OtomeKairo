@@ -855,6 +855,7 @@ def _compact_recall_pack(recall_pack: dict[str, Any]) -> dict[str, Any]:
         "episodic_evidence": [_compact_episode_context_item(item) for item in recall_pack.get("episodic_evidence", [])],
         "event_evidence": [_compact_event_evidence_item(item) for item in recall_pack.get("event_evidence", [])],
         "conflicts": [_compact_conflict_context_item(item) for item in recall_pack.get("conflicts", [])],
+        "memory_link_context": _compact_memory_link_context(recall_pack.get("memory_link_context", {})),
     }
 
 
@@ -871,6 +872,8 @@ def _compact_memory_context_item(item: dict[str, Any]) -> dict[str, Any]:
         payload["object_ref_or_value"] = item["object_ref_or_value"]
     if item.get("retrieval_lane") is not None:
         payload["retrieval_lane"] = item["retrieval_lane"]
+    if isinstance(item.get("memory_link_summary"), dict):
+        payload["memory_link_summary"] = item["memory_link_summary"]
     return payload
 
 
@@ -911,6 +914,33 @@ def _compact_event_evidence_item(item: dict[str, Any]) -> dict[str, Any]:
             continue
         payload[key] = value
     return payload
+
+
+def _compact_memory_link_context(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {
+            "link_count": 0,
+            "label_counts": {},
+            "representative_links": [],
+        }
+    representatives: list[dict[str, Any]] = []
+    for item in value.get("representative_links", []):
+        if not isinstance(item, dict):
+            continue
+        representatives.append(
+            {
+                "label": item.get("label"),
+                "selected_endpoint": item.get("selected_endpoint"),
+                "summary_text": item.get("summary_text"),
+            }
+        )
+        if len(representatives) >= 5:
+            break
+    return {
+        "link_count": int(value.get("link_count", 0) or 0),
+        "label_counts": value.get("label_counts", {}),
+        "representative_links": representatives,
+    }
 
 
 def _format_recent_turns(recent_turns: list[dict]) -> str:

@@ -2223,6 +2223,20 @@ class MockLLMClient:
         association_score = candidate.get("association_score")
         if isinstance(association_score, (int, float)):
             score += float(association_score) * 0.03
+        memory_link_summary = candidate.get("memory_link_summary")
+        if isinstance(memory_link_summary, dict):
+            label_counts = memory_link_summary.get("label_counts", {})
+            if isinstance(label_counts, dict):
+                if int(label_counts.get("contradicts", 0) or 0) > 0:
+                    score += 0.04
+                if int(label_counts.get("supports", 0) or 0) > 0:
+                    score += 0.03
+                if int(label_counts.get("derived_from", 0) or 0) > 0:
+                    score += 0.02
+                if int(label_counts.get("about_same_scope", 0) or 0) > 0:
+                    score += 0.02
+                if int(label_counts.get("affects", 0) or 0) > 0:
+                    score += 0.02
 
         # 文脈補正
         primary_recall_focus = str(recall_hint.get("primary_recall_focus") or "user")

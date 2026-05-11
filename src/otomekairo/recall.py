@@ -14,6 +14,17 @@ from otomekairo.recall_selection import SECTION_LIMITS, RecallPackSelectionError
 from otomekairo.store import FileStore
 
 
+MEMORY_LINK_RECALL_LABEL_PRIORITY = [
+    "contradicts",
+    "supports",
+    "derived_from",
+    "about_same_scope",
+    "affects",
+]
+MEMORY_LINK_RECALL_HINT_LIMIT = 3
+MEMORY_LINK_RECALL_TRACE_LIMIT = 8
+
+
 # recall構築
 class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvidenceMixin):
     def __init__(self, *, store: FileStore, llm: LLMClient) -> None:
@@ -151,6 +162,28 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             selected_memory_items=selected_memory_items,
         )
 
+        # 選別候補
+        candidate_sections = {
+            "self_model": self_model,
+            "user_model": user_model,
+            "relationship_model": relationship_model,
+            "active_topics": active_topics,
+            "active_commitments": active_commitments,
+            "episodic_evidence": episodic_evidence,
+        }
+
+        # relation 補助情報
+        candidate_memory_links = self.store.list_memory_links_for_recall(
+            memory_set_id=memory_set_id,
+            memory_unit_ids=self._collect_selected_ids(candidate_sections, key="memory_unit_id"),
+            limit_per_unit=2,
+            total_limit=40,
+        )
+        self._attach_memory_link_summaries_to_sections(
+            sections=candidate_sections,
+            memory_links=candidate_memory_links,
+        )
+
         # RecallPack 選別
         recall_pack_selection_role = state["model_presets"][state["selected_model_preset_id"]]["roles"][
             "recall_pack_selection"
@@ -158,14 +191,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
         selection_result = self._select_recall_pack_sections(
             input_text=input_text,
             recall_hint=recall_hint,
-            candidate_sections={
-                "self_model": self_model,
-                "user_model": user_model,
-                "relationship_model": relationship_model,
-                "active_topics": active_topics,
-                "active_commitments": active_commitments,
-                "episodic_evidence": episodic_evidence,
-            },
+            candidate_sections=candidate_sections,
             conflicts=conflicts,
             role_definition=recall_pack_selection_role,
         )
@@ -183,6 +209,25 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             sections,
             key="episode_id",
             retrieval_lane="association",
+        )
+        memory_links = self.store.list_memory_links_for_recall(
+            memory_set_id=memory_set_id,
+            memory_unit_ids=selected_memory_ids,
+            limit_per_unit=3,
+            total_limit=24,
+        )
+        self._attach_memory_link_summaries_to_sections(
+            sections=sections,
+            memory_links=memory_links,
+        )
+        memory_link_context = self._build_memory_link_context(
+            memory_links=memory_links,
+            selected_memory_ids=selected_memory_ids,
+        )
+        recall_pack_selection = dict(selection_result["recall_pack_selection"])
+        self._attach_memory_link_context_to_selection_trace(
+            recall_pack_selection=recall_pack_selection,
+            memory_link_context=memory_link_context,
         )
         event_evidence_role = state["model_presets"][state["selected_model_preset_id"]]["roles"]["event_evidence_generation"]
         event_evidence_result = self._build_event_evidence(
@@ -205,7 +250,8 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             "association_selected_memory_ids": association_selected_memory_ids,
             "association_selected_episode_ids": association_selected_episode_ids,
             "selected_event_ids": selected_event_ids,
-            "recall_pack_selection": selection_result["recall_pack_selection"],
+            "memory_link_context": memory_link_context,
+            "recall_pack_selection": recall_pack_selection,
             "candidate_count": len(raw_candidate_ids),
         }
 
@@ -663,6 +709,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             "association_selected_memory_ids": [],
             "association_selected_episode_ids": [],
             "selected_event_ids": [],
+            "memory_link_context": self._empty_memory_link_context(),
             "candidate_count": 0,
         }
 
@@ -701,6 +748,268 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
 
         # 結果
         return selected
+
+    def _empty_memory_link_context(self) -> dict[str, Any]:
+        # 結果
+        return {
+            "selected_memory_unit_count": 0,
+            "link_count": 0,
+            "label_counts": {},
+            "representative_links": [],
+            "result_status": "empty",
+        }
+
+    def _attach_memory_link_summaries_to_sections(
+        self,
+        *,
+        sections: dict[str, list[dict[str, Any]]],
+        memory_links: list[dict[str, Any]],
+    ) -> None:
+        # 対象なし
+        if not memory_links:
+            return
+
+        # memory_unit ごと要約
+        summaries_by_memory_id = self._memory_link_summaries_by_memory_id(
+            memory_links=memory_links,
+            memory_unit_ids=self._collect_selected_ids(sections, key="memory_unit_id"),
+        )
+
+        # 反映
+        for section_items in sections.values():
+            for item in section_items:
+                memory_unit_id = item.get("memory_unit_id")
+                if not isinstance(memory_unit_id, str):
+                    continue
+                summary = summaries_by_memory_id.get(memory_unit_id)
+                if summary is None:
+                    continue
+                item["memory_link_summary"] = summary
+
+    def _memory_link_summaries_by_memory_id(
+        self,
+        *,
+        memory_links: list[dict[str, Any]],
+        memory_unit_ids: list[str],
+    ) -> dict[str, dict[str, Any]]:
+        # 状態
+        selected_ids = set(memory_unit_ids)
+        buckets: dict[str, dict[str, Any]] = {
+            memory_unit_id: {
+                "label_counts": {},
+                "representative_links": [],
+            }
+            for memory_unit_id in memory_unit_ids
+        }
+
+        # 集計
+        for link in memory_links:
+            label = self._normalized_memory_link_label(link.get("label"))
+            if label is None:
+                continue
+            endpoints = self._memory_link_selected_endpoints(link=link, selected_ids=selected_ids)
+            for memory_unit_id, direction, related_unit in endpoints:
+                bucket = buckets.get(memory_unit_id)
+                if bucket is None:
+                    continue
+                label_counts = bucket["label_counts"]
+                label_counts[label] = int(label_counts.get(label, 0)) + 1
+                representatives = bucket["representative_links"]
+                if len(representatives) >= MEMORY_LINK_RECALL_HINT_LIMIT:
+                    continue
+                related_summary = self._short_relation_text(
+                    related_unit.get("summary_text") if isinstance(related_unit, dict) else None,
+                    limit=72,
+                )
+                if related_summary is None:
+                    continue
+                representatives.append(
+                    {
+                        "label": label,
+                        "direction": direction,
+                        "summary_text": f"{label}/{direction}: {related_summary}",
+                        "related_summary_text": related_summary,
+                    }
+                )
+
+        # 空bucketを落とす
+        return {
+            memory_unit_id: {
+                "label_counts": self._ordered_memory_link_label_counts(bucket["label_counts"]),
+                "representative_links": bucket["representative_links"],
+            }
+            for memory_unit_id, bucket in buckets.items()
+            if bucket["label_counts"]
+        }
+
+    def _build_memory_link_context(
+        self,
+        *,
+        memory_links: list[dict[str, Any]],
+        selected_memory_ids: list[str],
+    ) -> dict[str, Any]:
+        # 空
+        if not selected_memory_ids or not memory_links:
+            context = self._empty_memory_link_context()
+            context["selected_memory_unit_count"] = len(selected_memory_ids)
+            return context
+
+        # 集計
+        selected_ids = set(selected_memory_ids)
+        label_counts: dict[str, int] = {}
+        representative_links: list[dict[str, Any]] = []
+        link_count = 0
+        for link in memory_links:
+            label = self._normalized_memory_link_label(link.get("label"))
+            if label is None:
+                continue
+            endpoints = self._memory_link_selected_endpoints(link=link, selected_ids=selected_ids)
+            if not endpoints:
+                continue
+            link_count += 1
+            label_counts[label] = label_counts.get(label, 0) + 1
+            if len(representative_links) >= MEMORY_LINK_RECALL_TRACE_LIMIT:
+                continue
+            representative = self._memory_link_trace_item(link=link, label=label, selected_ids=selected_ids)
+            if representative is not None:
+                representative_links.append(representative)
+
+        # 結果
+        return {
+            "selected_memory_unit_count": len(selected_memory_ids),
+            "link_count": link_count,
+            "label_counts": self._ordered_memory_link_label_counts(label_counts),
+            "representative_links": representative_links,
+            "result_status": "linked" if link_count > 0 else "empty",
+        }
+
+    def _attach_memory_link_context_to_selection_trace(
+        self,
+        *,
+        recall_pack_selection: dict[str, Any],
+        memory_link_context: dict[str, Any],
+    ) -> None:
+        # trace は inspection 用の compact summary に留める。
+        recall_pack_selection["memory_link_count"] = int(memory_link_context.get("link_count", 0) or 0)
+        recall_pack_selection["memory_link_label_counts"] = memory_link_context.get("label_counts", {})
+        recall_pack_selection["memory_link_representative_links"] = [
+            {
+                "label": item.get("label"),
+                "summary_text": item.get("summary_text"),
+            }
+            for item in memory_link_context.get("representative_links", [])
+            if isinstance(item, dict)
+        ][:MEMORY_LINK_RECALL_HINT_LIMIT]
+
+    def _memory_link_trace_item(
+        self,
+        *,
+        link: dict[str, Any],
+        label: str,
+        selected_ids: set[str],
+    ) -> dict[str, Any] | None:
+        # endpoint
+        source_memory_unit_id = str(link.get("source_memory_unit_id") or "").strip()
+        target_memory_unit_id = str(link.get("target_memory_unit_id") or "").strip()
+        if source_memory_unit_id in selected_ids and target_memory_unit_id in selected_ids:
+            selected_endpoint = "internal"
+        elif source_memory_unit_id in selected_ids:
+            selected_endpoint = "outgoing"
+        elif target_memory_unit_id in selected_ids:
+            selected_endpoint = "incoming"
+        else:
+            return None
+
+        # 要約
+        source_unit = link.get("source_memory_unit")
+        target_unit = link.get("target_memory_unit")
+        source_summary = self._short_relation_text(
+            source_unit.get("summary_text") if isinstance(source_unit, dict) else None,
+            limit=80,
+        )
+        target_summary = self._short_relation_text(
+            target_unit.get("summary_text") if isinstance(target_unit, dict) else None,
+            limit=80,
+        )
+        if source_summary is None and target_summary is None:
+            return None
+
+        # 結果
+        return {
+            "memory_link_id": link.get("memory_link_id"),
+            "label": label,
+            "selected_endpoint": selected_endpoint,
+            "source_memory_unit_id": source_memory_unit_id,
+            "target_memory_unit_id": target_memory_unit_id,
+            "source_status": source_unit.get("status") if isinstance(source_unit, dict) else None,
+            "target_status": target_unit.get("status") if isinstance(target_unit, dict) else None,
+            "source_summary_text": source_summary,
+            "target_summary_text": target_summary,
+            "summary_text": f"{label}: {source_summary or '?'} -> {target_summary or '?'}",
+        }
+
+    def _memory_link_selected_endpoints(
+        self,
+        *,
+        link: dict[str, Any],
+        selected_ids: set[str],
+    ) -> list[tuple[str, str, dict[str, Any] | None]]:
+        # endpoint 判定
+        source_memory_unit_id = str(link.get("source_memory_unit_id") or "").strip()
+        target_memory_unit_id = str(link.get("target_memory_unit_id") or "").strip()
+        source_unit = link.get("source_memory_unit")
+        target_unit = link.get("target_memory_unit")
+        endpoints: list[tuple[str, str, dict[str, Any] | None]] = []
+        if source_memory_unit_id in selected_ids:
+            endpoints.append(
+                (
+                    source_memory_unit_id,
+                    "outgoing",
+                    target_unit if isinstance(target_unit, dict) else None,
+                )
+            )
+        if target_memory_unit_id in selected_ids:
+            endpoints.append(
+                (
+                    target_memory_unit_id,
+                    "incoming",
+                    source_unit if isinstance(source_unit, dict) else None,
+                )
+            )
+        return endpoints
+
+    def _normalized_memory_link_label(self, value: Any) -> str | None:
+        # 正規化
+        if not isinstance(value, str):
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+    def _ordered_memory_link_label_counts(self, label_counts: dict[str, int]) -> dict[str, int]:
+        # label priority 順に安定化する。
+        ordered: dict[str, int] = {}
+        for label in MEMORY_LINK_RECALL_LABEL_PRIORITY:
+            count = int(label_counts.get(label, 0) or 0)
+            if count > 0:
+                ordered[label] = count
+        for label in sorted(label_counts):
+            if label in ordered:
+                continue
+            count = int(label_counts.get(label, 0) or 0)
+            if count > 0:
+                ordered[label] = count
+        return ordered
+
+    def _short_relation_text(self, value: Any, *, limit: int) -> str | None:
+        # 短縮
+        if not isinstance(value, str):
+            return None
+        normalized = " ".join(value.strip().split())
+        if not normalized:
+            return None
+        if len(normalized) <= limit:
+            return normalized
+        return normalized[: limit - 1].rstrip() + "…"
 
     def _record_id(self, item: dict[str, Any]) -> str:
         # 記憶単位

@@ -43,6 +43,7 @@ REFLECTION_SUMMARY_PACK_MEMORY_LIMIT = 8
 REFLECTION_SCOPE_AFFECT_LIMIT = 4
 REFLECTION_AFFECT_STATE_EPISODE_LIMIT = 96
 REFLECTION_AFFECT_STATE_MIN_EPISODES = 2
+REFLECTION_AFFECT_STATE_INITIAL_LOOKBACK_HOURS = 6
 REFLECTION_AFFECT_STATE_WEAKEN_AFTER_DAYS = 14
 REFLECTION_AFFECT_STATE_WEAKEN_FACTOR = 0.85
 REFLECTION_AFFECT_STATE_CONFIDENCE_WEAKEN_FACTOR = 0.95
@@ -214,14 +215,18 @@ class ReflectiveConsolidator:
                 memory_set_id=memory_set_id,
                 current_time=finished_at,
             )
-            episode_affects = self.store.list_episode_affects_for_reflection(
-                memory_set_id=memory_set_id,
-                since_iso=since_iso,
-                limit=REFLECTION_AFFECT_STATE_EPISODE_LIMIT,
-            )
             affect_states = self.store.list_affect_states_for_context(
                 memory_set_id=memory_set_id,
                 limit=64,
+            )
+            episode_affects = self.store.list_episode_affects_for_reflection(
+                memory_set_id=memory_set_id,
+                since_iso=(
+                    self._initial_affect_state_since_iso(since_iso)
+                    if not affect_states
+                    else since_iso
+                ),
+                limit=REFLECTION_AFFECT_STATE_EPISODE_LIMIT,
             )
             affect_state_updates = self._build_reflective_affect_state_updates(
                 memory_set_id=memory_set_id,
@@ -543,6 +548,15 @@ class ReflectiveConsolidator:
             )
 
         return updates
+
+    def _initial_affect_state_since_iso(self, since_iso: str | None) -> str | None:
+        # 初回作成では、直前 reflection で単発消費された episode_affect を短く拾い直す。
+        if not isinstance(since_iso, str) or not since_iso:
+            return None
+        return (
+            local_datetime(since_iso)
+            - timedelta(hours=REFLECTION_AFFECT_STATE_INITIAL_LOOKBACK_HOURS)
+        ).isoformat()
 
     def _affect_state_update_trace(
         self,

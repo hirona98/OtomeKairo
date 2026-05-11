@@ -281,6 +281,8 @@ class RecallSelectionMixin:
             payload["status"] = item["status"]
             if item.get("commitment_state") is not None:
                 payload["commitment_state"] = item["commitment_state"]
+            if isinstance(item.get("memory_link_summary"), dict):
+                payload["memory_link_summary"] = item["memory_link_summary"]
             return payload
 
         # Episode要約
@@ -425,6 +427,9 @@ class RecallSelectionMixin:
             "selected_candidate_refs": [],
             "dropped_candidate_refs": [],
             "conflict_summary_count": 0,
+            "memory_link_count": 0,
+            "memory_link_label_counts": {},
+            "memory_link_representative_links": [],
             "result_status": "succeeded",
             "failure_reason": None,
         }

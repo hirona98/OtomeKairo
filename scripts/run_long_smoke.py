@@ -4539,12 +4539,18 @@ class LongSmokeRunner:
         recall_pack_selection = recall_trace.get("recall_pack_selection", {})
         if not isinstance(recall_pack_selection, dict):
             recall_pack_selection = {}
+        memory_link_context = recall_trace.get("memory_link_context", {})
+        if not isinstance(memory_link_context, dict):
+            memory_link_context = {}
         decision_context = decision_trace.get("internal_context_summary", {})
         if not isinstance(decision_context, dict):
             decision_context = {}
         decision_recall_pack_summary = decision_context.get("recall_pack_summary", {})
         if not isinstance(decision_recall_pack_summary, dict):
             decision_recall_pack_summary = {}
+        decision_memory_link_context = decision_context.get("memory_link_context", {})
+        if not isinstance(decision_memory_link_context, dict):
+            decision_memory_link_context = {}
 
         return {
             "cycle_id": trace.get("cycle_id"),
@@ -4580,13 +4586,57 @@ class LongSmokeRunner:
                 "selected_candidate_count": len(string_list(recall_pack_selection.get("selected_candidate_refs"))),
                 "dropped_candidate_count": len(string_list(recall_pack_selection.get("dropped_candidate_refs"))),
                 "conflict_summary_count": int(recall_pack_selection.get("conflict_summary_count", 0) or 0),
+                "memory_link_count": int(recall_pack_selection.get("memory_link_count", 0) or 0),
+                "memory_link_label_counts": self._memory_link_label_counts_digest(
+                    recall_pack_selection.get("memory_link_label_counts")
+                ),
+                "memory_link_representative_count": len(
+                    [
+                        item
+                        for item in recall_pack_selection.get("memory_link_representative_links", [])
+                        if isinstance(item, dict) and isinstance(item.get("summary_text"), str)
+                    ]
+                ),
+            },
+            "memory_link_context": {
+                "link_count": int(memory_link_context.get("link_count", 0) or 0),
+                "label_counts": self._memory_link_label_counts_digest(memory_link_context.get("label_counts")),
+                "representative_link_count": len(
+                    [
+                        item
+                        for item in memory_link_context.get("representative_links", [])
+                        if isinstance(item, dict) and isinstance(item.get("summary_text"), str)
+                    ]
+                ),
             },
             "decision": {
                 "result_kind": decision_trace.get("result_kind"),
                 "primary_candidate_kind": decision_trace.get("primary_candidate_kind"),
                 "reason_summary": decision_trace.get("reason_summary"),
                 "recall_pack_summary": decision_recall_pack_summary,
+                "memory_link_context": {
+                    "link_count": int(decision_memory_link_context.get("link_count", 0) or 0),
+                    "label_counts": self._memory_link_label_counts_digest(
+                        decision_memory_link_context.get("label_counts")
+                    ),
+                    "representative_link_count": len(
+                        [
+                            item
+                            for item in decision_memory_link_context.get("representative_links", [])
+                            if isinstance(item, dict) and isinstance(item.get("summary_text"), str)
+                        ]
+                    ),
+                },
             },
+        }
+
+    def _memory_link_label_counts_digest(self, value: Any) -> dict[str, int]:
+        if not isinstance(value, dict):
+            return {}
+        return {
+            label: int(count)
+            for label, count in value.items()
+            if isinstance(label, str) and isinstance(count, int)
         }
 
     def _recall_quality_probe_checks(self, digest: dict[str, Any]) -> dict[str, bool]:
@@ -4622,6 +4672,7 @@ class LongSmokeRunner:
         conflict_hint = conflict.get("recall_hint", {})
         conflict_summary = conflict.get("recall_pack_summary", {})
         conflict_selection = conflict.get("recall_pack_selection", {})
+        conflict_memory_links = conflict.get("memory_link_context", {})
         conflict_decision = conflict.get("decision", {})
         if not isinstance(conflict_hint, dict):
             conflict_hint = {}
@@ -4629,11 +4680,16 @@ class LongSmokeRunner:
             conflict_summary = {}
         if not isinstance(conflict_selection, dict):
             conflict_selection = {}
+        if not isinstance(conflict_memory_links, dict):
+            conflict_memory_links = {}
         if not isinstance(conflict_decision, dict):
             conflict_decision = {}
         conflict_decision_summary = conflict_decision.get("recall_pack_summary", {})
         if not isinstance(conflict_decision_summary, dict):
             conflict_decision_summary = {}
+        conflict_decision_memory_links = conflict_decision.get("memory_link_context", {})
+        if not isinstance(conflict_decision_memory_links, dict):
+            conflict_decision_memory_links = {}
 
         return {
             "bypasses_recall_hint_recent_window": int(digest.get("recent_window_bypass_turns", 0))
@@ -4655,6 +4711,12 @@ class LongSmokeRunner:
             "conflict_has_conflict": count(conflict_summary, "conflicts") >= 1,
             "conflict_selection_summarizes_conflict": count(conflict_selection, "conflict_summary_count") >= 1,
             "conflict_decision_sees_conflict": count(conflict_decision_summary, "conflicts") >= 1,
+            "conflict_has_memory_link_context": count(conflict_memory_links, "link_count") >= 1
+            and count(conflict_memory_links, "representative_link_count") >= 1,
+            "conflict_selection_summarizes_memory_links": count(conflict_selection, "memory_link_count") >= 1
+            and count(conflict_selection, "memory_link_representative_count") >= 1,
+            "conflict_decision_sees_memory_links": count(conflict_decision_memory_links, "link_count") >= 1
+            and count(conflict_decision_memory_links, "representative_link_count") >= 1,
         }
 
     def _wait_for_memory_jobs_to_drain(self) -> None:

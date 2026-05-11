@@ -831,6 +831,144 @@ class SQLiteMemoryStore(StoreCloneMixin, StoreVectorMixin, StoreSchemaMixin):
         # 結果
         return [json.loads(row["payload_json"]) for row in rows]
 
+    def list_memory_links_for_recall(
+        self,
+        *,
+        memory_set_id: str,
+        memory_unit_ids: list[str],
+        limit_per_unit: int = 3,
+        total_limit: int = 24,
+    ) -> list[dict[str, Any]]:
+        # 対象 memory_unit_id 群
+        normalized_memory_unit_ids: list[str] = []
+        seen_memory_unit_ids: set[str] = set()
+        for value in memory_unit_ids:
+            if not isinstance(value, str):
+                continue
+            normalized = value.strip()
+            if not normalized or normalized in seen_memory_unit_ids:
+                continue
+            normalized_memory_unit_ids.append(normalized)
+            seen_memory_unit_ids.add(normalized)
+        if not normalized_memory_unit_ids:
+            return []
+
+        # 上限
+        per_unit_limit = max(1, int(limit_per_unit))
+        record_limit = max(1, int(total_limit))
+        query_limit = max(record_limit * 4, len(normalized_memory_unit_ids) * per_unit_limit * 4, 16)
+        selected_ids = set(normalized_memory_unit_ids)
+        placeholders = ", ".join("?" for _ in normalized_memory_unit_ids)
+
+        # クエリ
+        with self._memory_db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT
+                    link.payload_json AS link_payload_json,
+                    source.payload_json AS source_payload_json,
+                    target.payload_json AS target_payload_json
+                FROM memory_links AS link
+                LEFT JOIN memory_units AS source
+                  ON source.memory_set_id = link.memory_set_id
+                 AND source.memory_unit_id = link.source_memory_unit_id
+                LEFT JOIN memory_units AS target
+                  ON target.memory_set_id = link.memory_set_id
+                 AND target.memory_unit_id = link.target_memory_unit_id
+                WHERE link.memory_set_id = ?
+                  AND (
+                    link.source_memory_unit_id IN ({placeholders})
+                    OR link.target_memory_unit_id IN ({placeholders})
+                  )
+                ORDER BY link.updated_at DESC, link.rowid DESC
+                LIMIT ?
+                """,
+                (
+                    memory_set_id,
+                    *normalized_memory_unit_ids,
+                    *normalized_memory_unit_ids,
+                    query_limit,
+                ),
+            ).fetchall()
+
+        # 整形
+        records: list[dict[str, Any]] = []
+        per_unit_counts: dict[str, int] = {memory_unit_id: 0 for memory_unit_id in normalized_memory_unit_ids}
+        seen_link_ids: set[str] = set()
+        for row in rows:
+            link_payload = json.loads(row["link_payload_json"])
+            if not isinstance(link_payload, dict):
+                continue
+            memory_link_id = str(link_payload.get("memory_link_id") or "").strip()
+            if not memory_link_id or memory_link_id in seen_link_ids:
+                continue
+            source_memory_unit_id = str(link_payload.get("source_memory_unit_id") or "").strip()
+            target_memory_unit_id = str(link_payload.get("target_memory_unit_id") or "").strip()
+            related_selected_ids = [
+                memory_unit_id
+                for memory_unit_id in (source_memory_unit_id, target_memory_unit_id)
+                if memory_unit_id in selected_ids
+            ]
+            if not related_selected_ids:
+                continue
+            if all(per_unit_counts[memory_unit_id] >= per_unit_limit for memory_unit_id in related_selected_ids):
+                continue
+
+            source_payload = self._loads_optional_payload(row["source_payload_json"])
+            target_payload = self._loads_optional_payload(row["target_payload_json"])
+            for memory_unit_id in related_selected_ids:
+                per_unit_counts[memory_unit_id] += 1
+            records.append(
+                {
+                    "memory_link_id": memory_link_id,
+                    "memory_set_id": link_payload.get("memory_set_id"),
+                    "source_memory_unit_id": source_memory_unit_id,
+                    "target_memory_unit_id": target_memory_unit_id,
+                    "label": link_payload.get("label"),
+                    "confidence": link_payload.get("confidence"),
+                    "evidence_revision_id": link_payload.get("evidence_revision_id"),
+                    "created_at": link_payload.get("created_at"),
+                    "updated_at": link_payload.get("updated_at"),
+                    "operation": link_payload.get("operation"),
+                    "reason": link_payload.get("reason"),
+                    "selected_memory_unit_ids": related_selected_ids,
+                    "source_memory_unit": self._compact_memory_unit_for_link_context(source_payload),
+                    "target_memory_unit": self._compact_memory_unit_for_link_context(target_payload),
+                }
+            )
+            seen_link_ids.add(memory_link_id)
+            if len(records) >= record_limit:
+                break
+
+        # 結果
+        return records
+
+    def _loads_optional_payload(self, value: Any) -> dict[str, Any] | None:
+        # 空値
+        if value is None:
+            return None
+
+        # JSON
+        payload = json.loads(value)
+        return payload if isinstance(payload, dict) else None
+
+    def _compact_memory_unit_for_link_context(self, payload: dict[str, Any] | None) -> dict[str, Any] | None:
+        # 欠損
+        if not isinstance(payload, dict):
+            return None
+
+        # 結果
+        return {
+            "memory_unit_id": payload.get("memory_unit_id"),
+            "memory_type": payload.get("memory_type"),
+            "scope_type": payload.get("scope_type"),
+            "scope_key": payload.get("scope_key"),
+            "summary_text": payload.get("summary_text"),
+            "status": payload.get("status"),
+            "confidence": payload.get("confidence"),
+            "salience": payload.get("salience"),
+        }
+
     def list_memory_units_for_reflection(
         self,
         *,
