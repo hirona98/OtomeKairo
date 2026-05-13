@@ -6,7 +6,7 @@ from copy import deepcopy
 from datetime import timedelta
 from typing import Any
 
-from otomekairo.capabilities import capability_manifests
+from otomekairo.capabilities import capability_manifests, capability_readiness_input_digest
 from otomekairo.service_common import debug_log
 
 
@@ -563,12 +563,22 @@ class ServiceCapabilityMixin:
     ) -> dict[str, Any] | None:
         if not isinstance(request_record, dict):
             return None
-        return {
+        capability_id = request_record.get("capability_id")
+        summary = {
             "request_id": request_record.get("request_id"),
-            "capability_id": request_record.get("capability_id"),
+            "capability_id": capability_id,
             "status": status,
             "timeout_ms": request_record.get("timeout_ms"),
         }
+        input_payload = request_record.get("input")
+        readiness_digest = (
+            capability_readiness_input_digest(capability_id, input_payload)
+            if isinstance(capability_id, str)
+            else None
+        )
+        if isinstance(readiness_digest, dict):
+            summary["readiness_digest"] = readiness_digest
+        return summary
 
     def _capability_state_policy(self, capability_id: str) -> dict[str, Any]:
         manifest = capability_manifests().get(capability_id, {})

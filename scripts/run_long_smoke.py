@@ -594,6 +594,9 @@ class LongSmokeRunner:
             self._exercise_memory_quality_probe()
             self._exercise_recall_quality_probe()
             self._run_conversations()
+            self._set_wake_policy_disabled()
+            self._set_desktop_watch_enabled(enabled=False)
+            self._wait_for_no_ongoing_action(label="final quiesce")
             self._wait_for_memory_jobs_to_drain()
             summary = self._collect_summary()
             self._write_summary(summary)
@@ -953,6 +956,32 @@ class LongSmokeRunner:
         client.connect(client_id=client_id, caps=caps)
         return client
 
+    def _apply_status_client_context_source(
+        self,
+        *,
+        client_context: dict[str, Any],
+        override: Any,
+    ) -> None:
+        source = None
+        unconnected_reason = None
+        if isinstance(override, dict):
+            source = override.get("data_source")
+            unconnected_reason = override.get("unconnected_reason")
+        if not isinstance(source, str) or not source.strip():
+            source = "safe_script_data" if isinstance(override, dict) else "synthetic_default"
+        if not isinstance(client_context.get("data_source"), str) or not client_context["data_source"].strip():
+            client_context["data_source"] = source
+        if isinstance(unconnected_reason, str) and unconnected_reason.strip():
+            client_context["unconnected_reason"] = unconnected_reason.strip()
+            return
+        if isinstance(override, dict):
+            return
+        if (
+            not isinstance(client_context.get("unconnected_reason"), str)
+            or not client_context["unconnected_reason"].strip()
+        ):
+            client_context["unconnected_reason"] = "safe_status_source_not_configured"
+
     def _handle_server_event(
         self,
         *,
@@ -1161,6 +1190,7 @@ class LongSmokeRunner:
                     client_context["device_state_summary"] = "external.status を返せる desktop client が接続中。"
                 if not isinstance(client_context.get("schedule_summary"), str) or not client_context["schedule_summary"].strip():
                     client_context["schedule_summary"] = f"{service.strip()} の状態確認をこのまま進められる。"
+            self._apply_status_client_context_source(client_context=client_context, override=override)
             self.api.post(
                 "/api/capability/result",
                 {
@@ -1230,6 +1260,7 @@ class LongSmokeRunner:
                 )
             ):
                 client_context["device_state_summary"] = "schedule.status を返せる desktop client が接続中。"
+            self._apply_status_client_context_source(client_context=client_context, override=override)
             self.api.post(
                 "/api/capability/result",
                 {
@@ -1279,6 +1310,7 @@ class LongSmokeRunner:
                 if isinstance(override, dict) and isinstance(override.get("client_context"), dict)
                 else {}
             )
+            self._apply_status_client_context_source(client_context=client_context, override=override)
             self.api.post(
                 "/api/capability/result",
                 {
@@ -1327,6 +1359,7 @@ class LongSmokeRunner:
                 if isinstance(override, dict) and isinstance(override.get("client_context"), dict)
                 else {}
             )
+            self._apply_status_client_context_source(client_context=client_context, override=override)
             self.api.post(
                 "/api/capability/result",
                 {
@@ -1375,6 +1408,7 @@ class LongSmokeRunner:
                 if isinstance(override, dict) and isinstance(override.get("client_context"), dict)
                 else {}
             )
+            self._apply_status_client_context_source(client_context=client_context, override=override)
             self.api.post(
                 "/api/capability/result",
                 {
@@ -1423,6 +1457,7 @@ class LongSmokeRunner:
                 if isinstance(override, dict) and isinstance(override.get("client_context"), dict)
                 else {}
             )
+            self._apply_status_client_context_source(client_context=client_context, override=override)
             self.api.post(
                 "/api/capability/result",
                 {
@@ -1471,6 +1506,7 @@ class LongSmokeRunner:
                 if isinstance(override, dict) and isinstance(override.get("client_context"), dict)
                 else {}
             )
+            self._apply_status_client_context_source(client_context=client_context, override=override)
             self.api.post(
                 "/api/capability/result",
                 {
@@ -1854,6 +1890,17 @@ class LongSmokeRunner:
                 }
             },
         )
+
+    def _set_desktop_watch_enabled(self, *, enabled: bool) -> None:
+        editor_state = self.api.get("/api/config/editor-state")
+        current = editor_state.get("current")
+        if not isinstance(current, dict):
+            raise SmokeError("editor-state current was invalid.")
+        current["desktop_watch"] = {
+            "enabled": enabled,
+            "interval_seconds": self.args.desktop_watch_interval_seconds,
+        }
+        self.api.put("/api/config/editor-state", editor_state)
 
     def _restart_server_for_real_llm_probe(self) -> None:
         self._stop_server()
@@ -3845,6 +3892,33 @@ class LongSmokeRunner:
         )
         return [capability_id for capability_id in capability_ids if isinstance(capability_id, str)]
 
+    def _fresh_world_state_readiness_digests_from_trace(
+        self,
+        trace: dict[str, Any],
+    ) -> dict[str, dict[str, Any]]:
+        decision_trace = trace.get("decision_trace", {})
+        internal_context = (
+            decision_trace.get("internal_context_summary")
+            if isinstance(decision_trace, dict)
+            else None
+        )
+        capability_decision_view = (
+            internal_context.get("capability_decision_view")
+            if isinstance(internal_context, dict)
+            else None
+        )
+        if not isinstance(capability_decision_view, list):
+            return {}
+        digests: dict[str, dict[str, Any]] = {}
+        for item in capability_decision_view:
+            if not isinstance(item, dict) or item.get("fresh_world_state_available") is not True:
+                continue
+            capability_id = item.get("id")
+            readiness_digest = item.get("fresh_world_state_readiness_digest")
+            if isinstance(capability_id, str) and capability_id and isinstance(readiness_digest, dict):
+                digests[capability_id] = readiness_digest
+        return digests
+
     def _real_llm_initiative_probe_case_results(
         self,
         traces: dict[str, dict[str, Any]],
@@ -3894,6 +3968,7 @@ class LongSmokeRunner:
                 "capability_id": request_summary.get("capability_id"),
                 "capability_request_status": request_summary.get("status"),
                 "fresh_world_state_capability_ids": self._fresh_world_state_capability_ids_from_trace(trace),
+                "fresh_world_state_readiness_digests": self._fresh_world_state_readiness_digests_from_trace(trace),
             }
         return case_results
 
@@ -5834,6 +5909,11 @@ class LongSmokeRunner:
             raise SmokeError("real-llm-smoke external.status request summary was invalid.")
         if request_summary.get("status") != "dispatched":
             raise SmokeError("real-llm-smoke external.status request was not dispatched.")
+        self._assert_capability_request_readiness_digest(
+            request_summary,
+            "external.status",
+            "real-llm-smoke external.status conversation",
+        )
         self._assert_memory_trace_succeeded(capability_conversation_trace, "real-llm-smoke external.status conversation")
 
         followup_trace = summary.get("external_status_followup_trace")
@@ -5847,6 +5927,18 @@ class LongSmokeRunner:
         transition_summary = ((followup_trace.get("result_trace") or {}).get("ongoing_action_transition_summary"))
         if not isinstance(transition_summary, dict) or transition_summary.get("final_state") != "completed":
             raise SmokeError("real-llm-smoke external.status follow-up did not complete ongoing_action.")
+        external_observation_summary = ((followup_trace.get("input_trace") or {}).get("observation_summary"))
+        if not isinstance(external_observation_summary, dict):
+            raise SmokeError("real-llm-smoke external.status observation_summary was not recorded.")
+        self._assert_capability_observation_readiness_digest(
+            external_observation_summary,
+            "external.status",
+            "real-llm-smoke external.status follow-up",
+        )
+        self._assert_status_client_context_source(
+            external_observation_summary,
+            "real-llm-smoke external.status follow-up",
+        )
         self._assert_memory_trace_succeeded(followup_trace, "real-llm-smoke external.status follow-up")
 
         schedule_conversation_trace = summary.get("schedule_status_conversation_trace")
@@ -5860,6 +5952,11 @@ class LongSmokeRunner:
             raise SmokeError("real-llm-smoke schedule.status request summary was invalid.")
         if schedule_request_summary.get("status") != "dispatched":
             raise SmokeError("real-llm-smoke schedule.status request was not dispatched.")
+        self._assert_capability_request_readiness_digest(
+            schedule_request_summary,
+            "schedule.status",
+            "real-llm-smoke schedule.status conversation",
+        )
         self._assert_memory_trace_succeeded(schedule_conversation_trace, "real-llm-smoke schedule.status conversation")
 
         schedule_followup_trace = summary.get("schedule_status_followup_trace")
@@ -5881,6 +5978,15 @@ class LongSmokeRunner:
         observed_slots = schedule_observation_summary.get("schedule_slots")
         if not isinstance(observed_slots, list) or not observed_slots:
             raise SmokeError("real-llm-smoke schedule.status schedule_slots were not recorded.")
+        self._assert_capability_observation_readiness_digest(
+            schedule_observation_summary,
+            "schedule.status",
+            "real-llm-smoke schedule.status follow-up",
+        )
+        self._assert_status_client_context_source(
+            schedule_observation_summary,
+            "real-llm-smoke schedule.status follow-up",
+        )
         schedule_world_state_trace = schedule_followup_trace.get("world_state_trace", {})
         if not isinstance(schedule_world_state_trace, dict):
             raise SmokeError("real-llm-smoke schedule.status world_state_trace was not recorded.")
@@ -6225,6 +6331,27 @@ class LongSmokeRunner:
                         f"real-llm-smoke initiative probe compact result {case_id}.{key} "
                         f"was {case_result.get(key)}, expected {expected_value}."
                     )
+            expected_fresh_ids = expected_items.get("fresh_world_state_capability_ids")
+            if isinstance(expected_fresh_ids, list):
+                fresh_digests = case_result.get("fresh_world_state_readiness_digests")
+                if not isinstance(fresh_digests, dict):
+                    raise SmokeError(f"real-llm-smoke initiative probe readiness digest was invalid: {case_id}")
+                if not expected_fresh_ids and fresh_digests:
+                    raise SmokeError(f"real-llm-smoke initiative probe recorded unexpected readiness digest: {case_id}")
+                for capability_id in expected_fresh_ids:
+                    digest = fresh_digests.get(capability_id)
+                    if not isinstance(digest, dict):
+                        raise SmokeError(
+                            f"real-llm-smoke initiative probe did not record readiness digest for {capability_id}."
+                        )
+                    if digest.get("world_state_type_matched") is not True:
+                        raise SmokeError(
+                            f"real-llm-smoke initiative probe readiness digest did not match for {capability_id}."
+                        )
+                    if digest.get("world_state_type") != digest.get("foreground_world_state_type"):
+                        raise SmokeError(
+                            f"real-llm-smoke initiative probe readiness world_state_type mismatch for {capability_id}."
+                        )
         initiative_traces = summary.get("real_llm_initiative_probe_traces")
         if not isinstance(initiative_traces, dict) or set(initiative_traces) != expected_initiative_cases:
             raise SmokeError("real-llm-smoke initiative probe traces were incomplete.")
@@ -6556,6 +6683,81 @@ class LongSmokeRunner:
             if vector_status != "succeeded":
                 raise SmokeError(f"restart probe cycle {cycle_id} vector_index_sync was {vector_status}.")
 
+    def _assert_capability_request_readiness_digest(
+        self,
+        capability_request_summary: Any,
+        capability_id: str,
+        label: str,
+    ) -> None:
+        if not isinstance(capability_request_summary, dict):
+            raise SmokeError(f"{label} capability_request_summary was invalid.")
+        readiness_digest = capability_request_summary.get("readiness_digest")
+        if not isinstance(readiness_digest, dict):
+            raise SmokeError(f"{label} readiness_digest was not recorded.")
+        if not isinstance(readiness_digest.get("family"), str) or not readiness_digest["family"].strip():
+            raise SmokeError(f"{label} readiness_digest.family was invalid.")
+        if not isinstance(readiness_digest.get("world_state_type"), str) or not readiness_digest["world_state_type"].strip():
+            raise SmokeError(f"{label} readiness_digest.world_state_type was invalid.")
+        if not isinstance(readiness_digest.get("input_keys"), list):
+            raise SmokeError(f"{label} readiness_digest.input_keys was invalid.")
+        if not isinstance(readiness_digest.get("present_input_keys"), list):
+            raise SmokeError(f"{label} readiness_digest.present_input_keys was invalid.")
+        if readiness_digest.get("missing_input_keys") != []:
+            raise SmokeError(f"{label} readiness_digest recorded missing input keys.")
+        if readiness_digest.get("input_keys_satisfied") is not True:
+            raise SmokeError(f"{label} readiness_digest input keys were not satisfied.")
+        if capability_request_summary.get("capability_id") != capability_id:
+            raise SmokeError(f"{label} readiness capability_id was invalid.")
+
+    def _assert_capability_observation_readiness_digest(
+        self,
+        observation_summary: Any,
+        capability_id: str,
+        label: str,
+    ) -> None:
+        if not isinstance(observation_summary, dict):
+            raise SmokeError(f"{label} observation_summary was invalid.")
+        readiness_digest = observation_summary.get("readiness_digest")
+        if not isinstance(readiness_digest, dict):
+            raise SmokeError(f"{label} observation readiness_digest was not recorded.")
+        if not isinstance(readiness_digest.get("family"), str) or not readiness_digest["family"].strip():
+            raise SmokeError(f"{label} observation readiness_digest.family was invalid.")
+        if not isinstance(readiness_digest.get("world_state_type"), str) or not readiness_digest["world_state_type"].strip():
+            raise SmokeError(f"{label} observation readiness_digest.world_state_type was invalid.")
+        if not isinstance(readiness_digest.get("result_summary_keys"), list):
+            raise SmokeError(f"{label} observation readiness_digest.result_summary_keys was invalid.")
+        if not isinstance(readiness_digest.get("present_result_summary_keys"), list):
+            raise SmokeError(f"{label} observation readiness_digest.present_result_summary_keys was invalid.")
+        if readiness_digest.get("missing_result_summary_keys") != []:
+            raise SmokeError(f"{label} observation readiness_digest recorded missing summary keys.")
+        if readiness_digest.get("result_summary_keys_satisfied") is not True:
+            raise SmokeError(f"{label} observation readiness_digest summary keys were not satisfied.")
+        if not isinstance(readiness_digest.get("result_item_keys"), list):
+            raise SmokeError(f"{label} observation readiness_digest.result_item_keys was invalid.")
+        if not isinstance(readiness_digest.get("present_result_item_keys"), list):
+            raise SmokeError(f"{label} observation readiness_digest.present_result_item_keys was invalid.")
+        if readiness_digest.get("missing_result_item_keys") != []:
+            raise SmokeError(f"{label} observation readiness_digest recorded missing item keys.")
+        if readiness_digest.get("result_item_keys_satisfied") is not True:
+            raise SmokeError(f"{label} observation readiness_digest item keys were not satisfied.")
+        if observation_summary.get("capability_id") != capability_id:
+            raise SmokeError(f"{label} observation readiness capability_id was invalid.")
+
+    def _assert_status_client_context_source(
+        self,
+        observation_summary: Any,
+        label: str,
+    ) -> None:
+        if not isinstance(observation_summary, dict):
+            raise SmokeError(f"{label} observation_summary was invalid.")
+        data_source = observation_summary.get("data_source")
+        if not isinstance(data_source, str) or not data_source.strip():
+            raise SmokeError(f"{label} data_source was not recorded.")
+        if data_source == "synthetic_default":
+            unconnected_reason = observation_summary.get("unconnected_reason")
+            if not isinstance(unconnected_reason, str) or not unconnected_reason.strip():
+                raise SmokeError(f"{label} synthetic data source did not record unconnected_reason.")
+
     def _assert_desktop_watch_probe_trace(self, trace: Any, label: str) -> None:
         if not isinstance(trace, dict):
             raise SmokeError(f"desktop_watch {label} probe trace was not collected.")
@@ -6615,6 +6817,11 @@ class LongSmokeRunner:
                 raise SmokeError("desktop_watch capability_request probe request_id was not recorded.")
             if not isinstance(capability_request_summary.get("timeout_ms"), int):
                 raise SmokeError("desktop_watch capability_request probe timeout_ms was not recorded.")
+            self._assert_capability_request_readiness_digest(
+                capability_request_summary,
+                "vision.capture",
+                "desktop_watch capability_request probe",
+            )
             ongoing_action_transition_summary = result_trace.get("ongoing_action_transition_summary", {})
             if not isinstance(ongoing_action_transition_summary, dict):
                 raise SmokeError("desktop_watch capability_request probe ongoing_action_transition_summary was invalid.")
@@ -6691,6 +6898,11 @@ class LongSmokeRunner:
             raise SmokeError("external.status probe conversation capability_id was invalid.")
         if capability_request_summary.get("status") != "dispatched":
             raise SmokeError("external.status probe conversation capability_request status was invalid.")
+        self._assert_capability_request_readiness_digest(
+            capability_request_summary,
+            "external.status",
+            "external.status probe conversation",
+        )
         request_id = capability_request_summary.get("request_id")
         if not isinstance(request_id, str) or not request_id:
             raise SmokeError("external.status probe conversation request_id was not recorded.")
@@ -6725,6 +6937,12 @@ class LongSmokeRunner:
         status_text = observation_summary.get("status_text")
         if not isinstance(status_text, str) or "LongSmokeExternalStatusProbeMarker" not in status_text:
             raise SmokeError("external.status probe follow-up status_text was invalid.")
+        self._assert_capability_observation_readiness_digest(
+            observation_summary,
+            "external.status",
+            "external.status probe follow-up",
+        )
+        self._assert_status_client_context_source(observation_summary, "external.status probe follow-up")
         world_state_trace = followup_trace.get("world_state_trace", {})
         if not isinstance(world_state_trace, dict):
             raise SmokeError("external.status probe follow-up world_state_trace was invalid.")
@@ -6857,6 +7075,11 @@ class LongSmokeRunner:
             raise SmokeError("schedule.status probe conversation capability_id was invalid.")
         if capability_request_summary.get("status") != "dispatched":
             raise SmokeError("schedule.status probe conversation capability_request status was invalid.")
+        self._assert_capability_request_readiness_digest(
+            capability_request_summary,
+            "schedule.status",
+            "schedule.status probe conversation",
+        )
         request_id = capability_request_summary.get("request_id")
         if not isinstance(request_id, str) or not request_id:
             raise SmokeError("schedule.status probe conversation request_id was not recorded.")
@@ -6882,6 +7105,12 @@ class LongSmokeRunner:
         schedule_slots = observation_summary.get("schedule_slots")
         if not isinstance(schedule_slots, list) or not schedule_slots:
             raise SmokeError("schedule.status probe follow-up schedule_slots were invalid.")
+        self._assert_capability_observation_readiness_digest(
+            observation_summary,
+            "schedule.status",
+            "schedule.status probe follow-up",
+        )
+        self._assert_status_client_context_source(observation_summary, "schedule.status probe follow-up")
 
         world_state_trace = followup_trace.get("world_state_trace", {})
         if not isinstance(world_state_trace, dict):
@@ -6974,6 +7203,11 @@ class LongSmokeRunner:
             raise SmokeError("device.status probe conversation capability_id was invalid.")
         if capability_request_summary.get("status") != "dispatched":
             raise SmokeError("device.status probe conversation capability_request status was invalid.")
+        self._assert_capability_request_readiness_digest(
+            capability_request_summary,
+            "device.status",
+            "device.status probe conversation",
+        )
         request_id = capability_request_summary.get("request_id")
         if not isinstance(request_id, str) or not request_id:
             raise SmokeError("device.status probe conversation request_id was not recorded.")
@@ -6996,6 +7230,12 @@ class LongSmokeRunner:
         device_state_summary = observation_summary.get("device_state_summary")
         if not isinstance(device_state_summary, str) or marker not in device_state_summary:
             raise SmokeError("device.status probe follow-up device_state_summary was invalid.")
+        self._assert_capability_observation_readiness_digest(
+            observation_summary,
+            "device.status",
+            "device.status probe follow-up",
+        )
+        self._assert_status_client_context_source(observation_summary, "device.status probe follow-up")
 
         world_state_trace = followup_trace.get("world_state_trace", {})
         if not isinstance(world_state_trace, dict):
@@ -7076,6 +7316,11 @@ class LongSmokeRunner:
             raise SmokeError("body.status probe conversation capability_id was invalid.")
         if capability_request_summary.get("status") != "dispatched":
             raise SmokeError("body.status probe conversation capability_request status was invalid.")
+        self._assert_capability_request_readiness_digest(
+            capability_request_summary,
+            "body.status",
+            "body.status probe conversation",
+        )
         request_id = capability_request_summary.get("request_id")
         if not isinstance(request_id, str) or not request_id:
             raise SmokeError("body.status probe conversation request_id was not recorded.")
@@ -7098,6 +7343,12 @@ class LongSmokeRunner:
         body_state_summary = observation_summary.get("body_state_summary")
         if not isinstance(body_state_summary, str) or marker not in body_state_summary:
             raise SmokeError("body.status probe follow-up body_state_summary was invalid.")
+        self._assert_capability_observation_readiness_digest(
+            observation_summary,
+            "body.status",
+            "body.status probe follow-up",
+        )
+        self._assert_status_client_context_source(observation_summary, "body.status probe follow-up")
 
         world_state_trace = followup_trace.get("world_state_trace", {})
         if not isinstance(world_state_trace, dict):
@@ -7178,6 +7429,11 @@ class LongSmokeRunner:
             raise SmokeError("social.status probe conversation capability_id was invalid.")
         if capability_request_summary.get("status") != "dispatched":
             raise SmokeError("social.status probe conversation capability_request status was invalid.")
+        self._assert_capability_request_readiness_digest(
+            capability_request_summary,
+            "social.status",
+            "social.status probe conversation",
+        )
         request_id = capability_request_summary.get("request_id")
         if not isinstance(request_id, str) or not request_id:
             raise SmokeError("social.status probe conversation request_id was not recorded.")
@@ -7200,6 +7456,12 @@ class LongSmokeRunner:
         social_context_summary = observation_summary.get("social_context_summary")
         if not isinstance(social_context_summary, str) or marker not in social_context_summary:
             raise SmokeError("social.status probe follow-up social_context_summary was invalid.")
+        self._assert_capability_observation_readiness_digest(
+            observation_summary,
+            "social.status",
+            "social.status probe follow-up",
+        )
+        self._assert_status_client_context_source(observation_summary, "social.status probe follow-up")
 
         world_state_trace = followup_trace.get("world_state_trace", {})
         if not isinstance(world_state_trace, dict):
@@ -7280,6 +7542,11 @@ class LongSmokeRunner:
             raise SmokeError("environment.status probe conversation capability_id was invalid.")
         if capability_request_summary.get("status") != "dispatched":
             raise SmokeError("environment.status probe conversation capability_request status was invalid.")
+        self._assert_capability_request_readiness_digest(
+            capability_request_summary,
+            "environment.status",
+            "environment.status probe conversation",
+        )
         request_id = capability_request_summary.get("request_id")
         if not isinstance(request_id, str) or not request_id:
             raise SmokeError("environment.status probe conversation request_id was not recorded.")
@@ -7302,6 +7569,12 @@ class LongSmokeRunner:
         environment_summary = observation_summary.get("environment_summary")
         if not isinstance(environment_summary, str) or marker not in environment_summary:
             raise SmokeError("environment.status probe follow-up environment_summary was invalid.")
+        self._assert_capability_observation_readiness_digest(
+            observation_summary,
+            "environment.status",
+            "environment.status probe follow-up",
+        )
+        self._assert_status_client_context_source(observation_summary, "environment.status probe follow-up")
 
         world_state_trace = followup_trace.get("world_state_trace", {})
         if not isinstance(world_state_trace, dict):
@@ -7382,6 +7655,11 @@ class LongSmokeRunner:
             raise SmokeError("location.status probe conversation capability_id was invalid.")
         if capability_request_summary.get("status") != "dispatched":
             raise SmokeError("location.status probe conversation capability_request status was invalid.")
+        self._assert_capability_request_readiness_digest(
+            capability_request_summary,
+            "location.status",
+            "location.status probe conversation",
+        )
         request_id = capability_request_summary.get("request_id")
         if not isinstance(request_id, str) or not request_id:
             raise SmokeError("location.status probe conversation request_id was not recorded.")
@@ -7404,6 +7682,12 @@ class LongSmokeRunner:
         location_summary = observation_summary.get("location_summary")
         if not isinstance(location_summary, str) or marker not in location_summary:
             raise SmokeError("location.status probe follow-up location_summary was invalid.")
+        self._assert_capability_observation_readiness_digest(
+            observation_summary,
+            "location.status",
+            "location.status probe follow-up",
+        )
+        self._assert_status_client_context_source(observation_summary, "location.status probe follow-up")
 
         world_state_trace = followup_trace.get("world_state_trace", {})
         if not isinstance(world_state_trace, dict):

@@ -5,7 +5,7 @@ import uuid
 from datetime import timedelta
 from typing import Any
 
-from otomekairo.capabilities import capability_manifests
+from otomekairo.capabilities import capability_manifests, capability_readiness_result_digest
 from otomekairo.llm import LLMContractError, LLMError
 from otomekairo.recall import RecallPackSelectionError
 from otomekairo.service_common import (
@@ -915,6 +915,9 @@ class ServiceSpontaneousMixin:
                     normalized_slots = self._normalize_capability_result_summary_schedule_slots(value)
                     if normalized_slots is not None:
                         summary[field] = normalized_slots
+        readiness_digest = capability_readiness_result_digest(capability_id, summary)
+        if isinstance(readiness_digest, dict):
+            summary["readiness_digest"] = readiness_digest
         return summary
 
     def _prepare_capability_result_context(

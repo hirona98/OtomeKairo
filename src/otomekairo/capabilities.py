@@ -75,6 +75,8 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
         "inspection_fields": [
             "capability_id",
             "target_client_id",
+            "data_source",
+            "unconnected_reason",
             "image_count",
             "image_interpreted",
             "visual_summary_text",
@@ -151,6 +153,8 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
         "inspection_fields": [
             "capability_id",
             "target_client_id",
+            "data_source",
+            "unconnected_reason",
             "service",
             "status_text",
             "body_state_summary",
@@ -240,6 +244,8 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
         "inspection_fields": [
             "capability_id",
             "target_client_id",
+            "data_source",
+            "unconnected_reason",
             "range",
             "schedule_summary",
             "schedule_slots",
@@ -314,6 +320,8 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
         "inspection_fields": [
             "capability_id",
             "target_client_id",
+            "data_source",
+            "unconnected_reason",
             "scope",
             "device_state_summary",
             "body_state_summary",
@@ -387,6 +395,8 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
         "inspection_fields": [
             "capability_id",
             "target_client_id",
+            "data_source",
+            "unconnected_reason",
             "scope",
             "body_state_summary",
             "device_state_summary",
@@ -461,6 +471,8 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
         "inspection_fields": [
             "capability_id",
             "target_client_id",
+            "data_source",
+            "unconnected_reason",
             "scope",
             "environment_summary",
             "body_state_summary",
@@ -535,6 +547,8 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
         "inspection_fields": [
             "capability_id",
             "target_client_id",
+            "data_source",
+            "unconnected_reason",
             "scope",
             "location_summary",
             "environment_summary",
@@ -610,6 +624,8 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
         "inspection_fields": [
             "capability_id",
             "target_client_id",
+            "data_source",
+            "unconnected_reason",
             "scope",
             "social_context_summary",
             "environment_summary",
@@ -636,6 +652,13 @@ def capability_decision_readiness_from_manifest(manifest: dict[str, Any]) -> dic
     return deepcopy(readiness)
 
 
+def capability_decision_readiness(capability_id: str) -> dict[str, Any] | None:
+    manifest = CAPABILITY_MANIFESTS.get(capability_id)
+    if not isinstance(manifest, dict):
+        return None
+    return capability_decision_readiness_from_manifest(manifest)
+
+
 def capability_world_state_type(capability_id: str) -> str | None:
     manifest = CAPABILITY_MANIFESTS.get(capability_id)
     if not isinstance(manifest, dict):
@@ -647,3 +670,115 @@ def capability_world_state_type(capability_id: str) -> str | None:
     if not isinstance(world_state_type, str) or not world_state_type.strip():
         return None
     return world_state_type.strip()
+
+
+def capability_readiness_input_digest(
+    capability_id: str,
+    input_payload: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    digest = _capability_readiness_digest_base(capability_id)
+    if digest is None:
+        return None
+    readiness = capability_decision_readiness(capability_id)
+    if readiness is None:
+        return None
+    payload = input_payload if isinstance(input_payload, dict) else {}
+    input_keys = _capability_readiness_key_list(readiness, "input_keys")
+    present_keys = [key for key in input_keys if _has_capability_readiness_value(payload.get(key))]
+    missing_keys = [key for key in input_keys if key not in present_keys]
+    digest.update(
+        {
+            "input_keys": input_keys,
+            "present_input_keys": present_keys,
+            "missing_input_keys": missing_keys,
+            "input_keys_satisfied": not missing_keys,
+        }
+    )
+    return digest
+
+
+def capability_readiness_result_digest(
+    capability_id: str,
+    result_payload: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    digest = _capability_readiness_digest_base(capability_id)
+    if digest is None:
+        return None
+    readiness = capability_decision_readiness(capability_id)
+    if readiness is None:
+        return None
+    payload = result_payload if isinstance(result_payload, dict) else {}
+    summary_keys = _capability_readiness_key_list(readiness, "result_summary_keys")
+    item_keys = _capability_readiness_key_list(readiness, "result_item_keys")
+    present_summary_keys = [key for key in summary_keys if _has_capability_readiness_value(payload.get(key))]
+    missing_summary_keys = [key for key in summary_keys if key not in present_summary_keys]
+    present_item_keys = [key for key in item_keys if _has_capability_readiness_value(payload.get(key))]
+    missing_item_keys = [key for key in item_keys if key not in present_item_keys]
+    digest.update(
+        {
+            "result_summary_keys": summary_keys,
+            "present_result_summary_keys": present_summary_keys,
+            "missing_result_summary_keys": missing_summary_keys,
+            "result_summary_keys_satisfied": not missing_summary_keys,
+            "result_item_keys": item_keys,
+            "present_result_item_keys": present_item_keys,
+            "missing_result_item_keys": missing_item_keys,
+            "result_item_keys_satisfied": not missing_item_keys,
+        }
+    )
+    return digest
+
+
+def capability_readiness_world_state_digest(
+    capability_id: str,
+    foreground_world_state_type: Any,
+) -> dict[str, Any] | None:
+    digest = _capability_readiness_digest_base(capability_id)
+    if digest is None:
+        return None
+    observed_type = foreground_world_state_type.strip() if isinstance(foreground_world_state_type, str) else None
+    digest.update(
+        {
+            "foreground_world_state_type": observed_type,
+            "world_state_type_matched": (
+                isinstance(observed_type, str)
+                and bool(observed_type)
+                and observed_type == digest.get("world_state_type")
+            ),
+        }
+    )
+    return digest
+
+
+def _capability_readiness_digest_base(capability_id: str) -> dict[str, Any] | None:
+    readiness = capability_decision_readiness(capability_id)
+    if readiness is None:
+        return None
+    family = readiness.get("family")
+    world_state_type = readiness.get("world_state_type")
+    if not isinstance(family, str) or not family.strip():
+        return None
+    if not isinstance(world_state_type, str) or not world_state_type.strip():
+        return None
+    # raw payload は残さず、manifest 由来の期待値と対応成否だけを inspection に載せる。
+    return {
+        "family": family.strip(),
+        "world_state_type": world_state_type.strip(),
+    }
+
+
+def _capability_readiness_key_list(readiness: dict[str, Any], key: str) -> list[str]:
+    raw_keys = readiness.get(key)
+    if not isinstance(raw_keys, list):
+        return []
+    return [item.strip() for item in raw_keys if isinstance(item, str) and item.strip()]
+
+
+def _has_capability_readiness_value(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, dict)):
+        return bool(value)
+    return True

@@ -5,7 +5,12 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Any
 
-from otomekairo.capabilities import capability_manifests, capability_world_state_type
+from otomekairo.capabilities import (
+    capability_manifests,
+    capability_readiness_result_digest,
+    capability_readiness_world_state_digest,
+    capability_world_state_type,
+)
 from otomekairo.llm import LLMError
 from otomekairo.memory_utils import (
     display_local_iso,
@@ -619,6 +624,14 @@ class ServiceInputMixin:
             "visual_summary_text": visual_summary_text,
             "visual_confidence_hint": visual_confidence_hint,
         }
+        capability_id = enriched_observation_summary.get("capability_id")
+        readiness_digest = (
+            capability_readiness_result_digest(capability_id, enriched_observation_summary)
+            if isinstance(capability_id, str)
+            else None
+        )
+        if isinstance(readiness_digest, dict):
+            enriched_observation_summary["readiness_digest"] = readiness_digest
         return enriched_client_context, enriched_observation_summary
 
     def _pipeline_effective_input_text(
@@ -687,12 +700,18 @@ class ServiceInputMixin:
             if item.get("available") is not True or fresh_state is None:
                 annotated.append(item)
                 continue
+            readiness_digest = capability_readiness_world_state_digest(
+                capability_id,
+                fresh_state.get("state_type"),
+            )
             annotated_item = {
                 **item,
                 "fresh_world_state_available": True,
                 "fresh_world_state": fresh_state,
                 "fresh_world_state_policy": "明示的なユーザー依頼なしでは同じ現在状態を再取得しない。",
             }
+            if isinstance(readiness_digest, dict):
+                annotated_item["fresh_world_state_readiness_digest"] = readiness_digest
             annotated.append(annotated_item)
             changed = True
         return annotated if changed else capability_decision_view
@@ -5379,6 +5398,9 @@ class ServiceInputMixin:
             if value is None:
                 continue
             payload[key] = value
+        readiness_digest = summary.get("readiness_digest")
+        if isinstance(readiness_digest, dict):
+            payload["readiness_digest"] = readiness_digest
         if not payload:
             return None
         return payload
@@ -5411,6 +5433,9 @@ class ServiceInputMixin:
                 payload[key] = self._clamp(normalized, limit=160)
                 continue
             if isinstance(value, (int, float, bool)):
+                payload[key] = value
+                continue
+            if key == "readiness_digest" and isinstance(value, dict):
                 payload[key] = value
         if not payload:
             return None
