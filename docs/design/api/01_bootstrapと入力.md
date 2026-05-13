@@ -154,7 +154,7 @@ response:
 - `internal_failure`
 
 `result_kind=capability_request` のとき、server は capability request を `events/stream` へ配送済みであり、response には `capability_request` 要約を返す。
-`capability_request` 要約には `request_id`、`capability_id`、`status`、`timeout_ms` だけを含め、`target_client_id`、資格情報、内部 URL、transport 詳細は含めない。
+`capability_request` 要約には `request_id`、`capability_id`、`status`、`timeout_ms`、`readiness_digest` を含め、`target_client_id`、資格情報、内部 URL、transport 詳細は含めない。
 
 ```json
 {
@@ -167,7 +167,15 @@ response:
       "request_id": "vision_capture_request:...",
       "capability_id": "vision.capture",
       "status": "dispatched",
-      "timeout_ms": 5000
+      "timeout_ms": 5000,
+      "readiness_digest": {
+        "family": "screen_observation",
+        "world_state_type": "screen",
+        "input_keys": ["source", "mode"],
+        "present_input_keys": ["source", "mode"],
+        "missing_input_keys": [],
+        "input_keys_satisfied": true
+      }
     }
   }
 }

@@ -183,7 +183,7 @@ inspection では、少なくとも次を追えるようにする。
 各 probe は `drive_state / world_state / ongoing_action` と recent conversation turns を消してから seed を入れ、直前の status 確認会話に判断を引っ張られない状態で実行する。
 status capability の全体 request / response 件数は存在確認に留める。専用 probe の request / follow-up 成功は cycle trace 内の request id、source request summary、transition summary で確認する。
 
-manual wake 自律判断 matrix は次の 13 件に固定する。
+manual wake 自律判断 matrix は次の 16 件に固定する。
 
 | case | 入力条件 | 期待する構造 |
 | --- | --- | --- |
@@ -192,6 +192,9 @@ manual wake 自律判断 matrix は次の 13 件に固定する。
 | `missing-social-status-probe` | 対人文脈に関わる強い `drive_state` があり、対人 `world_state` が無い | `selected_candidate_family=autonomous`、`preferred_result_kind=capability_request`、`social.status` request |
 | `stale-external-status-probe` | 外部サービスに関わる強い `drive_state` と古い外部サービス `world_state` がある | `selected_candidate_family=autonomous`、`preferred_result_kind=capability_request`、`external.status` request |
 | `missing-device-status-probe` | 端末状態に関わる強い `drive_state` があり、端末 `world_state` が無い | `selected_candidate_family=autonomous`、`preferred_result_kind=capability_request`、`device.status` request |
+| `missing-body-status-probe` | 身体状態に関わる強い `drive_state` があり、身体 `world_state` が無い | `selected_candidate_family=autonomous`、`preferred_result_kind=capability_request`、`body.status` request |
+| `missing-environment-status-probe` | 作業環境に関わる強い `drive_state` があり、環境 `world_state` が無い | `selected_candidate_family=autonomous`、`preferred_result_kind=capability_request`、`environment.status` request |
+| `missing-location-status-probe` | 場所状態に関わる強い `drive_state` があり、場所 `world_state` が無い | `selected_candidate_family=autonomous`、`preferred_result_kind=capability_request`、`location.status` request |
 | `schedule-grounded-reply` | 近い予定の `world_state` と整合する `drive_state` がある | `foreground_thinness=grounded`、`selected_candidate_family=autonomous`、`decision.kind=reply` |
 | `social-grounded-reply` | 対人文脈の `world_state` と整合する `drive_state` がある | `foreground_thinness=grounded`、`selected_candidate_family=autonomous`、`decision.kind=reply` |
 | `body-grounded-reply` | 身体状態の `world_state` と整合する `drive_state` がある | `foreground_thinness=grounded`、`selected_candidate_family=autonomous`、`decision.kind=reply`、`fresh_world_state_capability_ids=["body.status"]` |
