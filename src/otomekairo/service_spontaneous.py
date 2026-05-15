@@ -470,13 +470,59 @@ class ServiceSpontaneousMixin:
         request_record = response.get("request_record")
         if isinstance(request_record, dict) and request_record.get("wait_for_response"):
             return {}
-        self._execute_async_capability_result_cycle(
+        self._start_async_capability_result_cycle(
             state=state,
             capability_response=response,
             started_at=accepted_at,
         )
 
         return {}
+
+    def _start_async_capability_result_cycle(
+        self,
+        *,
+        state: dict[str, Any],
+        capability_response: dict[str, Any],
+        started_at: str,
+    ) -> None:
+        capability_id = self._capability_result_capability_id(capability_response)
+        request_record = capability_response.get("request_record")
+        request_id = request_record.get("request_id") if isinstance(request_record, dict) else None
+        request_label = request_id if isinstance(request_id, str) and request_id.strip() else "-"
+
+        def run_cycle() -> None:
+            try:
+                self._execute_async_capability_result_cycle(
+                    state=state,
+                    capability_response=capability_response,
+                    started_at=started_at,
+                )
+            except Exception as exc:  # noqa: BLE001
+                debug_log(
+                    "CapabilityResult",
+                    (
+                        f"async cycle crashed request={request_label} capability={capability_id} "
+                        f"error={type(exc).__name__}: {self._clamp(str(exc))}"
+                    ),
+                )
+                cooldown_seconds = int(self._capability_state_policy(capability_id).get("error_cooldown_seconds") or 0)
+                self._mark_capability_runtime_failure(
+                    capability_id=capability_id,
+                    current_time=self._now_iso(),
+                    failure_summary=str(exc),
+                    cooldown_seconds=cooldown_seconds,
+                )
+
+        thread = threading.Thread(
+            target=run_cycle,
+            name="otomekairo-capability-result",
+            daemon=True,
+        )
+        thread.start()
+        debug_log(
+            "CapabilityResult",
+            f"async cycle queued request={request_label} capability={capability_id}",
+        )
 
     def _execute_async_capability_result_cycle(
         self,
@@ -1895,6 +1941,7 @@ class ServiceSpontaneousMixin:
                 return
             if not capture_response["images"]:
                 debug_log("DesktopWatch", "cycle skipped no_images")
+                self._set_last_desktop_watch_at(self._now_iso())
                 return
 
             # 成功タイムスタンプ
