@@ -115,7 +115,7 @@ PROFILE_DEFAULTS: dict[str, dict[str, int | float]] = {
         "restart_burst_conversations": 16,
         "multiple_client_pause_seconds": 30.0,
         "status_log_interval_seconds": 120.0,
-        "inspection_cycle_summary_limit": 5000,
+        "inspection_cycle_summary_limit": 12000,
         "max_memory_job_lag_seconds": 1800.0,
         "request_timeout_seconds": DEFAULT_REQUEST_TIMEOUT_SECONDS,
     },
@@ -1857,25 +1857,30 @@ class LongSmokeRunner:
         verified_request_ids: list[str],
     ) -> None:
         # soak の最終 summary は最新 N 件だけを集めるため、応答直後にも request_id の follow-up 到達を記録する。
-        cycle_summaries = self.api.get("/api/inspection/cycle-summaries?limit=160").get("cycle_summaries", [])
-        if not isinstance(cycle_summaries, list):
-            raise SmokeError("cycle_summaries response was invalid while remembering capability_result follow-up.")
-        for cycle_summary in cycle_summaries:
-            if not isinstance(cycle_summary, dict) or cycle_summary.get("trigger_kind") != "capability_result":
-                continue
-            cycle_id = cycle_summary.get("cycle_id")
-            if not isinstance(cycle_id, str) or not cycle_id:
-                continue
-            trace = self.api.get(f"/api/inspection/cycles/{cycle_id}")
-            followup_summary = ((trace.get("result_trace") or {}).get("capability_result_followup_summary"))
-            if not isinstance(followup_summary, dict) or followup_summary.get("capability_id") != capability_id:
-                continue
-            source_request_summary = followup_summary.get("source_request_summary")
-            if not isinstance(source_request_summary, dict) or source_request_summary.get("request_id") != request_id:
-                continue
-            if request_id not in verified_request_ids:
-                verified_request_ids.append(request_id)
-            return
+        deadline = time.monotonic() + min(self.api.request_timeout_seconds, 10.0)
+        inspected_cycle_ids: set[str] = set()
+        while time.monotonic() < deadline:
+            cycle_summaries = self.api.get("/api/inspection/cycle-summaries?limit=160").get("cycle_summaries", [])
+            if not isinstance(cycle_summaries, list):
+                raise SmokeError("cycle_summaries response was invalid while remembering capability_result follow-up.")
+            for cycle_summary in cycle_summaries:
+                if not isinstance(cycle_summary, dict) or cycle_summary.get("trigger_kind") != "capability_result":
+                    continue
+                cycle_id = cycle_summary.get("cycle_id")
+                if not isinstance(cycle_id, str) or not cycle_id or cycle_id in inspected_cycle_ids:
+                    continue
+                inspected_cycle_ids.add(cycle_id)
+                trace = self.api.get(f"/api/inspection/cycles/{cycle_id}")
+                followup_summary = ((trace.get("result_trace") or {}).get("capability_result_followup_summary"))
+                if not isinstance(followup_summary, dict) or followup_summary.get("capability_id") != capability_id:
+                    continue
+                source_request_summary = followup_summary.get("source_request_summary")
+                if not isinstance(source_request_summary, dict) or source_request_summary.get("request_id") != request_id:
+                    continue
+                if request_id not in verified_request_ids:
+                    verified_request_ids.append(request_id)
+                return
+            time.sleep(0.25)
 
     def _set_wake_policy_disabled(self) -> None:
         self.api.post("/api/config/update-wake-policy", {"wake_policy": {"mode": "disabled"}})
