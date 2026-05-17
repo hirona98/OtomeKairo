@@ -14,6 +14,19 @@ OPENROUTER_DEFAULT_API_BASE = "https://openrouter.ai/api/v1"
 OPENROUTER_DEFAULT_TIMEOUT_SECONDS = 600
 
 
+# LiteLLM provider 未解決時の Provider List 表示だけ抑止する。
+class _LiteLLMProviderLogicProxy:
+    def __init__(self, module: Any) -> None:
+        self._module = module
+
+    @property
+    def suppress_debug_info(self) -> bool:
+        return True
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._module, name)
+
+
 # text completion を model 差分込みで実行する。
 def complete_text(
     *,
@@ -100,6 +113,7 @@ def _load_litellm_completion() -> Callable[..., Any]:
         from litellm import completion
     except ImportError as exc:
         raise LLMError("LiteLLM がインストールされていません。依存関係を入れるには ./scripts/setup_venv.sh を実行してください。") from exc
+    _configure_litellm_provider_list_suppression()
     return completion
 
 
@@ -108,7 +122,22 @@ def _load_litellm_embedding() -> Callable[..., Any]:
         from litellm import embedding
     except ImportError as exc:
         raise LLMError("LiteLLM がインストールされていません。依存関係を入れるには ./scripts/setup_venv.sh を実行してください。") from exc
+    _configure_litellm_provider_list_suppression()
     return embedding
+
+
+def _configure_litellm_provider_list_suppression() -> None:
+    try:
+        import litellm
+        from litellm.litellm_core_utils import get_llm_provider_logic
+    except ImportError as exc:
+        raise LLMError("LiteLLM がインストールされていません。依存関係を入れるには ./scripts/setup_venv.sh を実行してください。") from exc
+
+    if getattr(get_llm_provider_logic, "_otomekairo_provider_list_suppressed", False):
+        return
+
+    get_llm_provider_logic.litellm = _LiteLLMProviderLogicProxy(litellm)
+    get_llm_provider_logic._otomekairo_provider_list_suppressed = True
 
 
 def _is_openrouter_embedding_role_definition(role_definition: dict) -> bool:
