@@ -238,7 +238,7 @@ capability 実行は次の順序で行う。
 8. server が `request_id`、`target_client_id`、`result_schema` を検証する。
 9. server が `capability_id` ごとの follow-up pipeline で `memory_policy`、`state_policy`、`inspection_fields` に従って記憶、状態、inspection を更新する。
 
-どこまで実装済みか、どの result endpoint が concrete に開いているか、follow-up pipeline の現在地がどこまで進んでいるかは [../plan/01_現行計画.md](../plan/01_現行計画.md) を正とする。
+どこまで実装済みか、どの result endpoint が concrete に開いているか、follow-up pipeline の現在地は [../01_現在地.md](../01_現在地.md) を正とする。
 
 LLM が実行要求案を出しても、server の検証を通らない要求は実行しない。
 検証失敗は判断サイクルの `internal_failure` または capability failure として記録する。
