@@ -143,6 +143,8 @@ LLM に渡す source pack は少なくとも次を持つ。
 real schedule source がある場合は `schedule_slots` を持ち、各 slot は `slot_key / summary_text / not_before / expires_at` を持つ短い object にする。
 `external_service_context` には `summary_text` に加えて、`service / status_text / capability_id` と、必要なら `client_summary_text / result_summary_text / summary_source_hint` のような短い境界補助 field を含める。
 `visual_context` には `visual_summary_text / image_interpreted / visual_confidence_hint / image_count / capability_id` を含める。
+`visual_context` は `vision.capture` のような現在の視覚状態を観測する source から作る。
+通常会話の添付画像は `conversation_attachment` として会話入力へ反映し、添付画像だけから `world_state.visual_context` を更新しない。
 `social_context_context` には `social_context_summary / capability_id`、`environment_context` には `environment_summary`、`location_context` には `location_summary` を含める。
 `body_context` には `body_state_summary / capability_id`、`device_context` には `device_state_summary / capability_id`、`schedule_context` には `schedule_summary / capability_id` を含める。
 `social.status` result は `social_context_context.social_context_summary` に投影し、raw social payload は `world_state` に入れない。

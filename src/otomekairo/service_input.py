@@ -28,6 +28,7 @@ from otomekairo.service_common import ServiceError, debug_log
 
 RECALL_HINT_RECENT_TURN_LIMIT = 6
 VISUAL_OBSERVATION_IMAGE_LIMIT = 1
+VISUAL_OBSERVATION_DATA_URI_PREFIX = "data:image/"
 WORLD_STATE_CONTEXT_KEYS_BY_TYPE = (
     ("visual_context", "visual_context"),
     ("external_service", "external_service_context"),
@@ -207,11 +208,12 @@ class ServiceInputMixin:
         )
 
         try:
-            # 画像観測要約
+            # 会話添付画像は capability 実行ではなく、会話入力の補助要約として扱う。
             if input_images:
                 current_client_context["image_count"] = len(input_images)
                 observation_summary = {
-                    "source": "conversation_input",
+                    "source": "conversation_attachment",
+                    "image_input_kind": "conversation_attachment",
                     "image_count": len(input_images),
                     "image_interpreted": False,
                     "error": None,
@@ -602,14 +604,29 @@ class ServiceInputMixin:
             return []
         if not isinstance(images, list):
             raise ServiceError(400, "invalid_images", "images must be an array.")
+        if len(images) > VISUAL_OBSERVATION_IMAGE_LIMIT:
+            raise ServiceError(
+                400,
+                "invalid_images",
+                f"images must contain at most {VISUAL_OBSERVATION_IMAGE_LIMIT} item.",
+            )
         normalized_images: list[str] = []
         for image in images:
             if not isinstance(image, str) or not image.strip():
                 raise ServiceError(400, "invalid_images", "images must contain non-empty strings.")
-            normalized_images.append(image.strip())
-            if len(normalized_images) >= VISUAL_OBSERVATION_IMAGE_LIMIT:
-                break
+            normalized_image = image.strip()
+            if not self._is_image_data_uri(normalized_image):
+                raise ServiceError(400, "invalid_images", "images must contain image data URIs.")
+            normalized_images.append(normalized_image)
         return normalized_images
+
+    def _is_image_data_uri(self, value: str) -> bool:
+        if not value.startswith(VISUAL_OBSERVATION_DATA_URI_PREFIX):
+            return False
+        header, separator, body = value.partition(",")
+        if separator != "," or not body.strip():
+            return False
+        return ";base64" in header
 
     def _interpret_visual_observation(
         self,
@@ -628,13 +645,13 @@ class ServiceInputMixin:
         # role/source pack
         selected_preset = state["model_presets"][state["selected_model_preset_id"]]
         interpretation_role = selected_preset["roles"]["input_interpretation"]
-        source_pack = {
-            "trigger_kind": trigger_kind,
-            "time_context": llm_local_time_text(started_at).replace("\n", " / "),
-            "client_context": self._build_world_state_client_context(client_context),
-            "observation_summary": self._build_world_state_capability_result_summary(observation_summary) or {},
-            "current_input_summary": self._clamp(input_text.strip(), limit=200) or "",
-        }
+        source_pack = self._build_visual_observation_source_pack(
+            started_at=started_at,
+            input_text=input_text,
+            trigger_kind=trigger_kind,
+            client_context=client_context,
+            observation_summary=observation_summary,
+        )
 
         # 実行
         try:
@@ -670,6 +687,90 @@ class ServiceInputMixin:
             enriched_observation_summary["readiness_digest"] = readiness_digest
         return enriched_client_context, enriched_observation_summary
 
+    def _build_visual_observation_source_pack(
+        self,
+        *,
+        started_at: str,
+        input_text: str,
+        trigger_kind: str,
+        client_context: dict[str, Any],
+        observation_summary: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "trigger_kind": trigger_kind,
+            "image_input_kind": self._visual_observation_input_kind(
+                trigger_kind=trigger_kind,
+                observation_summary=observation_summary,
+            ),
+            "time_context": llm_local_time_text(started_at).replace("\n", " / "),
+            "client_context": self._build_visual_observation_client_context(
+                trigger_kind=trigger_kind,
+                client_context=client_context,
+                observation_summary=observation_summary,
+            ),
+            "observation_summary": self._build_visual_observation_observation_summary(observation_summary),
+            "current_input_summary": self._clamp(input_text.strip(), limit=200) or "",
+        }
+
+    def _visual_observation_input_kind(
+        self,
+        *,
+        trigger_kind: str,
+        observation_summary: dict[str, Any],
+    ) -> str:
+        image_input_kind = observation_summary.get("image_input_kind")
+        if isinstance(image_input_kind, str) and image_input_kind.strip():
+            return image_input_kind.strip()
+        if trigger_kind == "capability_result" and observation_summary.get("capability_id") == "vision.capture":
+            return "vision_capture_result"
+        return "conversation_attachment"
+
+    def _build_visual_observation_client_context(
+        self,
+        *,
+        trigger_kind: str,
+        client_context: dict[str, Any],
+        observation_summary: dict[str, Any],
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        include_foreground_hint = (
+            trigger_kind == "capability_result"
+            and observation_summary.get("capability_id") == "vision.capture"
+        )
+        for key, limit in (
+            ("source", 48),
+            ("client_id", 80),
+            ("active_app", 80),
+            ("window_title", 120),
+            ("locale", 32),
+        ):
+            if key in {"active_app", "window_title", "locale"} and not include_foreground_hint:
+                continue
+            value = client_context.get(key)
+            if isinstance(value, str) and value.strip():
+                payload[key] = self._clamp(value.strip(), limit=limit)
+        return payload
+
+    def _build_visual_observation_observation_summary(
+        self,
+        observation_summary: dict[str, Any],
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        for key in (
+            "source",
+            "image_input_kind",
+            "capability_id",
+            "image_count",
+            "image_interpreted",
+            "visual_confidence_hint",
+            "error",
+        ):
+            value = observation_summary.get(key)
+            if value is None:
+                continue
+            payload[key] = value
+        return payload
+
     def _pipeline_effective_input_text(
         self,
         *,
@@ -685,9 +786,24 @@ class ServiceInputMixin:
         normalized_input_text = input_text.strip()
         if visual_summary_text in normalized_input_text:
             return input_text
+        label = (
+            "添付画像"
+            if self._observation_summary_is_conversation_attachment(observation_summary)
+            else "視覚観測"
+        )
+        visual_input_summary = (
+            visual_summary_text
+            if visual_summary_text.startswith(label)
+            else f"{label}では、{visual_summary_text}"
+        )
         if not normalized_input_text:
-            return f"画像観測では、{visual_summary_text}"
-        return f"{normalized_input_text} 画像観測では、{visual_summary_text}"
+            return visual_input_summary
+        return f"{normalized_input_text} {visual_input_summary}"
+
+    def _observation_summary_is_conversation_attachment(self, observation_summary: dict[str, Any] | None) -> bool:
+        if not isinstance(observation_summary, dict):
+            return False
+        return observation_summary.get("source") == "conversation_attachment"
 
     def _visual_observation_summary_text(self, observation_summary: dict[str, Any] | None) -> str | None:
         if not isinstance(observation_summary, dict):
@@ -3280,9 +3396,10 @@ class ServiceInputMixin:
         ):
             if value is not None:
                 payload[key] = value
-        capability_result_summary = self._build_world_state_capability_result_summary(observation_summary)
-        if capability_result_summary is not None:
-            payload["capability_result_summary"] = capability_result_summary
+        if source_kind == "capability_result":
+            capability_result_summary = self._build_world_state_capability_result_summary(observation_summary)
+            if capability_result_summary is not None:
+                payload["capability_result_summary"] = capability_result_summary
         payload["allowed_state_types"] = self._world_state_allowed_state_types(source_pack=payload)
         return payload
 
@@ -3294,6 +3411,8 @@ class ServiceInputMixin:
         payload: dict[str, Any] = {}
         visual_summary_text = None
         capability_id_text = None
+        if not self._observation_summary_updates_visual_world_state(observation_summary):
+            return None
         if isinstance(observation_summary, dict):
             visual_summary_text = self._client_context_text(observation_summary.get("visual_summary_text"), limit=160)
             if visual_summary_text is not None:
@@ -3317,6 +3436,17 @@ class ServiceInputMixin:
         if capability_id_text is not None:
             payload["capability_id"] = capability_id_text
         return payload
+
+    def _observation_summary_updates_visual_world_state(
+        self,
+        observation_summary: dict[str, Any] | None,
+    ) -> bool:
+        if not isinstance(observation_summary, dict):
+            return False
+        return (
+            observation_summary.get("source") == "capability_result"
+            and observation_summary.get("capability_id") == "vision.capture"
+        )
 
     def _build_world_state_external_service_context(
         self,

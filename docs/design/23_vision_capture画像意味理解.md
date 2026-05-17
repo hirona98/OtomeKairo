@@ -3,6 +3,7 @@
 ## 目的
 
 非同期 capability result が取得した `vision.capture` の image payload を、raw payload のままではなく、共有判断パイプラインへ渡せる短い観測要約へ変換する。
+同じ `visual_observation` 契約は通常会話の添付画像でも再利用するが、通常会話の添付画像は `vision.capture` capability result ではない。
 
 この段階の目的は、画像から万能な構造理解を作ることではない。
 `client_context` だけでは落ちる「今の画面で何が前景か」を、判断、`world_state`、inspection に反映できるようにすることに絞る。
@@ -21,13 +22,12 @@
 - raw image payload の永続化
 - OCR の全文抽出
 - UI 要素や座標の構造化
-- 通常会話 API での画像入力
 - capability 実行一般への横展開
 
 ## 入力と出力
 
 `vision.capture` の client -> server wire 形式自体は変えない。
-`images` は Data URI 配列のまま受け取る。
+`images` は最大 1 件の Data URI 配列として受け取る。
 
 この段階では、画像意味理解の出力として次だけを持つ。
 
@@ -48,6 +48,7 @@ LLM に渡す source pack は少なくとも次を持つ。
 ```json
 {
   "trigger_kind": "capability_result",
+  "image_input_kind": "vision_capture_result",
   "time_context": "2026年4月27日 月曜日 23時00分（日本時間）",
   "client_context": {
     "active_app": "Slack",
@@ -65,6 +66,7 @@ LLM に渡す source pack は少なくとも次を持つ。
 
 画像は source pack の JSON に埋め込まず、multimodal message の image part として別に添付する。
 1 回の解釈で使う画像件数はコード側で制限する。
+通常会話の添付画像では `image_input_kind=conversation_attachment` を使い、desktop client、capability request、ongoing_action と結び付けない。
 
 LLM の出力は JSON object 1 個に固定する。
 

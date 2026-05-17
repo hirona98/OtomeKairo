@@ -124,11 +124,14 @@ request:
 ```
 
 - `text` は必須の文字列
-- `images` は任意の Data URI 配列とする。値がないときは省略する
+- `images` は任意の画像 Data URI 配列とする。値がないときは省略する
+- `images` は最大 1 件とする
 - `client_context` は object とする。値がないときは省略する
 - 標準の `client_context` には `source / client_id / active_app / window_title / locale` を含める
 - `client_context` の任意 field として `social_context_summary / environment_summary / location_summary / external_service_summary / body_state_summary / device_state_summary / schedule_summary` を定義する。いずれも raw payload ではなく短い要約だけを渡す
 - server は `images` を永続化せず、必要な場合だけ短い観測要約へ変換して shared pipeline に渡す
+- 会話の `images` は `conversation_attachment` として扱い、`vision.capture` の capability result とは結び付けない
+- 会話の `images` だけから `world_state.visual_context` を更新しない
 - server は上記 summary をそのまま永続化せず、必要な場合だけ `world_state` source pack の補助文脈へ使う
 
 response:
@@ -189,7 +192,7 @@ response:
 | HTTP | `error.code` | 意味 |
 |------|--------------|------|
 | `400` | `invalid_text` | `text` が文字列ではない |
-| `400` | `invalid_images` | `images` が配列でない、または要素が不正 |
+| `400` | `invalid_images` | `images` が配列でない、2 件以上、Data URI でない、または要素が不正 |
 | `400` | `invalid_client_context` | `client_context` が object ではない |
 
 ## 自律面

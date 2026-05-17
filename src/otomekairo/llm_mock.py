@@ -92,6 +92,7 @@ class MockLLMClient:
 
         # context
         _ = images
+        image_input_kind = str(source_pack.get("image_input_kind") or "").strip() if isinstance(source_pack, dict) else ""
         client_context = source_pack.get("client_context", {}) if isinstance(source_pack, dict) else {}
         active_app = ""
         window_title = ""
@@ -100,7 +101,9 @@ class MockLLMClient:
             window_title = str(client_context.get("window_title") or "").strip()
 
         # summary
-        if active_app and window_title:
+        if image_input_kind == "conversation_attachment":
+            summary_text = "添付画像には、会話で確認するための視覚情報が写っている。"
+        elif active_app and window_title:
             if active_app in {"Slack", "Discord", "Teams"}:
                 channel_name = window_title.split("|", 1)[0].strip()
                 summary_text = f"{active_app} の会話が視覚前景で、{channel_name} のやり取りが見えている。"

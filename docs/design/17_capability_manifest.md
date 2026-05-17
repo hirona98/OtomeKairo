@@ -114,7 +114,8 @@ inspection には運用確認に必要な binding 要約を出すが、token、c
     "properties": {
       "images": {
         "type": "array",
-        "items": { "type": "string" }
+        "items": { "type": "string" },
+        "maxItems": 1
       },
       "client_context": {
         "type": ["object", "null"]

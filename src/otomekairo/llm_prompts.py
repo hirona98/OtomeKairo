@@ -985,12 +985,14 @@ def _build_world_state_system_prompt() -> str:
 
 def _build_visual_observation_system_prompt() -> str:
     return (
-        "あなたは OtomeKairo の input_interpretation で、vision.capture の image payload を短い観測要約へ圧縮する visual_observation です。\n"
+        "あなたは OtomeKairo の input_interpretation で、image payload を短い観測要約へ圧縮する visual_observation です。\n"
         "画像と source pack を読み、JSON オブジェクト 1 個だけを返してください。\n"
         "Markdown、コードフェンス、説明文は禁止です。\n"
         "返すトップレベルキーは summary_text, confidence_hint の 2 つだけです。\n"
         "summary_text は 1 文、改行なし、内部識別子なしにしてください。\n"
-        "summary_text では、画面の前景として判断に効く内容だけを短く要約してください。\n"
+        "source_pack.image_input_kind が conversation_attachment の場合は、会話に添付された画像として要約してください。\n"
+        "source_pack.image_input_kind が vision_capture_result の場合は、現在の視覚前景として要約してください。\n"
+        "summary_text では、画像に見えている内容のうち判断に効く部分だけを短く要約してください。\n"
         "細かな OCR の全文、座標、UI 構造、資格情報、内部 URL、配送先 client、base64 本文を書いてはいけません。\n"
         "画像に自信が持てない場合は、控えめな summary_text と low confidence を返してください。\n"
         "confidence_hint は "

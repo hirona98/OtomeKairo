@@ -101,21 +101,11 @@ class ServiceSpontaneousMixin:
             images = result_payload.get("images", [])
             client_context = result_payload.get("client_context")
             error = result_payload.get("error")
-            if not isinstance(images, list):
-                raise ServiceError(400, "invalid_capability_result", "vision.capture result.images must be an array.")
             if client_context is not None and not isinstance(client_context, dict):
                 raise ServiceError(400, "invalid_capability_result", "vision.capture result.client_context must be an object.")
             if error is not None and not isinstance(error, str):
                 raise ServiceError(400, "invalid_capability_result", "vision.capture result.error must be a string or null.")
-            normalized_images: list[str] = []
-            for image in images:
-                if not isinstance(image, str) or not image.strip():
-                    raise ServiceError(
-                        400,
-                        "invalid_capability_result",
-                        "vision.capture result.images must contain non-empty strings.",
-                    )
-                normalized_images.append(image.strip())
+            normalized_images = self._normalize_vision_capture_result_images(images)
             return {
                 "images": normalized_images,
                 "client_context": client_context or {},
@@ -330,6 +320,18 @@ class ServiceSpontaneousMixin:
         if "error" in payload:
             payload["error"] = error.strip() if isinstance(error, str) and error.strip() else None
         return payload
+
+    def _normalize_vision_capture_result_images(self, images: Any) -> list[str]:
+        try:
+            return self._normalize_visual_observation_images(images, allow_missing=False)
+        except ServiceError as exc:
+            if exc.error_code != "invalid_images":
+                raise
+            raise ServiceError(
+                400,
+                "invalid_capability_result",
+                f"vision.capture result.{exc.message}",
+            ) from exc
 
     def _normalize_capability_result_schedule_slots(self, raw_slots: list[Any]) -> list[dict[str, Any]]:
         normalized_slots: list[dict[str, Any]] = []

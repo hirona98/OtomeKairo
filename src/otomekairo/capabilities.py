@@ -35,6 +35,7 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
                 "images": {
                     "type": "array",
                     "items": {"type": "string"},
+                    "maxItems": 1,
                 },
                 "client_context": {
                     "type": ["object", "null"],
