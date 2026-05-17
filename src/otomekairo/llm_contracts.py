@@ -193,6 +193,12 @@ def normalize_recall_hint_payload(payload: dict[str, Any]) -> dict[str, Any]:
     focus_scopes = normalized.get("focus_scopes")
     if isinstance(focus_scopes, list):
         normalized["focus_scopes"] = _normalized_recall_focus_scopes(focus_scopes)
+    mentioned_entities = normalized.get("mentioned_entities")
+    if isinstance(mentioned_entities, list):
+        normalized["mentioned_entities"] = _normalized_named_refs(mentioned_entities)
+    mentioned_topics = normalized.get("mentioned_topics")
+    if isinstance(mentioned_topics, list):
+        normalized["mentioned_topics"] = _normalized_topic_refs(mentioned_topics)
     return normalized
 
 
@@ -207,6 +213,42 @@ def _normalized_recall_focus_scopes(scopes: list[Any]) -> list[str]:
             continue
         normalized.append(value)
         seen.add(value)
+        if len(normalized) >= MAX_HINT_SCOPE_VALUES:
+            break
+    return normalized
+
+
+def _normalized_named_refs(values: list[Any]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if not isinstance(value, str):
+            continue
+        candidate = value.strip()
+        if not candidate or not _has_named_ref_prefix(candidate) or candidate in seen:
+            continue
+        normalized.append(candidate)
+        seen.add(candidate)
+        if len(normalized) >= MAX_HINT_SCOPE_VALUES:
+            break
+    return normalized
+
+
+def _normalized_topic_refs(values: list[Any]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if not isinstance(value, str):
+            continue
+        candidate = value.strip()
+        if not candidate:
+            continue
+        if ":" not in candidate:
+            candidate = f"topic:{candidate}"
+        if not candidate.startswith("topic:") or candidate == "topic:" or candidate in seen:
+            continue
+        normalized.append(candidate)
+        seen.add(candidate)
         if len(normalized) >= MAX_HINT_SCOPE_VALUES:
             break
     return normalized

@@ -446,6 +446,7 @@ def build_input_interpretation_repair_prompt(validation_error: str) -> str:
         "同じ入力だけを根拠に、JSON オブジェクト 1 個だけを返し直してください。\n"
         "トップレベルキーは recall_hint, answer_contract の 2 つだけです。\n"
         "recall_hint は interaction_mode, primary_recall_focus, secondary_recall_focuses, confidence, time_reference, focus_scopes, mentioned_entities, mentioned_topics, risk_flags の 9 キーだけを持ちます。\n"
+        "mentioned_topics の各要素は topic:<name> 形式です。例: [\"topic:仕事\"]。話題タグを特定できないなら [] にしてください。\n"
         "answer_contract は contract, reason_codes, boundary, target_actor, query_terms の 5 キーだけを持ちます。\n"
         "Markdown、コードフェンス、説明文は禁止です。"
     )
@@ -470,6 +471,7 @@ def _build_input_interpretation_system_prompt() -> str:
         + ", ".join(sorted(RISK_FLAG_VALUES))
         + "\n"
         "recall_hint は focus_scopes 最大4件、mentioned_entities 最大4件、mentioned_topics 最大4件、risk_flags 最大3件にしてください。\n"
+        "mentioned_topics は topic:睡眠 / topic:仕事 のように必ず topic: 接頭辞付きで返してください。話題タグを特定できない雑談なら [] にしてください。\n"
         "第三者名や固有名は focus_scopes ではなく mentioned_entities に入れてください。\n"
         "world は focus_scopes に入れず、世界条件が主題のとき primary_recall_focus=state または fact を選んでください。\n"
         "answer_contract は回答生成前にどの根拠を直接確認するかの契約です。一般応答は summary を返してください。\n"
