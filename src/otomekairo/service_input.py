@@ -28,6 +28,16 @@ from otomekairo.service_common import ServiceError, debug_log
 
 RECALL_HINT_RECENT_TURN_LIMIT = 6
 VISUAL_OBSERVATION_IMAGE_LIMIT = 1
+WORLD_STATE_CONTEXT_KEYS_BY_TYPE = (
+    ("screen", "screen_context"),
+    ("external_service", "external_service_context"),
+    ("body", "body_context"),
+    ("device", "device_context"),
+    ("schedule", "schedule_context"),
+    ("social_context", "social_context_context"),
+    ("environment", "environment_context"),
+    ("location", "location_context"),
+)
 WORLD_STATE_FOREGROUND_LIMIT = 4
 WORLD_STATE_MAX_ACTIVE = 12
 WORLD_STATE_USER_INPUT_REQUEST_TERMS = (
@@ -3292,6 +3302,7 @@ class ServiceInputMixin:
         capability_result_summary = self._build_world_state_capability_result_summary(observation_summary)
         if capability_result_summary is not None:
             payload["capability_result_summary"] = capability_result_summary
+        payload["allowed_state_types"] = self._world_state_allowed_state_types(source_pack=payload)
         return payload
 
     def _build_world_state_screen_context(
@@ -3700,6 +3711,13 @@ class ServiceInputMixin:
 
     def _summarize_world_state_source_pack_contexts(self, source_pack: dict[str, Any]) -> dict[str, Any]:
         summary: dict[str, Any] = {}
+        allowed_state_types = source_pack.get("allowed_state_types")
+        if isinstance(allowed_state_types, list):
+            summary["allowed_state_types"] = [
+                value
+                for value in allowed_state_types
+                if isinstance(value, str) and value.strip()
+            ]
         for key in (
             "client_context",
             "screen_context",
@@ -3719,16 +3737,7 @@ class ServiceInputMixin:
 
     def _summarize_world_state_state_type_hooks(self, source_pack: dict[str, Any]) -> dict[str, Any]:
         hooks: dict[str, Any] = {}
-        for state_type, context_key in (
-            ("screen", "screen_context"),
-            ("external_service", "external_service_context"),
-            ("body", "body_context"),
-            ("device", "device_context"),
-            ("schedule", "schedule_context"),
-            ("social_context", "social_context_context"),
-            ("environment", "environment_context"),
-            ("location", "location_context"),
-        ):
+        for state_type, context_key in WORLD_STATE_CONTEXT_KEYS_BY_TYPE:
             context = source_pack.get(context_key)
             if not isinstance(context, dict) or not context:
                 continue
@@ -3866,6 +3875,14 @@ class ServiceInputMixin:
                 signal_fields.append(key)
         return signal_fields
 
+    def _world_state_allowed_state_types(self, *, source_pack: dict[str, Any]) -> list[str]:
+        allowed: list[str] = []
+        for state_type, context_key in WORLD_STATE_CONTEXT_KEYS_BY_TYPE:
+            context = source_pack.get(context_key)
+            if isinstance(context, dict) and context:
+                allowed.append(state_type)
+        return allowed
+
     def _normalize_world_state_candidates(
         self,
         *,
@@ -3878,10 +3895,13 @@ class ServiceInputMixin:
     ) -> list[dict[str, Any]]:
         normalized: list[dict[str, Any]] = []
         seen_identity: set[tuple[str, str, str]] = set()
+        allowed_state_types = set(self._world_state_allowed_state_types(source_pack=source_pack))
         for candidate in payload.get("state_candidates", []):
             if not isinstance(candidate, dict):
                 continue
             state_type = str(candidate["state_type"]).strip()
+            if state_type not in allowed_state_types:
+                continue
             scope_type, scope_key = self._parse_world_state_scope(str(candidate["scope"]).strip())
             identity = (state_type, scope_type, scope_key)
             if identity in seen_identity:
