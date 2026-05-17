@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import errno
 import json
+import ssl
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
@@ -8,6 +10,25 @@ from urllib.parse import parse_qs, unquote, urlparse
 from otomekairo.event_stream import ServerWebSocket, WebSocketProtocolError, build_websocket_accept
 from otomekairo.service import OtomeKairoService, ServiceError
 from otomekairo.service_common import debug_log
+
+
+CLIENT_DISCONNECT_ERRNOS = {
+    errno.ECONNABORTED,
+    errno.ECONNRESET,
+    errno.EPIPE,
+    errno.ESHUTDOWN,
+    errno.ETIMEDOUT,
+}
+
+CLIENT_DISCONNECT_SSL_REASONS = {
+    "BAD_LENGTH",
+    "EOF_OCCURRED",
+}
+
+
+# クライアント切断
+class ClientDisconnectedError(RuntimeError):
+    pass
 
 
 # サーバー
@@ -230,12 +251,21 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
 
             # 未検出
             raise ServiceError(404, "route_not_found", "The requested route does not exist.")
+        except ClientDisconnectedError as exc:
+            self._debug_log_client_disconnect(exc.__cause__ or exc)
         except json.JSONDecodeError:
-            self._write_error(HTTPStatus.BAD_REQUEST, "invalid_json", "The request body must be valid JSON.")
+            self._write_error_safely(
+                HTTPStatus.BAD_REQUEST,
+                "invalid_json",
+                "The request body must be valid JSON.",
+            )
         except ServiceError as exc:
-            self._write_error(exc.status_code, exc.error_code, exc.message)
+            self._write_error_safely(exc.status_code, exc.error_code, exc.message)
         except Exception as exc:  # noqa: BLE001
-            self._write_error(HTTPStatus.INTERNAL_SERVER_ERROR, "internal_server_error", str(exc))
+            if self._is_client_disconnect(exc):
+                self._debug_log_client_disconnect(exc)
+                return
+            self._write_error_safely(HTTPStatus.INTERNAL_SERVER_ERROR, "internal_server_error", str(exc))
 
     def _handle_events_stream(self, token: str | None) -> None:
         # 認可
@@ -359,13 +389,26 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
         }
         self._write_json(status, payload)
 
+    def _write_error_safely(self, status: int, error_code: str, message: str) -> None:
+        # エラー応答中に切断された場合は、同じソケットへ再送しない。
+        try:
+            self._write_error(status, error_code, message)
+        except ClientDisconnectedError as exc:
+            self._debug_log_client_disconnect(exc.__cause__ or exc)
+
     def _write_json(self, status: int, payload: dict) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except Exception as exc:  # noqa: BLE001
+            if self._is_client_disconnect(exc):
+                self.close_connection = True
+                raise ClientDisconnectedError(str(exc)) from exc
+            raise
         self._debug_log_response(status, payload)
 
     def _debug_log_response(self, status: int, payload: dict) -> None:
@@ -381,3 +424,31 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
             return
 
         debug_log("HTTP", f"{self.command} {parsed.path} -> {status}")
+
+    def _debug_log_client_disconnect(self, exc: BaseException) -> None:
+        parsed = urlparse(self.path)
+        debug_log("HTTP", f"{self.command} {parsed.path} client_disconnected error={type(exc).__name__}")
+
+    def _is_client_disconnect(self, exc: BaseException) -> bool:
+        # レスポンス送信中の切断だけを通常の終了として扱う。
+        if isinstance(
+            exc,
+            (
+                BrokenPipeError,
+                ConnectionAbortedError,
+                ConnectionResetError,
+                TimeoutError,
+                ssl.SSLEOFError,
+                ssl.SSLZeroReturnError,
+            ),
+        ):
+            return True
+        if isinstance(exc, OSError) and exc.errno in CLIENT_DISCONNECT_ERRNOS:
+            return True
+        if isinstance(exc, ssl.SSLError):
+            reason = getattr(exc, "reason", None)
+            if isinstance(reason, str) and reason in CLIENT_DISCONNECT_SSL_REASONS:
+                return True
+            message = str(exc)
+            return any(marker in message for marker in CLIENT_DISCONNECT_SSL_REASONS)
+        return False
