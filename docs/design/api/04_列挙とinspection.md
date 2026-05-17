@@ -213,6 +213,8 @@ trigger をまたいだ比較用に、`result_trace.trigger_compact_summary` に
 capability dispatch が起きた cycle では、`result_trace.capability_dispatch_summary` に capability family 共通で比較しやすい compact summary を含める。
 `trigger_kind=capability_result` の cycle では、`result_trace.capability_result_followup_summary` に capability family 共通で比較しやすい compact summary を含める。
 initiative 系 trigger の `entry_summary.candidate_families` には、`preferred_result_kind / preferred_result_reason_summary / blocking_reason_summary` を含める。
+exact answer 系の cycle では、`recall_trace` に `answer_contract`、`evidence_pack`、`fact_resolution_trace` を含める。
+`fact_resolution_trace` は wire 上で少なくとも `query`、`selected_recall_sections`、`boundary_event_candidates`、`cycle_event_candidates`、`statement_event_candidates`、`adopted_evidence_items`、`consistency_checks` を持つ。
 
 | trace | 詳細正本 |
 |-------|----------|

@@ -403,16 +403,19 @@ class ServiceInputMixin:
             recall_hint=recall_hint,
             current_time=started_at,
         )
-        evidence_pack = self.evidence.build_evidence_pack(
+        evidence_resolution = self.evidence.build_evidence_resolution(
             memory_set_id=state["selected_memory_set_id"],
             input_text=effective_input_text,
             recall_pack=recall_pack,
             answer_contract=answer_contract,
             current_time=started_at,
         )
+        evidence_pack = evidence_resolution["evidence_pack"]
+        fact_resolution_trace = evidence_resolution["fact_resolution_trace"]
         recall_pack = dict(recall_pack)
         recall_pack["answer_contract"] = answer_contract
         recall_pack["evidence_pack"] = evidence_pack
+        recall_pack["fact_resolution_trace"] = fact_resolution_trace
         debug_log(
             "Pipeline",
             (
@@ -2827,6 +2830,7 @@ class ServiceInputMixin:
             "selected_event_ids": [],
             "memory_link_context": self._empty_memory_link_context_trace(),
             "candidate_count": 0,
+            "fact_resolution_trace": self._empty_fact_resolution_trace(),
         }
 
     def _empty_event_evidence_generation_trace(self) -> dict[str, Any]:
@@ -2841,6 +2845,40 @@ class ServiceInputMixin:
             "precise_selected_event_ids": [],
             "precise_requested_event_count": 0,
             "precise_loaded_event_count": 0,
+        }
+
+    def _empty_fact_resolution_trace(self) -> dict[str, Any]:
+        return {
+            "result_status": "summary",
+            "resolver_path": "summary",
+            "query": {
+                "input_text": None,
+                "current_time": None,
+                "contract": "summary",
+                "boundary": "none",
+                "target_actor": "any",
+                "reason_codes": [],
+                "query_terms": [],
+                "requires_direct_evidence": False,
+            },
+            "selected_recall_sections": {
+                "self_model": [],
+                "user_model": [],
+                "relationship_model": [],
+                "active_topics": [],
+                "active_commitments": [],
+                "episodic_evidence": [],
+                "event_evidence": [],
+                "conflicts": [],
+            },
+            "boundary_event_candidates": [],
+            "cycle_event_candidates": [],
+            "statement_event_candidates": [],
+            "conflict_candidates": [],
+            "adopted_evidence_items": [],
+            "consistency_checks": [],
+            "missing_reason": None,
+            "reply_guidance": None,
         }
 
     def _empty_recall_pack_selection_trace(self) -> dict[str, Any]:
@@ -4703,6 +4741,10 @@ class ServiceInputMixin:
             trace["answer_contract"] = recall_pack["answer_contract"]
         if isinstance(recall_pack.get("evidence_pack"), dict):
             trace["evidence_pack"] = recall_pack["evidence_pack"]
+        if isinstance(recall_pack.get("fact_resolution_trace"), dict):
+            trace["fact_resolution_trace"] = recall_pack["fact_resolution_trace"]
+        else:
+            trace["fact_resolution_trace"] = self._empty_fact_resolution_trace()
         return trace
 
     def _build_failure_recall_trace(
@@ -4723,6 +4765,7 @@ class ServiceInputMixin:
             "recall_pack_summary": None,
             "adopted_reason_summary": None,
             "rejected_candidate_summary": None,
+            "fact_resolution_trace": self._empty_fact_resolution_trace(),
         }
 
     def _build_success_decision_trace(
