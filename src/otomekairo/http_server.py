@@ -234,6 +234,9 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
                 return
 
             # 検査ルート
+            if method == "GET" and parsed.path == "/api/inspection/current-state":
+                self._write_success(HTTPStatus.OK, self.server.service.get_current_state_inspection(token))
+                return
             if method == "GET" and parsed.path == "/api/inspection/capabilities":
                 self._write_success(HTTPStatus.OK, self.server.service.get_capability_inspection(token))
                 return

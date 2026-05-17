@@ -9,6 +9,7 @@ from otomekairo.capabilities import (
     capability_manifests,
 )
 from otomekairo.event_stream import ServerWebSocket
+from otomekairo.memory_utils import localize_timestamp_fields
 from otomekairo.service_common import REQUIRED_MODEL_ROLE_NAMES, ServiceError, debug_log
 
 
@@ -120,11 +121,7 @@ class ServiceConfigMixin:
 
         # 状態
         generated_at = self._now_iso()
-        manifests = capability_manifests()
-        bindings = self._event_stream_registry.list_capability_bindings()
-        accepted_bindings = bindings["accepted"]
-        rejected_bindings = bindings["rejected"]
-        active_ongoing_action = self._current_ongoing_action(
+        inspection = self._build_capability_inspection_snapshot(
             state=state,
             current_time=generated_at,
         )
@@ -132,10 +129,54 @@ class ServiceConfigMixin:
         # 応答
         return {
             "generated_at": generated_at,
+            **inspection,
+        }
+
+    def get_current_state_inspection(self, token: str | None) -> dict[str, Any]:
+        # 認可
+        state = self._require_token(token)
+
+        # 状態
+        generated_at = self._now_iso()
+        snapshot = {
+            "generated_at": generated_at,
+            "settings_snapshot": self._build_settings_snapshot(state),
+            "runtime_summary": self._build_runtime_summary(state),
+            "runtime_detail": self._build_current_runtime_detail(
+                state=state,
+                current_time=generated_at,
+            ),
+            "current_state": self._build_current_state_snapshot(
+                state=state,
+                current_time=generated_at,
+            ),
+            "capability_inspection": self._build_capability_inspection_snapshot(
+                state=state,
+                current_time=generated_at,
+            ),
+        }
+        return localize_timestamp_fields(snapshot)
+
+    def _build_capability_inspection_snapshot(
+        self,
+        *,
+        state: dict[str, Any],
+        current_time: str,
+    ) -> dict[str, Any]:
+        manifests = capability_manifests()
+        bindings = self._event_stream_registry.list_capability_bindings()
+        accepted_bindings = bindings["accepted"]
+        rejected_bindings = bindings["rejected"]
+        active_ongoing_action = self._current_ongoing_action(
+            state=state,
+            current_time=current_time,
+        )
+
+        return {
             "capabilities": [
                 self._build_capability_availability(
                     manifest=manifest,
-                    current_time=generated_at,
+                    current_time=current_time,
                     bound_client_ids=accepted_bindings.get(capability_id, []),
                     rejected_bindings=rejected_bindings,
                     active_ongoing_action=active_ongoing_action,
@@ -846,6 +887,127 @@ class ServiceConfigMixin:
             ),
             "memory_job_in_progress": memory_job_in_progress,
         }
+
+    def _build_current_runtime_detail(
+        self,
+        *,
+        state: dict[str, Any],
+        current_time: str,
+    ) -> dict[str, Any]:
+        return {
+            "wake_runtime_state": self._snapshot_wake_runtime_state(current_time=current_time),
+            "desktop_watch_runtime_state": self._snapshot_desktop_watch_runtime_state(),
+            "memory_postprocess_runtime_state": self._snapshot_memory_postprocess_runtime_state(),
+            "pending_capability_requests": self._list_pending_capability_request_summaries(current_time=current_time),
+        }
+
+    def _build_current_state_snapshot(
+        self,
+        *,
+        state: dict[str, Any],
+        current_time: str,
+    ) -> dict[str, Any]:
+        return {
+            "foreground_world_states": self._list_current_world_states(
+                state=state,
+                current_time=current_time,
+                limit=8,
+            ),
+            "drive_states": self._list_current_drive_states(
+                state=state,
+                current_time=current_time,
+                limit=6,
+            ),
+            "ongoing_action": self._current_ongoing_action(
+                state=state,
+                current_time=current_time,
+            ),
+            "pending_intent_candidates": self._list_pending_intent_candidates_for_inspection(
+                state=state,
+                current_time=current_time,
+                limit=8,
+            ),
+            "mood_state": self.store.get_mood_state(
+                memory_set_id=state["selected_memory_set_id"],
+                current_time=current_time,
+            ),
+            "affect_states": self.store.list_affect_states_for_context(
+                memory_set_id=state["selected_memory_set_id"],
+                limit=6,
+            ),
+        }
+
+    def _snapshot_wake_runtime_state(self, *, current_time: str) -> dict[str, Any]:
+        self._prune_pending_intent_candidates(current_time=current_time)
+        with self._runtime_state_lock:
+            reply_history = self._wake_runtime_state.get("reply_history_by_dedupe", {})
+            return {
+                "last_wake_at": self._wake_runtime_state.get("last_wake_at"),
+                "last_spontaneous_at": self._wake_runtime_state.get("last_spontaneous_at"),
+                "cooldown_until": self._wake_runtime_state.get("cooldown_until"),
+                "reply_history_count": len(reply_history) if isinstance(reply_history, dict) else 0,
+            }
+
+    def _snapshot_desktop_watch_runtime_state(self) -> dict[str, Any]:
+        with self._runtime_state_lock:
+            return {
+                "last_watch_at": self._desktop_watch_runtime_state.get("last_watch_at"),
+            }
+
+    def _snapshot_memory_postprocess_runtime_state(self) -> dict[str, Any]:
+        with self._runtime_state_lock:
+            return {
+                "current_cycle_id": self._memory_postprocess_runtime_state.get("current_cycle_id"),
+            }
+
+    def _list_pending_intent_candidates_for_inspection(
+        self,
+        *,
+        state: dict[str, Any],
+        current_time: str,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        self._prune_pending_intent_candidates(current_time=current_time)
+        memory_set_id = state["selected_memory_set_id"]
+        with self._runtime_state_lock:
+            items = [
+                {
+                    "candidate_id": candidate.get("candidate_id"),
+                    "intent_kind": candidate.get("intent_kind"),
+                    "intent_summary": candidate.get("intent_summary"),
+                    "reason_summary": candidate.get("reason_summary"),
+                    "source_cycle_id": candidate.get("source_cycle_id"),
+                    "not_before": candidate.get("not_before"),
+                    "expires_at": candidate.get("expires_at"),
+                    "dedupe_key": candidate.get("dedupe_key"),
+                    "created_at": candidate.get("created_at"),
+                    "updated_at": candidate.get("updated_at"),
+                }
+                for candidate in self._pending_intent_candidates
+                if candidate.get("memory_set_id") == memory_set_id
+            ]
+        items.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
+        return items[:limit]
+
+    def _list_pending_capability_request_summaries(self, *, current_time: str) -> list[dict[str, Any]]:
+        self._prune_pending_capability_requests(current_time=current_time)
+        with self._capability_request_lock:
+            pending_records = list(self._pending_capability_requests.values())
+
+        summaries: list[dict[str, Any]] = []
+        for pending in pending_records:
+            request_record = pending.get("request_record") if isinstance(pending, dict) else None
+            summary = self._capability_request_summary(request_record, status="pending")
+            if not isinstance(summary, dict) or not isinstance(request_record, dict):
+                continue
+            summary["target_client_id"] = request_record.get("target_client_id")
+            summary["created_at"] = request_record.get("created_at")
+            summary["expires_at"] = request_record.get("expires_at")
+            summary["action_id"] = request_record.get("action_id")
+            summary["goal_summary"] = request_record.get("goal_summary")
+            summaries.append(summary)
+        summaries.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
+        return summaries
 
     def _list_current_drive_states(
         self,
