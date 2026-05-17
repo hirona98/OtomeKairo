@@ -959,6 +959,44 @@ class LLMClient:
             return 0
         return len(value)
 
+    def _debug_image_count(self, value: Any) -> int:
+        # multimodal content の画像数だけを数える。
+        if not isinstance(value, list):
+            return 0
+        count = 0
+        for item in value:
+            if isinstance(item, dict) and item.get("type") == "image_url":
+                count += 1
+        return count
+
+    def _debug_messages_size_summary(
+        self,
+        *,
+        operation: str,
+        attempt: int,
+        messages: list[dict[str, Any]],
+    ) -> None:
+        # prompt 肥大化を追えるよう、内容ではなくサイズだけを集計する。
+        role_chars: dict[str, int] = {}
+        image_count = 0
+        for message in messages:
+            if not isinstance(message, dict):
+                continue
+            role = message.get("role")
+            role_name = role if isinstance(role, str) and role else "unknown"
+            content = message.get("content")
+            role_chars[role_name] = role_chars.get(role_name, 0) + self._debug_text_length(content)
+            image_count += self._debug_image_count(content)
+        total_chars = sum(role_chars.values())
+        debug_log(
+            "LLM",
+            (
+                f"{operation} prompt_size attempt={attempt} total_chars={total_chars} "
+                f"system_chars={role_chars.get('system', 0)} user_chars={role_chars.get('user', 0)} "
+                f"assistant_chars={role_chars.get('assistant', 0)} images={image_count}"
+            ),
+        )
+
     def _debug_messages_preview(
         self,
         *,
@@ -967,6 +1005,7 @@ class LLMClient:
         messages: list[dict[str, Any]],
     ) -> None:
         # LLMへ送る message content の先頭だけを出す。
+        self._debug_messages_size_summary(operation=operation, attempt=attempt, messages=messages)
         total = len(messages)
         for index, message in enumerate(messages, start=1):
             role = message.get("role") if isinstance(message, dict) else None
