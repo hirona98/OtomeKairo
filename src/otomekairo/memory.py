@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import json
 import uuid
 from typing import Any
 
@@ -10,6 +11,11 @@ from otomekairo.memory_reflection import ReflectiveConsolidator
 from otomekairo.memory_utils import clamp_score, normalized_text_list, optional_text
 from otomekairo.memory_vector import MemoryVectorIndexer
 from otomekairo.store import FileStore
+
+
+# memory_interpretation に渡す events は補助文脈に留める。
+MEMORY_CONTEXT_EVENT_LIMIT = 12
+MEMORY_CONTEXT_EVENT_TOTAL_CHAR_LIMIT = 1600
 
 
 # 統合器
@@ -317,8 +323,31 @@ class MemoryConsolidator:
         compact_events = [self._compact_event_for_memory_context(event) for event in events]
         compact_events = [event for event in compact_events if event]
         if compact_events:
-            payload["events"] = compact_events
+            limited_events = self._limit_memory_context_events(compact_events)
+            payload["events"] = limited_events
+            if len(limited_events) < len(compact_events):
+                payload["events_truncated"] = {
+                    "original_count": len(compact_events),
+                    "included_count": len(limited_events),
+                    "event_limit": MEMORY_CONTEXT_EVENT_LIMIT,
+                    "total_char_limit": MEMORY_CONTEXT_EVENT_TOTAL_CHAR_LIMIT,
+                }
         return payload
+
+    def _limit_memory_context_events(self, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        selected = events
+        if len(events) > MEMORY_CONTEXT_EVENT_LIMIT:
+            selected = [events[0], *events[-(MEMORY_CONTEXT_EVENT_LIMIT - 1) :]]
+
+        limited: list[dict[str, Any]] = []
+        total_chars = 0
+        for event in selected:
+            event_chars = len(json.dumps(event, ensure_ascii=False, sort_keys=True))
+            if limited and total_chars + event_chars > MEMORY_CONTEXT_EVENT_TOTAL_CHAR_LIMIT:
+                break
+            limited.append(event)
+            total_chars += event_chars
+        return limited
 
     def _compact_event_for_memory_context(self, event: dict[str, Any]) -> dict[str, Any]:
         payload: dict[str, Any] = {}
