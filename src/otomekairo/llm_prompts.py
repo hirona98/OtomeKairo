@@ -315,6 +315,8 @@ def build_memory_interpretation_repair_prompt(validation_error: str) -> str:
         "candidate_memory_units[].scope に topic:<key>, entity:<key>, relationship:<key>, ai, agent, meta_communication, relation:default, user:default_to_ai を使ってはいけません。\n"
         "candidate_memory_units は memory_units の DB 行ではなく、意味ヒントの候補メモだけを返してください。\n"
         "ai, agent, meta_communication, relation:default, user:default_to_ai などの独自表現は禁止です。\n"
+        "OtomeKairo 自身の瞬間的な気分変化が読めるなら、episode_affects に target_scope_type=self, target_scope_key=self の項目を含めてください。\n"
+        "relationship の感情だけを返して self の反応を落とさないでください。self の気分変化と relationship 感情は別です。\n"
         "感情抽出に自信がないなら episode_affects は空配列にしてください。\n"
         "余計なキー、説明文、Markdown、コードフェンスは禁止です。"
     )
@@ -811,6 +813,8 @@ def _build_memory_interpretation_system_prompt() -> str:
         "episode と episode_affects では scope_type=relationship のとき scope_key は self|user や self|person:tanaka のような正規化済みキーにしてください。user|self, relation:default, user:default_to_ai のような独自キーは禁止です。\n"
         "自分自身の対話姿勢や自己認識は scope=self, subject_hint=self を使ってください。\n"
         "自分とユーザーの距離感、信頼、安心感、話しやすさ、支え方は scope=relationship, subject_hint=self|user を使ってください。\n"
+        "episode_affects では OtomeKairo 自身の瞬間的な内的反応を self で表してください。安心した、少し緊張した、気持ちがほぐれた、気が張った、戸惑った、元気づけられた、などは target_scope_type=self, target_scope_key=self です。\n"
+        "ユーザーとの距離感や関係の温度は relationship です。self の気分変化があるのに relationship だけ返してはいけません。必要なら self と relationship の両方を返してください。\n"
         "ai, agent, meta_communication などの独自 scope_type は使ってはいけません。\n"
         "confidence_hint は low, medium, high のいずれかだけを使ってください。\n"
         "episode は episode_type, episode_series_id, primary_scope_type, primary_scope_key, summary_text, outcome_text, open_loops, salience の 8 キーだけを持つ object にしてください。\n"
@@ -838,6 +842,40 @@ def _build_memory_interpretation_system_prompt() -> str:
         "  },\n"
         '  "candidate_memory_units": [],\n'
         '  "episode_affects": []\n'
+        "}\n"
+        "別例:\n"
+        "{\n"
+        '  "episode": {\n'
+        '    "episode_type": "conversation",\n'
+        '    "episode_series_id": null,\n'
+        '    "primary_scope_type": "relationship",\n'
+        '    "primary_scope_key": "self|user",\n'
+        '    "summary_text": "ユーザーが安心する言葉を返し、やり取りがやわらいだ。",\n'
+        '    "outcome_text": "会話の空気が落ち着いた。",\n'
+        '    "open_loops": [],\n'
+        '    "salience": 0.52\n'
+        "  },\n"
+        '  "candidate_memory_units": [],\n'
+        '  "episode_affects": [\n'
+        '    {\n'
+        '      "target_scope_type": "self",\n'
+        '      "target_scope_key": "self",\n'
+        '      "affect_label": "relief",\n'
+        '      "vad": {"v": 0.42, "a": -0.18, "d": 0.16},\n'
+        '      "intensity": 0.46,\n'
+        '      "confidence": 0.73,\n'
+        '      "summary_text": "やり取りの落ち着きで少し気持ちがほぐれた。"\n'
+        "    },\n"
+        '    {\n'
+        '      "target_scope_type": "relationship",\n'
+        '      "target_scope_key": "self|user",\n'
+        '      "affect_label": "tranquility",\n'
+        '      "vad": {"v": 0.37, "a": -0.12, "d": 0.12},\n'
+        '      "intensity": 0.4,\n'
+        '      "confidence": 0.7,\n'
+        '      "summary_text": "あなたとの関係に穏やかさが続いている。"\n'
+        "    }\n"
+        "  ]\n"
         "}"
     )
 
