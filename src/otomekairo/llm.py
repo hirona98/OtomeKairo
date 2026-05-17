@@ -603,6 +603,7 @@ class LLMClient:
         recall_hint: dict,
         decision: dict,
         reply_text: str | None,
+        memory_context: dict[str, Any] | None,
         current_time: str,
     ) -> dict[str, Any]:
         operation = "memory_interpretation"
@@ -622,6 +623,7 @@ class LLMClient:
                 recall_hint,
                 decision,
                 reply_text,
+                memory_context,
             )
             debug_log("LLM", f"{operation} done mode=mock keys={self._debug_payload_keys(payload)}")
             return payload
@@ -632,6 +634,7 @@ class LLMClient:
             recall_hint=recall_hint,
             decision=decision,
             reply_text=reply_text,
+            memory_context=memory_context,
             current_time=current_time,
         )
         return self._generate_structured_payload(

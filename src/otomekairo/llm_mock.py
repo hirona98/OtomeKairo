@@ -1247,6 +1247,7 @@ class MockLLMClient:
         recall_hint: dict,
         decision: dict,
         reply_text: str | None,
+        memory_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         # model確認
         self._assert_mock_model(role_definition)

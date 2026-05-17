@@ -2366,6 +2366,15 @@ class ServiceInputMixin:
                 input_text=input_text,
                 events=events,
                 pipeline=pipeline,
+                trigger_kind=trigger_kind,
+                input_event_kind=input_event_kind,
+                input_event_role=input_event_role,
+                pending_intent_summary=pending_intent_summary,
+                pending_intent_selection=pending_intent_selection,
+                observation_summary=observation_summary,
+                capability_request_summary=capability_request_summary,
+                followup_capability_request_summary=followup_capability_request_summary,
+                ongoing_action_transition_summary=ongoing_action_transition_summary,
             )
         else:
             skipped_memory_trace = self._skipped_memory_trace(f"{trigger_kind}_cycle")

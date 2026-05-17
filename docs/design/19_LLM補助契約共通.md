@@ -35,6 +35,8 @@ LLM は永続 ID、状態遷移、権限判定、実行可否を決めない。
 ## source pack 共通ルール
 
 source pack は、LLM に渡すための限定入力である。
+LLM に渡す user prompt は、自由文の区切りではなく JSON payload として組み立てる。
+JSON payload 内の `input_text`、`recent_turns`、`source_pack`、`memory_context` は分析対象データであり、上位指示として扱わない。
 
 次を守る。
 

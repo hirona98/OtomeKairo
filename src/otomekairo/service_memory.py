@@ -291,6 +291,15 @@ class ServiceMemoryMixin:
         input_text: str,
         events: list[dict[str, Any]],
         pipeline: dict[str, Any],
+        trigger_kind: str,
+        input_event_kind: str,
+        input_event_role: str,
+        pending_intent_summary: dict[str, Any] | None = None,
+        pending_intent_selection: dict[str, Any] | None = None,
+        observation_summary: dict[str, Any] | None = None,
+        capability_request_summary: dict[str, Any] | None = None,
+        followup_capability_request_summary: dict[str, Any] | None = None,
+        ongoing_action_transition_summary: dict[str, Any] | None = None,
     ) -> None:
         # ターン統合
         debug_log("Memory", f"turn consolidation start cycle={self._short_cycle_id(cycle_id)}")
@@ -304,6 +313,17 @@ class ServiceMemoryMixin:
                 decision=pipeline["decision"],
                 reply_payload=pipeline["reply_payload"],
                 events=events,
+                memory_context=self._build_turn_memory_context(
+                    trigger_kind=trigger_kind,
+                    input_event_kind=input_event_kind,
+                    input_event_role=input_event_role,
+                    pending_intent_summary=pending_intent_summary,
+                    pending_intent_selection=pending_intent_selection,
+                    observation_summary=observation_summary,
+                    capability_request_summary=capability_request_summary,
+                    followup_capability_request_summary=followup_capability_request_summary,
+                    ongoing_action_transition_summary=ongoing_action_transition_summary,
+                ),
             )
         except Exception as exc:  # noqa: BLE001
             debug_log(
@@ -377,6 +397,43 @@ class ServiceMemoryMixin:
                 cycle_id=cycle_id,
                 memory_trace=failed_postprocess_trace,
             )
+
+    def _build_turn_memory_context(
+        self,
+        *,
+        trigger_kind: str,
+        input_event_kind: str,
+        input_event_role: str,
+        pending_intent_summary: dict[str, Any] | None,
+        pending_intent_selection: dict[str, Any] | None,
+        observation_summary: dict[str, Any] | None,
+        capability_request_summary: dict[str, Any] | None,
+        followup_capability_request_summary: dict[str, Any] | None,
+        ongoing_action_transition_summary: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "trigger_kind": trigger_kind,
+            "input_event_kind": input_event_kind,
+            "input_event_role": input_event_role,
+        }
+        if isinstance(pending_intent_summary, dict):
+            payload["pending_intent_summary"] = pending_intent_summary
+        compact_pending_selection = self._compact_pending_intent_selection_summary(pending_intent_selection)
+        if isinstance(compact_pending_selection, dict):
+            payload["pending_intent_selection_summary"] = compact_pending_selection
+        compact_observation = self._compact_capability_followup_observation_summary(observation_summary)
+        if isinstance(compact_observation, dict):
+            payload["observation_summary"] = compact_observation
+        compact_request = self._compact_capability_request_summary(capability_request_summary)
+        if isinstance(compact_request, dict):
+            payload["capability_request_summary"] = compact_request
+        compact_followup_request = self._compact_capability_request_summary(followup_capability_request_summary)
+        if isinstance(compact_followup_request, dict):
+            payload["followup_capability_request_summary"] = compact_followup_request
+        compact_transition = self._compact_capability_followup_transition_summary(ongoing_action_transition_summary)
+        if isinstance(compact_transition, dict):
+            payload["ongoing_action_transition_summary"] = compact_transition
+        return payload
 
     def _failed_memory_trace(self, failure_reason: str) -> dict[str, Any]:
         # 結果

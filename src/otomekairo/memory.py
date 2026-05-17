@@ -38,6 +38,7 @@ class MemoryConsolidator:
         decision: dict[str, Any],
         reply_payload: dict[str, Any] | None,
         events: list[dict[str, Any]],
+        memory_context: dict[str, Any] | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         # モデル選択
         selected_preset = state["model_presets"][state["selected_model_preset_id"]]
@@ -50,6 +51,10 @@ class MemoryConsolidator:
             recall_hint=recall_hint,
             decision=decision,
             reply_text=reply_payload["reply_text"] if reply_payload else None,
+            memory_context=self._build_memory_interpretation_context(
+                memory_context=memory_context,
+                events=events,
+            ),
             current_time=finished_at,
         )
 
@@ -301,6 +306,52 @@ class MemoryConsolidator:
             "episode": deepcopy(episode),
             "memory_actions": deepcopy(memory_actions),
         }
+
+    def _build_memory_interpretation_context(
+        self,
+        *,
+        memory_context: dict[str, Any] | None,
+        events: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        payload = dict(memory_context) if isinstance(memory_context, dict) else {}
+        compact_events = [self._compact_event_for_memory_context(event) for event in events]
+        compact_events = [event for event in compact_events if event]
+        if compact_events:
+            payload["events"] = compact_events
+        return payload
+
+    def _compact_event_for_memory_context(self, event: dict[str, Any]) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        for key in (
+            "kind",
+            "role",
+            "result_kind",
+            "external_result_kind",
+            "reason_code",
+            "reason_summary",
+            "pending_intent_summary",
+        ):
+            value = event.get(key)
+            if value is None:
+                continue
+            if isinstance(value, str):
+                normalized = value.strip()
+                if not normalized:
+                    continue
+                payload[key] = self._compact_text(normalized)
+                continue
+            if isinstance(value, (int, float, bool, list, dict)):
+                payload[key] = value
+        text = event.get("text")
+        if isinstance(text, str) and text.strip():
+            payload["text_summary"] = self._compact_text(text.strip())
+        return payload
+
+    def _compact_text(self, value: str, limit: int = 200) -> str:
+        normalized = " ".join(value.split())
+        if len(normalized) <= limit:
+            return normalized
+        return normalized[: limit - 1].rstrip() + "…"
 
     def _build_episode(
         self,
