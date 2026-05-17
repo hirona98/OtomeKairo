@@ -139,25 +139,13 @@ server -> client の代表例:
 
 ```json
 {
-  "event_id": 7,
-  "type": "desktop_watch",
-  "data": {
-    "system_text": "[desktop_watch] Slack",
-    "message": "少し区切れそうなら、前の続きに戻っても大丈夫だよ。",
-    "images": ["data:image/png;base64,..."]
-  }
-}
-```
-
-```json
-{
   "event_id": 8,
   "type": "capability_result",
   "data": {
     "request_id": "vision_capture_request:...",
     "capability_id": "vision.capture",
     "system_text": "[capability_result] vision.capture",
-    "message": "画面では Slack の general チャンネルが前景に見えているよ。"
+    "message": "Slack の general チャンネルが視覚前景に見えているよ。"
   }
 }
 ```
@@ -172,11 +160,9 @@ server -> client の代表例:
 - `environment.status_request`
 - `location.status_request`
 - `social.status_request`
-- `desktop_watch`
 - `capability_result`
 
 `vision.capture_request`、`external.status_request`、`schedule.status_request`、`device.status_request`、`body.status_request`、`environment.status_request`、`location.status_request`、`social.status_request` は capability 実行要求である。
-`desktop_watch` は観測結果に基づく通知であり、capability 定義そのものではない。
 `capability_result` は accepted capability result を shared pipeline に戻した後、その follow-up が `reply` になったときの通知である。
 capability 実行要求と結果の対応は [05_実行連携.md](05_実行連携.md) を正とする。
 

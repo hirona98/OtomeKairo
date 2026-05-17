@@ -55,7 +55,6 @@ OtomeKairo の外部接点は、少なくとも次の面に分ける。
 
 ここでいう観測は、OtomeKairo が自分から取りに行った情報に限定する。
 外から届く対話入力や起床要求は観測面へ入れない。
-`desktop_watch` は観測機会を作る現在設定であり、実際の capture は実行連携面の capability を使って行う。
 将来的にカメラ、マイク、位置取得、各種センサが増えても、観測面では機器名ではなく capability の結果として受ける。
 観測結果から次の判断へ持ち越す短期外界条件は `world_state` として扱う。
 `world_state` の詳細は `22_world_state.md` を正とする。
@@ -91,8 +90,6 @@ capability の正本は本体が持つ `CapabilityManifest` である。
 - 実行結果として何が返るか
 - server 側で新規 dispatch を止める capability state 操作
 
-`desktop_watch` 自体は capability ではない。
-`desktop_watch` は観測方針として `vision.capture` のような capability を起動し、その結果を観測面へ戻す。
 移動機構やアクチュエータのような物理デバイスも、同じく capability として実行連携面で扱う。
 ここでは具体的なハードウェア名ではなく、request / result 契約を正とする。
 モデル role の `web_search_enabled` は、生成 provider へ渡す検索利用指示であり、実行連携面の capability ではない。

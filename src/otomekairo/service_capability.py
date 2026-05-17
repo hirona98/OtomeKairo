@@ -239,7 +239,7 @@ class ServiceCapabilityMixin:
                 ),
             }
 
-        # desktop_watch の同期観測では、その場で result を待つ。
+        # 同期実行では、その場で result を待つ。
         pending["event"].wait(timeout=(timeout_ms / 1000.0) + 1.0)
         with self._capability_request_lock:
             result = pending["response"]

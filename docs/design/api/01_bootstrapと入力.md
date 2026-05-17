@@ -169,8 +169,8 @@ response:
       "status": "dispatched",
       "timeout_ms": 5000,
       "readiness_digest": {
-        "family": "screen_observation",
-        "world_state_type": "screen",
+        "family": "visual_observation",
+        "world_state_type": "visual_context",
         "input_keys": ["source", "mode"],
         "present_input_keys": ["source", "mode"],
         "missing_input_keys": [],

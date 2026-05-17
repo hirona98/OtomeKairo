@@ -46,7 +46,7 @@ TIME_REFERENCE_VALUES = {
     "persistent",
 }
 WORLD_STATE_TYPE_VALUES = {
-    "screen",
+    "visual_context",
     "environment",
     "location",
     "external_service",

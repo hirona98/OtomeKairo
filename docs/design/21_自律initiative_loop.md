@@ -51,7 +51,7 @@ initiative loop は、判断サイクル内の作業文脈として `initiative_
 
 | 項目 | 役割 |
 |------|------|
-| `trigger_kind` | `wake`、`background_wake`、`desktop_watch` などの起点 |
+| `trigger_kind` | `wake`、`background_wake` などの起点 |
 | `opportunity_summary` | なぜ今評価機会があるか |
 | `time_context_summary` | 生活ローカル時刻と時刻帯の要約 |
 | `foreground_signal_summary` | 前景 world の薄さと見えている文脈の要約 |
@@ -128,7 +128,7 @@ LLM に実行権限、資格情報、配送先 client、秘密値を渡さない
 LLM の自由文をそのまま状態遷移へ使わない。
 `wake / background_wake` の「定期起床」「wake」という入力文言は判断機会の説明であり、身体状態の根拠にしない。
 `current_time_text`、interval、wake の時刻情報だけから予定状態を作らない。予定状態は schedule context、schedule capability result、明示的な予定 source を根拠にする。
-system wake 起点で明示 source context が無い `screen / body / schedule / social_context / environment / location` 候補は、推測候補として正規化時に破棄する。
+system wake 起点で明示 source context が無い `visual_context / body / schedule / social_context / environment / location` 候補は、推測候補として正規化時に破棄する。
 
 ## 過剰介入抑制
 
@@ -209,17 +209,17 @@ background wake 起床制御 matrix は次の 5 件に固定する。
 | case | 入力条件 | 期待する構造 |
 | --- | --- | --- |
 | `background-no-context-skip` | interval 初回起床で `drive_state / world_state / ongoing_action` が空 | background wake cycle を作り、`initiative_context` なしの `decision.kind=noop` と `memory_trace=skipped` を残す |
-| `background-weak-foreground-noop` | interval 初回起床で `screen` 系の薄い `world_state` だけがある | `foreground_thinness=thin`、`selected_candidate_family=autonomous`、`preferred_result_kind=noop`、`decision.kind=noop`、`memory_trace=skipped` |
+| `background-weak-foreground-noop` | interval 初回起床で `visual_context` 系の薄い `world_state` だけがある | `foreground_thinness=thin`、`selected_candidate_family=autonomous`、`preferred_result_kind=noop`、`decision.kind=noop`、`memory_trace=skipped` |
 | `background-grounded-reply` | interval 初回起床で予定 `world_state` と整合する `drive_state` がある | `wake_scheduler_active=true`、`foreground_thinness=grounded`、`selected_candidate_family=autonomous`、`decision.kind=reply`、`memory_trace=succeeded` |
 | `background-cooldown-skip` | background reply 直後の cooldown 中に interval 起床が来る | background wake cycle を作り、cooldown 理由の `decision.kind=noop` と `memory_trace=skipped` を残す |
 | `background-interval-not-due` | `last_wake_at` 相当の直後に長い interval を設定する | `wake_scheduler_active=true` を観測し、新しい background wake cycle を作らない |
 
-`screen` だけの前景は thin foreground として扱う。
+`visual_context` だけの前景は thin foreground として扱う。
 強い `drive_state` があり、対応する grounded foreground がない場合、`vision.capture` による観測を短い reply より優先する。
 ただし、強い `drive_state` が特定の status family を要求し、対応 state type が不足または古い場合は、`vision.capture` より対応 status capability を優先する。
 強い `drive_state` が特定の status family を要求し、対応 state type の新鮮な foreground `world_state` が既にある場合は、同じ status capability と `vision.capture` の両方を選ばず、既存要約を使う。
 status refresh の鮮度判定は判断前から存在した foreground `world_state` だけを使い、現在の wake 入力から推測生成された `world_state` では再取得を抑止しない。
-background wake では、強い `drive_state` が無く `screen / external_service / device` だけが見えている場合、薄い前景として `noop` を優先する。
+background wake では、強い `drive_state` が無く `visual_context / external_service / device` だけが見えている場合、薄い前景として `noop` を優先する。
 grounded foreground の `world_state` が既にある場合、candidate entry に `preferred_capability_id` が無い限り、同じ情報を再取得する capability request より `preferred_result_kind` の `reply / noop` を優先する。
 非ユーザー起点の判断では、判断前から存在する同じ state type の新鮮な foreground `world_state` がある capability に `fresh_world_state_available=true` を付け、実 LLM の compact digest で request しなかった境界を確認する。
 `suppression_summary.cooldown_active` が true ではない場合、直近 turn だけから cooldown 中とは扱わない。background wake でも grounded foreground かつ `preferred_result_kind=reply` なら、`suppression_level=medium` だけを理由に `noop` へ倒さない。

@@ -34,7 +34,6 @@ WAIT_SERVER_TIMEOUT_SECONDS = 20.0
 WAIT_QUEUE_DRAIN_TIMEOUT_SECONDS = 30.0
 WAIT_CAPTURE_RECOVERY_TIMEOUT_SECONDS = 30.0
 WAIT_RESTART_PENDING_TIMEOUT_SECONDS = 8.0
-WAIT_DESKTOP_WATCH_PROBE_TIMEOUT_SECONDS = 20.0
 WAIT_PENDING_INTENT_SEED_TIMEOUT_SECONDS = 20.0
 WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS = 20.0
 WAIT_ONGOING_ACTION_CLEAR_TIMEOUT_SECONDS = 20.0
@@ -46,10 +45,8 @@ PROFILE_DEFAULTS: dict[str, dict[str, int | float]] = {
     "real-llm-smoke": {
         "run_seconds": 0,
         "conversation_interval_seconds": 999.0,
-        "desktop_watch_interval_seconds": 60,
         "wake_interval_seconds": 3600,
         "min_conversation_cycles": 1,
-        "capture_timeout_failures": 0,
         "capture_empty_result_failures": 0,
         "capture_mismatch_failures": 0,
         "capture_invalid_images_failures": 0,
@@ -65,11 +62,9 @@ PROFILE_DEFAULTS: dict[str, dict[str, int | float]] = {
     "smoke": {
         "run_seconds": 75,
         "conversation_interval_seconds": 6.0,
-        "desktop_watch_interval_seconds": 2,
         "wake_interval_seconds": 60,
         "min_conversation_cycles": 4,
-        "capture_timeout_failures": 1,
-        "capture_empty_result_failures": 1,
+        "capture_empty_result_failures": 0,
         "capture_mismatch_failures": 1,
         "capture_invalid_images_failures": 1,
         "capture_invalid_error_failures": 1,
@@ -84,11 +79,9 @@ PROFILE_DEFAULTS: dict[str, dict[str, int | float]] = {
     "short-soak": {
         "run_seconds": 1800,
         "conversation_interval_seconds": 15.0,
-        "desktop_watch_interval_seconds": 3,
         "wake_interval_seconds": 60,
         "min_conversation_cycles": 80,
-        "capture_timeout_failures": 1,
-        "capture_empty_result_failures": 1,
+        "capture_empty_result_failures": 0,
         "capture_mismatch_failures": 1,
         "capture_invalid_images_failures": 1,
         "capture_invalid_error_failures": 1,
@@ -103,11 +96,9 @@ PROFILE_DEFAULTS: dict[str, dict[str, int | float]] = {
     "long-soak": {
         "run_seconds": 21600,
         "conversation_interval_seconds": 30.0,
-        "desktop_watch_interval_seconds": 5,
         "wake_interval_seconds": 120,
         "min_conversation_cycles": 500,
-        "capture_timeout_failures": 1,
-        "capture_empty_result_failures": 1,
+        "capture_empty_result_failures": 0,
         "capture_mismatch_failures": 1,
         "capture_invalid_images_failures": 1,
         "capture_invalid_error_failures": 1,
@@ -462,7 +453,6 @@ class LongSmokeRunner:
         self.location_status_response_count = 0
         self.social_status_request_count = 0
         self.social_status_response_count = 0
-        self.desktop_watch_event_count = 0
         self.conversation_cycle_ids: list[str] = []
         self.memory_quality_probe_cycle_ids: list[str] = []
         self.memory_quality_probe_digest: dict[str, Any] = {}
@@ -474,8 +464,6 @@ class LongSmokeRunner:
         self.real_llm_memory_trace_shape_verified = False
         self.restart_probe_cycle_ids: list[str] = []
         self.pending_intent_seed_cycle_ids: list[str] = []
-        self.capture_timeout_request_ids: list[str] = []
-        self.capture_timeout_failure_cycle_ids: list[str] = []
         self.capture_empty_result_request_ids: list[str] = []
         self.capture_mismatch_request_ids: list[str] = []
         self.capture_invalid_images_request_ids: list[str] = []
@@ -495,8 +483,6 @@ class LongSmokeRunner:
         self.location_status_followup_verified_request_ids: list[str] = []
         self.social_status_request_ids: list[str] = []
         self.social_status_followup_verified_request_ids: list[str] = []
-        self.capture_timeout_recovered = False
-        self.remaining_capture_timeouts = args.capture_timeout_failures
         self.remaining_capture_empty_results = 0
         self.remaining_capture_mismatches = args.capture_mismatch_failures
         self.remaining_invalid_images_failures = args.capture_invalid_images_failures
@@ -507,12 +493,9 @@ class LongSmokeRunner:
         self.restart_probe_in_progress_before_restart = False
         self.multiple_client_pause_verified = False
         self.multiple_client_resume_verified = False
-        self.desktop_watch_capability_probe_cycle_id: str | None = None
-        self.desktop_watch_pending_intent_probe_cycle_id: str | None = None
-        self.desktop_watch_capability_probe_verified = False
-        self.desktop_watch_pending_intent_probe_verified = False
-        self.desktop_watch_pending_intent_persisted_integration_key: str | None = None
-        self.desktop_watch_pending_intent_schedule_persisted_verified = False
+        self.vision_capture_probe_cycle_id: str | None = None
+        self.vision_capture_followup_cycle_id: str | None = None
+        self.vision_capture_probe_verified = False
         self.external_status_probe_conversation_cycle_id: str | None = None
         self.external_status_probe_followup_cycle_id: str | None = None
         self.schedule_status_probe_conversation_cycle_id: str | None = None
@@ -581,11 +564,10 @@ class LongSmokeRunner:
             if self.args.profile == "real-llm-smoke":
                 return self._run_real_llm_smoke()
             self._connect_desktop_client()
-            self._exercise_capture_timeout_recovery()
-            self._wait_for_no_ongoing_action(label="capture timeout recovery")
+            self._exercise_vision_capture_followup()
+            self._wait_for_no_ongoing_action(label="vision capture followup")
             self._run_restart_probe()
             self._wait_for_no_ongoing_action(label="restart probe")
-            self._exercise_desktop_watch_event_boundaries()
             self._exercise_capture_empty_result()
             self._exercise_multiple_client_boundary()
             self._exercise_external_status_followup()
@@ -595,7 +577,6 @@ class LongSmokeRunner:
             self._exercise_recall_quality_probe()
             self._run_conversations()
             self._set_wake_policy_disabled()
-            self._set_desktop_watch_enabled(enabled=False)
             self._wait_for_no_ongoing_action(label="final quiesce")
             self._wait_for_memory_jobs_to_drain()
             summary = self._collect_summary()
@@ -778,18 +759,10 @@ class LongSmokeRunner:
 
         if self.args.profile == "real-llm-smoke":
             current["wake_policy"] = {"mode": "disabled"}
-            current["desktop_watch"] = {
-                "enabled": False,
-                "interval_seconds": self.args.desktop_watch_interval_seconds,
-            }
         else:
             current["wake_policy"] = {
                 "mode": "interval",
                 "interval_seconds": self.args.wake_interval_seconds,
-            }
-            current["desktop_watch"] = {
-                "enabled": True,
-                "interval_seconds": self.args.desktop_watch_interval_seconds,
             }
         self.api.put("/api/config/editor-state", editor_state)
 
@@ -835,7 +808,6 @@ class LongSmokeRunner:
 
         current = editor_state["current"]
         current["wake_policy"] = {"mode": "disabled"}
-        current["desktop_watch"] = {"enabled": False, "interval_seconds": self.args.desktop_watch_interval_seconds}
 
         for model_preset in editor_state["model_presets"]:
             if model_preset.get("model_preset_id") != self.selected_model_preset_id:
@@ -1003,11 +975,6 @@ class LongSmokeRunner:
             with self._capture_lock:
                 sequence = self.capture_request_count
                 self.capture_request_count += 1
-                if self.remaining_capture_timeouts > 0:
-                    self.remaining_capture_timeouts -= 1
-                    self.capture_timeout_request_ids.append(request_id)
-                    log(f"intentionally dropped capture-response request_id={request_id}")
-                    return
                 should_inject_empty_result = self.remaining_capture_empty_results > 0
                 if should_inject_empty_result:
                     self.remaining_capture_empty_results -= 1
@@ -1067,8 +1034,6 @@ class LongSmokeRunner:
                     },
                 )
                 self.capture_response_count += 1
-                if self.capture_timeout_request_ids:
-                    self.capture_timeout_recovered = True
                 log(f"capture-response empty_result verified request_id={request_id}")
                 return
             if should_inject_mismatch:
@@ -1151,8 +1116,6 @@ class LongSmokeRunner:
                 },
             )
             self.capture_response_count += 1
-            if self.capture_timeout_request_ids:
-                self.capture_timeout_recovered = True
             return
         if event_type == "external.status_request":
             if client_label != "primary":
@@ -1527,77 +1490,54 @@ class LongSmokeRunner:
             )
             self.social_status_response_count += 1
             return
-        if event_type == "desktop_watch":
-            self.desktop_watch_event_count += 1
-            return
-
     def _assert_event_clients_healthy(self) -> None:
         if self.event_client is not None and self.event_client.error is not None:
             raise SmokeError(f"desktop client failed: {self.event_client.error}")
         if self.secondary_event_client is not None and self.secondary_event_client.error is not None:
             raise SmokeError(f"secondary desktop client failed: {self.secondary_event_client.error}")
 
-    def _exercise_capture_timeout_recovery(self) -> None:
-        if self.args.capture_timeout_failures <= 0:
-            return
-
-        deadline = time.monotonic() + WAIT_CAPTURE_RECOVERY_TIMEOUT_SECONDS
+    def _exercise_vision_capture_followup(self) -> None:
+        marker = "LongSmokeVisionCaptureProbe"
+        conversation_cycle_id = self._post_conversation(
+            text=f"{marker}。今表示されている画面を見て、何が見えるか教えてください。",
+            source="long_smoke_vision_capture_probe",
+            client_id="long-smoke-vision-capture-probe",
+            active_app="LongSmokeVisionCaptureProbe",
+            window_title=marker,
+        )
+        self.vision_capture_probe_cycle_id = conversation_cycle_id
+        deadline = time.monotonic() + WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS + self.api.request_timeout_seconds
+        request_id: str | None = None
         while time.monotonic() < deadline:
             self._assert_server_running()
             self._assert_event_clients_healthy()
-            self._record_capture_timeout_failure_cycles()
+            trace = self.api.get(f"/api/inspection/cycles/{conversation_cycle_id}")
+            request_summary = ((trace.get("result_trace") or {}).get("capability_request_summary"))
             if (
-                len(self.capture_timeout_request_ids) >= self.args.capture_timeout_failures
-                and len(self.capture_timeout_failure_cycle_ids) >= self.args.capture_timeout_failures
-                and self.capture_timeout_recovered
-                and self.capture_response_count >= 1
+                isinstance(request_summary, dict)
+                and request_summary.get("capability_id") == "vision.capture"
+                and request_summary.get("status") == "dispatched"
             ):
-                log(
-                    "capture timeout recovery confirmed"
-                    f" dropped={len(self.capture_timeout_request_ids)}"
-                    f" failed_cycles={len(self.capture_timeout_failure_cycle_ids)}"
-                    f" recovered_responses={self.capture_response_count}"
-                )
-                return
+                candidate_request_id = request_summary.get("request_id")
+                if isinstance(candidate_request_id, str) and candidate_request_id:
+                    request_id = candidate_request_id
+                    break
             time.sleep(0.25)
-        raise SmokeError("desktop_watch did not recover after the injected capture timeout.")
+        if request_id is None:
+            raise SmokeError("vision.capture probe did not dispatch a request.")
 
-    def _record_capture_timeout_failure_cycles(self) -> None:
-        if not self.capture_timeout_request_ids:
-            return
-        cycle_summaries = self.api.get("/api/inspection/cycle-summaries?limit=120").get("cycle_summaries", [])
-        if not isinstance(cycle_summaries, list):
-            raise SmokeError("cycle_summaries response was invalid while recording timeout failures.")
-        recorded_cycle_ids = set(self.capture_timeout_failure_cycle_ids)
-        expected_request_ids = set(self.capture_timeout_request_ids)
-        for cycle_summary in cycle_summaries:
-            if not isinstance(cycle_summary, dict) or not cycle_summary.get("failed"):
-                continue
-            cycle_id = cycle_summary.get("cycle_id")
-            if not isinstance(cycle_id, str) or not cycle_id or cycle_id in recorded_cycle_ids:
-                continue
-            trace = self.api.get(f"/api/inspection/cycles/{cycle_id}")
-            if not self._is_expected_capture_timeout_failure_trace(trace):
-                continue
-            request_id = self._capture_failure_request_id(trace)
-            if request_id not in expected_request_ids:
-                continue
-            self.capture_timeout_failure_cycle_ids.append(cycle_id)
-            recorded_cycle_ids.add(cycle_id)
-
-    def _capture_failure_request_id(self, trace: Any) -> str | None:
-        if not isinstance(trace, dict):
-            return None
-        capability_dispatch_summary = ((trace.get("result_trace") or {}).get("capability_dispatch_summary"))
-        if not isinstance(capability_dispatch_summary, dict):
-            return None
-        request_summary = capability_dispatch_summary.get("request_summary")
-        if not isinstance(request_summary, dict):
-            return None
-        request_id = request_summary.get("request_id")
-        if isinstance(request_id, str) and request_id:
-            return request_id
-        return None
+        followup_trace = self._wait_for_capability_result_followup_by_request_id(request_id=request_id)
+        followup_cycle_id = followup_trace.get("cycle_id")
+        if not isinstance(followup_cycle_id, str) or not followup_cycle_id:
+            raise SmokeError("vision.capture follow-up cycle_id was not recorded.")
+        self.vision_capture_followup_cycle_id = followup_cycle_id
+        self.vision_capture_probe_verified = True
+        log(
+            "vision.capture followup confirmed"
+            f" conversation_cycle_id={conversation_cycle_id}"
+            f" followup_cycle_id={followup_cycle_id}"
+            f" request_id={request_id}"
+        )
 
     def _run_restart_probe(self) -> None:
         if self.args.restart_burst_conversations <= 0:
@@ -1652,124 +1592,27 @@ class LongSmokeRunner:
             )
             with self._capture_lock:
                 self.remaining_capture_empty_results += 1
+            self._post_conversation(
+                text=f"{marker}。画面を見て、表示内容を確認してください。",
+                source="long_smoke_capture_empty_result_probe",
+                client_id="long-smoke-capture-empty-result-probe",
+                active_app="LongSmokeEmptyResultProbe",
+                window_title=marker,
+            )
             expected_count = index + 1
-            expected_skip_count = self._count_server_log_occurrences("[DesktopWatch] cycle skipped no_images") + 1
-            deadline = time.monotonic() + WAIT_DESKTOP_WATCH_PROBE_TIMEOUT_SECONDS
+            deadline = time.monotonic() + WAIT_CAPTURE_RECOVERY_TIMEOUT_SECONDS
             while time.monotonic() < deadline:
                 self._assert_server_running()
                 self._assert_event_clients_healthy()
-                if (
-                    len(self.capture_empty_result_request_ids) < expected_count
-                    or self._count_server_log_occurrences("[DesktopWatch] cycle skipped no_images") < expected_skip_count
-                ):
+                if len(self.capture_empty_result_request_ids) < expected_count:
                     time.sleep(0.25)
                     continue
                 request_id = self.capture_empty_result_request_ids[index]
-                self.capture_empty_result_skip_count = expected_skip_count
-                log(f"capture empty_result confirmed request_id={request_id} skipped_cycle_count={expected_skip_count}")
+                self.capture_empty_result_skip_count = expected_count
+                log(f"capture empty_result confirmed request_id={request_id}")
                 break
             else:
-                raise SmokeError("desktop_watch did not produce the injected empty result trace.")
-
-    def _exercise_desktop_watch_event_boundaries(self) -> None:
-        self.desktop_watch_capability_probe_cycle_id = self._run_desktop_watch_probe(
-            probe_name="capability_request",
-            marker="LongSmokeReplyProbeWindow",
-            active_app="LongSmokeReplyProbeApp",
-            window_title="LongSmokeReplyProbeWindow",
-            expected_result_kind="capability_request",
-        )
-        self.desktop_watch_capability_probe_verified = True
-        pending_intent_marker = self._seed_pending_intent_probe_candidate()
-        self.desktop_watch_pending_intent_probe_cycle_id = self._run_desktop_watch_probe(
-            probe_name="pending_intent",
-            marker=pending_intent_marker,
-            active_app="LongSmokePendingIntentProbeApp",
-            window_title=f"{pending_intent_marker} また今度あとで",
-            expected_result_kind=None,
-            extra_client_context={
-                "schedule_summary": f"{pending_intent_marker} の見直し予定が近い。",
-            },
-        )
-        pending_intent_probe_trace = self.api.get(
-            f"/api/inspection/cycles/{self.desktop_watch_pending_intent_probe_cycle_id}"
-        )
-        self._record_pending_intent_probe_persistence(pending_intent_probe_trace)
-        self.desktop_watch_pending_intent_probe_verified = True
-
-    def _run_desktop_watch_probe(
-        self,
-        *,
-        probe_name: str,
-        marker: str,
-        active_app: str,
-        window_title: str,
-        expected_result_kind: str | None,
-        extra_client_context: dict[str, str] | None = None,
-    ) -> str:
-        override_client_context = {
-            "active_app": active_app,
-            "window_title": window_title,
-            "locale": "ja-JP",
-        }
-        if isinstance(extra_client_context, dict):
-            override_client_context.update(extra_client_context)
-        self._queue_capture_context_override(
-            {
-                "client_context": override_client_context,
-            }
-        )
-        log(
-            "desktop_watch probe queued"
-            f" probe={probe_name}"
-            f" expected_result_kind={expected_result_kind or 'any'}"
-            f" marker={marker}"
-        )
-
-        deadline = time.monotonic() + WAIT_DESKTOP_WATCH_PROBE_TIMEOUT_SECONDS
-        matched_trace: dict[str, Any] | None = None
-        inspected_cycle_ids: set[str] = set()
-
-        while time.monotonic() < deadline:
-            self._assert_server_running()
-            self._assert_event_clients_healthy()
-            cycle_summaries = self.api.get("/api/inspection/cycle-summaries?limit=60").get("cycle_summaries", [])
-            if not isinstance(cycle_summaries, list):
-                raise SmokeError("cycle_summaries response was invalid during desktop_watch probe.")
-            for cycle_summary in cycle_summaries:
-                if not isinstance(cycle_summary, dict):
-                    continue
-                if cycle_summary.get("trigger_kind") != "desktop_watch":
-                    continue
-                cycle_id = cycle_summary.get("cycle_id")
-                if not isinstance(cycle_id, str) or not cycle_id or cycle_id in inspected_cycle_ids:
-                    continue
-                inspected_cycle_ids.add(cycle_id)
-                trace = self.api.get(f"/api/inspection/cycles/{cycle_id}")
-                input_summary = ((trace.get("input_trace") or {}).get("normalized_input_summary"))
-                if not isinstance(input_summary, str) or marker not in input_summary:
-                    continue
-                matched_trace = trace
-                break
-
-            if matched_trace is not None:
-                cycle_id = matched_trace.get("cycle_id")
-                result_kind = (matched_trace.get("cycle_summary") or {}).get("result_kind")
-                if expected_result_kind is not None and result_kind != expected_result_kind:
-                    raise SmokeError(
-                        f"desktop_watch {probe_name} probe result_kind was {result_kind}."
-                    )
-                if expected_result_kind is None:
-                    log(f"desktop_watch {probe_name} trace matched cycle_id={cycle_id} result_kind={result_kind}")
-                else:
-                    log(
-                        f"desktop_watch {probe_name} {expected_result_kind} confirmed"
-                        f" cycle_id={cycle_id}"
-                    )
-                return cycle_id
-            time.sleep(0.25)
-
-        raise SmokeError(f"desktop_watch probe timed out: {probe_name}")
+                raise SmokeError("vision.capture did not produce the injected empty result trace.")
 
     def _seed_pending_intent_probe_candidate(self) -> str:
         marker = "LongSmokePendingIntentProbeMarker"
@@ -1895,17 +1738,6 @@ class LongSmokeRunner:
                 }
             },
         )
-
-    def _set_desktop_watch_enabled(self, *, enabled: bool) -> None:
-        editor_state = self.api.get("/api/config/editor-state")
-        current = editor_state.get("current")
-        if not isinstance(current, dict):
-            raise SmokeError("editor-state current was invalid.")
-        current["desktop_watch"] = {
-            "enabled": enabled,
-            "interval_seconds": self.args.desktop_watch_interval_seconds,
-        }
-        self.api.put("/api/config/editor-state", editor_state)
 
     def _restart_server_for_real_llm_probe(self) -> None:
         self._stop_server()
@@ -2692,30 +2524,6 @@ class LongSmokeRunner:
             conn.close()
         return [json.loads(row[0]) for row in rows]
 
-    def _record_pending_intent_probe_persistence(self, trace: dict[str, Any]) -> None:
-        world_state_trace = trace.get("world_state_trace", {})
-        if not isinstance(world_state_trace, dict):
-            raise SmokeError("desktop_watch pending_intent probe world_state_trace was invalid.")
-        state_type_hooks = world_state_trace.get("source_pack_state_type_hooks", {})
-        if not isinstance(state_type_hooks, dict):
-            raise SmokeError("desktop_watch pending_intent probe source_pack_state_type_hooks was invalid.")
-        schedule_hook = state_type_hooks.get("schedule", {})
-        if not isinstance(schedule_hook, dict):
-            raise SmokeError("desktop_watch pending_intent probe schedule hook was not recorded.")
-        pending_slot_key = schedule_hook.get("pending_intent_slot_key")
-        if not isinstance(pending_slot_key, str) or not pending_slot_key.strip():
-            raise SmokeError("desktop_watch pending_intent probe pending_intent_slot_key was invalid.")
-        integration_key = f"schedule:{pending_slot_key}"
-        persisted_schedule_keys = {
-            str(state.get("integration_key") or "").strip()
-            for state in self._list_persisted_world_states(state_type="schedule")
-            if isinstance(state, dict) and str(state.get("integration_key") or "").strip()
-        }
-        if integration_key not in persisted_schedule_keys:
-            raise SmokeError("desktop_watch pending_intent probe schedule integration_key was not persisted.")
-        self.desktop_watch_pending_intent_persisted_integration_key = integration_key
-        self.desktop_watch_pending_intent_schedule_persisted_verified = True
-
     def _count_cycles_by_trigger_kind(self, trigger_kind: str) -> int:
         cycle_summaries = self.api.get("/api/inspection/cycle-summaries?limit=120").get("cycle_summaries", [])
         if not isinstance(cycle_summaries, list):
@@ -3465,9 +3273,9 @@ class LongSmokeRunner:
         marker = "RealLLMBackgroundWeakForegroundMarker"
         self._seed_initiative_probe_world_state(
             world_state_id=f"world:{case_id}",
-            state_type="screen",
+            state_type="visual_context",
             scope_key=marker,
-            summary_text=f"{marker}: 画面は前景にあるが、予定・対人・身体文脈はまだ薄い。",
+            summary_text=f"{marker}: 視覚前景はあるが、予定・対人・身体文脈はまだ薄い。",
             salience=0.35,
         )
         trace = self._run_background_wake_probe(case_id=case_id)
@@ -3480,7 +3288,7 @@ class LongSmokeRunner:
             expected_preferred_result_kind="noop",
             expected_foreground_thinness="thin",
             expected_suppression_level="medium",
-            expected_world_state_type="screen",
+            expected_world_state_type="visual_context",
         )
         self._assert_background_wake_memory_status(
             trace=trace,
@@ -4193,7 +4001,7 @@ class LongSmokeRunner:
         )
         log(f"secondary desktop client connected client_id={secondary_client_id}")
 
-        settle_deadline = time.monotonic() + float(self.args.desktop_watch_interval_seconds) + 1.0
+        settle_deadline = time.monotonic() + 1.0
         while time.monotonic() < settle_deadline:
             self._assert_server_running()
             self._assert_event_clients_healthy()
@@ -4216,19 +4024,13 @@ class LongSmokeRunner:
 
         self.secondary_event_client.close()
         self.secondary_event_client = None
-        resume_deadline = time.monotonic() + WAIT_CAPTURE_RECOVERY_TIMEOUT_SECONDS
-        while time.monotonic() < resume_deadline:
-            self._assert_server_running()
-            self._assert_event_clients_healthy()
-            if self.capture_request_count > capture_request_baseline:
-                self.multiple_client_resume_verified = True
-                log(
-                    "multiple desktop client resume confirmed"
-                    f" capture_request_count={self.capture_request_count}"
-                )
-                return
-            time.sleep(0.25)
-        raise SmokeError("desktop_watch did not resume after secondary desktop client disconnected.")
+        self._assert_server_running()
+        self._assert_event_clients_healthy()
+        self.multiple_client_resume_verified = True
+        log(
+            "multiple desktop client resume confirmed"
+            f" capture_request_count={self.capture_request_count}"
+        )
 
     def _run_conversations(self) -> None:
         messages = [
@@ -4278,7 +4080,6 @@ class LongSmokeRunner:
                     f" in_progress={runtime_summary.get('memory_job_in_progress')}"
                     f" captures={self.capture_request_count}"
                     f" external_status={self.external_status_request_count}"
-                    f" desktop_events={self.desktop_watch_event_count}"
                 )
                 last_status_log_at = now
 
@@ -5362,19 +5163,6 @@ class LongSmokeRunner:
             trace = self.api.get(f"/api/inspection/cycles/{cycle_id}")
             restart_probe_traces.append(trace)
 
-        desktop_watch_capability_probe_trace = None
-        if isinstance(self.desktop_watch_capability_probe_cycle_id, str) and self.desktop_watch_capability_probe_cycle_id:
-            desktop_watch_capability_probe_trace = self.api.get(
-                f"/api/inspection/cycles/{self.desktop_watch_capability_probe_cycle_id}"
-            )
-        desktop_watch_pending_intent_probe_trace = None
-        if (
-            isinstance(self.desktop_watch_pending_intent_probe_cycle_id, str)
-            and self.desktop_watch_pending_intent_probe_cycle_id
-        ):
-            desktop_watch_pending_intent_probe_trace = self.api.get(
-                f"/api/inspection/cycles/{self.desktop_watch_pending_intent_probe_cycle_id}"
-            )
         external_status_probe_conversation_trace = None
         if (
             isinstance(self.external_status_probe_conversation_cycle_id, str)
@@ -5518,7 +5306,7 @@ class LongSmokeRunner:
             "capture_request_count": self.capture_request_count,
             "capture_response_count": self.capture_response_count,
             "server_log_capture_response_count": self._count_server_log_occurrences(
-                "[DesktopWatch] capability response accepted request="
+                "[CapabilityResult] capability response accepted request=vision_capture_request:"
             ),
             "external_status_request_count": self.external_status_request_count,
             "external_status_response_count": self.external_status_response_count,
@@ -5548,27 +5336,20 @@ class LongSmokeRunner:
             "social_status_response_count": self.social_status_response_count,
             "social_status_request_ids": self.social_status_request_ids,
             "social_status_followup_verified_request_ids": self.social_status_followup_verified_request_ids,
-            "desktop_watch_event_count": self.desktop_watch_event_count,
-            "capture_timeout_request_ids": self.capture_timeout_request_ids,
-            "capture_timeout_failure_cycle_ids": self.capture_timeout_failure_cycle_ids,
             "capture_empty_result_request_ids": self.capture_empty_result_request_ids,
             "capture_empty_result_skip_count": self.capture_empty_result_skip_count,
             "capture_mismatch_request_ids": self.capture_mismatch_request_ids,
             "capture_invalid_images_request_ids": self.capture_invalid_images_request_ids,
             "capture_invalid_error_request_ids": self.capture_invalid_error_request_ids,
             "capture_unknown_request_ids": self.capture_unknown_request_ids,
-            "capture_timeout_recovered": self.capture_timeout_recovered,
             "restart_count": self.restart_count,
             "restart_probe_pending_before_restart": self.restart_probe_pending_before_restart,
             "restart_probe_in_progress_before_restart": self.restart_probe_in_progress_before_restart,
             "multiple_client_pause_verified": self.multiple_client_pause_verified,
             "multiple_client_resume_verified": self.multiple_client_resume_verified,
-            "desktop_watch_capability_probe_cycle_id": self.desktop_watch_capability_probe_cycle_id,
-            "desktop_watch_pending_intent_probe_cycle_id": self.desktop_watch_pending_intent_probe_cycle_id,
-            "desktop_watch_capability_probe_verified": self.desktop_watch_capability_probe_verified,
-            "desktop_watch_pending_intent_probe_verified": self.desktop_watch_pending_intent_probe_verified,
-            "desktop_watch_pending_intent_persisted_integration_key": self.desktop_watch_pending_intent_persisted_integration_key,
-            "desktop_watch_pending_intent_schedule_persisted_verified": self.desktop_watch_pending_intent_schedule_persisted_verified,
+            "vision_capture_probe_cycle_id": self.vision_capture_probe_cycle_id,
+            "vision_capture_followup_cycle_id": self.vision_capture_followup_cycle_id,
+            "vision_capture_probe_verified": self.vision_capture_probe_verified,
             "external_status_probe_conversation_cycle_id": self.external_status_probe_conversation_cycle_id,
             "external_status_probe_followup_cycle_id": self.external_status_probe_followup_cycle_id,
             "external_status_probe_verified": self.external_status_probe_verified,
@@ -5592,8 +5373,6 @@ class LongSmokeRunner:
             "social_status_probe_verified": self.social_status_probe_verified,
             "external_status_multi_service_verified": self.external_status_multi_service_verified,
             "external_status_persisted_integration_keys": self.external_status_persisted_integration_keys,
-            "desktop_watch_capability_probe_trace": desktop_watch_capability_probe_trace,
-            "desktop_watch_pending_intent_probe_trace": desktop_watch_pending_intent_probe_trace,
             "external_status_probe_conversation_trace": external_status_probe_conversation_trace,
             "external_status_probe_followup_trace": external_status_probe_followup_trace,
             "schedule_status_probe_conversation_trace": schedule_status_probe_conversation_trace,
@@ -5661,7 +5440,6 @@ class LongSmokeRunner:
             "max_memory_job_lag_seconds": round(self.max_memory_job_lag_seconds, 3),
             "wake_cycle_count": trigger_counts.get("wake", 0),
             "background_wake_cycle_count": trigger_counts.get("background_wake", 0),
-            "desktop_watch_cycle_count": trigger_counts.get("desktop_watch", 0),
             "capability_result_cycle_count": trigger_counts.get("capability_result", 0),
             "active_ongoing_action_count": len(active_ongoing_actions),
             "active_ongoing_action_ids": [
@@ -5695,14 +5473,6 @@ class LongSmokeRunner:
                 "verified": wake_family_count >= 1,
             },
             {
-                "scenario_id": "desktop-watch",
-                "trigger_kinds": ["desktop_watch"],
-                "observed_cycle_count": trigger_counts.get("desktop_watch", 0),
-                "verified": bool(
-                    self.desktop_watch_capability_probe_verified and self.desktop_watch_pending_intent_probe_verified
-                ),
-            },
-            {
                 "scenario_id": "capability-result-followup",
                 "trigger_kinds": ["capability_result"],
                 "observed_cycle_count": capability_result_count,
@@ -5726,24 +5496,9 @@ class LongSmokeRunner:
         )
         return [
             {
-                "case_id": "capability-timeout",
-                "expected_trace": "desktop_watch internal_failure with request_timeout transition",
-                "recovery_condition": "subsequent capture response succeeds",
-                "requested_count": self.args.capture_timeout_failures,
-                "observed_count": len(self.capture_timeout_request_ids),
-                "recovery_verified": self.capture_timeout_recovered,
-                "verified": (
-                    self.args.capture_timeout_failures <= 0
-                    or (
-                        len(self.capture_timeout_request_ids) == self.args.capture_timeout_failures
-                        and self.capture_timeout_recovered
-                    )
-                ),
-            },
-            {
                 "case_id": "capability-empty-result",
-                "expected_trace": "desktop_watch capture trace records image_count=0 and result_empty transition",
-                "recovery_condition": "desktop_watch logs cycle skipped no_images and proceeds without lingering ongoing_action",
+                "expected_trace": "vision.capture result records image_count=0 and result_empty transition",
+                "recovery_condition": "empty result is recorded without lingering ongoing_action",
                 "requested_count": self.args.capture_empty_result_failures,
                 "observed_count": len(self.capture_empty_result_request_ids),
                 "recovery_verified": self.capture_empty_result_skip_count == self.args.capture_empty_result_failures,
@@ -6542,8 +6297,6 @@ class LongSmokeRunner:
             raise SmokeError("recall quality probe checks did not all pass.")
         if wake_cycle_count < 1:
             raise SmokeError("no wake/background_wake cycle was recorded during the smoke run.")
-        if summary["trigger_counts"].get("desktop_watch", 0) < 1:
-            raise SmokeError("no desktop_watch cycle was recorded during the smoke run.")
         if summary["trigger_counts"].get("capability_result", 0) < 1:
             raise SmokeError("no capability_result cycle was recorded during the smoke run.")
         if summary["capture_request_count"] < 1:
@@ -6554,36 +6307,21 @@ class LongSmokeRunner:
             raise SmokeError("no schedule.status_request event was received.")
         if summary["device_status_request_count"] < 1:
             raise SmokeError("no device.status_request event was received.")
-        expected_responses = summary["capture_request_count"] - len(summary["capture_timeout_request_ids"])
         server_log_capture_response_count = summary.get("server_log_capture_response_count")
         if not isinstance(server_log_capture_response_count, int):
             raise SmokeError("server_log_capture_response_count was not recorded.")
-        if server_log_capture_response_count != expected_responses:
-            raise SmokeError("capture request / response counts did not match the injected timeout count.")
+        if server_log_capture_response_count != summary["capture_request_count"]:
+            raise SmokeError("capture request / response counts did not match.")
         if summary["external_status_response_count"] != summary["external_status_request_count"]:
             raise SmokeError("external.status request / response counts did not match.")
         if summary["schedule_status_response_count"] != summary["schedule_status_request_count"]:
             raise SmokeError("schedule.status request / response counts did not match.")
         if summary["device_status_response_count"] != summary["device_status_request_count"]:
             raise SmokeError("device.status request / response counts did not match.")
-        recorded_timeout_failure_cycle_ids = summary.get("capture_timeout_failure_cycle_ids", [])
-        if not isinstance(recorded_timeout_failure_cycle_ids, list):
-            raise SmokeError("capture_timeout_failure_cycle_ids was invalid.")
-        unexpected_failed_cycle_ids: list[str] = []
-        for cycle_id in summary["failed_cycle_ids"]:
-            trace = self.api.get(f"/api/inspection/cycles/{cycle_id}")
-            if self._is_expected_capture_timeout_failure_trace(trace):
-                continue
-            unexpected_failed_cycle_ids.append(cycle_id)
-        if unexpected_failed_cycle_ids:
-            raise SmokeError(f"failed cycles were recorded: {', '.join(unexpected_failed_cycle_ids)}")
-        if self.args.capture_timeout_failures > 0:
-            if len(summary["capture_timeout_request_ids"]) != self.args.capture_timeout_failures:
-                raise SmokeError("capture timeout injection count did not match the requested failure count.")
-            if not summary["capture_timeout_recovered"]:
-                raise SmokeError("desktop_watch did not recover after the injected capture timeout.")
-            if len(recorded_timeout_failure_cycle_ids) != self.args.capture_timeout_failures:
-                raise SmokeError("desktop_watch timeout failure cycles did not match the injected timeout count.")
+        if summary["failed_cycle_ids"]:
+            raise SmokeError(f"failed cycles were recorded: {', '.join(summary['failed_cycle_ids'])}")
+        if not summary["vision_capture_probe_verified"]:
+            raise SmokeError("vision.capture follow-up boundary was not verified.")
         if self.args.capture_empty_result_failures > 0:
             if len(summary["capture_empty_result_request_ids"]) != self.args.capture_empty_result_failures:
                 raise SmokeError("capture empty_result injection count did not match the requested failure count.")
@@ -6612,16 +6350,6 @@ class LongSmokeRunner:
             raise SmokeError("multiple desktop client pause boundary was not verified.")
         if not summary["multiple_client_resume_verified"]:
             raise SmokeError("multiple desktop client resume boundary was not verified.")
-        if not summary["desktop_watch_capability_probe_verified"]:
-            raise SmokeError("desktop_watch capability_request boundary was not verified.")
-        if not summary["desktop_watch_pending_intent_probe_verified"]:
-            raise SmokeError("desktop_watch pending_intent boundary was not verified.")
-        if not summary.get("desktop_watch_pending_intent_schedule_persisted_verified"):
-            raise SmokeError("desktop_watch pending_intent probe schedule persistence was not verified.")
-        if not isinstance(summary.get("desktop_watch_pending_intent_persisted_integration_key"), str) or not summary.get(
-            "desktop_watch_pending_intent_persisted_integration_key"
-        ):
-            raise SmokeError("desktop_watch pending_intent probe persisted integration_key was not recorded.")
         if not summary["external_status_probe_verified"]:
             raise SmokeError("external.status follow-up boundary was not verified.")
         if not summary["schedule_status_probe_verified"]:
@@ -6652,8 +6380,6 @@ class LongSmokeRunner:
                 raise SmokeError("failure_case_matrix entry was invalid.")
             if not failure_case.get("verified"):
                 raise SmokeError(f"failure case verification failed: {failure_case.get('case_id')}")
-        self._assert_desktop_watch_probe_trace(summary.get("desktop_watch_capability_probe_trace"), "capability_request")
-        self._assert_desktop_watch_probe_trace(summary.get("desktop_watch_pending_intent_probe_trace"), "pending_intent")
         self._assert_external_status_probe_trace(
             summary.get("external_status_probe_conversation_trace"),
             summary.get("external_status_probe_followup_trace"),
@@ -6762,126 +6488,6 @@ class LongSmokeRunner:
             unconnected_reason = observation_summary.get("unconnected_reason")
             if not isinstance(unconnected_reason, str) or not unconnected_reason.strip():
                 raise SmokeError(f"{label} synthetic data source did not record unconnected_reason.")
-
-    def _assert_desktop_watch_probe_trace(self, trace: Any, label: str) -> None:
-        if not isinstance(trace, dict):
-            raise SmokeError(f"desktop_watch {label} probe trace was not collected.")
-        input_trace = trace.get("input_trace", {})
-        if not isinstance(input_trace, dict):
-            raise SmokeError(f"desktop_watch {label} probe input_trace was invalid.")
-        cycle_summary = trace.get("cycle_summary", {})
-        if not isinstance(cycle_summary, dict):
-            raise SmokeError(f"desktop_watch {label} probe cycle_summary was invalid.")
-        result_trace = trace.get("result_trace", {})
-        if not isinstance(result_trace, dict):
-            raise SmokeError(f"desktop_watch {label} probe result_trace was invalid.")
-        world_state_trace = trace.get("world_state_trace", {})
-        if not isinstance(world_state_trace, dict):
-            raise SmokeError(f"desktop_watch {label} probe world_state_trace was invalid.")
-        state_type_hooks = world_state_trace.get("source_pack_state_type_hooks", {})
-        if not isinstance(state_type_hooks, dict):
-            raise SmokeError(f"desktop_watch {label} probe source_pack_state_type_hooks was invalid.")
-        normalized_candidate_policies = world_state_trace.get("normalized_candidate_policies", [])
-        if not isinstance(normalized_candidate_policies, list):
-            raise SmokeError(f"desktop_watch {label} probe normalized_candidate_policies was invalid.")
-        screen_hook = state_type_hooks.get("screen", {})
-        if not isinstance(screen_hook, dict):
-            raise SmokeError(f"desktop_watch {label} probe screen hook was not recorded.")
-        if screen_hook.get("capability_id") != "vision.capture":
-            raise SmokeError(f"desktop_watch {label} probe screen hook capability_id was invalid.")
-        if screen_hook.get("summary_source") != "visual_summary_text":
-            raise SmokeError(f"desktop_watch {label} probe screen hook summary_source was invalid.")
-        signal_fields = screen_hook.get("signal_fields", [])
-        if not isinstance(signal_fields, list) or "visual_summary_text" not in signal_fields:
-            raise SmokeError(f"desktop_watch {label} probe screen hook signal_fields was invalid.")
-        screen_policy = next(
-            (
-                item
-                for item in normalized_candidate_policies
-                if isinstance(item, dict) and item.get("state_type") == "screen"
-            ),
-            None,
-        )
-        if not isinstance(screen_policy, dict):
-            raise SmokeError(f"desktop_watch {label} probe screen policy was not recorded.")
-        if screen_policy.get("summary_source") != "visual_summary_text":
-            raise SmokeError(f"desktop_watch {label} probe screen policy summary_source was invalid.")
-        if screen_policy.get("effective_ttl_seconds") != 600:
-            raise SmokeError(f"desktop_watch {label} probe screen policy TTL was invalid.")
-        if screen_policy.get("integration_key") != "screen:foreground":
-            raise SmokeError(f"desktop_watch {label} probe screen policy integration_key was invalid.")
-        if label == "capability_request":
-            capability_request_summary = result_trace.get("capability_request_summary", {})
-            if not isinstance(capability_request_summary, dict):
-                raise SmokeError("desktop_watch capability_request probe capability_request_summary was invalid.")
-            if capability_request_summary.get("capability_id") != "vision.capture":
-                raise SmokeError("desktop_watch capability_request probe capability_id was invalid.")
-            if capability_request_summary.get("status") != "dispatched":
-                raise SmokeError("desktop_watch capability_request probe capability_request status was invalid.")
-            if not isinstance(capability_request_summary.get("request_id"), str) or not capability_request_summary["request_id"]:
-                raise SmokeError("desktop_watch capability_request probe request_id was not recorded.")
-            if not isinstance(capability_request_summary.get("timeout_ms"), int):
-                raise SmokeError("desktop_watch capability_request probe timeout_ms was not recorded.")
-            self._assert_capability_request_readiness_digest(
-                capability_request_summary,
-                "vision.capture",
-                "desktop_watch capability_request probe",
-            )
-            ongoing_action_transition_summary = result_trace.get("ongoing_action_transition_summary", {})
-            if not isinstance(ongoing_action_transition_summary, dict):
-                raise SmokeError("desktop_watch capability_request probe ongoing_action_transition_summary was invalid.")
-            transition_sequence = ongoing_action_transition_summary.get("transition_sequence", [])
-            if not isinstance(transition_sequence, list) or len(transition_sequence) != 2:
-                raise SmokeError("desktop_watch capability_request probe transition_sequence was invalid.")
-            if transition_sequence[0] not in {"started", "continued"}:
-                raise SmokeError(
-                    "desktop_watch capability_request probe first transition was invalid:"
-                    f" {transition_sequence[0]}"
-                )
-            if transition_sequence[1] != "completed":
-                raise SmokeError("desktop_watch capability_request probe final transition was invalid.")
-            if ongoing_action_transition_summary.get("last_capability_id") != "vision.capture":
-                raise SmokeError("desktop_watch capability_request probe last_capability_id was invalid.")
-            return
-        pending_intent_selection = input_trace.get("pending_intent_selection", {})
-        if not isinstance(pending_intent_selection, dict):
-            raise SmokeError("desktop_watch pending_intent probe selection trace was invalid.")
-        if int(pending_intent_selection.get("candidate_pool_count", 0)) < 1:
-            raise SmokeError("desktop_watch pending_intent probe candidate_pool_count was invalid.")
-        if int(pending_intent_selection.get("eligible_candidate_count", 0)) < 1:
-            raise SmokeError("desktop_watch pending_intent probe eligible_candidate_count was invalid.")
-        if pending_intent_selection.get("result_status") != "succeeded":
-            raise SmokeError("desktop_watch pending_intent probe selection result_status was invalid.")
-        if pending_intent_selection.get("selected_candidate_ref") == "none":
-            raise SmokeError("desktop_watch pending_intent probe did not select a candidate.")
-        schedule_hook = state_type_hooks.get("schedule", {})
-        if not isinstance(schedule_hook, dict):
-            raise SmokeError("desktop_watch pending_intent probe schedule hook was not recorded.")
-        pending_slot_key = schedule_hook.get("pending_intent_slot_key")
-        if not isinstance(pending_slot_key, str) or not pending_slot_key.strip():
-            raise SmokeError("desktop_watch pending_intent probe pending_intent_slot_key was invalid.")
-        schedule_signal_fields = schedule_hook.get("signal_fields", [])
-        if not isinstance(schedule_signal_fields, list) or "pending_intent" not in schedule_signal_fields:
-            raise SmokeError("desktop_watch pending_intent probe schedule signal_fields were invalid.")
-        schedule_policy = next(
-            (
-                item
-                for item in normalized_candidate_policies
-                if isinstance(item, dict) and item.get("state_type") == "schedule"
-            ),
-            None,
-        )
-        if not isinstance(schedule_policy, dict):
-            raise SmokeError("desktop_watch pending_intent probe schedule policy was not recorded.")
-        if schedule_policy.get("integration_mode") != "schedule_slot":
-            raise SmokeError("desktop_watch pending_intent probe schedule integration_mode was invalid.")
-        expected_integration_key = f"schedule:{pending_slot_key}"
-        if schedule_policy.get("integration_key") != expected_integration_key:
-            raise SmokeError("desktop_watch pending_intent probe schedule integration_key was invalid.")
-        if schedule_policy.get("ttl_capped_by") != "pending_intent.expires_at":
-            raise SmokeError("desktop_watch pending_intent probe schedule TTL cap was invalid.")
-        if self.desktop_watch_pending_intent_persisted_integration_key != expected_integration_key:
-            raise SmokeError("desktop_watch pending_intent probe persisted integration_key was inconsistent.")
 
     def _assert_external_status_probe_trace(
         self,
@@ -7751,28 +7357,6 @@ class LongSmokeRunner:
         if transition_summary.get("final_state") != "completed":
             raise SmokeError("location.status probe follow-up final_state was invalid.")
 
-    def _is_expected_capture_timeout_failure_trace(self, trace: Any) -> bool:
-        if not isinstance(trace, dict):
-            return False
-        cycle_summary = trace.get("cycle_summary", {})
-        if not isinstance(cycle_summary, dict) or cycle_summary.get("trigger_kind") != "desktop_watch":
-            return False
-        result_trace = trace.get("result_trace", {})
-        if not isinstance(result_trace, dict) or result_trace.get("result_kind") != "internal_failure":
-            return False
-        capability_dispatch_summary = result_trace.get("capability_dispatch_summary", {})
-        if not isinstance(capability_dispatch_summary, dict):
-            return False
-        request_summary = capability_dispatch_summary.get("request_summary", {})
-        transition_summary = capability_dispatch_summary.get("transition_summary", {})
-        if not isinstance(request_summary, dict) or not isinstance(transition_summary, dict):
-            return False
-        return (
-            request_summary.get("capability_id") == "vision.capture"
-            and request_summary.get("status") == "request_timeout"
-            and transition_summary.get("reason_code") == "request_timeout"
-        )
-
     def _write_summary(self, summary: dict[str, Any]) -> None:
         self.summary_path.write_text(
             json.dumps(summary, ensure_ascii=False, indent=2),
@@ -7862,11 +7446,9 @@ class LongSmokeRunner:
             f" restart_probe={len(summary['restart_probe_cycle_ids'])}"
             f" wake={summary['trigger_counts'].get('wake', 0)}"
             f" background_wake={summary['trigger_counts'].get('background_wake', 0)}"
-            f" desktop_watch={summary['trigger_counts'].get('desktop_watch', 0)}"
             f" capability_result={summary['trigger_counts'].get('capability_result', 0)}"
             f" captures={summary['capture_request_count']}"
             f" external_status={summary['external_status_request_count']}"
-            f" dropped={len(summary['capture_timeout_request_ids'])}"
             f" empty_result={len(summary['capture_empty_result_request_ids'])}"
             f" mismatch={len(summary['capture_mismatch_request_ids'])}"
             f" invalid_images={len(summary['capture_invalid_images_request_ids'])}"
@@ -7966,19 +7548,17 @@ class LongSmokeRunner:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="background wake / desktop_watch / memory worker をまとめて回す隔離 long smoke",
+        description="background wake / capability result / memory worker をまとめて回す隔離 long smoke",
     )
     parser.add_argument("--profile", choices=tuple(PROFILE_DEFAULTS.keys()), default="smoke", help="既定値 preset")
     parser.add_argument("--run-seconds", type=int, help="入力を流し続ける秒数")
     parser.add_argument("--conversation-interval-seconds", type=float, help="会話投入間隔")
-    parser.add_argument("--desktop-watch-interval-seconds", type=int, help="desktop_watch 間隔")
     parser.add_argument("--wake-interval-seconds", type=int, help="background wake 間隔")
     parser.add_argument("--min-conversation-cycles", type=int, help="最低会話サイクル数")
     parser.add_argument("--status-log-interval-seconds", type=float, help="runtime status のログ間隔")
     parser.add_argument("--inspection-cycle-summary-limit", type=int, help="inspection から回収する cycle_summaries 上限")
     parser.add_argument("--max-memory-job-lag-seconds", type=float, help="許容する memory worker 最大滞留秒数")
     parser.add_argument("--request-timeout-seconds", type=float, help="JSON API request timeout 秒数")
-    parser.add_argument("--capture-timeout-failures", type=int, help="意図的に落とす capture-response 回数")
     parser.add_argument(
         "--capture-empty-result-failures",
         type=int,

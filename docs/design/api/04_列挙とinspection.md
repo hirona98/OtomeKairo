@@ -65,7 +65,6 @@ response:
     "runtime_summary": {},
     "runtime_detail": {
       "wake_runtime_state": {},
-      "desktop_watch_runtime_state": {},
       "memory_postprocess_runtime_state": {},
       "pending_capability_requests": []
     },
@@ -116,8 +115,8 @@ response:
         "available": true,
         "unavailable_reason": null,
         "readiness": {
-          "family": "screen_observation",
-          "world_state_type": "screen",
+          "family": "visual_observation",
+          "world_state_type": "visual_context",
           "input_keys": ["source", "mode"],
           "result_summary_keys": ["visual_summary_text"]
         },

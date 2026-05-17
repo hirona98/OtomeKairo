@@ -552,6 +552,19 @@ class ServiceConfigMixin:
         state = self._require_token(token)
         should_clear_runtime_layers = False
         should_clear_drive_states = False
+        supported_fields = {
+            "selected_persona_id",
+            "selected_memory_set_id",
+            "selected_model_preset_id",
+            "wake_policy",
+        }
+        unsupported_fields = sorted(set(payload.keys()) - supported_fields)
+        if unsupported_fields:
+            raise ServiceError(
+                400,
+                "unsupported_current_config_fields",
+                f"current config has unsupported fields: {', '.join(unsupported_fields)}.",
+            )
 
         # 選択済みpersona
         if "selected_persona_id" in payload:
@@ -584,10 +597,6 @@ class ServiceConfigMixin:
         if "wake_policy" in payload:
             self._validate_wake_policy(payload["wake_policy"])
             state["wake_policy"] = payload["wake_policy"]
-        if "desktop_watch" in payload:
-            desktop_watch = self._normalize_desktop_watch(payload["desktop_watch"])
-            self._validate_desktop_watch(desktop_watch)
-            state["desktop_watch"] = desktop_watch
 
         # 永続化
         self.store.write_state(state)
@@ -805,6 +814,19 @@ class ServiceConfigMixin:
             self._validate_model_preset_definition(model_preset_id, model_preset)
 
         # 現在の選択
+        supported_current_fields = {
+            "selected_persona_id",
+            "selected_memory_set_id",
+            "selected_model_preset_id",
+            "wake_policy",
+        }
+        unsupported_current_fields = sorted(set(current.keys()) - supported_current_fields)
+        if unsupported_current_fields:
+            raise ServiceError(
+                400,
+                "unsupported_editor_state_current_fields",
+                f"editor-state current has unsupported fields: {', '.join(unsupported_current_fields)}.",
+            )
         selected_persona_id = current.get("selected_persona_id")
         selected_memory_set_id = current.get("selected_memory_set_id")
         selected_model_preset_id = current.get("selected_model_preset_id")
@@ -817,15 +839,12 @@ class ServiceConfigMixin:
 
         # 動作設定検証
         self._validate_wake_policy(current.get("wake_policy"))
-        desktop_watch = self._normalize_desktop_watch(current.get("desktop_watch"))
-        self._validate_desktop_watch(desktop_watch)
 
         # 永続化
         state["selected_persona_id"] = selected_persona_id
         state["selected_memory_set_id"] = selected_memory_set_id
         state["selected_model_preset_id"] = selected_model_preset_id
         state["wake_policy"] = current["wake_policy"]
-        state["desktop_watch"] = desktop_watch
         state["personas"] = personas
         state["memory_sets"] = memory_sets
         state["model_presets"] = model_presets
@@ -859,7 +878,6 @@ class ServiceConfigMixin:
         return {
             "selected_persona_id": state["selected_persona_id"],
             "selected_memory_set_id": state["selected_memory_set_id"],
-            "desktop_watch": self._normalize_desktop_watch(state["desktop_watch"]),
             "wake_policy": deepcopy(state["wake_policy"]),
             "selected_model_preset_id": state["selected_model_preset_id"],
         }
@@ -896,7 +914,6 @@ class ServiceConfigMixin:
     ) -> dict[str, Any]:
         return {
             "wake_runtime_state": self._snapshot_wake_runtime_state(current_time=current_time),
-            "desktop_watch_runtime_state": self._snapshot_desktop_watch_runtime_state(),
             "memory_postprocess_runtime_state": self._snapshot_memory_postprocess_runtime_state(),
             "pending_capability_requests": self._list_pending_capability_request_summaries(current_time=current_time),
         }
@@ -946,12 +963,6 @@ class ServiceConfigMixin:
                 "last_spontaneous_at": self._wake_runtime_state.get("last_spontaneous_at"),
                 "cooldown_until": self._wake_runtime_state.get("cooldown_until"),
                 "reply_history_count": len(reply_history) if isinstance(reply_history, dict) else 0,
-            }
-
-    def _snapshot_desktop_watch_runtime_state(self) -> dict[str, Any]:
-        with self._runtime_state_lock:
-            return {
-                "last_watch_at": self._desktop_watch_runtime_state.get("last_watch_at"),
             }
 
     def _snapshot_memory_postprocess_runtime_state(self) -> dict[str, Any]:
@@ -1325,32 +1336,6 @@ class ServiceConfigMixin:
                 "unsupported_wake_policy_fields",
                 f"wake_policy has unsupported fields: {', '.join(unsupported_fields)}.",
             )
-
-    def _validate_desktop_watch(self, desktop_watch: Any) -> None:
-        if not isinstance(desktop_watch, dict):
-            raise ServiceError(400, "invalid_desktop_watch", "desktop_watch must be an object.")
-        enabled = desktop_watch.get("enabled")
-        interval_seconds = desktop_watch.get("interval_seconds")
-        if not isinstance(enabled, bool):
-            raise ServiceError(400, "invalid_desktop_watch_enabled", "desktop_watch.enabled must be a boolean.")
-        if not isinstance(interval_seconds, int) or interval_seconds < 1:
-            raise ServiceError(
-                400,
-                "invalid_desktop_watch_interval_seconds",
-                "desktop_watch.interval_seconds must be an integer >= 1.",
-            )
-
-    def _normalize_desktop_watch(self, desktop_watch: Any) -> Any:
-        if not isinstance(desktop_watch, dict):
-            return desktop_watch
-        normalized: dict[str, Any] = {}
-        enabled = desktop_watch.get("enabled")
-        interval_seconds = desktop_watch.get("interval_seconds")
-        if isinstance(enabled, bool):
-            normalized["enabled"] = enabled
-        if isinstance(interval_seconds, int):
-            normalized["interval_seconds"] = interval_seconds
-        return normalized
 
     def _validate_persona_definition(self, persona_id: str, definition: dict[str, Any]) -> None:
         if definition.get("persona_id") != persona_id:

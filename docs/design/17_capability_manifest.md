@@ -147,8 +147,8 @@ inspection には運用確認に必要な binding 要約を出すが、token、c
     "unavailable_seconds_on_timeout": 15
   },
   "decision_readiness": {
-    "family": "screen_observation",
-    "world_state_type": "screen",
+    "family": "visual_observation",
+    "world_state_type": "visual_context",
     "input_keys": ["source", "mode"],
     "result_summary_keys": ["visual_summary_text"]
   },
@@ -203,7 +203,7 @@ server は manifest、binding、state、権限で提案を検証する。
 busy、権限不足、動的一時 unavailable は decision view の `available: false` に反映する。
 cooldown、直近成功、直近失敗は inspection の `CapabilityState` へ残し、明示的な capability 要求まで一律に遮断する理由にはしない。
 `readiness` は manifest の `decision_readiness` から作る。
-`readiness.family` は `screen_observation / external_status / schedule_status / device_status / body_status / environment_status / location_status / social_status` のいずれかである。
+`readiness.family` は `visual_observation / external_status / schedule_status / device_status / body_status / environment_status / location_status / social_status` のいずれかである。
 `readiness.world_state_type` は fresh `world_state` 再利用、status family の不足判定、result 投影先を揃えるための正本である。
 `readiness.input_keys` は LLM が capability 固有入力を組み立てる最小 key を表す。
 `readiness.result_summary_keys` と `readiness.result_item_keys` は result が判断・記憶・inspection へ投影される要約 key を表す。

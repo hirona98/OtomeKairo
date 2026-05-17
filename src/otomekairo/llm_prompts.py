@@ -946,8 +946,6 @@ def _build_pending_intent_selection_system_prompt() -> str:
         "候補外のものを足してはいけません。内部識別子を書いてはいけません。\n"
         "oldest-first で選ばず、trigger_kind と input_context に照らして今前に出す自然さを優先してください。\n"
         "wake では慎重に選び、自然さが弱いなら none を返してください。\n"
-        "desktop_watch では active_app / window_title / locale / image_count だけを手掛かりにしてください。\n"
-        "image の意味理解はまだ行いません。\n"
         "selection_reason は 1 文、改行なしで返してください。"
     )
 
@@ -972,9 +970,9 @@ def _build_world_state_system_prompt() -> str:
         + " / ".join(sorted(WORLD_STATE_TTL_HINT_VALUES))
         + " のいずれかだけを使ってください。\n"
         "raw payload、資格情報、内部 URL、配送先 client、画像本文の意味内容を書いてはいけません。\n"
-        "screen_context / external_service_context / body_context / device_context / schedule_context / social_context_context / environment_context / location_context があるときは、その短い summary_text と補助 field だけを根拠に使ってください。\n"
+        "visual_context / external_service_context / body_context / device_context / schedule_context / social_context_context / environment_context / location_context があるときは、その短い summary_text と補助 field だけを根拠に使ってください。\n"
         "current_input_summary、current_time_text、wake の時刻情報だけから現在状態を推測してはいけません。\n"
-        "screen_context.visual_summary_text は画面前景の短い補助要約として使い、external_service_context.status_text / service は外部状態の補助情報として使ってください。\n"
+        "visual_context.visual_summary_text は視覚前景の短い補助要約として使い、external_service_context.status_text / service は外部状態の補助情報として使ってください。\n"
         "external_service_context / body_context / device_context / schedule_context に client_summary_text や result_summary_text があるときは、summary_text と整合する補助比較用としてだけ使ってください。\n"
         "schedule_context.schedule_slots があるときは、各 slot の summary_text / slot_key / not_before / expires_at を短期予定の補助根拠として使ってください。\n"
         "body_context.body_state_summary、device_context.device_state_summary、schedule_context.schedule_summary、social_context_context.social_context_summary、environment_context.environment_summary、location_context.location_summary は各 state_type の短い補助要約として使ってください。\n"
@@ -987,7 +985,7 @@ def _build_world_state_system_prompt() -> str:
 
 def _build_visual_observation_system_prompt() -> str:
     return (
-        "あなたは OtomeKairo の input_interpretation で、desktop_watch の image payload を短い観測要約へ圧縮する visual_observation です。\n"
+        "あなたは OtomeKairo の input_interpretation で、vision.capture の image payload を短い観測要約へ圧縮する visual_observation です。\n"
         "画像と source pack を読み、JSON オブジェクト 1 個だけを返してください。\n"
         "Markdown、コードフェンス、説明文は禁止です。\n"
         "返すトップレベルキーは summary_text, confidence_hint の 2 つだけです。\n"

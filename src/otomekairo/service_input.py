@@ -29,7 +29,7 @@ from otomekairo.service_common import ServiceError, debug_log
 RECALL_HINT_RECENT_TURN_LIMIT = 6
 VISUAL_OBSERVATION_IMAGE_LIMIT = 1
 WORLD_STATE_CONTEXT_KEYS_BY_TYPE = (
-    ("screen", "screen_context"),
+    ("visual_context", "visual_context"),
     ("external_service", "external_service_context"),
     ("body", "body_context"),
     ("device", "device_context"),
@@ -114,11 +114,9 @@ WORLD_STATE_HINT_SCORES = {
     "high": 0.85,
 }
 WORLD_STATE_TTL_SECONDS_BY_TYPE = {
-    "screen": {
+    "visual_context": {
         "visual_summary_text": {"short": 600, "medium": 900, "long": 1800},
-        "window_title": {"short": 300, "medium": 600, "long": 1200},
-        "active_app": {"short": 300, "medium": 600, "long": 900},
-        "summary_text": {"short": 300, "medium": 600, "long": 900},
+        "summary_text": {"short": 600, "medium": 900, "long": 1800},
     },
     "environment": {
         "capability_result.environment_summary": {"short": 900, "medium": 2400, "long": 7200},
@@ -892,7 +890,7 @@ class ServiceInputMixin:
         selected_candidate: dict[str, Any] | None,
         pending_intent_selection: dict[str, Any] | None,
     ) -> dict[str, Any] | None:
-        if trigger_kind not in {"wake", "background_wake", "desktop_watch"}:
+        if trigger_kind not in {"wake", "background_wake"}:
             return None
         drive_summaries = self._initiative_drive_summaries(drive_state_summary)
         pending_intent_summaries = self._initiative_pending_intent_summaries(selected_candidate)
@@ -978,7 +976,7 @@ class ServiceInputMixin:
         world_state_trace: dict[str, Any] | None,
         trigger_kind: str,
     ) -> list[dict[str, Any]]:
-        if trigger_kind in {"wake", "background_wake", "desktop_watch"}:
+        if trigger_kind in {"wake", "background_wake"}:
             previous = (
                 world_state_trace.get("previous_foreground_world_state")
                 if isinstance(world_state_trace, dict)
@@ -1003,10 +1001,7 @@ class ServiceInputMixin:
             if isinstance(selected_candidate, dict):
                 return "manual wake が呼ばれ、保留中の候補を再評価する機会がある。"
             return "manual wake が呼ばれ、今の前進可否を見直す機会がある。"
-        active_app = self._client_context_text(client_context.get("active_app"), limit=48)
-        if active_app:
-            return f"desktop_watch が前景変化を観測しており、{active_app} を中心に今の判断機会がある。"
-        return "desktop_watch が前景変化を観測しており、今の判断機会がある。"
+        return "自律判断の機会があり、今の前進可否を見直す。"
 
     def _initiative_time_context_summary(self, *, time_context: dict[str, Any]) -> dict[str, Any]:
         payload: dict[str, Any] = {}
@@ -1045,29 +1040,24 @@ class ServiceInputMixin:
                 if isinstance(item, dict) and isinstance(item.get("state_type"), str)
             }
         )
-        active_app = self._client_context_text(client_context.get("active_app"), limit=48)
         if not world_state_summary:
             payload = {
                 "foreground_thinness": "thin",
-                "reason_summary": "前景 world_state がまだ薄く、画面や周辺状況の追加観測が欲しい。",
+                "reason_summary": "前景 world_state がまだ薄く、視覚や周辺状況の追加観測が欲しい。",
                 "world_state_count": 0,
             }
-            if trigger_kind == "desktop_watch":
-                payload["reason_summary"] = "desktop_watch 起点だが、まだ前景 world_state が薄く意味づけは限定的。"
-            if active_app is not None:
-                payload["active_app"] = active_app
             return payload
 
         grounded_types = {"schedule", "social_context", "body"}
         if grounded_types.intersection(state_types):
             thinness = "grounded"
             reason_summary = "予定・対人・身体の前景があり、いまの状況は比較的具体的に見えている。"
-        elif set(state_types).issubset({"screen", "external_service", "device"}):
+        elif set(state_types).issubset({"visual_context", "external_service", "device"}):
             thinness = "thin"
-            reason_summary = "画面や外部状態は見えているが、生活文脈や対人文脈はまだ薄い。"
+            reason_summary = "視覚前景や外部状態は見えているが、生活文脈や対人文脈はまだ薄い。"
         else:
             thinness = "mixed"
-            reason_summary = "前景 world はあるが、画面中心の信号と生活文脈が混在している。"
+            reason_summary = "前景 world はあるが、視覚中心の信号と生活文脈が混在している。"
         payload = {
             "foreground_thinness": thinness,
             "reason_summary": reason_summary,
@@ -1075,8 +1065,6 @@ class ServiceInputMixin:
         }
         if state_types:
             payload["state_types"] = state_types[:4]
-        if active_app is not None:
-            payload["active_app"] = active_app
         return payload
 
     def _initiative_foreground_thinness(self, foreground_signal_summary: dict[str, Any] | None) -> str | None:
@@ -1207,12 +1195,12 @@ class ServiceInputMixin:
         if drive_kind == "follow_through" and "schedule" in state_types:
             return 0.06
         if drive_kind in {"relationship_attunement", "user_attention"} and state_types.intersection(
-            {"social_context", "screen", "external_service"}
+            {"social_context", "visual_context", "external_service"}
         ):
             return 0.05
         if drive_kind == "self_regulation" and "body" in state_types:
             return 0.05
-        if drive_kind == "topic_continuation" and state_types.intersection({"screen", "external_service"}):
+        if drive_kind == "topic_continuation" and state_types.intersection({"visual_context", "external_service"}):
             return 0.04
         return 0.0
 
@@ -1222,7 +1210,7 @@ class ServiceInputMixin:
             for item in world_state_summary
             if isinstance(item, dict) and isinstance(item.get("state_type"), str)
         }
-        return bool(state_types) and state_types.issubset({"screen", "external_service", "device"})
+        return bool(state_types) and state_types.issubset({"visual_context", "external_service", "device"})
 
     def _initiative_autonomous_probe_preference(
         self,
@@ -1857,7 +1845,7 @@ class ServiceInputMixin:
             "social_context": 0.1,
             "body": 0.08,
             "external_service": 0.08,
-            "screen": 0.06,
+            "visual_context": 0.06,
             "device": 0.05,
             "environment": 0.05,
             "location": 0.05,
@@ -1908,8 +1896,8 @@ class ServiceInputMixin:
                 for item in world_state_summary
                 if isinstance(item, dict) and isinstance(item.get("state_type"), str)
             }
-            if state_types and state_types.issubset({"screen", "external_service", "device"}):
-                reasons.append("前景が画面や外部状態中心")
+            if state_types and state_types.issubset({"visual_context", "external_service", "device"}):
+                reasons.append("前景が視覚や外部状態中心")
         if int(capability_summary.get("available_count", 0)) == 0:
             reasons.append("使える capability が見当たらない")
         freshness_hint = self._client_context_text(
@@ -3091,7 +3079,7 @@ class ServiceInputMixin:
         observation_summary: dict[str, Any] | None,
         capability_request_summary: dict[str, Any] | None,
     ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-        existing_foreground_world_state = (
+        previous_foreground_world_state = (
             self._summarize_foreground_world_states(
                 self._list_current_world_states(
                     state=state,
@@ -3121,7 +3109,6 @@ class ServiceInputMixin:
                 source_ref=source_ref,
                 selected_candidate=selected_candidate,
                 observation_summary=observation_summary,
-                existing_foreground_world_state=existing_foreground_world_state,
             )
             source_pack_contexts = self._summarize_world_state_source_pack_contexts(source_pack)
             source_pack_state_type_hooks = self._summarize_world_state_state_type_hooks(source_pack)
@@ -3170,7 +3157,7 @@ class ServiceInputMixin:
                     "result_status": "succeeded",
                     "candidate_state_count": len(payload.get("state_candidates", [])),
                     "input_world_state_count": len(foreground_world_state),
-                    "previous_foreground_world_state": existing_foreground_world_state,
+                    "previous_foreground_world_state": previous_foreground_world_state,
                     "foreground_world_state": foreground_world_state,
                     "updated_state_count": int(refresh_summary.get("updated_count", 0)),
                     "replaced_state_count": int(refresh_summary.get("replaced_count", 0)),
@@ -3190,9 +3177,9 @@ class ServiceInputMixin:
                 {
                     "result_status": "failed",
                     "candidate_state_count": 0,
-                    "input_world_state_count": len(existing_foreground_world_state),
-                    "previous_foreground_world_state": existing_foreground_world_state,
-                    "foreground_world_state": existing_foreground_world_state,
+                    "input_world_state_count": len(previous_foreground_world_state),
+                    "previous_foreground_world_state": previous_foreground_world_state,
+                    "foreground_world_state": previous_foreground_world_state,
                     "updated_state_count": 0,
                     "replaced_state_count": 0,
                     "expired_state_count": 0,
@@ -3204,7 +3191,7 @@ class ServiceInputMixin:
                     "normalized_candidate_policies": [],
                     "failure_reason": str(exc),
                 },
-                existing_foreground_world_state,
+                previous_foreground_world_state,
             )
 
     def _build_world_state_source_pack(
@@ -3218,7 +3205,6 @@ class ServiceInputMixin:
         source_ref: str,
         selected_candidate: dict[str, Any] | None,
         observation_summary: dict[str, Any] | None,
-        existing_foreground_world_state: list[dict[str, Any]],
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "trigger_kind": trigger_kind,
@@ -3227,14 +3213,12 @@ class ServiceInputMixin:
             "source_ref": source_ref,
             "time_context": llm_local_time_text(started_at).replace("\n", " / "),
             "client_context": self._build_world_state_client_context(client_context),
-            "existing_foreground_world_state": existing_foreground_world_state,
         }
-        screen_context = self._build_world_state_screen_context(
-            client_context=client_context,
+        visual_context = self._build_world_state_visual_context(
             observation_summary=observation_summary,
         )
-        if screen_context is not None:
-            payload["screen_context"] = screen_context
+        if visual_context is not None:
+            payload["visual_context"] = visual_context
         for key, value in (
             (
                 "external_service_context",
@@ -3302,10 +3286,9 @@ class ServiceInputMixin:
         payload["allowed_state_types"] = self._world_state_allowed_state_types(source_pack=payload)
         return payload
 
-    def _build_world_state_screen_context(
+    def _build_world_state_visual_context(
         self,
         *,
-        client_context: dict[str, Any],
         observation_summary: dict[str, Any] | None,
     ) -> dict[str, Any] | None:
         payload: dict[str, Any] = {}
@@ -3328,22 +3311,8 @@ class ServiceInputMixin:
             capability_id = observation_summary.get("capability_id")
             if isinstance(capability_id, str) and capability_id.strip():
                 capability_id_text = capability_id.strip()
-        for key, limit in (("active_app", 80), ("window_title", 120), ("locale", 32)):
-            value = self._client_context_text(client_context.get(key), limit=limit)
-            if value is not None:
-                payload[key] = value
-        if "summary_text" not in payload:
-            window_title = payload.get("window_title")
-            active_app = payload.get("active_app")
-            if isinstance(window_title, str):
-                payload["summary_text"] = f"画面では {window_title} が前景にある。"
-            elif isinstance(active_app, str):
-                payload["summary_text"] = f"画面では {active_app} が前景にある。"
-        has_screen_signal = any(
-            key in payload
-            for key in ("summary_text", "visual_summary_text", "active_app", "window_title", "image_count", "image_interpreted")
-        )
-        if not has_screen_signal:
+        has_visual_signal = "summary_text" in payload
+        if not has_visual_signal:
             return None
         if capability_id_text is not None:
             payload["capability_id"] = capability_id_text
@@ -3468,17 +3437,10 @@ class ServiceInputMixin:
         payload: dict[str, Any] = {}
         for key, limit in (
             ("source", 48),
-            ("active_app", 80),
-            ("window_title", 120),
-            ("locale", 32),
-            ("image_summary_text", 160),
         ):
             value = client_context.get(key)
             if isinstance(value, str) and value.strip():
                 payload[key] = self._clamp(value.strip(), limit=limit)
-        image_count = client_context.get("image_count")
-        if isinstance(image_count, int) and image_count >= 0:
-            payload["image_count"] = image_count
         return payload
 
     def _build_world_state_social_context_context(
@@ -3717,7 +3679,7 @@ class ServiceInputMixin:
             ]
         for key in (
             "client_context",
-            "screen_context",
+            "visual_context",
             "external_service_context",
             "body_context",
             "device_context",
@@ -3760,12 +3722,7 @@ class ServiceInputMixin:
         capability_id = self._client_context_text(context.get("capability_id"), limit=80)
         if capability_id is not None:
             payload["capability_id"] = capability_id
-        if state_type == "screen":
-            for key, limit in (("active_app", 80), ("window_title", 120)):
-                value = self._client_context_text(context.get(key), limit=limit)
-                if value is not None:
-                    payload[key] = value
-        elif state_type == "external_service":
+        if state_type == "external_service":
             service = self._client_context_text(context.get("service"), limit=80)
             if service is not None:
                 payload["service"] = service
@@ -3793,13 +3750,9 @@ class ServiceInputMixin:
         summary_source_hint = self._client_context_text(context.get("summary_source_hint"), limit=120)
         if summary_source_hint is not None:
             return summary_source_hint
-        if state_type == "screen":
+        if state_type == "visual_context":
             if isinstance(context.get("visual_summary_text"), str) and context["visual_summary_text"].strip():
                 return "visual_summary_text"
-            if isinstance(context.get("window_title"), str) and context["window_title"].strip():
-                return "window_title"
-            if isinstance(context.get("active_app"), str) and context["active_app"].strip():
-                return "active_app"
             return "summary_text"
         if state_type == "external_service":
             if isinstance(context.get("status_text"), str) and context["status_text"].strip():
@@ -3824,14 +3777,11 @@ class ServiceInputMixin:
 
     def _world_state_hook_signal_fields(self, *, state_type: str, context: dict[str, Any]) -> list[str]:
         keys_by_state_type = {
-            "screen": (
+            "visual_context": (
                 "visual_summary_text",
                 "image_interpreted",
                 "visual_confidence_hint",
                 "image_count",
-                "active_app",
-                "window_title",
-                "locale",
             ),
             "external_service": (
                 "service",
@@ -3992,7 +3942,7 @@ class ServiceInputMixin:
             return False
         if source_context is not None:
             return False
-        return state_type in {"screen", "body", "schedule", "social_context", "environment", "location"}
+        return state_type in {"visual_context", "body", "schedule", "social_context", "environment", "location"}
 
     def _contains_any_text(self, text: str, terms: tuple[str, ...]) -> bool:
         return any(term in text for term in terms)
@@ -4004,7 +3954,7 @@ class ServiceInputMixin:
         source_pack: dict[str, Any],
     ) -> dict[str, Any] | None:
         context_key = {
-            "screen": "screen_context",
+            "visual_context": "visual_context",
             "external_service": "external_service_context",
             "body": "body_context",
             "device": "device_context",
@@ -4069,7 +4019,7 @@ class ServiceInputMixin:
         if not isinstance(context, dict) or not context:
             return "summary_text"
         if state_type in {
-            "screen",
+            "visual_context",
             "external_service",
             "body",
             "device",
@@ -4225,8 +4175,8 @@ class ServiceInputMixin:
         scope_key: str,
         context: dict[str, Any] | None,
     ) -> dict[str, str]:
-        if state_type == "screen":
-            return {"mode": "foreground_screen", "key": "screen:foreground"}
+        if state_type == "visual_context":
+            return {"mode": "foreground_visual_context", "key": "visual_context:foreground"}
         if state_type == "external_service":
             service_key = self._world_state_service_key(context)
             if service_key is not None:
@@ -4305,8 +4255,6 @@ class ServiceInputMixin:
     def _world_state_source_kind(self, trigger_kind: str) -> str:
         if trigger_kind == "user_message":
             return "user_input"
-        if trigger_kind == "desktop_watch":
-            return "system_observation"
         if trigger_kind == "capability_result":
             return "capability_result"
         return "client_context"
@@ -4393,7 +4341,7 @@ class ServiceInputMixin:
         pipeline: dict[str, Any],
         observation_summary: dict[str, Any] | None,
     ) -> bool:
-        if trigger_kind not in {"wake", "background_wake", "desktop_watch", "capability_result"}:
+        if trigger_kind not in {"wake", "background_wake", "capability_result"}:
             return False
 
         decision = pipeline.get("decision")
@@ -5070,7 +5018,7 @@ class ServiceInputMixin:
     def _trigger_compact_family(self, trigger_kind: str) -> str:
         if trigger_kind == "capability_result":
             return "capability_result_followup"
-        if trigger_kind in {"wake", "background_wake", "desktop_watch"}:
+        if trigger_kind in {"wake", "background_wake"}:
             return "initiative"
         if trigger_kind == "user_message":
             return "conversation"
@@ -5095,7 +5043,7 @@ class ServiceInputMixin:
             payload["source_request_summary"] = self._compact_capability_request_summary(capability_request_summary)
             payload["observation_summary"] = compact_observation_summary
             return payload
-        if trigger_kind in {"wake", "background_wake", "desktop_watch"}:
+        if trigger_kind in {"wake", "background_wake"}:
             payload.update(
                 self._compact_initiative_entry_summary(
                     initiative_context=initiative_context,
@@ -5146,7 +5094,7 @@ class ServiceInputMixin:
             foreground_signal_summary = initiative_context.get("foreground_signal_summary")
             if isinstance(foreground_signal_summary, dict):
                 compact_foreground_signal: dict[str, Any] = {}
-                for key in ("foreground_thinness", "reason_summary", "active_app"):
+                for key in ("foreground_thinness", "reason_summary"):
                     value = foreground_signal_summary.get(key)
                     if isinstance(value, str) and value.strip():
                         compact_foreground_signal[key] = self._clamp(value.strip(), limit=120)

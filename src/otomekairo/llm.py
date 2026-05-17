@@ -883,13 +883,11 @@ class LLMClient:
         source_pack: dict[str, Any],
     ) -> dict[str, Any]:
         operation = "world_state"
-        existing_states = source_pack.get("existing_foreground_world_state", []) if isinstance(source_pack, dict) else []
         debug_log(
             "LLM",
             (
                 f"{operation} start mode={self._debug_mode(role_definition)} "
-                f"model={self._debug_model(role_definition)} existing_states="
-                f"{len(existing_states) if isinstance(existing_states, list) else 0}"
+                f"model={self._debug_model(role_definition)}"
             ),
         )
         if self._is_mock_role_definition(role_definition):

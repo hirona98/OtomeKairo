@@ -2,8 +2,8 @@
 
 ## 目的
 
-`world_state` 第一段では、主に `client_context` の画面前景と `desktop_watch` の観測要約を source pack に入れていた。
-この拡張では、画面前景の補助要約と、対人文脈、周囲環境、場所、外部サービス、身体、機器、予定の短い current summary も state-type 別 context として同じ source pack に入れ、LLM が `world_state` 候補を選びやすくする。
+`world_state` 第一段では、視覚前景と短い current summary を同じ source pack に入れていた。
+この拡張では、`vision.capture` の視覚補助要約と、対人文脈、周囲環境、場所、外部サービス、身体、機器、予定の短い current summary を state-type 別 context として同じ source pack に入れ、LLM が `world_state` 候補を選びやすくする。
 
 ここで扱うのは **短い structured summary だけ** である。
 capability 自体の安定契約は `17_capability_manifest.md` と API 文書を正本にし、この文書は source pack に入れる summary 境界だけを扱う。
@@ -31,7 +31,7 @@ raw payload 保存、長い OCR、配送先 client の露出は入れない。
 - capability result の `client_context` から得た短い `schedule_summary`
 - capability result の `client_context` から得た短い `environment_summary`
 - capability result の `client_context` から得た短い `location_summary`
-- wake / `desktop_watch` で再評価対象として選ばれた pending-intent の
+- wake で再評価対象として選ばれた pending-intent の
   `intent_kind / intent_summary / reason_summary / not_before / expires_at`
 
 どれも 1 文程度の短い summary に留める。
@@ -49,18 +49,15 @@ raw response body、client 固有 ID、資格情報、内部 URL、base64 本文
   "source_ref": "cycle:...",
   "time_context": "2026年4月25日 土曜日 9時00分（日本時間）",
   "client_context": {
-    "source": "background_wake_scheduler",
-    "active_app": "Slack",
-    "window_title": "general | Slack",
-    "locale": "ja-JP"
+    "source": "background_wake_scheduler"
   },
-  "screen_context": {
-    "summary_text": "Slack の general チャンネルが前景で、やり取りが見えている。",
-    "visual_summary_text": "Slack の general チャンネルが前景で、やり取りが見えている。",
+  "visual_context": {
+    "summary_text": "チャットツールの general チャンネルが視覚前景で、やり取りが見えている。",
+    "visual_summary_text": "チャットツールの general チャンネルが視覚前景で、やり取りが見えている。",
     "image_interpreted": true,
     "visual_confidence_hint": "medium",
     "image_count": 1,
-    "capability_id": "device.status"
+    "capability_id": "vision.capture"
   },
   "social_context_context": {
     "summary_text": "Slack 上のやり取りが近い判断文脈として前景にある。",
@@ -89,37 +86,46 @@ raw response body、client 固有 ID、資格情報、内部 URL、base64 本文
     "capability_id": "body.status"
   },
   "device_context": {
-    "summary_text": "デスクトップ client は利用可能な状態で接続中。",
-    "device_state_summary": "デスクトップ client は利用可能な状態で接続中。",
-    "capability_id": "vision.capture"
+    "summary_text": "接続機器は正常に応答している。",
+    "device_state_summary": "接続機器は正常に応答している。",
+    "capability_id": "device.status"
   },
-    "schedule_context": {
-      "summary_text": "このあとレビュー確認を続ける予定が近い。",
-      "schedule_summary": "このあとレビュー確認を続ける予定が近い。",
-      "capability_id": "vision.capture",
-      "schedule_slots": [
-        {
-          "slot_key": "calendar:review",
-          "summary_text": "12:20 にレビュー確認がある。",
-          "not_before": "2026-04-25T12:20:00+09:00",
-          "expires_at": "2026-04-25T12:35:00+09:00"
-        }
-      ],
-      "pending_intent": {
-        "intent_kind": "conversation_follow_up",
-        "intent_summary": "レビュー状況に合わせてまた声をかける。",
+  "schedule_context": {
+    "summary_text": "このあとレビュー確認を続ける予定が近い。",
+    "schedule_summary": "このあとレビュー確認を続ける予定が近い。",
+    "capability_id": "schedule.status",
+    "schedule_slots": [
+      {
+        "slot_key": "calendar:review",
+        "summary_text": "12:20 にレビュー確認がある。",
+        "not_before": "2026-04-25T12:20:00+09:00",
+        "expires_at": "2026-04-25T12:35:00+09:00"
+      }
+    ],
+    "pending_intent": {
+      "intent_kind": "conversation_follow_up",
+      "intent_summary": "レビュー状況に合わせてまた声をかける。",
       "reason_summary": "あとで続きに触れる価値がある。",
       "slot_key": "pending_intent:topic:review",
       "not_before": "2026-04-25T09:10:00+09:00",
       "expires_at": "2026-04-25T15:00:00+09:00"
     }
   },
-  "existing_foreground_world_state": []
+  "allowed_state_types": [
+    "visual_context",
+    "social_context",
+    "environment",
+    "location",
+    "external_service",
+    "body",
+    "device",
+    "schedule"
+  ]
 }
 ```
 
 source pack では、標準の `client_context` と state-type 別の structured context を分ける。
-画面前景は `client_context` に加えて `screen_context` へ補助要約を載せ、その他の短い current summary は dedicated context へ載せる。
+視覚前景は `vision.capture` result の短い要約として `visual_context` へ載せ、その他の短い current summary は dedicated context へ載せる。
 `current_input_summary` は入力意図と、人が明示した状態値だけを補助する。
 確認依頼だけの入力から現在場所、身体状態、端末状態、周囲環境、対人文脈を推測して state 候補を作らない。
 `social_context_context / environment_context / location_context` は、`client_context` から取った短い summary をそのまま dedicated context へ写す。
@@ -134,11 +140,13 @@ source pack では、標準の `client_context` と state-type 別の structured
 `body_context / device_context / schedule_context` でも、capability result 由来のときは `capability_id` と state-type 別 summary field を載せる。
 client summary と result summary が両方あるときは、同様に `client_summary_text / result_summary_text / summary_source_hint` を追加する。
 real schedule source が複数あるときは、`schedule_context.schedule_slots` に複数 slot を載せる。
+前回の foreground `world_state` は LLM source pack に載せない。
+既存状態との置換や inspection のため、コード側の `world_state_trace.previous_foreground_world_state` だけに残す。
 
 ## コード責務
 
-- request / capture response の `client_context` から短い summary を抜き出す
-- `vision.capture` result の短い visual summary を `screen_context` へ投影する
+- capability result の `client_context` から短い summary を抜き出す
+- `vision.capture` result の短い visual summary を `visual_context` へ投影する
 - `client_context.social_context_summary / environment_summary / location_summary` を対応する dedicated context へ投影する
 - `social.status` result の `social_context_summary` を `social_context_context` へ投影する
 - `external.status` result の `service / status_text` を `external_service_context` へ投影する
@@ -150,7 +158,7 @@ real schedule source が複数あるときは、`schedule_context.schedule_slots
 - capability result の `body_state_summary / device_state_summary / schedule_summary / social_context_summary / environment_summary / location_summary` を対応する state-type context へ投影する
 - `summary_source` が `capability_result.<field>` と `client_context.<field>` を区別できるように context へ source hint を残す
 - `schedule_context.schedule_slots` があるときは deterministic な slot state を追加し、`schedule:self` と `schedule:<slot_key>` を併存させる
-- wake / `desktop_watch` の selected pending-intent があるときだけ `schedule_context.pending_intent` を作り、`slot_key` を付ける
+- wake の selected pending-intent があるときだけ `schedule_context.pending_intent` を作り、`slot_key` を付ける
 - user input の確認依頼だけから作られた現在状態候補は、対応 structured context が無い場合に正規化で落とす
 - LLM が返した `state_type / scope / summary_text / hint` を validator で検証する
 - TTL は `summary_source` と state_type ごとの規則で決める

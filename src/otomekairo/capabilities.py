@@ -10,14 +10,14 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
         "id": "vision.capture",
         "version": "1",
         "kind": "observation",
-        "decision_description": "現在の画面状態を観測する",
+        "decision_description": "現在の視覚状態を観測する",
         "when_to_use": [
-            "ユーザーが画面内容について質問した",
-            "判断に現在の画面状態が必要",
+            "ユーザーが見えている内容について質問した",
+            "判断に現在の視覚状態が必要",
         ],
         "do_not_use_when": [
             "ユーザーが画面観測を拒否している",
-            "現在の判断に画面情報が不要",
+            "現在の判断に視覚情報が不要",
         ],
         "required_permissions": ["observe_desktop"],
         "input_schema": {
@@ -67,8 +67,8 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
             "unavailable_seconds_on_timeout": 15,
         },
         "decision_readiness": {
-            "family": "screen_observation",
-            "world_state_type": "screen",
+            "family": "visual_observation",
+            "world_state_type": "visual_context",
             "input_keys": ["source", "mode"],
             "result_summary_keys": ["visual_summary_text"],
         },

@@ -103,15 +103,15 @@ class MockLLMClient:
         if active_app and window_title:
             if active_app in {"Slack", "Discord", "Teams"}:
                 channel_name = window_title.split("|", 1)[0].strip()
-                summary_text = f"{active_app} の会話画面が前景で、{channel_name} のやり取りが見えている。"
+                summary_text = f"{active_app} の会話が視覚前景で、{channel_name} のやり取りが見えている。"
             else:
-                summary_text = f"{active_app} の画面が前景で、{window_title} が表示されている。"
+                summary_text = f"{active_app} の表示内容が視覚前景で、{window_title} が見えている。"
         elif active_app:
-            summary_text = f"{active_app} の画面が前景にある。"
+            summary_text = f"{active_app} の表示内容が視覚前景にある。"
         elif window_title:
-            summary_text = f"{window_title} の画面が前景にある。"
+            summary_text = f"{window_title} が視覚前景にある。"
         else:
-            summary_text = "現在のデスクトップ画面の前景が見えている。"
+            summary_text = "現在の視覚前景が見えている。"
 
         payload = {
             "summary_text": summary_text,
@@ -1551,17 +1551,16 @@ class MockLLMClient:
 
         # 候補群
         state_candidates: list[dict[str, Any]] = []
-        screen_summary = self._mock_world_state_screen_summary(
-            screen_context=source_pack.get("screen_context"),
-            client_context=client_context,
+        visual_summary = self._mock_world_state_visual_summary(
+            visual_context=source_pack.get("visual_context"),
         )
-        if screen_summary is not None:
+        if visual_summary is not None:
             state_candidates.append(
                 {
-                    "state_type": "screen",
+                    "state_type": "visual_context",
                     "scope": "topic:current_work",
-                    "summary_text": screen_summary,
-                    "confidence_hint": "high" if trigger_kind == "desktop_watch" else "medium",
+                    "summary_text": visual_summary,
+                    "confidence_hint": "medium",
                     "salience_hint": "high",
                     "ttl_hint": "short",
                 }
@@ -1663,18 +1662,6 @@ class MockLLMClient:
                 }
             )
 
-        if capability_result_summary.get("image_count") and not state_candidates and trigger_kind == "desktop_watch":
-            state_candidates.append(
-                {
-                    "state_type": "screen",
-                    "scope": "topic:current_work",
-                    "summary_text": "画面の前景が変化している。",
-                    "confidence_hint": "low",
-                    "salience_hint": "medium",
-                    "ttl_hint": "short",
-                }
-            )
-
         # payload
         payload = {
             "state_candidates": state_candidates[:4],
@@ -1721,23 +1708,16 @@ class MockLLMClient:
             return "self|user"
         return "user"
 
-    def _mock_world_state_screen_summary(
+    def _mock_world_state_visual_summary(
         self,
         *,
-        screen_context: Any,
-        client_context: dict[str, Any],
+        visual_context: Any,
     ) -> str | None:
-        if isinstance(screen_context, dict):
+        if isinstance(visual_context, dict):
             for key in ("summary_text", "visual_summary_text"):
-                summary_text = screen_context.get(key)
+                summary_text = visual_context.get(key)
                 if isinstance(summary_text, str) and summary_text.strip():
                     return summary_text.strip()
-        window_title = client_context.get("window_title")
-        if isinstance(window_title, str) and window_title.strip():
-            return f"画面では {window_title.strip()} が前景にある。"
-        active_app = client_context.get("active_app")
-        if isinstance(active_app, str) and active_app.strip():
-            return f"画面では {active_app.strip()} が前景にある。"
         return None
 
     def _mock_world_state_social_summary(self, client_context: dict[str, Any]) -> str | None:
@@ -2375,17 +2355,6 @@ class MockLLMClient:
         if str(candidate.get("intent_kind") or "") == "conversation_follow_up" and recent_turns:
             score += 0.15
 
-        # trigger 補正
-        if trigger_kind == "desktop_watch" and isinstance(input_context, dict):
-            if any(
-                isinstance(input_context.get(key), str) and str(input_context.get(key)).strip()
-                for key in ("active_app", "window_title", "locale")
-            ):
-                score += 0.12
-            image_count = input_context.get("image_count")
-            if isinstance(image_count, int) and image_count > 0:
-                score += 0.05
-
         # 時刻補助
         minutes_since_updated = candidate.get("minutes_since_updated")
         if isinstance(minutes_since_updated, int):
@@ -2402,7 +2371,7 @@ class MockLLMClient:
 
     def _mock_pending_intent_selection_threshold(self, trigger_kind: str, candidate_count: int) -> float:
         # base
-        threshold = 0.4 if trigger_kind == "desktop_watch" else 0.5
+        threshold = 0.5
         if candidate_count == 1:
             threshold -= 0.1
         return threshold
@@ -2424,8 +2393,6 @@ class MockLLMClient:
 
         # 選択
         if selected:
-            if trigger_kind == "desktop_watch" and has_foreground_context:
-                return "前景の文脈と保留意図の継続性が噛み合っており、今はこの候補を再評価に乗せる自然さがある。"
             return "直近のやり取りとの連続性があり、今はこの候補を再評価に乗せる自然さがある。"
 
         # 非選択
