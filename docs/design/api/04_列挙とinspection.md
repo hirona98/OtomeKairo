@@ -45,6 +45,51 @@ response:
 
 ## inspection 面
 
+### `GET /api/inspection/current-state`
+
+- 認証: 必要
+- 役割: 現在の判断主体と runtime 前景を point-in-time snapshot として返す
+- この response は「いま何が前景にあり、何が動いているか」を確認する inspection 正本である
+- 含まれる timestamp 系フィールドは OtomeKairo のローカルタイムゾーンに属する offset 付き timestamp で返す
+- raw payload、credential、token、内部 URL、長い画像/OCR 本文は返さない
+- `pending_intent_candidates` と `pending_capability_requests` は process-local runtime state の snapshot であり、永続正本ではない
+
+response:
+
+```json
+{
+  "ok": true,
+  "data": {
+    "generated_at": "2026-03-31T09:00:00+09:00",
+    "settings_snapshot": {},
+    "runtime_summary": {},
+    "runtime_detail": {
+      "wake_runtime_state": {},
+      "desktop_watch_runtime_state": {},
+      "memory_postprocess_runtime_state": {},
+      "pending_capability_requests": []
+    },
+    "current_state": {
+      "foreground_world_states": [],
+      "drive_states": [],
+      "ongoing_action": null,
+      "pending_intent_candidates": [],
+      "mood_state": {},
+      "affect_states": []
+    },
+    "capability_inspection": {
+      "capabilities": [],
+      "rejected_bindings": []
+    }
+  }
+}
+```
+
+`current_state.foreground_world_states` は現在有効な `world_state` の前景 snapshot を返す。
+`drive_states`、`ongoing_action`、`mood_state`、`affect_states` は、現在の個を構成する内部状態の確認用 snapshot である。
+`runtime_detail` は scheduler、memory postprocess、capability request 待ちのような process-local runtime state を返す。
+`capability_inspection` は `GET /api/inspection/capabilities` と同じ availability 導出結果を current-state snapshot の中で参照しやすく束ねたものである。
+
 ### `GET /api/inspection/capabilities`
 
 - 認証: 必要
