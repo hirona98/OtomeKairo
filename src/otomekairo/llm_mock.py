@@ -10,6 +10,7 @@ from otomekairo.llm_contracts import (
     RECALL_PACK_SECTION_NAMES,
     RECALL_FOCUS_VALUES,
     LLMError,
+    validate_answer_contract_contract,
     validate_decision_contract,
     validate_event_evidence_contract,
     validate_memory_interpretation_contract,
@@ -25,6 +26,61 @@ from otomekairo.llm_contracts import (
 # モッククライアント
 @dataclass(slots=True)
 class MockLLMClient:
+    def generate_answer_contract(
+        self,
+        role_definition: dict,
+        input_text: str,
+        recall_hint: dict[str, Any],
+        current_time: str,
+    ) -> dict[str, Any]:
+        # model確認
+        self._assert_mock_model(role_definition)
+        _ = recall_hint
+        _ = current_time
+
+        # モックは開発検証用の固定規則。実運用の契約判定は LLM が行う。
+        text = input_text.strip()
+        contract = "summary"
+        boundary = "none"
+        target_actor = "any"
+        query_terms: list[str] = []
+        reason_codes = ["general_answer"]
+        if self._mock_contains_any(text, ("一字一句", "具体的な発言", "なんて言", "原文", "正確に再現")):
+            contract = "exact_statement"
+            reason_codes = ["verbatim_request"]
+            if self._mock_contains_any(text, ("最初", "初めて", "初回", "初対面")):
+                boundary = "first"
+            elif self._mock_contains_any(text, ("直近", "最後", "最新", "この前")):
+                boundary = "latest"
+        elif self._mock_contains_any(text, ("最初", "初めて", "初回", "初対面")):
+            contract = "exact_boundary"
+            boundary = "first"
+            reason_codes = ["boundary_request"]
+        elif self._mock_contains_any(text, ("直近", "最後", "最新", "この前")):
+            contract = "exact_boundary"
+            boundary = "latest"
+            reason_codes = ["boundary_request"]
+        elif self._mock_contains_any(text, ("根拠", "なぜ", "どうして", "矛盾")):
+            contract = "provenance"
+            reason_codes = ["provenance_request"]
+
+        if self._mock_contains_any(text, ("会話", "やり取り")):
+            target_actor = "any"
+        elif self._mock_contains_any(text, ("僕", "俺", "私の発言", "ユーザー")):
+            target_actor = "user"
+        elif self._mock_contains_any(text, ("君", "あなた", "人格", "AI")):
+            target_actor = "assistant"
+
+        payload = {
+            "contract": contract,
+            "reason_codes": reason_codes,
+            "boundary": boundary,
+            "target_actor": target_actor,
+            "query_terms": query_terms,
+        }
+        validate_answer_contract_contract(payload)
+        return payload
+
     def generate_visual_observation_summary(
         self,
         role_definition: dict,
@@ -2479,6 +2535,10 @@ class MockLLMClient:
         if norm <= 0.0:
             return [0.0] * embedding_dimension
         return [value / norm for value in values]
+
+    def _mock_contains_any(self, text: str, terms: tuple[str, ...]) -> bool:
+        # モック専用の簡易分岐
+        return any(term in text for term in terms)
 
     def _assert_mock_model(self, role_definition: dict) -> None:
         # モデル確認

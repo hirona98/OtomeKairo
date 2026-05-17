@@ -668,6 +668,147 @@ class SQLiteMemoryStore(StoreCloneMixin, StoreVectorMixin, StoreSchemaMixin):
         # 結果
         return ordered
 
+    def list_boundary_events_for_evidence(
+        self,
+        *,
+        memory_set_id: str,
+        target_actor: str,
+        boundary: str,
+        before_iso: str,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        # 空
+        if limit <= 0:
+            return []
+
+        # Query部品群
+        clauses = ["memory_set_id = ?", "text IS NOT NULL", "created_at < ?"]
+        params: list[Any] = [memory_set_id, before_iso]
+        self._append_in_clause(clauses, params, "kind", self._event_kinds_for_actor(target_actor))
+        roles = self._event_roles_for_actor(target_actor)
+        if roles:
+            self._append_in_clause(clauses, params, "role", roles)
+        direction = "ASC" if boundary == "first" else "DESC"
+
+        # クエリ
+        with self._memory_db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT event_id, cycle_id, memory_set_id, kind, role, text, created_at, payload_json
+                FROM events
+                WHERE {" AND ".join(clauses)}
+                ORDER BY created_at {direction}, rowid {direction}
+                LIMIT ?
+                """,
+                (*params, limit),
+            ).fetchall()
+
+        # 結果
+        return [dict(row) for row in rows]
+
+    def search_text_events_for_evidence(
+        self,
+        *,
+        memory_set_id: str,
+        target_actor: str,
+        query_terms: list[str],
+        before_iso: str,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        # 空
+        if limit <= 0:
+            return []
+
+        # Query部品群
+        clauses = ["memory_set_id = ?", "text IS NOT NULL", "created_at < ?"]
+        params: list[Any] = [memory_set_id, before_iso]
+        self._append_in_clause(clauses, params, "kind", self._event_kinds_for_actor(target_actor))
+        roles = self._event_roles_for_actor(target_actor)
+        if roles:
+            self._append_in_clause(clauses, params, "role", roles)
+        for term in query_terms:
+            if not isinstance(term, str) or not term.strip():
+                continue
+            clauses.append("text LIKE ?")
+            params.append(f"%{term.strip()}%")
+
+        # クエリ
+        with self._memory_db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT event_id, cycle_id, memory_set_id, kind, role, text, created_at, payload_json
+                FROM events
+                WHERE {" AND ".join(clauses)}
+                ORDER BY created_at DESC, rowid DESC
+                LIMIT ?
+                """,
+                (*params, limit),
+            ).fetchall()
+
+        # 結果
+        return [dict(row) for row in rows]
+
+    def list_cycle_events_for_evidence(
+        self,
+        *,
+        memory_set_id: str,
+        cycle_id: str,
+        target_actor: str,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        # 空
+        if limit <= 0:
+            return []
+
+        # Query部品群
+        clauses = ["memory_set_id = ?", "cycle_id = ?", "text IS NOT NULL"]
+        params: list[Any] = [memory_set_id, cycle_id]
+        self._append_in_clause(clauses, params, "kind", self._event_kinds_for_actor(target_actor))
+        roles = self._event_roles_for_actor(target_actor)
+        if roles:
+            self._append_in_clause(clauses, params, "role", roles)
+
+        # クエリ
+        with self._memory_db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT event_id, cycle_id, memory_set_id, kind, role, text, created_at, payload_json
+                FROM events
+                WHERE {" AND ".join(clauses)}
+                ORDER BY created_at ASC, rowid ASC
+                LIMIT ?
+                """,
+                (*params, limit),
+            ).fetchall()
+
+        # 結果
+        return [dict(row) for row in rows]
+
+    def _append_in_clause(
+        self,
+        clauses: list[str],
+        params: list[Any],
+        column_name: str,
+        values: tuple[str, ...],
+    ) -> None:
+        placeholders = ", ".join("?" for _ in values)
+        clauses.append(f"{column_name} IN ({placeholders})")
+        params.extend(values)
+
+    def _event_kinds_for_actor(self, target_actor: str) -> tuple[str, ...]:
+        if target_actor == "assistant":
+            return ("reply",)
+        if target_actor == "user":
+            return ("conversation_input", "observation")
+        return ("conversation_input", "observation", "reply")
+
+    def _event_roles_for_actor(self, target_actor: str) -> tuple[str, ...]:
+        if target_actor == "assistant":
+            return ("assistant",)
+        if target_actor == "user":
+            return ("user",)
+        return ()
+
     def count_cycle_summaries_since(
         self,
         *,

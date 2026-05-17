@@ -115,6 +115,31 @@ RECALL_PACK_SECTION_NAMES = (
     "active_commitments",
     "episodic_evidence",
 )
+ANSWER_CONTRACT_VALUES = {
+    "summary",
+    "exact_boundary",
+    "exact_statement",
+    "provenance",
+    "conflict_check",
+}
+DIRECT_GROUNDING_CONTRACTS = {
+    "exact_boundary",
+    "exact_statement",
+    "provenance",
+    "conflict_check",
+}
+ANSWER_BOUNDARY_VALUES = {
+    "none",
+    "first",
+    "latest",
+}
+ANSWER_TARGET_ACTOR_VALUES = {
+    "any",
+    "user",
+    "assistant",
+}
+MAX_ANSWER_CONTRACT_REASON_CODES = 3
+MAX_ANSWER_CONTRACT_QUERY_TERMS = 5
 INTERNAL_IDENTIFIER_PATTERN = re.compile(
     r"\b(?:event|episode|memory_unit|cycle|reflection_run|retrieval_run|pending_intent|candidate|conflict):[A-Za-z0-9._-]+\b"
 )
@@ -185,6 +210,67 @@ def _normalized_recall_focus_scopes(scopes: list[Any]) -> list[str]:
         if len(normalized) >= MAX_HINT_SCOPE_VALUES:
             break
     return normalized
+
+
+def normalize_answer_contract_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    # 実行側で扱う派生値だけを補う。意味判断は LLM 出力を正本にする。
+    normalized = dict(payload)
+    contract = normalized.get("contract")
+    normalized["requires_direct_evidence"] = contract in DIRECT_GROUNDING_CONTRACTS
+    return normalized
+
+
+def validate_answer_contract_contract(payload: dict[str, Any]) -> None:
+    # 形状
+    _validate_exact_keys(
+        payload,
+        {"contract", "reason_codes", "boundary", "target_actor", "query_terms"},
+        "AnswerContract",
+    )
+
+    # contract
+    contract = payload["contract"]
+    if contract not in ANSWER_CONTRACT_VALUES:
+        raise LLMError("AnswerContract.contract が不正です。")
+
+    # reason_codes
+    reason_codes = payload["reason_codes"]
+    if not isinstance(reason_codes, list):
+        raise LLMError("AnswerContract.reason_codes は配列である必要があります。")
+    if len(reason_codes) > MAX_ANSWER_CONTRACT_REASON_CODES:
+        raise LLMError("AnswerContract.reason_codes が多すぎます。")
+    for reason_code in reason_codes:
+        if not isinstance(reason_code, str) or not reason_code.strip():
+            raise LLMError("AnswerContract.reason_codes に空または文字列以外の値が含まれています。")
+
+    # boundary
+    boundary = payload["boundary"]
+    if boundary not in ANSWER_BOUNDARY_VALUES:
+        raise LLMError("AnswerContract.boundary が不正です。")
+    if contract == "exact_boundary" and boundary == "none":
+        raise LLMError("AnswerContract.contract=exact_boundary のとき boundary は first または latest です。")
+    if contract not in {"exact_boundary", "exact_statement"} and boundary != "none":
+        raise LLMError("AnswerContract.contract が exact_boundary / exact_statement 以外のとき boundary は none です。")
+
+    # target_actor
+    target_actor = payload["target_actor"]
+    if target_actor not in ANSWER_TARGET_ACTOR_VALUES:
+        raise LLMError("AnswerContract.target_actor が不正です。")
+
+    # query_terms
+    query_terms = payload["query_terms"]
+    if not isinstance(query_terms, list):
+        raise LLMError("AnswerContract.query_terms は配列である必要があります。")
+    if len(query_terms) > MAX_ANSWER_CONTRACT_QUERY_TERMS:
+        raise LLMError("AnswerContract.query_terms が多すぎます。")
+    seen: set[str] = set()
+    for term in query_terms:
+        if not isinstance(term, str) or not term.strip():
+            raise LLMError("AnswerContract.query_terms に空または文字列以外の値が含まれています。")
+        normalized = term.strip()
+        if normalized in seen:
+            raise LLMError("AnswerContract.query_terms に重複があります。")
+        seen.add(normalized)
 
 
 def _is_relationship_ref(value: str) -> bool:

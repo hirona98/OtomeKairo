@@ -7,6 +7,8 @@ from typing import Any
 from otomekairo.llm_contracts import (
     LLMContractError,
     LLMError,
+    normalize_answer_contract_payload,
+    validate_answer_contract_contract,
     validate_decision_contract,
     validate_event_evidence_contract,
     validate_memory_interpretation_contract,
@@ -19,6 +21,8 @@ from otomekairo.llm_contracts import (
 from otomekairo.llm_mock import MockLLMClient
 from otomekairo.llm_parsing import parse_json_object, parse_recall_hint_payload
 from otomekairo.llm_prompts import (
+    build_answer_contract_messages,
+    build_answer_contract_repair_prompt,
     build_decision_messages,
     build_decision_repair_prompt,
     build_event_evidence_messages,
@@ -546,6 +550,50 @@ class LLMClient:
         except Exception as exc:
             debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc)}")
             raise
+
+    def generate_answer_contract(
+        self,
+        *,
+        role_definition: dict,
+        input_text: str,
+        recall_hint: dict[str, Any],
+        current_time: str,
+    ) -> dict[str, Any]:
+        operation = "answer_contract"
+        debug_log(
+            "LLM",
+            (
+                f"{operation} start mode={self._debug_mode(role_definition)} "
+                f"model={self._debug_model(role_definition)} input_chars={len(input_text)}"
+            ),
+        )
+        if self._is_mock_role_definition(role_definition):
+            payload = self.mock_client.generate_answer_contract(
+                role_definition,
+                input_text,
+                recall_hint,
+                current_time,
+            )
+            normalized = normalize_answer_contract_payload(payload)
+            debug_log("LLM", f"{operation} done mode=mock contract={normalized.get('contract')}")
+            return normalized
+
+        messages = build_answer_contract_messages(
+            input_text=input_text,
+            recall_hint=recall_hint,
+            current_time=current_time,
+        )
+        payload = self._generate_structured_payload(
+            role_definition=role_definition,
+            messages=messages,
+            validator=validate_answer_contract_contract,
+            repair_prompt_builder=build_answer_contract_repair_prompt,
+            failure_message="AnswerContract の生成に失敗しました。解析可能な応答が得られませんでした。",
+            operation=operation,
+        )
+        normalized = normalize_answer_contract_payload(payload)
+        debug_log("LLM", f"{operation} done contract={normalized.get('contract')}")
+        return normalized
 
     def generate_memory_interpretation(
         self,

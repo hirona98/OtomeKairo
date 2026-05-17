@@ -395,6 +395,32 @@ class ServiceInputMixin:
             ),
         )
 
+        # 回答根拠契約
+        debug_log("Pipeline", f"{cycle_label} answer_contract start")
+        answer_contract = self.llm.generate_answer_contract(
+            role_definition=recall_role,
+            input_text=effective_input_text,
+            recall_hint=recall_hint,
+            current_time=started_at,
+        )
+        evidence_pack = self.evidence.build_evidence_pack(
+            memory_set_id=state["selected_memory_set_id"],
+            input_text=effective_input_text,
+            recall_pack=recall_pack,
+            answer_contract=answer_contract,
+            current_time=started_at,
+        )
+        recall_pack = dict(recall_pack)
+        recall_pack["answer_contract"] = answer_contract
+        recall_pack["evidence_pack"] = evidence_pack
+        debug_log(
+            "Pipeline",
+            (
+                f"{cycle_label} answer_contract done contract={answer_contract.get('contract')} "
+                f"evidence_status={evidence_pack.get('status')}"
+            ),
+        )
+
         # 内部コンテキスト
         debug_log("Pipeline", f"{cycle_label} context start")
         time_context = self._build_time_context(current_time=started_at)
@@ -541,6 +567,8 @@ class ServiceInputMixin:
         return {
             "recall_hint": recall_hint,
             "recall_pack": recall_pack,
+            "answer_contract": answer_contract,
+            "evidence_pack": evidence_pack,
             "time_context": time_context,
             "affect_context": affect_context,
             "drive_state_summary": drive_state_summary,
@@ -2385,8 +2413,9 @@ class ServiceInputMixin:
         self._log_stream_registry.remove_connection(session_id)
 
     def _summarize_recall_pack(self, recall_pack: dict[str, Any]) -> dict[str, int]:
+        evidence_pack = recall_pack.get("evidence_pack")
         # 要約
-        return {
+        summary = {
             "self_model": len(recall_pack["self_model"]),
             "user_model": len(recall_pack["user_model"]),
             "relationship_model": len(recall_pack["relationship_model"]),
@@ -2401,6 +2430,9 @@ class ServiceInputMixin:
                 else 0
             ),
         }
+        if isinstance(evidence_pack, dict):
+            summary["answer_evidence_items"] = len(evidence_pack.get("evidence_items", []))
+        return summary
 
     def _empty_memory_link_context_trace(self) -> dict[str, Any]:
         # 結果
@@ -4646,7 +4678,7 @@ class ServiceInputMixin:
 
     def _build_success_recall_trace(self, recall_hint: dict[str, Any], recall_pack: dict[str, Any]) -> dict[str, Any]:
         recall_pack_summary = self._summarize_recall_pack(recall_pack)
-        return {
+        trace = {
             "recall_hint_summary": recall_hint,
             "candidate_count": recall_pack["candidate_count"],
             "selected_memory_unit_ids": recall_pack["selected_memory_ids"],
@@ -4667,6 +4699,11 @@ class ServiceInputMixin:
             "adopted_reason_summary": self._recall_adopted_reason_summary(recall_pack),
             "rejected_candidate_summary": self._recall_rejected_reason_summary(recall_pack),
         }
+        if isinstance(recall_pack.get("answer_contract"), dict):
+            trace["answer_contract"] = recall_pack["answer_contract"]
+        if isinstance(recall_pack.get("evidence_pack"), dict):
+            trace["evidence_pack"] = recall_pack["evidence_pack"]
+        return trace
 
     def _build_failure_recall_trace(
         self,

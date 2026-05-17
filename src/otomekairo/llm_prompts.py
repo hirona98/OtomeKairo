@@ -4,6 +4,9 @@ import json
 from typing import Any
 
 from otomekairo.llm_contracts import (
+    ANSWER_BOUNDARY_VALUES,
+    ANSWER_CONTRACT_VALUES,
+    ANSWER_TARGET_ACTOR_VALUES,
     INTERACTION_MODE_VALUES,
     RECALL_PACK_SECTION_NAMES,
     RECALL_FOCUS_VALUES,
@@ -114,6 +117,29 @@ def build_reply_messages(
                 recall_hint=recall_hint,
                 recall_pack=recall_pack,
                 decision=decision,
+            ),
+        },
+    ]
+
+
+# AnswerContract 用の message 群を組み立てる。
+def build_answer_contract_messages(
+    *,
+    input_text: str,
+    recall_hint: dict[str, Any],
+    current_time: str,
+) -> list[dict[str, str]]:
+    return [
+        {
+            "role": "system",
+            "content": _build_answer_contract_system_prompt(),
+        },
+        {
+            "role": "user",
+            "content": _build_answer_contract_user_prompt(
+                input_text=input_text,
+                recall_hint=recall_hint,
+                current_time=current_time,
             ),
         },
     ]
@@ -328,6 +354,18 @@ def build_recall_pack_selection_repair_prompt(validation_error: str) -> str:
     )
 
 
+def build_answer_contract_repair_prompt(validation_error: str) -> str:
+    return (
+        "前回の出力は AnswerContract 契約を満たしていませんでした。\n"
+        f"validation_error: {validation_error}\n"
+        "JSON オブジェクト 1 個だけを返してください。\n"
+        "トップレベルキーは contract, reason_codes, boundary, target_actor, query_terms の 5 つだけです。\n"
+        "contract は許可値だけを使ってください。\n"
+        "boundary は exact_boundary のとき first または latest にしてください。\n"
+        "exact_statement で対象が初回や最新に限定されるときも boundary に first または latest を入れてください。\n"
+    )
+
+
 def build_pending_intent_selection_repair_prompt(validation_error: str) -> str:
     return (
         "前回の出力は pending_intent_selection 契約を満たしていませんでした。\n"
@@ -433,6 +471,10 @@ def _build_decision_system_prompt(persona: dict) -> str:
         "Markdown、コードフェンス、説明文は禁止です。\n"
         "入力には recent_turns と internal_context が含まれます。\n"
         "internal_context には TimeContext, AffectContext, DriveStateSummary, ForegroundWorldState, OngoingActionSummary, CapabilityDecisionView, RecallPack が入ります。\n"
+        "RecallPack.evidence_pack.status=grounded のとき、正確な原文・日時・出典に関する判断は evidence_items の範囲で行ってください。\n"
+        "recent_turns、過去の assistant 発話、要約記憶は会話の文脈や表現調整に使い、evidence_items の原文・日時・出典を書き換える材料にしないでください。\n"
+        "evidence_items に raw event が含まれるときは、raw ログが存在しない、原文を保持していない、逐語再現できない、という理由で拒否してはいけません。\n"
+        "RecallPack.evidence_pack.status=missing のときは、正確な原文・日時・根拠として断定しないでください。\n"
         "自律判断トリガー時だけ InitiativeContext も入ります。\n"
         "capability_result トリガー時だけ CapabilityResultContext も入ります。\n"
         "InitiativeContext には opportunity_summary, time_context_summary, foreground_signal_summary, initiative_baseline, runtime_state_summary, recent_turn_summary, candidate_families, selected_candidate_family, intervention_state, suppression_summary が入りえます。\n"
@@ -515,6 +557,10 @@ def _build_reply_system_prompt(persona: dict) -> str:
         "自律判断トリガー時だけ InitiativeContext も入ります。\n"
         "recall_hint.secondary_recall_focuses は話題継続や温度調整の補助にだけ使い、主方針は primary_recall_focus に従ってください。\n"
         "RecallPack の内容だけを根拠に、必要な範囲で自然に思い出や継続文脈を混ぜてください。\n"
+        "RecallPack.evidence_pack.status=grounded のとき、正確な原文・日時・出典に関する本文は evidence_items.text と recorded_date の範囲で作ってください。\n"
+        "recent_turns、過去の assistant 発話、要約記憶は会話の文脈や表現調整に使い、evidence_items の原文・日時・出典を書き換える材料にしないでください。\n"
+        "evidence_items に raw event が含まれるときは、raw ログが存在しない、原文を保持していない、逐語再現できない、という説明をしてはいけません。\n"
+        "RecallPack.evidence_pack.status=missing のときは、ログが存在しないとは言わず、対象を特定できない、または根拠を開けなかったと述べてください。\n"
         "RecallPack.event_evidence は 1-3 件の短い証拠要約として扱い、必要なときだけ自然に参照してください。\n"
         "RecallPack.conflicts があるときは断定を避け、短い確認質問に寄せてください。\n"
         "人格設定本文:\n"
@@ -522,6 +568,53 @@ def _build_reply_system_prompt(persona: dict) -> str:
         "表現補助:\n"
         f"{expression_addon or 'なし'}\n"
         "断定確認が必要な場合は、短く確認質問に寄せてください。"
+    )
+
+
+def _build_answer_contract_system_prompt() -> str:
+    return (
+        "あなたは OtomeKairo の AnswerContract 判定です。\n"
+        "ユーザー入力に答えるために必要な根拠の種類だけを JSON で指定してください。\n"
+        "これは話題分類ではなく、回答生成前にどの根拠を直接確認するかの契約です。\n"
+        "コード側は出力 contract を機械的に実行します。根拠が不要な一般応答は summary を返してください。\n"
+        "発話の原文、正確な日時、初回・最新、根拠、矛盾確認を求める入力は direct evidence 契約を選びます。\n"
+        "一字一句の原文要求と初回・最初・初めてが同時に含まれる入力は exact_statement を選び、boundary=first にしてください。\n"
+        "一字一句の原文要求と最新・最後・直近が同時に含まれる入力は exact_statement を選び、boundary=latest にしてください。\n"
+        "会話ややり取り全体の原文要求では target_actor=any にしてください。\n"
+        "発話原文を求めるが対象発話が指定されていない場合も exact_statement を選び、query_terms は空配列にしてください。\n"
+        "reason_codes は実行されません。初回や最新という境界情報は必ず boundary に入れてください。\n"
+        "対象がユーザー発話なら target_actor=user、人格側の発話なら assistant、不明なら any にしてください。\n"
+        "JSON オブジェクト 1 個だけを返してください。\n"
+        "許可 contract: "
+        f"{', '.join(sorted(ANSWER_CONTRACT_VALUES))}\n"
+        "許可 boundary: "
+        f"{', '.join(sorted(ANSWER_BOUNDARY_VALUES))}\n"
+        "許可 target_actor: "
+        f"{', '.join(sorted(ANSWER_TARGET_ACTOR_VALUES))}\n"
+        "返すキー:\n"
+        '- contract: "summary" または "exact_boundary" または "exact_statement" または "provenance" または "conflict_check"\n'
+        "- reason_codes: 判断理由コードの短い文字列配列、最大 3 件\n"
+        '- boundary: "none" または "first" または "latest"\n'
+        '- target_actor: "any" または "user" または "assistant"\n'
+        "- query_terms: exact_statement / provenance / conflict_check で対象を絞る語句配列。boundary で対象を絞れるなら空配列\n"
+    )
+
+
+def _build_answer_contract_user_prompt(
+    *,
+    input_text: str,
+    recall_hint: dict[str, Any],
+    current_time: str,
+) -> str:
+    payload = {
+        "current_time_iso": current_time,
+        "current_time_text": llm_local_time_text(current_time),
+        "input_text": input_text,
+        "recall_hint": recall_hint,
+    }
+    return (
+        "次の入力に必要な AnswerContract を返してください。\n"
+        f"{json.dumps(localize_timestamp_fields(payload), ensure_ascii=False)}\n"
     )
 
 
@@ -846,7 +939,7 @@ def _format_internal_context(
 
 
 def _compact_recall_pack(recall_pack: dict[str, Any]) -> dict[str, Any]:
-    return {
+    compact = {
         "self_model": [_compact_memory_context_item(item) for item in recall_pack.get("self_model", [])],
         "user_model": [_compact_memory_context_item(item) for item in recall_pack.get("user_model", [])],
         "relationship_model": [_compact_memory_context_item(item) for item in recall_pack.get("relationship_model", [])],
@@ -857,6 +950,11 @@ def _compact_recall_pack(recall_pack: dict[str, Any]) -> dict[str, Any]:
         "conflicts": [_compact_conflict_context_item(item) for item in recall_pack.get("conflicts", [])],
         "memory_link_context": _compact_memory_link_context(recall_pack.get("memory_link_context", {})),
     }
+    if isinstance(recall_pack.get("answer_contract"), dict):
+        compact["answer_contract"] = recall_pack["answer_contract"]
+    if isinstance(recall_pack.get("evidence_pack"), dict):
+        compact["evidence_pack"] = recall_pack["evidence_pack"]
+    return compact
 
 
 def _compact_memory_context_item(item: dict[str, Any]) -> dict[str, Any]:

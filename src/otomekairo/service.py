@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from otomekairo.event_stream import EventStreamRegistry
+from otomekairo.evidence import EvidenceResolver
 from otomekairo.llm import LLMClient
 from otomekairo.log_stream import LogStreamRegistry
 from otomekairo.memory import MemoryConsolidator
@@ -33,6 +34,7 @@ class OtomeKairoService(
         self.store = FileStore(root_dir)
         self.llm = LLMClient()
         self.recall = RecallBuilder(store=self.store, llm=self.llm)
+        self.evidence = EvidenceResolver(store=self.store)
         self.memory = MemoryConsolidator(store=self.store, llm=self.llm)
         self._runtime_state_lock = threading.RLock()
         self._wake_execution_lock = threading.Lock()
