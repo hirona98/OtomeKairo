@@ -8,6 +8,7 @@ from otomekairo.llm_contracts import (
     LLMContractError,
     LLMError,
     normalize_answer_contract_payload,
+    normalize_recall_hint_payload,
     validate_answer_contract_contract,
     validate_decision_contract,
     validate_event_evidence_contract,
@@ -15,6 +16,7 @@ from otomekairo.llm_contracts import (
     validate_memory_reflection_summary_contract,
     validate_pending_intent_selection_contract,
     validate_recall_pack_selection_contract,
+    validate_recall_hint_contract,
     validate_visual_observation_contract,
     validate_world_state_contract,
 )
@@ -27,6 +29,8 @@ from otomekairo.llm_prompts import (
     build_decision_repair_prompt,
     build_event_evidence_messages,
     build_event_evidence_repair_prompt,
+    build_input_interpretation_messages,
+    build_input_interpretation_repair_prompt,
     build_memory_interpretation_messages,
     build_memory_interpretation_repair_prompt,
     build_memory_reflection_summary_messages,
@@ -54,6 +58,94 @@ LLM_DEBUG_TEXT_PREVIEW_LIMIT = 200
 @dataclass(slots=True)
 class LLMClient:
     mock_client: MockLLMClient = field(default_factory=MockLLMClient)
+
+    def generate_input_interpretation(
+        self,
+        *,
+        role_definition: dict,
+        input_text: str,
+        recent_turns: list[dict],
+        current_time: str,
+    ) -> dict[str, Any]:
+        operation = "input_interpretation"
+        debug_log(
+            "LLM",
+            (
+                f"{operation} start mode={self._debug_mode(role_definition)} "
+                f"model={self._debug_model(role_definition)} input_chars={len(input_text)} "
+                f"recent_turns={len(recent_turns)}"
+            ),
+        )
+        try:
+            if self._is_mock_role_definition(role_definition):
+                recall_hint = self.mock_client.generate_recall_hint(
+                    role_definition,
+                    input_text,
+                    recent_turns,
+                    current_time,
+                )
+                answer_contract = self.mock_client.generate_answer_contract(
+                    role_definition,
+                    input_text,
+                    recall_hint,
+                    current_time,
+                )
+                answer_contract = normalize_answer_contract_payload(answer_contract)
+                payload = {
+                    "recall_hint": recall_hint,
+                    "answer_contract": answer_contract,
+                }
+                debug_log(
+                    "LLM",
+                    (
+                        f"{operation} done mode=mock focus={recall_hint.get('primary_recall_focus')} "
+                        f"contract={answer_contract.get('contract')}"
+                    ),
+                )
+                return payload
+
+            messages = build_input_interpretation_messages(
+                input_text=input_text,
+                recent_turns=recent_turns,
+                current_time=current_time,
+            )
+            payload = self._generate_structured_payload(
+                role_definition=role_definition,
+                messages=messages,
+                validator=self._validate_input_interpretation_contract,
+                repair_prompt_builder=build_input_interpretation_repair_prompt,
+                failure_message="InputInterpretation の生成に失敗しました。解析可能な応答が得られませんでした。",
+                operation=operation,
+            )
+            recall_hint = normalize_recall_hint_payload(payload["recall_hint"])
+            answer_contract = normalize_answer_contract_payload(payload["answer_contract"])
+            debug_log(
+                "LLM",
+                (
+                    f"{operation} done focus={recall_hint.get('primary_recall_focus')} "
+                    f"contract={answer_contract.get('contract')}"
+                ),
+            )
+            return {
+                "recall_hint": recall_hint,
+                "answer_contract": answer_contract,
+            }
+        except Exception as exc:
+            debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc)}")
+            raise
+
+    def _validate_input_interpretation_contract(self, payload: dict[str, Any]) -> None:
+        required_keys = {"recall_hint", "answer_contract"}
+        if set(payload.keys()) != required_keys:
+            raise LLMError("InputInterpretation のキーが契約と一致しません。")
+        recall_hint = payload["recall_hint"]
+        answer_contract = payload["answer_contract"]
+        if not isinstance(recall_hint, dict):
+            raise LLMError("InputInterpretation.recall_hint は object である必要があります。")
+        if not isinstance(answer_contract, dict):
+            raise LLMError("InputInterpretation.answer_contract は object である必要があります。")
+        validate_recall_hint_contract(normalize_recall_hint_payload(recall_hint))
+        validate_answer_contract_contract(answer_contract)
 
     def generate_recall_hint(
         self,

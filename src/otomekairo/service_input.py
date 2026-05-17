@@ -370,20 +370,23 @@ class ServiceInputMixin:
         reply_role = selected_preset["roles"]["expression_generation"]
         persona = state["personas"][state["selected_persona_id"]]
 
-        # recall_hint生成
+        # 入口解釈
         recall_hint_recent_turns = self._recall_hint_recent_turns(recent_turns)
-        debug_log("Pipeline", f"{cycle_label} recall_hint start recent_turns={len(recall_hint_recent_turns)}")
-        recall_hint = self.llm.generate_recall_hint(
+        debug_log("Pipeline", f"{cycle_label} input_interpretation start recent_turns={len(recall_hint_recent_turns)}")
+        input_interpretation = self.llm.generate_input_interpretation(
             role_definition=recall_role,
             input_text=effective_input_text,
             recent_turns=recall_hint_recent_turns,
             current_time=started_at,
         )
+        recall_hint = input_interpretation["recall_hint"]
+        answer_contract = input_interpretation["answer_contract"]
         debug_log(
             "Pipeline",
             (
-                f"{cycle_label} recall_hint done mode={recall_hint['interaction_mode']} "
-                f"focus={recall_hint['primary_recall_focus']} confidence={recall_hint['confidence']}"
+                f"{cycle_label} input_interpretation done mode={recall_hint['interaction_mode']} "
+                f"focus={recall_hint['primary_recall_focus']} confidence={recall_hint['confidence']} "
+                f"contract={answer_contract.get('contract')}"
             ),
         )
 
@@ -405,14 +408,8 @@ class ServiceInputMixin:
             ),
         )
 
-        # 回答根拠契約
-        debug_log("Pipeline", f"{cycle_label} answer_contract start")
-        answer_contract = self.llm.generate_answer_contract(
-            role_definition=recall_role,
-            input_text=effective_input_text,
-            recall_hint=recall_hint,
-            current_time=started_at,
-        )
+        # 回答根拠解決
+        debug_log("Pipeline", f"{cycle_label} evidence_resolution start contract={answer_contract.get('contract')}")
         evidence_resolution = self.evidence.build_evidence_resolution(
             memory_set_id=state["selected_memory_set_id"],
             input_text=effective_input_text,
@@ -429,7 +426,7 @@ class ServiceInputMixin:
         debug_log(
             "Pipeline",
             (
-                f"{cycle_label} answer_contract done contract={answer_contract.get('contract')} "
+                f"{cycle_label} evidence_resolution done contract={answer_contract.get('contract')} "
                 f"evidence_status={evidence_pack.get('status')}"
             ),
         )
