@@ -19,14 +19,14 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
             "ユーザーが画面観測を拒否している",
             "現在の判断に視覚情報が不要",
         ],
-        "required_permissions": ["observe_desktop"],
+        "required_permissions": ["observe_vision"],
         "input_schema": {
             "type": "object",
             "properties": {
-                "source": {"type": "string", "enum": ["desktop"]},
+                "vision_source_id": {"type": "string", "pattern": "^vision_source:"},
                 "mode": {"type": "string", "enum": ["still"]},
             },
-            "required": ["source", "mode"],
+            "required": ["vision_source_id", "mode"],
             "additionalProperties": False,
         },
         "result_schema": {
@@ -70,12 +70,15 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
         "decision_readiness": {
             "family": "visual_observation",
             "world_state_type": "visual_context",
-            "input_keys": ["source", "mode"],
+            "input_keys": ["vision_source_id", "mode"],
             "result_summary_keys": ["visual_summary_text"],
         },
         "inspection_fields": [
             "capability_id",
             "target_client_id",
+            "vision_source_id",
+            "source_kind",
+            "source_label",
             "data_source",
             "unconnected_reason",
             "image_count",

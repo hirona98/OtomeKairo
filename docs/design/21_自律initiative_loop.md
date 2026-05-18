@@ -221,9 +221,10 @@ background wake 起床制御 matrix は次の 5 件に固定する。
 status refresh の鮮度判定は判断前から存在した foreground `world_state` だけを使い、現在の wake 入力から推測生成された `world_state` では再取得を抑止しない。
 background wake では、強い `drive_state` が無く `visual_context / external_service / device` だけが見えている場合、薄い前景として `noop` を優先する。
 grounded foreground の `world_state` が既にある場合、candidate entry に `preferred_capability_id` が無い限り、同じ情報を再取得する capability request より `preferred_result_kind` の `reply / noop` を優先する。
-非ユーザー起点の判断では、判断前から存在する同じ state type の新鮮な foreground `world_state` がある capability に `fresh_world_state_available=true` を付け、実 LLM の compact digest で request しなかった境界を確認する。
+非ユーザー起点の判断では、判断前から存在する同じ state type の新鮮な foreground `world_state` がある status capability に `fresh_world_state_available=true` を付け、実 LLM の compact digest で request しなかった境界を確認する。
+`vision.capture` は `vision_source_id` が一致する新鮮な `visual_context` を `fresh_world_state_by_vision_source` として扱い、別 source の再観測は遮断しない。
 `suppression_summary.cooldown_active` が true ではない場合、直近 turn だけから cooldown 中とは扱わない。background wake でも grounded foreground かつ `preferred_result_kind=reply` なら、`suppression_level=medium` だけを理由に `noop` へ倒さない。
-decision contract validation は、initiative の selected candidate entry が `preferred_result_kind=capability_request` の場合に `capability_request` 以外を repair 対象にし、`preferred_capability_id` と異なる capability request も repair 対象にする。`preferred_result_kind=capability_request` ではない場合の `capability_request`、`fresh_world_state_available=true` の capability request、grounded foreground かつ `preferred_result_kind=reply` で cooldown が無い `noop` も repair 対象にする。
+decision contract validation は、initiative の selected candidate entry が `preferred_result_kind=capability_request` の場合に `capability_request` 以外を repair 対象にし、`preferred_capability_id` と異なる capability request も repair 対象にする。`preferred_result_kind=capability_request` ではない場合の `capability_request`、`fresh_world_state_available=true` の capability request、同じ `vision_source_id` の新鮮な `vision.capture` request、grounded foreground かつ `preferred_result_kind=reply` で cooldown が無い `noop` も repair 対象にする。
 通常会話の明示的な現在状態確認は自律判断ではないため、対応 capability が `available=true` なら `capability_request` へ repair する。
 
 この matrix が失敗した場合、修正先を次の順に切り分ける。

@@ -336,10 +336,7 @@ class MockLLMClient:
                 "pending_intent": None,
                 "capability_request": {
                     "capability_id": "vision.capture",
-                    "input": {
-                        "source": "desktop",
-                        "mode": "still",
-                    },
+                    "input": self._mock_vision_capture_input(capability_decision_view) or {},
                 },
             }
         elif self._should_mock_schedule_status_request(
@@ -727,13 +724,15 @@ class MockLLMClient:
         if not isinstance(ongoing_action_summary, dict):
             return None
         capability_id = str(ongoing_action_summary.get("last_capability_id") or "").strip()
-        if capability_id == "vision.capture" and self._mock_capability_available(capability_decision_view, capability_id):
+        vision_input = self._mock_vision_capture_input(capability_decision_view)
+        if (
+            capability_id == "vision.capture"
+            and self._mock_capability_available(capability_decision_view, capability_id)
+            and vision_input is not None
+        ):
             return {
                 "capability_id": capability_id,
-                "input": {
-                    "source": "desktop",
-                    "mode": "still",
-                },
+                "input": vision_input,
             }
         return None
 
@@ -805,9 +804,13 @@ class MockLLMClient:
             return False
         if not self._mock_capability_available(capability_decision_view, "vision.capture"):
             return False
+        if self._mock_vision_capture_input(capability_decision_view) is None:
+            return False
         markers = (
             "画面",
             "スクリーン",
+            "視覚",
+            "カメラ",
             "今見えて",
             "見えている",
             "表示",
@@ -1131,6 +1134,48 @@ class MockLLMClient:
             return "github"
         if "calendar" in lowered or any(token in normalized for token in ("カレンダー", "スケジュール")):
             return "calendar"
+        return None
+
+    def _mock_vision_capture_input(
+        self,
+        capability_decision_view: list[dict[str, Any]] | None,
+    ) -> dict[str, str] | None:
+        for item in capability_decision_view or []:
+            if not isinstance(item, dict):
+                continue
+            if item.get("id") != "vision.capture" or item.get("available") is not True:
+                continue
+            source_id = self._mock_default_vision_source_id(item.get("vision_sources"))
+            if source_id is None:
+                return None
+            return {
+                "vision_source_id": source_id,
+                "mode": "still",
+            }
+        return None
+
+    def _mock_default_vision_source_id(self, value: Any) -> str | None:
+        if not isinstance(value, list):
+            return None
+        for default_name in ("visual", "desktop", "camera"):
+            for source in value:
+                if not isinstance(source, dict):
+                    continue
+                source_id = source.get("vision_source_id")
+                default_for = source.get("default_for")
+                if (
+                    isinstance(source_id, str)
+                    and source_id.strip()
+                    and isinstance(default_for, list)
+                    and default_name in default_for
+                ):
+                    return source_id.strip()
+        for source in value:
+            if not isinstance(source, dict):
+                continue
+            source_id = source.get("vision_source_id")
+            if isinstance(source_id, str) and source_id.strip():
+                return source_id.strip()
         return None
 
     def _mock_capability_available(

@@ -174,6 +174,7 @@ class EventStreamRegistry:
                 "capabilities": {},
                 "permissions": sorted(set(permissions or [])),
                 "rejected_bindings": [],
+                "vision_sources": [],
             }
 
         # 結果
@@ -201,9 +202,11 @@ class EventStreamRegistry:
         client_id: str,
         capabilities: dict[str, str],
         rejected_bindings: list[dict[str, Any]],
+        vision_sources: list[dict[str, Any]] | None = None,
     ) -> None:
         # スナップショット
         replaced_sessions: list[dict[str, Any]] = []
+        normalized_vision_sources = [dict(source) for source in vision_sources or []]
         with self._lock:
             session = self._sessions.get(session_id)
             if session is None:
@@ -218,10 +221,32 @@ class EventStreamRegistry:
                 replaced_sessions.append(existing_session)
                 self._sessions.pop(existing_session_id, None)
 
+            # vision_source_id は接続中 client 全体で一意にする。
+            existing_source_ids: set[str] = set()
+            for existing_session in self._sessions.values():
+                if existing_session.get("session_id") == session_id:
+                    continue
+                for source in existing_session.get("vision_sources", []):
+                    if not isinstance(source, dict):
+                        continue
+                    source_id = source.get("vision_source_id")
+                    if isinstance(source_id, str) and source_id.strip():
+                        existing_source_ids.add(source_id.strip())
+            duplicate_source_ids = sorted(
+                {
+                    source["vision_source_id"]
+                    for source in normalized_vision_sources
+                    if source.get("vision_source_id") in existing_source_ids
+                }
+            )
+            if duplicate_source_ids:
+                raise ValueError(f"duplicate_vision_source_id: {', '.join(duplicate_source_ids)}")
+
             # 更新
             session["client_id"] = client_id
             session["capabilities"] = dict(capabilities)
             session["rejected_bindings"] = list(rejected_bindings)
+            session["vision_sources"] = normalized_vision_sources
 
         # 置換済み接続のクローズ
         for replaced_session in replaced_sessions:
@@ -280,16 +305,34 @@ class EventStreamRegistry:
         # inspection 用に接続中 client の binding 状態を要約する。
         accepted: dict[str, set[str]] = {}
         rejected: list[dict[str, Any]] = []
+        vision_sources: list[dict[str, Any]] = []
         with self._lock:
             for session in self._sessions.values():
                 client_id = session.get("client_id")
                 if not isinstance(client_id, str) or not client_id.strip():
                     continue
-                for capability_id in session.get("capabilities", {}):
+                capabilities = session.get("capabilities", {})
+                if not isinstance(capabilities, dict):
+                    capabilities = {}
+                for capability_id in capabilities:
                     accepted.setdefault(capability_id, set()).add(client_id)
                 for rejected_binding in session.get("rejected_bindings", []):
                     if isinstance(rejected_binding, dict):
                         rejected.append(dict(rejected_binding))
+                for source in session.get("vision_sources", []):
+                    if not isinstance(source, dict):
+                        continue
+                    capability_id = source.get("capability_id")
+                    if not isinstance(capability_id, str) or capability_id not in capabilities:
+                        continue
+                    vision_sources.append(
+                        {
+                            **dict(source),
+                            "client_id": client_id.strip(),
+                            "available": True,
+                            "unavailable_reason": None,
+                        }
+                    )
 
         return {
             "accepted": {
@@ -297,7 +340,44 @@ class EventStreamRegistry:
                 for capability_id, client_ids in accepted.items()
             },
             "rejected": rejected,
+            "vision_sources": sorted(
+                vision_sources,
+                key=lambda item: str(item.get("vision_source_id") or ""),
+            ),
         }
+
+    def get_vision_source(self, vision_source_id: str) -> dict[str, Any] | None:
+        # dispatch 用に vision_source_id から接続中 client と source metadata を引く。
+        normalized_source_id = vision_source_id.strip()
+        if not normalized_source_id:
+            return None
+        matches: list[dict[str, Any]] = []
+        with self._lock:
+            for session in self._sessions.values():
+                client_id = session.get("client_id")
+                if not isinstance(client_id, str) or not client_id.strip():
+                    continue
+                capabilities = session.get("capabilities", {})
+                if not isinstance(capabilities, dict) or "vision.capture" not in capabilities:
+                    continue
+                for source in session.get("vision_sources", []):
+                    if not isinstance(source, dict):
+                        continue
+                    if source.get("vision_source_id") != normalized_source_id:
+                        continue
+                    matches.append(
+                        {
+                            **dict(source),
+                            "client_id": client_id.strip(),
+                            "available": True,
+                            "unavailable_reason": None,
+                        }
+                    )
+        if not matches:
+            return None
+        if len(matches) > 1:
+            raise ValueError(f"Vision source is ambiguous: {normalized_source_id}")
+        return matches[0]
 
     def send_to_client(self, client_id: str, payload: dict[str, Any]) -> bool:
         # スナップショット

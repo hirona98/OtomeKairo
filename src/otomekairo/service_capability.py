@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import threading
 import uuid
 from copy import deepcopy
@@ -120,7 +121,10 @@ class ServiceCapabilityMixin:
 
         # binding と ongoing_action を検証し、内部実行記録を作る。
         try:
-            target_client_id = self._select_capability_target_client(capability_id=capability_id)
+            target = self._select_capability_target(
+                capability_id=capability_id,
+                input_payload=input_payload,
+            )
         except ValueError as exc:
             unavailable_reason = "no_binding" if "no_binding" in str(exc) else "unavailable"
             self._mark_capability_runtime_failure(
@@ -131,6 +135,8 @@ class ServiceCapabilityMixin:
                 unavailable_seconds=int(state_policy.get("unavailable_seconds_on_dispatch_failure") or 0),
             )
             raise
+        target_client_id = target["target_client_id"]
+        vision_source = target.get("vision_source")
         timeout_ms = int(manifest.get("timeout_ms") or 0)
         if timeout_ms <= 0:
             raise ValueError(f"Capability timeout_ms is invalid: {capability_id}")
@@ -153,6 +159,7 @@ class ServiceCapabilityMixin:
             manifest=manifest,
             action_seed=action_seed,
             wait_for_response=wait_for_response,
+            vision_source=vision_source if isinstance(vision_source, dict) else None,
         )
         pending = {
             "event": threading.Event(),
@@ -320,6 +327,11 @@ class ServiceCapabilityMixin:
                 raise ValueError("capability client_id does not match the pending target.")
             if request_record.get("capability_id") != capability_id:
                 raise ValueError("capability_id does not match the pending request.")
+            self._validate_capability_result_source(
+                capability_id=capability_id,
+                request_record=request_record,
+                result_payload=result_payload,
+            )
 
             self._clear_capability_runtime_busy(
                 capability_id=capability_id,
@@ -342,6 +354,31 @@ class ServiceCapabilityMixin:
             self._pending_capability_requests.pop(request_id, None)
 
         return response
+
+    def _select_capability_target(
+        self,
+        *,
+        capability_id: str,
+        input_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        if capability_id != "vision.capture":
+            return {
+                "target_client_id": self._select_capability_target_client(capability_id=capability_id),
+                "vision_source": None,
+            }
+        vision_source_id = input_payload.get("vision_source_id")
+        if not isinstance(vision_source_id, str) or not vision_source_id.strip():
+            raise ValueError("Capability is unavailable: vision.capture no_binding vision_source_id")
+        vision_source = self._event_stream_registry.get_vision_source(vision_source_id.strip())
+        if not isinstance(vision_source, dict):
+            raise ValueError(f"Capability is unavailable: vision.capture no_binding {vision_source_id.strip()}")
+        client_id = vision_source.get("client_id")
+        if not isinstance(client_id, str) or not client_id.strip():
+            raise ValueError(f"Capability is unavailable: vision.capture no_binding {vision_source_id.strip()}")
+        return {
+            "target_client_id": client_id.strip(),
+            "vision_source": vision_source,
+        }
 
     def _select_capability_target_client(self, *, capability_id: str) -> str:
         bindings = self._event_stream_registry.list_capability_bindings()
@@ -518,10 +555,11 @@ class ServiceCapabilityMixin:
         manifest: dict[str, Any],
         action_seed: dict[str, Any] | None,
         wait_for_response: bool,
+        vision_source: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         request_id = f"{capability_id.replace('.', '_')}_request:{uuid.uuid4().hex}"
         expires_at = self._capability_ongoing_action_expires_at(current_time=current_time, timeout_ms=timeout_ms)
-        return {
+        record = {
             "request_id": request_id,
             "target_client_id": target_client_id,
             "memory_set_id": memory_set_id,
@@ -540,6 +578,18 @@ class ServiceCapabilityMixin:
             ),
             "wait_for_response": wait_for_response,
         }
+        if capability_id == "vision.capture" and isinstance(vision_source, dict):
+            source_id = vision_source.get("vision_source_id")
+            source_kind = vision_source.get("kind")
+            source_label = vision_source.get("label")
+            if isinstance(source_id, str) and source_id.strip():
+                record["vision_source_id"] = source_id.strip()
+            if isinstance(source_kind, str) and source_kind.strip():
+                record["source_kind"] = source_kind.strip()
+            if isinstance(source_label, str) and source_label.strip():
+                record["source_label"] = source_label.strip()
+            record["vision_source"] = deepcopy(vision_source)
+        return record
 
     def _capability_request_event_type(self, capability_id: str) -> str:
         return f"{capability_id}_request"
@@ -553,6 +603,11 @@ class ServiceCapabilityMixin:
         input_payload = request_record.get("input")
         if isinstance(input_payload, dict):
             payload.update(deepcopy(input_payload))
+        if request_record.get("capability_id") == "vision.capture":
+            for source_key in ("source_kind", "source_label"):
+                value = request_record.get(source_key)
+                if isinstance(value, str) and value.strip():
+                    payload[source_key] = value.strip()
         return payload
 
     def _capability_request_summary(
@@ -578,7 +633,36 @@ class ServiceCapabilityMixin:
         )
         if isinstance(readiness_digest, dict):
             summary["readiness_digest"] = readiness_digest
+        if capability_id == "vision.capture":
+            for source_key in ("vision_source_id", "source_kind", "source_label"):
+                value = request_record.get(source_key)
+                if isinstance(value, str) and value.strip():
+                    summary[source_key] = value.strip()
         return summary
+
+    def _validate_capability_result_source(
+        self,
+        *,
+        capability_id: str,
+        request_record: dict[str, Any],
+        result_payload: dict[str, Any],
+    ) -> None:
+        if capability_id != "vision.capture":
+            return
+        client_context = result_payload.get("client_context")
+        if not isinstance(client_context, dict):
+            raise ValueError("vision.capture result.client_context must be an object.")
+        expected_fields = {
+            "vision_source_id": request_record.get("vision_source_id"),
+            "source_kind": request_record.get("source_kind"),
+            "source_label": request_record.get("source_label"),
+        }
+        for field_name, expected_value in expected_fields.items():
+            if not isinstance(expected_value, str) or not expected_value.strip():
+                raise ValueError(f"vision.capture request_record.{field_name} is missing.")
+            actual_value = client_context.get(field_name)
+            if not isinstance(actual_value, str) or actual_value.strip() != expected_value.strip():
+                raise ValueError(f"vision.capture result.client_context.{field_name} does not match the request.")
 
     def _capability_state_policy(self, capability_id: str) -> dict[str, Any]:
         manifest = capability_manifests().get(capability_id, {})
@@ -967,6 +1051,9 @@ class ServiceCapabilityMixin:
         enum_values = schema.get("enum")
         if isinstance(enum_values, list) and value not in enum_values:
             raise ValueError(f"{path} value is not allowed.")
+        pattern = schema.get("pattern")
+        if isinstance(value, str) and isinstance(pattern, str) and re.search(pattern, value) is None:
+            raise ValueError(f"{path} value does not match pattern.")
         if isinstance(value, dict):
             properties = schema.get("properties", {})
             required_names = schema.get("required", [])

@@ -13,8 +13,9 @@ from otomekairo.memory_utils import localize_timestamp_fields
 from otomekairo.service_common import REQUIRED_MODEL_ROLE_NAMES, ServiceError, debug_log
 
 
-EVENT_STREAM_CAPABILITY_PERMISSIONS = ("observe_desktop",)
+EVENT_STREAM_CAPABILITY_PERMISSIONS = ("observe_vision", "observe_desktop", "observe_camera")
 PERSONA_INITIATIVE_BASELINES = {"low", "medium", "high"}
+VISION_SOURCE_KINDS = {"desktop", "camera", "virtual"}
 
 
 # 設定Mixin
@@ -99,19 +100,30 @@ class ServiceConfigMixin:
                 )
                 continue
             accepted_capabilities[capability_id] = offered_version
+        vision_sources = self._normalize_hello_vision_sources(
+            payload=payload,
+            client_id=client_id.strip(),
+            accepted_capabilities=accepted_capabilities,
+            granted_permissions=granted_permissions,
+        )
 
         # 登録
-        self._event_stream_registry.register_hello(
-            session_id,
-            client_id=client_id.strip(),
-            capabilities=accepted_capabilities,
-            rejected_bindings=rejected_bindings,
-        )
+        try:
+            self._event_stream_registry.register_hello(
+                session_id,
+                client_id=client_id.strip(),
+                capabilities=accepted_capabilities,
+                rejected_bindings=rejected_bindings,
+                vision_sources=vision_sources,
+            )
+        except ValueError as exc:
+            raise ServiceError(400, "invalid_vision_sources", str(exc)) from exc
         debug_log(
             "EventStream",
             (
                 f"hello client_id={client_id.strip()} "
-                f"accepted={sorted(accepted_capabilities)} rejected={len(rejected_bindings)}"
+                f"accepted={sorted(accepted_capabilities)} rejected={len(rejected_bindings)} "
+                f"vision_sources={len(vision_sources)}"
             ),
         )
 
@@ -167,6 +179,7 @@ class ServiceConfigMixin:
         bindings = self._event_stream_registry.list_capability_bindings()
         accepted_bindings = bindings["accepted"]
         rejected_bindings = bindings["rejected"]
+        vision_sources = bindings.get("vision_sources", [])
         active_ongoing_action = self._current_ongoing_action(
             state=state,
             current_time=current_time,
@@ -179,6 +192,7 @@ class ServiceConfigMixin:
                     current_time=current_time,
                     bound_client_ids=accepted_bindings.get(capability_id, []),
                     rejected_bindings=rejected_bindings,
+                    vision_sources=vision_sources if capability_id == "vision.capture" else None,
                     active_ongoing_action=active_ongoing_action,
                 )
                 for capability_id, manifest in sorted(manifests.items())
@@ -215,6 +229,7 @@ class ServiceConfigMixin:
         )
         generated_at = self._now_iso()
         bindings = self._event_stream_registry.list_capability_bindings()
+        vision_sources = bindings.get("vision_sources", [])
         active_ongoing_action = self._current_ongoing_action(
             state=state,
             current_time=generated_at,
@@ -224,6 +239,7 @@ class ServiceConfigMixin:
             current_time=generated_at,
             bound_client_ids=bindings["accepted"].get(normalized_capability_id, []),
             rejected_bindings=bindings["rejected"],
+            vision_sources=vision_sources if normalized_capability_id == "vision.capture" else None,
             active_ongoing_action=active_ongoing_action,
         )
         debug_log(
@@ -353,6 +369,124 @@ class ServiceConfigMixin:
             "seen_at": seen_at,
         }
 
+    def _normalize_hello_vision_sources(
+        self,
+        *,
+        payload: dict[str, Any],
+        client_id: str,
+        accepted_capabilities: dict[str, str],
+        granted_permissions: set[str],
+    ) -> list[dict[str, Any]]:
+        raw_sources = payload.get("vision_sources")
+        if "vision.capture" not in accepted_capabilities:
+            if raw_sources is None:
+                return []
+            if isinstance(raw_sources, list) and not raw_sources:
+                return []
+            raise ServiceError(
+                400,
+                "invalid_vision_sources",
+                "hello.vision_sources requires accepted vision.capture capability.",
+            )
+        if not isinstance(raw_sources, list) or not raw_sources:
+            raise ServiceError(
+                400,
+                "invalid_vision_sources",
+                "hello.vision_sources must be a non-empty array when vision.capture is accepted.",
+            )
+
+        normalized_sources: list[dict[str, Any]] = []
+        seen_source_ids: set[str] = set()
+        for source in raw_sources:
+            if not isinstance(source, dict):
+                raise ServiceError(400, "invalid_vision_sources", "hello.vision_sources must contain objects.")
+            source_id = self._normalize_vision_source_text(
+                source.get("vision_source_id"),
+                "hello.vision_sources[].vision_source_id",
+            )
+            if not source_id.startswith("vision_source:"):
+                raise ServiceError(
+                    400,
+                    "invalid_vision_sources",
+                    "hello.vision_sources[].vision_source_id must start with vision_source:.",
+                )
+            if source_id in seen_source_ids:
+                raise ServiceError(400, "invalid_vision_sources", "hello.vision_sources contains duplicate ids.")
+            seen_source_ids.add(source_id)
+
+            capability_id = self._normalize_vision_source_text(
+                source.get("capability_id"),
+                "hello.vision_sources[].capability_id",
+            )
+            if capability_id != "vision.capture":
+                raise ServiceError(
+                    400,
+                    "invalid_vision_sources",
+                    "hello.vision_sources[].capability_id must be vision.capture.",
+                )
+            kind = self._normalize_vision_source_text(source.get("kind"), "hello.vision_sources[].kind")
+            if kind not in VISION_SOURCE_KINDS:
+                raise ServiceError(
+                    400,
+                    "invalid_vision_sources",
+                    "hello.vision_sources[].kind must be desktop, camera, or virtual.",
+                )
+            label = self._normalize_vision_source_text(source.get("label"), "hello.vision_sources[].label")
+            aliases = self._normalize_vision_source_text_list(
+                source.get("aliases", []),
+                "hello.vision_sources[].aliases",
+            )
+            default_for = self._normalize_vision_source_text_list(
+                source.get("default_for", []),
+                "hello.vision_sources[].default_for",
+            )
+            required_permissions = self._normalize_vision_source_text_list(
+                source.get("required_permissions", []),
+                "hello.vision_sources[].required_permissions",
+            )
+            missing_permissions = sorted(set(required_permissions) - granted_permissions)
+            if missing_permissions:
+                raise ServiceError(
+                    400,
+                    "invalid_vision_sources",
+                    "hello.vision_sources[].required_permissions are not granted.",
+                )
+            normalized_sources.append(
+                {
+                    "vision_source_id": source_id,
+                    "kind": kind,
+                    "label": self._clamp(label, limit=80),
+                    "aliases": aliases[:8],
+                    "default_for": default_for[:8],
+                    "client_id": client_id,
+                    "capability_id": capability_id,
+                    "required_permissions": required_permissions,
+                }
+            )
+        return normalized_sources
+
+    def _normalize_vision_source_text(self, value: Any, label: str) -> str:
+        if not isinstance(value, str) or not value.strip():
+            raise ServiceError(400, "invalid_vision_sources", f"{label} must be a non-empty string.")
+        return value.strip()
+
+    def _normalize_vision_source_text_list(self, value: Any, label: str) -> list[str]:
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise ServiceError(400, "invalid_vision_sources", f"{label} must be an array.")
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for item in value:
+            if not isinstance(item, str) or not item.strip():
+                raise ServiceError(400, "invalid_vision_sources", f"{label} must contain non-empty strings.")
+            text = item.strip()
+            if text in seen:
+                continue
+            seen.add(text)
+            normalized.append(self._clamp(text, limit=80))
+        return normalized
+
     def _build_capability_availability(
         self,
         *,
@@ -360,6 +494,7 @@ class ServiceConfigMixin:
         current_time: str,
         bound_client_ids: list[str],
         rejected_bindings: list[dict[str, Any]],
+        vision_sources: list[dict[str, Any]] | None = None,
         active_ongoing_action: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         capability_id = manifest["id"]
@@ -413,6 +548,10 @@ class ServiceConfigMixin:
             and not unavailable_active
             and not parallel_blocked
         )
+        normalized_vision_sources = self._inspection_vision_sources(vision_sources)
+        has_vision_source = bool(normalized_vision_sources)
+        if capability_id == "vision.capture" and available and not has_vision_source:
+            available = False
         unavailable_reason = None
         if not available:
             if missing_permissions:
@@ -425,6 +564,8 @@ class ServiceConfigMixin:
                 unavailable_reason = "busy"
             elif not bound_client_ids:
                 unavailable_reason = "no_binding"
+            elif capability_id == "vision.capture" and not has_vision_source:
+                unavailable_reason = "no_vision_source"
             elif parallel_blocked:
                 unavailable_reason = "parallel_blocked"
 
@@ -467,7 +608,49 @@ class ServiceConfigMixin:
         readiness = capability_decision_readiness_from_manifest(manifest)
         if readiness is not None:
             result["readiness"] = readiness
+        if capability_id == "vision.capture":
+            result["vision_sources"] = normalized_vision_sources
         return result
+
+    def _inspection_vision_sources(self, vision_sources: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+        normalized: list[dict[str, Any]] = []
+        for source in vision_sources or []:
+            if not isinstance(source, dict):
+                continue
+            source_id = source.get("vision_source_id")
+            kind = source.get("kind")
+            label = source.get("label")
+            if not isinstance(source_id, str) or not source_id.strip():
+                continue
+            if not isinstance(kind, str) or not kind.strip():
+                continue
+            if not isinstance(label, str) or not label.strip():
+                continue
+            normalized.append(
+                {
+                    "vision_source_id": source_id.strip(),
+                    "kind": kind.strip(),
+                    "label": self._clamp(label.strip(), limit=80),
+                    "aliases": [
+                        value
+                        for value in source.get("aliases", [])
+                        if isinstance(value, str) and value.strip()
+                    ][:8],
+                    "default_for": [
+                        value
+                        for value in source.get("default_for", [])
+                        if isinstance(value, str) and value.strip()
+                    ][:8],
+                    "available": source.get("available") is True,
+                    "required_permissions": [
+                        value
+                        for value in source.get("required_permissions", [])
+                        if isinstance(value, str) and value.strip()
+                    ],
+                    "unavailable_reason": source.get("unavailable_reason"),
+                }
+            )
+        return normalized
 
     def _build_capability_decision_view(
         self,
@@ -479,6 +662,7 @@ class ServiceConfigMixin:
         bindings = self._event_stream_registry.list_capability_bindings()
         accepted_bindings = bindings["accepted"]
         rejected_bindings = bindings["rejected"]
+        vision_sources = bindings.get("vision_sources", [])
         active_ongoing_action = None
         if isinstance(state, dict):
             active_ongoing_action = self._current_ongoing_action(
@@ -492,6 +676,7 @@ class ServiceConfigMixin:
                 current_time=current_time or self._now_iso(),
                 bound_client_ids=accepted_bindings.get(capability_id, []),
                 rejected_bindings=rejected_bindings,
+                vision_sources=vision_sources if capability_id == "vision.capture" else None,
                 active_ongoing_action=active_ongoing_action,
             )
             item = {
@@ -517,6 +702,8 @@ class ServiceConfigMixin:
             readiness = capability_decision_readiness_from_manifest(manifest)
             if readiness is not None:
                 item["readiness"] = readiness
+            if capability_id == "vision.capture":
+                item["vision_sources"] = availability.get("vision_sources", [])
             decision_view.append(item)
         if not decision_view:
             return None
@@ -1105,6 +1292,7 @@ class ServiceConfigMixin:
                     "summary_text": world_state.get("summary_text"),
                     "confidence": world_state.get("confidence"),
                     "salience": world_state.get("salience"),
+                    "integration_key": world_state.get("integration_key"),
                     "age_label": self._world_state_age_label(
                         reference_time=reference_time,
                         observed_at=world_state.get("observed_at"),

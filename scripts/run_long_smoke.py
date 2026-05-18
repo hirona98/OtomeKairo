@@ -248,7 +248,13 @@ class SimpleWebSocketClient:
         self._reader_thread: threading.Thread | None = None
         self.error: str | None = None
 
-    def connect(self, *, client_id: str, caps: list[dict[str, str]]) -> None:
+    def connect(
+        self,
+        *,
+        client_id: str,
+        caps: list[dict[str, str]],
+        vision_sources: list[dict[str, Any]] | None = None,
+    ) -> None:
         raw_socket = socket.create_connection((self.host, self.port), timeout=10.0)
         websocket = self.ssl_context.wrap_socket(raw_socket, server_hostname=self.host)
         websocket.settimeout(1.0)
@@ -275,13 +281,14 @@ class SimpleWebSocketClient:
         if headers.get("sec-websocket-accept") != expected_accept:
             raise SmokeError("event stream handshake returned an invalid Sec-WebSocket-Accept.")
 
-        self.send_json(
-            {
-                "type": "hello",
-                "client_id": client_id,
-                "caps": caps,
-            }
-        )
+        hello_payload: dict[str, Any] = {
+            "type": "hello",
+            "client_id": client_id,
+            "caps": caps,
+        }
+        if vision_sources is not None:
+            hello_payload["vision_sources"] = vision_sources
+        self.send_json(hello_payload)
         self._reader_thread = threading.Thread(target=self._reader_loop, name="long-smoke-event-reader", daemon=True)
         self._reader_thread.start()
 
@@ -917,6 +924,17 @@ class LongSmokeRunner:
             ),
         )
         caps = [{"id": "vision.capture", "version": "1"}]
+        vision_sources = [
+            {
+                "vision_source_id": self._vision_source_id_for_client(client_id),
+                "capability_id": "vision.capture",
+                "kind": "desktop",
+                "label": f"{client_label} desktop",
+                "aliases": [client_label, client_id],
+                "default_for": ["visual", "desktop"] if client_label == "primary" else [],
+                "required_permissions": ["observe_desktop"],
+            }
+        ]
         if client_label == "primary":
             caps.append({"id": "external.status", "version": "1"})
             caps.append({"id": "schedule.status", "version": "1"})
@@ -925,8 +943,12 @@ class LongSmokeRunner:
             caps.append({"id": "environment.status", "version": "1"})
             caps.append({"id": "location.status", "version": "1"})
             caps.append({"id": "social.status", "version": "1"})
-        client.connect(client_id=client_id, caps=caps)
+        client.connect(client_id=client_id, caps=caps, vision_sources=vision_sources)
         return client
+
+    def _vision_source_id_for_client(self, client_id: str) -> str:
+        normalized = "".join(character if character.isalnum() else "_" for character in client_id.lower()).strip("_")
+        return f"vision_source:{normalized or 'desktop'}"
 
     def _apply_status_client_context_source(
         self,
@@ -964,14 +986,22 @@ class LongSmokeRunner:
         event_type = event.get("type")
         data = event.get("data", {})
         if event_type == "vision.capture_request":
-            if client_label != "primary":
-                raise SmokeError(f"{client_label} desktop client unexpectedly received capture_request.")
             request_id = data.get("request_id")
             capability_id = data.get("capability_id")
+            vision_source_id = data.get("vision_source_id")
+            source_kind = data.get("source_kind")
+            source_label = data.get("source_label")
             if not isinstance(request_id, str) or not request_id:
                 raise SmokeError("capture_request did not include request_id.")
             if capability_id != "vision.capture":
                 raise SmokeError(f"capture_request capability_id was invalid: {capability_id}")
+            expected_vision_source_id = self._vision_source_id_for_client(connected_client_id)
+            if vision_source_id != expected_vision_source_id:
+                raise SmokeError(f"capture_request vision_source_id was invalid: {vision_source_id}")
+            if source_kind != "desktop":
+                raise SmokeError(f"capture_request source_kind was invalid: {source_kind}")
+            if not isinstance(source_label, str) or not source_label.strip():
+                raise SmokeError("capture_request did not include source_label.")
             with self._capture_lock:
                 sequence = self.capture_request_count
                 self.capture_request_count += 1
@@ -1014,11 +1044,17 @@ class LongSmokeRunner:
                 dict(override["client_context"])
                 if isinstance(override, dict) and isinstance(override.get("client_context"), dict)
                 else {
+                    "vision_source_id": vision_source_id,
+                    "source_kind": source_kind,
+                    "source_label": source_label,
                     "active_app": f"LongSmokeApp-{sequence % 3}",
                     "window_title": f"Long Smoke Window {sequence}",
                     "locale": "ja-JP",
                 }
             )
+            client_context.setdefault("vision_source_id", vision_source_id)
+            client_context.setdefault("source_kind", source_kind)
+            client_context.setdefault("source_label", source_label)
             if should_inject_empty_result:
                 self.api.post(
                     "/api/capability/result",
@@ -4007,17 +4043,14 @@ class LongSmokeRunner:
             self._assert_event_clients_healthy()
             time.sleep(0.25)
 
-        capture_request_baseline = self.capture_request_count
         pause_deadline = time.monotonic() + pause_seconds
         while time.monotonic() < pause_deadline:
             self._assert_server_running()
             self._assert_event_clients_healthy()
-            if self.capture_request_count != capture_request_baseline:
-                raise SmokeError("capture_request was emitted while multiple vision.capture clients were connected.")
             time.sleep(0.25)
         self.multiple_client_pause_verified = True
         log(
-            "multiple desktop client pause confirmed"
+            "multiple vision source coexistence confirmed"
             f" pause_seconds={pause_seconds:.1f}"
             f" capture_request_count={self.capture_request_count}"
         )

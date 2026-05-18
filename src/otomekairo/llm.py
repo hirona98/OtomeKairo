@@ -443,7 +443,7 @@ class LLMClient:
             ("body.status", ("体調", "身体", "疲労", "眠気", "姿勢")),
             ("environment.status", ("周囲", "作業環境", "部屋", "騒音", "明るさ")),
             ("location.status", ("場所", "居場所", "移動中", "作業場所")),
-            ("vision.capture", ("画面", "スクリーン", "表示", "ウィンドウ", "デスクトップ")),
+            ("vision.capture", ("視覚", "画面", "スクリーン", "表示", "ウィンドウ", "デスクトップ", "カメラ")),
         )
         for capability_id, terms in capability_terms:
             if any(term in normalized for term in terms):
@@ -471,6 +471,17 @@ class LLMClient:
             capability_id=request_capability_id.strip(),
         )
         if not isinstance(capability_entry, dict) or capability_entry.get("fresh_world_state_available") is not True:
+            if request_capability_id.strip() == "vision.capture" and isinstance(capability_entry, dict):
+                self._validate_vision_capture_fresh_world_state_reuse(
+                    request_payload=request_payload,
+                    capability_entry=capability_entry,
+                )
+            return
+        if request_capability_id.strip() == "vision.capture":
+            self._validate_vision_capture_fresh_world_state_reuse(
+                request_payload=request_payload,
+                capability_entry=capability_entry,
+            )
             return
         fresh_world_state = capability_entry.get("fresh_world_state")
         state_type = None
@@ -493,6 +504,41 @@ class LLMClient:
             "明示的なユーザー依頼なしで同じ現在状態を再取得する capability_request は不正です。"
             "既存の foreground_world_state を使って reply / noop / pending_intent を返してください。"
         )
+
+    def _validate_vision_capture_fresh_world_state_reuse(
+        self,
+        *,
+        request_payload: dict[str, Any],
+        capability_entry: dict[str, Any],
+    ) -> None:
+        input_payload = request_payload.get("input")
+        if not isinstance(input_payload, dict):
+            return
+        requested_source_id = input_payload.get("vision_source_id")
+        if not isinstance(requested_source_id, str) or not requested_source_id.strip():
+            return
+        fresh_sources = capability_entry.get("fresh_world_state_by_vision_source")
+        if not isinstance(fresh_sources, list):
+            return
+        for fresh_source in fresh_sources:
+            if not isinstance(fresh_source, dict):
+                continue
+            source_id = fresh_source.get("vision_source_id")
+            if source_id != requested_source_id.strip():
+                continue
+            summary_text = fresh_source.get("summary_text")
+            age_label = fresh_source.get("age_label")
+            state_summary = ""
+            if isinstance(age_label, str) and age_label.strip():
+                state_summary += f" age_label={age_label.strip()}"
+            if isinstance(summary_text, str) and summary_text.strip():
+                state_summary += f" summary={summary_text.strip()[:80]}"
+            raise LLMError(
+                "CapabilityDecisionView の vision.capture には "
+                f"vision_source_id={requested_source_id.strip()} の新鮮な visual_context があります。{state_summary}"
+                "明示的なユーザー依頼なしで同じ vision_source_id を再取得する capability_request は不正です。"
+                "既存の foreground_world_state を使って reply / noop / pending_intent を返してください。"
+            )
 
     def _capability_decision_view_entry(
         self,

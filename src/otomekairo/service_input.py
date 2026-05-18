@@ -740,11 +740,14 @@ class ServiceInputMixin:
         for key, limit in (
             ("source", 48),
             ("client_id", 80),
+            ("vision_source_id", 96),
+            ("source_kind", 32),
+            ("source_label", 80),
             ("active_app", 80),
             ("window_title", 120),
             ("locale", 32),
         ):
-            if key in {"active_app", "window_title", "locale"} and not include_foreground_hint:
+            if key in {"vision_source_id", "source_kind", "source_label", "active_app", "window_title", "locale"} and not include_foreground_hint:
                 continue
             value = client_context.get(key)
             if isinstance(value, str) and value.strip():
@@ -760,6 +763,9 @@ class ServiceInputMixin:
             "source",
             "image_input_kind",
             "capability_id",
+            "vision_source_id",
+            "source_kind",
+            "source_label",
             "image_count",
             "image_interpreted",
             "visual_confidence_hint",
@@ -832,7 +838,8 @@ class ServiceInputMixin:
         )
         if not reuse_world_state:
             return capability_decision_view
-        fresh_state_by_type = self._fresh_foreground_world_state_by_type(reuse_world_state)
+        fresh_world_states = self._fresh_foreground_world_state_summaries(reuse_world_state)
+        fresh_state_by_type = self._fresh_foreground_world_state_by_type(fresh_world_states)
         if not fresh_state_by_type:
             return capability_decision_view
 
@@ -848,6 +855,26 @@ class ServiceInputMixin:
                 if isinstance(capability_id, str)
                 else None
             )
+            if capability_id == "vision.capture":
+                if item.get("available") is True:
+                    fresh_visual_sources = self._fresh_visual_world_states_for_sources(
+                        vision_sources=item.get("vision_sources"),
+                        fresh_world_states=fresh_world_states,
+                    )
+                    if fresh_visual_sources:
+                        annotated.append(
+                            {
+                                **item,
+                                "fresh_world_state_by_vision_source": fresh_visual_sources,
+                                "fresh_world_state_policy": "明示的なユーザー依頼なしでは同じ vision_source_id の現在状態を再取得しない。",
+                            }
+                        )
+                        changed = True
+                    else:
+                        annotated.append(item)
+                else:
+                    annotated.append(item)
+                continue
             fresh_state = fresh_state_by_type.get(state_type) if state_type is not None else None
             if item.get("available") is not True or fresh_state is None:
                 annotated.append(item)
@@ -886,11 +913,11 @@ class ServiceInputMixin:
             return [item for item in previous if isinstance(item, dict)]
         return []
 
-    def _fresh_foreground_world_state_by_type(
+    def _fresh_foreground_world_state_summaries(
         self,
         foreground_world_state: list[dict[str, Any]],
-    ) -> dict[str, dict[str, Any]]:
-        fresh_state_by_type: dict[str, dict[str, Any]] = {}
+    ) -> list[dict[str, Any]]:
+        fresh_states: list[dict[str, Any]] = []
         for summary in foreground_world_state:
             if not isinstance(summary, dict) or not self._foreground_world_state_is_fresh(summary):
                 continue
@@ -907,13 +934,67 @@ class ServiceInputMixin:
                 "age_label": summary.get("age_label"),
                 "confidence": summary.get("confidence"),
                 "salience": summary.get("salience"),
+                "integration_key": summary.get("integration_key"),
             }
+            fresh_states.append(compact_summary)
+        return fresh_states
+
+    def _fresh_foreground_world_state_by_type(
+        self,
+        fresh_world_states: list[dict[str, Any]],
+    ) -> dict[str, dict[str, Any]]:
+        fresh_state_by_type: dict[str, dict[str, Any]] = {}
+        for compact_summary in fresh_world_states:
+            state_type = compact_summary.get("state_type")
+            if not isinstance(state_type, str) or not state_type.strip():
+                continue
             existing = fresh_state_by_type.get(state_type.strip())
             if existing is None or (
                 self._world_state_reuse_rank(compact_summary) > self._world_state_reuse_rank(existing)
             ):
                 fresh_state_by_type[state_type.strip()] = compact_summary
         return fresh_state_by_type
+
+    def _fresh_visual_world_states_for_sources(
+        self,
+        *,
+        vision_sources: Any,
+        fresh_world_states: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        if not isinstance(vision_sources, list):
+            return []
+        visual_states_by_key = {
+            state.get("integration_key"): state
+            for state in fresh_world_states
+            if isinstance(state, dict)
+            and state.get("state_type") == "visual_context"
+            and isinstance(state.get("integration_key"), str)
+        }
+        matches: list[dict[str, Any]] = []
+        for source in vision_sources:
+            if not isinstance(source, dict):
+                continue
+            source_id = self._client_context_text(source.get("vision_source_id"), limit=96)
+            if source_id is None:
+                continue
+            source_key = self._world_state_vision_source_key({"vision_source_id": source_id})
+            if source_key is None:
+                continue
+            state = visual_states_by_key.get(f"visual_context:{source_key}")
+            if not isinstance(state, dict):
+                continue
+            payload = {
+                "vision_source_id": source_id,
+                "summary_text": state.get("summary_text"),
+                "age_label": state.get("age_label"),
+                "confidence": state.get("confidence"),
+                "salience": state.get("salience"),
+            }
+            label = self._client_context_text(source.get("label"), limit=80)
+            if label is not None:
+                payload["source_label"] = label
+            matches.append(payload)
+        return matches[:6]
 
     def _foreground_world_state_is_fresh(self, summary: dict[str, Any]) -> bool:
         age_label = summary.get("age_label")
@@ -1362,6 +1443,9 @@ class ServiceInputMixin:
         available_ids = capability_summary.get("available_ids", [])
         if not isinstance(available_ids, list) or "vision.capture" not in available_ids:
             return None
+        vision_source_id = self._initiative_default_vision_source_id(capability_summary)
+        if vision_source_id is None:
+            return None
         if self._initiative_drive_priority_score(strongest_drive) < INITIATIVE_AUTONOMOUS_PROBE_THRESHOLD:
             return None
         level = self._client_context_text(initiative_baseline.get("level"), limit=16) or "medium"
@@ -1380,7 +1464,7 @@ class ServiceInputMixin:
         return {
             "capability_id": "vision.capture",
             "input": {
-                "source": "desktop",
+                "vision_source_id": vision_source_id,
                 "mode": "still",
             },
             "reason_summary": "強い drive はあるが現在の前景観測が薄いため、先に画面観測を当てたい。",
@@ -1624,6 +1708,7 @@ class ServiceInputMixin:
         available_ids: list[str] = []
         available_items: list[dict[str, Any]] = []
         unavailable_items: list[dict[str, Any]] = []
+        vision_sources: list[dict[str, Any]] = []
         for item in capability_decision_view or []:
             if not isinstance(item, dict):
                 continue
@@ -1632,13 +1717,15 @@ class ServiceInputMixin:
                 continue
             if item.get("available"):
                 available_ids.append(capability_id)
-                available_items.append(
-                    {
-                        "id": capability_id,
-                        "what_it_does": item.get("what_it_does"),
-                        "required_input": item.get("required_input"),
-                    }
-                )
+                available_item = {
+                    "id": capability_id,
+                    "what_it_does": item.get("what_it_does"),
+                    "required_input": item.get("required_input"),
+                }
+                if capability_id == "vision.capture":
+                    vision_sources = self._compact_vision_sources_for_decision(item.get("vision_sources"))
+                    available_item["vision_sources"] = vision_sources
+                available_items.append(available_item)
                 continue
             unavailable_items.append(
                 {
@@ -1652,7 +1739,80 @@ class ServiceInputMixin:
             "available_items": available_items[:3],
             "unavailable_count": len(unavailable_items),
             "unavailable_items": unavailable_items[:3],
+            "vision_sources": vision_sources,
         }
+
+    def _compact_vision_sources_for_decision(self, value: Any) -> list[dict[str, Any]]:
+        sources: list[dict[str, Any]] = []
+        if not isinstance(value, list):
+            return sources
+        for source in value:
+            if not isinstance(source, dict):
+                continue
+            source_id = self._client_context_text(source.get("vision_source_id"), limit=96)
+            kind = self._client_context_text(source.get("kind"), limit=32)
+            label = self._client_context_text(source.get("label"), limit=80)
+            if source_id is None or kind is None or label is None:
+                continue
+            payload: dict[str, Any] = {
+                "vision_source_id": source_id,
+                "kind": kind,
+                "label": label,
+            }
+            default_for = [
+                value
+                for value in source.get("default_for", [])
+                if isinstance(value, str) and value.strip()
+            ][:6]
+            aliases = [
+                value
+                for value in source.get("aliases", [])
+                if isinstance(value, str) and value.strip()
+            ][:6]
+            if aliases:
+                payload["aliases"] = aliases
+            if default_for:
+                payload["default_for"] = default_for
+            sources.append(payload)
+        return sources[:6]
+
+    def _initiative_default_vision_source_id(self, capability_summary: dict[str, Any]) -> str | None:
+        top_level_sources = capability_summary.get("vision_sources")
+        source_id = self._default_vision_source_id_from_sources(top_level_sources)
+        if source_id is not None:
+            return source_id
+        available_items = capability_summary.get("available_items")
+        if not isinstance(available_items, list):
+            return None
+        for item in available_items:
+            if not isinstance(item, dict) or item.get("id") != "vision.capture":
+                continue
+            return self._default_vision_source_id_from_sources(item.get("vision_sources"))
+        return None
+
+    def _default_vision_source_id_from_sources(self, value: Any) -> str | None:
+        if not isinstance(value, list):
+            return None
+        for default_name in ("visual", "desktop", "camera"):
+            for source in value:
+                if not isinstance(source, dict):
+                    continue
+                default_for = source.get("default_for")
+                source_id = source.get("vision_source_id")
+                if (
+                    isinstance(default_for, list)
+                    and default_name in default_for
+                    and isinstance(source_id, str)
+                    and source_id.strip()
+                ):
+                    return source_id.strip()
+        for source in value:
+            if not isinstance(source, dict):
+                continue
+            source_id = source.get("vision_source_id")
+            if isinstance(source_id, str) and source_id.strip():
+                return source_id.strip()
+        return None
 
     def _initiative_candidate_families(
         self,
@@ -3430,6 +3590,14 @@ class ServiceInputMixin:
             capability_id = observation_summary.get("capability_id")
             if isinstance(capability_id, str) and capability_id.strip():
                 capability_id_text = capability_id.strip()
+            for source_key, limit in (
+                ("vision_source_id", 96),
+                ("source_kind", 32),
+                ("source_label", 80),
+            ):
+                value = observation_summary.get(source_key)
+                if isinstance(value, str) and value.strip():
+                    payload[source_key] = self._clamp(value.strip(), limit=limit)
         has_visual_signal = "summary_text" in payload
         if not has_visual_signal:
             return None
@@ -3852,6 +4020,15 @@ class ServiceInputMixin:
         capability_id = self._client_context_text(context.get("capability_id"), limit=80)
         if capability_id is not None:
             payload["capability_id"] = capability_id
+        if state_type == "visual_context":
+            for source_key, limit in (
+                ("vision_source_id", 96),
+                ("source_kind", 32),
+                ("source_label", 80),
+            ):
+                value = self._client_context_text(context.get(source_key), limit=limit)
+                if value is not None:
+                    payload[source_key] = value
         if state_type == "external_service":
             service = self._client_context_text(context.get("service"), limit=80)
             if service is not None:
@@ -3908,6 +4085,9 @@ class ServiceInputMixin:
     def _world_state_hook_signal_fields(self, *, state_type: str, context: dict[str, Any]) -> list[str]:
         keys_by_state_type = {
             "visual_context": (
+                "vision_source_id",
+                "source_kind",
+                "source_label",
                 "visual_summary_text",
                 "image_interpreted",
                 "visual_confidence_hint",
@@ -4306,7 +4486,10 @@ class ServiceInputMixin:
         context: dict[str, Any] | None,
     ) -> dict[str, str]:
         if state_type == "visual_context":
-            return {"mode": "foreground_visual_context", "key": "visual_context:foreground"}
+            vision_source_key = self._world_state_vision_source_key(context)
+            if vision_source_key is None:
+                raise ValueError("visual_context requires vision_source_id.")
+            return {"mode": "vision_source", "key": f"visual_context:{vision_source_key}"}
         if state_type == "external_service":
             service_key = self._world_state_service_key(context)
             if service_key is not None:
@@ -4322,6 +4505,14 @@ class ServiceInputMixin:
                 return {"mode": "schedule_slot", "key": f"schedule:{schedule_slot_key}"}
             return {"mode": "schedule_foreground", "key": "schedule:self"}
         return {"mode": "scope", "key": f"{state_type}:{scope_type}:{scope_key}"}
+
+    def _world_state_vision_source_key(self, context: dict[str, Any] | None) -> str | None:
+        if not isinstance(context, dict):
+            return None
+        vision_source_id = self._client_context_text(context.get("vision_source_id"), limit=96)
+        if vision_source_id is None:
+            return None
+        return vision_source_id.strip() or None
 
     def _world_state_service_key(self, context: dict[str, Any] | None) -> str | None:
         if not isinstance(context, dict):

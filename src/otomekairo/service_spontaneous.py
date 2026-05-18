@@ -1192,10 +1192,10 @@ class ServiceSpontaneousMixin:
             if isinstance(observation_summary, dict):
                 visual_summary_text = observation_summary.get("visual_summary_text")
             if isinstance(visual_summary_text, str) and visual_summary_text.strip():
-                return self._clamp(f"画面観測では {visual_summary_text.strip()}", limit=160)
+                return self._clamp(f"視覚観測では {visual_summary_text.strip()}", limit=160)
             image_count = self._capability_result_payload_image_count(result_payload or {})
             if image_count is not None and image_count <= 0:
-                return "画面観測は空で、追加の手掛かりを得られなかった。"
+                return "視覚観測は空で、追加の手掛かりを得られなかった。"
             return None
         if hook_name == "external_status":
             status_text = None
@@ -1290,11 +1290,17 @@ class ServiceSpontaneousMixin:
     ) -> str:
         parts = ["capability result を受信。"]
         capability_id = self._capability_result_capability_id(capability_response)
-        source = self._client_context_text(client_context.get("source"), limit=48)
+        source_label = self._client_context_text(client_context.get("source_label"), limit=80)
+        source_kind = self._client_context_text(client_context.get("source_kind"), limit=32)
+        vision_source_id = self._client_context_text(client_context.get("vision_source_id"), limit=96)
         image_count = self._capability_result_payload_image_count(capability_response)
         parts.append(f"{capability_id} の非同期結果を受け取った。")
-        if isinstance(source, str):
-            parts.append(f"入力源は {source}。")
+        if source_label is not None:
+            parts.append(f"観測 source は {source_label}。")
+        elif vision_source_id is not None:
+            parts.append(f"観測 source id は {vision_source_id}。")
+        if source_kind is not None:
+            parts.append(f"source kind は {source_kind}。")
         error = capability_response.get("error")
         if isinstance(error, str) and error.strip():
             parts.append(f"結果は error だった。 error={self._clamp(error, limit=120)}")

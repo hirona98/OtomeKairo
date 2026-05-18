@@ -585,6 +585,7 @@ def _build_decision_system_prompt(persona: dict) -> str:
         "capability_request は CapabilityDecisionView に available=true で載っている能力が必要な場合だけ選んでください。\n"
         "ユーザーが現在状態の確認を明示的に依頼し、対応する status / observation capability が available=true のときは、入力から推測した foreground_world_state だけで答えず capability_request を選んでください。\n"
         "CapabilityDecisionView の項目に fresh_world_state_available=true がある場合、明示的なユーザー依頼なしに同じ現在状態を再取得する capability_request は選ばず、fresh_world_state を根拠に reply / noop / pending_intent を選んでください。\n"
+        "vision.capture に fresh_world_state_by_vision_source がある場合、明示的なユーザー依頼なしに同じ vision_source_id を再取得する capability_request は選ばないでください。\n"
         "capability_request.input は required_input に従う最小 object にしてください。target_client_id や資格情報は入れないでください。\n"
         "明示的な会話要求に自然に返せるなら reply を優先し、pending_intent を乱用しないでください。\n"
         "OngoingActionSummary.status=waiting_result のときは、新しい capability_request を出さないでください。\n"
