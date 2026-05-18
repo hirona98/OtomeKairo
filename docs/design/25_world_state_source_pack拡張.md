@@ -13,7 +13,7 @@ raw payload 保存、長い OCR、配送先 client の露出は入れない。
 
 `world_state` source pack に追加する入力は次に限る。
 
-- `vision.capture` result から得た短い `visual_summary_text / image_interpreted / visual_confidence_hint / image_count`
+- `vision.capture` result から得た短い `visual_summary_text / image_interpreted / visual_confidence_hint / image_count / vision_source_id / source_kind / source_label`
 - `client_context.social_context_summary`
 - `client_context.environment_summary`
 - `client_context.location_summary`
@@ -57,7 +57,10 @@ raw response body、client 固有 ID、資格情報、内部 URL、base64 本文
     "image_interpreted": true,
     "visual_confidence_hint": "medium",
     "image_count": 1,
-    "capability_id": "vision.capture"
+    "capability_id": "vision.capture",
+    "vision_source_id": "vision_source:main_display",
+    "source_kind": "desktop",
+    "source_label": "メイン画面"
   },
   "social_context_context": {
     "summary_text": "Slack 上のやり取りが近い判断文脈として前景にある。",
@@ -125,7 +128,8 @@ raw response body、client 固有 ID、資格情報、内部 URL、base64 本文
 ```
 
 source pack では、標準の `client_context` と state-type 別の structured context を分ける。
-視覚前景は `vision.capture` result の短い要約として `visual_context` へ載せ、その他の短い current summary は dedicated context へ載せる。
+視覚前景は `vision.capture` result の短い要約として `visual_context` へ載せ、`vision_source_id` で観測 source を識別する。
+その他の短い current summary は dedicated context へ載せる。
 `current_input_summary` は入力意図と、人が明示した状態値だけを補助する。
 確認依頼だけの入力から現在場所、身体状態、端末状態、周囲環境、対人文脈を推測して state 候補を作らない。
 `social_context_context / environment_context / location_context` は、`client_context` から取った短い summary をそのまま dedicated context へ写す。
@@ -146,7 +150,7 @@ real schedule source が複数あるときは、`schedule_context.schedule_slots
 ## コード責務
 
 - capability result の `client_context` から短い summary を抜き出す
-- `vision.capture` result の短い visual summary を `visual_context` へ投影する
+- `vision.capture` result の短い visual summary と `vision_source_id / source_kind / source_label` を `visual_context` へ投影する
 - `client_context.social_context_summary / environment_summary / location_summary` を対応する dedicated context へ投影する
 - `social.status` result の `social_context_summary` を `social_context_context` へ投影する
 - `external.status` result の `service / status_text` を `external_service_context` へ投影する

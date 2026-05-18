@@ -174,8 +174,8 @@ response:
       "readiness_digest": {
         "family": "visual_observation",
         "world_state_type": "visual_context",
-        "input_keys": ["source", "mode"],
-        "present_input_keys": ["source", "mode"],
+        "input_keys": ["vision_source_id", "mode"],
+        "present_input_keys": ["vision_source_id", "mode"],
         "missing_input_keys": [],
         "input_keys_satisfied": true
       }

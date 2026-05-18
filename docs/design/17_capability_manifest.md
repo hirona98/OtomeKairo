@@ -26,6 +26,7 @@ capability は次の三つを分けて扱う。
 
 `CapabilityManifest` は、何ができるか、いつ使うか、何を禁止するか、どの入力と結果を受けるかを定義する。
 `CapabilityBinding` は、接続中 client と manifest を結びつける。
+`vision.capture` のように複数の実行対象を持つ capability は、binding に加えて `VisionSource` で具体的な観測対象を指定する。
 `CapabilityState` は、manifest と binding を踏まえた現在の実行条件を持つ。
 
 client の `hello.caps` は `CapabilityBinding` の材料であり、manifest の正本ではない。
@@ -90,23 +91,24 @@ inspection には運用確認に必要な binding 要約を出すが、token、c
   "id": "vision.capture",
   "version": "1",
   "kind": "observation",
-  "decision_description": "現在の画面状態を観測する",
+  "decision_description": "指定された視覚 source の現在状態を観測する",
   "when_to_use": [
-    "ユーザーが画面内容について質問した",
-    "判断に現在の画面状態が必要"
+    "ユーザーが画面、カメラ、視覚 source の内容について質問した",
+    "判断に指定 source の現在視覚状態が必要"
   ],
   "do_not_use_when": [
-    "ユーザーが画面観測を拒否している",
-    "現在の判断に画面情報が不要"
+    "ユーザーが視覚観測を拒否している",
+    "現在の判断に視覚情報が不要",
+    "観測対象の vision_source_id が一意に定まらない"
   ],
-  "required_permissions": ["observe_desktop"],
+  "required_permissions": ["observe_vision"],
   "input_schema": {
     "type": "object",
     "properties": {
-      "source": { "type": "string", "enum": ["desktop"] },
+      "vision_source_id": { "type": "string", "pattern": "^vision_source:" },
       "mode": { "type": "string", "enum": ["still"] }
     },
-    "required": ["source", "mode"],
+    "required": ["vision_source_id", "mode"],
     "additionalProperties": false
   },
   "result_schema": {
@@ -150,12 +152,15 @@ inspection には運用確認に必要な binding 要約を出すが、token、c
   "decision_readiness": {
     "family": "visual_observation",
     "world_state_type": "visual_context",
-    "input_keys": ["source", "mode"],
+    "input_keys": ["vision_source_id", "mode"],
     "result_summary_keys": ["visual_summary_text"]
   },
   "inspection_fields": [
     "capability_id",
     "target_client_id",
+    "vision_source_id",
+    "source_kind",
+    "source_label",
     "image_count",
     "image_interpreted",
     "visual_summary_text",
@@ -164,6 +169,13 @@ inspection には運用確認に必要な binding 要約を出すが、token、c
   ]
 }
 ```
+
+`vision.capture.input.vision_source_id` は `VisionSourceRegistry` に存在する id を指定する。
+`VisionSource` はカメラ、画面、仮想画面、watch 対象を表し、具体的な client と source metadata を持つ。
+`VisionSource` の意味境界は [26_視覚機能実装設計.md](26_視覚機能実装設計.md) を正とする。
+server は `vision_source_id` から実行先 client と観測対象を一意に決める。
+source が一意に定まらない場合、server は `vision.capture` を dispatch しない。
+source ごとの `required_permissions` は `VisionSource` が持ち、manifest の `observe_vision` と合わせて検証する。
 
 `state_policy` は少なくとも次を持つ。
 

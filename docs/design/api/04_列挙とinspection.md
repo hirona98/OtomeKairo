@@ -117,7 +117,7 @@ response:
         "readiness": {
           "family": "visual_observation",
           "world_state_type": "visual_context",
-          "input_keys": ["source", "mode"],
+          "input_keys": ["vision_source_id", "mode"],
           "result_summary_keys": ["visual_summary_text"]
         },
         "binding": {
@@ -126,9 +126,20 @@ response:
           "bound_client_ids": ["console-..."]
         },
         "permissions": {
-          "required": ["observe_desktop"],
+          "required": ["observe_vision"],
           "missing": []
         },
+        "vision_sources": [
+          {
+            "vision_source_id": "vision_source:main_display",
+            "kind": "desktop",
+            "label": "メイン画面",
+            "default_for": ["visual", "desktop"],
+            "available": true,
+            "required_permissions": ["observe_desktop"],
+            "unavailable_reason": null
+          }
+        ],
         "state": {
           "paused": false,
           "busy": false,

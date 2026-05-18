@@ -28,16 +28,32 @@ client -> server:
       "id": "vision.capture",
       "version": "1"
     }
+  ],
+  "vision_sources": [
+    {
+      "vision_source_id": "vision_source:main_display",
+      "capability_id": "vision.capture",
+      "kind": "desktop",
+      "label": "メイン画面",
+      "aliases": ["画面", "デスクトップ", "メインモニタ"],
+      "default_for": ["visual", "desktop"],
+      "required_permissions": ["observe_desktop"]
+    }
   ]
 }
 ```
 
 - `client_id` は対象 client の安定識別子である
 - `caps` はその client が現在受けられる capability binding 候補の一覧である
+- `vision_sources` はその client が `vision.capture` で観測できる視覚 source の一覧である
 - capability 識別子は `vision.capture` のような canonical 名を使う
 - `version` は server が持つ `CapabilityManifest` の版と照合する
 - client は capability manifest を送らない
 - 未知の capability id または非対応 version は実行不可として扱う
+- `vision_sources[].vision_source_id` は server 内で一意に扱う
+- `vision_sources[].capability_id` は `vision.capture` と一致させる
+- `vision_sources[].kind` は `desktop / camera / virtual` のいずれかにする
+- `vision_sources[].required_permissions` は source 固有の権限照合に使う
 - `hello.caps` と availability の意味境界は [../17_capability_manifest.md](../17_capability_manifest.md) を正とする
 - 同じ `client_id` で再接続した場合、server は古い stream session を置き換える
 
@@ -52,7 +68,9 @@ server -> client の代表例:
   "data": {
     "request_id": "vision_capture_request:...",
     "capability_id": "vision.capture",
-    "source": "desktop",
+    "vision_source_id": "vision_source:main_display",
+    "source_kind": "desktop",
+    "source_label": "メイン画面",
     "mode": "still",
     "timeout_ms": 5000
   }

@@ -26,7 +26,7 @@
 
 ## 入力と出力
 
-`vision.capture` の client -> server wire 形式自体は変えない。
+`vision.capture` は `vision_source_id` で観測対象を指定する。
 `images` は最大 1 件の Data URI 配列として受け取る。
 
 この段階では、画像意味理解の出力として次だけを持つ。
@@ -51,12 +51,18 @@ LLM に渡す source pack は少なくとも次を持つ。
   "image_input_kind": "vision_capture_result",
   "time_context": "2026年4月27日 月曜日 23時00分（日本時間）",
   "client_context": {
+    "vision_source_id": "vision_source:main_display",
+    "source_kind": "desktop",
+    "source_label": "メイン画面",
     "active_app": "Slack",
     "window_title": "general | Slack",
     "locale": "ja-JP"
   },
   "observation_summary": {
     "capability_id": "vision.capture",
+    "vision_source_id": "vision_source:main_display",
+    "source_kind": "desktop",
+    "source_label": "メイン画面",
     "image_count": 1,
     "error": null
   },
@@ -66,6 +72,7 @@ LLM に渡す source pack は少なくとも次を持つ。
 
 画像は source pack の JSON に埋め込まず、multimodal message の image part として別に添付する。
 1 回の解釈で使う画像件数はコード側で制限する。
+`vision.capture` 由来の source pack には `vision_source_id / source_kind / source_label` を含める。
 通常会話の添付画像では `image_input_kind=conversation_attachment` を使い、desktop client、capability request、ongoing_action と結び付けない。
 
 LLM の出力は JSON object 1 個に固定する。
