@@ -129,6 +129,8 @@ raw response body、client 固有 ID、資格情報、内部 URL、base64 本文
 
 source pack では、標準の `client_context` と state-type 別の structured context を分ける。
 視覚前景は `vision.capture` result の短い要約として `visual_context` へ載せ、`vision_source_id` で観測 source を識別する。
+`vision.capture` result follow-up の `foreground_world_state` は、result の `vision_source_id` と一致する `visual_context` だけを decision / reply に渡す。
+一致しない `visual_context` は保存済み state と inspection 用 trace に残し、同じ follow-up の判断材料にしない。
 その他の短い current summary は dedicated context へ載せる。
 `current_input_summary` は入力意図と、人が明示した状態値だけを補助する。
 確認依頼だけの入力から現在場所、身体状態、端末状態、周囲環境、対人文脈を推測して state 候補を作らない。
@@ -151,6 +153,7 @@ real schedule source が複数あるときは、`schedule_context.schedule_slots
 
 - capability result の `client_context` から短い summary を抜き出す
 - `vision.capture` result の短い visual summary と `vision_source_id / source_kind / source_label` を `visual_context` へ投影する
+- `vision.capture` result follow-up では異なる `vision_source_id` の `visual_context` を判断入力から除外する
 - `client_context.social_context_summary / environment_summary / location_summary` を対応する dedicated context へ投影する
 - `social.status` result の `social_context_summary` を `social_context_context` へ投影する
 - `external.status` result の `service / status_text` を `external_service_context` へ投影する
