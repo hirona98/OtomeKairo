@@ -1446,6 +1446,11 @@ class ServiceInputMixin:
         vision_source_id = self._initiative_default_vision_source_id(capability_summary)
         if vision_source_id is None:
             return None
+        if self._initiative_vision_source_has_fresh_world_state(
+            vision_source_id=vision_source_id,
+            world_state_summary=status_refresh_world_state_summary,
+        ):
+            return None
         if self._initiative_drive_priority_score(strongest_drive) < INITIATIVE_AUTONOMOUS_PROBE_THRESHOLD:
             return None
         level = self._client_context_text(initiative_baseline.get("level"), limit=16) or "medium"
@@ -1469,6 +1474,24 @@ class ServiceInputMixin:
             },
             "reason_summary": "強い drive はあるが現在の前景観測が薄いため、先に画面観測を当てたい。",
         }
+
+    def _initiative_vision_source_has_fresh_world_state(
+        self,
+        *,
+        vision_source_id: str,
+        world_state_summary: list[dict[str, Any]],
+    ) -> bool:
+        source_key = self._world_state_vision_source_key({"vision_source_id": vision_source_id})
+        if source_key is None:
+            return False
+        target_integration_key = f"visual_context:{source_key}"
+        return any(
+            isinstance(item, dict)
+            and item.get("state_type") == "visual_context"
+            and item.get("integration_key") == target_integration_key
+            and self._foreground_world_state_is_fresh(item)
+            for item in world_state_summary
+        )
 
     def _initiative_autonomous_status_refresh_preference(
         self,

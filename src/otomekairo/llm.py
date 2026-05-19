@@ -327,6 +327,8 @@ class LLMClient:
             )
         self._validate_decision_fresh_world_state_reuse(
             payload=payload,
+            input_text=input_text,
+            trigger_kind=trigger_kind,
             capability_decision_view=capability_decision_view,
         )
         if not isinstance(initiative_context, dict):
@@ -454,6 +456,8 @@ class LLMClient:
         self,
         *,
         payload: dict[str, Any],
+        input_text: str,
+        trigger_kind: str,
         capability_decision_view: list[dict[str, Any]] | None,
     ) -> None:
         if payload.get("kind") != "capability_request":
@@ -466,18 +470,24 @@ class LLMClient:
         )
         if not isinstance(request_capability_id, str) or not request_capability_id.strip():
             return
+        normalized_request_capability_id = request_capability_id.strip()
+        if (
+            trigger_kind == "user_message"
+            and self._explicit_status_request_capability_id(input_text) == normalized_request_capability_id
+        ):
+            return
         capability_entry = self._capability_decision_view_entry(
             capability_decision_view=capability_decision_view,
-            capability_id=request_capability_id.strip(),
+            capability_id=normalized_request_capability_id,
         )
         if not isinstance(capability_entry, dict) or capability_entry.get("fresh_world_state_available") is not True:
-            if request_capability_id.strip() == "vision.capture" and isinstance(capability_entry, dict):
+            if normalized_request_capability_id == "vision.capture" and isinstance(capability_entry, dict):
                 self._validate_vision_capture_fresh_world_state_reuse(
                     request_payload=request_payload,
                     capability_entry=capability_entry,
                 )
             return
-        if request_capability_id.strip() == "vision.capture":
+        if normalized_request_capability_id == "vision.capture":
             self._validate_vision_capture_fresh_world_state_reuse(
                 request_payload=request_payload,
                 capability_entry=capability_entry,
@@ -499,7 +509,7 @@ class LLMClient:
         if isinstance(summary_text, str) and summary_text.strip():
             state_summary += f" summary={summary_text.strip()[:80]}"
         raise LLMError(
-            f"CapabilityDecisionView の {request_capability_id.strip()} は "
+            f"CapabilityDecisionView の {normalized_request_capability_id} は "
             f"fresh_world_state_available=true です。{state_summary}"
             "明示的なユーザー依頼なしで同じ現在状態を再取得する capability_request は不正です。"
             "既存の foreground_world_state を使って reply / noop / pending_intent を返してください。"
