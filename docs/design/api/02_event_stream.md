@@ -50,7 +50,10 @@ client -> server:
 - `version` は server が持つ `CapabilityManifest` の版と照合する
 - client は capability manifest を送らない
 - 未知の capability id または非対応 version は実行不可として扱う
+- `vision.capture` が accepted された client は、`vision_sources` を必須かつ 1 件以上にする
+- `vision.capture` が accepted されない client では、`vision_sources` は省略または空配列にする
 - `vision_sources[].vision_source_id` は server 内で一意に扱う
+- `vision_sources[].vision_source_id` は `vision_source:` で始める
 - `vision_sources[].capability_id` は `vision.capture` と一致させる
 - `vision_sources[].kind` は `desktop / camera / virtual` のいずれかにする
 - `vision_sources[].required_permissions` は source 固有の権限照合に使う

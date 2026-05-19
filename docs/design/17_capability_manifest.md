@@ -161,10 +161,15 @@ inspection には運用確認に必要な binding 要約を出すが、token、c
     "vision_source_id",
     "source_kind",
     "source_label",
+    "data_source",
+    "unconnected_reason",
     "image_count",
     "image_interpreted",
     "visual_summary_text",
     "visual_confidence_hint",
+    "body_state_summary",
+    "device_state_summary",
+    "schedule_summary",
     "error"
   ]
 }
@@ -176,6 +181,7 @@ inspection には運用確認に必要な binding 要約を出すが、token、c
 server は `vision_source_id` から実行先 client と観測対象を一意に決める。
 source が一意に定まらない場合、server は `vision.capture` を dispatch しない。
 source ごとの `required_permissions` は `VisionSource` が持ち、manifest の `observe_vision` と合わせて検証する。
+現行実装では event stream 接続へ `observe_vision / observe_desktop / observe_camera` を固定付与し、hello 登録時に manifest と source の `required_permissions` を検証する。
 
 `state_policy` は少なくとも次を持つ。
 
@@ -260,7 +266,7 @@ LLM が実行要求案を出しても、server の検証を通らない要求は
 
 ## 権限との関係
 
-capability 実行可否は `required_permissions` と認証済み client の権限を照合して決める。
+capability 実行可否は `required_permissions` と認証済み client または event stream 接続主体の権限を照合して決める。
 権限は人格設定、記憶、LLM 判断結果から導出しない。
 
 権限不足の capability は decision view で `available: false` とし、`unavailable_reason` に `permission_denied` を入れる。
