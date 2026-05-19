@@ -2388,6 +2388,12 @@ class ServiceSpontaneousMixin:
                 parts.append("入力源は background wake scheduler。")
             else:
                 parts.append(f"入力源は {source}。")
+        wake_observation_summary = self._client_context_text(
+            client_context.get("wake_observation_summary"),
+            limit=360,
+        )
+        if isinstance(wake_observation_summary, str):
+            parts.append(f"定期観測では、{wake_observation_summary}")
 
         # 前景
         if isinstance(active_app, str):

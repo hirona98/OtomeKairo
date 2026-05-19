@@ -1506,7 +1506,7 @@ class ServiceConfigMixin:
         if mode not in {"disabled", "interval"}:
             raise ServiceError(400, "invalid_wake_policy_mode", "wake_policy.mode must be disabled or interval.")
 
-        allowed_fields = {"mode"}
+        allowed_fields = {"mode", "observations"}
         if mode == "interval":
             allowed_fields.add("interval_seconds")
             interval_seconds = wake_policy.get("interval_seconds")
@@ -1517,6 +1517,9 @@ class ServiceConfigMixin:
                     "wake_policy.interval_seconds must be an integer >= 1.",
                 )
 
+        if "observations" in wake_policy:
+            self._validate_wake_policy_observations(wake_policy["observations"])
+
         unsupported_fields = sorted(set(wake_policy.keys()) - allowed_fields)
         if unsupported_fields:
             raise ServiceError(
@@ -1524,6 +1527,80 @@ class ServiceConfigMixin:
                 "unsupported_wake_policy_fields",
                 f"wake_policy has unsupported fields: {', '.join(unsupported_fields)}.",
             )
+
+    def _validate_wake_policy_observations(self, observations: Any) -> None:
+        if not isinstance(observations, list):
+            raise ServiceError(
+                400,
+                "invalid_wake_policy_observations",
+                "wake_policy.observations must be an array.",
+            )
+        seen_ids: set[str] = set()
+        manifests = capability_manifests()
+        for index, observation in enumerate(observations):
+            label = f"wake_policy.observations[{index}]"
+            if not isinstance(observation, dict):
+                raise ServiceError(
+                    400,
+                    "invalid_wake_policy_observation",
+                    f"{label} must be an object.",
+                )
+            supported_fields = {"observation_id", "enabled", "capability_id", "input"}
+            unsupported_fields = sorted(set(observation.keys()) - supported_fields)
+            if unsupported_fields:
+                raise ServiceError(
+                    400,
+                    "unsupported_wake_policy_observation_fields",
+                    f"{label} has unsupported fields: {', '.join(unsupported_fields)}.",
+                )
+            observation_id = observation.get("observation_id")
+            if not isinstance(observation_id, str) or not observation_id.strip():
+                raise ServiceError(
+                    400,
+                    "invalid_wake_policy_observation_id",
+                    f"{label}.observation_id must be a non-empty string.",
+                )
+            normalized_observation_id = observation_id.strip()
+            if normalized_observation_id in seen_ids:
+                raise ServiceError(
+                    400,
+                    "duplicate_wake_policy_observation_id",
+                    f"{label}.observation_id is duplicated.",
+                )
+            seen_ids.add(normalized_observation_id)
+            enabled = observation.get("enabled")
+            if not isinstance(enabled, bool):
+                raise ServiceError(
+                    400,
+                    "invalid_wake_policy_observation_enabled",
+                    f"{label}.enabled must be a boolean.",
+                )
+            capability_id = observation.get("capability_id")
+            if capability_id != "vision.capture":
+                raise ServiceError(
+                    400,
+                    "unsupported_wake_policy_observation_capability",
+                    f"{label}.capability_id must be vision.capture.",
+                )
+            input_payload = observation.get("input")
+            if not isinstance(input_payload, dict):
+                raise ServiceError(
+                    400,
+                    "invalid_wake_policy_observation_input",
+                    f"{label}.input must be an object.",
+                )
+            try:
+                self._validate_capability_payload(
+                    payload=input_payload,
+                    schema=manifests["vision.capture"].get("input_schema"),
+                    label=f"{label}.input",
+                )
+            except ValueError as exc:
+                raise ServiceError(
+                    400,
+                    "invalid_wake_policy_observation_input",
+                    str(exc),
+                ) from exc
 
     def _validate_persona_definition(self, persona_id: str, definition: dict[str, Any]) -> None:
         if definition.get("persona_id") != persona_id:

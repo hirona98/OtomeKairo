@@ -2470,6 +2470,19 @@ class ServiceInputMixin:
             debug_log("Wake", f"{cycle_label} skipped cooldown={self._clamp(cooldown_reason)}")
             return self._noop_pipeline(state=state, started_at=started_at, reason_summary=cooldown_reason), input_text
 
+        # 定期観測
+        client_context = self._run_wake_policy_observations(
+            state=state,
+            started_at=started_at,
+            client_context=client_context,
+            cycle_id=cycle_id,
+        )
+        input_text = self._build_wake_input_text(
+            state=state,
+            client_context=client_context,
+            selected_candidate=selected_candidate,
+        )
+
         # 候補
         if selected_candidate is None:
             self._set_last_wake_at(started_at)
@@ -2530,6 +2543,315 @@ class ServiceInputMixin:
             pending_intent_selection=pending_intent_selection,
         )
         return pipeline, input_text
+
+    def _run_wake_policy_observations(
+        self,
+        *,
+        state: dict[str, Any],
+        started_at: str,
+        client_context: dict[str, Any],
+        cycle_id: str | None,
+    ) -> dict[str, Any]:
+        observations = self._enabled_wake_policy_observations(state)
+        if not observations:
+            return client_context
+
+        cycle_label = self._debug_cycle_label(cycle_id)
+        debug_log("Wake", f"{cycle_label} observations start count={len(observations)}")
+        summaries: list[dict[str, Any]] = []
+        for observation in observations:
+            summaries.append(
+                self._run_wake_policy_observation(
+                    state=state,
+                    started_at=started_at,
+                    observation=observation,
+                    cycle_id=cycle_id,
+                )
+            )
+        summary_text = self._wake_policy_observation_summary_text(summaries)
+        debug_log("Wake", f"{cycle_label} observations done summary={self._clamp(summary_text)}")
+        return {
+            **client_context,
+            "wake_observations": summaries,
+            "wake_observation_summary": summary_text,
+        }
+
+    def _enabled_wake_policy_observations(self, state: dict[str, Any]) -> list[dict[str, Any]]:
+        wake_policy = state.get("wake_policy")
+        if not isinstance(wake_policy, dict) or wake_policy.get("mode") != "interval":
+            return []
+        observations = wake_policy.get("observations")
+        if not isinstance(observations, list):
+            return []
+        return [
+            observation
+            for observation in observations
+            if isinstance(observation, dict) and observation.get("enabled") is True
+        ]
+
+    def _run_wake_policy_observation(
+        self,
+        *,
+        state: dict[str, Any],
+        started_at: str,
+        observation: dict[str, Any],
+        cycle_id: str | None,
+    ) -> dict[str, Any]:
+        observation_id = self._client_context_text(observation.get("observation_id"), limit=96) or "observation:unknown"
+        capability_id = self._client_context_text(observation.get("capability_id"), limit=80) or "unknown"
+        input_payload = observation.get("input")
+        if not isinstance(input_payload, dict):
+            return self._wake_policy_observation_failure_summary(
+                observation=observation,
+                reason_summary="wake_policy observation input が不正。",
+            )
+        if not self._wake_policy_observation_source_available(capability_id=capability_id, input_payload=input_payload):
+            return self._wake_policy_observation_failure_summary(
+                observation=observation,
+                reason_summary="対象 vision source が接続されていない。",
+            )
+
+        try:
+            capability_response = self._dispatch_capability_request(
+                memory_set_id=state["selected_memory_set_id"],
+                capability_id=capability_id,
+                input_payload=input_payload,
+                current_time=self._now_iso(),
+                goal_summary=f"wake_policy observation {observation_id}",
+                wait_for_response=True,
+                component="WakeObservation",
+            )
+        except CapabilityDispatchError as exc:
+            return self._wake_policy_observation_failure_summary(
+                observation=observation,
+                reason_summary=str(exc),
+                capability_request_summary=exc.capability_request_summary,
+            )
+        except ValueError as exc:
+            return self._wake_policy_observation_failure_summary(
+                observation=observation,
+                reason_summary=str(exc),
+            )
+        if not isinstance(capability_response, dict):
+            return self._wake_policy_observation_failure_summary(
+                observation=observation,
+                reason_summary="capability response が空。",
+            )
+        return self._apply_wake_policy_observation_result(
+            state=state,
+            started_at=started_at,
+            observation=observation,
+            capability_response=capability_response,
+            cycle_id=cycle_id,
+        )
+
+    def _wake_policy_observation_source_available(self, *, capability_id: str, input_payload: dict[str, Any]) -> bool:
+        if capability_id != "vision.capture":
+            return True
+        vision_source_id = input_payload.get("vision_source_id")
+        if not isinstance(vision_source_id, str) or not vision_source_id.strip():
+            return False
+        return isinstance(self._event_stream_registry.get_vision_source(vision_source_id.strip()), dict)
+
+    def _apply_wake_policy_observation_result(
+        self,
+        *,
+        state: dict[str, Any],
+        started_at: str,
+        observation: dict[str, Any],
+        capability_response: dict[str, Any],
+        cycle_id: str | None,
+    ) -> dict[str, Any]:
+        capability_id = self._capability_result_capability_id(capability_response)
+        request_record = capability_response.get("request_record")
+        capability_request_summary = self._capability_request_summary(request_record)
+        client_context = self._build_capability_result_client_context(capability_response)
+        observation_summary = self._capability_result_observation_summary(capability_response)
+        input_text = self._build_capability_result_input_text(
+            client_context=client_context,
+            capability_response=capability_response,
+        )
+        try:
+            client_context, observation_summary, input_text = self._prepare_capability_result_context(
+                state=state,
+                started_at=started_at,
+                capability_id=capability_id,
+                client_context=client_context,
+                observation_summary=observation_summary,
+                input_text=input_text,
+                capability_response=capability_response,
+            )
+            self._refresh_world_state_context(
+                state=state,
+                started_at=started_at,
+                input_text=input_text,
+                trigger_kind="capability_result",
+                client_context=client_context,
+                cycle_id=cycle_id,
+                selected_candidate=None,
+                observation_summary=observation_summary,
+                capability_request_summary=capability_request_summary,
+            )
+            transition_summary = self._finish_wake_policy_observation_ongoing_action(
+                request_record=request_record,
+                current_time=self._now_iso(),
+                capability_id=capability_id,
+                capability_response=capability_response,
+                observation_summary=observation_summary,
+                failure_reason=None,
+            )
+            self._apply_capability_runtime_state_followup(
+                capability_id=capability_id,
+                current_time=self._now_iso(),
+                observation_summary=observation_summary,
+                result_payload=capability_response,
+                ongoing_action_transition_summary=transition_summary,
+            )
+            return self._wake_policy_observation_success_summary(
+                observation=observation,
+                capability_response=capability_response,
+                observation_summary=observation_summary,
+                capability_request_summary=capability_request_summary,
+            )
+        except (LLMError, KeyError, TypeError, ValueError) as exc:
+            transition_summary = self._finish_wake_policy_observation_ongoing_action(
+                request_record=request_record,
+                current_time=self._now_iso(),
+                capability_id=capability_id,
+                capability_response=capability_response,
+                observation_summary=observation_summary,
+                failure_reason=str(exc),
+            )
+            self._apply_capability_runtime_state_followup(
+                capability_id=capability_id,
+                current_time=self._now_iso(),
+                observation_summary=observation_summary,
+                result_payload=capability_response,
+                ongoing_action_transition_summary=transition_summary,
+                failure_reason=str(exc),
+            )
+            return self._wake_policy_observation_failure_summary(
+                observation=observation,
+                reason_summary=str(exc),
+                capability_request_summary=capability_request_summary,
+            )
+
+    def _finish_wake_policy_observation_ongoing_action(
+        self,
+        *,
+        request_record: Any,
+        current_time: str,
+        capability_id: str,
+        capability_response: dict[str, Any],
+        observation_summary: dict[str, Any] | None,
+        failure_reason: str | None,
+    ) -> dict[str, Any] | None:
+        result_error = capability_response.get("error") not in {None, ""} or failure_reason is not None
+        terminal_kind = "interrupted" if result_error else "completed"
+        terminal_reason = (
+            "wake_policy observation の取得または反映に失敗した。"
+            if result_error
+            else "wake_policy observation の取得結果を判断材料へ反映した。"
+        )
+        final_step_summary = (
+            "wake_policy observation を中断した。"
+            if result_error
+            else "wake_policy observation の結果を world_state へ反映した。"
+        )
+        detail_summary = failure_reason or self._capability_result_followup_hint_summary(
+            capability_id=capability_id,
+            observation_summary=observation_summary,
+            result_payload=capability_response,
+        )
+        return self._finish_capability_ongoing_action(
+            request_record=request_record,
+            current_time=current_time,
+            terminal_kind=terminal_kind,
+            reason_code="wake_observation_result",
+            terminal_reason=terminal_reason,
+            final_step_summary=final_step_summary,
+            transition_source="wake_policy_observation",
+            result_error=result_error,
+            detail_summary=detail_summary,
+        )
+
+    def _wake_policy_observation_success_summary(
+        self,
+        *,
+        observation: dict[str, Any],
+        capability_response: dict[str, Any],
+        observation_summary: dict[str, Any],
+        capability_request_summary: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        payload = self._wake_policy_observation_base_summary(observation)
+        error = observation_summary.get("error")
+        has_error = isinstance(error, str) and error.strip()
+        payload["status"] = "failed" if has_error else "succeeded"
+        if has_error:
+            payload["reason_summary"] = self._clamp(error.strip(), limit=160)
+        request_id = capability_response.get("request_id")
+        if isinstance(request_id, str) and request_id.strip():
+            payload["request_id"] = request_id.strip()
+        for key in ("vision_source_id", "source_kind", "source_label", "visual_summary_text", "error"):
+            value = observation_summary.get(key)
+            if isinstance(value, str) and value.strip():
+                payload[key] = self._clamp(value.strip(), limit=160)
+        image_count = observation_summary.get("image_count")
+        if isinstance(image_count, int):
+            payload["image_count"] = image_count
+        if isinstance(capability_request_summary, dict):
+            payload["capability_request_summary"] = capability_request_summary
+        return payload
+
+    def _wake_policy_observation_failure_summary(
+        self,
+        *,
+        observation: dict[str, Any],
+        reason_summary: str,
+        capability_request_summary: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        payload = self._wake_policy_observation_base_summary(observation)
+        payload["status"] = "failed"
+        payload["reason_summary"] = self._clamp(reason_summary, limit=160)
+        if isinstance(capability_request_summary, dict):
+            payload["capability_request_summary"] = capability_request_summary
+        return payload
+
+    def _wake_policy_observation_base_summary(self, observation: dict[str, Any]) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        for key, limit in (
+            ("observation_id", 96),
+            ("capability_id", 80),
+        ):
+            value = self._client_context_text(observation.get(key), limit=limit)
+            if value is not None:
+                payload[key] = value
+        input_payload = observation.get("input")
+        if isinstance(input_payload, dict):
+            vision_source_id = self._client_context_text(input_payload.get("vision_source_id"), limit=96)
+            if vision_source_id is not None:
+                payload["vision_source_id"] = vision_source_id
+        return payload
+
+    def _wake_policy_observation_summary_text(self, summaries: list[dict[str, Any]]) -> str:
+        if not summaries:
+            return "定期観測対象は無い。"
+        parts: list[str] = []
+        for summary in summaries[:6]:
+            label = self._client_context_text(summary.get("source_label"), limit=80)
+            if label is None:
+                label = self._client_context_text(summary.get("vision_source_id"), limit=96)
+            if label is None:
+                label = self._client_context_text(summary.get("observation_id"), limit=96) or "unknown"
+            if summary.get("status") == "succeeded":
+                text = self._client_context_text(summary.get("visual_summary_text"), limit=120)
+                if text is None:
+                    text = "取得済み"
+                parts.append(f"{label}: {text}")
+                continue
+            reason = self._client_context_text(summary.get("reason_summary"), limit=120) or "取得失敗"
+            parts.append(f"{label}: failed {reason}")
+        return self._clamp(" / ".join(parts), limit=360) or "定期観測結果は空。"
 
     def _has_autonomous_initiative_context(
         self,

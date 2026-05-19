@@ -128,6 +128,8 @@ LLM に実行権限、資格情報、配送先 client、秘密値を渡さない
 LLM の自由文をそのまま状態遷移へ使わない。
 `wake / background_wake` の「定期起床」「wake」という入力文言は判断機会の説明であり、身体状態の根拠にしない。
 `current_time_text`、interval、wake の時刻情報だけから予定状態を作らない。予定状態は schedule context、schedule capability result、明示的な予定 source を根拠にする。
+`wake_policy.observations` は interval wake の判断前に enabled 項目だけを順番に取得し、取得結果を `world_state` へ反映する。
+複数 observation がある場合も、server は取得結果を反映したあとに 1 回だけ initiative 判断を行う。
 system wake 起点で明示 source context が無い `visual_context / body / schedule / social_context / environment / location` 候補は、推測候補として正規化時に破棄する。
 
 ## 過剰介入抑制
