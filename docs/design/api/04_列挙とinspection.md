@@ -65,6 +65,20 @@ response:
     "runtime_summary": {},
     "runtime_detail": {
       "wake_runtime_state": {},
+      "wake_policy_observations": [
+        {
+          "observation_id": "observation:main_desktop",
+          "enabled": true,
+          "capability_id": "vision.capture",
+          "vision_source_id": "vision_source:console:desktop",
+          "mode": "still",
+          "last_run_at": "2026-03-31T09:00:00+09:00",
+          "last_status": "succeeded",
+          "last_summary": "エディタが開いている",
+          "last_error": null,
+          "last_request_id": "vision_capture_request:..."
+        }
+      ],
       "memory_postprocess_runtime_state": {},
       "pending_capability_requests": []
     },
@@ -87,6 +101,9 @@ response:
 `current_state.foreground_world_states` は現在有効な `world_state` の前景 snapshot を返す。
 `drive_states`、`ongoing_action`、`mood_state`、`affect_states` は、現在の個を構成する内部状態の確認用 snapshot である。
 `runtime_detail` は scheduler、memory postprocess、capability request 待ちのような process-local runtime state を返す。
+`runtime_detail.wake_policy_observations` は現在設定されている `wake_policy.observations` と process-local の直近実行結果を照合した snapshot である。
+各項目は `enabled / vision_source_id / last_run_at / last_status / last_summary / last_error` を返す。
+`last_*` は process-local runtime state であり、server restart をまたいで保持しない。
 `capability_inspection` は `GET /api/inspection/capabilities` と同じ availability 導出結果を current-state snapshot の中で参照しやすく束ねたものである。
 
 ### `GET /api/inspection/capabilities`

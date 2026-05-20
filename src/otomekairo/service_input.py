@@ -2560,14 +2560,17 @@ class ServiceInputMixin:
         debug_log("Wake", f"{cycle_label} observations start count={len(observations)}")
         summaries: list[dict[str, Any]] = []
         for observation in observations:
-            summaries.append(
-                self._run_wake_policy_observation(
-                    state=state,
-                    started_at=started_at,
-                    observation=observation,
-                    cycle_id=cycle_id,
-                )
+            summary = self._run_wake_policy_observation(
+                state=state,
+                started_at=started_at,
+                observation=observation,
+                cycle_id=cycle_id,
             )
+            self._record_wake_policy_observation_runtime_state(
+                summary=summary,
+                current_time=started_at,
+            )
+            summaries.append(summary)
         summary_text = self._wake_policy_observation_summary_text(summaries)
         debug_log("Wake", f"{cycle_label} observations done summary={self._clamp(summary_text)}")
         return {
@@ -2852,6 +2855,38 @@ class ServiceInputMixin:
             reason = self._client_context_text(summary.get("reason_summary"), limit=120) or "取得失敗"
             parts.append(f"{label}: failed {reason}")
         return self._clamp(" / ".join(parts), limit=360) or "定期観測結果は空。"
+
+    def _record_wake_policy_observation_runtime_state(
+        self,
+        *,
+        summary: dict[str, Any],
+        current_time: str,
+    ) -> None:
+        observation_id = summary.get("observation_id")
+        if not isinstance(observation_id, str) or not observation_id.strip():
+            return
+        status = summary.get("status")
+        if not isinstance(status, str) or not status.strip():
+            return
+        last_summary = self._client_context_text(summary.get("visual_summary_text"), limit=160)
+        if last_summary is None and status == "succeeded":
+            last_summary = self._client_context_text(summary.get("source_label"), limit=80) or "取得済み"
+        last_error = self._client_context_text(summary.get("reason_summary"), limit=160)
+        if last_error is None:
+            last_error = self._client_context_text(summary.get("error"), limit=160)
+        payload: dict[str, Any] = {
+            "observation_id": observation_id.strip(),
+            "last_run_at": current_time,
+            "last_status": status.strip(),
+            "last_summary": last_summary,
+            "last_error": last_error,
+            "last_request_id": summary.get("request_id") if isinstance(summary.get("request_id"), str) else None,
+            "last_vision_source_id": summary.get("vision_source_id") if isinstance(summary.get("vision_source_id"), str) else None,
+            "last_source_label": summary.get("source_label") if isinstance(summary.get("source_label"), str) else None,
+            "last_image_count": summary.get("image_count") if isinstance(summary.get("image_count"), int) else None,
+        }
+        with self._runtime_state_lock:
+            self._wake_observation_runtime_state[observation_id.strip()] = payload
 
     def _has_autonomous_initiative_context(
         self,

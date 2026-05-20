@@ -1101,6 +1101,7 @@ class ServiceConfigMixin:
     ) -> dict[str, Any]:
         return {
             "wake_runtime_state": self._snapshot_wake_runtime_state(current_time=current_time),
+            "wake_policy_observations": self._snapshot_wake_policy_observations(state=state),
             "memory_postprocess_runtime_state": self._snapshot_memory_postprocess_runtime_state(),
             "pending_capability_requests": self._list_pending_capability_request_summaries(current_time=current_time),
         }
@@ -1157,6 +1158,55 @@ class ServiceConfigMixin:
             return {
                 "current_cycle_id": self._memory_postprocess_runtime_state.get("current_cycle_id"),
             }
+
+    def _snapshot_wake_policy_observations(self, *, state: dict[str, Any]) -> list[dict[str, Any]]:
+        wake_policy = state.get("wake_policy")
+        observations = wake_policy.get("observations") if isinstance(wake_policy, dict) else None
+        if not isinstance(observations, list):
+            return []
+        with self._runtime_state_lock:
+            runtime_snapshot = {
+                key: dict(value)
+                for key, value in self._wake_observation_runtime_state.items()
+                if isinstance(key, str) and isinstance(value, dict)
+            }
+
+        summaries: list[dict[str, Any]] = []
+        for observation in observations:
+            if not isinstance(observation, dict):
+                continue
+            observation_id = self._client_context_text(observation.get("observation_id"), limit=96)
+            if observation_id is None:
+                continue
+            input_payload = observation.get("input")
+            vision_source_id = None
+            mode = None
+            if isinstance(input_payload, dict):
+                vision_source_id = self._client_context_text(input_payload.get("vision_source_id"), limit=96)
+                mode = self._client_context_text(input_payload.get("mode"), limit=32)
+            runtime = runtime_snapshot.get(observation_id, {})
+            item: dict[str, Any] = {
+                "observation_id": observation_id,
+                "enabled": observation.get("enabled") is True,
+                "capability_id": self._client_context_text(observation.get("capability_id"), limit=80),
+                "vision_source_id": vision_source_id,
+                "mode": mode,
+                "last_run_at": runtime.get("last_run_at"),
+                "last_status": runtime.get("last_status"),
+                "last_summary": runtime.get("last_summary"),
+                "last_error": runtime.get("last_error"),
+            }
+            for runtime_key in (
+                "last_request_id",
+                "last_vision_source_id",
+                "last_source_label",
+                "last_image_count",
+            ):
+                value = runtime.get(runtime_key)
+                if value is not None:
+                    item[runtime_key] = value
+            summaries.append(item)
+        return summaries
 
     def _list_pending_intent_candidates_for_inspection(
         self,

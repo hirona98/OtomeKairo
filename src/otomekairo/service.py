@@ -45,6 +45,7 @@ class OtomeKairoService(
             "cooldown_until": None,
             "reply_history_by_dedupe": {},
         }
+        self._wake_observation_runtime_state: dict[str, dict[str, Any]] = {}
         self._background_wake_stop_event: threading.Event | None = None
         self._background_wake_thread: threading.Thread | None = None
         self._background_memory_postprocess_stop_event: threading.Event | None = None
