@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import re
 from typing import Any
 
@@ -190,6 +191,8 @@ def _has_focus_scope_shape(value: str) -> bool:
 def normalize_recall_hint_payload(payload: dict[str, Any]) -> dict[str, Any]:
     # 不正な focus scope は意味補完せず検索ヒントから外す。
     normalized = dict(payload)
+    if "confidence" in normalized:
+        normalized["confidence"] = _normalized_recall_confidence(normalized["confidence"])
     focus_scopes = normalized.get("focus_scopes")
     if isinstance(focus_scopes, list):
         normalized["focus_scopes"] = _normalized_recall_focus_scopes(focus_scopes)
@@ -200,6 +203,22 @@ def normalize_recall_hint_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if isinstance(mentioned_topics, list):
         normalized["mentioned_topics"] = _normalized_topic_refs(mentioned_topics)
     return normalized
+
+
+def _normalized_recall_confidence(value: Any) -> Any:
+    # JSON number の引用符付き表現だけを数値へ戻す。意味ラベルや百分率は契約違反として残す。
+    if not isinstance(value, str):
+        return value
+    stripped = value.strip()
+    if not stripped:
+        return value
+    try:
+        parsed = float(stripped)
+    except ValueError:
+        return value
+    if not math.isfinite(parsed):
+        return value
+    return parsed
 
 
 def _normalized_recall_focus_scopes(scopes: list[Any]) -> list[str]:
