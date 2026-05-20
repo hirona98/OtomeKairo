@@ -1617,7 +1617,7 @@ class ServiceSpontaneousMixin:
                         f"selected={pending_intent_selection.get('selected_candidate_ref') or '-'}"
                     ),
                 )
-                pipeline, input_text = self._run_wake_pipeline(
+                pipeline, input_text, client_context = self._run_wake_pipeline(
                     state=state,
                     started_at=started_at,
                     trigger_kind=trigger_kind,

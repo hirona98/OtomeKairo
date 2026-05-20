@@ -2441,7 +2441,7 @@ class ServiceInputMixin:
         selected_candidate: dict[str, Any] | None,
         pending_intent_selection: dict[str, Any] | None = None,
         cycle_id: str | None = None,
-    ) -> tuple[dict[str, Any], str]:
+    ) -> tuple[dict[str, Any], str, dict[str, Any]]:
         cycle_label = self._debug_cycle_label(cycle_id)
         # 入力テキスト
         input_text = self._build_wake_input_text(
@@ -2461,14 +2461,22 @@ class ServiceInputMixin:
         due = self._wake_is_due(state=state, current_time=started_at)
         if due["should_skip"]:
             debug_log("Wake", f"{cycle_label} skipped reason={self._clamp(due['reason_summary'])}")
-            return self._noop_pipeline(state=state, started_at=started_at, reason_summary=due["reason_summary"]), input_text
+            return (
+                self._noop_pipeline(state=state, started_at=started_at, reason_summary=due["reason_summary"]),
+                input_text,
+                client_context,
+            )
 
         # クールダウン
         cooldown_reason = self._wake_cooldown_reason(current_time=started_at)
         if cooldown_reason is not None:
             self._set_last_wake_at(started_at)
             debug_log("Wake", f"{cycle_label} skipped cooldown={self._clamp(cooldown_reason)}")
-            return self._noop_pipeline(state=state, started_at=started_at, reason_summary=cooldown_reason), input_text
+            return (
+                self._noop_pipeline(state=state, started_at=started_at, reason_summary=cooldown_reason),
+                input_text,
+                client_context,
+            )
 
         # 定期観測
         client_context = self._run_wake_policy_observations(
@@ -2504,6 +2512,7 @@ class ServiceInputMixin:
                         reason_summary=reason_summary,
                     ),
                     input_text,
+                    client_context,
                 )
             debug_log("Wake", f"{cycle_label} autonomous path no_selected_candidate")
 
@@ -2525,6 +2534,7 @@ class ServiceInputMixin:
                         reason_summary="同じ pending_intent 候補には最近 reply 済みのため、今回は再介入しない。",
                     ),
                     input_text,
+                    client_context,
                 )
 
             # トリガー集計
@@ -2542,7 +2552,7 @@ class ServiceInputMixin:
             selected_candidate=selected_candidate,
             pending_intent_selection=pending_intent_selection,
         )
-        return pipeline, input_text
+        return pipeline, input_text, client_context
 
     def _run_wake_policy_observations(
         self,
@@ -5464,6 +5474,17 @@ class ServiceInputMixin:
         }
         if foreground_world_state:
             input_trace["foreground_world_state"] = foreground_world_state
+        wake_observation_summary = self._client_context_text(
+            client_context.get("wake_observation_summary"),
+            limit=360,
+        )
+        if isinstance(wake_observation_summary, str):
+            input_trace["wake_observation_summary"] = wake_observation_summary
+        compact_wake_observations = self._compact_wake_observations(
+            client_context.get("wake_observations")
+        )
+        if compact_wake_observations:
+            input_trace["wake_observations"] = compact_wake_observations
         if isinstance(observation_summary, dict):
             input_trace["observation_summary"] = observation_summary
         if isinstance(ongoing_action_summary, dict):
@@ -6110,6 +6131,41 @@ class ServiceInputMixin:
                 item["state_type"] = state_type.strip()
             if isinstance(summary_text, str) and summary_text.strip():
                 item["summary_text"] = self._clamp(summary_text.strip(), limit=160)
+            if item:
+                payload.append(item)
+        return payload
+
+    def _compact_wake_observations(self, observations: Any) -> list[dict[str, Any]]:
+        payload: list[dict[str, Any]] = []
+        if not isinstance(observations, list):
+            return payload
+        for observation in observations[:6]:
+            if not isinstance(observation, dict):
+                continue
+            item: dict[str, Any] = {}
+            for key in (
+                "observation_id",
+                "capability_id",
+                "status",
+                "vision_source_id",
+                "source_kind",
+                "source_label",
+                "visual_summary_text",
+                "reason_summary",
+                "error",
+                "request_id",
+            ):
+                value = observation.get(key)
+                if isinstance(value, str) and value.strip():
+                    item[key] = self._clamp(value.strip(), limit=160)
+            image_count = observation.get("image_count")
+            if isinstance(image_count, int):
+                item["image_count"] = image_count
+            capability_request_summary = observation.get("capability_request_summary")
+            if isinstance(capability_request_summary, dict):
+                item["capability_request_summary"] = self._compact_capability_request_summary(
+                    capability_request_summary
+                )
             if item:
                 payload.append(item)
         return payload
