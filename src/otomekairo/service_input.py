@@ -533,7 +533,7 @@ class ServiceInputMixin:
         if decision["kind"] == "capability_request":
             dispatch_result = self._dispatch_decision_capability_request(
                 state=state,
-                current_time=started_at,
+                current_time=self._now_iso(),
                 decision=decision,
             )
             dispatched_capability_request_summary = dispatch_result.get("capability_request_summary")
