@@ -575,6 +575,7 @@ class ServiceInputMixin:
         # 結果
         debug_log("Pipeline", f"{cycle_label} done")
         return {
+            "effective_input_text": effective_input_text,
             "recall_hint": recall_hint,
             "recall_pack": recall_pack,
             "answer_contract": answer_contract,
@@ -2981,6 +2982,7 @@ class ServiceInputMixin:
             state=state,
             runtime_summary=runtime_summary,
             input_text=input_text,
+            effective_input_text=pipeline.get("effective_input_text"),
             client_context=client_context,
             recall_hint=pipeline["recall_hint"],
             recall_pack=pipeline["recall_pack"],
@@ -5451,6 +5453,7 @@ class ServiceInputMixin:
         cycle_id: str,
         cycle_summary: dict[str, Any],
         input_text: str,
+        effective_input_text: str | None,
         client_context: dict[str, Any],
         runtime_summary: dict[str, Any],
         foreground_world_state: list[dict[str, Any]] | None,
@@ -5472,6 +5475,8 @@ class ServiceInputMixin:
             "runtime_state_summary": runtime_summary,
             "pending_intent_selection": pending_intent_selection or self._empty_pending_intent_selection_trace(),
         }
+        if isinstance(effective_input_text, str) and effective_input_text.strip() != input_text.strip():
+            input_trace["effective_input_summary"] = self._clamp(effective_input_text.strip())
         if foreground_world_state:
             input_trace["foreground_world_state"] = foreground_world_state
         wake_observation_summary = self._client_context_text(
@@ -5564,6 +5569,7 @@ class ServiceInputMixin:
         *,
         state: dict[str, Any],
         input_text: str,
+        effective_input_text: str | None,
         time_context: dict[str, Any],
         affect_context: dict[str, Any],
         drive_state_summary: list[dict[str, Any]] | None,
@@ -5600,6 +5606,8 @@ class ServiceInputMixin:
             "pending_intent_candidate_summary": pending_intent_summary,
             "capability_request_candidate_summary": self._decision_capability_request_summary(decision),
         }
+        if isinstance(effective_input_text, str) and effective_input_text.strip() != input_text.strip():
+            trace["effective_context_summary"] = self._clamp(effective_input_text.strip())
         if drive_state_summary:
             trace["drive_state_summary"] = drive_state_summary
         if isinstance(ongoing_action_summary, dict):
@@ -6442,6 +6450,7 @@ class ServiceInputMixin:
         state: dict[str, Any],
         runtime_summary: dict[str, Any],
         input_text: str,
+        effective_input_text: str | None,
         client_context: dict[str, Any],
         recall_hint: dict[str, Any],
         recall_pack: dict[str, Any],
@@ -6510,6 +6519,7 @@ class ServiceInputMixin:
             cycle_id=cycle_id,
             cycle_summary=cycle_summary,
             input_text=input_text,
+            effective_input_text=effective_input_text,
             client_context=client_context,
             runtime_summary=runtime_summary,
             foreground_world_state=foreground_world_state,
@@ -6517,6 +6527,7 @@ class ServiceInputMixin:
             decision_trace=self._build_success_decision_trace(
                 state=state,
                 input_text=input_text,
+                effective_input_text=effective_input_text,
                 time_context=time_context,
                 affect_context=affect_context,
                 drive_state_summary=drive_state_summary,
@@ -6620,6 +6631,7 @@ class ServiceInputMixin:
             cycle_id=cycle_id,
             cycle_summary=cycle_summary,
             input_text=input_text,
+            effective_input_text=None,
             client_context=client_context,
             runtime_summary=runtime_summary,
             foreground_world_state=None,
