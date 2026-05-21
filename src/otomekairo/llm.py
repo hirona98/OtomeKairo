@@ -325,12 +325,18 @@ class LLMClient:
                 payload=payload,
                 capability_result_context=capability_result_context,
             )
-        self._validate_decision_fresh_world_state_reuse(
-            payload=payload,
-            input_text=input_text,
-            trigger_kind=trigger_kind,
-            capability_decision_view=capability_decision_view,
-        )
+        try:
+            self._validate_decision_fresh_world_state_reuse(
+                payload=payload,
+                input_text=input_text,
+                trigger_kind=trigger_kind,
+                capability_decision_view=capability_decision_view,
+            )
+        except LLMError as exc:
+            if trigger_kind != "user_message" and payload.get("kind") == "capability_request":
+                self._coerce_decision_to_noop_for_fresh_world_state_reuse(payload, exc)
+                return
+            raise
         if not isinstance(initiative_context, dict):
             return
         selected_family = self._selected_initiative_family_entry(initiative_context)
@@ -390,6 +396,30 @@ class LLMClient:
                     "foreground_signal_summary.foreground_thinness=grounded です。"
                     "cooldown_active=true ではないため noop は不正です。kind=reply を返してください。"
                 )
+
+    def _coerce_decision_to_noop_for_fresh_world_state_reuse(
+        self,
+        payload: dict[str, Any],
+        exc: LLMError,
+    ) -> None:
+        reason_summary = str(exc).replace("\n", " ").strip()
+        if len(reason_summary) > 220:
+            reason_summary = reason_summary[:219] + "…"
+        payload.update(
+            {
+                "kind": "noop",
+                "reason_code": "fresh_world_state_reuse_noop",
+                "reason_summary": reason_summary
+                or "新鮮な world_state があるため、非ユーザー起点の重複 capability request は行わない。",
+                "requires_confirmation": False,
+                "pending_intent": None,
+                "capability_request": None,
+            }
+        )
+        debug_log(
+            "LLM",
+            "decision coerced_to_noop reason=fresh_world_state_reuse_non_user_trigger",
+        )
 
     def _validate_decision_explicit_status_request(
         self,

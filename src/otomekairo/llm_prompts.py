@@ -347,6 +347,7 @@ def build_decision_repair_prompt(validation_error: str) -> str:
         "pending_intent object のキーは intent_kind, intent_summary, dedupe_key の 3 つだけです。\n"
         "kind=capability_request のときだけ capability_request を object にし、requires_confirmation は false にしてください。\n"
         "capability_request object のキーは capability_id, input の 2 つだけです。\n"
+        "validator_error が fresh_world_state または新鮮な visual_context の再取得禁止を示す場合は、capability_request をやめて kind=noop または kind=reply を返してください。\n"
         "Markdown、コードフェンス、説明文は禁止です。"
     )
 
