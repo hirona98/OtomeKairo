@@ -17,6 +17,7 @@ DEFAULT_REFLECTION_SUMMARY_MAX_OUTPUT_TOKENS = 2000
 DEFAULT_EVENT_EVIDENCE_MAX_OUTPUT_TOKENS = 1500
 DEFAULT_RECALL_PACK_SELECTION_MAX_OUTPUT_TOKENS = 2000
 DEFAULT_PENDING_INTENT_SELECTION_MAX_OUTPUT_TOKENS = 1000
+DEFAULT_GENERATION_TIMEOUT_SECONDS = 90
 DEFAULT_EMBEDDING_DIMENSION = 3072
 DEFAULT_GEMINI_GENERATION_MODEL = "openrouter/google/gemini-3.1-flash-lite-preview"
 DEFAULT_GEMINI_EMBEDDING_MODEL = "openrouter/google/gemini-embedding-001"
@@ -106,48 +107,56 @@ def build_default_model_preset() -> dict:
                 "api_key": "",
                 "reasoning_effort": "low",
                 "max_output_tokens": DEFAULT_INPUT_MAX_OUTPUT_TOKENS,
+                "timeout_seconds": DEFAULT_GENERATION_TIMEOUT_SECONDS,
                 "web_search_enabled": False,
             },
             "decision_generation": {
                 "model": DEFAULT_GEMINI_GENERATION_MODEL,
                 "api_key": "",
                 "max_output_tokens": DEFAULT_DECISION_MAX_OUTPUT_TOKENS,
+                "timeout_seconds": DEFAULT_GENERATION_TIMEOUT_SECONDS,
                 "web_search_enabled": False,
             },
             "expression_generation": {
                 "model": DEFAULT_GEMINI_GENERATION_MODEL,
                 "api_key": "",
                 "max_output_tokens": DEFAULT_EXPRESSION_MAX_OUTPUT_TOKENS,
+                "timeout_seconds": DEFAULT_GENERATION_TIMEOUT_SECONDS,
                 "web_search_enabled": False,
             },
             "memory_interpretation": {
                 "model": DEFAULT_GEMINI_GENERATION_MODEL,
                 "api_key": "",
                 "max_output_tokens": DEFAULT_MEMORY_MAX_OUTPUT_TOKENS,
+                "timeout_seconds": DEFAULT_GENERATION_TIMEOUT_SECONDS,
                 "web_search_enabled": False,
             },
             "memory_reflection_summary": {
                 "model": DEFAULT_GEMINI_GENERATION_MODEL,
                 "api_key": "",
                 "max_output_tokens": DEFAULT_REFLECTION_SUMMARY_MAX_OUTPUT_TOKENS,
+                "timeout_seconds": DEFAULT_GENERATION_TIMEOUT_SECONDS,
                 "web_search_enabled": False,
             },
             "event_evidence_generation": {
                 "model": DEFAULT_GEMINI_GENERATION_MODEL,
                 "api_key": "",
                 "max_output_tokens": DEFAULT_EVENT_EVIDENCE_MAX_OUTPUT_TOKENS,
+                "timeout_seconds": DEFAULT_GENERATION_TIMEOUT_SECONDS,
                 "web_search_enabled": False,
             },
             "recall_pack_selection": {
                 "model": DEFAULT_GEMINI_GENERATION_MODEL,
                 "api_key": "",
                 "max_output_tokens": DEFAULT_RECALL_PACK_SELECTION_MAX_OUTPUT_TOKENS,
+                "timeout_seconds": DEFAULT_GENERATION_TIMEOUT_SECONDS,
                 "web_search_enabled": False,
             },
             "pending_intent_selection": {
                 "model": DEFAULT_GEMINI_GENERATION_MODEL,
                 "api_key": "",
                 "max_output_tokens": DEFAULT_PENDING_INTENT_SELECTION_MAX_OUTPUT_TOKENS,
+                "timeout_seconds": DEFAULT_GENERATION_TIMEOUT_SECONDS,
                 "web_search_enabled": False,
             },
         },

@@ -12,6 +12,7 @@ from otomekairo.llm_parsing import extract_embedding_vectors, extract_http_error
 # 定数
 OPENROUTER_DEFAULT_API_BASE = "https://openrouter.ai/api/v1"
 OPENROUTER_DEFAULT_TIMEOUT_SECONDS = 600
+DEFAULT_COMPLETION_TIMEOUT_SECONDS = 90.0
 
 
 # LiteLLM provider 未解決時の Provider List 表示だけ抑止する。
@@ -37,6 +38,7 @@ def complete_text(
     request_kwargs: dict[str, Any] = {
         "model": _resolve_litellm_model(role_definition),
         "messages": messages,
+        "timeout": _resolve_timeout_seconds(role_definition, default=DEFAULT_COMPLETION_TIMEOUT_SECONDS),
     }
     api_base = _resolve_api_base(role_definition)
     if isinstance(api_base, str) and api_base.strip():
@@ -240,6 +242,17 @@ def _resolve_max_output_tokens(role_definition: dict) -> int | None:
     if isinstance(value, int) and value >= 1:
         return value
     return None
+
+
+def _resolve_timeout_seconds(role_definition: dict, *, default: float) -> float:
+    value = role_definition.get("timeout_seconds")
+    if value is None:
+        value = role_definition.get("request_timeout_seconds")
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, (int, float)) and value > 0:
+        return float(value)
+    return default
 
 
 def _resolve_reasoning_effort(role_definition: dict) -> str | None:

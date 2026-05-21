@@ -1751,6 +1751,7 @@ class ServiceConfigMixin:
         api_key = definition.get("api_key")
         reasoning_effort = definition.get("reasoning_effort")
         max_output_tokens = definition.get("max_output_tokens")
+        timeout_seconds = definition.get("timeout_seconds")
         web_search_enabled = definition.get("web_search_enabled")
 
         if not isinstance(model, str) or not model.strip():
@@ -1766,6 +1767,19 @@ class ServiceConfigMixin:
                 400,
                 "invalid_max_output_tokens",
                 f"{role_name}.max_output_tokens must be an integer >= 1.",
+            )
+        if (
+            timeout_seconds is not None
+            and (
+                isinstance(timeout_seconds, bool)
+                or not isinstance(timeout_seconds, (int, float))
+                or timeout_seconds <= 0
+            )
+        ):
+            raise ServiceError(
+                400,
+                "invalid_timeout_seconds",
+                f"{role_name}.timeout_seconds must be a positive number when specified.",
             )
         if not isinstance(web_search_enabled, bool):
             raise ServiceError(
@@ -1814,6 +1828,11 @@ class ServiceConfigMixin:
             max_output_tokens = role_definition.get("max_output_tokens")
             if isinstance(max_output_tokens, int):
                 normalized_role["max_output_tokens"] = max_output_tokens
+            timeout_seconds = role_definition.get("timeout_seconds")
+            if isinstance(timeout_seconds, bool):
+                pass
+            elif isinstance(timeout_seconds, (int, float)):
+                normalized_role["timeout_seconds"] = timeout_seconds
             web_search_enabled = role_definition.get("web_search_enabled")
             if isinstance(web_search_enabled, bool):
                 normalized_role["web_search_enabled"] = web_search_enabled
