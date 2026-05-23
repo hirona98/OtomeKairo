@@ -941,6 +941,7 @@ def _build_recall_pack_selection_system_prompt() -> str:
         "あなたは OtomeKairo の recall_pack_selection です。\n"
         "候補群の中から RecallPack に採る candidate_ref の順序と conflicts の summary_text だけを JSON オブジェクト 1 個で返してください。\n"
         "Markdown、コードフェンス、説明文は禁止です。\n"
+        "source pack の augmented_query_text は検索・想起用の内部拡張クエリであり、ユーザー発話の原文ではありません。\n"
         "返すトップレベルキーは section_selection, conflict_summaries の 2 つだけです。\n"
         "section_selection の各要素は section_name と candidate_refs を持つ object です。\n"
         "section_name は "

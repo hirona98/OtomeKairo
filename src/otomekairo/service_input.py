@@ -399,7 +399,7 @@ class ServiceInputMixin:
         debug_log("Pipeline", f"{cycle_label} recall_pack start")
         recall_pack = self.recall.build_recall_pack(
             state=state,
-            input_text=augmented_query_text,
+            augmented_query_text=augmented_query_text,
             recall_hint=recall_hint,
         )
         recall_summary = self._summarize_recall_pack(recall_pack)
@@ -417,7 +417,7 @@ class ServiceInputMixin:
         debug_log("Pipeline", f"{cycle_label} evidence_resolution start contract={answer_contract.get('contract')}")
         evidence_resolution = self.evidence.build_evidence_resolution(
             memory_set_id=state["selected_memory_set_id"],
-            input_text=augmented_query_text,
+            augmented_query_text=augmented_query_text,
             recall_pack=recall_pack,
             answer_contract=answer_contract,
             current_time=started_at,
@@ -3550,7 +3550,7 @@ class ServiceInputMixin:
             "result_status": "summary",
             "resolver_path": "summary",
             "query": {
-                "input_text": None,
+                "augmented_query_text": None,
                 "current_time": None,
                 "contract": "summary",
                 "boundary": "none",
