@@ -5475,8 +5475,12 @@ class ServiceInputMixin:
             "runtime_state_summary": runtime_summary,
             "pending_intent_selection": pending_intent_selection or self._empty_pending_intent_selection_trace(),
         }
-        if isinstance(effective_input_text, str) and effective_input_text.strip() != input_text.strip():
-            input_trace["effective_input_summary"] = self._clamp(effective_input_text.strip())
+        effective_addition_summary = self._effective_input_addition_summary(
+            input_text=input_text,
+            effective_input_text=effective_input_text,
+        )
+        if effective_addition_summary is not None:
+            input_trace["effective_input_addition_summary"] = effective_addition_summary
         if foreground_world_state:
             input_trace["foreground_world_state"] = foreground_world_state
         wake_observation_summary = self._client_context_text(
@@ -5606,8 +5610,12 @@ class ServiceInputMixin:
             "pending_intent_candidate_summary": pending_intent_summary,
             "capability_request_candidate_summary": self._decision_capability_request_summary(decision),
         }
-        if isinstance(effective_input_text, str) and effective_input_text.strip() != input_text.strip():
-            trace["effective_context_summary"] = self._clamp(effective_input_text.strip())
+        effective_addition_summary = self._effective_input_addition_summary(
+            input_text=input_text,
+            effective_input_text=effective_input_text,
+        )
+        if effective_addition_summary is not None:
+            trace["effective_context_addition_summary"] = effective_addition_summary
         if drive_state_summary:
             trace["drive_state_summary"] = drive_state_summary
         if isinstance(ongoing_action_summary, dict):
@@ -5628,6 +5636,25 @@ class ServiceInputMixin:
             "capability_id": capability_id,
             "input": input_payload,
         }
+
+    def _effective_input_addition_summary(
+        self,
+        *,
+        input_text: str,
+        effective_input_text: str | None,
+    ) -> str | None:
+        if not isinstance(effective_input_text, str):
+            return None
+        original_text = input_text.strip()
+        effective_text = effective_input_text.strip()
+        if not effective_text or effective_text == original_text:
+            return None
+        addition_text = effective_text
+        if original_text and effective_text.startswith(original_text):
+            addition_text = effective_text[len(original_text) :].strip()
+        if not addition_text:
+            return None
+        return self._clamp(addition_text)
 
     def _build_failure_decision_trace(
         self,
