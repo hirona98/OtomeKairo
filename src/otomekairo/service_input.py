@@ -801,8 +801,16 @@ class ServiceInputMixin:
         normalized_input_text = input_text.strip()
         if visual_summary_text in normalized_input_text:
             return input_text
-        label = "会話添付画像要約" if self._observation_summary_is_conversation_attachment(observation_summary) else "視覚要約"
-        visual_input_summary = f"[{label}]\n{visual_summary_text}"
+        label = (
+            "conversation_attachment_visual_summary"
+            if self._observation_summary_is_conversation_attachment(observation_summary)
+            else "visual_summary"
+        )
+        visual_input_summary = (
+            f"<<<OTOMEKAIRO_INTERNAL_CONTEXT {label}>>>\n"
+            f"{visual_summary_text}\n"
+            "<<<END_OTOMEKAIRO_INTERNAL_CONTEXT>>>"
+        )
         if not normalized_input_text:
             return visual_input_summary
         return f"{normalized_input_text}\n\n{visual_input_summary}"
