@@ -234,6 +234,7 @@ class LLMClient:
         capability_decision_view: list[dict[str, Any]] | None,
         initiative_context: dict[str, Any] | None,
         capability_result_context: dict[str, Any] | None,
+        visual_observation_context: dict[str, Any] | None,
         recall_hint: dict,
         recall_pack: dict[str, Any],
     ) -> dict[str, Any]:
@@ -280,6 +281,7 @@ class LLMClient:
                 capability_decision_view=capability_decision_view,
                 initiative_context=initiative_context,
                 capability_result_context=capability_result_context,
+                visual_observation_context=visual_observation_context,
                 recall_hint=recall_hint,
                 recall_pack=recall_pack,
             )
@@ -294,6 +296,7 @@ class LLMClient:
                     capability_decision_view=capability_decision_view,
                     initiative_context=initiative_context,
                     capability_result_context=capability_result_context,
+                    visual_observation_context=visual_observation_context,
                 ),
                 repair_prompt_builder=build_decision_repair_prompt,
                 failure_message="Decision の生成に失敗しました。解析可能な応答が得られませんでした。",
@@ -312,6 +315,7 @@ class LLMClient:
         capability_decision_view: list[dict[str, Any]] | None,
         initiative_context: dict[str, Any] | None,
         capability_result_context: dict[str, Any] | None,
+        visual_observation_context: dict[str, Any] | None,
     ) -> None:
         validate_decision_contract(payload)
         self._validate_decision_explicit_status_request(
@@ -337,6 +341,11 @@ class LLMClient:
                 self._coerce_decision_to_noop_for_fresh_world_state_reuse(payload, exc)
                 return
             raise
+        self._validate_decision_visual_observation_context(
+            payload=payload,
+            trigger_kind=trigger_kind,
+            visual_observation_context=visual_observation_context,
+        )
         if not isinstance(initiative_context, dict):
             return
         selected_family = self._selected_initiative_family_entry(initiative_context)
@@ -396,6 +405,36 @@ class LLMClient:
                     "foreground_signal_summary.foreground_thinness=grounded です。"
                     "cooldown_active=true ではないため noop は不正です。kind=reply を返してください。"
                 )
+
+    def _validate_decision_visual_observation_context(
+        self,
+        *,
+        payload: dict[str, Any],
+        trigger_kind: str,
+        visual_observation_context: dict[str, Any] | None,
+    ) -> None:
+        if trigger_kind != "user_message" or payload.get("kind") != "noop":
+            return
+        if not isinstance(visual_observation_context, dict):
+            return
+        if visual_observation_context.get("source") != "conversation_attachment":
+            return
+        if visual_observation_context.get("image_interpreted") is not True:
+            return
+        summary_text = visual_observation_context.get("visual_summary_text")
+        if not isinstance(summary_text, str) or not summary_text.strip():
+            return
+        reason_text = " ".join(
+            str(payload.get(key) or "")
+            for key in ("reason_code", "reason_summary")
+        )
+        missing_terms = ("画像データ", "視覚情報", "欠落", "添付画像", "不足")
+        if any(term in reason_text for term in missing_terms):
+            raise LLMError(
+                "会話添付画像は VisualObservationContext.visual_summary_text として解釈済みです。"
+                "raw image が decision prompt に無いことを理由に noop を返してはいけません。"
+                "visual_summary_text の範囲で kind=reply を返してください。"
+            )
 
     def _coerce_decision_to_noop_for_fresh_world_state_reuse(
         self,
@@ -657,6 +696,7 @@ class LLMClient:
         ongoing_action_summary: dict[str, Any] | None,
         capability_decision_view: list[dict[str, Any]] | None,
         initiative_context: dict[str, Any] | None,
+        visual_observation_context: dict[str, Any] | None,
         recall_hint: dict,
         recall_pack: dict[str, Any],
         decision: dict,
@@ -703,6 +743,7 @@ class LLMClient:
                 ongoing_action_summary=ongoing_action_summary,
                 capability_decision_view=capability_decision_view,
                 initiative_context=initiative_context,
+                visual_observation_context=visual_observation_context,
                 recall_hint=recall_hint,
                 recall_pack=recall_pack,
                 decision=decision,

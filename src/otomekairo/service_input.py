@@ -493,6 +493,10 @@ class ServiceInputMixin:
             observation_summary=observation_summary,
             capability_request_summary=capability_request_summary,
         )
+        visual_observation_context = self._build_visual_observation_decision_context(
+            trigger_kind=trigger_kind,
+            observation_summary=observation_summary,
+        )
         debug_log(
             "Pipeline",
             (
@@ -519,6 +523,7 @@ class ServiceInputMixin:
             capability_decision_view=capability_decision_view,
             initiative_context=initiative_context,
             capability_result_context=capability_result_context,
+            visual_observation_context=visual_observation_context,
             recall_hint=recall_hint,
             recall_pack=recall_pack,
         )
@@ -564,6 +569,7 @@ class ServiceInputMixin:
                 ongoing_action_summary=ongoing_action_summary,
                 capability_decision_view=capability_decision_view,
                 initiative_context=initiative_context,
+                visual_observation_context=visual_observation_context,
                 recall_hint=recall_hint,
                 recall_pack=recall_pack,
                 decision=decision,
@@ -588,6 +594,7 @@ class ServiceInputMixin:
             "capability_decision_view": capability_decision_view,
             "initiative_context": initiative_context,
             "capability_result_context": capability_result_context,
+            "visual_observation_context": visual_observation_context,
             "world_state_trace": world_state_trace,
             "decision": decision,
             "reply_payload": reply_payload,
@@ -1052,6 +1059,31 @@ class ServiceInputMixin:
         compact_observation_summary = self._compact_capability_followup_observation_summary(observation_summary)
         if isinstance(compact_observation_summary, dict):
             payload["observation_summary"] = compact_observation_summary
+        return payload
+
+    def _build_visual_observation_decision_context(
+        self,
+        *,
+        trigger_kind: str,
+        observation_summary: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if trigger_kind != "user_message" or not isinstance(observation_summary, dict):
+            return None
+        if observation_summary.get("source") != "conversation_attachment":
+            return None
+        summary_text = self._visual_observation_summary_text(observation_summary)
+        if summary_text is None:
+            return None
+        payload: dict[str, Any] = {
+            "source": "conversation_attachment",
+            "image_input_kind": "conversation_attachment",
+            "image_interpreted": observation_summary.get("image_interpreted") is True,
+            "visual_summary_text": self._clamp(summary_text, limit=240),
+        }
+        for key in ("image_count", "visual_confidence_hint"):
+            value = observation_summary.get(key)
+            if value is not None:
+                payload[key] = value
         return payload
 
     def _capability_result_source_capability_id(
