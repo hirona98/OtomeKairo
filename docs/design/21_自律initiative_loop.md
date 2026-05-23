@@ -128,8 +128,10 @@ LLM に実行権限、資格情報、配送先 client、秘密値を渡さない
 LLM の自由文をそのまま状態遷移へ使わない。
 `wake / background_wake` の「定期起床」「wake」という入力文言は判断機会の説明であり、身体状態の根拠にしない。
 `current_time_text`、interval、wake の時刻情報だけから予定状態を作らない。予定状態は schedule context、schedule capability result、明示的な予定 source を根拠にする。
-`wake_policy.observations` は interval wake の判断前に enabled 項目だけを順番に取得し、取得結果を `world_state` へ反映する。
-複数 observation がある場合も、server は取得結果を反映したあとに 1 回だけ initiative 判断を行う。
+`wake_policy.observations` は interval wake の判断前に enabled 項目だけを順番に取得する。
+`wake_policy.observations` の成功結果は、その回の initiative 判断へ進む前景シグナルとして扱う。
+desktop capture の取得結果は一時観測として同じ wake 判断だけに使い、継続状態になる取得結果だけを `world_state` へ反映する。
+複数 observation がある場合も、server は取得結果を整理したあとに 1 回だけ initiative 判断を行う。
 system wake 起点で明示 source context が無い `visual_context / body / schedule / social_context / environment / location` 候補は、推測候補として正規化時に破棄する。
 
 ## 過剰介入抑制
@@ -224,7 +226,7 @@ status refresh の鮮度判定は判断前から存在した foreground `world_s
 background wake では、強い `drive_state` が無く `visual_context / external_service / device` だけが見えている場合、薄い前景として `noop` を優先する。
 grounded foreground の `world_state` が既にある場合、candidate entry に `preferred_capability_id` が無い限り、同じ情報を再取得する capability request より `preferred_result_kind` の `reply / noop` を優先する。
 非ユーザー起点の判断では、判断前から存在する同じ state type の新鮮な foreground `world_state` がある status capability に `fresh_world_state_available=true` を付け、実 LLM の compact digest で request しなかった境界を確認する。
-`vision.capture` は `vision_source_id` が一致する新鮮な `visual_context` を `fresh_world_state_by_vision_source` として扱い、別 source の再観測は遮断しない。
+desktop 以外の `vision.capture` は `vision_source_id` が一致する新鮮な `visual_context` を `fresh_world_state_by_vision_source` として扱い、別 source の再観測は遮断しない。
 `suppression_summary.cooldown_active` が true ではない場合、直近 turn だけから cooldown 中とは扱わない。background wake でも grounded foreground かつ `preferred_result_kind=reply` なら、`suppression_level=medium` だけを理由に `noop` へ倒さない。
 decision contract validation は、initiative の selected candidate entry が `preferred_result_kind=capability_request` の場合に `capability_request` 以外を repair 対象にし、`preferred_capability_id` と異なる capability request も repair 対象にする。`preferred_result_kind=capability_request` ではない場合の `capability_request`、`fresh_world_state_available=true` の capability request、同じ `vision_source_id` の新鮮な `vision.capture` request、grounded foreground かつ `preferred_result_kind=reply` で cooldown が無い `noop` も repair 対象にする。
 非ユーザー起点で、repair 後も新鮮な `world_state` または同じ `vision_source_id` の新鮮な `visual_context` を再取得する capability request が残る場合、server は dispatch せず `noop` decision に正規化する。

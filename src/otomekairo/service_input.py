@@ -1067,24 +1067,48 @@ class ServiceInputMixin:
         trigger_kind: str,
         observation_summary: dict[str, Any] | None,
     ) -> dict[str, Any] | None:
-        if trigger_kind != "user_message" or not isinstance(observation_summary, dict):
-            return None
-        if observation_summary.get("source") != "conversation_attachment":
+        if not isinstance(observation_summary, dict):
             return None
         summary_text = self._visual_observation_summary_text(observation_summary)
         if summary_text is None:
             return None
+
+        if trigger_kind == "user_message" and observation_summary.get("source") == "conversation_attachment":
+            source = "conversation_attachment"
+            image_input_kind = "conversation_attachment"
+        elif self._observation_summary_is_desktop_vision_capture(observation_summary):
+            source = "vision_capture_result"
+            image_input_kind = "vision_capture_result"
+        else:
+            return None
+
         payload: dict[str, Any] = {
-            "source": "conversation_attachment",
-            "image_input_kind": "conversation_attachment",
+            "source": source,
+            "image_input_kind": image_input_kind,
             "image_interpreted": observation_summary.get("image_interpreted") is True,
             "visual_summary_text": self._clamp(summary_text, limit=240),
         }
-        for key in ("image_count", "visual_confidence_hint"):
+        for key in ("image_count", "visual_confidence_hint", "vision_source_id", "source_kind", "source_label"):
             value = observation_summary.get(key)
             if value is not None:
                 payload[key] = value
+        if source == "vision_capture_result":
+            payload["retention_policy"] = "ephemeral_decision_only"
         return payload
+
+    def _observation_summary_is_desktop_vision_capture(
+        self,
+        observation_summary: dict[str, Any] | None,
+    ) -> bool:
+        if not isinstance(observation_summary, dict):
+            return False
+        source_kind = observation_summary.get("source_kind")
+        return (
+            observation_summary.get("source") == "capability_result"
+            and observation_summary.get("capability_id") == "vision.capture"
+            and isinstance(source_kind, str)
+            and source_kind.strip() == "desktop"
+        )
 
     def _capability_result_source_capability_id(
         self,
@@ -2500,17 +2524,6 @@ class ServiceInputMixin:
                 client_context,
             )
 
-        # クールダウン
-        cooldown_reason = self._wake_cooldown_reason(current_time=started_at)
-        if cooldown_reason is not None:
-            self._set_last_wake_at(started_at)
-            debug_log("Wake", f"{cycle_label} skipped cooldown={self._clamp(cooldown_reason)}")
-            return (
-                self._noop_pipeline(state=state, started_at=started_at, reason_summary=cooldown_reason),
-                input_text,
-                client_context,
-            )
-
         # 定期観測
         client_context = self._run_wake_policy_observations(
             state=state,
@@ -2524,10 +2537,25 @@ class ServiceInputMixin:
             selected_candidate=selected_candidate,
         )
 
+        # クールダウン
+        cooldown_reason = self._wake_cooldown_reason(current_time=started_at)
+        if cooldown_reason is not None:
+            self._set_last_wake_at(started_at)
+            debug_log("Wake", f"{cycle_label} skipped cooldown={self._clamp(cooldown_reason)}")
+            return (
+                self._noop_pipeline(state=state, started_at=started_at, reason_summary=cooldown_reason),
+                input_text,
+                client_context,
+            )
+
         # 候補
         if selected_candidate is None:
             self._set_last_wake_at(started_at)
-            if not self._has_autonomous_initiative_context(state=state, current_time=started_at):
+            if not self._has_autonomous_initiative_context(
+                state=state,
+                current_time=started_at,
+                client_context=client_context,
+            ):
                 if (
                     isinstance(pending_intent_selection, dict)
                     and pending_intent_selection.get("selected_candidate_ref") == "none"
@@ -2799,11 +2827,12 @@ class ServiceInputMixin:
             if result_error
             else "wake_policy observation の取得結果を判断材料へ反映した。"
         )
-        final_step_summary = (
-            "wake_policy observation を中断した。"
-            if result_error
-            else "wake_policy observation の結果を world_state へ反映した。"
-        )
+        if result_error:
+            final_step_summary = "wake_policy observation を中断した。"
+        elif self._observation_summary_is_desktop_vision_capture(observation_summary):
+            final_step_summary = "desktop wake observation の結果を一時観測として判断材料へ反映した。"
+        else:
+            final_step_summary = "wake_policy observation の結果を world_state へ反映した。"
         detail_summary = failure_reason or self._capability_result_followup_hint_summary(
             capability_id=capability_id,
             observation_summary=observation_summary,
@@ -2936,7 +2965,10 @@ class ServiceInputMixin:
         *,
         state: dict[str, Any],
         current_time: str,
+        client_context: dict[str, Any] | None = None,
     ) -> bool:
+        if self._client_context_has_successful_wake_observation(client_context):
+            return True
         drive_state_summary = self._summarize_drive_states(
             self._list_current_drive_states(
                 state=state,
@@ -2962,6 +2994,26 @@ class ServiceInputMixin:
             )
         )
         return isinstance(ongoing_action_summary, dict)
+
+    def _client_context_has_successful_wake_observation(
+        self,
+        client_context: dict[str, Any] | None,
+    ) -> bool:
+        if not isinstance(client_context, dict):
+            return False
+        wake_observations = client_context.get("wake_observations")
+        if not isinstance(wake_observations, list):
+            return False
+        for item in wake_observations:
+            if not isinstance(item, dict) or item.get("status") != "succeeded":
+                continue
+            summary_text = item.get("visual_summary_text")
+            if isinstance(summary_text, str) and summary_text.strip():
+                return True
+            image_count = item.get("image_count")
+            if isinstance(image_count, int) and image_count > 0:
+                return True
+        return False
 
     def _complete_input_success(
         self,
@@ -4059,6 +4111,8 @@ class ServiceInputMixin:
         observation_summary: dict[str, Any] | None,
     ) -> bool:
         if not isinstance(observation_summary, dict):
+            return False
+        if self._observation_summary_is_desktop_vision_capture(observation_summary):
             return False
         return (
             observation_summary.get("source") == "capability_result"
@@ -5181,8 +5235,13 @@ class ServiceInputMixin:
         trigger_kind: str,
         pipeline: dict[str, Any],
         observation_summary: dict[str, Any] | None,
+        client_context: dict[str, Any] | None = None,
     ) -> bool:
         if trigger_kind not in {"wake", "background_wake", "capability_result"}:
+            return False
+        if self._observation_summary_is_desktop_vision_capture(observation_summary):
+            return False
+        if self._client_context_has_desktop_wake_observation(client_context):
             return False
 
         decision = pipeline.get("decision")
@@ -5201,6 +5260,23 @@ class ServiceInputMixin:
             return False
         error = observation_summary.get("error")
         return isinstance(error, str) and bool(error.strip())
+
+    def _client_context_has_desktop_wake_observation(
+        self,
+        client_context: dict[str, Any] | None,
+    ) -> bool:
+        if not isinstance(client_context, dict):
+            return False
+        wake_observations = client_context.get("wake_observations")
+        if not isinstance(wake_observations, list):
+            return False
+        return any(
+            isinstance(item, dict)
+            and item.get("capability_id") == "vision.capture"
+            and isinstance(item.get("source_kind"), str)
+            and item["source_kind"].strip() == "desktop"
+            for item in wake_observations
+        )
 
     def _foreground_world_state_changed(self, pipeline: dict[str, Any]) -> bool:
         if not isinstance(pipeline, dict):

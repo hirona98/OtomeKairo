@@ -3,7 +3,8 @@
 ## 目的
 
 `world_state` 第一段では、視覚前景と短い current summary を同じ source pack に入れていた。
-この拡張では、`vision.capture` の視覚補助要約と、対人文脈、周囲環境、場所、外部サービス、身体、機器、予定の短い current summary を state-type 別 context として同じ source pack に入れ、LLM が `world_state` 候補を選びやすくする。
+この拡張では、desktop capture 以外の `vision.capture` の視覚補助要約と、対人文脈、周囲環境、場所、外部サービス、身体、機器、予定の短い current summary を state-type 別 context として同じ source pack に入れ、LLM が `world_state` 候補を選びやすくする。
+desktop capture の視覚補助要約は一時 `VisualObservationContext` として扱い、`world_state` source pack に入れない。
 
 ここで扱うのは **短い structured summary だけ** である。
 capability 自体の安定契約は `17_capability_manifest.md` と API 文書を正本にし、この文書は source pack に入れる summary 境界だけを扱う。
@@ -13,7 +14,7 @@ raw payload 保存、長い OCR、配送先 client の露出は入れない。
 
 `world_state` source pack に追加する入力は次に限る。
 
-- `vision.capture` result から得た短い `visual_summary_text / image_interpreted / visual_confidence_hint / image_count / vision_source_id / source_kind / source_label`
+- desktop capture 以外の `vision.capture` result から得た短い `visual_summary_text / image_interpreted / visual_confidence_hint / image_count / vision_source_id / source_kind / source_label`
 - `client_context.social_context_summary`
 - `client_context.environment_summary`
 - `client_context.location_summary`
@@ -128,8 +129,8 @@ raw response body、client 固有 ID、資格情報、内部 URL、base64 本文
 ```
 
 source pack では、標準の `client_context` と state-type 別の structured context を分ける。
-視覚前景は `vision.capture` result の短い要約として `visual_context` へ載せ、`vision_source_id` で観測 source を識別する。
-`vision.capture` result follow-up の `foreground_world_state` は、result の `vision_source_id` と一致する `visual_context` だけを decision / reply に渡す。
+desktop capture 以外の視覚前景は `vision.capture` result の短い要約として `visual_context` へ載せ、`vision_source_id` で観測 source を識別する。
+desktop capture 以外の `vision.capture` result follow-up の `foreground_world_state` は、result の `vision_source_id` と一致する `visual_context` だけを decision / reply に渡す。
 一致しない `visual_context` は保存済み state と inspection 用 trace に残し、同じ follow-up の判断材料にしない。
 その他の短い current summary は dedicated context へ載せる。
 `current_input_summary` は入力意図と、人が明示した状態値だけを補助する。

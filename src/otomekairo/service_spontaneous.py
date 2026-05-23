@@ -608,6 +608,7 @@ class ServiceSpontaneousMixin:
                     trigger_kind="capability_result",
                     pipeline=pipeline,
                     observation_summary=observation_summary,
+                    client_context=client_context,
                 ),
                 pending_intent_selection=pending_intent_selection,
                 observation_summary=observation_summary,
@@ -1644,6 +1645,7 @@ class ServiceSpontaneousMixin:
                         trigger_kind=trigger_kind,
                         pipeline=pipeline,
                         observation_summary=None,
+                        client_context=client_context,
                     ),
                     pending_intent_selection=pending_intent_selection,
                 )

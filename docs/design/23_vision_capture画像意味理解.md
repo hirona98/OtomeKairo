@@ -6,20 +6,23 @@
 同じ `visual_observation` 契約は通常会話の添付画像でも再利用するが、通常会話の添付画像は `vision.capture` capability result ではない。
 
 この段階の目的は、画像から万能な構造理解を作ることではない。
-`client_context` だけでは落ちる「今の画面で何が前景か」を、判断、`world_state`、inspection に反映できるようにすることに絞る。
+`client_context` だけでは落ちる「今の視覚入力で何が前景か」を、判断と inspection に反映できるようにすることに絞る。
+desktop capture はその瞬間のコメントや判断にだけ使い、`world_state` と記憶更新の根拠にしない。
 
 ## 境界
 
-この段階で行うこと:
+この機能で行うこと:
 
 - 非同期 capability result の image payload を `model_preset.roles.input_interpretation` で要約する
 - 要約結果を `input_text` と `observation_summary` に反映する
-- 要約結果を `world_state` 更新の入力へ渡す
+- desktop capture の要約結果を `VisualObservationContext` としてその判断サイクルへ渡す
 - inspection で `image_interpreted=true` と観測要約を見られるようにする
 
-この段階で行わないこと:
+禁止すること:
 
 - raw image payload の永続化
+- desktop capture 要約の `world_state` 永続化
+- desktop capture 要約の記憶候補化
 - OCR の全文抽出
 - UI 要素や座標の構造化
 - capability 実行一般への横展開
@@ -100,10 +103,11 @@ LLM の出力は JSON object 1 個に固定する。
 2. image payload を LLM で短い `summary_text` へ変換する
 3. `observation_summary.image_interpreted=true` と `visual_summary_text` を付ける
 4. `input_text` に観測要約を足して、以後の `recall_hint / recall_pack / decision / reply` に渡す
-5. `world_state` 更新 source pack に `visual_summary_text` を渡す
+5. desktop capture では `VisualObservationContext.source=vision_capture_result` と `retention_policy=ephemeral_decision_only` を判断入力へ渡す
+6. desktop capture 以外で継続状態として扱う視覚 source だけ、`world_state` 更新 source pack に `visual_summary_text` を渡す
 
 この段階では、`summary_text` を唯一の意味出力として扱う。
-画像から直接 `world_state` 行や capability result row を作らない。
+画像から直接 `world_state` 行、memory row、capability result row を作らない。
 
 ## failure の扱い
 
