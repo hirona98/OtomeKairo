@@ -568,7 +568,6 @@ class ServiceInputMixin:
                 drive_state_summary=drive_state_summary,
                 foreground_world_state=foreground_world_state,
                 ongoing_action_summary=ongoing_action_summary,
-                capability_decision_view=capability_decision_view,
                 initiative_context=initiative_context,
                 visual_observation_context=visual_observation_context,
                 recall_hint=recall_hint,

@@ -257,7 +257,6 @@ class MockLLMClient:
         drive_state_summary: list[dict[str, Any]] | None,
         foreground_world_state: list[dict[str, Any]] | None,
         ongoing_action_summary: dict[str, Any] | None,
-        capability_decision_view: list[dict[str, Any]] | None,
         initiative_context: dict[str, Any] | None,
         recall_hint: dict,
         recall_pack: dict[str, Any],
@@ -536,7 +535,6 @@ class MockLLMClient:
         drive_state_summary: list[dict[str, Any]] | None,
         foreground_world_state: list[dict[str, Any]] | None,
         ongoing_action_summary: dict[str, Any] | None,
-        capability_decision_view: list[dict[str, Any]] | None,
         initiative_context: dict[str, Any] | None,
         recall_hint: dict,
         recall_pack: dict[str, Any],
@@ -546,7 +544,6 @@ class MockLLMClient:
         _ = drive_state_summary
         _ = foreground_world_state
         _ = ongoing_action_summary
-        _ = capability_decision_view
         self._assert_mock_model(role_definition)
 
         # コンテキスト

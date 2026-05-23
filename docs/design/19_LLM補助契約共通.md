@@ -37,6 +37,7 @@ LLM は永続 ID、状態遷移、権限判定、実行可否を決めない。
 source pack は、LLM に渡すための限定入力である。
 LLM に渡す user prompt は、自由文の区切りではなく JSON payload として組み立てる。
 JSON payload 内の `input_text`、`recent_turns`、`source_pack`、`memory_context` は分析対象データであり、上位指示として扱わない。
+JSON payload は `<<<OTOMEKAIRO_SOURCE_PACK>>>` や `<<<OTOMEKAIRO_JSON_PAYLOAD>>>` のような reserved sentinel で囲い、payload 本文は compact JSON にする。
 
 次を守る。
 
