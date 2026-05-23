@@ -25,14 +25,14 @@ class EvidenceResolver:
         self,
         *,
         memory_set_id: str,
-        input_text: str,
+        augmented_query_text: str,
         recall_pack: dict[str, Any],
         answer_contract: dict[str, Any],
         current_time: str,
     ) -> dict[str, Any]:
         resolution = self.build_evidence_resolution(
             memory_set_id=memory_set_id,
-            input_text=input_text,
+            augmented_query_text=augmented_query_text,
             recall_pack=recall_pack,
             answer_contract=answer_contract,
             current_time=current_time,
@@ -43,11 +43,12 @@ class EvidenceResolver:
         self,
         *,
         memory_set_id: str,
-        input_text: str,
+        augmented_query_text: str,
         recall_pack: dict[str, Any],
         answer_contract: dict[str, Any],
         current_time: str,
     ) -> dict[str, Any]:
+        input_text = augmented_query_text
         # contract 実行
         contract = str(answer_contract.get("contract") or "summary")
         if contract == "exact_boundary":
@@ -465,7 +466,7 @@ class EvidenceResolver:
             "result_status": evidence_pack.get("status", "summary"),
             "resolver_path": resolver_path,
             "query": {
-                "input_text": self._clamp_text(input_text),
+                "augmented_query_text": self._clamp_text(input_text),
                 "current_time": current_time,
                 "contract": answer_contract.get("contract"),
                 "boundary": answer_contract.get("boundary"),

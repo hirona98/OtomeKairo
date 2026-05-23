@@ -66,6 +66,7 @@ class LLMClient:
         input_text: str,
         recent_turns: list[dict],
         current_time: str,
+        visual_observation_context: dict[str, Any] | None,
     ) -> dict[str, Any]:
         operation = "input_interpretation"
         debug_log(
@@ -108,6 +109,7 @@ class LLMClient:
                 input_text=input_text,
                 recent_turns=recent_turns,
                 current_time=current_time,
+                visual_observation_context=visual_observation_context,
             )
             payload = self._generate_structured_payload(
                 role_definition=role_definition,

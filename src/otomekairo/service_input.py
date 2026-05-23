@@ -350,8 +350,12 @@ class ServiceInputMixin:
     ) -> dict[str, Any]:
         cycle_label = self._debug_cycle_label(cycle_id)
         current_client_context = client_context or {}
-        effective_input_text = self._pipeline_effective_input_text(
+        augmented_query_text = self._pipeline_augmented_query_text(
             input_text=input_text,
+            trigger_kind=trigger_kind,
+            observation_summary=observation_summary,
+        )
+        visual_observation_context = self._build_visual_observation_decision_context(
             trigger_kind=trigger_kind,
             observation_summary=observation_summary,
         )
@@ -375,9 +379,10 @@ class ServiceInputMixin:
         debug_log("Pipeline", f"{cycle_label} input_interpretation start recent_turns={len(recall_hint_recent_turns)}")
         input_interpretation = self.llm.generate_input_interpretation(
             role_definition=recall_role,
-            input_text=effective_input_text,
+            input_text=input_text,
             recent_turns=recall_hint_recent_turns,
             current_time=started_at,
+            visual_observation_context=visual_observation_context,
         )
         recall_hint = input_interpretation["recall_hint"]
         answer_contract = input_interpretation["answer_contract"]
@@ -394,7 +399,7 @@ class ServiceInputMixin:
         debug_log("Pipeline", f"{cycle_label} recall_pack start")
         recall_pack = self.recall.build_recall_pack(
             state=state,
-            input_text=effective_input_text,
+            augmented_query_text=augmented_query_text,
             recall_hint=recall_hint,
         )
         recall_summary = self._summarize_recall_pack(recall_pack)
@@ -412,7 +417,7 @@ class ServiceInputMixin:
         debug_log("Pipeline", f"{cycle_label} evidence_resolution start contract={answer_contract.get('contract')}")
         evidence_resolution = self.evidence.build_evidence_resolution(
             memory_set_id=state["selected_memory_set_id"],
-            input_text=effective_input_text,
+            augmented_query_text=augmented_query_text,
             recall_pack=recall_pack,
             answer_contract=answer_contract,
             current_time=started_at,
@@ -448,7 +453,7 @@ class ServiceInputMixin:
         world_state_trace, foreground_world_state = self._refresh_world_state_context(
             state=state,
             started_at=started_at,
-            input_text=effective_input_text,
+            input_text=input_text,
             trigger_kind=trigger_kind,
             client_context=current_client_context,
             cycle_id=cycle_id,
@@ -493,10 +498,6 @@ class ServiceInputMixin:
             observation_summary=observation_summary,
             capability_request_summary=capability_request_summary,
         )
-        visual_observation_context = self._build_visual_observation_decision_context(
-            trigger_kind=trigger_kind,
-            observation_summary=observation_summary,
-        )
         debug_log(
             "Pipeline",
             (
@@ -512,7 +513,7 @@ class ServiceInputMixin:
         decision = self.llm.generate_decision(
             role_definition=decision_role,
             persona=persona,
-            input_text=effective_input_text,
+            input_text=input_text,
             trigger_kind=trigger_kind,
             recent_turns=recent_turns,
             time_context=time_context,
@@ -560,7 +561,7 @@ class ServiceInputMixin:
             reply_payload = self.llm.generate_reply(
                 role_definition=reply_role,
                 persona=persona,
-                input_text=effective_input_text,
+                input_text=input_text,
                 recent_turns=recent_turns,
                 time_context=time_context,
                 affect_context=affect_context,
@@ -581,7 +582,7 @@ class ServiceInputMixin:
         # 結果
         debug_log("Pipeline", f"{cycle_label} done")
         return {
-            "effective_input_text": effective_input_text,
+            "augmented_query_text": augmented_query_text,
             "recall_hint": recall_hint,
             "recall_pack": recall_pack,
             "answer_contract": answer_contract,
@@ -785,7 +786,7 @@ class ServiceInputMixin:
             payload[key] = value
         return payload
 
-    def _pipeline_effective_input_text(
+    def _pipeline_augmented_query_text(
         self,
         *,
         input_text: str,
@@ -801,18 +802,18 @@ class ServiceInputMixin:
         if visual_summary_text in normalized_input_text:
             return input_text
         label = (
-            "添付画像"
+            "conversation_attachment_visual_summary"
             if self._observation_summary_is_conversation_attachment(observation_summary)
-            else "視覚観測"
+            else "visual_summary"
         )
         visual_input_summary = (
-            visual_summary_text
-            if visual_summary_text.startswith(label)
-            else f"{label}では、{visual_summary_text}"
+            f"<<<OTOMEKAIRO_INTERNAL_CONTEXT {label}>>>\n"
+            f"{visual_summary_text}\n"
+            "<<<END_OTOMEKAIRO_INTERNAL_CONTEXT>>>"
         )
         if not normalized_input_text:
             return visual_input_summary
-        return f"{normalized_input_text} {visual_input_summary}"
+        return f"{normalized_input_text}\n\n{visual_input_summary}"
 
     def _observation_summary_is_conversation_attachment(self, observation_summary: dict[str, Any] | None) -> bool:
         if not isinstance(observation_summary, dict):
@@ -3014,7 +3015,7 @@ class ServiceInputMixin:
             state=state,
             runtime_summary=runtime_summary,
             input_text=input_text,
-            effective_input_text=pipeline.get("effective_input_text"),
+            augmented_query_text=pipeline.get("augmented_query_text"),
             client_context=client_context,
             recall_hint=pipeline["recall_hint"],
             recall_pack=pipeline["recall_pack"],
@@ -3030,6 +3031,7 @@ class ServiceInputMixin:
             capability_decision_view=pipeline.get("capability_decision_view"),
             initiative_context=pipeline.get("initiative_context"),
             capability_result_context=pipeline.get("capability_result_context"),
+            visual_observation_context=pipeline.get("visual_observation_context"),
             world_state_trace=pipeline.get("world_state_trace"),
             trigger_kind=trigger_kind,
             input_event_kind=input_event_kind,
@@ -3556,7 +3558,7 @@ class ServiceInputMixin:
             "result_status": "summary",
             "resolver_path": "summary",
             "query": {
-                "input_text": None,
+                "augmented_query_text": None,
                 "current_time": None,
                 "contract": "summary",
                 "boundary": "none",
@@ -5485,7 +5487,7 @@ class ServiceInputMixin:
         cycle_id: str,
         cycle_summary: dict[str, Any],
         input_text: str,
-        effective_input_text: str | None,
+        augmented_query_text: str | None,
         client_context: dict[str, Any],
         runtime_summary: dict[str, Any],
         foreground_world_state: list[dict[str, Any]] | None,
@@ -5507,12 +5509,13 @@ class ServiceInputMixin:
             "runtime_state_summary": runtime_summary,
             "pending_intent_selection": pending_intent_selection or self._empty_pending_intent_selection_trace(),
         }
-        effective_addition_summary = self._effective_input_addition_summary(
+        input_context_addition_summary = self._input_context_addition_summary(
             input_text=input_text,
-            effective_input_text=effective_input_text,
+            augmented_query_text=augmented_query_text,
         )
-        if effective_addition_summary is not None:
-            input_trace["effective_input_addition_summary"] = effective_addition_summary
+        if input_context_addition_summary is not None:
+            input_trace["input_context_addition_summary"] = input_context_addition_summary
+            input_trace["augmented_query_summary"] = self._clamp(str(augmented_query_text or ""))
         if foreground_world_state:
             input_trace["foreground_world_state"] = foreground_world_state
         wake_observation_summary = self._client_context_text(
@@ -5605,7 +5608,7 @@ class ServiceInputMixin:
         *,
         state: dict[str, Any],
         input_text: str,
-        effective_input_text: str | None,
+        augmented_query_text: str | None,
         time_context: dict[str, Any],
         affect_context: dict[str, Any],
         drive_state_summary: list[dict[str, Any]] | None,
@@ -5614,6 +5617,7 @@ class ServiceInputMixin:
         capability_decision_view: list[dict[str, Any]] | None,
         initiative_context: dict[str, Any] | None,
         capability_result_context: dict[str, Any] | None,
+        visual_observation_context: dict[str, Any] | None,
         recall_pack: dict[str, Any],
         decision: dict[str, Any],
         pending_intent_summary: dict[str, Any] | None,
@@ -5633,6 +5637,7 @@ class ServiceInputMixin:
                 "capability_decision_view": capability_decision_view,
                 "initiative_context": initiative_context,
                 "capability_result_context": capability_result_context,
+                "visual_observation_context": visual_observation_context,
                 "recall_pack_summary": self._summarize_recall_pack(recall_pack),
                 "memory_link_context": self._summarize_memory_link_context(
                     recall_pack.get("memory_link_context")
@@ -5642,12 +5647,13 @@ class ServiceInputMixin:
             "pending_intent_candidate_summary": pending_intent_summary,
             "capability_request_candidate_summary": self._decision_capability_request_summary(decision),
         }
-        effective_addition_summary = self._effective_input_addition_summary(
+        input_context_addition_summary = self._input_context_addition_summary(
             input_text=input_text,
-            effective_input_text=effective_input_text,
+            augmented_query_text=augmented_query_text,
         )
-        if effective_addition_summary is not None:
-            trace["effective_context_addition_summary"] = effective_addition_summary
+        if input_context_addition_summary is not None:
+            trace["input_context_addition_summary"] = input_context_addition_summary
+            trace["augmented_query_summary"] = self._clamp(str(augmented_query_text or ""))
         if drive_state_summary:
             trace["drive_state_summary"] = drive_state_summary
         if isinstance(ongoing_action_summary, dict):
@@ -5669,21 +5675,21 @@ class ServiceInputMixin:
             "input": input_payload,
         }
 
-    def _effective_input_addition_summary(
+    def _input_context_addition_summary(
         self,
         *,
         input_text: str,
-        effective_input_text: str | None,
+        augmented_query_text: str | None,
     ) -> str | None:
-        if not isinstance(effective_input_text, str):
+        if not isinstance(augmented_query_text, str):
             return None
         original_text = input_text.strip()
-        effective_text = effective_input_text.strip()
-        if not effective_text or effective_text == original_text:
+        augmented_text = augmented_query_text.strip()
+        if not augmented_text or augmented_text == original_text:
             return None
-        addition_text = effective_text
-        if original_text and effective_text.startswith(original_text):
-            addition_text = effective_text[len(original_text) :].strip()
+        addition_text = augmented_text
+        if original_text and augmented_text.startswith(original_text):
+            addition_text = augmented_text[len(original_text) :].strip()
         if not addition_text:
             return None
         return self._clamp(addition_text)
@@ -6509,7 +6515,7 @@ class ServiceInputMixin:
         state: dict[str, Any],
         runtime_summary: dict[str, Any],
         input_text: str,
-        effective_input_text: str | None,
+        augmented_query_text: str | None,
         client_context: dict[str, Any],
         recall_hint: dict[str, Any],
         recall_pack: dict[str, Any],
@@ -6525,6 +6531,7 @@ class ServiceInputMixin:
         capability_decision_view: list[dict[str, Any]] | None,
         initiative_context: dict[str, Any] | None,
         capability_result_context: dict[str, Any] | None,
+        visual_observation_context: dict[str, Any] | None,
         world_state_trace: dict[str, Any] | None,
         trigger_kind: str,
         input_event_kind: str,
@@ -6578,7 +6585,7 @@ class ServiceInputMixin:
             cycle_id=cycle_id,
             cycle_summary=cycle_summary,
             input_text=input_text,
-            effective_input_text=effective_input_text,
+            augmented_query_text=augmented_query_text,
             client_context=client_context,
             runtime_summary=runtime_summary,
             foreground_world_state=foreground_world_state,
@@ -6586,7 +6593,7 @@ class ServiceInputMixin:
             decision_trace=self._build_success_decision_trace(
                 state=state,
                 input_text=input_text,
-                effective_input_text=effective_input_text,
+                augmented_query_text=augmented_query_text,
                 time_context=time_context,
                 affect_context=affect_context,
                 drive_state_summary=drive_state_summary,
@@ -6595,6 +6602,7 @@ class ServiceInputMixin:
                 capability_decision_view=capability_decision_view,
                 initiative_context=initiative_context,
                 capability_result_context=capability_result_context,
+                visual_observation_context=visual_observation_context,
                 recall_pack=recall_pack,
                 decision=decision,
                 pending_intent_summary=pending_intent_summary,
@@ -6690,7 +6698,7 @@ class ServiceInputMixin:
             cycle_id=cycle_id,
             cycle_summary=cycle_summary,
             input_text=input_text,
-            effective_input_text=None,
+            augmented_query_text=None,
             client_context=client_context,
             runtime_summary=runtime_summary,
             foreground_world_state=None,
