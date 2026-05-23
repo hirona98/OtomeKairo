@@ -27,6 +27,9 @@ OtomeKairo は、HTTPS API サーバとして bootstrap、観測、設定、insp
 - 既定ポートは `55601` を使う
 
 データはデフォルトで `var/otomekairo/` に保存される。
+デバッグログは `var/otomekairo/server.log` に保存される。
+ログは既定で 5MiB を超えるとローテーションし、`server.log.1` から `server.log.3` まで保持する。
+既定の総保持量は `server.log` 本体と 3 世代を合わせて最大約 20MiB である。
 
 ## LLM 接続
 
@@ -107,6 +110,8 @@ VSCode では `F5` で `OtomeKairo: Debug Server` を起動できる。
 OTOMEKAIRO_TLS_CERT_FILE=/path/to/cert.pem \
 OTOMEKAIRO_TLS_KEY_FILE=/path/to/key.pem \
 OTOMEKAIRO_DATA_DIR=var/otomekairo \
+OTOMEKAIRO_DEBUG_LOG_MAX_BYTES=5242880 \
+OTOMEKAIRO_DEBUG_LOG_BACKUP_COUNT=3 \
 PYTHONPATH=src \
 .venv/bin/python -m otomekairo.run
 ```

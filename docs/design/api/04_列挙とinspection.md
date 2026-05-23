@@ -337,3 +337,5 @@ message shape:
 
 ここで流すのは live 表示向けの派生ログであり、inspection の正本ではない。
 完全な prompt、生の LLM 応答全文、長い思考過程は流さない。
+通常サーバ実行では、同じ短い段階要約ログを `OTOMEKAIRO_DATA_DIR/server.log` にも保存する。
+ファイルログは容量上限付きでローテーションする。

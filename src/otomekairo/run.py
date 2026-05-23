@@ -6,7 +6,7 @@ from pathlib import Path
 
 from otomekairo.http_server import OtomeKairoHttpServer
 from otomekairo.service import OtomeKairoService
-from otomekairo.service_common import debug_log
+from otomekairo.service_common import configure_debug_log_file, debug_log
 
 
 # メイン
@@ -17,10 +17,19 @@ def main() -> None:
     cert_file = os.environ.get("OTOMEKAIRO_TLS_CERT_FILE")
     key_file = os.environ.get("OTOMEKAIRO_TLS_KEY_FILE")
     root_dir = Path(os.environ.get("OTOMEKAIRO_DATA_DIR", "var/otomekairo"))
+    log_max_bytes = int(os.environ.get("OTOMEKAIRO_DEBUG_LOG_MAX_BYTES", str(5 * 1024 * 1024)))
+    log_backup_count = int(os.environ.get("OTOMEKAIRO_DEBUG_LOG_BACKUP_COUNT", "3"))
 
     # TLS検証
     if not cert_file or not key_file:
         raise SystemExit("OTOMEKAIRO_TLS_CERT_FILE and OTOMEKAIRO_TLS_KEY_FILE are required.")
+
+    # ログファイル
+    configure_debug_log_file(
+        root_dir / "server.log",
+        max_bytes=log_max_bytes,
+        backup_count=log_backup_count,
+    )
 
     # サービス
     debug_log("Run", f"starting host={host} port={port} data_dir={root_dir}")
