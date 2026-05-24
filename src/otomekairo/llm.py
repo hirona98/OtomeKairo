@@ -256,6 +256,7 @@ class LLMClient:
                     role_definition,
                     persona,
                     input_text,
+                    trigger_kind,
                     recent_turns,
                     time_context,
                     affect_context,
@@ -264,6 +265,8 @@ class LLMClient:
                     ongoing_action_summary,
                     capability_decision_view,
                     initiative_context,
+                    capability_result_context,
+                    visual_observation_context,
                     recall_hint,
                     recall_pack,
                 )
