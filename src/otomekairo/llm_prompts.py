@@ -747,6 +747,8 @@ def _build_decision_trigger_policy(
                 "foreground_signal_summary が grounded で world_state_summary に該当状況が既にあるときは、同じ情報を再取得する capability_request より、preferred_result_kind に沿った reply / noop を優先してください。",
                 "suppression_summary.cooldown_active が true ではない場合、recent_turn_summary だけから cooldown 中だと推測してはいけません。",
                 "background_wake でも foreground_signal_summary が grounded で selected candidate entry の preferred_result_kind=reply なら、suppression_level=medium だけを理由に noop へ倒さず、短い reply を優先してください。",
+                "foreground_signal_summary.desktop_observation_signal.reply_eligibility=eligible かつ novelty_kind が first_success / changed / pending_after_cooldown の場合、background_wake でも未発話の新しい desktop 前景として扱い、selected candidate entry の preferred_result_kind=reply なら短い reply を noop より優先してください。",
+                "foreground_signal_summary.desktop_observation_signal.reply_eligibility=discouraged_by_cooldown の場合、suppression_summary.cooldown_active=true を強い抑制として扱い、原則 noop を選んでください。ただし novelty_kind が first_success / changed で、今まで見ていない desktop 前景への一文コメントが自然な場合だけ、短い reply を選びます。",
                 "InitiativeContext があり pending_intent_summaries が空のときは、drive_state / world_state / ongoing_action から自然な前進理由がある場合だけ reply を選び、弱ければ noop を選んでください。",
                 "selected_candidate_family が ongoing_action で preferred_result_kind=capability_request のときは、available な capability の範囲で follow-up capability_request を検討してください。",
                 "foreground_signal_summary が thin で suppression_summary や intervention_risk_summary が強いとき、特に background_wake や initiative_baseline=low では、押し出しすぎず noop を優先してください。",

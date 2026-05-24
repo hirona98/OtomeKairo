@@ -76,7 +76,11 @@ response:
           "last_status": "succeeded",
           "last_summary": "エディタが開いている",
           "last_error": null,
-          "last_request_id": "vision_capture_request:..."
+          "last_request_id": "vision_capture_request:...",
+          "last_scene_signature": "vision_source_id=... | source_label=... | visual_summary_text=...",
+          "same_scene_count": 1,
+          "last_prompted_at": null,
+          "pending_novel_scene": null
         }
       ],
       "memory_postprocess_runtime_state": {},
@@ -103,6 +107,7 @@ response:
 `runtime_detail` は scheduler、memory postprocess、capability request 待ちのような process-local runtime state を返す。
 `runtime_detail.wake_policy_observations` は現在設定されている `wake_policy.observations` と process-local の直近実行結果を照合した snapshot である。
 各項目は `enabled / vision_source_id / last_run_at / last_status / last_summary / last_error` を返す。
+desktop observation では、process-local novelty 判定用に `last_scene_signature / same_scene_count / last_prompted_at / pending_novel_scene` も返す。
 `last_*` は process-local runtime state であり、server restart をまたいで保持しない。
 `capability_inspection` は `GET /api/inspection/capabilities` と同じ availability 導出結果を current-state snapshot の中で参照しやすく束ねたものである。
 

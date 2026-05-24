@@ -248,7 +248,8 @@ wake API は少なくとも次の挙動を持つ。
 
 - `wake_policy.mode=disabled` なら `noop`
 - `mode=interval` で次回時刻にまだ達していなければ `noop`
-- `mode=interval` で `wake_policy.observations` がある場合、enabled observation を順番に取得し、成功結果をその回の判断へ進む前景シグナルとして扱い、desktop capture は一時観測として、継続状態は `world_state` として整理してから wake 判断を 1 回だけ行う
+- `mode=interval` で `wake_policy.observations` がある場合、enabled observation を順番に取得し、成功結果をその回の判断へ進む前景シグナルとして扱い、desktop capture は一時観測として runtime novelty だけを判定し、継続状態は `world_state` として整理してから wake 判断を 1 回だけ行う
+- cooldown 中の desktop novelty は `discouraged_by_cooldown` として wake 判断へ渡し、runtime の `pending_novel_scene` にも保持し、cooldown 終了後に同じ scene が続く場合は `pending_after_cooldown` として wake 判断へ渡す
 - 再評価時刻に達した保留意図があれば再評価し、必要なら `reply`
 
 server 内の background 起床スケジューラも、同じ wake 1 サイクルを内部的に使う。

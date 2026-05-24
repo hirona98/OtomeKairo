@@ -1520,6 +1520,68 @@ class ServiceSpontaneousMixin:
             ),
         )
 
+    def _emit_wake_reply_event(
+        self,
+        *,
+        cycle_id: str,
+        trigger_kind: str,
+        client_context: dict[str, Any],
+        pipeline: dict[str, Any],
+    ) -> None:
+        if trigger_kind not in {"wake", "background_wake"}:
+            return
+        reply_payload = pipeline.get("reply_payload")
+        if not isinstance(reply_payload, dict):
+            debug_log("Wake", f"{self._short_cycle_id(cycle_id)} reply_event skipped no_reply")
+            return
+        target_client_id = self._wake_reply_target_client_id(client_context)
+        if target_client_id is None:
+            debug_log("Wake", f"{self._short_cycle_id(cycle_id)} reply_event skipped no_client")
+            return
+
+        event = {
+            "event_id": self._next_stream_event_id(),
+            "type": "spontaneous_reply",
+            "data": {
+                "cycle_id": cycle_id,
+                "trigger_kind": trigger_kind,
+                "system_text": f"[{trigger_kind}]",
+                "message": reply_payload["reply_text"],
+            },
+        }
+        sent = self._event_stream_registry.send_to_client(target_client_id, event)
+        debug_log(
+            "Wake",
+            (
+                f"{self._short_cycle_id(cycle_id)} reply_event sent={sent} "
+                f"client={target_client_id} reply_chars={len(reply_payload['reply_text'])}"
+            ),
+        )
+
+    def _wake_reply_target_client_id(self, client_context: dict[str, Any]) -> str | None:
+        client_id = self._client_context_text(client_context.get("client_id"), limit=128)
+        if client_id is not None:
+            return client_id
+
+        wake_observations = client_context.get("wake_observations")
+        if not isinstance(wake_observations, list):
+            return None
+        for observation in wake_observations:
+            if not isinstance(observation, dict) or observation.get("status") != "succeeded":
+                continue
+            if observation.get("capability_id") != "vision.capture":
+                continue
+            vision_source_id = self._client_context_text(observation.get("vision_source_id"), limit=128)
+            if vision_source_id is None:
+                continue
+            vision_source = self._event_stream_registry.get_vision_source(vision_source_id)
+            if not isinstance(vision_source, dict):
+                continue
+            source_client_id = self._client_context_text(vision_source.get("client_id"), limit=128)
+            if source_client_id is not None:
+                return source_client_id
+        return None
+
     def _execute_wake_cycle(
         self,
         *,
@@ -1572,33 +1634,6 @@ class ServiceSpontaneousMixin:
                         consolidate_memory=False,
                         pending_intent_selection=pending_intent_selection,
                     )
-                cooldown_reason = self._wake_cooldown_reason(current_time=started_at)
-                if cooldown_reason is not None:
-                    self._set_last_wake_at(started_at)
-                    debug_log(
-                        "Wake",
-                        f"{self._short_cycle_id(cycle_id)} skip cooldown reason={self._clamp(cooldown_reason)}",
-                    )
-                    pipeline = self._noop_pipeline(
-                        state=state,
-                        started_at=started_at,
-                        reason_summary=cooldown_reason,
-                    )
-                    return self._complete_input_success(
-                        cycle_id=cycle_id,
-                        started_at=started_at,
-                        state=state,
-                        runtime_summary=runtime_summary,
-                        input_text=input_text,
-                        client_context=client_context,
-                        pipeline=pipeline,
-                        trigger_kind=trigger_kind,
-                        input_event_kind=input_event_kind,
-                        input_event_role="system",
-                        consolidate_memory=False,
-                        pending_intent_selection=pending_intent_selection,
-                    )
-
                 # パイプライン
                 selection_result = self._select_due_pending_intent_candidate(
                     state=state,
@@ -1655,6 +1690,13 @@ class ServiceSpontaneousMixin:
                     current_time=started_at,
                     decision=pipeline["decision"],
                     selected_candidate=selected_candidate,
+                    client_context=client_context,
+                )
+                self._emit_wake_reply_event(
+                    cycle_id=cycle_id,
+                    trigger_kind=trigger_kind,
+                    client_context=client_context,
+                    pipeline=pipeline,
                 )
                 debug_log(
                     "Wake",
@@ -2250,6 +2292,7 @@ class ServiceSpontaneousMixin:
         current_time: str,
         decision: dict[str, Any],
         selected_candidate: dict[str, Any] | None,
+        client_context: dict[str, Any] | None = None,
     ) -> None:
         # 返信
         if decision.get("kind") == "reply":
@@ -2262,11 +2305,42 @@ class ServiceSpontaneousMixin:
                         reply_history = self._wake_runtime_state.setdefault("reply_history_by_dedupe", {})
                         reply_history[dedupe_key] = current_time
                     self._remove_pending_intent_candidate(selected_candidate.get("candidate_id"))
+                self._record_desktop_observation_prompted_locked(
+                    current_time=current_time,
+                    client_context=client_context,
+                )
             return
 
         # 将来行動
         if decision.get("kind") == "pending_intent":
             return
+
+    def _record_desktop_observation_prompted_locked(
+        self,
+        *,
+        current_time: str,
+        client_context: dict[str, Any] | None,
+    ) -> None:
+        if not isinstance(client_context, dict):
+            return
+        signal = client_context.get("desktop_observation_signal")
+        if not isinstance(signal, dict) or signal.get("reply_eligibility") not in {
+            "eligible",
+            "discouraged_by_cooldown",
+        }:
+            return
+        observation_id = signal.get("observation_id")
+        scene_signature = signal.get("scene_signature")
+        if not isinstance(observation_id, str) or not observation_id.strip():
+            return
+        if not isinstance(scene_signature, str) or not scene_signature.strip():
+            return
+        runtime = self._wake_observation_runtime_state.get(observation_id.strip())
+        if not isinstance(runtime, dict):
+            return
+        runtime["last_prompted_scene_signature"] = scene_signature.strip()
+        runtime["last_prompted_at"] = current_time
+        runtime.pop("pending_novel_scene", None)
 
     def _next_stream_event_id(self) -> int:
         # カウンター
@@ -2396,6 +2470,19 @@ class ServiceSpontaneousMixin:
         )
         if isinstance(wake_observation_summary, str):
             parts.append(f"定期観測では、{wake_observation_summary}")
+        desktop_signal = self._compact_desktop_observation_signal(
+            client_context.get("desktop_observation_signal")
+        )
+        if isinstance(desktop_signal, dict):
+            novelty_kind = desktop_signal.get("novelty_kind")
+            reply_eligibility = desktop_signal.get("reply_eligibility")
+            reason_summary = desktop_signal.get("reason_summary")
+            if isinstance(novelty_kind, str) and isinstance(reply_eligibility, str):
+                parts.append(
+                    f"desktop観測シグナルは novelty={novelty_kind}, reply_eligibility={reply_eligibility}。"
+                )
+            if isinstance(reason_summary, str):
+                parts.append(f"desktop観測理由は {reason_summary}")
 
         # 前景
         if isinstance(active_app, str):

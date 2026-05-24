@@ -1200,11 +1200,26 @@ class ServiceConfigMixin:
                 "last_request_id",
                 "last_vision_source_id",
                 "last_source_label",
+                "last_active_app",
+                "last_window_title",
                 "last_image_count",
+                "last_success_at",
+                "last_scene_signature",
+                "same_scene_count",
+                "last_prompted_at",
+                "last_prompted_scene_signature",
             ):
                 value = runtime.get(runtime_key)
                 if value is not None:
                     item[runtime_key] = value
+            pending_scene = runtime.get("pending_novel_scene")
+            if isinstance(pending_scene, dict):
+                item["pending_novel_scene"] = {
+                    key: value
+                    for key, value in pending_scene.items()
+                    if key in {"scene_signature", "summary_text", "first_seen_at", "blocked_reason"}
+                    and value is not None
+                }
             summaries.append(item)
         return summaries
 

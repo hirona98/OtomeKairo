@@ -3,6 +3,7 @@ from __future__ import annotations
 import secrets
 import uuid
 from datetime import datetime, timedelta
+from difflib import SequenceMatcher
 from typing import Any
 
 from otomekairo.capabilities import (
@@ -109,6 +110,7 @@ INITIATIVE_DRIVE_FRESHNESS_ADJUSTMENTS = {
 }
 INITIATIVE_AUTONOMOUS_PROBE_SCORE = 0.08
 INITIATIVE_AUTONOMOUS_PROBE_THRESHOLD = 0.34
+DESKTOP_SCENE_SIMILARITY_THRESHOLD = 0.86
 WORLD_STATE_HINT_SCORES = {
     "low": 0.35,
     "medium": 0.65,
@@ -1287,6 +1289,9 @@ class ServiceInputMixin:
         client_context: dict[str, Any],
         world_state_summary: list[dict[str, Any]],
     ) -> dict[str, Any]:
+        desktop_signal = self._compact_desktop_observation_signal(
+            client_context.get("desktop_observation_signal")
+        )
         state_types = sorted(
             {
                 item.get("state_type")
@@ -1294,12 +1299,24 @@ class ServiceInputMixin:
                 if isinstance(item, dict) and isinstance(item.get("state_type"), str)
             }
         )
+        if self._desktop_observation_signal_is_judgable(desktop_signal):
+            payload = {
+                "foreground_thinness": "ready",
+                "reason_summary": "desktop wake observation に未発話の新しい前景があり、短い自発 reply の候補になる。",
+                "world_state_count": len(world_state_summary),
+                "desktop_observation_signal": desktop_signal,
+            }
+            if state_types:
+                payload["state_types"] = state_types[:4]
+            return payload
         if not world_state_summary:
             payload = {
                 "foreground_thinness": "thin",
                 "reason_summary": "前景 world_state がまだ薄く、視覚や周辺状況の追加観測が欲しい。",
                 "world_state_count": 0,
             }
+            if desktop_signal:
+                payload["desktop_observation_signal"] = desktop_signal
             return payload
 
         grounded_types = {"schedule", "social_context", "body"}
@@ -1319,6 +1336,8 @@ class ServiceInputMixin:
         }
         if state_types:
             payload["state_types"] = state_types[:4]
+        if desktop_signal:
+            payload["desktop_observation_signal"] = desktop_signal
         return payload
 
     def _initiative_foreground_thinness(self, foreground_signal_summary: dict[str, Any] | None) -> str | None:
@@ -2088,13 +2107,14 @@ class ServiceInputMixin:
         intervention_state: dict[str, Any],
         capability_summary: dict[str, Any],
     ) -> dict[str, Any]:
+        desktop_signal = self._initiative_desktop_observation_signal(foreground_signal_summary)
         payload: dict[str, Any] = {
             "family": "autonomous",
             "available": False,
             "selected": False,
             "priority_score": 0.0,
         }
-        available = bool(drive_summaries or world_state_summary or recent_turn_summary)
+        available = bool(drive_summaries or world_state_summary or recent_turn_summary or desktop_signal)
         if not available:
             payload["blocking_reason_summary"] = "drive_state / world_state / 直近会話の前景がまだ弱い。"
             return payload
@@ -2109,6 +2129,8 @@ class ServiceInputMixin:
             strongest_drive=strongest_drive,
             world_state_summary=world_state_summary,
         )
+        if desktop_signal:
+            priority_score += 0.18
         if foreground_thinness == "ready":
             priority_score += 0.04
         elif foreground_thinness == "thin":
@@ -2137,12 +2159,17 @@ class ServiceInputMixin:
             strongest_drive=strongest_drive,
             world_state_summary=world_state_summary,
             recent_turn_summary=recent_turn_summary,
+            desktop_signal=desktop_signal,
+        )
+        desktop_discouraged_by_cooldown = (
+            isinstance(desktop_signal, dict)
+            and desktop_signal.get("reply_eligibility") == "discouraged_by_cooldown"
         )
         if isinstance(probe_preference, dict):
             preferred_result_kind = "capability_request"
             preferred_result_reason = self._client_context_text(probe_preference.get("reason_summary"), limit=160)
             priority_score += INITIATIVE_AUTONOMOUS_PROBE_SCORE
-        elif suppression_level == "high":
+        elif suppression_level == "high" and not desktop_discouraged_by_cooldown:
             preferred_result_kind = "noop"
             preferred_result_reason = "suppression が high で、今回は押し出さず見送るほうが自然。"
         elif (
@@ -2170,6 +2197,7 @@ class ServiceInputMixin:
                     initiative_baseline=initiative_baseline,
                     capability_summary=capability_summary,
                     probe_preference=probe_preference,
+                    desktop_signal=desktop_signal,
                 ),
                 "preferred_result_kind": preferred_result_kind,
                 "preferred_result_reason_summary": preferred_result_reason,
@@ -2232,6 +2260,9 @@ class ServiceInputMixin:
         initiative_baseline: dict[str, Any],
         capability_summary: dict[str, Any],
     ) -> str | None:
+        desktop_signal = self._initiative_desktop_observation_signal(foreground_signal_summary)
+        if desktop_signal:
+            return None
         reasons: list[str] = []
         level = self._client_context_text(initiative_baseline.get("level"), limit=16)
         if level == "low":
@@ -2364,8 +2395,18 @@ class ServiceInputMixin:
         initiative_baseline: dict[str, Any],
         capability_summary: dict[str, Any],
         probe_preference: dict[str, Any] | None,
+        desktop_signal: dict[str, Any] | None,
     ) -> str | None:
         parts: list[str] = []
+        if desktop_signal:
+            novelty_kind = self._client_context_text(desktop_signal.get("novelty_kind"), limit=48)
+            summary_text = self._client_context_text(desktop_signal.get("summary_text"), limit=120)
+            if novelty_kind is not None and summary_text is not None:
+                parts.append(f"desktop observation {novelty_kind}:{summary_text}")
+            elif novelty_kind is not None:
+                parts.append(f"desktop observation {novelty_kind}")
+            else:
+                parts.append("desktop observation に未発話の新しい前景")
         if drive_summaries:
             parts.append(f"drive_state {len(drive_summaries)} 件")
         if isinstance(strongest_drive, dict):
@@ -2418,7 +2459,13 @@ class ServiceInputMixin:
         strongest_drive: dict[str, Any] | None,
         world_state_summary: list[dict[str, Any]],
         recent_turn_summary: list[dict[str, str]],
+        desktop_signal: dict[str, Any] | None,
     ) -> str:
+        if desktop_signal:
+            novelty_kind = self._client_context_text(desktop_signal.get("novelty_kind"), limit=48)
+            if novelty_kind in {"first_success", "changed", "pending_after_cooldown"}:
+                return "desktop wake observation に未発話の新しい前景があり、短い reply で触れるのが自然。"
+            return "desktop wake observation の前景を見て、必要なら短い reply を返せる。"
         if isinstance(strongest_drive, dict) and world_state_summary:
             return "strongest drive と前景 world が噛み合っており、短い reply が自然。"
         if isinstance(strongest_drive, dict) and recent_turn_summary:
@@ -2428,6 +2475,19 @@ class ServiceInputMixin:
         if recent_turn_summary:
             return "直近文脈が残っており、軽い reply で前へ出られる。"
         return "自発判断の前景が残っており、短い reply を返せる。"
+
+    def _initiative_desktop_observation_signal(
+        self,
+        foreground_signal_summary: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if not isinstance(foreground_signal_summary, dict):
+            return None
+        signal = self._compact_desktop_observation_signal(
+            foreground_signal_summary.get("desktop_observation_signal")
+        )
+        if not self._desktop_observation_signal_is_judgable(signal):
+            return None
+        return signal
 
     def _initiative_intervention_risk_summary(
         self,
@@ -2539,7 +2599,7 @@ class ServiceInputMixin:
 
         # クールダウン
         cooldown_reason = self._wake_cooldown_reason(current_time=started_at)
-        if cooldown_reason is not None:
+        if cooldown_reason is not None and not self._client_context_has_judgable_desktop_observation(client_context):
             self._set_last_wake_at(started_at)
             debug_log("Wake", f"{cycle_label} skipped cooldown={self._clamp(cooldown_reason)}")
             return (
@@ -2547,6 +2607,8 @@ class ServiceInputMixin:
                 input_text,
                 client_context,
             )
+        if cooldown_reason is not None:
+            debug_log("Wake", f"{cycle_label} cooldown judged desktop_observation={self._clamp(cooldown_reason)}")
 
         # 候補
         if selected_candidate is None:
@@ -2637,18 +2699,22 @@ class ServiceInputMixin:
                 observation=observation,
                 cycle_id=cycle_id,
             )
-            self._record_wake_policy_observation_runtime_state(
+            summary = self._record_wake_policy_observation_runtime_state(
                 summary=summary,
                 current_time=started_at,
             )
             summaries.append(summary)
         summary_text = self._wake_policy_observation_summary_text(summaries)
         debug_log("Wake", f"{cycle_label} observations done summary={self._clamp(summary_text)}")
-        return {
+        next_context = {
             **client_context,
             "wake_observations": summaries,
             "wake_observation_summary": summary_text,
         }
+        desktop_signal = self._wake_policy_desktop_observation_signal(summaries)
+        if desktop_signal:
+            next_context["desktop_observation_signal"] = desktop_signal
+        return next_context
 
     def _enabled_wake_policy_observations(self, state: dict[str, Any]) -> list[dict[str, Any]]:
         wake_policy = state.get("wake_policy")
@@ -2867,7 +2933,15 @@ class ServiceInputMixin:
         request_id = capability_response.get("request_id")
         if isinstance(request_id, str) and request_id.strip():
             payload["request_id"] = request_id.strip()
-        for key in ("vision_source_id", "source_kind", "source_label", "visual_summary_text", "error"):
+        for key in (
+            "vision_source_id",
+            "source_kind",
+            "source_label",
+            "active_app",
+            "window_title",
+            "visual_summary_text",
+            "error",
+        ):
             value = observation_summary.get(key)
             if isinstance(value, str) and value.strip():
                 payload[key] = self._clamp(value.strip(), limit=160)
@@ -2933,13 +3007,30 @@ class ServiceInputMixin:
         *,
         summary: dict[str, Any],
         current_time: str,
-    ) -> None:
+    ) -> dict[str, Any]:
         observation_id = summary.get("observation_id")
         if not isinstance(observation_id, str) or not observation_id.strip():
-            return
+            return summary
         status = summary.get("status")
         if not isinstance(status, str) or not status.strip():
-            return
+            return summary
+        normalized_observation_id = observation_id.strip()
+        with self._runtime_state_lock:
+            previous_runtime = dict(self._wake_observation_runtime_state.get(normalized_observation_id, {}))
+
+        enriched_summary = dict(summary)
+        desktop_signal = self._build_desktop_observation_signal(
+            summary=summary,
+            previous_runtime=previous_runtime,
+            current_time=current_time,
+        )
+        if desktop_signal:
+            enriched_summary["desktop_observation_signal"] = desktop_signal
+            for key in ("novelty_kind", "reply_eligibility", "scene_signature"):
+                value = desktop_signal.get(key)
+                if isinstance(value, str) and value.strip():
+                    enriched_summary[key] = value.strip()
+
         last_summary = self._client_context_text(summary.get("visual_summary_text"), limit=160)
         if last_summary is None and status == "succeeded":
             last_summary = self._client_context_text(summary.get("source_label"), limit=80) or "取得済み"
@@ -2947,7 +3038,7 @@ class ServiceInputMixin:
         if last_error is None:
             last_error = self._client_context_text(summary.get("error"), limit=160)
         payload: dict[str, Any] = {
-            "observation_id": observation_id.strip(),
+            "observation_id": normalized_observation_id,
             "last_run_at": current_time,
             "last_status": status.strip(),
             "last_summary": last_summary,
@@ -2955,10 +3046,232 @@ class ServiceInputMixin:
             "last_request_id": summary.get("request_id") if isinstance(summary.get("request_id"), str) else None,
             "last_vision_source_id": summary.get("vision_source_id") if isinstance(summary.get("vision_source_id"), str) else None,
             "last_source_label": summary.get("source_label") if isinstance(summary.get("source_label"), str) else None,
+            "last_active_app": summary.get("active_app") if isinstance(summary.get("active_app"), str) else None,
+            "last_window_title": summary.get("window_title") if isinstance(summary.get("window_title"), str) else None,
             "last_image_count": summary.get("image_count") if isinstance(summary.get("image_count"), int) else None,
         }
+        self._apply_desktop_observation_runtime_payload(
+            payload=payload,
+            summary=enriched_summary,
+            previous_runtime=previous_runtime,
+            current_time=current_time,
+        )
         with self._runtime_state_lock:
-            self._wake_observation_runtime_state[observation_id.strip()] = payload
+            self._wake_observation_runtime_state[normalized_observation_id] = payload
+        return enriched_summary
+
+    def _build_desktop_observation_signal(
+        self,
+        *,
+        summary: dict[str, Any],
+        previous_runtime: dict[str, Any],
+        current_time: str,
+    ) -> dict[str, Any] | None:
+        if not self._wake_observation_is_desktop_vision_capture(summary):
+            return None
+        scene_signature = self._desktop_observation_scene_signature(summary)
+        if scene_signature is None:
+            return None
+        previous_signature = self._client_context_text(previous_runtime.get("last_scene_signature"), limit=320)
+        pending_scene = previous_runtime.get("pending_novel_scene")
+        pending_signature = None
+        if isinstance(pending_scene, dict):
+            pending_signature = self._client_context_text(pending_scene.get("scene_signature"), limit=320)
+        last_prompted_signature = self._client_context_text(
+            previous_runtime.get("last_prompted_scene_signature"),
+            limit=320,
+        )
+        cooldown_reason = self._wake_cooldown_reason(current_time=current_time)
+        cooldown_active = cooldown_reason is not None
+        same_as_previous = self._desktop_scene_signatures_similar(scene_signature, previous_signature)
+        same_as_pending = self._desktop_scene_signatures_similar(scene_signature, pending_signature)
+        same_as_prompted = self._desktop_scene_signatures_similar(scene_signature, last_prompted_signature)
+
+        if same_as_pending and not cooldown_active and not same_as_prompted:
+            novelty_kind = "pending_after_cooldown"
+        elif same_as_prompted:
+            novelty_kind = "already_prompted"
+        elif previous_signature is None:
+            novelty_kind = "first_success"
+        elif same_as_previous:
+            novelty_kind = "same"
+        else:
+            novelty_kind = "changed"
+
+        reply_eligible_novelty = novelty_kind in {"first_success", "changed", "pending_after_cooldown"}
+        if same_as_prompted:
+            reply_eligibility = "already_prompted"
+        elif cooldown_active and reply_eligible_novelty:
+            reply_eligibility = "discouraged_by_cooldown"
+        elif reply_eligible_novelty:
+            reply_eligibility = "eligible"
+        else:
+            reply_eligibility = "not_needed"
+
+        reason_summary = self._desktop_observation_signal_reason(
+            novelty_kind=novelty_kind,
+            reply_eligibility=reply_eligibility,
+            cooldown_reason=cooldown_reason,
+        )
+        signal: dict[str, Any] = {
+            "observation_id": summary.get("observation_id"),
+            "novelty_kind": novelty_kind,
+            "reply_eligibility": reply_eligibility,
+            "reason_summary": reason_summary,
+            "scene_signature": scene_signature,
+            "summary_text": self._client_context_text(summary.get("visual_summary_text"), limit=160),
+            "source_label": self._client_context_text(summary.get("source_label"), limit=80),
+            "active_app": self._client_context_text(summary.get("active_app"), limit=80),
+            "window_title": self._client_context_text(summary.get("window_title"), limit=120),
+            "cooldown_active": cooldown_active,
+        }
+        if cooldown_reason is not None:
+            signal["cooldown_reason"] = cooldown_reason
+        return {key: value for key, value in signal.items() if value is not None}
+
+    def _apply_desktop_observation_runtime_payload(
+        self,
+        *,
+        payload: dict[str, Any],
+        summary: dict[str, Any],
+        previous_runtime: dict[str, Any],
+        current_time: str,
+    ) -> None:
+        signal = summary.get("desktop_observation_signal")
+        if not isinstance(signal, dict):
+            return
+        scene_signature = self._client_context_text(signal.get("scene_signature"), limit=320)
+        if scene_signature is None:
+            return
+        previous_signature = self._client_context_text(previous_runtime.get("last_scene_signature"), limit=320)
+        same_count = previous_runtime.get("same_scene_count")
+        if not isinstance(same_count, int) or same_count < 0:
+            same_count = 0
+        payload["last_success_at"] = current_time
+        payload["last_scene_signature"] = scene_signature
+        if self._desktop_scene_signatures_similar(scene_signature, previous_signature):
+            payload["same_scene_count"] = same_count + 1
+        else:
+            payload["same_scene_count"] = 1
+        for key in ("last_prompted_scene_signature", "last_prompted_at"):
+            value = previous_runtime.get(key)
+            if isinstance(value, str) and value.strip():
+                payload[key] = value.strip()
+
+        pending_scene = previous_runtime.get("pending_novel_scene")
+        if isinstance(pending_scene, dict):
+            payload["pending_novel_scene"] = dict(pending_scene)
+        reply_eligibility = signal.get("reply_eligibility")
+        if reply_eligibility == "discouraged_by_cooldown":
+            first_seen_at = current_time
+            if isinstance(pending_scene, dict) and self._desktop_scene_signatures_similar(
+                scene_signature,
+                self._client_context_text(pending_scene.get("scene_signature"), limit=320),
+            ):
+                previous_first_seen_at = pending_scene.get("first_seen_at")
+                if isinstance(previous_first_seen_at, str) and previous_first_seen_at.strip():
+                    first_seen_at = previous_first_seen_at.strip()
+            payload["pending_novel_scene"] = {
+                "scene_signature": scene_signature,
+                "summary_text": signal.get("summary_text"),
+                "first_seen_at": first_seen_at,
+                "suppression_reason": "cooldown",
+            }
+        elif reply_eligibility in {"eligible", "already_prompted"}:
+            payload.pop("pending_novel_scene", None)
+
+    def _wake_observation_is_desktop_vision_capture(self, summary: dict[str, Any]) -> bool:
+        return (
+            summary.get("status") == "succeeded"
+            and summary.get("capability_id") == "vision.capture"
+            and isinstance(summary.get("source_kind"), str)
+            and summary["source_kind"].strip() == "desktop"
+        )
+
+    def _desktop_observation_scene_signature(self, summary: dict[str, Any]) -> str | None:
+        parts: list[str] = []
+        for key in ("vision_source_id", "source_label", "active_app", "window_title", "visual_summary_text"):
+            value = self._client_context_text(summary.get(key), limit=160)
+            if value is not None:
+                parts.append(f"{key}={value}")
+        if not parts:
+            return None
+        normalized = " | ".join(" ".join(part.lower().split()) for part in parts)
+        return self._clamp(normalized, limit=320)
+
+    def _desktop_scene_signatures_similar(self, current: str | None, previous: str | None) -> bool:
+        if current is None or previous is None:
+            return False
+        if current == previous:
+            return True
+        current_fields = self._desktop_scene_signature_fields(current)
+        previous_fields = self._desktop_scene_signature_fields(previous)
+        for key in ("vision_source_id", "active_app", "window_title"):
+            current_value = current_fields.get(key)
+            previous_value = previous_fields.get(key)
+            if current_value and previous_value and current_value != previous_value:
+                return False
+        current_summary = current_fields.get("visual_summary_text") or current
+        previous_summary = previous_fields.get("visual_summary_text") or previous
+        return SequenceMatcher(None, current_summary, previous_summary).ratio() >= DESKTOP_SCENE_SIMILARITY_THRESHOLD
+
+    def _desktop_scene_signature_fields(self, signature: str) -> dict[str, str]:
+        fields: dict[str, str] = {}
+        for part in signature.split(" | "):
+            key, separator, value = part.partition("=")
+            if separator and key and value:
+                fields[key] = value
+        return fields
+
+    def _desktop_observation_signal_reason(
+        self,
+        *,
+        novelty_kind: str,
+        reply_eligibility: str,
+        cooldown_reason: str | None,
+    ) -> str:
+        if reply_eligibility == "discouraged_by_cooldown":
+            return cooldown_reason or "cooldown 中なので強く抑制し、判断入力には渡す。"
+        if reply_eligibility == "already_prompted":
+            return "この desktop scene には既に自発 reply 済みなので、繰り返さない。"
+        if novelty_kind == "first_success":
+            return "desktop wake observation の初回成功で、未発話の前景として扱う。"
+        if novelty_kind == "changed":
+            return "desktop wake observation が前回と変化し、未発話の前景として扱う。"
+        if novelty_kind == "pending_after_cooldown":
+            return "cooldown 中に保留した desktop scene がまだ見えており、今は短い reply の候補になる。"
+        return "desktop scene は前回と大きく変わらないため、通常は見送る。"
+
+    def _wake_policy_desktop_observation_signal(self, summaries: list[dict[str, Any]]) -> dict[str, Any] | None:
+        for summary in summaries:
+            if not isinstance(summary, dict):
+                continue
+            signal = summary.get("desktop_observation_signal")
+            if isinstance(signal, dict) and signal:
+                return dict(signal)
+        return None
+
+    def _compact_desktop_observation_signal(self, signal: Any) -> dict[str, Any] | None:
+        if not isinstance(signal, dict):
+            return None
+        payload: dict[str, Any] = {}
+        for key, limit in (
+            ("observation_id", 96),
+            ("novelty_kind", 48),
+            ("reply_eligibility", 48),
+            ("reason_summary", 180),
+            ("summary_text", 160),
+            ("source_label", 80),
+            ("active_app", 80),
+            ("window_title", 120),
+        ):
+            value = self._client_context_text(signal.get(key), limit=limit)
+            if value is not None:
+                payload[key] = value
+        cooldown_active = signal.get("cooldown_active")
+        if isinstance(cooldown_active, bool):
+            payload["cooldown_active"] = cooldown_active
+        return payload or None
 
     def _has_autonomous_initiative_context(
         self,
@@ -3004,9 +3317,21 @@ class ServiceInputMixin:
         wake_observations = client_context.get("wake_observations")
         if not isinstance(wake_observations, list):
             return False
+        desktop_signal = self._compact_desktop_observation_signal(
+            client_context.get("desktop_observation_signal")
+        )
+        if desktop_signal:
+            return self._desktop_observation_signal_is_judgable(desktop_signal)
         for item in wake_observations:
             if not isinstance(item, dict) or item.get("status") != "succeeded":
                 continue
+            if (
+                item.get("capability_id") == "vision.capture"
+                and isinstance(item.get("source_kind"), str)
+                and item["source_kind"].strip() == "desktop"
+            ):
+                signal = self._compact_desktop_observation_signal(item.get("desktop_observation_signal"))
+                return self._desktop_observation_signal_is_judgable(signal)
             summary_text = item.get("visual_summary_text")
             if isinstance(summary_text, str) and summary_text.strip():
                 return True
@@ -3014,6 +3339,33 @@ class ServiceInputMixin:
             if isinstance(image_count, int) and image_count > 0:
                 return True
         return False
+
+    def _client_context_has_judgable_desktop_observation(
+        self,
+        client_context: dict[str, Any] | None,
+    ) -> bool:
+        if not isinstance(client_context, dict):
+            return False
+        signal = self._compact_desktop_observation_signal(
+            client_context.get("desktop_observation_signal")
+        )
+        if self._desktop_observation_signal_is_judgable(signal):
+            return True
+        wake_observations = client_context.get("wake_observations")
+        if not isinstance(wake_observations, list):
+            return False
+        for item in wake_observations:
+            if not isinstance(item, dict):
+                continue
+            signal = self._compact_desktop_observation_signal(item.get("desktop_observation_signal"))
+            if self._desktop_observation_signal_is_judgable(signal):
+                return True
+        return False
+
+    def _desktop_observation_signal_is_judgable(self, signal: dict[str, Any] | None) -> bool:
+        if not isinstance(signal, dict):
+            return False
+        return signal.get("reply_eligibility") in {"eligible", "discouraged_by_cooldown"}
 
     def _complete_input_success(
         self,
@@ -4662,6 +5014,8 @@ class ServiceInputMixin:
                 "vision_source_id",
                 "source_kind",
                 "source_label",
+                "active_app",
+                "window_title",
                 "visual_summary_text",
                 "image_interpreted",
                 "visual_confidence_hint",
@@ -6073,6 +6427,11 @@ class ServiceInputMixin:
                         for value in state_types
                         if isinstance(value, str) and value.strip()
                     ][:4]
+                desktop_signal = self._compact_desktop_observation_signal(
+                    foreground_signal_summary.get("desktop_observation_signal")
+                )
+                if desktop_signal:
+                    compact_foreground_signal["desktop_observation_signal"] = desktop_signal
                 if compact_foreground_signal:
                     payload["foreground_signal_summary"] = compact_foreground_signal
             selected_candidate_family = initiative_context.get("selected_candidate_family")
@@ -6314,6 +6673,11 @@ class ServiceInputMixin:
                 item["capability_request_summary"] = self._compact_capability_request_summary(
                     capability_request_summary
                 )
+            desktop_signal = self._compact_desktop_observation_signal(
+                observation.get("desktop_observation_signal")
+            )
+            if desktop_signal:
+                item["desktop_observation_signal"] = desktop_signal
             if item:
                 payload.append(item)
         return payload

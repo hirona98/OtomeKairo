@@ -171,6 +171,19 @@ server -> client の代表例:
 }
 ```
 
+```json
+{
+  "event_id": 9,
+  "type": "spontaneous_reply",
+  "data": {
+    "cycle_id": "cycle:...",
+    "trigger_kind": "background_wake",
+    "system_text": "[background_wake]",
+    "message": "CocoroConsole のディレクトリまで進んだのですね。"
+  }
+}
+```
+
 少なくとも次の event type を持つ。
 
 - `vision.capture_request`
@@ -182,9 +195,11 @@ server -> client の代表例:
 - `location.status_request`
 - `social.status_request`
 - `capability_result`
+- `spontaneous_reply`
 
 `vision.capture_request`、`external.status_request`、`schedule.status_request`、`device.status_request`、`body.status_request`、`environment.status_request`、`location.status_request`、`social.status_request` は capability 実行要求である。
 `capability_result` は accepted capability result を shared pipeline に戻した後、その follow-up が `reply` になったときの通知である。
+`spontaneous_reply` は `wake / background_wake` cycle が `reply` になったとき、同じ cycle の client context または wake observation の `vision_source_id` から解決した client へ送る通知である。
 capability 実行要求と結果の対応は [05_実行連携.md](05_実行連携.md) を正とする。
 
 主な失敗:

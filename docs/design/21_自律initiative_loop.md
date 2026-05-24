@@ -131,6 +131,11 @@ LLM の自由文をそのまま状態遷移へ使わない。
 `wake_policy.observations` は interval wake の判断前に enabled 項目だけを順番に取得する。
 `wake_policy.observations` の成功結果は、その回の initiative 判断へ進む前景シグナルとして扱う。
 desktop capture の取得結果は一時観測として同じ wake 判断だけに使い、継続状態になる取得結果だけを `world_state` へ反映する。
+desktop capture の短い scene signature と直近自発 reply 済み scene は process-local runtime にだけ保持し、`world_state` と記憶には保存しない。
+desktop capture の novelty が `first_success / changed / pending_after_cooldown` で、同じ scene に未発話かつ cooldown 中ではない場合、server は `desktop_observation_signal.reply_eligibility=eligible` を initiative context に入れる。
+cooldown 中の `first_success / changed` は `desktop_observation_signal.reply_eligibility=discouraged_by_cooldown` として initiative context に入れ、cooldown を強い抑制として LLM 判断へ渡す。
+cooldown 中の新しい desktop capture は process-local runtime の `pending_novel_scene` としても保持する。
+cooldown 終了後も同じ scene が見えている場合、server は `pending_after_cooldown` として 1 回だけ短い reply 候補にする。
 複数 observation がある場合も、server は取得結果を整理したあとに 1 回だけ initiative 判断を行う。
 system wake 起点で明示 source context が無い `visual_context / body / schedule / social_context / environment / location` 候補は、推測候補として正規化時に破棄する。
 
@@ -224,6 +229,9 @@ background wake 起床制御 matrix は次の 5 件に固定する。
 強い `drive_state` が特定の status family を要求し、対応 state type の新鮮な foreground `world_state` が既にある場合は、同じ status capability と `vision.capture` の両方を選ばず、既存要約を使う。
 status refresh の鮮度判定は判断前から存在した foreground `world_state` だけを使い、現在の wake 入力から推測生成された `world_state` では再取得を抑止しない。
 background wake では、強い `drive_state` が無く `visual_context / external_service / device` だけが見えている場合、薄い前景として `noop` を優先する。
+background wake でも `desktop_observation_signal.reply_eligibility=eligible` かつ `preferred_result_kind=reply` の場合、未発話の新しい desktop 前景として短い reply を `noop` より優先する。
+`desktop_observation_signal.reply_eligibility=discouraged_by_cooldown` の場合、cooldown を強い抑制として扱い、原則 `noop` を選ぶ。ただし `first_success / changed` の desktop 前景に一文コメントすることが自然な場合だけ、短い `reply` を選ぶ。
+`wake / background_wake` cycle が `reply` になった場合、server は `spontaneous_reply` event を client へ送る。送信先 client は cycle の client context または wake observation の `vision_source_id` から解決する。
 grounded foreground の `world_state` が既にある場合、candidate entry に `preferred_capability_id` が無い限り、同じ情報を再取得する capability request より `preferred_result_kind` の `reply / noop` を優先する。
 非ユーザー起点の判断では、判断前から存在する同じ state type の新鮮な foreground `world_state` がある status capability に `fresh_world_state_available=true` を付け、実 LLM の compact digest で request しなかった境界を確認する。
 desktop 以外の `vision.capture` は `vision_source_id` が一致する新鮮な `visual_context` を `fresh_world_state_by_vision_source` として扱い、別 source の再観測は遮断しない。
