@@ -4,7 +4,12 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from otomekairo.llm_contexts import DecisionContext, InitiativeContext, ReplyContext
+from otomekairo.llm_contexts import (
+    DecisionContext,
+    InitiativeCandidateFamily,
+    InitiativeContext,
+    ReplyContext,
+)
 from otomekairo.llm_contracts import (
     LLMContractError,
     LLMError,
@@ -309,7 +314,7 @@ class LLMClient:
         selected_family = self._selected_initiative_family_entry(context.initiative_context)
         if selected_family is None:
             return
-        preferred_result_kind = selected_family.get("preferred_result_kind")
+        preferred_result_kind = selected_family.preferred_result_kind
         if not isinstance(preferred_result_kind, str) or not preferred_result_kind:
             return
         decision_kind = payload.get("kind")
@@ -326,7 +331,7 @@ class LLMClient:
                 f"kind={preferred_result_kind} を返してください。"
             )
         if decision_kind == "capability_request":
-            preferred_capability_id = selected_family.get("preferred_capability_id")
+            preferred_capability_id = selected_family.preferred_capability_id
             request_payload = payload.get("capability_request")
             request_capability_id = (
                 request_payload.get("capability_id")
@@ -645,7 +650,10 @@ class LLMClient:
             "受け取った result に基づく reply / noop / pending_intent を返してください。"
         )
 
-    def _selected_initiative_family_entry(self, initiative_context: InitiativeContext) -> dict[str, Any] | None:
+    def _selected_initiative_family_entry(
+        self,
+        initiative_context: InitiativeContext,
+    ) -> InitiativeCandidateFamily | None:
         return initiative_context.selected_family_entry()
 
     def generate_reply(

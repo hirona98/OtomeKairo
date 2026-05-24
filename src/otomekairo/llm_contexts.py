@@ -1,7 +1,44 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
+
+
+@dataclass(frozen=True, slots=True)
+class InitiativeCandidateFamily:
+    family: str
+    available: bool
+    selected: bool
+    priority_score: float
+    reason_summary: str | None = None
+    preferred_result_kind: str | None = None
+    preferred_result_reason_summary: str | None = None
+    blocking_reason_summary: str | None = None
+    preferred_capability_id: str | None = None
+    preferred_capability_input: dict[str, Any] | None = None
+
+    def with_selected(self, *, selected: bool) -> "InitiativeCandidateFamily":
+        return replace(self, selected=selected)
+
+    def to_prompt_payload(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "family": self.family,
+            "available": self.available,
+            "selected": self.selected,
+            "priority_score": self.priority_score,
+        }
+        for key, value in (
+            ("reason_summary", self.reason_summary),
+            ("preferred_result_kind", self.preferred_result_kind),
+            ("preferred_result_reason_summary", self.preferred_result_reason_summary),
+            ("blocking_reason_summary", self.blocking_reason_summary),
+            ("preferred_capability_id", self.preferred_capability_id),
+        ):
+            if isinstance(value, str) and value.strip():
+                payload[key] = value
+        if isinstance(self.preferred_capability_input, dict):
+            payload["preferred_capability_input"] = self.preferred_capability_input
+        return payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,23 +55,19 @@ class InitiativeContext:
     world_state_summary: list[dict[str, Any]]
     ongoing_action_summary: dict[str, Any] | None
     capability_summary: dict[str, Any]
-    candidate_families: list[dict[str, Any]]
+    candidate_families: list[InitiativeCandidateFamily]
     selected_candidate_family: str | None
     intervention_state: dict[str, Any]
     suppression_summary: dict[str, Any]
     intervention_risk_summary: str
 
-    def selected_family_entry(self) -> dict[str, Any] | None:
+    def selected_family_entry(self) -> InitiativeCandidateFamily | None:
         for family in self.candidate_families:
-            if not isinstance(family, dict):
-                continue
-            family_name = family.get("family")
-            if family.get("selected") is True:
+            if family.selected is True:
                 return family
             if (
                 isinstance(self.selected_candidate_family, str)
-                and isinstance(family_name, str)
-                and family_name.strip() == self.selected_candidate_family
+                and family.family.strip() == self.selected_candidate_family
             ):
                 return family
         return None
@@ -53,7 +86,7 @@ class InitiativeContext:
             "world_state_summary": self.world_state_summary,
             "ongoing_action_summary": self.ongoing_action_summary,
             "capability_summary": self.capability_summary,
-            "candidate_families": self.candidate_families,
+            "candidate_families": [family.to_prompt_payload() for family in self.candidate_families],
             "selected_candidate_family": self.selected_candidate_family,
             "intervention_state": self.intervention_state,
             "suppression_summary": self.suppression_summary,

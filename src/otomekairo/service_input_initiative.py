@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from otomekairo.llm_contexts import InitiativeContext
+from otomekairo.llm_contexts import InitiativeCandidateFamily, InitiativeContext
 from otomekairo.service_common import debug_log
 from otomekairo.service_input_constants import (
     INITIATIVE_AUTONOMOUS_PROBE_SCORE,
@@ -104,7 +104,7 @@ class ServiceInputInitiativeMixin:
             "Initiative",
             (
                 f"trigger={trigger_kind} selected={selected_candidate_family or '-'} "
-                f"preferred={selected_family_entry.get('preferred_result_kind') if isinstance(selected_family_entry, dict) else '-'} "
+                f"preferred={selected_family_entry.preferred_result_kind if selected_family_entry is not None else '-'} "
                 f"suppression={suppression_summary.get('suppression_level', '-')} "
                 f"foreground={foreground_signal_summary.get('foreground_thinness', '-')} "
                 f"desktop={desktop_debug}"
@@ -838,7 +838,7 @@ class ServiceInputInitiativeMixin:
         initiative_baseline: dict[str, Any],
         intervention_state: dict[str, Any],
         capability_summary: dict[str, Any],
-    ) -> list[dict[str, Any]]:
+    ) -> list[InitiativeCandidateFamily]:
         pending_pool_count = 0
         pending_eligible_count = 0
         selection_reason: str | None = None
@@ -874,25 +874,25 @@ class ServiceInputInitiativeMixin:
             ),
         ]
         selected_family = self._initiative_selected_candidate_family_name(candidate_families)
-        for family in candidate_families:
-            family["selected"] = family.get("family") == selected_family and family.get("available") is True
-        return candidate_families
+        return [
+            family.with_selected(selected=family.family == selected_family and family.available is True)
+            for family in candidate_families
+        ]
 
     def _initiative_ongoing_action_family(
         self,
         *,
         ongoing_action_summary: dict[str, Any] | None,
         capability_summary: dict[str, Any],
-    ) -> dict[str, Any]:
-        payload: dict[str, Any] = {
-            "family": "ongoing_action",
-            "available": False,
-            "selected": False,
-            "priority_score": 0.0,
-        }
+    ) -> InitiativeCandidateFamily:
         if not isinstance(ongoing_action_summary, dict):
-            payload["blocking_reason_summary"] = "継続中の ongoing_action は無い。"
-            return payload
+            return InitiativeCandidateFamily(
+                family="ongoing_action",
+                available=False,
+                selected=False,
+                priority_score=0.0,
+                blocking_reason_summary="継続中の ongoing_action は無い。",
+            )
         status = self._client_context_text(ongoing_action_summary.get("status"), limit=48)
         last_capability_id = self._client_context_text(ongoing_action_summary.get("last_capability_id"), limit=64)
         available_ids = capability_summary.get("available_ids", [])
@@ -928,21 +928,19 @@ class ServiceInputInitiativeMixin:
             preferred_result_reason = "進行中の流れはいったん保留扱いで、pending_intent として持つのが自然。"
         else:
             preferred_result_reason = "継続中の流れが残っており、状況に応じて続きを選びたい。"
-        payload.update(
-            {
-                "available": True,
-                "priority_score": round(priority_score, 2),
-                "reason_summary": self._initiative_ongoing_action_family_reason(
-                    ongoing_action_summary,
-                    capability_available=capability_available,
-                ),
-                "preferred_result_kind": preferred_result_kind,
-                "preferred_result_reason_summary": preferred_result_reason,
-            }
+        return InitiativeCandidateFamily(
+            family="ongoing_action",
+            available=True,
+            selected=False,
+            priority_score=round(priority_score, 2),
+            reason_summary=self._initiative_ongoing_action_family_reason(
+                ongoing_action_summary,
+                capability_available=capability_available,
+            ),
+            preferred_result_kind=preferred_result_kind,
+            preferred_result_reason_summary=preferred_result_reason,
+            blocking_reason_summary=blocking_reason,
         )
-        if blocking_reason is not None:
-            payload["blocking_reason_summary"] = blocking_reason
-        return payload
 
     def _initiative_pending_intent_family(
         self,
@@ -951,56 +949,58 @@ class ServiceInputInitiativeMixin:
         pool_count: int,
         eligible_count: int,
         selection_reason: str | None,
-    ) -> dict[str, Any]:
-        payload: dict[str, Any] = {
-            "family": "pending_intent",
-            "available": False,
-            "selected": False,
-            "priority_score": 0.0,
-        }
+    ) -> InitiativeCandidateFamily:
         if isinstance(selected_candidate, dict):
-            payload.update(
-                {
-                    "available": True,
-                    "priority_score": 0.95,
-                    "reason_summary": self._initiative_pending_intent_family_reason(
-                        selected_candidate=selected_candidate,
-                        pool_count=pool_count,
-                        eligible_count=eligible_count,
-                        selection_reason=selection_reason,
-                    ),
-                    "preferred_result_kind": "reply",
-                    "preferred_result_reason_summary": "due になった pending_intent 候補があり、今回は表に出してよい。",
-                }
+            return InitiativeCandidateFamily(
+                family="pending_intent",
+                available=True,
+                selected=False,
+                priority_score=0.95,
+                reason_summary=self._initiative_pending_intent_family_reason(
+                    selected_candidate=selected_candidate,
+                    pool_count=pool_count,
+                    eligible_count=eligible_count,
+                    selection_reason=selection_reason,
+                ),
+                preferred_result_kind="reply",
+                preferred_result_reason_summary="due になった pending_intent 候補があり、今回は表に出してよい。",
             )
-            return payload
         if eligible_count > 0:
-            payload.update(
-                {
-                    "available": True,
-                    "priority_score": 0.52,
-                    "reason_summary": self._initiative_pending_intent_family_reason(
-                        selected_candidate=None,
-                        pool_count=pool_count,
-                        eligible_count=eligible_count,
-                        selection_reason=selection_reason,
-                    ),
-                    "preferred_result_kind": "pending_intent",
-                    "preferred_result_reason_summary": "再評価対象はあるが、今回は pending_intent として保持するのが自然。",
-                }
+            return InitiativeCandidateFamily(
+                family="pending_intent",
+                available=True,
+                selected=False,
+                priority_score=0.52,
+                reason_summary=self._initiative_pending_intent_family_reason(
+                    selected_candidate=None,
+                    pool_count=pool_count,
+                    eligible_count=eligible_count,
+                    selection_reason=selection_reason,
+                ),
+                preferred_result_kind="pending_intent",
+                preferred_result_reason_summary="再評価対象はあるが、今回は pending_intent として保持するのが自然。",
             )
-            return payload
         if pool_count > 0:
-            payload["blocking_reason_summary"] = "pending_intent 候補はあるが、まだ due ではない。"
-            payload["reason_summary"] = self._initiative_pending_intent_family_reason(
-                selected_candidate=None,
-                pool_count=pool_count,
-                eligible_count=eligible_count,
-                selection_reason=selection_reason,
+            return InitiativeCandidateFamily(
+                family="pending_intent",
+                available=False,
+                selected=False,
+                priority_score=0.0,
+                reason_summary=self._initiative_pending_intent_family_reason(
+                    selected_candidate=None,
+                    pool_count=pool_count,
+                    eligible_count=eligible_count,
+                    selection_reason=selection_reason,
+                ),
+                blocking_reason_summary="pending_intent 候補はあるが、まだ due ではない。",
             )
-            return payload
-        payload["blocking_reason_summary"] = "前景に出す pending_intent 候補はまだ無い。"
-        return payload
+        return InitiativeCandidateFamily(
+            family="pending_intent",
+            available=False,
+            selected=False,
+            priority_score=0.0,
+            blocking_reason_summary="前景に出す pending_intent 候補はまだ無い。",
+        )
 
     def _initiative_autonomous_family(
         self,
@@ -1015,18 +1015,17 @@ class ServiceInputInitiativeMixin:
         initiative_baseline: dict[str, Any],
         intervention_state: dict[str, Any],
         capability_summary: dict[str, Any],
-    ) -> dict[str, Any]:
+    ) -> InitiativeCandidateFamily:
         desktop_signal = self._initiative_desktop_observation_signal(foreground_signal_summary)
-        payload: dict[str, Any] = {
-            "family": "autonomous",
-            "available": False,
-            "selected": False,
-            "priority_score": 0.0,
-        }
         available = bool(drive_summaries or world_state_summary or recent_turn_summary or desktop_signal)
         if not available:
-            payload["blocking_reason_summary"] = "drive_state / world_state / 直近会話の前景がまだ弱い。"
-            return payload
+            return InitiativeCandidateFamily(
+                family="autonomous",
+                available=False,
+                selected=False,
+                priority_score=0.0,
+                blocking_reason_summary="drive_state / world_state / 直近会話の前景がまだ弱い。",
+            )
         strongest_drive = self._initiative_strongest_drive_summary(drive_summaries)
         level = self._client_context_text(initiative_baseline.get("level"), limit=16) or "medium"
         foreground_thinness = self._initiative_foreground_thinness(foreground_signal_summary)
@@ -1076,10 +1075,14 @@ class ServiceInputInitiativeMixin:
             and desktop_signal.get("cooldown_active") is True
             and desktop_signal.get("novelty_kind") in {"first_success", "changed"}
         )
+        preferred_capability_id: str | None = None
+        preferred_capability_input: dict[str, Any] | None = None
         if isinstance(probe_preference, dict):
             preferred_result_kind = "capability_request"
             preferred_result_reason = self._client_context_text(probe_preference.get("reason_summary"), limit=160)
             priority_score += INITIATIVE_AUTONOMOUS_PROBE_SCORE
+            preferred_capability_id = probe_preference["capability_id"]
+            preferred_capability_input = probe_preference["input"]
         elif suppression_level == "high" and not desktop_cooldown_novelty:
             preferred_result_kind = "noop"
             preferred_result_reason = "suppression が high で、今回は押し出さず見送るほうが自然。"
@@ -1094,29 +1097,6 @@ class ServiceInputInitiativeMixin:
         elif foreground_thinness == "thin" and not world_state_summary and not recent_turn_summary:
             preferred_result_kind = "noop"
             preferred_result_reason = "前景文脈が薄く、いまは reply より様子見を優先したい。"
-        payload.update(
-            {
-                "available": True,
-                "priority_score": round(max(0.0, min(priority_score, 0.9)), 2),
-                "reason_summary": self._initiative_autonomous_family_reason(
-                    drive_summaries=drive_summaries,
-                    strongest_drive=strongest_drive,
-                    world_state_summary=world_state_summary,
-                    recent_turn_summary=recent_turn_summary,
-                    foreground_signal_summary=foreground_signal_summary,
-                    suppression_summary=suppression_summary,
-                    initiative_baseline=initiative_baseline,
-                    capability_summary=capability_summary,
-                    probe_preference=probe_preference,
-                    desktop_signal=desktop_signal,
-                ),
-                "preferred_result_kind": preferred_result_kind,
-                "preferred_result_reason_summary": preferred_result_reason,
-            }
-        )
-        if isinstance(probe_preference, dict):
-            payload["preferred_capability_id"] = probe_preference["capability_id"]
-            payload["preferred_capability_input"] = probe_preference["input"]
         blocking_reason = self._initiative_autonomous_blocking_reason(
             trigger_kind=trigger_kind,
             drive_summaries=drive_summaries,
@@ -1127,9 +1107,29 @@ class ServiceInputInitiativeMixin:
             initiative_baseline=initiative_baseline,
             capability_summary=capability_summary,
         )
-        if blocking_reason is not None:
-            payload["blocking_reason_summary"] = blocking_reason
-        return payload
+        return InitiativeCandidateFamily(
+            family="autonomous",
+            available=True,
+            selected=False,
+            priority_score=round(max(0.0, min(priority_score, 0.9)), 2),
+            reason_summary=self._initiative_autonomous_family_reason(
+                drive_summaries=drive_summaries,
+                strongest_drive=strongest_drive,
+                world_state_summary=world_state_summary,
+                recent_turn_summary=recent_turn_summary,
+                foreground_signal_summary=foreground_signal_summary,
+                suppression_summary=suppression_summary,
+                initiative_baseline=initiative_baseline,
+                capability_summary=capability_summary,
+                probe_preference=probe_preference,
+                desktop_signal=desktop_signal,
+            ),
+            preferred_result_kind=preferred_result_kind,
+            preferred_result_reason_summary=preferred_result_reason,
+            blocking_reason_summary=blocking_reason,
+            preferred_capability_id=preferred_capability_id,
+            preferred_capability_input=preferred_capability_input,
+        )
 
     def _initiative_world_state_signal_score(
         self,
@@ -1208,49 +1208,47 @@ class ServiceInputInitiativeMixin:
             return None
         return " / ".join(reasons) + " ため、押し出しは慎重にする。"
 
-    def _initiative_selected_candidate_family_name(self, candidate_families: list[dict[str, Any]]) -> str | None:
+    def _initiative_selected_candidate_family_name(
+        self,
+        candidate_families: list[InitiativeCandidateFamily],
+    ) -> str | None:
         selected_family: str | None = None
         selected_score = -1.0
         for family in candidate_families:
-            if not isinstance(family, dict) or family.get("available") is not True:
+            if family.available is not True:
                 continue
-            family_name = family.get("family")
-            if not isinstance(family_name, str) or not family_name.strip():
+            family_name = family.family
+            if not family_name.strip():
                 continue
-            priority_score = family.get("priority_score")
-            if not isinstance(priority_score, (int, float)):
-                priority_score = 0.0
-            if float(priority_score) <= selected_score:
+            if float(family.priority_score) <= selected_score:
                 continue
             selected_family = family_name.strip()
-            selected_score = float(priority_score)
+            selected_score = float(family.priority_score)
         return selected_family
 
-    def _initiative_selected_candidate_family(self, candidate_families: list[dict[str, Any]]) -> str | None:
+    def _initiative_selected_candidate_family(
+        self,
+        candidate_families: list[InitiativeCandidateFamily],
+    ) -> str | None:
         for family in candidate_families:
-            if not isinstance(family, dict) or family.get("selected") is not True:
+            if family.selected is not True:
                 continue
-            family_name = family.get("family")
-            if isinstance(family_name, str) and family_name.strip():
-                return family_name.strip()
+            if family.family.strip():
+                return family.family.strip()
         return None
 
     def _initiative_selected_family_entry(
         self,
         *,
-        candidate_families: list[dict[str, Any]],
+        candidate_families: list[InitiativeCandidateFamily],
         selected_candidate_family: str | None,
-    ) -> dict[str, Any] | None:
+    ) -> InitiativeCandidateFamily | None:
         for family in candidate_families:
-            if not isinstance(family, dict):
-                continue
-            family_name = family.get("family")
-            if family.get("selected") is True:
+            if family.selected is True:
                 return family
             if (
                 isinstance(selected_candidate_family, str)
-                and isinstance(family_name, str)
-                and family_name.strip() == selected_candidate_family
+                and family.family.strip() == selected_candidate_family
             ):
                 return family
         return None

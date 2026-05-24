@@ -5,7 +5,12 @@ import math
 import re
 from dataclasses import dataclass
 from typing import Any
-from otomekairo.llm_contexts import DecisionContext, InitiativeContext, ReplyContext
+from otomekairo.llm_contexts import (
+    DecisionContext,
+    InitiativeCandidateFamily,
+    InitiativeContext,
+    ReplyContext,
+)
 from otomekairo.llm_contracts import (
     RECALL_PACK_SECTION_NAMES,
     RECALL_FOCUS_VALUES,
@@ -885,7 +890,7 @@ class MockLLMClient:
             return False
         selected_family = self._selected_initiative_family_entry(initiative_context)
         if selected_family is not None:
-            preferred_result_kind = str(selected_family.get("preferred_result_kind") or "").strip()
+            preferred_result_kind = str(selected_family.preferred_result_kind or "").strip()
             if preferred_result_kind in {"noop", "capability_request"}:
                 return False
         drive_summaries = initiative_context.drive_summaries
@@ -916,11 +921,11 @@ class MockLLMClient:
         selected_family = self._selected_initiative_family_entry(initiative_context)
         if selected_family is None:
             return None
-        preferred_result_kind = str(selected_family.get("preferred_result_kind") or "").strip()
+        preferred_result_kind = str(selected_family.preferred_result_kind or "").strip()
         if preferred_result_kind != "capability_request":
             return None
-        preferred_capability_id = str(selected_family.get("preferred_capability_id") or "").strip()
-        preferred_capability_input = selected_family.get("preferred_capability_input")
+        preferred_capability_id = str(selected_family.preferred_capability_id or "").strip()
+        preferred_capability_input = selected_family.preferred_capability_input
         if (
             preferred_capability_id
             and isinstance(preferred_capability_input, dict)
@@ -946,7 +951,10 @@ class MockLLMClient:
             }
         return None
 
-    def _selected_initiative_family_entry(self, initiative_context: InitiativeContext) -> dict[str, Any] | None:
+    def _selected_initiative_family_entry(
+        self,
+        initiative_context: InitiativeContext,
+    ) -> InitiativeCandidateFamily | None:
         return initiative_context.selected_family_entry()
 
     def _mock_initiative_reply_text(
@@ -963,7 +971,7 @@ class MockLLMClient:
         if isinstance(pending_intent_summaries, list) and pending_intent_summaries:
             return None
         selected_family = self._selected_initiative_family_entry(initiative_context)
-        if isinstance(selected_family, dict) and selected_family.get("family") == "ongoing_action":
+        if selected_family is not None and selected_family.family == "ongoing_action":
             ongoing_action_summary = initiative_context.ongoing_action_summary
             if isinstance(ongoing_action_summary, dict):
                 step_summary = ongoing_action_summary.get("step_summary")
