@@ -5,7 +5,8 @@ import math
 import re
 from dataclasses import dataclass
 from typing import Any
-
+from typing import Any
+from otomekairo.llm_contexts import DecisionContext, ReplyContext
 from otomekairo.llm_contracts import (
     RECALL_PACK_SECTION_NAMES,
     RECALL_FOCUS_VALUES,
@@ -253,31 +254,35 @@ class MockLLMClient:
 
     def generate_decision(
         self,
+        *,
         role_definition: dict,
         persona: dict,
-        input_text: str,
-        trigger_kind: str,
-        recent_turns: list[dict],
-        time_context: dict[str, Any],
-        affect_context: dict[str, Any],
-        drive_state_summary: list[dict[str, Any]] | None,
-        foreground_world_state: list[dict[str, Any]] | None,
-        ongoing_action_summary: dict[str, Any] | None,
-        capability_decision_view: list[dict[str, Any]] | None,
-        initiative_context: dict[str, Any] | None,
-        capability_result_context: dict[str, Any] | None,
-        visual_observation_context: dict[str, Any] | None,
-        recall_hint: dict,
-        recall_pack: dict[str, Any],
+        context: DecisionContext,
     ) -> dict[str, Any]:
         # model確認
         _ = persona
+        self._assert_mock_model(role_definition)
+        input_text = context.input_text
+        trigger_kind = context.trigger_kind
+        recent_turns = context.recent_turns
+        time_context = context.time_context
+        affect_context = context.affect_context
+        drive_state_summary = context.drive_state_summary
+        foreground_world_state = context.foreground_world_state
+        ongoing_action_summary = context.ongoing_action_summary
+        capability_decision_view = context.capability_decision_view
+        initiative_context = context.initiative_context
+        capability_result_context = context.capability_result_context
+        visual_observation_context = context.visual_observation_context
+        recall_hint = context.recall_hint
+        recall_pack = context.recall_pack
         _ = trigger_kind
+        _ = recent_turns
+        _ = time_context
         _ = drive_state_summary
         _ = foreground_world_state
         _ = capability_result_context
         _ = visual_observation_context
-        self._assert_mock_model(role_definition)
 
         # コンテキスト
         normalized = input_text.strip()
@@ -538,25 +543,27 @@ class MockLLMClient:
 
     def generate_reply(
         self,
+        *,
         role_definition: dict,
         persona: dict,
-        input_text: str,
-        recent_turns: list[dict],
-        time_context: dict[str, Any],
-        affect_context: dict[str, Any],
-        drive_state_summary: list[dict[str, Any]] | None,
-        foreground_world_state: list[dict[str, Any]] | None,
-        ongoing_action_summary: dict[str, Any] | None,
-        initiative_context: dict[str, Any] | None,
-        recall_hint: dict,
-        recall_pack: dict[str, Any],
-        decision: dict,
+        context: ReplyContext,
     ) -> dict[str, Any]:
         # model確認
+        self._assert_mock_model(role_definition)
+        input_text = context.input_text
+        recent_turns = context.recent_turns
+        time_context = context.time_context
+        affect_context = context.affect_context
+        drive_state_summary = context.drive_state_summary
+        foreground_world_state = context.foreground_world_state
+        ongoing_action_summary = context.ongoing_action_summary
+        initiative_context = context.initiative_context
+        recall_hint = context.recall_hint
+        recall_pack = context.recall_pack
+        decision = context.decision
         _ = drive_state_summary
         _ = foreground_world_state
         _ = ongoing_action_summary
-        self._assert_mock_model(role_definition)
 
         # コンテキスト
         persona_prompt = str(persona.get("persona_prompt", "")).strip()

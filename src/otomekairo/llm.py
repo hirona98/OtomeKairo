@@ -4,6 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from otomekairo.llm_contexts import DecisionContext, ReplyContext
 from otomekairo.llm_contracts import (
     LLMContractError,
     LLMError,
@@ -225,50 +226,24 @@ class LLMClient:
         *,
         role_definition: dict,
         persona: dict,
-        input_text: str,
-        trigger_kind: str,
-        recent_turns: list[dict],
-        time_context: dict[str, Any],
-        affect_context: dict[str, Any],
-        drive_state_summary: list[dict[str, Any]] | None,
-        foreground_world_state: list[dict[str, Any]] | None,
-        ongoing_action_summary: dict[str, Any] | None,
-        capability_decision_view: list[dict[str, Any]] | None,
-        initiative_context: dict[str, Any] | None,
-        capability_result_context: dict[str, Any] | None,
-        visual_observation_context: dict[str, Any] | None,
-        recall_hint: dict,
-        recall_pack: dict[str, Any],
+        context: DecisionContext,
     ) -> dict[str, Any]:
         operation = "decision"
         debug_log(
             "LLM",
             (
                 f"{operation} start mode={self._debug_mode(role_definition)} "
-                f"model={self._debug_model(role_definition)} recent_turns={len(recent_turns)} "
-                f"recall_candidates={recall_pack.get('candidate_count', 0)}"
+                f"model={self._debug_model(role_definition)} recent_turns={len(context.recent_turns)} "
+                f"recall_candidates={context.recall_pack.get('candidate_count', 0)}"
             ),
         )
         try:
             # モック経路
             if self._is_mock_role_definition(role_definition):
                 payload = self.mock_client.generate_decision(
-                    role_definition,
-                    persona,
-                    input_text,
-                    trigger_kind,
-                    recent_turns,
-                    time_context,
-                    affect_context,
-                    drive_state_summary,
-                    foreground_world_state,
-                    ongoing_action_summary,
-                    capability_decision_view,
-                    initiative_context,
-                    capability_result_context,
-                    visual_observation_context,
-                    recall_hint,
-                    recall_pack,
+                    role_definition=role_definition,
+                    persona=persona,
+                    context=context,
                 )
                 debug_log("LLM", f"{operation} done mode=mock kind={payload.get('kind')}")
                 return payload
@@ -276,19 +251,7 @@ class LLMClient:
             # プロンプト構築
             messages = build_decision_messages(
                 persona=persona,
-                input_text=input_text,
-                recent_turns=recent_turns,
-                time_context=time_context,
-                affect_context=affect_context,
-                drive_state_summary=drive_state_summary,
-                foreground_world_state=foreground_world_state,
-                ongoing_action_summary=ongoing_action_summary,
-                capability_decision_view=capability_decision_view,
-                initiative_context=initiative_context,
-                capability_result_context=capability_result_context,
-                visual_observation_context=visual_observation_context,
-                recall_hint=recall_hint,
-                recall_pack=recall_pack,
+                context=context,
             )
 
             return self._generate_structured_payload(
@@ -296,12 +259,7 @@ class LLMClient:
                 messages=messages,
                 validator=lambda payload: self._validate_decision_contract_for_context(
                     payload=payload,
-                    input_text=input_text,
-                    trigger_kind=trigger_kind,
-                    capability_decision_view=capability_decision_view,
-                    initiative_context=initiative_context,
-                    capability_result_context=capability_result_context,
-                    visual_observation_context=visual_observation_context,
+                    context=context,
                 ),
                 repair_prompt_builder=build_decision_repair_prompt,
                 failure_message="Decision の生成に失敗しました。解析可能な応答が得られませんでした。",
@@ -315,45 +273,40 @@ class LLMClient:
         self,
         *,
         payload: dict[str, Any],
-        input_text: str,
-        trigger_kind: str,
-        capability_decision_view: list[dict[str, Any]] | None,
-        initiative_context: dict[str, Any] | None,
-        capability_result_context: dict[str, Any] | None,
-        visual_observation_context: dict[str, Any] | None,
+        context: DecisionContext,
     ) -> None:
         validate_decision_contract(payload)
         self._validate_decision_explicit_status_request(
             payload=payload,
-            input_text=input_text,
-            trigger_kind=trigger_kind,
-            capability_decision_view=capability_decision_view,
+            input_text=context.input_text,
+            trigger_kind=context.trigger_kind,
+            capability_decision_view=context.capability_decision_view,
         )
-        if isinstance(capability_result_context, dict):
+        if isinstance(context.capability_result_context, dict):
             self._validate_decision_capability_result_context(
                 payload=payload,
-                capability_result_context=capability_result_context,
+                capability_result_context=context.capability_result_context,
             )
         try:
             self._validate_decision_fresh_world_state_reuse(
                 payload=payload,
-                input_text=input_text,
-                trigger_kind=trigger_kind,
-                capability_decision_view=capability_decision_view,
+                input_text=context.input_text,
+                trigger_kind=context.trigger_kind,
+                capability_decision_view=context.capability_decision_view,
             )
         except LLMError as exc:
-            if trigger_kind != "user_message" and payload.get("kind") == "capability_request":
+            if context.trigger_kind != "user_message" and payload.get("kind") == "capability_request":
                 self._coerce_decision_to_noop_for_fresh_world_state_reuse(payload, exc)
                 return
             raise
         self._validate_decision_visual_observation_context(
             payload=payload,
-            trigger_kind=trigger_kind,
-            visual_observation_context=visual_observation_context,
+            trigger_kind=context.trigger_kind,
+            visual_observation_context=context.visual_observation_context,
         )
-        if not isinstance(initiative_context, dict):
+        if not isinstance(context.initiative_context, dict):
             return
-        selected_family = self._selected_initiative_family_entry(initiative_context)
+        selected_family = self._selected_initiative_family_entry(context.initiative_context)
         if not isinstance(selected_family, dict):
             return
         preferred_result_kind = selected_family.get("preferred_result_kind")
@@ -387,8 +340,8 @@ class LLMClient:
                 )
             return
         if decision_kind == "noop" and preferred_result_kind == "reply":
-            foreground_summary = initiative_context.get("foreground_signal_summary")
-            suppression_summary = initiative_context.get("suppression_summary")
+            foreground_summary = context.initiative_context.get("foreground_signal_summary")
+            suppression_summary = context.initiative_context.get("suppression_summary")
             foreground_thinness = (
                 foreground_summary.get("foreground_thinness")
                 if isinstance(foreground_summary, dict)
@@ -709,44 +662,23 @@ class LLMClient:
         *,
         role_definition: dict,
         persona: dict,
-        input_text: str,
-        recent_turns: list[dict],
-        time_context: dict[str, Any],
-        affect_context: dict[str, Any],
-        drive_state_summary: list[dict[str, Any]] | None,
-        foreground_world_state: list[dict[str, Any]] | None,
-        ongoing_action_summary: dict[str, Any] | None,
-        initiative_context: dict[str, Any] | None,
-        visual_observation_context: dict[str, Any] | None,
-        recall_hint: dict,
-        recall_pack: dict[str, Any],
-        decision: dict,
+        context: ReplyContext,
     ) -> dict[str, Any]:
         operation = "reply"
         debug_log(
             "LLM",
             (
                 f"{operation} start mode={self._debug_mode(role_definition)} "
-                f"model={self._debug_model(role_definition)} decision_kind={decision.get('kind')}"
+                f"model={self._debug_model(role_definition)} decision_kind={context.decision.get('kind')}"
             ),
         )
         try:
             # モック経路
             if self._is_mock_role_definition(role_definition):
                 payload = self.mock_client.generate_reply(
-                    role_definition,
-                    persona,
-                    input_text,
-                    recent_turns,
-                    time_context,
-                    affect_context,
-                    drive_state_summary,
-                    foreground_world_state,
-                    ongoing_action_summary,
-                    initiative_context,
-                    recall_hint,
-                    recall_pack,
-                    decision,
+                    role_definition=role_definition,
+                    persona=persona,
+                    context=context,
                 )
                 debug_log("LLM", f"{operation} done mode=mock reply_chars={len(payload.get('reply_text', ''))}")
                 return payload
@@ -754,18 +686,7 @@ class LLMClient:
             # プロンプト構築
             messages = build_reply_messages(
                 persona=persona,
-                input_text=input_text,
-                recent_turns=recent_turns,
-                time_context=time_context,
-                affect_context=affect_context,
-                drive_state_summary=drive_state_summary,
-                foreground_world_state=foreground_world_state,
-                ongoing_action_summary=ongoing_action_summary,
-                initiative_context=initiative_context,
-                visual_observation_context=visual_observation_context,
-                recall_hint=recall_hint,
-                recall_pack=recall_pack,
-                decision=decision,
+                context=context,
             )
 
             # 補完

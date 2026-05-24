@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from otomekairo.llm_contexts import DecisionContext, ReplyContext
 from otomekairo.llm_contracts import (
     ANSWER_BOUNDARY_VALUES,
     ANSWER_CONTRACT_VALUES,
@@ -77,19 +78,7 @@ def build_recall_hint_messages(
 def build_decision_messages(
     *,
     persona: dict,
-    input_text: str,
-    recent_turns: list[dict],
-    time_context: dict[str, Any],
-    affect_context: dict[str, Any],
-    drive_state_summary: list[dict[str, Any]] | None,
-    foreground_world_state: list[dict[str, Any]] | None,
-    ongoing_action_summary: dict[str, Any] | None,
-    capability_decision_view: list[dict[str, Any]] | None,
-    initiative_context: dict[str, Any] | None,
-    capability_result_context: dict[str, Any] | None,
-    visual_observation_context: dict[str, Any] | None,
-    recall_hint: dict,
-    recall_pack: dict[str, Any],
+    context: DecisionContext,
 ) -> list[dict[str, str]]:
     return [
         {
@@ -99,23 +88,23 @@ def build_decision_messages(
         {
             "role": "user",
             "content": _build_decision_context_prompt(
-                recent_turns=recent_turns,
-                time_context=time_context,
-                affect_context=affect_context,
-                drive_state_summary=drive_state_summary,
-                foreground_world_state=foreground_world_state,
-                ongoing_action_summary=ongoing_action_summary,
-                capability_decision_view=capability_decision_view,
-                initiative_context=initiative_context,
-                capability_result_context=capability_result_context,
-                visual_observation_context=visual_observation_context,
-                recall_hint=recall_hint,
-                recall_pack=recall_pack,
+                recent_turns=context.recent_turns,
+                time_context=context.time_context,
+                affect_context=context.affect_context,
+                drive_state_summary=context.drive_state_summary,
+                foreground_world_state=context.foreground_world_state,
+                ongoing_action_summary=context.ongoing_action_summary,
+                capability_decision_view=context.capability_decision_view,
+                initiative_context=context.initiative_context,
+                capability_result_context=context.capability_result_context,
+                visual_observation_context=context.visual_observation_context,
+                recall_hint=context.recall_hint,
+                recall_pack=context.recall_pack,
             ),
         },
         {
             "role": "user",
-            "content": _build_user_input_prompt(input_text),
+            "content": _build_user_input_prompt(context.input_text),
         },
     ]
 
@@ -124,18 +113,7 @@ def build_decision_messages(
 def build_reply_messages(
     *,
     persona: dict,
-    input_text: str,
-    recent_turns: list[dict],
-    time_context: dict[str, Any],
-    affect_context: dict[str, Any],
-    drive_state_summary: list[dict[str, Any]] | None,
-    foreground_world_state: list[dict[str, Any]] | None,
-    ongoing_action_summary: dict[str, Any] | None,
-    initiative_context: dict[str, Any] | None,
-    visual_observation_context: dict[str, Any] | None,
-    recall_hint: dict,
-    recall_pack: dict[str, Any],
-    decision: dict,
+    context: ReplyContext,
 ) -> list[dict[str, str]]:
     return [
         {
@@ -145,22 +123,22 @@ def build_reply_messages(
         {
             "role": "user",
             "content": _build_reply_context_prompt(
-                recent_turns=recent_turns,
-                time_context=time_context,
-                affect_context=affect_context,
-                drive_state_summary=drive_state_summary,
-                foreground_world_state=foreground_world_state,
-                ongoing_action_summary=ongoing_action_summary,
-                initiative_context=initiative_context,
-                visual_observation_context=visual_observation_context,
-                recall_hint=recall_hint,
-                recall_pack=recall_pack,
-                decision=decision,
+                recent_turns=context.recent_turns,
+                time_context=context.time_context,
+                affect_context=context.affect_context,
+                drive_state_summary=context.drive_state_summary,
+                foreground_world_state=context.foreground_world_state,
+                ongoing_action_summary=context.ongoing_action_summary,
+                initiative_context=context.initiative_context,
+                visual_observation_context=context.visual_observation_context,
+                recall_hint=context.recall_hint,
+                recall_pack=context.recall_pack,
+                decision=context.decision,
             ),
         },
         {
             "role": "user",
-            "content": _build_user_input_prompt(input_text),
+            "content": _build_user_input_prompt(context.input_text),
         },
     ]
 

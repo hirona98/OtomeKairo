@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import uuid
+from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
 
@@ -29,6 +30,40 @@ class PendingIntentSelectionError(LLMError):
         super().__init__(message)
         self.pending_intent_selection = pending_intent_selection
         self.failure_stage = failure_stage
+
+
+@dataclass(frozen=True, slots=True)
+class CapabilityResultPayloadSpec:
+    summary_field: str
+    accepted_detail_label: str
+
+
+SIMPLE_CAPABILITY_RESULT_PAYLOAD_SPECS = {
+    "external.status": CapabilityResultPayloadSpec(
+        summary_field="status_text",
+        accepted_detail_label="status_chars",
+    ),
+    "device.status": CapabilityResultPayloadSpec(
+        summary_field="device_state_summary",
+        accepted_detail_label="device_summary_chars",
+    ),
+    "body.status": CapabilityResultPayloadSpec(
+        summary_field="body_state_summary",
+        accepted_detail_label="body_summary_chars",
+    ),
+    "environment.status": CapabilityResultPayloadSpec(
+        summary_field="environment_summary",
+        accepted_detail_label="environment_summary_chars",
+    ),
+    "location.status": CapabilityResultPayloadSpec(
+        summary_field="location_summary",
+        accepted_detail_label="location_summary_chars",
+    ),
+    "social.status": CapabilityResultPayloadSpec(
+        summary_field="social_context_summary",
+        accepted_detail_label="social_context_summary_chars",
+    ),
+}
 
 
 # 自発Mixin
@@ -111,33 +146,13 @@ class ServiceSpontaneousMixin:
                 "client_context": client_context or {},
                 "error": error.strip() if isinstance(error, str) and error.strip() else None,
             }
-        if capability_id == "external.status":
-            status_text = result_payload.get("status_text")
-            client_context = result_payload.get("client_context")
-            error = result_payload.get("error")
-            if not isinstance(status_text, str) or not status_text.strip():
-                raise ServiceError(
-                    400,
-                    "invalid_capability_result",
-                    "external.status result.status_text must be a non-empty string.",
-                )
-            if client_context is not None and not isinstance(client_context, dict):
-                raise ServiceError(
-                    400,
-                    "invalid_capability_result",
-                    "external.status result.client_context must be an object.",
-                )
-            if error is not None and not isinstance(error, str):
-                raise ServiceError(
-                    400,
-                    "invalid_capability_result",
-                    "external.status result.error must be a string or null.",
-                )
-            return {
-                "status_text": status_text.strip(),
-                "client_context": client_context or {},
-                "error": error.strip() if isinstance(error, str) and error.strip() else None,
-            }
+        spec = SIMPLE_CAPABILITY_RESULT_PAYLOAD_SPECS.get(capability_id)
+        if spec is not None:
+            return self._normalize_simple_capability_result_payload(
+                capability_id=capability_id,
+                result_payload=result_payload,
+                spec=spec,
+            )
         if capability_id == "schedule.status":
             schedule_summary = result_payload.get("schedule_summary")
             schedule_slots = result_payload.get("schedule_slots")
@@ -173,141 +188,6 @@ class ServiceSpontaneousMixin:
                 "client_context": client_context or {},
                 "error": error.strip() if isinstance(error, str) and error.strip() else None,
             }
-        if capability_id == "device.status":
-            device_state_summary = result_payload.get("device_state_summary")
-            client_context = result_payload.get("client_context")
-            error = result_payload.get("error")
-            if not isinstance(device_state_summary, str) or not device_state_summary.strip():
-                raise ServiceError(
-                    400,
-                    "invalid_capability_result",
-                    "device.status result.device_state_summary must be a non-empty string.",
-                )
-            if client_context is not None and not isinstance(client_context, dict):
-                raise ServiceError(
-                    400,
-                    "invalid_capability_result",
-                    "device.status result.client_context must be an object.",
-                )
-            if error is not None and not isinstance(error, str):
-                raise ServiceError(
-                    400,
-                    "invalid_capability_result",
-                    "device.status result.error must be a string or null.",
-                )
-            return {
-                "device_state_summary": device_state_summary.strip(),
-                "client_context": client_context or {},
-                "error": error.strip() if isinstance(error, str) and error.strip() else None,
-            }
-        if capability_id == "body.status":
-            body_state_summary = result_payload.get("body_state_summary")
-            client_context = result_payload.get("client_context")
-            error = result_payload.get("error")
-            if not isinstance(body_state_summary, str) or not body_state_summary.strip():
-                raise ServiceError(
-                    400,
-                    "invalid_capability_result",
-                    "body.status result.body_state_summary must be a non-empty string.",
-                )
-            if client_context is not None and not isinstance(client_context, dict):
-                raise ServiceError(
-                    400,
-                    "invalid_capability_result",
-                    "body.status result.client_context must be an object.",
-                )
-            if error is not None and not isinstance(error, str):
-                raise ServiceError(
-                    400,
-                    "invalid_capability_result",
-                    "body.status result.error must be a string or null.",
-                )
-            return {
-                "body_state_summary": body_state_summary.strip(),
-                "client_context": client_context or {},
-                "error": error.strip() if isinstance(error, str) and error.strip() else None,
-            }
-        if capability_id == "environment.status":
-            environment_summary = result_payload.get("environment_summary")
-            client_context = result_payload.get("client_context")
-            error = result_payload.get("error")
-            if not isinstance(environment_summary, str) or not environment_summary.strip():
-                raise ServiceError(
-                    400,
-                    "invalid_capability_result",
-                    "environment.status result.environment_summary must be a non-empty string.",
-                )
-            if client_context is not None and not isinstance(client_context, dict):
-                raise ServiceError(
-                    400,
-                    "invalid_capability_result",
-                    "environment.status result.client_context must be an object.",
-                )
-            if error is not None and not isinstance(error, str):
-                raise ServiceError(
-                    400,
-                    "invalid_capability_result",
-                    "environment.status result.error must be a string or null.",
-                )
-            return {
-                "environment_summary": environment_summary.strip(),
-                "client_context": client_context or {},
-                "error": error.strip() if isinstance(error, str) and error.strip() else None,
-            }
-        if capability_id == "location.status":
-            location_summary = result_payload.get("location_summary")
-            client_context = result_payload.get("client_context")
-            error = result_payload.get("error")
-            if not isinstance(location_summary, str) or not location_summary.strip():
-                raise ServiceError(
-                    400,
-                    "invalid_capability_result",
-                    "location.status result.location_summary must be a non-empty string.",
-                )
-            if client_context is not None and not isinstance(client_context, dict):
-                raise ServiceError(
-                    400,
-                    "invalid_capability_result",
-                    "location.status result.client_context must be an object.",
-                )
-            if error is not None and not isinstance(error, str):
-                raise ServiceError(
-                    400,
-                    "invalid_capability_result",
-                    "location.status result.error must be a string or null.",
-                )
-            return {
-                "location_summary": location_summary.strip(),
-                "client_context": client_context or {},
-                "error": error.strip() if isinstance(error, str) and error.strip() else None,
-            }
-        if capability_id == "social.status":
-            social_context_summary = result_payload.get("social_context_summary")
-            client_context = result_payload.get("client_context")
-            error = result_payload.get("error")
-            if not isinstance(social_context_summary, str) or not social_context_summary.strip():
-                raise ServiceError(
-                    400,
-                    "invalid_capability_result",
-                    "social.status result.social_context_summary must be a non-empty string.",
-                )
-            if client_context is not None and not isinstance(client_context, dict):
-                raise ServiceError(
-                    400,
-                    "invalid_capability_result",
-                    "social.status result.client_context must be an object.",
-                )
-            if error is not None and not isinstance(error, str):
-                raise ServiceError(
-                    400,
-                    "invalid_capability_result",
-                    "social.status result.error must be a string or null.",
-                )
-            return {
-                "social_context_summary": social_context_summary.strip(),
-                "client_context": client_context or {},
-                "error": error.strip() if isinstance(error, str) and error.strip() else None,
-            }
         payload = dict(result_payload)
         client_context = payload.get("client_context")
         if client_context is not None and not isinstance(client_context, dict):
@@ -320,6 +200,40 @@ class ServiceSpontaneousMixin:
         if "error" in payload:
             payload["error"] = error.strip() if isinstance(error, str) and error.strip() else None
         return payload
+
+    def _normalize_simple_capability_result_payload(
+        self,
+        *,
+        capability_id: str,
+        result_payload: dict[str, Any],
+        spec: CapabilityResultPayloadSpec,
+    ) -> dict[str, Any]:
+        summary_text = result_payload.get(spec.summary_field)
+        client_context = result_payload.get("client_context")
+        error = result_payload.get("error")
+        if not isinstance(summary_text, str) or not summary_text.strip():
+            raise ServiceError(
+                400,
+                "invalid_capability_result",
+                f"{capability_id} result.{spec.summary_field} must be a non-empty string.",
+            )
+        if client_context is not None and not isinstance(client_context, dict):
+            raise ServiceError(
+                400,
+                "invalid_capability_result",
+                f"{capability_id} result.client_context must be an object.",
+            )
+        if error is not None and not isinstance(error, str):
+            raise ServiceError(
+                400,
+                "invalid_capability_result",
+                f"{capability_id} result.error must be a string or null.",
+            )
+        return {
+            spec.summary_field: summary_text.strip(),
+            "client_context": client_context or {},
+            "error": error.strip() if isinstance(error, str) and error.strip() else None,
+        }
 
     def _normalize_vision_capture_result_images(self, images: Any) -> list[str]:
         try:
@@ -380,30 +294,11 @@ class ServiceSpontaneousMixin:
             images = result_payload.get("images")
             image_count = len(images) if isinstance(images, list) else 0
             return f"images={image_count} error={bool(result_payload.get('error'))}"
-        if capability_id == "external.status":
-            status_text = result_payload.get("status_text")
-            status_chars = len(status_text) if isinstance(status_text, str) else 0
-            return f"status_chars={status_chars} error={bool(result_payload.get('error'))}"
-        if capability_id == "device.status":
-            summary_text = result_payload.get("device_state_summary")
+        spec = SIMPLE_CAPABILITY_RESULT_PAYLOAD_SPECS.get(capability_id)
+        if spec is not None:
+            summary_text = result_payload.get(spec.summary_field)
             summary_chars = len(summary_text) if isinstance(summary_text, str) else 0
-            return f"device_summary_chars={summary_chars} error={bool(result_payload.get('error'))}"
-        if capability_id == "body.status":
-            summary_text = result_payload.get("body_state_summary")
-            summary_chars = len(summary_text) if isinstance(summary_text, str) else 0
-            return f"body_summary_chars={summary_chars} error={bool(result_payload.get('error'))}"
-        if capability_id == "environment.status":
-            summary_text = result_payload.get("environment_summary")
-            summary_chars = len(summary_text) if isinstance(summary_text, str) else 0
-            return f"environment_summary_chars={summary_chars} error={bool(result_payload.get('error'))}"
-        if capability_id == "location.status":
-            summary_text = result_payload.get("location_summary")
-            summary_chars = len(summary_text) if isinstance(summary_text, str) else 0
-            return f"location_summary_chars={summary_chars} error={bool(result_payload.get('error'))}"
-        if capability_id == "social.status":
-            summary_text = result_payload.get("social_context_summary")
-            summary_chars = len(summary_text) if isinstance(summary_text, str) else 0
-            return f"social_context_summary_chars={summary_chars} error={bool(result_payload.get('error'))}"
+            return f"{spec.accepted_detail_label}={summary_chars} error={bool(result_payload.get('error'))}"
         return f"result_keys={len(result_payload)} error={bool(result_payload.get('error'))}"
 
     def _capability_result_context_hook_name(self, capability_id: str) -> str | None:
@@ -1717,12 +1612,9 @@ class ServiceSpontaneousMixin:
                         f"error={type(exc).__name__}: {self._clamp(str(exc))}"
                     ),
                 )
-                # 失敗永続化
-                finished_at = self._now_iso()
-                self._persist_cycle_failure(
+                return self._finalize_cycle_failure(
                     cycle_id=cycle_id,
                     started_at=started_at,
-                    finished_at=finished_at,
                     state=state,
                     runtime_summary=runtime_summary,
                     input_text=input_text,
@@ -1737,19 +1629,6 @@ class ServiceSpontaneousMixin:
                     },
                     pending_intent_selection=exc.pending_intent_selection,
                 )
-                self._emit_input_failure_logs(
-                    cycle_id=cycle_id,
-                    trigger_kind=trigger_kind,
-                    input_text=input_text,
-                    failure_reason=str(exc),
-                    pending_intent_selection=exc.pending_intent_selection,
-                )
-                return {
-                    "cycle_id": cycle_id,
-                    "result_kind": "internal_failure",
-                    "reply": None,
-                    "capability_request": None,
-                }
             except RecallPackSelectionError as exc:
                 debug_log(
                     "Wake",
@@ -1758,12 +1637,9 @@ class ServiceSpontaneousMixin:
                         f"error={type(exc).__name__}: {self._clamp(str(exc))}"
                     ),
                 )
-                # 失敗永続化
-                finished_at = self._now_iso()
-                self._persist_cycle_failure(
+                return self._finalize_cycle_failure(
                     cycle_id=cycle_id,
                     started_at=started_at,
-                    finished_at=finished_at,
                     state=state,
                     runtime_summary=runtime_summary,
                     input_text=input_text,
@@ -1782,19 +1658,6 @@ class ServiceSpontaneousMixin:
                     },
                     pending_intent_selection=pending_intent_selection,
                 )
-                self._emit_input_failure_logs(
-                    cycle_id=cycle_id,
-                    trigger_kind=trigger_kind,
-                    input_text=input_text,
-                    failure_reason=str(exc),
-                    pending_intent_selection=pending_intent_selection,
-                )
-                return {
-                    "cycle_id": cycle_id,
-                    "result_kind": "internal_failure",
-                    "reply": None,
-                    "capability_request": None,
-                }
             except (LLMError, KeyError, ValueError) as exc:
                 capability_request_summary, ongoing_action_transition_summary = self._exception_capability_dispatch_trace(
                     exc
@@ -1803,12 +1666,9 @@ class ServiceSpontaneousMixin:
                     "Wake",
                     f"{self._short_cycle_id(cycle_id)} failed error={type(exc).__name__}: {self._clamp(str(exc))}",
                 )
-                # 失敗永続化
-                finished_at = self._now_iso()
-                self._persist_cycle_failure(
+                return self._finalize_cycle_failure(
                     cycle_id=cycle_id,
                     started_at=started_at,
-                    finished_at=finished_at,
                     state=state,
                     runtime_summary=runtime_summary,
                     input_text=input_text,
@@ -1821,19 +1681,6 @@ class ServiceSpontaneousMixin:
                     capability_request_summary=capability_request_summary,
                     ongoing_action_transition_summary=ongoing_action_transition_summary,
                 )
-                self._emit_input_failure_logs(
-                    cycle_id=cycle_id,
-                    trigger_kind=trigger_kind,
-                    input_text=input_text,
-                    failure_reason=str(exc),
-                    pending_intent_selection=pending_intent_selection,
-                )
-                return {
-                    "cycle_id": cycle_id,
-                    "result_kind": "internal_failure",
-                    "reply": None,
-                    "capability_request": None,
-                }
 
     def _background_wake_loop(self, stop_event: threading.Event) -> None:
         # ループ

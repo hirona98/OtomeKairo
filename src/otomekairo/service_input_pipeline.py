@@ -1,0 +1,349 @@
+from __future__ import annotations
+
+from typing import Any
+
+from otomekairo.llm_contexts import DecisionContext, ReplyContext
+from otomekairo.service_common import debug_log
+
+
+class ServiceInputPipelineMixin:
+    def _run_input_pipeline(
+        self,
+        *,
+        state: dict[str, Any],
+        started_at: str,
+        input_text: str,
+        recent_turns: list[dict[str, Any]],
+        cycle_id: str | None = None,
+        trigger_kind: str = "user_message",
+        client_context: dict[str, Any] | None = None,
+        selected_candidate: dict[str, Any] | None = None,
+        pending_intent_selection: dict[str, Any] | None = None,
+        observation_summary: dict[str, Any] | None = None,
+        capability_request_summary: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        cycle_label = self._debug_cycle_label(cycle_id)
+        current_client_context = client_context or {}
+        augmented_query_text = self._pipeline_augmented_query_text(
+            input_text=input_text,
+            trigger_kind=trigger_kind,
+            observation_summary=observation_summary,
+        )
+        visual_observation_context = self._build_visual_observation_decision_context(
+            trigger_kind=trigger_kind,
+            observation_summary=observation_summary,
+        )
+        debug_log(
+            "Pipeline",
+            (
+                f"{cycle_label} start memory_set={self._short_identifier(state['selected_memory_set_id'])} "
+                f"persona={state['selected_persona_id']} preset={state['selected_model_preset_id']} "
+                f"input_chars={len(input_text)} recent_turns={len(recent_turns)}"
+            ),
+        )
+        # モデル選択
+        selected_preset = state["model_presets"][state["selected_model_preset_id"]]
+        recall_role = selected_preset["roles"]["input_interpretation"]
+        decision_role = selected_preset["roles"]["decision_generation"]
+        reply_role = selected_preset["roles"]["expression_generation"]
+        persona = state["personas"][state["selected_persona_id"]]
+
+        # 入口解釈
+        recall_hint_recent_turns = self._recall_hint_recent_turns(recent_turns)
+        debug_log("Pipeline", f"{cycle_label} input_interpretation start recent_turns={len(recall_hint_recent_turns)}")
+        input_interpretation = self.llm.generate_input_interpretation(
+            role_definition=recall_role,
+            input_text=input_text,
+            recent_turns=recall_hint_recent_turns,
+            current_time=started_at,
+            visual_observation_context=visual_observation_context,
+        )
+        recall_hint = input_interpretation["recall_hint"]
+        answer_contract = input_interpretation["answer_contract"]
+        debug_log(
+            "Pipeline",
+            (
+                f"{cycle_label} input_interpretation done mode={recall_hint['interaction_mode']} "
+                f"focus={recall_hint['primary_recall_focus']} confidence={recall_hint['confidence']} "
+                f"contract={answer_contract.get('contract')}"
+            ),
+        )
+
+        # recall_pack構築
+        debug_log("Pipeline", f"{cycle_label} recall_pack start")
+        recall_pack = self.recall.build_recall_pack(
+            state=state,
+            augmented_query_text=augmented_query_text,
+            recall_hint=recall_hint,
+        )
+        recall_summary = self._summarize_recall_pack(recall_pack)
+        debug_log(
+            "Pipeline",
+            (
+                f"{cycle_label} recall_pack done candidates={recall_pack['candidate_count']} "
+                f"selected_memory={len(recall_pack['selected_memory_ids'])} "
+                f"selected_episode={len(recall_pack['selected_episode_ids'])} "
+                f"sections={recall_summary}"
+            ),
+        )
+
+        # 回答根拠解決
+        debug_log("Pipeline", f"{cycle_label} evidence_resolution start contract={answer_contract.get('contract')}")
+        evidence_resolution = self.evidence.build_evidence_resolution(
+            memory_set_id=state["selected_memory_set_id"],
+            augmented_query_text=augmented_query_text,
+            recall_pack=recall_pack,
+            answer_contract=answer_contract,
+            current_time=started_at,
+        )
+        evidence_pack = evidence_resolution["evidence_pack"]
+        fact_resolution_trace = evidence_resolution["fact_resolution_trace"]
+        recall_pack = dict(recall_pack)
+        recall_pack["answer_contract"] = answer_contract
+        recall_pack["evidence_pack"] = evidence_pack
+        recall_pack["fact_resolution_trace"] = fact_resolution_trace
+        debug_log(
+            "Pipeline",
+            (
+                f"{cycle_label} evidence_resolution done contract={answer_contract.get('contract')} "
+                f"evidence_status={evidence_pack.get('status')}"
+            ),
+        )
+
+        # 内部コンテキスト
+        debug_log("Pipeline", f"{cycle_label} context start")
+        time_context = self._build_time_context(current_time=started_at)
+        affect_context = self._build_affect_context(
+            state=state,
+            recall_hint=recall_hint,
+            current_time=started_at,
+        )
+        drive_state_summary = self._summarize_drive_states(
+            self._list_current_drive_states(
+                state=state,
+                current_time=started_at,
+            )
+        )
+        world_state_trace, foreground_world_state = self._refresh_world_state_context(
+            state=state,
+            started_at=started_at,
+            input_text=input_text,
+            trigger_kind=trigger_kind,
+            client_context=current_client_context,
+            cycle_id=cycle_id,
+            selected_candidate=selected_candidate,
+            observation_summary=observation_summary,
+            capability_request_summary=capability_request_summary,
+        )
+        ongoing_action_summary = self._summarize_ongoing_action(
+            self._current_ongoing_action(
+                state=state,
+                current_time=started_at,
+            )
+        )
+        capability_decision_view = self._build_capability_decision_view(
+            state=state,
+            current_time=started_at,
+        )
+        capability_decision_view = self._annotate_capability_decision_view_with_fresh_world_state(
+            capability_decision_view=capability_decision_view,
+            foreground_world_state=foreground_world_state,
+            world_state_trace=world_state_trace,
+            trigger_kind=trigger_kind,
+        )
+        initiative_context = self._build_initiative_context(
+            state=state,
+            persona=persona,
+            current_time=started_at,
+            time_context=time_context,
+            recent_turns=recent_turns,
+            trigger_kind=trigger_kind,
+            client_context=current_client_context,
+            drive_state_summary=drive_state_summary,
+            foreground_world_state=foreground_world_state,
+            world_state_trace=world_state_trace,
+            ongoing_action_summary=ongoing_action_summary,
+            capability_decision_view=capability_decision_view,
+            selected_candidate=selected_candidate,
+            pending_intent_selection=pending_intent_selection,
+        )
+        capability_result_context = self._build_capability_result_decision_context(
+            trigger_kind=trigger_kind,
+            observation_summary=observation_summary,
+            capability_request_summary=capability_request_summary,
+        )
+        debug_log(
+            "Pipeline",
+            (
+                f"{cycle_label} context done affect_states={len(affect_context.get('affect_states', []))} "
+                f"drives={len(drive_state_summary or [])} world_states={len(foreground_world_state or [])} "
+                f"ongoing_action={isinstance(ongoing_action_summary, dict)} "
+                f"capabilities={len(capability_decision_view or [])} initiative={isinstance(initiative_context, dict)}"
+            ),
+        )
+
+        # decision生成
+        debug_log("Pipeline", f"{cycle_label} decision start")
+        decision_context = self._build_decision_context(
+            input_text=input_text,
+            trigger_kind=trigger_kind,
+            recent_turns=recent_turns,
+            time_context=time_context,
+            affect_context=affect_context,
+            drive_state_summary=drive_state_summary,
+            foreground_world_state=foreground_world_state,
+            ongoing_action_summary=ongoing_action_summary,
+            capability_decision_view=capability_decision_view,
+            initiative_context=initiative_context,
+            capability_result_context=capability_result_context,
+            visual_observation_context=visual_observation_context,
+            recall_hint=recall_hint,
+            recall_pack=recall_pack,
+        )
+        decision = self.llm.generate_decision(
+            role_definition=decision_role,
+            persona=persona,
+            context=decision_context,
+        )
+        debug_log(
+            "Pipeline",
+            f"{cycle_label} decision done kind={decision['kind']} reason={self._clamp(decision['reason_summary'])}",
+        )
+
+        # capability request
+        dispatched_capability_request_summary: dict[str, Any] | None = None
+        ongoing_action_transition_summary: dict[str, Any] | None = None
+        if decision["kind"] == "capability_request":
+            dispatch_result = self._dispatch_decision_capability_request(
+                state=state,
+                current_time=self._now_iso(),
+                decision=decision,
+            )
+            dispatched_capability_request_summary = dispatch_result.get("capability_request_summary")
+            transition_summary = dispatch_result.get("ongoing_action_transition_summary")
+            if isinstance(transition_summary, dict):
+                ongoing_action_transition_summary = transition_summary
+            debug_log(
+                "Pipeline",
+                (
+                    f"{cycle_label} capability dispatched "
+                    f"request={dispatched_capability_request_summary.get('request_id') if isinstance(dispatched_capability_request_summary, dict) else '-'}"
+                ),
+            )
+
+        # 返信
+        reply_payload: dict[str, Any] | None = None
+        if decision["kind"] == "reply":
+            debug_log("Pipeline", f"{cycle_label} reply start")
+            reply_context = self._build_reply_context(
+                input_text=input_text,
+                recent_turns=recent_turns,
+                time_context=time_context,
+                affect_context=affect_context,
+                drive_state_summary=drive_state_summary,
+                foreground_world_state=foreground_world_state,
+                ongoing_action_summary=ongoing_action_summary,
+                initiative_context=initiative_context,
+                visual_observation_context=visual_observation_context,
+                recall_hint=recall_hint,
+                recall_pack=recall_pack,
+                decision=decision,
+            )
+            reply_payload = self.llm.generate_reply(
+                role_definition=reply_role,
+                persona=persona,
+                context=reply_context,
+            )
+            debug_log("Pipeline", f"{cycle_label} reply done reply_chars={len(reply_payload['reply_text'])}")
+        else:
+            debug_log("Pipeline", f"{cycle_label} reply skipped decision_kind={decision['kind']}")
+
+        # 結果
+        debug_log("Pipeline", f"{cycle_label} done")
+        return {
+            "augmented_query_text": augmented_query_text,
+            "recall_hint": recall_hint,
+            "recall_pack": recall_pack,
+            "answer_contract": answer_contract,
+            "evidence_pack": evidence_pack,
+            "time_context": time_context,
+            "affect_context": affect_context,
+            "drive_state_summary": drive_state_summary,
+            "foreground_world_state": foreground_world_state,
+            "ongoing_action_summary": ongoing_action_summary,
+            "capability_decision_view": capability_decision_view,
+            "initiative_context": initiative_context,
+            "capability_result_context": capability_result_context,
+            "visual_observation_context": visual_observation_context,
+            "world_state_trace": world_state_trace,
+            "decision": decision,
+            "reply_payload": reply_payload,
+            "capability_request_summary": dispatched_capability_request_summary,
+            "ongoing_action_transition_summary": ongoing_action_transition_summary,
+        }
+
+    def _build_decision_context(
+        self,
+        *,
+        input_text: str,
+        trigger_kind: str,
+        recent_turns: list[dict[str, Any]],
+        time_context: dict[str, Any],
+        affect_context: dict[str, Any],
+        drive_state_summary: list[dict[str, Any]] | None,
+        foreground_world_state: list[dict[str, Any]] | None,
+        ongoing_action_summary: dict[str, Any] | None,
+        capability_decision_view: list[dict[str, Any]] | None,
+        initiative_context: dict[str, Any] | None,
+        capability_result_context: dict[str, Any] | None,
+        visual_observation_context: dict[str, Any] | None,
+        recall_hint: dict[str, Any],
+        recall_pack: dict[str, Any],
+    ) -> DecisionContext:
+        return DecisionContext(
+            input_text=input_text,
+            trigger_kind=trigger_kind,
+            recent_turns=recent_turns,
+            time_context=time_context,
+            affect_context=affect_context,
+            drive_state_summary=drive_state_summary,
+            foreground_world_state=foreground_world_state,
+            ongoing_action_summary=ongoing_action_summary,
+            capability_decision_view=capability_decision_view,
+            initiative_context=initiative_context,
+            capability_result_context=capability_result_context,
+            visual_observation_context=visual_observation_context,
+            recall_hint=recall_hint,
+            recall_pack=recall_pack,
+        )
+
+    def _build_reply_context(
+        self,
+        *,
+        input_text: str,
+        recent_turns: list[dict[str, Any]],
+        time_context: dict[str, Any],
+        affect_context: dict[str, Any],
+        drive_state_summary: list[dict[str, Any]] | None,
+        foreground_world_state: list[dict[str, Any]] | None,
+        ongoing_action_summary: dict[str, Any] | None,
+        initiative_context: dict[str, Any] | None,
+        visual_observation_context: dict[str, Any] | None,
+        recall_hint: dict[str, Any],
+        recall_pack: dict[str, Any],
+        decision: dict[str, Any],
+    ) -> ReplyContext:
+        return ReplyContext(
+            input_text=input_text,
+            recent_turns=recent_turns,
+            time_context=time_context,
+            affect_context=affect_context,
+            drive_state_summary=drive_state_summary,
+            foreground_world_state=foreground_world_state,
+            ongoing_action_summary=ongoing_action_summary,
+            initiative_context=initiative_context,
+            visual_observation_context=visual_observation_context,
+            recall_hint=recall_hint,
+            recall_pack=recall_pack,
+            decision=decision,
+        )
