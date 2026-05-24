@@ -615,7 +615,8 @@ class ServiceSpontaneousMixin:
                 capability_request_summary=capability_request_summary,
                 ongoing_action_transition_summary=ongoing_action_transition_summary,
             )
-            self._emit_capability_result_reply_event(
+            self._emit_capability_result_assistant_message_event(
+                cycle_id=cycle_id,
                 capability_response=capability_response,
                 pipeline=pipeline,
             )
@@ -1480,20 +1481,21 @@ class ServiceSpontaneousMixin:
             result_payload=result_payload,
         )
 
-    def _emit_capability_result_reply_event(
+    def _emit_capability_result_assistant_message_event(
         self,
         *,
+        cycle_id: str,
         capability_response: dict[str, Any],
         pipeline: dict[str, Any],
     ) -> None:
         reply_payload = pipeline.get("reply_payload")
         if not isinstance(reply_payload, dict):
-            debug_log("CapabilityResult", "reply_event skipped no_reply")
+            debug_log("CapabilityResult", f"{self._short_cycle_id(cycle_id)} assistant_message skipped no_reply")
             return
 
         target_client_id = capability_response.get("client_id")
         if not isinstance(target_client_id, str) or not target_client_id.strip():
-            debug_log("CapabilityResult", "reply_event skipped no_client")
+            debug_log("CapabilityResult", f"{self._short_cycle_id(cycle_id)} assistant_message skipped no_client")
             return
 
         request_record = capability_response.get("request_record")
@@ -1503,8 +1505,10 @@ class ServiceSpontaneousMixin:
             request_id = request_record.get("request_id", request_id)
         event = {
             "event_id": self._next_stream_event_id(),
-            "type": "capability_result",
+            "type": "assistant_message",
             "data": {
+                "cycle_id": cycle_id,
+                "source_kind": "capability_result",
                 "request_id": request_id,
                 "capability_id": capability_id,
                 "system_text": f"[capability_result] {capability_id}",
@@ -1515,12 +1519,13 @@ class ServiceSpontaneousMixin:
         debug_log(
             "CapabilityResult",
             (
-                f"reply_event sent={sent} client={target_client_id.strip()} "
+                f"{self._short_cycle_id(cycle_id)} assistant_message sent={sent} "
+                f"client={target_client_id.strip()} "
                 f"reply_chars={len(reply_payload['reply_text'])}"
             ),
         )
 
-    def _emit_wake_reply_event(
+    def _emit_wake_assistant_message_event(
         self,
         *,
         cycle_id: str,
@@ -1532,18 +1537,19 @@ class ServiceSpontaneousMixin:
             return
         reply_payload = pipeline.get("reply_payload")
         if not isinstance(reply_payload, dict):
-            debug_log("Wake", f"{self._short_cycle_id(cycle_id)} reply_event skipped no_reply")
+            debug_log("Wake", f"{self._short_cycle_id(cycle_id)} assistant_message skipped no_reply")
             return
-        target_client_id = self._wake_reply_target_client_id(client_context)
+        target_client_id = self._wake_assistant_message_target_client_id(client_context)
         if target_client_id is None:
-            debug_log("Wake", f"{self._short_cycle_id(cycle_id)} reply_event skipped no_client")
+            debug_log("Wake", f"{self._short_cycle_id(cycle_id)} assistant_message skipped no_client")
             return
 
         event = {
             "event_id": self._next_stream_event_id(),
-            "type": "spontaneous_reply",
+            "type": "assistant_message",
             "data": {
                 "cycle_id": cycle_id,
+                "source_kind": trigger_kind,
                 "trigger_kind": trigger_kind,
                 "system_text": f"[{trigger_kind}]",
                 "message": reply_payload["reply_text"],
@@ -1553,12 +1559,12 @@ class ServiceSpontaneousMixin:
         debug_log(
             "Wake",
             (
-                f"{self._short_cycle_id(cycle_id)} reply_event sent={sent} "
+                f"{self._short_cycle_id(cycle_id)} assistant_message sent={sent} "
                 f"client={target_client_id} reply_chars={len(reply_payload['reply_text'])}"
             ),
         )
 
-    def _wake_reply_target_client_id(self, client_context: dict[str, Any]) -> str | None:
+    def _wake_assistant_message_target_client_id(self, client_context: dict[str, Any]) -> str | None:
         client_id = self._client_context_text(client_context.get("client_id"), limit=128)
         if client_id is not None:
             return client_id
@@ -1692,7 +1698,7 @@ class ServiceSpontaneousMixin:
                     selected_candidate=selected_candidate,
                     client_context=client_context,
                 )
-                self._emit_wake_reply_event(
+                self._emit_wake_assistant_message_event(
                     cycle_id=cycle_id,
                     trigger_kind=trigger_kind,
                     client_context=client_context,

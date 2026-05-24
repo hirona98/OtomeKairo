@@ -231,7 +231,7 @@ status refresh の鮮度判定は判断前から存在した foreground `world_s
 background wake では、強い `drive_state` が無く `visual_context / external_service / device` だけが見えている場合、薄い前景として `noop` を優先する。
 background wake でも `desktop_observation_signal.reply_eligibility=eligible` かつ `preferred_result_kind=reply` の場合、未発話の新しい desktop 前景として短い reply を `noop` より優先する。
 `desktop_observation_signal.reply_eligibility=discouraged_by_cooldown` の場合、cooldown を強い抑制として扱い、原則 `noop` を選ぶ。ただし `first_success / changed` の desktop 前景に一文コメントすることが自然な場合だけ、短い `reply` を選ぶ。
-`wake / background_wake` cycle が `reply` になった場合、server は `spontaneous_reply` event を client へ送る。送信先 client は cycle の client context または wake observation の `vision_source_id` から解決する。
+`wake / background_wake` cycle が `reply` になった場合、server は `assistant_message` event を `source_kind=wake / background_wake` で client へ送る。送信先 client は cycle の client context または wake observation の `vision_source_id` から解決する。
 grounded foreground の `world_state` が既にある場合、candidate entry に `preferred_capability_id` が無い限り、同じ情報を再取得する capability request より `preferred_result_kind` の `reply / noop` を優先する。
 非ユーザー起点の判断では、判断前から存在する同じ state type の新鮮な foreground `world_state` がある status capability に `fresh_world_state_available=true` を付け、実 LLM の compact digest で request しなかった境界を確認する。
 desktop 以外の `vision.capture` は `vision_source_id` が一致する新鮮な `visual_context` を `fresh_world_state_by_vision_source` として扱い、別 source の再観測は遮断しない。

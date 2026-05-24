@@ -62,6 +62,17 @@ client -> server:
 
 この設計では、client から受ける message は `hello` だけとする。
 
+event type の分類軸は次に固定する。
+
+- `*_request` は server から client への capability 実行要求である
+- `assistant_message` は server が生成した assistant 発話を client に表示させる通知である
+- `assistant_message.data.source_kind` は発話生成の起点を示し、event type を増やして起点ごとの返信通知を分けない
+- capability result follow-up の返信通知は `assistant_message` に `source_kind=capability_result`、`request_id`、`capability_id` を入れる
+- `wake / background_wake` の返信通知は `assistant_message` に `source_kind=wake / background_wake`、`trigger_kind` を入れる
+
+`capability_result` は event type として使わない。capability result そのものは client が `/api/capability/result` へ HTTP POST する payload であり、event stream の返信通知ではない。
+`spontaneous_reply` は event type として使わない。自発発話も `assistant_message` に統一し、起点は `source_kind` で表す。
+
 server -> client の代表例:
 
 ```json
@@ -161,8 +172,10 @@ server -> client の代表例:
 ```json
 {
   "event_id": 8,
-  "type": "capability_result",
+  "type": "assistant_message",
   "data": {
+    "cycle_id": "cycle:...",
+    "source_kind": "capability_result",
     "request_id": "vision_capture_request:...",
     "capability_id": "vision.capture",
     "system_text": "[capability_result] vision.capture",
@@ -174,9 +187,10 @@ server -> client の代表例:
 ```json
 {
   "event_id": 9,
-  "type": "spontaneous_reply",
+  "type": "assistant_message",
   "data": {
     "cycle_id": "cycle:...",
+    "source_kind": "background_wake",
     "trigger_kind": "background_wake",
     "system_text": "[background_wake]",
     "message": "CocoroConsole のディレクトリまで進んだのですね。"
@@ -186,20 +200,20 @@ server -> client の代表例:
 
 少なくとも次の event type を持つ。
 
-- `vision.capture_request`
-- `external.status_request`
-- `schedule.status_request`
-- `device.status_request`
-- `body.status_request`
-- `environment.status_request`
-- `location.status_request`
-- `social.status_request`
-- `capability_result`
-- `spontaneous_reply`
+- `vision.capture_request`: 視覚 source の画像取得を client に要求する
+- `external.status_request`: 外部 service の状態取得を client に要求する
+- `schedule.status_request`: 予定情報の取得を client に要求する
+- `device.status_request`: device 状態の取得を client に要求する
+- `body.status_request`: body 状態の取得を client に要求する
+- `environment.status_request`: 周辺環境状態の取得を client に要求する
+- `location.status_request`: 位置状態の取得を client に要求する
+- `social.status_request`: 社会的文脈の状態取得を client に要求する
+- `assistant_message`: server が生成した assistant 発話を client に表示させる
 
 `vision.capture_request`、`external.status_request`、`schedule.status_request`、`device.status_request`、`body.status_request`、`environment.status_request`、`location.status_request`、`social.status_request` は capability 実行要求である。
-`capability_result` は accepted capability result を shared pipeline に戻した後、その follow-up が `reply` になったときの通知である。
-`spontaneous_reply` は `wake / background_wake` cycle が `reply` になったとき、同じ cycle の client context または wake observation の `vision_source_id` から解決した client へ送る通知である。
+`assistant_message` は server が生成した assistant 発話を client へ表示させる通知である。
+`assistant_message.data.source_kind` は `capability_result / wake / background_wake` のいずれかであり、capability result follow-up の場合だけ `request_id / capability_id` を持つ。
+`wake / background_wake` の `assistant_message` は、同じ cycle の client context または wake observation の `vision_source_id` から解決した client へ送る。
 capability 実行要求と結果の対応は [05_実行連携.md](05_実行連携.md) を正とする。
 
 主な失敗:
