@@ -5,7 +5,7 @@ import math
 import re
 from dataclasses import dataclass
 from typing import Any
-from otomekairo.llm_contexts import DecisionContext, ReplyContext
+from otomekairo.llm_contexts import DecisionContext, InitiativeContext, ReplyContext
 from otomekairo.llm_contracts import (
     RECALL_PACK_SECTION_NAMES,
     RECALL_FOCUS_VALUES,
@@ -377,13 +377,11 @@ class MockLLMClient:
     def _mock_initiative_decision(
         self,
         *,
-        initiative_context: dict[str, Any] | None,
+        initiative_context: InitiativeContext | None,
         capability_decision_view: list[dict[str, Any]] | None,
     ) -> dict[str, Any] | None:
-        initiative_trigger = initiative_context.get("trigger_kind") if isinstance(initiative_context, dict) else None
-        initiative_pending = (
-            initiative_context.get("pending_intent_summaries", []) if isinstance(initiative_context, dict) else []
-        )
+        initiative_trigger = initiative_context.trigger_kind if initiative_context is not None else None
+        initiative_pending = initiative_context.pending_intent_summaries if initiative_context is not None else []
         if initiative_trigger not in {"wake", "background_wake"} or initiative_pending:
             return None
         capability_request = self._mock_autonomous_initiative_capability_request(
@@ -882,25 +880,25 @@ class MockLLMClient:
         # 結果
         return None
 
-    def _should_mock_autonomous_initiative_reply(self, initiative_context: dict[str, Any] | None) -> bool:
-        if not isinstance(initiative_context, dict):
+    def _should_mock_autonomous_initiative_reply(self, initiative_context: InitiativeContext | None) -> bool:
+        if initiative_context is None:
             return False
         selected_family = self._selected_initiative_family_entry(initiative_context)
-        if isinstance(selected_family, dict):
+        if selected_family is not None:
             preferred_result_kind = str(selected_family.get("preferred_result_kind") or "").strip()
             if preferred_result_kind in {"noop", "capability_request"}:
                 return False
-        drive_summaries = initiative_context.get("drive_summaries", [])
+        drive_summaries = initiative_context.drive_summaries
         if isinstance(drive_summaries, list) and drive_summaries:
             return True
-        world_state_summary = initiative_context.get("world_state_summary", [])
+        world_state_summary = initiative_context.world_state_summary
         if isinstance(world_state_summary, list):
             for item in world_state_summary:
                 if not isinstance(item, dict):
                     continue
                 if item.get("state_type") in {"schedule", "social_context", "body"}:
                     return True
-        ongoing_action_summary = initiative_context.get("ongoing_action_summary")
+        ongoing_action_summary = initiative_context.ongoing_action_summary
         if isinstance(ongoing_action_summary, dict):
             status = str(ongoing_action_summary.get("status") or "").strip()
             if status and status != "waiting_result":
@@ -910,13 +908,13 @@ class MockLLMClient:
     def _mock_autonomous_initiative_capability_request(
         self,
         *,
-        initiative_context: dict[str, Any] | None,
+        initiative_context: InitiativeContext | None,
         capability_decision_view: list[dict[str, Any]] | None,
     ) -> dict[str, Any] | None:
-        if not isinstance(initiative_context, dict):
+        if initiative_context is None:
             return None
         selected_family = self._selected_initiative_family_entry(initiative_context)
-        if not isinstance(selected_family, dict):
+        if selected_family is None:
             return None
         preferred_result_kind = str(selected_family.get("preferred_result_kind") or "").strip()
         if preferred_result_kind != "capability_request":
@@ -932,7 +930,7 @@ class MockLLMClient:
                 "capability_id": preferred_capability_id,
                 "input": preferred_capability_input,
             }
-        ongoing_action_summary = initiative_context.get("ongoing_action_summary")
+        ongoing_action_summary = initiative_context.ongoing_action_summary
         if not isinstance(ongoing_action_summary, dict):
             return None
         capability_id = str(ongoing_action_summary.get("last_capability_id") or "").strip()
@@ -948,42 +946,30 @@ class MockLLMClient:
             }
         return None
 
-    def _selected_initiative_family_entry(self, initiative_context: dict[str, Any]) -> dict[str, Any] | None:
-        candidate_families = initiative_context.get("candidate_families")
-        selected_candidate_family = initiative_context.get("selected_candidate_family")
-        if not isinstance(candidate_families, list):
-            return None
-        for family in candidate_families:
-            if not isinstance(family, dict):
-                continue
-            if family.get("selected") is True:
-                return family
-            family_name = family.get("family")
-            if isinstance(selected_candidate_family, str) and family_name == selected_candidate_family:
-                return family
-        return None
+    def _selected_initiative_family_entry(self, initiative_context: InitiativeContext) -> dict[str, Any] | None:
+        return initiative_context.selected_family_entry()
 
     def _mock_initiative_reply_text(
         self,
         *,
-        initiative_context: dict[str, Any] | None,
+        initiative_context: InitiativeContext | None,
         decision: dict[str, Any],
     ) -> str | None:
-        if not isinstance(initiative_context, dict) or decision.get("kind") != "reply":
+        if initiative_context is None or decision.get("kind") != "reply":
             return None
-        if initiative_context.get("trigger_kind") not in {"wake", "background_wake"}:
+        if initiative_context.trigger_kind not in {"wake", "background_wake"}:
             return None
-        pending_intent_summaries = initiative_context.get("pending_intent_summaries", [])
+        pending_intent_summaries = initiative_context.pending_intent_summaries
         if isinstance(pending_intent_summaries, list) and pending_intent_summaries:
             return None
         selected_family = self._selected_initiative_family_entry(initiative_context)
         if isinstance(selected_family, dict) and selected_family.get("family") == "ongoing_action":
-            ongoing_action_summary = initiative_context.get("ongoing_action_summary")
+            ongoing_action_summary = initiative_context.ongoing_action_summary
             if isinstance(ongoing_action_summary, dict):
                 step_summary = ongoing_action_summary.get("step_summary")
                 if isinstance(step_summary, str) and step_summary.strip():
                     return f"{step_summary.strip()} が前景にあるから、ここは続きとして少し前へ進めるね。"
-        world_state_summary = initiative_context.get("world_state_summary", [])
+        world_state_summary = initiative_context.world_state_summary
         if isinstance(world_state_summary, list):
             for item in world_state_summary:
                 if not isinstance(item, dict):
@@ -995,7 +981,7 @@ class MockLLMClient:
                     return f"{summary_text.strip()} という前景があるから、今のうちにそっと声をかけておくね。"
                 if item.get("state_type") in {"social_context", "body"}:
                     return f"{summary_text.strip()} と見えているから、今の様子に少し触れてみるね。"
-        drive_summaries = initiative_context.get("drive_summaries", [])
+        drive_summaries = initiative_context.drive_summaries
         if isinstance(drive_summaries, list):
             for item in drive_summaries:
                 if not isinstance(item, dict):

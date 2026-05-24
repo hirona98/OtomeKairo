@@ -12,6 +12,7 @@ from otomekairo.capabilities import (
     capability_readiness_world_state_digest,
     capability_world_state_type,
 )
+from otomekairo.llm_contexts import InitiativeContext
 from otomekairo.llm import LLMError
 from otomekairo.memory_utils import (
     display_local_iso,
@@ -2568,7 +2569,7 @@ class ServiceInputMixin(
         pending_intent_selection: dict[str, Any] | None = None,
         observation_summary: dict[str, Any] | None = None,
         ongoing_action_summary: dict[str, Any] | None = None,
-        initiative_context: dict[str, Any] | None = None,
+        initiative_context: InitiativeContext | None = None,
     ) -> dict[str, Any]:
         input_trace = {
             "trigger_kind": cycle_summary["trigger_kind"],
@@ -2602,7 +2603,7 @@ class ServiceInputMixin(
             input_trace["observation_summary"] = observation_summary
         if isinstance(ongoing_action_summary, dict):
             input_trace["ongoing_action_summary"] = ongoing_action_summary
-        if isinstance(initiative_context, dict):
+        if initiative_context is not None:
             input_trace["initiative_context"] = self._compact_initiative_context_summary(
                 initiative_context=initiative_context,
                 pending_intent_selection=pending_intent_selection,
@@ -2684,7 +2685,7 @@ class ServiceInputMixin(
         foreground_world_state: list[dict[str, Any]] | None,
         ongoing_action_summary: dict[str, Any] | None,
         capability_decision_view: list[dict[str, Any]] | None,
-        initiative_context: dict[str, Any] | None,
+        initiative_context: InitiativeContext | None,
         capability_result_context: dict[str, Any] | None,
         visual_observation_context: dict[str, Any] | None,
         recall_pack: dict[str, Any],
@@ -2704,7 +2705,7 @@ class ServiceInputMixin(
                 "foreground_world_state": foreground_world_state,
                 "ongoing_action_summary": ongoing_action_summary,
                 "capability_decision_view": capability_decision_view,
-                "initiative_context": initiative_context,
+                "initiative_context": initiative_context.to_prompt_payload() if initiative_context is not None else None,
                 "capability_result_context": capability_result_context,
                 "visual_observation_context": visual_observation_context,
                 "recall_pack_summary": self._summarize_recall_pack(recall_pack),
@@ -2772,7 +2773,7 @@ class ServiceInputMixin(
         drive_state_summary: list[dict[str, Any]] | None = None,
         ongoing_action_summary: dict[str, Any] | None = None,
         capability_decision_view: list[dict[str, Any]] | None = None,
-        initiative_context: dict[str, Any] | None = None,
+        initiative_context: InitiativeContext | None = None,
     ) -> dict[str, Any]:
         trace = {
             "result_kind": "internal_failure",
@@ -2785,7 +2786,7 @@ class ServiceInputMixin(
         if capability_decision_view or initiative_context:
             trace["internal_context_summary"] = {
                 "capability_decision_view": capability_decision_view,
-                "initiative_context": initiative_context,
+                "initiative_context": initiative_context.to_prompt_payload() if initiative_context is not None else None,
             }
         if drive_state_summary:
             trace["drive_state_summary"] = drive_state_summary
@@ -2805,7 +2806,7 @@ class ServiceInputMixin(
         reply_payload: dict[str, Any] | None,
         pending_intent_summary: dict[str, Any] | None,
         pending_intent_selection: dict[str, Any] | None = None,
-        initiative_context: dict[str, Any] | None = None,
+        initiative_context: InitiativeContext | None = None,
         observation_summary: dict[str, Any] | None = None,
         capability_request_summary: dict[str, Any] | None = None,
         followup_capability_request_summary: dict[str, Any] | None = None,
@@ -2870,7 +2871,7 @@ class ServiceInputMixin(
         finished_at: str,
         failure_reason: str,
         pending_intent_selection: dict[str, Any] | None = None,
-        initiative_context: dict[str, Any] | None = None,
+        initiative_context: InitiativeContext | None = None,
         observation_summary: dict[str, Any] | None = None,
         capability_request_summary: dict[str, Any] | None = None,
         followup_capability_request_summary: dict[str, Any] | None = None,
@@ -2941,7 +2942,7 @@ class ServiceInputMixin(
         reply_payload: dict[str, Any] | None,
         pending_intent_summary: dict[str, Any] | None,
         pending_intent_selection: dict[str, Any] | None,
-        initiative_context: dict[str, Any] | None,
+        initiative_context: InitiativeContext | None,
         ongoing_action_transition_summary: dict[str, Any] | None,
         failure_reason: str | None = None,
     ) -> dict[str, Any]:
@@ -2991,7 +2992,7 @@ class ServiceInputMixin(
         observation_summary: dict[str, Any] | None,
         capability_request_summary: dict[str, Any] | None,
         pending_intent_selection: dict[str, Any] | None,
-        initiative_context: dict[str, Any] | None,
+        initiative_context: InitiativeContext | None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {}
         normalized_input = self._clamp(input_text.strip(), limit=160)
@@ -3019,7 +3020,7 @@ class ServiceInputMixin(
     def _compact_initiative_entry_summary(
         self,
         *,
-        initiative_context: dict[str, Any] | None,
+        initiative_context: InitiativeContext | None,
         pending_intent_selection: dict[str, Any] | None,
     ) -> dict[str, Any]:
         return self._compact_initiative_context_summary(
@@ -3030,18 +3031,19 @@ class ServiceInputMixin(
     def _compact_initiative_context_summary(
         self,
         *,
-        initiative_context: dict[str, Any] | None,
+        initiative_context: InitiativeContext | None,
         pending_intent_selection: dict[str, Any] | None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {}
-        if isinstance(initiative_context, dict):
-            trigger_kind = initiative_context.get("trigger_kind")
+        initiative_payload = initiative_context.to_prompt_payload() if initiative_context is not None else None
+        if isinstance(initiative_payload, dict):
+            trigger_kind = initiative_payload.get("trigger_kind")
             if isinstance(trigger_kind, str) and trigger_kind.strip():
                 payload["trigger_kind"] = trigger_kind.strip()
-            opportunity_summary = initiative_context.get("opportunity_summary")
+            opportunity_summary = initiative_payload.get("opportunity_summary")
             if isinstance(opportunity_summary, str) and opportunity_summary.strip():
                 payload["opportunity_summary"] = self._clamp(opportunity_summary.strip(), limit=160)
-            time_context_summary = initiative_context.get("time_context_summary")
+            time_context_summary = initiative_payload.get("time_context_summary")
             if isinstance(time_context_summary, dict):
                 compact_time_context: dict[str, Any] = {}
                 for key in ("current_time_text", "part_of_day", "weekday", "time_band_summary"):
@@ -3050,7 +3052,7 @@ class ServiceInputMixin(
                         compact_time_context[key] = self._clamp(value.strip(), limit=120)
                 if compact_time_context:
                     payload["time_context_summary"] = compact_time_context
-            foreground_signal_summary = initiative_context.get("foreground_signal_summary")
+            foreground_signal_summary = initiative_payload.get("foreground_signal_summary")
             if isinstance(foreground_signal_summary, dict):
                 compact_foreground_signal: dict[str, Any] = {}
                 for key in ("foreground_thinness", "reason_summary"):
@@ -3074,25 +3076,25 @@ class ServiceInputMixin(
                     compact_foreground_signal["desktop_observation_signal"] = desktop_signal
                 if compact_foreground_signal:
                     payload["foreground_signal_summary"] = compact_foreground_signal
-            selected_candidate_family = initiative_context.get("selected_candidate_family")
+            selected_candidate_family = initiative_payload.get("selected_candidate_family")
             if isinstance(selected_candidate_family, str) and selected_candidate_family.strip():
                 payload["selected_candidate_family"] = selected_candidate_family.strip()
-            initiative_baseline = initiative_context.get("initiative_baseline")
+            initiative_baseline = initiative_payload.get("initiative_baseline")
             if isinstance(initiative_baseline, dict):
                 baseline_level = initiative_baseline.get("level")
                 if isinstance(baseline_level, str) and baseline_level.strip():
                     payload["initiative_baseline"] = baseline_level.strip()
             compact_pending_intent_summaries = self._compact_initiative_pending_intent_summaries(
-                initiative_context.get("pending_intent_summaries")
+                initiative_payload.get("pending_intent_summaries")
             )
             if compact_pending_intent_summaries:
                 payload["pending_intent_summaries"] = compact_pending_intent_summaries
             compact_candidate_families = self._compact_initiative_candidate_families(
-                initiative_context.get("candidate_families")
+                initiative_payload.get("candidate_families")
             )
             if compact_candidate_families:
                 payload["candidate_families"] = compact_candidate_families
-            runtime_state_summary = initiative_context.get("runtime_state_summary")
+            runtime_state_summary = initiative_payload.get("runtime_state_summary")
             if isinstance(runtime_state_summary, dict):
                 payload["runtime_state_summary"] = {
                     "wake_scheduler_active": runtime_state_summary.get("wake_scheduler_active"),
@@ -3100,26 +3102,26 @@ class ServiceInputMixin(
                     "pending_memory_job_count": runtime_state_summary.get("pending_memory_job_count"),
                 }
             compact_drive_summaries = self._compact_initiative_drive_summaries(
-                initiative_context.get("drive_summaries")
+                initiative_payload.get("drive_summaries")
             )
             if compact_drive_summaries:
                 payload["drive_summaries"] = compact_drive_summaries
             compact_recent_turn_summary = self._compact_initiative_recent_turn_summary(
-                initiative_context.get("recent_turn_summary")
+                initiative_payload.get("recent_turn_summary")
             )
             if compact_recent_turn_summary:
                 payload["recent_turn_summary"] = compact_recent_turn_summary
             compact_world_state_summaries = self._compact_initiative_world_state_summaries(
-                initiative_context.get("world_state_summary")
+                initiative_payload.get("world_state_summary")
             )
             if compact_world_state_summaries:
                 payload["world_state_summaries"] = compact_world_state_summaries
             compact_intervention_state = self._compact_initiative_intervention_state(
-                initiative_context.get("intervention_state")
+                initiative_payload.get("intervention_state")
             )
             if compact_intervention_state:
                 payload["intervention_state"] = compact_intervention_state
-            suppression_summary = initiative_context.get("suppression_summary")
+            suppression_summary = initiative_payload.get("suppression_summary")
             if isinstance(suppression_summary, dict):
                 compact_suppression: dict[str, Any] = {}
                 for key in ("suppression_level", "reason_summary"):
@@ -3132,7 +3134,7 @@ class ServiceInputMixin(
                         compact_suppression[key] = value
                 if compact_suppression:
                     payload["suppression_summary"] = compact_suppression
-            intervention_risk_summary = initiative_context.get("intervention_risk_summary")
+            intervention_risk_summary = initiative_payload.get("intervention_risk_summary")
             if isinstance(intervention_risk_summary, str) and intervention_risk_summary.strip():
                 payload["intervention_risk_summary"] = self._clamp(intervention_risk_summary.strip(), limit=160)
         compact_pending_intent_selection = self._compact_pending_intent_selection_summary(
@@ -3608,7 +3610,7 @@ class ServiceInputMixin(
         reply_payload: dict[str, Any] | None,
         pending_intent_summary: dict[str, Any] | None,
         capability_decision_view: list[dict[str, Any]] | None,
-        initiative_context: dict[str, Any] | None,
+        initiative_context: InitiativeContext | None,
         capability_result_context: dict[str, Any] | None,
         visual_observation_context: dict[str, Any] | None,
         world_state_trace: dict[str, Any] | None,
@@ -3738,7 +3740,7 @@ class ServiceInputMixin(
         drive_state_summary: list[dict[str, Any]] | None = None,
         ongoing_action_summary: dict[str, Any] | None = None,
         capability_decision_view: list[dict[str, Any]] | None = None,
-        initiative_context: dict[str, Any] | None = None,
+        initiative_context: InitiativeContext | None = None,
         observation_summary: dict[str, Any] | None = None,
         capability_request_summary: dict[str, Any] | None = None,
         followup_capability_request_summary: dict[str, Any] | None = None,

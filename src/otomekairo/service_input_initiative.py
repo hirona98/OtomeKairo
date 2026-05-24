@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from otomekairo.llm_contexts import InitiativeContext
 from otomekairo.service_common import debug_log
 from otomekairo.service_input_constants import (
     INITIATIVE_AUTONOMOUS_PROBE_SCORE,
@@ -30,7 +31,7 @@ class ServiceInputInitiativeMixin:
         capability_decision_view: list[dict[str, Any]] | None,
         selected_candidate: dict[str, Any] | None,
         pending_intent_selection: dict[str, Any] | None,
-    ) -> dict[str, Any] | None:
+    ) -> InitiativeContext | None:
         if trigger_kind not in {"wake", "background_wake"}:
             return None
         drive_summaries = self._initiative_drive_summaries(drive_state_summary)
@@ -109,29 +110,29 @@ class ServiceInputInitiativeMixin:
                 f"desktop={desktop_debug}"
             ),
         )
-        return {
-            "trigger_kind": trigger_kind,
-            "opportunity_summary": self._initiative_opportunity_summary(
+        return InitiativeContext(
+            trigger_kind=trigger_kind,
+            opportunity_summary=self._initiative_opportunity_summary(
                 trigger_kind=trigger_kind,
                 client_context=client_context,
                 selected_candidate=selected_candidate,
             ),
-            "time_context_summary": self._initiative_time_context_summary(time_context=time_context),
-            "foreground_signal_summary": foreground_signal_summary,
-            "initiative_baseline": initiative_baseline,
-            "runtime_state_summary": runtime_state_summary,
-            "recent_turn_summary": recent_turn_summary,
-            "drive_summaries": drive_summaries,
-            "pending_intent_summaries": pending_intent_summaries,
-            "world_state_summary": world_state_summary,
-            "ongoing_action_summary": ongoing_action_summary,
-            "capability_summary": capability_summary,
-            "candidate_families": candidate_families,
-            "selected_candidate_family": selected_candidate_family,
-            "intervention_state": intervention_state,
-            "suppression_summary": suppression_summary,
-            "intervention_risk_summary": intervention_risk_summary,
-        }
+            time_context_summary=self._initiative_time_context_summary(time_context=time_context),
+            foreground_signal_summary=foreground_signal_summary,
+            initiative_baseline=initiative_baseline,
+            runtime_state_summary=runtime_state_summary,
+            recent_turn_summary=recent_turn_summary,
+            drive_summaries=drive_summaries,
+            pending_intent_summaries=pending_intent_summaries,
+            world_state_summary=world_state_summary,
+            ongoing_action_summary=ongoing_action_summary,
+            capability_summary=capability_summary,
+            candidate_families=candidate_families,
+            selected_candidate_family=selected_candidate_family,
+            intervention_state=intervention_state,
+            suppression_summary=suppression_summary,
+            intervention_risk_summary=intervention_risk_summary,
+        )
 
     def _initiative_status_refresh_world_state_summary(
         self,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from otomekairo.llm_contexts import DecisionContext, ReplyContext
+from otomekairo.llm_contexts import DecisionContext, InitiativeContext, ReplyContext
 from otomekairo.service_common import debug_log
 
 
@@ -178,7 +178,7 @@ class ServiceInputPipelineMixin:
                 f"{cycle_label} context done affect_states={len(affect_context.get('affect_states', []))} "
                 f"drives={len(drive_state_summary or [])} world_states={len(foreground_world_state or [])} "
                 f"ongoing_action={isinstance(ongoing_action_summary, dict)} "
-                f"capabilities={len(capability_decision_view or [])} initiative={isinstance(initiative_context, dict)}"
+                f"capabilities={len(capability_decision_view or [])} initiative={initiative_context is not None}"
             ),
         )
 
@@ -294,7 +294,7 @@ class ServiceInputPipelineMixin:
         foreground_world_state: list[dict[str, Any]] | None,
         ongoing_action_summary: dict[str, Any] | None,
         capability_decision_view: list[dict[str, Any]] | None,
-        initiative_context: dict[str, Any] | None,
+        initiative_context: InitiativeContext | None,
         capability_result_context: dict[str, Any] | None,
         visual_observation_context: dict[str, Any] | None,
         recall_hint: dict[str, Any],
@@ -327,7 +327,7 @@ class ServiceInputPipelineMixin:
         drive_state_summary: list[dict[str, Any]] | None,
         foreground_world_state: list[dict[str, Any]] | None,
         ongoing_action_summary: dict[str, Any] | None,
-        initiative_context: dict[str, Any] | None,
+        initiative_context: InitiativeContext | None,
         visual_observation_context: dict[str, Any] | None,
         recall_hint: dict[str, Any],
         recall_pack: dict[str, Any],

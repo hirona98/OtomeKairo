@@ -4,7 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from otomekairo.llm_contexts import DecisionContext, ReplyContext
+from otomekairo.llm_contexts import DecisionContext, InitiativeContext, ReplyContext
 from otomekairo.llm_contracts import (
     LLMContractError,
     LLMError,
@@ -304,10 +304,10 @@ class LLMClient:
             trigger_kind=context.trigger_kind,
             visual_observation_context=context.visual_observation_context,
         )
-        if not isinstance(context.initiative_context, dict):
+        if context.initiative_context is None:
             return
         selected_family = self._selected_initiative_family_entry(context.initiative_context)
-        if not isinstance(selected_family, dict):
+        if selected_family is None:
             return
         preferred_result_kind = selected_family.get("preferred_result_kind")
         if not isinstance(preferred_result_kind, str) or not preferred_result_kind:
@@ -340,8 +340,8 @@ class LLMClient:
                 )
             return
         if decision_kind == "noop" and preferred_result_kind == "reply":
-            foreground_summary = context.initiative_context.get("foreground_signal_summary")
-            suppression_summary = context.initiative_context.get("suppression_summary")
+            foreground_summary = context.initiative_context.foreground_signal_summary
+            suppression_summary = context.initiative_context.suppression_summary
             foreground_thinness = (
                 foreground_summary.get("foreground_thinness")
                 if isinstance(foreground_summary, dict)
@@ -645,17 +645,8 @@ class LLMClient:
             "受け取った result に基づく reply / noop / pending_intent を返してください。"
         )
 
-    def _selected_initiative_family_entry(self, initiative_context: dict[str, Any]) -> dict[str, Any] | None:
-        selected_family = initiative_context.get("selected_candidate_family")
-        candidate_families = initiative_context.get("candidate_families")
-        if not isinstance(selected_family, str) or not isinstance(candidate_families, list):
-            return None
-        for family in candidate_families:
-            if not isinstance(family, dict):
-                continue
-            if family.get("selected") is True or family.get("family") == selected_family:
-                return family
-        return None
+    def _selected_initiative_family_entry(self, initiative_context: InitiativeContext) -> dict[str, Any] | None:
+        return initiative_context.selected_family_entry()
 
     def generate_reply(
         self,

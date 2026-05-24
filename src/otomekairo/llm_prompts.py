@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from otomekairo.llm_contexts import DecisionContext, ReplyContext
+from otomekairo.llm_contexts import DecisionContext, InitiativeContext, ReplyContext
 from otomekairo.llm_contracts import (
     ANSWER_BOUNDARY_VALUES,
     ANSWER_CONTRACT_VALUES,
@@ -669,7 +669,7 @@ def _build_decision_context_prompt(
     foreground_world_state: list[dict[str, Any]] | None,
     ongoing_action_summary: dict[str, Any] | None,
     capability_decision_view: list[dict[str, Any]] | None,
-    initiative_context: dict[str, Any] | None,
+    initiative_context: InitiativeContext | None,
     capability_result_context: dict[str, Any] | None,
     visual_observation_context: dict[str, Any] | None,
     recall_hint: dict,
@@ -702,7 +702,7 @@ def _build_decision_context_prompt(
 
 def _build_decision_trigger_policy(
     *,
-    initiative_context: dict[str, Any] | None,
+    initiative_context: InitiativeContext | None,
     capability_result_context: dict[str, Any] | None,
 ) -> list[str]:
     policies: list[str] = []
@@ -713,7 +713,7 @@ def _build_decision_trigger_policy(
                 "CapabilityResultContext.allowed_followup_capability_ids に含まれない capability_request は選ばず、受け取った結果への reply / noop / pending_intent で閉じてください。",
             ]
         )
-    if isinstance(initiative_context, dict):
+    if initiative_context is not None:
         policies.extend(
             [
                 "InitiativeContext には opportunity_summary, time_context_summary, foreground_signal_summary, initiative_baseline, runtime_state_summary, recent_turn_summary, candidate_families, selected_candidate_family, intervention_state, suppression_summary が入りえます。",
@@ -828,7 +828,7 @@ def _build_reply_context_prompt(
     drive_state_summary: list[dict[str, Any]] | None,
     foreground_world_state: list[dict[str, Any]] | None,
     ongoing_action_summary: dict[str, Any] | None,
-    initiative_context: dict[str, Any] | None,
+    initiative_context: InitiativeContext | None,
     visual_observation_context: dict[str, Any] | None,
     recall_hint: dict,
     recall_pack: dict[str, Any],
@@ -1183,7 +1183,7 @@ def _build_reply_internal_context_payload(
     drive_state_summary: list[dict[str, Any]] | None,
     foreground_world_state: list[dict[str, Any]] | None,
     ongoing_action_summary: dict[str, Any] | None,
-    initiative_context: dict[str, Any] | None,
+    initiative_context: InitiativeContext | None,
     visual_observation_context: dict[str, Any] | None,
     recall_pack: dict[str, Any],
 ) -> dict[str, Any]:
@@ -1206,9 +1206,10 @@ def _build_reply_internal_context_payload(
     return payload
 
 
-def _compact_reply_initiative_context(initiative_context: dict[str, Any] | None) -> dict[str, Any]:
-    if not isinstance(initiative_context, dict):
+def _compact_reply_initiative_context(initiative_context: InitiativeContext | None) -> dict[str, Any]:
+    if initiative_context is None:
         return {}
+    initiative_payload = initiative_context.to_prompt_payload()
     payload: dict[str, Any] = {}
     for key, limit in (
         ("trigger_kind", 40),
@@ -1216,10 +1217,10 @@ def _compact_reply_initiative_context(initiative_context: dict[str, Any] | None)
         ("selected_candidate_family", 80),
         ("intervention_risk_summary", 160),
     ):
-        value = initiative_context.get(key)
+        value = initiative_payload.get(key)
         if isinstance(value, str) and value.strip():
             payload[key] = _compact_prompt_text(value, limit=limit)
-    foreground_signal_summary = initiative_context.get("foreground_signal_summary")
+    foreground_signal_summary = initiative_payload.get("foreground_signal_summary")
     if isinstance(foreground_signal_summary, dict):
         compact_foreground: dict[str, Any] = {}
         for key, limit in (
@@ -1252,7 +1253,7 @@ def _build_internal_context_payload(
     foreground_world_state: list[dict[str, Any]] | None,
     ongoing_action_summary: dict[str, Any] | None,
     capability_decision_view: list[dict[str, Any]] | None,
-    initiative_context: dict[str, Any] | None,
+    initiative_context: InitiativeContext | None,
     capability_result_context: dict[str, Any] | None,
     visual_observation_context: dict[str, Any] | None,
     recall_pack: dict[str, Any],
@@ -1270,8 +1271,8 @@ def _build_internal_context_payload(
         payload["ongoing_action_summary"] = ongoing_action_summary
     if capability_decision_view:
         payload["capability_decision_view"] = capability_decision_view
-    if initiative_context:
-        payload["initiative_context"] = initiative_context
+    if initiative_context is not None:
+        payload["initiative_context"] = initiative_context.to_prompt_payload()
     if capability_result_context:
         payload["capability_result_context"] = capability_result_context
     if visual_observation_context:
@@ -1286,7 +1287,7 @@ def _format_internal_context(
     foreground_world_state: list[dict[str, Any]] | None,
     ongoing_action_summary: dict[str, Any] | None,
     capability_decision_view: list[dict[str, Any]] | None,
-    initiative_context: dict[str, Any] | None,
+    initiative_context: InitiativeContext | None,
     capability_result_context: dict[str, Any] | None,
     visual_observation_context: dict[str, Any] | None,
     recall_pack: dict[str, Any],
