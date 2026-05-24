@@ -78,17 +78,25 @@ class ServiceInputWakeObservationMixin:
                 observation=observation,
                 reason_summary="wake_policy observation input が不正。",
             )
-        if not self._wake_policy_observation_source_available(capability_id=capability_id, input_payload=input_payload):
+        resolved_input_payload = self._resolve_wake_policy_observation_input(
+            capability_id=capability_id,
+            input_payload=input_payload,
+        )
+        if resolved_input_payload is None:
             return self._wake_policy_observation_failure_summary(
                 observation=observation,
                 reason_summary="対象 vision source が接続されていない。",
             )
+        resolved_observation = {
+            **observation,
+            "input": resolved_input_payload,
+        }
 
         try:
             capability_response = self._dispatch_capability_request(
                 memory_set_id=state["selected_memory_set_id"],
                 capability_id=capability_id,
-                input_payload=input_payload,
+                input_payload=resolved_input_payload,
                 current_time=self._now_iso(),
                 goal_summary=f"wake_policy observation {observation_id}",
                 wait_for_response=True,
@@ -113,18 +121,49 @@ class ServiceInputWakeObservationMixin:
         return self._apply_wake_policy_observation_result(
             state=state,
             started_at=started_at,
-            observation=observation,
+            observation=resolved_observation,
             capability_response=capability_response,
             cycle_id=cycle_id,
         )
 
-    def _wake_policy_observation_source_available(self, *, capability_id: str, input_payload: dict[str, Any]) -> bool:
+    def _resolve_wake_policy_observation_input(
+        self,
+        *,
+        capability_id: str,
+        input_payload: dict[str, Any],
+    ) -> dict[str, Any] | None:
         if capability_id != "vision.capture":
-            return True
+            return dict(input_payload)
         vision_source_id = input_payload.get("vision_source_id")
         if not isinstance(vision_source_id, str) or not vision_source_id.strip():
-            return False
-        return isinstance(self._event_stream_registry.get_vision_source(vision_source_id.strip()), dict)
+            return None
+        normalized_source_id = vision_source_id.strip()
+        if isinstance(self._event_stream_registry.get_vision_source(normalized_source_id), dict):
+            return dict(input_payload)
+
+        resolved_source = self._resolve_wake_policy_vision_source_from_stale_id(normalized_source_id)
+        if not isinstance(resolved_source, dict):
+            return None
+        resolved_source_id = resolved_source.get("vision_source_id")
+        if not isinstance(resolved_source_id, str) or not resolved_source_id.strip():
+            return None
+        return {
+            **input_payload,
+            "vision_source_id": resolved_source_id.strip(),
+        }
+
+    def _resolve_wake_policy_vision_source_from_stale_id(self, vision_source_id: str) -> dict[str, Any] | None:
+        # CocoroConsole の再生成済み source id は末尾 token と default_for で同じ観測対象へ束ねる。
+        stale_kind = vision_source_id.rsplit(":", 1)[-1].strip()
+        if stale_kind in {"desktop", "camera", "virtual"}:
+            resolved = self._event_stream_registry.find_single_vision_source(
+                kind=stale_kind,
+                default_for=stale_kind,
+            )
+            if isinstance(resolved, dict):
+                return resolved
+            return self._event_stream_registry.find_single_vision_source(kind=stale_kind)
+        return None
 
     def _apply_wake_policy_observation_result(
         self,

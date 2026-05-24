@@ -379,6 +379,49 @@ class EventStreamRegistry:
             raise ValueError(f"Vision source is ambiguous: {normalized_source_id}")
         return matches[0]
 
+    def find_single_vision_source(
+        self,
+        *,
+        kind: str | None = None,
+        default_for: str | None = None,
+    ) -> dict[str, Any] | None:
+        # 保存済み設定の古い vision_source_id を、接続中 source の安定した属性から再解決する。
+        normalized_kind = kind.strip() if isinstance(kind, str) else ""
+        normalized_default_for = default_for.strip() if isinstance(default_for, str) else ""
+        if not normalized_kind and not normalized_default_for:
+            return None
+
+        matches: list[dict[str, Any]] = []
+        with self._lock:
+            for session in self._sessions.values():
+                client_id = session.get("client_id")
+                if not isinstance(client_id, str) or not client_id.strip():
+                    continue
+                capabilities = session.get("capabilities", {})
+                if not isinstance(capabilities, dict) or "vision.capture" not in capabilities:
+                    continue
+                for source in session.get("vision_sources", []):
+                    if not isinstance(source, dict):
+                        continue
+                    if normalized_kind and source.get("kind") != normalized_kind:
+                        continue
+                    default_for_values = source.get("default_for", [])
+                    if normalized_default_for and (
+                        not isinstance(default_for_values, list) or normalized_default_for not in default_for_values
+                    ):
+                        continue
+                    matches.append(
+                        {
+                            **dict(source),
+                            "client_id": client_id.strip(),
+                            "available": True,
+                            "unavailable_reason": None,
+                        }
+                    )
+        if len(matches) != 1:
+            return None
+        return matches[0]
+
     def send_to_client(self, client_id: str, payload: dict[str, Any]) -> bool:
         # スナップショット
         with self._lock:
