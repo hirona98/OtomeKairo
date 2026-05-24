@@ -764,6 +764,7 @@ def _build_reply_system_prompt(persona: dict) -> str:
         (
             "応答ルール",
             "自律判断トリガー時だけ返信理由の短い InitiativeContext も入ります。\n"
+            "InitiativeContext.trigger_kind が wake / background_wake のとき、user input message はシステム観測文であり、ユーザーが直接話した内容ではありません。「そうでしたか」「なるほど」など、ユーザー発話への相づちとして始めないでください。\n"
             "recall_hint.secondary_recall_focuses は話題継続や温度調整の補助にだけ使い、主方針は primary_recall_focus に従ってください。\n"
             "RecallPack の内容だけを根拠に、必要な範囲で自然に思い出や継続文脈を混ぜてください。\n"
             "RecallPack.evidence_pack.status=grounded のとき、正確な原文・日時・出典に関する本文は evidence_items.text と recorded_date の範囲で作ってください。\n"

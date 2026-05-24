@@ -422,6 +422,16 @@ class ServiceInputWakeObservationMixin:
             "last_window_title": summary.get("window_title") if isinstance(summary.get("window_title"), str) else None,
             "last_image_count": summary.get("image_count") if isinstance(summary.get("image_count"), int) else None,
         }
+        for key in (
+            "last_success_at",
+            "last_scene_signature",
+            "same_scene_count",
+            "last_prompted_scene_signature",
+            "last_prompted_at",
+            "pending_novel_scene",
+        ):
+            if key not in payload and key in previous_runtime:
+                payload[key] = previous_runtime[key]
         self._apply_desktop_observation_runtime_payload(
             payload=payload,
             summary=enriched_summary,
@@ -455,9 +465,21 @@ class ServiceInputWakeObservationMixin:
         )
         cooldown_reason = self._wake_cooldown_reason(current_time=current_time)
         cooldown_active = cooldown_reason is not None
-        same_as_previous = self._desktop_scene_signatures_similar(scene_signature, previous_signature)
-        same_as_pending = self._desktop_scene_signatures_similar(scene_signature, pending_signature)
-        same_as_prompted = self._desktop_scene_signatures_similar(scene_signature, last_prompted_signature)
+        same_as_previous = self._desktop_scene_signatures_similar(
+            scene_signature,
+            previous_signature,
+            compare_target="previous",
+        )
+        same_as_pending = self._desktop_scene_signatures_similar(
+            scene_signature,
+            pending_signature,
+            compare_target="pending",
+        )
+        same_as_prompted = self._desktop_scene_signatures_similar(
+            scene_signature,
+            last_prompted_signature,
+            compare_target="prompted",
+        )
 
         if same_as_pending and not cooldown_active and not same_as_prompted:
             novelty_kind = "pending_after_cooldown"
@@ -519,7 +541,11 @@ class ServiceInputWakeObservationMixin:
             same_count = 0
         payload["last_success_at"] = current_time
         payload["last_scene_signature"] = scene_signature
-        if self._desktop_scene_signatures_similar(scene_signature, previous_signature):
+        if self._desktop_scene_signatures_similar(
+            scene_signature,
+            previous_signature,
+            compare_target="previous",
+        ):
             payload["same_scene_count"] = same_count + 1
         else:
             payload["same_scene_count"] = 1
@@ -541,6 +567,7 @@ class ServiceInputWakeObservationMixin:
             if isinstance(pending_scene, dict) and self._desktop_scene_signatures_similar(
                 scene_signature,
                 self._client_context_text(pending_scene.get("scene_signature"), limit=320),
+                compare_target="pending",
             ):
                 previous_first_seen_at = pending_scene.get("first_seen_at")
                 if isinstance(previous_first_seen_at, str) and previous_first_seen_at.strip():
@@ -573,10 +600,27 @@ class ServiceInputWakeObservationMixin:
         normalized = " | ".join(" ".join(part.lower().split()) for part in parts)
         return self._clamp(normalized, limit=320)
 
-    def _desktop_scene_signatures_similar(self, current: str | None, previous: str | None) -> bool:
+    def _desktop_scene_signatures_similar(
+        self,
+        current: str | None,
+        previous: str | None,
+        *,
+        compare_target: str,
+    ) -> bool:
         if current is None or previous is None:
+            if compare_target == "previous":
+                debug_log(
+                    "Wake",
+                    "desktop scene similarity skipped target=previous reason=missing_signature",
+                )
             return False
         if current == previous:
+            debug_log(
+                "Wake",
+                f"desktop scene similarity target={compare_target} result=same "
+                "reason=exact_match similarity=1.00 "
+                f"threshold={DESKTOP_SCENE_SIMILARITY_THRESHOLD:.2f}",
+            )
             return True
         current_fields = self._desktop_scene_signature_fields(current)
         previous_fields = self._desktop_scene_signature_fields(previous)
@@ -584,10 +628,28 @@ class ServiceInputWakeObservationMixin:
             current_value = current_fields.get(key)
             previous_value = previous_fields.get(key)
             if current_value and previous_value and current_value != previous_value:
+                debug_log(
+                    "Wake",
+                    (
+                        f"desktop scene similarity target={compare_target} result=changed "
+                        f"reason={key}_mismatch similarity=0.00 "
+                        f"threshold={DESKTOP_SCENE_SIMILARITY_THRESHOLD:.2f}"
+                    ),
+                )
                 return False
         current_summary = current_fields.get("visual_summary_text") or current
         previous_summary = previous_fields.get("visual_summary_text") or previous
-        return SequenceMatcher(None, current_summary, previous_summary).ratio() >= DESKTOP_SCENE_SIMILARITY_THRESHOLD
+        similarity = SequenceMatcher(None, current_summary, previous_summary).ratio()
+        similar = similarity >= DESKTOP_SCENE_SIMILARITY_THRESHOLD
+        debug_log(
+            "Wake",
+            (
+                f"desktop scene similarity target={compare_target} "
+                f"result={'same' if similar else 'changed'} "
+                f"similarity={similarity:.2f} threshold={DESKTOP_SCENE_SIMILARITY_THRESHOLD:.2f}"
+            ),
+        )
+        return similar
 
     def _desktop_scene_signature_fields(self, signature: str) -> dict[str, str]:
         fields: dict[str, str] = {}
