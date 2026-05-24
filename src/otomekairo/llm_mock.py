@@ -5,7 +5,6 @@ import math
 import re
 from dataclasses import dataclass
 from typing import Any
-from typing import Any
 from otomekairo.llm_contexts import DecisionContext, ReplyContext
 from otomekairo.llm_contracts import (
     RECALL_PACK_SECTION_NAMES,
@@ -22,6 +21,58 @@ from otomekairo.llm_contracts import (
     validate_visual_observation_contract,
     validate_world_state_contract,
 )
+
+MOCK_CAPABILITY_REQUEST_RULES = (
+    (
+        "vision.capture",
+        "_should_mock_vision_capture_request",
+        "_build_mock_vision_capture_request_input",
+        "現在の画面状態を観測する必要がある。",
+    ),
+    (
+        "schedule.status",
+        "_should_mock_schedule_status_request",
+        "_build_mock_schedule_status_request_input",
+        "近い予定やカレンダー状態を確認する必要がある。",
+    ),
+    (
+        "body.status",
+        "_should_mock_body_status_request",
+        "_build_mock_body_status_request_input",
+        "身体や体調の現在状態を確認する必要がある。",
+    ),
+    (
+        "social.status",
+        "_should_mock_social_status_request",
+        "_build_mock_social_status_request_input",
+        "対人文脈や連絡状況の現在状態を確認する必要がある。",
+    ),
+    (
+        "environment.status",
+        "_should_mock_environment_status_request",
+        "_build_mock_environment_status_request_input",
+        "周囲や作業環境の現在状態を確認する必要がある。",
+    ),
+    (
+        "location.status",
+        "_should_mock_location_status_request",
+        "_build_mock_location_status_request_input",
+        "場所や移動に関わる現在状態を確認する必要がある。",
+    ),
+    (
+        "device.status",
+        "_should_mock_device_status_request",
+        "_build_mock_device_status_request_input",
+        "端末や接続の現在状態を確認する必要がある。",
+    ),
+    (
+        "external.status",
+        "_should_mock_external_status_request",
+        "_build_mock_external_status_request_input",
+        "外部サービスの現在状態を確認する必要がある。",
+    ),
+)
+
 
 
 # モッククライアント
@@ -263,26 +314,16 @@ class MockLLMClient:
         _ = persona
         self._assert_mock_model(role_definition)
         input_text = context.input_text
-        trigger_kind = context.trigger_kind
         recent_turns = context.recent_turns
         time_context = context.time_context
         affect_context = context.affect_context
-        drive_state_summary = context.drive_state_summary
-        foreground_world_state = context.foreground_world_state
         ongoing_action_summary = context.ongoing_action_summary
         capability_decision_view = context.capability_decision_view
         initiative_context = context.initiative_context
-        capability_result_context = context.capability_result_context
-        visual_observation_context = context.visual_observation_context
         recall_hint = context.recall_hint
         recall_pack = context.recall_pack
-        _ = trigger_kind
         _ = recent_turns
         _ = time_context
-        _ = drive_state_summary
-        _ = foreground_world_state
-        _ = capability_result_context
-        _ = visual_observation_context
 
         # コンテキスト
         normalized = input_text.strip()
@@ -298,248 +339,278 @@ class MockLLMClient:
         current_vad = mood_state.get("current_vad") or {}
         current_valence = float(current_vad.get("v", 0.0)) if isinstance(current_vad, dict) else 0.0
 
-        # decisionルール
-        initiative_trigger = initiative_context.get("trigger_kind") if isinstance(initiative_context, dict) else None
-        initiative_pending = initiative_context.get("pending_intent_summaries", []) if isinstance(initiative_context, dict) else []
-        if initiative_trigger in {"wake", "background_wake"} and not initiative_pending:
-            capability_request = self._mock_autonomous_initiative_capability_request(
-                initiative_context=initiative_context,
+        payload = self._mock_initiative_decision(
+            initiative_context=initiative_context,
+            capability_decision_view=capability_decision_view,
+        )
+        if payload is None:
+            payload = self._mock_capability_request_decision(
+                normalized=normalized,
+                ongoing_action_summary=ongoing_action_summary,
                 capability_decision_view=capability_decision_view,
             )
-            if capability_request is not None:
-                payload = {
-                    "kind": "capability_request",
-                    "reason_code": f"initiative:{capability_request['capability_id']}",
-                    "reason_summary": "継続中の initiative 候補から capability follow-up を進める。",
-                    "requires_confirmation": False,
-                    "pending_intent": None,
-                    "capability_request": capability_request,
-                }
-            elif self._should_mock_autonomous_initiative_reply(initiative_context):
-                payload = {
-                    "kind": "reply",
-                    "reason_code": "initiative_context",
-                    "reason_summary": "現在の drive_state や world_state から自発的に前へ出る理由がある。",
-                    "requires_confirmation": False,
-                    "pending_intent": None,
-                }
-            else:
-                payload = {
-                    "kind": "noop",
-                    "reason_code": "initiative_wait",
-                    "reason_summary": "現在の前景だけでは自発的に前へ出る理由がまだ弱い。",
-                    "requires_confirmation": False,
-                    "pending_intent": None,
-                }
-        elif not normalized:
-            payload = {
-                "kind": "noop",
-                "reason_code": "empty_input",
-                "reason_summary": "Input text was empty after normalization.",
+        if payload is None:
+            payload = self._mock_pending_intent_decision(
+                normalized=normalized,
+                primary_recall_focus=primary_recall_focus,
+                active_commitments=active_commitments,
+                episodic_evidence=episodic_evidence,
+                event_evidence=event_evidence,
+                active_topics=active_topics,
+            )
+        if payload is None:
+            payload = self._mock_default_conversation_decision(
+                primary_recall_focus=primary_recall_focus,
+                secondary_recall_focuses=secondary_recall_focuses,
+                conflicts=conflicts,
+                active_commitments=active_commitments,
+                episodic_evidence=episodic_evidence,
+                recent_episode_affects=recent_episode_affects,
+                current_valence=current_valence,
+            )
+
+        # 検証
+        payload.setdefault("capability_request", None)
+        validate_decision_contract(payload)
+        return payload
+
+    def _mock_initiative_decision(
+        self,
+        *,
+        initiative_context: dict[str, Any] | None,
+        capability_decision_view: list[dict[str, Any]] | None,
+    ) -> dict[str, Any] | None:
+        initiative_trigger = initiative_context.get("trigger_kind") if isinstance(initiative_context, dict) else None
+        initiative_pending = (
+            initiative_context.get("pending_intent_summaries", []) if isinstance(initiative_context, dict) else []
+        )
+        if initiative_trigger not in {"wake", "background_wake"} or initiative_pending:
+            return None
+        capability_request = self._mock_autonomous_initiative_capability_request(
+            initiative_context=initiative_context,
+            capability_decision_view=capability_decision_view,
+        )
+        if capability_request is not None:
+            return {
+                "kind": "capability_request",
+                "reason_code": f"initiative:{capability_request['capability_id']}",
+                "reason_summary": "継続中の initiative 候補から capability follow-up を進める。",
+                "requires_confirmation": False,
+                "pending_intent": None,
+                "capability_request": capability_request,
+            }
+        if self._should_mock_autonomous_initiative_reply(initiative_context):
+            return {
+                "kind": "reply",
+                "reason_code": "initiative_context",
+                "reason_summary": "現在の drive_state や world_state から自発的に前へ出る理由がある。",
                 "requires_confirmation": False,
                 "pending_intent": None,
             }
-        elif self._should_mock_vision_capture_request(
-            normalized=normalized,
-            ongoing_action_summary=ongoing_action_summary,
-            capability_decision_view=capability_decision_view,
-        ):
-            payload = {
+        return {
+            "kind": "noop",
+            "reason_code": "initiative_wait",
+            "reason_summary": "現在の前景だけでは自発的に前へ出る理由がまだ弱い。",
+            "requires_confirmation": False,
+            "pending_intent": None,
+        }
+
+    def _mock_capability_request_decision(
+        self,
+        *,
+        normalized: str,
+        ongoing_action_summary: dict[str, Any] | None,
+        capability_decision_view: list[dict[str, Any]] | None,
+    ) -> dict[str, Any] | None:
+        for capability_id, predicate_name, input_builder_name, reason_summary in MOCK_CAPABILITY_REQUEST_RULES:
+            predicate = getattr(self, predicate_name)
+            if not predicate(
+                normalized=normalized,
+                ongoing_action_summary=ongoing_action_summary,
+                capability_decision_view=capability_decision_view,
+            ):
+                continue
+            request_input = getattr(self, input_builder_name)(
+                normalized=normalized,
+                capability_decision_view=capability_decision_view,
+            )
+            if request_input is None:
+                continue
+            return {
                 "kind": "capability_request",
-                "reason_code": "capability:vision.capture",
-                "reason_summary": "現在の画面状態を観測する必要がある。",
+                "reason_code": f"capability:{capability_id}",
+                "reason_summary": reason_summary,
                 "requires_confirmation": False,
                 "pending_intent": None,
                 "capability_request": {
-                    "capability_id": "vision.capture",
-                    "input": self._mock_vision_capture_input(capability_decision_view) or {},
+                    "capability_id": capability_id,
+                    "input": request_input,
                 },
             }
-        elif self._should_mock_schedule_status_request(
-            normalized=normalized,
-            ongoing_action_summary=ongoing_action_summary,
-            capability_decision_view=capability_decision_view,
-        ):
-            payload = {
-                "kind": "capability_request",
-                "reason_code": "capability:schedule.status",
-                "reason_summary": "近い予定やカレンダー状態を確認する必要がある。",
-                "requires_confirmation": False,
-                "pending_intent": None,
-                "capability_request": {
-                    "capability_id": "schedule.status",
-                    "input": self._mock_schedule_status_input(normalized),
-                },
-            }
-        elif self._should_mock_body_status_request(
-            normalized=normalized,
-            ongoing_action_summary=ongoing_action_summary,
-            capability_decision_view=capability_decision_view,
-        ):
-            payload = {
-                "kind": "capability_request",
-                "reason_code": "capability:body.status",
-                "reason_summary": "身体や体調の現在状態を確認する必要がある。",
-                "requires_confirmation": False,
-                "pending_intent": None,
-                "capability_request": {
-                    "capability_id": "body.status",
-                    "input": self._mock_body_status_input(normalized),
-                },
-            }
-        elif self._should_mock_social_status_request(
-            normalized=normalized,
-            ongoing_action_summary=ongoing_action_summary,
-            capability_decision_view=capability_decision_view,
-        ):
-            payload = {
-                "kind": "capability_request",
-                "reason_code": "capability:social.status",
-                "reason_summary": "対人文脈や連絡状況の現在状態を確認する必要がある。",
-                "requires_confirmation": False,
-                "pending_intent": None,
-                "capability_request": {
-                    "capability_id": "social.status",
-                    "input": self._mock_social_status_input(normalized),
-                },
-            }
-        elif self._should_mock_environment_status_request(
-            normalized=normalized,
-            ongoing_action_summary=ongoing_action_summary,
-            capability_decision_view=capability_decision_view,
-        ):
-            payload = {
-                "kind": "capability_request",
-                "reason_code": "capability:environment.status",
-                "reason_summary": "周囲や作業環境の現在状態を確認する必要がある。",
-                "requires_confirmation": False,
-                "pending_intent": None,
-                "capability_request": {
-                    "capability_id": "environment.status",
-                    "input": self._mock_environment_status_input(normalized),
-                },
-            }
-        elif self._should_mock_location_status_request(
-            normalized=normalized,
-            ongoing_action_summary=ongoing_action_summary,
-            capability_decision_view=capability_decision_view,
-        ):
-            payload = {
-                "kind": "capability_request",
-                "reason_code": "capability:location.status",
-                "reason_summary": "場所や移動に関わる現在状態を確認する必要がある。",
-                "requires_confirmation": False,
-                "pending_intent": None,
-                "capability_request": {
-                    "capability_id": "location.status",
-                    "input": self._mock_location_status_input(normalized),
-                },
-            }
-        elif self._should_mock_device_status_request(
-            normalized=normalized,
-            ongoing_action_summary=ongoing_action_summary,
-            capability_decision_view=capability_decision_view,
-        ):
-            payload = {
-                "kind": "capability_request",
-                "reason_code": "capability:device.status",
-                "reason_summary": "端末や接続の現在状態を確認する必要がある。",
-                "requires_confirmation": False,
-                "pending_intent": None,
-                "capability_request": {
-                    "capability_id": "device.status",
-                    "input": self._mock_device_status_input(normalized),
-                },
-            }
-        elif self._should_mock_external_status_request(
-            normalized=normalized,
-            ongoing_action_summary=ongoing_action_summary,
-            capability_decision_view=capability_decision_view,
-        ):
-            payload = {
-                "kind": "capability_request",
-                "reason_code": "capability:external.status",
-                "reason_summary": "外部サービスの現在状態を確認する必要がある。",
-                "requires_confirmation": False,
-                "pending_intent": None,
-                "capability_request": {
-                    "capability_id": "external.status",
-                    "input": self._mock_external_status_input(normalized),
-                },
-            }
-        elif self._should_mock_pending_intent(
+        return None
+
+    def _mock_pending_intent_decision(
+        self,
+        *,
+        normalized: str,
+        primary_recall_focus: str,
+        active_commitments: list[dict[str, Any]],
+        episodic_evidence: list[dict[str, Any]],
+        event_evidence: list[dict[str, Any]],
+        active_topics: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        if not self._should_mock_pending_intent(
             normalized=normalized,
             active_commitments=active_commitments,
             episodic_evidence=episodic_evidence,
             event_evidence=event_evidence,
             active_topics=active_topics,
         ):
-            payload = {
-                "kind": "pending_intent",
-                "reason_code": "defer_for_later",
-                "reason_summary": "継続価値はあるが、今は返さず後で触れたほうが自然。",
-                "requires_confirmation": False,
-                "pending_intent": self._mock_pending_intent_payload(
-                    primary_recall_focus=primary_recall_focus,
-                    active_commitments=active_commitments,
-                    episodic_evidence=episodic_evidence,
-                    event_evidence=event_evidence,
-                    active_topics=active_topics,
-                ),
-            }
-        elif conflicts:
-            payload = {
+            return None
+        return {
+            "kind": "pending_intent",
+            "reason_code": "defer_for_later",
+            "reason_summary": "継続価値はあるが、今は返さず後で触れたほうが自然。",
+            "requires_confirmation": False,
+            "pending_intent": self._mock_pending_intent_payload(
+                primary_recall_focus=primary_recall_focus,
+                active_commitments=active_commitments,
+                episodic_evidence=episodic_evidence,
+                event_evidence=event_evidence,
+                active_topics=active_topics,
+            ),
+        }
+
+    def _mock_default_conversation_decision(
+        self,
+        *,
+        primary_recall_focus: str,
+        secondary_recall_focuses: list[str],
+        conflicts: list[dict[str, Any]],
+        active_commitments: list[dict[str, Any]],
+        episodic_evidence: list[dict[str, Any]],
+        recent_episode_affects: list[dict[str, Any]],
+        current_valence: float,
+    ) -> dict[str, Any]:
+        if conflicts:
+            return {
                 "kind": "reply",
                 "reason_code": "conflict_present",
                 "reason_summary": "RecallPack に矛盾候補があり、確認寄りの返答が必要。",
                 "requires_confirmation": True,
                 "pending_intent": None,
             }
-        elif primary_recall_focus == "commitment" and active_commitments:
-            payload = {
+        if primary_recall_focus == "commitment" and active_commitments:
+            return {
                 "kind": "reply",
                 "reason_code": "active_commitment",
                 "reason_summary": "進行中の約束や保留があり、継続会話として返答する。",
                 "requires_confirmation": False,
                 "pending_intent": None,
             }
-        elif "episodic" in secondary_recall_focuses and episodic_evidence:
-            payload = {
+        if "episodic" in secondary_recall_focuses and episodic_evidence:
+            return {
                 "kind": "reply",
                 "reason_code": "secondary_episodic",
                 "reason_summary": "補助焦点として回想があり、関連エピソードを踏まえて返答する。",
                 "requires_confirmation": False,
                 "pending_intent": None,
             }
-        elif recent_episode_affects and recent_episode_affects[0]["affect_label"] in {"不安", "緊張", "迷い", "concern"}:
-            payload = {
+        if recent_episode_affects and recent_episode_affects[0]["affect_label"] in {"不安", "緊張", "迷い", "concern"}:
+            return {
                 "kind": "reply",
                 "reason_code": "affect_caution",
                 "reason_summary": "AffectContext に慎重さを要する感情があり、確認寄りに返す。",
                 "requires_confirmation": True,
                 "pending_intent": None,
             }
-        elif current_valence <= -0.25:
-            payload = {
+        if current_valence <= -0.25:
+            return {
                 "kind": "reply",
                 "reason_code": "mood_caution",
                 "reason_summary": "AffectContext の現在機嫌がやや張っており、慎重寄りに返す。",
                 "requires_confirmation": True,
                 "pending_intent": None,
             }
-        else:
-            payload = {
-                "kind": "reply",
-                "reason_code": f"focus:{primary_recall_focus}",
-                "reason_summary": "A normal conversation reply is appropriate for the current input.",
-                "requires_confirmation": primary_recall_focus in {"fact", "relationship"},
-                "pending_intent": None,
-            }
+        return {
+            "kind": "reply",
+            "reason_code": f"focus:{primary_recall_focus}",
+            "reason_summary": "A normal conversation reply is appropriate for the current input.",
+            "requires_confirmation": primary_recall_focus in {"fact", "relationship"},
+            "pending_intent": None,
+        }
 
-        # 検証
-        payload.setdefault("capability_request", None)
-        validate_decision_contract(payload)
-        return payload
+    def _build_mock_vision_capture_request_input(
+        self,
+        *,
+        normalized: str,
+        capability_decision_view: list[dict[str, Any]] | None,
+    ) -> dict[str, Any] | None:
+        _ = normalized
+        return self._mock_vision_capture_input(capability_decision_view)
+
+    def _build_mock_schedule_status_request_input(
+        self,
+        *,
+        normalized: str,
+        capability_decision_view: list[dict[str, Any]] | None,
+    ) -> dict[str, Any] | None:
+        _ = capability_decision_view
+        return self._mock_schedule_status_input(normalized)
+
+    def _build_mock_body_status_request_input(
+        self,
+        *,
+        normalized: str,
+        capability_decision_view: list[dict[str, Any]] | None,
+    ) -> dict[str, Any] | None:
+        _ = capability_decision_view
+        return self._mock_body_status_input(normalized)
+
+    def _build_mock_social_status_request_input(
+        self,
+        *,
+        normalized: str,
+        capability_decision_view: list[dict[str, Any]] | None,
+    ) -> dict[str, Any] | None:
+        _ = capability_decision_view
+        return self._mock_social_status_input(normalized)
+
+    def _build_mock_environment_status_request_input(
+        self,
+        *,
+        normalized: str,
+        capability_decision_view: list[dict[str, Any]] | None,
+    ) -> dict[str, Any] | None:
+        _ = capability_decision_view
+        return self._mock_environment_status_input(normalized)
+
+    def _build_mock_location_status_request_input(
+        self,
+        *,
+        normalized: str,
+        capability_decision_view: list[dict[str, Any]] | None,
+    ) -> dict[str, Any] | None:
+        _ = capability_decision_view
+        return self._mock_location_status_input(normalized)
+
+    def _build_mock_device_status_request_input(
+        self,
+        *,
+        normalized: str,
+        capability_decision_view: list[dict[str, Any]] | None,
+    ) -> dict[str, Any] | None:
+        _ = capability_decision_view
+        return self._mock_device_status_input(normalized)
+
+    def _build_mock_external_status_request_input(
+        self,
+        *,
+        normalized: str,
+        capability_decision_view: list[dict[str, Any]] | None,
+    ) -> dict[str, Any] | None:
+        _ = capability_decision_view
+        return self._mock_external_status_input(normalized)
 
     def generate_reply(
         self,
@@ -554,16 +625,10 @@ class MockLLMClient:
         recent_turns = context.recent_turns
         time_context = context.time_context
         affect_context = context.affect_context
-        drive_state_summary = context.drive_state_summary
-        foreground_world_state = context.foreground_world_state
-        ongoing_action_summary = context.ongoing_action_summary
         initiative_context = context.initiative_context
         recall_hint = context.recall_hint
         recall_pack = context.recall_pack
         decision = context.decision
-        _ = drive_state_summary
-        _ = foreground_world_state
-        _ = ongoing_action_summary
 
         # コンテキスト
         persona_prompt = str(persona.get("persona_prompt", "")).strip()
@@ -591,77 +656,37 @@ class MockLLMClient:
         current_vad = mood_state.get("current_vad") or {}
         current_valence = float(current_vad.get("v", 0.0)) if isinstance(current_vad, dict) else 0.0
 
-        # 注意プレフィックス
-        caution_prefix = ""
-        if conflict_item is not None:
-            caution_prefix = "今は少し慎重に受け取っている。"
-        elif recent_episode_affect is not None and recent_episode_affect["affect_label"] in {"不安", "緊張", "迷い", "concern"}:
-            caution_prefix = "少し慎重に聞いているよ。"
-        elif current_valence <= -0.25:
-            caution_prefix = "少し気を引き締めて聞いているよ。"
-
-        # 継続プレフィックス
-        continuity_prefix = ""
-        if primary_recall_focus != "episodic" and "episodic" in secondary_recall_focuses:
-            if episode_item is not None or event_basis is not None or recent_turns:
-                continuity_prefix = "前の流れも踏まえると、"
-
+        caution_prefix = self._mock_caution_prefix(
+            conflict_item=conflict_item,
+            recent_episode_affect=recent_episode_affect,
+            current_valence=current_valence,
+        )
+        continuity_prefix = self._mock_continuity_prefix(
+            primary_recall_focus=primary_recall_focus,
+            secondary_recall_focuses=secondary_recall_focuses,
+            episode_item=episode_item,
+            event_basis=event_basis,
+            recent_turns=recent_turns,
+        )
         initiative_reply = self._mock_initiative_reply_text(
             initiative_context=initiative_context,
             decision=decision,
         )
-
-        # 返信ルール
-        if initiative_reply is not None:
-            reply_text = initiative_reply
-        elif decision["requires_confirmation"]:
-            basis_text = None
-            if relationship_item is not None:
-                basis_text = relationship_item["summary_text"]
-            elif episode_item is not None:
-                basis_text = episode_item["summary_text"]
-            elif event_basis is not None:
-                basis_text = event_basis
-            elif conflict_item is not None:
-                basis_text = conflict_item["summary_text"]
-            if basis_text is not None:
-                reply_text = (
-                    f"{caution_prefix}{basis_text} という流れで受け取っているけれど、"
-                    f"{text} の理解はこれで合っている？"
-                )
-            else:
-                reply_text = f"{caution_prefix}{text} の受け取りを断定せず確認したい。いまの理解で合っている？"
-        elif primary_recall_focus == "user" and any(token in text for token in ("相談", "どうしたら", "悩", "困って")):
-            if user_item is not None:
-                reply_text = f"{caution_prefix}{continuity_prefix}{user_item['summary_text']} も踏まえて聞くね。{text} の中で、今いちばん困っている点をもう少し教えて。"
-            else:
-                reply_text = f"{caution_prefix}{continuity_prefix}状況は受け取ったよ。{text} の中で、今いちばん困っている点をもう少し教えて。"
-        elif primary_recall_focus == "commitment":
-            if commitment_item is not None:
-                if "どこまで" in text:
-                    reply_text = f"{commitment_item['summary_text']} の続きとして受け取ったよ。いまはどの範囲まで進めたい？"
-                else:
-                    reply_text = f"{commitment_item['summary_text']} の続きとして受け取ったよ。{text} について、今回はどこまで進めたい？"
-            elif event_basis is not None:
-                reply_text = f"{event_basis} の続きとして受け取ったよ。{text} について、今回はどこまで進めたい？"
-            else:
-                reply_text = f"{caution_prefix}その流れは覚えている前提で話すね。{text} に関して、今回どこまで進めたい？"
-        elif primary_recall_focus == "episodic":
-            if episode_item is not None:
-                reply_text = f"{episode_item['summary_text']} の流れとして受け取ったよ。{text} のどの部分からつなげたい？"
-            elif event_basis is not None:
-                reply_text = f"{event_basis} の場面として受け取ったよ。{text} のどの部分からつなげたい？"
-            else:
-                reply_text = f"{caution_prefix}その続きとして受け取ったよ。{text} のどの部分からつなげたい？"
-        elif primary_recall_focus == "preference":
-            reply_text = f"{caution_prefix}{continuity_prefix}好みの話として受け取ったよ。{text} について、今の気分も含めて聞かせて。"
-        else:
-            topic_prefix = ""
-            if topic_item is not None:
-                topic_prefix = f"{topic_item['summary_text']} の流れで、"
-            elif recent_turns:
-                topic_prefix = "前の流れをつなげつつ、"
-            reply_text = f"{caution_prefix}{continuity_prefix}{topic_prefix}{text}として受け取ったよ。"
+        reply_text = initiative_reply or self._mock_contextual_reply_text(
+            text=text,
+            decision=decision,
+            primary_recall_focus=primary_recall_focus,
+            caution_prefix=caution_prefix,
+            continuity_prefix=continuity_prefix,
+            conflict_item=conflict_item,
+            commitment_item=commitment_item,
+            relationship_item=relationship_item,
+            user_item=user_item,
+            topic_item=topic_item,
+            episode_item=episode_item,
+            event_basis=event_basis,
+            recent_turns=recent_turns,
+        )
 
         # payload作成
         return {
@@ -671,6 +696,177 @@ class MockLLMClient:
             ),
             "confidence_note": "mock_model",
         }
+
+    def _mock_caution_prefix(
+        self,
+        *,
+        conflict_item: dict[str, Any] | None,
+        recent_episode_affect: dict[str, Any] | None,
+        current_valence: float,
+    ) -> str:
+        if conflict_item is not None:
+            return "今は少し慎重に受け取っている。"
+        if recent_episode_affect is not None and recent_episode_affect["affect_label"] in {"不安", "緊張", "迷い", "concern"}:
+            return "少し慎重に聞いているよ。"
+        if current_valence <= -0.25:
+            return "少し気を引き締めて聞いているよ。"
+        return ""
+
+    def _mock_continuity_prefix(
+        self,
+        *,
+        primary_recall_focus: str,
+        secondary_recall_focuses: list[str],
+        episode_item: dict[str, Any] | None,
+        event_basis: str | None,
+        recent_turns: list[dict[str, Any]],
+    ) -> str:
+        if primary_recall_focus == "episodic" or "episodic" not in secondary_recall_focuses:
+            return ""
+        if episode_item is None and event_basis is None and not recent_turns:
+            return ""
+        return "前の流れも踏まえると、"
+
+    def _mock_contextual_reply_text(
+        self,
+        *,
+        text: str,
+        decision: dict[str, Any],
+        primary_recall_focus: str,
+        caution_prefix: str,
+        continuity_prefix: str,
+        conflict_item: dict[str, Any] | None,
+        commitment_item: dict[str, Any] | None,
+        relationship_item: dict[str, Any] | None,
+        user_item: dict[str, Any] | None,
+        topic_item: dict[str, Any] | None,
+        episode_item: dict[str, Any] | None,
+        event_basis: str | None,
+        recent_turns: list[dict[str, Any]],
+    ) -> str:
+        if decision["requires_confirmation"]:
+            return self._mock_confirmation_reply_text(
+                text=text,
+                caution_prefix=caution_prefix,
+                relationship_item=relationship_item,
+                episode_item=episode_item,
+                event_basis=event_basis,
+                conflict_item=conflict_item,
+            )
+        if primary_recall_focus == "user" and any(token in text for token in ("相談", "どうしたら", "悩", "困って")):
+            return self._mock_user_focus_reply_text(
+                text=text,
+                caution_prefix=caution_prefix,
+                continuity_prefix=continuity_prefix,
+                user_item=user_item,
+            )
+        if primary_recall_focus == "commitment":
+            return self._mock_commitment_reply_text(
+                text=text,
+                caution_prefix=caution_prefix,
+                commitment_item=commitment_item,
+                event_basis=event_basis,
+            )
+        if primary_recall_focus == "episodic":
+            return self._mock_episodic_reply_text(
+                text=text,
+                caution_prefix=caution_prefix,
+                episode_item=episode_item,
+                event_basis=event_basis,
+            )
+        if primary_recall_focus == "preference":
+            return f"{caution_prefix}{continuity_prefix}好みの話として受け取ったよ。{text} について、今の気分も含めて聞かせて。"
+        return self._mock_default_topic_reply_text(
+            text=text,
+            caution_prefix=caution_prefix,
+            continuity_prefix=continuity_prefix,
+            topic_item=topic_item,
+            recent_turns=recent_turns,
+        )
+
+    def _mock_confirmation_reply_text(
+        self,
+        *,
+        text: str,
+        caution_prefix: str,
+        relationship_item: dict[str, Any] | None,
+        episode_item: dict[str, Any] | None,
+        event_basis: str | None,
+        conflict_item: dict[str, Any] | None,
+    ) -> str:
+        basis_text = None
+        if relationship_item is not None:
+            basis_text = relationship_item["summary_text"]
+        elif episode_item is not None:
+            basis_text = episode_item["summary_text"]
+        elif event_basis is not None:
+            basis_text = event_basis
+        elif conflict_item is not None:
+            basis_text = conflict_item["summary_text"]
+        if basis_text is not None:
+            return f"{caution_prefix}{basis_text} という流れで受け取っているけれど、{text} の理解はこれで合っている？"
+        return f"{caution_prefix}{text} の受け取りを断定せず確認したい。いまの理解で合っている？"
+
+    def _mock_user_focus_reply_text(
+        self,
+        *,
+        text: str,
+        caution_prefix: str,
+        continuity_prefix: str,
+        user_item: dict[str, Any] | None,
+    ) -> str:
+        if user_item is not None:
+            return (
+                f"{caution_prefix}{continuity_prefix}{user_item['summary_text']} も踏まえて聞くね。"
+                f"{text} の中で、今いちばん困っている点をもう少し教えて。"
+            )
+        return f"{caution_prefix}{continuity_prefix}状況は受け取ったよ。{text} の中で、今いちばん困っている点をもう少し教えて。"
+
+    def _mock_commitment_reply_text(
+        self,
+        *,
+        text: str,
+        caution_prefix: str,
+        commitment_item: dict[str, Any] | None,
+        event_basis: str | None,
+    ) -> str:
+        if commitment_item is not None:
+            if "どこまで" in text:
+                return f"{commitment_item['summary_text']} の続きとして受け取ったよ。いまはどの範囲まで進めたい？"
+            return f"{commitment_item['summary_text']} の続きとして受け取ったよ。{text} について、今回はどこまで進めたい？"
+        if event_basis is not None:
+            return f"{event_basis} の続きとして受け取ったよ。{text} について、今回はどこまで進めたい？"
+        return f"{caution_prefix}その流れは覚えている前提で話すね。{text} に関して、今回どこまで進めたい？"
+
+    def _mock_episodic_reply_text(
+        self,
+        *,
+        text: str,
+        caution_prefix: str,
+        episode_item: dict[str, Any] | None,
+        event_basis: str | None,
+    ) -> str:
+        if episode_item is not None:
+            return f"{episode_item['summary_text']} の流れとして受け取ったよ。{text} のどの部分からつなげたい？"
+        if event_basis is not None:
+            return f"{event_basis} の場面として受け取ったよ。{text} のどの部分からつなげたい？"
+        return f"{caution_prefix}その続きとして受け取ったよ。{text} のどの部分からつなげたい？"
+
+    def _mock_default_topic_reply_text(
+        self,
+        *,
+        text: str,
+        caution_prefix: str,
+        continuity_prefix: str,
+        topic_item: dict[str, Any] | None,
+        recent_turns: list[dict[str, Any]],
+    ) -> str:
+        topic_prefix = ""
+        if topic_item is not None:
+            topic_prefix = f"{topic_item['summary_text']} の流れで、"
+        elif recent_turns:
+            topic_prefix = "前の流れをつなげつつ、"
+        return f"{caution_prefix}{continuity_prefix}{topic_prefix}{text}として受け取ったよ。"
 
     def _event_evidence_basis_text(self, item: dict[str, Any] | None) -> str | None:
         # 空
