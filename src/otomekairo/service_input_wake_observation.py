@@ -607,6 +607,7 @@ class ServiceInputWakeObservationMixin:
         *,
         compare_target: str,
     ) -> bool:
+        threshold = self._desktop_scene_similarity_threshold()
         if current is None or previous is None:
             if compare_target == "previous":
                 debug_log(
@@ -619,7 +620,7 @@ class ServiceInputWakeObservationMixin:
                 "Wake",
                 f"desktop scene similarity target={compare_target} result=same "
                 "reason=exact_match similarity=1.00 "
-                f"threshold={DESKTOP_SCENE_SIMILARITY_THRESHOLD:.2f}",
+                f"threshold={threshold:.2f}",
             )
             return True
         current_fields = self._desktop_scene_signature_fields(current)
@@ -633,23 +634,35 @@ class ServiceInputWakeObservationMixin:
                     (
                         f"desktop scene similarity target={compare_target} result=changed "
                         f"reason={key}_mismatch similarity=0.00 "
-                        f"threshold={DESKTOP_SCENE_SIMILARITY_THRESHOLD:.2f}"
+                        f"threshold={threshold:.2f}"
                     ),
                 )
                 return False
         current_summary = current_fields.get("visual_summary_text") or current
         previous_summary = previous_fields.get("visual_summary_text") or previous
         similarity = SequenceMatcher(None, current_summary, previous_summary).ratio()
-        similar = similarity >= DESKTOP_SCENE_SIMILARITY_THRESHOLD
+        similar = similarity >= threshold
         debug_log(
             "Wake",
             (
                 f"desktop scene similarity target={compare_target} "
                 f"result={'same' if similar else 'changed'} "
-                f"similarity={similarity:.2f} threshold={DESKTOP_SCENE_SIMILARITY_THRESHOLD:.2f}"
+                f"similarity={similarity:.2f} threshold={threshold:.2f}"
             ),
         )
         return similar
+
+    def _desktop_scene_similarity_threshold(self) -> float:
+        state = self.store.read_state()
+        wake_policy = state.get("wake_policy")
+        if not isinstance(wake_policy, dict):
+            return DESKTOP_SCENE_SIMILARITY_THRESHOLD
+        value = wake_policy.get("desktop_scene_similarity_threshold")
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            return DESKTOP_SCENE_SIMILARITY_THRESHOLD
+        if not 0 <= value <= 1:
+            return DESKTOP_SCENE_SIMILARITY_THRESHOLD
+        return float(value)
 
     def _desktop_scene_signature_fields(self, signature: str) -> dict[str, str]:
         fields: dict[str, str] = {}

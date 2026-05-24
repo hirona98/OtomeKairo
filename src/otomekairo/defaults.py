@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import uuid
 
+from otomekairo.service_input_constants import DESKTOP_SCENE_SIMILARITY_THRESHOLD
+
 
 # 既定の識別子
 DEFAULT_PERSONA_ID = "persona:default"
@@ -60,6 +62,7 @@ def build_default_state() -> dict:
         "selected_model_preset_id": DEFAULT_MODEL_PRESET_ID,
         "wake_policy": {
             "mode": "disabled",
+            "desktop_scene_similarity_threshold": DESKTOP_SCENE_SIMILARITY_THRESHOLD,
         },
         "personas": {
             DEFAULT_PERSONA_ID: {
