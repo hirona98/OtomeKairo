@@ -25,6 +25,8 @@ CLIENT_DISCONNECT_SSL_REASONS = {
     "EOF_OCCURRED",
 }
 
+SUPPRESSED_HTTP_LOG_PATH_PREFIXES = ("/api/inspection",)
+
 
 # クライアント切断
 class ClientDisconnectedError(RuntimeError):
@@ -73,7 +75,7 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
             parsed = urlparse(self.path)
             query = parse_qs(parsed.query)
             token = self._bearer_token()
-            if parsed.path not in {"/api/status", "/api/bootstrap/probe"}:
+            if self._should_log_http_path(parsed.path):
                 debug_log("HTTP", f"{method} {parsed.path} begin query_keys={sorted(query)} auth={bool(token)}")
 
             # 起動時ルート
@@ -363,7 +365,8 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
         if not isinstance(payload, dict):
             raise ServiceError(400, "invalid_json_shape", "The request body must be a JSON object.")
         parsed = urlparse(self.path)
-        debug_log("HTTP", f"{self.command} {parsed.path} body_bytes={len(raw_body)} body_keys={sorted(payload)}")
+        if self._should_log_http_path(parsed.path):
+            debug_log("HTTP", f"{self.command} {parsed.path} body_bytes={len(raw_body)} body_keys={sorted(payload)}")
         return payload
 
     def _bearer_token(self) -> str | None:
@@ -415,9 +418,8 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
         self._debug_log_response(status, payload)
 
     def _debug_log_response(self, status: int, payload: dict) -> None:
-        # 高頻度ポーリングは成功時だけ抑制する。
         parsed = urlparse(self.path)
-        if status < 400 and parsed.path in {"/api/status", "/api/bootstrap/probe"}:
+        if not self._should_log_http_path(parsed.path):
             return
 
         if status >= 400:
@@ -430,7 +432,15 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
 
     def _debug_log_client_disconnect(self, exc: BaseException) -> None:
         parsed = urlparse(self.path)
+        if not self._should_log_http_path(parsed.path):
+            return
         debug_log("HTTP", f"{self.command} {parsed.path} client_disconnected error={type(exc).__name__}")
+
+    def _should_log_http_path(self, path: str) -> bool:
+        # inspection は情報量が多く、正本は endpoint 応答側なので HTTP access log へ重複記録しない。
+        if path in {"/api/status", "/api/bootstrap/probe"}:
+            return False
+        return not any(path.startswith(prefix) for prefix in SUPPRESSED_HTTP_LOG_PATH_PREFIXES)
 
     def _is_client_disconnect(self, exc: BaseException) -> bool:
         # レスポンス送信中の切断だけを通常の終了として扱う。
