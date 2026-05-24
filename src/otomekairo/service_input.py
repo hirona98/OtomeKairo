@@ -1201,6 +1201,29 @@ class ServiceInputMixin:
             intervention_state=intervention_state,
             capability_summary=capability_summary,
         )
+        selected_candidate_family = self._initiative_selected_candidate_family(candidate_families)
+        selected_family_entry = self._initiative_selected_family_entry(
+            candidate_families=candidate_families,
+            selected_candidate_family=selected_candidate_family,
+        )
+        desktop_signal = self._initiative_desktop_observation_signal(foreground_signal_summary)
+        desktop_debug = "-"
+        if isinstance(desktop_signal, dict):
+            desktop_debug = (
+                f"novelty={desktop_signal.get('novelty_kind', '-')}"
+                f" eligibility={desktop_signal.get('reply_eligibility', '-')}"
+                f" cooldown={desktop_signal.get('cooldown_active', '-')}"
+            )
+        debug_log(
+            "Initiative",
+            (
+                f"trigger={trigger_kind} selected={selected_candidate_family or '-'} "
+                f"preferred={selected_family_entry.get('preferred_result_kind') if isinstance(selected_family_entry, dict) else '-'} "
+                f"suppression={suppression_summary.get('suppression_level', '-')} "
+                f"foreground={foreground_signal_summary.get('foreground_thinness', '-')} "
+                f"desktop={desktop_debug}"
+            ),
+        )
         return {
             "trigger_kind": trigger_kind,
             "opportunity_summary": self._initiative_opportunity_summary(
@@ -1219,7 +1242,7 @@ class ServiceInputMixin:
             "ongoing_action_summary": ongoing_action_summary,
             "capability_summary": capability_summary,
             "candidate_families": candidate_families,
-            "selected_candidate_family": self._initiative_selected_candidate_family(candidate_families),
+            "selected_candidate_family": selected_candidate_family,
             "intervention_state": intervention_state,
             "suppression_summary": suppression_summary,
             "intervention_risk_summary": intervention_risk_summary,
@@ -2161,15 +2184,17 @@ class ServiceInputMixin:
             recent_turn_summary=recent_turn_summary,
             desktop_signal=desktop_signal,
         )
-        desktop_discouraged_by_cooldown = (
+        desktop_cooldown_novelty = (
             isinstance(desktop_signal, dict)
-            and desktop_signal.get("reply_eligibility") == "discouraged_by_cooldown"
+            and desktop_signal.get("reply_eligibility") == "eligible"
+            and desktop_signal.get("cooldown_active") is True
+            and desktop_signal.get("novelty_kind") in {"first_success", "changed"}
         )
         if isinstance(probe_preference, dict):
             preferred_result_kind = "capability_request"
             preferred_result_reason = self._client_context_text(probe_preference.get("reason_summary"), limit=160)
             priority_score += INITIATIVE_AUTONOMOUS_PROBE_SCORE
-        elif suppression_level == "high" and not desktop_discouraged_by_cooldown:
+        elif suppression_level == "high" and not desktop_cooldown_novelty:
             preferred_result_kind = "noop"
             preferred_result_reason = "suppression が high で、今回は押し出さず見送るほうが自然。"
         elif (
@@ -2322,6 +2347,26 @@ class ServiceInputMixin:
             family_name = family.get("family")
             if isinstance(family_name, str) and family_name.strip():
                 return family_name.strip()
+        return None
+
+    def _initiative_selected_family_entry(
+        self,
+        *,
+        candidate_families: list[dict[str, Any]],
+        selected_candidate_family: str | None,
+    ) -> dict[str, Any] | None:
+        for family in candidate_families:
+            if not isinstance(family, dict):
+                continue
+            family_name = family.get("family")
+            if family.get("selected") is True:
+                return family
+            if (
+                isinstance(selected_candidate_family, str)
+                and isinstance(family_name, str)
+                and family_name.strip() == selected_candidate_family
+            ):
+                return family
         return None
 
     def _initiative_has_ongoing_action_candidate(
@@ -2534,9 +2579,13 @@ class ServiceInputMixin:
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {}
         suppression_level = "low"
-        if intervention_state.get("cooldown_active") is True or intervention_state.get("same_dedupe_recently_replied") is True:
+        if intervention_state.get("same_dedupe_recently_replied") is True:
             suppression_level = "high"
-        elif intervention_state.get("background_trigger") is True or intervention_risk_summary is not None:
+        elif (
+            intervention_state.get("cooldown_active") is True
+            or intervention_state.get("background_trigger") is True
+            or intervention_risk_summary is not None
+        ):
             suppression_level = "medium"
         payload["suppression_level"] = suppression_level
         if intervention_risk_summary is not None:
@@ -3101,8 +3150,6 @@ class ServiceInputMixin:
         reply_eligible_novelty = novelty_kind in {"first_success", "changed", "pending_after_cooldown"}
         if same_as_prompted:
             reply_eligibility = "already_prompted"
-        elif cooldown_active and reply_eligible_novelty:
-            reply_eligibility = "discouraged_by_cooldown"
         elif reply_eligible_novelty:
             reply_eligibility = "eligible"
         else:
@@ -3162,7 +3209,11 @@ class ServiceInputMixin:
         if isinstance(pending_scene, dict):
             payload["pending_novel_scene"] = dict(pending_scene)
         reply_eligibility = signal.get("reply_eligibility")
-        if reply_eligibility == "discouraged_by_cooldown":
+        if (
+            reply_eligibility == "eligible"
+            and signal.get("cooldown_active") is True
+            and signal.get("novelty_kind") in {"first_success", "changed"}
+        ):
             first_seen_at = current_time
             if isinstance(pending_scene, dict) and self._desktop_scene_signatures_similar(
                 scene_signature,
@@ -3230,10 +3281,10 @@ class ServiceInputMixin:
         reply_eligibility: str,
         cooldown_reason: str | None,
     ) -> str:
-        if reply_eligibility == "discouraged_by_cooldown":
-            return cooldown_reason or "cooldown 中なので強く抑制し、判断入力には渡す。"
         if reply_eligibility == "already_prompted":
             return "この desktop scene には既に自発 reply 済みなので、繰り返さない。"
+        if reply_eligibility == "eligible" and cooldown_reason is not None and novelty_kind in {"first_success", "changed"}:
+            return "cooldown 中だが desktop scene が変化したため、cooldown を割り込み量の調整材料として短い reply の候補にする。"
         if novelty_kind == "first_success":
             return "desktop wake observation の初回成功で、未発話の前景として扱う。"
         if novelty_kind == "changed":
@@ -3365,7 +3416,9 @@ class ServiceInputMixin:
     def _desktop_observation_signal_is_judgable(self, signal: dict[str, Any] | None) -> bool:
         if not isinstance(signal, dict):
             return False
-        return signal.get("reply_eligibility") in {"eligible", "discouraged_by_cooldown"}
+        return signal.get("reply_eligibility") in {
+            "eligible",
+        }
 
     def _complete_input_success(
         self,

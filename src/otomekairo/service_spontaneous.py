@@ -2332,7 +2332,6 @@ class ServiceSpontaneousMixin:
         signal = client_context.get("desktop_observation_signal")
         if not isinstance(signal, dict) or signal.get("reply_eligibility") not in {
             "eligible",
-            "discouraged_by_cooldown",
         }:
             return
         observation_id = signal.get("observation_id")
@@ -2401,7 +2400,7 @@ class ServiceSpontaneousMixin:
         if not isinstance(cooldown_until, str) or not cooldown_until:
             return None
         if self._parse_iso(current_time) < self._parse_iso(cooldown_until):
-            return "直近の自発 reply から cooldown 中のため、今回は再介入しない。"
+            return "直近の自発 reply から cooldown 中のため、発話量と頻度を控えめに調整する。"
         return None
 
     def _was_recently_replied(self, *, dedupe_key: str, current_time: str) -> bool:
@@ -2482,10 +2481,14 @@ class ServiceSpontaneousMixin:
         if isinstance(desktop_signal, dict):
             novelty_kind = desktop_signal.get("novelty_kind")
             reply_eligibility = desktop_signal.get("reply_eligibility")
+            cooldown_active = desktop_signal.get("cooldown_active")
             reason_summary = desktop_signal.get("reason_summary")
             if isinstance(novelty_kind, str) and isinstance(reply_eligibility, str):
+                cooldown_part = ""
+                if isinstance(cooldown_active, bool):
+                    cooldown_part = f", cooldown_active={str(cooldown_active).lower()}"
                 parts.append(
-                    f"desktop観測シグナルは novelty={novelty_kind}, reply_eligibility={reply_eligibility}。"
+                    f"desktop観測シグナルは novelty={novelty_kind}, reply_eligibility={reply_eligibility}{cooldown_part}。"
                 )
             if isinstance(reason_summary, str):
                 parts.append(f"desktop観測理由は {reason_summary}")

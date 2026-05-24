@@ -401,11 +401,28 @@ class LLMClient:
                 if isinstance(suppression_summary, dict)
                 else None
             )
-            if foreground_thinness == "grounded" and suppression_level != "high" and cooldown_active is not True:
+            desktop_signal = (
+                foreground_summary.get("desktop_observation_signal")
+                if isinstance(foreground_summary, dict)
+                else None
+            )
+            desktop_reply_candidate = (
+                isinstance(desktop_signal, dict)
+                and desktop_signal.get("reply_eligibility") == "eligible"
+                and desktop_signal.get("novelty_kind") in {"first_success", "changed", "pending_after_cooldown"}
+            )
+            if (
+                desktop_reply_candidate
+                or (
+                    foreground_thinness in {"ready", "grounded"}
+                    and suppression_level != "high"
+                    and cooldown_active is not True
+                )
+            ):
                 raise LLMError(
                     "Initiative selected candidate entry は preferred_result_kind=reply で、"
-                    "foreground_signal_summary.foreground_thinness=grounded です。"
-                    "cooldown_active=true ではないため noop は不正です。kind=reply を返してください。"
+                    "foreground_signal_summary.foreground_thinness は reply 可能な前景です。"
+                    "noop は不正です。kind=reply を返してください。"
                 )
 
     def _validate_decision_visual_observation_context(
