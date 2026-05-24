@@ -27,6 +27,7 @@ from otomekairo.llm_contracts import (
     validate_world_state_contract,
 )
 from otomekairo.world_state_models import (
+    WorldStateClientContext,
     WorldStatePendingIntent,
     WorldStateScheduleContext,
     WorldStateSourcePack,
@@ -1803,7 +1804,6 @@ class MockLLMClient:
         trigger_kind = source_pack.trigger_kind
         client_context = source_pack.client_context
         current_input_summary = source_pack.current_input_summary.strip()
-        capability_result_summary = source_pack.capability_result_summary or {}
 
         # 候補群
         state_candidates: list[dict[str, Any]] = []
@@ -1979,8 +1979,8 @@ class MockLLMClient:
                 return visual_context.visual_summary_text
         return None
 
-    def _mock_world_state_social_summary(self, client_context: dict[str, Any]) -> str | None:
-        active_app = client_context.get("active_app")
+    def _mock_world_state_social_summary(self, client_context: WorldStateClientContext) -> str | None:
+        active_app = getattr(client_context, "active_app", None)
         if not isinstance(active_app, str) or not active_app.strip():
             return None
         lowered = active_app.strip().lower()

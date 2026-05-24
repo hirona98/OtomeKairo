@@ -245,6 +245,62 @@ class WorldStateScheduleContext:
         return payload
 
 
+@dataclass(frozen=True, slots=True)
+class WorldStateClientContext:
+    source: str | None = None
+
+    def to_prompt_payload(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        if isinstance(self.source, str) and self.source.strip():
+            payload["source"] = self.source
+        return payload
+
+
+@dataclass(frozen=True, slots=True)
+class WorldStateCapabilityResultSummary:
+    capability_id: str | None = None
+    image_count: int | None = None
+    image_interpreted: bool | None = None
+    visual_summary_text: str | None = None
+    visual_confidence_hint: str | None = None
+    service: str | None = None
+    status_text: str | None = None
+    social_context_summary: str | None = None
+    body_state_summary: str | None = None
+    device_state_summary: str | None = None
+    schedule_summary: str | None = None
+    environment_summary: str | None = None
+    location_summary: str | None = None
+    schedule_slots: tuple[WorldStateScheduleSlot, ...] = field(default_factory=tuple)
+    error: str | None = None
+
+    def to_prompt_payload(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        for key, value in (
+            ("capability_id", self.capability_id),
+            ("visual_summary_text", self.visual_summary_text),
+            ("visual_confidence_hint", self.visual_confidence_hint),
+            ("service", self.service),
+            ("status_text", self.status_text),
+            ("social_context_summary", self.social_context_summary),
+            ("body_state_summary", self.body_state_summary),
+            ("device_state_summary", self.device_state_summary),
+            ("schedule_summary", self.schedule_summary),
+            ("environment_summary", self.environment_summary),
+            ("location_summary", self.location_summary),
+            ("error", self.error),
+        ):
+            if isinstance(value, str) and value.strip():
+                payload[key] = value
+        if isinstance(self.image_count, int) and self.image_count >= 0:
+            payload["image_count"] = self.image_count
+        if isinstance(self.image_interpreted, bool):
+            payload["image_interpreted"] = self.image_interpreted
+        if self.schedule_slots:
+            payload["schedule_slots"] = [slot.to_prompt_payload() for slot in self.schedule_slots]
+        return payload
+
+
 WorldStateBodyContext: TypeAlias = WorldStateNamedSummaryContext
 WorldStateDeviceContext: TypeAlias = WorldStateNamedSummaryContext
 WorldStateSocialContext: TypeAlias = WorldStateNamedSummaryContext
@@ -265,7 +321,7 @@ class WorldStateSourcePack:
     source_kind: str
     source_ref: str
     time_context: str
-    client_context: dict[str, Any]
+    client_context: WorldStateClientContext
     allowed_state_types: tuple[str, ...] = field(default_factory=tuple)
     visual_context: WorldStateVisualContext | None = None
     external_service_context: WorldStateExternalServiceContext | None = None
@@ -275,7 +331,7 @@ class WorldStateSourcePack:
     social_context_context: WorldStateSocialContext | None = None
     environment_context: WorldStateEnvironmentContext | None = None
     location_context: WorldStateLocationContext | None = None
-    capability_result_summary: dict[str, Any] | None = None
+    capability_result_summary: WorldStateCapabilityResultSummary | None = None
 
     def context(self, context_key: str) -> WorldStateContext | None:
         value = getattr(self, context_key, None)
@@ -303,7 +359,7 @@ class WorldStateSourcePack:
             "source_kind": self.source_kind,
             "source_ref": self.source_ref,
             "time_context": self.time_context,
-            "client_context": self.client_context,
+            "client_context": self.client_context.to_prompt_payload(),
             "allowed_state_types": list(self.allowed_state_types),
         }
         for key in (
@@ -319,8 +375,10 @@ class WorldStateSourcePack:
             value = self.context(key)
             if value is not None:
                 payload[key] = value.to_prompt_payload()
-        if isinstance(self.capability_result_summary, dict) and self.capability_result_summary:
-            payload["capability_result_summary"] = self.capability_result_summary
+        if isinstance(self.capability_result_summary, WorldStateCapabilityResultSummary):
+            capability_result_payload = self.capability_result_summary.to_prompt_payload()
+            if capability_result_payload:
+                payload["capability_result_summary"] = capability_result_payload
         return payload
 
 

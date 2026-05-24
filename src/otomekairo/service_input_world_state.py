@@ -17,6 +17,8 @@ from otomekairo.service_input_constants import (
 )
 from otomekairo.world_state_models import (
     WorldStateCandidate,
+    WorldStateCapabilityResultSummary,
+    WorldStateClientContext,
     WorldStateContext,
     WorldStateExternalServiceContext,
     WorldStateNamedSummaryContext,
@@ -530,15 +532,12 @@ class ServiceInputWorldStateMixin:
             capability_id=capability_id_text,
         )
 
-    def _build_world_state_client_context(self, client_context: dict[str, Any]) -> dict[str, Any]:
-        payload: dict[str, Any] = {}
-        for key, limit in (
-            ("source", 48),
-        ):
-            value = client_context.get(key)
-            if isinstance(value, str) and value.strip():
-                payload[key] = self._clamp(value.strip(), limit=limit)
-        return payload
+    def _build_world_state_client_context(self, client_context: dict[str, Any]) -> WorldStateClientContext:
+        source = None
+        value = client_context.get("source")
+        if isinstance(value, str) and value.strip():
+            source = self._clamp(value.strip(), limit=48)
+        return WorldStateClientContext(source=source)
 
     def _build_world_state_social_context_context(
         self,
@@ -747,32 +746,40 @@ class ServiceInputWorldStateMixin:
     def _build_world_state_capability_result_summary(
         self,
         observation_summary: dict[str, Any] | None,
-    ) -> dict[str, Any] | None:
+    ) -> WorldStateCapabilityResultSummary | None:
         if not isinstance(observation_summary, dict):
             return None
-        payload: dict[str, Any] = {}
-        for key in (
-            "capability_id",
-            "image_count",
-            "image_interpreted",
-            "visual_summary_text",
-            "visual_confidence_hint",
-            "service",
-            "status_text",
-            "social_context_summary",
-            "body_state_summary",
-            "device_state_summary",
-            "schedule_summary",
-            "environment_summary",
-            "location_summary",
-            "schedule_slots",
-            "error",
-        ):
-            value = observation_summary.get(key)
-            if value is None:
-                continue
-            payload[key] = value
-        if not payload:
+        schedule_slots = self._build_world_state_schedule_slots(
+            client_context={},
+            observation_summary=observation_summary,
+            source_kind="capability_result",
+        )
+        payload = WorldStateCapabilityResultSummary(
+            capability_id=self._client_context_text(observation_summary.get("capability_id"), limit=80),
+            image_count=(
+                observation_summary.get("image_count")
+                if isinstance(observation_summary.get("image_count"), int) and observation_summary.get("image_count") >= 0
+                else None
+            ),
+            image_interpreted=(
+                observation_summary.get("image_interpreted")
+                if isinstance(observation_summary.get("image_interpreted"), bool)
+                else None
+            ),
+            visual_summary_text=self._client_context_text(observation_summary.get("visual_summary_text"), limit=160),
+            visual_confidence_hint=self._client_context_text(observation_summary.get("visual_confidence_hint"), limit=24),
+            service=self._client_context_text(observation_summary.get("service"), limit=80),
+            status_text=self._client_context_text(observation_summary.get("status_text"), limit=160),
+            social_context_summary=self._client_context_text(observation_summary.get("social_context_summary"), limit=160),
+            body_state_summary=self._client_context_text(observation_summary.get("body_state_summary"), limit=160),
+            device_state_summary=self._client_context_text(observation_summary.get("device_state_summary"), limit=160),
+            schedule_summary=self._client_context_text(observation_summary.get("schedule_summary"), limit=160),
+            environment_summary=self._client_context_text(observation_summary.get("environment_summary"), limit=160),
+            location_summary=self._client_context_text(observation_summary.get("location_summary"), limit=160),
+            schedule_slots=schedule_slots,
+            error=self._client_context_text(observation_summary.get("error"), limit=240),
+        )
+        if not payload.to_prompt_payload():
             return None
         return payload
 
@@ -793,13 +800,16 @@ class ServiceInputWorldStateMixin:
             "capability_result_summary",
         ):
             if key == "client_context":
-                if isinstance(source_pack.client_context, dict) and source_pack.client_context:
-                    summary[key] = source_pack.client_context
+                client_context_payload = source_pack.client_context.to_prompt_payload()
+                if client_context_payload:
+                    summary[key] = client_context_payload
                 continue
             if key == "capability_result_summary":
                 value = source_pack.capability_result_summary
-                if isinstance(value, dict) and value:
-                    summary[key] = value
+                if isinstance(value, WorldStateCapabilityResultSummary):
+                    capability_result_payload = value.to_prompt_payload()
+                    if capability_result_payload:
+                        summary[key] = capability_result_payload
                 continue
             value = source_pack.context(key)
             if value is not None:
