@@ -26,6 +26,7 @@ from otomekairo.llm_contracts import (
     validate_visual_observation_contract,
     validate_world_state_contract,
 )
+from otomekairo.world_state_models import WorldStateSourcePack
 
 MOCK_CAPABILITY_REQUEST_RULES = (
     (
@@ -1788,25 +1789,21 @@ class MockLLMClient:
     def generate_world_state(
         self,
         role_definition: dict,
-        source_pack: dict[str, Any],
+        source_pack: WorldStateSourcePack,
     ) -> dict[str, Any]:
         # model確認
         self._assert_mock_model(role_definition)
 
         # source pack
-        trigger_kind = str(source_pack.get("trigger_kind") or "user_message")
-        client_context = source_pack.get("client_context", {})
-        if not isinstance(client_context, dict):
-            client_context = {}
-        current_input_summary = str(source_pack.get("current_input_summary") or "").strip()
-        capability_result_summary = source_pack.get("capability_result_summary", {})
-        if not isinstance(capability_result_summary, dict):
-            capability_result_summary = {}
+        trigger_kind = source_pack.trigger_kind
+        client_context = source_pack.client_context
+        current_input_summary = source_pack.current_input_summary.strip()
+        capability_result_summary = source_pack.capability_result_summary or {}
 
         # 候補群
         state_candidates: list[dict[str, Any]] = []
         visual_summary = self._mock_world_state_visual_summary(
-            visual_context=source_pack.get("visual_context"),
+            visual_context=source_pack.visual_context,
         )
         if visual_summary is not None:
             state_candidates.append(
@@ -1820,7 +1817,7 @@ class MockLLMClient:
                 }
             )
 
-        social_summary = self._mock_world_state_structured_summary(source_pack.get("social_context_context"))
+        social_summary = self._mock_world_state_structured_summary(source_pack.social_context_context)
         if social_summary is None:
             social_summary = self._mock_world_state_social_summary(client_context)
         if social_summary is not None:
@@ -1848,7 +1845,7 @@ class MockLLMClient:
                 }
             )
 
-        schedule_summary = self._mock_world_state_schedule_summary(source_pack.get("schedule_context"))
+        schedule_summary = self._mock_world_state_schedule_summary(source_pack.schedule_context)
         if schedule_summary is not None:
             state_candidates.append(
                 {
@@ -1865,17 +1862,17 @@ class MockLLMClient:
             (
                 "external_service",
                 "world",
-                self._mock_world_state_structured_summary(source_pack.get("external_service_context")),
+                self._mock_world_state_structured_summary(source_pack.external_service_context),
             ),
             (
                 "body",
                 "self",
-                self._mock_world_state_structured_summary(source_pack.get("body_context")),
+                self._mock_world_state_structured_summary(source_pack.body_context),
             ),
             (
                 "device",
                 "world",
-                self._mock_world_state_structured_summary(source_pack.get("device_context")),
+                self._mock_world_state_structured_summary(source_pack.device_context),
             ),
         ):
             if summary_text is None:
@@ -1895,12 +1892,12 @@ class MockLLMClient:
             (
                 "environment",
                 "world",
-                self._mock_world_state_structured_summary(source_pack.get("environment_context")),
+                self._mock_world_state_structured_summary(source_pack.environment_context),
             ),
             (
                 "location",
                 "world",
-                self._mock_world_state_structured_summary(source_pack.get("location_context")),
+                self._mock_world_state_structured_summary(source_pack.location_context),
             ),
         ):
             if summary_text is None:

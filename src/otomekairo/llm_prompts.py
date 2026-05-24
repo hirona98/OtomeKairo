@@ -18,6 +18,7 @@ from otomekairo.llm_contracts import (
     WORLD_STATE_TYPE_VALUES,
 )
 from otomekairo.memory_utils import llm_local_time_text, localize_timestamp_fields
+from otomekairo.world_state_models import WorldStateSourcePack
 
 
 # 入力解釈用の message 群を組み立てる。
@@ -261,7 +262,7 @@ def build_pending_intent_selection_messages(
 
 def build_world_state_messages(
     *,
-    source_pack: dict[str, Any],
+    source_pack: WorldStateSourcePack,
 ) -> list[dict[str, str]]:
     return [
         {
@@ -1102,8 +1103,8 @@ def _build_pending_intent_selection_user_prompt(source_pack: dict[str, Any]) -> 
     return _format_named_json_prompt_payload("SOURCE_PACK", source_pack, localize=False)
 
 
-def _build_world_state_user_prompt(source_pack: dict[str, Any]) -> str:
-    return _format_named_json_prompt_payload("SOURCE_PACK", source_pack)
+def _build_world_state_user_prompt(source_pack: WorldStateSourcePack) -> str:
+    return _format_named_json_prompt_payload("SOURCE_PACK", source_pack.to_prompt_payload())
 
 
 def _build_visual_observation_user_prompt(

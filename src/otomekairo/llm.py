@@ -52,6 +52,7 @@ from otomekairo.llm_prompts import (
     build_world_state_messages,
     build_world_state_repair_prompt,
 )
+from otomekairo.world_state_models import WorldStateSourcePack
 from otomekairo.llm_transport import complete_text, generate_embeddings as transport_generate_embeddings
 from otomekairo.service_common import debug_log
 
@@ -946,7 +947,7 @@ class LLMClient:
         self,
         *,
         role_definition: dict,
-        source_pack: dict[str, Any],
+        source_pack: WorldStateSourcePack,
     ) -> dict[str, Any]:
         operation = "world_state"
         debug_log(

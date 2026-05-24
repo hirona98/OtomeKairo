@@ -15,6 +15,7 @@ from otomekairo.service_input_constants import (
     WORLD_STATE_USER_INPUT_CURRENT_STATE_TERMS_BY_TYPE,
     WORLD_STATE_USER_INPUT_REQUEST_TERMS,
 )
+from otomekairo.world_state_models import WorldStateCandidate, WorldStateSourcePack
 
 
 class ServiceInputWorldStateMixin:
@@ -181,21 +182,21 @@ class ServiceInputWorldStateMixin:
         source_ref: str,
         selected_candidate: dict[str, Any] | None,
         observation_summary: dict[str, Any] | None,
-    ) -> dict[str, Any]:
-        payload: dict[str, Any] = {
-            "trigger_kind": trigger_kind,
-            "current_input_summary": self._clamp(input_text.strip(), limit=200) or "",
-            "source_kind": source_kind,
-            "source_ref": source_ref,
-            "time_context": llm_local_time_text(started_at).replace("\n", " / "),
-            "client_context": self._build_world_state_client_context(client_context),
-        }
+    ) -> WorldStateSourcePack:
+        payload = WorldStateSourcePack(
+            trigger_kind=trigger_kind,
+            current_input_summary=self._clamp(input_text.strip(), limit=200) or "",
+            source_kind=source_kind,
+            source_ref=source_ref,
+            time_context=llm_local_time_text(started_at).replace("\n", " / "),
+            client_context=self._build_world_state_client_context(client_context),
+        )
         visual_context = self._build_world_state_visual_context(
             observation_summary=observation_summary,
         )
         if visual_context is not None:
-            payload["visual_context"] = visual_context
-        for key, value in (
+            payload.visual_context = visual_context
+        for attribute_name, value in (
             (
                 "external_service_context",
                 self._build_world_state_external_service_context(
@@ -255,12 +256,12 @@ class ServiceInputWorldStateMixin:
             ),
         ):
             if value is not None:
-                payload[key] = value
+                setattr(payload, attribute_name, value)
         if source_kind == "capability_result":
             capability_result_summary = self._build_world_state_capability_result_summary(observation_summary)
             if capability_result_summary is not None:
-                payload["capability_result_summary"] = capability_result_summary
-        payload["allowed_state_types"] = self._world_state_allowed_state_types(source_pack=payload)
+                payload.capability_result_summary = capability_result_summary
+        payload.allowed_state_types = tuple(self._world_state_allowed_state_types(source_pack=payload))
         return payload
 
     def _build_world_state_visual_context(
@@ -739,15 +740,10 @@ class ServiceInputWorldStateMixin:
             return None
         return payload
 
-    def _summarize_world_state_source_pack_contexts(self, source_pack: dict[str, Any]) -> dict[str, Any]:
+    def _summarize_world_state_source_pack_contexts(self, source_pack: WorldStateSourcePack) -> dict[str, Any]:
         summary: dict[str, Any] = {}
-        allowed_state_types = source_pack.get("allowed_state_types")
-        if isinstance(allowed_state_types, list):
-            summary["allowed_state_types"] = [
-                value
-                for value in allowed_state_types
-                if isinstance(value, str) and value.strip()
-            ]
+        if source_pack.allowed_state_types:
+            summary["allowed_state_types"] = list(source_pack.allowed_state_types)
         for key in (
             "client_context",
             "visual_context",
@@ -760,16 +756,16 @@ class ServiceInputWorldStateMixin:
             "location_context",
             "capability_result_summary",
         ):
-            value = source_pack.get(key)
-            if isinstance(value, dict) and value:
+            value = source_pack.context(key)
+            if value is not None:
                 summary[key] = value
         return summary
 
-    def _summarize_world_state_state_type_hooks(self, source_pack: dict[str, Any]) -> dict[str, Any]:
+    def _summarize_world_state_state_type_hooks(self, source_pack: WorldStateSourcePack) -> dict[str, Any]:
         hooks: dict[str, Any] = {}
         for state_type, context_key in WORLD_STATE_CONTEXT_KEYS_BY_TYPE:
-            context = source_pack.get(context_key)
-            if not isinstance(context, dict) or not context:
+            context = source_pack.context(context_key)
+            if context is None:
                 continue
             hook = self._build_world_state_state_type_hook(state_type=state_type, context=context)
             if hook is not None:
@@ -907,11 +903,11 @@ class ServiceInputWorldStateMixin:
                 signal_fields.append(key)
         return signal_fields
 
-    def _world_state_allowed_state_types(self, *, source_pack: dict[str, Any]) -> list[str]:
+    def _world_state_allowed_state_types(self, *, source_pack: WorldStateSourcePack) -> list[str]:
         allowed: list[str] = []
         for state_type, context_key in WORLD_STATE_CONTEXT_KEYS_BY_TYPE:
-            context = source_pack.get(context_key)
-            if isinstance(context, dict) and context:
+            context = source_pack.context(context_key)
+            if context is not None:
                 allowed.append(state_type)
         return allowed
 
@@ -923,18 +919,16 @@ class ServiceInputWorldStateMixin:
         source_kind: str,
         source_ref: str,
         payload: dict[str, Any],
-        source_pack: dict[str, Any],
+        source_pack: WorldStateSourcePack,
     ) -> list[dict[str, Any]]:
         normalized: list[dict[str, Any]] = []
         seen_identity: set[tuple[str, str, str]] = set()
-        allowed_state_types = set(self._world_state_allowed_state_types(source_pack=source_pack))
-        for candidate in payload.get("state_candidates", []):
-            if not isinstance(candidate, dict):
-                continue
-            state_type = str(candidate["state_type"]).strip()
+        allowed_state_types = set(source_pack.allowed_state_types)
+        for candidate in self._world_state_candidates_from_payload(payload):
+            state_type = candidate.state_type
             if state_type not in allowed_state_types:
                 continue
-            scope_type, scope_key = self._parse_world_state_scope(str(candidate["scope"]).strip())
+            scope_type, scope_key = self._parse_world_state_scope(candidate.scope)
             identity = (state_type, scope_type, scope_key)
             if identity in seen_identity:
                 continue
@@ -956,7 +950,7 @@ class ServiceInputWorldStateMixin:
                 source_pack=source_pack,
             ):
                 continue
-            ttl_hint = str(candidate["ttl_hint"]).strip()
+            ttl_hint = candidate.ttl_hint
             ttl_policy = self._world_state_ttl_policy(
                 current_time=observed_at,
                 state_type=state_type,
@@ -976,11 +970,11 @@ class ServiceInputWorldStateMixin:
                     "state_type": state_type,
                     "scope_type": scope_type,
                     "scope_key": scope_key,
-                    "summary_text": str(candidate["summary_text"]).strip(),
+                    "summary_text": candidate.summary_text,
                     "source_kind": source_kind,
                     "source_ref": source_ref,
-                    "confidence": self._world_state_score_from_hint(candidate["confidence_hint"]),
-                    "salience": self._world_state_score_from_hint(candidate["salience_hint"]),
+                    "confidence": self._world_state_score_from_hint(candidate.confidence_hint),
+                    "salience": self._world_state_score_from_hint(candidate.salience_hint),
                     "observed_at": observed_at,
                     "expires_at": ttl_policy["expires_at"],
                     "updated_at": observed_at,
@@ -996,20 +990,28 @@ class ServiceInputWorldStateMixin:
         normalized.sort(key=lambda record: (record["salience"], record["updated_at"]), reverse=True)
         return normalized
 
+    def _world_state_candidates_from_payload(self, payload: dict[str, Any]) -> list[WorldStateCandidate]:
+        candidates: list[WorldStateCandidate] = []
+        for raw_candidate in payload.get("state_candidates", []):
+            candidate = WorldStateCandidate.from_payload(raw_candidate)
+            if candidate is not None:
+                candidates.append(candidate)
+        return candidates
+
     def _should_skip_user_input_current_state_candidate(
         self,
         *,
         state_type: str,
         source_kind: str,
         source_context: dict[str, Any] | None,
-        source_pack: dict[str, Any],
+        source_pack: WorldStateSourcePack,
     ) -> bool:
         if source_kind != "user_input" or source_context is not None:
             return False
         state_terms = WORLD_STATE_USER_INPUT_CURRENT_STATE_TERMS_BY_TYPE.get(state_type)
         if not state_terms:
             return False
-        current_input = str(source_pack.get("current_input_summary") or "").strip()
+        current_input = source_pack.current_input_summary.strip()
         if not current_input:
             return False
         if not self._contains_any_text(current_input, WORLD_STATE_USER_INPUT_REQUEST_TERMS):
@@ -1021,9 +1023,9 @@ class ServiceInputWorldStateMixin:
         *,
         state_type: str,
         source_context: dict[str, Any] | None,
-        source_pack: dict[str, Any],
+        source_pack: WorldStateSourcePack,
     ) -> bool:
-        if source_pack.get("trigger_kind") not in {"wake", "background_wake"}:
+        if source_pack.trigger_kind not in {"wake", "background_wake"}:
             return False
         if source_context is not None:
             return False
@@ -1036,24 +1038,9 @@ class ServiceInputWorldStateMixin:
         self,
         *,
         state_type: str,
-        source_pack: dict[str, Any],
+        source_pack: WorldStateSourcePack,
     ) -> dict[str, Any] | None:
-        context_key = {
-            "visual_context": "visual_context",
-            "external_service": "external_service_context",
-            "body": "body_context",
-            "device": "device_context",
-            "schedule": "schedule_context",
-            "social_context": "social_context_context",
-            "environment": "environment_context",
-            "location": "location_context",
-        }.get(state_type)
-        if context_key is None:
-            return None
-        context = source_pack.get(context_key)
-        if not isinstance(context, dict) or not context:
-            return None
-        return context
+        return source_pack.state_type_context(state_type)
 
     def _world_state_ttl_policy(
         self,
@@ -1123,7 +1110,7 @@ class ServiceInputWorldStateMixin:
         observed_at: str,
         source_kind: str,
         source_ref: str,
-        source_pack: dict[str, Any],
+        source_pack: WorldStateSourcePack,
     ) -> list[dict[str, Any]]:
         context = self._world_state_source_context(state_type="schedule", source_pack=source_pack)
         if not isinstance(context, dict):
