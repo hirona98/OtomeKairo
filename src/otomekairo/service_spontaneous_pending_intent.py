@@ -493,6 +493,7 @@ class ServiceSpontaneousPendingIntentMixin:
                 "last_wake_at": None,
                 "last_spontaneous_at": None,
                 "cooldown_until": None,
+                "initial_delay_until": None,
                 "reply_history_by_dedupe": {},
             }
 

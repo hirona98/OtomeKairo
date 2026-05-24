@@ -129,6 +129,7 @@ LLM の自由文をそのまま状態遷移へ使わない。
 `wake / background_wake` の「定期起床」「wake」という入力文言は判断機会の説明であり、身体状態の根拠にしない。
 `current_time_text`、interval、wake の時刻情報だけから予定状態を作らない。予定状態は schedule context、schedule capability result、明示的な予定 source を根拠にする。
 `wake_policy.observations` は interval wake の判断前に enabled 項目だけを順番に取得する。
+desktop capture を含む enabled observation を有効化した直後の初回だけ、server は 5 秒待ってから interval wake の観測へ進む。
 `wake_policy.observations` の成功結果は、その回の initiative 判断へ進む前景シグナルとして扱う。
 desktop capture の取得結果は一時観測として同じ wake 判断だけに使い、継続状態になる取得結果だけを `world_state` へ反映する。
 desktop capture の短い scene signature と直近自発 reply 済み scene は process-local runtime にだけ保持し、`world_state` と記憶には保存しない。

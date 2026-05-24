@@ -8,6 +8,7 @@ from otomekairo.llm import LLMError
 from otomekairo.recall import RecallPackSelectionError
 from otomekairo.service_common import (
     BACKGROUND_WAKE_POLL_SECONDS,
+    INITIAL_DESKTOP_CAPTURE_DELAY_SECONDS,
     WAKE_REPLY_COOLDOWN_MINUTES,
     debug_log,
 )
@@ -301,6 +302,11 @@ class ServiceSpontaneousWakeMixin:
         if wake_policy.get("mode") != "interval":
             return BACKGROUND_WAKE_POLL_SECONDS
 
+        # 初回観測待ち
+        initial_delay_seconds = self._wake_initial_delay_remaining_seconds(current_time=current_time)
+        if initial_delay_seconds is not None:
+            return min(initial_delay_seconds, BACKGROUND_WAKE_POLL_SECONDS)
+
         # 初回起床
         with self._runtime_state_lock:
             last_wake_at = self._wake_runtime_state.get("last_wake_at")
@@ -385,6 +391,52 @@ class ServiceSpontaneousWakeMixin:
         with self._runtime_state_lock:
             self._wake_runtime_state["last_wake_at"] = current_time
 
+    def _sync_wake_policy_runtime_state(
+        self,
+        *,
+        previous_wake_policy: dict[str, Any] | None,
+        next_wake_policy: dict[str, Any] | None,
+        current_time: str,
+    ) -> None:
+        previous_enabled = self._wake_policy_has_enabled_desktop_capture(previous_wake_policy)
+        next_enabled = self._wake_policy_has_enabled_desktop_capture(next_wake_policy)
+        with self._runtime_state_lock:
+            if next_enabled and not previous_enabled:
+                self._wake_runtime_state["initial_delay_until"] = (
+                    self._parse_iso(current_time) + timedelta(seconds=INITIAL_DESKTOP_CAPTURE_DELAY_SECONDS)
+                ).isoformat()
+                return
+            if not next_enabled:
+                self._wake_runtime_state["initial_delay_until"] = None
+
+    def _wake_policy_has_enabled_desktop_capture(self, wake_policy: dict[str, Any] | None) -> bool:
+        if not isinstance(wake_policy, dict) or wake_policy.get("mode") != "interval":
+            return False
+        observations = wake_policy.get("observations")
+        if not isinstance(observations, list):
+            return False
+        for observation in observations:
+            if not isinstance(observation, dict):
+                continue
+            if observation.get("enabled") is not True:
+                continue
+            if observation.get("capability_id") == "vision.capture":
+                return True
+        return False
+
+    def _wake_initial_delay_remaining_seconds(self, *, current_time: str) -> float | None:
+        with self._runtime_state_lock:
+            initial_delay_until = self._wake_runtime_state.get("initial_delay_until")
+        if not isinstance(initial_delay_until, str) or not initial_delay_until:
+            return None
+        remaining_seconds = (self._parse_iso(initial_delay_until) - self._parse_iso(current_time)).total_seconds()
+        if remaining_seconds > 0:
+            return remaining_seconds
+        with self._runtime_state_lock:
+            if self._wake_runtime_state.get("initial_delay_until") == initial_delay_until:
+                self._wake_runtime_state["initial_delay_until"] = None
+        return None
+
     def _wake_is_due(self, *, state: dict[str, Any], current_time: str) -> dict[str, Any]:
         # 無効時
         wake_policy = state.get("wake_policy", {})
@@ -392,6 +444,14 @@ class ServiceSpontaneousWakeMixin:
             return {
                 "should_skip": True,
                 "reason_summary": "wake_policy が disabled のため、自発判断は止まっている。",
+            }
+
+        # 初回観測待ち
+        initial_delay_seconds = self._wake_initial_delay_remaining_seconds(current_time=current_time)
+        if initial_delay_seconds is not None:
+            return {
+                "should_skip": True,
+                "reason_summary": "desktop capture 有効化直後のため、初回観測を 5 秒待っている。",
             }
 
         # 初回起床

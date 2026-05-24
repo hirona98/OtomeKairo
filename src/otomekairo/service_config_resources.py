@@ -98,6 +98,7 @@ class ServiceConfigResourcesMixin:
     def patch_current(self, token: str | None, payload: dict[str, Any]) -> dict[str, Any]:
         # 状態
         state = self._require_token(token)
+        previous_wake_policy = deepcopy(state["wake_policy"])
         should_clear_runtime_layers = False
         should_clear_drive_states = False
         supported_fields = {
@@ -152,6 +153,12 @@ class ServiceConfigResourcesMixin:
             self._clear_runtime_state_layers(
                 memory_set_ids=list(state["memory_sets"].keys()),
                 clear_drive_states=should_clear_drive_states,
+            )
+        if "wake_policy" in payload:
+            self._sync_wake_policy_runtime_state(
+                previous_wake_policy=previous_wake_policy,
+                next_wake_policy=state["wake_policy"],
+                current_time=self._now_iso(),
             )
         return self.get_config(token=state["console_access_token"])
 
@@ -322,6 +329,7 @@ class ServiceConfigResourcesMixin:
     def replace_editor_state(self, token: str | None, definition: dict[str, Any]) -> dict[str, Any]:
         # 認可
         state = self._require_token(token)
+        previous_wake_policy = deepcopy(state["wake_policy"])
         previous_memory_sets = deepcopy(state["memory_sets"])
 
         # 生値Entries
@@ -404,6 +412,11 @@ class ServiceConfigResourcesMixin:
         self._clear_runtime_state_layers(
             memory_set_ids=list(memory_sets.keys()),
             clear_drive_states=True,
+        )
+        self._sync_wake_policy_runtime_state(
+            previous_wake_policy=previous_wake_policy,
+            next_wake_policy=state["wake_policy"],
+            current_time=self._now_iso(),
         )
         self._append_editor_state_audit_event(state=state, operation="write")
         return self._build_editor_state(state)
