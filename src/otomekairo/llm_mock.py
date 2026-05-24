@@ -102,19 +102,24 @@ class MockLLMClient:
 
         # summary
         if image_input_kind == "conversation_attachment":
-            summary_text = "添付画像には、会話で確認するための視覚情報が写っている。"
+            summary_text = "添付画像には、会話で確認したい主題が中央に写り、その周囲の表示や文脈も読み取れる。"
         elif active_app and window_title:
             if active_app in {"Slack", "Discord", "Teams"}:
                 channel_name = window_title.split("|", 1)[0].strip()
-                summary_text = f"{active_app} の会話が視覚前景で、{channel_name} のやり取りが見えている。"
+                summary_text = (
+                    f"{active_app} の {channel_name} が写っており、左に一覧、中央に会話ログ、"
+                    "周辺に関連ペインが見えている。"
+                )
             else:
-                summary_text = f"{active_app} の表示内容が視覚前景で、{window_title} が見えている。"
+                summary_text = (
+                    f"{active_app} の {window_title} が写っており、中央の主要内容と周辺の操作領域が見えている。"
+                )
         elif active_app:
-            summary_text = f"{active_app} の表示内容が視覚前景にある。"
+            summary_text = f"{active_app} の画面が写っており、主要内容と周辺 UI が見えている。"
         elif window_title:
-            summary_text = f"{window_title} が視覚前景にある。"
+            summary_text = f"{window_title} を中心にした画面が写っており、主題と周辺表示が見えている。"
         else:
-            summary_text = "現在の視覚前景が見えている。"
+            summary_text = "現在の画像内容が見えており、主題となる内容と周辺の表示が読み取れる。"
 
         payload = {
             "summary_text": summary_text,
