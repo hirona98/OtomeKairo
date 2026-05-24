@@ -1,0 +1,109 @@
+from __future__ import annotations
+
+
+ACTIVE_MEMORY_STATUSES = ("inferred", "confirmed")
+REFLECTIVE_SCOPE_TYPES = ("self", "user", "relationship", "topic")
+REFLECTION_TRIGGER_CYCLE_INTERVAL = 8
+REFLECTION_TRIGGER_HOURS = 24
+REFLECTION_HIGH_SALIENCE_THRESHOLD = 0.8
+REFLECTION_HIGH_SALIENCE_COUNT = 3
+REFLECTION_SCOPE_SIGNAL_SALIENCE = 0.65
+REFLECTION_EPISODE_LIMIT = 24
+REFLECTION_MEMORY_LIMIT = 96
+REFLECTION_MIN_SUMMARY_EVIDENCE = 3
+REFLECTION_MIN_SUMMARY_EPISODES = 2
+REFLECTION_CONFIRMED_SUMMARY_EVIDENCE = 7
+REFLECTION_CONFIRMED_SUMMARY_EPISODES = 4
+REFLECTION_SUMMARY_PACK_EPISODE_LIMIT = 6
+REFLECTION_SUMMARY_PACK_MEMORY_LIMIT = 8
+REFLECTION_SCOPE_AFFECT_LIMIT = 4
+REFLECTION_AFFECT_STATE_EPISODE_LIMIT = 96
+REFLECTION_AFFECT_STATE_MIN_EPISODES = 2
+REFLECTION_AFFECT_STATE_INITIAL_LOOKBACK_HOURS = 6
+REFLECTION_AFFECT_STATE_WEAKEN_AFTER_DAYS = 14
+REFLECTION_AFFECT_STATE_WEAKEN_FACTOR = 0.85
+REFLECTION_AFFECT_STATE_CONFIDENCE_WEAKEN_FACTOR = 0.95
+REFLECTION_AFFECT_STATE_MIN_INTENSITY = 0.12
+REFLECTION_PERSONA_PROMPT_LIMIT = 240
+REFLECTION_TOPIC_DORMANT_AFTER_DAYS = 14
+REFLECTION_CONFIRMED_TOPIC_DORMANT_AFTER_DAYS = 30
+DRIVE_MAX_ACTIVE = 3
+DRIVE_COMMITMENT_STATES = ("open", "waiting_confirmation", "on_hold")
+DRIVE_SUMMARY_MIN_SALIENCE = 0.58
+DRIVE_KIND_EXPIRY_HOURS = {
+    "follow_through": 72,
+    "resume_when_ready": 48,
+    "relationship_attunement": 60,
+    "user_attention": 48,
+    "self_regulation": 36,
+    "topic_continuation": 36,
+}
+DRIVE_SCOPE_SALIENCE_BOOSTS = {
+    "relationship": 0.08,
+    "self": 0.06,
+    "user": 0.05,
+    "topic": 0.03,
+}
+DRIVE_FRESHNESS_SALIENCE_ADJUSTMENTS = {
+    "fresh": 0.04,
+    "warm": 0.01,
+    "stale": -0.06,
+}
+DRIVE_CANDIDATE_FRESHNESS_WEIGHTS = {
+    "fresh": 1.0,
+    "warm": 0.76,
+    "stale": 0.48,
+}
+DRIVE_SUMMARY_STATUS_WEIGHTS = {
+    "confirmed": 1.0,
+    "inferred": 0.84,
+}
+DRIVE_COMMITMENT_STATE_WEIGHTS = {
+    "waiting_confirmation": 1.0,
+    "open": 0.92,
+    "on_hold": 0.68,
+}
+DRIVE_PERSONA_ALIGNMENT_BY_BASELINE = {
+    "low": {
+        "follow_through": 0.68,
+        "resume_when_ready": 0.58,
+        "relationship_attunement": 0.44,
+        "user_attention": 0.46,
+        "self_regulation": 0.72,
+        "topic_continuation": 0.38,
+    },
+    "medium": {
+        "follow_through": 0.64,
+        "resume_when_ready": 0.56,
+        "relationship_attunement": 0.58,
+        "user_attention": 0.56,
+        "self_regulation": 0.62,
+        "topic_continuation": 0.52,
+    },
+    "high": {
+        "follow_through": 0.66,
+        "resume_when_ready": 0.5,
+        "relationship_attunement": 0.74,
+        "user_attention": 0.7,
+        "self_regulation": 0.58,
+        "topic_continuation": 0.66,
+    },
+}
+DRIVE_SUPPORT_SALIENCE_STEP = 0.04
+DRIVE_MAX_SUPPORT_BONUS = 0.12
+DRIVE_MAX_SIGNAL_BONUS = 0.12
+DRIVE_MAX_SCOPE_SUPPORT_BONUS = 0.08
+DRIVE_PERSONA_ALIGNMENT_SALIENCE_RANGE = 0.08
+DRIVE_MAX_MIXED_PENALTY = 0.16
+DRIVE_WEAK_STABILITY_PENALTY = 0.22
+DRIVE_MAX_SUPPORTING_MEMORY_UNITS = 8
+DRIVE_MAX_SUPPORTING_EVENT_IDS = 12
+DRIVE_FRESH_HOURS = 12
+DRIVE_WARM_HOURS = 36
+DRIVE_MOOD_SIGNAL_LOW = 0.25
+DRIVE_MOOD_SIGNAL_HIGH = 0.45
+DRIVE_RELATIONSHIP_SIGNAL_LOW = 0.2
+DRIVE_RELATIONSHIP_SIGNAL_HIGH = 0.45
+DRIVE_STALE_SUMMARY_SUPPORT_FLOOR = 0.42
+DRIVE_STALE_SUMMARY_SIGNAL_FLOOR = 0.18
+DRIVE_MIN_SUMMARY_DRIVE_SALIENCE = 0.46
