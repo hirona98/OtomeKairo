@@ -48,6 +48,117 @@ class ServiceInputPipelineMixin:
         reply_role = selected_preset["roles"]["expression_generation"]
         persona = state["personas"][state["selected_persona_id"]]
 
+        # 想起入力
+        recall_inputs = self._build_pipeline_recall_inputs(
+            state=state,
+            started_at=started_at,
+            input_text=input_text,
+            recent_turns=recent_turns,
+            augmented_query_text=augmented_query_text,
+            visual_observation_context=visual_observation_context,
+            recall_role=recall_role,
+            cycle_label=cycle_label,
+        )
+        recall_hint = recall_inputs["recall_hint"]
+        recall_pack = recall_inputs["recall_pack"]
+        answer_contract = recall_inputs["answer_contract"]
+        evidence_pack = recall_inputs["evidence_pack"]
+
+        # 内部コンテキスト
+        pipeline_contexts = self._build_pipeline_internal_contexts(
+            state=state,
+            persona=persona,
+            started_at=started_at,
+            input_text=input_text,
+            recent_turns=recent_turns,
+            trigger_kind=trigger_kind,
+            client_context=current_client_context,
+            cycle_id=cycle_id,
+            selected_candidate=selected_candidate,
+            pending_intent_selection=pending_intent_selection,
+            observation_summary=observation_summary,
+            capability_request_summary=capability_request_summary,
+            recall_hint=recall_hint,
+            cycle_label=cycle_label,
+        )
+
+        # decision生成
+        decision = self._run_pipeline_decision(
+            input_text=input_text,
+            trigger_kind=trigger_kind,
+            recent_turns=recent_turns,
+            time_context=pipeline_contexts["time_context"],
+            affect_context=pipeline_contexts["affect_context"],
+            drive_state_summary=pipeline_contexts["drive_state_summary"],
+            foreground_world_state=pipeline_contexts["foreground_world_state"],
+            ongoing_action_summary=pipeline_contexts["ongoing_action_summary"],
+            capability_decision_view=pipeline_contexts["capability_decision_view"],
+            initiative_context=pipeline_contexts["initiative_context"],
+            capability_result_context=pipeline_contexts["capability_result_context"],
+            recall_hint=recall_hint,
+            recall_pack=recall_pack,
+            visual_observation_context=visual_observation_context,
+            decision_role=decision_role,
+            persona=persona,
+            cycle_label=cycle_label,
+        )
+
+        # 出力
+        output_result = self._run_pipeline_output(
+            state=state,
+            input_text=input_text,
+            recent_turns=recent_turns,
+            time_context=pipeline_contexts["time_context"],
+            affect_context=pipeline_contexts["affect_context"],
+            drive_state_summary=pipeline_contexts["drive_state_summary"],
+            foreground_world_state=pipeline_contexts["foreground_world_state"],
+            ongoing_action_summary=pipeline_contexts["ongoing_action_summary"],
+            initiative_context=pipeline_contexts["initiative_context"],
+            recall_hint=recall_hint,
+            recall_pack=recall_pack,
+            visual_observation_context=visual_observation_context,
+            reply_role=reply_role,
+            persona=persona,
+            decision=decision,
+            cycle_label=cycle_label,
+        )
+
+        # 結果
+        debug_log("Pipeline", f"{cycle_label} done")
+        return {
+            "augmented_query_text": augmented_query_text,
+            "recall_hint": recall_hint,
+            "recall_pack": recall_pack,
+            "answer_contract": answer_contract,
+            "evidence_pack": evidence_pack,
+            "time_context": pipeline_contexts["time_context"],
+            "affect_context": pipeline_contexts["affect_context"],
+            "drive_state_summary": pipeline_contexts["drive_state_summary"],
+            "foreground_world_state": pipeline_contexts["foreground_world_state"],
+            "ongoing_action_summary": pipeline_contexts["ongoing_action_summary"],
+            "capability_decision_view": pipeline_contexts["capability_decision_view"],
+            "initiative_context": pipeline_contexts["initiative_context"],
+            "capability_result_context": pipeline_contexts["capability_result_context"],
+            "visual_observation_context": visual_observation_context,
+            "world_state_trace": pipeline_contexts["world_state_trace"],
+            "decision": decision,
+            "reply_payload": output_result["reply_payload"],
+            "capability_request_summary": output_result["capability_request_summary"],
+            "ongoing_action_transition_summary": output_result["ongoing_action_transition_summary"],
+        }
+
+    def _build_pipeline_recall_inputs(
+        self,
+        *,
+        state: dict[str, Any],
+        started_at: str,
+        input_text: str,
+        recent_turns: list[dict[str, Any]],
+        augmented_query_text: str,
+        visual_observation_context: dict[str, Any] | None,
+        recall_role: dict[str, Any],
+        cycle_label: str,
+    ) -> dict[str, Any]:
         # 入口解釈
         recall_hint_recent_turns = self._recall_hint_recent_turns(recent_turns)
         debug_log("Pipeline", f"{cycle_label} input_interpretation start recent_turns={len(recall_hint_recent_turns)}")
@@ -109,7 +220,31 @@ class ServiceInputPipelineMixin:
                 f"evidence_status={evidence_pack.get('status')}"
             ),
         )
+        return {
+            "recall_hint": recall_hint,
+            "recall_pack": recall_pack,
+            "answer_contract": answer_contract,
+            "evidence_pack": evidence_pack,
+        }
 
+    def _build_pipeline_internal_contexts(
+        self,
+        *,
+        state: dict[str, Any],
+        persona: dict[str, Any],
+        started_at: str,
+        input_text: str,
+        recent_turns: list[dict[str, Any]],
+        trigger_kind: str,
+        client_context: dict[str, Any],
+        cycle_id: str | None,
+        selected_candidate: dict[str, Any] | None,
+        pending_intent_selection: dict[str, Any] | None,
+        observation_summary: dict[str, Any] | None,
+        capability_request_summary: dict[str, Any] | None,
+        recall_hint: dict[str, Any],
+        cycle_label: str,
+    ) -> dict[str, Any]:
         # 内部コンテキスト
         debug_log("Pipeline", f"{cycle_label} context start")
         time_context = self._build_time_context(current_time=started_at)
@@ -129,7 +264,7 @@ class ServiceInputPipelineMixin:
             started_at=started_at,
             input_text=input_text,
             trigger_kind=trigger_kind,
-            client_context=current_client_context,
+            client_context=client_context,
             cycle_id=cycle_id,
             selected_candidate=selected_candidate,
             observation_summary=observation_summary,
@@ -158,7 +293,7 @@ class ServiceInputPipelineMixin:
             time_context=time_context,
             recent_turns=recent_turns,
             trigger_kind=trigger_kind,
-            client_context=current_client_context,
+            client_context=client_context,
             drive_state_summary=drive_state_summary,
             foreground_world_state=foreground_world_state,
             world_state_trace=world_state_trace,
@@ -181,7 +316,39 @@ class ServiceInputPipelineMixin:
                 f"capabilities={len(capability_decision_view or [])} initiative={initiative_context is not None}"
             ),
         )
+        return {
+            "time_context": time_context,
+            "affect_context": affect_context,
+            "drive_state_summary": drive_state_summary,
+            "world_state_trace": world_state_trace,
+            "foreground_world_state": foreground_world_state,
+            "ongoing_action_summary": ongoing_action_summary,
+            "capability_decision_view": capability_decision_view,
+            "initiative_context": initiative_context,
+            "capability_result_context": capability_result_context,
+        }
 
+    def _run_pipeline_decision(
+        self,
+        *,
+        input_text: str,
+        trigger_kind: str,
+        recent_turns: list[dict[str, Any]],
+        time_context: dict[str, Any],
+        affect_context: dict[str, Any],
+        drive_state_summary: list[dict[str, Any]] | None,
+        foreground_world_state: list[dict[str, Any]] | None,
+        ongoing_action_summary: dict[str, Any] | None,
+        capability_decision_view: list[dict[str, Any]] | None,
+        initiative_context: InitiativeContext | None,
+        capability_result_context: dict[str, Any] | None,
+        visual_observation_context: dict[str, Any] | None,
+        recall_hint: dict[str, Any],
+        recall_pack: dict[str, Any],
+        decision_role: dict[str, Any],
+        persona: dict[str, Any],
+        cycle_label: str,
+    ) -> dict[str, Any]:
         # decision生成
         debug_log("Pipeline", f"{cycle_label} decision start")
         decision_context = self._build_decision_context(
@@ -209,7 +376,28 @@ class ServiceInputPipelineMixin:
             "Pipeline",
             f"{cycle_label} decision done kind={decision['kind']} reason={self._clamp(decision['reason_summary'])}",
         )
+        return decision
 
+    def _run_pipeline_output(
+        self,
+        *,
+        state: dict[str, Any],
+        input_text: str,
+        recent_turns: list[dict[str, Any]],
+        time_context: dict[str, Any],
+        affect_context: dict[str, Any],
+        drive_state_summary: list[dict[str, Any]] | None,
+        foreground_world_state: list[dict[str, Any]] | None,
+        ongoing_action_summary: dict[str, Any] | None,
+        initiative_context: InitiativeContext | None,
+        visual_observation_context: dict[str, Any] | None,
+        recall_hint: dict[str, Any],
+        recall_pack: dict[str, Any],
+        reply_role: dict[str, Any],
+        persona: dict[str, Any],
+        decision: dict[str, Any],
+        cycle_label: str,
+    ) -> dict[str, Any]:
         # capability request
         dispatched_capability_request_summary: dict[str, Any] | None = None
         ongoing_action_transition_summary: dict[str, Any] | None = None
@@ -257,26 +445,7 @@ class ServiceInputPipelineMixin:
             debug_log("Pipeline", f"{cycle_label} reply done reply_chars={len(reply_payload['reply_text'])}")
         else:
             debug_log("Pipeline", f"{cycle_label} reply skipped decision_kind={decision['kind']}")
-
-        # 結果
-        debug_log("Pipeline", f"{cycle_label} done")
         return {
-            "augmented_query_text": augmented_query_text,
-            "recall_hint": recall_hint,
-            "recall_pack": recall_pack,
-            "answer_contract": answer_contract,
-            "evidence_pack": evidence_pack,
-            "time_context": time_context,
-            "affect_context": affect_context,
-            "drive_state_summary": drive_state_summary,
-            "foreground_world_state": foreground_world_state,
-            "ongoing_action_summary": ongoing_action_summary,
-            "capability_decision_view": capability_decision_view,
-            "initiative_context": initiative_context,
-            "capability_result_context": capability_result_context,
-            "visual_observation_context": visual_observation_context,
-            "world_state_trace": world_state_trace,
-            "decision": decision,
             "reply_payload": reply_payload,
             "capability_request_summary": dispatched_capability_request_summary,
             "ongoing_action_transition_summary": ongoing_action_transition_summary,
