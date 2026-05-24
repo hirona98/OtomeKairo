@@ -1,0 +1,539 @@
+from __future__ import annotations
+
+from typing import Any
+
+from otomekairo.llm_contexts import InitiativeContext
+from otomekairo.service_common import debug_log
+from otomekairo.world_state_models import WorldStateTrace
+
+
+class ServiceInputInitiativeContextMixin:
+    def _build_initiative_context(
+        self,
+        *,
+        state: dict[str, Any],
+        persona: dict[str, Any],
+        current_time: str,
+        time_context: dict[str, Any],
+        recent_turns: list[dict[str, Any]],
+        trigger_kind: str,
+        client_context: dict[str, Any],
+        drive_state_summary: list[dict[str, Any]] | None,
+        foreground_world_state: list[dict[str, Any]] | None,
+        world_state_trace: WorldStateTrace | None,
+        ongoing_action_summary: dict[str, Any] | None,
+        capability_decision_view: list[dict[str, Any]] | None,
+        selected_candidate: dict[str, Any] | None,
+        pending_intent_selection: dict[str, Any] | None,
+    ) -> InitiativeContext | None:
+        if trigger_kind not in {"wake", "background_wake"}:
+            return None
+        drive_summaries = self._initiative_drive_summaries(drive_state_summary)
+        pending_intent_summaries = self._initiative_pending_intent_summaries(selected_candidate)
+        world_state_summary = foreground_world_state or []
+        status_refresh_world_state_summary = self._initiative_status_refresh_world_state_summary(
+            foreground_world_state=foreground_world_state,
+            world_state_trace=world_state_trace,
+            trigger_kind=trigger_kind,
+        )
+        initiative_baseline = self._initiative_baseline_summary(persona)
+        runtime_state_summary = self._initiative_runtime_state_summary(
+            state=state,
+            ongoing_action_summary=ongoing_action_summary,
+        )
+        recent_turn_summary = self._initiative_recent_turn_summary(recent_turns)
+        foreground_signal_summary = self._initiative_foreground_signal_summary(
+            trigger_kind=trigger_kind,
+            client_context=client_context,
+            world_state_summary=world_state_summary,
+        )
+        intervention_state = self._initiative_intervention_state(
+            current_time=current_time,
+            trigger_kind=trigger_kind,
+            selected_candidate=selected_candidate,
+        )
+        capability_summary = self._initiative_capability_summary(capability_decision_view)
+        intervention_risk_summary = self._initiative_intervention_risk_summary(
+            initiative_baseline=initiative_baseline,
+            intervention_state=intervention_state,
+            trigger_kind=trigger_kind,
+            ongoing_action_summary=ongoing_action_summary,
+            capability_summary=capability_summary,
+            selected_candidate=selected_candidate,
+            pending_intent_selection=pending_intent_selection,
+        )
+        suppression_summary = self._initiative_suppression_summary(
+            intervention_state=intervention_state,
+            intervention_risk_summary=intervention_risk_summary,
+        )
+        candidate_families = self._initiative_candidate_families(
+            trigger_kind=trigger_kind,
+            drive_summaries=drive_summaries,
+            world_state_summary=world_state_summary,
+            status_refresh_world_state_summary=status_refresh_world_state_summary,
+            recent_turn_summary=recent_turn_summary,
+            foreground_signal_summary=foreground_signal_summary,
+            suppression_summary=suppression_summary,
+            ongoing_action_summary=ongoing_action_summary,
+            selected_candidate=selected_candidate,
+            pending_intent_selection=pending_intent_selection,
+            initiative_baseline=initiative_baseline,
+            intervention_state=intervention_state,
+            capability_summary=capability_summary,
+        )
+        selected_candidate_family = self._initiative_selected_candidate_family(candidate_families)
+        selected_family_entry = self._initiative_selected_family_entry(
+            candidate_families=candidate_families,
+            selected_candidate_family=selected_candidate_family,
+        )
+        desktop_signal = self._initiative_desktop_observation_signal(foreground_signal_summary)
+        desktop_debug = "-"
+        if isinstance(desktop_signal, dict):
+            desktop_debug = (
+                f"novelty={desktop_signal.get('novelty_kind', '-')}"
+                f" eligibility={desktop_signal.get('reply_eligibility', '-')}"
+                f" cooldown={desktop_signal.get('cooldown_active', '-')}"
+            )
+        debug_log(
+            "Initiative",
+            (
+                f"trigger={trigger_kind} selected={selected_candidate_family or '-'} "
+                f"preferred={selected_family_entry.preferred_result_kind if selected_family_entry is not None else '-'} "
+                f"suppression={suppression_summary.get('suppression_level', '-')} "
+                f"foreground={foreground_signal_summary.get('foreground_thinness', '-')} "
+                f"desktop={desktop_debug}"
+            ),
+        )
+        return InitiativeContext(
+            trigger_kind=trigger_kind,
+            opportunity_summary=self._initiative_opportunity_summary(
+                trigger_kind=trigger_kind,
+                client_context=client_context,
+                selected_candidate=selected_candidate,
+            ),
+            time_context_summary=self._initiative_time_context_summary(time_context=time_context),
+            foreground_signal_summary=foreground_signal_summary,
+            initiative_baseline=initiative_baseline,
+            runtime_state_summary=runtime_state_summary,
+            recent_turn_summary=recent_turn_summary,
+            drive_summaries=drive_summaries,
+            pending_intent_summaries=pending_intent_summaries,
+            world_state_summary=world_state_summary,
+            ongoing_action_summary=ongoing_action_summary,
+            capability_summary=capability_summary,
+            candidate_families=candidate_families,
+            selected_candidate_family=selected_candidate_family,
+            intervention_state=intervention_state,
+            suppression_summary=suppression_summary,
+            intervention_risk_summary=intervention_risk_summary,
+        )
+
+    def _initiative_status_refresh_world_state_summary(
+        self,
+        *,
+        foreground_world_state: list[dict[str, Any]] | None,
+        world_state_trace: WorldStateTrace | None,
+        trigger_kind: str,
+    ) -> list[dict[str, Any]]:
+        if trigger_kind in {"wake", "background_wake"}:
+            previous = world_state_trace.previous_foreground_world_state if world_state_trace is not None else None
+            if isinstance(previous, list):
+                return [item for item in previous if isinstance(item, dict)]
+        return foreground_world_state or []
+
+    def _initiative_opportunity_summary(
+        self,
+        *,
+        trigger_kind: str,
+        client_context: dict[str, Any],
+        selected_candidate: dict[str, Any] | None,
+    ) -> str:
+        _ = client_context
+        if trigger_kind == "background_wake":
+            if isinstance(selected_candidate, dict):
+                return "background wake が来ており、保留中の候補を再評価する機会がある。"
+            return "background wake が来ており、直近入力なしで前進可否を見直す機会がある。"
+        if trigger_kind == "wake":
+            if isinstance(selected_candidate, dict):
+                return "manual wake が呼ばれ、保留中の候補を再評価する機会がある。"
+            return "manual wake が呼ばれ、今の前進可否を見直す機会がある。"
+        return "自律判断の機会があり、今の前進可否を見直す。"
+
+    def _initiative_time_context_summary(self, *, time_context: dict[str, Any]) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        current_time_text = self._client_context_text(time_context.get("current_time_text"), limit=120)
+        if current_time_text is not None:
+            payload["current_time_text"] = current_time_text
+        part_of_day = self._client_context_text(time_context.get("part_of_day"), limit=16)
+        if part_of_day is not None:
+            payload["part_of_day"] = part_of_day
+            payload["time_band_summary"] = self._initiative_time_band_summary(part_of_day=part_of_day)
+        weekday = self._client_context_text(time_context.get("weekday"), limit=16)
+        if weekday is not None:
+            payload["weekday"] = weekday
+        return payload
+
+    def _initiative_time_band_summary(self, *, part_of_day: str) -> str:
+        if part_of_day == "morning":
+            return "朝の立ち上がり帯で、軽い前進か様子見かを決めたい時間帯。"
+        if part_of_day == "daytime":
+            return "日中の活動帯で、前景理由があれば動きやすい時間帯。"
+        if part_of_day == "evening":
+            return "夕方から夜への移行帯で、流れの整理や軽い声かけが自然な時間帯。"
+        return "夜間で、押し出しすぎず静かな前進可否を見たい時間帯。"
+
+    def _initiative_foreground_signal_summary(
+        self,
+        *,
+        trigger_kind: str,
+        client_context: dict[str, Any],
+        world_state_summary: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        _ = trigger_kind
+        desktop_signal = self._compact_desktop_observation_signal(
+            client_context.get("desktop_observation_signal")
+        )
+        state_types = sorted(
+            {
+                item.get("state_type")
+                for item in world_state_summary
+                if isinstance(item, dict) and isinstance(item.get("state_type"), str)
+            }
+        )
+        if self._desktop_observation_signal_is_judgable(desktop_signal):
+            payload = {
+                "foreground_thinness": "ready",
+                "reason_summary": "desktop wake observation に未発話の新しい前景があり、短い自発 reply の候補になる。",
+                "world_state_count": len(world_state_summary),
+                "desktop_observation_signal": desktop_signal,
+            }
+            if state_types:
+                payload["state_types"] = state_types[:4]
+            return payload
+        if not world_state_summary:
+            payload = {
+                "foreground_thinness": "thin",
+                "reason_summary": "前景 world_state がまだ薄く、視覚や周辺状況の追加観測が欲しい。",
+                "world_state_count": 0,
+            }
+            if desktop_signal:
+                payload["desktop_observation_signal"] = desktop_signal
+            return payload
+
+        grounded_types = {"schedule", "social_context", "body"}
+        if grounded_types.intersection(state_types):
+            thinness = "grounded"
+            reason_summary = "予定・対人・身体の前景があり、いまの状況は比較的具体的に見えている。"
+        elif set(state_types).issubset({"visual_context", "external_service", "device"}):
+            thinness = "thin"
+            reason_summary = "視覚前景や外部状態は見えているが、生活文脈や対人文脈はまだ薄い。"
+        else:
+            thinness = "mixed"
+            reason_summary = "前景 world はあるが、視覚中心の信号と生活文脈が混在している。"
+        payload = {
+            "foreground_thinness": thinness,
+            "reason_summary": reason_summary,
+            "world_state_count": len(world_state_summary),
+        }
+        if state_types:
+            payload["state_types"] = state_types[:4]
+        if desktop_signal:
+            payload["desktop_observation_signal"] = desktop_signal
+        return payload
+
+    def _initiative_foreground_thinness(self, foreground_signal_summary: dict[str, Any] | None) -> str | None:
+        if not isinstance(foreground_signal_summary, dict):
+            return None
+        return self._client_context_text(foreground_signal_summary.get("foreground_thinness"), limit=16)
+
+    def _initiative_suppression_level(self, suppression_summary: dict[str, Any] | None) -> str | None:
+        if not isinstance(suppression_summary, dict):
+            return None
+        return self._client_context_text(suppression_summary.get("suppression_level"), limit=16)
+
+    def _initiative_baseline_summary(self, persona: dict[str, Any]) -> dict[str, Any]:
+        level = self._client_context_text(persona.get("initiative_baseline"), limit=16)
+        if level is None:
+            return {}
+        if level == "low":
+            summary_text = "自発介入は控えめ寄りで、前景理由が弱ければ見送る。"
+        elif level == "high":
+            summary_text = "自発介入は強めで、前景理由が揃えば一歩前へ出る。"
+        else:
+            summary_text = "自発介入は中庸で、前景理由と抑制要因の両方を見る。"
+        return {
+            "level": level,
+            "summary_text": summary_text,
+        }
+
+    def _initiative_runtime_state_summary(
+        self,
+        *,
+        state: dict[str, Any],
+        ongoing_action_summary: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        with self._runtime_state_lock:
+            memory_job_in_progress = self._memory_postprocess_runtime_state.get("current_cycle_id") is not None
+        return {
+            "wake_scheduler_active": self._background_wake_scheduler_active() and state["wake_policy"]["mode"] == "interval",
+            "ongoing_action_exists": isinstance(ongoing_action_summary, dict),
+            "memory_job_worker_active": self._background_memory_postprocess_worker_active(),
+            "pending_memory_job_count": self.store.count_memory_postprocess_jobs(
+                result_statuses=["queued", "running"],
+            ),
+            "memory_job_in_progress": memory_job_in_progress,
+        }
+
+    def _initiative_recent_turn_summary(
+        self,
+        recent_turns: list[dict[str, Any]],
+    ) -> list[dict[str, str]]:
+        payload: list[dict[str, str]] = []
+        for turn in recent_turns[-3:]:
+            if not isinstance(turn, dict):
+                continue
+            role = turn.get("role")
+            text = turn.get("text")
+            if not isinstance(role, str) or not role.strip():
+                continue
+            if not isinstance(text, str) or not text.strip():
+                continue
+            payload.append(
+                {
+                    "role": role.strip(),
+                    "text": self._clamp(text.strip(), limit=80) or "",
+                }
+            )
+        return payload
+
+    def _initiative_intervention_state(
+        self,
+        *,
+        current_time: str,
+        trigger_kind: str,
+        selected_candidate: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "background_trigger": trigger_kind == "background_wake",
+        }
+        cooldown_reason = self._wake_cooldown_reason(current_time=current_time)
+        if cooldown_reason is not None:
+            payload["cooldown_active"] = True
+            payload["cooldown_reason"] = cooldown_reason
+        with self._runtime_state_lock:
+            last_spontaneous_at = self._wake_runtime_state.get("last_spontaneous_at")
+        if isinstance(last_spontaneous_at, str) and last_spontaneous_at:
+            age_label = self._world_state_age_label(
+                reference_time=current_time,
+                observed_at=last_spontaneous_at,
+                updated_at=None,
+            )
+            if age_label is not None:
+                payload["last_spontaneous_reply_age_label"] = age_label
+        if isinstance(selected_candidate, dict):
+            dedupe_key = selected_candidate.get("dedupe_key")
+            if isinstance(dedupe_key, str) and dedupe_key:
+                payload["same_dedupe_recently_replied"] = self._was_recently_replied(
+                    dedupe_key=dedupe_key,
+                    current_time=current_time,
+                )
+        return payload
+
+    def _initiative_pending_intent_summaries(self, selected_candidate: dict[str, Any] | None) -> list[dict[str, Any]]:
+        if not isinstance(selected_candidate, dict):
+            return []
+        return [
+            {
+                "intent_kind": selected_candidate.get("intent_kind"),
+                "intent_summary": selected_candidate.get("intent_summary"),
+                "reason_summary": selected_candidate.get("reason_summary"),
+            }
+        ]
+
+    def _initiative_capability_summary(
+        self,
+        capability_decision_view: list[dict[str, Any]] | None,
+    ) -> dict[str, Any]:
+        available_ids: list[str] = []
+        available_items: list[dict[str, Any]] = []
+        unavailable_items: list[dict[str, Any]] = []
+        vision_sources: list[dict[str, Any]] = []
+        for item in capability_decision_view or []:
+            if not isinstance(item, dict):
+                continue
+            capability_id = item.get("id")
+            if not isinstance(capability_id, str) or not capability_id:
+                continue
+            if item.get("available"):
+                available_ids.append(capability_id)
+                available_item = {
+                    "id": capability_id,
+                    "what_it_does": item.get("what_it_does"),
+                    "required_input": item.get("required_input"),
+                }
+                if capability_id == "vision.capture":
+                    vision_sources = self._compact_vision_sources_for_decision(item.get("vision_sources"))
+                    available_item["vision_sources"] = vision_sources
+                available_items.append(available_item)
+                continue
+            unavailable_items.append(
+                {
+                    "id": capability_id,
+                    "reason": item.get("unavailable_reason"),
+                }
+            )
+        return {
+            "available_count": len(available_ids),
+            "available_ids": available_ids,
+            "available_items": available_items[:3],
+            "unavailable_count": len(unavailable_items),
+            "unavailable_items": unavailable_items[:3],
+            "vision_sources": vision_sources,
+        }
+
+    def _compact_vision_sources_for_decision(self, value: Any) -> list[dict[str, Any]]:
+        sources: list[dict[str, Any]] = []
+        if not isinstance(value, list):
+            return sources
+        for source in value:
+            if not isinstance(source, dict):
+                continue
+            source_id = self._client_context_text(source.get("vision_source_id"), limit=96)
+            kind = self._client_context_text(source.get("kind"), limit=32)
+            label = self._client_context_text(source.get("label"), limit=80)
+            if source_id is None or kind is None or label is None:
+                continue
+            payload: dict[str, Any] = {
+                "vision_source_id": source_id,
+                "kind": kind,
+                "label": label,
+            }
+            default_for = [
+                value
+                for value in source.get("default_for", [])
+                if isinstance(value, str) and value.strip()
+            ][:6]
+            aliases = [
+                value
+                for value in source.get("aliases", [])
+                if isinstance(value, str) and value.strip()
+            ][:6]
+            if aliases:
+                payload["aliases"] = aliases
+            if default_for:
+                payload["default_for"] = default_for
+            sources.append(payload)
+        return sources[:6]
+
+    def _initiative_default_vision_source_id(self, capability_summary: dict[str, Any]) -> str | None:
+        top_level_sources = capability_summary.get("vision_sources")
+        source_id = self._default_vision_source_id_from_sources(top_level_sources)
+        if source_id is not None:
+            return source_id
+        available_items = capability_summary.get("available_items")
+        if not isinstance(available_items, list):
+            return None
+        for item in available_items:
+            if not isinstance(item, dict) or item.get("id") != "vision.capture":
+                continue
+            return self._default_vision_source_id_from_sources(item.get("vision_sources"))
+        return None
+
+    def _default_vision_source_id_from_sources(self, value: Any) -> str | None:
+        if not isinstance(value, list):
+            return None
+        for default_name in ("visual", "desktop", "camera"):
+            for source in value:
+                if not isinstance(source, dict):
+                    continue
+                default_for = source.get("default_for")
+                source_id = source.get("vision_source_id")
+                if (
+                    isinstance(default_for, list)
+                    and default_name in default_for
+                    and isinstance(source_id, str)
+                    and source_id.strip()
+                ):
+                    return source_id.strip()
+        for source in value:
+            if not isinstance(source, dict):
+                continue
+            source_id = source.get("vision_source_id")
+            if isinstance(source_id, str) and source_id.strip():
+                return source_id.strip()
+        return None
+
+    def _initiative_desktop_observation_signal(
+        self,
+        foreground_signal_summary: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if not isinstance(foreground_signal_summary, dict):
+            return None
+        signal = self._compact_desktop_observation_signal(
+            foreground_signal_summary.get("desktop_observation_signal")
+        )
+        if not self._desktop_observation_signal_is_judgable(signal):
+            return None
+        return signal
+
+    def _initiative_intervention_risk_summary(
+        self,
+        *,
+        initiative_baseline: dict[str, Any],
+        intervention_state: dict[str, Any],
+        trigger_kind: str,
+        ongoing_action_summary: dict[str, Any] | None,
+        capability_summary: dict[str, Any],
+        selected_candidate: dict[str, Any] | None,
+        pending_intent_selection: dict[str, Any] | None,
+    ) -> str | None:
+        reasons: list[str] = []
+        baseline_level = self._client_context_text(initiative_baseline.get("level"), limit=16)
+        if trigger_kind == "background_wake":
+            reasons.append("直近入力のない定期 wake なので、過剰介入は避けたい。")
+        if baseline_level == "low":
+            reasons.append("initiative_baseline が low で、押し出しは控えめにしたい。")
+        if intervention_state.get("cooldown_active") is True:
+            cooldown_reason = intervention_state.get("cooldown_reason")
+            if isinstance(cooldown_reason, str) and cooldown_reason.strip():
+                reasons.append(cooldown_reason.strip())
+        if intervention_state.get("same_dedupe_recently_replied") is True:
+            reasons.append("同じ pending_intent 系統には最近 reply 済みで、連続介入は避けたい。")
+        if isinstance(ongoing_action_summary, dict) and ongoing_action_summary.get("status") == "waiting_result":
+            reasons.append("ongoing_action が結果待ちで、重複介入は抑えたい。")
+        if int(capability_summary.get("available_count", 0)) == 0:
+            reasons.append("現時点で使える capability が見当たらない。")
+        if not isinstance(selected_candidate, dict):
+            pool_count = 0
+            if isinstance(pending_intent_selection, dict):
+                pool_count = int(pending_intent_selection.get("candidate_pool_count", 0))
+            if pool_count == 0:
+                reasons.append("前景に出す pending_intent 候補はまだ見当たらない。")
+        if not reasons:
+            return None
+        return " / ".join(reasons)
+
+    def _initiative_suppression_summary(
+        self,
+        *,
+        intervention_state: dict[str, Any],
+        intervention_risk_summary: str | None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        suppression_level = "low"
+        if intervention_state.get("same_dedupe_recently_replied") is True:
+            suppression_level = "high"
+        elif (
+            intervention_state.get("cooldown_active") is True
+            or intervention_state.get("background_trigger") is True
+            or intervention_risk_summary is not None
+        ):
+            suppression_level = "medium"
+        payload["suppression_level"] = suppression_level
+        if intervention_risk_summary is not None:
+            payload["reason_summary"] = intervention_risk_summary
+        for key in ("background_trigger", "cooldown_active", "same_dedupe_recently_replied"):
+            value = intervention_state.get(key)
+            if isinstance(value, bool):
+                payload[key] = value
+        return payload
