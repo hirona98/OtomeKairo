@@ -15,7 +15,17 @@ from otomekairo.service_input_constants import (
     WORLD_STATE_USER_INPUT_CURRENT_STATE_TERMS_BY_TYPE,
     WORLD_STATE_USER_INPUT_REQUEST_TERMS,
 )
-from otomekairo.world_state_models import WorldStateCandidate, WorldStateSourcePack
+from otomekairo.world_state_models import (
+    WorldStateCandidate,
+    WorldStateContext,
+    WorldStateExternalServiceContext,
+    WorldStateNamedSummaryContext,
+    WorldStatePendingIntent,
+    WorldStateScheduleContext,
+    WorldStateScheduleSlot,
+    WorldStateSourcePack,
+    WorldStateVisualContext,
+)
 
 
 class ServiceInputWorldStateMixin:
@@ -268,26 +278,28 @@ class ServiceInputWorldStateMixin:
         self,
         *,
         observation_summary: dict[str, Any] | None,
-    ) -> dict[str, Any] | None:
-        payload: dict[str, Any] = {}
+    ) -> WorldStateVisualContext | None:
         visual_summary_text = None
-        capability_id_text = None
         if not self._observation_summary_updates_visual_world_state(observation_summary):
             return None
+        image_interpreted = None
+        visual_confidence_hint = None
+        image_count = None
+        capability_id_text = None
+        vision_source_id = None
+        source_kind = None
+        source_label = None
         if isinstance(observation_summary, dict):
             visual_summary_text = self._client_context_text(observation_summary.get("visual_summary_text"), limit=160)
-            if visual_summary_text is not None:
-                payload["summary_text"] = visual_summary_text
-                payload["visual_summary_text"] = visual_summary_text
-            image_interpreted = observation_summary.get("image_interpreted")
-            if isinstance(image_interpreted, bool):
-                payload["image_interpreted"] = image_interpreted
-            visual_confidence_hint = observation_summary.get("visual_confidence_hint")
-            if isinstance(visual_confidence_hint, str) and visual_confidence_hint.strip():
-                payload["visual_confidence_hint"] = visual_confidence_hint.strip()
-            image_count = observation_summary.get("image_count")
-            if isinstance(image_count, int) and image_count >= 0:
-                payload["image_count"] = image_count
+            image_interpreted_value = observation_summary.get("image_interpreted")
+            if isinstance(image_interpreted_value, bool):
+                image_interpreted = image_interpreted_value
+            visual_confidence_hint_value = observation_summary.get("visual_confidence_hint")
+            if isinstance(visual_confidence_hint_value, str) and visual_confidence_hint_value.strip():
+                visual_confidence_hint = visual_confidence_hint_value.strip()
+            image_count_value = observation_summary.get("image_count")
+            if isinstance(image_count_value, int) and image_count_value >= 0:
+                image_count = image_count_value
             capability_id = observation_summary.get("capability_id")
             if isinstance(capability_id, str) and capability_id.strip():
                 capability_id_text = capability_id.strip()
@@ -298,13 +310,26 @@ class ServiceInputWorldStateMixin:
             ):
                 value = observation_summary.get(source_key)
                 if isinstance(value, str) and value.strip():
-                    payload[source_key] = self._clamp(value.strip(), limit=limit)
-        has_visual_signal = "summary_text" in payload
-        if not has_visual_signal:
+                    normalized_value = self._clamp(value.strip(), limit=limit)
+                    if source_key == "vision_source_id":
+                        vision_source_id = normalized_value
+                    elif source_key == "source_kind":
+                        source_kind = normalized_value
+                    elif source_key == "source_label":
+                        source_label = normalized_value
+        if visual_summary_text is None:
             return None
-        if capability_id_text is not None:
-            payload["capability_id"] = capability_id_text
-        return payload
+        return WorldStateVisualContext(
+            summary_text=visual_summary_text,
+            visual_summary_text=visual_summary_text,
+            image_interpreted=image_interpreted,
+            visual_confidence_hint=visual_confidence_hint,
+            image_count=image_count,
+            capability_id=capability_id_text,
+            vision_source_id=vision_source_id,
+            source_kind=source_kind,
+            source_label=source_label,
+        )
 
     def _observation_summary_updates_visual_world_state(
         self,
@@ -385,9 +410,9 @@ class ServiceInputWorldStateMixin:
                     vision_source_id = input_payload.get("vision_source_id")
             if not isinstance(vision_source_id, str) or not vision_source_id.strip():
                 continue
-            source_key = self._world_state_vision_source_key({"vision_source_id": vision_source_id})
-            if source_key is not None:
-                return source_key
+            normalized_vision_source_id = self._client_context_text(vision_source_id, limit=96)
+            if normalized_vision_source_id is not None:
+                return normalized_vision_source_id
         return None
 
     def _build_world_state_external_service_context(
@@ -396,42 +421,41 @@ class ServiceInputWorldStateMixin:
         client_context: dict[str, Any],
         observation_summary: dict[str, Any] | None,
         source_kind: str,
-    ) -> dict[str, Any] | None:
-        payload: dict[str, Any] = {}
+    ) -> WorldStateExternalServiceContext | None:
         client_summary_text = self._client_context_text(client_context.get("external_service_summary"), limit=160)
         summary_text = client_summary_text
-        capability_id_text = None
         result_summary_text = None
-        if client_summary_text is not None:
-            payload["external_service_summary"] = client_summary_text
-            payload["client_summary_text"] = client_summary_text
+        service = None
+        capability_id_text = None
         if isinstance(observation_summary, dict):
             result_summary_text = self._client_context_text(observation_summary.get("status_text"), limit=160)
             if result_summary_text is not None:
                 summary_text = result_summary_text
-                payload["status_text"] = result_summary_text
-                payload["result_summary_text"] = result_summary_text
             service = self._client_context_text(observation_summary.get("service"), limit=80)
-            if service is not None:
-                payload["service"] = service
             capability_id = observation_summary.get("capability_id")
             if isinstance(capability_id, str) and capability_id.strip():
                 capability_id_text = capability_id.strip()
-        has_external_signal = summary_text is not None or "status_text" in payload or "service" in payload
+        has_external_signal = summary_text is not None or result_summary_text is not None or service is not None
         if not has_external_signal:
             return None
-        if summary_text is not None:
-            payload["summary_text"] = summary_text
+        summary_source_hint = None
         if result_summary_text is not None:
-            payload["summary_source_hint"] = "capability_result.status_text"
+            summary_source_hint = "capability_result.status_text"
         elif client_summary_text is not None:
-            payload["summary_source_hint"] = self._world_state_client_context_summary_source(
+            summary_source_hint = self._world_state_client_context_summary_source(
                 source_kind=source_kind,
                 field_name="external_service_summary",
             )
-        if capability_id_text is not None:
-            payload["capability_id"] = capability_id_text
-        return payload
+        return WorldStateExternalServiceContext(
+            summary_text=summary_text or result_summary_text or service or "",
+            external_service_summary=client_summary_text,
+            client_summary_text=client_summary_text,
+            result_summary_text=result_summary_text,
+            status_text=result_summary_text,
+            service=service,
+            summary_source_hint=summary_source_hint,
+            capability_id=capability_id_text,
+        )
 
     def _build_world_state_body_context(
         self,
@@ -439,7 +463,7 @@ class ServiceInputWorldStateMixin:
         client_context: dict[str, Any],
         observation_summary: dict[str, Any] | None,
         source_kind: str,
-    ) -> dict[str, Any] | None:
+    ) -> WorldStateNamedSummaryContext | None:
         return self._build_world_state_capability_state_context(
             client_context=client_context,
             observation_summary=observation_summary,
@@ -455,7 +479,7 @@ class ServiceInputWorldStateMixin:
         client_context: dict[str, Any],
         observation_summary: dict[str, Any] | None,
         source_kind: str,
-    ) -> dict[str, Any] | None:
+    ) -> WorldStateNamedSummaryContext | None:
         return self._build_world_state_capability_state_context(
             client_context=client_context,
             observation_summary=observation_summary,
@@ -474,36 +498,36 @@ class ServiceInputWorldStateMixin:
         client_summary_key: str,
         observation_summary_key: str,
         explicit_field_name: str,
-    ) -> dict[str, Any] | None:
-        payload: dict[str, Any] = {}
+    ) -> WorldStateNamedSummaryContext | None:
         client_summary_text = self._client_context_text(client_context.get(client_summary_key), limit=160)
         summary_text = client_summary_text
         capability_id_text = None
         observation_text = None
-        if client_summary_text is not None:
-            payload["client_summary_text"] = client_summary_text
         if isinstance(observation_summary, dict):
             observation_text = self._client_context_text(observation_summary.get(observation_summary_key), limit=160)
             if observation_text is not None:
                 summary_text = observation_text
-                payload["result_summary_text"] = observation_text
             capability_id = observation_summary.get("capability_id")
             if isinstance(capability_id, str) and capability_id.strip():
                 capability_id_text = capability_id.strip()
         if summary_text is None:
             return None
-        payload["summary_text"] = summary_text
-        payload[explicit_field_name] = summary_text
+        summary_source_hint = None
         if observation_text is not None:
-            payload["summary_source_hint"] = f"capability_result.{observation_summary_key}"
+            summary_source_hint = f"capability_result.{observation_summary_key}"
         elif client_summary_text is not None:
-            payload["summary_source_hint"] = self._world_state_client_context_summary_source(
+            summary_source_hint = self._world_state_client_context_summary_source(
                 source_kind=source_kind,
                 field_name=client_summary_key,
             )
-        if capability_id_text is not None:
-            payload["capability_id"] = capability_id_text
-        return payload
+        return WorldStateNamedSummaryContext(
+            summary_text=summary_text,
+            summary_field_name=explicit_field_name,
+            client_summary_text=client_summary_text,
+            result_summary_text=observation_text,
+            summary_source_hint=summary_source_hint,
+            capability_id=capability_id_text,
+        )
 
     def _build_world_state_client_context(self, client_context: dict[str, Any]) -> dict[str, Any]:
         payload: dict[str, Any] = {}
@@ -521,7 +545,7 @@ class ServiceInputWorldStateMixin:
         client_context: dict[str, Any],
         observation_summary: dict[str, Any] | None,
         source_kind: str,
-    ) -> dict[str, Any] | None:
+    ) -> WorldStateNamedSummaryContext | None:
         return self._build_world_state_capability_state_context(
             client_context=client_context,
             observation_summary=observation_summary,
@@ -537,7 +561,7 @@ class ServiceInputWorldStateMixin:
         client_context: dict[str, Any],
         observation_summary: dict[str, Any] | None,
         source_kind: str,
-    ) -> dict[str, Any] | None:
+    ) -> WorldStateNamedSummaryContext | None:
         return self._build_world_state_capability_state_context(
             client_context=client_context,
             observation_summary=observation_summary,
@@ -553,7 +577,7 @@ class ServiceInputWorldStateMixin:
         client_context: dict[str, Any],
         observation_summary: dict[str, Any] | None,
         source_kind: str,
-    ) -> dict[str, Any] | None:
+    ) -> WorldStateNamedSummaryContext | None:
         return self._build_world_state_capability_state_context(
             client_context=client_context,
             observation_summary=observation_summary,
@@ -570,8 +594,7 @@ class ServiceInputWorldStateMixin:
         observation_summary: dict[str, Any] | None,
         source_kind: str,
         selected_candidate: dict[str, Any] | None,
-    ) -> dict[str, Any] | None:
-        payload: dict[str, Any] = {}
+    ) -> WorldStateScheduleContext | None:
         client_summary_text = self._client_context_text(client_context.get("schedule_summary"), limit=160)
         summary_text = client_summary_text
         capability_id_text = None
@@ -581,49 +604,50 @@ class ServiceInputWorldStateMixin:
             observation_summary=observation_summary,
             source_kind=source_kind,
         )
-        if client_summary_text is not None:
-            payload["client_summary_text"] = client_summary_text
         if isinstance(observation_summary, dict):
             observation_text = self._client_context_text(observation_summary.get("schedule_summary"), limit=160)
             if observation_text is not None:
                 summary_text = observation_text
-                payload["result_summary_text"] = observation_text
             capability_id = observation_summary.get("capability_id")
             if isinstance(capability_id, str) and capability_id.strip():
                 capability_id_text = capability_id.strip()
+        summary_source_hint = None
+        schedule_summary = None
         if summary_text is not None:
-            payload["summary_text"] = summary_text
-            payload["schedule_summary"] = summary_text
+            schedule_summary = summary_text
             if observation_text is not None:
-                payload["summary_source_hint"] = "capability_result.schedule_summary"
+                summary_source_hint = "capability_result.schedule_summary"
             elif client_summary_text is not None:
-                payload["summary_source_hint"] = self._world_state_client_context_summary_source(
+                summary_source_hint = self._world_state_client_context_summary_source(
                     source_kind=source_kind,
                     field_name="schedule_summary",
                 )
         elif schedule_slots:
-            payload["summary_text"] = (
-                schedule_slots[0]["summary_text"]
+            summary_text = (
+                schedule_slots[0].summary_text
                 if len(schedule_slots) == 1
                 else f"近い予定が {len(schedule_slots)} 件ある。"
             )
-            payload["summary_source_hint"] = self._world_state_client_context_summary_source(
+            summary_source_hint = self._world_state_client_context_summary_source(
                 source_kind=source_kind,
                 field_name="schedule_slots",
                 from_observation=isinstance(observation_summary, dict)
                 and isinstance(observation_summary.get("schedule_slots"), list)
                 and bool(observation_summary.get("schedule_slots")),
             )
-        if schedule_slots:
-            payload["schedule_slots"] = schedule_slots
         pending_intent = self._build_world_state_pending_intent_context(selected_candidate)
-        if pending_intent is not None:
-            payload["pending_intent"] = pending_intent
-        if capability_id_text is not None and summary_text is not None:
-            payload["capability_id"] = capability_id_text
-        if not payload:
+        if summary_text is None and pending_intent is None and not schedule_slots:
             return None
-        return payload
+        return WorldStateScheduleContext(
+            summary_text=summary_text,
+            schedule_summary=schedule_summary,
+            client_summary_text=client_summary_text,
+            result_summary_text=observation_text,
+            summary_source_hint=summary_source_hint,
+            capability_id=capability_id_text,
+            schedule_slots=schedule_slots,
+            pending_intent=pending_intent,
+        )
 
     def _build_world_state_schedule_slots(
         self,
@@ -631,7 +655,7 @@ class ServiceInputWorldStateMixin:
         client_context: dict[str, Any],
         observation_summary: dict[str, Any] | None,
         source_kind: str,
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[WorldStateScheduleSlot, ...]:
         raw_slots: Any = None
         from_observation = False
         if isinstance(observation_summary, dict):
@@ -641,8 +665,8 @@ class ServiceInputWorldStateMixin:
             raw_slots = client_context.get("schedule_slots")
             from_observation = False
         if not isinstance(raw_slots, list):
-            return []
-        normalized_slots: list[dict[str, Any]] = []
+            return ()
+        normalized_slots: list[WorldStateScheduleSlot] = []
         seen_slot_keys: set[str] = set()
         summary_source = self._world_state_client_context_summary_source(
             source_kind=source_kind,
@@ -657,25 +681,26 @@ class ServiceInputWorldStateMixin:
             if slot_key is None or summary_text is None or slot_key in seen_slot_keys:
                 continue
             seen_slot_keys.add(slot_key)
-            slot_payload: dict[str, Any] = {
-                "slot_key": slot_key,
-                "summary_text": summary_text,
-                "summary_source": summary_source,
-            }
-            for key in ("not_before", "expires_at"):
-                value = item.get(key)
-                if isinstance(value, str) and value.strip():
-                    slot_payload[key] = value.strip()
-            normalized_slots.append(slot_payload)
-        return normalized_slots[:4]
+            not_before = item.get("not_before")
+            expires_at = item.get("expires_at")
+            normalized_slots.append(
+                WorldStateScheduleSlot(
+                    slot_key=slot_key,
+                    summary_text=summary_text,
+                    summary_source=summary_source,
+                    not_before=not_before.strip() if isinstance(not_before, str) and not_before.strip() else None,
+                    expires_at=expires_at.strip() if isinstance(expires_at, str) and expires_at.strip() else None,
+                )
+            )
+        return tuple(normalized_slots[:4])
 
     def _build_world_state_pending_intent_context(
         self,
         selected_candidate: dict[str, Any] | None,
-    ) -> dict[str, Any] | None:
+    ) -> WorldStatePendingIntent | None:
         if not isinstance(selected_candidate, dict):
             return None
-        payload: dict[str, Any] = {}
+        payload: dict[str, str] = {}
         for key, limit in (
             ("intent_kind", 48),
             ("intent_summary", 120),
@@ -684,16 +709,26 @@ class ServiceInputWorldStateMixin:
             value = self._client_context_text(selected_candidate.get(key), limit=limit)
             if value is not None:
                 payload[key] = value
+        not_before = None
+        expires_at = None
         for key in ("not_before", "expires_at"):
             value = selected_candidate.get(key)
             if isinstance(value, str) and value.strip():
-                payload[key] = value.strip()
+                if key == "not_before":
+                    not_before = value.strip()
+                else:
+                    expires_at = value.strip()
         slot_key = self._world_state_schedule_slot_key(selected_candidate)
-        if slot_key is not None:
-            payload["slot_key"] = slot_key
-        if not payload:
+        if not payload and not_before is None and expires_at is None and slot_key is None:
             return None
-        return payload
+        return WorldStatePendingIntent(
+            intent_kind=payload.get("intent_kind"),
+            intent_summary=payload.get("intent_summary"),
+            reason_summary=payload.get("reason_summary"),
+            not_before=not_before,
+            expires_at=expires_at,
+            slot_key=slot_key,
+        )
 
     def _world_state_client_context_summary_source(
         self,
@@ -756,9 +791,18 @@ class ServiceInputWorldStateMixin:
             "location_context",
             "capability_result_summary",
         ):
+            if key == "client_context":
+                if isinstance(source_pack.client_context, dict) and source_pack.client_context:
+                    summary[key] = source_pack.client_context
+                continue
+            if key == "capability_result_summary":
+                value = source_pack.capability_result_summary
+                if isinstance(value, dict) and value:
+                    summary[key] = value
+                continue
             value = source_pack.context(key)
             if value is not None:
-                summary[key] = value
+                summary[key] = value.to_prompt_payload()
         return summary
 
     def _summarize_world_state_state_type_hooks(self, source_pack: WorldStateSourcePack) -> dict[str, Any]:
@@ -776,132 +820,50 @@ class ServiceInputWorldStateMixin:
         self,
         *,
         state_type: str,
-        context: dict[str, Any],
+        context: WorldStateContext,
     ) -> dict[str, Any] | None:
-        summary_text = self._client_context_text(context.get("summary_text"), limit=160)
-        if summary_text is None:
+        if not isinstance(context.summary_text, str) or not context.summary_text.strip():
             return None
         payload: dict[str, Any] = {
-            "summary_text": summary_text,
+            "summary_text": context.summary_text,
             "summary_source": self._world_state_hook_summary_source(state_type=state_type, context=context),
             "signal_fields": self._world_state_hook_signal_fields(state_type=state_type, context=context),
         }
-        capability_id = self._client_context_text(context.get("capability_id"), limit=80)
-        if capability_id is not None:
+        capability_id = getattr(context, "capability_id", None)
+        if isinstance(capability_id, str) and capability_id.strip():
             payload["capability_id"] = capability_id
-        if state_type == "visual_context":
-            for source_key, limit in (
-                ("vision_source_id", 96),
-                ("source_kind", 32),
-                ("source_label", 80),
+        if isinstance(context, WorldStateVisualContext):
+            for key, value in (
+                ("vision_source_id", context.vision_source_id),
+                ("source_kind", context.source_kind),
+                ("source_label", context.source_label),
             ):
-                value = self._client_context_text(context.get(source_key), limit=limit)
-                if value is not None:
-                    payload[source_key] = value
-        if state_type == "external_service":
-            service = self._client_context_text(context.get("service"), limit=80)
-            if service is not None:
-                payload["service"] = service
-        elif state_type == "schedule":
-            pending_intent = context.get("pending_intent")
-            if isinstance(pending_intent, dict):
-                pending_summary = self._client_context_text(pending_intent.get("intent_summary"), limit=120)
-                if pending_summary is not None:
-                    payload["pending_intent_summary"] = pending_summary
-                slot_key = self._client_context_text(pending_intent.get("slot_key"), limit=160)
-                if slot_key is not None:
-                    payload["pending_intent_slot_key"] = slot_key
-            schedule_slots = context.get("schedule_slots")
-            if isinstance(schedule_slots, list) and schedule_slots:
-                slot_keys = [
-                    self._client_context_text(item.get("slot_key"), limit=160)
-                    for item in schedule_slots
-                    if isinstance(item, dict)
-                ]
-                payload["real_schedule_slot_count"] = len(schedule_slots)
-                payload["schedule_slot_keys"] = [value for value in slot_keys if value is not None][:4]
+                if isinstance(value, str) and value.strip():
+                    payload[key] = value
+        if isinstance(context, WorldStateExternalServiceContext):
+            if isinstance(context.service, str) and context.service.strip():
+                payload["service"] = context.service
+        elif isinstance(context, WorldStateScheduleContext):
+            if isinstance(context.pending_intent, WorldStatePendingIntent):
+                if (
+                    isinstance(context.pending_intent.intent_summary, str)
+                    and context.pending_intent.intent_summary.strip()
+                ):
+                    payload["pending_intent_summary"] = context.pending_intent.intent_summary
+                if isinstance(context.pending_intent.slot_key, str) and context.pending_intent.slot_key.strip():
+                    payload["pending_intent_slot_key"] = context.pending_intent.slot_key
+            if context.schedule_slots:
+                payload["real_schedule_slot_count"] = len(context.schedule_slots)
+                payload["schedule_slot_keys"] = [slot.slot_key for slot in context.schedule_slots][:4]
         return payload
 
-    def _world_state_hook_summary_source(self, *, state_type: str, context: dict[str, Any]) -> str:
-        summary_source_hint = self._client_context_text(context.get("summary_source_hint"), limit=120)
-        if summary_source_hint is not None:
-            return summary_source_hint
-        if state_type == "visual_context":
-            if isinstance(context.get("visual_summary_text"), str) and context["visual_summary_text"].strip():
-                return "visual_summary_text"
-            return "summary_text"
-        if state_type == "external_service":
-            if isinstance(context.get("status_text"), str) and context["status_text"].strip():
-                return "status_text"
-            return "external_service_summary"
-        if state_type == "body":
-            return "body_state_summary"
-        if state_type == "device":
-            return "device_state_summary"
-        if state_type == "schedule":
-            if isinstance(context.get("schedule_summary"), str) and context["schedule_summary"].strip():
-                return "schedule_summary"
-            if isinstance(context.get("pending_intent"), dict):
-                return "pending_intent"
-        if state_type == "social_context":
-            return "social_context_summary"
-        if state_type == "environment":
-            return "environment_summary"
-        if state_type == "location":
-            return "location_summary"
-        return "summary_text"
+    def _world_state_hook_summary_source(self, *, state_type: str, context: WorldStateContext) -> str:
+        _ = state_type
+        return context.hook_summary_source()
 
-    def _world_state_hook_signal_fields(self, *, state_type: str, context: dict[str, Any]) -> list[str]:
-        keys_by_state_type = {
-            "visual_context": (
-                "vision_source_id",
-                "source_kind",
-                "source_label",
-                "active_app",
-                "window_title",
-                "visual_summary_text",
-                "image_interpreted",
-                "visual_confidence_hint",
-                "image_count",
-            ),
-            "external_service": (
-                "service",
-                "status_text",
-                "external_service_summary",
-            ),
-            "body": (
-                "body_state_summary",
-            ),
-            "device": (
-                "device_state_summary",
-            ),
-            "schedule": (
-                "schedule_summary",
-                "schedule_slots",
-                "pending_intent",
-            ),
-            "social_context": (
-                "social_context_summary",
-            ),
-            "environment": (
-                "environment_summary",
-            ),
-            "location": (
-                "location_summary",
-            ),
-        }
-        signal_fields: list[str] = []
-        for key in keys_by_state_type.get(state_type, ()):
-            value = context.get(key)
-            if isinstance(value, str):
-                if value.strip():
-                    signal_fields.append(key)
-            elif isinstance(value, dict):
-                if value:
-                    signal_fields.append(key)
-            elif isinstance(value, (int, float, bool)):
-                signal_fields.append(key)
-        return signal_fields
+    def _world_state_hook_signal_fields(self, *, state_type: str, context: WorldStateContext) -> list[str]:
+        _ = state_type
+        return context.signal_fields()
 
     def _world_state_allowed_state_types(self, *, source_pack: WorldStateSourcePack) -> list[str]:
         allowed: list[str] = []
@@ -1003,7 +965,7 @@ class ServiceInputWorldStateMixin:
         *,
         state_type: str,
         source_kind: str,
-        source_context: dict[str, Any] | None,
+        source_context: WorldStateContext | None,
         source_pack: WorldStateSourcePack,
     ) -> bool:
         if source_kind != "user_input" or source_context is not None:
@@ -1022,7 +984,7 @@ class ServiceInputWorldStateMixin:
         self,
         *,
         state_type: str,
-        source_context: dict[str, Any] | None,
+        source_context: WorldStateContext | None,
         source_pack: WorldStateSourcePack,
     ) -> bool:
         if source_pack.trigger_kind not in {"wake", "background_wake"}:
@@ -1039,7 +1001,7 @@ class ServiceInputWorldStateMixin:
         *,
         state_type: str,
         source_pack: WorldStateSourcePack,
-    ) -> dict[str, Any] | None:
+    ) -> WorldStateContext | None:
         return source_pack.state_type_context(state_type)
 
     def _world_state_ttl_policy(
@@ -1048,7 +1010,7 @@ class ServiceInputWorldStateMixin:
         current_time: str,
         state_type: str,
         ttl_hint: str,
-        context: dict[str, Any] | None,
+        context: WorldStateContext | None,
     ) -> dict[str, Any]:
         summary_source = self._world_state_candidate_summary_source(
             state_type=state_type,
@@ -1086,9 +1048,9 @@ class ServiceInputWorldStateMixin:
         self,
         *,
         state_type: str,
-        context: dict[str, Any] | None,
+        context: WorldStateContext | None,
     ) -> str:
-        if not isinstance(context, dict) or not context:
+        if context is None:
             return "summary_text"
         if state_type in {
             "visual_context",
@@ -1113,35 +1075,30 @@ class ServiceInputWorldStateMixin:
         source_pack: WorldStateSourcePack,
     ) -> list[dict[str, Any]]:
         context = self._world_state_source_context(state_type="schedule", source_pack=source_pack)
-        if not isinstance(context, dict):
+        if not isinstance(context, WorldStateScheduleContext):
             return []
-        schedule_slots = context.get("schedule_slots")
-        if not isinstance(schedule_slots, list):
+        if not context.schedule_slots:
             return []
         normalized_records: list[dict[str, Any]] = []
         seen_slot_keys: set[str] = set()
-        for item in schedule_slots:
-            if not isinstance(item, dict):
-                continue
-            slot_key = self._client_context_text(item.get("slot_key"), limit=160)
-            summary_text = self._client_context_text(item.get("summary_text"), limit=160)
-            if slot_key is None or summary_text is None or slot_key in seen_slot_keys:
+        for schedule_slot in context.schedule_slots:
+            if schedule_slot.slot_key in seen_slot_keys:
                 continue
             ttl_policy = self._world_state_schedule_slot_ttl_policy(
                 current_time=observed_at,
                 source_kind=source_kind,
-                schedule_slot=item,
+                schedule_slot=schedule_slot,
             )
             if ttl_policy is None:
                 continue
-            seen_slot_keys.add(slot_key)
+            seen_slot_keys.add(schedule_slot.slot_key)
             record: dict[str, Any] = {
                 "world_state_id": f"world_state:{uuid.uuid4().hex}",
                 "memory_set_id": memory_set_id,
                 "state_type": "schedule",
                 "scope_type": "self",
                 "scope_key": "self",
-                "summary_text": summary_text,
+                "summary_text": schedule_slot.summary_text,
                 "source_kind": source_kind,
                 "source_ref": source_ref,
                 "confidence": self._world_state_score_from_hint("high"),
@@ -1153,15 +1110,13 @@ class ServiceInputWorldStateMixin:
                 "ttl_hint": "medium",
                 "ttl_seconds": ttl_policy["ttl_seconds"],
                 "integration_mode": "schedule_slot",
-                "integration_key": f"schedule:{slot_key}",
-                "slot_key": slot_key,
+                "integration_key": f"schedule:{schedule_slot.slot_key}",
+                "slot_key": schedule_slot.slot_key,
             }
-            not_before = item.get("not_before")
-            if isinstance(not_before, str) and not_before.strip():
-                record["slot_not_before"] = not_before.strip()
-            slot_expires_at = item.get("expires_at")
-            if isinstance(slot_expires_at, str) and slot_expires_at.strip():
-                record["slot_expires_at"] = slot_expires_at.strip()
+            if isinstance(schedule_slot.not_before, str) and schedule_slot.not_before.strip():
+                record["slot_not_before"] = schedule_slot.not_before
+            if isinstance(schedule_slot.expires_at, str) and schedule_slot.expires_at.strip():
+                record["slot_expires_at"] = schedule_slot.expires_at
             if ttl_policy.get("capped_by") is not None:
                 record["ttl_capped_by"] = ttl_policy["capped_by"]
             normalized_records.append(record)
@@ -1172,11 +1127,10 @@ class ServiceInputWorldStateMixin:
         *,
         current_time: str,
         source_kind: str,
-        schedule_slot: dict[str, Any],
+        schedule_slot: WorldStateScheduleSlot,
     ) -> dict[str, Any] | None:
-        raw_summary_source = schedule_slot.get("summary_source")
-        if isinstance(raw_summary_source, str) and raw_summary_source.strip():
-            summary_source = raw_summary_source.strip()
+        if isinstance(schedule_slot.summary_source, str) and schedule_slot.summary_source.strip():
+            summary_source = schedule_slot.summary_source
         else:
             summary_source = self._world_state_client_context_summary_source(
                 source_kind=source_kind,
@@ -1187,9 +1141,10 @@ class ServiceInputWorldStateMixin:
             raise ValueError("world_state schedule slot ttl is invalid.")
         ttl_seconds = int(ttl_table["medium"])
         capped_by = None
-        expires_at = schedule_slot.get("expires_at")
-        if isinstance(expires_at, str) and expires_at.strip():
-            remaining_seconds = int((self._parse_iso(expires_at.strip()) - self._parse_iso(current_time)).total_seconds())
+        if isinstance(schedule_slot.expires_at, str) and schedule_slot.expires_at.strip():
+            remaining_seconds = int(
+                (self._parse_iso(schedule_slot.expires_at) - self._parse_iso(current_time)).total_seconds()
+            )
             if remaining_seconds <= 0:
                 return None
             ttl_seconds = min(ttl_seconds, max(1, remaining_seconds))
@@ -1206,14 +1161,13 @@ class ServiceInputWorldStateMixin:
         *,
         current_time: str,
         state_type: str,
-        context: dict[str, Any] | None,
+        context: WorldStateContext | None,
     ) -> str | None:
-        if state_type != "schedule" or not isinstance(context, dict):
+        if state_type != "schedule" or not isinstance(context, WorldStateScheduleContext):
             return None
-        pending_intent = context.get("pending_intent")
-        if not isinstance(pending_intent, dict):
+        if not isinstance(context.pending_intent, WorldStatePendingIntent):
             return None
-        expires_at = pending_intent.get("expires_at")
+        expires_at = context.pending_intent.expires_at
         if not isinstance(expires_at, str) or not expires_at.strip():
             return None
         remaining_seconds = int((self._parse_iso(expires_at.strip()) - self._parse_iso(current_time)).total_seconds())
@@ -1226,14 +1180,13 @@ class ServiceInputWorldStateMixin:
         *,
         current_time: str,
         state_type: str,
-        context: dict[str, Any] | None,
+        context: WorldStateContext | None,
     ) -> int:
-        if state_type != "schedule" or not isinstance(context, dict):
+        if state_type != "schedule" or not isinstance(context, WorldStateScheduleContext):
             raise ValueError("world_state ttl cap is invalid.")
-        pending_intent = context.get("pending_intent")
-        if not isinstance(pending_intent, dict):
+        if not isinstance(context.pending_intent, WorldStatePendingIntent):
             raise ValueError("world_state ttl cap is invalid.")
-        expires_at = pending_intent.get("expires_at")
+        expires_at = context.pending_intent.expires_at
         if not isinstance(expires_at, str) or not expires_at.strip():
             raise ValueError("world_state ttl cap is invalid.")
         remaining_seconds = int((self._parse_iso(expires_at.strip()) - self._parse_iso(current_time)).total_seconds())
@@ -1245,7 +1198,7 @@ class ServiceInputWorldStateMixin:
         state_type: str,
         scope_type: str,
         scope_key: str,
-        context: dict[str, Any] | None,
+        context: WorldStateContext | None,
     ) -> dict[str, str]:
         if state_type == "visual_context":
             vision_source_key = self._world_state_vision_source_key(context)
@@ -1268,33 +1221,25 @@ class ServiceInputWorldStateMixin:
             return {"mode": "schedule_foreground", "key": "schedule:self"}
         return {"mode": "scope", "key": f"{state_type}:{scope_type}:{scope_key}"}
 
-    def _world_state_vision_source_key(self, context: dict[str, Any] | None) -> str | None:
-        if not isinstance(context, dict):
+    def _world_state_vision_source_key(self, context: WorldStateContext | None) -> str | None:
+        if not isinstance(context, WorldStateVisualContext):
             return None
-        vision_source_id = self._client_context_text(context.get("vision_source_id"), limit=96)
-        if vision_source_id is None:
+        if not isinstance(context.vision_source_id, str) or not context.vision_source_id.strip():
             return None
-        return vision_source_id.strip() or None
+        return context.vision_source_id
 
-    def _world_state_service_key(self, context: dict[str, Any] | None) -> str | None:
-        if not isinstance(context, dict):
+    def _world_state_service_key(self, context: WorldStateContext | None) -> str | None:
+        if not isinstance(context, WorldStateExternalServiceContext):
             return None
-        service = self._client_context_text(context.get("service"), limit=80)
-        if service is None:
+        if not isinstance(context.service, str) or not context.service.strip():
             return None
-        normalized = "".join(character if character.isalnum() else "_" for character in service.lower()).strip("_")
+        normalized = "".join(character if character.isalnum() else "_" for character in context.service.lower()).strip("_")
         return normalized or None
 
-    def _world_state_schedule_context_slot_key(self, context: dict[str, Any] | None) -> str | None:
-        if not isinstance(context, dict):
+    def _world_state_schedule_context_slot_key(self, context: WorldStateContext | None) -> str | None:
+        if not isinstance(context, WorldStateScheduleContext):
             return None
-        pending_intent = context.get("pending_intent")
-        if not isinstance(pending_intent, dict):
-            return None
-        slot_key = self._client_context_text(pending_intent.get("slot_key"), limit=160)
-        if slot_key is None:
-            return None
-        return slot_key
+        return context.pending_intent_slot_key()
 
     def _world_state_schedule_slot_key(self, selected_candidate: dict[str, Any]) -> str | None:
         dedupe_key = self._client_context_text(selected_candidate.get("dedupe_key"), limit=160)

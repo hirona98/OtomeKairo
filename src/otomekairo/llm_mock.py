@@ -26,7 +26,12 @@ from otomekairo.llm_contracts import (
     validate_visual_observation_contract,
     validate_world_state_contract,
 )
-from otomekairo.world_state_models import WorldStateSourcePack
+from otomekairo.world_state_models import (
+    WorldStatePendingIntent,
+    WorldStateScheduleContext,
+    WorldStateSourcePack,
+    WorldStateVisualContext,
+)
 
 MOCK_CAPABILITY_REQUEST_RULES = (
     (
@@ -1962,13 +1967,16 @@ class MockLLMClient:
     def _mock_world_state_visual_summary(
         self,
         *,
-        visual_context: Any,
+        visual_context: WorldStateVisualContext | None,
     ) -> str | None:
-        if isinstance(visual_context, dict):
-            for key in ("summary_text", "visual_summary_text"):
-                summary_text = visual_context.get(key)
-                if isinstance(summary_text, str) and summary_text.strip():
-                    return summary_text.strip()
+        if isinstance(visual_context, WorldStateVisualContext):
+            if isinstance(visual_context.summary_text, str) and visual_context.summary_text.strip():
+                return visual_context.summary_text
+            if (
+                isinstance(visual_context.visual_summary_text, str)
+                and visual_context.visual_summary_text.strip()
+            ):
+                return visual_context.visual_summary_text
         return None
 
     def _mock_world_state_social_summary(self, client_context: dict[str, Any]) -> str | None:
@@ -1990,38 +1998,31 @@ class MockLLMClient:
         return None
 
     def _mock_world_state_structured_summary(self, context: Any) -> str | None:
-        if not isinstance(context, dict):
+        summary_text = getattr(context, "summary_text", None)
+        if not isinstance(summary_text, str) or not summary_text.strip():
             return None
-        for key in (
-            "summary_text",
-            "status_text",
-            "body_state_summary",
-            "device_state_summary",
-            "schedule_summary",
-            "social_context_summary",
-            "environment_summary",
-            "location_summary",
-        ):
-            summary_text = context.get(key)
-            if isinstance(summary_text, str) and summary_text.strip():
-                return summary_text.strip()
-        return None
+        return summary_text.strip()
 
-    def _mock_world_state_schedule_summary(self, schedule_context: Any) -> str | None:
-        if not isinstance(schedule_context, dict):
+    def _mock_world_state_schedule_summary(
+        self,
+        schedule_context: WorldStateScheduleContext | None,
+    ) -> str | None:
+        if not isinstance(schedule_context, WorldStateScheduleContext):
             return None
-        summary_text = schedule_context.get("summary_text")
-        if isinstance(summary_text, str) and summary_text.strip():
-            return summary_text.strip()
-        pending_intent = schedule_context.get("pending_intent")
-        if not isinstance(pending_intent, dict):
+        if isinstance(schedule_context.summary_text, str) and schedule_context.summary_text.strip():
+            return schedule_context.summary_text.strip()
+        if not isinstance(schedule_context.pending_intent, WorldStatePendingIntent):
             return None
-        intent_summary = pending_intent.get("intent_summary")
-        if isinstance(intent_summary, str) and intent_summary.strip():
-            return f"近いうちに {intent_summary.strip()} を見直す予定が前景にある。"
-        reason_summary = pending_intent.get("reason_summary")
-        if isinstance(reason_summary, str) and reason_summary.strip():
-            return f"近い予定として {reason_summary.strip()}"
+        if (
+            isinstance(schedule_context.pending_intent.intent_summary, str)
+            and schedule_context.pending_intent.intent_summary.strip()
+        ):
+            return f"近いうちに {schedule_context.pending_intent.intent_summary.strip()} を見直す予定が前景にある。"
+        if (
+            isinstance(schedule_context.pending_intent.reason_summary, str)
+            and schedule_context.pending_intent.reason_summary.strip()
+        ):
+            return f"近い予定として {schedule_context.pending_intent.reason_summary.strip()}"
         return None
 
     def _mock_open_loops(self, normalized: str, primary_recall_focus: str) -> list[str]:
