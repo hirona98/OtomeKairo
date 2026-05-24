@@ -11,6 +11,7 @@ from otomekairo.service_input_constants import (
     INITIATIVE_DRIVE_FRESHNESS_ADJUSTMENTS,
     INITIATIVE_DRIVE_KIND_SCORES,
 )
+from otomekairo.world_state_models import WorldStateTrace
 
 
 class ServiceInputInitiativeMixin:
@@ -26,7 +27,7 @@ class ServiceInputInitiativeMixin:
         client_context: dict[str, Any],
         drive_state_summary: list[dict[str, Any]] | None,
         foreground_world_state: list[dict[str, Any]] | None,
-        world_state_trace: dict[str, Any] | None,
+        world_state_trace: WorldStateTrace | None,
         ongoing_action_summary: dict[str, Any] | None,
         capability_decision_view: list[dict[str, Any]] | None,
         selected_candidate: dict[str, Any] | None,
@@ -138,15 +139,11 @@ class ServiceInputInitiativeMixin:
         self,
         *,
         foreground_world_state: list[dict[str, Any]] | None,
-        world_state_trace: dict[str, Any] | None,
+        world_state_trace: WorldStateTrace | None,
         trigger_kind: str,
     ) -> list[dict[str, Any]]:
         if trigger_kind in {"wake", "background_wake"}:
-            previous = (
-                world_state_trace.get("previous_foreground_world_state")
-                if isinstance(world_state_trace, dict)
-                else None
-            )
+            previous = world_state_trace.previous_foreground_world_state if world_state_trace is not None else None
             if isinstance(previous, list):
                 return [item for item in previous if isinstance(item, dict)]
         return foreground_world_state or []

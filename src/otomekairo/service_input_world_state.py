@@ -24,6 +24,7 @@ from otomekairo.world_state_models import (
     WorldStateScheduleContext,
     WorldStateScheduleSlot,
     WorldStateSourcePack,
+    WorldStateTrace,
     WorldStateVisualContext,
 )
 
@@ -41,7 +42,7 @@ class ServiceInputWorldStateMixin:
         selected_candidate: dict[str, Any] | None,
         observation_summary: dict[str, Any] | None,
         capability_request_summary: dict[str, Any] | None,
-    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    ) -> tuple[WorldStateTrace, list[dict[str, Any]]]:
         previous_foreground_world_state = (
             self._summarize_foreground_world_states(
                 self._list_current_world_states(
@@ -123,26 +124,25 @@ class ServiceInputWorldStateMixin:
                     capability_request_summary=capability_request_summary,
                 )
             )
-            world_state_trace = {
-                "result_status": "succeeded",
-                "candidate_state_count": len(payload.get("state_candidates", [])),
-                "input_world_state_count": len(visible_foreground_world_state),
-                "previous_foreground_world_state": previous_foreground_world_state,
-                "foreground_world_state": visible_foreground_world_state,
-                "updated_state_count": int(refresh_summary.get("updated_count", 0)),
-                "replaced_state_count": int(refresh_summary.get("replaced_count", 0)),
-                "expired_state_count": int(refresh_summary.get("expired_count", 0)),
-                "dropped_state_count": int(refresh_summary.get("dropped_count", 0)),
-                "source_kind": source_kind,
-                "source_ref": source_ref,
-                "source_pack_contexts": source_pack_contexts,
-                "source_pack_state_type_hooks": source_pack_state_type_hooks,
-                "normalized_candidate_policies": normalized_candidate_policies,
-                "failure_reason": None,
-            }
-            if foreground_visibility_filter is not None:
-                world_state_trace["foreground_world_state_filter"] = foreground_visibility_filter
-                world_state_trace["stored_foreground_world_state"] = foreground_world_state
+            world_state_trace = WorldStateTrace(
+                result_status="succeeded",
+                candidate_state_count=len(payload.get("state_candidates", [])),
+                input_world_state_count=len(visible_foreground_world_state),
+                previous_foreground_world_state=previous_foreground_world_state,
+                foreground_world_state=visible_foreground_world_state,
+                updated_state_count=int(refresh_summary.get("updated_count", 0)),
+                replaced_state_count=int(refresh_summary.get("replaced_count", 0)),
+                expired_state_count=int(refresh_summary.get("expired_count", 0)),
+                dropped_state_count=int(refresh_summary.get("dropped_count", 0)),
+                source_kind=source_kind,
+                source_ref=source_ref,
+                source_pack_contexts=source_pack_contexts,
+                source_pack_state_type_hooks=source_pack_state_type_hooks,
+                normalized_candidate_policies=normalized_candidate_policies,
+                failure_reason=None,
+                foreground_world_state_filter=foreground_visibility_filter,
+                stored_foreground_world_state=foreground_world_state if foreground_visibility_filter is not None else None,
+            )
             return (
                 world_state_trace,
                 visible_foreground_world_state,
@@ -156,26 +156,27 @@ class ServiceInputWorldStateMixin:
                     capability_request_summary=capability_request_summary,
                 )
             )
-            world_state_trace = {
-                "result_status": "failed",
-                "candidate_state_count": 0,
-                "input_world_state_count": len(visible_foreground_world_state),
-                "previous_foreground_world_state": previous_foreground_world_state,
-                "foreground_world_state": visible_foreground_world_state,
-                "updated_state_count": 0,
-                "replaced_state_count": 0,
-                "expired_state_count": 0,
-                "dropped_state_count": 0,
-                "source_kind": source_kind,
-                "source_ref": source_ref,
-                "source_pack_contexts": source_pack_contexts,
-                "source_pack_state_type_hooks": source_pack_state_type_hooks,
-                "normalized_candidate_policies": [],
-                "failure_reason": str(exc),
-            }
-            if foreground_visibility_filter is not None:
-                world_state_trace["foreground_world_state_filter"] = foreground_visibility_filter
-                world_state_trace["stored_foreground_world_state"] = previous_foreground_world_state
+            world_state_trace = WorldStateTrace(
+                result_status="failed",
+                candidate_state_count=0,
+                input_world_state_count=len(visible_foreground_world_state),
+                previous_foreground_world_state=previous_foreground_world_state,
+                foreground_world_state=visible_foreground_world_state,
+                updated_state_count=0,
+                replaced_state_count=0,
+                expired_state_count=0,
+                dropped_state_count=0,
+                source_kind=source_kind,
+                source_ref=source_ref,
+                source_pack_contexts=source_pack_contexts,
+                source_pack_state_type_hooks=source_pack_state_type_hooks,
+                normalized_candidate_policies=[],
+                failure_reason=str(exc),
+                foreground_world_state_filter=foreground_visibility_filter,
+                stored_foreground_world_state=(
+                    previous_foreground_world_state if foreground_visibility_filter is not None else None
+                ),
+            )
             return (
                 world_state_trace,
                 visible_foreground_world_state,

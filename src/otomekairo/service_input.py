@@ -32,6 +32,7 @@ from otomekairo.service_input_constants import (
     VISUAL_OBSERVATION_IMAGE_LIMIT,
     WORLD_STATE_FOREGROUND_LIMIT,
 )
+from otomekairo.world_state_models import WorldStateTrace
 from otomekairo.service_input_cycle import ServiceInputCycleMixin
 from otomekairo.service_input_initiative import ServiceInputInitiativeMixin
 from otomekairo.service_input_pipeline import ServiceInputPipelineMixin
@@ -275,7 +276,7 @@ class ServiceInputMixin(
         *,
         capability_decision_view: list[dict[str, Any]] | None,
         foreground_world_state: list[dict[str, Any]] | None,
-        world_state_trace: dict[str, Any] | None,
+        world_state_trace: WorldStateTrace | None,
         trigger_kind: str,
     ) -> list[dict[str, Any]] | None:
         if not capability_decision_view:
@@ -350,16 +351,12 @@ class ServiceInputMixin(
         self,
         *,
         foreground_world_state: list[dict[str, Any]] | None,
-        world_state_trace: dict[str, Any] | None,
+        world_state_trace: WorldStateTrace | None,
         trigger_kind: str,
     ) -> list[dict[str, Any]]:
         if trigger_kind == "capability_result":
             return foreground_world_state or []
-        previous = (
-            world_state_trace.get("previous_foreground_world_state")
-            if isinstance(world_state_trace, dict)
-            else None
-        )
+        previous = world_state_trace.previous_foreground_world_state if world_state_trace is not None else None
         if isinstance(previous, list):
             return [item for item in previous if isinstance(item, dict)]
         return []
@@ -2205,24 +2202,12 @@ class ServiceInputMixin(
         source_kind: str | None,
         source_ref: str | None,
         foreground_world_state: list[dict[str, Any]],
-    ) -> dict[str, Any]:
-        return {
-            "result_status": "not_requested",
-            "candidate_state_count": 0,
-            "input_world_state_count": len(foreground_world_state),
-            "previous_foreground_world_state": foreground_world_state,
-            "foreground_world_state": foreground_world_state,
-            "updated_state_count": 0,
-            "replaced_state_count": 0,
-            "expired_state_count": 0,
-            "dropped_state_count": 0,
-            "source_kind": source_kind,
-            "source_ref": source_ref,
-            "source_pack_contexts": {},
-            "source_pack_state_type_hooks": {},
-            "normalized_candidate_policies": [],
-            "failure_reason": None,
-        }
+    ) -> WorldStateTrace:
+        return WorldStateTrace.not_requested(
+            source_kind=source_kind,
+            source_ref=source_ref,
+            foreground_world_state=foreground_world_state,
+        )
 
     def _should_consolidate_spontaneous_cycle(
         self,
@@ -2277,10 +2262,10 @@ class ServiceInputMixin(
         if not isinstance(pipeline, dict):
             return False
         world_state_trace = pipeline.get("world_state_trace")
-        if not isinstance(world_state_trace, dict):
+        if not isinstance(world_state_trace, WorldStateTrace):
             return False
-        previous = world_state_trace.get("previous_foreground_world_state") or []
-        current = pipeline.get("foreground_world_state") or world_state_trace.get("foreground_world_state") or []
+        previous = world_state_trace.previous_foreground_world_state or []
+        current = pipeline.get("foreground_world_state") or world_state_trace.foreground_world_state or []
         if not previous and not current:
             return False
         return self._foreground_world_state_signature(previous) != self._foreground_world_state_signature(current)
@@ -2563,7 +2548,7 @@ class ServiceInputMixin(
         foreground_world_state: list[dict[str, Any]] | None,
         recall_trace: dict[str, Any],
         decision_trace: dict[str, Any],
-        world_state_trace: dict[str, Any] | None,
+        world_state_trace: WorldStateTrace | None,
         result_trace: dict[str, Any],
         memory_trace: dict[str, Any] | None,
         pending_intent_selection: dict[str, Any] | None = None,
@@ -2614,7 +2599,7 @@ class ServiceInputMixin(
             "input_trace": input_trace,
             "recall_trace": recall_trace,
             "decision_trace": decision_trace,
-            "world_state_trace": world_state_trace or {},
+            "world_state_trace": world_state_trace.to_trace_payload() if world_state_trace is not None else {},
             "result_trace": result_trace,
             "memory_trace": memory_trace or {},
         }
@@ -3613,7 +3598,7 @@ class ServiceInputMixin(
         initiative_context: InitiativeContext | None,
         capability_result_context: dict[str, Any] | None,
         visual_observation_context: dict[str, Any] | None,
-        world_state_trace: dict[str, Any] | None,
+        world_state_trace: WorldStateTrace | None,
         trigger_kind: str,
         input_event_kind: str,
         input_event_role: str,
@@ -3793,7 +3778,7 @@ class ServiceInputMixin(
                 capability_decision_view=capability_decision_view,
                 initiative_context=initiative_context,
             ),
-            world_state_trace={},
+            world_state_trace=None,
             result_trace=self._build_failure_result_trace(
                 trigger_kind=trigger_kind,
                 input_text=input_text,

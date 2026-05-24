@@ -333,6 +333,77 @@ _WORLD_STATE_CONTEXT_TYPES = (
 
 
 @dataclass(frozen=True, slots=True)
+class WorldStateTrace:
+    result_status: str
+    candidate_state_count: int
+    input_world_state_count: int
+    previous_foreground_world_state: list[dict[str, Any]]
+    foreground_world_state: list[dict[str, Any]]
+    updated_state_count: int
+    replaced_state_count: int
+    expired_state_count: int
+    dropped_state_count: int
+    source_kind: str | None
+    source_ref: str | None
+    source_pack_contexts: dict[str, Any]
+    source_pack_state_type_hooks: dict[str, Any]
+    normalized_candidate_policies: list[dict[str, Any]]
+    failure_reason: str | None = None
+    foreground_world_state_filter: dict[str, Any] | None = None
+    stored_foreground_world_state: list[dict[str, Any]] | None = None
+
+    @classmethod
+    def not_requested(
+        cls,
+        *,
+        source_kind: str | None,
+        source_ref: str | None,
+        foreground_world_state: list[dict[str, Any]],
+    ) -> "WorldStateTrace":
+        return cls(
+            result_status="not_requested",
+            candidate_state_count=0,
+            input_world_state_count=len(foreground_world_state),
+            previous_foreground_world_state=foreground_world_state,
+            foreground_world_state=foreground_world_state,
+            updated_state_count=0,
+            replaced_state_count=0,
+            expired_state_count=0,
+            dropped_state_count=0,
+            source_kind=source_kind,
+            source_ref=source_ref,
+            source_pack_contexts={},
+            source_pack_state_type_hooks={},
+            normalized_candidate_policies=[],
+            failure_reason=None,
+        )
+
+    def to_trace_payload(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "result_status": self.result_status,
+            "candidate_state_count": self.candidate_state_count,
+            "input_world_state_count": self.input_world_state_count,
+            "previous_foreground_world_state": self.previous_foreground_world_state,
+            "foreground_world_state": self.foreground_world_state,
+            "updated_state_count": self.updated_state_count,
+            "replaced_state_count": self.replaced_state_count,
+            "expired_state_count": self.expired_state_count,
+            "dropped_state_count": self.dropped_state_count,
+            "source_kind": self.source_kind,
+            "source_ref": self.source_ref,
+            "source_pack_contexts": self.source_pack_contexts,
+            "source_pack_state_type_hooks": self.source_pack_state_type_hooks,
+            "normalized_candidate_policies": self.normalized_candidate_policies,
+            "failure_reason": self.failure_reason,
+        }
+        if isinstance(self.foreground_world_state_filter, dict) and self.foreground_world_state_filter:
+            payload["foreground_world_state_filter"] = self.foreground_world_state_filter
+        if isinstance(self.stored_foreground_world_state, list):
+            payload["stored_foreground_world_state"] = self.stored_foreground_world_state
+        return payload
+
+
+@dataclass(frozen=True, slots=True)
 class WorldStateCandidate:
     state_type: str
     scope: str
