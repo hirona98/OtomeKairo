@@ -6,7 +6,7 @@ import uuid
 from typing import Any
 
 from otomekairo.event_stream import ServerWebSocket
-from otomekairo.service_common import debug_log
+from otomekairo.service.common import debug_log
 
 
 # 定数

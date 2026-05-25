@@ -8,8 +8,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
 from otomekairo.event_stream import ServerWebSocket, WebSocketProtocolError, build_websocket_accept
-from otomekairo.service import OtomeKairoService, ServiceError
-from otomekairo.service_common import debug_log
+from otomekairo.service.app import OtomeKairoService, ServiceError
+from otomekairo.service.common import debug_log
 
 
 CLIENT_DISCONNECT_ERRNOS = {

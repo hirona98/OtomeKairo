@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from otomekairo.service_input_constants import DESKTOP_SCENE_SIMILARITY_THRESHOLD
+from otomekairo.service.input.constants import DESKTOP_SCENE_SIMILARITY_THRESHOLD
 
 
 # 既定の識別子

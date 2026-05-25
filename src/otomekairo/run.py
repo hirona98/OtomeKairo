@@ -5,8 +5,8 @@ import ssl
 from pathlib import Path
 
 from otomekairo.http_server import OtomeKairoHttpServer
-from otomekairo.service import OtomeKairoService
-from otomekairo.service_common import configure_debug_log_file, debug_log
+from otomekairo.service.app import OtomeKairoService
+from otomekairo.service.common import configure_debug_log_file, debug_log
 
 
 # メイン

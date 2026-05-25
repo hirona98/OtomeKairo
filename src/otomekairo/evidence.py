@@ -4,7 +4,7 @@ import json
 import re
 from typing import Any
 
-from otomekairo.memory_utils import localize_timestamp_fields
+from otomekairo.memory.utils import localize_timestamp_fields
 
 
 # 定数
