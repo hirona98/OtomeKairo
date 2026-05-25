@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from otomekairo.llm.contexts import (
+    CurrentInput,
     DecisionContext,
     InitiativeCandidateFamily,
     InitiativeContext,
@@ -71,6 +72,7 @@ class LLMClient:
         *,
         role_definition: dict,
         input_text: str,
+        current_input: CurrentInput,
         recent_turns: list[dict],
         current_time: str,
         visual_observation_context: dict[str, Any] | None,
@@ -114,6 +116,7 @@ class LLMClient:
 
             messages = build_input_interpretation_messages(
                 input_text=input_text,
+                current_input=current_input,
                 recent_turns=recent_turns,
                 current_time=current_time,
                 visual_observation_context=visual_observation_context,
@@ -161,6 +164,7 @@ class LLMClient:
         *,
         role_definition: dict,
         input_text: str,
+        current_input: CurrentInput,
         recent_turns: list[dict],
         current_time: str,
     ) -> dict[str, Any]:
@@ -189,6 +193,7 @@ class LLMClient:
             # プロンプト構築
             messages = build_recall_hint_messages(
                 input_text=input_text,
+                current_input=current_input,
                 recent_turns=recent_turns,
                 current_time=current_time,
             )
@@ -310,6 +315,10 @@ class LLMClient:
             trigger_kind=context.trigger_kind,
             visual_observation_context=context.visual_observation_context,
         )
+        self._validate_decision_user_message_response(
+            payload=payload,
+            context=context,
+        )
         if context.initiative_context is None:
             return
         selected_family = self._selected_initiative_family_entry(context.initiative_context)
@@ -416,6 +425,40 @@ class LLMClient:
                 "raw image が decision prompt に無いことを理由に noop を返してはいけません。"
                 "visual_summary_text の範囲で kind=reply を返してください。"
             )
+
+    def _validate_decision_user_message_response(
+        self,
+        *,
+        payload: dict[str, Any],
+        context: DecisionContext,
+    ) -> None:
+        if payload.get("kind") != "noop":
+            return
+        current_input = context.current_input
+        if current_input.sender != "user" or current_input.response_target != "user":
+            return
+        text = current_input.text.strip()
+        if not text or self._user_message_explicitly_allows_noop(text):
+            return
+        raise LLMError(
+            "current_input.sender=user かつ response_target=user の非空 text はユーザー発話です。"
+            "ユーザー発話への noop は不正です。短い挨拶や断片でも kind=reply を返してください。"
+        )
+
+    def _user_message_explicitly_allows_noop(self, text: str) -> bool:
+        normalized = text.strip().lower()
+        if not normalized:
+            return True
+        return any(
+            marker in normalized
+            for marker in (
+                "返信不要",
+                "返事不要",
+                "反応不要",
+                "no reply",
+                "do not reply",
+            )
+        )
 
     def _coerce_decision_to_noop_for_fresh_world_state_reuse(
         self,

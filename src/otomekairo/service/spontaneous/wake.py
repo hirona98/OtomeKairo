@@ -307,6 +307,11 @@ class ServiceSpontaneousWakeMixin:
         if initial_delay_seconds is not None:
             return min(initial_delay_seconds, BACKGROUND_WAKE_POLL_SECONDS)
 
+        # 一時失敗後の再試行待ち
+        retry_delay_seconds = self._wake_retry_delay_remaining_seconds(current_time=current_time)
+        if retry_delay_seconds is not None:
+            return min(retry_delay_seconds, BACKGROUND_WAKE_POLL_SECONDS)
+
         # 初回起床
         with self._runtime_state_lock:
             last_wake_at = self._wake_runtime_state.get("last_wake_at")
@@ -390,6 +395,13 @@ class ServiceSpontaneousWakeMixin:
         # 更新
         with self._runtime_state_lock:
             self._wake_runtime_state["last_wake_at"] = current_time
+            self._wake_runtime_state["retry_after"] = None
+
+    def _set_wake_retry_after(self, current_time: str) -> None:
+        # 一時失敗は interval を消費せず、短い再試行だけを待つ。
+        retry_at = self._parse_iso(current_time) + timedelta(seconds=BACKGROUND_WAKE_POLL_SECONDS)
+        with self._runtime_state_lock:
+            self._wake_runtime_state["retry_after"] = retry_at.isoformat()
 
     def _sync_wake_policy_runtime_state(
         self,
@@ -437,6 +449,19 @@ class ServiceSpontaneousWakeMixin:
                 self._wake_runtime_state["initial_delay_until"] = None
         return None
 
+    def _wake_retry_delay_remaining_seconds(self, *, current_time: str) -> float | None:
+        with self._runtime_state_lock:
+            retry_after = self._wake_runtime_state.get("retry_after")
+        if not isinstance(retry_after, str) or not retry_after:
+            return None
+        remaining_seconds = (self._parse_iso(retry_after) - self._parse_iso(current_time)).total_seconds()
+        if remaining_seconds > 0:
+            return remaining_seconds
+        with self._runtime_state_lock:
+            if self._wake_runtime_state.get("retry_after") == retry_after:
+                self._wake_runtime_state["retry_after"] = None
+        return None
+
     def _wake_is_due(self, *, state: dict[str, Any], current_time: str) -> dict[str, Any]:
         # 無効時
         wake_policy = state.get("wake_policy", {})
@@ -452,6 +477,14 @@ class ServiceSpontaneousWakeMixin:
             return {
                 "should_skip": True,
                 "reason_summary": "desktop capture 有効化直後のため、初回観測を 5 秒待っている。",
+            }
+
+        # 一時失敗後の再試行待ち
+        retry_delay_seconds = self._wake_retry_delay_remaining_seconds(current_time=current_time)
+        if retry_delay_seconds is not None:
+            return {
+                "should_skip": True,
+                "reason_summary": "wake observation の一時失敗後の再試行待機中。",
             }
 
         # 初回起床

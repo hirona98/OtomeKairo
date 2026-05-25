@@ -107,6 +107,7 @@ response:
 `runtime_detail` は scheduler、memory postprocess、capability request 待ちのような process-local runtime state を返す。
 `runtime_detail.wake_policy_observations` は現在設定されている `wake_policy.observations` と process-local の直近実行結果を照合した snapshot である。
 `runtime_detail.wake_runtime_state.initial_delay_until` は、desktop capture を有効化した直後の初回 5 秒待機が残っている間だけ入る。
+`runtime_detail.wake_runtime_state.retry_after` は、wake observation の一時失敗後に interval を消費せず短く再試行する時刻を表す。
 各項目は `enabled / vision_source_id / last_run_at / last_status / last_summary / last_error` を返す。
 desktop observation では、process-local novelty 判定用に `last_scene_signature / same_scene_count / last_prompted_at / pending_novel_scene` も返す。
 `last_*` は process-local runtime state であり、server restart をまたいで保持しない。

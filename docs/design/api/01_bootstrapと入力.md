@@ -133,6 +133,8 @@ request:
 - 会話の `images` は `conversation_attachment` として扱い、`vision.capture` の capability result とは結び付けない
 - 会話の `images` だけから `world_state.visual_context` を更新しない
 - server は上記 summary をそのまま永続化せず、必要な場合だけ `world_state` source pack の補助文脈へ使う
+- server は会話入力を `current_input.sender=user`、`source_kind=user_message`、`response_target=user`、`text=<ユーザー原文>` として shared pipeline に渡す
+- server は非空のユーザー原文に対する `decision.kind=noop` を契約違反として repair する。明示的な返信不要表現がある場合だけ `noop` を許可する
 
 response:
 
@@ -249,7 +251,14 @@ wake API は少なくとも次の挙動を持つ。
 - `wake_policy.mode=disabled` なら `noop`
 - `mode=interval` で次回時刻にまだ達していなければ `noop`
 - `mode=interval` で `wake_policy.observations` がある場合、enabled observation を順番に取得し、成功結果をその回の判断へ進む前景シグナルとして扱い、desktop capture は一時観測として runtime novelty だけを判定し、継続状態は `world_state` として整理してから wake 判断を 1 回だけ行う
-- cooldown 中の desktop novelty は `reply_eligibility=eligible` と `cooldown_active=true` として wake 判断へ渡し、reply にならなかった場合に備えて runtime の `pending_novel_scene` にも保持し、cooldown 終了後に同じ scene が続く場合は `pending_after_cooldown` として wake 判断へ渡す
+- wake_policy observation が vision source 未接続の一時失敗だけで終わった場合、server は interval を消費せず短い再試行待ちにする
+- wake_policy observation の同期 capability request は内部観測として扱い、`ongoing_action` を作らない
+- server は wake 入力を `current_input.sender=system`、`source_kind=wake`、`response_target=none` として shared pipeline に渡す
+- server 内の background 起床スケジューラは `current_input.sender=system`、`source_kind=background_wake`、`response_target=none` として shared pipeline に渡す
+- capability request は dispatch 時点の `current_input` を request record の `source_current_input` に保存し、capability result の `response_target` は `source_current_input.response_target` を引き継ぐ
+- `source_current_input.response_target=none` の capability result は内部観測結果として扱い、実効判断を `noop` に正規化し、assistant message を送信しない
+- desktop novelty は wake 判断へ渡し、`first_success / changed / pending_after_cooldown` は wake 判断へ進む前景シグナルとして扱う。`reply_eligibility=eligible` は、観測した desktop scene を根拠に短い自発 reply の候補へ進めることを表す
+- cooldown 中の desktop novelty は `cooldown_active=true` として wake 判断へ渡し、reply にならなかった場合に備えて runtime の `pending_novel_scene` に保持し、cooldown 終了後に同じ scene が続く場合は `pending_after_cooldown` として再評価する
 - 再評価時刻に達した保留意図があれば再評価し、必要なら `reply`
 
 server 内の background 起床スケジューラも、同じ wake 1 サイクルを内部的に使う。

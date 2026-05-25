@@ -14,7 +14,7 @@ desktop capture はその瞬間のコメントや判断にだけ使い、`world_
 この機能で行うこと:
 
 - 非同期 capability result の image payload を `model_preset.roles.input_interpretation` で要約する
-- 要約結果を `input_text` と `observation_summary` に反映する
+- 要約結果を `observation_summary` と `VisualObservationContext` に反映する
 - desktop capture の要約結果を `VisualObservationContext` としてその判断サイクルへ渡す
 - inspection で `image_interpreted=true` と観測要約を見られるようにする
 
@@ -102,7 +102,7 @@ LLM の出力は JSON object 1 個に固定する。
 1. `vision.capture` の response を受ける
 2. image payload を LLM で短い `summary_text` へ変換する
 3. `observation_summary.image_interpreted=true` と `visual_summary_text` を付ける
-4. `input_text` に観測要約を足して、以後の `recall_hint / recall_pack / decision / reply` に渡す
+4. `current_input` は capability result の起点説明だけを持ち、観測要約は `observation_summary` と `VisualObservationContext` として以後の `recall_hint / recall_pack / decision / reply` に渡す
 5. desktop capture では `VisualObservationContext.source=vision_capture_result` と `retention_policy=ephemeral_decision_only` を判断入力へ渡す
 6. desktop capture 以外で継続状態として扱う視覚 source だけ、`world_state` 更新 source pack に `visual_summary_text` を渡す
 

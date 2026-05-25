@@ -101,6 +101,7 @@ class ServiceInputWakeObservationMixin:
                 goal_summary=f"wake_policy observation {observation_id}",
                 wait_for_response=True,
                 component="WakeObservation",
+                track_ongoing_action=False,
             )
         except CapabilityDispatchError as exc:
             return self._wake_policy_observation_failure_summary(
@@ -559,8 +560,7 @@ class ServiceInputWakeObservationMixin:
             payload["pending_novel_scene"] = dict(pending_scene)
         reply_eligibility = signal.get("reply_eligibility")
         if (
-            reply_eligibility == "eligible"
-            and signal.get("cooldown_active") is True
+            signal.get("cooldown_active") is True
             and signal.get("novelty_kind") in {"first_success", "changed"}
         ):
             first_seen_at = current_time
@@ -578,7 +578,7 @@ class ServiceInputWakeObservationMixin:
                 "first_seen_at": first_seen_at,
                 "suppression_reason": "cooldown",
             }
-        elif reply_eligibility in {"eligible", "already_prompted"}:
+        elif reply_eligibility == "already_prompted":
             payload.pop("pending_novel_scene", None)
 
     def _wake_observation_is_desktop_vision_capture(self, summary: dict[str, Any]) -> bool:
@@ -682,13 +682,19 @@ class ServiceInputWakeObservationMixin:
         if reply_eligibility == "already_prompted":
             return "この desktop scene には既に自発 reply 済みなので、繰り返さない。"
         if reply_eligibility == "eligible" and cooldown_reason is not None and novelty_kind in {"first_success", "changed"}:
-            return "cooldown 中だが desktop scene が変化したため、cooldown を割り込み量の調整材料として短い reply の候補にする。"
+            return "cooldown 中の desktop scene 変化を、短い自発 reply 候補として扱う。"
+        if reply_eligibility == "eligible" and novelty_kind == "first_success":
+            return "desktop wake observation の初回成功を、短い自発 reply 候補として扱う。"
+        if reply_eligibility == "eligible" and novelty_kind == "changed":
+            return "desktop wake observation が前回と変化したため、短い自発 reply 候補として扱う。"
+        if reply_eligibility == "eligible" and novelty_kind == "pending_after_cooldown":
+            return "cooldown 中に保留した desktop scene がまだ見えているため、短い自発 reply 候補として再評価する。"
         if novelty_kind == "first_success":
-            return "desktop wake observation の初回成功で、未発話の前景として扱う。"
+            return "desktop wake observation の初回成功を判断材料として扱う。"
         if novelty_kind == "changed":
-            return "desktop wake observation が前回と変化し、未発話の前景として扱う。"
+            return "desktop wake observation が前回と変化したため、判断材料として扱う。"
         if novelty_kind == "pending_after_cooldown":
-            return "cooldown 中に保留した desktop scene がまだ見えており、今は短い reply の候補になる。"
+            return "cooldown 中に保留した desktop scene がまだ見えているため、再評価する。"
         return "desktop scene は前回と大きく変わらないため、通常は見送る。"
 
     def _wake_policy_desktop_observation_signal(self, summaries: list[dict[str, Any]]) -> dict[str, Any] | None:

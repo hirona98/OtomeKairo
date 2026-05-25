@@ -32,6 +32,11 @@ class ServiceInputTraceCompactMixin:
         return {
             "trigger_kind": trigger_kind,
             "trigger_family": self._trigger_compact_family(trigger_kind),
+            "current_input_summary": self._build_current_input(
+                input_text=input_text,
+                trigger_kind=trigger_kind,
+                capability_request_summary=capability_request_summary,
+            ).to_prompt_payload(),
             "entry_summary": self._build_trigger_compact_entry_summary(
                 trigger_kind=trigger_kind,
                 input_text=input_text,

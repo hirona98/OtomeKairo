@@ -64,6 +64,7 @@ class ServiceCapabilityMixin:
         *,
         state: dict[str, Any],
         current_time: str,
+        source_current_input: dict[str, Any],
         decision: dict[str, Any],
     ) -> dict[str, Any]:
         request_payload = decision.get("capability_request")
@@ -84,6 +85,7 @@ class ServiceCapabilityMixin:
             goal_summary=str(decision.get("reason_summary") or "").strip(),
             wait_for_response=False,
             component="Capability",
+            source_current_input=source_current_input,
         )
         if result is None:
             raise ValueError("Capability request dispatch failed.")
@@ -99,6 +101,8 @@ class ServiceCapabilityMixin:
         goal_summary: str,
         wait_for_response: bool,
         component: str,
+        source_current_input: dict[str, Any] | None = None,
+        track_ongoing_action: bool = True,
     ) -> dict[str, Any] | None:
         # manifest と input schema を先に確定する。
         manifests = capability_manifests()
@@ -141,14 +145,16 @@ class ServiceCapabilityMixin:
         if timeout_ms <= 0:
             raise ValueError(f"Capability timeout_ms is invalid: {capability_id}")
 
-        action_seed = self._begin_capability_ongoing_action(
-            memory_set_id=memory_set_id,
-            capability_id=capability_id,
-            manifest=manifest,
-            current_time=current_time,
-            timeout_ms=timeout_ms,
-            goal_summary=goal_summary,
-        )
+        action_seed = None
+        if track_ongoing_action:
+            action_seed = self._begin_capability_ongoing_action(
+                memory_set_id=memory_set_id,
+                capability_id=capability_id,
+                manifest=manifest,
+                current_time=current_time,
+                timeout_ms=timeout_ms,
+                goal_summary=goal_summary,
+            )
         request_record = self._build_capability_request_record(
             memory_set_id=memory_set_id,
             capability_id=capability_id,
@@ -160,6 +166,7 @@ class ServiceCapabilityMixin:
             action_seed=action_seed,
             wait_for_response=wait_for_response,
             vision_source=vision_source if isinstance(vision_source, dict) else None,
+            source_current_input=source_current_input,
         )
         pending = {
             "event": threading.Event(),
@@ -556,6 +563,7 @@ class ServiceCapabilityMixin:
         action_seed: dict[str, Any] | None,
         wait_for_response: bool,
         vision_source: dict[str, Any] | None = None,
+        source_current_input: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         request_id = f"{capability_id.replace('.', '_')}_request:{uuid.uuid4().hex}"
         expires_at = self._capability_ongoing_action_expires_at(current_time=current_time, timeout_ms=timeout_ms)
@@ -578,6 +586,8 @@ class ServiceCapabilityMixin:
             ),
             "wait_for_response": wait_for_response,
         }
+        if isinstance(source_current_input, dict):
+            record["source_current_input"] = deepcopy(source_current_input)
         if capability_id == "vision.capture" and isinstance(vision_source, dict):
             source_id = vision_source.get("vision_source_id")
             source_kind = vision_source.get("kind")
@@ -638,6 +648,9 @@ class ServiceCapabilityMixin:
                 value = request_record.get(source_key)
                 if isinstance(value, str) and value.strip():
                     summary[source_key] = value.strip()
+        source_current_input = request_record.get("source_current_input")
+        if isinstance(source_current_input, dict):
+            summary["source_current_input"] = deepcopy(source_current_input)
         return summary
 
     def _validate_capability_result_source(

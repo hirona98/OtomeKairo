@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from otomekairo.llm.contexts import DecisionContext, InitiativeContext, ReplyContext
+from otomekairo.llm.contexts import CurrentInput, DecisionContext, InitiativeContext, ReplyContext
 from otomekairo.service.common import debug_log
 
 
@@ -24,6 +24,11 @@ class ServiceInputPipelineMixin:
     ) -> dict[str, Any]:
         cycle_label = self._debug_cycle_label(cycle_id)
         current_client_context = client_context or {}
+        current_input = self._build_current_input(
+            input_text=input_text,
+            trigger_kind=trigger_kind,
+            capability_request_summary=capability_request_summary,
+        )
         augmented_query_text = self._pipeline_augmented_query_text(
             input_text=input_text,
             trigger_kind=trigger_kind,
@@ -53,6 +58,7 @@ class ServiceInputPipelineMixin:
             state=state,
             started_at=started_at,
             input_text=input_text,
+            current_input=current_input,
             recent_turns=recent_turns,
             augmented_query_text=augmented_query_text,
             visual_observation_context=visual_observation_context,
@@ -85,6 +91,7 @@ class ServiceInputPipelineMixin:
         # decision生成
         decision = self._run_pipeline_decision(
             input_text=input_text,
+            current_input=current_input,
             trigger_kind=trigger_kind,
             recent_turns=recent_turns,
             time_context=pipeline_contexts["time_context"],
@@ -107,6 +114,7 @@ class ServiceInputPipelineMixin:
         output_result = self._run_pipeline_output(
             state=state,
             input_text=input_text,
+            current_input=current_input,
             recent_turns=recent_turns,
             time_context=pipeline_contexts["time_context"],
             affect_context=pipeline_contexts["affect_context"],
@@ -126,6 +134,7 @@ class ServiceInputPipelineMixin:
         # 結果
         debug_log("Pipeline", f"{cycle_label} done")
         return {
+            "current_input": current_input.to_prompt_payload(),
             "augmented_query_text": augmented_query_text,
             "recall_hint": recall_hint,
             "recall_pack": recall_pack,
@@ -147,12 +156,51 @@ class ServiceInputPipelineMixin:
             "ongoing_action_transition_summary": output_result["ongoing_action_transition_summary"],
         }
 
+    def _build_current_input(
+        self,
+        *,
+        input_text: str,
+        trigger_kind: str,
+        capability_request_summary: dict[str, Any] | None = None,
+    ) -> CurrentInput:
+        normalized_trigger = trigger_kind.strip() or "user_message"
+        if normalized_trigger == "user_message":
+            sender = "user"
+            source_kind = "user_message"
+            response_target = "user"
+        elif normalized_trigger in {"wake", "background_wake"}:
+            sender = "system"
+            source_kind = normalized_trigger
+            response_target = "none"
+        elif normalized_trigger == "capability_result":
+            sender = "capability"
+            source_kind = "capability_result"
+            response_target = self._capability_result_response_target(capability_request_summary)
+        else:
+            sender = "system"
+            source_kind = normalized_trigger
+            response_target = "none"
+        return CurrentInput(
+            sender=sender,
+            source_kind=source_kind,
+            response_target=response_target,
+            text=input_text,
+        )
+
+    def _capability_result_response_target(self, capability_request_summary: dict[str, Any] | None) -> str:
+        if isinstance(capability_request_summary, dict):
+            source_current_input = capability_request_summary.get("source_current_input")
+            if isinstance(source_current_input, dict) and source_current_input.get("response_target") == "user":
+                return "user"
+        return "none"
+
     def _build_pipeline_recall_inputs(
         self,
         *,
         state: dict[str, Any],
         started_at: str,
         input_text: str,
+        current_input: CurrentInput,
         recent_turns: list[dict[str, Any]],
         augmented_query_text: str,
         visual_observation_context: dict[str, Any] | None,
@@ -165,6 +213,7 @@ class ServiceInputPipelineMixin:
         input_interpretation = self.llm.generate_input_interpretation(
             role_definition=recall_role,
             input_text=input_text,
+            current_input=current_input,
             recent_turns=recall_hint_recent_turns,
             current_time=started_at,
             visual_observation_context=visual_observation_context,
@@ -332,6 +381,7 @@ class ServiceInputPipelineMixin:
         self,
         *,
         input_text: str,
+        current_input: CurrentInput,
         trigger_kind: str,
         recent_turns: list[dict[str, Any]],
         time_context: dict[str, Any],
@@ -353,6 +403,7 @@ class ServiceInputPipelineMixin:
         debug_log("Pipeline", f"{cycle_label} decision start")
         decision_context = self._build_decision_context(
             input_text=input_text,
+            current_input=current_input,
             trigger_kind=trigger_kind,
             recent_turns=recent_turns,
             time_context=time_context,
@@ -383,6 +434,7 @@ class ServiceInputPipelineMixin:
         *,
         state: dict[str, Any],
         input_text: str,
+        current_input: CurrentInput,
         recent_turns: list[dict[str, Any]],
         time_context: dict[str, Any],
         affect_context: dict[str, Any],
@@ -405,6 +457,7 @@ class ServiceInputPipelineMixin:
             dispatch_result = self._dispatch_decision_capability_request(
                 state=state,
                 current_time=self._now_iso(),
+                source_current_input=current_input.to_prompt_payload(),
                 decision=decision,
             )
             dispatched_capability_request_summary = dispatch_result.get("capability_request_summary")
@@ -421,10 +474,32 @@ class ServiceInputPipelineMixin:
 
         # 返信
         reply_payload: dict[str, Any] | None = None
-        if decision["kind"] == "reply":
+        reply_suppressed = (
+            decision["kind"] == "reply"
+            and current_input.source_kind == "capability_result"
+            and current_input.response_target == "none"
+        )
+        if reply_suppressed:
+            original_reason = str(decision.get("reason_summary") or "").strip()
+            reason_summary = "capability result の source_current_input.response_target=none のため、内部観測結果として処理し assistant message を送信しない。"
+            if original_reason:
+                reason_summary = f"{reason_summary} 元判断: {original_reason}"
+            decision.update(
+                {
+                    "kind": "noop",
+                    "reason_code": "capability_result_response_target_none",
+                    "reason_summary": reason_summary,
+                    "requires_confirmation": False,
+                    "pending_intent": None,
+                    "capability_request": None,
+                }
+            )
+            debug_log("Pipeline", f"{cycle_label} reply skipped capability_result_response_target=none")
+        elif decision["kind"] == "reply":
             debug_log("Pipeline", f"{cycle_label} reply start")
             reply_context = self._build_reply_context(
                 input_text=input_text,
+                current_input=current_input,
                 recent_turns=recent_turns,
                 time_context=time_context,
                 affect_context=affect_context,
@@ -455,6 +530,7 @@ class ServiceInputPipelineMixin:
         self,
         *,
         input_text: str,
+        current_input: CurrentInput,
         trigger_kind: str,
         recent_turns: list[dict[str, Any]],
         time_context: dict[str, Any],
@@ -471,6 +547,7 @@ class ServiceInputPipelineMixin:
     ) -> DecisionContext:
         return DecisionContext(
             input_text=input_text,
+            current_input=current_input,
             trigger_kind=trigger_kind,
             recent_turns=recent_turns,
             time_context=time_context,
@@ -490,6 +567,7 @@ class ServiceInputPipelineMixin:
         self,
         *,
         input_text: str,
+        current_input: CurrentInput,
         recent_turns: list[dict[str, Any]],
         time_context: dict[str, Any],
         affect_context: dict[str, Any],
@@ -504,6 +582,7 @@ class ServiceInputPipelineMixin:
     ) -> ReplyContext:
         return ReplyContext(
             input_text=input_text,
+            current_input=current_input,
             recent_turns=recent_turns,
             time_context=time_context,
             affect_context=affect_context,

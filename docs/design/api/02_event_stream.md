@@ -193,7 +193,7 @@ server -> client の代表例:
     "source_kind": "background_wake",
     "trigger_kind": "background_wake",
     "system_text": "[background_wake]",
-    "message": "CocoroConsole のディレクトリまで進んだのですね。"
+    "message": "このあと 22 時の予定が近づいています。今の作業を切り上げる目安にしてください。"
   }
 }
 ```

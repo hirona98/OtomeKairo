@@ -297,11 +297,17 @@ class ServiceInputTraceBuildMixin:
         memory_trace: dict[str, Any] | None,
         pending_intent_selection: dict[str, Any] | None = None,
         observation_summary: dict[str, Any] | None = None,
+        capability_request_summary: dict[str, Any] | None = None,
         ongoing_action_summary: dict[str, Any] | None = None,
         initiative_context: InitiativeContext | None = None,
     ) -> dict[str, Any]:
         input_trace = {
             "trigger_kind": cycle_summary["trigger_kind"],
+            "current_input": self._build_current_input(
+                input_text=input_text,
+                trigger_kind=cycle_summary["trigger_kind"],
+                capability_request_summary=capability_request_summary,
+            ).to_prompt_payload(),
             "input_summary": self._clamp(input_text),
             "client_context_summary": self._clamp(str(client_context)),
             "normalized_input_summary": self._clamp(input_text.strip()),

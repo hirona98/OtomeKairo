@@ -38,6 +38,7 @@ initiative loop は、少なくとも次を入力にする。
 - capability decision view
 - 直近会話の短い要約
 - 過剰介入抑制状態
+- `current_input` の `sender / source_kind / response_target`
 
 LLM には offset 付き timestamp を主要表現として渡さない。
 コードは deadline、cooldown、timeout、失効判定を duration と offset 付きローカル timestamp で計算する。
@@ -130,13 +131,20 @@ LLM の自由文をそのまま状態遷移へ使わない。
 `current_time_text`、interval、wake の時刻情報だけから予定状態を作らない。予定状態は schedule context、schedule capability result、明示的な予定 source を根拠にする。
 `wake_policy.observations` は interval wake の判断前に enabled 項目だけを順番に取得する。
 desktop capture を含む enabled observation を有効化した直後の初回だけ、server は 5 秒待ってから interval wake の観測へ進む。
+vision source 未接続による wake observation の一時失敗だけで終わった場合、server は interval を消費せず短い再試行待ちへ進む。
 `wake_policy.observations` の成功結果は、その回の initiative 判断へ進む前景シグナルとして扱う。
+wake_policy observation として同期取得する capability result は内部観測であり、`ongoing_action` を作らない。
 desktop capture の取得結果は一時観測として同じ wake 判断だけに使い、継続状態になる取得結果だけを `world_state` へ反映する。
 desktop capture の短い scene signature と直近自発 reply 済み scene は process-local runtime にだけ保持し、`world_state` と記憶には保存しない。
-desktop capture の novelty が `first_success / changed / pending_after_cooldown` で、同じ scene に未発話の場合、server は `desktop_observation_signal.reply_eligibility=eligible` を initiative context に入れる。
-cooldown 中の `first_success / changed` でも `desktop_observation_signal.reply_eligibility=eligible` を維持し、`desktop_observation_signal.cooldown_active=true` を割り込み量を控える調整材料として LLM 判断へ渡す。
-cooldown 中の新しい desktop capture は、reply にならなかった場合に備えて process-local runtime の `pending_novel_scene` としても保持する。
-cooldown 終了後も同じ scene が見えている場合、server は `pending_after_cooldown` として 1 回だけ短い reply 候補にする。
+desktop capture の novelty は `first_success / changed / same / already_prompted / pending_after_cooldown` に正規化する。
+desktop capture の novelty は「観測が新しい」ことだけを表し、ユーザーへの reply 必要性を直接表さない。
+`first_success / changed / pending_after_cooldown` の desktop novelty は wake 判断へ進む前景シグナルとして扱う。
+`desktop_observation_signal.reply_eligibility=eligible` は、観測した desktop scene を根拠に短い自発 reply の候補へ進めることを表す。
+`current_input.sender=system` かつ `current_input.response_target=none` の `wake / background_wake` では、desktop novelty をユーザー発話やユーザーへの応答要求として扱わず、reply 本文は画面観測に根拠づける。
+background wake から dispatch した capability request の result は、source request の `source_current_input.response_target=none` を引き継ぐ。
+この capability result は内部観測結果として扱い、実効判断を `noop` に正規化し、assistant message を送信しない。
+cooldown 中の新しい desktop capture は、reply にならなかった場合に備えて process-local runtime の `pending_novel_scene` として保持する。
+cooldown 終了後も同じ scene が見えている場合、server は `pending_after_cooldown` として 1 回だけ再評価する。
 複数 observation がある場合も、server は取得結果を整理したあとに 1 回だけ initiative 判断を行う。
 system wake 起点で明示 source context が無い `visual_context / body / schedule / social_context / environment / location` 候補は、推測候補として正規化時に破棄する。
 
@@ -230,14 +238,15 @@ background wake 起床制御 matrix は次の 5 件に固定する。
 強い `drive_state` が特定の status family を要求し、対応 state type の新鮮な foreground `world_state` が既にある場合は、同じ status capability と `vision.capture` の両方を選ばず、既存要約を使う。
 status refresh の鮮度判定は判断前から存在した foreground `world_state` だけを使い、現在の wake 入力から推測生成された `world_state` では再取得を抑止しない。
 background wake では、強い `drive_state` が無く `visual_context / external_service / device` だけが見えている場合、薄い前景として `noop` を優先する。
-background wake でも `desktop_observation_signal.reply_eligibility=eligible` かつ `preferred_result_kind=reply` の場合、未発話の新しい desktop 前景として短い reply を `noop` より優先する。cooldown は発話量と頻度を控える調整材料であり、応答禁止条件ではない。
+background wake でも `desktop_observation_signal.reply_eligibility=eligible` かつ `preferred_result_kind=reply` の場合、画面観測に根拠づく短い reply を `noop` より優先する。cooldown は発話量と頻度を控える調整材料であり、応答禁止条件ではない。
+`current_input.sender=system` かつ `current_input.response_target=none` の background wake では、desktop novelty を「ユーザーへの応答要求」として扱わず、ユーザー発話への相づちとして reply を始めない。
 `cooldown_active=true` は単独で `suppression_level=high` にしない。通常 cooldown は `suppression_level=medium` として扱い、同一 dedupe への連続 reply だけを high suppression にする。
 `wake / background_wake` cycle が `reply` になった場合、server は `assistant_message` event を `source_kind=wake / background_wake` で client へ送る。送信先 client は cycle の client context または wake observation の `vision_source_id` から解決する。
 grounded foreground の `world_state` が既にある場合、candidate entry に `preferred_capability_id` が無い限り、同じ情報を再取得する capability request より `preferred_result_kind` の `reply / noop` を優先する。
 非ユーザー起点の判断では、判断前から存在する同じ state type の新鮮な foreground `world_state` がある status capability に `fresh_world_state_available=true` を付け、実 LLM の compact digest で request しなかった境界を確認する。
 desktop 以外の `vision.capture` は `vision_source_id` が一致する新鮮な `visual_context` を `fresh_world_state_by_vision_source` として扱い、別 source の再観測は遮断しない。
 `suppression_summary.cooldown_active` が true ではない場合、直近 turn だけから cooldown 中とは扱わない。background wake でも ready / grounded foreground かつ `preferred_result_kind=reply` なら、`suppression_level=medium` だけを理由に `noop` へ倒さない。
-decision contract validation は、initiative の selected candidate entry が `preferred_result_kind=capability_request` の場合に `capability_request` 以外を repair 対象にし、`preferred_capability_id` と異なる capability request も repair 対象にする。`preferred_result_kind=capability_request` ではない場合の `capability_request`、`fresh_world_state_available=true` の capability request、同じ `vision_source_id` の新鮮な `vision.capture` request、ready / grounded foreground かつ `preferred_result_kind=reply` で `noop`、`reply_eligibility=eligible` の新しい desktop 前景に対する `noop` も repair 対象にする。
+decision contract validation は、initiative の selected candidate entry が `preferred_result_kind=capability_request` の場合に `capability_request` 以外を repair 対象にし、`preferred_capability_id` と異なる capability request も repair 対象にする。`preferred_result_kind=capability_request` ではない場合の `capability_request`、`fresh_world_state_available=true` の capability request、同じ `vision_source_id` の新鮮な `vision.capture` request は repair 対象にする。`desktop_observation_signal.reply_eligibility=eligible`、`response_target=user`、due の `pending_intent`、継続中の `ongoing_action`、または強い `drive_state` と grounded foreground がある場合、ready / grounded foreground かつ `preferred_result_kind=reply` の `noop` を repair 対象にする。
 非ユーザー起点で、repair 後も新鮮な `world_state` または同じ `vision_source_id` の新鮮な `visual_context` を再取得する capability request が残る場合、server は dispatch せず `noop` decision に正規化する。
 これは定期 wake の過剰な再取得を抑制するための実行境界であり、ユーザーが明示的に再観測を依頼した場合の capability request には適用しない。
 通常会話の明示的な現在状態確認は自律判断ではないため、対応 capability が `available=true` なら `capability_request` へ repair する。

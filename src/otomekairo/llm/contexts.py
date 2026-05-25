@@ -5,6 +5,22 @@ from typing import Any
 
 
 @dataclass(frozen=True, slots=True)
+class CurrentInput:
+    sender: str
+    source_kind: str
+    response_target: str
+    text: str
+
+    def to_prompt_payload(self) -> dict[str, Any]:
+        return {
+            "sender": self.sender,
+            "source_kind": self.source_kind,
+            "response_target": self.response_target,
+            "text": self.text,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class InitiativeCandidateFamily:
     family: str
     available: bool
@@ -97,6 +113,7 @@ class InitiativeContext:
 @dataclass(frozen=True, slots=True)
 class DecisionContext:
     input_text: str
+    current_input: CurrentInput
     trigger_kind: str
     recent_turns: list[dict[str, Any]]
     time_context: dict[str, Any]
@@ -115,6 +132,7 @@ class DecisionContext:
 @dataclass(frozen=True, slots=True)
 class ReplyContext:
     input_text: str
+    current_input: CurrentInput
     recent_turns: list[dict[str, Any]]
     time_context: dict[str, Any]
     affect_context: dict[str, Any]

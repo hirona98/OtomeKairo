@@ -72,13 +72,21 @@ class ServiceInputWakePipelineMixin:
 
         # 候補
         if selected_candidate is None:
-            self._set_last_wake_at(started_at)
             if not self._has_autonomous_initiative_context(
                 state=state,
                 current_time=started_at,
                 client_context=client_context,
             ):
-                if (
+                retryable_observation_failure = self._client_context_has_retryable_wake_observation_failure(
+                    client_context
+                )
+                if retryable_observation_failure:
+                    self._set_wake_retry_after(started_at)
+                else:
+                    self._set_last_wake_at(started_at)
+                if retryable_observation_failure:
+                    reason_summary = "wake observation の vision source が未接続だったため、interval を消費せず短く再試行する。"
+                elif (
                     isinstance(pending_intent_selection, dict)
                     and pending_intent_selection.get("selected_candidate_ref") == "none"
                     and isinstance(pending_intent_selection.get("selection_reason"), str)
@@ -97,6 +105,7 @@ class ServiceInputWakePipelineMixin:
                     input_text,
                     client_context,
                 )
+            self._set_last_wake_at(started_at)
             debug_log("Wake", f"{cycle_label} autonomous path no_selected_candidate")
 
         # 返信抑制
@@ -185,7 +194,7 @@ class ServiceInputWakePipelineMixin:
             client_context.get("desktop_observation_signal")
         )
         if desktop_signal:
-            return self._desktop_observation_signal_is_judgable(desktop_signal)
+            return self._desktop_observation_signal_needs_wake_judgement(desktop_signal)
         for item in wake_observations:
             if not isinstance(item, dict) or item.get("status") != "succeeded":
                 continue
@@ -195,7 +204,7 @@ class ServiceInputWakePipelineMixin:
                 and item["source_kind"].strip() == "desktop"
             ):
                 signal = self._compact_desktop_observation_signal(item.get("desktop_observation_signal"))
-                return self._desktop_observation_signal_is_judgable(signal)
+                return self._desktop_observation_signal_needs_wake_judgement(signal)
             summary_text = item.get("visual_summary_text")
             if isinstance(summary_text, str) and summary_text.strip():
                 return True
@@ -213,7 +222,7 @@ class ServiceInputWakePipelineMixin:
         signal = self._compact_desktop_observation_signal(
             client_context.get("desktop_observation_signal")
         )
-        if self._desktop_observation_signal_is_judgable(signal):
+        if self._desktop_observation_signal_needs_wake_judgement(signal):
             return True
         wake_observations = client_context.get("wake_observations")
         if not isinstance(wake_observations, list):
@@ -222,9 +231,40 @@ class ServiceInputWakePipelineMixin:
             if not isinstance(item, dict):
                 continue
             signal = self._compact_desktop_observation_signal(item.get("desktop_observation_signal"))
-            if self._desktop_observation_signal_is_judgable(signal):
+            if self._desktop_observation_signal_needs_wake_judgement(signal):
                 return True
         return False
+
+    def _client_context_has_retryable_wake_observation_failure(
+        self,
+        client_context: dict[str, Any] | None,
+    ) -> bool:
+        if not isinstance(client_context, dict):
+            return False
+        wake_observations = client_context.get("wake_observations")
+        if not isinstance(wake_observations, list) or not wake_observations:
+            return False
+        retryable_failure = False
+        for item in wake_observations:
+            if not isinstance(item, dict):
+                continue
+            if item.get("status") == "succeeded":
+                return False
+            reason_summary = item.get("reason_summary")
+            if isinstance(reason_summary, str) and "対象 vision source が接続されていない" in reason_summary:
+                retryable_failure = True
+        return retryable_failure
+
+    def _desktop_observation_signal_needs_wake_judgement(self, signal: dict[str, Any] | None) -> bool:
+        if not isinstance(signal, dict):
+            return False
+        if self._desktop_observation_signal_is_judgable(signal):
+            return True
+        return signal.get("novelty_kind") in {
+            "first_success",
+            "changed",
+            "pending_after_cooldown",
+        }
 
     def _desktop_observation_signal_is_judgable(self, signal: dict[str, Any] | None) -> bool:
         if not isinstance(signal, dict):

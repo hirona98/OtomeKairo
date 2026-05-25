@@ -257,6 +257,7 @@ class ServiceInputTracePersistMixin:
             memory_trace=self._pending_memory_trace(),
             pending_intent_selection=pending_intent_selection,
             observation_summary=observation_summary,
+            capability_request_summary=capability_request_summary,
             ongoing_action_summary=ongoing_action_summary,
             initiative_context=initiative_context,
         )
@@ -359,6 +360,7 @@ class ServiceInputTracePersistMixin:
             memory_trace={},
             pending_intent_selection=pending_intent_selection,
             observation_summary=observation_summary,
+            capability_request_summary=capability_request_summary,
             ongoing_action_summary=ongoing_action_summary,
             initiative_context=initiative_context,
         )

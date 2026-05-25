@@ -44,6 +44,7 @@ class OtomeKairoService(
             "last_spontaneous_at": None,
             "cooldown_until": None,
             "initial_delay_until": None,
+            "retry_after": None,
             "reply_history_by_dedupe": {},
         }
         self._wake_observation_runtime_state: dict[str, dict[str, Any]] = {}
