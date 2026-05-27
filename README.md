@@ -59,7 +59,7 @@ OtomeKairo は、HTTPS API サーバとして bootstrap、観測、設定、insp
   "display_name": "Default OpenRouter Gemini Preset",
   "prompt_window": {
     "recent_turn_limit": 30,
-    "recent_turn_minutes": 3
+    "recent_turn_minutes": 30
   },
   "roles": {
     "decision_generation": {
