@@ -38,6 +38,7 @@ class ServiceInputCycleMixin:
             ),
         )
 
+        self._begin_user_response_cycle()
         try:
             # 会話添付画像は capability 実行ではなく、会話入力の補助要約として扱う。
             if input_images:
@@ -133,6 +134,8 @@ class ServiceInputCycleMixin:
                 capability_request_summary=capability_request_summary,
                 ongoing_action_transition_summary=ongoing_action_transition_summary,
             )
+        finally:
+            self._end_user_response_cycle()
 
     def _finalize_cycle_failure(
         self,

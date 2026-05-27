@@ -125,6 +125,7 @@ class ServiceSpontaneousCapabilityCycleMixin:
         capability_id = self._capability_result_capability_id(capability_response)
         image_count = self._capability_result_payload_image_count(capability_response)
         capability_request_summary = self._capability_request_summary(request_record)
+        user_facing_result = self._capability_result_response_target(capability_request_summary) == "user"
         self._activate_capability_ongoing_action(
             request_record=request_record,
             current_time=started_at,
@@ -155,6 +156,8 @@ class ServiceSpontaneousCapabilityCycleMixin:
             ),
         )
 
+        if user_facing_result:
+            self._begin_user_response_cycle()
         try:
             client_context, observation_summary, input_text = self._prepare_capability_result_context(
                 state=state,
@@ -326,6 +329,9 @@ class ServiceSpontaneousCapabilityCycleMixin:
                 ongoing_action_transition_summary=ongoing_action_transition_summary,
                 failure_reason=str(exc),
             )
+        finally:
+            if user_facing_result:
+                self._end_user_response_cycle()
 
     def _resolve_capability_result_followup_ongoing_action(
         self,

@@ -495,6 +495,26 @@ class ServiceInputPipelineMixin:
                 }
             )
             debug_log("Pipeline", f"{cycle_label} reply skipped capability_result_response_target=none")
+        elif (
+            decision["kind"] == "reply"
+            and current_input.source_kind == "background_wake"
+            and self._user_response_cycle_active()
+        ):
+            original_reason = str(decision.get("reason_summary") or "").strip()
+            reason_summary = "ユーザー向け応答サイクルが進行中のため、background wake の自発発話は行わない。"
+            if original_reason:
+                reason_summary = f"{reason_summary} 元判断: {original_reason}"
+            decision.update(
+                {
+                    "kind": "noop",
+                    "reason_code": "background_wake_user_response_active",
+                    "reason_summary": reason_summary,
+                    "requires_confirmation": False,
+                    "pending_intent": None,
+                    "capability_request": None,
+                }
+            )
+            debug_log("Pipeline", f"{cycle_label} reply skipped background_wake_user_response_active")
         elif decision["kind"] == "reply":
             debug_log("Pipeline", f"{cycle_label} reply start")
             reply_context = self._build_reply_context(

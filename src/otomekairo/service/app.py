@@ -46,6 +46,7 @@ class OtomeKairoService(
             "initial_delay_until": None,
             "retry_after": None,
             "reply_history_by_dedupe": {},
+            "active_user_response_cycle_count": 0,
         }
         self._wake_observation_runtime_state: dict[str, dict[str, Any]] = {}
         self._background_wake_stop_event: threading.Event | None = None

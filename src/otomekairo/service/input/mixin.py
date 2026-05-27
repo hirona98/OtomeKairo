@@ -488,6 +488,37 @@ class ServiceInputMixin(
         # RecallHint は入口判断なので prompt_window 候補をさらに軽くする。
         return recent_turns[-RECALL_HINT_RECENT_TURN_LIMIT:]
 
+    def _begin_user_response_cycle(self) -> None:
+        # ユーザー向け応答中は background wake の外向き発話を止める。
+        with self._runtime_state_lock:
+            count = self._wake_runtime_state.get("active_user_response_cycle_count")
+            if not isinstance(count, int) or count < 0:
+                count = 0
+            self._wake_runtime_state["active_user_response_cycle_count"] = count + 1
+
+    def _end_user_response_cycle(self) -> None:
+        # カウンタ
+        with self._runtime_state_lock:
+            count = self._wake_runtime_state.get("active_user_response_cycle_count")
+            if not isinstance(count, int) or count <= 0:
+                self._wake_runtime_state["active_user_response_cycle_count"] = 0
+                return
+            self._wake_runtime_state["active_user_response_cycle_count"] = count - 1
+
+    def _user_response_cycle_active(self) -> bool:
+        # 状態
+        with self._runtime_state_lock:
+            count = self._wake_runtime_state.get("active_user_response_cycle_count")
+        return isinstance(count, int) and count > 0
+
+    def _recent_turns_added_since(self, *, state: dict[str, Any], started_at: str) -> bool:
+        # wake 開始後に会話 turn が追加された場合、開始時 snapshot は古い。
+        for turn in self._load_recent_turns(state):
+            created_at = turn.get("created_at") if isinstance(turn, dict) else None
+            if isinstance(created_at, str) and created_at > started_at:
+                return True
+        return False
+
     def _new_console_token(self) -> str:
         # トークン
         return f"tok_{secrets.token_urlsafe(24)}"

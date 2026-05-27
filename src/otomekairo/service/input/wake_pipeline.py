@@ -56,6 +56,22 @@ class ServiceInputWakePipelineMixin:
             client_context=client_context,
             selected_candidate=selected_candidate,
         )
+        if trigger_kind == "background_wake" and (
+            self._user_response_cycle_active()
+            or self._recent_turns_added_since(state=state, started_at=started_at)
+        ):
+            self._set_last_wake_at(started_at)
+            reason_summary = "background wake の観測中にユーザー向け会話が進んだため、自発発話は行わない。"
+            debug_log("Wake", f"{cycle_label} skipped user_response_changed")
+            return (
+                self._noop_pipeline(
+                    state=state,
+                    started_at=started_at,
+                    reason_summary=reason_summary,
+                ),
+                input_text,
+                client_context,
+            )
 
         # クールダウン
         cooldown_reason = self._wake_cooldown_reason(current_time=started_at)
