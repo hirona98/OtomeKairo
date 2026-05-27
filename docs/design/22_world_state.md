@@ -194,7 +194,7 @@ LLM の出力は JSON object 1 個に固定する。
 - `state_type` はこの文書の `state_type` enum かつ source pack の `allowed_state_types` に含まれる値だけを使う
 - `allowed_state_types` が空の場合は `state_candidates` を空配列にする
 - `scope` は `self / user / entity:<key> / topic:<key> / relationship:<key> / world` のいずれかにする
-- `summary_text` は 1 文、改行なし、内部識別子なしにする
+- `summary_text` は簡潔にし、改行なし、内部識別子なしにする
 - `confidence_hint` と `salience_hint` は `low / medium / high` のいずれかにする
 - `ttl_hint` は `short / medium / long` のいずれかにする
 - raw payload、資格情報、内部 URL、配送先 client を出力しない

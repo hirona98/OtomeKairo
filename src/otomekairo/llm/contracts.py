@@ -102,11 +102,7 @@ SCOPE_TYPE_VALUES = {
 MAX_SECONDARY_RECALL_FOCUSES = 2
 MAX_RISK_FLAGS = 3
 MAX_HINT_SCOPE_VALUES = 4
-MAX_MEMORY_REFLECTION_SUMMARY_SENTENCES = 2
 MAX_MEMORY_REFLECTION_SUMMARY_LENGTH = 140
-MAX_EVENT_EVIDENCE_SLOT_SENTENCES = 1
-MAX_RECALL_PACK_CONFLICT_SUMMARY_SENTENCES = 1
-MAX_PENDING_INTENT_SELECTION_REASON_SENTENCES = 1
 MAX_VISUAL_OBSERVATION_SUMMARY_LENGTH = 300
 RECALL_PACK_SECTION_NAMES = (
     "self_model",
@@ -193,6 +189,12 @@ def normalize_recall_hint_payload(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(payload)
     if "confidence" in normalized:
         normalized["confidence"] = _normalized_recall_confidence(normalized["confidence"])
+    primary_focus = normalized.get("primary_recall_focus")
+    if isinstance(normalized.get("secondary_recall_focuses"), list):
+        normalized["secondary_recall_focuses"] = _normalized_recall_focuses(
+            normalized["secondary_recall_focuses"],
+            primary_focus=primary_focus if isinstance(primary_focus, str) else None,
+        )
     focus_scopes = normalized.get("focus_scopes")
     if isinstance(focus_scopes, list):
         normalized["focus_scopes"] = _normalized_recall_focus_scopes(focus_scopes)
@@ -202,6 +204,9 @@ def normalize_recall_hint_payload(payload: dict[str, Any]) -> dict[str, Any]:
     mentioned_topics = normalized.get("mentioned_topics")
     if isinstance(mentioned_topics, list):
         normalized["mentioned_topics"] = _normalized_topic_refs(mentioned_topics)
+    risk_flags = normalized.get("risk_flags")
+    if isinstance(risk_flags, list):
+        normalized["risk_flags"] = _normalized_risk_flags(risk_flags)
     return normalized
 
 
@@ -221,6 +226,39 @@ def _normalized_recall_confidence(value: Any) -> Any:
     return parsed
 
 
+def _normalized_unique_enum_values(
+    values: list[Any],
+    *,
+    allowed_values: set[str],
+    max_items: int,
+    excluded_values: set[str] | None = None,
+) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    excluded = excluded_values or set()
+    for value in values:
+        if not isinstance(value, str):
+            continue
+        candidate = value.strip()
+        if not candidate or candidate in seen or candidate in excluded or candidate not in allowed_values:
+            continue
+        normalized.append(candidate)
+        seen.add(candidate)
+        if len(normalized) >= max_items:
+            break
+    return normalized
+
+
+def _normalized_recall_focuses(values: list[Any], *, primary_focus: str | None) -> list[str]:
+    excluded_values = {primary_focus} if primary_focus else set()
+    return _normalized_unique_enum_values(
+        values,
+        allowed_values=RECALL_FOCUS_VALUES,
+        max_items=MAX_SECONDARY_RECALL_FOCUSES,
+        excluded_values=excluded_values,
+    )
+
+
 def _normalized_recall_focus_scopes(scopes: list[Any]) -> list[str]:
     normalized: list[str] = []
     seen: set[str] = set()
@@ -235,6 +273,14 @@ def _normalized_recall_focus_scopes(scopes: list[Any]) -> list[str]:
         if len(normalized) >= MAX_HINT_SCOPE_VALUES:
             break
     return normalized
+
+
+def _normalized_risk_flags(values: list[Any]) -> list[str]:
+    return _normalized_unique_enum_values(
+        values,
+        allowed_values=RISK_FLAG_VALUES,
+        max_items=MAX_RISK_FLAGS,
+    )
 
 
 def _normalized_named_refs(values: list[Any]) -> list[str]:
@@ -278,6 +324,25 @@ def normalize_answer_contract_payload(payload: dict[str, Any]) -> dict[str, Any]
     normalized = dict(payload)
     contract = normalized.get("contract")
     normalized["requires_direct_evidence"] = contract in DIRECT_GROUNDING_CONTRACTS
+    query_terms = normalized.get("query_terms")
+    if isinstance(query_terms, list):
+        normalized["query_terms"] = _normalized_query_terms(query_terms)
+    return normalized
+
+
+def _normalized_query_terms(values: list[Any]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if not isinstance(value, str):
+            continue
+        candidate = value.strip()
+        if not candidate or candidate in seen:
+            continue
+        normalized.append(candidate)
+        seen.add(candidate)
+        if len(normalized) >= MAX_ANSWER_CONTRACT_QUERY_TERMS:
+            break
     return normalized
 
 
@@ -322,16 +387,9 @@ def validate_answer_contract_contract(payload: dict[str, Any]) -> None:
     query_terms = payload["query_terms"]
     if not isinstance(query_terms, list):
         raise LLMError("AnswerContract.query_terms は配列である必要があります。")
-    if len(query_terms) > MAX_ANSWER_CONTRACT_QUERY_TERMS:
-        raise LLMError("AnswerContract.query_terms が多すぎます。")
-    seen: set[str] = set()
     for term in query_terms:
         if not isinstance(term, str) or not term.strip():
             raise LLMError("AnswerContract.query_terms に空または文字列以外の値が含まれています。")
-        normalized = term.strip()
-        if normalized in seen:
-            raise LLMError("AnswerContract.query_terms に重複があります。")
-        seen.add(normalized)
 
 
 def _is_relationship_ref(value: str) -> bool:
@@ -480,37 +538,25 @@ def validate_recall_hint_contract(payload: dict[str, Any]) -> None:
         raise LLMError("RecallHint time_reference が不正です。")
     if not isinstance(payload["secondary_recall_focuses"], list):
         raise LLMError("RecallHint secondary_recall_focuses は配列である必要があります。")
-    if len(payload["secondary_recall_focuses"]) > MAX_SECONDARY_RECALL_FOCUSES:
-        raise LLMError("RecallHint secondary_recall_focuses の件数が上限を超えています。")
     for focus in payload["secondary_recall_focuses"]:
         if not isinstance(focus, str) or not focus.strip():
             raise LLMError("RecallHint secondary_recall_focuses の各要素は空でない文字列である必要があります。")
         if focus not in RECALL_FOCUS_VALUES:
             raise LLMError("RecallHint secondary_recall_focus が不正です。")
-    if len(payload["secondary_recall_focuses"]) != len(set(payload["secondary_recall_focuses"])):
-        raise LLMError("RecallHint secondary_recall_focuses に重複があります。")
-    if payload["primary_recall_focus"] in payload["secondary_recall_focuses"]:
-        raise LLMError("RecallHint secondary_recall_focuses に primary_recall_focus と同じ値を含めてはいけません。")
     if not isinstance(payload["focus_scopes"], list):
         raise LLMError("RecallHint focus_scopes は配列である必要があります。")
-    if len(payload["focus_scopes"]) > MAX_HINT_SCOPE_VALUES:
-        raise LLMError("RecallHint focus_scopes の件数が上限を超えています。")
     if any(not isinstance(scope, str) or not scope.strip() for scope in payload["focus_scopes"]):
         raise LLMError("RecallHint focus_scopes の各要素は空でない文字列である必要があります。")
     if any(not _has_focus_scope_shape(scope.strip()) for scope in payload["focus_scopes"]):
         raise LLMError("RecallHint focus_scopes は self/user/relationship:<key>/topic:<key> 形式である必要があります。")
     if not isinstance(payload["mentioned_entities"], list):
         raise LLMError("RecallHint mentioned_entities は配列である必要があります。")
-    if len(payload["mentioned_entities"]) > MAX_HINT_SCOPE_VALUES:
-        raise LLMError("RecallHint mentioned_entities の件数が上限を超えています。")
     if any(not isinstance(entity, str) or not entity.strip() for entity in payload["mentioned_entities"]):
         raise LLMError("RecallHint mentioned_entities の各要素は空でない文字列である必要があります。")
     if any(not _has_named_ref_prefix(entity.strip()) for entity in payload["mentioned_entities"]):
         raise LLMError("RecallHint mentioned_entities は person:/place:/tool: 形式である必要があります。")
     if not isinstance(payload["mentioned_topics"], list):
         raise LLMError("RecallHint mentioned_topics は配列である必要があります。")
-    if len(payload["mentioned_topics"]) > MAX_HINT_SCOPE_VALUES:
-        raise LLMError("RecallHint mentioned_topics の件数が上限を超えています。")
     if any(not isinstance(topic, str) or not topic.strip() for topic in payload["mentioned_topics"]):
         raise LLMError("RecallHint mentioned_topics の各要素は空でない文字列である必要があります。")
     if any(
@@ -520,15 +566,11 @@ def validate_recall_hint_contract(payload: dict[str, Any]) -> None:
         raise LLMError("RecallHint mentioned_topics は topic:<name> 形式である必要があります。")
     if not isinstance(payload["risk_flags"], list):
         raise LLMError("RecallHint risk_flags は配列である必要があります。")
-    if len(payload["risk_flags"]) > MAX_RISK_FLAGS:
-        raise LLMError("RecallHint risk_flags の件数が上限を超えています。")
     for risk_flag in payload["risk_flags"]:
         if not isinstance(risk_flag, str) or not risk_flag.strip():
             raise LLMError("RecallHint risk_flags の各要素は空でない文字列である必要があります。")
         if risk_flag not in RISK_FLAG_VALUES:
             raise LLMError("RecallHint risk_flag が不正です。")
-    if len(payload["risk_flags"]) != len(set(payload["risk_flags"])):
-        raise LLMError("RecallHint risk_flags に重複があります。")
     if isinstance(payload["confidence"], bool) or not isinstance(payload["confidence"], (int, float)):
         raise LLMError("RecallHint confidence は数値である必要があります。")
     if not 0.0 <= float(payload["confidence"]) <= 1.0:
@@ -742,11 +784,6 @@ def validate_memory_reflection_summary_contract(payload: dict[str, Any]) -> None
     if INTERNAL_IDENTIFIER_PATTERN.search(normalized) is not None:
         raise LLMError("MemoryReflectionSummary summary_text に内部識別子を含めてはいけません。")
 
-    sentence_count = len([part for part in re.split(r"[。!?！？]+", normalized) if part.strip()])
-    if not 1 <= sentence_count <= MAX_MEMORY_REFLECTION_SUMMARY_SENTENCES:
-        raise LLMError("MemoryReflectionSummary summary_text は 1 文または 2 文である必要があります。")
-
-
 def validate_event_evidence_contract(payload: dict[str, Any]) -> None:
     # 必須キー群
     required_keys = {
@@ -772,9 +809,6 @@ def validate_event_evidence_contract(payload: dict[str, Any]) -> None:
             raise LLMError(f"EventEvidence {slot_name} に改行を含めてはいけません。")
         if INTERNAL_IDENTIFIER_PATTERN.search(normalized) is not None:
             raise LLMError(f"EventEvidence {slot_name} に内部識別子を含めてはいけません。")
-        sentence_count = len([part for part in re.split(r"[。!?！？]+", normalized) if part.strip()])
-        if sentence_count != MAX_EVENT_EVIDENCE_SLOT_SENTENCES:
-            raise LLMError(f"EventEvidence {slot_name} は指定する場合、ちょうど 1 文である必要があります。")
         present_slot_count += 1
 
     if present_slot_count == 0:
@@ -814,10 +848,6 @@ def validate_world_state_contract(payload: dict[str, Any]) -> None:
             raise LLMError("WorldState candidate.summary_text に改行を含めてはいけません。")
         if INTERNAL_IDENTIFIER_PATTERN.search(normalized_summary) is not None:
             raise LLMError("WorldState candidate.summary_text に内部識別子を含めてはいけません。")
-        sentence_count = len([part for part in re.split(r"[。!?！？]+", normalized_summary) if part.strip()])
-        if sentence_count != 1:
-            raise LLMError("WorldState candidate.summary_text はちょうど 1 文である必要があります。")
-
         confidence_hint = candidate["confidence_hint"]
         salience_hint = candidate["salience_hint"]
         ttl_hint = candidate["ttl_hint"]
@@ -851,10 +881,6 @@ def validate_visual_observation_contract(payload: dict[str, Any]) -> None:
         raise LLMError("VisualObservation summary_text が最大長を超えています。")
     if INTERNAL_IDENTIFIER_PATTERN.search(normalized_summary) is not None:
         raise LLMError("VisualObservation summary_text に内部識別子を含めてはいけません。")
-    sentence_count = len([part for part in re.split(r"[。!?！？]+", normalized_summary) if part.strip()])
-    if sentence_count != 1:
-        raise LLMError("VisualObservation summary_text はちょうど 1 文である必要があります。")
-
     # confidence_hint
     confidence_hint = payload["confidence_hint"]
     if confidence_hint not in WORLD_STATE_HINT_VALUES:
@@ -1007,10 +1033,6 @@ def validate_recall_pack_selection_contract(payload: dict[str, Any], *, source_p
             raise LLMError("RecallPackSelection summary_text に改行を含めてはいけません。")
         if INTERNAL_IDENTIFIER_PATTERN.search(normalized_summary) is not None:
             raise LLMError("RecallPackSelection summary_text に内部識別子を含めてはいけません。")
-        sentence_count = len([part for part in re.split(r"[。!?！？]+", normalized_summary) if part.strip()])
-        if sentence_count != MAX_RECALL_PACK_CONFLICT_SUMMARY_SENTENCES:
-            raise LLMError("RecallPackSelection summary_text はちょうど 1 文である必要があります。")
-
     if seen_conflict_refs != valid_conflict_refs:
         raise LLMError("RecallPackSelection conflict_summaries はすべての conflict_ref を網羅する必要があります。")
 
@@ -1064,6 +1086,3 @@ def validate_pending_intent_selection_contract(payload: dict[str, Any], *, sourc
         raise LLMError("PendingIntentSelection selection_reason に改行を含めてはいけません。")
     if INTERNAL_IDENTIFIER_PATTERN.search(normalized_reason) is not None:
         raise LLMError("PendingIntentSelection selection_reason に内部識別子を含めてはいけません。")
-    sentence_count = len([part for part in re.split(r"[。!?！？]+", normalized_reason) if part.strip()])
-    if sentence_count != MAX_PENDING_INTENT_SELECTION_REASON_SENTENCES:
-        raise LLMError("PendingIntentSelection selection_reason はちょうど 1 文である必要があります。")

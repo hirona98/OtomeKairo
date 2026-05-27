@@ -36,10 +36,10 @@ desktop capture はその瞬間のコメントや判断にだけ使い、`world_
 
 | 項目 | 役割 |
 |------|------|
-| `summary_text` | 画面の前景を 1 文で表した短い要約 |
+| `summary_text` | 画面の前景を短く表した要約 |
 | `confidence_hint` | `low / medium / high` の確からしさ |
 
-`summary_text` は、判断に効く前景だけを 1 文に圧縮する。
+`summary_text` は、判断に効く前景だけを短く圧縮する。
 対象は「どのアプリ / 画面 / 会話 / 作業が前景か」「何が起きていそうか」の第一段に留める。
 
 ## LLM 契約
@@ -90,7 +90,7 @@ LLM の出力は JSON object 1 個に固定する。
 契約は次とする。
 
 - トップレベルキーは `summary_text / confidence_hint` だけにする
-- `summary_text` は 1 文、改行なし、内部識別子なしにする
+- `summary_text` は簡潔にし、改行なし、内部識別子なしにする
 - `summary_text` は見えている内容の短い要約に留め、推測を膨らませない
 - `confidence_hint` は `low / medium / high` のいずれかにする
 - raw payload、資格情報、内部 URL、配送先 client、base64 本文を出力しない

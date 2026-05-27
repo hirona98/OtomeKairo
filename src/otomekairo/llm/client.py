@@ -151,13 +151,12 @@ class LLMClient:
         if set(payload.keys()) != required_keys:
             raise LLMError("InputInterpretation のキーが契約と一致しません。")
         recall_hint = payload["recall_hint"]
-        answer_contract = payload["answer_contract"]
         if not isinstance(recall_hint, dict):
             raise LLMError("InputInterpretation.recall_hint は object である必要があります。")
-        if not isinstance(answer_contract, dict):
+        if not isinstance(payload["answer_contract"], dict):
             raise LLMError("InputInterpretation.answer_contract は object である必要があります。")
         validate_recall_hint_contract(normalize_recall_hint_payload(recall_hint))
-        validate_answer_contract_contract(answer_contract)
+        validate_answer_contract_contract(payload["answer_contract"])
 
     def generate_recall_hint(
         self,

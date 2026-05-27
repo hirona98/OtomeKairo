@@ -329,7 +329,7 @@ def build_memory_reflection_summary_repair_prompt(validation_error: str) -> str:
         f"validator_error: {validation_error}\n"
         "同じ evidence pack だけを根拠に、JSON オブジェクト 1 個だけを返し直してください。\n"
         "トップレベルキーは summary_text だけです。\n"
-        "summary_text は 1 文から 2 文、140 文字以内、改行なしで返してください。\n"
+        "summary_text は簡潔に、140 文字以内、改行なしで返してください。\n"
         "新しい事実の追加、内部識別子、Markdown、コードフェンス、説明文は禁止です。"
     )
 
@@ -360,7 +360,7 @@ def build_event_evidence_repair_prompt(validation_error: str) -> str:
         "同じ source pack だけを根拠に、JSON オブジェクト 1 個だけを返し直してください。\n"
         "トップレベルキーは anchor, topic, decision_or_result, tone_or_note の 4 つだけです。\n"
         "各値は string または null です。少なくとも 1 つは null ではなくしてください。\n"
-        "各 slot は present な場合 1 文だけ、改行なしで返してください。\n"
+        "各 slot は present な場合は簡潔に、改行なしで返してください。\n"
         "新しい事実の追加、内部識別子、Markdown、コードフェンス、説明文は禁止です。"
     )
 
@@ -378,7 +378,7 @@ def build_recall_pack_selection_repair_prompt(validation_error: str) -> str:
         "candidate_refs には source pack に含まれる candidate_ref だけを使い、section をまたいで重複させないでください。\n"
         "conflict_summaries の各要素は conflict_ref と summary_text を持つ object だけです。\n"
         "source pack にある conflict_ref はすべて 1 回ずつ返してください。\n"
-        "summary_text は 1 文、改行なし、内部識別子なしで返してください。\n"
+        "summary_text は簡潔に、改行なし、内部識別子なしで返してください。\n"
         "新しい候補の追加、section 名の発明、Markdown、コードフェンス、説明文は禁止です。"
     )
 
@@ -402,7 +402,7 @@ def build_pending_intent_selection_repair_prompt(validation_error: str) -> str:
         "同じ source pack だけを根拠に、JSON オブジェクト 1 個だけを返し直してください。\n"
         "トップレベルキーは selected_candidate_ref, selection_reason の 2 つだけです。\n"
         "selected_candidate_ref は source pack に含まれる candidate_ref か none のどちらかだけです。\n"
-        "selection_reason は 1 文、改行なし、内部識別子なしで返してください。\n"
+        "selection_reason は簡潔に、改行なし、内部識別子なしで返してください。\n"
         "新しい候補の追加、内部識別子、Markdown、コードフェンス、説明文は禁止です。"
     )
 
@@ -418,7 +418,7 @@ def build_world_state_repair_prompt(validation_error: str) -> str:
         + " / ".join(sorted(WORLD_STATE_TYPE_VALUES))
         + " のいずれかだけを使ってください。\n"
         "scope は self / user / world / entity:<key> / topic:<key> / relationship:<key> 形式だけを使ってください。\n"
-        "summary_text は 1 文、改行なし、内部識別子なしで返してください。\n"
+        "summary_text は簡潔に、改行なし、内部識別子なしで返してください。\n"
         "confidence_hint と salience_hint は "
         + " / ".join(sorted(WORLD_STATE_HINT_VALUES))
         + " のいずれかです。\n"
@@ -959,7 +959,7 @@ def _build_memory_reflection_summary_system_prompt() -> str:
         "reflective consolidation 用の evidence pack を読み、summary_text だけを JSON オブジェクト 1 個で返してください。\n"
         "Markdown、コードフェンス、説明文は禁止です。\n"
         "返すキーは summary_text だけです。\n"
-        "summary_text は 1 文から 2 文、140 文字以内、改行なしで返してください。\n"
+        "summary_text は簡潔に、140 文字以内、改行なしで返してください。\n"
         "渡された evidence pack の外を推測で埋めないでください。\n"
         "単発出来事の説明ではなく、反復して見えている傾向として要約してください。\n"
         "summary_status_candidate=inferred のときは断定しすぎず、confirmed のときも過剰な人格断定は避けてください。\n"
@@ -977,7 +977,7 @@ def _build_event_evidence_system_prompt() -> str:
         "Markdown、コードフェンス、説明文は禁止です。\n"
         "返すキーは anchor, topic, decision_or_result, tone_or_note の 4 つだけです。\n"
         "各値は string または null にしてください。少なくとも 1 つは null ではなくしてください。\n"
-        "各 slot は 1 文だけ、改行なしで返してください。\n"
+        "各 slot は簡潔に、改行なしで返してください。\n"
         "source pack に無い事実を補ってはいけません。\n"
         "長い逐語引用、言い直し、相槌の再掲は避けてください。\n"
         "decision_or_result は決定や結果があるときだけ書き、tone_or_note は補助に留めてください。\n"
@@ -1001,7 +1001,7 @@ def _build_recall_pack_selection_system_prompt() -> str:
         "同じ candidate_ref を section をまたいで重複させてはいけません。\n"
         "conflict_summaries の各要素は conflict_ref と summary_text を持つ object です。\n"
         "source pack にある conflict_ref は、ある場合すべて 1 回ずつ返してください。\n"
-        "summary_text は 1 文、改行なし、内部識別子なしで返してください。\n"
+        "summary_text は簡潔に、改行なし、内部識別子なしで返してください。\n"
         "候補外のものを足してはいけません。section 名を発明してはいけません。\n"
         "primary_recall_focus を主軸にし、secondary_recall_focuses は軽い補助に留めてください。\n"
         "association 候補は使えても、構造候補より無条件に優先してはいけません。\n"
@@ -1020,7 +1020,7 @@ def _build_pending_intent_selection_system_prompt() -> str:
         "候補外のものを足してはいけません。内部識別子を書いてはいけません。\n"
         "oldest-first で選ばず、trigger_kind と input_context に照らして今前に出す自然さを優先してください。\n"
         "wake では慎重に選び、自然さが弱いなら none を返してください。\n"
-        "selection_reason は 1 文、改行なしで返してください。"
+        "selection_reason は簡潔に、改行なしで返してください。"
     )
 
 
@@ -1036,7 +1036,7 @@ def _build_world_state_system_prompt() -> str:
         + " / ".join(sorted(WORLD_STATE_TYPE_VALUES))
         + " のいずれかだけを使ってください。\n"
         "scope は self / user / world / entity:<key> / topic:<key> / relationship:<key> 形式だけを使ってください。\n"
-        "summary_text は 1 文、改行なし、内部識別子なしにしてください。\n"
+        "summary_text は簡潔に、改行なし、内部識別子なしにしてください。\n"
         "confidence_hint と salience_hint は "
         + " / ".join(sorted(WORLD_STATE_HINT_VALUES))
         + " のいずれかだけを使ってください。\n"

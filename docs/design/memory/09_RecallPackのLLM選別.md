@@ -257,7 +257,7 @@ LLM の出力は JSON object 1 個に固定する。
 - `candidate_refs` は section をまたいで重複しない
 - candidate は元の所属 section から移動させない
 - `conflict_summaries` の `conflict_ref` も source pack 内に存在する ref だけを使う
-- `summary_text` は 1 文、改行なし、内部識別子なし、固定文の繰り返しではない
+- `summary_text` は簡潔にし、改行なし、内部識別子なし、固定文の繰り返しではない
 
 最終的な `RecallPack` では、コード側が ref を実 candidate へ戻し、同じ shape に射影する。
 
