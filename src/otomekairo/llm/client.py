@@ -57,11 +57,6 @@ from otomekairo.world_state.models import WorldStateSourcePack
 from otomekairo.llm.transport import complete_text, generate_embeddings as transport_generate_embeddings
 from otomekairo.service.common import debug_log
 
-
-# 定数
-LLM_DEBUG_TEXT_PREVIEW_LIMIT = 200
-
-
 # LiteLLM連携
 @dataclass(slots=True)
 class LLMClient:
@@ -201,9 +196,7 @@ class LLMClient:
             last_contract_error: LLMError | None = None
             for attempt in range(2):
                 debug_log("LLM", f"{operation} attempt={attempt + 1} request messages={len(messages)}")
-                self._debug_messages_preview(operation=operation, attempt=attempt + 1, messages=messages)
                 content = complete_text(role_definition=role_definition, messages=messages)
-                self._debug_response_preview(operation=operation, attempt=attempt + 1, content=content)
                 try:
                     payload = parse_recall_hint_payload(content)
                     debug_log(
@@ -733,9 +726,7 @@ class LLMClient:
 
             # 補完
             debug_log("LLM", f"{operation} request messages={len(messages)}")
-            self._debug_messages_preview(operation=operation, attempt=1, messages=messages)
             content = complete_text(role_definition=role_definition, messages=messages)
-            self._debug_response_preview(operation=operation, attempt=1, content=content)
             reply_text = content.strip()
             if not reply_text:
                 raise LLMError("Reply の生成結果が空でした。")
@@ -1078,7 +1069,6 @@ class LLMClient:
                 f"model={self._debug_model(role_definition)} texts={len(texts)} dimension={embedding_dimension}"
             ),
         )
-        self._debug_embedding_texts_preview(texts)
 
         # モック経路
         if self._is_mock_role_definition(role_definition):
@@ -1119,127 +1109,6 @@ class LLMClient:
         keys = sorted(str(key) for key in payload.keys())[:8]
         return ",".join(keys) if keys else "-"
 
-    def _debug_text_preview(self, value: Any) -> str:
-        # 元文字列の先頭 200 文字だけを出す。
-        if not isinstance(value, str):
-            if isinstance(value, list):
-                parts: list[str] = []
-                for item in value[:3]:
-                    if not isinstance(item, dict):
-                        continue
-                    item_type = item.get("type")
-                    if item_type == "text":
-                        text = item.get("text")
-                        if isinstance(text, str):
-                            preview = text[:80].replace("\r", "\\r").replace("\n", "\\n")
-                            parts.append(f"text:{preview}")
-                            continue
-                    if item_type == "image_url":
-                        parts.append("image_url")
-                return " | ".join(parts) if parts else "-"
-            return "-"
-        return value[:LLM_DEBUG_TEXT_PREVIEW_LIMIT].replace("\r", "\\r").replace("\n", "\\n")
-
-    def _debug_text_length(self, value: Any) -> int:
-        # 文字列以外は 0 扱いにする。
-        if not isinstance(value, str):
-            if isinstance(value, list):
-                length = 0
-                for item in value:
-                    if not isinstance(item, dict):
-                        continue
-                    text = item.get("text")
-                    if isinstance(text, str):
-                        length += len(text)
-                        continue
-                    if item.get("type") == "image_url":
-                        length += 16
-                return length
-            return 0
-        return len(value)
-
-    def _debug_image_count(self, value: Any) -> int:
-        # multimodal content の画像数だけを数える。
-        if not isinstance(value, list):
-            return 0
-        count = 0
-        for item in value:
-            if isinstance(item, dict) and item.get("type") == "image_url":
-                count += 1
-        return count
-
-    def _debug_messages_size_summary(
-        self,
-        *,
-        operation: str,
-        attempt: int,
-        messages: list[dict[str, Any]],
-    ) -> None:
-        # prompt 肥大化を追えるよう、内容ではなくサイズだけを集計する。
-        role_chars: dict[str, int] = {}
-        image_count = 0
-        for message in messages:
-            if not isinstance(message, dict):
-                continue
-            role = message.get("role")
-            role_name = role if isinstance(role, str) and role else "unknown"
-            content = message.get("content")
-            role_chars[role_name] = role_chars.get(role_name, 0) + self._debug_text_length(content)
-            image_count += self._debug_image_count(content)
-        total_chars = sum(role_chars.values())
-        debug_log(
-            "LLM",
-            (
-                f"{operation} prompt_size attempt={attempt} total_chars={total_chars} "
-                f"system_chars={role_chars.get('system', 0)} user_chars={role_chars.get('user', 0)} "
-                f"assistant_chars={role_chars.get('assistant', 0)} images={image_count}"
-            ),
-        )
-
-    def _debug_messages_preview(
-        self,
-        *,
-        operation: str,
-        attempt: int,
-        messages: list[dict[str, Any]],
-    ) -> None:
-        # LLMへ送る message content の先頭だけを出す。
-        self._debug_messages_size_summary(operation=operation, attempt=attempt, messages=messages)
-        total = len(messages)
-        for index, message in enumerate(messages, start=1):
-            role = message.get("role") if isinstance(message, dict) else None
-            content = message.get("content") if isinstance(message, dict) else None
-            debug_log(
-                "LLM",
-                (
-                    f"{operation} send attempt={attempt} message={index}/{total} "
-                    f"role={role if isinstance(role, str) else '-'} chars={self._debug_text_length(content)} "
-                    f"text={self._debug_text_preview(content)}"
-                ),
-            )
-
-    def _debug_response_preview(self, *, operation: str, attempt: int, content: str) -> None:
-        # LLMから返った文字列の先頭だけを出す。
-        debug_log(
-            "LLM",
-            (
-                f"{operation} recv attempt={attempt} chars={len(content)} "
-                f"text={self._debug_text_preview(content)}"
-            ),
-        )
-
-    def _debug_embedding_texts_preview(self, texts: list[str]) -> None:
-        # embeddings に送る文字列の先頭だけを出す。
-        total = len(texts)
-        for index, text in enumerate(texts, start=1):
-            debug_log(
-                "LLM",
-                (
-                    f"embeddings send text={index}/{total} chars={self._debug_text_length(text)} "
-                    f"text={self._debug_text_preview(text)}"
-                ),
-            )
-
     def _is_mock_role_definition(self, role_definition: dict) -> bool:
         # model=mock* は開発用の内蔵ロジックへ切り替える。
         model = role_definition.get("model")
@@ -1263,9 +1132,7 @@ class LLMClient:
         attempt_messages = list(messages)
         for attempt in range(2):
             debug_log("LLM", f"{operation} attempt={attempt + 1} request messages={len(attempt_messages)}")
-            self._debug_messages_preview(operation=operation, attempt=attempt + 1, messages=attempt_messages)
             content = complete_text(role_definition=role_definition, messages=attempt_messages)
-            self._debug_response_preview(operation=operation, attempt=attempt + 1, content=content)
             try:
                 payload = parse_json_object(content)
                 try:

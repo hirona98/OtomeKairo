@@ -364,9 +364,6 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
         payload = json.loads(raw_body.decode("utf-8"))
         if not isinstance(payload, dict):
             raise ServiceError(400, "invalid_json_shape", "The request body must be a JSON object.")
-        parsed = urlparse(self.path)
-        if self._should_log_http_path(parsed.path):
-            debug_log("HTTP", f"{self.command} {parsed.path} body_bytes={len(raw_body)} body_keys={sorted(payload)}")
         return payload
 
     def _bearer_token(self) -> str | None:
