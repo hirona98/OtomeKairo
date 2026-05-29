@@ -110,7 +110,6 @@ class LLMClient:
                 return payload
 
             messages = build_input_interpretation_messages(
-                input_text=input_text,
                 current_input=current_input,
                 recent_turns=recent_turns,
                 current_time=current_time,
@@ -186,7 +185,6 @@ class LLMClient:
 
             # プロンプト構築
             messages = build_recall_hint_messages(
-                input_text=input_text,
                 current_input=current_input,
                 recent_turns=recent_turns,
                 current_time=current_time,

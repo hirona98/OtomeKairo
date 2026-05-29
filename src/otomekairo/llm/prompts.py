@@ -24,7 +24,6 @@ from otomekairo.world_state.models import WorldStateSourcePack
 # 入力解釈用の message 群を組み立てる。
 def build_input_interpretation_messages(
     *,
-    input_text: str,
     current_input: CurrentInput,
     recent_turns: list[dict],
     current_time: str,
@@ -53,7 +52,6 @@ def build_input_interpretation_messages(
 # RecallHint 用の message 群を組み立てる。
 def build_recall_hint_messages(
     *,
-    input_text: str,
     current_input: CurrentInput,
     recent_turns: list[dict],
     current_time: str,
@@ -387,11 +385,22 @@ def build_answer_contract_repair_prompt(validation_error: str) -> str:
     return (
         "前回の出力は AnswerContract 契約を満たしていませんでした。\n"
         f"validation_error: {validation_error}\n"
-        "JSON オブジェクト 1 個だけを返してください。\n"
+        "同じ入力だけを根拠に、JSON オブジェクト 1 個だけを返し直してください。\n"
         "トップレベルキーは contract, reason_codes, boundary, target_actor, query_terms の 5 つだけです。\n"
-        "contract は許可値だけを使ってください。\n"
+        "contract は "
+        + " / ".join(sorted(ANSWER_CONTRACT_VALUES))
+        + " のいずれかだけを使ってください。\n"
+        "boundary は "
+        + " / ".join(sorted(ANSWER_BOUNDARY_VALUES))
+        + " のいずれかだけを使ってください。\n"
+        "target_actor は "
+        + " / ".join(sorted(ANSWER_TARGET_ACTOR_VALUES))
+        + " のいずれかだけを使ってください。\n"
         "boundary は exact_boundary のとき first または latest にしてください。\n"
         "exact_statement で対象が初回や最新に限定されるときも boundary に first または latest を入れてください。\n"
+        "contract が exact_boundary / exact_statement 以外なら boundary は none です。\n"
+        "reason_codes は最大 3 件、query_terms は文字列配列です。\n"
+        "余計なキー、Markdown、コードフェンス、説明文は禁止です。"
     )
 
 
@@ -435,7 +444,7 @@ def build_visual_observation_repair_prompt(validation_error: str) -> str:
         f"validator_error: {validation_error}\n"
         "同じ画像と source pack だけを根拠に、JSON オブジェクト 1 個だけを返し直してください。\n"
         "トップレベルキーは summary_text, confidence_hint の 2 つだけです。\n"
-        "summary_text は 1～3 文、改行なし、内部識別子なしで返してください。\n"
+        "summary_text は 2～5 文、改行なし、内部識別子なしで返してください。\n"
         "confidence_hint は "
         + " / ".join(sorted(WORLD_STATE_HINT_VALUES))
         + " のいずれかです。\n"
@@ -496,7 +505,8 @@ def _build_input_interpretation_system_prompt() -> str:
             + "world は focus_scopes に入れず、世界条件が主題のとき primary_recall_focus=state または fact を選んでください。\n"
             + "answer_contract は回答生成前にどの根拠を直接確認するかの契約です。一般応答は summary を返してください。\n"
             + "answer_contract は contract, reason_codes, boundary, target_actor, query_terms の 5 キーだけを持ちます。\n"
-            + "発話の原文、正確な日時、初回・最新、根拠、矛盾確認を求める入力は direct evidence 契約を選びます。\n"
+            + "初回・最新の境界を求める入力は exact_boundary、発話の原文を求める入力は exact_statement、根拠や出典を求める入力は provenance、矛盾確認を求める入力は conflict_check を選んでください。\n"
+            + "正確な日時を求める入力は、初回・最新の境界が主題なら exact_boundary、特定発話や根拠の日時が主題なら provenance を選んでください。\n"
             + "一字一句の原文要求と初回・最初・初めてが同時に含まれる入力は exact_statement を選び、boundary=first にしてください。\n"
             + "一字一句の原文要求と最新・最後・直近が同時に含まれる入力は exact_statement を選び、boundary=latest にしてください。\n"
             + "発話原文を求めるが対象発話が指定されていない場合も exact_statement を選び、query_terms は空配列にしてください。\n"
@@ -794,7 +804,8 @@ def _build_answer_contract_system_prompt() -> str:
         "ユーザー入力に答えるために必要な根拠の種類だけを JSON で指定してください。\n"
         "これは話題分類ではなく、回答生成前にどの根拠を直接確認するかの契約です。\n"
         "コード側は出力 contract を機械的に実行します。根拠が不要な一般応答は summary を返してください。\n"
-        "発話の原文、正確な日時、初回・最新、根拠、矛盾確認を求める入力は direct evidence 契約を選びます。\n"
+        "初回・最新の境界を求める入力は exact_boundary、発話の原文を求める入力は exact_statement、根拠や出典を求める入力は provenance、矛盾確認を求める入力は conflict_check を選んでください。\n"
+        "正確な日時を求める入力は、初回・最新の境界が主題なら exact_boundary、特定発話や根拠の日時が主題なら provenance を選んでください。\n"
         "一字一句の原文要求と初回・最初・初めてが同時に含まれる入力は exact_statement を選び、boundary=first にしてください。\n"
         "一字一句の原文要求と最新・最後・直近が同時に含まれる入力は exact_statement を選び、boundary=latest にしてください。\n"
         "会話ややり取り全体の原文要求では target_actor=any にしてください。\n"
@@ -1045,7 +1056,8 @@ def _build_world_state_system_prompt() -> str:
         "ttl_hint は "
         + " / ".join(sorted(WORLD_STATE_TTL_HINT_VALUES))
         + " のいずれかだけを使ってください。\n"
-        "raw payload、資格情報、内部 URL、配送先 client、画像本文の意味内容を書いてはいけません。\n"
+        "raw payload、資格情報、内部 URL、配送先 client、base64、OCR 全文を書いてはいけません。\n"
+        "raw image を直接読んだように書かず、画像由来の判断は source pack にある visual_summary_text の範囲だけにしてください。\n"
         "visual_context / external_service_context / body_context / device_context / schedule_context / social_context_context / environment_context / location_context があるときは、その短い summary_text と補助 field だけを根拠に使ってください。\n"
         "current_input_summary、current_time_text、wake の時刻情報だけから現在状態を推測してはいけません。\n"
         "visual_context.visual_summary_text は視覚前景の短い補助要約として使い、external_service_context.status_text / service は外部状態の補助情報として使ってください。\n"
@@ -1065,10 +1077,10 @@ def _build_visual_observation_system_prompt() -> str:
         "画像と source pack を読み、JSON オブジェクト 1 個だけを返してください。\n"
         "Markdown、コードフェンス、説明文は禁止です。\n"
         "返すトップレベルキーは summary_text, confidence_hint の 2 つだけです。\n"
-        "summary_text は 1～3 文、改行なし、内部識別子なしにしてください。\n"
-        "source_pack.image_input_kind が conversation_attachment の場合は、会話に添付された画像として詳細な説明文に変換してください。\n"
-        "source_pack.image_input_kind が vision_capture_result の場合は、現在の視覚前景として詳細な説明文に変換してください。\n"
-        "summary_text では、画像に見えている内容のうち判断に効く部分だけを短く要約してください。\n"
+        "summary_text は 2～5 文、改行なし、内部識別子なしにしてください。\n"
+        "source_pack.image_input_kind が conversation_attachment の場合は、会話に添付された画像として、ユーザーの質問に答えるために必要な見えている内容を詳細な説明文に変換してください。\n"
+        "source_pack.image_input_kind が vision_capture_result の場合は、現在の視覚前景として、判断に効く対象、状態、配置、変化を詳細な説明文に変換してください。\n"
+        "summary_text では、画像に見えている内容のうち判断に効く部分を具体的に書いてください。\n"
         "細かな OCR の全文、座標、UI 構造、資格情報、内部 URL、配送先 client、base64 本文を書いてはいけません。\n"
         "画像に自信が持てない場合は、控えめな summary_text と low confidence を返してください。\n"
         "confidence_hint は "
