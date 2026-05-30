@@ -263,14 +263,14 @@ class ServiceInputVisualMixin:
             "source": source,
             "image_input_kind": image_input_kind,
             "image_interpreted": observation_summary.get("image_interpreted") is True,
-            "visual_summary_text": self._clamp(summary_text, limit=240),
+            "visual_summary_text": self._clamp(summary_text, limit=1200),
         }
         for key in ("image_count", "visual_confidence_hint", "vision_source_id", "source_kind", "source_label"):
             value = observation_summary.get(key)
             if value is not None:
                 payload[key] = value
         if source == "vision_capture_result":
-            payload["retention_policy"] = "ephemeral_decision_only"
+            payload["retention_policy"] = "visual_record_candidate"
         return payload
 
     def _observation_summary_is_desktop_vision_capture(

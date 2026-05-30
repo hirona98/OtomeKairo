@@ -294,7 +294,7 @@ class ServiceInputWakeObservationMixin:
         if result_error:
             final_step_summary = "wake_policy observation を中断した。"
         elif self._observation_summary_is_desktop_vision_capture(observation_summary):
-            final_step_summary = "desktop wake observation の結果を一時観測として判断材料へ反映した。"
+            final_step_summary = "desktop wake observation の結果を視覚記録候補と判断材料へ反映した。"
         else:
             final_step_summary = "wake_policy observation の結果を world_state へ反映した。"
         detail_summary = failure_reason or self._capability_result_followup_hint_summary(

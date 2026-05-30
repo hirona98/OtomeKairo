@@ -400,8 +400,6 @@ class ServiceInputWorldStateSourcePackMixin:
     ) -> bool:
         if not isinstance(observation_summary, dict):
             return False
-        if self._observation_summary_is_desktop_vision_capture(observation_summary):
-            return False
         return (
             observation_summary.get("source") == "capability_result"
             and observation_summary.get("capability_id") == "vision.capture"

@@ -129,7 +129,7 @@ request:
 - `client_context` は object とする。値がないときは省略する
 - 標準の `client_context` には `source / client_id / active_app / window_title / locale` を含める
 - `client_context` の任意 field として `social_context_summary / environment_summary / location_summary / external_service_summary / body_state_summary / device_state_summary / schedule_summary` を定義する。いずれも raw payload ではなく短い要約だけを渡す
-- server は `images` を永続化せず、必要な場合だけ短い観測要約へ変換して shared pipeline に渡す
+- server は raw `images` を永続化せず、必要な場合だけ詳細な視覚説明へ変換して shared pipeline と視覚記録へ渡す
 - 会話の `images` は `conversation_attachment` として扱い、`vision.capture` の capability result とは結び付けない
 - 会話の `images` だけから `world_state.visual_context` を更新しない
 - server は上記 summary をそのまま永続化せず、必要な場合だけ `world_state` source pack の補助文脈へ使う
@@ -250,7 +250,7 @@ wake API は少なくとも次の挙動を持つ。
 
 - `wake_policy.mode=disabled` なら `noop`
 - `mode=interval` で次回時刻にまだ達していなければ `noop`
-- `mode=interval` で `wake_policy.observations` がある場合、enabled observation を順番に取得し、成功結果をその回の判断へ進む前景シグナルとして扱い、desktop capture は一時観測として runtime novelty だけを判定し、継続状態は `world_state` として整理してから wake 判断を 1 回だけ行う
+- `mode=interval` で `wake_policy.observations` がある場合、enabled observation を順番に取得し、成功結果をその回の判断へ進む前景シグナルとして扱い、desktop capture は runtime novelty を判定し、視覚記録と `world_state` を整理してから wake 判断を 1 回だけ行う
 - wake_policy observation が vision source 未接続の一時失敗だけで終わった場合、server は interval を消費せず短い再試行待ちにする
 - wake_policy observation の同期 capability request は内部観測として扱い、`ongoing_action` を作らない
 - server は wake 入力を `current_input.sender=system`、`source_kind=wake`、`response_target=none` として shared pipeline に渡す
