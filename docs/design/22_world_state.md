@@ -80,6 +80,12 @@
 人からの入力が状態確認の依頼だけで具体的な状態値を含まない場合、その入力は `world_state` の現在状態 source にしない。
 現在場所、身体状態、端末状態、周囲環境、対人文脈の確認依頼は、対応 capability の result または `client_context` に明示 summary がある場合だけ短期状態へ反映する。
 
+`world_state` 更新 LLM は、状態化できる source がある場合だけ呼ぶ。
+`capability_result` は常に更新 LLM の対象にする。
+`observation_summary` がある入力、または source pack に `visual_context / external_service_context / body_context / device_context / schedule_context / social_context_context / environment_context / location_context / capability_result_summary` のいずれかがある入力は更新 LLM の対象にする。
+それ以外の通常会話入力では更新 LLM を呼ばず、既存 foreground `world_state` だけを判断へ渡す。
+スキップした cycle は `world_state_trace.result_status=skipped` として残す。
+
 LLM は、観測や結果から `summary_text` と前景性を整理する。
 コードは、契約検証、`state_type`、`scope`、`source_ref`、`confidence`、`salience`、`summary_source`、`expires_at`、統合単位、状態遷移を決める。
 

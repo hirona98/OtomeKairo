@@ -11,7 +11,7 @@
 1. `input_interpretation`
 2. `recall_pack_selection`
 3. `event_evidence` 0 件以上
-4. `world_state`
+4. `world_state`（状態化できる source がある場合）
 5. `decision`
 6. `reply`
 7. `memory_interpretation`
@@ -40,18 +40,21 @@ flowchart TD
     H -- 不要 --> J[evidence_resolution]
     I --> J
     J --> K[context 構築]
-    K --> L[LLM world_state]
-    L --> M[LLM decision]
-    M --> N{decision.kind}
-    N -- reply --> O[LLM reply]
-    N -- capability_request --> P[capability dispatch]
-    N -- noop/pending_intent --> Q[返信なし]
-    O --> R[persist cycle]
-    P --> R
-    Q --> R
-    R --> S[LLM memory_interpretation]
-    S --> T[postprocess job queue]
-    T --> U[HTTP response]
+    K --> L{world_state source あり}
+    L -- あり --> M[LLM world_state]
+    L -- なし --> N[既存 foreground world_state を使用]
+    M --> O[LLM decision]
+    N --> O
+    O --> P{decision.kind}
+    P -- reply --> Q[LLM reply]
+    P -- capability_request --> R[capability dispatch]
+    P -- noop/pending_intent --> S[返信なし]
+    Q --> T[persist cycle]
+    R --> T
+    S --> T
+    T --> U[LLM memory_interpretation]
+    U --> V[postprocess job queue]
+    V --> W[HTTP response]
 ```
 
 実装上の順序は `_run_input_pipeline` 内で、想起入力、内部コンテキスト、decision、出力の順に並ぶ。`world_state` は内部コンテキスト構築中に呼ばれる。
@@ -64,7 +67,7 @@ flowchart TD
 | 1 | `input_interpretation` | `service/input/pipeline.py` | 同期直列 | `recall_hint` と `answer_contract` を 1 回の構造化 LLM で得る。 |
 | 2 | `recall_pack_selection` | `recall/builder.py`, `recall/selection.py` | 同期直列 | 候補が空ならスキップする。 |
 | 3 | `event_evidence` | `recall/event_evidence.py` | 同期待ち、event 単位は上限付き並列 | `requested_event_ids` の順序を保持し、LLM 圧縮結果を元順序へ戻す。 |
-| 4 | `world_state` | `service/input/world_state_source_pack.py` | 同期直列 | 失敗時は直前の foreground world_state を使い続ける。 |
+| 4 | `world_state` | `service/input/world_state_source_pack.py` | 条件付き同期直列 | 状態化できる source がある場合だけ呼ぶ。失敗時とスキップ時は直前の foreground world_state を使い続ける。 |
 | 5 | `decision` | `service/input/pipeline.py` | 同期直列 | 出力契約違反時は repair prompt で 1 回再試行する。 |
 | 6 | `reply` | `service/input/pipeline.py` | 同期直列 | `decision.kind == reply` の場合だけ実行する。 |
 | 7 | `memory_interpretation` | `service/memory.py`, `memory/consolidator.py` | 同期直列 | HTTP response 返却前に実行する。 |
@@ -121,7 +124,7 @@ background wake scheduler は daemon thread で動く。wake cycle 本体は `_w
 
 ### 1. 通常応答前の LLM 呼び出し数が多い
 
-通常会話で `reply` まで進む場合、少なくとも `input_interpretation`、`world_state`、`recall_pack_selection`、`decision`、`reply`、`memory_interpretation` を待つ。`event_evidence` が発生すると追加で最大複数回待つ。
+通常会話で `reply` まで進む場合、少なくとも `input_interpretation`、`recall_pack_selection`、`decision`、`reply`、`memory_interpretation` を待つ。状態化できる source がある場合は `world_state` も待つ。`event_evidence` が発生すると追加で最大複数回待つ。
 
 ### 2. `memory_interpretation` がレスポンス返却前にある
 
@@ -135,9 +138,9 @@ background wake scheduler は daemon thread で動く。wake cycle 本体は `_w
 
 構造化 LLM は契約違反や JSON parse 失敗時に 1 回 repair retry を行う。`decision`、`recall_pack_selection`、`event_evidence`、`world_state`、`memory_*` で発生する。ログには `parse_failed`、`validation_failed`、`attempt=2` が出る。
 
-### 5. `world_state` はほぼ毎 cycle 呼ばれる
+### 5. `world_state` は source 条件に左右される
 
-`_build_pipeline_internal_contexts` は `_refresh_world_state_context` を毎回呼ぶ。`world_state` 生成に失敗しても cycle は継続するため、速度優先なら呼び出し条件やスキップ条件を検討する余地がある。
+`_build_pipeline_internal_contexts` は `_refresh_world_state_context` を毎回呼ぶが、`world_state` LLM は状態化できる source がある場合だけ呼ぶ。通常会話で capability result、observation summary、world_state context がない場合は `result_status=skipped` として既存 foreground world_state だけを判断へ渡す。
 
 ### 6. OpenRouter embedding timeout が長い
 
@@ -181,10 +184,10 @@ cycle trace には `recall_pack_selection`、`event_evidence_generation`、`worl
 
 ### 優先度 中
 
-4. `world_state` の呼び出し条件を絞る
-   - 毎 cycle の LLM 呼び出しになっている。
-   - `client_context`、`observation_summary`、`capability_result_summary`、入力種別に意味ある source context がない場合はスキップする案がある。
-   - ただし docs 上の world_state 方針との同期が必要である。
+4. `world_state` のスキップ率と判断品質を確認する
+   - `capability_result`、`observation_summary`、source pack context がある場合だけ `world_state` LLM を呼ぶ。
+   - それ以外は `result_status=skipped` とし、既存 foreground world_state を判断へ渡す。
+   - スキップ後に不要な capability request が増えないか確認する。
 
 5. `recall_pack_selection` と `event_evidence` の入力候補をさらに絞る
    - 候補数、選択セクション数、イベント数が遅延に直結する。
