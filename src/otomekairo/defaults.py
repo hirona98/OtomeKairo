@@ -2,17 +2,20 @@ from __future__ import annotations
 
 import uuid
 
+from otomekairo.service.input.constants import DESKTOP_SCENE_SIMILARITY_THRESHOLD
+
 
 # 既定の識別子
 DEFAULT_PERSONA_ID = "persona:default"
 DEFAULT_MEMORY_SET_ID = "memory_set:default"
 DEFAULT_MODEL_PRESET_ID = "model_preset:default"
 DEFAULT_PROMPT_WINDOW_RECENT_TURN_LIMIT = 30
-DEFAULT_PROMPT_WINDOW_RECENT_TURN_MINUTES = 3
+DEFAULT_PROMPT_WINDOW_RECENT_TURN_MINUTES = 30
 DEFAULT_INPUT_MAX_OUTPUT_TOKENS = 3000
 DEFAULT_DECISION_MAX_OUTPUT_TOKENS = 3000
 DEFAULT_EXPRESSION_MAX_OUTPUT_TOKENS = 4000
 DEFAULT_MEMORY_MAX_OUTPUT_TOKENS = 3000
+DEFAULT_MEMORY_CORRECTION_MAX_OUTPUT_TOKENS = 1200
 DEFAULT_REFLECTION_SUMMARY_MAX_OUTPUT_TOKENS = 2000
 DEFAULT_EVENT_EVIDENCE_MAX_OUTPUT_TOKENS = 1500
 DEFAULT_RECALL_PACK_SELECTION_MAX_OUTPUT_TOKENS = 2000
@@ -60,6 +63,7 @@ def build_default_state() -> dict:
         "selected_model_preset_id": DEFAULT_MODEL_PRESET_ID,
         "wake_policy": {
             "mode": "disabled",
+            "desktop_scene_similarity_threshold": DESKTOP_SCENE_SIMILARITY_THRESHOLD,
         },
         "personas": {
             DEFAULT_PERSONA_ID: {
@@ -128,6 +132,13 @@ def build_default_model_preset() -> dict:
                 "model": DEFAULT_GEMINI_GENERATION_MODEL,
                 "api_key": "",
                 "max_output_tokens": DEFAULT_MEMORY_MAX_OUTPUT_TOKENS,
+                "timeout_seconds": DEFAULT_GENERATION_TIMEOUT_SECONDS,
+                "web_search_enabled": False,
+            },
+            "memory_correction_reconciliation": {
+                "model": DEFAULT_GEMINI_GENERATION_MODEL,
+                "api_key": "",
+                "max_output_tokens": DEFAULT_MEMORY_CORRECTION_MAX_OUTPUT_TOKENS,
                 "timeout_seconds": DEFAULT_GENERATION_TIMEOUT_SECONDS,
                 "web_search_enabled": False,
             },

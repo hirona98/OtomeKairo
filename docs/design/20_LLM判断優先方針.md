@@ -80,7 +80,7 @@ OtomeKairo では、LLM を使う意味判断を次の 2 種類に分ける。
 - 接続管理、認証、資格情報の扱い
 - scheduler、queue、retry、timeout
 - persistence と transaction
-- `create / refine / reinforce / supersede / revoke / dormant` のような状態遷移
+- `create / refine / reinforce / supersede / revoke / dormant / correct` のような状態遷移
 - rate limit や件数上限のような deterministic 制約
 - failure の監査記録
 

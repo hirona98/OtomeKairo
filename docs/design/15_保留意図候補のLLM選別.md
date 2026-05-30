@@ -80,7 +80,7 @@ LLM は候補の外側を増やさない。
 
 - eligible な保留意図候補群から、今の trigger で再評価に乗せる 1 件を選ぶ
 - どの候補も自然でなければ `none` を返す
-- その選択理由を短い 1 文で返す
+- その選択理由を短く返す
 
 この role を `input_interpretation` や `decision_generation` から分ける理由は次である。
 
@@ -166,7 +166,7 @@ LLM の出力は JSON object 1 個に固定する。
 - 必須キーは `selected_candidate_ref` と `selection_reason` の 2 つ
 - `selected_candidate_ref` は source pack 内に存在する `candidate_ref` か `"none"` のいずれか
 - 余計なトップレベルキーを持たない
-- `selection_reason` は 1 文、改行なし、内部識別子なし
+- `selection_reason` は簡潔にし、改行なし、内部識別子なし
 - 候補を選ばない場合でも `selection_reason` は必須とする
 
 ## プロンプト方針

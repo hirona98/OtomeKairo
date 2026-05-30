@@ -8,8 +8,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
 from otomekairo.event_stream import ServerWebSocket, WebSocketProtocolError, build_websocket_accept
-from otomekairo.service import OtomeKairoService, ServiceError
-from otomekairo.service_common import debug_log
+from otomekairo.service.app import OtomeKairoService, ServiceError
+from otomekairo.service.common import debug_log
 
 
 CLIENT_DISCONNECT_ERRNOS = {
@@ -76,7 +76,7 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
             query = parse_qs(parsed.query)
             token = self._bearer_token()
             if self._should_log_http_path(parsed.path):
-                debug_log("HTTP", f"{method} {parsed.path} begin query_keys={sorted(query)} auth={bool(token)}")
+                debug_log("HTTP", f"{method} {parsed.path} begin query_keys={sorted(query)} auth={bool(token)}", level="DEBUG")
 
             # 起動時ルート
             if method == "GET" and parsed.path == "/api/bootstrap/probe":
@@ -364,9 +364,6 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
         payload = json.loads(raw_body.decode("utf-8"))
         if not isinstance(payload, dict):
             raise ServiceError(400, "invalid_json_shape", "The request body must be a JSON object.")
-        parsed = urlparse(self.path)
-        if self._should_log_http_path(parsed.path):
-            debug_log("HTTP", f"{self.command} {parsed.path} body_bytes={len(raw_body)} body_keys={sorted(payload)}")
         return payload
 
     def _bearer_token(self) -> str | None:
@@ -425,7 +422,8 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
         if status >= 400:
             error = payload.get("error", {})
             error_code = error.get("code") if isinstance(error, dict) else None
-            debug_log("HTTP", f"{self.command} {parsed.path} -> {status} error={error_code or '-'}")
+            level = "ERROR" if status >= 500 else "WARNING"
+            debug_log("HTTP", f"{self.command} {parsed.path} -> {status} error={error_code or '-'}", level=level)
             return
 
         debug_log("HTTP", f"{self.command} {parsed.path} -> {status}")
@@ -434,7 +432,7 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         if not self._should_log_http_path(parsed.path):
             return
-        debug_log("HTTP", f"{self.command} {parsed.path} client_disconnected error={type(exc).__name__}")
+        debug_log("HTTP", f"{self.command} {parsed.path} client_disconnected error={type(exc).__name__}", level="WARNING")
 
     def _should_log_http_path(self, path: str) -> bool:
         # inspection は情報量が多く、正本は endpoint 応答側なので HTTP access log へ重複記録しない。
