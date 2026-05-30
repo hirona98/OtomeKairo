@@ -239,7 +239,7 @@ class ServiceInputPipelineMixin:
         debug_log(
             "Pipeline",
             (
-                f"{cycle_label} input_interpretation done mode={recall_hint['interaction_mode']} "
+                f"{cycle_label} input_interpretation done "
                 f"focus={recall_hint['primary_recall_focus']} confidence={recall_hint['confidence']} "
                 f"contract={answer_contract.get('contract')}"
             ),

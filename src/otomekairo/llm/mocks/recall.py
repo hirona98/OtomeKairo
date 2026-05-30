@@ -85,7 +85,6 @@ class LLMMockRecallMixin:
         lower_text = normalized.lower()
         _ = current_time
 
-        interaction_mode = "conversation" if normalized else "autonomous"
         primary_recall_focus = "user"
         secondary_recall_focuses: list[str] = []
         risk_flags: list[str] = []
@@ -137,7 +136,6 @@ class LLMMockRecallMixin:
 
         # payload作成
         payload = {
-            "interaction_mode": interaction_mode,
             "primary_recall_focus": primary_recall_focus,
             "secondary_recall_focuses": secondary_recall_focuses[:2],
             "confidence": 0.7 if normalized else 0.1,

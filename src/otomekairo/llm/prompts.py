@@ -10,7 +10,6 @@ from otomekairo.llm.contracts import (
     ANSWER_TARGET_ACTOR_VALUES,
     ACTIVITY_STATUS_VALUES,
     ACTIVITY_TRANSITION_VALUES,
-    INTERACTION_MODE_VALUES,
     RECALL_PACK_SECTION_NAMES,
     RECALL_FOCUS_VALUES,
     RISK_FLAG_VALUES,
@@ -537,7 +536,7 @@ def build_input_interpretation_repair_prompt(validation_error: str) -> str:
         f"validator_error: {validation_error}\n"
         "同じ入力だけを根拠に、JSON オブジェクト 1 個だけを返し直してください。\n"
         "トップレベルキーは recall_hint, answer_contract の 2 つだけです。\n"
-        "recall_hint は interaction_mode, primary_recall_focus, secondary_recall_focuses, confidence, time_reference, focus_scopes, mentioned_entities, mentioned_topics, risk_flags の 9 キーだけを持ちます。\n"
+        "recall_hint は primary_recall_focus, secondary_recall_focuses, confidence, time_reference, focus_scopes, mentioned_entities, mentioned_topics, risk_flags の 8 キーだけを持ちます。\n"
         "recall_hint.confidence は 0.0 以上 1.0 以下の JSON number です。文字列、low/medium/high、百分率は禁止です。\n"
         "mentioned_topics の各要素は topic:<name> 形式です。例: [\"topic:仕事\"]。話題タグを特定できないなら [] にしてください。\n"
         "answer_contract は contract, reason_codes, boundary, target_actor, query_terms の 5 キーだけを持ちます。\n"
@@ -566,10 +565,7 @@ def _build_input_interpretation_system_prompt() -> str:
         ),
         (
             "出力契約",
-            "recall_hint.interaction_mode は次のいずれかです: "
-            + ", ".join(sorted(INTERACTION_MODE_VALUES))
-            + "\n"
-            + "recall_hint.primary_recall_focus と secondary_recall_focuses は次のいずれかです: "
+            "recall_hint.primary_recall_focus と secondary_recall_focuses は次のいずれかです: "
             + ", ".join(sorted(RECALL_FOCUS_VALUES))
             + "\n"
             + "recall_hint.time_reference は次のいずれかです: "
@@ -646,10 +642,7 @@ def _build_recall_hint_system_prompt() -> str:
         ),
         (
             "出力契約",
-            "interaction_mode は次のいずれかです: "
-            + ", ".join(sorted(INTERACTION_MODE_VALUES))
-            + "\n"
-            + "primary_recall_focus と secondary_recall_focuses は次のいずれかです: "
+            "primary_recall_focus と secondary_recall_focuses は次のいずれかです: "
             + ", ".join(sorted(RECALL_FOCUS_VALUES))
             + "\n"
             + "time_reference は次のいずれかです: "
@@ -658,8 +651,7 @@ def _build_recall_hint_system_prompt() -> str:
             + "risk_flags は次のいずれかです: "
             + ", ".join(sorted(RISK_FLAG_VALUES))
             + "\n"
-            + "返すキーは必ず次の 9 個です:\n"
-            + "- interaction_mode: string\n"
+            + "返すキーは必ず次の 8 個です:\n"
             + "- primary_recall_focus: string\n"
             + "- secondary_recall_focuses: string[] (最大2件。primary_recall_focus を含めない)\n"
             + "- confidence: number (0.0 以上 1.0 以下。文字列、low/medium/high、百分率は禁止)\n"

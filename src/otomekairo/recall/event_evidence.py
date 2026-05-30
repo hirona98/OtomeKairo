@@ -576,7 +576,6 @@ class RecallEventEvidenceMixin:
         # 基底順序
         ordered = ["episodic_evidence"]
         recall_hint = {
-            "interaction_mode": "conversation",
             "primary_recall_focus": primary_recall_focus,
             "secondary_recall_focuses": [],
             "confidence": 1.0,
@@ -644,7 +643,6 @@ class RecallEventEvidenceMixin:
 
         # 結果
         return {
-            "interaction_mode": str(recall_hint.get("interaction_mode") or "conversation"),
             "primary_recall_focus": primary_recall_focus,
             "secondary_recall_focuses": self._secondary_recall_focuses(recall_hint),
             "time_reference": str(recall_hint.get("time_reference") or "none"),

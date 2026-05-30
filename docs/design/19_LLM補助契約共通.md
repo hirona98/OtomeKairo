@@ -61,6 +61,27 @@ LLM の出力は、個別文書で定めた JSON object 1 個に固定する。
 - 改行を含む長文や生ログの長い逐語引用を出力しない
 - source pack に無い事実を補わない
 
+## enum の扱い
+
+LLM 補助契約では、enum を制御面だけに使う。
+自然な意味表現や、人間の行動・感情・話題の網羅分類には enum を使わない。
+
+enum にする条件は次である。
+
+- コードが分岐、状態遷移、TTL、検索、保存 identity、wire 互換のいずれかに使う
+- 値の集合がシステム境界として閉じている
+- 未知の値を受け入れると安全性、再現性、永続データの整合性が崩れる
+
+enum にしない条件は次である。
+
+- LLM の自然文要約を後段へ渡すだけで、コードが値ごとの分岐をしない
+- 人間の行動、感情、話題、理由、対象のように集合が開いている
+- enum 化すると `other` や `unknown` が増え、判断に必要な意味が `label` や `summary_text` と重複する
+
+入力種別のようにコードがすでに知っている値は、LLM に推定させない。
+活動内容や根拠説明は、`label`、`summary_text`、`reason_summary` の自然文で表す。
+`kind`、`status`、`transition`、`scope_type`、`state_type`、`memory_type`、`confidence_hint`、`ttl_hint` のように後段制御へ使う値は enum として固定する。
+
 ## failure 共通ルール
 
 LLM 補助処理は、失敗範囲を個別文書で固定する。

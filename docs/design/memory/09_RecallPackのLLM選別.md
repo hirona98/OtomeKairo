@@ -52,7 +52,7 @@ OtomeKairo では、`RecallPack` 全体を LLM 任せにはしない。
 ## 目的
 
 - `RecallPack` の採用順を fixed weight ではなく意味的な優先度で決める
-- `interaction_mode` / `primary_recall_focus` / `secondary_recall_focuses` / `time_reference` を、硬い if 分岐ではなく文脈判断として効かせる
+- `primary_recall_focus` / `secondary_recall_focuses` / `time_reference` を、硬い if 分岐ではなく文脈判断として効かせる
 - `association` 候補を補助レーンのまま保ちつつ、採否そのものは意味的に決められるようにする
 - `conflicts.summary_text` を固定文ではなく、競合の中身が分かる短い説明にする
 - deterministic な境界、inspection、監査構造は壊さない
@@ -121,7 +121,6 @@ LLM に渡すのは raw DB row 群ではなく、候補群を request-local ref 
 {
   "augmented_query_text": "この前の続きだけど、どう進める？",
   "recall_hint": {
-    "interaction_mode": "conversation",
     "primary_recall_focus": "commitment",
     "secondary_recall_focuses": ["episodic"],
     "time_reference": "past",

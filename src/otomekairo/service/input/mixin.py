@@ -134,7 +134,6 @@ class ServiceInputMixin(
     def _empty_recall_hint(self) -> dict[str, Any]:
         # 結果
         return {
-            "interaction_mode": "autonomous",
             "primary_recall_focus": "user",
             "secondary_recall_focuses": [],
             "confidence": 0.0,

@@ -15,12 +15,6 @@ class LLMContractError(LLMError):
 
 
 # 設定
-INTERACTION_MODE_VALUES = {
-    "conversation",
-    "action",
-    "observation",
-    "autonomous",
-}
 RECALL_FOCUS_VALUES = {
     "self",
     "user",
@@ -89,14 +83,6 @@ MEMORY_TYPE_VALUES = {
     "summary",
 }
 
-MEMORY_STATUS_VALUES = {
-    "inferred",
-    "confirmed",
-    "superseded",
-    "revoked",
-    "dormant",
-}
-
 MEMORY_CORRECTION_STATUS_VALUES = {
     "no_correction",
     "selected",
@@ -107,13 +93,6 @@ MEMORY_CORRECTION_KIND_VALUES = {
     "supersede_compensation",
 }
 
-COMMITMENT_STATE_VALUES = {
-    "open",
-    "waiting_confirmation",
-    "on_hold",
-    "done",
-    "cancelled",
-}
 SCOPE_TYPE_VALUES = {
     "self",
     "user",
@@ -578,7 +557,6 @@ def _validate_world_state_scope_ref(value: Any, label: str) -> None:
 def validate_recall_hint_contract(payload: dict[str, Any]) -> None:
     # 必須キー群
     required_keys = {
-        "interaction_mode",
         "primary_recall_focus",
         "secondary_recall_focuses",
         "confidence",
@@ -592,14 +570,10 @@ def validate_recall_hint_contract(payload: dict[str, Any]) -> None:
         raise LLMError("RecallHint のキーが契約と一致しません。")
 
     # 値検証
-    if not isinstance(payload["interaction_mode"], str) or not payload["interaction_mode"].strip():
-        raise LLMError("RecallHint interaction_mode は空でない文字列である必要があります。")
     if not isinstance(payload["primary_recall_focus"], str) or not payload["primary_recall_focus"].strip():
         raise LLMError("RecallHint primary_recall_focus は空でない文字列である必要があります。")
     if not isinstance(payload["time_reference"], str) or not payload["time_reference"].strip():
         raise LLMError("RecallHint time_reference は空でない文字列である必要があります。")
-    if payload["interaction_mode"] not in INTERACTION_MODE_VALUES:
-        raise LLMError("RecallHint interaction_mode が不正です。")
     if payload["primary_recall_focus"] not in RECALL_FOCUS_VALUES:
         raise LLMError("RecallHint primary_recall_focus が不正です。")
     if payload["time_reference"] not in TIME_REFERENCE_VALUES:
