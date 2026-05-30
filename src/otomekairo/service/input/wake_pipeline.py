@@ -32,6 +32,7 @@ class ServiceInputWakePipelineMixin:
                 f"{cycle_label} pipeline start selected_candidate="
                 f"{selected_candidate.get('candidate_id') if isinstance(selected_candidate, dict) else '-'}"
             ),
+            level="DEBUG",
         )
 
         # 起床ポリシー

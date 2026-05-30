@@ -32,7 +32,7 @@ class OtomeKairoService(
         # 依存関係
         self._log_stream_registry = LogStreamRegistry()
         configure_debug_log_stream_sink(self._append_debug_log_stream_record)
-        debug_log("Service", f"initializing root_dir={root_dir}")
+        debug_log("Service", f"initializing root_dir={root_dir}", level="DEBUG")
         self.store = FileStore(root_dir)
         self.llm = LLMClient()
         self.recall = RecallBuilder(store=self.store, llm=self.llm)
@@ -90,7 +90,7 @@ class OtomeKairoService(
 
         # 開始
         thread.start()
-        debug_log("Wake", f"background scheduler started thread={thread.name}")
+        debug_log("Wake", f"background scheduler started thread={thread.name}", level="DEBUG")
 
     def stop_background_wake_scheduler(self) -> None:
         # スナップショット

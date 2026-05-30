@@ -219,6 +219,7 @@ class ServiceCapabilityMixin:
             debug_log(
                 component,
                 f"capability dispatch failed request={request_record['request_id']} capability={capability_id}",
+                level="ERROR",
             )
             raise CapabilityDispatchError(
                 f"Capability request dispatch failed: {capability_id}",
@@ -289,6 +290,7 @@ class ServiceCapabilityMixin:
             debug_log(
                 component,
                 f"capability timeout request={request_record['request_id']} capability={capability_id}",
+                level="WARNING",
             )
             raise CapabilityDispatchError(
                 f"Capability request timed out: {capability_id}",

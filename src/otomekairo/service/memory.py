@@ -16,7 +16,7 @@ class ServiceMemoryMixin:
                 self._background_memory_postprocess_thread is not None
                 and self._background_memory_postprocess_thread.is_alive()
             ):
-                debug_log("MemoryWorker", "already running")
+                debug_log("MemoryWorker", "already running", level="DEBUG")
                 return
 
             # 再起動時も incomplete job を拾い直せるよう、永続状態からキューを復元する。
@@ -24,7 +24,7 @@ class ServiceMemoryMixin:
             restored_jobs = self.store.list_memory_postprocess_jobs(
                 result_statuses=["queued", "running"],
             )
-            debug_log("MemoryWorker", f"restoring jobs count={len(restored_jobs)}")
+            debug_log("MemoryWorker", f"restoring jobs count={len(restored_jobs)}", level="DEBUG")
             for job in restored_jobs:
                 requeued_job = self._requeue_memory_postprocess_job(job)
                 self._memory_postprocess_queue.put(requeued_job)
@@ -42,7 +42,7 @@ class ServiceMemoryMixin:
 
         # 開始
         thread.start()
-        debug_log("MemoryWorker", f"started thread={thread.name}")
+        debug_log("MemoryWorker", f"started thread={thread.name}", level="DEBUG")
 
     def stop_background_memory_postprocess_worker(self) -> None:
         # スナップショット
@@ -93,12 +93,12 @@ class ServiceMemoryMixin:
             },
             emit_logs=False,
         )
-        debug_log("MemoryWorker", f"requeued cycle={self._short_cycle_id(requeued_job['cycle_id'])}")
+        debug_log("MemoryWorker", f"requeued cycle={self._short_cycle_id(requeued_job['cycle_id'])}", level="DEBUG")
         return requeued_job
 
     def _background_memory_postprocess_loop(self, stop_event: threading.Event) -> None:
         # ループ
-        debug_log("MemoryWorker", "loop started")
+        debug_log("MemoryWorker", "loop started", level="DEBUG")
         while True:
             if stop_event.is_set() and self._memory_postprocess_queue.empty():
                 break
@@ -114,13 +114,13 @@ class ServiceMemoryMixin:
                 continue
 
             self._run_memory_postprocess_job(job)
-        debug_log("MemoryWorker", "loop stopped")
+        debug_log("MemoryWorker", "loop stopped", level="DEBUG")
 
     def _run_memory_postprocess_job(self, job: dict[str, Any]) -> None:
         # 削除済み job は走らせない。
         persisted_job = self.store.get_memory_postprocess_job(job["cycle_id"])
         if persisted_job is None:
-            debug_log("MemoryWorker", f"skip missing cycle={self._short_cycle_id(job['cycle_id'])}")
+            debug_log("MemoryWorker", f"skip missing cycle={self._short_cycle_id(job['cycle_id'])}", level="DEBUG")
             return
 
         # job開始
@@ -139,6 +139,7 @@ class ServiceMemoryMixin:
                 f"job start cycle={self._short_cycle_id(started_job['cycle_id'])} "
                 f"memory_set={self._short_identifier(started_job['memory_set_id'])}"
             ),
+            level="DEBUG",
         )
 
         try:
@@ -184,6 +185,7 @@ class ServiceMemoryMixin:
             debug_log(
                 "MemoryWorker",
                 f"job failed cycle={self._short_cycle_id(started_job['cycle_id'])} error={type(exc).__name__}: {failure_reason}",
+                level="ERROR",
             )
             self._update_memory_trace_postprocess(
                 cycle_id=started_job["cycle_id"],
@@ -236,6 +238,7 @@ class ServiceMemoryMixin:
                 f"queued cycle={self._short_cycle_id(job['cycle_id'])} "
                 f"memory_set={self._short_identifier(job['memory_set_id'])}"
             ),
+            level="DEBUG",
         )
 
     def _update_memory_trace_postprocess(
@@ -302,7 +305,7 @@ class ServiceMemoryMixin:
         ongoing_action_transition_summary: dict[str, Any] | None = None,
     ) -> None:
         # ターン統合
-        debug_log("Memory", f"turn consolidation start cycle={self._short_cycle_id(cycle_id)}")
+        debug_log("Memory", f"turn consolidation start cycle={self._short_cycle_id(cycle_id)}", level="DEBUG")
         try:
             memory_trace, postprocess_job = self.memory.consolidate_turn(
                 state=state,
@@ -329,6 +332,7 @@ class ServiceMemoryMixin:
             debug_log(
                 "Memory",
                 f"turn consolidation failed cycle={self._short_cycle_id(cycle_id)} error={type(exc).__name__}: {exc}",
+                level="ERROR",
             )
             memory_trace = self._failed_memory_trace(str(exc))
             self.store.append_events(
@@ -352,15 +356,16 @@ class ServiceMemoryMixin:
 
         # 後段job投入
         if postprocess_job is None:
-            debug_log("Memory", f"turn consolidation done cycle={self._short_cycle_id(cycle_id)} postprocess=none")
+            debug_log("Memory", f"turn consolidation done cycle={self._short_cycle_id(cycle_id)} postprocess=none", level="DEBUG")
             return
         try:
             self._queue_memory_postprocess_job(postprocess_job)
-            debug_log("Memory", f"turn consolidation done cycle={self._short_cycle_id(cycle_id)} postprocess=queued")
+            debug_log("Memory", f"turn consolidation done cycle={self._short_cycle_id(cycle_id)} postprocess=queued", level="DEBUG")
         except Exception as exc:  # noqa: BLE001
             debug_log(
                 "Memory",
                 f"postprocess queue failed cycle={self._short_cycle_id(cycle_id)} error={type(exc).__name__}: {exc}",
+                level="ERROR",
             )
             failed_postprocess_trace = {
                 **memory_trace,

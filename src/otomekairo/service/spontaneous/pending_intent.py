@@ -82,6 +82,7 @@ class ServiceSpontaneousPendingIntentMixin:
                 f"selection start trigger={trigger_kind} pool={len(candidate_pool)} "
                 f"eligible={len(eligible_candidates)}"
             ),
+            level="DEBUG",
         )
         if not eligible_candidates:
             debug_log("PendingIntent", f"selection skipped trigger={trigger_kind} reason=no_eligible_candidates")
@@ -106,6 +107,7 @@ class ServiceSpontaneousPendingIntentMixin:
             debug_log(
                 "PendingIntent",
                 f"selection failed trigger={trigger_kind} stage=build_source_pack error={self._clamp(str(exc))}",
+                level="ERROR",
             )
             raise PendingIntentSelectionError(
                 str(exc),
@@ -126,6 +128,7 @@ class ServiceSpontaneousPendingIntentMixin:
             debug_log(
                 "PendingIntent",
                 f"selection failed trigger={trigger_kind} stage=contract_validation error={self._clamp(str(exc))}",
+                level="ERROR",
             )
             raise PendingIntentSelectionError(
                 str(exc),
@@ -138,6 +141,7 @@ class ServiceSpontaneousPendingIntentMixin:
             debug_log(
                 "PendingIntent",
                 f"selection failed trigger={trigger_kind} stage=llm_generation error={self._clamp(str(exc))}",
+                level="ERROR",
             )
             raise PendingIntentSelectionError(
                 str(exc),
@@ -158,6 +162,7 @@ class ServiceSpontaneousPendingIntentMixin:
             debug_log(
                 "PendingIntent",
                 f"selection failed trigger={trigger_kind} stage=apply_selection error={self._clamp(str(exc))}",
+                level="ERROR",
             )
             raise PendingIntentSelectionError(
                 str(exc),

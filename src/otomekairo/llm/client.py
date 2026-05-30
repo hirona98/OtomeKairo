@@ -80,6 +80,7 @@ class LLMClient:
                 f"model={self._debug_model(role_definition)} input_chars={len(input_text)} "
                 f"recent_turns={len(recent_turns)}"
             ),
+            level="DEBUG",
         )
         try:
             if self._is_mock_role_definition(role_definition):
@@ -106,6 +107,7 @@ class LLMClient:
                         f"{operation} done mode=mock focus={recall_hint.get('primary_recall_focus')} "
                         f"contract={answer_contract.get('contract')}"
                     ),
+                    level="DEBUG",
                 )
                 return payload
 
@@ -131,13 +133,14 @@ class LLMClient:
                     f"{operation} done focus={recall_hint.get('primary_recall_focus')} "
                     f"contract={answer_contract.get('contract')}"
                 ),
+                level="DEBUG",
             )
             return {
                 "recall_hint": recall_hint,
                 "answer_contract": answer_contract,
             }
         except Exception as exc:
-            debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc)}")
+            debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc)}", level="ERROR")
             raise
 
     def _validate_input_interpretation_contract(self, payload: dict[str, Any]) -> None:
@@ -169,6 +172,7 @@ class LLMClient:
                 f"model={self._debug_model(role_definition)} input_chars={len(input_text)} "
                 f"recent_turns={len(recent_turns)}"
             ),
+            level="DEBUG",
         )
         try:
             # モック経路
@@ -180,6 +184,7 @@ class LLMClient:
                         f"{operation} done mode=mock focus={payload.get('primary_recall_focus')} "
                         f"confidence={payload.get('confidence')}"
                     ),
+                    level="DEBUG",
                 )
                 return payload
 
@@ -193,7 +198,7 @@ class LLMClient:
             # 再試行
             last_contract_error: LLMError | None = None
             for attempt in range(2):
-                debug_log("LLM", f"{operation} attempt={attempt + 1} request messages={len(messages)}")
+                debug_log("LLM", f"{operation} attempt={attempt + 1} request messages={len(messages)}", level="DEBUG")
                 content = complete_text(role_definition=role_definition, messages=messages)
                 try:
                     payload = parse_recall_hint_payload(content)
@@ -203,6 +208,7 @@ class LLMClient:
                             f"{operation} done attempt={attempt + 1} response_chars={len(content)} "
                             f"focus={payload.get('primary_recall_focus')} confidence={payload.get('confidence')}"
                         ),
+                        level="DEBUG",
                     )
                     return payload
                 except LLMError as exc:
@@ -210,6 +216,7 @@ class LLMClient:
                     debug_log(
                         "LLM",
                         f"{operation} parse_failed attempt={attempt + 1} error={self._debug_error(exc)}",
+                        level="WARNING",
                     )
                     if attempt >= 1:
                         raise
@@ -219,7 +226,7 @@ class LLMClient:
                 raise last_contract_error
             raise LLMError("RecallHint の生成に失敗しました。解析可能な応答が得られませんでした。")
         except Exception as exc:
-            debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc)}")
+            debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc)}", level="ERROR")
             raise
 
     def generate_decision(
@@ -237,6 +244,7 @@ class LLMClient:
                 f"model={self._debug_model(role_definition)} recent_turns={len(context.recent_turns)} "
                 f"recall_candidates={context.recall_pack.get('candidate_count', 0)}"
             ),
+            level="DEBUG",
         )
         try:
             # モック経路
@@ -246,7 +254,7 @@ class LLMClient:
                     persona=persona,
                     context=context,
                 )
-                debug_log("LLM", f"{operation} done mode=mock kind={payload.get('kind')}")
+                debug_log("LLM", f"{operation} done mode=mock kind={payload.get('kind')}", level="DEBUG")
                 return payload
 
             # プロンプト構築
@@ -267,7 +275,7 @@ class LLMClient:
                 operation=operation,
             )
         except Exception as exc:
-            debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc)}")
+            debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc)}", level="ERROR")
             raise
 
     def _validate_decision_contract_for_context(
@@ -704,6 +712,7 @@ class LLMClient:
                 f"{operation} start mode={self._debug_mode(role_definition)} "
                 f"model={self._debug_model(role_definition)} decision_kind={context.decision.get('kind')}"
             ),
+            level="DEBUG",
         )
         try:
             # モック経路
@@ -713,7 +722,7 @@ class LLMClient:
                     persona=persona,
                     context=context,
                 )
-                debug_log("LLM", f"{operation} done mode=mock reply_chars={len(payload.get('reply_text', ''))}")
+                debug_log("LLM", f"{operation} done mode=mock reply_chars={len(payload.get('reply_text', ''))}", level="DEBUG")
                 return payload
 
             # プロンプト構築
@@ -723,7 +732,7 @@ class LLMClient:
             )
 
             # 補完
-            debug_log("LLM", f"{operation} request messages={len(messages)}")
+            debug_log("LLM", f"{operation} request messages={len(messages)}", level="DEBUG")
             content = complete_text(role_definition=role_definition, messages=messages)
             reply_text = content.strip()
             if not reply_text:
@@ -735,10 +744,10 @@ class LLMClient:
                 "reply_style_notes": f"model={role_definition.get('model')}",
                 "confidence_note": "litellm_model",
             }
-            debug_log("LLM", f"{operation} done response_chars={len(content)} reply_chars={len(reply_text)}")
+            debug_log("LLM", f"{operation} done response_chars={len(content)} reply_chars={len(reply_text)}", level="DEBUG")
             return payload
         except Exception as exc:
-            debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc)}")
+            debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc)}", level="ERROR")
             raise
 
     def generate_answer_contract(
@@ -756,6 +765,7 @@ class LLMClient:
                 f"{operation} start mode={self._debug_mode(role_definition)} "
                 f"model={self._debug_model(role_definition)} input_chars={len(input_text)}"
             ),
+            level="DEBUG",
         )
         if self._is_mock_role_definition(role_definition):
             payload = self.mock_client.generate_answer_contract(
@@ -765,7 +775,7 @@ class LLMClient:
                 current_time,
             )
             normalized = normalize_answer_contract_payload(payload)
-            debug_log("LLM", f"{operation} done mode=mock contract={normalized.get('contract')}")
+            debug_log("LLM", f"{operation} done mode=mock contract={normalized.get('contract')}", level="DEBUG")
             return normalized
 
         messages = build_answer_contract_messages(
@@ -782,7 +792,7 @@ class LLMClient:
             operation=operation,
         )
         normalized = normalize_answer_contract_payload(payload)
-        debug_log("LLM", f"{operation} done contract={normalized.get('contract')}")
+        debug_log("LLM", f"{operation} done contract={normalized.get('contract')}", level="DEBUG")
         return normalized
 
     def generate_memory_interpretation(
@@ -804,6 +814,7 @@ class LLMClient:
                 f"model={self._debug_model(role_definition)} input_chars={len(input_text)} "
                 f"decision_kind={decision.get('kind')} reply_chars={len(reply_text or '')}"
             ),
+            level="DEBUG",
         )
         # モック経路
         if self._is_mock_role_definition(role_definition):
@@ -815,7 +826,7 @@ class LLMClient:
                 reply_text,
                 memory_context,
             )
-            debug_log("LLM", f"{operation} done mode=mock keys={self._debug_payload_keys(payload)}")
+            debug_log("LLM", f"{operation} done mode=mock keys={self._debug_payload_keys(payload)}", level="DEBUG")
             return payload
 
         # プロンプト構築
@@ -849,11 +860,12 @@ class LLMClient:
                 f"{operation} start mode={self._debug_mode(role_definition)} "
                 f"model={self._debug_model(role_definition)} evidence_keys={self._debug_payload_keys(evidence_pack)}"
             ),
+            level="DEBUG",
         )
         # モック経路
         if self._is_mock_role_definition(role_definition):
             payload = self.mock_client.generate_memory_reflection_summary(role_definition, evidence_pack)
-            debug_log("LLM", f"{operation} done mode=mock keys={self._debug_payload_keys(payload)}")
+            debug_log("LLM", f"{operation} done mode=mock keys={self._debug_payload_keys(payload)}", level="DEBUG")
             return payload
 
         # プロンプト構築
@@ -883,11 +895,12 @@ class LLMClient:
                 f"{operation} start mode={self._debug_mode(role_definition)} "
                 f"model={self._debug_model(role_definition)} events={len(source_events) if isinstance(source_events, list) else 0}"
             ),
+            level="DEBUG",
         )
         # モック経路
         if self._is_mock_role_definition(role_definition):
             payload = self.mock_client.generate_event_evidence(role_definition, source_pack)
-            debug_log("LLM", f"{operation} done mode=mock keys={self._debug_payload_keys(payload)}")
+            debug_log("LLM", f"{operation} done mode=mock keys={self._debug_payload_keys(payload)}", level="DEBUG")
             return payload
 
         # プロンプト構築
@@ -918,11 +931,12 @@ class LLMClient:
                 f"{operation} start mode={self._debug_mode(role_definition)} "
                 f"model={self._debug_model(role_definition)} candidates={len(candidates) if isinstance(candidates, list) else 0}"
             ),
+            level="DEBUG",
         )
         # モック経路
         if self._is_mock_role_definition(role_definition):
             payload = self.mock_client.generate_recall_pack_selection(role_definition, source_pack)
-            debug_log("LLM", f"{operation} done mode=mock keys={self._debug_payload_keys(payload)}")
+            debug_log("LLM", f"{operation} done mode=mock keys={self._debug_payload_keys(payload)}", level="DEBUG")
             return payload
 
         # プロンプト構築
@@ -953,11 +967,12 @@ class LLMClient:
                 f"{operation} start mode={self._debug_mode(role_definition)} "
                 f"model={self._debug_model(role_definition)} candidates={len(candidates) if isinstance(candidates, list) else 0}"
             ),
+            level="DEBUG",
         )
         # モック経路
         if self._is_mock_role_definition(role_definition):
             payload = self.mock_client.generate_pending_intent_selection(role_definition, source_pack)
-            debug_log("LLM", f"{operation} done mode=mock keys={self._debug_payload_keys(payload)}")
+            debug_log("LLM", f"{operation} done mode=mock keys={self._debug_payload_keys(payload)}", level="DEBUG")
             return payload
 
         # プロンプト構築
@@ -987,10 +1002,11 @@ class LLMClient:
                 f"{operation} start mode={self._debug_mode(role_definition)} "
                 f"model={self._debug_model(role_definition)}"
             ),
+            level="DEBUG",
         )
         if self._is_mock_role_definition(role_definition):
             payload = self.mock_client.generate_world_state(role_definition, source_pack)
-            debug_log("LLM", f"{operation} done mode=mock keys={self._debug_payload_keys(payload)}")
+            debug_log("LLM", f"{operation} done mode=mock keys={self._debug_payload_keys(payload)}", level="DEBUG")
             return payload
 
         messages = build_world_state_messages(
@@ -1020,6 +1036,7 @@ class LLMClient:
                 f"{operation} start mode={self._debug_mode(role_definition)} "
                 f"model={self._debug_model(role_definition)} images={len(images)}"
             ),
+            level="DEBUG",
         )
         if self._is_mock_role_definition(role_definition):
             payload = self.mock_client.generate_visual_observation_summary(
@@ -1027,7 +1044,7 @@ class LLMClient:
                 source_pack,
                 images,
             )
-            debug_log("LLM", f"{operation} done mode=mock keys={self._debug_payload_keys(payload)}")
+            debug_log("LLM", f"{operation} done mode=mock keys={self._debug_payload_keys(payload)}", level="DEBUG")
             return payload
 
         messages = build_visual_observation_messages(
@@ -1052,7 +1069,7 @@ class LLMClient:
     ) -> list[list[float]]:
         # 空
         if not texts:
-            debug_log("LLM", "embeddings skipped empty_texts")
+            debug_log("LLM", "embeddings skipped empty_texts", level="DEBUG")
             return []
 
         # 次元
@@ -1066,12 +1083,13 @@ class LLMClient:
                 f"embeddings start mode={self._debug_mode(role_definition)} "
                 f"model={self._debug_model(role_definition)} texts={len(texts)} dimension={embedding_dimension}"
             ),
+            level="DEBUG",
         )
 
         # モック経路
         if self._is_mock_role_definition(role_definition):
             vectors = self.mock_client.generate_embeddings(role_definition, texts, embedding_dimension)
-            debug_log("LLM", f"embeddings done mode=mock vectors={len(vectors)}")
+            debug_log("LLM", f"embeddings done mode=mock vectors={len(vectors)}", level="DEBUG")
             return vectors
 
         # model差分込みの transport へ委譲する。
@@ -1080,7 +1098,7 @@ class LLMClient:
             texts=texts,
             expected_dimension=embedding_dimension,
         )
-        debug_log("LLM", f"embeddings done vectors={len(vectors)}")
+        debug_log("LLM", f"embeddings done vectors={len(vectors)}", level="DEBUG")
         return vectors
 
     # 設定補助
@@ -1129,7 +1147,7 @@ class LLMClient:
         last_error: LLMError | None = None
         attempt_messages = list(messages)
         for attempt in range(2):
-            debug_log("LLM", f"{operation} attempt={attempt + 1} request messages={len(attempt_messages)}")
+            debug_log("LLM", f"{operation} attempt={attempt + 1} request messages={len(attempt_messages)}", level="DEBUG")
             content = complete_text(role_definition=role_definition, messages=attempt_messages)
             try:
                 payload = parse_json_object(content)
@@ -1141,6 +1159,7 @@ class LLMClient:
                             f"{operation} done attempt={attempt + 1} response_chars={len(content)} "
                             f"keys={self._debug_payload_keys(payload)}"
                         ),
+                        level="DEBUG",
                     )
                     return payload
                 except LLMError as exc:
@@ -1148,12 +1167,14 @@ class LLMClient:
                     debug_log(
                         "LLM",
                         f"{operation} validation_failed attempt={attempt + 1} error={self._debug_error(last_error)}",
+                        level="WARNING",
                     )
             except LLMError as exc:
                 last_error = exc
                 debug_log(
                     "LLM",
                     f"{operation} parse_failed attempt={attempt + 1} error={self._debug_error(exc)}",
+                    level="WARNING",
                 )
 
             if attempt >= 1:
@@ -1174,7 +1195,7 @@ class LLMClient:
             ]
 
         if last_error is not None:
-            debug_log("LLM", f"{operation} failed error={self._debug_error(last_error)}")
+            debug_log("LLM", f"{operation} failed error={self._debug_error(last_error)}", level="ERROR")
             raise last_error
-        debug_log("LLM", f"{operation} failed error={failure_message}")
+        debug_log("LLM", f"{operation} failed error={failure_message}", level="ERROR")
         raise LLMError(failure_message)

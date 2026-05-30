@@ -22,9 +22,10 @@ class StoreSchemaMixin:
             debug_log(
                 "Store",
                 f"memory_db open path={self.memory_db_path} user_version={version} expected={CURRENT_MEMORY_DB_VERSION}",
+                level="DEBUG",
             )
             if version not in {0, CURRENT_MEMORY_DB_VERSION}:
-                debug_log("Store", f"memory_db unsupported_schema user_version={version}")
+                debug_log("Store", f"memory_db unsupported_schema user_version={version}", level="ERROR")
                 raise RuntimeError(
                     f"Unsupported memory.db schema version: {version}. "
                     f"Expected {CURRENT_MEMORY_DB_VERSION}."

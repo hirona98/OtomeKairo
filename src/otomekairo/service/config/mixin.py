@@ -21,10 +21,10 @@ class ServiceConfigMixin(
 
         # 検証
         if issued is None:
-            debug_log("Auth", "token rejected reason=bootstrap_required")
+            debug_log("Auth", "token rejected reason=bootstrap_required", level="WARNING")
             raise ServiceError(401, "bootstrap_required", "A console_access_token has not been issued yet.")
         if token != issued:
-            debug_log("Auth", f"token rejected reason=invalid_token supplied={bool(token)}")
+            debug_log("Auth", f"token rejected reason=invalid_token supplied={bool(token)}", level="WARNING")
             raise ServiceError(401, "invalid_token", "The console_access_token is missing or invalid.")
         return state
 

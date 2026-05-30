@@ -45,6 +45,7 @@ class ServiceInputPipelineMixin:
                 f"persona={state['selected_persona_id']} preset={state['selected_model_preset_id']} "
                 f"input_chars={len(input_text)} recent_turns={len(recent_turns)}"
             ),
+            level="DEBUG",
         )
         # モデル選択
         selected_preset = state["model_presets"][state["selected_model_preset_id"]]
@@ -132,7 +133,7 @@ class ServiceInputPipelineMixin:
         )
 
         # 結果
-        debug_log("Pipeline", f"{cycle_label} done")
+        debug_log("Pipeline", f"{cycle_label} done", level="DEBUG")
         return {
             "current_input": current_input.to_prompt_payload(),
             "augmented_query_text": augmented_query_text,
@@ -209,7 +210,7 @@ class ServiceInputPipelineMixin:
     ) -> dict[str, Any]:
         # 入口解釈
         recall_hint_recent_turns = self._recall_hint_recent_turns(recent_turns)
-        debug_log("Pipeline", f"{cycle_label} input_interpretation start recent_turns={len(recall_hint_recent_turns)}")
+        debug_log("Pipeline", f"{cycle_label} input_interpretation start recent_turns={len(recall_hint_recent_turns)}", level="DEBUG")
         input_interpretation = self.llm.generate_input_interpretation(
             role_definition=recall_role,
             input_text=input_text,
@@ -230,7 +231,7 @@ class ServiceInputPipelineMixin:
         )
 
         # recall_pack構築
-        debug_log("Pipeline", f"{cycle_label} recall_pack start")
+        debug_log("Pipeline", f"{cycle_label} recall_pack start", level="DEBUG")
         recall_pack = self.recall.build_recall_pack(
             state=state,
             augmented_query_text=augmented_query_text,
@@ -245,10 +246,11 @@ class ServiceInputPipelineMixin:
                 f"selected_episode={len(recall_pack['selected_episode_ids'])} "
                 f"sections={recall_summary}"
             ),
+            level="DEBUG",
         )
 
         # 回答根拠解決
-        debug_log("Pipeline", f"{cycle_label} evidence_resolution start contract={answer_contract.get('contract')}")
+        debug_log("Pipeline", f"{cycle_label} evidence_resolution start contract={answer_contract.get('contract')}", level="DEBUG")
         evidence_resolution = self.evidence.build_evidence_resolution(
             memory_set_id=state["selected_memory_set_id"],
             augmented_query_text=augmented_query_text,
@@ -295,7 +297,7 @@ class ServiceInputPipelineMixin:
         cycle_label: str,
     ) -> dict[str, Any]:
         # 内部コンテキスト
-        debug_log("Pipeline", f"{cycle_label} context start")
+        debug_log("Pipeline", f"{cycle_label} context start", level="DEBUG")
         time_context = self._build_time_context(current_time=started_at)
         affect_context = self._build_affect_context(
             state=state,
@@ -364,6 +366,7 @@ class ServiceInputPipelineMixin:
                 f"ongoing_action={isinstance(ongoing_action_summary, dict)} "
                 f"capabilities={len(capability_decision_view or [])} initiative={initiative_context is not None}"
             ),
+            level="DEBUG",
         )
         return {
             "time_context": time_context,
@@ -400,7 +403,7 @@ class ServiceInputPipelineMixin:
         cycle_label: str,
     ) -> dict[str, Any]:
         # decision生成
-        debug_log("Pipeline", f"{cycle_label} decision start")
+        debug_log("Pipeline", f"{cycle_label} decision start", level="DEBUG")
         decision_context = self._build_decision_context(
             input_text=input_text,
             current_input=current_input,
@@ -516,7 +519,7 @@ class ServiceInputPipelineMixin:
             )
             debug_log("Pipeline", f"{cycle_label} reply skipped background_wake_user_response_active")
         elif decision["kind"] == "reply":
-            debug_log("Pipeline", f"{cycle_label} reply start")
+            debug_log("Pipeline", f"{cycle_label} reply start", level="DEBUG")
             reply_context = self._build_reply_context(
                 input_text=input_text,
                 current_input=current_input,

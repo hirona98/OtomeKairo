@@ -48,6 +48,7 @@ class ServiceSpontaneousCapabilityCycleMixin:
             debug_log(
                 log_channel,
                 f"capability response ignored request={request_id} capability={capability_id} client={client_id}",
+                level="DEBUG",
             )
             return {}
         debug_log(
@@ -94,6 +95,7 @@ class ServiceSpontaneousCapabilityCycleMixin:
                         f"async cycle crashed request={request_label} capability={capability_id} "
                         f"error={type(exc).__name__}: {self._clamp(str(exc))}"
                     ),
+                    level="ERROR",
                 )
                 cooldown_seconds = int(self._capability_state_policy(capability_id).get("error_cooldown_seconds") or 0)
                 self._mark_capability_runtime_failure(
@@ -112,6 +114,7 @@ class ServiceSpontaneousCapabilityCycleMixin:
         debug_log(
             "CapabilityResult",
             f"async cycle queued request={request_label} capability={capability_id}",
+            level="DEBUG",
         )
 
     def _execute_async_capability_result_cycle(
@@ -154,6 +157,7 @@ class ServiceSpontaneousCapabilityCycleMixin:
                 f"recent_turns={len(recent_turns)} {image_count_summary}"
                 f"error={bool(capability_response.get('error'))}"
             ),
+            level="DEBUG",
         )
 
         if user_facing_result:
@@ -238,6 +242,7 @@ class ServiceSpontaneousCapabilityCycleMixin:
                     f"{self._short_cycle_id(cycle_id)} failed stage={exc.failure_stage} "
                     f"error={type(exc).__name__}: {self._clamp(str(exc))}"
                 ),
+                level="ERROR",
             )
             self._persist_cycle_failure(
                 cycle_id=cycle_id,
@@ -295,6 +300,7 @@ class ServiceSpontaneousCapabilityCycleMixin:
             debug_log(
                 "CapabilityResult",
                 f"{self._short_cycle_id(cycle_id)} failed error={type(exc).__name__}: {self._clamp(str(exc))}",
+                level="ERROR",
             )
             self._persist_cycle_failure(
                 cycle_id=cycle_id,
@@ -431,12 +437,12 @@ class ServiceSpontaneousCapabilityCycleMixin:
     ) -> None:
         reply_payload = pipeline.get("reply_payload")
         if not isinstance(reply_payload, dict):
-            debug_log("CapabilityResult", f"{self._short_cycle_id(cycle_id)} assistant_message skipped no_reply")
+            debug_log("CapabilityResult", f"{self._short_cycle_id(cycle_id)} assistant_message skipped no_reply", level="DEBUG")
             return
 
         target_client_id = capability_response.get("client_id")
         if not isinstance(target_client_id, str) or not target_client_id.strip():
-            debug_log("CapabilityResult", f"{self._short_cycle_id(cycle_id)} assistant_message skipped no_client")
+            debug_log("CapabilityResult", f"{self._short_cycle_id(cycle_id)} assistant_message skipped no_client", level="DEBUG")
             return
 
         request_record = capability_response.get("request_record")
@@ -464,4 +470,5 @@ class ServiceSpontaneousCapabilityCycleMixin:
                 f"client={target_client_id.strip()} "
                 f"reply_chars={len(reply_payload['reply_text'])}"
             ),
+            level="DEBUG",
         )

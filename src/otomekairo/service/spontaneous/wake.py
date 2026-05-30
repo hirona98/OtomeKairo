@@ -28,11 +28,11 @@ class ServiceSpontaneousWakeMixin:
             return
         reply_payload = pipeline.get("reply_payload")
         if not isinstance(reply_payload, dict):
-            debug_log("Wake", f"{self._short_cycle_id(cycle_id)} assistant_message skipped no_reply")
+            debug_log("Wake", f"{self._short_cycle_id(cycle_id)} assistant_message skipped no_reply", level="DEBUG")
             return
         target_client_id = self._wake_assistant_message_target_client_id(client_context)
         if target_client_id is None:
-            debug_log("Wake", f"{self._short_cycle_id(cycle_id)} assistant_message skipped no_client")
+            debug_log("Wake", f"{self._short_cycle_id(cycle_id)} assistant_message skipped no_client", level="DEBUG")
             return
 
         event = {
@@ -53,6 +53,7 @@ class ServiceSpontaneousWakeMixin:
                 f"{self._short_cycle_id(cycle_id)} assistant_message sent={sent} "
                 f"client={target_client_id} reply_chars={len(reply_payload['reply_text'])}"
             ),
+            level="DEBUG",
         )
 
     def _wake_assistant_message_target_client_id(self, client_context: dict[str, Any]) -> str | None:
@@ -105,6 +106,7 @@ class ServiceSpontaneousWakeMixin:
                     f"{self._short_cycle_id(cycle_id)} start trigger={trigger_kind} "
                     f"recent_turns={len(recent_turns)} context_keys={self._debug_context_keys(client_context)}"
                 ),
+                level="DEBUG",
             )
 
             try:
@@ -230,6 +232,7 @@ class ServiceSpontaneousWakeMixin:
                         f"{self._short_cycle_id(cycle_id)} failed stage={exc.failure_stage} "
                         f"error={type(exc).__name__}: {self._clamp(str(exc))}"
                     ),
+                    level="ERROR",
                 )
                 return self._finalize_cycle_failure(
                     cycle_id=cycle_id,
@@ -255,6 +258,7 @@ class ServiceSpontaneousWakeMixin:
                         f"{self._short_cycle_id(cycle_id)} failed stage={exc.failure_stage} "
                         f"error={type(exc).__name__}: {self._clamp(str(exc))}"
                     ),
+                    level="ERROR",
                 )
                 return self._finalize_cycle_failure(
                     cycle_id=cycle_id,
@@ -284,6 +288,7 @@ class ServiceSpontaneousWakeMixin:
                 debug_log(
                     "Wake",
                     f"{self._short_cycle_id(cycle_id)} failed error={type(exc).__name__}: {self._clamp(str(exc))}",
+                    level="ERROR",
                 )
                 return self._finalize_cycle_failure(
                     cycle_id=cycle_id,
@@ -316,7 +321,7 @@ class ServiceSpontaneousWakeMixin:
                     trigger_kind="background_wake",
                 )
             except Exception as exc:  # noqa: BLE001
-                debug_log("Wake", f"background loop error={type(exc).__name__}: {self._clamp(str(exc))}")
+                debug_log("Wake", f"background loop error={type(exc).__name__}: {self._clamp(str(exc))}", level="ERROR")
                 stop_event.wait(timeout=BACKGROUND_WAKE_POLL_SECONDS)
 
     def _background_wake_delay_seconds(self, *, state: dict[str, Any], current_time: str) -> float:

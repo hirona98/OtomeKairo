@@ -36,6 +36,7 @@ class ServiceInputCycleMixin:
                 f"{self._short_cycle_id(cycle_id)} start input_chars={len(input_text)} "
                 f"recent_turns={len(recent_turns)} context_keys={self._debug_context_keys(client_context)}"
             ),
+            level="DEBUG",
         )
         self._emit_live_log(
             level="INFO",
@@ -100,6 +101,7 @@ class ServiceInputCycleMixin:
                     f"{self._short_cycle_id(cycle_id)} failed stage={exc.failure_stage} "
                     f"error={type(exc).__name__}: {self._clamp(str(exc))}"
                 ),
+                level="ERROR",
             )
             return self._finalize_cycle_failure(
                 cycle_id=cycle_id,
@@ -123,6 +125,7 @@ class ServiceInputCycleMixin:
             debug_log(
                 "Conversation",
                 f"{self._short_cycle_id(cycle_id)} failed error={type(exc).__name__}: {self._clamp(str(exc))}",
+                level="ERROR",
             )
             capability_request_summary, ongoing_action_transition_summary = self._exception_capability_dispatch_trace(
                 exc

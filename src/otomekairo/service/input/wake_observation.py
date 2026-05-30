@@ -23,7 +23,7 @@ class ServiceInputWakeObservationMixin:
             return client_context
 
         cycle_label = self._debug_cycle_label(cycle_id)
-        debug_log("Wake", f"{cycle_label} observations start count={len(observations)}")
+        debug_log("Wake", f"{cycle_label} observations start count={len(observations)}", level="DEBUG")
         summaries: list[dict[str, Any]] = []
         for observation in observations:
             summary = self._run_wake_policy_observation(
@@ -506,6 +506,14 @@ class ServiceInputWakeObservationMixin:
             reply_eligibility=reply_eligibility,
             cooldown_reason=cooldown_reason,
         )
+        self._debug_log_desktop_scene_similarity(
+            scene_signature=scene_signature,
+            previous_signature=previous_signature,
+            pending_signature=pending_signature,
+            prompted_signature=last_prompted_signature,
+            novelty_kind=novelty_kind,
+            reply_eligibility=reply_eligibility,
+        )
         signal: dict[str, Any] = {
             "observation_id": summary.get("observation_id"),
             "novelty_kind": novelty_kind,
@@ -607,50 +615,100 @@ class ServiceInputWakeObservationMixin:
         *,
         compare_target: str,
     ) -> bool:
+        return self._desktop_scene_signature_similarity(current, previous, compare_target=compare_target)["similar"]
+
+    def _desktop_scene_signature_similarity(
+        self,
+        current: str | None,
+        previous: str | None,
+        *,
+        compare_target: str,
+    ) -> dict[str, Any]:
         threshold = self._desktop_scene_similarity_threshold()
         if current is None or previous is None:
-            if compare_target == "previous":
-                debug_log(
-                    "Wake",
-                    "desktop scene similarity skipped target=previous reason=missing_signature",
-                )
-            return False
+            return {
+                "target": compare_target,
+                "similar": False,
+                "similarity": None,
+                "reason": "missing_signature",
+                "threshold": threshold,
+            }
         if current == previous:
-            debug_log(
-                "Wake",
-                f"desktop scene similarity target={compare_target} result=same "
-                "reason=exact_match similarity=1.00 "
-                f"threshold={threshold:.2f}",
-            )
-            return True
+            return {
+                "target": compare_target,
+                "similar": True,
+                "similarity": 1.0,
+                "reason": "exact_match",
+                "threshold": threshold,
+            }
         current_fields = self._desktop_scene_signature_fields(current)
         previous_fields = self._desktop_scene_signature_fields(previous)
         for key in ("vision_source_id", "active_app", "window_title"):
             current_value = current_fields.get(key)
             previous_value = previous_fields.get(key)
             if current_value and previous_value and current_value != previous_value:
-                debug_log(
-                    "Wake",
-                    (
-                        f"desktop scene similarity target={compare_target} result=changed "
-                        f"reason={key}_mismatch similarity=0.00 "
-                        f"threshold={threshold:.2f}"
-                    ),
-                )
-                return False
+                return {
+                    "target": compare_target,
+                    "similar": False,
+                    "similarity": 0.0,
+                    "reason": f"{key}_mismatch",
+                    "threshold": threshold,
+                }
         current_summary = current_fields.get("visual_summary_text") or current
         previous_summary = previous_fields.get("visual_summary_text") or previous
         similarity = SequenceMatcher(None, current_summary, previous_summary).ratio()
-        similar = similarity >= threshold
+        return {
+            "target": compare_target,
+            "similar": similarity >= threshold,
+            "similarity": similarity,
+            "reason": "summary_similarity",
+            "threshold": threshold,
+        }
+
+    def _debug_log_desktop_scene_similarity(
+        self,
+        *,
+        scene_signature: str,
+        previous_signature: str | None,
+        pending_signature: str | None,
+        prompted_signature: str | None,
+        novelty_kind: str,
+        reply_eligibility: str,
+    ) -> None:
+        # 人間が見るログは、現在シーンの最終判定につき1行だけ出す。
+        comparisons = [
+            self._desktop_scene_signature_similarity(
+                scene_signature,
+                previous_signature,
+                compare_target="previous",
+            ),
+            self._desktop_scene_signature_similarity(
+                scene_signature,
+                pending_signature,
+                compare_target="pending",
+            ),
+            self._desktop_scene_signature_similarity(
+                scene_signature,
+                prompted_signature,
+                compare_target="prompted",
+            ),
+        ]
+        primary = next((item for item in comparisons if item["target"] == "previous" and item["similarity"] is not None), None)
+        if primary is None:
+            primary = next((item for item in comparisons if item["similarity"] is not None), comparisons[0])
+
+        similarity = primary["similarity"]
+        similarity_text = "-" if similarity is None else f"{similarity:.2f}"
         debug_log(
             "Wake",
             (
-                f"desktop scene similarity target={compare_target} "
-                f"result={'same' if similar else 'changed'} "
-                f"similarity={similarity:.2f} threshold={threshold:.2f}"
+                f"desktop scene similarity target={primary['target']} "
+                f"result={'same' if primary['similar'] else 'changed'} "
+                f"reason={primary['reason']} similarity={similarity_text} "
+                f"threshold={primary['threshold']:.2f} novelty={novelty_kind} "
+                f"reply_eligibility={reply_eligibility}"
             ),
         )
-        return similar
 
     def _desktop_scene_similarity_threshold(self) -> float:
         state = self.store.read_state()
