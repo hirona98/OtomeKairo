@@ -37,6 +37,11 @@ class ServiceInputCycleMixin:
                 f"recent_turns={len(recent_turns)} context_keys={self._debug_context_keys(client_context)}"
             ),
         )
+        self._emit_live_log(
+            level="INFO",
+            component="Input",
+            message=f"{self._short_cycle_id(cycle_id)} user_message input={self._conversation_log_excerpt(input_text)}",
+        )
 
         self._begin_user_response_cycle()
         try:

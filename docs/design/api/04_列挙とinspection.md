@@ -317,6 +317,9 @@ exact answer 系の cycle では、`recall_trace` に `answer_contract`、`evide
 - client から送る message は不要
 - 接続時には、直近の短いログを replay する
 - `ts` は OtomeKairo のローカルタイムゾーンに属する offset 付き timestamp で返す
+- 通常会話では、ユーザー入力と実際にユーザーへ表示する assistant 返信の短い抜粋を流す
+- 会話本文の抜粋は最初の改行までを流し、それ以降の行を流さない
+- `logs/stream` に流す live log は同じ `logger` と `msg` で標準出力とログファイルにも出力する
 
 message shape:
 
@@ -333,13 +336,9 @@ message shape:
 
 `logger` には少なくとも次を流す。
 
-- `Observation`
-- `RecallHint`
-- `RecallStructured`
-- `RecallAssociation`
-- `RecallResult`
-- `Decision`
+- `Input`
 - `Result`
+- `Failure`
 - `Memory`
 
 ここで流すのは live 表示向けの派生ログであり、inspection の正本ではない。

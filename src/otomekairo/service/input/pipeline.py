@@ -538,6 +538,11 @@ class ServiceInputPipelineMixin:
                 context=reply_context,
             )
             debug_log("Pipeline", f"{cycle_label} reply done reply_chars={len(reply_payload['reply_text'])}")
+            self._emit_live_log(
+                level="INFO",
+                component="Result",
+                message=f"{cycle_label} reply done reply={self._conversation_log_excerpt(reply_payload['reply_text'])}",
+            )
         else:
             debug_log("Pipeline", f"{cycle_label} reply skipped decision_kind={decision['kind']}")
         return {

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from otomekairo.memory.utils import display_local_iso
+from otomekairo.service.common import debug_log
 
 
 class ServiceInputLoggingMixin:
@@ -81,105 +82,17 @@ class ServiceInputLoggingMixin:
         reply_payload: dict[str, Any] | None,
         pending_intent_selection: dict[str, Any] | None = None,
     ) -> None:
-        # recall一覧
-        recall_hint = pipeline["recall_hint"]
-        recall_pack = pipeline["recall_pack"]
-        decision = pipeline["decision"]
-        association_memory_ids = set(recall_pack["association_selected_memory_ids"])
-        association_episode_ids = set(recall_pack["association_selected_episode_ids"])
-        structured_memory_ids = [
-            memory_id for memory_id in recall_pack["selected_memory_ids"] if memory_id not in association_memory_ids
-        ]
-        structured_episode_ids = [
-            episode_id
-            for episode_id in recall_pack["selected_episode_ids"]
-            if episode_id not in association_episode_ids
-        ]
-
         # ログ群
-        logs = [
-            self._build_live_log_record(
-                level="INFO",
-                component="Input",
-                message=(
-                    f"{self._short_cycle_id(cycle_id)} trigger={trigger_kind} "
-                    f"input={self._clamp(input_text)}"
-                ),
-            ),
-            self._build_live_log_record(
-                level="INFO",
-                component="RecallHint",
-                message=(
-                    f"{self._short_cycle_id(cycle_id)} mode={recall_hint['interaction_mode']} "
-                    f"primary={recall_hint['primary_recall_focus']} "
-                    f"secondary={self._format_list_for_log(recall_hint['secondary_recall_focuses'])} "
-                    f"risk={self._format_list_for_log(recall_hint['risk_flags'])} "
-                    f"time={recall_hint['time_reference']} confidence={recall_hint['confidence']}"
-                ),
-            ),
-            self._build_live_log_record(
-                level="INFO",
-                component="RecallStructured",
-                message=(
-                    f"{self._short_cycle_id(cycle_id)} "
-                    f"memory_units={self._format_id_list_for_log(structured_memory_ids)} "
-                    f"episodes={self._format_id_list_for_log(structured_episode_ids)}"
-                ),
-            ),
-            self._build_live_log_record(
-                level="INFO",
-                component="RecallAssociation",
-                message=(
-                    f"{self._short_cycle_id(cycle_id)} "
-                    f"memory_units={self._format_id_list_for_log(recall_pack['association_selected_memory_ids'])} "
-                    f"episodes={self._format_id_list_for_log(recall_pack['association_selected_episode_ids'])}"
-                ),
-            ),
-            self._build_live_log_record(
-                level="INFO",
-                component="RecallResult",
-                message=(
-                    f"{self._short_cycle_id(cycle_id)} candidates={recall_pack['candidate_count']} "
-                    f"adopted={self._clamp(self._recall_adopted_reason_summary(recall_pack))}"
-                ),
-            ),
-            self._build_live_log_record(
-                level="INFO",
-                component="Decision",
-                message=(
-                    f"{self._short_cycle_id(cycle_id)} kind={decision['kind']} "
-                    f"reason={self._clamp(decision['reason_summary'])}"
-                ),
-            ),
-            self._build_live_log_record(
-                level="INFO",
-                component="Result",
-                message=(
-                    f"{self._short_cycle_id(cycle_id)} result={result_kind} "
-                    f"reply={self._clamp(reply_payload['reply_text']) if reply_payload else '-'}"
-                ),
-            ),
-        ]
-        if isinstance(pending_intent_selection, dict) and (
-            int(pending_intent_selection.get("candidate_pool_count", 0)) > 0
-            or str(pending_intent_selection.get("result_status") or "") == "failed"
-        ):
-            logs.insert(
-                1,
+        logs: list[dict[str, Any]] = []
+        if reply_payload is None:
+            logs.append(
                 self._build_live_log_record(
                     level="INFO",
-                    component="Input",
-                    message=(
-                        f"{self._short_cycle_id(cycle_id)} pending_intent_selection "
-                        f"pool={pending_intent_selection.get('candidate_pool_count', 0)} "
-                        f"eligible={pending_intent_selection.get('eligible_candidate_count', 0)} "
-                        f"selected={pending_intent_selection.get('selected_candidate_ref') or '-'} "
-                        f"status={pending_intent_selection.get('result_status', 'unknown')} "
-                        f"reason={self._clamp(str(pending_intent_selection.get('selection_reason') or '-'))}"
-                    ),
-                ),
+                    component="Result",
+                    message=f"{self._short_cycle_id(cycle_id)} result={result_kind} reply=-",
+                )
             )
-        self._log_stream_registry.append_logs(logs)
+        self._emit_live_logs(logs)
 
     def _emit_input_failure_logs(
         self,
@@ -197,7 +110,7 @@ class ServiceInputLoggingMixin:
                 component="Input",
                 message=(
                     f"{self._short_cycle_id(cycle_id)} trigger={trigger_kind} "
-                    f"input={self._clamp(input_text)}"
+                    f"input={self._conversation_log_excerpt(input_text)}"
                 ),
             ),
             self._build_live_log_record(
@@ -209,26 +122,7 @@ class ServiceInputLoggingMixin:
                 ),
             ),
         ]
-        if isinstance(pending_intent_selection, dict) and (
-            int(pending_intent_selection.get("candidate_pool_count", 0)) > 0
-            or str(pending_intent_selection.get("result_status") or "") == "failed"
-        ):
-            logs.insert(
-                1,
-                self._build_live_log_record(
-                    level="INFO",
-                    component="Input",
-                    message=(
-                        f"{self._short_cycle_id(cycle_id)} pending_intent_selection "
-                        f"pool={pending_intent_selection.get('candidate_pool_count', 0)} "
-                        f"eligible={pending_intent_selection.get('eligible_candidate_count', 0)} "
-                        f"selected={pending_intent_selection.get('selected_candidate_ref') or '-'} "
-                        f"status={pending_intent_selection.get('result_status', 'unknown')} "
-                        f"reason={self._clamp(str(pending_intent_selection.get('selection_reason') or '-'))}"
-                    ),
-                ),
-            )
-        self._log_stream_registry.append_logs(logs)
+        self._emit_live_logs(logs)
 
     def _emit_memory_trace_logs(self, *, cycle_id: str, memory_trace: dict[str, Any]) -> None:
         # status判定
@@ -261,15 +155,33 @@ class ServiceInputLoggingMixin:
             level = "INFO"
 
         # 送出
-        self._log_stream_registry.append_logs(
+        self._emit_live_log(
+            level=level,
+            component="Memory",
+            message=message,
+        )
+
+    def _emit_live_log(self, *, level: str, component: str, message: str) -> None:
+        # 会話ウインドウ側で処理位置を追うための短い段階ログ。
+        self._emit_live_logs(
             [
                 self._build_live_log_record(
                     level=level,
-                    component="Memory",
+                    component=component,
                     message=message,
                 )
             ]
         )
+
+    def _emit_live_logs(self, logs: list[dict[str, Any]]) -> None:
+        # live log は server.log と logs/stream で同じ内容を扱う。
+        if not logs:
+            return
+        for log in logs:
+            component = str(log.get("logger") or "LiveLog")
+            message = str(log.get("msg") or "")
+            debug_log(component, message)
+        self._log_stream_registry.append_logs(logs)
 
     def _build_live_log_record(self, *, level: str, component: str, message: str) -> dict[str, Any]:
         # 結果
@@ -279,6 +191,14 @@ class ServiceInputLoggingMixin:
             "logger": component,
             "msg": message,
         }
+
+    def _conversation_log_excerpt(self, value: str | None, limit: int = 160) -> str | None:
+        # 会話本文のログ表示は最初の行だけにする。
+        if value is None:
+            return None
+        stripped = value.strip()
+        first_line = stripped.splitlines()[0] if stripped else ""
+        return self._clamp(first_line, limit=limit)
 
     def _short_cycle_id(self, cycle_id: str) -> str:
         # 空
