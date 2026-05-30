@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from typing import Any, Callable
 from urllib import error as urllib_error
 from urllib import request as urllib_request
@@ -13,6 +14,7 @@ from otomekairo.llm.parsing import extract_embedding_vectors, extract_http_error
 OPENROUTER_DEFAULT_API_BASE = "https://openrouter.ai/api/v1"
 OPENROUTER_DEFAULT_TIMEOUT_SECONDS = 600
 DEFAULT_COMPLETION_TIMEOUT_SECONDS = 90.0
+_LITELLM_PROVIDER_SUPPRESSION_LOCK = threading.Lock()
 
 
 # LiteLLM provider 未解決時の Provider List 表示だけ抑止する。
@@ -129,17 +131,19 @@ def _load_litellm_embedding() -> Callable[..., Any]:
 
 
 def _configure_litellm_provider_list_suppression() -> None:
-    try:
-        import litellm
-        from litellm.litellm_core_utils import get_llm_provider_logic
-    except ImportError as exc:
-        raise LLMError("LiteLLM がインストールされていません。依存関係を入れるには ./scripts/setup_venv.sh を実行してください。") from exc
+    # 並列 LLM 呼び出し時も、LiteLLM のグローバル設定差し替えを一度だけ行う。
+    with _LITELLM_PROVIDER_SUPPRESSION_LOCK:
+        try:
+            import litellm
+            from litellm.litellm_core_utils import get_llm_provider_logic
+        except ImportError as exc:
+            raise LLMError("LiteLLM がインストールされていません。依存関係を入れるには ./scripts/setup_venv.sh を実行してください。") from exc
 
-    if getattr(get_llm_provider_logic, "_otomekairo_provider_list_suppressed", False):
-        return
+        if getattr(get_llm_provider_logic, "_otomekairo_provider_list_suppressed", False):
+            return
 
-    get_llm_provider_logic.litellm = _LiteLLMProviderLogicProxy(litellm)
-    get_llm_provider_logic._otomekairo_provider_list_suppressed = True
+        get_llm_provider_logic.litellm = _LiteLLMProviderLogicProxy(litellm)
+        get_llm_provider_logic._otomekairo_provider_list_suppressed = True
 
 
 def _is_openrouter_embedding_role_definition(role_definition: dict) -> bool:

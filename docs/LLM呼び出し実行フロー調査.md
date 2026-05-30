@@ -16,7 +16,7 @@
 6. `reply`
 7. `memory_interpretation`
 
-`event_evidence` はイベント単位で複数回呼ぶが、現行実装では `for` ループで 1 件ずつ待つ。ここは並列化候補である。
+`event_evidence` はイベント単位で複数回呼ぶ。現行実装では event 単位の LLM 圧縮だけを上限 3 worker で並列実行し、event 選定、DB 読み込み、最終順序はコード側で固定する。
 
 `memory_interpretation` はレスポンス返却前に同期実行される。ベクトル索引、記憶訂正、内省要約はバックグラウンド worker に送られるため、通常応答の直接待ち時間には入らない。
 
@@ -36,7 +36,7 @@ flowchart TD
     E --> F[recall_pack 構築]
     F --> G[LLM recall_pack_selection]
     G --> H{event evidence が必要}
-    H -- 必要 --> I[LLM event_evidence をイベントごとに直列実行]
+    H -- 必要 --> I[LLM event_evidence をイベントごとに上限付き並列実行]
     H -- 不要 --> J[evidence_resolution]
     I --> J
     J --> K[context 構築]
@@ -63,7 +63,7 @@ flowchart TD
 | 0 | `visual_observation` | `service/input/visual.py` | 同期直列 | 添付画像または vision result 画像がある場合だけ実行する。 |
 | 1 | `input_interpretation` | `service/input/pipeline.py` | 同期直列 | `recall_hint` と `answer_contract` を 1 回の構造化 LLM で得る。 |
 | 2 | `recall_pack_selection` | `recall/builder.py`, `recall/selection.py` | 同期直列 | 候補が空ならスキップする。 |
-| 3 | `event_evidence` | `recall/event_evidence.py` | 同期直列、複数回 | `requested_event_ids` を `for` で順に処理する。 |
+| 3 | `event_evidence` | `recall/event_evidence.py` | 同期待ち、event 単位は上限付き並列 | `requested_event_ids` の順序を保持し、LLM 圧縮結果を元順序へ戻す。 |
 | 4 | `world_state` | `service/input/world_state_source_pack.py` | 同期直列 | 失敗時は直前の foreground world_state を使い続ける。 |
 | 5 | `decision` | `service/input/pipeline.py` | 同期直列 | 出力契約違反時は repair prompt で 1 回再試行する。 |
 | 6 | `reply` | `service/input/pipeline.py` | 同期直列 | `decision.kind == reply` の場合だけ実行する。 |
@@ -115,7 +115,7 @@ background wake scheduler は daemon thread で動く。wake cycle 本体は `_w
 | capability result follow-up | daemon thread | thread 内は直列 |
 | background wake | daemon thread | `_wake_execution_lock` により wake cycle は直列 |
 | memory postprocess | daemon worker | queue を 1 件ずつ直列処理 |
-| event evidence | 同一 request thread | イベントごとに直列 |
+| event evidence | 同一 request thread 内の thread pool | event 単位 LLM 圧縮だけ上限 3 並列 |
 
 ## 応答時間の主なネック候補
 
@@ -127,9 +127,9 @@ background wake scheduler は daemon thread で動く。wake cycle 本体は `_w
 
 `_complete_input_success` は cycle 永続化後、`_finalize_memory_trace` を同期実行する。ここで `MemoryConsolidator.consolidate_turn` が `generate_memory_interpretation` を呼ぶ。ユーザーに返す文面はすでに生成済みだが、HTTP response は記憶統合の完了まで返らない。
 
-### 3. `event_evidence` がイベント数分だけ直列増加する
+### 3. `event_evidence` は event 件数と provider 制限の影響を受ける
 
-`RecallEventEvidenceMixin._build_event_evidence` は `requested_event_ids` を `for` で処理し、各イベントで `generate_event_evidence` を待つ。イベント間に依存が薄いため、並列化しやすい候補である。
+`RecallEventEvidenceMixin._build_event_evidence` は event 単位の LLM 圧縮を上限 3 worker で並列実行する。標準 event と precise event が合わせて 4 件以上になる場合、複数 wave で待つ。provider rate limit や repair retry が発生すると、この段の待ち時間が伸びる。
 
 ### 4. repair retry が隠れた遅延になる
 
@@ -169,10 +169,10 @@ cycle trace には `recall_pack_selection`、`event_evidence_generation`、`worl
    - 現状は記憶統合が終わるまで HTTP response が返らない。
    - 実装時は cycle trace の初期 memory trace を `queued` にし、worker で `memory_interpretation` から実行する設計に変える。
 
-2. `event_evidence` を並列化する
-   - イベント単位の source pack は独立している。
-   - 最大件数は小さいが、複数 LLM 呼び出しの直列待ちを削れる。
-   - Python thread pool で十分に効果が出る可能性がある。LLM 呼び出しは I/O 待ちが主である。
+2. `event_evidence` の並列数と失敗率を計測する
+   - event 単位の LLM 圧縮は上限 3 worker で並列実行する。
+   - `requested_event_count`、`succeeded_event_count`、`failed_items`、provider の rate limit を合わせて見る。
+   - 並列数を上げる場合は、他の LLM 呼び出しとの競合と API エラー率を確認する。
 
 3. role 別の latency 計測を追加する
    - `complete_text` と `generate_embeddings` の前後で elapsed_ms をログに出す。
