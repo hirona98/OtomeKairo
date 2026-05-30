@@ -71,6 +71,45 @@ class ServiceInputWorldStateSourcePackMixin:
             )
             source_pack_contexts = self._summarize_world_state_source_pack_contexts(source_pack)
             source_pack_state_type_hooks = self._summarize_world_state_state_type_hooks(source_pack)
+            if not self._should_generate_world_state(
+                trigger_kind=trigger_kind,
+                observation_summary=observation_summary,
+                source_pack=source_pack,
+            ):
+                visible_foreground_world_state, foreground_visibility_filter = (
+                    self._filter_foreground_world_state_for_capability_result(
+                        foreground_world_state=previous_foreground_world_state,
+                        trigger_kind=trigger_kind,
+                        observation_summary=observation_summary,
+                        capability_request_summary=capability_request_summary,
+                    )
+                )
+                world_state_trace = WorldStateTrace(
+                    result_status="skipped",
+                    candidate_state_count=0,
+                    input_world_state_count=len(visible_foreground_world_state),
+                    previous_foreground_world_state=previous_foreground_world_state,
+                    foreground_world_state=visible_foreground_world_state,
+                    updated_state_count=0,
+                    replaced_state_count=0,
+                    expired_state_count=0,
+                    dropped_state_count=0,
+                    source_kind=source_kind,
+                    source_ref=source_ref,
+                    source_pack_contexts=source_pack_contexts,
+                    source_pack_state_type_hooks=source_pack_state_type_hooks,
+                    normalized_candidate_policies=[],
+                    failure_reason=None,
+                    foreground_world_state_filter=foreground_visibility_filter,
+                    stored_foreground_world_state=(
+                        previous_foreground_world_state if foreground_visibility_filter is not None else None
+                    ),
+                )
+                return (
+                    world_state_trace,
+                    visible_foreground_world_state,
+                )
+
             role_definition = state["model_presets"][state["selected_model_preset_id"]]["roles"]["input_interpretation"]
             payload = self.llm.generate_world_state(
                 role_definition=role_definition,
@@ -176,6 +215,34 @@ class ServiceInputWorldStateSourcePackMixin:
                 world_state_trace,
                 visible_foreground_world_state,
             )
+
+    def _should_generate_world_state(
+        self,
+        *,
+        trigger_kind: str,
+        observation_summary: dict[str, Any] | None,
+        source_pack: WorldStateSourcePack,
+    ) -> bool:
+        # capability result は外部状態の反映点なので、source pack が薄くても LLM 更新対象にする。
+        if trigger_kind == "capability_result":
+            return True
+        if isinstance(observation_summary, dict) and bool(observation_summary):
+            return True
+        if isinstance(source_pack.capability_result_summary, WorldStateCapabilityResultSummary):
+            return True
+        for key in (
+            "visual_context",
+            "external_service_context",
+            "body_context",
+            "device_context",
+            "schedule_context",
+            "social_context_context",
+            "environment_context",
+            "location_context",
+        ):
+            if source_pack.context(key) is not None:
+                return True
+        return False
 
     def _build_world_state_source_pack(
         self,

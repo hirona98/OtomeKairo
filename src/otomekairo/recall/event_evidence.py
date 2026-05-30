@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from otomekairo.llm.contracts import LLMContractError, LLMError
@@ -7,6 +8,7 @@ from otomekairo.llm.contracts import LLMContractError, LLMError
 
 # 定数
 EVENT_EVIDENCE_LIMIT = 3
+EVENT_EVIDENCE_MAX_WORKERS = 3
 EVENT_EVIDENCE_FOCUSES = {
     "commitment",
     "fact",
@@ -106,105 +108,170 @@ class RecallEventEvidenceMixin:
         generation["precise_loaded_event_count"] = len(precise_records_by_id)
 
         # event 単位生成
-        event_evidence: list[dict[str, Any]] = []
-        failed_items: list[dict[str, Any]] = []
         precise_selected_set = set(precise_plan["selected_event_ids"])
-        for event_id in requested_event_ids:
+        event_results: list[dict[str, Any] | None] = [None] * len(requested_event_ids)
+        work_items: list[dict[str, Any]] = []
+        for index, event_id in enumerate(requested_event_ids):
             record = records_by_id.get(event_id)
             if record is None:
-                failed_items.append(
-                    self._event_evidence_failure_item(
+                event_results[index] = {
+                    "event_evidence": None,
+                    "failed_item": self._event_evidence_failure_item(
                         event_id=event_id,
                         kind="event",
                         failure_stage="load_event",
                         failure_reason="selected event was not found in events table.",
-                    )
-                )
+                    ),
+                }
                 continue
 
-            kind = self._event_evidence_kind(record)
-            try:
-                source_pack = self._build_event_evidence_source_pack(
-                    primary_recall_focus=primary_recall_focus,
-                    recall_hint=recall_hint,
-                    sections=sections,
-                    event_id=event_id,
-                    record=record,
-                    selection_mode="precise" if event_id in precise_selected_set else "standard",
-                    precise_reason_summary=(
+            work_items.append(
+                {
+                    "index": index,
+                    "event_id": event_id,
+                    "record": record,
+                    "selection_mode": "precise" if event_id in precise_selected_set else "standard",
+                    "precise_reason_summary": (
                         precise_plan["reason_summary"] if event_id in precise_selected_set else None
                     ),
-                )
-            except Exception as exc:  # noqa: BLE001
-                failed_items.append(
-                    self._event_evidence_failure_item(
-                        event_id=event_id,
-                        kind=kind,
-                        failure_stage="build_source_pack",
-                        failure_reason=str(exc),
-                    )
-                )
-                continue
+                }
+            )
 
-            try:
-                payload = self.llm.generate_event_evidence(
-                    role_definition=role_definition,
-                    source_pack=source_pack,
-                )
-            except LLMContractError as exc:
-                failed_items.append(
-                    self._event_evidence_failure_item(
-                        event_id=event_id,
-                        kind=kind,
-                        failure_stage="contract_validation",
-                        failure_reason=str(exc),
+        if work_items:
+            worker_count = min(EVENT_EVIDENCE_MAX_WORKERS, len(work_items))
+            with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="event-evidence") as executor:
+                futures = [
+                    executor.submit(
+                        self._build_event_evidence_item_result,
+                        primary_recall_focus=primary_recall_focus,
+                        recall_hint=recall_hint,
+                        sections=sections,
+                        role_definition=role_definition,
+                        work_item=work_item,
                     )
-                )
-                continue
-            except LLMError as exc:
-                failed_items.append(
-                    self._event_evidence_failure_item(
-                        event_id=event_id,
-                        kind=kind,
-                        failure_stage="llm_generation",
-                        failure_reason=str(exc),
-                    )
-                )
-                continue
-            except Exception as exc:  # noqa: BLE001
-                failed_items.append(
-                    self._event_evidence_failure_item(
-                        event_id=event_id,
-                        kind=kind,
-                        failure_stage="llm_generation",
-                        failure_reason=str(exc),
-                    )
-                )
-                continue
+                    for work_item in work_items
+                ]
+                for future in as_completed(futures):
+                    item_result = future.result()
+                    event_results[item_result["index"]] = item_result
 
-            try:
-                event_evidence.append(
-                    self._event_evidence_item_from_payload(
-                        event_id=event_id,
-                        kind=kind,
-                        payload=payload,
-                    )
-                )
-            except Exception as exc:  # noqa: BLE001
-                failed_items.append(
-                    self._event_evidence_failure_item(
-                        event_id=event_id,
-                        kind=kind,
-                        failure_stage="contract_validation",
-                        failure_reason=str(exc),
-                    )
-                )
+        event_evidence: list[dict[str, Any]] = []
+        failed_items: list[dict[str, Any]] = []
+        for item_result in event_results:
+            if not isinstance(item_result, dict):
+                continue
+            item = item_result.get("event_evidence")
+            if isinstance(item, dict):
+                event_evidence.append(item)
+                continue
+            failed_item = item_result.get("failed_item")
+            if isinstance(failed_item, dict):
+                failed_items.append(failed_item)
 
         # 結果
         result["event_evidence"] = event_evidence
         result["event_evidence_generation"]["succeeded_event_count"] = len(event_evidence)
         result["event_evidence_generation"]["failed_items"] = failed_items
         return result
+
+    def _build_event_evidence_item_result(
+        self,
+        *,
+        primary_recall_focus: str,
+        recall_hint: dict[str, Any],
+        sections: dict[str, list[dict[str, Any]]],
+        role_definition: dict[str, Any],
+        work_item: dict[str, Any],
+    ) -> dict[str, Any]:
+        # event 単位の LLM 圧縮を独立実行し、呼び出し元で元順序へ戻せる形で返す。
+        index = int(work_item["index"])
+        event_id = str(work_item["event_id"])
+        record = work_item["record"]
+        kind = self._event_evidence_kind(record)
+        try:
+            source_pack = self._build_event_evidence_source_pack(
+                primary_recall_focus=primary_recall_focus,
+                recall_hint=recall_hint,
+                sections=sections,
+                event_id=event_id,
+                record=record,
+                selection_mode=str(work_item["selection_mode"]),
+                precise_reason_summary=work_item.get("precise_reason_summary"),
+            )
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "index": index,
+                "event_evidence": None,
+                "failed_item": self._event_evidence_failure_item(
+                    event_id=event_id,
+                    kind=kind,
+                    failure_stage="build_source_pack",
+                    failure_reason=str(exc),
+                ),
+            }
+
+        try:
+            payload = self.llm.generate_event_evidence(
+                role_definition=role_definition,
+                source_pack=source_pack,
+            )
+        except LLMContractError as exc:
+            return {
+                "index": index,
+                "event_evidence": None,
+                "failed_item": self._event_evidence_failure_item(
+                    event_id=event_id,
+                    kind=kind,
+                    failure_stage="contract_validation",
+                    failure_reason=str(exc),
+                ),
+            }
+        except LLMError as exc:
+            return {
+                "index": index,
+                "event_evidence": None,
+                "failed_item": self._event_evidence_failure_item(
+                    event_id=event_id,
+                    kind=kind,
+                    failure_stage="llm_generation",
+                    failure_reason=str(exc),
+                ),
+            }
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "index": index,
+                "event_evidence": None,
+                "failed_item": self._event_evidence_failure_item(
+                    event_id=event_id,
+                    kind=kind,
+                    failure_stage="llm_generation",
+                    failure_reason=str(exc),
+                ),
+            }
+
+        try:
+            item = self._event_evidence_item_from_payload(
+                event_id=event_id,
+                kind=kind,
+                payload=payload,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "index": index,
+                "event_evidence": None,
+                "failed_item": self._event_evidence_failure_item(
+                    event_id=event_id,
+                    kind=kind,
+                    failure_stage="contract_validation",
+                    failure_reason=str(exc),
+                ),
+            }
+
+        return {
+            "index": index,
+            "event_evidence": item,
+            "failed_item": None,
+        }
 
     def _empty_event_evidence_result(self) -> dict[str, Any]:
         return {
