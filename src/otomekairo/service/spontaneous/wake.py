@@ -627,6 +627,7 @@ class ServiceSpontaneousWakeMixin:
         )
         if isinstance(desktop_signal, dict):
             novelty_kind = desktop_signal.get("novelty_kind")
+            interrupt_worthiness = desktop_signal.get("interrupt_worthiness")
             reply_eligibility = desktop_signal.get("reply_eligibility")
             cooldown_active = desktop_signal.get("cooldown_active")
             reason_summary = desktop_signal.get("reason_summary")
@@ -634,8 +635,11 @@ class ServiceSpontaneousWakeMixin:
                 cooldown_part = ""
                 if isinstance(cooldown_active, bool):
                     cooldown_part = f", cooldown_active={str(cooldown_active).lower()}"
+                interrupt_part = ""
+                if isinstance(interrupt_worthiness, str):
+                    interrupt_part = f", interrupt_worthiness={interrupt_worthiness}"
                 parts.append(
-                    f"desktop観測シグナルは novelty={novelty_kind}, reply_eligibility={reply_eligibility}{cooldown_part}。"
+                    f"desktop観測シグナルは novelty={novelty_kind}, reply_eligibility={reply_eligibility}{interrupt_part}{cooldown_part}。"
                 )
             if isinstance(reason_summary, str):
                 parts.append(f"desktop観測理由は {reason_summary}")

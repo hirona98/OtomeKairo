@@ -6,7 +6,10 @@ from typing import Any
 from otomekairo.llm.client import LLMError
 from otomekairo.service.capability import CapabilityDispatchError
 from otomekairo.service.common import debug_log
-from otomekairo.service.input.constants import DESKTOP_SCENE_SIMILARITY_THRESHOLD
+from otomekairo.service.input.constants import (
+    DESKTOP_SCENE_SIGNIFICANT_CHANGE_THRESHOLD,
+    DESKTOP_SCENE_SIMILARITY_THRESHOLD,
+)
 
 
 class ServiceInputWakeObservationMixin:
@@ -488,11 +491,12 @@ class ServiceInputWakeObservationMixin:
         )
         cooldown_reason = self._wake_cooldown_reason(current_time=current_time)
         cooldown_active = cooldown_reason is not None
-        same_as_previous = self._desktop_scene_signatures_similar(
+        previous_similarity = self._desktop_scene_signature_similarity(
             scene_signature,
             previous_signature,
             compare_target="previous",
         )
+        same_as_previous = previous_similarity["similar"]
         same_as_pending = self._desktop_scene_signatures_similar(
             scene_signature,
             pending_signature,
@@ -515,7 +519,15 @@ class ServiceInputWakeObservationMixin:
         else:
             novelty_kind = "changed"
 
-        reply_eligible_novelty = novelty_kind in {"first_success", "changed", "pending_after_cooldown"}
+        change_strength = self._desktop_observation_change_strength(
+            novelty_kind=novelty_kind,
+            previous_similarity=previous_similarity,
+        )
+        interrupt_worthiness = self._desktop_observation_interrupt_worthiness(
+            novelty_kind=novelty_kind,
+            change_strength=change_strength,
+        )
+        reply_eligible_novelty = interrupt_worthiness in {"medium", "high"}
         if same_as_prompted:
             reply_eligibility = "already_prompted"
         elif reply_eligible_novelty:
@@ -527,6 +539,8 @@ class ServiceInputWakeObservationMixin:
             novelty_kind=novelty_kind,
             reply_eligibility=reply_eligibility,
             cooldown_reason=cooldown_reason,
+            change_strength=change_strength,
+            interrupt_worthiness=interrupt_worthiness,
         )
         self._debug_log_desktop_scene_similarity(
             scene_signature=scene_signature,
@@ -539,6 +553,7 @@ class ServiceInputWakeObservationMixin:
         signal: dict[str, Any] = {
             "observation_id": summary.get("observation_id"),
             "novelty_kind": novelty_kind,
+            "interrupt_worthiness": interrupt_worthiness,
             "reply_eligibility": reply_eligibility,
             "reason_summary": reason_summary,
             "scene_signature": scene_signature,
@@ -548,6 +563,8 @@ class ServiceInputWakeObservationMixin:
             "window_title": self._client_context_text(summary.get("window_title"), limit=120),
             "cooldown_active": cooldown_active,
         }
+        if change_strength is not None:
+            signal["change_strength"] = change_strength
         if cooldown_reason is not None:
             signal["cooldown_reason"] = cooldown_reason
         return {key: value for key, value in signal.items() if value is not None}
@@ -592,6 +609,7 @@ class ServiceInputWakeObservationMixin:
         if (
             signal.get("cooldown_active") is True
             and signal.get("novelty_kind") in {"first_success", "changed"}
+            and signal.get("interrupt_worthiness") != "high"
         ):
             first_seen_at = current_time
             if isinstance(pending_scene, dict) and self._desktop_scene_signatures_similar(
@@ -621,7 +639,7 @@ class ServiceInputWakeObservationMixin:
 
     def _desktop_observation_scene_signature(self, summary: dict[str, Any]) -> str | None:
         parts: list[str] = []
-        for key in ("vision_source_id", "source_label", "active_app", "window_title", "visual_summary_text"):
+        for key in ("vision_source_id", "source_label", "active_app", "visual_summary_text"):
             value = self._client_context_text(summary.get(key), limit=160)
             if value is not None:
                 parts.append(f"{key}={value}")
@@ -665,7 +683,7 @@ class ServiceInputWakeObservationMixin:
             }
         current_fields = self._desktop_scene_signature_fields(current)
         previous_fields = self._desktop_scene_signature_fields(previous)
-        for key in ("vision_source_id", "active_app", "window_title"):
+        for key in ("vision_source_id", "active_app"):
             current_value = current_fields.get(key)
             previous_value = previous_fields.get(key)
             if current_value and previous_value and current_value != previous_value:
@@ -686,6 +704,33 @@ class ServiceInputWakeObservationMixin:
             "reason": "summary_similarity",
             "threshold": threshold,
         }
+
+    def _desktop_observation_change_strength(
+        self,
+        *,
+        novelty_kind: str,
+        previous_similarity: dict[str, Any],
+    ) -> str | None:
+        if novelty_kind != "changed":
+            return None
+        if previous_similarity.get("reason") in {"vision_source_id_mismatch", "active_app_mismatch"}:
+            return "significant"
+        similarity = previous_similarity.get("similarity")
+        if isinstance(similarity, int | float) and similarity < DESKTOP_SCENE_SIGNIFICANT_CHANGE_THRESHOLD:
+            return "significant"
+        return "normal"
+
+    def _desktop_observation_interrupt_worthiness(
+        self,
+        *,
+        novelty_kind: str,
+        change_strength: str | None,
+    ) -> str:
+        if novelty_kind == "pending_after_cooldown":
+            return "medium"
+        if novelty_kind == "changed" and change_strength == "significant":
+            return "medium"
+        return "low"
 
     def _debug_log_desktop_scene_similarity(
         self,
@@ -758,11 +803,22 @@ class ServiceInputWakeObservationMixin:
         novelty_kind: str,
         reply_eligibility: str,
         cooldown_reason: str | None,
+        change_strength: str | None,
+        interrupt_worthiness: str,
     ) -> str:
         if reply_eligibility == "already_prompted":
             return "この desktop scene には既に自発 reply 済みなので、繰り返さない。"
+        if (
+            cooldown_reason is not None
+            and novelty_kind == "changed"
+            and change_strength == "significant"
+            and interrupt_worthiness == "medium"
+        ):
+            return "cooldown 中の大きな desktop scene 変化を判断材料として扱うが、発話価値は別に判断する。"
         if reply_eligibility == "eligible" and cooldown_reason is not None and novelty_kind in {"first_success", "changed"}:
             return "cooldown 中の desktop scene 変化を、短い自発 reply 候補として扱う。"
+        if novelty_kind in {"first_success", "changed"} and interrupt_worthiness == "low":
+            return "desktop wake observation は新しいが、観測の新しさだけでは自発 reply の根拠にしない。"
         if reply_eligibility == "eligible" and novelty_kind == "first_success":
             return "desktop wake observation の初回成功を、短い自発 reply 候補として扱う。"
         if reply_eligibility == "eligible" and novelty_kind == "changed":
@@ -793,6 +849,8 @@ class ServiceInputWakeObservationMixin:
         for key, limit in (
             ("observation_id", 96),
             ("novelty_kind", 48),
+            ("change_strength", 48),
+            ("interrupt_worthiness", 48),
             ("reply_eligibility", 48),
             ("reason_summary", 180),
             ("summary_text", 160),

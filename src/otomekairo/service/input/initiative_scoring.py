@@ -449,8 +449,13 @@ class ServiceInputInitiativeScoringMixin:
     ) -> str:
         if desktop_signal:
             novelty_kind = self._client_context_text(desktop_signal.get("novelty_kind"), limit=48)
+            interrupt_worthiness = self._client_context_text(desktop_signal.get("interrupt_worthiness"), limit=16)
+            if interrupt_worthiness == "high":
+                return "desktop wake observation に強い割り込み価値があり、短い reply で触れるのが自然。"
+            if interrupt_worthiness == "medium":
+                return "desktop wake observation に新しい前景があり、cooldown や抑制要因が弱い場合だけ短い reply を検討する。"
             if novelty_kind in {"first_success", "changed", "pending_after_cooldown"}:
-                return "desktop wake observation に未発話の新しい前景があり、短い reply で触れるのが自然。"
+                return "desktop wake observation は新しいが、観測の新しさだけでは自発 reply の根拠にしない。"
             return "desktop wake observation の前景を見て、必要なら短い reply を返せる。"
         if isinstance(strongest_drive, dict) and world_state_summary:
             return "strongest drive と前景 world が噛み合っており、短い reply が自然。"

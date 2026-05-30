@@ -225,8 +225,17 @@ class ServiceInputInitiativeFamiliesMixin:
             strongest_drive=strongest_drive,
             world_state_summary=world_state_summary,
         )
+        desktop_interrupt_worthiness = (
+            self._client_context_text(desktop_signal.get("interrupt_worthiness"), limit=16)
+            if isinstance(desktop_signal, dict)
+            else None
+        )
         if desktop_signal:
-            priority_score += 0.18
+            priority_score += {
+                "high": 0.18,
+                "medium": 0.1,
+                "low": 0.02,
+            }.get(desktop_interrupt_worthiness or "low", 0.02)
         if foreground_thinness == "ready":
             priority_score += 0.04
         elif foreground_thinness == "thin":
@@ -257,12 +266,6 @@ class ServiceInputInitiativeFamiliesMixin:
             recent_turn_summary=recent_turn_summary,
             desktop_signal=desktop_signal,
         )
-        desktop_cooldown_novelty = (
-            isinstance(desktop_signal, dict)
-            and desktop_signal.get("reply_eligibility") == "eligible"
-            and desktop_signal.get("cooldown_active") is True
-            and desktop_signal.get("novelty_kind") in {"first_success", "changed"}
-        )
         preferred_capability_id: str | None = None
         preferred_capability_input: dict[str, Any] | None = None
         if isinstance(probe_preference, dict):
@@ -271,9 +274,23 @@ class ServiceInputInitiativeFamiliesMixin:
             priority_score += INITIATIVE_AUTONOMOUS_PROBE_SCORE
             preferred_capability_id = probe_preference["capability_id"]
             preferred_capability_input = probe_preference["input"]
-        elif suppression_level == "high" and not desktop_cooldown_novelty:
+        elif (
+            isinstance(desktop_signal, dict)
+            and desktop_signal.get("cooldown_active") is True
+            and desktop_interrupt_worthiness != "high"
+        ):
+            preferred_result_kind = "noop"
+            preferred_result_reason = "cooldown 中の desktop novelty は観測材料に留め、発話価値が high でない限り見送る。"
+        elif suppression_level == "high":
             preferred_result_kind = "noop"
             preferred_result_reason = "suppression が high で、今回は押し出さず見送るほうが自然。"
+        elif (
+            trigger_kind == "background_wake"
+            and isinstance(desktop_signal, dict)
+            and desktop_interrupt_worthiness == "low"
+        ):
+            preferred_result_kind = "noop"
+            preferred_result_reason = "desktop observation は新しいが、観測の新しさだけでは定期 wake の発話根拠にしない。"
         elif (
             trigger_kind == "background_wake"
             and foreground_thinness == "thin"
