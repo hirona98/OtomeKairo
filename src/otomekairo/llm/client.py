@@ -375,10 +375,27 @@ class LLMClient:
                 if isinstance(foreground_summary, dict)
                 else None
             )
+            desktop_novelty_kind = (
+                desktop_signal.get("novelty_kind")
+                if isinstance(desktop_signal, dict)
+                else None
+            )
+            desktop_cooldown_active = (
+                desktop_signal.get("cooldown_active")
+                if isinstance(desktop_signal, dict)
+                else None
+            )
             desktop_reply_candidate = (
                 isinstance(desktop_signal, dict)
                 and desktop_signal.get("reply_eligibility") == "eligible"
-                and desktop_signal.get("novelty_kind") in {"first_success", "changed", "pending_after_cooldown"}
+                and (
+                    desktop_novelty_kind == "pending_after_cooldown"
+                    or (
+                        desktop_novelty_kind in {"first_success", "changed"}
+                        and cooldown_active is not True
+                        and desktop_cooldown_active is not True
+                    )
+                )
             )
             if (
                 desktop_reply_candidate
