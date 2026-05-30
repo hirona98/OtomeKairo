@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -104,6 +105,13 @@ def configure_debug_log_stream_sink(sink: Callable[[dict[str, Any]], None] | Non
 
 
 DEBUG_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR"}
+DEBUG_LOG_LEVEL_COLORS = {
+    "DEBUG": "\033[36m",
+    "INFO": "\033[32m",
+    "WARNING": "\033[33m",
+    "ERROR": "\033[31m",
+}
+DEBUG_LOG_COLOR_RESET = "\033[0m"
 
 
 def debug_log(component: str, message: str, *, level: str = "INFO") -> None:
@@ -112,7 +120,7 @@ def debug_log(component: str, message: str, *, level: str = "INFO") -> None:
     if normalized_level not in DEBUG_LOG_LEVELS:
         normalized_level = "INFO"
     line = f"{timestamp} [{normalized_level}] [{component}] {message}"
-    print(line, flush=True)
+    print(_terminal_debug_log_line(line, normalized_level), flush=True)
     _append_debug_log_file(line)
     _append_debug_log_stream(
         {
@@ -122,6 +130,15 @@ def debug_log(component: str, message: str, *, level: str = "INFO") -> None:
             "msg": message,
         }
     )
+
+
+def _terminal_debug_log_line(line: str, level: str) -> str:
+    if not sys.stdout.isatty():
+        return line
+    color = DEBUG_LOG_LEVEL_COLORS.get(level)
+    if color is None:
+        return line
+    return f"{color}{line}{DEBUG_LOG_COLOR_RESET}"
 
 
 def _append_debug_log_stream(record: dict[str, Any]) -> None:

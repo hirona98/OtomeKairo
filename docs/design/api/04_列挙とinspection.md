@@ -320,6 +320,7 @@ exact answer 系の cycle では、`recall_trace` に `answer_contract`、`evide
 - 通常会話では、ユーザー入力と実際にユーザーへ表示する assistant 返信の短い抜粋を流す
 - 会話本文の抜粋は最初の改行までを流し、それ以降の行を流さない
 - `logs/stream` は `debug_log` の購読先として扱い、標準出力とログファイルに出る `LEVEL / Component / message` と同じ内容を `level / logger / msg` として流す
+- `logs/stream` の `level / logger / msg` にはターミナル表示用の ANSI 色を含めない
 
 message shape:
 
