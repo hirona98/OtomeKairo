@@ -66,6 +66,19 @@ WORLD_STATE_TTL_HINT_VALUES = {
     "medium",
     "long",
 }
+ACTIVITY_STATUS_VALUES = {
+    "active",
+    "recently_active",
+    "ended",
+    "unknown",
+}
+ACTIVITY_TRANSITION_VALUES = {
+    "start",
+    "continue",
+    "switch",
+    "end",
+    "none",
+}
 
 MEMORY_TYPE_VALUES = {
     "fact",
@@ -400,6 +413,51 @@ def validate_answer_contract_contract(payload: dict[str, Any]) -> None:
     for term in query_terms:
         if not isinstance(term, str) or not term.strip():
             raise LLMError("AnswerContract.query_terms に空または文字列以外の値が含まれています。")
+
+
+def validate_activity_state_contract(payload: dict[str, Any]) -> None:
+    # 形状
+    _validate_exact_keys(payload, {"activity_candidates"}, "ActivityState")
+    candidates = payload["activity_candidates"]
+    if not isinstance(candidates, list):
+        raise LLMError("ActivityState.activity_candidates は配列である必要があります。")
+    if len(candidates) > 1:
+        raise LLMError("ActivityState.activity_candidates は最大 1 件です。")
+
+    # 候補
+    for candidate in candidates:
+        _validate_exact_keys(
+            candidate,
+            {
+                "label",
+                "target",
+                "status",
+                "confidence_hint",
+                "salience_hint",
+                "ttl_hint",
+                "transition",
+                "reason_summary",
+            },
+            "ActivityState.activity_candidate",
+        )
+        if candidate["status"] not in ACTIVITY_STATUS_VALUES:
+            raise LLMError("ActivityState.status が不正です。")
+        if candidate["confidence_hint"] not in WORLD_STATE_HINT_VALUES:
+            raise LLMError("ActivityState.confidence_hint が不正です。")
+        if candidate["salience_hint"] not in WORLD_STATE_HINT_VALUES:
+            raise LLMError("ActivityState.salience_hint が不正です。")
+        if candidate["ttl_hint"] not in WORLD_STATE_TTL_HINT_VALUES:
+            raise LLMError("ActivityState.ttl_hint が不正です。")
+        if candidate["transition"] not in ACTIVITY_TRANSITION_VALUES:
+            raise LLMError("ActivityState.transition が不正です。")
+        for key in ("label", "target", "reason_summary"):
+            value = candidate[key]
+            if not isinstance(value, str):
+                raise LLMError(f"ActivityState.{key} は文字列である必要があります。")
+            if key in {"label", "reason_summary"} and not value.strip():
+                raise LLMError(f"ActivityState.{key} は空にできません。")
+            if INTERNAL_IDENTIFIER_PATTERN.search(value):
+                raise LLMError(f"ActivityState.{key} に内部識別子を含めてはいけません。")
 
 
 def _is_relationship_ref(value: str) -> bool:

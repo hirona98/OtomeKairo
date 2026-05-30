@@ -10,7 +10,8 @@ from otomekairo.service.common import debug_log
 
 # 定数
 MEMORY_DB_FILE_NAME = "memory.db"
-CURRENT_MEMORY_DB_VERSION = 11
+CURRENT_MEMORY_DB_VERSION = 13
+SUPPORTED_MEMORY_DB_VERSIONS = {0, 11, 12, CURRENT_MEMORY_DB_VERSION}
 
 
 # スキーマMixin
@@ -24,7 +25,7 @@ class StoreSchemaMixin:
                 f"memory_db open path={self.memory_db_path} user_version={version} expected={CURRENT_MEMORY_DB_VERSION}",
                 level="DEBUG",
             )
-            if version not in {0, CURRENT_MEMORY_DB_VERSION}:
+            if version not in SUPPORTED_MEMORY_DB_VERSIONS:
                 debug_log("Store", f"memory_db unsupported_schema user_version={version}", level="ERROR")
                 raise RuntimeError(
                     f"Unsupported memory.db schema version: {version}. "
@@ -32,7 +33,7 @@ class StoreSchemaMixin:
                 )
 
             self._apply_current_schema(conn)
-            if version == 0:
+            if version != CURRENT_MEMORY_DB_VERSION:
                 conn.execute(f"PRAGMA user_version = {CURRENT_MEMORY_DB_VERSION}")
                 debug_log("Store", f"memory_db initialized user_version={CURRENT_MEMORY_DB_VERSION}")
             else:
@@ -166,6 +167,25 @@ class StoreSchemaMixin:
 
             CREATE INDEX IF NOT EXISTS idx_world_states_identity
             ON world_states(memory_set_id, state_type, scope_type, scope_key, updated_at);
+
+            CREATE TABLE IF NOT EXISTS activity_states (
+                activity_id TEXT PRIMARY KEY,
+                memory_set_id TEXT NOT NULL,
+                activity_label TEXT NOT NULL,
+                status TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                salience REAL NOT NULL,
+                started_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                payload_json TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_activity_states_memory_set_expires_at
+            ON activity_states(memory_set_id, expires_at, salience, updated_at);
+
+            CREATE INDEX IF NOT EXISTS idx_activity_states_current
+            ON activity_states(memory_set_id, status, updated_at);
 
             CREATE TABLE IF NOT EXISTS episodes (
                 episode_id TEXT PRIMARY KEY,
@@ -372,3 +392,14 @@ class StoreSchemaMixin:
             ON memory_postprocess_jobs(memory_set_id, result_status, queued_at);
             """
         )
+        self._migrate_activity_states_schema(conn)
+
+    def _migrate_activity_states_schema(self, conn: sqlite3.Connection) -> None:
+        # v12 の activity_type 列は分類 enum 用だったため、自然文 label の列名へ変える。
+        columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(activity_states)").fetchall()
+            if isinstance(row["name"], str)
+        }
+        if "activity_type" in columns and "activity_label" not in columns:
+            conn.execute("ALTER TABLE activity_states RENAME COLUMN activity_type TO activity_label")

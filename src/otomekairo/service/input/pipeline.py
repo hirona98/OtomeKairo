@@ -38,6 +38,13 @@ class ServiceInputPipelineMixin:
             trigger_kind=trigger_kind,
             observation_summary=observation_summary,
         )
+        initial_activity_context = self._summarize_activity_context(
+            self.store.get_current_activity_state(
+                memory_set_id=state["selected_memory_set_id"],
+                current_time=started_at,
+            ),
+            current_time=started_at,
+        )
         debug_log(
             "Pipeline",
             (
@@ -63,6 +70,7 @@ class ServiceInputPipelineMixin:
             recent_turns=recent_turns,
             augmented_query_text=augmented_query_text,
             visual_observation_context=visual_observation_context,
+            activity_context=initial_activity_context,
             recall_role=recall_role,
             cycle_label=cycle_label,
         )
@@ -85,6 +93,7 @@ class ServiceInputPipelineMixin:
             pending_intent_selection=pending_intent_selection,
             observation_summary=observation_summary,
             capability_request_summary=capability_request_summary,
+            visual_observation_context=visual_observation_context,
             recall_hint=recall_hint,
             cycle_label=cycle_label,
         )
@@ -99,6 +108,7 @@ class ServiceInputPipelineMixin:
             affect_context=pipeline_contexts["affect_context"],
             drive_state_summary=pipeline_contexts["drive_state_summary"],
             foreground_world_state=pipeline_contexts["foreground_world_state"],
+            activity_context=pipeline_contexts["activity_context"],
             ongoing_action_summary=pipeline_contexts["ongoing_action_summary"],
             capability_decision_view=pipeline_contexts["capability_decision_view"],
             initiative_context=pipeline_contexts["initiative_context"],
@@ -121,6 +131,7 @@ class ServiceInputPipelineMixin:
             affect_context=pipeline_contexts["affect_context"],
             drive_state_summary=pipeline_contexts["drive_state_summary"],
             foreground_world_state=pipeline_contexts["foreground_world_state"],
+            activity_context=pipeline_contexts["activity_context"],
             ongoing_action_summary=pipeline_contexts["ongoing_action_summary"],
             initiative_context=pipeline_contexts["initiative_context"],
             recall_hint=recall_hint,
@@ -145,6 +156,8 @@ class ServiceInputPipelineMixin:
             "affect_context": pipeline_contexts["affect_context"],
             "drive_state_summary": pipeline_contexts["drive_state_summary"],
             "foreground_world_state": pipeline_contexts["foreground_world_state"],
+            "activity_context": pipeline_contexts["activity_context"],
+            "activity_trace": pipeline_contexts["activity_trace"],
             "ongoing_action_summary": pipeline_contexts["ongoing_action_summary"],
             "capability_decision_view": pipeline_contexts["capability_decision_view"],
             "initiative_context": pipeline_contexts["initiative_context"],
@@ -205,6 +218,7 @@ class ServiceInputPipelineMixin:
         recent_turns: list[dict[str, Any]],
         augmented_query_text: str,
         visual_observation_context: dict[str, Any] | None,
+        activity_context: dict[str, Any] | None,
         recall_role: dict[str, Any],
         cycle_label: str,
     ) -> dict[str, Any]:
@@ -218,6 +232,7 @@ class ServiceInputPipelineMixin:
             recent_turns=recall_hint_recent_turns,
             current_time=started_at,
             visual_observation_context=visual_observation_context,
+            activity_context=activity_context,
         )
         recall_hint = input_interpretation["recall_hint"]
         answer_contract = input_interpretation["answer_contract"]
@@ -293,6 +308,7 @@ class ServiceInputPipelineMixin:
         pending_intent_selection: dict[str, Any] | None,
         observation_summary: dict[str, Any] | None,
         capability_request_summary: dict[str, Any] | None,
+        visual_observation_context: dict[str, Any] | None,
         recall_hint: dict[str, Any],
         cycle_label: str,
     ) -> dict[str, Any]:
@@ -337,6 +353,24 @@ class ServiceInputPipelineMixin:
             world_state_trace=world_state_trace,
             trigger_kind=trigger_kind,
         )
+        activity_context, activity_trace = self._refresh_activity_context(
+            state=state,
+            started_at=started_at,
+            input_text=input_text,
+            current_input=self._build_current_input(
+                input_text=input_text,
+                trigger_kind=trigger_kind,
+                capability_request_summary=capability_request_summary,
+            ).to_prompt_payload(),
+            recent_turns=recent_turns,
+            trigger_kind=trigger_kind,
+            client_context=client_context,
+            observation_summary=observation_summary,
+            visual_observation_context=visual_observation_context,
+            foreground_world_state=foreground_world_state,
+            cycle_id=cycle_id,
+            cycle_label=cycle_label,
+        )
         initiative_context = self._build_initiative_context(
             state=state,
             persona=persona,
@@ -374,6 +408,8 @@ class ServiceInputPipelineMixin:
             "drive_state_summary": drive_state_summary,
             "world_state_trace": world_state_trace,
             "foreground_world_state": foreground_world_state,
+            "activity_context": activity_context,
+            "activity_trace": activity_trace,
             "ongoing_action_summary": ongoing_action_summary,
             "capability_decision_view": capability_decision_view,
             "initiative_context": initiative_context,
@@ -391,6 +427,7 @@ class ServiceInputPipelineMixin:
         affect_context: dict[str, Any],
         drive_state_summary: list[dict[str, Any]] | None,
         foreground_world_state: list[dict[str, Any]] | None,
+        activity_context: dict[str, Any] | None,
         ongoing_action_summary: dict[str, Any] | None,
         capability_decision_view: list[dict[str, Any]] | None,
         initiative_context: InitiativeContext | None,
@@ -413,6 +450,7 @@ class ServiceInputPipelineMixin:
             affect_context=affect_context,
             drive_state_summary=drive_state_summary,
             foreground_world_state=foreground_world_state,
+            activity_context=activity_context,
             ongoing_action_summary=ongoing_action_summary,
             capability_decision_view=capability_decision_view,
             initiative_context=initiative_context,
@@ -443,6 +481,7 @@ class ServiceInputPipelineMixin:
         affect_context: dict[str, Any],
         drive_state_summary: list[dict[str, Any]] | None,
         foreground_world_state: list[dict[str, Any]] | None,
+        activity_context: dict[str, Any] | None,
         ongoing_action_summary: dict[str, Any] | None,
         initiative_context: InitiativeContext | None,
         visual_observation_context: dict[str, Any] | None,
@@ -528,6 +567,7 @@ class ServiceInputPipelineMixin:
                 affect_context=affect_context,
                 drive_state_summary=drive_state_summary,
                 foreground_world_state=foreground_world_state,
+                activity_context=activity_context,
                 ongoing_action_summary=ongoing_action_summary,
                 initiative_context=initiative_context,
                 visual_observation_context=visual_observation_context,
@@ -565,6 +605,7 @@ class ServiceInputPipelineMixin:
         affect_context: dict[str, Any],
         drive_state_summary: list[dict[str, Any]] | None,
         foreground_world_state: list[dict[str, Any]] | None,
+        activity_context: dict[str, Any] | None,
         ongoing_action_summary: dict[str, Any] | None,
         capability_decision_view: list[dict[str, Any]] | None,
         initiative_context: InitiativeContext | None,
@@ -582,6 +623,7 @@ class ServiceInputPipelineMixin:
             affect_context=affect_context,
             drive_state_summary=drive_state_summary,
             foreground_world_state=foreground_world_state,
+            activity_context=activity_context,
             ongoing_action_summary=ongoing_action_summary,
             capability_decision_view=capability_decision_view,
             initiative_context=initiative_context,
@@ -601,6 +643,7 @@ class ServiceInputPipelineMixin:
         affect_context: dict[str, Any],
         drive_state_summary: list[dict[str, Any]] | None,
         foreground_world_state: list[dict[str, Any]] | None,
+        activity_context: dict[str, Any] | None,
         ongoing_action_summary: dict[str, Any] | None,
         initiative_context: InitiativeContext | None,
         visual_observation_context: dict[str, Any] | None,
@@ -616,6 +659,7 @@ class ServiceInputPipelineMixin:
             affect_context=affect_context,
             drive_state_summary=drive_state_summary,
             foreground_world_state=foreground_world_state,
+            activity_context=activity_context,
             ongoing_action_summary=ongoing_action_summary,
             initiative_context=initiative_context,
             visual_observation_context=visual_observation_context,

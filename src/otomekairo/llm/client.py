@@ -16,6 +16,7 @@ from otomekairo.llm.contracts import (
     LLMError,
     normalize_answer_contract_payload,
     normalize_recall_hint_payload,
+    validate_activity_state_contract,
     validate_answer_contract_contract,
     validate_decision_contract,
     validate_event_evidence_contract,
@@ -33,6 +34,8 @@ from otomekairo.llm.parsing import parse_json_object, parse_recall_hint_payload
 from otomekairo.llm.prompts import (
     build_answer_contract_messages,
     build_answer_contract_repair_prompt,
+    build_activity_state_messages,
+    build_activity_state_repair_prompt,
     build_decision_messages,
     build_decision_repair_prompt,
     build_event_evidence_messages,
@@ -74,6 +77,7 @@ class LLMClient:
         recent_turns: list[dict],
         current_time: str,
         visual_observation_context: dict[str, Any] | None,
+        activity_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         operation = "input_interpretation"
         debug_log(
@@ -119,6 +123,7 @@ class LLMClient:
                 recent_turns=recent_turns,
                 current_time=current_time,
                 visual_observation_context=visual_observation_context,
+                activity_context=activity_context,
             )
             payload = self._generate_structured_payload(
                 role_definition=role_definition,
@@ -1073,6 +1078,39 @@ class LLMClient:
             validator=validate_world_state_contract,
             repair_prompt_builder=build_world_state_repair_prompt,
             failure_message="WorldState の生成に失敗しました。解析可能な応答が得られませんでした。",
+            wrap_validation_error=True,
+            operation=operation,
+        )
+
+    def generate_activity_state(
+        self,
+        *,
+        role_definition: dict,
+        source_pack: dict[str, Any],
+    ) -> dict[str, Any]:
+        operation = "activity_state"
+        debug_log(
+            "LLM",
+            (
+                f"{operation} start mode={self._debug_mode(role_definition)} "
+                f"model={self._debug_model(role_definition)}"
+            ),
+            level="DEBUG",
+        )
+        if self._is_mock_role_definition(role_definition):
+            payload = self.mock_client.generate_activity_state(role_definition, source_pack)
+            debug_log("LLM", f"{operation} done mode=mock keys={self._debug_payload_keys(payload)}", level="DEBUG")
+            return payload
+
+        messages = build_activity_state_messages(
+            source_pack=source_pack,
+        )
+        return self._generate_structured_payload(
+            role_definition=role_definition,
+            messages=messages,
+            validator=validate_activity_state_contract,
+            repair_prompt_builder=build_activity_state_repair_prompt,
+            failure_message="ActivityState の生成に失敗しました。解析可能な応答が得られませんでした。",
             wrap_validation_error=True,
             operation=operation,
         )

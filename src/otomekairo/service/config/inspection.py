@@ -122,6 +122,13 @@ class ServiceConfigInspectionMixin:
                 current_time=current_time,
                 limit=8,
             ),
+            "activity_context": self._summarize_activity_context(
+                self.store.get_current_activity_state(
+                    memory_set_id=state["selected_memory_set_id"],
+                    current_time=current_time,
+                ),
+                current_time=current_time,
+            ),
             "drive_states": self._list_current_drive_states(
                 state=state,
                 current_time=current_time,

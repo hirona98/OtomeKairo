@@ -73,6 +73,29 @@ class MockLLMClient(
         # モック専用の簡易分岐
         return any(term in text for term in terms)
 
+    def generate_activity_state(self, role_definition: dict, source_pack: dict) -> dict:
+        # model確認
+        self._assert_mock_model(role_definition)
+
+        # モックは契約形状だけを満たす。
+        text = str(source_pack)
+        if self._mock_contains_any(text, ("ゲーム", "プレイ", "game")):
+            return {
+                "activity_candidates": [
+                    {
+                        "label": "ゲームをプレイ中",
+                        "target": "",
+                        "status": "active",
+                        "confidence_hint": "medium",
+                        "salience_hint": "medium",
+                        "ttl_hint": "short",
+                        "transition": "continue",
+                        "reason_summary": "観測文脈にゲームプレイの活動が含まれる。",
+                    }
+                ]
+            }
+        return {"activity_candidates": []}
+
     def _assert_mock_model(self, role_definition: dict) -> None:
         # モデル確認
         model = role_definition.get("model")

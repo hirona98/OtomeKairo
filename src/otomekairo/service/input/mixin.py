@@ -19,6 +19,7 @@ from otomekairo.service.input.constants import (
     WORLD_STATE_FOREGROUND_LIMIT,
 )
 from otomekairo.service.input.capability_context import ServiceInputCapabilityContextMixin
+from otomekairo.service.input.activity import ServiceInputActivityMixin
 from otomekairo.service.input.cycle import ServiceInputCycleMixin
 from otomekairo.service.input.initiative import ServiceInputInitiativeMixin
 from otomekairo.service.input.logging import ServiceInputLoggingMixin
@@ -33,6 +34,7 @@ from otomekairo.world_state.models import WorldStateTrace
 
 class ServiceInputMixin(
     ServiceInputCycleMixin,
+    ServiceInputActivityMixin,
     ServiceInputPipelineMixin,
     ServiceInputVisualMixin,
     ServiceInputCapabilityContextMixin,

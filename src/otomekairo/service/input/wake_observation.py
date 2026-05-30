@@ -205,6 +205,28 @@ class ServiceInputWakeObservationMixin:
                 observation_summary=observation_summary,
                 capability_request_summary=capability_request_summary,
             )
+            visual_observation_context = self._build_visual_observation_decision_context(
+                trigger_kind="capability_result",
+                observation_summary=observation_summary,
+            )
+            self._refresh_activity_context(
+                state=state,
+                started_at=started_at,
+                input_text=input_text,
+                current_input=self._build_current_input(
+                    input_text=input_text,
+                    trigger_kind="capability_result",
+                    capability_request_summary=capability_request_summary,
+                ).to_prompt_payload(),
+                recent_turns=[],
+                trigger_kind="capability_result",
+                client_context=client_context,
+                observation_summary=observation_summary,
+                visual_observation_context=visual_observation_context,
+                foreground_world_state=None,
+                cycle_id=cycle_id,
+                cycle_label=self._debug_cycle_label(cycle_id),
+            )
             transition_summary = self._finish_wake_policy_observation_ongoing_action(
                 request_record=request_record,
                 current_time=self._now_iso(),

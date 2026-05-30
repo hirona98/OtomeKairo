@@ -120,6 +120,7 @@ class DecisionContext:
     affect_context: dict[str, Any]
     drive_state_summary: list[dict[str, Any]] | None
     foreground_world_state: list[dict[str, Any]] | None
+    activity_context: dict[str, Any] | None
     ongoing_action_summary: dict[str, Any] | None
     capability_decision_view: list[dict[str, Any]] | None
     initiative_context: InitiativeContext | None
@@ -138,6 +139,7 @@ class ReplyContext:
     affect_context: dict[str, Any]
     drive_state_summary: list[dict[str, Any]] | None
     foreground_world_state: list[dict[str, Any]] | None
+    activity_context: dict[str, Any] | None
     ongoing_action_summary: dict[str, Any] | None
     initiative_context: InitiativeContext | None
     visual_observation_context: dict[str, Any] | None

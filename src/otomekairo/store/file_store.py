@@ -7,6 +7,7 @@ from typing import Any
 
 from otomekairo.store.state import StateStore
 from otomekairo.store.affect import StoreAffectMixin
+from otomekairo.store.activity import StoreActivityMixin
 from otomekairo.store.clone import StoreCloneMixin
 from otomekairo.store.cycle import StoreCycleMixin
 from otomekairo.store.memory_links import StoreMemoryLinksMixin
@@ -19,6 +20,7 @@ class SQLiteMemoryStore(
     StoreCycleMixin,
     StoreMemoryLinksMixin,
     StoreAffectMixin,
+    StoreActivityMixin,
     StoreCloneMixin,
     StoreVectorMixin,
     StoreSchemaMixin,
