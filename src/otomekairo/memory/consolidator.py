@@ -7,6 +7,7 @@ from typing import Any
 
 from otomekairo.llm.client import LLMClient
 from otomekairo.memory.actions import MemoryActionResolver
+from otomekairo.memory.correction import MemoryCorrectionReconciler
 from otomekairo.memory.reflection.consolidator import ReflectiveConsolidator
 from otomekairo.memory.utils import clamp_score, normalized_text_list, optional_text
 from otomekairo.memory.vector import MemoryVectorIndexer
@@ -25,6 +26,10 @@ class MemoryConsolidator:
         self.store = store
         self.llm = llm
         self.action_resolver = MemoryActionResolver(store=store, llm=llm)
+        self.correction = MemoryCorrectionReconciler(
+            store=store,
+            action_resolver=self.action_resolver,
+        )
         self.vector_indexer = MemoryVectorIndexer(store=store, llm=llm)
         self.reflective = ReflectiveConsolidator(
             store=store,
@@ -49,6 +54,15 @@ class MemoryConsolidator:
         # モデル選択
         selected_preset = state["model_presets"][state["selected_model_preset_id"]]
         memory_role = selected_preset["roles"]["memory_interpretation"]
+        selected_memory_set_id = state["selected_memory_set_id"]
+        embedding_definition = state["memory_sets"][selected_memory_set_id]["embedding"]
+
+        # 訂正候補
+        correction_prepared = self.correction.prepare(
+            memory_set_id=selected_memory_set_id,
+            cycle_id=cycle_id,
+            finished_at=finished_at,
+        )
 
         # 解釈
         interpretation = self.llm.generate_memory_interpretation(
@@ -65,8 +79,6 @@ class MemoryConsolidator:
         )
 
         # Episode要約
-        selected_memory_set_id = state["selected_memory_set_id"]
-        embedding_definition = state["memory_sets"][selected_memory_set_id]["embedding"]
         event_ids = [event["event_id"] for event in events]
         episode = self._build_episode(
             cycle_id=cycle_id,
@@ -117,6 +129,7 @@ class MemoryConsolidator:
                 "episode_series_id": episode.get("episode_series_id"),
                 "open_loops": episode.get("open_loops", []),
                 "memory_action_count": len(memory_actions),
+                "correction_reconciliation": correction_prepared["trace"],
                 "episode_affect_count": len(episode_affects),
                 "updated_memory_unit_ids": [
                     action["memory_unit_id"]
@@ -189,6 +202,14 @@ class MemoryConsolidator:
                 finished_at=finished_at,
                 episode=episode,
                 memory_actions=memory_actions,
+                correction_context=self._build_correction_job_context(
+                    input_text=input_text,
+                    reply_payload=reply_payload,
+                    decision=decision,
+                    event_ids=event_ids,
+                    cycle_id=cycle_id,
+                    prepared=correction_prepared,
+                ),
             ),
         )
 
@@ -198,6 +219,17 @@ class MemoryConsolidator:
         finished_at = job["turn_finished_at"]
         episode = job["episode"]
         memory_actions = job["memory_actions"]
+        correction_actions, correction_trace = self._run_correction_reconciliation(
+            job=job,
+            finished_at=finished_at,
+        )
+        if correction_actions:
+            self.store.persist_turn_consolidation(
+                episode=None,
+                memory_actions=correction_actions,
+                episode_affects=[],
+            )
+        all_memory_actions = [*memory_actions, *correction_actions]
 
         # ベクトル索引
         try:
@@ -205,7 +237,7 @@ class MemoryConsolidator:
                 state=state_snapshot,
                 finished_at=finished_at,
                 episode=episode,
-                memory_actions=memory_actions,
+                memory_actions=all_memory_actions,
             )
         except Exception as exc:  # noqa: BLE001
             return {
@@ -213,6 +245,7 @@ class MemoryConsolidator:
                     "result_status": "failed",
                     "failure_reason": str(exc),
                 },
+                "correction_reconciliation": correction_trace,
                 "reflective_consolidation": {
                     "started": False,
                     "result_status": "not_started",
@@ -253,7 +286,7 @@ class MemoryConsolidator:
             state=state_snapshot,
             finished_at=finished_at,
             episode=episode,
-            memory_actions=memory_actions,
+            memory_actions=all_memory_actions,
         )
 
         # 結果
@@ -262,8 +295,46 @@ class MemoryConsolidator:
                 "result_status": "succeeded",
                 "failure_reason": None,
             },
+            "correction_reconciliation": correction_trace,
             "reflective_consolidation": reflective_result,
         }
+
+    def _run_correction_reconciliation(
+        self,
+        *,
+        job: dict[str, Any],
+        finished_at: str,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        # correction jobなし
+        correction_context = job.get("correction_reconciliation")
+        if not isinstance(correction_context, dict):
+            return [], self.correction.skipped_trace(reason="no_context")
+
+        # 実行
+        try:
+            state_snapshot = job["state_snapshot"]
+            selected_model_preset = state_snapshot["model_presets"][state_snapshot["selected_model_preset_id"]]
+            role_definition = selected_model_preset["roles"]["memory_correction_reconciliation"]
+            return self.correction.run(
+                llm=self.llm,
+                role_definition=role_definition,
+                context=correction_context,
+                finished_at=finished_at,
+            )
+        except Exception as exc:  # noqa: BLE001
+            targets = correction_context.get("targets", [])
+            return [], {
+                "result_status": "failed",
+                "selection_status": "failed",
+                "target_candidate_count": len(targets) if isinstance(targets, list) else 0,
+                "selected_target_count": 0,
+                "selected_revision_ids": [],
+                "correction_group_ids": [],
+                "action_count": 0,
+                "operation_counts": {},
+                "actions": [],
+                "failure_reason": str(exc),
+            }
 
     def _build_postprocess_job(
         self,
@@ -273,12 +344,17 @@ class MemoryConsolidator:
         finished_at: str,
         episode: dict[str, Any],
         memory_actions: list[dict[str, Any]],
+        correction_context: dict[str, Any] | None,
     ) -> dict[str, Any]:
         selected_memory_set_id = state["selected_memory_set_id"]
         selected_model_preset_id = state["selected_model_preset_id"]
         selected_persona_id = state["selected_persona_id"]
         selected_model_preset = state["model_presets"][selected_model_preset_id]
         reflection_summary_role = selected_model_preset["roles"]["memory_reflection_summary"]
+        correction_role = selected_model_preset["roles"].get(
+            "memory_correction_reconciliation",
+            selected_model_preset["roles"]["memory_interpretation"],
+        )
         return {
             "cycle_id": cycle_id,
             "memory_set_id": selected_memory_set_id,
@@ -304,6 +380,7 @@ class MemoryConsolidator:
                 "model_presets": {
                     selected_model_preset_id: {
                         "roles": {
+                            "memory_correction_reconciliation": deepcopy(correction_role),
                             "memory_reflection_summary": deepcopy(reflection_summary_role),
                         }
                     }
@@ -311,6 +388,7 @@ class MemoryConsolidator:
             },
             "episode": deepcopy(episode),
             "memory_actions": deepcopy(memory_actions),
+            "correction_reconciliation": deepcopy(correction_context),
         }
 
     def _build_memory_interpretation_context(
@@ -333,6 +411,34 @@ class MemoryConsolidator:
                     "total_char_limit": MEMORY_CONTEXT_EVENT_TOTAL_CHAR_LIMIT,
                 }
         return payload
+
+    def _build_correction_job_context(
+        self,
+        *,
+        input_text: str,
+        reply_payload: dict[str, Any] | None,
+        decision: dict[str, Any],
+        event_ids: list[str],
+        cycle_id: str,
+        prepared: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        # 候補なし
+        targets = prepared.get("targets", [])
+        if not isinstance(targets, list) or not targets:
+            return None
+
+        # job context
+        return {
+            "input_text": input_text,
+            "reply_text": reply_payload.get("reply_text") if isinstance(reply_payload, dict) else None,
+            "decision_summary": {
+                "kind": decision.get("kind"),
+                "reason_summary": decision.get("reason_summary"),
+            },
+            "event_ids": event_ids,
+            "cycle_ids": [cycle_id],
+            "targets": targets,
+        }
 
     def _limit_memory_context_events(self, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
         selected = events

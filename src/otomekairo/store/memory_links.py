@@ -234,6 +234,7 @@ class StoreMemoryLinksMixin:
 
     def _insert_revision(self, conn: sqlite3.Connection, action: dict[str, Any]) -> None:
         # payload構築
+        correction = action.get("correction")
         revision = {
             "revision_id": action["revision_id"],
             "memory_set_id": action["memory_set_id"],
@@ -246,6 +247,20 @@ class StoreMemoryLinksMixin:
             "reason": action["reason"],
             "evidence_event_ids": action.get("evidence_event_ids", []),
         }
+        if isinstance(correction, dict):
+            revision["corrects_revision_id"] = correction.get("corrects_revision_id")
+            revision["correction_group_id"] = correction.get("correction_group_id")
+            revision["correction_basis_event_ids"] = correction.get("correction_basis_event_ids", [])
+            revision["correction_reason"] = correction.get("correction_reason")
+            revision["correction_kind"] = correction.get("correction_kind")
+            revision["corrected_operation"] = correction.get("corrected_operation")
+        elif action.get("operation") == "correct":
+            revision["corrects_revision_id"] = action.get("corrects_revision_id")
+            revision["correction_group_id"] = action.get("correction_group_id")
+            revision["correction_basis_event_ids"] = action.get("correction_basis_event_ids", [])
+            revision["correction_reason"] = action.get("correction_reason")
+            revision["correction_kind"] = action.get("correction_kind")
+            revision["corrected_operation"] = action.get("corrected_operation")
 
         # 追加
         conn.execute(

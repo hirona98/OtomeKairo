@@ -19,6 +19,7 @@ from otomekairo.llm.contracts import (
     validate_answer_contract_contract,
     validate_decision_contract,
     validate_event_evidence_contract,
+    validate_memory_correction_reconciliation_contract,
     validate_memory_interpretation_contract,
     validate_memory_reflection_summary_contract,
     validate_pending_intent_selection_contract,
@@ -38,6 +39,8 @@ from otomekairo.llm.prompts import (
     build_event_evidence_repair_prompt,
     build_input_interpretation_messages,
     build_input_interpretation_repair_prompt,
+    build_memory_correction_reconciliation_messages,
+    build_memory_correction_reconciliation_repair_prompt,
     build_memory_interpretation_messages,
     build_memory_interpretation_repair_prompt,
     build_memory_reflection_summary_messages,
@@ -895,6 +898,41 @@ class LLMClient:
             validator=validate_memory_reflection_summary_contract,
             repair_prompt_builder=build_memory_reflection_summary_repair_prompt,
             failure_message="MemoryReflectionSummary の生成に失敗しました。解析可能な応答が得られませんでした。",
+            operation=operation,
+        )
+
+    def generate_memory_correction_reconciliation(
+        self,
+        *,
+        role_definition: dict,
+        source_pack: dict[str, Any],
+    ) -> dict[str, Any]:
+        operation = "memory_correction_reconciliation"
+        targets = source_pack.get("target_candidates", []) if isinstance(source_pack, dict) else []
+        debug_log(
+            "LLM",
+            (
+                f"{operation} start mode={self._debug_mode(role_definition)} "
+                f"model={self._debug_model(role_definition)} target_count={len(targets)}"
+            ),
+            level="DEBUG",
+        )
+        # モック経路
+        if self._is_mock_role_definition(role_definition):
+            payload = self.mock_client.generate_memory_correction_reconciliation(role_definition, source_pack)
+            debug_log("LLM", f"{operation} done mode=mock keys={self._debug_payload_keys(payload)}", level="DEBUG")
+            return payload
+
+        # プロンプト構築
+        messages = build_memory_correction_reconciliation_messages(
+            source_pack=source_pack,
+        )
+        return self._generate_structured_payload(
+            role_definition=role_definition,
+            messages=messages,
+            validator=validate_memory_correction_reconciliation_contract,
+            repair_prompt_builder=build_memory_correction_reconciliation_repair_prompt,
+            failure_message="MemoryCorrectionReconciliation の生成に失敗しました。解析可能な応答が得られませんでした。",
             operation=operation,
         )
 

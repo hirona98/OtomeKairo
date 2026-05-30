@@ -110,7 +110,7 @@ class MemoryReflectionSummaryMixin:
             reasons.append("high_salience_cluster")
 
         # 補正シグナル
-        if any(action["operation"] in {"supersede", "revoke"} for action in memory_actions):
+        if any(action["operation"] in {"supersede", "revoke", "correct"} for action in memory_actions):
             reasons.append("explicit_correction")
 
         # 関係シグナル

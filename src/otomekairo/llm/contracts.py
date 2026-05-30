@@ -84,6 +84,16 @@ MEMORY_STATUS_VALUES = {
     "dormant",
 }
 
+MEMORY_CORRECTION_STATUS_VALUES = {
+    "no_correction",
+    "selected",
+}
+MEMORY_CORRECTION_KIND_VALUES = {
+    "revoke_created",
+    "restore_previous",
+    "supersede_compensation",
+}
+
 COMMITMENT_STATE_VALUES = {
     "open",
     "waiting_confirmation",
@@ -783,6 +793,49 @@ def validate_memory_reflection_summary_contract(payload: dict[str, Any]) -> None
         raise LLMError("MemoryReflectionSummary summary_text が最大長を超えています。")
     if INTERNAL_IDENTIFIER_PATTERN.search(normalized) is not None:
         raise LLMError("MemoryReflectionSummary summary_text に内部識別子を含めてはいけません。")
+
+
+def validate_memory_correction_reconciliation_contract(payload: dict[str, Any]) -> None:
+    # 必須キー群
+    _validate_exact_keys(payload, {"correction_status", "selected_targets"}, "MemoryCorrectionReconciliation")
+
+    # status
+    if payload["correction_status"] not in MEMORY_CORRECTION_STATUS_VALUES:
+        raise LLMError("MemoryCorrectionReconciliation correction_status が不正です。")
+
+    # selected targets
+    selected_targets = payload["selected_targets"]
+    if not isinstance(selected_targets, list):
+        raise LLMError("MemoryCorrectionReconciliation selected_targets は配列である必要があります。")
+    if payload["correction_status"] == "no_correction" and selected_targets:
+        raise LLMError("MemoryCorrectionReconciliation no_correction では selected_targets を空にしてください。")
+    if payload["correction_status"] == "selected" and not selected_targets:
+        raise LLMError("MemoryCorrectionReconciliation selected では selected_targets を 1 件以上入れてください。")
+    if len(selected_targets) > 8:
+        raise LLMError("MemoryCorrectionReconciliation selected_targets は最大 8 件までです。")
+
+    seen_revision_ids: set[str] = set()
+    for item in selected_targets:
+        required_keys = {"revision_id", "memory_unit_id", "correction_kind", "reason_summary"}
+        _validate_exact_keys(item, required_keys, "MemoryCorrectionReconciliation selected_target")
+        revision_id = item["revision_id"]
+        if not isinstance(revision_id, str) or not revision_id.startswith("revision:"):
+            raise LLMError("MemoryCorrectionReconciliation selected_target.revision_id が不正です。")
+        if revision_id in seen_revision_ids:
+            raise LLMError("MemoryCorrectionReconciliation selected_targets に重複した revision_id があります。")
+        seen_revision_ids.add(revision_id)
+
+        memory_unit_id = item["memory_unit_id"]
+        if not isinstance(memory_unit_id, str) or not memory_unit_id.startswith("memory_unit:"):
+            raise LLMError("MemoryCorrectionReconciliation selected_target.memory_unit_id が不正です。")
+        if item["correction_kind"] not in MEMORY_CORRECTION_KIND_VALUES:
+            raise LLMError("MemoryCorrectionReconciliation selected_target.correction_kind が不正です。")
+        reason_summary = item["reason_summary"]
+        if not isinstance(reason_summary, str) or not reason_summary.strip():
+            raise LLMError("MemoryCorrectionReconciliation selected_target.reason_summary が不正です。")
+        if "\n" in reason_summary or "\r" in reason_summary:
+            raise LLMError("MemoryCorrectionReconciliation selected_target.reason_summary に改行を含めてはいけません。")
+
 
 def validate_event_evidence_contract(payload: dict[str, Any]) -> None:
     # 必須キー群

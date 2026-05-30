@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from otomekairo.llm.contracts import (
+    validate_memory_correction_reconciliation_contract,
     validate_memory_interpretation_contract,
     validate_memory_reflection_summary_contract,
 )
@@ -106,6 +107,23 @@ class LLMMockMemoryMixin:
             "summary_text": summary_text[:140].replace("\n", " ").strip(),
         }
         validate_memory_reflection_summary_contract(payload)
+        return payload
+
+    def generate_memory_correction_reconciliation(
+        self,
+        role_definition: dict,
+        source_pack: dict[str, Any],
+    ) -> dict[str, Any]:
+        # model確認
+        self._assert_mock_model(role_definition)
+        _ = source_pack
+
+        # mock は訂正 reconciliation を自動選定しない。
+        payload = {
+            "correction_status": "no_correction",
+            "selected_targets": [],
+        }
+        validate_memory_correction_reconciliation_contract(payload)
         return payload
 
     def _mock_episode_type(self, primary_recall_focus: str) -> str:
@@ -335,18 +353,9 @@ class LLMMockMemoryMixin:
         return None
 
     def _mock_has_correction_signal(self, normalized: str) -> bool:
-        # トークン群
-        correction_tokens = (
-            "いや",
-            "違う",
-            "勘違い",
-            "じゃなく",
-            "ではなく",
-            "むしろ",
-        )
-
-        # 結果
-        return any(token in normalized for token in correction_tokens)
+        # mock でも訂正検出を語彙一致には寄せない。
+        _ = normalized
+        return False
 
     def _mock_preference_object(self, normalized: str) -> str:
         # マッピング

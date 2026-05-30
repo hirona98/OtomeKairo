@@ -114,6 +114,202 @@ class SQLiteMemoryStore(
             return None
         return json.loads(row["payload_json"])
 
+    def list_recent_memory_revision_targets_for_correction(
+        self,
+        *,
+        memory_set_id: str,
+        before_finished_at: str,
+        exclude_cycle_id: str,
+        cycle_limit: int,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        # 入力検証
+        if cycle_limit <= 0 or limit <= 0:
+            return []
+
+        # トランザクション
+        with self._memory_db() as conn:
+            cycle_rows = conn.execute(
+                """
+                SELECT cycle_id, trigger_kind, started_at, finished_at
+                FROM cycle_summaries
+                WHERE selected_memory_set_id = ?
+                  AND cycle_id != ?
+                  AND failed = 0
+                  AND finished_at <= ?
+                ORDER BY started_at DESC, rowid DESC
+                LIMIT ?
+                """,
+                (memory_set_id, exclude_cycle_id, before_finished_at, cycle_limit),
+            ).fetchall()
+            if not cycle_rows:
+                return []
+
+            cycle_payloads = [
+                {
+                    "cycle_id": row["cycle_id"],
+                    "trigger_kind": row["trigger_kind"],
+                    "started_at": row["started_at"],
+                    "finished_at": row["finished_at"],
+                }
+                for row in cycle_rows
+            ]
+            cycle_by_id = {cycle["cycle_id"]: cycle for cycle in cycle_payloads}
+            recent_cycle_ids = list(cycle_by_id)
+            placeholders = ", ".join("?" for _ in recent_cycle_ids)
+
+            event_rows = conn.execute(
+                f"""
+                SELECT event_id, cycle_id
+                FROM events
+                WHERE memory_set_id = ?
+                  AND cycle_id IN ({placeholders})
+                """,
+                (memory_set_id, *recent_cycle_ids),
+            ).fetchall()
+            event_cycle_ids = {
+                row["event_id"]: row["cycle_id"]
+                for row in event_rows
+            }
+
+            revision_rows = conn.execute(
+                """
+                SELECT
+                    rev.payload_json AS revision_payload_json,
+                    unit.payload_json AS unit_payload_json,
+                    rev.operation AS operation,
+                    rev.occurred_at AS occurred_at
+                FROM revisions AS rev
+                JOIN memory_units AS unit
+                  ON unit.memory_set_id = rev.memory_set_id
+                 AND unit.memory_unit_id = rev.memory_unit_id
+                WHERE rev.memory_set_id = ?
+                  AND rev.operation IN (
+                      'create',
+                      'reinforce',
+                      'refine',
+                      'supersede',
+                      'revoke',
+                      'dormant'
+                  )
+                  AND rev.occurred_at < ?
+                ORDER BY rev.occurred_at DESC, rev.rowid DESC
+                LIMIT ?
+                """,
+                (memory_set_id, before_finished_at, max(limit * 8, 32)),
+            ).fetchall()
+
+            # 最新revisionだけを候補にする。
+            targets: list[dict[str, Any]] = []
+            seen_memory_unit_ids: set[str] = set()
+            for row in revision_rows:
+                revision = json.loads(row["revision_payload_json"])
+                unit = json.loads(row["unit_payload_json"])
+                memory_unit_id = revision.get("memory_unit_id")
+                if not isinstance(memory_unit_id, str) or not memory_unit_id:
+                    continue
+                if memory_unit_id in seen_memory_unit_ids:
+                    continue
+                seen_memory_unit_ids.add(memory_unit_id)
+
+                source_cycle_ids = self._revision_source_cycle_ids(
+                    revision=revision,
+                    unit=unit,
+                    event_cycle_ids=event_cycle_ids,
+                    cycle_by_id=cycle_by_id,
+                )
+                if not source_cycle_ids:
+                    continue
+
+                related_memory_units = self._load_memory_units_by_id(
+                    conn,
+                    memory_set_id=memory_set_id,
+                    memory_unit_ids=revision.get("related_memory_unit_ids", []),
+                )
+                targets.append(
+                    {
+                        "memory_unit": unit,
+                        "revision": revision,
+                        "operation": row["operation"],
+                        "occurred_at": row["occurred_at"],
+                        "source_cycle_ids": source_cycle_ids,
+                        "source_cycles": [
+                            cycle_by_id[cycle_id]
+                            for cycle_id in source_cycle_ids
+                            if cycle_id in cycle_by_id
+                        ],
+                        "related_memory_units": related_memory_units,
+                    }
+                )
+                if len(targets) >= limit:
+                    break
+
+        # 結果
+        return targets
+
+    def _revision_source_cycle_ids(
+        self,
+        *,
+        revision: dict[str, Any],
+        unit: dict[str, Any],
+        event_cycle_ids: dict[str, str],
+        cycle_by_id: dict[str, dict[str, Any]],
+    ) -> list[str]:
+        # revision の根拠 event から cycle を復元する。
+        source_cycle_ids: list[str] = []
+        for event_id in revision.get("evidence_event_ids", []):
+            if not isinstance(event_id, str):
+                continue
+            cycle_id = event_cycle_ids.get(event_id)
+            if cycle_id in cycle_by_id and cycle_id not in source_cycle_ids:
+                source_cycle_ids.append(cycle_id)
+
+        # 古い action 互換として memory_unit 側の cycle ids も見る。
+        if not source_cycle_ids:
+            for cycle_id in unit.get("evidence_cycle_ids", []):
+                if isinstance(cycle_id, str) and cycle_id in cycle_by_id and cycle_id not in source_cycle_ids:
+                    source_cycle_ids.append(cycle_id)
+
+        # 結果
+        return source_cycle_ids
+
+    def _load_memory_units_by_id(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        memory_set_id: str,
+        memory_unit_ids: list[Any],
+    ) -> list[dict[str, Any]]:
+        # 正規化
+        normalized_ids: list[str] = []
+        for value in memory_unit_ids:
+            if isinstance(value, str) and value and value not in normalized_ids:
+                normalized_ids.append(value)
+        if not normalized_ids:
+            return []
+
+        # クエリ
+        placeholders = ", ".join("?" for _ in normalized_ids)
+        rows = conn.execute(
+            f"""
+            SELECT payload_json
+            FROM memory_units
+            WHERE memory_set_id = ?
+              AND memory_unit_id IN ({placeholders})
+            """,
+            (memory_set_id, *normalized_ids),
+        ).fetchall()
+        units_by_id = {
+            payload["memory_unit_id"]: payload
+            for payload in (json.loads(row["payload_json"]) for row in rows)
+            if isinstance(payload.get("memory_unit_id"), str)
+        }
+        return [
+            units_by_id[memory_unit_id]
+            for memory_unit_id in normalized_ids
+            if memory_unit_id in units_by_id
+        ]
+
     def list_cycle_summaries(self, limit: int) -> list[dict[str, Any]]:
         # クエリ
         with self._memory_db() as conn:

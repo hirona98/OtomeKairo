@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import math
 import re
 import uuid
@@ -431,6 +432,10 @@ class MemoryActionResolver:
             "evidence_cycle_ids": merged_cycle_ids(existing.get("evidence_cycle_ids", []), cycle_ids),
         }
 
+    def build_corrected_memory_unit(self, *, corrected_snapshot: dict[str, Any]) -> dict[str, Any]:
+        # correct は履歴を消さず、現在の正本だけを補正済み snapshot に置き換える。
+        return deepcopy(corrected_snapshot)
+
     def build_memory_action(
         self,
         *,
@@ -443,9 +448,10 @@ class MemoryActionResolver:
         after_snapshot: dict[str, Any] | None,
         reason: str,
         event_ids: list[str],
+        correction: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         # アクション
-        return {
+        action = {
             "operation": operation,
             "revision_id": f"revision:{uuid.uuid4().hex}",
             "memory_set_id": memory_set_id,
@@ -458,6 +464,9 @@ class MemoryActionResolver:
             "evidence_event_ids": event_ids,
             "memory_unit": memory_unit,
         }
+        if isinstance(correction, dict):
+            action["correction"] = correction
+        return action
 
     def is_same_memory(self, existing: dict[str, Any], candidate: dict[str, Any]) -> bool:
         # object比較

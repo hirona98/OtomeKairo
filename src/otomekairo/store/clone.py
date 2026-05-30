@@ -188,6 +188,14 @@ class StoreCloneMixin:
                         event_id_map.get(event_id, event_id)
                         for event_id in record.get("evidence_event_ids", [])
                     ],
+                    "corrects_revision_id": revision_id_map.get(
+                        record.get("corrects_revision_id"),
+                        record.get("corrects_revision_id"),
+                    ),
+                    "correction_basis_event_ids": [
+                        event_id_map.get(event_id, event_id)
+                        for event_id in record.get("correction_basis_event_ids", [])
+                    ],
                 },
             )
         return memory_unit_id_map

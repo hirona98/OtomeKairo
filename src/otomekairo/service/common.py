@@ -27,6 +27,7 @@ REQUIRED_MODEL_ROLE_NAMES = (
     "decision_generation",
     "input_interpretation",
     "memory_interpretation",
+    "memory_correction_reconciliation",
     "memory_reflection_summary",
     "event_evidence_generation",
     "recall_pack_selection",
