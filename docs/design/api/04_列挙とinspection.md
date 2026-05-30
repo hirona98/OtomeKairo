@@ -313,13 +313,13 @@ exact answer 系の cycle では、`recall_trace` に `answer_contract`、`evide
 ### `GET /api/logs/stream`
 
 - 認証: 必要
-- 役割: `CocoroConsole` のログビューアー向けに、判断サイクルの短い段階要約ログを WebSocket で流す
+- 役割: `CocoroConsole` のログビューアー向けに、`debug_log` の出力を WebSocket で流す
 - client から送る message は不要
 - 接続時には、直近の短いログを replay する
 - `ts` は OtomeKairo のローカルタイムゾーンに属する offset 付き timestamp で返す
 - 通常会話では、ユーザー入力と実際にユーザーへ表示する assistant 返信の短い抜粋を流す
 - 会話本文の抜粋は最初の改行までを流し、それ以降の行を流さない
-- `logs/stream` に流す live log は同じ `logger` と `msg` で標準出力とログファイルにも出力する
+- `logs/stream` は `debug_log` の購読先として扱い、標準出力とログファイルに出る `LEVEL / Component / message` と同じ内容を `level / logger / msg` として流す
 
 message shape:
 
@@ -334,14 +334,8 @@ message shape:
 ]
 ```
 
-`logger` には少なくとも次を流す。
-
-- `Input`
-- `Result`
-- `Failure`
-- `Memory`
-
-ここで流すのは live 表示向けの派生ログであり、inspection の正本ではない。
+`logger` は `debug_log` の component と一致させる。
+ここで流すのはデバッグ表示向けログであり、inspection の正本ではない。
 完全な prompt、生の LLM 応答全文、長い思考過程は流さない。
-通常サーバ実行では、同じ短い段階要約ログを `OTOMEKAIRO_DATA_DIR/server.log` にも保存する。
+通常サーバ実行では、同じデバッグログを `OTOMEKAIRO_DATA_DIR/server.log` にも保存する。
 ファイルログは容量上限付きでローテーションする。

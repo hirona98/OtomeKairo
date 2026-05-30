@@ -180,8 +180,8 @@ class ServiceInputLoggingMixin:
         for log in logs:
             component = str(log.get("logger") or "LiveLog")
             message = str(log.get("msg") or "")
-            debug_log(component, message)
-        self._log_stream_registry.append_logs(logs)
+            level = str(log.get("level") or "INFO")
+            debug_log(component, message, level=level)
 
     def _build_live_log_record(self, *, level: str, component: str, message: str) -> dict[str, Any]:
         # 結果

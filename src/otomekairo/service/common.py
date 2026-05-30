@@ -4,6 +4,7 @@ import os
 import threading
 from datetime import datetime
 from pathlib import Path
+from typing import Any, Callable
 
 
 def _read_non_negative_int_env(name: str, default: int) -> int:
@@ -40,6 +41,7 @@ BACKGROUND_WAKE_POLL_SECONDS = 5.0
 INITIAL_DESKTOP_CAPTURE_DELAY_SECONDS = 5.0
 DEFAULT_DEBUG_LOG_MAX_BYTES = 5 * 1024 * 1024
 DEFAULT_DEBUG_LOG_BACKUP_COUNT = 3
+MAX_PENDING_DEBUG_STREAM_RECORDS = 200
 
 
 # デバッグログファイル
@@ -47,6 +49,8 @@ _debug_log_file_lock = threading.RLock()
 _debug_log_file_path: Path | None = None
 _debug_log_file_max_bytes = DEFAULT_DEBUG_LOG_MAX_BYTES
 _debug_log_file_backup_count = DEFAULT_DEBUG_LOG_BACKUP_COUNT
+_debug_log_stream_sink: Callable[[dict[str, Any]], None] | None = None
+_debug_log_stream_pending_records: list[dict[str, Any]] = []
 
 
 # エラー
@@ -83,11 +87,57 @@ def configure_debug_log_file(
             _debug_log_file_path.parent.mkdir(parents=True, exist_ok=True)
 
 
-def debug_log(component: str, message: str) -> None:
+def configure_debug_log_stream_sink(sink: Callable[[dict[str, Any]], None] | None) -> None:
+    global _debug_log_stream_sink
+
+    with _debug_log_file_lock:
+        _debug_log_stream_sink = sink
+        pending_records = list(_debug_log_stream_pending_records)
+        _debug_log_stream_pending_records.clear()
+    if sink is None:
+        return
+    for record in pending_records:
+        try:
+            sink(record)
+        except Exception as exc:
+            print(f"[LogStream] append_failed error={type(exc).__name__}", flush=True)
+
+
+DEBUG_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR"}
+
+
+def debug_log(component: str, message: str, *, level: str = "INFO") -> None:
     timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
-    line = f"{timestamp} [{component}] {message}"
+    normalized_level = level.strip().upper() if isinstance(level, str) else "INFO"
+    if normalized_level not in DEBUG_LOG_LEVELS:
+        normalized_level = "INFO"
+    line = f"{timestamp} [{normalized_level}] [{component}] {message}"
     print(line, flush=True)
     _append_debug_log_file(line)
+    _append_debug_log_stream(
+        {
+            "ts": timestamp,
+            "level": normalized_level,
+            "logger": component,
+            "msg": message,
+        }
+    )
+
+
+def _append_debug_log_stream(record: dict[str, Any]) -> None:
+    with _debug_log_file_lock:
+        sink = _debug_log_stream_sink
+        if sink is None:
+            _debug_log_stream_pending_records.append(record)
+            if len(_debug_log_stream_pending_records) > MAX_PENDING_DEBUG_STREAM_RECORDS:
+                del _debug_log_stream_pending_records[:-MAX_PENDING_DEBUG_STREAM_RECORDS]
+            return
+    if sink is None:
+        return
+    try:
+        sink(record)
+    except Exception as exc:
+        print(f"[LogStream] append_failed error={type(exc).__name__}", flush=True)
 
 
 def _append_debug_log_file(line: str) -> None:

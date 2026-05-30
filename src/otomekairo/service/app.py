@@ -12,7 +12,7 @@ from otomekairo.log_stream import LogStreamRegistry
 from otomekairo.memory.consolidator import MemoryConsolidator
 from otomekairo.recall.builder import RecallBuilder
 from otomekairo.service.capability import ServiceCapabilityMixin
-from otomekairo.service.common import ServiceError, debug_log
+from otomekairo.service.common import ServiceError, configure_debug_log_stream_sink, debug_log
 from otomekairo.service.config.mixin import ServiceConfigMixin
 from otomekairo.service.memory import ServiceMemoryMixin
 from otomekairo.service.input.mixin import ServiceInputMixin
@@ -30,6 +30,8 @@ class OtomeKairoService(
 ):
     def __init__(self, root_dir: Path) -> None:
         # 依存関係
+        self._log_stream_registry = LogStreamRegistry()
+        configure_debug_log_stream_sink(self._append_debug_log_stream_record)
         debug_log("Service", f"initializing root_dir={root_dir}")
         self.store = FileStore(root_dir)
         self.llm = LLMClient()
@@ -58,7 +60,6 @@ class OtomeKairoService(
             "current_cycle_id": None,
         }
         self._event_stream_registry = EventStreamRegistry()
-        self._log_stream_registry = LogStreamRegistry()
         self._capability_request_lock = threading.RLock()
         self._pending_capability_requests: dict[str, dict[str, Any]] = {}
         self._capability_runtime_state: dict[str, dict[str, Any]] = {}
@@ -66,6 +67,9 @@ class OtomeKairoService(
         self._next_stream_event_value = 1
         self.recover_capability_runtime_state_after_startup()
         debug_log("Service", "initialized")
+
+    def _append_debug_log_stream_record(self, record: dict[str, Any]) -> None:
+        self._log_stream_registry.append_logs([record])
 
     def start_background_wake_scheduler(self) -> None:
         # 既存
