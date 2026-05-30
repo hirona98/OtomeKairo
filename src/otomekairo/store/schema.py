@@ -11,7 +11,7 @@ from otomekairo.service.common import debug_log
 # 定数
 MEMORY_DB_FILE_NAME = "memory.db"
 CURRENT_MEMORY_DB_VERSION = 13
-SUPPORTED_MEMORY_DB_VERSIONS = {0, 11, 12, CURRENT_MEMORY_DB_VERSION}
+SUPPORTED_MEMORY_DB_VERSIONS = {0, CURRENT_MEMORY_DB_VERSION}
 
 
 # スキーマMixin
@@ -392,14 +392,3 @@ class StoreSchemaMixin:
             ON memory_postprocess_jobs(memory_set_id, result_status, queued_at);
             """
         )
-        self._migrate_activity_states_schema(conn)
-
-    def _migrate_activity_states_schema(self, conn: sqlite3.Connection) -> None:
-        # v12 の activity_type 列は分類 enum 用だったため、自然文 label の列名へ変える。
-        columns = {
-            row["name"]
-            for row in conn.execute("PRAGMA table_info(activity_states)").fetchall()
-            if isinstance(row["name"], str)
-        }
-        if "activity_type" in columns and "activity_label" not in columns:
-            conn.execute("ALTER TABLE activity_states RENAME COLUMN activity_type TO activity_label")
