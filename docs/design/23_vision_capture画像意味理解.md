@@ -209,6 +209,9 @@ LLM の出力は JSON object 1 個に固定する。
 4. `daily_visual_digest`
 5. 長期 memory
 
+現行実装では、検索一致した視覚記録と直近の視覚記録を `RecallPack.visual_observations` へ少数投入する。
+応答と判断は `visual_observations[].detailed_summary_text` の範囲で、画像内の対象有無を確認する。
+
 回答では不確実性を維持する。
 例えば詳細説明に「背景に観覧車らしき大きな円形構造物が見える」とある場合、回答では「観覧車らしきものは写っていた」と述べ、断定しすぎない。
 

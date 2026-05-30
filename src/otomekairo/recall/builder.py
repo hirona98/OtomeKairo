@@ -23,6 +23,7 @@ MEMORY_LINK_RECALL_LABEL_PRIORITY = [
 ]
 MEMORY_LINK_RECALL_HINT_LIMIT = 3
 MEMORY_LINK_RECALL_TRACE_LIMIT = 8
+VISUAL_OBSERVATION_RECALL_LIMIT = 3
 
 
 # recall構築
@@ -239,11 +240,17 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
         )
         event_evidence = event_evidence_result["event_evidence"]
         selected_event_ids = event_evidence_result["selected_event_ids"]
+        visual_observations = self._build_visual_observations(
+            memory_set_id=memory_set_id,
+            augmented_query_text=augmented_query_text,
+            limit=VISUAL_OBSERVATION_RECALL_LIMIT,
+        )
 
         # 結果
         return {
             **sections,
             "event_evidence": event_evidence,
+            "visual_observations": visual_observations,
             "event_evidence_generation": event_evidence_result["event_evidence_generation"],
             "selected_memory_ids": selected_memory_ids,
             "selected_episode_ids": selected_episode_ids,
@@ -690,6 +697,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             "active_commitments": [],
             "episodic_evidence": [],
             "event_evidence": [],
+            "visual_observations": [],
             "event_evidence_generation": {
                 "requested_event_count": 0,
                 "loaded_event_count": 0,
@@ -712,6 +720,40 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             "memory_link_context": self._empty_memory_link_context(),
             "candidate_count": 0,
         }
+
+    def _build_visual_observations(
+        self,
+        *,
+        memory_set_id: str,
+        augmented_query_text: str,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        # 検索一致と直近記録を合わせ、直後の「あれあったっけ」に耐える。
+        queried_records = self.store.list_visual_observation_records(
+            memory_set_id=memory_set_id,
+            query_text=augmented_query_text,
+            limit=limit,
+        )
+        recent_records = self.store.list_visual_observation_records(
+            memory_set_id=memory_set_id,
+            query_text=None,
+            limit=limit,
+        )
+
+        # 重複除去
+        selected: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for record in queried_records + recent_records:
+            visual_observation_id = record.get("visual_observation_id")
+            if not isinstance(visual_observation_id, str) or visual_observation_id in seen:
+                continue
+            selected.append(self._to_visual_observation_item(record))
+            seen.add(visual_observation_id)
+            if len(selected) >= limit:
+                break
+
+        # 結果
+        return selected
 
     def _embedding_dimension(self, definition: dict[str, Any]) -> int:
         embedding_dimension = definition.get("embedding_dimension")
@@ -1054,6 +1096,20 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             "salience": record["salience"],
             "formed_at": record["formed_at"],
             "linked_event_ids": record.get("linked_event_ids", []),
+        }
+
+    def _to_visual_observation_item(self, record: dict[str, Any]) -> dict[str, Any]:
+        # 視覚記録項目化
+        return {
+            "source_kind": "visual_observation_record",
+            "visual_observation_id": record["visual_observation_id"],
+            "observed_at": record["observed_at"],
+            "vision_source_id": record.get("vision_source_id"),
+            "source_label": record.get("source_label"),
+            "image_input_kind": record["image_input_kind"],
+            "detailed_summary_text": record["detailed_summary_text"],
+            "confidence_hint": record.get("confidence_hint"),
+            "retention_status": record["retention_status"],
         }
 
     def _to_topic_episode_item(self, record: dict[str, Any]) -> dict[str, Any]:

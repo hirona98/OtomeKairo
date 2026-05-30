@@ -168,6 +168,30 @@ class StoreSchemaMixin:
             CREATE INDEX IF NOT EXISTS idx_world_states_identity
             ON world_states(memory_set_id, state_type, scope_type, scope_key, updated_at);
 
+            CREATE TABLE IF NOT EXISTS visual_observation_records (
+                visual_observation_id TEXT PRIMARY KEY,
+                memory_set_id TEXT NOT NULL,
+                cycle_id TEXT NOT NULL,
+                observed_at TEXT NOT NULL,
+                source_kind TEXT NOT NULL,
+                source_label TEXT,
+                vision_source_id TEXT,
+                image_input_kind TEXT NOT NULL,
+                confidence_hint TEXT,
+                retention_status TEXT NOT NULL,
+                detailed_summary_text TEXT NOT NULL,
+                payload_json TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_visual_observation_memory_observed
+            ON visual_observation_records(memory_set_id, observed_at);
+
+            CREATE INDEX IF NOT EXISTS idx_visual_observation_cycle
+            ON visual_observation_records(cycle_id);
+
+            CREATE INDEX IF NOT EXISTS idx_visual_observation_source
+            ON visual_observation_records(memory_set_id, vision_source_id, observed_at);
+
             CREATE TABLE IF NOT EXISTS activity_states (
                 activity_id TEXT PRIMARY KEY,
                 memory_set_id TEXT NOT NULL,

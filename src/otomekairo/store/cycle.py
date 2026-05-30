@@ -12,6 +12,7 @@ class StoreCycleMixin:
         retrieval_run: dict[str, Any],
         cycle_summary: dict[str, Any],
         cycle_trace: dict[str, Any],
+        visual_observation_records: list[dict[str, Any]] | None = None,
     ) -> None:
         # トランザクション
         with self._memory_db() as conn:
@@ -27,6 +28,10 @@ class StoreCycleMixin:
 
             # trace追加
             self._insert_cycle_trace(conn, cycle_trace)
+
+            # 視覚記録追加
+            for record in visual_observation_records or []:
+                self._insert_visual_observation_record(conn, record)
 
     def append_events(self, *, events: list[dict[str, Any]]) -> None:
         # 空

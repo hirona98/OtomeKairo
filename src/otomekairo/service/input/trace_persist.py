@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 from typing import Any
 
 from otomekairo.llm.contexts import InitiativeContext
@@ -267,11 +266,19 @@ class ServiceInputTracePersistMixin:
             ongoing_action_summary=ongoing_action_summary,
             initiative_context=initiative_context,
         )
+        visual_observation_records = self._build_visual_observation_records(
+            cycle_id=cycle_id,
+            memory_set_id=memory_set_id,
+            observed_at=started_at,
+            client_context=client_context,
+            observation_summary=observation_summary,
+        )
         self.store.persist_cycle_records(
             events=events,
             retrieval_run=retrieval_run,
             cycle_summary=cycle_summary,
             cycle_trace=cycle_trace,
+            visual_observation_records=visual_observation_records,
         )
         return events
 
@@ -371,12 +378,137 @@ class ServiceInputTracePersistMixin:
             ongoing_action_summary=ongoing_action_summary,
             initiative_context=initiative_context,
         )
+        visual_observation_records = self._build_visual_observation_records(
+            cycle_id=cycle_id,
+            memory_set_id=memory_set_id,
+            observed_at=started_at,
+            client_context=client_context,
+            observation_summary=observation_summary,
+        )
         self.store.persist_cycle_records(
             events=events,
             retrieval_run=retrieval_run,
             cycle_summary=cycle_summary,
             cycle_trace=cycle_trace,
+            visual_observation_records=visual_observation_records,
         )
+
+    def _build_visual_observation_records(
+        self,
+        *,
+        cycle_id: str,
+        memory_set_id: str,
+        observed_at: str,
+        client_context: dict[str, Any],
+        observation_summary: dict[str, Any] | None,
+    ) -> list[dict[str, Any]]:
+        # 視覚説明が成功している入力だけ永続視覚記録にする。
+        if not isinstance(observation_summary, dict):
+            return []
+        if observation_summary.get("image_interpreted") is not True:
+            return []
+        detailed_summary_text = observation_summary.get("visual_summary_text")
+        if not isinstance(detailed_summary_text, str) or not detailed_summary_text.strip():
+            return []
+
+        image_input_kind = observation_summary.get("image_input_kind")
+        if not isinstance(image_input_kind, str) or not image_input_kind.strip():
+            return []
+
+        source_kind = observation_summary.get("source_kind")
+        if not isinstance(source_kind, str) or not source_kind.strip():
+            source_value = observation_summary.get("source")
+            if not isinstance(source_value, str) or not source_value.strip():
+                return []
+            source_kind = source_value
+
+        visual_observation_id = observation_summary.get("visual_observation_id")
+        if not isinstance(visual_observation_id, str) or not visual_observation_id.strip():
+            return []
+
+        source_label = observation_summary.get("source_label")
+        vision_source_id = observation_summary.get("vision_source_id")
+        confidence_hint = observation_summary.get("visual_confidence_hint")
+        active_app = client_context.get("active_app")
+        window_title = client_context.get("window_title")
+
+        record = {
+            "visual_observation_id": visual_observation_id.strip(),
+            "memory_set_id": memory_set_id,
+            "cycle_id": cycle_id,
+            "observed_at": observed_at,
+            "source_kind": source_kind.strip(),
+            "source_label": (
+                source_label.strip()
+                if isinstance(source_label, str) and source_label.strip()
+                else None
+            ),
+            "vision_source_id": (
+                vision_source_id.strip()
+                if isinstance(vision_source_id, str) and vision_source_id.strip()
+                else None
+            ),
+            "image_input_kind": image_input_kind.strip(),
+            "detailed_summary_text": detailed_summary_text.strip(),
+            "confidence_hint": (
+                confidence_hint.strip()
+                if isinstance(confidence_hint, str) and confidence_hint.strip()
+                else None
+            ),
+            "scene_entities": [],
+            "activity_labels": [],
+            "environment_labels": [],
+            "uncertainty_notes": [],
+            "redaction_notes": [],
+            "related_cycle_id": cycle_id,
+            "related_episode_id": None,
+            "duplicate_group_id": None,
+            "importance_score": self._visual_observation_importance_score(
+                trigger_kind=image_input_kind.strip(),
+                observation_summary=observation_summary,
+            ),
+            "retention_status": "active",
+            "index": {
+                "short_summary_text": self._clamp(detailed_summary_text.strip(), limit=240),
+                "searchable_terms": self._visual_observation_searchable_terms(
+                    observation_summary=observation_summary,
+                    client_context=client_context,
+                ),
+                "embedding_text": self._clamp(detailed_summary_text.strip(), limit=1200),
+            },
+            "client_context_summary": {
+                "active_app": active_app.strip() if isinstance(active_app, str) and active_app.strip() else None,
+                "window_title": window_title.strip() if isinstance(window_title, str) and window_title.strip() else None,
+            },
+        }
+        return [record]
+
+    def _visual_observation_importance_score(
+        self,
+        *,
+        trigger_kind: str,
+        observation_summary: dict[str, Any],
+    ) -> float:
+        # 会話添付画像はユーザー関心が明示されているため高めにする。
+        if trigger_kind == "conversation_attachment":
+            return 0.72
+        if self._observation_summary_is_vision_capture(observation_summary):
+            return 0.48
+        return 0.4
+
+    def _visual_observation_searchable_terms(
+        self,
+        *,
+        observation_summary: dict[str, Any],
+        client_context: dict[str, Any],
+    ) -> list[str]:
+        terms: list[str] = []
+        for source in (observation_summary, client_context):
+            for key in ("source_kind", "source_label", "vision_source_id", "active_app", "window_title"):
+                value = source.get(key)
+                if isinstance(value, str) and value.strip() and value.strip() not in terms:
+                    terms.append(self._clamp(value.strip(), limit=120))
+        return terms
 
     def _exception_capability_dispatch_trace(
         self,
