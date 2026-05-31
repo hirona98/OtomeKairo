@@ -352,6 +352,7 @@ class ServiceInputPipelineMixin:
             foreground_world_state=foreground_world_state,
             world_state_trace=world_state_trace,
             trigger_kind=trigger_kind,
+            client_context=client_context,
         )
         activity_context, activity_trace = self._refresh_activity_context(
             state=state,

@@ -137,8 +137,7 @@ class ServiceInputInitiativeContextMixin:
     ) -> list[dict[str, Any]]:
         if trigger_kind in {"wake", "background_wake"}:
             previous = world_state_trace.previous_foreground_world_state if world_state_trace is not None else None
-            if isinstance(previous, list):
-                return [item for item in previous if isinstance(item, dict)]
+            return self._merge_foreground_world_state_for_reuse(foreground_world_state, previous)
         return foreground_world_state or []
 
     def _initiative_opportunity_summary(

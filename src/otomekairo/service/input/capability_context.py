@@ -17,6 +17,7 @@ class ServiceInputCapabilityContextMixin:
         foreground_world_state: list[dict[str, Any]] | None,
         world_state_trace: WorldStateTrace | None,
         trigger_kind: str,
+        client_context: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]] | None:
         if not capability_decision_view:
             return capability_decision_view
@@ -27,11 +28,12 @@ class ServiceInputCapabilityContextMixin:
             world_state_trace=world_state_trace,
             trigger_kind=trigger_kind,
         )
-        if not reuse_world_state:
+        wake_observation_sources = self._fresh_wake_observation_visual_sources(client_context)
+        if not reuse_world_state and not wake_observation_sources:
             return capability_decision_view
         fresh_world_states = self._fresh_foreground_world_state_summaries(reuse_world_state)
         fresh_state_by_type = self._fresh_foreground_world_state_by_type(fresh_world_states)
-        if not fresh_state_by_type:
+        if not fresh_state_by_type and not wake_observation_sources:
             return capability_decision_view
 
         annotated: list[dict[str, Any]] = []
@@ -51,6 +53,10 @@ class ServiceInputCapabilityContextMixin:
                     fresh_visual_sources = self._fresh_visual_world_states_for_sources(
                         vision_sources=item.get("vision_sources"),
                         fresh_world_states=fresh_world_states,
+                    )
+                    fresh_visual_sources = self._merge_fresh_visual_sources(
+                        fresh_visual_sources,
+                        wake_observation_sources,
                     )
                     if fresh_visual_sources:
                         annotated.append(
@@ -95,10 +101,108 @@ class ServiceInputCapabilityContextMixin:
     ) -> list[dict[str, Any]]:
         if trigger_kind == "capability_result":
             return foreground_world_state or []
+        if trigger_kind in {"wake", "background_wake"}:
+            return self._merge_foreground_world_state_for_reuse(
+                foreground_world_state,
+                world_state_trace.previous_foreground_world_state if world_state_trace is not None else None,
+            )
         previous = world_state_trace.previous_foreground_world_state if world_state_trace is not None else None
         if isinstance(previous, list):
             return [item for item in previous if isinstance(item, dict)]
         return []
+
+    def _merge_foreground_world_state_for_reuse(
+        self,
+        current: list[dict[str, Any]] | None,
+        previous: list[dict[str, Any]] | None,
+    ) -> list[dict[str, Any]]:
+        merged: list[dict[str, Any]] = []
+        seen_keys: set[str] = set()
+        for source in (current, previous):
+            if not isinstance(source, list):
+                continue
+            for item in source:
+                if not isinstance(item, dict):
+                    continue
+                key = self._foreground_world_state_reuse_key(item)
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+                merged.append(item)
+        return merged
+
+    def _foreground_world_state_reuse_key(self, item: dict[str, Any]) -> str:
+        integration_key = item.get("integration_key")
+        if isinstance(integration_key, str) and integration_key.strip():
+            return f"integration_key:{integration_key.strip()}"
+        scope = item.get("scope")
+        if isinstance(scope, str) and scope.strip():
+            return f"scope:{item.get('state_type') or ''}:{scope.strip()}"
+        return "|".join(
+            str(item.get(key) or "")
+            for key in ("state_type", "summary_text")
+        )
+
+    def _fresh_wake_observation_visual_sources(
+        self,
+        client_context: dict[str, Any] | None,
+    ) -> list[dict[str, Any]]:
+        if not isinstance(client_context, dict):
+            return []
+        observations = client_context.get("wake_observations")
+        if not isinstance(observations, list):
+            return []
+        sources: list[dict[str, Any]] = []
+        for observation in observations:
+            if not isinstance(observation, dict):
+                continue
+            if (
+                observation.get("status") != "succeeded"
+                or observation.get("capability_id") != "vision.capture"
+            ):
+                continue
+            vision_source_id = self._client_context_text(observation.get("vision_source_id"), limit=96)
+            if vision_source_id is None:
+                continue
+            # wake observation は同じ cycle で取得済みの視覚観測として扱う。
+            payload: dict[str, Any] = {
+                "vision_source_id": vision_source_id,
+                "age_label": "たった今",
+                "fresh_source": "wake_observation",
+            }
+            for source_key, target_key, limit in (
+                ("visual_summary_text", "summary_text", 120),
+                ("source_label", "source_label", 80),
+            ):
+                value = self._client_context_text(observation.get(source_key), limit=limit)
+                if value is not None:
+                    payload[target_key] = value
+            sources.append(payload)
+        return sources[:6]
+
+    def _merge_fresh_visual_sources(
+        self,
+        *source_lists: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        merged_by_source_id: dict[str, dict[str, Any]] = {}
+        for source_list in source_lists:
+            for item in source_list:
+                if not isinstance(item, dict):
+                    continue
+                vision_source_id = item.get("vision_source_id")
+                if not isinstance(vision_source_id, str) or not vision_source_id.strip():
+                    continue
+                key = vision_source_id.strip()
+                existing = merged_by_source_id.get(key, {})
+                merged_by_source_id[key] = {
+                    **item,
+                    **{
+                        field: existing[field]
+                        for field in ("summary_text", "source_label")
+                        if field in existing and field not in item
+                    },
+                }
+        return list(merged_by_source_id.values())[:6]
 
     def _fresh_foreground_world_state_summaries(
         self,
