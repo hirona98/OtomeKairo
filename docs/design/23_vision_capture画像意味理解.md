@@ -176,6 +176,12 @@ LLM の出力は JSON object 1 個に固定する。
 6. 重要な視覚体験を episode と長期記憶へ接続する
 7. `daily_visual_digest` を作る
 
+現行実装では、前日以前の未整理日を background worker が処理する。
+連続する類似視覚記録には `duplicate_group_id` を付ける。
+詳細説明は残し、低変化 group の中間記録だけ `retention_status=compressed` にする。
+日ごとの整理結果は `daily_visual_digest` として保存する。
+`daily_visual_digest.memory_candidate_summaries` は記憶候補であり、直接 `memory_unit` を作る処理ではない。
+
 保持対象は次である。
 
 - 会話と結びついた画像

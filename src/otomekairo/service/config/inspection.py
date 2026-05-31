@@ -86,15 +86,18 @@ class ServiceConfigInspectionMixin:
         ongoing_action = self._current_ongoing_action(state=state, current_time=current_time)
         with self._runtime_state_lock:
             memory_job_in_progress = self._memory_postprocess_runtime_state.get("current_cycle_id") is not None
+            visual_daily_in_progress = self._visual_daily_runtime_state.get("current_digest_id") is not None
         return {
             "connection_state": "ready",
             "wake_scheduler_active": self._background_wake_scheduler_active() and state["wake_policy"]["mode"] == "interval",
             "ongoing_action_exists": ongoing_action is not None,
             "memory_job_worker_active": self._background_memory_postprocess_worker_active(),
+            "visual_daily_worker_active": self._background_visual_daily_worker_active(),
             "pending_memory_job_count": self.store.count_memory_postprocess_jobs(
                 result_statuses=["queued", "running"],
             ),
             "memory_job_in_progress": memory_job_in_progress,
+            "visual_daily_in_progress": visual_daily_in_progress,
         }
 
     def _build_current_runtime_detail(
@@ -107,6 +110,7 @@ class ServiceConfigInspectionMixin:
             "wake_runtime_state": self._snapshot_wake_runtime_state(current_time=current_time),
             "wake_policy_observations": self._snapshot_wake_policy_observations(state=state),
             "memory_postprocess_runtime_state": self._snapshot_memory_postprocess_runtime_state(),
+            "visual_daily_runtime_state": self._snapshot_visual_daily_runtime_state(),
             "pending_capability_requests": self._list_pending_capability_request_summaries(current_time=current_time),
         }
 
@@ -170,6 +174,12 @@ class ServiceConfigInspectionMixin:
         with self._runtime_state_lock:
             return {
                 "current_cycle_id": self._memory_postprocess_runtime_state.get("current_cycle_id"),
+            }
+
+    def _snapshot_visual_daily_runtime_state(self) -> dict[str, Any]:
+        with self._runtime_state_lock:
+            return {
+                "current_digest_id": self._visual_daily_runtime_state.get("current_digest_id"),
             }
 
     def _snapshot_wake_policy_observations(self, *, state: dict[str, Any]) -> list[dict[str, Any]]:
@@ -447,4 +457,11 @@ class ServiceConfigInspectionMixin:
             return (
                 self._background_memory_postprocess_thread is not None
                 and self._background_memory_postprocess_thread.is_alive()
+            )
+
+    def _background_visual_daily_worker_active(self) -> bool:
+        with self._runtime_state_lock:
+            return (
+                self._background_visual_daily_thread is not None
+                and self._background_visual_daily_thread.is_alive()
             )

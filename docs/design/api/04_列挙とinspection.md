@@ -84,6 +84,7 @@ response:
         }
       ],
       "memory_postprocess_runtime_state": {},
+      "visual_daily_runtime_state": {},
       "pending_capability_requests": []
     },
     "current_state": {
@@ -104,7 +105,7 @@ response:
 
 `current_state.foreground_world_states` は現在有効な `world_state` の前景 snapshot を返す。
 `drive_states`、`ongoing_action`、`mood_state`、`affect_states` は、現在の個を構成する内部状態の確認用 snapshot である。
-`runtime_detail` は scheduler、memory postprocess、capability request 待ちのような process-local runtime state を返す。
+`runtime_detail` は scheduler、memory postprocess、visual daily worker、capability request 待ちのような process-local runtime state を返す。
 `runtime_detail.wake_policy_observations` は現在設定されている `wake_policy.observations` と process-local の直近実行結果を照合した snapshot である。
 `runtime_detail.wake_runtime_state.initial_delay_until` は、desktop capture を有効化した直後の初回 5 秒待機が残っている間だけ入る。
 `runtime_detail.wake_runtime_state.retry_after` は、wake observation の一時失敗後に interval を消費せず短く再試行する時刻を表す。

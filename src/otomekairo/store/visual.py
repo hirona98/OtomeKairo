@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import date, timedelta
 from typing import Any
 
 
@@ -15,6 +16,117 @@ class StoreVisualMixin:
         with self._memory_db() as conn:
             for record in records:
                 self._insert_visual_observation_record(conn, record)
+
+    def upsert_daily_visual_digest(
+        self,
+        *,
+        digest: dict[str, Any],
+        updated_records: list[dict[str, Any]],
+    ) -> None:
+        # トランザクション
+        with self._memory_db() as conn:
+            for record in updated_records:
+                self._insert_visual_observation_record(conn, record)
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO daily_visual_digests (
+                    digest_id,
+                    memory_set_id,
+                    local_date,
+                    started_at,
+                    finished_at,
+                    result_status,
+                    record_count,
+                    payload_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    digest["digest_id"],
+                    digest["memory_set_id"],
+                    digest["local_date"],
+                    digest["started_at"],
+                    digest["finished_at"],
+                    digest["result_status"],
+                    int(digest["record_count"]),
+                    self._to_json(digest),
+                ),
+            )
+
+    def get_daily_visual_digest(self, *, memory_set_id: str, local_date: str) -> dict[str, Any] | None:
+        # クエリ
+        with self._memory_db() as conn:
+            row = conn.execute(
+                """
+                SELECT payload_json
+                FROM daily_visual_digests
+                WHERE memory_set_id = ? AND local_date = ?
+                """,
+                (memory_set_id, local_date),
+            ).fetchone()
+
+        # 結果
+        if row is None:
+            return None
+        return json.loads(row["payload_json"])
+
+    def list_visual_observation_local_dates(
+        self,
+        *,
+        memory_set_id: str,
+        before_local_date: str,
+        limit: int = 14,
+    ) -> list[str]:
+        # 入力検証
+        if limit <= 0:
+            return []
+
+        # クエリ
+        with self._memory_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT DISTINCT substr(observed_at, 1, 10) AS local_date
+                FROM visual_observation_records
+                WHERE memory_set_id = ?
+                  AND substr(observed_at, 1, 10) < ?
+                ORDER BY local_date ASC
+                LIMIT ?
+                """,
+                (memory_set_id, before_local_date, limit),
+            ).fetchall()
+
+        # 結果
+        return [str(row["local_date"]) for row in rows]
+
+    def list_visual_observation_records_for_date(
+        self,
+        *,
+        memory_set_id: str,
+        local_date: str,
+        limit: int = 500,
+    ) -> list[dict[str, Any]]:
+        # 入力検証
+        if limit <= 0:
+            return []
+        start_date = date.fromisoformat(local_date)
+        end_date = (start_date + timedelta(days=1)).isoformat()
+
+        # クエリ
+        with self._memory_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT payload_json
+                FROM visual_observation_records
+                WHERE memory_set_id = ?
+                  AND observed_at >= ?
+                  AND observed_at < ?
+                ORDER BY observed_at ASC, rowid ASC
+                LIMIT ?
+                """,
+                (memory_set_id, f"{local_date}T00:00:00", f"{end_date}T00:00:00", limit),
+            ).fetchall()
+
+        # 結果
+        return [json.loads(row["payload_json"]) for row in rows]
 
     def list_visual_observation_records(
         self,

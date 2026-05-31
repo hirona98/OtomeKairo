@@ -192,6 +192,23 @@ class StoreSchemaMixin:
             CREATE INDEX IF NOT EXISTS idx_visual_observation_source
             ON visual_observation_records(memory_set_id, vision_source_id, observed_at);
 
+            CREATE TABLE IF NOT EXISTS daily_visual_digests (
+                digest_id TEXT PRIMARY KEY,
+                memory_set_id TEXT NOT NULL,
+                local_date TEXT NOT NULL,
+                started_at TEXT NOT NULL,
+                finished_at TEXT NOT NULL,
+                result_status TEXT NOT NULL,
+                record_count INTEGER NOT NULL,
+                payload_json TEXT NOT NULL
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_visual_digests_memory_date
+            ON daily_visual_digests(memory_set_id, local_date);
+
+            CREATE INDEX IF NOT EXISTS idx_daily_visual_digests_memory_finished
+            ON daily_visual_digests(memory_set_id, finished_at);
+
             CREATE TABLE IF NOT EXISTS activity_states (
                 activity_id TEXT PRIMARY KEY,
                 memory_set_id TEXT NOT NULL,
