@@ -1,7 +1,22 @@
 # OtomeKairo
 
-OtomeKairo は、HTTPS API サーバとして bootstrap、観測、設定、inspection、event stream を提供する。
-設計と現在地は `docs/` を正とする。
+OtomeKairo は、LLM を用いて人間を模した自立可能な個を作るためのプロジェクトである。
+会話 AI ではなく、継続的に存在し、観測し、理解し、判断する個を目指す。
+
+人格設定と記憶を基盤に、その時点で成立する判断主体を「現在の個」として扱う。
+実際の挙動は、人格設定だけでも記憶だけでも決まらず、人格設定、記憶、そこから派生する内部状態を含む文脈で決まる。
+
+現行実装は HTTPS API サーバとして動作する。
+bootstrap、対話入力、wake、観測 capability、設定、inspection、event stream、log stream を扱う。
+設計、既知の制約、確認入口は `docs/` を正とする。
+
+## 文書の入口
+
+- 目的と設計の入口: `docs/00_はじめに.md`
+- 現行実装の読み方、既知の制約、確認入口: `docs/01_現在地.md`
+- 上位設計: `docs/design/`
+- HTTP / WebSocket API 仕様: `docs/design/api/`
+- 記憶 subsystem: `docs/design/memory/`
 
 ## セットアップ
 
@@ -86,6 +101,16 @@ OtomeKairo は、HTTPS API サーバとして bootstrap、観測、設定、insp
 
 通常は `CocoroConsole` の設定画面からこれらを編集する。詳細は `docs/design/07_設定モデル.md` と `docs/design/10_モデルプリセット詳細.md` を参照する。
 
+## smoke
+
+mock 経路の smoke は次で実行する。
+
+```bash
+.venv/bin/python scripts/run_long_smoke.py --profile smoke
+```
+
+この profile は隔離データディレクトリでサーバを起動し、通常会話、background wake、capability request / result follow-up、memory worker、vision capture、記憶と想起の代表ケースを確認する。
+
 ## 実 LLM smoke
 
 保存済みの `var/otomekairo/server_state.json` に実 LLM 用の API key が入っている場合、隔離データディレクトリへ model/memory 設定だけをコピーして、短い実 LLM smoke を実行できる。
@@ -94,24 +119,6 @@ OtomeKairo は、HTTPS API サーバとして bootstrap、観測、設定、insp
 .venv/bin/python scripts/run_long_smoke.py --profile real-llm-smoke --keep-artifacts
 ```
 
-この profile は通常会話 1 回、`external.status / schedule.status / social.status / device.status / body.status / environment.status / location.status` の capability request / result follow-up、manual wake 自律判断 scenario matrix、`vision.capture` result follow-up の追加 request 制御、background wake 起床制御 matrix、memory postprocess drain を確認する。status capability の全体件数は存在確認に留め、専用 probe の request / follow-up は cycle trace の request id で確認する。manual wake 自律判断 matrix の結果は `summary.json` の `real_llm_initiative_probe_case_results`、capability result follow-up の結果は `real_llm_capability_result_probe_case_results`、background wake matrix の結果は `real_llm_background_wake_probe_case_results` で確認する。`stale-schedule-status-probe / missing-social-status-probe / stale-external-status-probe / missing-device-status-probe / missing-body-status-probe / missing-environment-status-probe / missing-location-status-probe` は古いまたは不足した `world_state` で status capability を選ぶことを確認し、`schedule-grounded-reply / social-grounded-reply / body-grounded-reply / external-fresh-reply / device-fresh-reply / environment-fresh-reply / location-fresh-reply` は `fresh_world_state_capability_ids` で、新鮮な `world_state` がある status capability を再取得しないことも確認する。
+この profile は通常会話、status capability の request / result follow-up、manual wake 自律判断 matrix、`vision.capture` result follow-up、background wake 起床制御 matrix、memory postprocess drain を確認する。
+詳細な確認観点は `docs/design/21_自律initiative_loop.md` と `scripts/run_long_smoke.py` を正とする。
 full smoke と違い、`wake_policy` は各 matrix の実行中だけ一時的に有効化する。
-
-## VSCode から起動
-
-VSCode では `F5` で `OtomeKairo: Debug Server` を起動できる。
-
-- 起動前に `.venv` と開発用証明書を自動で準備する
-- `PYTHONPATH=src` を付けて `otomekairo.run` をデバッグ実行する
-
-## 手動実行
-
-```bash
-OTOMEKAIRO_TLS_CERT_FILE=/path/to/cert.pem \
-OTOMEKAIRO_TLS_KEY_FILE=/path/to/key.pem \
-OTOMEKAIRO_DATA_DIR=var/otomekairo \
-OTOMEKAIRO_DEBUG_LOG_MAX_BYTES=5242880 \
-OTOMEKAIRO_DEBUG_LOG_BACKUP_COUNT=3 \
-PYTHONPATH=src \
-.venv/bin/python -m otomekairo.run
-```
