@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from otomekairo.capabilities import capability_readiness_result_digest
@@ -92,6 +93,7 @@ class ServiceInputVisualMixin:
         }
         enriched_observation_summary = {
             **observation_summary,
+            "visual_observation_id": f"visual_observation:{uuid.uuid4().hex}",
             "image_interpreted": True,
             "visual_summary_text": visual_summary_text,
             "visual_confidence_hint": visual_confidence_hint,
@@ -253,7 +255,7 @@ class ServiceInputVisualMixin:
         if trigger_kind == "user_message" and observation_summary.get("source") == "conversation_attachment":
             source = "conversation_attachment"
             image_input_kind = "conversation_attachment"
-        elif self._observation_summary_is_desktop_vision_capture(observation_summary):
+        elif self._observation_summary_is_vision_capture(observation_summary):
             source = "vision_capture_result"
             image_input_kind = "vision_capture_result"
         else:
@@ -263,14 +265,14 @@ class ServiceInputVisualMixin:
             "source": source,
             "image_input_kind": image_input_kind,
             "image_interpreted": observation_summary.get("image_interpreted") is True,
-            "visual_summary_text": self._clamp(summary_text, limit=240),
+            "visual_summary_text": self._clamp(summary_text, limit=1200),
         }
         for key in ("image_count", "visual_confidence_hint", "vision_source_id", "source_kind", "source_label"):
             value = observation_summary.get(key)
             if value is not None:
                 payload[key] = value
         if source == "vision_capture_result":
-            payload["retention_policy"] = "ephemeral_decision_only"
+            payload["retention_policy"] = "visual_record_candidate"
         return payload
 
     def _observation_summary_is_desktop_vision_capture(
@@ -285,4 +287,15 @@ class ServiceInputVisualMixin:
             and observation_summary.get("capability_id") == "vision.capture"
             and isinstance(source_kind, str)
             and source_kind.strip() == "desktop"
+        )
+
+    def _observation_summary_is_vision_capture(
+        self,
+        observation_summary: dict[str, Any] | None,
+    ) -> bool:
+        if not isinstance(observation_summary, dict):
+            return False
+        return (
+            observation_summary.get("source") == "capability_result"
+            and observation_summary.get("capability_id") == "vision.capture"
         )

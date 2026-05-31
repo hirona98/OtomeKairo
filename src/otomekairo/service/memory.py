@@ -442,10 +442,7 @@ class ServiceMemoryMixin:
         if isinstance(compact_pending_selection, dict):
             payload["pending_intent_selection_summary"] = compact_pending_selection
         compact_observation = self._compact_capability_followup_observation_summary(observation_summary)
-        if (
-            isinstance(compact_observation, dict)
-            and not self._observation_summary_is_desktop_vision_capture(observation_summary)
-        ):
+        if isinstance(compact_observation, dict):
             payload["observation_summary"] = compact_observation
         compact_request = self._compact_capability_request_summary(capability_request_summary)
         if isinstance(compact_request, dict):

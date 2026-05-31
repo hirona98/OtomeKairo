@@ -17,6 +17,7 @@ from otomekairo.service.config.mixin import ServiceConfigMixin
 from otomekairo.service.memory import ServiceMemoryMixin
 from otomekairo.service.input.mixin import ServiceInputMixin
 from otomekairo.service.spontaneous.mixin import ServiceSpontaneousMixin
+from otomekairo.service.visual_daily import ServiceVisualDailyMixin
 from otomekairo.store.file_store import FileStore
 
 
@@ -26,6 +27,7 @@ class OtomeKairoService(
     ServiceSpontaneousMixin,
     ServiceConfigMixin,
     ServiceInputMixin,
+    ServiceVisualDailyMixin,
     ServiceMemoryMixin,
 ):
     def __init__(self, root_dir: Path) -> None:
@@ -55,9 +57,14 @@ class OtomeKairoService(
         self._background_wake_thread: threading.Thread | None = None
         self._background_memory_postprocess_stop_event: threading.Event | None = None
         self._background_memory_postprocess_thread: threading.Thread | None = None
+        self._background_visual_daily_stop_event: threading.Event | None = None
+        self._background_visual_daily_thread: threading.Thread | None = None
         self._memory_postprocess_queue: queue.Queue[dict[str, Any] | None] = queue.Queue()
         self._memory_postprocess_runtime_state: dict[str, Any] = {
             "current_cycle_id": None,
+        }
+        self._visual_daily_runtime_state: dict[str, Any] = {
+            "current_digest_id": None,
         }
         self._event_stream_registry = EventStreamRegistry()
         self._capability_request_lock = threading.RLock()

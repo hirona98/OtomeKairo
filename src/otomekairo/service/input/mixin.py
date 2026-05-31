@@ -154,6 +154,8 @@ class ServiceInputMixin(
             "active_commitments": [],
             "episodic_evidence": [],
             "event_evidence": [],
+            "visual_observations": [],
+            "visual_daily_digests": [],
             "event_evidence_generation": self._empty_event_evidence_generation_trace(),
             "recall_pack_selection": self._empty_recall_pack_selection_trace(),
             "conflicts": [],

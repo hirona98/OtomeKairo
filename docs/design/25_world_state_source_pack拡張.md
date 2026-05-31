@@ -3,10 +3,11 @@
 ## 目的
 
 `world_state` 第一段では、視覚前景と短い current summary を同じ source pack に入れていた。
-この拡張では、desktop capture 以外の `vision.capture` の視覚補助要約と、対人文脈、周囲環境、場所、外部サービス、身体、機器、予定の短い current summary を state-type 別 context として同じ source pack に入れ、LLM が `world_state` 候補を選びやすくする。
-desktop capture の視覚補助要約は一時 `VisualObservationContext` として扱い、`world_state` source pack に入れない。
+この拡張では、`vision.capture` の視覚補助要約と、対人文脈、周囲環境、場所、外部サービス、身体、機器、予定の短い current summary を state-type 別 context として同じ source pack に入れ、LLM が `world_state` 候補を選びやすくする。
+`vision.capture` は `source_kind` に関係なく `visual_context` の候補にする。
 
-ここで扱うのは **短い structured summary だけ** である。
+ここで扱う正本状態は **短い structured summary だけ** である。
+詳細な視覚説明は `visual_observation_record` の正本に置き、source pack では `visual_observation_id` と補助根拠として参照する。
 capability 自体の安定契約は `17_capability_manifest.md` と API 文書を正本にし、この文書は source pack に入れる summary 境界だけを扱う。
 raw payload 保存、長い OCR、配送先 client の露出は入れない。
 
@@ -14,7 +15,7 @@ raw payload 保存、長い OCR、配送先 client の露出は入れない。
 
 `world_state` source pack に追加する入力は次に限る。
 
-- desktop capture 以外の `vision.capture` result から得た短い `visual_summary_text / image_interpreted / visual_confidence_hint / image_count / vision_source_id / source_kind / source_label`
+- `vision.capture` result から得た `visual_summary_text / visual_observation_id / image_interpreted / visual_confidence_hint / image_count / vision_source_id / source_kind / source_label`
 - `client_context.social_context_summary`
 - `client_context.environment_summary`
 - `client_context.location_summary`
@@ -35,7 +36,8 @@ raw payload 保存、長い OCR、配送先 client の露出は入れない。
 - wake で再評価対象として選ばれた pending-intent の
   `intent_kind / intent_summary / reason_summary / not_before / expires_at`
 
-どれも 1 文程度の短い summary に留める。
+`visual_summary_text` は詳細な視覚説明であり、現在状態として永続化する値ではない。
+`world_state` 候補の `summary_text` は 1 文程度の短い現在状態要約に留める。
 raw response body、client 固有 ID、資格情報、内部 URL、base64 本文は入れない。
 
 ## source pack shape
@@ -129,8 +131,8 @@ raw response body、client 固有 ID、資格情報、内部 URL、base64 本文
 ```
 
 source pack では、標準の `client_context` と state-type 別の structured context を分ける。
-desktop capture 以外の視覚前景は `vision.capture` result の短い要約として `visual_context` へ載せ、`vision_source_id` で観測 source を識別する。
-desktop capture 以外の `vision.capture` result follow-up の `foreground_world_state` は、result の `vision_source_id` と一致する `visual_context` だけを decision / reply に渡す。
+視覚前景は `vision.capture` result の視覚説明を根拠に `visual_context` へ載せ、`vision_source_id` で観測 source を識別する。
+`vision.capture` result follow-up の `foreground_world_state` は、result の `vision_source_id` と一致する `visual_context` だけを decision / reply に渡す。
 一致しない `visual_context` は保存済み state と inspection 用 trace に残し、同じ follow-up の判断材料にしない。
 その他の短い current summary は dedicated context へ載せる。
 `current_input_summary` は入力意図と、人が明示した状態値だけを補助する。
@@ -153,7 +155,7 @@ real schedule source が複数あるときは、`schedule_context.schedule_slots
 ## コード責務
 
 - capability result の `client_context` から短い summary を抜き出す
-- `vision.capture` result の短い visual summary と `vision_source_id / source_kind / source_label` を `visual_context` へ投影する
+- `vision.capture` result の visual summary、`visual_observation_id`、`vision_source_id / source_kind / source_label` を `visual_context` へ投影する
 - `vision.capture` result follow-up では異なる `vision_source_id` の `visual_context` を判断入力から除外する
 - `client_context.social_context_summary / environment_summary / location_summary` を対応する dedicated context へ投影する
 - `social.status` result の `social_context_summary` を `social_context_context` へ投影する

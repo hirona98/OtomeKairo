@@ -15,6 +15,9 @@ class StoreCloneMixin:
 
             # 削除順序
             conn.execute("DELETE FROM world_states WHERE memory_set_id = ?", (memory_set_id,))
+            conn.execute("DELETE FROM daily_visual_digests WHERE memory_set_id = ?", (memory_set_id,))
+            conn.execute("DELETE FROM visual_observation_search_index WHERE memory_set_id = ?", (memory_set_id,))
+            conn.execute("DELETE FROM visual_observation_records WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM ongoing_actions WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM drive_states WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM memory_postprocess_jobs WHERE memory_set_id = ?", (memory_set_id,))
@@ -93,6 +96,12 @@ class StoreCloneMixin:
                 target_memory_set_id=target_memory_set_id,
                 episode_id_map=episode_id_map,
                 memory_unit_id_map=memory_unit_id_map,
+            )
+            self._clone_visual_observation_records(
+                conn,
+                source_memory_set_id=source_memory_set_id,
+                target_memory_set_id=target_memory_set_id,
+                cycle_id_map=cycle_id_map,
             )
             self._clone_vector_index_entries(
                 conn,
@@ -326,6 +335,34 @@ class StoreCloneMixin:
                     **record,
                     "mood_state_id": f"mood_state:{target_memory_set_id}",
                     "memory_set_id": target_memory_set_id,
+                },
+            )
+
+    def _clone_visual_observation_records(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        source_memory_set_id: str,
+        target_memory_set_id: str,
+        cycle_id_map: dict[str, str],
+    ) -> None:
+        source_records = self._load_payload_rows(conn, "visual_observation_records", source_memory_set_id)
+        for record in source_records:
+            visual_observation_id = f"visual_observation:{uuid.uuid4().hex}"
+            self._insert_visual_observation_record(
+                conn,
+                {
+                    **record,
+                    "visual_observation_id": visual_observation_id,
+                    "memory_set_id": target_memory_set_id,
+                    "cycle_id": cycle_id_map.get(record["cycle_id"], record["cycle_id"]),
+                    "retention_status": "active",
+                    "duplicate_group_id": None,
+                    "daily_digest_id": None,
+                    "related_cycle_id": cycle_id_map.get(
+                        record.get("related_cycle_id"),
+                        record.get("related_cycle_id"),
+                    ),
                 },
             )
 

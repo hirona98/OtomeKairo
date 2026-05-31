@@ -168,6 +168,60 @@ class StoreSchemaMixin:
             CREATE INDEX IF NOT EXISTS idx_world_states_identity
             ON world_states(memory_set_id, state_type, scope_type, scope_key, updated_at);
 
+            CREATE TABLE IF NOT EXISTS visual_observation_records (
+                visual_observation_id TEXT PRIMARY KEY,
+                memory_set_id TEXT NOT NULL,
+                cycle_id TEXT NOT NULL,
+                observed_at TEXT NOT NULL,
+                source_kind TEXT NOT NULL,
+                source_label TEXT,
+                vision_source_id TEXT,
+                image_input_kind TEXT NOT NULL,
+                confidence_hint TEXT,
+                retention_status TEXT NOT NULL,
+                detailed_summary_text TEXT NOT NULL,
+                payload_json TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_visual_observation_memory_observed
+            ON visual_observation_records(memory_set_id, observed_at);
+
+            CREATE INDEX IF NOT EXISTS idx_visual_observation_cycle
+            ON visual_observation_records(cycle_id);
+
+            CREATE INDEX IF NOT EXISTS idx_visual_observation_source
+            ON visual_observation_records(memory_set_id, vision_source_id, observed_at);
+
+            CREATE VIRTUAL TABLE IF NOT EXISTS visual_observation_search_index
+            USING fts5(
+                visual_observation_id UNINDEXED,
+                memory_set_id UNINDEXED,
+                observed_at UNINDEXED,
+                retention_status UNINDEXED,
+                importance_score UNINDEXED,
+                source_kind UNINDEXED,
+                source_label UNINDEXED,
+                search_text,
+                tokenize = 'unicode61'
+            );
+
+            CREATE TABLE IF NOT EXISTS daily_visual_digests (
+                digest_id TEXT PRIMARY KEY,
+                memory_set_id TEXT NOT NULL,
+                local_date TEXT NOT NULL,
+                started_at TEXT NOT NULL,
+                finished_at TEXT NOT NULL,
+                result_status TEXT NOT NULL,
+                record_count INTEGER NOT NULL,
+                payload_json TEXT NOT NULL
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_visual_digests_memory_date
+            ON daily_visual_digests(memory_set_id, local_date);
+
+            CREATE INDEX IF NOT EXISTS idx_daily_visual_digests_memory_finished
+            ON daily_visual_digests(memory_set_id, finished_at);
+
             CREATE TABLE IF NOT EXISTS activity_states (
                 activity_id TEXT PRIMARY KEY,
                 memory_set_id TEXT NOT NULL,

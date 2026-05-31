@@ -242,6 +242,18 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
             if method == "GET" and parsed.path == "/api/inspection/capabilities":
                 self._write_success(HTTPStatus.OK, self.server.service.get_capability_inspection(token))
                 return
+            if method == "GET" and parsed.path == "/api/inspection/visual-digests":
+                limit = int(query.get("limit", ["20"])[0])
+                local_date = query.get("local_date", [None])[0]
+                self._write_success(
+                    HTTPStatus.OK,
+                    self.server.service.get_visual_digest_inspection(
+                        token,
+                        limit=max(limit, 1),
+                        local_date=local_date,
+                    ),
+                )
+                return
             if method == "GET" and parsed.path == "/api/inspection/cycle-summaries":
                 limit = int(query.get("limit", ["20"])[0])
                 self._write_success(

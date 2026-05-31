@@ -86,15 +86,18 @@ class ServiceConfigInspectionMixin:
         ongoing_action = self._current_ongoing_action(state=state, current_time=current_time)
         with self._runtime_state_lock:
             memory_job_in_progress = self._memory_postprocess_runtime_state.get("current_cycle_id") is not None
+            visual_daily_in_progress = self._visual_daily_runtime_state.get("current_digest_id") is not None
         return {
             "connection_state": "ready",
             "wake_scheduler_active": self._background_wake_scheduler_active() and state["wake_policy"]["mode"] == "interval",
             "ongoing_action_exists": ongoing_action is not None,
             "memory_job_worker_active": self._background_memory_postprocess_worker_active(),
+            "visual_daily_worker_active": self._background_visual_daily_worker_active(),
             "pending_memory_job_count": self.store.count_memory_postprocess_jobs(
                 result_statuses=["queued", "running"],
             ),
             "memory_job_in_progress": memory_job_in_progress,
+            "visual_daily_in_progress": visual_daily_in_progress,
         }
 
     def _build_current_runtime_detail(
@@ -107,6 +110,7 @@ class ServiceConfigInspectionMixin:
             "wake_runtime_state": self._snapshot_wake_runtime_state(current_time=current_time),
             "wake_policy_observations": self._snapshot_wake_policy_observations(state=state),
             "memory_postprocess_runtime_state": self._snapshot_memory_postprocess_runtime_state(),
+            "visual_daily_runtime_state": self._snapshot_visual_daily_runtime_state(),
             "pending_capability_requests": self._list_pending_capability_request_summaries(current_time=current_time),
         }
 
@@ -151,6 +155,93 @@ class ServiceConfigInspectionMixin:
                 memory_set_id=state["selected_memory_set_id"],
                 limit=6,
             ),
+            "visual_daily_summary": self._current_visual_daily_summary(state=state),
+        }
+
+    def get_visual_digest_inspection(
+        self,
+        token: str | None,
+        *,
+        limit: int,
+        local_date: str | None = None,
+    ) -> dict[str, Any]:
+        # 認可
+        state = self._require_token(token)
+        memory_set_id = state["selected_memory_set_id"]
+        digests = self.store.list_daily_visual_digests(
+            memory_set_id=memory_set_id,
+            local_date=local_date,
+            limit=max(1, min(limit, 50)),
+        )
+        return {
+            "selected_memory_set_id": memory_set_id,
+            "daily_visual_digests": [self._compact_visual_daily_digest(digest) for digest in digests],
+        }
+
+    def _current_visual_daily_summary(self, *, state: dict[str, Any]) -> dict[str, Any] | None:
+        # 直近 digest
+        digests = self.store.list_daily_visual_digests(
+            memory_set_id=state["selected_memory_set_id"],
+            limit=1,
+        )
+        if not digests:
+            return None
+        digest = digests[0]
+        return {
+            "latest_local_date": digest.get("local_date"),
+            "latest_digest_id": digest.get("digest_id"),
+            "record_count": int(digest.get("record_count", 0) or 0),
+            "group_count": int(digest.get("group_count", 0) or 0),
+            "retained_count": int(digest.get("retained_count", 0) or 0),
+            "compressed_count": int(digest.get("compressed_count", 0) or 0),
+            "memory_candidate_count": len(digest.get("memory_candidate_summaries", [])),
+            "memory_promotion": digest.get("memory_promotion", {}),
+        }
+
+    def _compact_visual_daily_digest(self, digest: dict[str, Any]) -> dict[str, Any]:
+        # compact 表示
+        return {
+            "digest_id": digest.get("digest_id"),
+            "local_date": digest.get("local_date"),
+            "started_at": digest.get("started_at"),
+            "finished_at": digest.get("finished_at"),
+            "result_status": digest.get("result_status"),
+            "record_count": int(digest.get("record_count", 0) or 0),
+            "group_count": int(digest.get("group_count", 0) or 0),
+            "retained_count": int(digest.get("retained_count", 0) or 0),
+            "compressed_count": int(digest.get("compressed_count", 0) or 0),
+            "memory_promotion": digest.get("memory_promotion", {}),
+            "group_summaries": [
+                self._compact_visual_daily_group_summary(item)
+                for item in digest.get("group_summaries", [])
+                if isinstance(item, dict)
+            ][:10],
+            "memory_candidate_summaries": [
+                self._compact_visual_daily_memory_candidate(item)
+                for item in digest.get("memory_candidate_summaries", [])
+                if isinstance(item, dict)
+            ][:10],
+        }
+
+    def _compact_visual_daily_group_summary(self, item: dict[str, Any]) -> dict[str, Any]:
+        # group 表示
+        return {
+            "duplicate_group_id": item.get("duplicate_group_id"),
+            "record_count": int(item.get("record_count", 0) or 0),
+            "first_observed_at": item.get("first_observed_at"),
+            "last_observed_at": item.get("last_observed_at"),
+            "representative_visual_observation_id": item.get("representative_visual_observation_id"),
+            "summary_text": self._clamp(item.get("summary_text"), limit=160),
+            "retention_status": item.get("retention_status"),
+        }
+
+    def _compact_visual_daily_memory_candidate(self, item: dict[str, Any]) -> dict[str, Any]:
+        # 候補表示
+        return {
+            "duplicate_group_id": item.get("duplicate_group_id"),
+            "representative_visual_observation_id": item.get("representative_visual_observation_id"),
+            "summary_text": self._clamp(item.get("summary_text"), limit=160),
+            "reason_code": item.get("reason_code"),
         }
 
     def _snapshot_wake_runtime_state(self, *, current_time: str) -> dict[str, Any]:
@@ -172,11 +263,18 @@ class ServiceConfigInspectionMixin:
                 "current_cycle_id": self._memory_postprocess_runtime_state.get("current_cycle_id"),
             }
 
+    def _snapshot_visual_daily_runtime_state(self) -> dict[str, Any]:
+        with self._runtime_state_lock:
+            return {
+                "current_digest_id": self._visual_daily_runtime_state.get("current_digest_id"),
+            }
+
     def _snapshot_wake_policy_observations(self, *, state: dict[str, Any]) -> list[dict[str, Any]]:
         wake_policy = state.get("wake_policy")
         observations = wake_policy.get("observations") if isinstance(wake_policy, dict) else None
         if not isinstance(observations, list):
             return []
+        interval_seconds = wake_policy.get("interval_seconds") if isinstance(wake_policy, dict) else None
         with self._runtime_state_lock:
             runtime_snapshot = {
                 key: dict(value)
@@ -204,6 +302,7 @@ class ServiceConfigInspectionMixin:
                 "capability_id": self._client_context_text(observation.get("capability_id"), limit=80),
                 "vision_source_id": vision_source_id,
                 "mode": mode,
+                "interval_seconds": interval_seconds,
                 "last_run_at": runtime.get("last_run_at"),
                 "last_status": runtime.get("last_status"),
                 "last_summary": runtime.get("last_summary"),
@@ -447,4 +546,11 @@ class ServiceConfigInspectionMixin:
             return (
                 self._background_memory_postprocess_thread is not None
                 and self._background_memory_postprocess_thread.is_alive()
+            )
+
+    def _background_visual_daily_worker_active(self) -> bool:
+        with self._runtime_state_lock:
+            return (
+                self._background_visual_daily_thread is not None
+                and self._background_visual_daily_thread.is_alive()
             )

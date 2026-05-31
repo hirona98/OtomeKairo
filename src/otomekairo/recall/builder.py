@@ -23,6 +23,8 @@ MEMORY_LINK_RECALL_LABEL_PRIORITY = [
 ]
 MEMORY_LINK_RECALL_HINT_LIMIT = 3
 MEMORY_LINK_RECALL_TRACE_LIMIT = 8
+VISUAL_OBSERVATION_RECALL_LIMIT = 3
+VISUAL_DAILY_DIGEST_RECALL_LIMIT = 2
 
 
 # recall構築
@@ -239,11 +241,23 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
         )
         event_evidence = event_evidence_result["event_evidence"]
         selected_event_ids = event_evidence_result["selected_event_ids"]
+        visual_observations = self._build_visual_observations(
+            memory_set_id=memory_set_id,
+            augmented_query_text=augmented_query_text,
+            limit=VISUAL_OBSERVATION_RECALL_LIMIT,
+        )
+        visual_daily_digests = self._build_visual_daily_digests(
+            memory_set_id=memory_set_id,
+            augmented_query_text=augmented_query_text,
+            limit=VISUAL_DAILY_DIGEST_RECALL_LIMIT,
+        )
 
         # 結果
         return {
             **sections,
             "event_evidence": event_evidence,
+            "visual_observations": visual_observations,
+            "visual_daily_digests": visual_daily_digests,
             "event_evidence_generation": event_evidence_result["event_evidence_generation"],
             "selected_memory_ids": selected_memory_ids,
             "selected_episode_ids": selected_episode_ids,
@@ -690,6 +704,8 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             "active_commitments": [],
             "episodic_evidence": [],
             "event_evidence": [],
+            "visual_observations": [],
+            "visual_daily_digests": [],
             "event_evidence_generation": {
                 "requested_event_count": 0,
                 "loaded_event_count": 0,
@@ -712,6 +728,153 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             "memory_link_context": self._empty_memory_link_context(),
             "candidate_count": 0,
         }
+
+    def _build_visual_observations(
+        self,
+        *,
+        memory_set_id: str,
+        augmented_query_text: str,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        # 検索一致、重要、直近の枠を分け、毎分キャプチャで直近だけに寄らないようにする。
+        queried_records = self.store.list_visual_observation_records(
+            memory_set_id=memory_set_id,
+            query_text=augmented_query_text,
+            limit=max(limit * 4, 12),
+        )
+        important_records = self.store.list_important_visual_observation_records(
+            memory_set_id=memory_set_id,
+            limit=max(limit * 2, 6),
+        )
+        recent_records = self.store.list_recent_visual_observation_records(
+            memory_set_id=memory_set_id,
+            limit=max(limit * 2, 6),
+        )
+
+        # 枠別選定
+        selected_records: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        used_groups: set[str] = set()
+        used_sources: set[str] = set()
+
+        query_target = min(2, limit)
+        self._append_visual_observation_records(
+            selected_records=selected_records,
+            seen=seen,
+            used_groups=used_groups,
+            used_sources=used_sources,
+            records=queried_records,
+            target_count=query_target,
+            allow_same_source=False,
+        )
+        important_target = min(limit, len(selected_records) + 1)
+        self._append_visual_observation_records(
+            selected_records=selected_records,
+            seen=seen,
+            used_groups=used_groups,
+            used_sources=used_sources,
+            records=important_records,
+            target_count=important_target,
+            allow_same_source=False,
+        )
+        self._append_visual_observation_records(
+            selected_records=selected_records,
+            seen=seen,
+            used_groups=used_groups,
+            used_sources=used_sources,
+            records=recent_records,
+            target_count=limit,
+            allow_same_source=False,
+        )
+
+        if len(selected_records) < limit:
+            self._append_visual_observation_records(
+                selected_records=selected_records,
+                seen=seen,
+                used_groups=used_groups,
+                used_sources=used_sources,
+                records=queried_records + important_records + recent_records,
+                target_count=limit,
+                allow_same_source=True,
+            )
+
+        # 結果
+        return [self._to_visual_observation_item(record) for record in selected_records[:limit]]
+
+    def _append_visual_observation_records(
+        self,
+        *,
+        selected_records: list[dict[str, Any]],
+        seen: set[str],
+        used_groups: set[str],
+        used_sources: set[str],
+        records: list[dict[str, Any]],
+        target_count: int,
+        allow_same_source: bool,
+    ) -> None:
+        # 代表を優先し、不足時だけ同一 source/group の重複を許す。
+        for record in records:
+            if len(selected_records) >= target_count:
+                return
+            visual_observation_id = record.get("visual_observation_id")
+            if not isinstance(visual_observation_id, str) or visual_observation_id in seen:
+                continue
+
+            duplicate_group_id = record.get("duplicate_group_id")
+            if isinstance(duplicate_group_id, str) and duplicate_group_id in used_groups and not allow_same_source:
+                continue
+
+            source_key = self._visual_observation_source_key(record)
+            if source_key in used_sources and not allow_same_source:
+                continue
+
+            selected_records.append(record)
+            seen.add(visual_observation_id)
+            if isinstance(duplicate_group_id, str) and duplicate_group_id:
+                used_groups.add(duplicate_group_id)
+            used_sources.add(source_key)
+
+    def _visual_observation_source_key(self, record: dict[str, Any]) -> str:
+        # source の代表化
+        for key in ("vision_source_id", "source_label", "source_kind"):
+            value = record.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return "unknown"
+
+    def _build_visual_daily_digests(
+        self,
+        *,
+        memory_set_id: str,
+        augmented_query_text: str,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        # 検索一致と直近日次 digest を合わせる。
+        queried_records = self.store.list_daily_visual_digests(
+            memory_set_id=memory_set_id,
+            query_text=augmented_query_text,
+            limit=limit,
+        )
+        recent_records = self.store.list_daily_visual_digests(
+            memory_set_id=memory_set_id,
+            query_text=None,
+            limit=limit,
+        )
+
+        # 重複除去
+        selected: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for record in queried_records + recent_records:
+            digest_id = record.get("digest_id")
+            if not isinstance(digest_id, str) or digest_id in seen:
+                continue
+            selected.append(self._to_visual_daily_digest_item(record))
+            seen.add(digest_id)
+            if len(selected) >= limit:
+                break
+
+        # 結果
+        return selected
 
     def _embedding_dimension(self, definition: dict[str, Any]) -> int:
         embedding_dimension = definition.get("embedding_dimension")
@@ -1054,6 +1217,62 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             "salience": record["salience"],
             "formed_at": record["formed_at"],
             "linked_event_ids": record.get("linked_event_ids", []),
+        }
+
+    def _to_visual_observation_item(self, record: dict[str, Any]) -> dict[str, Any]:
+        # 視覚記録項目化
+        return {
+            "source_kind": "visual_observation_record",
+            "visual_observation_id": record["visual_observation_id"],
+            "observed_at": record["observed_at"],
+            "vision_source_id": record.get("vision_source_id"),
+            "source_label": record.get("source_label"),
+            "image_input_kind": record["image_input_kind"],
+            "detailed_summary_text": record["detailed_summary_text"],
+            "confidence_hint": record.get("confidence_hint"),
+            "retention_status": record["retention_status"],
+        }
+
+    def _to_visual_daily_digest_item(self, record: dict[str, Any]) -> dict[str, Any]:
+        # 日次視覚整理項目化
+        group_summaries = [
+            self._to_visual_daily_group_summary(item)
+            for item in record.get("group_summaries", [])
+            if isinstance(item, dict)
+        ][:3]
+        memory_candidate_summaries = [
+            self._to_visual_daily_memory_candidate_summary(item)
+            for item in record.get("memory_candidate_summaries", [])
+            if isinstance(item, dict)
+        ][:3]
+        return {
+            "source_kind": "daily_visual_digest",
+            "digest_id": record["digest_id"],
+            "local_date": record["local_date"],
+            "record_count": int(record.get("record_count", 0) or 0),
+            "group_count": int(record.get("group_count", 0) or 0),
+            "retained_count": int(record.get("retained_count", 0) or 0),
+            "compressed_count": int(record.get("compressed_count", 0) or 0),
+            "group_summaries": group_summaries,
+            "memory_candidate_summaries": memory_candidate_summaries,
+        }
+
+    def _to_visual_daily_group_summary(self, item: dict[str, Any]) -> dict[str, Any]:
+        # group要約項目化
+        return {
+            "summary_text": item.get("summary_text"),
+            "record_count": int(item.get("record_count", 0) or 0),
+            "first_observed_at": item.get("first_observed_at"),
+            "last_observed_at": item.get("last_observed_at"),
+            "representative_visual_observation_id": item.get("representative_visual_observation_id"),
+        }
+
+    def _to_visual_daily_memory_candidate_summary(self, item: dict[str, Any]) -> dict[str, Any]:
+        # 候補要約項目化
+        return {
+            "summary_text": item.get("summary_text"),
+            "reason_code": item.get("reason_code"),
+            "duplicate_group_id": item.get("duplicate_group_id"),
         }
 
     def _to_topic_episode_item(self, record: dict[str, Any]) -> dict[str, Any]:
