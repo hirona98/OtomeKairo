@@ -175,7 +175,7 @@ class ServiceConfigInspectionMixin:
         )
         return {
             "selected_memory_set_id": memory_set_id,
-            "visual_digests": [self._compact_visual_daily_digest(digest) for digest in digests],
+            "daily_visual_digests": [self._compact_visual_daily_digest(digest) for digest in digests],
         }
 
     def _current_visual_daily_summary(self, *, state: dict[str, Any]) -> dict[str, Any] | None:
@@ -274,6 +274,7 @@ class ServiceConfigInspectionMixin:
         observations = wake_policy.get("observations") if isinstance(wake_policy, dict) else None
         if not isinstance(observations, list):
             return []
+        interval_seconds = wake_policy.get("interval_seconds") if isinstance(wake_policy, dict) else None
         with self._runtime_state_lock:
             runtime_snapshot = {
                 key: dict(value)
@@ -301,6 +302,7 @@ class ServiceConfigInspectionMixin:
                 "capability_id": self._client_context_text(observation.get("capability_id"), limit=80),
                 "vision_source_id": vision_source_id,
                 "mode": mode,
+                "interval_seconds": interval_seconds,
                 "last_run_at": runtime.get("last_run_at"),
                 "last_status": runtime.get("last_status"),
                 "last_summary": runtime.get("last_summary"),

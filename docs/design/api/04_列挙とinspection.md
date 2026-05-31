@@ -72,6 +72,7 @@ response:
           "capability_id": "vision.capture",
           "vision_source_id": "vision_source:console:desktop",
           "mode": "still",
+          "interval_seconds": 60,
           "last_run_at": "2026-03-31T09:00:00+09:00",
           "last_status": "succeeded",
           "last_summary": "エディタが開いている",
@@ -89,11 +90,13 @@ response:
     },
     "current_state": {
       "foreground_world_states": [],
+      "activity_context": null,
       "drive_states": [],
       "ongoing_action": null,
       "pending_intent_candidates": [],
       "mood_state": {},
-      "affect_states": []
+      "affect_states": [],
+      "visual_daily_summary": null
     },
     "capability_inspection": {
       "capabilities": [],
@@ -104,12 +107,12 @@ response:
 ```
 
 `current_state.foreground_world_states` は現在有効な `world_state` の前景 snapshot を返す。
-`drive_states`、`ongoing_action`、`mood_state`、`affect_states` は、現在の個を構成する内部状態の確認用 snapshot である。
+`activity_context`、`drive_states`、`ongoing_action`、`mood_state`、`affect_states` は、現在の個を構成する内部状態の確認用 snapshot である。
 `runtime_detail` は scheduler、memory postprocess、visual daily worker、capability request 待ちのような process-local runtime state を返す。
 `runtime_detail.wake_policy_observations` は現在設定されている `wake_policy.observations` と process-local の直近実行結果を照合した snapshot である。
 `runtime_detail.wake_runtime_state.initial_delay_until` は、desktop capture を有効化した直後の初回 5 秒待機が残っている間だけ入る。
 `runtime_detail.wake_runtime_state.retry_after` は、wake observation の一時失敗後に interval を消費せず短く再試行する時刻を表す。
-各項目は `enabled / vision_source_id / last_run_at / last_status / last_summary / last_error` を返す。
+各項目は `enabled / vision_source_id / interval_seconds / last_run_at / last_status / last_summary / last_error` を返す。
 desktop observation では、process-local novelty 判定用に `last_scene_signature / same_scene_count / last_prompted_at / pending_novel_scene` も返す。
 `last_*` は process-local runtime state であり、server restart をまたいで保持しない。
 `capability_inspection` は `GET /api/inspection/capabilities` と同じ availability 導出結果を current-state snapshot の中で参照しやすく束ねたものである。
@@ -285,6 +288,7 @@ response:
     "cycle_summary": {},
     "input_trace": {},
     "world_state_trace": {},
+    "activity_trace": {},
     "recall_trace": {},
     "decision_trace": {},
     "result_trace": {},
@@ -310,6 +314,7 @@ exact answer 系の cycle では、`recall_trace` に `answer_contract`、`evide
 |-------|----------|
 | `input_trace` | [../13_デバッグ可能性.md](../13_デバッグ可能性.md)、[../21_自律initiative_loop.md](../21_自律initiative_loop.md)、[../15_保留意図候補のLLM選別.md](../15_保留意図候補のLLM選別.md) |
 | `world_state_trace` | [../22_world_state.md](../22_world_state.md) |
+| `activity_trace` | [../28_activity_state.md](../28_activity_state.md) |
 | `recall_trace` | [../memory/03_想起と判断.md](../memory/03_想起と判断.md)、[../memory/08_event_evidenceのLLM圧縮.md](../memory/08_event_evidenceのLLM圧縮.md)、[../memory/09_RecallPackのLLM選別.md](../memory/09_RecallPackのLLM選別.md) |
 | `decision_trace` | [../05_判断と行動.md](../05_判断と行動.md)、[../21_自律initiative_loop.md](../21_自律initiative_loop.md) |
 | `result_trace` | [../05_判断と行動.md](../05_判断と行動.md)、[../17_capability_manifest.md](../17_capability_manifest.md) |
