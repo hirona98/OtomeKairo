@@ -132,7 +132,7 @@ response は `daily_visual_digests` の compact 表示に限り、`group_summari
 - 認証: 必要
 - 役割: server が manifest、binding、`capability_state`、権限から導出した現在の capability availability を返す
 - この response は capability availability の外向き確認正本である
-- この endpoint は現行設計が目指す HTTP API 仕様である。実装状態は `src/` と smoke 結果を正とし、既知の制約は [../../01_現在地.md](../../01_現在地.md) を参照する
+- この endpoint は現行設計が目指す HTTP API 仕様である。実装状態は `src/` と smoke 結果を正とする
 - `capabilities` は server が知っている manifest を基準に並べる
 - `rejected_bindings` は、接続 client が `hello.caps` で提示したが server が binding として受理しなかった候補を返す
 - token、credential、内部 URL、transport 詳細は返さない

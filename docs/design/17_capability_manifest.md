@@ -263,7 +263,6 @@ capability 実行は次の順序で行う。
 9. server が `capability_id` ごとの follow-up pipeline で `memory_policy`、`state_policy`、`inspection_fields` に従って記憶、状態、inspection を更新する。
 
 どこまで実装済みか、どの result endpoint が concrete に開いているか、follow-up pipeline の実装状態は `src/` と smoke 結果を正とする。
-既知の制約と確認入口は [../01_現在地.md](../01_現在地.md) を参照する。
 
 LLM が実行要求案を出しても、server の検証を通らない要求は実行しない。
 検証失敗は判断サイクルの `internal_failure` または capability failure として記録する。

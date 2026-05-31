@@ -126,4 +126,4 @@ OtomeKairo では、次の分離を基本形にする。
 - inspection と監査への露出
 
 `reflective consolidation` の summary 文面については [07_内省要約のLLM生成.md](memory/07_内省要約のLLM生成.md) を正とする。
-既知の制約と確認入口は [../01_現在地.md](../01_現在地.md) を参照する。
+実装状態は `src/` と smoke 結果を正とする。
