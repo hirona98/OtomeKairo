@@ -19,6 +19,7 @@ class ServiceInputLoggingMixin:
             "episodic_evidence": len(recall_pack["episodic_evidence"]),
             "event_evidence": len(recall_pack["event_evidence"]),
             "visual_observations": len(recall_pack.get("visual_observations", [])),
+            "visual_daily_digests": len(recall_pack.get("visual_daily_digests", [])),
             "conflicts": len(recall_pack["conflicts"]),
             "memory_links": int(
                 (recall_pack.get("memory_link_context") or {}).get("link_count", 0)

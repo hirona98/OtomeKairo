@@ -11,8 +11,10 @@ from otomekairo.service.common import debug_log
 
 VISUAL_DAILY_CHECK_INTERVAL_SECONDS = 3600.0
 VISUAL_DAILY_RUN_DATE_LIMIT = 7
-VISUAL_DAILY_RECORD_LIMIT = 500
 VISUAL_DAILY_DUPLICATE_SIMILARITY = 0.86
+VISUAL_DAILY_PROMOTION_LOOKBACK_LIMIT = 14
+VISUAL_DAILY_PROMOTION_LIMIT_PER_DIGEST = 3
+VISUAL_DAILY_PROMOTION_SIMILARITY = 0.74
 
 
 class ServiceVisualDailyMixin:
@@ -82,13 +84,13 @@ class ServiceVisualDailyMixin:
                 if self.store.get_daily_visual_digest(memory_set_id=memory_set_id, local_date=local_date) is not None:
                     continue
                 self._run_visual_daily_digest(memory_set_id=memory_set_id, local_date=local_date)
+            self._run_due_visual_daily_promotions(memory_set_id=memory_set_id)
 
     def _run_visual_daily_digest(self, *, memory_set_id: str, local_date: str) -> dict[str, Any] | None:
         # 対象記録
         records = self.store.list_visual_observation_records_for_date(
             memory_set_id=memory_set_id,
             local_date=local_date,
-            limit=VISUAL_DAILY_RECORD_LIMIT,
         )
         if not records:
             return None
@@ -116,6 +118,13 @@ class ServiceVisualDailyMixin:
                 groups=groups,
             )
             self.store.upsert_daily_visual_digest(digest=digest, updated_records=updated_records)
+            self._promote_visual_daily_digest_memory_candidates(
+                digest=digest,
+                state=self._visual_daily_state_for_memory_set(
+                    state=self.store.read_state(),
+                    memory_set_id=memory_set_id,
+                ),
+            )
             debug_log(
                 "VisualDaily",
                 (
@@ -210,6 +219,12 @@ class ServiceVisualDailyMixin:
             "compressed_count": compressed_count,
             "group_summaries": group_summaries,
             "memory_candidate_summaries": candidate_summaries,
+            "memory_promotion": {
+                "result_status": "not_started",
+                "promoted_memory_unit_ids": [],
+                "skipped_candidate_count": 0,
+                "failure_reason": None,
+            },
         }
 
     def _visual_daily_group_summary(self, group: dict[str, Any]) -> dict[str, Any]:
@@ -238,6 +253,7 @@ class ServiceVisualDailyMixin:
                 {
                     "source": "daily_visual_digest",
                     "duplicate_group_id": group["duplicate_group_id"],
+                    "representative_visual_observation_id": group.get("representative_visual_observation_id"),
                     "summary_text": group["summary_text"],
                     "reason_code": "repeated_or_retained_visual_context",
                 }
@@ -289,3 +305,204 @@ class ServiceVisualDailyMixin:
         # 安定ID
         group_key = hashlib.sha256(f"{memory_set_id}:{local_date}:{index}".encode("utf-8")).hexdigest()[:24]
         return f"visual_duplicate_group:{group_key}"
+
+    def _run_due_visual_daily_promotions(self, *, memory_set_id: str) -> None:
+        # 未昇格 digest を少数だけ処理する。
+        digests = self.store.list_daily_visual_digests(
+            memory_set_id=memory_set_id,
+            query_text=None,
+            limit=VISUAL_DAILY_RUN_DATE_LIMIT,
+        )
+        state = self.store.read_state()
+        for digest in reversed(digests):
+            promotion = digest.get("memory_promotion")
+            if isinstance(promotion, dict) and promotion.get("result_status") in {"succeeded", "skipped"}:
+                continue
+            self._promote_visual_daily_digest_memory_candidates(
+                digest=digest,
+                state=self._visual_daily_state_for_memory_set(state=state, memory_set_id=memory_set_id),
+            )
+
+    def _promote_visual_daily_digest_memory_candidates(
+        self,
+        *,
+        digest: dict[str, Any],
+        state: dict[str, Any],
+    ) -> None:
+        # 候補なし
+        candidates = [
+            item
+            for item in digest.get("memory_candidate_summaries", [])
+            if isinstance(item, dict)
+        ]
+        if not candidates:
+            self._store_visual_daily_promotion_result(
+                digest=digest,
+                result_status="skipped",
+                promoted_memory_unit_ids=[],
+                skipped_candidate_count=0,
+                failure_reason=None,
+            )
+            return
+
+        # 昇格
+        memory_set_id = digest["memory_set_id"]
+        finished_at = self._now_iso()
+        actions: list[dict[str, Any]] = []
+        skipped_count = 0
+        for candidate in candidates[:VISUAL_DAILY_PROMOTION_LIMIT_PER_DIGEST]:
+            if not self._visual_daily_candidate_has_repeated_support(digest=digest, candidate=candidate):
+                skipped_count += 1
+                continue
+            memory_candidate = self._visual_daily_memory_candidate(digest=digest, candidate=candidate)
+            candidate_actions = self.memory.action_resolver.resolve_memory_actions(
+                memory_set_id=memory_set_id,
+                finished_at=finished_at,
+                event_ids=[],
+                cycle_ids=[],
+                candidate=memory_candidate,
+                embedding_definition=state["memory_sets"][memory_set_id]["embedding"],
+                allow_summary=False,
+            )
+            actions.extend(self._cap_visual_daily_memory_action_scores(candidate_actions))
+
+        if not actions:
+            self._store_visual_daily_promotion_result(
+                digest=digest,
+                result_status="skipped",
+                promoted_memory_unit_ids=[],
+                skipped_candidate_count=skipped_count,
+                failure_reason=None,
+            )
+            return
+
+        try:
+            self.store.persist_memory_actions(memory_actions=actions)
+            self.memory.vector_indexer.sync(
+                state=state,
+                finished_at=finished_at,
+                episode=None,
+                memory_actions=actions,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self._store_visual_daily_promotion_result(
+                digest=digest,
+                result_status="failed",
+                promoted_memory_unit_ids=[],
+                skipped_candidate_count=skipped_count,
+                failure_reason=str(exc),
+            )
+            debug_log("VisualDaily", f"promotion failed digest={digest['digest_id']} error={type(exc).__name__}: {exc}", level="ERROR")
+            return
+
+        promoted_ids = [
+            action["memory_unit_id"]
+            for action in actions
+            if isinstance(action.get("memory_unit_id"), str)
+        ]
+        self._store_visual_daily_promotion_result(
+            digest=digest,
+            result_status="succeeded",
+            promoted_memory_unit_ids=promoted_ids,
+            skipped_candidate_count=skipped_count,
+            failure_reason=None,
+        )
+        debug_log(
+            "VisualDaily",
+            f"promotion done digest={digest['digest_id']} promoted={len(promoted_ids)} skipped={skipped_count}",
+        )
+
+    def _visual_daily_candidate_has_repeated_support(self, *, digest: dict[str, Any], candidate: dict[str, Any]) -> bool:
+        # 2 日以上にまたがる類似 digest だけ昇格する。
+        previous_digests = self.store.list_daily_visual_digests(
+            memory_set_id=digest["memory_set_id"],
+            before_local_date=digest["local_date"],
+            limit=VISUAL_DAILY_PROMOTION_LOOKBACK_LIMIT,
+        )
+        candidate_text = self._visual_daily_similarity_text(str(candidate.get("summary_text", "")))
+        for previous_digest in previous_digests:
+            for previous_candidate in previous_digest.get("memory_candidate_summaries", []):
+                if not isinstance(previous_candidate, dict):
+                    continue
+                similarity = SequenceMatcher(
+                    None,
+                    candidate_text,
+                    self._visual_daily_similarity_text(str(previous_candidate.get("summary_text", ""))),
+                ).ratio()
+                if similarity >= VISUAL_DAILY_PROMOTION_SIMILARITY:
+                    return True
+        return False
+
+    def _visual_daily_memory_candidate(self, *, digest: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
+        # 日次視覚整理由来の候補は弱い inferred 記憶に固定する。
+        summary_text = str(candidate.get("summary_text", "")).strip()
+        topic_hint = self._visual_daily_topic_hint(summary_text)
+        return {
+            "memory_type": "interpretation",
+            "scope": "topic",
+            "subject_hint": topic_hint,
+            "predicate_hint": "visual_daily_pattern",
+            "object_hint": topic_hint,
+            "summary_text": summary_text,
+            "confidence_hint": "medium",
+            "qualifiers_hint": {
+                "source": "daily_visual_digest",
+                "digest_id": digest["digest_id"],
+                "local_date": digest["local_date"],
+                "duplicate_group_id": candidate.get("duplicate_group_id"),
+                "representative_visual_observation_id": candidate.get("representative_visual_observation_id"),
+            },
+            "evidence_text": f"{digest['local_date']} の視覚日次整理で反復または保持対象として整理された。",
+        }
+
+    def _visual_daily_topic_hint(self, summary_text: str) -> str:
+        # 安定した topic hint
+        key = hashlib.sha256(summary_text.encode("utf-8")).hexdigest()[:12]
+        return f"topic:visual_daily_{key}"
+
+    def _cap_visual_daily_memory_action_scores(self, actions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        # 日次視覚由来の記憶は控えめな重みに固定する。
+        capped: list[dict[str, Any]] = []
+        for action in actions:
+            memory_unit = action.get("memory_unit")
+            if isinstance(memory_unit, dict) and action.get("operation") in {"create", "reinforce", "refine"}:
+                memory_unit = {
+                    **memory_unit,
+                    "confidence": min(float(memory_unit.get("confidence", 0.0) or 0.0), 0.55),
+                    "salience": min(float(memory_unit.get("salience", 0.0) or 0.0), 0.45),
+                }
+                action = {
+                    **action,
+                    "memory_unit": memory_unit,
+                    "after_snapshot": memory_unit,
+                }
+            capped.append(action)
+        return capped
+
+    def _store_visual_daily_promotion_result(
+        self,
+        *,
+        digest: dict[str, Any],
+        result_status: str,
+        promoted_memory_unit_ids: list[str],
+        skipped_candidate_count: int,
+        failure_reason: str | None,
+    ) -> None:
+        # digest payload に昇格結果を残す。
+        updated_digest = {
+            **digest,
+            "memory_promotion": {
+                "result_status": result_status,
+                "promoted_memory_unit_ids": promoted_memory_unit_ids,
+                "skipped_candidate_count": skipped_candidate_count,
+                "failure_reason": failure_reason,
+            },
+        }
+        self.store.upsert_daily_visual_digest(digest=updated_digest, updated_records=[])
+
+    def _visual_daily_state_for_memory_set(self, *, state: dict[str, Any], memory_set_id: str) -> dict[str, Any]:
+        # vector sync は selected_memory_set_id を見るため、対象 memory_set を選択状態にする。
+        return {
+            **state,
+            "selected_memory_set_id": memory_set_id,
+        }

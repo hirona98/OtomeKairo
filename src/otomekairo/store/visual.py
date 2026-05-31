@@ -69,6 +69,51 @@ class StoreVisualMixin:
             return None
         return json.loads(row["payload_json"])
 
+    def list_daily_visual_digests(
+        self,
+        *,
+        memory_set_id: str,
+        query_text: str | None = None,
+        local_date: str | None = None,
+        before_local_date: str | None = None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        # 入力検証
+        if limit <= 0:
+            return []
+
+        clauses = ["memory_set_id = ?"]
+        params: list[Any] = [memory_set_id]
+        if isinstance(local_date, str) and local_date.strip():
+            clauses.append("local_date = ?")
+            params.append(local_date.strip())
+        if isinstance(before_local_date, str) and before_local_date.strip():
+            clauses.append("local_date < ?")
+            params.append(before_local_date.strip())
+        normalized_query = query_text.strip() if isinstance(query_text, str) else ""
+        if normalized_query:
+            query_terms = self._visual_observation_query_terms(normalized_query)
+            if query_terms:
+                clauses.append("(" + " OR ".join("payload_json LIKE ?" for _ in query_terms) + ")")
+                params.extend(f"%{term.strip()}%" for term in query_terms)
+        params.append(limit)
+
+        # クエリ
+        with self._memory_db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT payload_json
+                FROM daily_visual_digests
+                WHERE {' AND '.join(clauses)}
+                ORDER BY local_date DESC, finished_at DESC, rowid DESC
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+
+        # 結果
+        return [json.loads(row["payload_json"]) for row in rows]
+
     def list_visual_observation_local_dates(
         self,
         *,
@@ -102,27 +147,31 @@ class StoreVisualMixin:
         *,
         memory_set_id: str,
         local_date: str,
-        limit: int = 500,
+        limit: int | None = None,
     ) -> list[dict[str, Any]]:
         # 入力検証
-        if limit <= 0:
+        if limit is not None and limit <= 0:
             return []
         start_date = date.fromisoformat(local_date)
         end_date = (start_date + timedelta(days=1)).isoformat()
 
         # クエリ
+        limit_clause = "LIMIT ?" if limit is not None else ""
+        params: list[Any] = [memory_set_id, f"{local_date}T00:00:00", f"{end_date}T00:00:00"]
+        if limit is not None:
+            params.append(limit)
         with self._memory_db() as conn:
             rows = conn.execute(
-                """
+                f"""
                 SELECT payload_json
                 FROM visual_observation_records
                 WHERE memory_set_id = ?
                   AND observed_at >= ?
                   AND observed_at < ?
                 ORDER BY observed_at ASC, rowid ASC
-                LIMIT ?
+                {limit_clause}
                 """,
-                (memory_set_id, f"{local_date}T00:00:00", f"{end_date}T00:00:00", limit),
+                params,
             ).fetchall()
 
         # 結果
@@ -139,8 +188,9 @@ class StoreVisualMixin:
         if limit <= 0:
             return []
 
-        clauses = ["memory_set_id = ?"]
+        clauses = ["memory_set_id = ?", "retention_status != ?"]
         params: list[Any] = [memory_set_id]
+        params.append("excluded")
         normalized_query = query_text.strip() if isinstance(query_text, str) else ""
         if normalized_query:
             # 日本語入力は空白で分かち書きされないため、空白語と短い n-gram の OR 検索にする。
@@ -160,7 +210,14 @@ class StoreVisualMixin:
                 SELECT payload_json
                 FROM visual_observation_records
                 WHERE {' AND '.join(clauses)}
-                ORDER BY observed_at DESC, rowid DESC
+                ORDER BY
+                    CASE retention_status
+                        WHEN 'active' THEN 0
+                        WHEN 'compressed' THEN 1
+                        ELSE 2
+                    END ASC,
+                    observed_at DESC,
+                    rowid DESC
                 LIMIT ?
                 """,
                 params,

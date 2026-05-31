@@ -177,10 +177,11 @@ LLM の出力は JSON object 1 個に固定する。
 7. `daily_visual_digest` を作る
 
 現行実装では、前日以前の未整理日を background worker が処理する。
+日次整理は対象日の `visual_observation_record` を全件読み、毎分キャプチャのような高頻度入力でも同じ日の記録を整理対象から落とさない。
 連続する類似視覚記録には `duplicate_group_id` を付ける。
 詳細説明は残し、低変化 group の中間記録だけ `retention_status=compressed` にする。
 日ごとの整理結果は `daily_visual_digest` として保存する。
-`daily_visual_digest.memory_candidate_summaries` は記憶候補であり、直接 `memory_unit` を作る処理ではない。
+`daily_visual_digest.memory_candidate_summaries` は記憶候補であり、background worker が 2 日以上の類似候補だけを制限付きで `memory_unit` へ昇格する。
 
 保持対象は次である。
 
@@ -203,6 +204,47 @@ LLM の出力は JSON object 1 個に固定する。
 - 秘密情報を含む可能性が高い説明
 - ユーザーが削除または記憶禁止を明示した記録
 
+## 検索優先度
+
+`visual_observation_record.retention_status` は詳細説明の有無ではなく、検索と整理での優先度を表す。
+`active` は通常検索対象である。
+`compressed` は詳細説明を保持したまま、通常想起での優先度を下げる。
+`excluded` はユーザー削除、記憶禁止、秘密情報の可能性がある場合だけ使い、通常想起と digest 昇格の対象から外す。
+
+視覚記録検索は次の順で候補を並べる。
+
+1. `retention_status=active`
+2. query text と詳細説明の一致度
+3. `importance_score`
+4. `observed_at` の新しさ
+5. `retention_status=compressed`
+
+`compressed` は検索対象から消さない。
+ユーザーが明示的に「そのときの画面を細かく確認したい」と求めた場合は、`compressed` も最大 3 件まで開く。
+通常の「あったっけ」「最近どうだった」のような確認では、`active` と `daily_visual_digest` を優先する。
+
+## しきい値調整
+
+視覚整理のしきい値は固定仕様ではなく、実ログを根拠に調整する運用値である。
+初期値は次とする。
+
+- 連続観測の duplicate 判定類似度: `0.86`
+- 1 日あたりの整理対象上限: `500`
+- 1 回の worker 実行で処理する未整理日数: `7`
+- `RecallPack.visual_observations` の投入上限: `3`
+- `RecallPack.visual_daily_digests` の投入上限: `2`
+- `daily_visual_digest` からの `memory_unit` 昇格上限: 1 日 `3`
+
+調整では次を観測する。
+
+- digest ごとの `record_count / group_count / compressed_count`
+- `visual_observations` と `visual_daily_digests` が reply に使われた頻度
+- `compressed` から後で参照された件数
+- 昇格した `memory_unit` が訂正、矛盾、削除された件数
+- 画像由来記憶がユーザーに過剰または不気味に見えた事例
+
+しきい値は、記録を失わない方向ではなく、断定と昇格を抑える方向へまず調整する。
+
 ## 想起と回答
 
 後続会話で視覚確認が必要な場合、通常の長期記憶だけでなく `visual_observation_record` を検索する。
@@ -218,8 +260,25 @@ LLM の出力は JSON object 1 個に固定する。
 現行実装では、検索一致した視覚記録と直近の視覚記録を `RecallPack.visual_observations` へ少数投入する。
 応答と判断は `visual_observations[].detailed_summary_text` の範囲で、画像内の対象有無を確認する。
 
+`daily_visual_digest` は、特定の画像内対象を直接断定する根拠ではなく、1 日単位の視覚経験の索引である。
+後続会話で「昨日は何をしていた」「最近いつも何が見えていた」のような日単位、反復、傾向を確認する場合は、`daily_visual_digest` を `RecallPack.visual_daily_digests` へ投入する。
+特定物体の有無確認では、まず `visual_observation_record.detailed_summary_text` を優先し、digest だけしか無い場合は「その日の整理上はそう見える」と不確実性を残す。
+
 回答では不確実性を維持する。
 例えば詳細説明に「背景に観覧車らしき大きな円形構造物が見える」とある場合、回答では「観覧車らしきものは写っていた」と述べ、断定しすぎない。
+
+## 実装済みの順序
+
+視覚記録の追加実装は次の順序で入った。
+
+1. `daily_visual_digest` を想起へ投入する
+2. `daily_visual_digest.memory_candidate_summaries` を長期記憶候補へ昇格する
+3. `retention_status=compressed` の検索優先度を下げる
+4. inspection/API で digest と整理結果を確認できるようにする
+5. 実ログに基づいて類似度、件数、昇格しきい値を調整する
+
+この順序にした理由は、想起で digest を使える状態にしてから、誤記憶化しやすい長期記憶昇格を制限付きで入れるためである。
+検索優先度、inspection、しきい値調整は、想起と昇格の挙動を観測可能にしてから行う。
 
 ## failure の扱い
 

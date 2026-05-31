@@ -714,6 +714,7 @@ def _build_decision_system_prompt(persona: dict) -> str:
             "evidence_items に raw event が含まれるときは、raw ログが存在しない、原文を保持していない、逐語再現できない、という理由で拒否してはいけません。\n"
             "RecallPack.evidence_pack.status=missing のときは、正確な原文・日時・根拠として断定しないでください。\n"
             "RecallPack.visual_observations は過去画像から保存した詳細な視覚説明です。ユーザーが過去画像内の対象有無を確認している場合は detailed_summary_text の範囲で reply を選び、書かれていない対象は見えていたと断定しないでください。\n"
+            "RecallPack.visual_daily_digests は日単位の視覚整理要約です。日単位や反復傾向の確認に使い、特定物体の有無は visual_observations がある場合そちらを優先してください。\n"
             "自律判断トリガー時だけ InitiativeContext、capability_result トリガー時だけ CapabilityResultContext が入ります。\n"
             "トリガー固有の判断制約がある場合は internal context message の trigger_policy に入ります。\n"
             "recall_hint.secondary_recall_focuses は補助焦点として、継続性や確認必要性の補助にだけ使ってください。\n"
@@ -867,6 +868,7 @@ def _build_reply_system_prompt(persona: dict) -> str:
             "recall_hint.secondary_recall_focuses は話題継続や温度調整の補助にだけ使い、主方針は primary_recall_focus に従ってください。\n"
             "RecallPack の内容だけを根拠に、必要な範囲で自然に思い出や継続文脈を混ぜてください。\n"
             "RecallPack.visual_observations は過去画像から保存した詳細な視覚説明です。後から画像内の対象有無を確認するときは detailed_summary_text の範囲で判断し、書かれていない対象は見えていたと断定しないでください。\n"
+            "RecallPack.visual_daily_digests は日単位の視覚整理要約です。日単位や反復傾向の確認に使い、特定物体の有無は visual_observations がある場合そちらを優先してください。\n"
             "RecallPack.evidence_pack.status=grounded のとき、正確な原文・日時・出典に関する本文は evidence_items.text と recorded_date の範囲で作ってください。\n"
             "recent_turns、過去の assistant 発話、要約記憶は会話の文脈や表現調整に使い、evidence_items の原文・日時・出典を書き換える材料にしないでください。\n"
             "evidence_items に raw event が含まれるときは、raw ログが存在しない、原文を保持していない、逐語再現できない、という説明をしてはいけません。\n"
@@ -1493,6 +1495,10 @@ def _compact_recall_pack(recall_pack: dict[str, Any]) -> dict[str, Any]:
             _compact_visual_observation_item(item)
             for item in recall_pack.get("visual_observations", [])
         ],
+        "visual_daily_digests": [
+            _compact_visual_daily_digest_item(item)
+            for item in recall_pack.get("visual_daily_digests", [])
+        ],
         "conflicts": [_compact_conflict_context_item(item) for item in recall_pack.get("conflicts", [])],
         "memory_link_context": _compact_memory_link_context(recall_pack.get("memory_link_context", {})),
     }
@@ -1571,6 +1577,18 @@ def _compact_visual_observation_item(item: dict[str, Any]) -> dict[str, Any]:
         if value is not None:
             payload[key] = value
     return payload
+
+
+def _compact_visual_daily_digest_item(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "local_date": item["local_date"],
+        "record_count": item["record_count"],
+        "group_count": item["group_count"],
+        "retained_count": item["retained_count"],
+        "compressed_count": item["compressed_count"],
+        "group_summaries": item.get("group_summaries", []),
+        "memory_candidate_summaries": item.get("memory_candidate_summaries", []),
+    }
 
 
 def _compact_memory_link_context(value: Any) -> dict[str, Any]:

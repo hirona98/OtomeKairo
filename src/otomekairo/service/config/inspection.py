@@ -155,6 +155,93 @@ class ServiceConfigInspectionMixin:
                 memory_set_id=state["selected_memory_set_id"],
                 limit=6,
             ),
+            "visual_daily_summary": self._current_visual_daily_summary(state=state),
+        }
+
+    def get_visual_digest_inspection(
+        self,
+        token: str | None,
+        *,
+        limit: int,
+        local_date: str | None = None,
+    ) -> dict[str, Any]:
+        # 認可
+        state = self._require_token(token)
+        memory_set_id = state["selected_memory_set_id"]
+        digests = self.store.list_daily_visual_digests(
+            memory_set_id=memory_set_id,
+            local_date=local_date,
+            limit=max(1, min(limit, 50)),
+        )
+        return {
+            "selected_memory_set_id": memory_set_id,
+            "visual_digests": [self._compact_visual_daily_digest(digest) for digest in digests],
+        }
+
+    def _current_visual_daily_summary(self, *, state: dict[str, Any]) -> dict[str, Any] | None:
+        # 直近 digest
+        digests = self.store.list_daily_visual_digests(
+            memory_set_id=state["selected_memory_set_id"],
+            limit=1,
+        )
+        if not digests:
+            return None
+        digest = digests[0]
+        return {
+            "latest_local_date": digest.get("local_date"),
+            "latest_digest_id": digest.get("digest_id"),
+            "record_count": int(digest.get("record_count", 0) or 0),
+            "group_count": int(digest.get("group_count", 0) or 0),
+            "retained_count": int(digest.get("retained_count", 0) or 0),
+            "compressed_count": int(digest.get("compressed_count", 0) or 0),
+            "memory_candidate_count": len(digest.get("memory_candidate_summaries", [])),
+            "memory_promotion": digest.get("memory_promotion", {}),
+        }
+
+    def _compact_visual_daily_digest(self, digest: dict[str, Any]) -> dict[str, Any]:
+        # compact 表示
+        return {
+            "digest_id": digest.get("digest_id"),
+            "local_date": digest.get("local_date"),
+            "started_at": digest.get("started_at"),
+            "finished_at": digest.get("finished_at"),
+            "result_status": digest.get("result_status"),
+            "record_count": int(digest.get("record_count", 0) or 0),
+            "group_count": int(digest.get("group_count", 0) or 0),
+            "retained_count": int(digest.get("retained_count", 0) or 0),
+            "compressed_count": int(digest.get("compressed_count", 0) or 0),
+            "memory_promotion": digest.get("memory_promotion", {}),
+            "group_summaries": [
+                self._compact_visual_daily_group_summary(item)
+                for item in digest.get("group_summaries", [])
+                if isinstance(item, dict)
+            ][:10],
+            "memory_candidate_summaries": [
+                self._compact_visual_daily_memory_candidate(item)
+                for item in digest.get("memory_candidate_summaries", [])
+                if isinstance(item, dict)
+            ][:10],
+        }
+
+    def _compact_visual_daily_group_summary(self, item: dict[str, Any]) -> dict[str, Any]:
+        # group 表示
+        return {
+            "duplicate_group_id": item.get("duplicate_group_id"),
+            "record_count": int(item.get("record_count", 0) or 0),
+            "first_observed_at": item.get("first_observed_at"),
+            "last_observed_at": item.get("last_observed_at"),
+            "representative_visual_observation_id": item.get("representative_visual_observation_id"),
+            "summary_text": self._clamp(item.get("summary_text"), limit=160),
+            "retention_status": item.get("retention_status"),
+        }
+
+    def _compact_visual_daily_memory_candidate(self, item: dict[str, Any]) -> dict[str, Any]:
+        # 候補表示
+        return {
+            "duplicate_group_id": item.get("duplicate_group_id"),
+            "representative_visual_observation_id": item.get("representative_visual_observation_id"),
+            "summary_text": self._clamp(item.get("summary_text"), limit=160),
+            "reason_code": item.get("reason_code"),
         }
 
     def _snapshot_wake_runtime_state(self, *, current_time: str) -> dict[str, Any]:

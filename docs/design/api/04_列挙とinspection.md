@@ -114,6 +114,16 @@ desktop observation では、process-local novelty 判定用に `last_scene_sign
 `last_*` は process-local runtime state であり、server restart をまたいで保持しない。
 `capability_inspection` は `GET /api/inspection/capabilities` と同じ availability 導出結果を current-state snapshot の中で参照しやすく束ねたものである。
 
+`runtime_detail.visual_daily_runtime_state` は、視覚日次整理 worker の process-local 状態を返す。
+少なくとも `current_digest_id` を含める。
+`current_state.visual_daily_summary` は、直近 digest の集計を返す。
+少なくとも `latest_local_date / latest_digest_id / record_count / group_count / retained_count / compressed_count / memory_candidate_count` を含める。
+`current_state.visual_daily_summary` は raw image、詳細な `detailed_summary_text`、OCR 全文を含めない。
+
+digest 詳細を inspection で見る API は、認証必須の `GET /api/inspection/visual-digests` とする。
+query は `limit` と `local_date` だけを受け付ける。
+response は `daily_visual_digests` の compact 表示に限り、`group_summaries[].summary_text` は短縮した値だけを返す。
+
 ### `GET /api/inspection/capabilities`
 
 - 認証: 必要
