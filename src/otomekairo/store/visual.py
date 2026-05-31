@@ -7,6 +7,52 @@ from typing import Any
 
 
 class StoreVisualMixin:
+    def ensure_visual_observation_search_index(self, *, memory_set_id: str | None = None) -> None:
+        # 派生検索 index が欠けている視覚記録だけ補完する。
+        clauses = ["i.visual_observation_id IS NULL"]
+        params: list[Any] = []
+        if isinstance(memory_set_id, str) and memory_set_id.strip():
+            clauses.append("r.memory_set_id = ?")
+            params.append(memory_set_id.strip())
+
+        with self._memory_db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT r.payload_json
+                FROM visual_observation_records AS r
+                LEFT JOIN visual_observation_search_index AS i
+                  ON i.visual_observation_id = r.visual_observation_id
+                WHERE {' AND '.join(clauses)}
+                """,
+                params,
+            ).fetchall()
+            for row in rows:
+                self._upsert_visual_observation_search_index(conn, json.loads(row["payload_json"]))
+
+    def rebuild_visual_observation_search_index(self, *, memory_set_id: str | None = None) -> None:
+        # 派生検索 index は正本ではないため、視覚記録から再構築する。
+        clauses: list[str] = []
+        params: list[Any] = []
+        if isinstance(memory_set_id, str) and memory_set_id.strip():
+            clauses.append("memory_set_id = ?")
+            params.append(memory_set_id.strip())
+
+        with self._memory_db() as conn:
+            if clauses:
+                conn.execute(
+                    "DELETE FROM visual_observation_search_index WHERE memory_set_id = ?",
+                    (memory_set_id.strip(),),
+                )
+            else:
+                conn.execute("DELETE FROM visual_observation_search_index")
+
+            query = "SELECT payload_json FROM visual_observation_records"
+            if clauses:
+                query += f" WHERE {' AND '.join(clauses)}"
+            rows = conn.execute(query, params).fetchall()
+            for row in rows:
+                self._upsert_visual_observation_search_index(conn, json.loads(row["payload_json"]))
+
     def upsert_visual_observation_records(self, *, records: list[dict[str, Any]]) -> None:
         # 空
         if not records:
@@ -188,20 +234,16 @@ class StoreVisualMixin:
         if limit <= 0:
             return []
 
-        clauses = ["memory_set_id = ?", "retention_status != ?"]
-        params: list[Any] = [memory_set_id]
-        params.append("excluded")
         normalized_query = query_text.strip() if isinstance(query_text, str) else ""
         if normalized_query:
             # 日本語入力は空白で分かち書きされないため、空白語と短い n-gram の OR 検索にする。
-            query_terms = self._visual_observation_query_terms(normalized_query)
-            if query_terms:
-                clauses.append("(" + " OR ".join("detailed_summary_text LIKE ?" for _ in query_terms) + ")")
-                params.extend(f"%{term.strip()}%" for term in query_terms)
-            else:
-                clauses.append("detailed_summary_text LIKE ?")
-                params.append(f"%{normalized_query}%")
-        params.append(limit)
+            return self._list_visual_observation_records_by_query(
+                memory_set_id=memory_set_id,
+                query_text=normalized_query,
+                limit=limit,
+            )
+
+        params: list[Any] = [memory_set_id, "excluded", limit]
 
         # クエリ
         with self._memory_db() as conn:
@@ -209,7 +251,8 @@ class StoreVisualMixin:
                 f"""
                 SELECT payload_json
                 FROM visual_observation_records
-                WHERE {' AND '.join(clauses)}
+                WHERE memory_set_id = ?
+                  AND retention_status != ?
                 ORDER BY
                     CASE retention_status
                         WHEN 'active' THEN 0
@@ -225,6 +268,152 @@ class StoreVisualMixin:
 
         # 結果
         return [json.loads(row["payload_json"]) for row in rows]
+
+    def list_important_visual_observation_records(
+        self,
+        *,
+        memory_set_id: str,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        # 入力検証
+        if limit <= 0:
+            return []
+
+        # クエリ
+        with self._memory_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT r.payload_json
+                FROM visual_observation_search_index AS i
+                JOIN visual_observation_records AS r
+                  ON r.visual_observation_id = i.visual_observation_id
+                WHERE i.memory_set_id = ?
+                  AND r.retention_status != ?
+                ORDER BY
+                    CAST(i.importance_score AS REAL) DESC,
+                    CASE r.retention_status
+                        WHEN 'active' THEN 0
+                        WHEN 'compressed' THEN 1
+                        ELSE 2
+                    END ASC,
+                    r.observed_at DESC,
+                    r.rowid DESC
+                LIMIT ?
+                """,
+                (memory_set_id, "excluded", limit),
+            ).fetchall()
+
+        # 結果
+        return [json.loads(row["payload_json"]) for row in rows]
+
+    def list_recent_visual_observation_records(
+        self,
+        *,
+        memory_set_id: str,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        # 入力検証
+        if limit <= 0:
+            return []
+
+        # クエリ
+        with self._memory_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT payload_json
+                FROM visual_observation_records
+                WHERE memory_set_id = ?
+                  AND retention_status != ?
+                ORDER BY observed_at DESC, rowid DESC
+                LIMIT ?
+                """,
+                (memory_set_id, "excluded", limit),
+            ).fetchall()
+
+        # 結果
+        return [json.loads(row["payload_json"]) for row in rows]
+
+    def _list_visual_observation_records_by_query(
+        self,
+        *,
+        memory_set_id: str,
+        query_text: str,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        # 検索語
+        query_terms = self._visual_observation_query_terms(query_text)
+        if not query_terms:
+            return []
+        match_query = self._visual_observation_fts_query(query_terms)
+        candidate_limit = max(limit * 12, 48)
+
+        # FTS候補
+        with self._memory_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT r.payload_json
+                FROM visual_observation_search_index
+                JOIN visual_observation_records AS r
+                  ON r.visual_observation_id = visual_observation_search_index.visual_observation_id
+                WHERE visual_observation_search_index MATCH ?
+                  AND visual_observation_search_index.memory_set_id = ?
+                  AND r.retention_status != ?
+                ORDER BY rank, r.observed_at DESC, r.rowid DESC
+                LIMIT ?
+                """,
+                (match_query, memory_set_id, "excluded", candidate_limit),
+            ).fetchall()
+
+        records = [json.loads(row["payload_json"]) for row in rows]
+        records.sort(
+            key=lambda record: self._visual_observation_query_sort_key(
+                record=record,
+                query_text=query_text,
+                query_terms=query_terms,
+            )
+        )
+        return records[:limit]
+
+    def _visual_observation_query_sort_key(
+        self,
+        *,
+        record: dict[str, Any],
+        query_text: str,
+        query_terms: list[str],
+    ) -> tuple[float, float, int]:
+        # query 一致を retention_status より前に置く。
+        match_score = self._visual_observation_match_score(
+            record=record,
+            query_text=query_text,
+            query_terms=query_terms,
+        )
+        importance_score = record.get("importance_score")
+        importance = float(importance_score) if isinstance(importance_score, (int, float)) else 0.0
+        retention_bonus = 1 if record.get("retention_status") == "active" else 0
+        return (-match_score, -importance, -retention_bonus)
+
+    def _visual_observation_match_score(
+        self,
+        *,
+        record: dict[str, Any],
+        query_text: str,
+        query_terms: list[str],
+    ) -> float:
+        # 詳細説明や派生ラベルの一致度を単純な点数にする。
+        search_text = self._visual_observation_plain_search_text(record).lower()
+        compact_query = self._visual_observation_compact_text(query_text).lower()
+        score = 0.0
+        if compact_query and compact_query in search_text:
+            score += 16.0
+        for term in query_terms:
+            normalized = term.lower().strip()
+            if not normalized:
+                continue
+            if normalized in search_text:
+                score += min(float(len(normalized)), 8.0)
+        if record.get("image_input_kind") == "conversation_attachment":
+            score += 1.0
+        return score
 
     def _visual_observation_query_terms(self, query_text: str) -> list[str]:
         # 空白語
@@ -253,7 +442,16 @@ class StoreVisualMixin:
             terms.extend(grams[:16])
 
         # 結果
-        return terms[:20]
+        return terms[:40]
+
+    def _visual_observation_fts_query(self, query_terms: list[str]) -> str:
+        # FTS構文の制御文字を避けるため、全 term を phrase として渡す。
+        phrases = []
+        for term in query_terms:
+            escaped = term.replace('"', '""').strip()
+            if escaped:
+                phrases.append(f'"{escaped}"')
+        return " OR ".join(phrases)
 
     def _insert_visual_observation_record(self, conn: sqlite3.Connection, record: dict[str, Any]) -> None:
         # 追加
@@ -289,3 +487,104 @@ class StoreVisualMixin:
                 self._to_json(record),
             ),
         )
+        self._upsert_visual_observation_search_index(conn, record)
+
+    def _upsert_visual_observation_search_index(
+        self,
+        conn: sqlite3.Connection,
+        record: dict[str, Any],
+    ) -> None:
+        # 派生 index 更新
+        conn.execute(
+            "DELETE FROM visual_observation_search_index WHERE visual_observation_id = ?",
+            (record["visual_observation_id"],),
+        )
+        conn.execute(
+            """
+            INSERT INTO visual_observation_search_index (
+                visual_observation_id,
+                memory_set_id,
+                observed_at,
+                retention_status,
+                importance_score,
+                source_kind,
+                source_label,
+                search_text
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                record["visual_observation_id"],
+                record["memory_set_id"],
+                record["observed_at"],
+                record["retention_status"],
+                str(record.get("importance_score", 0.0)),
+                record["source_kind"],
+                record.get("source_label") or "",
+                self._visual_observation_search_document(record),
+            ),
+        )
+
+    def _visual_observation_search_document(self, record: dict[str, Any]) -> str:
+        # FTS 用に詳細説明、派生ラベル、短い n-gram を同じ document に入れる。
+        plain_text = self._visual_observation_plain_search_text(record)
+        ngrams = self._visual_observation_search_ngrams(plain_text)
+        return " ".join([plain_text, *ngrams]).strip()
+
+    def _visual_observation_plain_search_text(self, record: dict[str, Any]) -> str:
+        # 検索対象テキスト
+        parts: list[str] = []
+        for key in (
+            "detailed_summary_text",
+            "source_kind",
+            "source_label",
+            "vision_source_id",
+            "image_input_kind",
+            "confidence_hint",
+        ):
+            value = record.get(key)
+            if isinstance(value, str) and value.strip():
+                parts.append(value.strip())
+
+        for key in ("scene_entities", "activity_labels", "environment_labels"):
+            parts.extend(self._visual_observation_string_list(record.get(key)))
+
+        index = record.get("index")
+        if isinstance(index, dict):
+            for key in ("short_summary_text", "embedding_text"):
+                value = index.get(key)
+                if isinstance(value, str) and value.strip():
+                    parts.append(value.strip())
+            parts.extend(self._visual_observation_string_list(index.get("searchable_terms")))
+
+        client_context_summary = record.get("client_context_summary")
+        if isinstance(client_context_summary, dict):
+            for value in client_context_summary.values():
+                if isinstance(value, str) and value.strip():
+                    parts.append(value.strip())
+
+        return " ".join(parts)
+
+    def _visual_observation_string_list(self, value: Any) -> list[str]:
+        # 文字列配列だけ取り出す。
+        if not isinstance(value, list):
+            return []
+        return [item.strip() for item in value if isinstance(item, str) and item.strip()]
+
+    def _visual_observation_search_ngrams(self, text: str) -> list[str]:
+        # 日本語の部分一致に使う短い n-gram。
+        compact = self._visual_observation_compact_text(text)
+        grams: list[str] = []
+        seen: set[str] = set()
+        for size in range(2, min(6, len(compact)) + 1):
+            for index in range(0, len(compact) - size + 1):
+                gram = compact[index : index + size]
+                if gram in seen:
+                    continue
+                grams.append(gram)
+                seen.add(gram)
+        return grams
+
+    def _visual_observation_compact_text(self, text: str) -> str:
+        # 空白と主要な句読点を落とした検索用文字列。
+        ignored = set(" \t\r\n。、，．！？!?「」『』（）()[]{}<>＜＞:：;；,，.．/／\\|｜'\"`~〜")
+        return "".join(char for char in text if char not in ignored)

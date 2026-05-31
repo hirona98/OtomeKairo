@@ -16,6 +16,7 @@ class StoreCloneMixin:
             # 削除順序
             conn.execute("DELETE FROM world_states WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM daily_visual_digests WHERE memory_set_id = ?", (memory_set_id,))
+            conn.execute("DELETE FROM visual_observation_search_index WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM visual_observation_records WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM ongoing_actions WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM drive_states WHERE memory_set_id = ?", (memory_set_id,))

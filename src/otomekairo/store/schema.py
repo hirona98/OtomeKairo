@@ -192,6 +192,19 @@ class StoreSchemaMixin:
             CREATE INDEX IF NOT EXISTS idx_visual_observation_source
             ON visual_observation_records(memory_set_id, vision_source_id, observed_at);
 
+            CREATE VIRTUAL TABLE IF NOT EXISTS visual_observation_search_index
+            USING fts5(
+                visual_observation_id UNINDEXED,
+                memory_set_id UNINDEXED,
+                observed_at UNINDEXED,
+                retention_status UNINDEXED,
+                importance_score UNINDEXED,
+                source_kind UNINDEXED,
+                source_label UNINDEXED,
+                search_text,
+                tokenize = 'unicode61'
+            );
+
             CREATE TABLE IF NOT EXISTS daily_visual_digests (
                 digest_id TEXT PRIMARY KEY,
                 memory_set_id TEXT NOT NULL,

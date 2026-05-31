@@ -35,6 +35,7 @@ class SQLiteMemoryStore(
         # 初期化
         self.root_dir.mkdir(parents=True, exist_ok=True)
         self._initialize_memory_db()
+        self.ensure_visual_observation_search_index()
 
     def upsert_reflection_run(self, *, reflection_run: dict[str, Any]) -> None:
         # トランザクション

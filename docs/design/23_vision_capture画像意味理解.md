@@ -62,7 +62,7 @@ raw image、base64、OCR 全文、UI 座標、資格情報、内部 URL、配送
 
 | データ | 役割 |
 |------|------|
-| `visual_observation_index` | 検索、embedding、一覧表示、重複判定のための短い索引 |
+| `visual_observation_search_index` | 検索、embedding、一覧表示、重複判定のための派生索引 |
 | `scene_entities` | 後から照会しやすい物体、場所、画面要素、背景要素 |
 | `activity_labels` | 何をしているかの短い活動ラベル |
 | `environment_labels` | 場所、周囲、環境状態の短いラベル |
@@ -71,6 +71,8 @@ raw image、base64、OCR 全文、UI 座標、資格情報、内部 URL、配送
 
 派生データは `detailed_summary_text` を置き換えない。
 検索に使う `short_summary_text` や `embedding_text` は、詳細説明へ辿る入口として扱う。
+`visual_observation_search_index` は再構築可能な派生データであり、正本ではない。
+index が壊れた場合は `visual_observation_record.detailed_summary_text` から再構築する。
 
 ## LLM 契約
 
@@ -206,22 +208,28 @@ LLM の出力は JSON object 1 個に固定する。
 
 ## 検索優先度
 
-`visual_observation_record.retention_status` は詳細説明の有無ではなく、検索と整理での優先度を表す。
+`visual_observation_record.retention_status` は詳細説明の有無ではなく、日次整理後の保持状態を表す。
 `active` は通常検索対象である。
 `compressed` は詳細説明を保持したまま、通常想起での優先度を下げる。
 `excluded` はユーザー削除、記憶禁止、秘密情報の可能性がある場合だけ使い、通常想起と digest 昇格の対象から外す。
 
-視覚記録検索は次の順で候補を並べる。
+視覚記録検索の ranking は、`retention_status` だけで決めない。
+特定物体、場所、画面要素の有無確認では、query text と `detailed_summary_text / scene_entities / searchable_terms` の一致度を最優先する。
+`compressed` でも query に強く一致する記録は、query に弱く一致する `active` より上に置く。
 
-1. `retention_status=active`
-2. query text と詳細説明の一致度
-3. `importance_score`
+視覚記録検索は次の要素で候補を並べる。
+
+1. query text と詳細説明、物体ラベル、検索語の一致度
+2. 会話結合、ユーザー関心、`importance_score`
+3. `retention_status=active`
 4. `observed_at` の新しさ
-5. `retention_status=compressed`
+5. source と duplicate group の多様性
+6. query に一致しない `retention_status=compressed`
 
 `compressed` は検索対象から消さない。
 ユーザーが明示的に「そのときの画面を細かく確認したい」と求めた場合は、`compressed` も最大 3 件まで開く。
-通常の「あったっけ」「最近どうだった」のような確認では、`active` と `daily_visual_digest` を優先する。
+「あったっけ」のような特定対象の有無確認では、`active / compressed` より query 一致を優先する。
+「最近どうだった」のような日単位、反復、傾向の確認では、`daily_visual_digest` と `active` の代表記録を優先する。
 
 ## しきい値調整
 
@@ -229,7 +237,7 @@ LLM の出力は JSON object 1 個に固定する。
 初期値は次とする。
 
 - 連続観測の duplicate 判定類似度: `0.86`
-- 1 日あたりの整理対象上限: `500`
+- 1 日あたりの整理対象: 意味上の上限を持たず、対象日の全 `visual_observation_record`
 - 1 回の worker 実行で処理する未整理日数: `7`
 - `RecallPack.visual_observations` の投入上限: `3`
 - `RecallPack.visual_daily_digests` の投入上限: `2`
@@ -252,10 +260,15 @@ LLM の出力は JSON object 1 個に固定する。
 検索順は次を基準にする。
 
 1. 直近会話と episode
-2. `visual_observation_index` の `scene_entities / embedding_text`
+2. `visual_observation_search_index` の `scene_entities / embedding_text / searchable_terms`
 3. `visual_observation_record.detailed_summary_text`
 4. `daily_visual_digest`
 5. 長期 memory
+
+`RecallPack.visual_observations` は、検索一致枠、重要枠、直近枠に分けて選ぶ。
+最終投入上限は `3` 件とし、同一 duplicate group または同一 source の連続記録で埋め尽くさない。
+特定対象の有無確認では検索一致枠を優先し、query に強く一致する `compressed` を直近の `active` より上に置く。
+日次整理前の当日記録は大量に `active` のまま存在するため、直近枠だけで `RecallPack.visual_observations` を埋めない。
 
 現行実装では、検索一致した視覚記録と直近の視覚記録を `RecallPack.visual_observations` へ少数投入する。
 応答と判断は `visual_observations[].detailed_summary_text` の範囲で、画像内の対象有無を確認する。
@@ -273,12 +286,12 @@ LLM の出力は JSON object 1 個に固定する。
 
 1. `daily_visual_digest` を想起へ投入する
 2. `daily_visual_digest.memory_candidate_summaries` を長期記憶候補へ昇格する
-3. `retention_status=compressed` の検索優先度を下げる
+3. `retention_status=compressed` を通常想起では後ろに置き、query 強一致では上位に戻す
 4. inspection/API で digest と整理結果を確認できるようにする
 5. 実ログに基づいて類似度、件数、昇格しきい値を調整する
 
 この順序にした理由は、想起で digest を使える状態にしてから、誤記憶化しやすい長期記憶昇格を制限付きで入れるためである。
-検索優先度、inspection、しきい値調整は、想起と昇格の挙動を観測可能にしてから行う。
+検索 ranking、inspection、しきい値調整は、想起と昇格の挙動を観測可能にしてから行う。
 
 ## failure の扱い
 

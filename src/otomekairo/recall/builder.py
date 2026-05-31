@@ -736,32 +736,111 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
         augmented_query_text: str,
         limit: int,
     ) -> list[dict[str, Any]]:
-        # 検索一致と直近記録を合わせ、直後の「あれあったっけ」に耐える。
+        # 検索一致、重要、直近の枠を分け、毎分キャプチャで直近だけに寄らないようにする。
         queried_records = self.store.list_visual_observation_records(
             memory_set_id=memory_set_id,
             query_text=augmented_query_text,
-            limit=limit,
+            limit=max(limit * 4, 12),
         )
-        recent_records = self.store.list_visual_observation_records(
+        important_records = self.store.list_important_visual_observation_records(
             memory_set_id=memory_set_id,
-            query_text=None,
-            limit=limit,
+            limit=max(limit * 2, 6),
+        )
+        recent_records = self.store.list_recent_visual_observation_records(
+            memory_set_id=memory_set_id,
+            limit=max(limit * 2, 6),
         )
 
-        # 重複除去
-        selected: list[dict[str, Any]] = []
+        # 枠別選定
+        selected_records: list[dict[str, Any]] = []
         seen: set[str] = set()
-        for record in queried_records + recent_records:
+        used_groups: set[str] = set()
+        used_sources: set[str] = set()
+
+        query_target = min(2, limit)
+        self._append_visual_observation_records(
+            selected_records=selected_records,
+            seen=seen,
+            used_groups=used_groups,
+            used_sources=used_sources,
+            records=queried_records,
+            target_count=query_target,
+            allow_same_source=False,
+        )
+        important_target = min(limit, len(selected_records) + 1)
+        self._append_visual_observation_records(
+            selected_records=selected_records,
+            seen=seen,
+            used_groups=used_groups,
+            used_sources=used_sources,
+            records=important_records,
+            target_count=important_target,
+            allow_same_source=False,
+        )
+        self._append_visual_observation_records(
+            selected_records=selected_records,
+            seen=seen,
+            used_groups=used_groups,
+            used_sources=used_sources,
+            records=recent_records,
+            target_count=limit,
+            allow_same_source=False,
+        )
+
+        if len(selected_records) < limit:
+            self._append_visual_observation_records(
+                selected_records=selected_records,
+                seen=seen,
+                used_groups=used_groups,
+                used_sources=used_sources,
+                records=queried_records + important_records + recent_records,
+                target_count=limit,
+                allow_same_source=True,
+            )
+
+        # 結果
+        return [self._to_visual_observation_item(record) for record in selected_records[:limit]]
+
+    def _append_visual_observation_records(
+        self,
+        *,
+        selected_records: list[dict[str, Any]],
+        seen: set[str],
+        used_groups: set[str],
+        used_sources: set[str],
+        records: list[dict[str, Any]],
+        target_count: int,
+        allow_same_source: bool,
+    ) -> None:
+        # 代表を優先し、不足時だけ同一 source/group の重複を許す。
+        for record in records:
+            if len(selected_records) >= target_count:
+                return
             visual_observation_id = record.get("visual_observation_id")
             if not isinstance(visual_observation_id, str) or visual_observation_id in seen:
                 continue
-            selected.append(self._to_visual_observation_item(record))
-            seen.add(visual_observation_id)
-            if len(selected) >= limit:
-                break
 
-        # 結果
-        return selected
+            duplicate_group_id = record.get("duplicate_group_id")
+            if isinstance(duplicate_group_id, str) and duplicate_group_id in used_groups and not allow_same_source:
+                continue
+
+            source_key = self._visual_observation_source_key(record)
+            if source_key in used_sources and not allow_same_source:
+                continue
+
+            selected_records.append(record)
+            seen.add(visual_observation_id)
+            if isinstance(duplicate_group_id, str) and duplicate_group_id:
+                used_groups.add(duplicate_group_id)
+            used_sources.add(source_key)
+
+    def _visual_observation_source_key(self, record: dict[str, Any]) -> str:
+        # source の代表化
+        for key in ("vision_source_id", "source_label", "source_kind"):
+            value = record.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return "unknown"
 
     def _build_visual_daily_digests(
         self,
