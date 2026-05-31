@@ -47,6 +47,7 @@ class ServiceInputInitiativeContextMixin:
             client_context=client_context,
             world_state_summary=world_state_summary,
         )
+        desktop_reply_priority = self._initiative_desktop_reply_priority(foreground_signal_summary)
         intervention_state = self._initiative_intervention_state(
             current_time=current_time,
             trigger_kind=trigger_kind,
@@ -61,10 +62,12 @@ class ServiceInputInitiativeContextMixin:
             capability_summary=capability_summary,
             selected_candidate=selected_candidate,
             pending_intent_selection=pending_intent_selection,
+            desktop_reply_priority=desktop_reply_priority,
         )
         suppression_summary = self._initiative_suppression_summary(
             intervention_state=intervention_state,
             intervention_risk_summary=intervention_risk_summary,
+            desktop_reply_priority=desktop_reply_priority,
         )
         candidate_families = self._initiative_candidate_families(
             trigger_kind=trigger_kind,
@@ -100,6 +103,7 @@ class ServiceInputInitiativeContextMixin:
                 f"trigger={trigger_kind} selected={selected_candidate_family or '-'} "
                 f"preferred={selected_family_entry.preferred_result_kind if selected_family_entry is not None else '-'} "
                 f"suppression={suppression_summary.get('suppression_level', '-')} "
+                f"override={suppression_summary.get('foreground_override', '-')} "
                 f"foreground={foreground_signal_summary.get('foreground_thinness', '-')} "
                 f"desktop={desktop_debug}"
             ),
@@ -475,6 +479,37 @@ class ServiceInputInitiativeContextMixin:
             return None
         return signal
 
+    def _initiative_desktop_reply_priority(
+        self,
+        foreground_signal_summary: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        desktop_signal = self._initiative_desktop_observation_signal(foreground_signal_summary)
+        if not isinstance(desktop_signal, dict):
+            return None
+        if self._client_context_text(desktop_signal.get("reply_eligibility"), limit=24) != "eligible":
+            return None
+        novelty_kind = self._client_context_text(desktop_signal.get("novelty_kind"), limit=48)
+        change_strength = self._client_context_text(desktop_signal.get("change_strength"), limit=16)
+        if novelty_kind == "pending_after_cooldown":
+            return {
+                "priority_kind": "pending_after_cooldown",
+                "cooldown_policy": "soft",
+                "reason_summary": (
+                    "cooldown 中に保留した desktop scene がまだ見えているため、"
+                    "background wake や pending_intent 不在は単独の見送り理由にしない。"
+                ),
+            }
+        if novelty_kind == "changed" and change_strength == "significant":
+            return {
+                "priority_kind": "significant_desktop_change",
+                "cooldown_policy": "soft",
+                "reason_summary": (
+                    "未発話の大きな desktop scene 変化があるため、"
+                    "background wake や cooldown は単独の見送り理由にしない。"
+                ),
+            }
+        return None
+
     def _initiative_intervention_risk_summary(
         self,
         *,
@@ -485,14 +520,16 @@ class ServiceInputInitiativeContextMixin:
         capability_summary: dict[str, Any],
         selected_candidate: dict[str, Any] | None,
         pending_intent_selection: dict[str, Any] | None,
+        desktop_reply_priority: dict[str, Any] | None,
     ) -> str | None:
         reasons: list[str] = []
+        has_desktop_reply_priority = isinstance(desktop_reply_priority, dict)
         baseline_level = self._client_context_text(initiative_baseline.get("level"), limit=16)
-        if trigger_kind == "background_wake":
+        if trigger_kind == "background_wake" and not has_desktop_reply_priority:
             reasons.append("直近入力のない定期 wake なので、過剰介入は避けたい。")
-        if baseline_level == "low":
+        if baseline_level == "low" and not has_desktop_reply_priority:
             reasons.append("initiative_baseline が low で、押し出しは控えめにしたい。")
-        if intervention_state.get("cooldown_active") is True:
+        if intervention_state.get("cooldown_active") is True and not has_desktop_reply_priority:
             cooldown_reason = intervention_state.get("cooldown_reason")
             if isinstance(cooldown_reason, str) and cooldown_reason.strip():
                 reasons.append(cooldown_reason.strip())
@@ -500,9 +537,9 @@ class ServiceInputInitiativeContextMixin:
             reasons.append("同じ pending_intent 系統には最近 reply 済みで、連続介入は避けたい。")
         if isinstance(ongoing_action_summary, dict) and ongoing_action_summary.get("status") == "waiting_result":
             reasons.append("ongoing_action が結果待ちで、重複介入は抑えたい。")
-        if int(capability_summary.get("available_count", 0)) == 0:
+        if int(capability_summary.get("available_count", 0)) == 0 and not has_desktop_reply_priority:
             reasons.append("現時点で使える capability が見当たらない。")
-        if not isinstance(selected_candidate, dict):
+        if not isinstance(selected_candidate, dict) and not has_desktop_reply_priority:
             pool_count = 0
             if isinstance(pending_intent_selection, dict):
                 pool_count = int(pending_intent_selection.get("candidate_pool_count", 0))
@@ -517,11 +554,15 @@ class ServiceInputInitiativeContextMixin:
         *,
         intervention_state: dict[str, Any],
         intervention_risk_summary: str | None,
+        desktop_reply_priority: dict[str, Any] | None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {}
+        has_desktop_reply_priority = isinstance(desktop_reply_priority, dict)
         suppression_level = "low"
         if intervention_state.get("same_dedupe_recently_replied") is True:
             suppression_level = "high"
+        elif has_desktop_reply_priority and intervention_risk_summary is None:
+            suppression_level = "low"
         elif (
             intervention_state.get("cooldown_active") is True
             or intervention_state.get("background_trigger") is True
@@ -531,6 +572,22 @@ class ServiceInputInitiativeContextMixin:
         payload["suppression_level"] = suppression_level
         if intervention_risk_summary is not None:
             payload["reason_summary"] = intervention_risk_summary
+        elif has_desktop_reply_priority:
+            reason_summary = desktop_reply_priority.get("reason_summary")
+            if isinstance(reason_summary, str) and reason_summary.strip():
+                payload["reason_summary"] = reason_summary.strip()
+        if has_desktop_reply_priority:
+            payload["foreground_override"] = "desktop_reply_priority"
+            priority_kind = desktop_reply_priority.get("priority_kind")
+            if isinstance(priority_kind, str) and priority_kind.strip():
+                payload["desktop_reply_priority_kind"] = priority_kind.strip()
+            cooldown_policy = desktop_reply_priority.get("cooldown_policy")
+            if (
+                intervention_state.get("cooldown_active") is True
+                and isinstance(cooldown_policy, str)
+                and cooldown_policy.strip()
+            ):
+                payload["cooldown_policy"] = cooldown_policy.strip()
         for key in ("background_trigger", "cooldown_active", "same_dedupe_recently_replied"):
             value = intervention_state.get(key)
             if isinstance(value, bool):

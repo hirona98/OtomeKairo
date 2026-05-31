@@ -65,6 +65,7 @@ class MemoryReflectionDriveMixin:
         )
         source_units = self.store.list_memory_units_for_reflection(
             memory_set_id=memory_set_id,
+            current_time=finished_at,
             statuses=list(ACTIVE_MEMORY_STATUSES),
             include_memory_types=["commitment", "summary"],
             limit=96,
@@ -388,6 +389,8 @@ class MemoryReflectionDriveMixin:
         memory_type = unit.get("memory_type")
         scope_type = unit.get("scope_type")
         if memory_type == "commitment":
+            if self._drive_commitment_is_transient_support(unit):
+                return None
             commitment_state = unit.get("commitment_state")
             if commitment_state == "on_hold":
                 return "resume_when_ready"
@@ -435,6 +438,22 @@ class MemoryReflectionDriveMixin:
         if unit.get("memory_type") == "summary":
             return f"{drive_kind}:{unit['scope_type']}:{unit['scope_key']}"
         return f"{drive_kind}:{unit['memory_unit_id']}"
+
+    def _drive_commitment_is_transient_support(self, unit: dict[str, Any]) -> bool:
+        qualifiers = unit.get("qualifiers")
+        if not isinstance(qualifiers, dict):
+            qualifiers = {}
+        predicate = unit.get("predicate")
+        transient_predicate = predicate in {"provide_support", "support_posture", "waits_for", "watch_over", "stand_by"}
+        if qualifiers.get("scope_duration") in {"turn", "session"}:
+            return True
+        if qualifiers.get("source") in {"assistant_response", "assistant_self_statement"}:
+            return True
+        if qualifiers.get("commitment_actor") in {"self", "assistant"}:
+            return True
+        if transient_predicate and qualifiers.get("source") == "inference":
+            return True
+        return False
 
     def _drive_source_updated_at(self, *, unit: dict[str, Any], finished_at: str) -> str:
         for key in ("last_confirmed_at", "formed_at"):

@@ -95,6 +95,7 @@ class ReflectiveConsolidator(
             )
             active_units = self.store.list_memory_units_for_reflection(
                 memory_set_id=memory_set_id,
+                current_time=finished_at,
                 statuses=list(ACTIVE_MEMORY_STATUSES),
                 scope_types=list(REFLECTIVE_SCOPE_TYPES),
                 limit=REFLECTION_MEMORY_LIMIT,

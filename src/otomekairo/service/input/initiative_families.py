@@ -230,12 +230,16 @@ class ServiceInputInitiativeFamiliesMixin:
             if isinstance(desktop_signal, dict)
             else None
         )
+        desktop_reply_priority = self._initiative_desktop_reply_priority(foreground_signal_summary)
+        desktop_significant_reply_candidate = isinstance(desktop_reply_priority, dict)
         if desktop_signal:
             priority_score += {
                 "high": 0.18,
                 "medium": 0.1,
                 "low": 0.02,
             }.get(desktop_interrupt_worthiness or "low", 0.02)
+        if desktop_significant_reply_candidate:
+            priority_score += 0.06
         if foreground_thinness == "ready":
             priority_score += 0.04
         elif foreground_thinness == "thin":
@@ -274,6 +278,13 @@ class ServiceInputInitiativeFamiliesMixin:
             priority_score += INITIATIVE_AUTONOMOUS_PROBE_SCORE
             preferred_capability_id = probe_preference["capability_id"]
             preferred_capability_input = probe_preference["input"]
+        elif desktop_significant_reply_candidate:
+            preferred_result_kind = "reply"
+            reason_summary = desktop_reply_priority.get("reason_summary")
+            preferred_result_reason = (
+                self._client_context_text(reason_summary, limit=160)
+                or "desktop wake observation に未発話の大きな変化があり、短い reply で前に出る。"
+            )
         elif (
             isinstance(desktop_signal, dict)
             and desktop_signal.get("cooldown_active") is True

@@ -814,7 +814,7 @@ class ServiceInputWakeObservationMixin:
             and change_strength == "significant"
             and interrupt_worthiness == "medium"
         ):
-            return "cooldown 中の大きな desktop scene 変化を判断材料として扱うが、発話価値は別に判断する。"
+            return "cooldown 中でも未発話の大きな desktop scene 変化なので、短い自発 reply の優先候補として扱う。"
         if reply_eligibility == "eligible" and cooldown_reason is not None and novelty_kind in {"first_success", "changed"}:
             return "cooldown 中の desktop scene 変化を、短い自発 reply 候補として扱う。"
         if novelty_kind in {"first_success", "changed"} and interrupt_worthiness == "low":

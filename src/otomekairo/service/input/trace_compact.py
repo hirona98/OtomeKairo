@@ -207,7 +207,13 @@ class ServiceInputTraceCompactMixin:
             suppression_summary = initiative_payload.get("suppression_summary")
             if isinstance(suppression_summary, dict):
                 compact_suppression: dict[str, Any] = {}
-                for key in ("suppression_level", "reason_summary"):
+                for key in (
+                    "suppression_level",
+                    "reason_summary",
+                    "foreground_override",
+                    "desktop_reply_priority_kind",
+                    "cooldown_policy",
+                ):
                     value = suppression_summary.get(key)
                     if isinstance(value, str) and value.strip():
                         compact_suppression[key] = self._clamp(value.strip(), limit=160)

@@ -40,6 +40,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
         state: dict[str, Any],
         augmented_query_text: str,
         recall_hint: dict[str, Any],
+        current_time: str | None = None,
     ) -> dict[str, Any]:
         # コンテキスト
         memory_set_id = state["selected_memory_set_id"]
@@ -49,7 +50,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
 
         # 有効なcommitment群
         active_commitments = self._limit_memory_section(
-            raw_items=self._build_active_commitments(memory_set_id=memory_set_id),
+            raw_items=self._build_active_commitments(memory_set_id=memory_set_id, current_time=current_time),
             limit=SECTION_LIMITS["active_commitments"],
         )
         self._collect_raw_candidate_ids(raw_candidate_ids, active_commitments)
@@ -60,6 +61,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
                 memory_set_id=memory_set_id,
                 scope_filters=scope_context["relationship_filters"],
                 limit=SECTION_LIMITS["relationship_model"] * 3,
+                current_time=current_time,
                 exclude_memory_types=["commitment"],
             ),
             limit=SECTION_LIMITS["relationship_model"],
@@ -72,6 +74,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
                 memory_set_id=memory_set_id,
                 scope_filters=scope_context["user_filters"],
                 limit=SECTION_LIMITS["user_model"] * 3,
+                current_time=current_time,
                 exclude_memory_types=["commitment"],
             ),
             limit=SECTION_LIMITS["user_model"],
@@ -84,6 +87,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
                 memory_set_id=memory_set_id,
                 scope_filters=scope_context["self_filters"],
                 limit=SECTION_LIMITS["self_model"] * 3,
+                current_time=current_time,
                 exclude_memory_types=["commitment"],
             ),
             limit=SECTION_LIMITS["self_model"],
@@ -95,6 +99,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             raw_items=self._build_active_topics(
                 memory_set_id=memory_set_id,
                 topic_scope_filters=scope_context["topic_filters"],
+                current_time=current_time,
             )
             + self._build_scope_memory_section(
                 memory_set_id=memory_set_id,
@@ -103,6 +108,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
                     + scope_context["world_filters"]
                 ),
                 limit=SECTION_LIMITS["active_topics"] * 2,
+                current_time=current_time,
                 exclude_memory_types=["commitment"],
             ),
             limit=SECTION_LIMITS["active_topics"],
@@ -321,10 +327,16 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             "episode_scope_filters": episode_scope_filters,
         }
 
-    def _build_active_commitments(self, *, memory_set_id: str) -> list[dict[str, Any]]:
+    def _build_active_commitments(
+        self,
+        *,
+        memory_set_id: str,
+        current_time: str | None,
+    ) -> list[dict[str, Any]]:
         # クエリ
         records = self.store.list_memory_units_for_recall(
             memory_set_id=memory_set_id,
+            current_time=current_time,
             include_memory_types=["commitment"],
             statuses=list(ACTIVE_MEMORY_STATUSES),
             commitment_states=list(ACTIVE_COMMITMENT_STATES),
@@ -340,6 +352,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
         memory_set_id: str,
         scope_filters: list[tuple[str, str]],
         limit: int,
+        current_time: str | None,
         exclude_memory_types: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         # 空
@@ -349,6 +362,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
         # クエリ
         records = self.store.list_memory_units_for_recall(
             memory_set_id=memory_set_id,
+            current_time=current_time,
             scope_filters=scope_filters,
             exclude_memory_types=exclude_memory_types,
             statuses=list(ACTIVE_MEMORY_STATUSES),
@@ -363,10 +377,12 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
         *,
         memory_set_id: str,
         topic_scope_filters: list[tuple[str, str]],
+        current_time: str | None,
     ) -> list[dict[str, Any]]:
         # トピック記憶
         topic_records = self.store.list_memory_units_for_recall(
             memory_set_id=memory_set_id,
+            current_time=current_time,
             scope_filters=topic_scope_filters or None,
             scope_types=["topic"],
             statuses=list(ACTIVE_MEMORY_STATUSES),

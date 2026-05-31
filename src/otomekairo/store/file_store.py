@@ -5,6 +5,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from otomekairo.memory.utils import now_iso
 from otomekairo.store.state import StateStore
 from otomekairo.store.affect import StoreAffectMixin
 from otomekairo.store.activity import StoreActivityMixin
@@ -915,6 +916,7 @@ class SQLiteMemoryStore(
         self,
         *,
         memory_set_id: str,
+        current_time: str | None = None,
         scope_filters: list[tuple[str, str]] | None = None,
         scope_types: list[str] | None = None,
         include_memory_types: list[str] | None = None,
@@ -924,8 +926,9 @@ class SQLiteMemoryStore(
         limit: int,
     ) -> list[dict[str, Any]]:
         # Query部品群
-        clauses = ["memory_set_id = ?"]
-        params: list[Any] = [memory_set_id]
+        effective_time = current_time or now_iso()
+        clauses = ["memory_set_id = ?", "(valid_to IS NULL OR valid_to > ?)"]
+        params: list[Any] = [memory_set_id, effective_time]
 
         # スコープFilters
         if scope_filters:
@@ -984,6 +987,7 @@ class SQLiteMemoryStore(
         self,
         *,
         memory_set_id: str,
+        current_time: str | None = None,
         statuses: list[str] | None = None,
         scope_types: list[str] | None = None,
         include_memory_types: list[str] | None = None,
@@ -991,8 +995,9 @@ class SQLiteMemoryStore(
         limit: int,
     ) -> list[dict[str, Any]]:
         # Query部品群
-        clauses = ["memory_set_id = ?"]
-        params: list[Any] = [memory_set_id]
+        effective_time = current_time or now_iso()
+        clauses = ["memory_set_id = ?", "(valid_to IS NULL OR valid_to > ?)"]
+        params: list[Any] = [memory_set_id, effective_time]
 
         # status群
         if statuses:

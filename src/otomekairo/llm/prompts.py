@@ -720,6 +720,7 @@ def _build_decision_system_prompt(persona: dict) -> str:
             "recall_hint.secondary_recall_focuses は補助焦点として、継続性や確認必要性の補助にだけ使ってください。\n"
             "RecallPack.conflicts があるときは requires_confirmation=true を優先してください。\n"
             "active_commitments, episodic_evidence, event_evidence は reply と pending_intent の継続根拠に使ってください。\n"
+            "active_commitments に qualifiers.scope_duration=session や qualifiers.source=assistant_response がある場合、それはその場限りの支援姿勢です。未知または大きく変化した前景を抑え込む長期方針として扱わないでください。\n"
             "pending_intent は『今は返さないが、後で触れる価値がある』場合だけ選んでください。\n"
             "capability_request は CapabilityDecisionView に available=true で載っている能力が必要な場合だけ選んでください。\n"
             "ユーザーが現在状態の確認を明示的に依頼し、対応する status / observation capability が available=true のときは、入力から推測した foreground_world_state だけで答えず capability_request を選んでください。\n"
@@ -822,11 +823,13 @@ def _build_decision_trigger_policy(
                 "InitiativeContext の selected candidate entry が preferred_result_kind=reply / noop / pending_intent のときは、preferred_capability_id が無い限り新しい capability_request を選ばないでください。",
                 "foreground_signal_summary が grounded で world_state_summary に該当状況が既にあるときは、同じ情報を再取得する capability_request より、preferred_result_kind に沿った reply / noop を優先してください。",
                 "suppression_summary.cooldown_active が true ではない場合、recent_turn_summary だけから cooldown 中だと推測してはいけません。",
-                "background_wake でも foreground_signal_summary が ready / grounded で selected candidate entry の preferred_result_kind=reply なら、suppression_level=medium だけを理由に noop へ倒さず、短い reply を優先してください。ただし suppression_summary.cooldown_active=true または foreground_signal_summary.desktop_observation_signal.cooldown_active=true の場合は、過剰介入を避けるため noop を選べます。",
+                "background_wake は自律判断の通常入口なので、直近のユーザー呼びかけが無いこと自体を noop 理由にしないでください。",
+                "background_wake でも foreground_signal_summary が ready / grounded で selected candidate entry の preferred_result_kind=reply なら、suppression_level=medium だけを理由に noop へ倒さず、短い reply を優先してください。",
                 "foreground_signal_summary.desktop_observation_signal の novelty_kind は観測の新しさであり、ユーザー発話ではありません。reply を選ぶ場合は、ユーザーへの相づちではなく画面観測に根拠づけた短い自発発話にしてください。",
                 "foreground_signal_summary.desktop_observation_signal.interrupt_worthiness は発話として割り込む価値です。novelty_kind=changed だけを理由に reply を選ばず、interrupt_worthiness と suppression_summary を合わせて判断してください。",
-                "foreground_signal_summary.desktop_observation_signal.cooldown_active=true の場合、cooldown は割り込み量を控える調整材料です。新しい desktop novelty は保留候補として扱い、interrupt_worthiness=high でなければ noop を優先してください。",
-                "InitiativeContext があり pending_intent_summaries が空のときは、drive_state / world_state / ongoing_action から自然な前進理由がある場合だけ reply を選び、弱ければ noop を選んでください。",
+                "suppression_summary.foreground_override=desktop_reply_priority の場合、background_wake / cooldown / pending_intent_summaries が空であることは単独の noop 理由ではありません。",
+                "foreground_signal_summary.desktop_observation_signal.cooldown_active=true の場合、cooldown は割り込み量を控える調整材料であり、単独の拒否理由ではありません。novelty_kind=changed かつ change_strength=significant、または novelty_kind=pending_after_cooldown の selected candidate が preferred_result_kind=reply なら、見慣れない前景として短い reply を優先してください。noop を選ぶ場合は、cooldown 以外の具体的な見送り理由を reason_summary に含めてください。",
+                "InitiativeContext があり pending_intent_summaries が空のときは、drive_state / world_state / ongoing_action / eligible な desktop_observation_signal から自然な前進理由がある場合だけ reply を選び、弱ければ noop を選んでください。",
                 "selected_candidate_family が ongoing_action で preferred_result_kind=capability_request のときは、available な capability の範囲で follow-up capability_request を検討してください。",
                 "foreground_signal_summary が thin で suppression_summary や intervention_risk_summary が強いとき、特に background_wake や initiative_baseline=low では、押し出しすぎず noop を優先してください。",
             ]
@@ -971,9 +974,13 @@ def _build_memory_interpretation_system_prompt() -> str:
         "candidate_memory_units は、今後の会話や判断に効く継続理解だけを入れてください。\n"
         "弱い雑談断片や一時判断は memory_unit にしないでください。\n"
         "明示された生活状況、習慣、役割、現在の継続状態は fact を優先してください。\n"
+        "commitment は、ユーザーまたは自律 AI 本体がその場を越えて履行すべき未完了・約束・確認待ちだけにしてください。\n"
+        "AI 側の返答に含まれる「控える」「見守る」「必要な時だけ支援する」だけを根拠に、広い commitment を作ってはいけません。\n"
+        "ユーザーの短い相槌や了承だけで、AI の待機姿勢を長期 commitment にしてはいけません。その場の文脈は episode.open_loops または episode.summary_text に留めてください。\n"
+        "一時的な支援姿勢をどうしても commitment 候補にする場合は qualifiers_hint.source=assistant_response、commitment_actor=self、scope_duration=session、commitment_focus=support_posture を入れてください。\n"
         "明示訂正で以前の理解を置き換えるなら、置換後の候補メモを返し qualifiers_hint.negates_previous=true を付けてください。\n"
         "弱い単発推測や event に留めるべき断片は candidate_memory_units に入れず、結果として noop になってよいです。\n"
-        "qualifiers_hint には必要なら source=explicit_statement|explicit_correction|inference, negates_previous, replace_prior, allow_parallel, polarity を入れてください。\n"
+        "qualifiers_hint には必要なら source=explicit_statement|explicit_confirmation|explicit_correction|assistant_response|inference, negates_previous, replace_prior, allow_parallel, polarity, commitment_actor, scope_duration, commitment_focus, valid_from, valid_to を入れてください。\n"
         "memory_type は fact, preference, relation, commitment, interpretation, summary のいずれかです。\n"
         "candidate_memory_units は DB 行候補ではなく、意味ヒントだけを持つ記憶候補メモです。\n"
         "episode.primary_scope_type, candidate_memory_units[].scope, episode_affects[].target_scope_type は self, user, entity, topic, relationship, world のいずれかだけを使ってください。\n"
@@ -1518,6 +1525,17 @@ def _compact_memory_context_item(item: dict[str, Any]) -> dict[str, Any]:
     }
     if item.get("commitment_state") is not None:
         payload["commitment_state"] = item["commitment_state"]
+    if item.get("valid_to") is not None:
+        payload["valid_to"] = item["valid_to"]
+    qualifiers = item.get("qualifiers")
+    if isinstance(qualifiers, dict):
+        compact_qualifiers = {
+            key: qualifiers[key]
+            for key in ("source", "scope_duration", "commitment_actor", "commitment_focus")
+            if key in qualifiers
+        }
+        if compact_qualifiers:
+            payload["qualifiers"] = compact_qualifiers
     if item.get("object_ref_or_value") is not None:
         payload["object_ref_or_value"] = item["object_ref_or_value"]
     if item.get("retrieval_lane") is not None:

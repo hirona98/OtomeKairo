@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import timedelta
 import math
 import re
 import uuid
@@ -10,6 +11,7 @@ from otomekairo.memory.utils import (
     NON_SEMANTIC_QUALIFIER_KEYS,
     build_memory_unit_semantic_text,
     clamp_score,
+    local_datetime,
     merged_cycle_ids,
     merged_event_ids,
     optional_text,
@@ -55,6 +57,20 @@ SALIENCE_HINT_SCORES = {
     "medium": 0.58,
     "high": 0.78,
 }
+WEAK_COMMITMENT_SOURCE_VALUES = {
+    "assistant_response",
+    "assistant_self_statement",
+}
+SESSION_SCOPED_COMMITMENT_HOURS = 6
+SESSION_SCOPED_COMMITMENT_CONFIDENCE_CAP = 0.58
+SESSION_SCOPED_COMMITMENT_SALIENCE_CAP = 0.36
+TRANSIENT_SUPPORT_PREDICATES = {
+    "provide_support",
+    "support_posture",
+    "waits_for",
+    "watch_over",
+    "stand_by",
+}
 
 
 # 解決器
@@ -76,7 +92,7 @@ class MemoryActionResolver:
         allow_summary: bool = False,
     ) -> list[dict[str, Any]]:
         # 候補
-        normalized_candidate = self._normalized_candidate(candidate)
+        normalized_candidate = self._normalized_candidate(candidate, finished_at=finished_at)
         if self._should_noop_candidate(normalized_candidate, allow_summary=allow_summary):
             return []
 
@@ -501,9 +517,9 @@ class MemoryActionResolver:
             or existing.get("valid_to") != candidate.get("valid_to")
         )
 
-    def _normalized_candidate(self, candidate: dict[str, Any]) -> dict[str, Any]:
+    def _normalized_candidate(self, candidate: dict[str, Any], *, finished_at: str) -> dict[str, Any]:
         if "scope" in candidate:
-            return self._normalized_candidate_memo(candidate)
+            return self._normalized_candidate_memo(candidate, finished_at=finished_at)
 
         # 記録
         return {
@@ -515,7 +531,7 @@ class MemoryActionResolver:
             "qualifiers": dict(candidate.get("qualifiers", {})),
         }
 
-    def _normalized_candidate_memo(self, candidate: dict[str, Any]) -> dict[str, Any]:
+    def _normalized_candidate_memo(self, candidate: dict[str, Any], *, finished_at: str) -> dict[str, Any]:
         # LLM の候補メモを memory_units の正本候補へ変換する。
         memory_type = str(candidate["memory_type"]).strip()
         scope_type = str(candidate["scope"]).strip()
@@ -530,6 +546,26 @@ class MemoryActionResolver:
         if memory_type == "commitment":
             raw_commitment_state = qualifiers.get("commitment_state")
             commitment_state = raw_commitment_state if raw_commitment_state in COMMITMENT_STATE_VALUES else "open"
+            qualifiers = self._normalized_commitment_qualifiers(
+                qualifiers=qualifiers,
+                predicate=self._normalize_predicate_hint(candidate["predicate_hint"]),
+            )
+
+        valid_from = self._optional_string_qualifier(qualifiers.get("valid_from"))
+        valid_to = self._optional_string_qualifier(qualifiers.get("valid_to"))
+        if memory_type == "commitment" and qualifiers.get("scope_duration") == "session" and valid_to is None:
+            valid_to = self._session_scoped_valid_to(finished_at)
+
+        status = self._candidate_memo_status(
+            memory_type=memory_type,
+            confidence_hint=confidence_hint,
+            qualifiers=qualifiers,
+            object_ref_or_value=object_ref_or_value,
+        )
+        if memory_type == "commitment" and self._weak_commitment_candidate(qualifiers=qualifiers):
+            status = "inferred"
+            confidence = min(confidence, SESSION_SCOPED_COMMITMENT_CONFIDENCE_CAP)
+            salience = min(salience, SESSION_SCOPED_COMMITMENT_SALIENCE_CAP)
 
         return {
             "memory_type": memory_type,
@@ -543,20 +579,38 @@ class MemoryActionResolver:
             "predicate": self._normalize_predicate_hint(candidate["predicate_hint"]),
             "object_ref_or_value": object_ref_or_value,
             "summary_text": candidate["summary_text"].strip(),
-            "status": self._candidate_memo_status(
-                memory_type=memory_type,
-                confidence_hint=confidence_hint,
-                qualifiers=qualifiers,
-                object_ref_or_value=object_ref_or_value,
-            ),
+            "status": status,
             "commitment_state": commitment_state,
             "confidence": clamp_score(confidence),
             "salience": clamp_score(salience),
-            "valid_from": self._optional_string_qualifier(qualifiers.get("valid_from")),
-            "valid_to": self._optional_string_qualifier(qualifiers.get("valid_to")),
+            "valid_from": valid_from,
+            "valid_to": valid_to,
             "qualifiers": qualifiers,
             "reason": candidate["evidence_text"].strip(),
         }
+
+    def _normalized_commitment_qualifiers(self, *, qualifiers: dict[str, Any], predicate: str) -> dict[str, Any]:
+        normalized = dict(qualifiers)
+        source = normalized.get("source")
+        actor = normalized.get("commitment_actor")
+        if (
+            source in WEAK_COMMITMENT_SOURCE_VALUES
+            or (source == "inference" and predicate in TRANSIENT_SUPPORT_PREDICATES)
+            or actor in {"self", "assistant"}
+            or predicate in TRANSIENT_SUPPORT_PREDICATES
+        ):
+            normalized.setdefault("scope_duration", "session")
+        return normalized
+
+    def _weak_commitment_candidate(self, *, qualifiers: dict[str, Any]) -> bool:
+        return (
+            qualifiers.get("scope_duration") == "session"
+            or qualifiers.get("source") in WEAK_COMMITMENT_SOURCE_VALUES
+            or qualifiers.get("commitment_actor") in {"self", "assistant"}
+        )
+
+    def _session_scoped_valid_to(self, finished_at: str) -> str:
+        return (local_datetime(finished_at) + timedelta(hours=SESSION_SCOPED_COMMITMENT_HOURS)).isoformat()
 
     def _candidate_memo_status(
         self,

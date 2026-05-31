@@ -251,6 +251,7 @@ class ServiceInputPipelineMixin:
             state=state,
             augmented_query_text=augmented_query_text,
             recall_hint=recall_hint,
+            current_time=started_at,
         )
         recall_summary = self._summarize_recall_pack(recall_pack)
         debug_log(

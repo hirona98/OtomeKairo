@@ -399,7 +399,7 @@ class LLMClient:
                 and (
                     desktop_novelty_kind == "pending_after_cooldown"
                     or (
-                        desktop_novelty_kind in {"first_success", "changed"}
+                        desktop_novelty_kind == "first_success"
                         and cooldown_active is not True
                         and desktop_cooldown_active is not True
                     )

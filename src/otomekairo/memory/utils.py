@@ -174,6 +174,7 @@ NON_SEMANTIC_QUALIFIER_KEYS = {
     "negates_previous",
     "replace_prior",
     "source",
+    "scope_duration",
     "summary_scope",
     "source_memory_types",
 }
