@@ -361,6 +361,8 @@ class LLMClient:
                 )
             return
         if decision_kind == "noop" and preferred_result_kind == "reply":
+            if selected_family.family == "autonomous":
+                return
             foreground_summary = context.initiative_context.foreground_signal_summary
             suppression_summary = context.initiative_context.suppression_summary
             foreground_thinness = (
@@ -378,40 +380,10 @@ class LLMClient:
                 if isinstance(suppression_summary, dict)
                 else None
             )
-            desktop_signal = (
-                foreground_summary.get("desktop_observation_signal")
-                if isinstance(foreground_summary, dict)
-                else None
-            )
-            desktop_novelty_kind = (
-                desktop_signal.get("novelty_kind")
-                if isinstance(desktop_signal, dict)
-                else None
-            )
-            desktop_cooldown_active = (
-                desktop_signal.get("cooldown_active")
-                if isinstance(desktop_signal, dict)
-                else None
-            )
-            desktop_reply_candidate = (
-                isinstance(desktop_signal, dict)
-                and desktop_signal.get("reply_eligibility") == "eligible"
-                and (
-                    desktop_novelty_kind == "pending_after_cooldown"
-                    or (
-                        desktop_novelty_kind == "first_success"
-                        and cooldown_active is not True
-                        and desktop_cooldown_active is not True
-                    )
-                )
-            )
             if (
-                desktop_reply_candidate
-                or (
-                    foreground_thinness in {"ready", "grounded"}
-                    and suppression_level != "high"
-                    and cooldown_active is not True
-                )
+                foreground_thinness in {"ready", "grounded"}
+                and suppression_level != "high"
+                and cooldown_active is not True
             ):
                 raise LLMError(
                     "Initiative selected candidate entry は preferred_result_kind=reply で、"

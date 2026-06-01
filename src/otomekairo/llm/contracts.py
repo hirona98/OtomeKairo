@@ -60,12 +60,6 @@ WORLD_STATE_TTL_HINT_VALUES = {
     "medium",
     "long",
 }
-ACTIVITY_STATUS_VALUES = {
-    "active",
-    "recently_active",
-    "ended",
-    "unknown",
-}
 ACTIVITY_TRANSITION_VALUES = {
     "start",
     "continue",
@@ -410,7 +404,6 @@ def validate_activity_state_contract(payload: dict[str, Any]) -> None:
             {
                 "label",
                 "target",
-                "status",
                 "confidence_hint",
                 "salience_hint",
                 "ttl_hint",
@@ -419,8 +412,6 @@ def validate_activity_state_contract(payload: dict[str, Any]) -> None:
             },
             "ActivityState.activity_candidate",
         )
-        if candidate["status"] not in ACTIVITY_STATUS_VALUES:
-            raise LLMError("ActivityState.status が不正です。")
         if candidate["confidence_hint"] not in WORLD_STATE_HINT_VALUES:
             raise LLMError("ActivityState.confidence_hint が不正です。")
         if candidate["salience_hint"] not in WORLD_STATE_HINT_VALUES:

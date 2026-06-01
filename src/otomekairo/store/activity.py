@@ -55,7 +55,7 @@ class StoreActivityMixin:
                 SELECT payload_json
                 FROM activity_states
                 WHERE memory_set_id = ?
-                  AND status IN ('active', 'recently_active', 'unknown')
+                  AND status = 'active'
                   AND expires_at > ?
                 ORDER BY salience DESC, updated_at DESC, rowid DESC
                 LIMIT 1
@@ -76,7 +76,7 @@ class StoreActivityMixin:
                 payload_json = json_set(payload_json, '$.status', 'ended', '$.expires_at', ?)
             WHERE memory_set_id = ?
               AND activity_id != ?
-              AND status IN ('active', 'recently_active', 'unknown')
+              AND status = 'active'
             """,
             (
                 record["updated_at"],
@@ -127,7 +127,7 @@ class StoreActivityMixin:
             SET status = 'ended',
                 payload_json = json_set(payload_json, '$.status', 'ended')
             WHERE memory_set_id = ?
-              AND status IN ('active', 'recently_active', 'unknown')
+              AND status = 'active'
               AND expires_at <= ?
             """,
             (memory_set_id, current_time),
@@ -150,7 +150,7 @@ class StoreActivityMixin:
                 payload_json = json_set(payload_json, '$.status', 'ended', '$.expires_at', ?)
             WHERE memory_set_id = ?
               AND activity_id = ?
-              AND status IN ('active', 'recently_active', 'unknown')
+              AND status = 'active'
             """,
             (current_time, current_time, memory_set_id, activity_id),
         )

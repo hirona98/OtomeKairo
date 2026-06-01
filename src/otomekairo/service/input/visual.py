@@ -275,20 +275,6 @@ class ServiceInputVisualMixin:
             payload["retention_policy"] = "visual_record_candidate"
         return payload
 
-    def _observation_summary_is_desktop_vision_capture(
-        self,
-        observation_summary: dict[str, Any] | None,
-    ) -> bool:
-        if not isinstance(observation_summary, dict):
-            return False
-        source_kind = observation_summary.get("source_kind")
-        return (
-            observation_summary.get("source") == "capability_result"
-            and observation_summary.get("capability_id") == "vision.capture"
-            and isinstance(source_kind, str)
-            and source_kind.strip() == "desktop"
-        )
-
     def _observation_summary_is_vision_capture(
         self,
         observation_summary: dict[str, Any] | None,

@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any
 
 from otomekairo.service.input.constants import (
-    INITIATIVE_AUTONOMOUS_PROBE_SCORE,
     INITIATIVE_AUTONOMOUS_PROBE_THRESHOLD,
     INITIATIVE_DRIVE_FRESHNESS_ADJUSTMENTS,
     INITIATIVE_DRIVE_KIND_SCORES,
@@ -402,8 +401,8 @@ class ServiceInputInitiativeScoringMixin:
         initiative_baseline: dict[str, Any],
         capability_summary: dict[str, Any],
     ) -> str | None:
-        desktop_signal = self._initiative_desktop_observation_signal(foreground_signal_summary)
-        if desktop_signal:
+        visual_signal = self._initiative_primary_visual_observation_signal(foreground_signal_summary)
+        if isinstance(visual_signal, dict) and self._visual_observation_signal_is_judgable(visual_signal):
             return None
         reasons: list[str] = []
         level = self._client_context_text(initiative_baseline.get("level"), limit=16)
@@ -445,23 +444,18 @@ class ServiceInputInitiativeScoringMixin:
         strongest_drive: dict[str, Any] | None,
         world_state_summary: list[dict[str, Any]],
         recent_turn_summary: list[dict[str, str]],
-        desktop_signal: dict[str, Any] | None,
+        visual_signal: dict[str, Any] | None,
     ) -> str:
-        if desktop_signal:
-            novelty_kind = self._client_context_text(desktop_signal.get("novelty_kind"), limit=48)
-            change_strength = self._client_context_text(desktop_signal.get("change_strength"), limit=16)
-            interrupt_worthiness = self._client_context_text(desktop_signal.get("interrupt_worthiness"), limit=16)
-            if interrupt_worthiness == "high":
-                return "desktop wake observation に強い割り込み価値があり、短い reply で触れるのが自然。"
-            if interrupt_worthiness == "medium":
-                if novelty_kind == "pending_after_cooldown" or (
-                    novelty_kind == "changed" and change_strength == "significant"
-                ):
-                    return "desktop wake observation に未発話の大きな前景変化があり、短い reply で触れるのが自然。"
-                return "desktop wake observation に新しい前景があり、短い reply の価値を検討する。"
-            if novelty_kind in {"first_success", "changed", "pending_after_cooldown"}:
-                return "desktop wake observation は新しいが、観測の新しさだけでは自発 reply の根拠にしない。"
-            return "desktop wake observation の前景を見て、必要なら短い reply を返せる。"
+        if visual_signal:
+            change_state = self._client_context_text(visual_signal.get("change_state"), limit=48)
+            source_kind = self._client_context_text(visual_signal.get("source_kind"), limit=32)
+            source_label = self._client_context_text(visual_signal.get("source_label"), limit=80)
+            source_name = source_label or source_kind or "視覚観測"
+            if change_state in {"first_seen", "changed"}:
+                return f"{source_name} に前回からの変化があり、reply / noop / pending_intent を文脈で選ぶ。"
+            if change_state == "same_as_recent_reply":
+                return f"{source_name} は直近 reply 済みの観測と近く、繰り返す価値を慎重に見る。"
+            return f"{source_name} の前景を見て、必要なら短い reply を返し、弱ければ noop を選ぶ。"
         if isinstance(strongest_drive, dict) and world_state_summary:
             return "strongest drive と前景 world が噛み合っており、短い reply が自然。"
         if isinstance(strongest_drive, dict) and recent_turn_summary:

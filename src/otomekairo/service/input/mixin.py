@@ -342,9 +342,9 @@ class ServiceInputMixin(
     ) -> bool:
         if trigger_kind not in {"wake", "background_wake", "capability_result"}:
             return False
-        if self._observation_summary_is_desktop_vision_capture(observation_summary):
+        if self._observation_summary_is_vision_capture(observation_summary):
             return False
-        if self._client_context_has_desktop_wake_observation(client_context):
+        if self._client_context_has_visual_wake_observation(client_context):
             return False
 
         decision = pipeline.get("decision")
@@ -364,7 +364,7 @@ class ServiceInputMixin(
         error = observation_summary.get("error")
         return isinstance(error, str) and bool(error.strip())
 
-    def _client_context_has_desktop_wake_observation(
+    def _client_context_has_visual_wake_observation(
         self,
         client_context: dict[str, Any] | None,
     ) -> bool:
@@ -376,8 +376,6 @@ class ServiceInputMixin(
         return any(
             isinstance(item, dict)
             and item.get("capability_id") == "vision.capture"
-            and isinstance(item.get("source_kind"), str)
-            and item["source_kind"].strip() == "desktop"
             for item in wake_observations
         )
 

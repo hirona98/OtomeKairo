@@ -204,15 +204,15 @@ class ServiceInputInitiativeFamiliesMixin:
         intervention_state: dict[str, Any],
         capability_summary: dict[str, Any],
     ) -> InitiativeCandidateFamily:
-        desktop_signal = self._initiative_desktop_observation_signal(foreground_signal_summary)
-        available = bool(drive_summaries or world_state_summary or recent_turn_summary or desktop_signal)
+        visual_signal = self._initiative_primary_visual_observation_signal(foreground_signal_summary)
+        available = bool(drive_summaries or world_state_summary or recent_turn_summary or visual_signal)
         if not available:
             return InitiativeCandidateFamily(
                 family="autonomous",
                 available=False,
                 selected=False,
                 priority_score=0.0,
-                blocking_reason_summary="drive_state / world_state / 直近会話の前景がまだ弱い。",
+                blocking_reason_summary="drive_state / world_state / 直近会話 / 視覚観測の前景がまだ弱い。",
             )
         strongest_drive = self._initiative_strongest_drive_summary(drive_summaries)
         level = self._client_context_text(initiative_baseline.get("level"), limit=16) or "medium"
@@ -225,21 +225,15 @@ class ServiceInputInitiativeFamiliesMixin:
             strongest_drive=strongest_drive,
             world_state_summary=world_state_summary,
         )
-        desktop_interrupt_worthiness = (
-            self._client_context_text(desktop_signal.get("interrupt_worthiness"), limit=16)
-            if isinstance(desktop_signal, dict)
+        visual_change_state = (
+            self._client_context_text(visual_signal.get("change_state"), limit=32)
+            if isinstance(visual_signal, dict)
             else None
         )
-        desktop_reply_priority = self._initiative_desktop_reply_priority(foreground_signal_summary)
-        desktop_significant_reply_candidate = isinstance(desktop_reply_priority, dict)
-        if desktop_signal:
-            priority_score += {
-                "high": 0.18,
-                "medium": 0.1,
-                "low": 0.02,
-            }.get(desktop_interrupt_worthiness or "low", 0.02)
-        if desktop_significant_reply_candidate:
-            priority_score += 0.06
+        if visual_change_state in {"first_seen", "changed"}:
+            priority_score += 0.08
+        elif visual_signal:
+            priority_score += 0.02
         if foreground_thinness == "ready":
             priority_score += 0.04
         elif foreground_thinness == "thin":
@@ -263,12 +257,12 @@ class ServiceInputInitiativeFamiliesMixin:
             initiative_baseline=initiative_baseline,
             capability_summary=capability_summary,
         )
-        preferred_result_kind = "reply"
+        preferred_result_kind: str | None = None
         preferred_result_reason = self._initiative_autonomous_preferred_result_reason(
             strongest_drive=strongest_drive,
             world_state_summary=world_state_summary,
             recent_turn_summary=recent_turn_summary,
-            desktop_signal=desktop_signal,
+            visual_signal=visual_signal,
         )
         preferred_capability_id: str | None = None
         preferred_capability_input: dict[str, Any] | None = None
@@ -278,30 +272,9 @@ class ServiceInputInitiativeFamiliesMixin:
             priority_score += INITIATIVE_AUTONOMOUS_PROBE_SCORE
             preferred_capability_id = probe_preference["capability_id"]
             preferred_capability_input = probe_preference["input"]
-        elif desktop_significant_reply_candidate:
-            preferred_result_kind = "reply"
-            reason_summary = desktop_reply_priority.get("reason_summary")
-            preferred_result_reason = (
-                self._client_context_text(reason_summary, limit=160)
-                or "desktop wake observation に未発話の大きな変化があり、短い reply で前に出る。"
-            )
-        elif (
-            isinstance(desktop_signal, dict)
-            and desktop_signal.get("cooldown_active") is True
-            and desktop_interrupt_worthiness != "high"
-        ):
-            preferred_result_kind = "noop"
-            preferred_result_reason = "cooldown 中の desktop novelty は観測材料に留め、発話価値が high でない限り見送る。"
         elif suppression_level == "high":
             preferred_result_kind = "noop"
             preferred_result_reason = "suppression が high で、今回は押し出さず見送るほうが自然。"
-        elif (
-            trigger_kind == "background_wake"
-            and isinstance(desktop_signal, dict)
-            and desktop_interrupt_worthiness == "low"
-        ):
-            preferred_result_kind = "noop"
-            preferred_result_reason = "desktop observation は新しいが、観測の新しさだけでは定期 wake の発話根拠にしない。"
         elif (
             trigger_kind == "background_wake"
             and foreground_thinness == "thin"
@@ -338,7 +311,7 @@ class ServiceInputInitiativeFamiliesMixin:
                 initiative_baseline=initiative_baseline,
                 capability_summary=capability_summary,
                 probe_preference=probe_preference,
-                desktop_signal=desktop_signal,
+                visual_signal=visual_signal,
             ),
             preferred_result_kind=preferred_result_kind,
             preferred_result_reason_summary=preferred_result_reason,
@@ -463,18 +436,20 @@ class ServiceInputInitiativeFamiliesMixin:
         initiative_baseline: dict[str, Any],
         capability_summary: dict[str, Any],
         probe_preference: dict[str, Any] | None,
-        desktop_signal: dict[str, Any] | None,
+        visual_signal: dict[str, Any] | None,
     ) -> str | None:
         parts: list[str] = []
-        if desktop_signal:
-            novelty_kind = self._client_context_text(desktop_signal.get("novelty_kind"), limit=48)
-            summary_text = self._client_context_text(desktop_signal.get("summary_text"), limit=120)
-            if novelty_kind is not None and summary_text is not None:
-                parts.append(f"desktop observation {novelty_kind}:{summary_text}")
-            elif novelty_kind is not None:
-                parts.append(f"desktop observation {novelty_kind}")
+        if visual_signal:
+            change_state = self._client_context_text(visual_signal.get("change_state"), limit=48)
+            source_kind = self._client_context_text(visual_signal.get("source_kind"), limit=32)
+            summary_text = self._client_context_text(visual_signal.get("summary_text"), limit=120)
+            source_label = source_kind or "visual"
+            if change_state is not None and summary_text is not None:
+                parts.append(f"{source_label} observation {change_state}:{summary_text}")
+            elif change_state is not None:
+                parts.append(f"{source_label} observation {change_state}")
             else:
-                parts.append("desktop observation に未発話の新しい前景")
+                parts.append("視覚観測が自発判断の前景候補にある")
         if drive_summaries:
             parts.append(f"drive_state {len(drive_summaries)} 件")
         if isinstance(strongest_drive, dict):

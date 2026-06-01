@@ -250,16 +250,16 @@ wake API は少なくとも次の挙動を持つ。
 
 - `wake_policy.mode=disabled` なら `noop`
 - `mode=interval` で次回時刻にまだ達していなければ `noop`
-- `mode=interval` で `wake_policy.observations` がある場合、enabled observation を順番に取得し、成功結果をその回の判断へ進む前景シグナルとして扱い、desktop capture は runtime novelty を判定し、視覚記録と `world_state` を整理してから wake 判断を 1 回だけ行う
+- `mode=interval` で `wake_policy.observations` がある場合、enabled observation を順番に取得し、成功結果をその回の判断へ進む前景シグナルとして扱い、visual capture は runtime の `change_state` を判定し、視覚記録と `world_state` を整理してから wake 判断を 1 回だけ行う
 - wake_policy observation が vision source 未接続の一時失敗だけで終わった場合、server は interval を消費せず短い再試行待ちにする
 - wake_policy observation の同期 capability request は内部観測として扱い、`ongoing_action` を作らない
 - server は wake 入力を `current_input.sender=system`、`source_kind=wake`、`response_target=none` として shared pipeline に渡す
 - server 内の background 起床スケジューラは `current_input.sender=system`、`source_kind=background_wake`、`response_target=none` として shared pipeline に渡す
 - capability request は dispatch 時点の `current_input` を request record の `source_current_input` に保存し、capability result の `response_target` は `source_current_input.response_target` を引き継ぐ
 - `source_current_input.response_target=none` の capability result は内部観測結果として扱い、実効判断を `noop` に正規化し、assistant message を送信しない
-- desktop novelty は wake 判断へ渡し、`first_success / changed / pending_after_cooldown` は wake 判断へ進む前景シグナルとして扱う。`changed` は `change_strength=normal / significant` を持つ。desktop capture は `interrupt_worthiness=low / medium / high` を持ち、`novelty_kind` は観測の新しさ、`interrupt_worthiness` は自発 reply として割り込む価値を表す。`reply_eligibility=eligible` は、`interrupt_worthiness` が medium 以上の desktop scene を根拠に短い自発 reply の候補へ進めることを表す
-- desktop scene signature は `vision_source_id / source_label / active_app / visual_summary_text` を持ち、`window_title` を持たない。desktop scene 比較は `vision_source_id / active_app` の不一致と `visual_summary_text` の類似度を使い、`window_title` を使わない。`vision_source_id` または `active_app` が異なる場合、または `visual_summary_text` の類似度が `0.22` 未満の場合、`change_strength=significant` とする
-- cooldown 中の desktop novelty は `cooldown_active=true` として wake 判断へ渡し、reply にならなかった場合に備えて runtime の `pending_novel_scene` に保持し、cooldown 終了後に同じ scene が続く場合は `pending_after_cooldown` として再評価する。`changed` かつ `change_strength=significant` の scene は cooldown 中でも観測材料に留め、`interrupt_worthiness=high` でない限り `pending_novel_scene` に保持する
+- visual observation は wake 判断へ渡し、`change_state=first_seen / changed` は wake 判断へ進む前景シグナルとして扱うが、reply 義務ではない
+- visual observation signature は `vision_source_id / source_kind / source_label / visual_summary_text` を持ち、`window_title` を持たない。signature 比較は `vision_source_id / source_kind` の不一致と `visual_summary_text` の類似度を使う
+- cooldown 中の visual observation は `cooldown_active=true` として wake 判断へ渡す。LLM は cooldown、直近 reply、drive_state、world_state を合わせて `reply / noop / pending_intent` を選ぶ
 - 再評価時刻に達した保留意図があれば再評価し、必要なら `reply`
 
 server 内の background 起床スケジューラも、同じ wake 1 サイクルを内部的に使う。

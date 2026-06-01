@@ -6,10 +6,7 @@ from typing import Any
 from otomekairo.llm.client import LLMError
 from otomekairo.service.capability import CapabilityDispatchError
 from otomekairo.service.common import debug_log
-from otomekairo.service.input.constants import (
-    DESKTOP_SCENE_SIGNIFICANT_CHANGE_THRESHOLD,
-    DESKTOP_SCENE_SIMILARITY_THRESHOLD,
-)
+from otomekairo.service.input.constants import VISUAL_OBSERVATION_SIMILARITY_THRESHOLD
 
 
 class ServiceInputWakeObservationMixin:
@@ -47,9 +44,9 @@ class ServiceInputWakeObservationMixin:
             "wake_observations": summaries,
             "wake_observation_summary": summary_text,
         }
-        desktop_signal = self._wake_policy_desktop_observation_signal(summaries)
-        if desktop_signal:
-            next_context["desktop_observation_signal"] = desktop_signal
+        visual_signals = self._wake_policy_visual_observation_signals(summaries)
+        if visual_signals:
+            next_context["visual_observation_signals"] = visual_signals
         return next_context
 
     def _enabled_wake_policy_observations(self, state: dict[str, Any]) -> list[dict[str, Any]]:
@@ -293,8 +290,8 @@ class ServiceInputWakeObservationMixin:
         )
         if result_error:
             final_step_summary = "wake_policy observation を中断した。"
-        elif self._observation_summary_is_desktop_vision_capture(observation_summary):
-            final_step_summary = "desktop wake observation の結果を視覚記録候補と判断材料へ反映した。"
+        elif self._observation_summary_is_vision_capture(observation_summary):
+            final_step_summary = "visual wake observation の結果を視覚記録候補と判断材料へ反映した。"
         else:
             final_step_summary = "wake_policy observation の結果を world_state へ反映した。"
         detail_summary = failure_reason or self._capability_result_followup_hint_summary(
@@ -417,15 +414,15 @@ class ServiceInputWakeObservationMixin:
             previous_runtime = dict(self._wake_observation_runtime_state.get(normalized_observation_id, {}))
 
         enriched_summary = dict(summary)
-        desktop_signal = self._build_desktop_observation_signal(
+        visual_signal = self._build_visual_observation_signal(
             summary=summary,
             previous_runtime=previous_runtime,
             current_time=current_time,
         )
-        if desktop_signal:
-            enriched_summary["desktop_observation_signal"] = desktop_signal
-            for key in ("novelty_kind", "reply_eligibility", "scene_signature"):
-                value = desktop_signal.get(key)
+        if visual_signal:
+            enriched_summary["visual_observation_signal"] = visual_signal
+            for key in ("change_state", "observation_signature"):
+                value = visual_signal.get(key)
                 if isinstance(value, str) and value.strip():
                     enriched_summary[key] = value.strip()
 
@@ -450,15 +447,14 @@ class ServiceInputWakeObservationMixin:
         }
         for key in (
             "last_success_at",
-            "last_scene_signature",
-            "same_scene_count",
-            "last_prompted_scene_signature",
+            "last_observation_signature",
+            "same_observation_count",
+            "last_prompted_observation_signature",
             "last_prompted_at",
-            "pending_novel_scene",
         ):
             if key not in payload and key in previous_runtime:
                 payload[key] = previous_runtime[key]
-        self._apply_desktop_observation_runtime_payload(
+        self._apply_visual_observation_runtime_payload(
             payload=payload,
             summary=enriched_summary,
             previous_runtime=previous_runtime,
@@ -468,108 +464,82 @@ class ServiceInputWakeObservationMixin:
             self._wake_observation_runtime_state[normalized_observation_id] = payload
         return enriched_summary
 
-    def _build_desktop_observation_signal(
+    def _build_visual_observation_signal(
         self,
         *,
         summary: dict[str, Any],
         previous_runtime: dict[str, Any],
         current_time: str,
     ) -> dict[str, Any] | None:
-        if not self._wake_observation_is_desktop_vision_capture(summary):
+        if not self._wake_observation_is_vision_capture(summary):
             return None
-        scene_signature = self._desktop_observation_scene_signature(summary)
-        if scene_signature is None:
+        observation_signature = self._visual_observation_signature(summary)
+        if observation_signature is None:
             return None
-        previous_signature = self._client_context_text(previous_runtime.get("last_scene_signature"), limit=320)
-        pending_scene = previous_runtime.get("pending_novel_scene")
-        pending_signature = None
-        if isinstance(pending_scene, dict):
-            pending_signature = self._client_context_text(pending_scene.get("scene_signature"), limit=320)
+        previous_signature = self._client_context_text(previous_runtime.get("last_observation_signature"), limit=360)
         last_prompted_signature = self._client_context_text(
-            previous_runtime.get("last_prompted_scene_signature"),
-            limit=320,
+            previous_runtime.get("last_prompted_observation_signature"),
+            limit=360,
         )
         cooldown_reason = self._wake_cooldown_reason(current_time=current_time)
         cooldown_active = cooldown_reason is not None
-        previous_similarity = self._desktop_scene_signature_similarity(
-            scene_signature,
+        previous_similarity = self._visual_observation_signature_similarity(
+            observation_signature,
             previous_signature,
             compare_target="previous",
         )
         same_as_previous = previous_similarity["similar"]
-        same_as_pending = self._desktop_scene_signatures_similar(
-            scene_signature,
-            pending_signature,
-            compare_target="pending",
-        )
-        same_as_prompted = self._desktop_scene_signatures_similar(
-            scene_signature,
+        prompted_similarity = self._visual_observation_signature_similarity(
+            observation_signature,
             last_prompted_signature,
             compare_target="prompted",
         )
+        same_as_prompted = prompted_similarity["similar"]
 
-        if same_as_pending and not cooldown_active and not same_as_prompted:
-            novelty_kind = "pending_after_cooldown"
-        elif same_as_prompted:
-            novelty_kind = "already_prompted"
-        elif previous_signature is None:
-            novelty_kind = "first_success"
-        elif same_as_previous:
-            novelty_kind = "same"
-        else:
-            novelty_kind = "changed"
-
-        change_strength = self._desktop_observation_change_strength(
-            novelty_kind=novelty_kind,
-            previous_similarity=previous_similarity,
-        )
-        interrupt_worthiness = self._desktop_observation_interrupt_worthiness(
-            novelty_kind=novelty_kind,
-            change_strength=change_strength,
-        )
-        reply_eligible_novelty = interrupt_worthiness in {"medium", "high"}
         if same_as_prompted:
-            reply_eligibility = "already_prompted"
-        elif reply_eligible_novelty:
-            reply_eligibility = "eligible"
+            change_state = "same_as_recent_reply"
+        elif previous_signature is None:
+            change_state = "first_seen"
+        elif same_as_previous:
+            change_state = "stable"
         else:
-            reply_eligibility = "not_needed"
+            change_state = "changed"
 
-        reason_summary = self._desktop_observation_signal_reason(
-            novelty_kind=novelty_kind,
-            reply_eligibility=reply_eligibility,
+        reason_summary = self._visual_observation_signal_reason(
+            change_state=change_state,
             cooldown_reason=cooldown_reason,
-            change_strength=change_strength,
-            interrupt_worthiness=interrupt_worthiness,
         )
-        self._debug_log_desktop_scene_similarity(
-            scene_signature=scene_signature,
+        self._debug_log_visual_observation_similarity(
+            observation_signature=observation_signature,
             previous_signature=previous_signature,
-            pending_signature=pending_signature,
             prompted_signature=last_prompted_signature,
-            novelty_kind=novelty_kind,
-            reply_eligibility=reply_eligibility,
+            change_state=change_state,
         )
         signal: dict[str, Any] = {
             "observation_id": summary.get("observation_id"),
-            "novelty_kind": novelty_kind,
-            "interrupt_worthiness": interrupt_worthiness,
-            "reply_eligibility": reply_eligibility,
+            "change_state": change_state,
             "reason_summary": reason_summary,
-            "scene_signature": scene_signature,
+            "observation_signature": observation_signature,
+            "same_as_recent_reply": same_as_prompted,
             "summary_text": self._client_context_text(summary.get("visual_summary_text"), limit=160),
+            "vision_source_id": self._client_context_text(summary.get("vision_source_id"), limit=96),
+            "source_kind": self._client_context_text(summary.get("source_kind"), limit=32),
             "source_label": self._client_context_text(summary.get("source_label"), limit=80),
             "active_app": self._client_context_text(summary.get("active_app"), limit=80),
             "window_title": self._client_context_text(summary.get("window_title"), limit=120),
             "cooldown_active": cooldown_active,
         }
-        if change_strength is not None:
-            signal["change_strength"] = change_strength
+        similarity = previous_similarity.get("similarity")
+        if isinstance(similarity, int | float):
+            signal["similarity"] = round(float(similarity), 3)
+        basis = prompted_similarity.get("reason") if same_as_prompted else previous_similarity.get("reason")
+        if isinstance(basis, str) and basis:
+            signal["change_basis"] = basis
         if cooldown_reason is not None:
             signal["cooldown_reason"] = cooldown_reason
         return {key: value for key, value in signal.items() if value is not None}
 
-    def _apply_desktop_observation_runtime_payload(
+    def _apply_visual_observation_runtime_payload(
         self,
         *,
         payload: dict[str, Any],
@@ -577,94 +547,65 @@ class ServiceInputWakeObservationMixin:
         previous_runtime: dict[str, Any],
         current_time: str,
     ) -> None:
-        signal = summary.get("desktop_observation_signal")
+        signal = summary.get("visual_observation_signal")
         if not isinstance(signal, dict):
             return
-        scene_signature = self._client_context_text(signal.get("scene_signature"), limit=320)
-        if scene_signature is None:
+        observation_signature = self._client_context_text(signal.get("observation_signature"), limit=360)
+        if observation_signature is None:
             return
-        previous_signature = self._client_context_text(previous_runtime.get("last_scene_signature"), limit=320)
-        same_count = previous_runtime.get("same_scene_count")
+        previous_signature = self._client_context_text(previous_runtime.get("last_observation_signature"), limit=360)
+        same_count = previous_runtime.get("same_observation_count")
         if not isinstance(same_count, int) or same_count < 0:
             same_count = 0
         payload["last_success_at"] = current_time
-        payload["last_scene_signature"] = scene_signature
-        if self._desktop_scene_signatures_similar(
-            scene_signature,
+        payload["last_observation_signature"] = observation_signature
+        if self._visual_observation_signatures_similar(
+            observation_signature,
             previous_signature,
             compare_target="previous",
         ):
-            payload["same_scene_count"] = same_count + 1
+            payload["same_observation_count"] = same_count + 1
         else:
-            payload["same_scene_count"] = 1
-        for key in ("last_prompted_scene_signature", "last_prompted_at"):
+            payload["same_observation_count"] = 1
+        for key in ("last_prompted_observation_signature", "last_prompted_at"):
             value = previous_runtime.get(key)
             if isinstance(value, str) and value.strip():
                 payload[key] = value.strip()
 
-        pending_scene = previous_runtime.get("pending_novel_scene")
-        if isinstance(pending_scene, dict):
-            payload["pending_novel_scene"] = dict(pending_scene)
-        reply_eligibility = signal.get("reply_eligibility")
-        if (
-            signal.get("cooldown_active") is True
-            and signal.get("novelty_kind") in {"first_success", "changed"}
-            and signal.get("interrupt_worthiness") != "high"
-        ):
-            first_seen_at = current_time
-            if isinstance(pending_scene, dict) and self._desktop_scene_signatures_similar(
-                scene_signature,
-                self._client_context_text(pending_scene.get("scene_signature"), limit=320),
-                compare_target="pending",
-            ):
-                previous_first_seen_at = pending_scene.get("first_seen_at")
-                if isinstance(previous_first_seen_at, str) and previous_first_seen_at.strip():
-                    first_seen_at = previous_first_seen_at.strip()
-            payload["pending_novel_scene"] = {
-                "scene_signature": scene_signature,
-                "summary_text": signal.get("summary_text"),
-                "first_seen_at": first_seen_at,
-                "suppression_reason": "cooldown",
-            }
-        elif reply_eligibility == "already_prompted":
-            payload.pop("pending_novel_scene", None)
-
-    def _wake_observation_is_desktop_vision_capture(self, summary: dict[str, Any]) -> bool:
+    def _wake_observation_is_vision_capture(self, summary: dict[str, Any]) -> bool:
         return (
             summary.get("status") == "succeeded"
             and summary.get("capability_id") == "vision.capture"
-            and isinstance(summary.get("source_kind"), str)
-            and summary["source_kind"].strip() == "desktop"
         )
 
-    def _desktop_observation_scene_signature(self, summary: dict[str, Any]) -> str | None:
+    def _visual_observation_signature(self, summary: dict[str, Any]) -> str | None:
         parts: list[str] = []
-        for key in ("vision_source_id", "source_label", "active_app", "visual_summary_text"):
+        for key in ("vision_source_id", "source_kind", "source_label", "visual_summary_text"):
             value = self._client_context_text(summary.get(key), limit=160)
             if value is not None:
                 parts.append(f"{key}={value}")
         if not parts:
             return None
         normalized = " | ".join(" ".join(part.lower().split()) for part in parts)
-        return self._clamp(normalized, limit=320)
+        return self._clamp(normalized, limit=360)
 
-    def _desktop_scene_signatures_similar(
+    def _visual_observation_signatures_similar(
         self,
         current: str | None,
         previous: str | None,
         *,
         compare_target: str,
     ) -> bool:
-        return self._desktop_scene_signature_similarity(current, previous, compare_target=compare_target)["similar"]
+        return self._visual_observation_signature_similarity(current, previous, compare_target=compare_target)["similar"]
 
-    def _desktop_scene_signature_similarity(
+    def _visual_observation_signature_similarity(
         self,
         current: str | None,
         previous: str | None,
         *,
         compare_target: str,
     ) -> dict[str, Any]:
-        threshold = self._desktop_scene_similarity_threshold()
+        threshold = self._visual_observation_similarity_threshold()
         if current is None or previous is None:
             return {
                 "target": compare_target,
@@ -681,9 +622,9 @@ class ServiceInputWakeObservationMixin:
                 "reason": "exact_match",
                 "threshold": threshold,
             }
-        current_fields = self._desktop_scene_signature_fields(current)
-        previous_fields = self._desktop_scene_signature_fields(previous)
-        for key in ("vision_source_id", "active_app"):
+        current_fields = self._visual_observation_signature_fields(current)
+        previous_fields = self._visual_observation_signature_fields(previous)
+        for key in ("vision_source_id", "source_kind"):
             current_value = current_fields.get(key)
             previous_value = previous_fields.get(key)
             if current_value and previous_value and current_value != previous_value:
@@ -705,57 +646,23 @@ class ServiceInputWakeObservationMixin:
             "threshold": threshold,
         }
 
-    def _desktop_observation_change_strength(
+    def _debug_log_visual_observation_similarity(
         self,
         *,
-        novelty_kind: str,
-        previous_similarity: dict[str, Any],
-    ) -> str | None:
-        if novelty_kind != "changed":
-            return None
-        if previous_similarity.get("reason") in {"vision_source_id_mismatch", "active_app_mismatch"}:
-            return "significant"
-        similarity = previous_similarity.get("similarity")
-        if isinstance(similarity, int | float) and similarity < DESKTOP_SCENE_SIGNIFICANT_CHANGE_THRESHOLD:
-            return "significant"
-        return "normal"
-
-    def _desktop_observation_interrupt_worthiness(
-        self,
-        *,
-        novelty_kind: str,
-        change_strength: str | None,
-    ) -> str:
-        if novelty_kind == "pending_after_cooldown":
-            return "medium"
-        if novelty_kind == "changed" and change_strength == "significant":
-            return "medium"
-        return "low"
-
-    def _debug_log_desktop_scene_similarity(
-        self,
-        *,
-        scene_signature: str,
+        observation_signature: str,
         previous_signature: str | None,
-        pending_signature: str | None,
         prompted_signature: str | None,
-        novelty_kind: str,
-        reply_eligibility: str,
+        change_state: str,
     ) -> None:
         # 人間が見るログは、現在シーンの最終判定につき1行だけ出す。
         comparisons = [
-            self._desktop_scene_signature_similarity(
-                scene_signature,
+            self._visual_observation_signature_similarity(
+                observation_signature,
                 previous_signature,
                 compare_target="previous",
             ),
-            self._desktop_scene_signature_similarity(
-                scene_signature,
-                pending_signature,
-                compare_target="pending",
-            ),
-            self._desktop_scene_signature_similarity(
-                scene_signature,
+            self._visual_observation_signature_similarity(
+                observation_signature,
                 prompted_signature,
                 compare_target="prompted",
             ),
@@ -769,27 +676,26 @@ class ServiceInputWakeObservationMixin:
         debug_log(
             "Wake",
             (
-                f"desktop scene similarity target={primary['target']} "
+                f"visual observation similarity target={primary['target']} "
                 f"result={'same' if primary['similar'] else 'changed'} "
                 f"reason={primary['reason']} similarity={similarity_text} "
-                f"threshold={primary['threshold']:.2f} novelty={novelty_kind} "
-                f"reply_eligibility={reply_eligibility}"
+                f"threshold={primary['threshold']:.2f} change_state={change_state}"
             ),
         )
 
-    def _desktop_scene_similarity_threshold(self) -> float:
+    def _visual_observation_similarity_threshold(self) -> float:
         state = self.store.read_state()
         wake_policy = state.get("wake_policy")
         if not isinstance(wake_policy, dict):
-            return DESKTOP_SCENE_SIMILARITY_THRESHOLD
-        value = wake_policy.get("desktop_scene_similarity_threshold")
+            return VISUAL_OBSERVATION_SIMILARITY_THRESHOLD
+        value = wake_policy.get("visual_observation_similarity_threshold")
         if isinstance(value, bool) or not isinstance(value, int | float):
-            return DESKTOP_SCENE_SIMILARITY_THRESHOLD
+            return VISUAL_OBSERVATION_SIMILARITY_THRESHOLD
         if not 0 <= value <= 1:
-            return DESKTOP_SCENE_SIMILARITY_THRESHOLD
+            return VISUAL_OBSERVATION_SIMILARITY_THRESHOLD
         return float(value)
 
-    def _desktop_scene_signature_fields(self, signature: str) -> dict[str, str]:
+    def _visual_observation_signature_fields(self, signature: str) -> dict[str, str]:
         fields: dict[str, str] = {}
         for part in signature.split(" | "):
             key, separator, value = part.partition("=")
@@ -797,63 +703,46 @@ class ServiceInputWakeObservationMixin:
                 fields[key] = value
         return fields
 
-    def _desktop_observation_signal_reason(
+    def _visual_observation_signal_reason(
         self,
         *,
-        novelty_kind: str,
-        reply_eligibility: str,
+        change_state: str,
         cooldown_reason: str | None,
-        change_strength: str | None,
-        interrupt_worthiness: str,
     ) -> str:
-        if reply_eligibility == "already_prompted":
-            return "この desktop scene には既に自発 reply 済みなので、繰り返さない。"
-        if (
-            cooldown_reason is not None
-            and novelty_kind == "changed"
-            and change_strength == "significant"
-            and interrupt_worthiness == "medium"
-        ):
-            return "cooldown 中でも未発話の大きな desktop scene 変化なので、短い自発 reply の優先候補として扱う。"
-        if reply_eligibility == "eligible" and cooldown_reason is not None and novelty_kind in {"first_success", "changed"}:
-            return "cooldown 中の desktop scene 変化を、短い自発 reply 候補として扱う。"
-        if novelty_kind in {"first_success", "changed"} and interrupt_worthiness == "low":
-            return "desktop wake observation は新しいが、観測の新しさだけでは自発 reply の根拠にしない。"
-        if reply_eligibility == "eligible" and novelty_kind == "first_success":
-            return "desktop wake observation の初回成功を、短い自発 reply 候補として扱う。"
-        if reply_eligibility == "eligible" and novelty_kind == "changed":
-            return "desktop wake observation が前回と変化したため、短い自発 reply 候補として扱う。"
-        if reply_eligibility == "eligible" and novelty_kind == "pending_after_cooldown":
-            return "cooldown 中に保留した desktop scene がまだ見えているため、短い自発 reply 候補として再評価する。"
-        if novelty_kind == "first_success":
-            return "desktop wake observation の初回成功を判断材料として扱う。"
-        if novelty_kind == "changed":
-            return "desktop wake observation が前回と変化したため、判断材料として扱う。"
-        if novelty_kind == "pending_after_cooldown":
-            return "cooldown 中に保留した desktop scene がまだ見えているため、再評価する。"
-        return "desktop scene は前回と大きく変わらないため、通常は見送る。"
+        if change_state == "same_as_recent_reply":
+            return "この視覚観測には既に自発 reply 済みなので、繰り返さない。"
+        if change_state == "first_seen":
+            if cooldown_reason is not None:
+                return "初めて見る視覚観測を cooldown 中の判断材料として渡す。発話するかは文脈で決める。"
+            return "初めて見る視覚観測を自律判断の材料として渡す。"
+        if change_state == "changed":
+            if cooldown_reason is not None:
+                return "前回から変化した視覚観測を cooldown 中の判断材料として渡す。発話するかは文脈で決める。"
+            return "前回から変化した視覚観測を自律判断の材料として渡す。"
+        return "視覚観測は前回と大きく変わらないため、通常は見送る材料として扱う。"
 
-    def _wake_policy_desktop_observation_signal(self, summaries: list[dict[str, Any]]) -> dict[str, Any] | None:
+    def _wake_policy_visual_observation_signals(self, summaries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        signals: list[dict[str, Any]] = []
         for summary in summaries:
             if not isinstance(summary, dict):
                 continue
-            signal = summary.get("desktop_observation_signal")
+            signal = summary.get("visual_observation_signal")
             if isinstance(signal, dict) and signal:
-                return dict(signal)
-        return None
+                signals.append(dict(signal))
+        return signals
 
-    def _compact_desktop_observation_signal(self, signal: Any) -> dict[str, Any] | None:
+    def _compact_visual_observation_signal(self, signal: Any) -> dict[str, Any] | None:
         if not isinstance(signal, dict):
             return None
         payload: dict[str, Any] = {}
         for key, limit in (
             ("observation_id", 96),
-            ("novelty_kind", 48),
-            ("change_strength", 48),
-            ("interrupt_worthiness", 48),
-            ("reply_eligibility", 48),
+            ("change_state", 48),
+            ("change_basis", 48),
             ("reason_summary", 180),
             ("summary_text", 160),
+            ("vision_source_id", 96),
+            ("source_kind", 32),
             ("source_label", 80),
             ("active_app", 80),
             ("window_title", 120),
@@ -864,4 +753,20 @@ class ServiceInputWakeObservationMixin:
         cooldown_active = signal.get("cooldown_active")
         if isinstance(cooldown_active, bool):
             payload["cooldown_active"] = cooldown_active
+        same_as_recent_reply = signal.get("same_as_recent_reply")
+        if isinstance(same_as_recent_reply, bool):
+            payload["same_as_recent_reply"] = same_as_recent_reply
+        similarity = signal.get("similarity")
+        if isinstance(similarity, int | float):
+            payload["similarity"] = round(float(similarity), 3)
         return payload or None
+
+    def _compact_visual_observation_signals(self, value: Any) -> list[dict[str, Any]]:
+        if not isinstance(value, list):
+            return []
+        signals: list[dict[str, Any]] = []
+        for item in value[:6]:
+            compact = self._compact_visual_observation_signal(item)
+            if compact:
+                signals.append(compact)
+        return signals

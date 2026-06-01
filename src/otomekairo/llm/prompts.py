@@ -8,7 +8,6 @@ from otomekairo.llm.contracts import (
     ANSWER_BOUNDARY_VALUES,
     ANSWER_CONTRACT_VALUES,
     ANSWER_TARGET_ACTOR_VALUES,
-    ACTIVITY_STATUS_VALUES,
     ACTIVITY_TRANSITION_VALUES,
     RECALL_PACK_SECTION_NAMES,
     RECALL_FOCUS_VALUES,
@@ -497,11 +496,8 @@ def build_activity_state_repair_prompt(validation_error: str) -> str:
         "同じ source pack だけを根拠に、JSON オブジェクト 1 個だけを返し直してください。\n"
         "トップレベルキーは activity_candidates だけです。\n"
         "activity_candidates は最大 1 件です。候補がなければ空配列を返してください。\n"
-        "各候補は label, target, status, confidence_hint, salience_hint, ttl_hint, transition, reason_summary だけを持つ object にしてください。\n"
+        "各候補は label, target, confidence_hint, salience_hint, ttl_hint, transition, reason_summary だけを持つ object にしてください。\n"
         "label は活動内容を自然文で短く書いてください。分類名だけにしてはいけません。\n"
-        "status は "
-        + " / ".join(sorted(ACTIVITY_STATUS_VALUES))
-        + " のいずれかです。\n"
         "transition は "
         + " / ".join(sorted(ACTIVITY_TRANSITION_VALUES))
         + " のいずれかです。\n"
@@ -729,6 +725,8 @@ def _build_decision_system_prompt(persona: dict) -> str:
             "capability_request.input は required_input に従う最小 object にしてください。target_client_id や資格情報は入れないでください。\n"
             "current_input.sender=user かつ response_target=user の text が非空なら、明示的な返信不要表現がない限り reply を選んでください。\n"
             "明示的な会話要求に自然に返せるなら reply を優先し、pending_intent を乱用しないでください。\n"
+            "ActivityContext.current_activity は現在の短期活動推定です。ActivityContext.previous_activity は直前活動であり、current_activity が存在して内容が異なる場合は、previous_activity を現在進行中の作業として扱わないでください。\n"
+            "reason_summary では current_activity と矛盾する活動状態を書いてはいけません。前の活動に触れる必要がある場合は「直前まで」の文脈として扱ってください。\n"
             "OngoingActionSummary.status=waiting_result のときは、新しい capability_request を出さないでください。\n"
             "空文字だけの入力は noop を選んでください。",
         ),
@@ -824,12 +822,11 @@ def _build_decision_trigger_policy(
                 "foreground_signal_summary が grounded で world_state_summary に該当状況が既にあるときは、同じ情報を再取得する capability_request より、preferred_result_kind に沿った reply / noop を優先してください。",
                 "suppression_summary.cooldown_active が true ではない場合、recent_turn_summary だけから cooldown 中だと推測してはいけません。",
                 "background_wake は自律判断の通常入口なので、直近のユーザー呼びかけが無いこと自体を noop 理由にしないでください。",
-                "background_wake でも foreground_signal_summary が ready / grounded で selected candidate entry の preferred_result_kind=reply なら、suppression_level=medium だけを理由に noop へ倒さず、短い reply を優先してください。",
-                "foreground_signal_summary.desktop_observation_signal の novelty_kind は観測の新しさであり、ユーザー発話ではありません。reply を選ぶ場合は、ユーザーへの相づちではなく画面観測に根拠づけた短い自発発話にしてください。",
-                "foreground_signal_summary.desktop_observation_signal.interrupt_worthiness は発話として割り込む価値です。novelty_kind=changed だけを理由に reply を選ばず、interrupt_worthiness と suppression_summary を合わせて判断してください。",
-                "suppression_summary.foreground_override=desktop_reply_priority の場合、background_wake / cooldown / pending_intent_summaries が空であることは単独の noop 理由ではありません。",
-                "foreground_signal_summary.desktop_observation_signal.cooldown_active=true の場合、cooldown は割り込み量を控える調整材料であり、単独の拒否理由ではありません。novelty_kind=changed かつ change_strength=significant、または novelty_kind=pending_after_cooldown の selected candidate が preferred_result_kind=reply なら、見慣れない前景として短い reply を優先してください。noop を選ぶ場合は、cooldown 以外の具体的な見送り理由を reason_summary に含めてください。",
-                "InitiativeContext があり pending_intent_summaries が空のときは、drive_state / world_state / ongoing_action / eligible な desktop_observation_signal から自然な前進理由がある場合だけ reply を選び、弱ければ noop を選んでください。",
+                "background_wake でも foreground_signal_summary が ready / grounded の場合、suppression_level=medium は抑制材料ですが、単独で noop を固定しないでください。",
+                "foreground_signal_summary.visual_observations は desktop / camera / virtual などの視覚観測であり、ユーザー発話ではありません。reply を選ぶ場合は、相づちではなく観測に根拠づけた短い自発発話にしてください。",
+                "visual_observations[].change_state=first_seen / changed は判断へ進める変化であり、reply 義務ではありません。最近の自発 reply、cooldown、観測内容の価値を合わせ、弱ければ noop を選んでください。",
+                "visual_observations[].change_state=same_as_recent_reply / stable は繰り返し発話を避ける強い材料です。別の drive_state や pending_intent が無ければ noop を優先してください。",
+                "InitiativeContext があり pending_intent_summaries が空のときは、drive_state / world_state / ongoing_action / visual_observations から自然な前進理由がある場合だけ reply を選び、弱ければ noop を選んでください。",
                 "selected_candidate_family が ongoing_action で preferred_result_kind=capability_request のときは、available な capability の範囲で follow-up capability_request を検討してください。",
                 "foreground_signal_summary が thin で suppression_summary や intervention_risk_summary が強いとき、特に background_wake や initiative_baseline=low では、押し出しすぎず noop を優先してください。",
             ]
@@ -1191,11 +1188,8 @@ def _build_activity_state_system_prompt() -> str:
         "Markdown、コードフェンス、説明文は禁止です。\n"
         "返すトップレベルキーは activity_candidates だけです。\n"
         "activity_candidates は最大 1 件です。十分な根拠がなければ空配列にしてください。\n"
-        "各候補は label, target, status, confidence_hint, salience_hint, ttl_hint, transition, reason_summary の 8 キーだけを持つ object にしてください。\n"
+        "各候補は label, target, confidence_hint, salience_hint, ttl_hint, transition, reason_summary の 7 キーだけを持つ object にしてください。\n"
         "label は活動内容を自然文で短く書いてください。分類名だけにしてはいけません。\n"
-        "status は "
-        + " / ".join(sorted(ACTIVITY_STATUS_VALUES))
-        + " のいずれかだけを使ってください。\n"
         "transition は "
         + " / ".join(sorted(ACTIVITY_TRANSITION_VALUES))
         + " のいずれかだけを使ってください。\n"
@@ -1208,7 +1202,7 @@ def _build_activity_state_system_prompt() -> str:
         "活動推定は desktop capture 専用ではありません。current_input、recent_turns、client_context、visual_observation_context、foreground_world_state、previous_activity_context を総合してください。\n"
         "active_app や window_title や visual_summary_text の文字列一致だけで活動内容を決めてはいけません。複数 source の意味から判断してください。\n"
         "current_input.sender=user の本文はユーザー発話です。その他の観測要約は内部文脈であり、ユーザー発話として扱ってはいけません。\n"
-        "画面が会話 UI に戻っていても previous_activity_context に直前活動があり、ユーザー発話がその直後の反応として自然なら、直前活動を保持する transition=none または recently_active を選んでください。\n"
+        "画面が会話 UI に戻っていても previous_activity_context に直前活動があり、ユーザー発話がその直後の反応として自然なら、直前活動を保持する transition=none または continue を選んでください。\n"
         "label と reason_summary は簡潔に、改行なし、内部識別子なしにしてください。\n"
         "target が不明な場合は空文字にしてください。\n"
         "raw payload、資格情報、内部 URL、配送先 client、base64、OCR 全文を書いてはいけません。"
@@ -1410,6 +1404,30 @@ def _compact_reply_initiative_context(initiative_context: InitiativeContext | No
         world_state_count = foreground_signal_summary.get("world_state_count")
         if isinstance(world_state_count, int):
             compact_foreground["world_state_count"] = world_state_count
+        visual_observations = foreground_signal_summary.get("visual_observations")
+        if isinstance(visual_observations, list):
+            compact_visual_observations: list[dict[str, Any]] = []
+            for observation in visual_observations[:3]:
+                if not isinstance(observation, dict):
+                    continue
+                compact_observation: dict[str, Any] = {}
+                for key, limit in (
+                    ("change_state", 40),
+                    ("source_kind", 32),
+                    ("source_label", 80),
+                    ("summary_text", 160),
+                    ("reason_summary", 160),
+                ):
+                    value = observation.get(key)
+                    if isinstance(value, str) and value.strip():
+                        compact_observation[key] = _compact_prompt_text(value, limit=limit)
+                cooldown_active = observation.get("cooldown_active")
+                if isinstance(cooldown_active, bool):
+                    compact_observation["cooldown_active"] = cooldown_active
+                if compact_observation:
+                    compact_visual_observations.append(compact_observation)
+            if compact_visual_observations:
+                compact_foreground["visual_observations"] = compact_visual_observations
         if compact_foreground:
             payload["foreground_signal_summary"] = compact_foreground
     return payload

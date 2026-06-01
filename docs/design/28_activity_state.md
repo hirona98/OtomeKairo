@@ -17,7 +17,7 @@ OtomeKairo は、対話入力、起床要求、観測 capability の結果、外
 
 - ユーザーが現在している活動の推定
 - ユーザーが直前までしていた活動の推定
-- 活動内容、活動対象、継続中か終了直後かの短い状態
+- 活動内容、活動対象、現在活動か直前活動かの短い状態
 - 推定の確からしさ、更新時刻、失効時刻
 - 推定に使った source kind と source ref の要約
 
@@ -45,7 +45,7 @@ OtomeKairo は、対話入力、起床要求、観測 capability の結果、外
 | `memory_set_id` | 記憶集合 |
 | `label` | 判断へ渡す短い自然文の活動要約 |
 | `target` | 活動対象。アプリ名、作品名、相手、作業対象など |
-| `status` | `active / recently_active / ended / unknown` のいずれか |
+| `status` | 保存内部の生存状態。`active / ended` のいずれか |
 | `confidence` | 推定の確からしさ |
 | `salience` | 判断前景へ出す強さ |
 | `source_kinds` | 推定に使った source kind の配列 |
@@ -105,7 +105,6 @@ LLM の出力は JSON object 1 個に固定する。
     {
       "label": "リズムゲームをプレイ中",
       "target": "KAMITSUBAKI CITY ENSEMBLE",
-      "status": "active",
       "confidence_hint": "high",
       "salience_hint": "high",
       "ttl_hint": "short",
@@ -121,9 +120,8 @@ LLM の出力は JSON object 1 個に固定する。
 - 必須トップレベルキーは `activity_candidates` だけにする
 - `activity_candidates` は最大 1 件の配列にする
 - 候補がない場合は空配列にする
-- 各候補は `label / target / status / confidence_hint / salience_hint / ttl_hint / transition / reason_summary` だけを持つ
+- 各候補は `label / target / confidence_hint / salience_hint / ttl_hint / transition / reason_summary` だけを持つ
 - `label` は活動内容を自然文で短く表す
-- `status` は `active / recently_active / ended / unknown` のいずれかにする
 - `confidence_hint`、`salience_hint` は `low / medium / high` のいずれかにする
 - `ttl_hint` は `short / medium / long` のいずれかにする
 - `transition` は `start / continue / switch / end / none` のいずれかにする
@@ -137,6 +135,7 @@ LLM の出力は JSON object 1 個に固定する。
 - 数値 `confidence / salience`
 - `source_kinds / source_refs`
 - `started_at / updated_at / expires_at`
+- 保存内部の `status`
 - 既存 activity との継続、切替、終了
 - `previous_activity`
 
@@ -144,6 +143,8 @@ LLM の出力は JSON object 1 個に固定する。
 `transition=start` または `switch` では、既存 activity を `previous_activity` に移し、新しい activity を current にする。
 `transition=end` では、既存 activity を `previous_activity` に移し、current を空にする。
 `transition=none` または候補なしでは、既存 activity を保存したまま、期限切れだけを処理する。
+保存内部では、current activity を `active`、終了済み activity を `ended` として扱う。
+LLM は `status` を出力しない。
 
 現在入力が user message で、直前 activity が短時間以内に存在する場合、`previous_activity` を判断文脈へ出す。
 これは「今はチャット画面に戻っているが、直前までゲームをしていた」のような発話解釈に使う。
@@ -151,6 +152,8 @@ LLM の出力は JSON object 1 個に固定する。
 ## 判断入力
 
 判断と返信へ渡す `activity_context` は、保存 row ではなく前景要約にする。
+`previous_activity` は直前活動だけを表し、現在進行中の活動として扱わない。
+判断文脈へ出す `activity_context` には `status` を含めない。
 
 ```json
 {

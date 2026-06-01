@@ -152,11 +152,11 @@ class ServiceInputTraceCompactMixin:
                         for value in state_types
                         if isinstance(value, str) and value.strip()
                     ][:4]
-                desktop_signal = self._compact_desktop_observation_signal(
-                    foreground_signal_summary.get("desktop_observation_signal")
+                visual_signals = self._compact_visual_observation_signals(
+                    foreground_signal_summary.get("visual_observations")
                 )
-                if desktop_signal:
-                    compact_foreground_signal["desktop_observation_signal"] = desktop_signal
+                if visual_signals:
+                    compact_foreground_signal["visual_observations"] = visual_signals
                 if compact_foreground_signal:
                     payload["foreground_signal_summary"] = compact_foreground_signal
             selected_candidate_family = initiative_payload.get("selected_candidate_family")
@@ -210,9 +210,6 @@ class ServiceInputTraceCompactMixin:
                 for key in (
                     "suppression_level",
                     "reason_summary",
-                    "foreground_override",
-                    "desktop_reply_priority_kind",
-                    "cooldown_policy",
                 ):
                     value = suppression_summary.get(key)
                     if isinstance(value, str) and value.strip():
@@ -404,11 +401,11 @@ class ServiceInputTraceCompactMixin:
                 item["capability_request_summary"] = self._compact_capability_request_summary(
                     capability_request_summary
                 )
-            desktop_signal = self._compact_desktop_observation_signal(
-                observation.get("desktop_observation_signal")
+            visual_signal = self._compact_visual_observation_signal(
+                observation.get("visual_observation_signal")
             )
-            if desktop_signal:
-                item["desktop_observation_signal"] = desktop_signal
+            if visual_signal:
+                item["visual_observation_signal"] = visual_signal
             if item:
                 payload.append(item)
         return payload

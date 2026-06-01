@@ -76,7 +76,7 @@ class ServiceInputWakePipelineMixin:
 
         # クールダウン
         cooldown_reason = self._wake_cooldown_reason(current_time=started_at)
-        if cooldown_reason is not None and not self._client_context_has_judgable_desktop_observation(client_context):
+        if cooldown_reason is not None and not self._client_context_has_judgable_visual_observation(client_context):
             self._set_last_wake_at(started_at)
             debug_log("Wake", f"{cycle_label} skipped cooldown={self._clamp(cooldown_reason)}")
             return (
@@ -85,7 +85,7 @@ class ServiceInputWakePipelineMixin:
                 client_context,
             )
         if cooldown_reason is not None:
-            debug_log("Wake", f"{cycle_label} cooldown judged desktop_observation={self._clamp(cooldown_reason)}")
+            debug_log("Wake", f"{cycle_label} cooldown judged visual_observation={self._clamp(cooldown_reason)}")
 
         # 候補
         if selected_candidate is None:
@@ -207,21 +207,17 @@ class ServiceInputWakePipelineMixin:
         wake_observations = client_context.get("wake_observations")
         if not isinstance(wake_observations, list):
             return False
-        desktop_signal = self._compact_desktop_observation_signal(
-            client_context.get("desktop_observation_signal")
+        visual_signals = self._compact_visual_observation_signals(
+            client_context.get("visual_observation_signals")
         )
-        if desktop_signal:
-            return self._desktop_observation_signal_needs_wake_judgement(desktop_signal)
+        if visual_signals:
+            return any(self._visual_observation_signal_needs_wake_judgement(signal) for signal in visual_signals)
         for item in wake_observations:
             if not isinstance(item, dict) or item.get("status") != "succeeded":
                 continue
-            if (
-                item.get("capability_id") == "vision.capture"
-                and isinstance(item.get("source_kind"), str)
-                and item["source_kind"].strip() == "desktop"
-            ):
-                signal = self._compact_desktop_observation_signal(item.get("desktop_observation_signal"))
-                return self._desktop_observation_signal_needs_wake_judgement(signal)
+            signal = self._compact_visual_observation_signal(item.get("visual_observation_signal"))
+            if signal:
+                return self._visual_observation_signal_needs_wake_judgement(signal)
             summary_text = item.get("visual_summary_text")
             if isinstance(summary_text, str) and summary_text.strip():
                 return True
@@ -230,16 +226,16 @@ class ServiceInputWakePipelineMixin:
                 return True
         return False
 
-    def _client_context_has_judgable_desktop_observation(
+    def _client_context_has_judgable_visual_observation(
         self,
         client_context: dict[str, Any] | None,
     ) -> bool:
         if not isinstance(client_context, dict):
             return False
-        signal = self._compact_desktop_observation_signal(
-            client_context.get("desktop_observation_signal")
+        signals = self._compact_visual_observation_signals(
+            client_context.get("visual_observation_signals")
         )
-        if self._desktop_observation_signal_needs_wake_judgement(signal):
+        if any(self._visual_observation_signal_needs_wake_judgement(signal) for signal in signals):
             return True
         wake_observations = client_context.get("wake_observations")
         if not isinstance(wake_observations, list):
@@ -247,8 +243,8 @@ class ServiceInputWakePipelineMixin:
         for item in wake_observations:
             if not isinstance(item, dict):
                 continue
-            signal = self._compact_desktop_observation_signal(item.get("desktop_observation_signal"))
-            if self._desktop_observation_signal_needs_wake_judgement(signal):
+            signal = self._compact_visual_observation_signal(item.get("visual_observation_signal"))
+            if self._visual_observation_signal_needs_wake_judgement(signal):
                 return True
         return False
 
@@ -272,20 +268,15 @@ class ServiceInputWakePipelineMixin:
                 retryable_failure = True
         return retryable_failure
 
-    def _desktop_observation_signal_needs_wake_judgement(self, signal: dict[str, Any] | None) -> bool:
+    def _visual_observation_signal_needs_wake_judgement(self, signal: dict[str, Any] | None) -> bool:
         if not isinstance(signal, dict):
             return False
-        if self._desktop_observation_signal_is_judgable(signal):
-            return True
-        return signal.get("novelty_kind") in {
-            "first_success",
+        return signal.get("change_state") in {
+            "first_seen",
             "changed",
-            "pending_after_cooldown",
         }
 
-    def _desktop_observation_signal_is_judgable(self, signal: dict[str, Any] | None) -> bool:
+    def _visual_observation_signal_is_judgable(self, signal: dict[str, Any] | None) -> bool:
         if not isinstance(signal, dict):
             return False
-        return signal.get("reply_eligibility") in {
-            "eligible",
-        }
+        return self._visual_observation_signal_needs_wake_judgement(signal)

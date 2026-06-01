@@ -174,9 +174,11 @@ class ServiceInputActivityMixin:
             value = self._client_context_text(client_context.get(key), limit=limit)
             if value is not None:
                 payload[key] = value
-        desktop_signal = self._compact_desktop_observation_signal(client_context.get("desktop_observation_signal"))
-        if desktop_signal:
-            payload["desktop_observation_signal"] = desktop_signal
+        visual_signals = self._compact_visual_observation_signals(
+            client_context.get("visual_observation_signals")
+        )
+        if visual_signals:
+            payload["visual_observations"] = visual_signals
         return payload
 
     def _activity_observation_summary(self, observation_summary: dict[str, Any] | None) -> dict[str, Any]:
@@ -247,7 +249,7 @@ class ServiceInputActivityMixin:
             "memory_set_id": memory_set_id,
             "label": self._clamp(str(candidate["label"]).strip(), limit=120),
             "target": self._clamp(str(candidate.get("target", "")).strip(), limit=120),
-            "status": str(candidate["status"]).strip(),
+            "status": "active",
             "confidence": self._activity_score_from_hint(str(candidate["confidence_hint"])),
             "salience": self._activity_score_from_hint(str(candidate["salience_hint"])),
             "source_kinds": self._activity_source_kinds(source_pack),
@@ -297,7 +299,11 @@ class ServiceInputActivityMixin:
             return None
         current_activity = self._activity_prompt_summary(activity_state, current_time=current_time)
         previous = activity_state.get("previous_activity")
-        previous_activity = previous if isinstance(previous, dict) else None
+        previous_activity = (
+            self._activity_previous_prompt_summary(previous)
+            if isinstance(previous, dict)
+            else None
+        )
         payload: dict[str, Any] = {}
         if current_activity:
             payload["current_activity"] = current_activity
@@ -312,7 +318,7 @@ class ServiceInputActivityMixin:
         current_time: str,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {}
-        for key in ("label", "target", "status"):
+        for key in ("label", "target"):
             value = activity_state.get(key)
             if isinstance(value, str) and value.strip():
                 payload[key] = self._clamp(value.strip(), limit=120)
@@ -343,6 +349,19 @@ class ServiceInputActivityMixin:
             str(activity_state.get("updated_at") or current_time),
             current_time=current_time,
         )
+        return self._activity_previous_prompt_summary(payload)
+
+    def _activity_previous_prompt_summary(self, activity_state: dict[str, Any]) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        for key in ("label", "target", "reason_summary", "ended_age_label"):
+            value = activity_state.get(key)
+            if isinstance(value, str) and value.strip():
+                limit = 160 if key == "reason_summary" else 120
+                payload[key] = self._clamp(value.strip(), limit=limit)
+        for key in ("confidence", "salience"):
+            value = activity_state.get(key)
+            if isinstance(value, (int, float)):
+                payload[key] = round(float(value), 3)
         return payload
 
     def _activity_age_label(self, updated_at: str, *, current_time: str) -> str:
@@ -375,7 +394,6 @@ class ServiceInputActivityMixin:
             for key in (
                 "label",
                 "target",
-                "status",
                 "confidence_hint",
                 "salience_hint",
                 "ttl_hint",

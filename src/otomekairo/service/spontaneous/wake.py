@@ -8,7 +8,7 @@ from otomekairo.llm.client import LLMError
 from otomekairo.recall.builder import RecallPackSelectionError
 from otomekairo.service.common import (
     BACKGROUND_WAKE_POLL_SECONDS,
-    INITIAL_DESKTOP_CAPTURE_DELAY_SECONDS,
+    INITIAL_VISUAL_CAPTURE_DELAY_SECONDS,
     WAKE_REPLY_COOLDOWN_MINUTES,
     debug_log,
 )
@@ -376,7 +376,7 @@ class ServiceSpontaneousWakeMixin:
                         reply_history = self._wake_runtime_state.setdefault("reply_history_by_dedupe", {})
                         reply_history[dedupe_key] = current_time
                     self._remove_pending_intent_candidate(selected_candidate.get("candidate_id"))
-                self._record_desktop_observation_prompted_locked(
+                self._record_visual_observation_prompted_locked(
                     current_time=current_time,
                     client_context=client_context,
                 )
@@ -386,7 +386,7 @@ class ServiceSpontaneousWakeMixin:
         if decision.get("kind") == "pending_intent":
             return
 
-    def _record_desktop_observation_prompted_locked(
+    def _record_visual_observation_prompted_locked(
         self,
         *,
         current_time: str,
@@ -394,23 +394,37 @@ class ServiceSpontaneousWakeMixin:
     ) -> None:
         if not isinstance(client_context, dict):
             return
-        signal = client_context.get("desktop_observation_signal")
-        if not isinstance(signal, dict) or signal.get("reply_eligibility") not in {
-            "eligible",
-        }:
-            return
-        observation_id = signal.get("observation_id")
-        scene_signature = signal.get("scene_signature")
-        if not isinstance(observation_id, str) or not observation_id.strip():
-            return
-        if not isinstance(scene_signature, str) or not scene_signature.strip():
-            return
-        runtime = self._wake_observation_runtime_state.get(observation_id.strip())
-        if not isinstance(runtime, dict):
-            return
-        runtime["last_prompted_scene_signature"] = scene_signature.strip()
-        runtime["last_prompted_at"] = current_time
-        runtime.pop("pending_novel_scene", None)
+        signals: list[dict[str, Any]] = []
+        value = client_context.get("visual_observation_signals")
+        if isinstance(value, list):
+            signals.extend(item for item in value if isinstance(item, dict))
+        wake_observations = client_context.get("wake_observations")
+        if isinstance(wake_observations, list):
+            for observation in wake_observations:
+                if not isinstance(observation, dict):
+                    continue
+                signal = observation.get("visual_observation_signal")
+                if isinstance(signal, dict):
+                    signals.append(signal)
+        seen_observation_ids: set[str] = set()
+        for signal in signals:
+            if signal.get("change_state") not in {"first_seen", "changed"}:
+                continue
+            observation_id = signal.get("observation_id")
+            observation_signature = signal.get("observation_signature")
+            if not isinstance(observation_id, str) or not observation_id.strip():
+                continue
+            normalized_id = observation_id.strip()
+            if normalized_id in seen_observation_ids:
+                continue
+            if not isinstance(observation_signature, str) or not observation_signature.strip():
+                continue
+            runtime = self._wake_observation_runtime_state.get(normalized_id)
+            if not isinstance(runtime, dict):
+                continue
+            runtime["last_prompted_observation_signature"] = observation_signature.strip()
+            runtime["last_prompted_at"] = current_time
+            seen_observation_ids.add(normalized_id)
 
     def _next_stream_event_id(self) -> int:
         # カウンター
@@ -438,18 +452,18 @@ class ServiceSpontaneousWakeMixin:
         next_wake_policy: dict[str, Any] | None,
         current_time: str,
     ) -> None:
-        previous_enabled = self._wake_policy_has_enabled_desktop_capture(previous_wake_policy)
-        next_enabled = self._wake_policy_has_enabled_desktop_capture(next_wake_policy)
+        previous_enabled = self._wake_policy_has_enabled_visual_capture(previous_wake_policy)
+        next_enabled = self._wake_policy_has_enabled_visual_capture(next_wake_policy)
         with self._runtime_state_lock:
             if next_enabled and not previous_enabled:
                 self._wake_runtime_state["initial_delay_until"] = (
-                    self._parse_iso(current_time) + timedelta(seconds=INITIAL_DESKTOP_CAPTURE_DELAY_SECONDS)
+                    self._parse_iso(current_time) + timedelta(seconds=INITIAL_VISUAL_CAPTURE_DELAY_SECONDS)
                 ).isoformat()
                 return
             if not next_enabled:
                 self._wake_runtime_state["initial_delay_until"] = None
 
-    def _wake_policy_has_enabled_desktop_capture(self, wake_policy: dict[str, Any] | None) -> bool:
+    def _wake_policy_has_enabled_visual_capture(self, wake_policy: dict[str, Any] | None) -> bool:
         if not isinstance(wake_policy, dict) or wake_policy.get("mode") != "interval":
             return False
         observations = wake_policy.get("observations")
@@ -504,7 +518,7 @@ class ServiceSpontaneousWakeMixin:
         if initial_delay_seconds is not None:
             return {
                 "should_skip": True,
-                "reason_summary": "desktop capture 有効化直後のため、初回観測を 5 秒待っている。",
+                "reason_summary": "visual capture 有効化直後のため、初回観測を 5 秒待っている。",
             }
 
         # 一時失敗後の再試行待ち
@@ -622,27 +636,24 @@ class ServiceSpontaneousWakeMixin:
         )
         if isinstance(wake_observation_summary, str):
             parts.append(f"定期観測では、{wake_observation_summary}")
-        desktop_signal = self._compact_desktop_observation_signal(
-            client_context.get("desktop_observation_signal")
+        visual_signals = self._compact_visual_observation_signals(
+            client_context.get("visual_observation_signals")
         )
-        if isinstance(desktop_signal, dict):
-            novelty_kind = desktop_signal.get("novelty_kind")
-            interrupt_worthiness = desktop_signal.get("interrupt_worthiness")
-            reply_eligibility = desktop_signal.get("reply_eligibility")
-            cooldown_active = desktop_signal.get("cooldown_active")
-            reason_summary = desktop_signal.get("reason_summary")
-            if isinstance(novelty_kind, str) and isinstance(reply_eligibility, str):
+        for visual_signal in visual_signals[:3]:
+            change_state = visual_signal.get("change_state")
+            source_kind = visual_signal.get("source_kind")
+            source_label = visual_signal.get("source_label")
+            cooldown_active = visual_signal.get("cooldown_active")
+            reason_summary = visual_signal.get("reason_summary")
+            if isinstance(change_state, str):
+                source_part = source_label if isinstance(source_label, str) else source_kind
+                source_text = f"{source_part}の" if isinstance(source_part, str) else ""
                 cooldown_part = ""
                 if isinstance(cooldown_active, bool):
                     cooldown_part = f", cooldown_active={str(cooldown_active).lower()}"
-                interrupt_part = ""
-                if isinstance(interrupt_worthiness, str):
-                    interrupt_part = f", interrupt_worthiness={interrupt_worthiness}"
-                parts.append(
-                    f"desktop観測シグナルは novelty={novelty_kind}, reply_eligibility={reply_eligibility}{interrupt_part}{cooldown_part}。"
-                )
+                parts.append(f"{source_text}視覚観測シグナルは change_state={change_state}{cooldown_part}。")
             if isinstance(reason_summary, str):
-                parts.append(f"desktop観測理由は {reason_summary}")
+                parts.append(f"視覚観測理由は {reason_summary}")
 
         # 前景
         if isinstance(active_app, str):

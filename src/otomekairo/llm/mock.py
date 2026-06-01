@@ -85,7 +85,6 @@ class MockLLMClient(
                     {
                         "label": "ゲームをプレイ中",
                         "target": "",
-                        "status": "active",
                         "confidence_hint": "medium",
                         "salience_hint": "medium",
                         "ttl_hint": "short",
