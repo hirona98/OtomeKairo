@@ -143,16 +143,10 @@ class ServiceInputInitiativeContextMixin:
         client_context: dict[str, Any],
         selected_candidate: dict[str, Any] | None,
     ) -> str:
-        _ = client_context
-        if trigger_kind == "background_wake":
-            if isinstance(selected_candidate, dict):
-                return "background wake が来ており、保留中の候補を再評価する機会がある。"
-            return "background wake が来ており、自律判断として前進可否を見直す機会がある。"
-        if trigger_kind == "wake":
-            if isinstance(selected_candidate, dict):
-                return "manual wake が呼ばれ、保留中の候補を再評価する機会がある。"
-            return "manual wake が呼ばれ、今の前進可否を見直す機会がある。"
-        return "自律判断の機会があり、今の前進可否を見直す。"
+        _ = trigger_kind, client_context
+        if isinstance(selected_candidate, dict):
+            return "自律判断の機会があり、保留中の候補を再評価する機会がある。"
+        return "自律判断の機会があり、前進可否を見直す機会がある。"
 
     def _initiative_time_context_summary(self, *, time_context: dict[str, Any]) -> dict[str, Any]:
         payload: dict[str, Any] = {}
