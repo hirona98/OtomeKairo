@@ -1091,6 +1091,12 @@ class ServiceCapabilityMixin:
                             path=f"{path}.{key}",
                         )
         if isinstance(value, list):
+            max_items = schema.get("maxItems")
+            if max_items is not None:
+                if not isinstance(max_items, int) or isinstance(max_items, bool) or max_items < 0:
+                    raise ValueError(f"{path} schema maxItems is invalid.")
+                if len(value) > max_items:
+                    raise ValueError(f"{path} has too many items.")
             item_schema = schema.get("items")
             if isinstance(item_schema, dict):
                 for index, item in enumerate(value):
