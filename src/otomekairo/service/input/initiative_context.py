@@ -56,11 +56,8 @@ class ServiceInputInitiativeContextMixin:
         intervention_risk_summary = self._initiative_intervention_risk_summary(
             initiative_baseline=initiative_baseline,
             intervention_state=intervention_state,
-            trigger_kind=trigger_kind,
             ongoing_action_summary=ongoing_action_summary,
             capability_summary=capability_summary,
-            selected_candidate=selected_candidate,
-            pending_intent_selection=pending_intent_selection,
         )
         suppression_summary = self._initiative_suppression_summary(
             intervention_state=intervention_state,
@@ -150,7 +147,7 @@ class ServiceInputInitiativeContextMixin:
         if trigger_kind == "background_wake":
             if isinstance(selected_candidate, dict):
                 return "background wake が来ており、保留中の候補を再評価する機会がある。"
-            return "background wake が来ており、直近入力なしで前進可否を見直す機会がある。"
+            return "background wake が来ており、自律判断として前進可否を見直す機会がある。"
         if trigger_kind == "wake":
             if isinstance(selected_candidate, dict):
                 return "manual wake が呼ばれ、保留中の候補を再評価する機会がある。"
@@ -490,16 +487,11 @@ class ServiceInputInitiativeContextMixin:
         *,
         initiative_baseline: dict[str, Any],
         intervention_state: dict[str, Any],
-        trigger_kind: str,
         ongoing_action_summary: dict[str, Any] | None,
         capability_summary: dict[str, Any],
-        selected_candidate: dict[str, Any] | None,
-        pending_intent_selection: dict[str, Any] | None,
     ) -> str | None:
         reasons: list[str] = []
         baseline_level = self._client_context_text(initiative_baseline.get("level"), limit=16)
-        if trigger_kind == "background_wake":
-            reasons.append("直近入力のない定期 wake なので、過剰介入は避けたい。")
         if baseline_level == "low":
             reasons.append("initiative_baseline が low で、押し出しは控えめにしたい。")
         if intervention_state.get("cooldown_active") is True:
@@ -512,12 +504,6 @@ class ServiceInputInitiativeContextMixin:
             reasons.append("ongoing_action が結果待ちで、重複介入は抑えたい。")
         if int(capability_summary.get("available_count", 0)) == 0:
             reasons.append("現時点で使える capability が見当たらない。")
-        if not isinstance(selected_candidate, dict):
-            pool_count = 0
-            if isinstance(pending_intent_selection, dict):
-                pool_count = int(pending_intent_selection.get("candidate_pool_count", 0))
-            if pool_count == 0:
-                reasons.append("前景に出す pending_intent 候補はまだ見当たらない。")
         if not reasons:
             return None
         return " / ".join(reasons)
@@ -534,7 +520,6 @@ class ServiceInputInitiativeContextMixin:
             suppression_level = "high"
         elif (
             intervention_state.get("cooldown_active") is True
-            or intervention_state.get("background_trigger") is True
             or intervention_risk_summary is not None
         ):
             suppression_level = "medium"
