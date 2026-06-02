@@ -1331,8 +1331,8 @@ def _wrap_prompt_block(block_name: str, body: str) -> str:
 
 def _normalize_prompt_block_name(block_name: str) -> str:
     normalized = [
-        character if character.isascii() and (character.isalnum() or character == "_") else "_"
-        for character in block_name.upper()
+        char if char.isascii() and (char.isalnum() or char == "_") else "_"
+        for char in block_name.upper()
     ]
     compact = "".join(normalized).strip("_")
     return compact or "BLOCK"

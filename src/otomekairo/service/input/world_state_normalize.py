@@ -382,7 +382,7 @@ class ServiceInputWorldStateNormalizeMixin:
             return None
         if not isinstance(context.service, str) or not context.service.strip():
             return None
-        normalized = "".join(character if character.isalnum() else "_" for character in context.service.lower()).strip("_")
+        normalized = "".join(char if char.isalnum() else "_" for char in context.service.lower()).strip("_")
         return normalized or None
 
     def _world_state_schedule_context_slot_key(self, context: WorldStateContext | None) -> str | None:

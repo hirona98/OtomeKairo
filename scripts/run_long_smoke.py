@@ -947,7 +947,7 @@ class LongSmokeRunner:
         return client
 
     def _vision_source_id_for_client(self, client_id: str) -> str:
-        normalized = "".join(character if character.isalnum() else "_" for character in client_id.lower()).strip("_")
+        normalized = "".join(char if char.isalnum() else "_" for char in client_id.lower()).strip("_")
         return f"vision_source:{normalized or 'desktop'}"
 
     def _apply_status_client_context_source(
