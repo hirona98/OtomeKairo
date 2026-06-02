@@ -607,7 +607,7 @@ class SQLiteMemoryStore(
                 SELECT role, text, created_at
                 FROM events
                 WHERE memory_set_id = ?
-                  AND kind IN ('conversation_input', 'reply')
+                  AND kind IN ('conversation_input', 'speech')
                   AND text IS NOT NULL
                   AND created_at >= ?
                 ORDER BY created_at DESC, rowid DESC
@@ -806,10 +806,10 @@ class SQLiteMemoryStore(
 
     def _event_kinds_for_actor(self, target_actor: str) -> tuple[str, ...]:
         if target_actor == "assistant":
-            return ("reply",)
+            return ("speech",)
         if target_actor == "user":
             return ("conversation_input", "observation")
-        return ("conversation_input", "observation", "reply")
+        return ("conversation_input", "observation", "speech")
 
     def _event_roles_for_actor(self, target_actor: str) -> tuple[str, ...]:
         if target_actor == "assistant":

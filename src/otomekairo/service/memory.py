@@ -325,7 +325,7 @@ class ServiceMemoryMixin:
                 input_text=input_text,
                 recall_hint=pipeline["recall_hint"],
                 decision=pipeline["decision"],
-                reply_payload=pipeline["reply_payload"],
+                speech_payload=pipeline["speech_payload"],
                 events=events,
                 memory_context=self._build_turn_memory_context(
                     trigger_kind=trigger_kind,

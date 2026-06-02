@@ -125,7 +125,7 @@ class ServiceInputWakePipelineMixin:
             self._set_last_wake_at(started_at)
             debug_log("Wake", f"{cycle_label} autonomous path no_selected_candidate")
 
-        # 返信抑制
+        # 発話抑制
         if selected_candidate is not None:
             if self._was_recently_replied(
                 dedupe_key=selected_candidate["dedupe_key"],
@@ -140,7 +140,7 @@ class ServiceInputWakePipelineMixin:
                     self._noop_pipeline(
                         state=state,
                         started_at=started_at,
-                        reason_summary="同じ pending_intent 候補には最近 reply 済みのため、今回は再介入しない。",
+                        reason_summary="同じ pending_intent 候補には最近 speech 済みのため、今回は再介入しない。",
                     ),
                     input_text,
                     client_context,

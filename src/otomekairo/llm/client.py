@@ -9,7 +9,7 @@ from otomekairo.llm.contexts import (
     DecisionContext,
     InitiativeCandidateFamily,
     InitiativeContext,
-    ReplyContext,
+    SpeechContext,
 )
 from otomekairo.llm.contracts import (
     LLMContractError,
@@ -53,7 +53,7 @@ from otomekairo.llm.prompts import (
     build_recall_pack_selection_messages,
     build_recall_pack_selection_repair_prompt,
     build_recall_hint_messages,
-    build_reply_messages,
+    build_speech_messages,
     build_visual_observation_messages,
     build_visual_observation_repair_prompt,
     build_world_state_messages,
@@ -360,7 +360,7 @@ class LLMClient:
                     "capability_request.capability_id が一致していません。"
                 )
             return
-        if decision_kind == "noop" and preferred_result_kind == "reply":
+        if decision_kind == "noop" and preferred_result_kind == "speech":
             foreground_summary = context.initiative_context.foreground_signal_summary
             suppression_summary = context.initiative_context.suppression_summary
             foreground_thinness = (
@@ -384,9 +384,9 @@ class LLMClient:
                 and cooldown_active is not True
             ):
                 raise LLMError(
-                    "Initiative selected candidate entry は preferred_result_kind=reply で、"
-                    "foreground_signal_summary.foreground_thinness は reply 可能な前景です。"
-                    "noop は不正です。kind=reply を返してください。"
+                    "Initiative selected candidate entry は preferred_result_kind=speech で、"
+                    "foreground_signal_summary.foreground_thinness は speech 可能な前景です。"
+                    "noop は不正です。kind=speech を返してください。"
                 )
 
     def _validate_decision_visual_observation_context(
@@ -416,7 +416,7 @@ class LLMClient:
             raise LLMError(
                 "会話添付画像は VisualObservationContext.visual_summary_text として解釈済みです。"
                 "raw image が decision prompt に無いことを理由に noop を返してはいけません。"
-                "visual_summary_text の範囲で kind=reply を返してください。"
+                "visual_summary_text の範囲で kind=speech を返してください。"
             )
 
     def _validate_decision_user_message_response(
@@ -435,7 +435,7 @@ class LLMClient:
             return
         raise LLMError(
             "current_input.sender=user かつ response_target=user の非空 text はユーザー発話です。"
-            "ユーザー発話への noop は不正です。短い挨拶や断片でも kind=reply を返してください。"
+            "ユーザー発話への noop は不正です。短い挨拶や断片でも kind=speech を返してください。"
         )
 
     def _user_message_explicitly_allows_noop(self, text: str) -> bool:
@@ -445,11 +445,11 @@ class LLMClient:
         return any(
             marker in normalized
             for marker in (
-                "返信不要",
+                "発話不要",
                 "返事不要",
                 "反応不要",
-                "no reply",
-                "do not reply",
+                "no speech",
+                "do not speech",
             )
         )
 
@@ -598,7 +598,7 @@ class LLMClient:
             f"CapabilityDecisionView の {normalized_request_capability_id} は "
             f"fresh_world_state_available=true です。{state_summary}"
             "明示的なユーザー依頼なしで同じ現在状態を再取得する capability_request は不正です。"
-            "既存の foreground_world_state を使って reply / noop / pending_intent を返してください。"
+            "既存の foreground_world_state を使って speech / noop / pending_intent を返してください。"
         )
 
     def _validate_vision_capture_fresh_world_state_reuse(
@@ -633,7 +633,7 @@ class LLMClient:
                 "CapabilityDecisionView の vision.capture には "
                 f"vision_source_id={requested_source_id.strip()} の新鮮な visual_context があります。{state_summary}"
                 "明示的なユーザー依頼なしで同じ vision_source_id を再取得する capability_request は不正です。"
-                "既存の foreground_world_state を使って reply / noop / pending_intent を返してください。"
+                "既存の foreground_world_state を使って speech / noop / pending_intent を返してください。"
             )
 
     def _capability_decision_view_entry(
@@ -684,7 +684,7 @@ class LLMClient:
             f"source_capability_id={source_capability_id} の follow-up です。"
             f"allowed_followup_capability_ids={allowed_summary} に含まれない "
             f"{request_capability_id.strip()} の capability_request は不正です。"
-            "受け取った result に基づく reply / noop / pending_intent を返してください。"
+            "受け取った result に基づく speech / noop / pending_intent を返してください。"
         )
 
     def _selected_initiative_family_entry(
@@ -693,14 +693,14 @@ class LLMClient:
     ) -> InitiativeCandidateFamily | None:
         return initiative_context.selected_family_entry()
 
-    def generate_reply(
+    def generate_speech(
         self,
         *,
         role_definition: dict,
         persona: dict,
-        context: ReplyContext,
+        context: SpeechContext,
     ) -> dict[str, Any]:
-        operation = "reply"
+        operation = "speech"
         debug_log(
             "LLM",
             (
@@ -712,16 +712,16 @@ class LLMClient:
         try:
             # モック経路
             if self._is_mock_role_definition(role_definition):
-                payload = self.mock_client.generate_reply(
+                payload = self.mock_client.generate_speech(
                     role_definition=role_definition,
                     persona=persona,
                     context=context,
                 )
-                debug_log("LLM", f"{operation} done mode=mock reply_chars={len(payload.get('reply_text', ''))}", level="DEBUG")
+                debug_log("LLM", f"{operation} done mode=mock speech_chars={len(payload.get('speech_text', ''))}", level="DEBUG")
                 return payload
 
             # プロンプト構築
-            messages = build_reply_messages(
+            messages = build_speech_messages(
                 persona=persona,
                 context=context,
             )
@@ -729,17 +729,17 @@ class LLMClient:
             # 補完
             debug_log("LLM", f"{operation} request messages={len(messages)}", level="DEBUG")
             content = complete_text(role_definition=role_definition, messages=messages)
-            reply_text = content.strip()
-            if not reply_text:
-                raise LLMError("Reply の生成結果が空でした。")
+            speech_text = content.strip()
+            if not speech_text:
+                raise LLMError("Speech の生成結果が空でした。")
 
             # payload作成
             payload = {
-                "reply_text": reply_text,
-                "reply_style_notes": f"model={role_definition.get('model')}",
+                "speech_text": speech_text,
+                "speech_style_notes": f"model={role_definition.get('model')}",
                 "confidence_note": "litellm_model",
             }
-            debug_log("LLM", f"{operation} done response_chars={len(content)} reply_chars={len(reply_text)}", level="DEBUG")
+            debug_log("LLM", f"{operation} done response_chars={len(content)} speech_chars={len(speech_text)}", level="DEBUG")
             return payload
         except Exception as exc:
             debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc)}", level="ERROR")
@@ -797,7 +797,7 @@ class LLMClient:
         input_text: str,
         recall_hint: dict,
         decision: dict,
-        reply_text: str | None,
+        speech_text: str | None,
         memory_context: dict[str, Any] | None,
         current_time: str,
     ) -> dict[str, Any]:
@@ -807,7 +807,7 @@ class LLMClient:
             (
                 f"{operation} start mode={self._debug_mode(role_definition)} "
                 f"model={self._debug_model(role_definition)} input_chars={len(input_text)} "
-                f"decision_kind={decision.get('kind')} reply_chars={len(reply_text or '')}"
+                f"decision_kind={decision.get('kind')} speech_chars={len(speech_text or '')}"
             ),
             level="DEBUG",
         )
@@ -818,7 +818,7 @@ class LLMClient:
                 input_text,
                 recall_hint,
                 decision,
-                reply_text,
+                speech_text,
                 memory_context,
             )
             debug_log("LLM", f"{operation} done mode=mock keys={self._debug_payload_keys(payload)}", level="DEBUG")
@@ -829,7 +829,7 @@ class LLMClient:
             input_text=input_text,
             recall_hint=recall_hint,
             decision=decision,
-            reply_text=reply_text,
+            speech_text=speech_text,
             memory_context=memory_context,
             current_time=current_time,
         )

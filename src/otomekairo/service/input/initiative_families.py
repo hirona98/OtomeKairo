@@ -85,7 +85,7 @@ class ServiceInputInitiativeFamiliesMixin:
         last_capability_id = self._client_context_text(ongoing_action_summary.get("last_capability_id"), limit=64)
         available_ids = capability_summary.get("available_ids", [])
         capability_available = isinstance(last_capability_id, str) and last_capability_id in available_ids
-        preferred_result_kind = "reply"
+        preferred_result_kind = "speech"
         preferred_result_reason: str | None = None
         priority_score = 0.56
         blocking_reason: str | None = None
@@ -109,7 +109,7 @@ class ServiceInputInitiativeFamiliesMixin:
                 blocking_reason = preferred_result_reason
             else:
                 priority_score = 0.68
-                preferred_result_reason = "継続中の流れが残っており、短い reply で続きを整えられる。"
+                preferred_result_reason = "継続中の流れが残っており、短い speech で続きを整えられる。"
         elif status == "on_hold":
             priority_score = 0.42
             preferred_result_kind = "pending_intent"
@@ -150,7 +150,7 @@ class ServiceInputInitiativeFamiliesMixin:
                     eligible_count=eligible_count,
                     selection_reason=selection_reason,
                 ),
-                preferred_result_kind="reply",
+                preferred_result_kind="speech",
                 preferred_result_reason_summary="due になった pending_intent 候補があり、今回は表に出してよい。",
             )
         if eligible_count > 0:
@@ -285,23 +285,23 @@ class ServiceInputInitiativeFamiliesMixin:
             preferred_result_reason = "background wake で画面や外部状態だけが薄く見えており、drive なしでは見送るほうが自然。"
         elif foreground_thinness == "thin" and not world_state_summary and not recent_turn_summary:
             preferred_result_kind = "noop"
-            preferred_result_reason = "前景文脈が薄く、いまは reply より様子見を優先したい。"
+            preferred_result_reason = "前景文脈が薄く、いまは speech より様子見を優先したい。"
         elif (
             visual_change_state in {"first_seen", "changed"}
             and foreground_thinness == "ready"
             and suppression_level == "low"
             and isinstance(visual_signal, dict)
             and visual_signal.get("cooldown_active") is not True
-            and visual_signal.get("same_as_recent_reply") is not True
+            and visual_signal.get("same_as_recent_speech") is not True
         ):
-            preferred_result_kind = "reply"
-            preferred_result_reason = "視覚観測に前回からの判別可能な変化があり、suppression が low なので短い自発 reply を前景候補にする。"
+            preferred_result_kind = "speech"
+            preferred_result_reason = "視覚観測に前回からの判別可能な変化があり、suppression が low なので短い自発 speech を前景候補にする。"
         elif (
             isinstance(strongest_drive, dict)
             and world_state_summary
             and suppression_level != "high"
         ):
-            preferred_result_kind = "reply"
+            preferred_result_kind = "speech"
             preferred_result_reason = self._initiative_autonomous_preferred_result_reason(
                 strongest_drive=strongest_drive,
                 world_state_summary=world_state_summary,

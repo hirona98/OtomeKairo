@@ -128,7 +128,7 @@ class EvidenceResolver:
         evidence_pack = self._grounded_pack(
             answer_contract=answer_contract,
             evidence_items=[self._event_evidence_item(records[0])],
-            reply_guidance=self._boundary_reply_guidance(boundary, records[0]),
+            speech_guidance=self._boundary_speech_guidance(boundary, records[0]),
         )
         return self._resolution(
             input_text=input_text,
@@ -197,7 +197,7 @@ class EvidenceResolver:
         evidence_pack = self._grounded_pack(
             answer_contract=answer_contract,
             evidence_items=[self._event_evidence_item(record) for record in records],
-            reply_guidance=guidance,
+            speech_guidance=guidance,
         )
         return self._resolution(
             input_text=input_text,
@@ -265,7 +265,7 @@ class EvidenceResolver:
         evidence_pack = self._grounded_pack(
             answer_contract=answer_contract,
             evidence_items=[self._event_evidence_item(record) for record in cycle_records],
-            reply_guidance=guidance,
+            speech_guidance=guidance,
         )
         return self._resolution(
             input_text=input_text,
@@ -292,7 +292,7 @@ class EvidenceResolver:
             evidence_pack = self._grounded_pack(
                 answer_contract=answer_contract,
                 evidence_items=items,
-                reply_guidance="根拠として渡された evidence_items だけを使い、根拠が弱い部分は弱いと明示する。",
+                speech_guidance="根拠として渡された evidence_items だけを使い、根拠が弱い部分は弱いと明示する。",
             )
             return self._resolution(
                 input_text=input_text,
@@ -343,7 +343,7 @@ class EvidenceResolver:
         evidence_pack = self._grounded_pack(
             answer_contract=answer_contract,
             evidence_items=items,
-            reply_guidance="conflict evidence を比較し、どの記録同士が食い違うかを短く説明する。",
+            speech_guidance="conflict evidence を比較し、どの記録同士が食い違うかを短く説明する。",
         )
         return self._resolution(
             input_text=input_text,
@@ -375,7 +375,7 @@ class EvidenceResolver:
             "answer_contract": answer_contract,
             "requires_direct_evidence": False,
             "evidence_items": [],
-            "reply_guidance": "通常の recall_pack と直近文脈で自然に応答する。",
+            "speech_guidance": "通常の recall_pack と直近文脈で自然に応答する。",
         }
 
     def _grounded_pack(
@@ -383,14 +383,14 @@ class EvidenceResolver:
         *,
         answer_contract: dict[str, Any],
         evidence_items: list[dict[str, Any]],
-        reply_guidance: str,
+        speech_guidance: str,
     ) -> dict[str, Any]:
         return {
             "status": "grounded",
             "answer_contract": answer_contract,
             "requires_direct_evidence": bool(answer_contract.get("requires_direct_evidence")),
             "evidence_items": localize_timestamp_fields(evidence_items),
-            "reply_guidance": reply_guidance,
+            "speech_guidance": speech_guidance,
         }
 
     def _missing_pack(
@@ -406,7 +406,7 @@ class EvidenceResolver:
             "requires_direct_evidence": bool(answer_contract.get("requires_direct_evidence")),
             "missing_reason": reason,
             "evidence_items": [],
-            "reply_guidance": guidance,
+            "speech_guidance": guidance,
         }
 
     def _resolution(
@@ -487,7 +487,7 @@ class EvidenceResolver:
                 boundary_candidates=boundary_candidates,
             ),
             "missing_reason": evidence_pack.get("missing_reason"),
-            "reply_guidance": evidence_pack.get("reply_guidance"),
+            "speech_guidance": evidence_pack.get("speech_guidance"),
         }
 
     def _selected_recall_sections(self, recall_pack: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
@@ -694,7 +694,7 @@ class EvidenceResolver:
             "payload": localize_timestamp_fields(item),
         }
 
-    def _boundary_reply_guidance(self, boundary: str, record: dict[str, Any]) -> str:
+    def _boundary_speech_guidance(self, boundary: str, record: dict[str, Any]) -> str:
         item = self._event_evidence_item(record)
         if boundary == "first":
             return (

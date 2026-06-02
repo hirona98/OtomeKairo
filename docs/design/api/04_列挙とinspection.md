@@ -263,7 +263,7 @@ response:
         "trigger_kind": "user_message",
         "started_at": "2026-03-31T09:00:00+09:00",
         "finished_at": "2026-03-31T09:00:00+09:00",
-        "result_kind": "reply",
+        "result_kind": "speech",
         "failed": false
       }
     ]
@@ -332,7 +332,7 @@ exact answer 系の cycle では、`recall_trace` に `answer_contract`、`evide
 - client から送る message は不要
 - 接続時には、直近の短いログを replay する
 - `ts` は OtomeKairo のローカルタイムゾーンに属する offset 付き timestamp で返す
-- 通常会話では、ユーザー入力と実際にユーザーへ表示する assistant 返信の短い抜粋を流す
+- 通常会話では、ユーザー入力と実際にユーザーへ表示する assistant 発話の短い抜粋を流す
 - 会話本文の抜粋は最初の改行までを流し、それ以降の行を流さない
 - `logs/stream` は `debug_log` の購読先として扱い、標準出力とログファイルに出る `LEVEL / Component / message` と同じ内容を `level / logger / msg` として流す
 - `logs/stream` の `level / logger / msg` にはターミナル表示用の ANSI 色を含めない

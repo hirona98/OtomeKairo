@@ -49,7 +49,7 @@ class OtomeKairoService(
             "cooldown_until": None,
             "initial_delay_until": None,
             "retry_after": None,
-            "reply_history_by_dedupe": {},
+            "speech_history_by_dedupe": {},
             "active_user_response_cycle_count": 0,
         }
         self._wake_observation_runtime_state: dict[str, dict[str, Any]] = {}

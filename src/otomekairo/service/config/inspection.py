@@ -247,14 +247,14 @@ class ServiceConfigInspectionMixin:
     def _snapshot_wake_runtime_state(self, *, current_time: str) -> dict[str, Any]:
         self._prune_pending_intent_candidates(current_time=current_time)
         with self._runtime_state_lock:
-            reply_history = self._wake_runtime_state.get("reply_history_by_dedupe", {})
+            speech_history = self._wake_runtime_state.get("speech_history_by_dedupe", {})
             return {
                 "last_wake_at": self._wake_runtime_state.get("last_wake_at"),
                 "last_spontaneous_at": self._wake_runtime_state.get("last_spontaneous_at"),
                 "cooldown_until": self._wake_runtime_state.get("cooldown_until"),
                 "initial_delay_until": self._wake_runtime_state.get("initial_delay_until"),
                 "retry_after": self._wake_runtime_state.get("retry_after"),
-                "reply_history_count": len(reply_history) if isinstance(reply_history, dict) else 0,
+                "speech_history_count": len(speech_history) if isinstance(speech_history, dict) else 0,
             }
 
     def _snapshot_memory_postprocess_runtime_state(self) -> dict[str, Any]:

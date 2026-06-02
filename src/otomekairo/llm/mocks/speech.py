@@ -2,16 +2,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from otomekairo.llm.contexts import InitiativeContext, ReplyContext
+from otomekairo.llm.contexts import InitiativeContext, SpeechContext
 
 
-class LLMMockReplyMixin:
-    def generate_reply(
+class LLMMockSpeechMixin:
+    def generate_speech(
         self,
         *,
         role_definition: dict,
         persona: dict,
-        context: ReplyContext,
+        context: SpeechContext,
     ) -> dict[str, Any]:
         # model確認
         self._assert_mock_model(role_definition)
@@ -62,11 +62,11 @@ class LLMMockReplyMixin:
             event_basis=event_basis,
             recent_turns=recent_turns,
         )
-        initiative_reply = self._mock_initiative_reply_text(
+        initiative_speech = self._mock_initiative_speech_text(
             initiative_context=initiative_context,
             decision=decision,
         )
-        reply_text = initiative_reply or self._mock_contextual_reply_text(
+        speech_text = initiative_speech or self._mock_contextual_speech_text(
             text=text,
             decision=decision,
             primary_recall_focus=primary_recall_focus,
@@ -84,8 +84,8 @@ class LLMMockReplyMixin:
 
         # payload作成
         return {
-            "reply_text": reply_text,
-            "reply_style_notes": (
+            "speech_text": speech_text,
+            "speech_style_notes": (
                 f"persona_prompt_present={bool(persona_prompt)}; part_of_day={time_context.get('part_of_day', 'unknown')}"
             ),
             "confidence_note": "mock_model",
@@ -121,7 +121,7 @@ class LLMMockReplyMixin:
             return ""
         return "前の流れも踏まえると、"
 
-    def _mock_contextual_reply_text(
+    def _mock_contextual_speech_text(
         self,
         *,
         text: str,
@@ -139,7 +139,7 @@ class LLMMockReplyMixin:
         recent_turns: list[dict[str, Any]],
     ) -> str:
         if decision["requires_confirmation"]:
-            return self._mock_confirmation_reply_text(
+            return self._mock_confirmation_speech_text(
                 text=text,
                 caution_prefix=caution_prefix,
                 relationship_item=relationship_item,
@@ -148,21 +148,21 @@ class LLMMockReplyMixin:
                 conflict_item=conflict_item,
             )
         if primary_recall_focus == "user" and any(token in text for token in ("相談", "どうしたら", "悩", "困って")):
-            return self._mock_user_focus_reply_text(
+            return self._mock_user_focus_speech_text(
                 text=text,
                 caution_prefix=caution_prefix,
                 continuity_prefix=continuity_prefix,
                 user_item=user_item,
             )
         if primary_recall_focus == "commitment":
-            return self._mock_commitment_reply_text(
+            return self._mock_commitment_speech_text(
                 text=text,
                 caution_prefix=caution_prefix,
                 commitment_item=commitment_item,
                 event_basis=event_basis,
             )
         if primary_recall_focus == "episodic":
-            return self._mock_episodic_reply_text(
+            return self._mock_episodic_speech_text(
                 text=text,
                 caution_prefix=caution_prefix,
                 episode_item=episode_item,
@@ -170,7 +170,7 @@ class LLMMockReplyMixin:
             )
         if primary_recall_focus == "preference":
             return f"{caution_prefix}{continuity_prefix}好みの話として受け取ったよ。{text} について、今の気分も含めて聞かせて。"
-        return self._mock_default_topic_reply_text(
+        return self._mock_default_topic_speech_text(
             text=text,
             caution_prefix=caution_prefix,
             continuity_prefix=continuity_prefix,
@@ -178,7 +178,7 @@ class LLMMockReplyMixin:
             recent_turns=recent_turns,
         )
 
-    def _mock_confirmation_reply_text(
+    def _mock_confirmation_speech_text(
         self,
         *,
         text: str,
@@ -201,7 +201,7 @@ class LLMMockReplyMixin:
             return f"{caution_prefix}{basis_text} という流れで受け取っているけれど、{text} の理解はこれで合っている？"
         return f"{caution_prefix}{text} の受け取りを断定せず確認したい。いまの理解で合っている？"
 
-    def _mock_user_focus_reply_text(
+    def _mock_user_focus_speech_text(
         self,
         *,
         text: str,
@@ -216,7 +216,7 @@ class LLMMockReplyMixin:
             )
         return f"{caution_prefix}{continuity_prefix}状況は受け取ったよ。{text} の中で、今いちばん困っている点をもう少し教えて。"
 
-    def _mock_commitment_reply_text(
+    def _mock_commitment_speech_text(
         self,
         *,
         text: str,
@@ -232,7 +232,7 @@ class LLMMockReplyMixin:
             return f"{event_basis} の続きとして受け取ったよ。{text} について、今回はどこまで進めたい？"
         return f"{caution_prefix}その流れは覚えている前提で話すね。{text} に関して、今回どこまで進めたい？"
 
-    def _mock_episodic_reply_text(
+    def _mock_episodic_speech_text(
         self,
         *,
         text: str,
@@ -246,7 +246,7 @@ class LLMMockReplyMixin:
             return f"{event_basis} の場面として受け取ったよ。{text} のどの部分からつなげたい？"
         return f"{caution_prefix}その続きとして受け取ったよ。{text} のどの部分からつなげたい？"
 
-    def _mock_default_topic_reply_text(
+    def _mock_default_topic_speech_text(
         self,
         *,
         text: str,
@@ -276,13 +276,13 @@ class LLMMockReplyMixin:
         # 結果
         return None
 
-    def _should_mock_autonomous_initiative_reply(self, initiative_context: InitiativeContext | None) -> bool:
+    def _should_mock_autonomous_initiative_speech(self, initiative_context: InitiativeContext | None) -> bool:
         if initiative_context is None:
             return False
         selected_family = self._selected_initiative_family_entry(initiative_context)
         if selected_family is not None:
             preferred_result_kind = str(selected_family.preferred_result_kind or "").strip()
-            if preferred_result_kind == "reply":
+            if preferred_result_kind == "speech":
                 return True
             if preferred_result_kind in {"noop", "capability_request"}:
                 return False
@@ -303,13 +303,13 @@ class LLMMockReplyMixin:
                 return True
         return False
 
-    def _mock_initiative_reply_text(
+    def _mock_initiative_speech_text(
         self,
         *,
         initiative_context: InitiativeContext | None,
         decision: dict[str, Any],
     ) -> str | None:
-        if initiative_context is None or decision.get("kind") != "reply":
+        if initiative_context is None or decision.get("kind") != "speech":
             return None
         if initiative_context.trigger_kind not in {"wake", "background_wake"}:
             return None

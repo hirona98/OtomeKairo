@@ -28,7 +28,7 @@ class ServiceInputTracePersistMixin:
     ) -> dict[str, Any]:
         # 結果選択
         decision = pipeline["decision"]
-        reply_payload = pipeline["reply_payload"]
+        speech_payload = pipeline["speech_payload"]
         if capability_request_summary is None:
             candidate_summary = pipeline.get("capability_request_summary")
             if isinstance(candidate_summary, dict):
@@ -71,7 +71,7 @@ class ServiceInputTracePersistMixin:
             ongoing_action_summary=pipeline.get("ongoing_action_summary"),
             decision=decision,
             result_kind=result_kind,
-            reply_payload=reply_payload,
+            speech_payload=speech_payload,
             pending_intent_summary=pending_intent_summary,
             capability_decision_view=pipeline.get("capability_decision_view"),
             initiative_context=pipeline.get("initiative_context"),
@@ -95,7 +95,7 @@ class ServiceInputTracePersistMixin:
             input_text=input_text,
             pipeline=pipeline,
             result_kind=result_kind,
-            reply_payload=reply_payload,
+            speech_payload=speech_payload,
             pending_intent_selection=pending_intent_selection,
         )
 
@@ -133,7 +133,7 @@ class ServiceInputTracePersistMixin:
         return {
             "cycle_id": cycle_id,
             "result_kind": result_kind,
-            "reply": {"text": reply_payload["reply_text"]} if reply_payload else None,
+            "speech": {"text": speech_payload["speech_text"]} if speech_payload else None,
             "capability_request": capability_request_summary if isinstance(capability_request_summary, dict) else None,
         }
 
@@ -159,7 +159,7 @@ class ServiceInputTracePersistMixin:
         ongoing_action_summary: dict[str, Any] | None,
         decision: dict[str, Any],
         result_kind: str,
-        reply_payload: dict[str, Any] | None,
+        speech_payload: dict[str, Any] | None,
         pending_intent_summary: dict[str, Any] | None,
         capability_decision_view: list[dict[str, Any]] | None,
         initiative_context: InitiativeContext | None,
@@ -186,7 +186,7 @@ class ServiceInputTracePersistMixin:
             finished_at=finished_at,
             decision=decision,
             result_kind=result_kind,
-            reply_payload=reply_payload,
+            speech_payload=speech_payload,
             pending_intent_summary=pending_intent_summary,
         )
         events.extend(
@@ -250,7 +250,7 @@ class ServiceInputTracePersistMixin:
                 finished_at=finished_at,
                 decision=decision,
                 result_kind=result_kind,
-                reply_payload=reply_payload,
+                speech_payload=speech_payload,
                 pending_intent_summary=pending_intent_summary,
                 pending_intent_selection=pending_intent_selection,
                 initiative_context=initiative_context,

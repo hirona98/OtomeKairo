@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from otomekairo.llm.contexts import CurrentInput, DecisionContext, InitiativeContext, ReplyContext
+from otomekairo.llm.contexts import CurrentInput, DecisionContext, InitiativeContext, SpeechContext
 from otomekairo.service.common import debug_log
 
 
@@ -58,7 +58,7 @@ class ServiceInputPipelineMixin:
         selected_preset = state["model_presets"][state["selected_model_preset_id"]]
         recall_role = selected_preset["roles"]["input_interpretation"]
         decision_role = selected_preset["roles"]["decision_generation"]
-        reply_role = selected_preset["roles"]["expression_generation"]
+        speech_role = selected_preset["roles"]["expression_generation"]
         persona = state["personas"][state["selected_persona_id"]]
 
         # 想起入力
@@ -137,7 +137,7 @@ class ServiceInputPipelineMixin:
             recall_hint=recall_hint,
             recall_pack=recall_pack,
             visual_observation_context=visual_observation_context,
-            reply_role=reply_role,
+            speech_role=speech_role,
             persona=persona,
             decision=decision,
             cycle_label=cycle_label,
@@ -165,7 +165,7 @@ class ServiceInputPipelineMixin:
             "visual_observation_context": visual_observation_context,
             "world_state_trace": pipeline_contexts["world_state_trace"],
             "decision": decision,
-            "reply_payload": output_result["reply_payload"],
+            "speech_payload": output_result["speech_payload"],
             "capability_request_summary": output_result["capability_request_summary"],
             "ongoing_action_transition_summary": output_result["ongoing_action_transition_summary"],
         }
@@ -489,7 +489,7 @@ class ServiceInputPipelineMixin:
         visual_observation_context: dict[str, Any] | None,
         recall_hint: dict[str, Any],
         recall_pack: dict[str, Any],
-        reply_role: dict[str, Any],
+        speech_role: dict[str, Any],
         persona: dict[str, Any],
         decision: dict[str, Any],
         cycle_label: str,
@@ -516,14 +516,14 @@ class ServiceInputPipelineMixin:
                 ),
             )
 
-        # 返信
-        reply_payload: dict[str, Any] | None = None
-        reply_suppressed = (
-            decision["kind"] == "reply"
+        # 発話
+        speech_payload: dict[str, Any] | None = None
+        speech_suppressed = (
+            decision["kind"] == "speech"
             and current_input.source_kind == "capability_result"
             and current_input.response_target == "none"
         )
-        if reply_suppressed:
+        if speech_suppressed:
             original_reason = str(decision.get("reason_summary") or "").strip()
             reason_summary = "capability result の source_current_input.response_target=none のため、内部観測結果として処理し assistant message を送信しない。"
             if original_reason:
@@ -538,9 +538,9 @@ class ServiceInputPipelineMixin:
                     "capability_request": None,
                 }
             )
-            debug_log("Pipeline", f"{cycle_label} reply skipped capability_result_response_target=none")
+            debug_log("Pipeline", f"{cycle_label} speech skipped capability_result_response_target=none")
         elif (
-            decision["kind"] == "reply"
+            decision["kind"] == "speech"
             and current_input.source_kind == "background_wake"
             and self._user_response_cycle_active()
         ):
@@ -558,10 +558,10 @@ class ServiceInputPipelineMixin:
                     "capability_request": None,
                 }
             )
-            debug_log("Pipeline", f"{cycle_label} reply skipped background_wake_user_response_active")
-        elif decision["kind"] == "reply":
-            debug_log("Pipeline", f"{cycle_label} reply start", level="DEBUG")
-            reply_context = self._build_reply_context(
+            debug_log("Pipeline", f"{cycle_label} speech skipped background_wake_user_response_active")
+        elif decision["kind"] == "speech":
+            debug_log("Pipeline", f"{cycle_label} speech start", level="DEBUG")
+            speech_context = self._build_speech_context(
                 input_text=input_text,
                 current_input=current_input,
                 recent_turns=recent_turns,
@@ -577,21 +577,21 @@ class ServiceInputPipelineMixin:
                 recall_pack=recall_pack,
                 decision=decision,
             )
-            reply_payload = self.llm.generate_reply(
-                role_definition=reply_role,
+            speech_payload = self.llm.generate_speech(
+                role_definition=speech_role,
                 persona=persona,
-                context=reply_context,
+                context=speech_context,
             )
-            debug_log("Pipeline", f"{cycle_label} reply done reply_chars={len(reply_payload['reply_text'])}")
+            debug_log("Pipeline", f"{cycle_label} speech done speech_chars={len(speech_payload['speech_text'])}")
             self._emit_live_log(
                 level="INFO",
                 component="Result",
-                message=f"{cycle_label} reply done reply={self._conversation_log_excerpt(reply_payload['reply_text'])}",
+                message=f"{cycle_label} speech done speech={self._conversation_log_excerpt(speech_payload['speech_text'])}",
             )
         else:
-            debug_log("Pipeline", f"{cycle_label} reply skipped decision_kind={decision['kind']}")
+            debug_log("Pipeline", f"{cycle_label} speech skipped decision_kind={decision['kind']}")
         return {
-            "reply_payload": reply_payload,
+            "speech_payload": speech_payload,
             "capability_request_summary": dispatched_capability_request_summary,
             "ongoing_action_transition_summary": ongoing_action_transition_summary,
         }
@@ -635,7 +635,7 @@ class ServiceInputPipelineMixin:
             recall_pack=recall_pack,
         )
 
-    def _build_reply_context(
+    def _build_speech_context(
         self,
         *,
         input_text: str,
@@ -652,8 +652,8 @@ class ServiceInputPipelineMixin:
         recall_hint: dict[str, Any],
         recall_pack: dict[str, Any],
         decision: dict[str, Any],
-    ) -> ReplyContext:
-        return ReplyContext(
+    ) -> SpeechContext:
+        return SpeechContext(
             input_text=input_text,
             current_input=current_input,
             recent_turns=recent_turns,

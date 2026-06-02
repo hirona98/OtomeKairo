@@ -962,10 +962,10 @@ class ServiceCapabilityMixin:
     ) -> str:
         if reason_code == "followup_pending_intent":
             return "capability result を受け、今は pending_intent へ切り替えて後で再評価する。"
-        if reason_code == "followup_reply":
+        if reason_code == "followup_speech":
             if result_error:
-                return "capability result の error を受け、reply で継続を中断した。"
-            return "capability result を受け、reply で継続を完了した。"
+                return "capability result の error を受け、speech で継続を中断した。"
+            return "capability result を受け、speech で継続を完了した。"
         if reason_code == "followup_noop":
             if result_error:
                 return "capability result の error を受け、noop で継続を中断した。"

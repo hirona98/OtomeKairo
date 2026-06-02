@@ -93,7 +93,7 @@ class MemoryCorrectionReconciler:
         # LLM選定
         source_pack = {
             "input_text": context.get("input_text"),
-            "reply_text": context.get("reply_text"),
+            "speech_text": context.get("speech_text"),
             "decision_summary": context.get("decision_summary"),
             "target_candidates": [
                 self._compact_target(target)

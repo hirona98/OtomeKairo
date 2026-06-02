@@ -207,7 +207,7 @@ LLM に渡すのは raw DB row 群ではなく、候補群を request-local ref 
 ```
 
 `augmented_query_text` は検索・想起用の内部拡張クエリであり、ユーザー発話の原文ではない。
-会話判断・返信の `input_text` と同一視しない。
+会話判断・発話の `input_text` と同一視しない。
 
 入力の原則は次である。
 

@@ -322,7 +322,7 @@ class ServiceInputInitiativeContextMixin:
                 updated_at=None,
             )
             if age_label is not None:
-                payload["last_spontaneous_reply_age_label"] = age_label
+                payload["last_spontaneous_speech_age_label"] = age_label
         if isinstance(selected_candidate, dict):
             dedupe_key = selected_candidate.get("dedupe_key")
             if isinstance(dedupe_key, str) and dedupe_key:
@@ -493,7 +493,7 @@ class ServiceInputInitiativeContextMixin:
             if isinstance(cooldown_reason, str) and cooldown_reason.strip():
                 reasons.append(cooldown_reason.strip())
         if intervention_state.get("same_dedupe_recently_replied") is True:
-            reasons.append("同じ pending_intent 系統には最近 reply 済みで、連続介入は避けたい。")
+            reasons.append("同じ pending_intent 系統には最近 speech 済みで、連続介入は避けたい。")
         if isinstance(ongoing_action_summary, dict) and ongoing_action_summary.get("status") == "waiting_result":
             reasons.append("ongoing_action が結果待ちで、重複介入は抑えたい。")
         if int(capability_summary.get("available_count", 0)) == 0:

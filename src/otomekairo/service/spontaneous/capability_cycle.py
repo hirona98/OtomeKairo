@@ -435,9 +435,9 @@ class ServiceSpontaneousCapabilityCycleMixin:
         capability_response: dict[str, Any],
         pipeline: dict[str, Any],
     ) -> None:
-        reply_payload = pipeline.get("reply_payload")
-        if not isinstance(reply_payload, dict):
-            debug_log("CapabilityResult", f"{self._short_cycle_id(cycle_id)} assistant_message skipped no_reply", level="DEBUG")
+        speech_payload = pipeline.get("speech_payload")
+        if not isinstance(speech_payload, dict):
+            debug_log("CapabilityResult", f"{self._short_cycle_id(cycle_id)} assistant_message skipped no_speech", level="DEBUG")
             return
 
         target_client_id = capability_response.get("client_id")
@@ -459,7 +459,7 @@ class ServiceSpontaneousCapabilityCycleMixin:
                 "request_id": request_id,
                 "capability_id": capability_id,
                 "system_text": f"[capability_result] {capability_id}",
-                "message": reply_payload["reply_text"],
+                "message": speech_payload["speech_text"],
             },
         }
         sent = self._event_stream_registry.send_to_client(target_client_id.strip(), event)
@@ -468,7 +468,7 @@ class ServiceSpontaneousCapabilityCycleMixin:
             (
                 f"{self._short_cycle_id(cycle_id)} assistant_message sent={sent} "
                 f"client={target_client_id.strip()} "
-                f"reply_chars={len(reply_payload['reply_text'])}"
+                f"speech_chars={len(speech_payload['speech_text'])}"
             ),
             level="DEBUG",
         )

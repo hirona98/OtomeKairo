@@ -17,7 +17,7 @@ class ServiceInputTraceCompactMixin:
         followup_capability_request_summary: dict[str, Any] | None,
         decision: dict[str, Any] | None,
         result_kind: str,
-        reply_payload: dict[str, Any] | None,
+        speech_payload: dict[str, Any] | None,
         pending_intent_summary: dict[str, Any] | None,
         pending_intent_selection: dict[str, Any] | None,
         initiative_context: InitiativeContext | None,
@@ -48,7 +48,7 @@ class ServiceInputTraceCompactMixin:
             "decision_summary": self._compact_capability_followup_decision_summary(decision),
             "result_summary": self._compact_trigger_result_summary(
                 result_kind=result_kind,
-                reply_payload=reply_payload,
+                speech_payload=speech_payload,
                 pending_intent_summary=pending_intent_summary,
                 capability_request_summary=dispatch_request_summary,
                 failure_reason=failure_reason,
@@ -346,7 +346,7 @@ class ServiceInputTraceCompactMixin:
             value = intervention_state.get(key)
             if isinstance(value, bool):
                 payload[key] = value
-        for key in ("cooldown_reason", "last_spontaneous_reply_age_label"):
+        for key in ("cooldown_reason", "last_spontaneous_speech_age_label"):
             value = intervention_state.get(key)
             if isinstance(value, str) and value.strip():
                 payload[key] = self._clamp(value.strip(), limit=120)
@@ -475,7 +475,7 @@ class ServiceInputTraceCompactMixin:
         followup_capability_request_summary: dict[str, Any] | None,
         decision: dict[str, Any] | None,
         result_kind: str,
-        reply_payload: dict[str, Any] | None,
+        speech_payload: dict[str, Any] | None,
         pending_intent_summary: dict[str, Any] | None,
         ongoing_action_transition_summary: dict[str, Any] | None,
         failure_reason: str | None = None,
@@ -497,7 +497,7 @@ class ServiceInputTraceCompactMixin:
             "decision_summary": self._compact_capability_followup_decision_summary(decision),
             "followup_result_summary": self._compact_capability_followup_result_summary(
                 result_kind=result_kind,
-                reply_payload=reply_payload,
+                speech_payload=speech_payload,
                 pending_intent_summary=pending_intent_summary,
                 followup_capability_request_summary=followup_capability_request_summary,
                 failure_reason=failure_reason,
@@ -607,7 +607,7 @@ class ServiceInputTraceCompactMixin:
         self,
         *,
         result_kind: str,
-        reply_payload: dict[str, Any] | None,
+        speech_payload: dict[str, Any] | None,
         pending_intent_summary: dict[str, Any] | None,
         capability_request_summary: dict[str, Any] | None,
         failure_reason: str | None,
@@ -615,8 +615,8 @@ class ServiceInputTraceCompactMixin:
         payload: dict[str, Any] = {
             "result_kind": result_kind,
         }
-        if isinstance(reply_payload, dict) and isinstance(reply_payload.get("reply_text"), str):
-            payload["reply_summary"] = self._clamp(reply_payload["reply_text"].strip(), limit=160)
+        if isinstance(speech_payload, dict) and isinstance(speech_payload.get("speech_text"), str):
+            payload["speech_summary"] = self._clamp(speech_payload["speech_text"].strip(), limit=160)
         if isinstance(pending_intent_summary, dict):
             payload["pending_intent_summary"] = pending_intent_summary
         compact_capability_request = self._compact_capability_request_summary(capability_request_summary)
@@ -630,14 +630,14 @@ class ServiceInputTraceCompactMixin:
         self,
         *,
         result_kind: str,
-        reply_payload: dict[str, Any] | None,
+        speech_payload: dict[str, Any] | None,
         pending_intent_summary: dict[str, Any] | None,
         followup_capability_request_summary: dict[str, Any] | None,
         failure_reason: str | None,
     ) -> dict[str, Any]:
         payload = self._compact_trigger_result_summary(
             result_kind=result_kind,
-            reply_payload=reply_payload,
+            speech_payload=speech_payload,
             pending_intent_summary=pending_intent_summary,
             capability_request_summary=followup_capability_request_summary,
             failure_reason=failure_reason,

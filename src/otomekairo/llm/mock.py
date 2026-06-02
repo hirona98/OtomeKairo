@@ -9,7 +9,7 @@ from otomekairo.llm.mocks.capability import LLMMockCapabilityMixin
 from otomekairo.llm.mocks.decision import LLMMockDecisionMixin
 from otomekairo.llm.mocks.memory import LLMMockMemoryMixin
 from otomekairo.llm.mocks.recall import LLMMockRecallMixin
-from otomekairo.llm.mocks.reply import LLMMockReplyMixin
+from otomekairo.llm.mocks.speech import LLMMockSpeechMixin
 from otomekairo.llm.mocks.world_state import LLMMockWorldStateMixin
 
 
@@ -19,7 +19,7 @@ class MockLLMClient(
     LLMMockRecallMixin,
     LLMMockCapabilityMixin,
     LLMMockDecisionMixin,
-    LLMMockReplyMixin,
+    LLMMockSpeechMixin,
     LLMMockMemoryMixin,
     LLMMockWorldStateMixin,
 ):

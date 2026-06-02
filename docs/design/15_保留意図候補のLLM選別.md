@@ -20,7 +20,7 @@ OtomeKairo では、次をコードで守る。
 - 候補の作成、更新、期限切れ削除
 - `memory_set_id` の一致
 - `not_before`、`expires_at`、wake の interval due
-- 同じ `dedupe_key` に対する recent reply 抑制
+- 同じ `dedupe_key` に対する recent speech 抑制
 - LLM が返した `candidate_ref` と実 candidate の照合
 
 LLM に任せるのは、eligible な候補群の中から今再評価に乗せる 1 件を選ぶか、今回は選ばないかだけである。
@@ -69,7 +69,7 @@ LLM は候補の外側を増やさない。
 - global cooldown 判定
 - `memory_set_id` 一致
 - `not_before` / `expires_at` の検証
-- 同じ `dedupe_key` の recent reply 抑制
+- 同じ `dedupe_key` の recent speech 抑制
 - `selected_candidate_ref=none` のときに `wake_noop` へ落とすこと
 
 ## 追加する論理 role

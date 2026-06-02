@@ -207,6 +207,6 @@ class ServiceInputCycleMixin:
         return {
             "cycle_id": cycle_id,
             "result_kind": "internal_failure",
-            "reply": None,
+            "speech": None,
             "capability_request": None,
         }

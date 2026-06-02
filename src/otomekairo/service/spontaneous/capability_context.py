@@ -530,7 +530,7 @@ class ServiceSpontaneousCapabilityContextMixin:
             decision=decision,
             result_payload=result_payload,
         )
-        if reason_code in {"followup_reply", "followup_noop"}:
+        if reason_code in {"followup_speech", "followup_noop"}:
             return self._capability_terminal_transition_reason_summary(
                 reason_code=reason_code,
                 result_error=has_error,
@@ -547,8 +547,8 @@ class ServiceSpontaneousCapabilityContextMixin:
         result_payload: dict[str, Any],
     ) -> str:
         decision_kind = str(decision.get("kind") or "").strip()
-        if decision_kind == "reply":
-            return "followup_reply"
+        if decision_kind == "speech":
+            return "followup_speech"
         if decision_kind == "noop":
             return "followup_noop"
         if result_payload.get("error") not in {None, ""}:
@@ -626,10 +626,10 @@ class ServiceSpontaneousCapabilityContextMixin:
     ) -> str:
         decision_kind = str(decision.get("kind") or "").strip()
         has_error = result_payload.get("error") not in {None, ""}
-        if decision_kind == "reply":
+        if decision_kind == "speech":
             if has_error:
-                return f"{capability_id} の error を受けて reply した。"
-            return f"{capability_id} の結果を受けて reply した。"
+                return f"{capability_id} の error を受けて speech した。"
+            return f"{capability_id} の結果を受けて speech した。"
         if decision_kind == "noop":
             if has_error:
                 return f"{capability_id} の error を受けて継続を中断した。"

@@ -66,12 +66,12 @@ event type の分類軸は次に固定する。
 
 - `*_request` は server から client への capability 実行要求である
 - `assistant_message` は server が生成した assistant 発話を client に表示させる通知である
-- `assistant_message.data.source_kind` は発話生成の起点を示し、event type を増やして起点ごとの返信通知を分けない
-- capability result follow-up の返信通知は `assistant_message` に `source_kind=capability_result`、`request_id`、`capability_id` を入れる
-- `wake / background_wake` の返信通知は `assistant_message` に `source_kind=wake / background_wake`、`trigger_kind` を入れる
+- `assistant_message.data.source_kind` は発話生成の起点を示し、event type を増やして起点ごとの発話通知を分けない
+- capability result follow-up の発話通知は `assistant_message` に `source_kind=capability_result`、`request_id`、`capability_id` を入れる
+- `wake / background_wake` の発話通知は `assistant_message` に `source_kind=wake / background_wake`、`trigger_kind` を入れる
 
-`capability_result` は event type として使わない。capability result そのものは client が `/api/capability/result` へ HTTP POST する payload であり、event stream の返信通知ではない。
-`spontaneous_reply` は event type として使わない。自発発話も `assistant_message` に統一し、起点は `source_kind` で表す。
+`capability_result` は event type として使わない。capability result そのものは client が `/api/capability/result` へ HTTP POST する payload であり、event stream の発話通知ではない。
+`spontaneous_speech` は event type として使わない。自発発話も `assistant_message` に統一し、起点は `source_kind` で表す。
 
 server -> client の代表例:
 

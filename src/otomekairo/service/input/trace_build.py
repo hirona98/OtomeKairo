@@ -106,7 +106,7 @@ class ServiceInputTraceBuildMixin:
         finished_at: str,
         decision: dict[str, Any] | None = None,
         result_kind: str | None = None,
-        reply_payload: dict[str, Any] | None = None,
+        speech_payload: dict[str, Any] | None = None,
         pending_intent_summary: dict[str, Any] | None = None,
         failure_reason: str | None = None,
         failure_event_kind: str = "recall_hint_failure",
@@ -165,15 +165,15 @@ class ServiceInputTraceBuildMixin:
         )
 
         # 応答イベント
-        if reply_payload is not None:
+        if speech_payload is not None:
             events.append(
                 {
                     "event_id": f"event:{uuid.uuid4().hex}",
                     "cycle_id": cycle_id,
                     "memory_set_id": memory_set_id,
-                    "kind": "reply",
+                    "kind": "speech",
                     "role": "assistant",
-                    "text": reply_payload["reply_text"],
+                    "text": speech_payload["speech_text"],
                     "created_at": finished_at,
                 }
             )
@@ -542,7 +542,7 @@ class ServiceInputTraceBuildMixin:
         finished_at: str,
         decision: dict[str, Any],
         result_kind: str,
-        reply_payload: dict[str, Any] | None,
+        speech_payload: dict[str, Any] | None,
         pending_intent_summary: dict[str, Any] | None,
         pending_intent_selection: dict[str, Any] | None = None,
         initiative_context: InitiativeContext | None = None,
@@ -553,7 +553,7 @@ class ServiceInputTraceBuildMixin:
     ) -> dict[str, Any]:
         trace = {
             "result_kind": result_kind,
-            "reply_summary": self._clamp(reply_payload["reply_text"]) if reply_payload else None,
+            "speech_summary": self._clamp(speech_payload["speech_text"]) if speech_payload else None,
             "noop_reason_summary": decision["reason_summary"] if decision["kind"] == "noop" else None,
             "pending_intent_summary": pending_intent_summary,
             "internal_failure_summary": None,
@@ -571,7 +571,7 @@ class ServiceInputTraceBuildMixin:
             followup_capability_request_summary=followup_capability_request_summary,
             decision=decision,
             result_kind=result_kind,
-            reply_payload=reply_payload,
+            speech_payload=speech_payload,
             pending_intent_summary=pending_intent_summary,
             pending_intent_selection=pending_intent_selection,
             initiative_context=initiative_context,
@@ -593,7 +593,7 @@ class ServiceInputTraceBuildMixin:
             followup_capability_request_summary=followup_capability_request_summary,
             decision=decision,
             result_kind=result_kind,
-            reply_payload=reply_payload,
+            speech_payload=speech_payload,
             pending_intent_summary=pending_intent_summary,
             ongoing_action_transition_summary=ongoing_action_transition_summary,
         )
@@ -618,7 +618,7 @@ class ServiceInputTraceBuildMixin:
     ) -> dict[str, Any]:
         trace = {
             "result_kind": "internal_failure",
-            "reply_summary": None,
+            "speech_summary": None,
             "noop_reason_summary": None,
             "pending_intent_summary": None,
             "internal_failure_summary": failure_reason,
@@ -636,7 +636,7 @@ class ServiceInputTraceBuildMixin:
             followup_capability_request_summary=followup_capability_request_summary,
             decision=None,
             result_kind="internal_failure",
-            reply_payload=None,
+            speech_payload=None,
             pending_intent_summary=None,
             pending_intent_selection=pending_intent_selection,
             initiative_context=initiative_context,
@@ -659,7 +659,7 @@ class ServiceInputTraceBuildMixin:
             followup_capability_request_summary=followup_capability_request_summary,
             decision=None,
             result_kind="internal_failure",
-            reply_payload=None,
+            speech_payload=None,
             pending_intent_summary=None,
             ongoing_action_transition_summary=ongoing_action_transition_summary,
             failure_reason=failure_reason,

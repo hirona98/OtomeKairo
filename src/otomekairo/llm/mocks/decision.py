@@ -102,9 +102,9 @@ class LLMMockDecisionMixin:
                 "pending_intent": None,
                 "capability_request": capability_request,
             }
-        if self._should_mock_autonomous_initiative_reply(initiative_context):
+        if self._should_mock_autonomous_initiative_speech(initiative_context):
             return {
-                "kind": "reply",
+                "kind": "speech",
                 "reason_code": "initiative_context",
                 "reason_summary": "現在の drive_state や world_state から自発的に前へ出る理由がある。",
                 "requires_confirmation": False,
@@ -197,7 +197,7 @@ class LLMMockDecisionMixin:
     ) -> dict[str, Any]:
         if conflicts:
             return {
-                "kind": "reply",
+                "kind": "speech",
                 "reason_code": "conflict_present",
                 "reason_summary": "RecallPack に矛盾候補があり、確認寄りの返答が必要。",
                 "requires_confirmation": True,
@@ -205,7 +205,7 @@ class LLMMockDecisionMixin:
             }
         if primary_recall_focus == "commitment" and active_commitments:
             return {
-                "kind": "reply",
+                "kind": "speech",
                 "reason_code": "active_commitment",
                 "reason_summary": "進行中の約束や保留があり、継続会話として返答する。",
                 "requires_confirmation": False,
@@ -213,7 +213,7 @@ class LLMMockDecisionMixin:
             }
         if "episodic" in secondary_recall_focuses and episodic_evidence:
             return {
-                "kind": "reply",
+                "kind": "speech",
                 "reason_code": "secondary_episodic",
                 "reason_summary": "補助焦点として回想があり、関連エピソードを踏まえて返答する。",
                 "requires_confirmation": False,
@@ -221,7 +221,7 @@ class LLMMockDecisionMixin:
             }
         if recent_episode_affects and recent_episode_affects[0]["affect_label"] in {"不安", "緊張", "迷い", "concern"}:
             return {
-                "kind": "reply",
+                "kind": "speech",
                 "reason_code": "affect_caution",
                 "reason_summary": "AffectContext に慎重さを要する感情があり、確認寄りに返す。",
                 "requires_confirmation": True,
@@ -229,16 +229,16 @@ class LLMMockDecisionMixin:
             }
         if current_valence <= -0.25:
             return {
-                "kind": "reply",
+                "kind": "speech",
                 "reason_code": "mood_caution",
                 "reason_summary": "AffectContext の現在機嫌がやや張っており、慎重寄りに返す。",
                 "requires_confirmation": True,
                 "pending_intent": None,
             }
         return {
-            "kind": "reply",
+            "kind": "speech",
             "reason_code": f"focus:{primary_recall_focus}",
-            "reason_summary": "A normal conversation reply is appropriate for the current input.",
+            "reason_summary": "A normal conversation speech is appropriate for the current input.",
             "requires_confirmation": primary_recall_focus in {"fact", "relationship"},
             "pending_intent": None,
         }

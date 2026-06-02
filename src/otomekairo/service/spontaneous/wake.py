@@ -9,7 +9,7 @@ from otomekairo.recall.builder import RecallPackSelectionError
 from otomekairo.service.common import (
     BACKGROUND_WAKE_POLL_SECONDS,
     INITIAL_VISUAL_CAPTURE_DELAY_SECONDS,
-    WAKE_REPLY_COOLDOWN_MINUTES,
+    WAKE_SPEECH_COOLDOWN_MINUTES,
     debug_log,
 )
 from otomekairo.service.spontaneous.pending_intent import PendingIntentSelectionError
@@ -26,9 +26,9 @@ class ServiceSpontaneousWakeMixin:
     ) -> None:
         if trigger_kind not in {"wake", "background_wake"}:
             return
-        reply_payload = pipeline.get("reply_payload")
-        if not isinstance(reply_payload, dict):
-            debug_log("Wake", f"{self._short_cycle_id(cycle_id)} assistant_message skipped no_reply", level="DEBUG")
+        speech_payload = pipeline.get("speech_payload")
+        if not isinstance(speech_payload, dict):
+            debug_log("Wake", f"{self._short_cycle_id(cycle_id)} assistant_message skipped no_speech", level="DEBUG")
             return
         target_client_id = self._wake_assistant_message_target_client_id(client_context)
         if target_client_id is None:
@@ -43,7 +43,7 @@ class ServiceSpontaneousWakeMixin:
                 "source_kind": trigger_kind,
                 "trigger_kind": trigger_kind,
                 "system_text": f"[{trigger_kind}]",
-                "message": reply_payload["reply_text"],
+                "message": speech_payload["speech_text"],
             },
         }
         sent = self._event_stream_registry.send_to_client(target_client_id, event)
@@ -51,7 +51,7 @@ class ServiceSpontaneousWakeMixin:
             "Wake",
             (
                 f"{self._short_cycle_id(cycle_id)} assistant_message sent={sent} "
-                f"client={target_client_id} reply_chars={len(reply_payload['reply_text'])}"
+                f"client={target_client_id} speech_chars={len(speech_payload['speech_text'])}"
             ),
             level="DEBUG",
         )
@@ -207,7 +207,7 @@ class ServiceSpontaneousWakeMixin:
                     pending_intent_selection=pending_intent_selection,
                 )
 
-                # 返信後処理
+                # 発話後処理
                 self._record_wake_outcome(
                     current_time=started_at,
                     decision=pipeline["decision"],
@@ -365,16 +365,16 @@ class ServiceSpontaneousWakeMixin:
         selected_candidate: dict[str, Any] | None,
         client_context: dict[str, Any] | None = None,
     ) -> None:
-        # 返信
-        if decision.get("kind") == "reply":
+        # 発話
+        if decision.get("kind") == "speech":
             with self._runtime_state_lock:
                 self._wake_runtime_state["last_spontaneous_at"] = current_time
                 self._wake_runtime_state["cooldown_until"] = self._wake_cooldown_until(current_time)
                 if selected_candidate is not None:
                     dedupe_key = selected_candidate.get("dedupe_key")
                     if isinstance(dedupe_key, str) and dedupe_key:
-                        reply_history = self._wake_runtime_state.setdefault("reply_history_by_dedupe", {})
-                        reply_history[dedupe_key] = current_time
+                        speech_history = self._wake_runtime_state.setdefault("speech_history_by_dedupe", {})
+                        speech_history[dedupe_key] = current_time
                     self._remove_pending_intent_candidate(selected_candidate.get("candidate_id"))
                 self._record_visual_observation_prompted_locked(
                     current_time=current_time,
@@ -561,22 +561,22 @@ class ServiceSpontaneousWakeMixin:
         if not isinstance(cooldown_until, str) or not cooldown_until:
             return None
         if self._parse_iso(current_time) < self._parse_iso(cooldown_until):
-            return "直近の自発 reply から cooldown 中のため、発話量と頻度を控えめに調整する。"
+            return "直近の自発 speech から cooldown 中のため、発話量と頻度を控えめに調整する。"
         return None
 
     def _was_recently_replied(self, *, dedupe_key: str, current_time: str) -> bool:
         # 検索
         with self._runtime_state_lock:
-            reply_history = self._wake_runtime_state.setdefault("reply_history_by_dedupe", {})
-            last_reply_at = reply_history.get(dedupe_key)
-        if not isinstance(last_reply_at, str) or not last_reply_at:
+            speech_history = self._wake_runtime_state.setdefault("speech_history_by_dedupe", {})
+            last_speech_at = speech_history.get(dedupe_key)
+        if not isinstance(last_speech_at, str) or not last_speech_at:
             return False
         current_dt = self._parse_iso(current_time)
-        return current_dt - self._parse_iso(last_reply_at) < timedelta(minutes=WAKE_REPLY_COOLDOWN_MINUTES)
+        return current_dt - self._parse_iso(last_speech_at) < timedelta(minutes=WAKE_SPEECH_COOLDOWN_MINUTES)
 
     def _wake_cooldown_until(self, current_time: str) -> str:
         # タイムスタンプ
-        return (self._parse_iso(current_time) + timedelta(minutes=WAKE_REPLY_COOLDOWN_MINUTES)).isoformat()
+        return (self._parse_iso(current_time) + timedelta(minutes=WAKE_SPEECH_COOLDOWN_MINUTES)).isoformat()
 
     def _wake_input_text(self, candidate: dict[str, Any]) -> str:
         # intent判定

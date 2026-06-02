@@ -131,7 +131,7 @@ class DecisionContext:
 
 
 @dataclass(frozen=True, slots=True)
-class ReplyContext:
+class SpeechContext:
     input_text: str
     current_input: CurrentInput
     recent_turns: list[dict[str, Any]]

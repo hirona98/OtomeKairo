@@ -134,7 +134,7 @@ request:
 - 会話の `images` だけから `world_state.visual_context` を更新しない
 - server は上記 summary をそのまま永続化せず、必要な場合だけ `world_state` source pack の補助文脈へ使う
 - server は会話入力を `current_input.sender=user`、`source_kind=user_message`、`response_target=user`、`text=<ユーザー原文>` として shared pipeline に渡す
-- server は非空のユーザー原文に対する `decision.kind=noop` を契約違反として repair する。明示的な返信不要表現がある場合だけ `noop` を許可する
+- server は非空のユーザー原文に対する `decision.kind=noop` を契約違反として repair する。明示的な発話不要表現がある場合だけ `noop` を許可する
 
 response:
 
@@ -143,8 +143,8 @@ response:
   "ok": true,
   "data": {
     "cycle_id": "cycle:...",
-    "result_kind": "reply",
-    "reply": {
+    "result_kind": "speech",
+    "speech": {
       "text": "やわらかく穏やかに受け取ったよ。こんにちは"
     }
   }
@@ -153,7 +153,7 @@ response:
 
 `result_kind` は次のいずれかを返す。
 
-- `reply`
+- `speech`
 - `capability_request`
 - `noop`
 - `internal_failure`
@@ -167,7 +167,7 @@ response:
   "data": {
     "cycle_id": "cycle:...",
     "result_kind": "capability_request",
-    "reply": null,
+    "speech": null,
     "capability_request": {
       "request_id": "vision_capture_request:...",
       "capability_id": "vision.capture",
@@ -186,7 +186,7 @@ response:
 }
 ```
 
-`result_kind=noop`、`result_kind=capability_request`、`result_kind=internal_failure` のとき、`reply` は `null` を返す。
+`result_kind=noop`、`result_kind=capability_request`、`result_kind=internal_failure` のとき、`speech` は `null` を返す。
 `capability_request` が無い結果では、`capability_request` は `null` を返す。
 
 主な失敗:
@@ -230,14 +230,14 @@ response:
   "data": {
     "cycle_id": "cycle:...",
     "result_kind": "noop",
-    "reply": null
+    "speech": null
   }
 }
 ```
 
 `result_kind` は次のいずれかを返す。
 
-- `reply`
+- `speech`
 - `capability_request`
 - `noop`
 - `internal_failure`
@@ -257,14 +257,14 @@ wake API は少なくとも次の挙動を持つ。
 - server 内の background 起床スケジューラは `current_input.sender=system`、`source_kind=background_wake`、`response_target=none` として shared pipeline に渡す
 - capability request は dispatch 時点の `current_input` を request record の `source_current_input` に保存し、capability result の `response_target` は `source_current_input.response_target` を引き継ぐ
 - `source_current_input.response_target=none` の capability result は内部観測結果として扱い、実効判断を `noop` に正規化し、assistant message を送信しない
-- visual observation は wake 判断へ渡し、`change_state=first_seen / changed` は wake 判断へ進む前景シグナルとして扱うが、reply 義務ではない
+- visual observation は wake 判断へ渡し、`change_state=first_seen / changed` は wake 判断へ進む前景シグナルとして扱うが、speech 義務ではない
 - visual observation signature は `vision_source_id / source_kind / source_label / visual_summary_text` を持ち、`window_title` を持たない。signature 比較は `vision_source_id / source_kind` の不一致と `visual_summary_text` の類似度を使う
-- cooldown 中の visual observation は `cooldown_active=true` として wake 判断へ渡す。LLM は cooldown、直近 reply、drive_state、world_state を合わせて `reply / noop / pending_intent` を選ぶ
-- 再評価時刻に達した保留意図があれば再評価し、必要なら `reply`
+- cooldown 中の visual observation は `cooldown_active=true` として wake 判断へ渡す。LLM は cooldown、直近 speech、drive_state、world_state を合わせて `speech / noop / pending_intent` を選ぶ
+- 再評価時刻に達した保留意図があれば再評価し、必要なら `speech`
 
 server 内の background 起床スケジューラも、同じ wake 1 サイクルを内部的に使う。
 
-`result_kind=noop`、`result_kind=capability_request`、`result_kind=internal_failure` のとき、`reply` は `null` を返す。
+`result_kind=noop`、`result_kind=capability_request`、`result_kind=internal_failure` のとき、`speech` は `null` を返す。
 `capability_request` が無い結果では、`capability_request` は `null` を返す。
 
 主な失敗:

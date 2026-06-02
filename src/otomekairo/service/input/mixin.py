@@ -128,7 +128,7 @@ class ServiceInputMixin(
                 "pending_intent": None,
                 "capability_request": None,
             },
-            "reply_payload": None,
+            "speech_payload": None,
         }
 
     def _empty_recall_hint(self) -> dict[str, Any]:
@@ -214,7 +214,7 @@ class ServiceInputMixin(
             "adopted_evidence_items": [],
             "consistency_checks": [],
             "missing_reason": None,
-            "reply_guidance": None,
+            "speech_guidance": None,
         }
 
     def _empty_recall_pack_selection_trace(self) -> dict[str, Any]:
@@ -350,7 +350,7 @@ class ServiceInputMixin(
         decision = pipeline.get("decision")
         if isinstance(decision, dict):
             decision_kind = decision.get("kind")
-            if decision_kind in {"reply", "pending_intent", "capability_request"}:
+            if decision_kind in {"speech", "pending_intent", "capability_request"}:
                 return True
 
         if self._observation_capability_failed(observation_summary):

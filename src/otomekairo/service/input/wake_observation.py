@@ -497,7 +497,7 @@ class ServiceInputWakeObservationMixin:
         same_as_prompted = prompted_similarity["similar"]
 
         if same_as_prompted:
-            change_state = "same_as_recent_reply"
+            change_state = "same_as_recent_speech"
         elif previous_signature is None:
             change_state = "first_seen"
         elif same_as_previous:
@@ -520,7 +520,7 @@ class ServiceInputWakeObservationMixin:
             "change_state": change_state,
             "reason_summary": reason_summary,
             "observation_signature": observation_signature,
-            "same_as_recent_reply": same_as_prompted,
+            "same_as_recent_speech": same_as_prompted,
             "summary_text": self._client_context_text(summary.get("visual_summary_text"), limit=160),
             "vision_source_id": self._client_context_text(summary.get("vision_source_id"), limit=96),
             "source_kind": self._client_context_text(summary.get("source_kind"), limit=32),
@@ -709,8 +709,8 @@ class ServiceInputWakeObservationMixin:
         change_state: str,
         cooldown_reason: str | None,
     ) -> str:
-        if change_state == "same_as_recent_reply":
-            return "この視覚観測には既に自発 reply 済みなので、繰り返さない。"
+        if change_state == "same_as_recent_speech":
+            return "この視覚観測には既に自発 speech 済みなので、繰り返さない。"
         if change_state == "first_seen":
             if cooldown_reason is not None:
                 return "初めて見る視覚観測を cooldown 中の判断材料として渡す。発話するかは文脈で決める。"
@@ -753,9 +753,9 @@ class ServiceInputWakeObservationMixin:
         cooldown_active = signal.get("cooldown_active")
         if isinstance(cooldown_active, bool):
             payload["cooldown_active"] = cooldown_active
-        same_as_recent_reply = signal.get("same_as_recent_reply")
-        if isinstance(same_as_recent_reply, bool):
-            payload["same_as_recent_reply"] = same_as_recent_reply
+        same_as_recent_speech = signal.get("same_as_recent_speech")
+        if isinstance(same_as_recent_speech, bool):
+            payload["same_as_recent_speech"] = same_as_recent_speech
         similarity = signal.get("similarity")
         if isinstance(similarity, int | float):
             payload["similarity"] = round(float(similarity), 3)

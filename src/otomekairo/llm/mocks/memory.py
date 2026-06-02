@@ -16,7 +16,7 @@ class LLMMockMemoryMixin:
         input_text: str,
         recall_hint: dict,
         decision: dict,
-        reply_text: str | None,
+        speech_text: str | None,
         memory_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         # model確認
@@ -31,7 +31,7 @@ class LLMMockMemoryMixin:
             "primary_scope_type": self._mock_primary_scope_type(recall_hint["primary_recall_focus"]),
             "primary_scope_key": self._mock_primary_scope_key(recall_hint["primary_recall_focus"]),
             "summary_text": normalized or "空の入力だった。",
-            "outcome_text": reply_text or decision["reason_summary"],
+            "outcome_text": speech_text or decision["reason_summary"],
             "open_loops": self._mock_open_loops(normalized, recall_hint["primary_recall_focus"]),
             "salience": 0.72 if normalized else 0.2,
         }

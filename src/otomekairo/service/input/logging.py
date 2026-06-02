@@ -81,17 +81,17 @@ class ServiceInputLoggingMixin:
         input_text: str,
         pipeline: dict[str, Any],
         result_kind: str,
-        reply_payload: dict[str, Any] | None,
+        speech_payload: dict[str, Any] | None,
         pending_intent_selection: dict[str, Any] | None = None,
     ) -> None:
         # ログ群
         logs: list[dict[str, Any]] = []
-        if reply_payload is None:
+        if speech_payload is None:
             logs.append(
                 self._build_live_log_record(
                     level="INFO",
                     component="Result",
-                    message=f"{self._short_cycle_id(cycle_id)} result={result_kind} reply=-",
+                    message=f"{self._short_cycle_id(cycle_id)} result={result_kind} speech=-",
                 )
             )
         self._emit_live_logs(logs)

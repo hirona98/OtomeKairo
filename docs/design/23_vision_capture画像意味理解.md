@@ -140,7 +140,7 @@ LLM の出力は JSON object 1 個に固定する。
 4. `observation_summary.image_interpreted=true` と `visual_summary_text` を付ける
 5. `visual_summary_text` を `visual_observation_record.detailed_summary_text` として保存する
 6. `scene_entities / activity_labels / environment_labels` と検索用 index を派生する
-7. `VisualObservationContext` として `recall_hint / recall_pack / decision / reply` に渡す
+7. `VisualObservationContext` として `recall_hint / recall_pack / decision / speech` に渡す
 8. `vision.capture` 由来の視覚観測は `world_state.visual_context` 更新候補にする
 9. 会話や行動と結びつく場合は episode に紐づける
 10. 重要、反復、継続、会話結合を満たす場合は記憶候補にする
@@ -246,7 +246,7 @@ LLM の出力は JSON object 1 個に固定する。
 調整では次を観測する。
 
 - digest ごとの `record_count / group_count / compressed_count`
-- `visual_observations` と `visual_daily_digests` が reply に使われた頻度
+- `visual_observations` と `visual_daily_digests` が speech に使われた頻度
 - `compressed` から後で参照された件数
 - 昇格した `memory_unit` が訂正、矛盾、削除された件数
 - 画像由来記憶がユーザーに過剰または不気味に見えた事例

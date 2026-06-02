@@ -47,7 +47,7 @@ class MemoryConsolidator:
         input_text: str,
         recall_hint: dict[str, Any],
         decision: dict[str, Any],
-        reply_payload: dict[str, Any] | None,
+        speech_payload: dict[str, Any] | None,
         events: list[dict[str, Any]],
         memory_context: dict[str, Any] | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -70,7 +70,7 @@ class MemoryConsolidator:
             input_text=input_text,
             recall_hint=recall_hint,
             decision=decision,
-            reply_text=reply_payload["reply_text"] if reply_payload else None,
+            speech_text=speech_payload["speech_text"] if speech_payload else None,
             memory_context=self._build_memory_interpretation_context(
                 memory_context=memory_context,
                 events=events,
@@ -204,7 +204,7 @@ class MemoryConsolidator:
                 memory_actions=memory_actions,
                 correction_context=self._build_correction_job_context(
                     input_text=input_text,
-                    reply_payload=reply_payload,
+                    speech_payload=speech_payload,
                     decision=decision,
                     event_ids=event_ids,
                     cycle_id=cycle_id,
@@ -416,7 +416,7 @@ class MemoryConsolidator:
         self,
         *,
         input_text: str,
-        reply_payload: dict[str, Any] | None,
+        speech_payload: dict[str, Any] | None,
         decision: dict[str, Any],
         event_ids: list[str],
         cycle_id: str,
@@ -430,7 +430,7 @@ class MemoryConsolidator:
         # job context
         return {
             "input_text": input_text,
-            "reply_text": reply_payload.get("reply_text") if isinstance(reply_payload, dict) else None,
+            "speech_text": speech_payload.get("speech_text") if isinstance(speech_payload, dict) else None,
             "decision_summary": {
                 "kind": decision.get("kind"),
                 "reason_summary": decision.get("reason_summary"),

@@ -333,7 +333,7 @@ class ServiceInputCapabilityContextMixin:
             "allowed_followup_capability_ids": [source_capability_id],
             "followup_policy_summary": (
                 "source capability と異なる capability_request は出さず、"
-                "受け取った result への reply / noop / pending_intent で閉じる。"
+                "受け取った result への speech / noop / pending_intent で閉じる。"
             ),
         }
         source_request_summary = self._compact_capability_request_summary(capability_request_summary)

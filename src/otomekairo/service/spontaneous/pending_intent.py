@@ -499,7 +499,7 @@ class ServiceSpontaneousPendingIntentMixin:
                 "last_spontaneous_at": None,
                 "cooldown_until": None,
                 "initial_delay_until": None,
-                "reply_history_by_dedupe": {},
+                "speech_history_by_dedupe": {},
             }
 
     def _pending_intent_not_before(self, occurred_at: str) -> str:

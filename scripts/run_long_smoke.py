@@ -1804,7 +1804,7 @@ class LongSmokeRunner:
             conn.execute("DELETE FROM world_states WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute("DELETE FROM ongoing_actions WHERE memory_set_id = ?", (memory_set_id,))
             conn.execute(
-                "DELETE FROM events WHERE memory_set_id = ? AND kind IN ('conversation_input', 'reply')",
+                "DELETE FROM events WHERE memory_set_id = ? AND kind IN ('conversation_input', 'speech')",
                 (memory_set_id,),
             )
             conn.commit()
@@ -2599,13 +2599,13 @@ class LongSmokeRunner:
             self._run_real_llm_initiative_probe_missing_body_status,
             self._run_real_llm_initiative_probe_missing_environment_status,
             self._run_real_llm_initiative_probe_missing_location_status,
-            self._run_real_llm_initiative_probe_schedule_reply,
-            self._run_real_llm_initiative_probe_social_reply,
-            self._run_real_llm_initiative_probe_body_reply,
-            self._run_real_llm_initiative_probe_external_reply,
-            self._run_real_llm_initiative_probe_device_reply,
-            self._run_real_llm_initiative_probe_environment_reply,
-            self._run_real_llm_initiative_probe_location_reply,
+            self._run_real_llm_initiative_probe_schedule_speech,
+            self._run_real_llm_initiative_probe_social_speech,
+            self._run_real_llm_initiative_probe_body_speech,
+            self._run_real_llm_initiative_probe_external_speech,
+            self._run_real_llm_initiative_probe_device_speech,
+            self._run_real_llm_initiative_probe_environment_speech,
+            self._run_real_llm_initiative_probe_location_speech,
             self._run_real_llm_initiative_probe_ongoing_waiting_noop,
         ]
         traces: dict[str, dict[str, Any]] = {}
@@ -3020,9 +3020,9 @@ class LongSmokeRunner:
             return
         raise SmokeError(f"unsupported initiative status override capability: {capability_id}")
 
-    def _run_real_llm_initiative_probe_schedule_reply(self) -> tuple[str, dict[str, Any]]:
-        case_id = "schedule-grounded-reply"
-        marker = "RealLLMInitiativeScheduleReplyMarker"
+    def _run_real_llm_initiative_probe_schedule_speech(self) -> tuple[str, dict[str, Any]]:
+        case_id = "schedule-grounded-speech"
+        marker = "RealLLMInitiativeScheduleSpeechMarker"
         self._seed_initiative_probe_drive(
             drive_id=f"drive:{case_id}",
             drive_kind="follow_through",
@@ -3049,18 +3049,18 @@ class LongSmokeRunner:
             trace,
             case_id=case_id,
             expected_trigger_kind="wake",
-            expected_result_kind="reply",
+            expected_result_kind="speech",
             expected_selected_family="autonomous",
-            expected_preferred_result_kind="reply",
+            expected_preferred_result_kind="speech",
             expected_foreground_thinness="grounded",
             expected_world_state_type="schedule",
             expected_fresh_world_state_capability_id="schedule.status",
         )
         return case_id, trace
 
-    def _run_real_llm_initiative_probe_social_reply(self) -> tuple[str, dict[str, Any]]:
-        case_id = "social-grounded-reply"
-        marker = "RealLLMInitiativeSocialReplyMarker"
+    def _run_real_llm_initiative_probe_social_speech(self) -> tuple[str, dict[str, Any]]:
+        case_id = "social-grounded-speech"
+        marker = "RealLLMInitiativeSocialSpeechMarker"
         self._seed_initiative_probe_drive(
             drive_id=f"drive:{case_id}",
             drive_kind="relationship_attunement",
@@ -3087,18 +3087,18 @@ class LongSmokeRunner:
             trace,
             case_id=case_id,
             expected_trigger_kind="wake",
-            expected_result_kind="reply",
+            expected_result_kind="speech",
             expected_selected_family="autonomous",
-            expected_preferred_result_kind="reply",
+            expected_preferred_result_kind="speech",
             expected_foreground_thinness="grounded",
             expected_world_state_type="social_context",
             expected_fresh_world_state_capability_id="social.status",
         )
         return case_id, trace
 
-    def _run_real_llm_initiative_probe_body_reply(self) -> tuple[str, dict[str, Any]]:
-        case_id = "body-grounded-reply"
-        marker = "RealLLMInitiativeBodyReplyMarker"
+    def _run_real_llm_initiative_probe_body_speech(self) -> tuple[str, dict[str, Any]]:
+        case_id = "body-grounded-speech"
+        marker = "RealLLMInitiativeBodySpeechMarker"
         self._seed_initiative_probe_drive(
             drive_id=f"drive:{case_id}",
             drive_kind="self_regulation",
@@ -3125,19 +3125,19 @@ class LongSmokeRunner:
             trace,
             case_id=case_id,
             expected_trigger_kind="wake",
-            expected_result_kind="reply",
+            expected_result_kind="speech",
             expected_selected_family="autonomous",
-            expected_preferred_result_kind="reply",
+            expected_preferred_result_kind="speech",
             expected_foreground_thinness="grounded",
             expected_world_state_type="body",
             expected_fresh_world_state_capability_id="body.status",
         )
         return case_id, trace
 
-    def _run_real_llm_initiative_probe_external_reply(self) -> tuple[str, dict[str, Any]]:
-        return self._run_real_llm_initiative_probe_fresh_status_reply(
-            case_id="external-fresh-reply",
-            marker="RealLLMInitiativeExternalReplyMarker",
+    def _run_real_llm_initiative_probe_external_speech(self) -> tuple[str, dict[str, Any]]:
+        return self._run_real_llm_initiative_probe_fresh_status_speech(
+            case_id="external-fresh-speech",
+            marker="RealLLMInitiativeExternalSpeechMarker",
             drive_kind="topic_continuation",
             drive_summary="GitHub レビューの外部サービス状態に合わせて短く続けたい。",
             world_state_type="external_service",
@@ -3148,10 +3148,10 @@ class LongSmokeRunner:
             expected_fresh_world_state_capability_id="external.status",
         )
 
-    def _run_real_llm_initiative_probe_device_reply(self) -> tuple[str, dict[str, Any]]:
-        return self._run_real_llm_initiative_probe_fresh_status_reply(
-            case_id="device-fresh-reply",
-            marker="RealLLMInitiativeDeviceReplyMarker",
+    def _run_real_llm_initiative_probe_device_speech(self) -> tuple[str, dict[str, Any]]:
+        return self._run_real_llm_initiative_probe_fresh_status_speech(
+            case_id="device-fresh-speech",
+            marker="RealLLMInitiativeDeviceSpeechMarker",
             drive_kind="user_attention",
             drive_summary="端末の接続状態に合わせて短く判断したい。",
             world_state_type="device",
@@ -3162,10 +3162,10 @@ class LongSmokeRunner:
             expected_fresh_world_state_capability_id="device.status",
         )
 
-    def _run_real_llm_initiative_probe_environment_reply(self) -> tuple[str, dict[str, Any]]:
-        return self._run_real_llm_initiative_probe_fresh_status_reply(
-            case_id="environment-fresh-reply",
-            marker="RealLLMInitiativeEnvironmentReplyMarker",
+    def _run_real_llm_initiative_probe_environment_speech(self) -> tuple[str, dict[str, Any]]:
+        return self._run_real_llm_initiative_probe_fresh_status_speech(
+            case_id="environment-fresh-speech",
+            marker="RealLLMInitiativeEnvironmentSpeechMarker",
             drive_kind="self_regulation",
             drive_summary="作業環境に合わせて短く整えたい。",
             world_state_type="environment",
@@ -3176,10 +3176,10 @@ class LongSmokeRunner:
             expected_fresh_world_state_capability_id="environment.status",
         )
 
-    def _run_real_llm_initiative_probe_location_reply(self) -> tuple[str, dict[str, Any]]:
-        return self._run_real_llm_initiative_probe_fresh_status_reply(
-            case_id="location-fresh-reply",
-            marker="RealLLMInitiativeLocationReplyMarker",
+    def _run_real_llm_initiative_probe_location_speech(self) -> tuple[str, dict[str, Any]]:
+        return self._run_real_llm_initiative_probe_fresh_status_speech(
+            case_id="location-fresh-speech",
+            marker="RealLLMInitiativeLocationSpeechMarker",
             drive_kind="follow_through",
             drive_summary="今の作業場所に合わせて短く続けたい。",
             world_state_type="location",
@@ -3190,7 +3190,7 @@ class LongSmokeRunner:
             expected_fresh_world_state_capability_id="location.status",
         )
 
-    def _run_real_llm_initiative_probe_fresh_status_reply(
+    def _run_real_llm_initiative_probe_fresh_status_speech(
         self,
         *,
         case_id: str,
@@ -3230,9 +3230,9 @@ class LongSmokeRunner:
             trace,
             case_id=case_id,
             expected_trigger_kind="wake",
-            expected_result_kind="reply",
+            expected_result_kind="speech",
             expected_selected_family="autonomous",
-            expected_preferred_result_kind="reply",
+            expected_preferred_result_kind="speech",
             expected_foreground_thinness=expected_foreground_thinness,
             expected_world_state_type=world_state_type,
             expected_fresh_world_state_capability_id=expected_fresh_world_state_capability_id,
@@ -3267,7 +3267,7 @@ class LongSmokeRunner:
         self._restart_server_for_real_llm_probe()
         self._clear_initiative_probe_state()
         for run_case in (
-            self._run_real_llm_background_wake_probe_grounded_reply,
+            self._run_real_llm_background_wake_probe_grounded_speech,
             self._run_real_llm_background_wake_probe_cooldown_skip,
         ):
             case_id, trace = run_case()
@@ -3333,9 +3333,9 @@ class LongSmokeRunner:
         )
         return case_id, trace
 
-    def _run_real_llm_background_wake_probe_grounded_reply(self) -> tuple[str, dict[str, Any]]:
-        case_id = "background-grounded-reply"
-        marker = "RealLLMBackgroundGroundedReplyMarker"
+    def _run_real_llm_background_wake_probe_grounded_speech(self) -> tuple[str, dict[str, Any]]:
+        case_id = "background-grounded-speech"
+        marker = "RealLLMBackgroundGroundedSpeechMarker"
         self._seed_initiative_probe_drive(
             drive_id=f"drive:{case_id}",
             drive_kind="follow_through",
@@ -3353,9 +3353,9 @@ class LongSmokeRunner:
             trace,
             case_id=case_id,
             expected_trigger_kind="background_wake",
-            expected_result_kind="reply",
+            expected_result_kind="speech",
             expected_selected_family="autonomous",
-            expected_preferred_result_kind="reply",
+            expected_preferred_result_kind="speech",
             expected_foreground_thinness="grounded",
             expected_suppression_level="medium",
             expected_world_state_type="schedule",
@@ -5685,8 +5685,8 @@ class LongSmokeRunner:
         if not isinstance(conversation_trace, dict):
             raise SmokeError("real-llm-smoke conversation_trace was not recorded.")
         conversation_summary = conversation_trace.get("cycle_summary", {})
-        if not isinstance(conversation_summary, dict) or conversation_summary.get("result_kind") != "reply":
-            raise SmokeError("real-llm-smoke initial conversation did not produce reply.")
+        if not isinstance(conversation_summary, dict) or conversation_summary.get("result_kind") != "speech":
+            raise SmokeError("real-llm-smoke initial conversation did not produce speech.")
         if conversation_summary.get("failed"):
             raise SmokeError("real-llm-smoke initial conversation failed.")
         self._assert_memory_trace_succeeded(conversation_trace, "real-llm-smoke initial conversation")
@@ -5715,8 +5715,8 @@ class LongSmokeRunner:
         followup_summary = followup_trace.get("cycle_summary", {})
         if not isinstance(followup_summary, dict) or followup_summary.get("trigger_kind") != "capability_result":
             raise SmokeError("real-llm-smoke external.status follow-up trigger was invalid.")
-        if followup_summary.get("result_kind") != "reply" or followup_summary.get("failed"):
-            raise SmokeError("real-llm-smoke external.status follow-up did not produce reply.")
+        if followup_summary.get("result_kind") != "speech" or followup_summary.get("failed"):
+            raise SmokeError("real-llm-smoke external.status follow-up did not produce speech.")
         transition_summary = ((followup_trace.get("result_trace") or {}).get("ongoing_action_transition_summary"))
         if not isinstance(transition_summary, dict) or transition_summary.get("final_state") != "completed":
             raise SmokeError("real-llm-smoke external.status follow-up did not complete ongoing_action.")
@@ -5758,8 +5758,8 @@ class LongSmokeRunner:
         schedule_followup_summary = schedule_followup_trace.get("cycle_summary", {})
         if not isinstance(schedule_followup_summary, dict) or schedule_followup_summary.get("trigger_kind") != "capability_result":
             raise SmokeError("real-llm-smoke schedule.status follow-up trigger was invalid.")
-        if schedule_followup_summary.get("result_kind") != "reply" or schedule_followup_summary.get("failed"):
-            raise SmokeError("real-llm-smoke schedule.status follow-up did not produce reply.")
+        if schedule_followup_summary.get("result_kind") != "speech" or schedule_followup_summary.get("failed"):
+            raise SmokeError("real-llm-smoke schedule.status follow-up did not produce speech.")
         schedule_transition_summary = ((schedule_followup_trace.get("result_trace") or {}).get("ongoing_action_transition_summary"))
         if not isinstance(schedule_transition_summary, dict) or schedule_transition_summary.get("final_state") != "completed":
             raise SmokeError("real-llm-smoke schedule.status follow-up did not complete ongoing_action.")
@@ -5942,13 +5942,13 @@ class LongSmokeRunner:
             "missing-body-status-probe",
             "missing-environment-status-probe",
             "missing-location-status-probe",
-            "schedule-grounded-reply",
-            "social-grounded-reply",
-            "body-grounded-reply",
-            "external-fresh-reply",
-            "device-fresh-reply",
-            "environment-fresh-reply",
-            "location-fresh-reply",
+            "schedule-grounded-speech",
+            "social-grounded-speech",
+            "body-grounded-speech",
+            "external-fresh-speech",
+            "device-fresh-speech",
+            "environment-fresh-speech",
+            "location-fresh-speech",
             "ongoing-waiting-noop",
         }
         if summary.get("real_llm_initiative_probe_verified") is not True:
@@ -6047,59 +6047,59 @@ class LongSmokeRunner:
                 "capability_request_status": "dispatched",
                 "fresh_world_state_capability_ids": [],
             },
-            "schedule-grounded-reply": {
+            "schedule-grounded-speech": {
                 "trigger_kind": "wake",
-                "result_kind": "reply",
+                "result_kind": "speech",
                 "selected_candidate_family": "autonomous",
-                "preferred_result_kind": "reply",
+                "preferred_result_kind": "speech",
                 "foreground_thinness": "grounded",
                 "fresh_world_state_capability_ids": ["schedule.status"],
             },
-            "social-grounded-reply": {
+            "social-grounded-speech": {
                 "trigger_kind": "wake",
-                "result_kind": "reply",
+                "result_kind": "speech",
                 "selected_candidate_family": "autonomous",
-                "preferred_result_kind": "reply",
+                "preferred_result_kind": "speech",
                 "foreground_thinness": "grounded",
                 "fresh_world_state_capability_ids": ["social.status"],
             },
-            "body-grounded-reply": {
+            "body-grounded-speech": {
                 "trigger_kind": "wake",
-                "result_kind": "reply",
+                "result_kind": "speech",
                 "selected_candidate_family": "autonomous",
-                "preferred_result_kind": "reply",
+                "preferred_result_kind": "speech",
                 "foreground_thinness": "grounded",
                 "fresh_world_state_capability_ids": ["body.status"],
             },
-            "external-fresh-reply": {
+            "external-fresh-speech": {
                 "trigger_kind": "wake",
-                "result_kind": "reply",
+                "result_kind": "speech",
                 "selected_candidate_family": "autonomous",
-                "preferred_result_kind": "reply",
+                "preferred_result_kind": "speech",
                 "foreground_thinness": "thin",
                 "fresh_world_state_capability_ids": ["external.status"],
             },
-            "device-fresh-reply": {
+            "device-fresh-speech": {
                 "trigger_kind": "wake",
-                "result_kind": "reply",
+                "result_kind": "speech",
                 "selected_candidate_family": "autonomous",
-                "preferred_result_kind": "reply",
+                "preferred_result_kind": "speech",
                 "foreground_thinness": "thin",
                 "fresh_world_state_capability_ids": ["device.status"],
             },
-            "environment-fresh-reply": {
+            "environment-fresh-speech": {
                 "trigger_kind": "wake",
-                "result_kind": "reply",
+                "result_kind": "speech",
                 "selected_candidate_family": "autonomous",
-                "preferred_result_kind": "reply",
+                "preferred_result_kind": "speech",
                 "foreground_thinness": "mixed",
                 "fresh_world_state_capability_ids": ["environment.status"],
             },
-            "location-fresh-reply": {
+            "location-fresh-speech": {
                 "trigger_kind": "wake",
-                "result_kind": "reply",
+                "result_kind": "speech",
                 "selected_candidate_family": "autonomous",
-                "preferred_result_kind": "reply",
+                "preferred_result_kind": "speech",
                 "foreground_thinness": "mixed",
                 "fresh_world_state_capability_ids": ["location.status"],
             },
@@ -6183,7 +6183,7 @@ class LongSmokeRunner:
         expected_background_cases = {
             "background-no-context-skip",
             "background-weak-foreground-noop",
-            "background-grounded-reply",
+            "background-grounded-speech",
             "background-cooldown-skip",
             "background-interval-not-due",
         }
@@ -6217,14 +6217,14 @@ class LongSmokeRunner:
                 "suppression_level": "medium",
                 "turn_consolidation_status": "skipped",
             },
-            "background-grounded-reply": {
+            "background-grounded-speech": {
                 "observed_cycle": True,
                 "trigger_kind": "background_wake",
-                "result_kind": "reply",
-                "decision_kind": "reply",
+                "result_kind": "speech",
+                "decision_kind": "speech",
                 "wake_scheduler_active": True,
                 "selected_candidate_family": "autonomous",
-                "preferred_result_kind": "reply",
+                "preferred_result_kind": "speech",
                 "foreground_thinness": "grounded",
                 "suppression_level": "medium",
                 "turn_consolidation_status": "succeeded",
@@ -6568,7 +6568,7 @@ class LongSmokeRunner:
             raise SmokeError("external.status probe follow-up cycle_summary was invalid.")
         if followup_cycle_summary.get("trigger_kind") != "capability_result":
             raise SmokeError("external.status probe follow-up trigger_kind was invalid.")
-        if followup_cycle_summary.get("result_kind") != "reply":
+        if followup_cycle_summary.get("result_kind") != "speech":
             raise SmokeError("external.status probe follow-up result_kind was invalid.")
         input_trace = followup_trace.get("input_trace", {})
         if not isinstance(input_trace, dict):
@@ -6689,12 +6689,12 @@ class LongSmokeRunner:
         if not isinstance(source_request_summary, dict) or source_request_summary.get("request_id") != request_id:
             raise SmokeError("external.status probe follow-up source_request_summary was invalid.")
         followup_result_summary = capability_result_followup_summary.get("followup_result_summary", {})
-        if not isinstance(followup_result_summary, dict) or followup_result_summary.get("result_kind") != "reply":
+        if not isinstance(followup_result_summary, dict) or followup_result_summary.get("result_kind") != "speech":
             raise SmokeError("external.status probe follow-up result summary was invalid.")
         transition_summary = capability_result_followup_summary.get("transition_summary", {})
         if not isinstance(transition_summary, dict):
             raise SmokeError("external.status probe follow-up transition summary was invalid.")
-        if transition_summary.get("reason_code") != "followup_reply":
+        if transition_summary.get("reason_code") != "followup_speech":
             raise SmokeError("external.status probe follow-up reason_code was invalid.")
         if transition_summary.get("final_state") != "completed":
             raise SmokeError("external.status probe follow-up final_state was invalid.")
@@ -6733,7 +6733,7 @@ class LongSmokeRunner:
             raise SmokeError("schedule.status probe follow-up cycle_summary was invalid.")
         if followup_cycle_summary.get("trigger_kind") != "capability_result":
             raise SmokeError("schedule.status probe follow-up trigger_kind was invalid.")
-        if followup_cycle_summary.get("result_kind") != "reply":
+        if followup_cycle_summary.get("result_kind") != "speech":
             raise SmokeError("schedule.status probe follow-up result_kind was invalid.")
         input_trace = followup_trace.get("input_trace", {})
         if not isinstance(input_trace, dict):
@@ -6815,12 +6815,12 @@ class LongSmokeRunner:
         if not isinstance(source_request_summary, dict) or source_request_summary.get("request_id") != request_id:
             raise SmokeError("schedule.status probe follow-up source_request_summary was invalid.")
         followup_result_summary = capability_result_followup_summary.get("followup_result_summary", {})
-        if not isinstance(followup_result_summary, dict) or followup_result_summary.get("result_kind") != "reply":
+        if not isinstance(followup_result_summary, dict) or followup_result_summary.get("result_kind") != "speech":
             raise SmokeError("schedule.status probe follow-up result summary was invalid.")
         transition_summary = capability_result_followup_summary.get("transition_summary", {})
         if not isinstance(transition_summary, dict):
             raise SmokeError("schedule.status probe follow-up transition summary was invalid.")
-        if transition_summary.get("reason_code") != "followup_reply":
+        if transition_summary.get("reason_code") != "followup_speech":
             raise SmokeError("schedule.status probe follow-up reason_code was invalid.")
         if transition_summary.get("final_state") != "completed":
             raise SmokeError("schedule.status probe follow-up final_state was invalid.")
@@ -6861,7 +6861,7 @@ class LongSmokeRunner:
             raise SmokeError("device.status probe follow-up cycle_summary was invalid.")
         if followup_cycle_summary.get("trigger_kind") != "capability_result":
             raise SmokeError("device.status probe follow-up trigger_kind was invalid.")
-        if followup_cycle_summary.get("result_kind") != "reply":
+        if followup_cycle_summary.get("result_kind") != "speech":
             raise SmokeError("device.status probe follow-up result_kind was invalid.")
         input_trace = followup_trace.get("input_trace", {})
         if not isinstance(input_trace, dict):
@@ -6933,7 +6933,7 @@ class LongSmokeRunner:
         transition_summary = capability_result_followup_summary.get("transition_summary", {})
         if not isinstance(transition_summary, dict):
             raise SmokeError("device.status probe follow-up transition summary was invalid.")
-        if transition_summary.get("reason_code") != "followup_reply":
+        if transition_summary.get("reason_code") != "followup_speech":
             raise SmokeError("device.status probe follow-up reason_code was invalid.")
         if transition_summary.get("final_state") != "completed":
             raise SmokeError("device.status probe follow-up final_state was invalid.")
@@ -6974,7 +6974,7 @@ class LongSmokeRunner:
             raise SmokeError("body.status probe follow-up cycle_summary was invalid.")
         if followup_cycle_summary.get("trigger_kind") != "capability_result":
             raise SmokeError("body.status probe follow-up trigger_kind was invalid.")
-        if followup_cycle_summary.get("result_kind") != "reply":
+        if followup_cycle_summary.get("result_kind") != "speech":
             raise SmokeError("body.status probe follow-up result_kind was invalid.")
         input_trace = followup_trace.get("input_trace", {})
         if not isinstance(input_trace, dict):
@@ -7046,7 +7046,7 @@ class LongSmokeRunner:
         transition_summary = capability_result_followup_summary.get("transition_summary", {})
         if not isinstance(transition_summary, dict):
             raise SmokeError("body.status probe follow-up transition summary was invalid.")
-        if transition_summary.get("reason_code") != "followup_reply":
+        if transition_summary.get("reason_code") != "followup_speech":
             raise SmokeError("body.status probe follow-up reason_code was invalid.")
         if transition_summary.get("final_state") != "completed":
             raise SmokeError("body.status probe follow-up final_state was invalid.")
@@ -7087,7 +7087,7 @@ class LongSmokeRunner:
             raise SmokeError("social.status probe follow-up cycle_summary was invalid.")
         if followup_cycle_summary.get("trigger_kind") != "capability_result":
             raise SmokeError("social.status probe follow-up trigger_kind was invalid.")
-        if followup_cycle_summary.get("result_kind") != "reply":
+        if followup_cycle_summary.get("result_kind") != "speech":
             raise SmokeError("social.status probe follow-up result_kind was invalid.")
         input_trace = followup_trace.get("input_trace", {})
         if not isinstance(input_trace, dict):
@@ -7159,7 +7159,7 @@ class LongSmokeRunner:
         transition_summary = capability_result_followup_summary.get("transition_summary", {})
         if not isinstance(transition_summary, dict):
             raise SmokeError("social.status probe follow-up transition summary was invalid.")
-        if transition_summary.get("reason_code") != "followup_reply":
+        if transition_summary.get("reason_code") != "followup_speech":
             raise SmokeError("social.status probe follow-up reason_code was invalid.")
         if transition_summary.get("final_state") != "completed":
             raise SmokeError("social.status probe follow-up final_state was invalid.")
@@ -7200,7 +7200,7 @@ class LongSmokeRunner:
             raise SmokeError("environment.status probe follow-up cycle_summary was invalid.")
         if followup_cycle_summary.get("trigger_kind") != "capability_result":
             raise SmokeError("environment.status probe follow-up trigger_kind was invalid.")
-        if followup_cycle_summary.get("result_kind") != "reply":
+        if followup_cycle_summary.get("result_kind") != "speech":
             raise SmokeError("environment.status probe follow-up result_kind was invalid.")
         input_trace = followup_trace.get("input_trace", {})
         if not isinstance(input_trace, dict):
@@ -7272,7 +7272,7 @@ class LongSmokeRunner:
         transition_summary = capability_result_followup_summary.get("transition_summary", {})
         if not isinstance(transition_summary, dict):
             raise SmokeError("environment.status probe follow-up transition summary was invalid.")
-        if transition_summary.get("reason_code") != "followup_reply":
+        if transition_summary.get("reason_code") != "followup_speech":
             raise SmokeError("environment.status probe follow-up reason_code was invalid.")
         if transition_summary.get("final_state") != "completed":
             raise SmokeError("environment.status probe follow-up final_state was invalid.")
@@ -7313,7 +7313,7 @@ class LongSmokeRunner:
             raise SmokeError("location.status probe follow-up cycle_summary was invalid.")
         if followup_cycle_summary.get("trigger_kind") != "capability_result":
             raise SmokeError("location.status probe follow-up trigger_kind was invalid.")
-        if followup_cycle_summary.get("result_kind") != "reply":
+        if followup_cycle_summary.get("result_kind") != "speech":
             raise SmokeError("location.status probe follow-up result_kind was invalid.")
         input_trace = followup_trace.get("input_trace", {})
         if not isinstance(input_trace, dict):
@@ -7385,7 +7385,7 @@ class LongSmokeRunner:
         transition_summary = capability_result_followup_summary.get("transition_summary", {})
         if not isinstance(transition_summary, dict):
             raise SmokeError("location.status probe follow-up transition summary was invalid.")
-        if transition_summary.get("reason_code") != "followup_reply":
+        if transition_summary.get("reason_code") != "followup_speech":
             raise SmokeError("location.status probe follow-up reason_code was invalid.")
         if transition_summary.get("final_state") != "completed":
             raise SmokeError("location.status probe follow-up final_state was invalid.")

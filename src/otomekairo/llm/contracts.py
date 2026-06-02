@@ -624,7 +624,7 @@ def validate_decision_contract(payload: dict[str, Any]) -> None:
     _validate_exact_keys(payload, required_keys, "Decision")
 
     # 値Checks
-    if payload["kind"] not in {"reply", "noop", "pending_intent", "capability_request"}:
+    if payload["kind"] not in {"speech", "noop", "pending_intent", "capability_request"}:
         raise LLMError("Decision kind が不正です。")
     if not isinstance(payload["reason_code"], str) or not payload["reason_code"].strip():
         raise LLMError("Decision reason_code は空でない文字列である必要があります。")

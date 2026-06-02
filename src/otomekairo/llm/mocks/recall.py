@@ -228,7 +228,7 @@ class LLMMockRecallMixin:
         anchor_prefix = "前回の" if primary_recall_focus == "episodic" or time_reference == "past" else "そのときの"
         if kind == "decision":
             anchor = f"{anchor_prefix}{section_label}の判断場面"
-        elif kind == "reply":
+        elif kind == "speech":
             anchor = f"{anchor_prefix}{section_label}への返答場面"
         elif kind == "conversation_input":
             anchor = f"{anchor_prefix}{section_label}の会話場面"
@@ -245,7 +245,7 @@ class LLMMockRecallMixin:
                 decision_or_result = f"{result_kind} を選ぶ流れになった。"
             else:
                 decision_or_result = "その場で応答方針を決めた。"
-        elif kind == "reply" and event_text is not None:
+        elif kind == "speech" and event_text is not None:
             decision_or_result = f"{event_text} と返した。"
 
         tone_or_note = None
@@ -253,7 +253,7 @@ class LLMMockRecallMixin:
             tone_or_note = "様子を確かめながら進める空気だった。"
         elif kind == "decision" and result_kind == "pending_intent":
             tone_or_note = "その場では返さず、後で触れる含みを残した。"
-        elif kind == "reply":
+        elif kind == "speech":
             tone_or_note = "前の流れを受けて返していた。"
 
         payload = {
