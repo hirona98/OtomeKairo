@@ -111,7 +111,7 @@ class ServiceSpontaneousWakeMixin:
 
             try:
                 if trigger_kind == "background_wake" and self._user_response_cycle_active():
-                    reason_summary = "ユーザー向け応答サイクルが進行中のため、background wake の自発発話は行わない。"
+                    reason_summary = "ユーザー向け応答サイクルが進行中のため、定期起床の自発発話は行わない。"
                     self._set_last_wake_at(started_at)
                     debug_log("Wake", f"{self._short_cycle_id(cycle_id)} skip user_response_active")
                     pipeline = self._noop_pipeline(
@@ -526,7 +526,7 @@ class ServiceSpontaneousWakeMixin:
         if retry_delay_seconds is not None:
             return {
                 "should_skip": True,
-                "reason_summary": "wake observation の一時失敗後の再試行待機中。",
+                "reason_summary": "起床前観測 の一時失敗後の再試行待機中。",
             }
 
         # 初回起床
@@ -545,7 +545,7 @@ class ServiceSpontaneousWakeMixin:
         if current_dt < due_at:
             return {
                 "should_skip": True,
-                "reason_summary": "interval wake の次回時刻にまだ達していない。",
+                "reason_summary": "定期起床 の次回時刻にまだ達していない。",
             }
 
         # 期限到来
@@ -627,7 +627,7 @@ class ServiceSpontaneousWakeMixin:
         # source取得
         if include_source and isinstance(source, str):
             if source == "background_wake_scheduler":
-                parts.append("入力源は background wake scheduler。")
+                parts.append("入力源は定期起床スケジューラ。")
             else:
                 parts.append(f"入力源は {source}。")
         wake_observation_summary = self._client_context_text(

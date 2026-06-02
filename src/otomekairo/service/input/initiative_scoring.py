@@ -409,7 +409,7 @@ class ServiceInputInitiativeScoringMixin:
         if level == "low":
             reasons.append("initiative_baseline が low")
         if trigger_kind == "background_wake":
-            reasons.append("background wake")
+            reasons.append("定期起床")
         foreground_thinness = self._initiative_foreground_thinness(foreground_signal_summary)
         if foreground_thinness == "thin":
             reasons.append("前景文脈が thin")

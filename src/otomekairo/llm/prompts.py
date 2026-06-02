@@ -821,14 +821,14 @@ def _build_decision_trigger_policy(
                 "selected candidate entry が preferred_result_kind=speech で suppression_level=low の場合、短い外向き伝達を出す正の候補です。直近のユーザー呼びかけが無いことや視覚変化のみであることを理由に noop へ落とさないでください。",
                 "foreground_signal_summary が grounded で world_state_summary に該当状況が既にあるときは、同じ情報を再取得する capability_request より、preferred_result_kind に沿った speech / noop を優先してください。",
                 "suppression_summary.cooldown_active が true ではない場合、recent_turn_summary だけから cooldown 中だと推測してはいけません。",
-                "background_wake は自律判断の通常入口なので、直近のユーザー呼びかけが無いこと自体を noop 理由にしないでください。",
-                "background_wake でも foreground_signal_summary が ready / grounded の場合、suppression_level=medium は抑制材料ですが、単独で noop を固定しないでください。",
+                "`background_wake` は定期起床であり、自律判断の通常入口なので、直近のユーザー呼びかけが無いこと自体を noop 理由にしないでください。",
+                "`background_wake` の定期起床でも foreground_signal_summary が ready / grounded の場合、suppression_level=medium は抑制材料ですが、単独で noop を固定しないでください。",
                 "foreground_signal_summary.visual_observations は desktop / camera / virtual などの視覚観測であり、ユーザー発話ではありません。speech を選ぶ場合は、相づちではなく観測に根拠づけた短い自発発話にしてください。",
                 "visual_observations[].change_state=first_seen / changed は判断へ進める変化であり、speech 義務ではありません。最近の自発 speech、cooldown、観測内容の価値を合わせ、弱ければ noop を選んでください。",
                 "visual_observations[].change_state=same_as_recent_speech / stable は繰り返し発話を避ける強い材料です。別の drive_state や pending_intent が無ければ noop を優先してください。",
                 "InitiativeContext があり pending_intent_summaries が空のときは、drive_state / world_state / ongoing_action / visual_observations から自然な前進理由がある場合だけ speech を選び、弱ければ noop を選んでください。",
                 "selected_candidate_family が ongoing_action で preferred_result_kind=capability_request のときは、available な capability の範囲で follow-up capability_request を検討してください。",
-                "foreground_signal_summary が thin で suppression_summary や intervention_risk_summary が強いとき、特に background_wake や initiative_baseline=low では、押し出しすぎず noop を優先してください。",
+                "foreground_signal_summary が thin で suppression_summary や intervention_risk_summary が強いとき、特に `background_wake` の定期起床や initiative_baseline=low では、押し出しすぎず noop を優先してください。",
             ]
         )
     return policies

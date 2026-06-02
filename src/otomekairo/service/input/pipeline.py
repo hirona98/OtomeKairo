@@ -545,7 +545,7 @@ class ServiceInputPipelineMixin:
             and self._user_response_cycle_active()
         ):
             original_reason = str(decision.get("reason_summary") or "").strip()
-            reason_summary = "ユーザー向け応答サイクルが進行中のため、background wake の自発発話は行わない。"
+            reason_summary = "ユーザー向け応答サイクルが進行中のため、定期起床の自発発話は行わない。"
             if original_reason:
                 reason_summary = f"{reason_summary} 元判断: {original_reason}"
             decision.update(

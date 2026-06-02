@@ -62,7 +62,7 @@ class ServiceInputWakePipelineMixin:
             or self._recent_turns_added_since(state=state, started_at=started_at)
         ):
             self._set_last_wake_at(started_at)
-            reason_summary = "background wake の観測中にユーザー向け会話が進んだため、自発発話は行わない。"
+            reason_summary = "定期起床の観測中にユーザー向け会話が進んだため、自発発話は行わない。"
             debug_log("Wake", f"{cycle_label} skipped user_response_changed")
             return (
                 self._noop_pipeline(
@@ -102,7 +102,7 @@ class ServiceInputWakePipelineMixin:
                 else:
                     self._set_last_wake_at(started_at)
                 if retryable_observation_failure:
-                    reason_summary = "wake observation の vision source が未接続だったため、interval を消費せず短く再試行する。"
+                    reason_summary = "起床前観測 の vision source が未接続だったため、interval を消費せず短く再試行する。"
                 elif (
                     isinstance(pending_intent_selection, dict)
                     and pending_intent_selection.get("selected_candidate_ref") == "none"

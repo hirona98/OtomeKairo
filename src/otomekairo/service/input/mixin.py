@@ -490,7 +490,7 @@ class ServiceInputMixin(
         return recent_turns[-RECALL_HINT_RECENT_TURN_LIMIT:]
 
     def _begin_user_response_cycle(self) -> None:
-        # ユーザー向け応答中は background wake の外向き発話を止める。
+        # ユーザー向け応答中は定期起床の外向き発話を止める。
         with self._runtime_state_lock:
             count = self._wake_runtime_state.get("active_user_response_cycle_count")
             if not isinstance(count, int) or count < 0:

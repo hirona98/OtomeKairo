@@ -76,7 +76,7 @@ class ServiceInputWakeObservationMixin:
         if not isinstance(input_payload, dict):
             return self._wake_policy_observation_failure_summary(
                 observation=observation,
-                reason_summary="wake_policy observation input が不正。",
+                reason_summary="起床前観測 input が不正。",
             )
         resolved_input_payload = self._resolve_wake_policy_observation_input(
             capability_id=capability_id,
@@ -98,7 +98,7 @@ class ServiceInputWakeObservationMixin:
                 capability_id=capability_id,
                 input_payload=resolved_input_payload,
                 current_time=self._now_iso(),
-                goal_summary=f"wake_policy observation {observation_id}",
+                goal_summary=f"起床前観測 {observation_id}",
                 wait_for_response=True,
                 component="WakeObservation",
                 track_ongoing_action=False,
@@ -284,16 +284,16 @@ class ServiceInputWakeObservationMixin:
         result_error = capability_response.get("error") not in {None, ""} or failure_reason is not None
         terminal_kind = "interrupted" if result_error else "completed"
         terminal_reason = (
-            "wake_policy observation の取得または反映に失敗した。"
+            "起床前観測 の取得または反映に失敗した。"
             if result_error
-            else "wake_policy observation の取得結果を判断材料へ反映した。"
+            else "起床前観測 の取得結果を判断材料へ反映した。"
         )
         if result_error:
-            final_step_summary = "wake_policy observation を中断した。"
+            final_step_summary = "起床前観測 を中断した。"
         elif self._observation_summary_is_vision_capture(observation_summary):
-            final_step_summary = "visual wake observation の結果を視覚記録候補と判断材料へ反映した。"
+            final_step_summary = "視覚の起床前観測の結果を視覚記録候補と判断材料へ反映した。"
         else:
-            final_step_summary = "wake_policy observation の結果を world_state へ反映した。"
+            final_step_summary = "起床前観測 の結果を world_state へ反映した。"
         detail_summary = failure_reason or self._capability_result_followup_hint_summary(
             capability_id=capability_id,
             observation_summary=observation_summary,

@@ -131,11 +131,11 @@ LLM に実行権限、資格情報、配送先 client、秘密値を渡さない
 LLM の自由文をそのまま状態遷移へ使わない。
 `wake / background_wake` の「定期起床」「wake」という入力文言は判断機会の説明であり、身体状態の根拠にしない。
 `current_time_text`、interval、wake の時刻情報だけから予定状態を作らない。予定状態は schedule context、schedule capability result、明示的な予定 source を根拠にする。
-`wake_policy.observations` は interval wake の判断前に enabled 項目だけを順番に取得する。
-visual capture を含む enabled observation を有効化した直後の初回だけ、server は 5 秒待ってから interval wake の観測へ進む。
-vision source 未接続による wake observation の一時失敗だけで終わった場合、server は interval を消費せず短い再試行待ちへ進む。
+`wake_policy.observations` は 定期起床 の判断前に enabled 項目だけを順番に取得する。
+visual capture を含む enabled observation を有効化した直後の初回だけ、server は 5 秒待ってから 定期起床 の観測へ進む。
+vision source 未接続による 起床前観測 の一時失敗だけで終わった場合、server は interval を消費せず短い再試行待ちへ進む。
 `wake_policy.observations` の成功結果は、その回の initiative 判断へ進む前景シグナルとして扱う。
-wake_policy observation として同期取得する capability result は内部観測であり、`ongoing_action` を作らない。
+起床前観測 として同期取得する capability result は内部観測であり、`ongoing_action` を作らない。
 ユーザー向け応答サイクルが進行中の間、server は `background_wake` の自発発話判断を `noop` にする。
 `background_wake` の観測中に `conversation_input` または `speech` が新しく増えた場合、server は観測前の直近会話 snapshot を使って発話せず、`noop` にする。
 visual capture の取得結果は画像意味理解へ通し、詳細な視覚説明を `visual_observation_record` として保存する。
@@ -147,7 +147,7 @@ visual capture の変化は `first_seen / changed / stable / same_as_recent_spee
 `first_seen / changed` は wake 判断へ進む前景シグナルとして扱うが、ユーザーへの speech 必要性を直接表さない。
 `same_as_recent_speech / stable` は繰り返し発話を避ける材料として扱う。
 `current_input.sender=system` かつ `current_input.response_target=none` の `wake / background_wake` では、visual observation をユーザー発話やユーザーへの応答要求として扱わず、speech 本文は観測に根拠づける。
-background wake から dispatch した capability request の result は、source request の `source_current_input.response_target=none` を引き継ぐ。
+定期起床から dispatch した capability request の result は、source request の `source_current_input.response_target=none` を引き継ぐ。
 この capability result は内部観測結果として扱い、実効判断を `noop` に正規化し、assistant message を送信しない。
 cooldown 中の新しい visual capture も `cooldown_active=true` として判断入力へ渡す。
 cooldown 中の `first_seen / changed` でも speech 義務にはせず、LLM が `speech / noop / pending_intent` を選ぶ。
@@ -211,7 +211,7 @@ inspection では、少なくとも次を追えるようにする。
 各 probe は `drive_state / world_state / ongoing_action` と recent conversation turns を消してから seed を入れ、直前の status 確認会話に判断を引っ張られない状態で実行する。
 status capability の全体 request / response 件数は存在確認に留める。専用 probe の request / follow-up 成功は cycle trace 内の request id、source request summary、transition summary で確認する。
 
-manual wake 自律判断 matrix は次の 16 件に固定する。
+API起床の自律判断 matrix は次の 16 件に固定する。
 
 | case | 入力条件 | 期待する構造 |
 | --- | --- | --- |
@@ -232,15 +232,15 @@ manual wake 自律判断 matrix は次の 16 件に固定する。
 | `location-fresh-speech` | 場所状態の新鮮な `world_state` と整合する `drive_state` がある | `foreground_thinness=mixed`、`selected_candidate_family=autonomous`、`decision.kind=speech`、`fresh_world_state_capability_ids=["location.status"]` |
 | `ongoing-waiting-noop` | `ongoing_action.status=waiting_result` がある | `selected_candidate_family=ongoing_action`、`preferred_result_kind=noop`、`decision.kind=noop` |
 
-background wake 起床制御 matrix は次の 5 件に固定する。
+定期起床（`background_wake`）制御 matrix は次の 5 件に固定する。
 
 | case | 入力条件 | 期待する構造 |
 | --- | --- | --- |
-| `background-no-context-skip` | interval 初回起床で `drive_state / world_state / ongoing_action` が空 | background wake cycle を作り、`initiative_context` なしの `decision.kind=noop` と `memory_trace=skipped` を残す |
+| `background-no-context-skip` | interval 初回起床で `drive_state / world_state / ongoing_action` が空 | 定期起床 cycle を作り、`initiative_context` なしの `decision.kind=noop` と `memory_trace=skipped` を残す |
 | `background-weak-foreground-noop` | interval 初回起床で `visual_context` 系の薄い `world_state` だけがある | `foreground_thinness=thin`、`selected_candidate_family=autonomous`、`preferred_result_kind=noop`、`decision.kind=noop`、`memory_trace=skipped` |
 | `background-grounded-speech` | interval 初回起床で予定 `world_state` と整合する `drive_state` がある | `wake_scheduler_active=true`、`foreground_thinness=grounded`、`selected_candidate_family=autonomous`、`decision.kind=speech`、`memory_trace=succeeded` |
-| `background-cooldown-skip` | background speech 直後の cooldown 中に interval 起床が来る | background wake cycle を作り、cooldown 理由の `decision.kind=noop` と `memory_trace=skipped` を残す |
-| `background-interval-not-due` | `last_wake_at` 相当の直後に長い interval を設定する | `wake_scheduler_active=true` を観測し、新しい background wake cycle を作らない |
+| `background-cooldown-skip` | 定期起床由来の speech 直後の cooldown 中に interval 起床が来る | 定期起床 cycle を作り、cooldown 理由の `decision.kind=noop` と `memory_trace=skipped` を残す |
+| `background-interval-not-due` | `last_wake_at` 相当の直後に長い interval を設定する | `wake_scheduler_active=true` を観測し、新しい定期起床 cycle を作らない |
 
 `visual_context` だけの前景は thin foreground として扱う。
 強い `drive_state` があり、対応する grounded foreground がない場合、`vision.capture` による観測を短い speech より優先する。
@@ -248,17 +248,17 @@ background wake 起床制御 matrix は次の 5 件に固定する。
 強い `drive_state` が特定の status family を要求し、対応 state type の新鮮な foreground `world_state` が既にある場合は、同じ status capability と `vision.capture` の両方を選ばず、既存要約を使う。
 status refresh の鮮度判定は判断前から存在した foreground `world_state` と、同じ `wake / background_wake` cycle の `wake_observations` から反映された foreground `world_state` を使う。
 現在入力だけから根拠なしに推測生成された `world_state` は再取得抑止に使わない。
-background wake では、強い `drive_state` が無く `visual_context / external_service / device` だけが見えている場合、薄い前景として `noop` を優先する。
-background wake でも `visual_observations[].change_state=first_seen / changed` は判断材料にするが、それだけで `speech` を固定しない。
+定期起床では、強い `drive_state` が無く `visual_context / external_service / device` だけが見えている場合、薄い前景として `noop` を優先する。
+定期起床でも `visual_observations[].change_state=first_seen / changed` は判断材料にするが、それだけで `speech` を固定しない。
 `cooldown_active=true` の視覚変化は過剰介入を避けるため `noop` を許可する。
-`current_input.sender=system` かつ `current_input.response_target=none` の background wake では、visual observation を「ユーザーへの応答要求」として扱わず、ユーザー発話への相づちとして speech を始めない。
+`current_input.sender=system` かつ `current_input.response_target=none` の定期起床では、visual observation を「ユーザーへの応答要求」として扱わず、ユーザー発話への相づちとして speech を始めない。
 `cooldown_active=true` は単独で `suppression_level=high` にしない。通常 cooldown は `suppression_level=medium` として扱い、同一 dedupe への連続 speech だけを high suppression にする。
-`wake / background_wake` cycle が `speech` になった場合、server は `assistant_message` event を `source_kind=wake / background_wake` で client へ送る。送信先 client は cycle の client context または wake observation の `vision_source_id` から解決する。
+`wake / background_wake` cycle が `speech` になった場合、server は `assistant_message` event を `source_kind=wake / background_wake` で client へ送る。送信先 client は cycle の client context または 起床前観測 の `vision_source_id` から解決する。
 grounded foreground の `world_state` が既にある場合、candidate entry に `preferred_capability_id` が無い限り、同じ情報を再取得する capability request より `preferred_result_kind` の `speech / noop` を優先する。
 非ユーザー起点の判断では、判断前から存在する同じ state type の新鮮な foreground `world_state` がある status capability に `fresh_world_state_available=true` を付け、実 LLM の compact digest で request しなかった境界を確認する。
 `wake / background_wake` では、同じ cycle の `wake_observations` で成功した `vision.capture` も `fresh_world_state_by_vision_source` として扱う。
 `vision.capture` は `source_kind` に関係なく、`vision_source_id` が一致する新鮮な `visual_context` を `fresh_world_state_by_vision_source` として扱い、別 source の再観測は遮断しない。
-`suppression_summary.cooldown_active` が true ではない場合、直近 turn だけから cooldown 中とは扱わない。background wake でも ready / grounded foreground の `visual_observations` は判断材料にするが、`suppression_level=medium` だけで `speech` も `noop` も固定しない。
+`suppression_summary.cooldown_active` が true ではない場合、直近 turn だけから cooldown 中とは扱わない。定期起床でも ready / grounded foreground の `visual_observations` は判断材料にするが、`suppression_level=medium` だけで `speech` も `noop` も固定しない。
 decision contract validation は、initiative の selected candidate entry が `preferred_result_kind=capability_request` の場合に `capability_request` 以外を repair 対象にし、`preferred_capability_id` と異なる capability request も repair 対象にする。`preferred_result_kind=capability_request` ではない場合の `capability_request`、`fresh_world_state_available=true` の capability request、同じ `vision_source_id` の新鮮な `vision.capture` request は repair 対象にする。視覚観測の `change_state=first_seen / changed` だけでは validation は `noop` を不正扱いしないが、candidate entry が `preferred_result_kind=speech` を立てており `suppression_level=low` の場合は、`noop` を repair 対象にする。
 重複再取得の抑制は判断文脈と decision contract validation に置き、capability dispatch 直前の専用停止境界は置かない。
 ユーザーが明示的に再観測を依頼した場合の capability request には freshness による再取得抑制を適用しない。

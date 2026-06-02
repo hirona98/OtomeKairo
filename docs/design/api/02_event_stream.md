@@ -213,7 +213,7 @@ server -> client の代表例:
 `vision.capture_request`、`external.status_request`、`schedule.status_request`、`device.status_request`、`body.status_request`、`environment.status_request`、`location.status_request`、`social.status_request` は capability 実行要求である。
 `assistant_message` は server が生成した assistant 発話を client へ表示させる通知である。
 `assistant_message.data.source_kind` は `capability_result / wake / background_wake` のいずれかであり、capability result follow-up の場合だけ `request_id / capability_id` を持つ。
-`wake / background_wake` の `assistant_message` は、同じ cycle の client context または wake observation の `vision_source_id` から解決した client へ送る。
+`wake / background_wake` の `assistant_message` は、同じ cycle の client context または 起床前観測 の `vision_source_id` から解決した client へ送る。
 capability 実行要求と結果の対応は [05_実行連携.md](05_実行連携.md) を正とする。
 
 主な失敗:

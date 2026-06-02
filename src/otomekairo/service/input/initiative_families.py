@@ -282,7 +282,7 @@ class ServiceInputInitiativeFamiliesMixin:
             and self._initiative_world_state_is_weak_foreground(world_state_summary)
         ):
             preferred_result_kind = "noop"
-            preferred_result_reason = "background wake で画面や外部状態だけが薄く見えており、drive なしでは見送るほうが自然。"
+            preferred_result_reason = "定期起床で画面や外部状態だけが薄く見えており、drive なしでは見送るほうが自然。"
         elif foreground_thinness == "thin" and not world_state_summary and not recent_turn_summary:
             preferred_result_kind = "noop"
             preferred_result_reason = "前景文脈が薄く、いまは speech より様子見を優先したい。"

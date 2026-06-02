@@ -202,7 +202,7 @@ response:
 ### `POST /api/wake`
 
 - 認証: 必要
-- 役割: 自律起床要求を受け、wake 1 サイクルを実行する
+- 役割: API起床要求を受け、wake 1 サイクルを実行する
 
 request:
 
@@ -246,15 +246,15 @@ response:
 そのため、wake で内部的に保留意図が選ばれた場合も、response の `result_kind` は `noop` とする。
 capability 実行を開始した場合は、`POST /api/conversation` と同じ `capability_request` 要約を返す。
 
-wake API は少なくとも次の挙動を持つ。
+API起床は少なくとも次の挙動を持つ。
 
 - `wake_policy.mode=disabled` なら `noop`
 - `mode=interval` で次回時刻にまだ達していなければ `noop`
 - `mode=interval` で `wake_policy.observations` がある場合、enabled observation を順番に取得し、成功結果をその回の判断へ進む前景シグナルとして扱い、visual capture は runtime の `change_state` を判定し、視覚記録と `world_state` を整理してから wake 判断を 1 回だけ行う
-- wake_policy observation が vision source 未接続の一時失敗だけで終わった場合、server は interval を消費せず短い再試行待ちにする
-- wake_policy observation の同期 capability request は内部観測として扱い、`ongoing_action` を作らない
+- 起床前観測 が vision source 未接続の一時失敗だけで終わった場合、server は interval を消費せず短い再試行待ちにする
+- 起床前観測 の同期 capability request は内部観測として扱い、`ongoing_action` を作らない
 - server は wake 入力を `current_input.sender=system`、`source_kind=wake`、`response_target=none` として shared pipeline に渡す
-- server 内の background 起床スケジューラは `current_input.sender=system`、`source_kind=background_wake`、`response_target=none` として shared pipeline に渡す
+- server 内の定期起床スケジューラは `current_input.sender=system`、`source_kind=background_wake`、`response_target=none` として shared pipeline に渡す
 - capability request は dispatch 時点の `current_input` を request record の `source_current_input` に保存し、capability result の `response_target` は `source_current_input.response_target` を引き継ぐ
 - `source_current_input.response_target=none` の capability result は内部観測結果として扱い、実効判断を `noop` に正規化し、assistant message を送信しない
 - visual observation は wake 判断へ渡し、`change_state=first_seen / changed` は wake 判断へ進む前景シグナルとして扱うが、speech 義務ではない
@@ -262,7 +262,7 @@ wake API は少なくとも次の挙動を持つ。
 - cooldown 中の visual observation は `cooldown_active=true` として wake 判断へ渡す。LLM は cooldown、直近 speech、drive_state、world_state を合わせて `speech / noop / pending_intent` を選ぶ
 - 再評価時刻に達した保留意図があれば再評価し、必要なら `speech`
 
-server 内の background 起床スケジューラも、同じ wake 1 サイクルを内部的に使う。
+server 内の定期起床スケジューラも、同じ wake 1 サイクルを内部的に使う。
 
 `result_kind=noop`、`result_kind=capability_request`、`result_kind=internal_failure` のとき、`speech` は `null` を返す。
 `capability_request` が無い結果では、`capability_request` は `null` を返す。

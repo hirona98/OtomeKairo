@@ -164,7 +164,7 @@ class ServiceInputCapabilityContextMixin:
             vision_source_id = self._client_context_text(observation.get("vision_source_id"), limit=96)
             if vision_source_id is None:
                 continue
-            # wake observation は同じ cycle で取得済みの視覚観測として扱う。
+            # 起床前観測は同じ cycle で取得済みの視覚観測として扱う。
             payload: dict[str, Any] = {
                 "vision_source_id": vision_source_id,
                 "age_label": "たった今",
