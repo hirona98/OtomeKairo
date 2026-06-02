@@ -818,6 +818,7 @@ def _build_decision_trigger_policy(
                 "InitiativeContext.drive_summaries に drive_kind, support_count, freshness_hint, support_strength, scope_alignment, signal_strength, persona_alignment, stability_hint があるときは、中期の向きの比較材料として扱ってください。",
                 "InitiativeContext.candidate_families に preferred_capability_id と preferred_capability_input があるとき、preferred_result_kind=capability_request ならその capability と最小 input を優先してください。",
                 "InitiativeContext の selected candidate entry が preferred_result_kind=reply / noop / pending_intent のときは、preferred_capability_id が無い限り新しい capability_request を選ばないでください。",
+                "selected candidate entry が preferred_result_kind=reply で suppression_level=low の場合、短い外向き伝達を出す正の候補です。直近のユーザー呼びかけが無いことや視覚変化のみであることを理由に noop へ落とさないでください。",
                 "foreground_signal_summary が grounded で world_state_summary に該当状況が既にあるときは、同じ情報を再取得する capability_request より、preferred_result_kind に沿った reply / noop を優先してください。",
                 "suppression_summary.cooldown_active が true ではない場合、recent_turn_summary だけから cooldown 中だと推測してはいけません。",
                 "background_wake は自律判断の通常入口なので、直近のユーザー呼びかけが無いこと自体を noop 理由にしないでください。",

@@ -282,6 +282,8 @@ class LLMMockReplyMixin:
         selected_family = self._selected_initiative_family_entry(initiative_context)
         if selected_family is not None:
             preferred_result_kind = str(selected_family.preferred_result_kind or "").strip()
+            if preferred_result_kind == "reply":
+                return True
             if preferred_result_kind in {"noop", "capability_request"}:
                 return False
         drive_summaries = initiative_context.drive_summaries

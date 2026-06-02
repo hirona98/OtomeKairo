@@ -286,6 +286,28 @@ class ServiceInputInitiativeFamiliesMixin:
         elif foreground_thinness == "thin" and not world_state_summary and not recent_turn_summary:
             preferred_result_kind = "noop"
             preferred_result_reason = "前景文脈が薄く、いまは reply より様子見を優先したい。"
+        elif (
+            visual_change_state in {"first_seen", "changed"}
+            and foreground_thinness == "ready"
+            and suppression_level == "low"
+            and isinstance(visual_signal, dict)
+            and visual_signal.get("cooldown_active") is not True
+            and visual_signal.get("same_as_recent_reply") is not True
+        ):
+            preferred_result_kind = "reply"
+            preferred_result_reason = "視覚観測に前回からの判別可能な変化があり、suppression が low なので短い自発 reply を前景候補にする。"
+        elif (
+            isinstance(strongest_drive, dict)
+            and world_state_summary
+            and suppression_level != "high"
+        ):
+            preferred_result_kind = "reply"
+            preferred_result_reason = self._initiative_autonomous_preferred_result_reason(
+                strongest_drive=strongest_drive,
+                world_state_summary=world_state_summary,
+                recent_turn_summary=recent_turn_summary,
+                visual_signal=visual_signal,
+            )
         blocking_reason = self._initiative_autonomous_blocking_reason(
             trigger_kind=trigger_kind,
             drive_summaries=drive_summaries,

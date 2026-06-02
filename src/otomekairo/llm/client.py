@@ -361,8 +361,6 @@ class LLMClient:
                 )
             return
         if decision_kind == "noop" and preferred_result_kind == "reply":
-            if selected_family.family == "autonomous":
-                return
             foreground_summary = context.initiative_context.foreground_signal_summary
             suppression_summary = context.initiative_context.suppression_summary
             foreground_thinness = (
@@ -381,8 +379,8 @@ class LLMClient:
                 else None
             )
             if (
-                foreground_thinness in {"ready", "grounded"}
-                and suppression_level != "high"
+                foreground_thinness in {"ready", "grounded", "mixed", "thin"}
+                and suppression_level not in {"high", "medium"}
                 and cooldown_active is not True
             ):
                 raise LLMError(
