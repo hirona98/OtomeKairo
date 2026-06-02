@@ -11,7 +11,7 @@ API 仕様は、次のように分ける。
 - `design/api/01_bootstrapと入力.md`
   - bootstrap
   - 会話入力
-  - wake 起床要求
+  - `wake` 自律起床要求
 - `design/api/02_event_stream.md`
   - `events/stream`
   - 接続 client の capability binding 提示

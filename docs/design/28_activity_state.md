@@ -5,7 +5,7 @@
 `activity_state` は、ユーザーが現在または直前に何をしているかの短期推定を保持する状態である。
 判断と返信では `activity_context` として渡す。
 
-OtomeKairo は、対話入力、起床要求、観測 capability の結果、外部サービスや各種 status capability の結果を同じ判断ループで扱う。
+OtomeKairo は、対話入力、自律起床要求、観測能力の結果、外部サービスや各種 status capability の結果を同じ判断ループで扱う。
 `activity_state` はその入力群から、ユーザー活動の意味を短期的に推定し、次の判断へ持ち越す。
 
 `activity_state` は desktop capture 専用ではない。

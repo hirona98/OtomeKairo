@@ -55,12 +55,12 @@ initiative loop は、判断サイクル内の作業文脈として `initiative_
 | `trigger_kind` | `wake`、`background_wake` などの起点 |
 | `opportunity_summary` | なぜ今評価機会があるか |
 | `time_context_summary` | 生活ローカル時刻と時刻帯の要約 |
-| `foreground_signal_summary` | 前景 world の薄さと見えている文脈の要約 |
+| `foreground_signal_summary` | 前景世界状態の薄さと見えている文脈の要約 |
 | `drive_summaries` | 前景に出す `drive_state` 要約 |
 | `pending_intent_summaries` | 再評価対象の保留意図要約 |
 | `candidate_families` | `ongoing_action / pending_intent / autonomous` の候補系統ごとの availability と理由要約 |
 | `selected_candidate_family` | その回で前景候補として最も強く立っている系統 |
-| `world_state_summary` | 現在文脈として効く外界状態の要約 |
+| `world_state_summary` | 現在文脈として効く世界状態の要約 |
 | `ongoing_action_summary` | 継続中の実行列がある場合の要約 |
 | `capability_summary` | 使える能力と使えない能力の判断用要約 |
 | `suppression_summary` | 押し出し抑制の強さと主理由の要約 |
@@ -123,7 +123,7 @@ LLM は次を担う。
 - 期限切れ候補の除外
 - capability availability と権限の検証
 - 1 サイクル 1 主結果の制約
-- 現在文脈が薄い `wake / background_wake` で、低リスクの観測 capability を先に当てるかの優先形を組み立てる
+- 現在文脈が薄い `wake / background_wake` で、低リスクの観測能力を先に当てるかの優先形を組み立てる
 - `pending_intent`、`ongoing_action`、`world_state` の状態遷移
 - inspection と audit への記録
 
