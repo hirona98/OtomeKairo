@@ -25,17 +25,7 @@ class StateStore:
 
     def read_state(self) -> dict:
         # 読み取り状態
-        state = json.loads(self.state_path.read_text(encoding="utf-8"))
-        self._normalize_wake_policy(state)
-        return state
-
-    def _normalize_wake_policy(self, state: dict) -> None:
-        wake_policy = state.get("wake_policy")
-        if not isinstance(wake_policy, dict):
-            return
-        legacy_threshold = wake_policy.pop("desktop_scene_similarity_threshold", None)
-        if "visual_observation_similarity_threshold" not in wake_policy and legacy_threshold is not None:
-            wake_policy["visual_observation_similarity_threshold"] = legacy_threshold
+        return json.loads(self.state_path.read_text(encoding="utf-8"))
 
     def write_state(self, state: dict) -> None:
         # アトミック書き込み
