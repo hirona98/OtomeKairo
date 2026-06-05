@@ -416,8 +416,6 @@ class ServiceInputInitiativeScoringMixin:
         suppression_level = self._initiative_suppression_level(suppression_summary)
         if suppression_level == "high":
             reasons.append("suppression が high")
-        elif suppression_level == "medium":
-            reasons.append("抑制要因が残る")
         if not drive_summaries and world_state_summary:
             state_types = {
                 item.get("state_type")

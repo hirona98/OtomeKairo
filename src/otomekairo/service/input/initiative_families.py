@@ -204,7 +204,6 @@ class ServiceInputInitiativeFamiliesMixin:
         strongest_drive = self._initiative_strongest_drive_summary(drive_summaries)
         level = self._client_context_text(initiative_baseline.get("level"), limit=16) or "medium"
         foreground_thinness = self._initiative_foreground_thinness(foreground_signal_summary)
-        suppression_level = self._initiative_suppression_level(suppression_summary)
         priority_score = INITIATIVE_BASELINE_SCORES.get(level, INITIATIVE_BASELINE_SCORES["medium"])
         priority_score += self._initiative_drive_signal_score(drive_summaries)
         priority_score += self._initiative_world_state_signal_score(world_state_summary)
@@ -223,18 +222,10 @@ class ServiceInputInitiativeFamiliesMixin:
             priority_score += 0.02
         if foreground_thinness == "ready":
             priority_score += 0.04
-        elif foreground_thinness == "thin":
-            priority_score -= 0.08
         if recent_turn_summary:
             priority_score += 0.08
         if int(capability_summary.get("available_count", 0)) > 0:
             priority_score += 0.06
-        if trigger_kind == "background_wake":
-            priority_score -= 0.06
-        if suppression_level == "high":
-            priority_score -= 0.18
-        elif suppression_level == "medium":
-            priority_score -= 0.08
         probe_preference = self._initiative_autonomous_probe_preference(
             trigger_kind=trigger_kind,
             drive_summaries=drive_summaries,
@@ -448,7 +439,7 @@ class ServiceInputInitiativeFamiliesMixin:
         if foreground_thinness is not None:
             parts.append(f"foreground={foreground_thinness}")
         suppression_level = self._initiative_suppression_level(suppression_summary)
-        if suppression_level in {"medium", "high"}:
+        if suppression_level == "high":
             parts.append(f"suppression={suppression_level}")
         available_count = int(capability_summary.get("available_count", 0))
         if available_count > 0:
