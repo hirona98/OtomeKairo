@@ -600,13 +600,11 @@ class ServiceSpontaneousCapabilityContextMixin:
             result_payload=result_payload,
         )
         summary_text = hook_summary or str(ongoing_action_transition_summary.get("reason_summary") or "").strip() or failure_reason or capability_id
-        state_policy = self._capability_state_policy(capability_id)
         if ongoing_action_transition_summary.get("result_error") is True or final_state == "interrupted":
             self._mark_capability_runtime_failure(
                 capability_id=capability_id,
                 current_time=current_time,
                 failure_summary=summary_text,
-                cooldown_seconds=int(state_policy.get("error_cooldown_seconds") or 0),
             )
             return
         if final_state in {"completed", "on_hold"}:
@@ -614,7 +612,6 @@ class ServiceSpontaneousCapabilityContextMixin:
                 capability_id=capability_id,
                 current_time=current_time,
                 result_summary=summary_text,
-                cooldown_seconds=int(state_policy.get("success_cooldown_seconds") or 0),
             )
 
     def _capability_result_followup_terminal_step_summary(

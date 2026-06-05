@@ -3268,7 +3268,6 @@ class LongSmokeRunner:
         self._clear_initiative_probe_state()
         for run_case in (
             self._run_real_llm_background_wake_probe_grounded_speech,
-            self._run_real_llm_background_wake_probe_cooldown_skip,
         ):
             case_id, trace = run_case()
             traces[case_id] = trace
@@ -3367,28 +3366,6 @@ class LongSmokeRunner:
         )
         return case_id, trace
 
-    def _run_real_llm_background_wake_probe_cooldown_skip(self) -> tuple[str, dict[str, Any]]:
-        case_id = "background-cooldown-skip"
-        trace = self._run_background_wake_probe(case_id=case_id)
-        self._assert_initiative_probe_trace(
-            trace,
-            case_id=case_id,
-            expected_trigger_kind="background_wake",
-            expected_result_kind="noop",
-            allow_missing_initiative_context=True,
-        )
-        self._assert_background_wake_memory_status(
-            trace=trace,
-            case_id=case_id,
-            expected_status="skipped",
-        )
-        self._assert_background_wake_noop_reason_contains(
-            trace=trace,
-            case_id=case_id,
-            expected_text="cooldown",
-        )
-        return case_id, trace
-
     def _run_real_llm_background_wake_probe_interval_not_due(self) -> tuple[str, dict[str, Any]]:
         case_id = "background-interval-not-due"
         existing_cycle_ids = self._cycle_ids_by_trigger_kind("background_wake")
@@ -3464,18 +3441,6 @@ class LongSmokeRunner:
         memory_trace = trace.get("memory_trace", {})
         if not isinstance(memory_trace, dict) or memory_trace.get("turn_consolidation_status") != expected_status:
             raise SmokeError(f"real-llm periodic wake {case_id} memory status was invalid.")
-
-    def _assert_background_wake_noop_reason_contains(
-        self,
-        *,
-        trace: dict[str, Any],
-        case_id: str,
-        expected_text: str,
-    ) -> None:
-        result_trace = trace.get("result_trace", {})
-        reason_summary = result_trace.get("noop_reason_summary") if isinstance(result_trace, dict) else None
-        if not isinstance(reason_summary, str) or expected_text not in reason_summary:
-            raise SmokeError(f"real-llm periodic wake {case_id} noop reason was invalid.")
 
     def _run_real_llm_initiative_probe_ongoing_waiting_noop(self) -> tuple[str, dict[str, Any]]:
         case_id = "ongoing-waiting-noop"
@@ -6184,7 +6149,6 @@ class LongSmokeRunner:
             "background-no-context-skip",
             "background-weak-foreground-noop",
             "background-grounded-speech",
-            "background-cooldown-skip",
             "background-interval-not-due",
         }
         expected_background_trace_cases = expected_background_cases - {"background-interval-not-due"}
@@ -6229,14 +6193,6 @@ class LongSmokeRunner:
                 "suppression_level": "medium",
                 "turn_consolidation_status": "succeeded",
             },
-            "background-cooldown-skip": {
-                "observed_cycle": True,
-                "trigger_kind": "background_wake",
-                "result_kind": "noop",
-                "decision_kind": "noop",
-                "wake_scheduler_active": True,
-                "turn_consolidation_status": "skipped",
-            },
             "background-interval-not-due": {
                 "observed_cycle": False,
                 "trigger_kind": "background_wake",
@@ -6259,10 +6215,6 @@ class LongSmokeRunner:
                         f"real-llm-smoke periodic wake compact result {case_id}.{key} "
                         f"was {case_result.get(key)}, expected {expected_value}."
                     )
-        cooldown_result = background_case_results.get("background-cooldown-skip")
-        cooldown_reason = cooldown_result.get("noop_reason_summary") if isinstance(cooldown_result, dict) else None
-        if not isinstance(cooldown_reason, str) or "cooldown" not in cooldown_reason:
-            raise SmokeError("real-llm-smoke periodic wake cooldown compact reason was invalid.")
         background_traces = summary.get("real_llm_background_wake_probe_traces")
         if not isinstance(background_traces, dict) or set(background_traces) != expected_background_trace_cases:
             raise SmokeError("real-llm-smoke periodic wake probe traces were incomplete.")

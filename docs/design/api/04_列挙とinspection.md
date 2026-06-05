@@ -182,8 +182,6 @@ response:
           "busy": false,
           "busy_request_id": null,
           "busy_action_id": null,
-          "cooldown_active": false,
-          "cooldown_until": null,
           "last_failure_at": null,
           "last_failure_summary": null,
           "last_result_at": null,
@@ -222,8 +220,6 @@ response:
 | `request_timeout` | 直近の result timeout により一時的に実行不可である |
 | `parallel_blocked` | 並列実行制限により実行不可である |
 
-cooldown は `state.cooldown_active / state.cooldown_until` に残す。
-cooldown は availability を単独で false にしない。
 `readiness` は manifest 由来の family 前提条件であり、`family / world_state_type / input_keys / result_summary_keys / result_item_keys` を持つ。
 `readiness` は token、credential、内部 URL、transport 詳細を含まない。
 
@@ -305,7 +301,7 @@ top-level の trace object は、存在しない段階でも空 object として
 trigger をまたいだ比較用に、`result_trace.trigger_compact_summary` に共通 outer shape の compact summary を含める。
 capability dispatch が起きた cycle では、`result_trace.capability_dispatch_summary` に capability family 共通で比較しやすい compact summary を含める。
 `trigger_kind=capability_result` の cycle では、`result_trace.capability_result_followup_summary` に capability family 共通で比較しやすい compact summary を含める。
-initiative 系 trigger の `entry_summary.candidate_families` には、`preferred_result_kind / preferred_result_reason_summary / blocking_reason_summary` を含める。
+initiative 系 trigger の `entry_summary.candidate_families` には、`reason_summary / blocking_reason_summary` を含める。capability 提案がある場合は `preferred_result_kind / preferred_result_reason_summary` を含める。
 exact answer 系の cycle では、`recall_trace` に `answer_contract`、`evidence_pack`、`fact_resolution_trace` を含める。
 `fact_resolution_trace` は wire 上で少なくとも `query`、`selected_recall_sections`、`boundary_event_candidates`、`cycle_event_candidates`、`statement_event_candidates`、`adopted_evidence_items`、`consistency_checks` を持つ。
 

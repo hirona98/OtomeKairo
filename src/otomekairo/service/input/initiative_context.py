@@ -20,6 +20,7 @@ class ServiceInputInitiativeContextMixin:
         client_context: dict[str, Any],
         drive_state_summary: list[dict[str, Any]] | None,
         foreground_world_state: list[dict[str, Any]] | None,
+        activity_context: dict[str, Any] | None,
         world_state_trace: WorldStateTrace | None,
         ongoing_action_summary: dict[str, Any] | None,
         capability_decision_view: list[dict[str, Any]] | None,
@@ -109,6 +110,7 @@ class ServiceInputInitiativeContextMixin:
             ),
             time_context_summary=self._initiative_time_context_summary(time_context=time_context),
             foreground_signal_summary=foreground_signal_summary,
+            activity_context=self._initiative_activity_context(activity_context),
             initiative_baseline=initiative_baseline,
             runtime_state_summary=runtime_state_summary,
             recent_turn_summary=recent_turn_summary,
@@ -169,7 +171,7 @@ class ServiceInputInitiativeContextMixin:
             return "日中の活動帯で、前景理由があれば動きやすい時間帯。"
         if part_of_day == "evening":
             return "夕方から夜への移行帯で、流れの整理や軽い声かけが自然な時間帯。"
-        return "夜間で、押し出しすぎず静かな前進可否を見たい時間帯。"
+        return "夜間で、短く静かな声かけとして前へ出るかを見たい時間帯。"
 
     def _initiative_foreground_signal_summary(
         self,
@@ -239,6 +241,38 @@ class ServiceInputInitiativeContextMixin:
             return None
         return self._client_context_text(foreground_signal_summary.get("foreground_thinness"), limit=16)
 
+    def _initiative_activity_context(self, activity_context: dict[str, Any] | None) -> dict[str, Any] | None:
+        if not isinstance(activity_context, dict):
+            return None
+        payload: dict[str, Any] = {}
+        current_activity = self._initiative_activity_summary(activity_context.get("current_activity"))
+        previous_activity = self._initiative_activity_summary(activity_context.get("previous_activity"))
+        if current_activity:
+            payload["current_activity"] = current_activity
+        if previous_activity:
+            payload["previous_activity"] = previous_activity
+        return payload or None
+
+    def _initiative_activity_summary(self, activity: Any) -> dict[str, Any]:
+        if not isinstance(activity, dict):
+            return {}
+        payload: dict[str, Any] = {}
+        for key, limit in (
+            ("label", 120),
+            ("target", 120),
+            ("age_label", 40),
+            ("ended_age_label", 40),
+            ("reason_summary", 160),
+        ):
+            value = self._client_context_text(activity.get(key), limit=limit)
+            if value is not None:
+                payload[key] = value
+        for key in ("confidence", "salience"):
+            value = activity.get(key)
+            if isinstance(value, (int, float)):
+                payload[key] = round(max(0.0, min(float(value), 1.0)), 3)
+        return payload
+
     def _initiative_suppression_level(self, suppression_summary: dict[str, Any] | None) -> str | None:
         if not isinstance(suppression_summary, dict):
             return None
@@ -253,7 +287,7 @@ class ServiceInputInitiativeContextMixin:
         elif level == "high":
             summary_text = "自発介入は強めで、前景理由が揃えば一歩前へ出る。"
         else:
-            summary_text = "自発介入は中庸で、前景理由と抑制要因の両方を見る。"
+            summary_text = "自発介入は中庸で、具体的な前景変化があれば短く前へ出る。"
         return {
             "level": level,
             "summary_text": summary_text,
@@ -309,20 +343,6 @@ class ServiceInputInitiativeContextMixin:
         payload: dict[str, Any] = {
             "background_trigger": trigger_kind == "background_wake",
         }
-        cooldown_reason = self._wake_cooldown_reason(current_time=current_time)
-        if cooldown_reason is not None:
-            payload["cooldown_active"] = True
-            payload["cooldown_reason"] = cooldown_reason
-        with self._runtime_state_lock:
-            last_spontaneous_at = self._wake_runtime_state.get("last_spontaneous_at")
-        if isinstance(last_spontaneous_at, str) and last_spontaneous_at:
-            age_label = self._world_state_age_label(
-                reference_time=current_time,
-                observed_at=last_spontaneous_at,
-                updated_at=None,
-            )
-            if age_label is not None:
-                payload["last_spontaneous_speech_age_label"] = age_label
         if isinstance(selected_candidate, dict):
             dedupe_key = selected_candidate.get("dedupe_key")
             if isinstance(dedupe_key, str) and dedupe_key:
@@ -488,10 +508,6 @@ class ServiceInputInitiativeContextMixin:
         baseline_level = self._client_context_text(initiative_baseline.get("level"), limit=16)
         if baseline_level == "low":
             reasons.append("initiative_baseline が low で、押し出しは控えめにしたい。")
-        if intervention_state.get("cooldown_active") is True:
-            cooldown_reason = intervention_state.get("cooldown_reason")
-            if isinstance(cooldown_reason, str) and cooldown_reason.strip():
-                reasons.append(cooldown_reason.strip())
         if intervention_state.get("same_dedupe_recently_replied") is True:
             reasons.append("同じ pending_intent 系統には最近 speech 済みで、連続介入は避けたい。")
         if isinstance(ongoing_action_summary, dict) and ongoing_action_summary.get("status") == "waiting_result":
@@ -512,15 +528,10 @@ class ServiceInputInitiativeContextMixin:
         suppression_level = "low"
         if intervention_state.get("same_dedupe_recently_replied") is True:
             suppression_level = "high"
-        elif (
-            intervention_state.get("cooldown_active") is True
-            or intervention_risk_summary is not None
-        ):
-            suppression_level = "medium"
         payload["suppression_level"] = suppression_level
         if intervention_risk_summary is not None:
             payload["reason_summary"] = intervention_risk_summary
-        for key in ("background_trigger", "cooldown_active", "same_dedupe_recently_replied"):
+        for key in ("background_trigger", "same_dedupe_recently_replied"):
             value = intervention_state.get(key)
             if isinstance(value, bool):
                 payload[key] = value

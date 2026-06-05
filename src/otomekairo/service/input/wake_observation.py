@@ -481,8 +481,6 @@ class ServiceInputWakeObservationMixin:
             previous_runtime.get("last_prompted_observation_signature"),
             limit=360,
         )
-        cooldown_reason = self._wake_cooldown_reason(current_time=current_time)
-        cooldown_active = cooldown_reason is not None
         previous_similarity = self._visual_observation_signature_similarity(
             observation_signature,
             previous_signature,
@@ -507,7 +505,6 @@ class ServiceInputWakeObservationMixin:
 
         reason_summary = self._visual_observation_signal_reason(
             change_state=change_state,
-            cooldown_reason=cooldown_reason,
         )
         self._debug_log_visual_observation_similarity(
             observation_signature=observation_signature,
@@ -527,7 +524,6 @@ class ServiceInputWakeObservationMixin:
             "source_label": self._client_context_text(summary.get("source_label"), limit=80),
             "active_app": self._client_context_text(summary.get("active_app"), limit=80),
             "window_title": self._client_context_text(summary.get("window_title"), limit=120),
-            "cooldown_active": cooldown_active,
         }
         similarity = previous_similarity.get("similarity")
         if isinstance(similarity, int | float):
@@ -535,8 +531,6 @@ class ServiceInputWakeObservationMixin:
         basis = prompted_similarity.get("reason") if same_as_prompted else previous_similarity.get("reason")
         if isinstance(basis, str) and basis:
             signal["change_basis"] = basis
-        if cooldown_reason is not None:
-            signal["cooldown_reason"] = cooldown_reason
         return {key: value for key, value in signal.items() if value is not None}
 
     def _apply_visual_observation_runtime_payload(
@@ -707,17 +701,12 @@ class ServiceInputWakeObservationMixin:
         self,
         *,
         change_state: str,
-        cooldown_reason: str | None,
     ) -> str:
         if change_state == "same_as_recent_speech":
             return "この視覚観測には既に自発 speech 済みなので、繰り返さない。"
         if change_state == "first_seen":
-            if cooldown_reason is not None:
-                return "初めて見る視覚観測を cooldown 中の判断材料として渡す。発話するかは文脈で決める。"
             return "初めて見る視覚観測を自律判断の材料として渡す。"
         if change_state == "changed":
-            if cooldown_reason is not None:
-                return "前回から変化した視覚観測を cooldown 中の判断材料として渡す。発話するかは文脈で決める。"
             return "前回から変化した視覚観測を自律判断の材料として渡す。"
         return "視覚観測は前回と大きく変わらないため、通常は見送る材料として扱う。"
 
@@ -750,9 +739,6 @@ class ServiceInputWakeObservationMixin:
             value = self._client_context_text(signal.get(key), limit=limit)
             if value is not None:
                 payload[key] = value
-        cooldown_active = signal.get("cooldown_active")
-        if isinstance(cooldown_active, bool):
-            payload["cooldown_active"] = cooldown_active
         same_as_recent_speech = signal.get("same_as_recent_speech")
         if isinstance(same_as_recent_speech, bool):
             payload["same_as_recent_speech"] = same_as_recent_speech

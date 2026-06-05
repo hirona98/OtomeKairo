@@ -694,7 +694,6 @@ class ServiceCapabilityMixin:
                     "paused": False,
                     "busy_request_id": None,
                     "busy_action_id": None,
-                    "cooldown_until": None,
                     "last_failure_at": None,
                     "last_failure_summary": None,
                     "last_result_at": None,
@@ -713,9 +712,6 @@ class ServiceCapabilityMixin:
     ) -> dict[str, Any]:
         with self._runtime_state_lock:
             entry = dict(self._capability_runtime_state_entry(capability_id))
-            cooldown_until = entry.get("cooldown_until")
-            if isinstance(cooldown_until, str) and cooldown_until and cooldown_until <= current_time:
-                entry["cooldown_until"] = None
             unavailable_until = entry.get("unavailable_until")
             if isinstance(unavailable_until, str) and unavailable_until and unavailable_until <= current_time:
                 entry["unavailable_until"] = None
@@ -729,8 +725,6 @@ class ServiceCapabilityMixin:
             if not isinstance(entry.get("busy_action_id"), str) or not entry.get("busy_action_id"):
                 entry["busy_action_id"] = active_ongoing_action.get("action_id")
         entry["busy"] = bool(entry.get("busy_request_id") or entry.get("busy_action_id"))
-        cooldown_until = entry.get("cooldown_until")
-        entry["cooldown_active"] = isinstance(cooldown_until, str) and bool(cooldown_until) and cooldown_until > current_time
         unavailable_until = entry.get("unavailable_until")
         entry["unavailable_active"] = (
             isinstance(unavailable_until, str) and bool(unavailable_until) and unavailable_until > current_time
@@ -828,7 +822,6 @@ class ServiceCapabilityMixin:
         capability_id: str,
         current_time: str,
         failure_summary: str,
-        cooldown_seconds: int = 0,
         unavailable_reason: str | None = None,
         unavailable_seconds: int = 0,
     ) -> None:
@@ -836,8 +829,6 @@ class ServiceCapabilityMixin:
             entry = self._capability_runtime_state_entry(capability_id)
             entry["last_failure_at"] = current_time
             entry["last_failure_summary"] = self._clamp(failure_summary, limit=160)
-            if cooldown_seconds > 0:
-                entry["cooldown_until"] = (self._parse_iso(current_time) + timedelta(seconds=cooldown_seconds)).isoformat()
             if unavailable_reason and unavailable_seconds > 0:
                 entry["unavailable_reason"] = unavailable_reason
                 entry["unavailable_until"] = (
@@ -850,7 +841,6 @@ class ServiceCapabilityMixin:
         capability_id: str,
         current_time: str,
         result_summary: str,
-        cooldown_seconds: int = 0,
     ) -> None:
         with self._runtime_state_lock:
             entry = self._capability_runtime_state_entry(capability_id)
@@ -858,8 +848,6 @@ class ServiceCapabilityMixin:
             entry["last_result_summary"] = self._clamp(result_summary, limit=160)
             entry["unavailable_reason"] = None
             entry["unavailable_until"] = None
-            if cooldown_seconds > 0:
-                entry["cooldown_until"] = (self._parse_iso(current_time) + timedelta(seconds=cooldown_seconds)).isoformat()
 
     def _capability_transition_kind(self, *, final_state: str) -> str:
         if final_state == "waiting_result":

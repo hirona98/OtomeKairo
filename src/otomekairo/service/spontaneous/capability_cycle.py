@@ -30,12 +30,10 @@ class ServiceSpontaneousCapabilityCycleMixin:
                 current_time=accepted_at,
             )
         except ValueError as exc:
-            cooldown_seconds = int(self._capability_state_policy(capability_id).get("error_cooldown_seconds") or 0)
             self._mark_capability_runtime_failure(
                 capability_id=capability_id,
                 current_time=accepted_at,
                 failure_summary=str(exc),
-                cooldown_seconds=cooldown_seconds,
             )
             if "client_id" in str(exc):
                 raise ServiceError(
@@ -97,12 +95,10 @@ class ServiceSpontaneousCapabilityCycleMixin:
                     ),
                     level="ERROR",
                 )
-                cooldown_seconds = int(self._capability_state_policy(capability_id).get("error_cooldown_seconds") or 0)
                 self._mark_capability_runtime_failure(
                     capability_id=capability_id,
                     current_time=self._now_iso(),
                     failure_summary=str(exc),
-                    cooldown_seconds=cooldown_seconds,
                 )
 
         thread = threading.Thread(

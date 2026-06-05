@@ -383,6 +383,7 @@ class ServiceInputPipelineMixin:
             client_context=client_context,
             drive_state_summary=drive_state_summary,
             foreground_world_state=foreground_world_state,
+            activity_context=activity_context,
             world_state_trace=world_state_trace,
             ongoing_action_summary=ongoing_action_summary,
             capability_decision_view=capability_decision_view,

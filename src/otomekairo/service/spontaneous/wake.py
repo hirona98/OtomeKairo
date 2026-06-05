@@ -9,7 +9,7 @@ from otomekairo.recall.builder import RecallPackSelectionError
 from otomekairo.service.common import (
     BACKGROUND_WAKE_POLL_SECONDS,
     INITIAL_VISUAL_CAPTURE_DELAY_SECONDS,
-    WAKE_SPEECH_COOLDOWN_MINUTES,
+    WAKE_RECENT_DEDUPE_WINDOW_MINUTES,
     debug_log,
 )
 from otomekairo.service.spontaneous.pending_intent import PendingIntentSelectionError
@@ -133,7 +133,7 @@ class ServiceSpontaneousWakeMixin:
                         consolidate_memory=False,
                         pending_intent_selection=pending_intent_selection,
                     )
-                # due / cooldown
+                # due 判定
                 due = self._wake_is_due(state=state, current_time=started_at)
                 if due["should_skip"]:
                     debug_log("Wake", f"{self._short_cycle_id(cycle_id)} skip due reason={self._clamp(due['reason_summary'])}")
@@ -369,7 +369,6 @@ class ServiceSpontaneousWakeMixin:
         if decision.get("kind") == "speech":
             with self._runtime_state_lock:
                 self._wake_runtime_state["last_spontaneous_at"] = current_time
-                self._wake_runtime_state["cooldown_until"] = self._wake_cooldown_until(current_time)
                 if selected_candidate is not None:
                     dedupe_key = selected_candidate.get("dedupe_key")
                     if isinstance(dedupe_key, str) and dedupe_key:
@@ -554,16 +553,6 @@ class ServiceSpontaneousWakeMixin:
             "reason_summary": None,
         }
 
-    def _wake_cooldown_reason(self, *, current_time: str) -> str | None:
-        # 検索
-        with self._runtime_state_lock:
-            cooldown_until = self._wake_runtime_state.get("cooldown_until")
-        if not isinstance(cooldown_until, str) or not cooldown_until:
-            return None
-        if self._parse_iso(current_time) < self._parse_iso(cooldown_until):
-            return "直近の自発 speech から cooldown 中のため、発話量と頻度を控えめに調整する。"
-        return None
-
     def _was_recently_replied(self, *, dedupe_key: str, current_time: str) -> bool:
         # 検索
         with self._runtime_state_lock:
@@ -572,11 +561,7 @@ class ServiceSpontaneousWakeMixin:
         if not isinstance(last_speech_at, str) or not last_speech_at:
             return False
         current_dt = self._parse_iso(current_time)
-        return current_dt - self._parse_iso(last_speech_at) < timedelta(minutes=WAKE_SPEECH_COOLDOWN_MINUTES)
-
-    def _wake_cooldown_until(self, current_time: str) -> str:
-        # タイムスタンプ
-        return (self._parse_iso(current_time) + timedelta(minutes=WAKE_SPEECH_COOLDOWN_MINUTES)).isoformat()
+        return current_dt - self._parse_iso(last_speech_at) < timedelta(minutes=WAKE_RECENT_DEDUPE_WINDOW_MINUTES)
 
     def _wake_input_text(self, candidate: dict[str, Any]) -> str:
         # intent判定
@@ -607,7 +592,10 @@ class ServiceSpontaneousWakeMixin:
             parts.append(self._wake_input_text(selected_candidate))
             parts.append("いま保留中の会話候補を再評価したい。")
         else:
-            parts.append("drive_state と world_state を見て、今は前へ出る価値があるかを見たい。")
+            parts.append(
+                "ユーザーへの応答要求ではなく、自律的に観測から短く話しかける機会として見る。"
+                "呼びかけの有無ではなく、drive_state と world_state と観測価値から前へ出るかを決めたい。"
+            )
         return " ".join(parts)
 
     def _client_context_input_parts(
@@ -643,15 +631,11 @@ class ServiceSpontaneousWakeMixin:
             change_state = visual_signal.get("change_state")
             source_kind = visual_signal.get("source_kind")
             source_label = visual_signal.get("source_label")
-            cooldown_active = visual_signal.get("cooldown_active")
             reason_summary = visual_signal.get("reason_summary")
             if isinstance(change_state, str):
                 source_part = source_label if isinstance(source_label, str) else source_kind
                 source_text = f"{source_part}の" if isinstance(source_part, str) else ""
-                cooldown_part = ""
-                if isinstance(cooldown_active, bool):
-                    cooldown_part = f", cooldown_active={str(cooldown_active).lower()}"
-                parts.append(f"{source_text}視覚観測シグナルは change_state={change_state}{cooldown_part}。")
+                parts.append(f"{source_text}視覚観測シグナルは change_state={change_state}。")
             if isinstance(reason_summary, str):
                 parts.append(f"視覚観測理由は {reason_summary}")
 

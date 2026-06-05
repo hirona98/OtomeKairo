@@ -367,7 +367,6 @@ class ServiceConfigStreamMixin:
         )
         paused = runtime_state.get("paused") is True
         busy = runtime_state.get("busy") is True or same_capability_waiting
-        cooldown_active = runtime_state.get("cooldown_active") is True
         unavailable_active = runtime_state.get("unavailable_active") is True
         available = (
             bool(bound_client_ids)
@@ -418,8 +417,6 @@ class ServiceConfigStreamMixin:
                 "busy": busy,
                 "busy_request_id": runtime_state.get("busy_request_id"),
                 "busy_action_id": runtime_state.get("busy_action_id"),
-                "cooldown_active": cooldown_active,
-                "cooldown_until": runtime_state.get("cooldown_until"),
                 "last_failure_at": runtime_state.get("last_failure_at"),
                 "last_failure_summary": runtime_state.get("last_failure_summary"),
                 "last_result_at": runtime_state.get("last_result_at"),

@@ -3,7 +3,7 @@
 ## 目的
 
 `activity_state` は、ユーザーが現在または直前に何をしているかの短期推定を保持する状態である。
-判断と発話では `activity_context` として渡す。
+判断、発話、自律 initiative では `activity_context` として渡す。
 
 OtomeKairo は、対話入力、API起床要求、観測能力の結果、外部サービスや各種 status capability の結果を同じ判断ループで扱う。
 `activity_state` はその入力群から、ユーザー活動の意味を短期的に推定し、次の判断へ持ち越す。
@@ -151,7 +151,7 @@ LLM は `status` を出力しない。
 
 ## 判断入力
 
-判断と発話へ渡す `activity_context` は、保存 row ではなく前景要約にする。
+判断、発話、自律 initiative へ渡す `activity_context` は、保存 row ではなく前景要約にする。
 `previous_activity` は直前活動だけを表し、現在進行中の活動として扱わない。
 判断文脈へ出す `activity_context` には `status` を含めない。
 
@@ -174,6 +174,10 @@ LLM は `status` を出力しない。
 
 `activity_context` はユーザー発話ではない。
 `current_input.sender=user` の本文と混ぜない。
+自律 initiative では、`activity_context` をタイミング判断の補助材料として扱う。
+コードは `label / target` の語句一致で活動分類を固定しない。
+コードは `activity_context` だけを理由に `suppression_level` を上げない。
+コードは `activity_context` だけを理由に `speech / noop / pending_intent` を固定しない。
 
 ## 記憶との関係
 

@@ -95,7 +95,7 @@ def _is_timestamp_display_key(key: Any) -> bool:
     return (
         key.endswith("_at")
         or key.endswith("_iso")
-        or key in {"current_time", "ts", "valid_from", "valid_to", "not_before", "cooldown_until"}
+        or key in {"current_time", "ts", "valid_from", "valid_to", "not_before"}
     )
 
 

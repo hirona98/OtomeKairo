@@ -259,7 +259,7 @@ API起床は少なくとも次の挙動を持つ。
 - `source_current_input.response_target=none` の capability result は内部観測結果として扱い、実効判断を `noop` に正規化し、assistant message を送信しない
 - visual observation は wake 判断へ渡し、`change_state=first_seen / changed` は wake 判断へ進む前景シグナルとして扱うが、speech 義務ではない
 - visual observation signature は `vision_source_id / source_kind / source_label / visual_summary_text` を持ち、`window_title` を持たない。signature 比較は `vision_source_id / source_kind` の不一致と `visual_summary_text` の類似度を使う
-- cooldown 中の visual observation は `cooldown_active=true` として wake 判断へ渡す。LLM は cooldown、直近 speech、drive_state、world_state を合わせて `speech / noop / pending_intent` を選ぶ
+- visual observation は wake 判断へ渡す。LLM は change_state、drive_state、world_state、同一観測の反復有無を合わせて `speech / noop / pending_intent` を選ぶ
 - 再評価時刻に達した保留意図があれば再評価し、必要なら `speech`
 
 server 内の定期起床スケジューラも、同じ wake 1 サイクルを内部的に使う。

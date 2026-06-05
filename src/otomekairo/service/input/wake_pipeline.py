@@ -74,19 +74,6 @@ class ServiceInputWakePipelineMixin:
                 client_context,
             )
 
-        # クールダウン
-        cooldown_reason = self._wake_cooldown_reason(current_time=started_at)
-        if cooldown_reason is not None and not self._client_context_has_judgable_visual_observation(client_context):
-            self._set_last_wake_at(started_at)
-            debug_log("Wake", f"{cycle_label} skipped cooldown={self._clamp(cooldown_reason)}")
-            return (
-                self._noop_pipeline(state=state, started_at=started_at, reason_summary=cooldown_reason),
-                input_text,
-                client_context,
-            )
-        if cooldown_reason is not None:
-            debug_log("Wake", f"{cycle_label} cooldown judged visual_observation={self._clamp(cooldown_reason)}")
-
         # 候補
         if selected_candidate is None:
             if not self._has_autonomous_initiative_context(
@@ -223,28 +210,6 @@ class ServiceInputWakePipelineMixin:
                 return True
             image_count = item.get("image_count")
             if isinstance(image_count, int) and image_count > 0:
-                return True
-        return False
-
-    def _client_context_has_judgable_visual_observation(
-        self,
-        client_context: dict[str, Any] | None,
-    ) -> bool:
-        if not isinstance(client_context, dict):
-            return False
-        signals = self._compact_visual_observation_signals(
-            client_context.get("visual_observation_signals")
-        )
-        if any(self._visual_observation_signal_needs_wake_judgement(signal) for signal in signals):
-            return True
-        wake_observations = client_context.get("wake_observations")
-        if not isinstance(wake_observations, list):
-            return False
-        for item in wake_observations:
-            if not isinstance(item, dict):
-                continue
-            signal = self._compact_visual_observation_signal(item.get("visual_observation_signal"))
-            if self._visual_observation_signal_needs_wake_judgement(signal):
                 return True
         return False
 

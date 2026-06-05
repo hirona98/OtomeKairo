@@ -7,7 +7,6 @@ from typing import Any
 from otomekairo.llm.contexts import (
     CurrentInput,
     DecisionContext,
-    InitiativeCandidateFamily,
     InitiativeContext,
     SpeechContext,
 )
@@ -325,69 +324,6 @@ class LLMClient:
             payload=payload,
             context=context,
         )
-        if context.initiative_context is None:
-            return
-        selected_family = self._selected_initiative_family_entry(context.initiative_context)
-        if selected_family is None:
-            return
-        preferred_result_kind = selected_family.preferred_result_kind
-        if not isinstance(preferred_result_kind, str) or not preferred_result_kind:
-            return
-        decision_kind = payload.get("kind")
-        if preferred_result_kind == "capability_request" and decision_kind != "capability_request":
-            raise LLMError(
-                "Initiative selected candidate entry は preferred_result_kind=capability_request です。"
-                "kind=capability_request を返してください。"
-            )
-        if decision_kind == "capability_request" and preferred_result_kind != "capability_request":
-            raise LLMError(
-                "Initiative selected candidate entry は "
-                f"preferred_result_kind={preferred_result_kind} です。"
-                "preferred_result_kind=capability_request ではないため capability_request は不正です。"
-                f"kind={preferred_result_kind} を返してください。"
-            )
-        if decision_kind == "capability_request":
-            preferred_capability_id = selected_family.preferred_capability_id
-            request_payload = payload.get("capability_request")
-            request_capability_id = (
-                request_payload.get("capability_id")
-                if isinstance(request_payload, dict)
-                else None
-            )
-            if isinstance(preferred_capability_id, str) and request_capability_id != preferred_capability_id:
-                raise LLMError(
-                    "Initiative selected candidate entry の preferred_capability_id と "
-                    "capability_request.capability_id が一致していません。"
-                )
-            return
-        if decision_kind == "noop" and preferred_result_kind == "speech":
-            foreground_summary = context.initiative_context.foreground_signal_summary
-            suppression_summary = context.initiative_context.suppression_summary
-            foreground_thinness = (
-                foreground_summary.get("foreground_thinness")
-                if isinstance(foreground_summary, dict)
-                else None
-            )
-            suppression_level = (
-                suppression_summary.get("suppression_level")
-                if isinstance(suppression_summary, dict)
-                else None
-            )
-            cooldown_active = (
-                suppression_summary.get("cooldown_active")
-                if isinstance(suppression_summary, dict)
-                else None
-            )
-            if (
-                foreground_thinness in {"ready", "grounded", "mixed", "thin"}
-                and suppression_level not in {"high", "medium"}
-                and cooldown_active is not True
-            ):
-                raise LLMError(
-                    "Initiative selected candidate entry は preferred_result_kind=speech で、"
-                    "foreground_signal_summary.foreground_thinness は speech 可能な前景です。"
-                    "noop は不正です。kind=speech を返してください。"
-                )
 
     def _validate_decision_visual_observation_context(
         self,
@@ -686,12 +622,6 @@ class LLMClient:
             f"{request_capability_id.strip()} の capability_request は不正です。"
             "受け取った result に基づく speech / noop / pending_intent を返してください。"
         )
-
-    def _selected_initiative_family_entry(
-        self,
-        initiative_context: InitiativeContext,
-    ) -> InitiativeCandidateFamily | None:
-        return initiative_context.selected_family_entry()
 
     def generate_speech(
         self,

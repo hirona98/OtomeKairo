@@ -725,6 +725,7 @@ def _build_decision_system_prompt(persona: dict) -> str:
             "current_input.sender=user かつ response_target=user の text が非空なら、明示的な発話不要表現がない限り speech を選んでください。\n"
             "明示的な会話要求に自然に返せるなら speech を優先し、pending_intent を乱用しないでください。\n"
             "ActivityContext.current_activity は現在の短期活動推定です。ActivityContext.previous_activity は直前活動であり、current_activity が存在して内容が異なる場合は、previous_activity を現在進行中の作業として扱わないでください。\n"
+            "自律判断時の ActivityContext はタイミング判断の補助材料です。label や target の語句一致で活動分類を固定せず、ActivityContext だけを理由に speech / noop / pending_intent を固定しないでください。\n"
             "reason_summary では current_activity と矛盾する活動状態を書いてはいけません。前の活動に触れる必要がある場合は「直前まで」の文脈として扱ってください。\n"
             "OngoingActionSummary.status=waiting_result のときは、新しい capability_request を出さないでください。\n"
             "空文字だけの入力は noop を選んでください。",
@@ -812,23 +813,23 @@ def _build_decision_trigger_policy(
     if initiative_context is not None:
         policies.extend(
             [
-                "InitiativeContext には opportunity_summary, time_context_summary, foreground_signal_summary, initiative_baseline, runtime_state_summary, recent_turn_summary, candidate_families, selected_candidate_family, intervention_state, suppression_summary が入りえます。",
-                "InitiativeContext.candidate_families に priority_score, preferred_result_kind, preferred_result_reason_summary, blocking_reason_summary があるときは、その候補比較を尊重してください。",
-                "selected_candidate_family は strongest family の要約であり、機械的命令ではなく、reason_summary と preferred_result_kind を見て最終結果を選んでください。",
+                "InitiativeContext には opportunity_summary, time_context_summary, foreground_signal_summary, activity_context, initiative_baseline, runtime_state_summary, recent_turn_summary, candidate_families, selected_candidate_family, intervention_state, suppression_summary が入りえます。",
+                "InitiativeContext.candidate_families の priority_score, reason_summary, blocking_reason_summary は候補比較の材料です。decision.kind は候補要約だけで固定せず、全体文脈から選んでください。",
+                "selected_candidate_family は strongest family の要約であり、機械的命令ではありません。reason_summary, drive_summaries, world_state_summary, recent_turn_summary, intervention_state を合わせて最終結果を選んでください。",
                 "InitiativeContext.drive_summaries に drive_kind, support_count, freshness_hint, support_strength, scope_alignment, signal_strength, persona_alignment, stability_hint があるときは、中期の向きの比較材料として扱ってください。",
-                "InitiativeContext.candidate_families に preferred_capability_id と preferred_capability_input があるとき、preferred_result_kind=capability_request ならその capability と最小 input を優先してください。",
-                "InitiativeContext の selected candidate entry が preferred_result_kind=speech / noop / pending_intent のときは、preferred_capability_id が無い限り新しい capability_request を選ばないでください。",
-                "selected candidate entry が preferred_result_kind=speech で suppression_level=low の場合、短い外向き伝達を出す正の候補です。直近のユーザー呼びかけが無いことや視覚変化のみであることを理由に noop へ落とさないでください。",
-                "foreground_signal_summary が grounded で world_state_summary に該当状況が既にあるときは、同じ情報を再取得する capability_request より、preferred_result_kind に沿った speech / noop を優先してください。",
-                "suppression_summary.cooldown_active が true ではない場合、recent_turn_summary だけから cooldown 中だと推測してはいけません。",
-                "`background_wake` は定期起床であり、自律判断の通常入口なので、直近のユーザー呼びかけが無いこと自体を noop 理由にしないでください。",
-                "`background_wake` の定期起床でも foreground_signal_summary が ready / grounded の場合、suppression_level=medium は抑制材料ですが、単独で noop を固定しないでください。",
+                "InitiativeContext.candidate_families に preferred_capability_id と preferred_capability_input があるときは capability_request の提案です。現在文脈で追加観測が必要な場合だけ、その capability と最小 input を選んでください。",
+                "foreground_signal_summary が grounded で world_state_summary に該当状況が既にあるときは、同じ情報を再取得せず、既存要約を使って speech / noop / pending_intent を判断してください。",
+                "recent_turn_summary だけから直近発話後の待機が必要だと推測して noop の主理由にしてはいけません。反復かどうかは visual_observations[].change_state と same_as_recent_speech を見て判断してください。",
+                "`background_wake` は定期起床であり、自律判断の通常入口なので、直近のユーザー呼びかけが無いことを noop の主理由にしないでください。",
+                "`background_wake` の定期起床でも foreground_signal_summary が ready / grounded の場合、定期起床であることだけで noop を固定しないでください。",
+                "`background_wake` で noop を選ぶ場合は、直近発話、緊急性の低さ、呼びかけ不在だけを理由にせず、観測が反復であること、内容が空疎であること、またはユーザー向け応答が進行中であることを具体的に説明してください。",
                 "foreground_signal_summary.visual_observations は desktop / camera / virtual などの視覚観測であり、ユーザー発話ではありません。speech を選ぶ場合は、相づちではなく観測に根拠づけた短い自発発話にしてください。",
-                "visual_observations[].change_state=first_seen / changed は判断へ進める変化であり、speech 義務ではありません。最近の自発 speech、cooldown、観測内容の価値を合わせ、弱ければ noop を選んでください。",
+                "InitiativeContext.activity_context は自律判断時のタイミング補助材料です。label や target の語句一致で活動分類を固定せず、activity_context だけを理由に speech / noop / pending_intent を固定しないでください。",
+                "visual_observations[].change_state=first_seen / changed は判断へ進める変化であり、短い自発 speech の価値を積極的に評価してください。観測内容の新しさと現在の流れへの接続を重く見てください。",
                 "visual_observations[].change_state=same_as_recent_speech / stable は繰り返し発話を避ける強い材料です。別の drive_state や pending_intent が無ければ noop を優先してください。",
-                "InitiativeContext があり pending_intent_summaries が空のときは、drive_state / world_state / ongoing_action / visual_observations から自然な前進理由がある場合だけ speech を選び、弱ければ noop を選んでください。",
-                "selected_candidate_family が ongoing_action で preferred_result_kind=capability_request のときは、available な capability の範囲で follow-up capability_request を検討してください。",
-                "foreground_signal_summary が thin で suppression_summary や intervention_risk_summary が強いとき、特に `background_wake` の定期起床や initiative_baseline=low では、押し出しすぎず noop を優先してください。",
+                "InitiativeContext があり pending_intent_summaries が空でも、drive_state / world_state / ongoing_action / visual_observations にいま触れる価値があるなら speech を選んでください。pending_intent が無いことだけで noop にしないでください。",
+                "selected_candidate_family が ongoing_action で follow-up capability が available なときは、現在の流れを進める capability_request を検討してください。",
+                "foreground_signal_summary が thin のとき、特に `background_wake` の定期起床や initiative_baseline=low では、前へ出る価値と繰り返し感を比較して speech / noop / pending_intent を選んでください。",
             ]
         )
     return policies
@@ -1420,9 +1421,6 @@ def _compact_speech_initiative_context(initiative_context: InitiativeContext | N
                     value = observation.get(key)
                     if isinstance(value, str) and value.strip():
                         compact_observation[key] = _compact_prompt_text(value, limit=limit)
-                cooldown_active = observation.get("cooldown_active")
-                if isinstance(cooldown_active, bool):
-                    compact_observation["cooldown_active"] = cooldown_active
                 if compact_observation:
                     compact_visual_observations.append(compact_observation)
             if compact_visual_observations:

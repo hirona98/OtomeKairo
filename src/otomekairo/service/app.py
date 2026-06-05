@@ -46,7 +46,6 @@ class OtomeKairoService(
         self._wake_runtime_state: dict[str, Any] = {
             "last_wake_at": None,
             "last_spontaneous_at": None,
-            "cooldown_until": None,
             "initial_delay_until": None,
             "retry_after": None,
             "speech_history_by_dedupe": {},

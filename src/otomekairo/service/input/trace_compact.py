@@ -214,7 +214,7 @@ class ServiceInputTraceCompactMixin:
                     value = suppression_summary.get(key)
                     if isinstance(value, str) and value.strip():
                         compact_suppression[key] = self._clamp(value.strip(), limit=160)
-                for key in ("background_trigger", "cooldown_active", "same_dedupe_recently_replied"):
+                for key in ("background_trigger", "same_dedupe_recently_replied"):
                     value = suppression_summary.get(key)
                     if isinstance(value, bool):
                         compact_suppression[key] = value
@@ -342,14 +342,10 @@ class ServiceInputTraceCompactMixin:
         payload: dict[str, Any] = {}
         if not isinstance(intervention_state, dict):
             return payload
-        for key in ("background_trigger", "cooldown_active", "same_dedupe_recently_replied"):
+        for key in ("background_trigger", "same_dedupe_recently_replied"):
             value = intervention_state.get(key)
             if isinstance(value, bool):
                 payload[key] = value
-        for key in ("cooldown_reason", "last_spontaneous_speech_age_label"):
-            value = intervention_state.get(key)
-            if isinstance(value, str) and value.strip():
-                payload[key] = self._clamp(value.strip(), limit=120)
         return payload
 
     def _compact_initiative_world_state_summaries(self, summaries: Any) -> list[dict[str, Any]]:

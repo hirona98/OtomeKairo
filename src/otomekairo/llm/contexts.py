@@ -63,6 +63,7 @@ class InitiativeContext:
     opportunity_summary: str
     time_context_summary: dict[str, Any]
     foreground_signal_summary: dict[str, Any]
+    activity_context: dict[str, Any] | None
     initiative_baseline: dict[str, Any]
     runtime_state_summary: dict[str, Any]
     recent_turn_summary: list[dict[str, str]]
@@ -94,6 +95,7 @@ class InitiativeContext:
             "opportunity_summary": self.opportunity_summary,
             "time_context_summary": self.time_context_summary,
             "foreground_signal_summary": self.foreground_signal_summary,
+            "activity_context": self.activity_context,
             "initiative_baseline": self.initiative_baseline,
             "runtime_state_summary": self.runtime_state_summary,
             "recent_turn_summary": self.recent_turn_summary,

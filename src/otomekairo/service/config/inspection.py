@@ -251,7 +251,6 @@ class ServiceConfigInspectionMixin:
             return {
                 "last_wake_at": self._wake_runtime_state.get("last_wake_at"),
                 "last_spontaneous_at": self._wake_runtime_state.get("last_spontaneous_at"),
-                "cooldown_until": self._wake_runtime_state.get("cooldown_until"),
                 "initial_delay_until": self._wake_runtime_state.get("initial_delay_until"),
                 "retry_after": self._wake_runtime_state.get("retry_after"),
                 "speech_history_count": len(speech_history) if isinstance(speech_history, dict) else 0,

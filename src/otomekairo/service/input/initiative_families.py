@@ -85,15 +85,13 @@ class ServiceInputInitiativeFamiliesMixin:
         last_capability_id = self._client_context_text(ongoing_action_summary.get("last_capability_id"), limit=64)
         available_ids = capability_summary.get("available_ids", [])
         capability_available = isinstance(last_capability_id, str) and last_capability_id in available_ids
-        preferred_result_kind = "speech"
+        preferred_result_kind: str | None = None
         preferred_result_reason: str | None = None
         priority_score = 0.56
         blocking_reason: str | None = None
         if status == "waiting_result":
             priority_score = 0.74
-            preferred_result_kind = "noop"
-            preferred_result_reason = "ongoing_action が結果待ちで、今は新しい介入より待機を優先する。"
-            blocking_reason = preferred_result_reason
+            blocking_reason = "ongoing_action が結果待ちで、今は新しい介入より待機を判断材料にする。"
         elif status in {"active", "continued"}:
             if capability_available:
                 priority_score = 0.82
@@ -104,18 +102,11 @@ class ServiceInputInitiativeFamiliesMixin:
                     preferred_result_reason = "利用可能な follow-up capability があり、そのまま継続できる。"
             elif last_capability_id is not None:
                 priority_score = 0.48
-                preferred_result_kind = "noop"
-                preferred_result_reason = f"{last_capability_id} の follow-up を考えたいが、現時点では利用できない。"
-                blocking_reason = preferred_result_reason
+                blocking_reason = f"{last_capability_id} の follow-up を考えたいが、現時点では利用できない。"
             else:
                 priority_score = 0.68
-                preferred_result_reason = "継続中の流れが残っており、短い speech で続きを整えられる。"
         elif status == "on_hold":
             priority_score = 0.42
-            preferred_result_kind = "pending_intent"
-            preferred_result_reason = "進行中の流れはいったん保留扱いで、pending_intent として持つのが自然。"
-        else:
-            preferred_result_reason = "継続中の流れが残っており、状況に応じて続きを選びたい。"
         return InitiativeCandidateFamily(
             family="ongoing_action",
             available=True,
@@ -150,8 +141,6 @@ class ServiceInputInitiativeFamiliesMixin:
                     eligible_count=eligible_count,
                     selection_reason=selection_reason,
                 ),
-                preferred_result_kind="speech",
-                preferred_result_reason_summary="due になった pending_intent 候補があり、今回は表に出してよい。",
             )
         if eligible_count > 0:
             return InitiativeCandidateFamily(
@@ -165,8 +154,6 @@ class ServiceInputInitiativeFamiliesMixin:
                     eligible_count=eligible_count,
                     selection_reason=selection_reason,
                 ),
-                preferred_result_kind="pending_intent",
-                preferred_result_reason_summary="再評価対象はあるが、今回は pending_intent として保持するのが自然。",
             )
         if pool_count > 0:
             return InitiativeCandidateFamily(
@@ -258,12 +245,7 @@ class ServiceInputInitiativeFamiliesMixin:
             capability_summary=capability_summary,
         )
         preferred_result_kind: str | None = None
-        preferred_result_reason = self._initiative_autonomous_preferred_result_reason(
-            strongest_drive=strongest_drive,
-            world_state_summary=world_state_summary,
-            recent_turn_summary=recent_turn_summary,
-            visual_signal=visual_signal,
-        )
+        preferred_result_reason: str | None = None
         preferred_capability_id: str | None = None
         preferred_capability_input: dict[str, Any] | None = None
         if isinstance(probe_preference, dict):
@@ -272,42 +254,6 @@ class ServiceInputInitiativeFamiliesMixin:
             priority_score += INITIATIVE_AUTONOMOUS_PROBE_SCORE
             preferred_capability_id = probe_preference["capability_id"]
             preferred_capability_input = probe_preference["input"]
-        elif suppression_level == "high":
-            preferred_result_kind = "noop"
-            preferred_result_reason = "suppression が high で、今回は押し出さず見送るほうが自然。"
-        elif (
-            trigger_kind == "background_wake"
-            and foreground_thinness == "thin"
-            and not drive_summaries
-            and self._initiative_world_state_is_weak_foreground(world_state_summary)
-        ):
-            preferred_result_kind = "noop"
-            preferred_result_reason = "定期起床で画面や外部状態だけが薄く見えており、drive なしでは見送るほうが自然。"
-        elif foreground_thinness == "thin" and not world_state_summary and not recent_turn_summary:
-            preferred_result_kind = "noop"
-            preferred_result_reason = "前景文脈が薄く、いまは speech より様子見を優先したい。"
-        elif (
-            visual_change_state in {"first_seen", "changed"}
-            and foreground_thinness == "ready"
-            and suppression_level == "low"
-            and isinstance(visual_signal, dict)
-            and visual_signal.get("cooldown_active") is not True
-            and visual_signal.get("same_as_recent_speech") is not True
-        ):
-            preferred_result_kind = "speech"
-            preferred_result_reason = "視覚観測に前回からの判別可能な変化があり、suppression が low なので短い自発 speech を前景候補にする。"
-        elif (
-            isinstance(strongest_drive, dict)
-            and world_state_summary
-            and suppression_level != "high"
-        ):
-            preferred_result_kind = "speech"
-            preferred_result_reason = self._initiative_autonomous_preferred_result_reason(
-                strongest_drive=strongest_drive,
-                world_state_summary=world_state_summary,
-                recent_turn_summary=recent_turn_summary,
-                visual_signal=visual_signal,
-            )
         blocking_reason = self._initiative_autonomous_blocking_reason(
             trigger_kind=trigger_kind,
             drive_summaries=drive_summaries,

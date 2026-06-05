@@ -437,31 +437,3 @@ class ServiceInputInitiativeScoringMixin:
         if not reasons:
             return None
         return " / ".join(reasons) + " ため、押し出しは慎重にする。"
-
-    def _initiative_autonomous_preferred_result_reason(
-        self,
-        *,
-        strongest_drive: dict[str, Any] | None,
-        world_state_summary: list[dict[str, Any]],
-        recent_turn_summary: list[dict[str, str]],
-        visual_signal: dict[str, Any] | None,
-    ) -> str:
-        if visual_signal:
-            change_state = self._client_context_text(visual_signal.get("change_state"), limit=48)
-            source_kind = self._client_context_text(visual_signal.get("source_kind"), limit=32)
-            source_label = self._client_context_text(visual_signal.get("source_label"), limit=80)
-            source_name = source_label or source_kind or "視覚観測"
-            if change_state in {"first_seen", "changed"}:
-                return f"{source_name} に前回からの変化があり、speech / noop / pending_intent を文脈で選ぶ。"
-            if change_state == "same_as_recent_speech":
-                return f"{source_name} は直近 speech 済みの観測と近く、繰り返す価値を慎重に見る。"
-            return f"{source_name} の前景を見て、必要なら短い speech を返し、弱ければ noop を選ぶ。"
-        if isinstance(strongest_drive, dict) and world_state_summary:
-            return "strongest drive と前景 world が噛み合っており、短い speech が自然。"
-        if isinstance(strongest_drive, dict) and recent_turn_summary:
-            return "strongest drive と直近文脈がつながっており、短い speech が自然。"
-        if world_state_summary:
-            return "前景 world が見えており、短い speech で触れられる。"
-        if recent_turn_summary:
-            return "直近文脈が残っており、軽い speech で前へ出られる。"
-        return "自発判断の前景が残っており、短い speech を返せる。"
