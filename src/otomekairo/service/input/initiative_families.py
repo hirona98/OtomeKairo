@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from otomekairo.llm.contexts import InitiativeCandidateFamily
+from otomekairo.llm.contracts import INITIATIVE_ENTRY_ENTER_BASIS_VALUES
 
 
 class ServiceInputInitiativeFamiliesMixin:
@@ -189,14 +190,24 @@ class ServiceInputInitiativeFamiliesMixin:
             if isinstance(initiative_entry_summary, dict)
             else None
         )
-        available = bool(drive_summaries or entry_kind == "enter")
+        entry_basis = (
+            initiative_entry_summary.get("entry_basis")
+            if isinstance(initiative_entry_summary, dict)
+            else None
+        )
+        # 自発 speech は活動モード遷移または強い関心の入口だけで成立させる。
+        entry_is_strong = entry_kind == "enter" and entry_basis in INITIATIVE_ENTRY_ENTER_BASIS_VALUES
+        available = bool(drive_summaries or entry_is_strong)
         if not available:
+            blocking_reason = "drive_state も外向きの自律判断入口もまだ無い。"
+            if entry_kind == "enter":
+                blocking_reason = "自律入口判定は enter だが、entry_basis が同一活動内の詳細変化または観測のみで、autonomous speech の入口として扱わない。"
             return InitiativeCandidateFamily(
                 family="autonomous",
                 available=False,
                 selected=False,
                 priority_score=0.0,
-                blocking_reason_summary="drive_state も外向きの自律判断入口もまだ無い。",
+                blocking_reason_summary=blocking_reason,
             )
         strongest_drive = drive_summaries[0] if drive_summaries else None
         preferred_result_kind: str | None = None
@@ -335,6 +346,9 @@ class ServiceInputInitiativeFamiliesMixin:
         parts: list[str] = []
         if isinstance(initiative_entry_summary, dict):
             reason_summary = self._client_context_text(initiative_entry_summary.get("reason_summary"), limit=180)
+            entry_basis = self._client_context_text(initiative_entry_summary.get("entry_basis"), limit=48)
+            if entry_basis is not None:
+                parts.append(f"自律入口basis={entry_basis}")
             if reason_summary is not None:
                 parts.append(f"自律入口理由={reason_summary}")
         if drive_summaries:

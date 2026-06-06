@@ -7,6 +7,7 @@ from otomekairo.llm.client import LLMError
 from otomekairo.service.capability import CapabilityDispatchError
 from otomekairo.service.common import debug_log
 from otomekairo.service.input.constants import VISUAL_OBSERVATION_SIMILARITY_THRESHOLD
+from otomekairo.service.input.source_owner import visual_source_owner
 
 
 class ServiceInputWakeObservationMixin:
@@ -525,6 +526,9 @@ class ServiceInputWakeObservationMixin:
             "active_app": self._client_context_text(summary.get("active_app"), limit=80),
             "window_title": self._client_context_text(summary.get("window_title"), limit=120),
         }
+        source_owner = visual_source_owner(signal.get("source_kind"))
+        if source_owner is not None:
+            signal["source_owner"] = source_owner
         similarity = previous_similarity.get("similarity")
         if isinstance(similarity, int | float):
             signal["similarity"] = round(float(similarity), 3)
@@ -733,6 +737,7 @@ class ServiceInputWakeObservationMixin:
             ("vision_source_id", 96),
             ("source_kind", 32),
             ("source_label", 80),
+            ("source_owner", 32),
             ("active_app", 80),
             ("window_title", 120),
         ):

@@ -18,6 +18,7 @@ OtomeKairo は、対話入力、API起床要求、観測能力の結果、外部
 - ユーザーが現在している活動の推定
 - ユーザーが直前までしていた活動の推定
 - 活動内容、活動対象、現在活動か直前活動かの短い状態
+- 活動主体。通常は `user`、AI 本体の ongoing action と構造的に分かる場合だけ `self`
 - 推定の確からしさ、更新時刻、失効時刻
 - 推定に使った source kind と source ref の要約
 
@@ -27,6 +28,7 @@ OtomeKairo は、対話入力、API起床要求、観測能力の結果、外部
 - クライアント UI のローカル状態そのもの
 - ユーザーの恒久的な習慣や人物理解
 - OtomeKairo 自身の実行列
+- OtomeKairo の直近発話、約束、待機姿勢をユーザー活動として混ぜたもの
 - capability manifest や binding
 - 期限の無い状態
 
@@ -43,7 +45,8 @@ OtomeKairo は、対話入力、API起床要求、観測能力の結果、外部
 |------|------|
 | `activity_id` | 状態の識別子 |
 | `memory_set_id` | 記憶集合 |
-| `label` | 判断へ渡す短い自然文の活動要約 |
+| `label` | 判断へ渡す短い自然文の活動モード要約 |
+| `actor` | 活動主体。`user / self / unknown` のいずれか |
 | `target` | 活動対象。アプリ名、作品名、相手、作業対象など |
 | `status` | 保存内部の生存状態。`active / ended` のいずれか |
 | `confidence` | 推定の確からしさ |
@@ -73,6 +76,7 @@ LLM には、少なくとも次の要約を source pack として渡す。
 - `visual_observation_context`
 - `foreground_world_state`
 - `previous_activity_context`
+- `source_owner`
 
 入力がない field は渡さない。
 raw image、音声、長い payload、資格情報、内部 URL、配送先 client は渡さない。
@@ -81,6 +85,11 @@ LLM は文字列一致で活動を確定しない。
 LLM は複数 source の意味を見て、活動候補を返す。
 コード側もアプリ名やタイトルの文字列一致で活動内容を決めない。
 文字列比較は同一活動の統合、重複抑制、inspection の補助に限定する。
+`desktop / camera / virtual` の vision source と `source_owner=user_environment` はユーザー側の環境観測として扱い、activity candidate の `actor=user` にする。
+activity の `label / reason_summary` はユーザー側の観測事実から構成する。
+assistant の直近発話、約束、待機姿勢は activity とは別文脈として扱う。
+activity の `label` は投稿内容、検索語、曲名、ファイル名などの細部ではなく、X閲覧中、検索で調査中、コーディング中、ゲーム中、音楽鑑賞中のような活動モードにする。
+作品名、曲名、投稿内容、作業対象などの詳細は `target / reason_summary` に置く。
 
 ### 活動内容の表現
 
@@ -103,6 +112,7 @@ LLM の出力は JSON object 1 個に固定する。
 {
   "activity_candidates": [
     {
+      "actor": "user",
       "label": "リズムゲームをプレイ中",
       "target": "KAMITSUBAKI CITY ENSEMBLE",
       "confidence_hint": "high",
@@ -120,7 +130,8 @@ LLM の出力は JSON object 1 個に固定する。
 - 必須トップレベルキーは `activity_candidates` だけにする
 - `activity_candidates` は最大 1 件の配列にする
 - 候補がない場合は空配列にする
-- 各候補は `label / target / confidence_hint / salience_hint / ttl_hint / transition / reason_summary` だけを持つ
+- 各候補は `actor / label / target / confidence_hint / salience_hint / ttl_hint / transition / reason_summary` だけを持つ
+- `actor` は `user / self / unknown` のいずれかにする
 - `label` は活動内容を自然文で短く表す
 - `confidence_hint`、`salience_hint` は `low / medium / high` のいずれかにする
 - `ttl_hint` は `short / medium / long` のいずれかにする
@@ -154,16 +165,20 @@ LLM は `status` を出力しない。
 判断、発話、自律 initiative へ渡す `activity_context` は、保存 row ではなく前景要約にする。
 `previous_activity` は直前活動だけを表し、現在進行中の活動として扱わない。
 判断文脈へ出す `activity_context` には `status` を含めない。
+判断文脈へ出す `activity_context.current_activity.actor` は speech の主体境界に使う。
+`actor=user` の活動に触れる発話は、ユーザー側の状況へのコメントとして表現する。
 
 ```json
 {
   "current_activity": {
+    "actor": "user",
     "label": "CocoroAI で会話中",
     "confidence": 0.7,
     "salience": 0.5,
     "age_label": "直前"
   },
   "previous_activity": {
+    "actor": "user",
     "label": "リズムゲームをプレイしていた",
     "target": "KAMITSUBAKI CITY ENSEMBLE",
     "ended_age_label": "直前",

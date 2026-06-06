@@ -152,8 +152,9 @@ LLM に渡す source pack は少なくとも次を持つ。
 `schedule_context` には `summary_text` に加えて、wake が再評価対象として選んだ pending-intent の `intent_summary / reason_summary / slot_key / not_before / expires_at` を含める。
 real schedule source がある場合は `schedule_slots` を持ち、各 slot は `slot_key / summary_text / not_before / expires_at` を持つ短い object にする。
 `external_service_context` には `summary_text` に加えて、`service / status_text / capability_id` と、必要なら `client_summary_text / result_summary_text / summary_source_hint` のような短い境界補助 field を含める。
-`visual_context` には `visual_summary_text / image_interpreted / visual_confidence_hint / image_count / capability_id / vision_source_id / source_kind / source_label` を含める。
+`visual_context` には `visual_summary_text / image_interpreted / visual_confidence_hint / image_count / capability_id / vision_source_id / source_kind / source_label / source_owner` を含める。
 `visual_context` は `vision.capture` のような現在の視覚状態を観測する source から作る。
+`source_owner=user_environment` の `visual_context` はユーザー側の画面、カメラ、仮想 source の観測であり、AI 本体の一人称行動として発話しない。
 詳細な視覚説明は `visual_observation_record` に保存し、`visual_context` には現在判断に効く短い状態要約だけを入れる。
 `vision.capture` 由来の `visual_context` は `vision_source_id` 単位で統合する。
 `vision.capture` result の follow-up では、判断入力の `foreground_world_state` に同じ `vision_source_id` の `visual_context` だけを載せる。

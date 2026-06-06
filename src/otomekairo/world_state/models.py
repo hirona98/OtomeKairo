@@ -60,6 +60,7 @@ class WorldStateVisualContext:
     vision_source_id: str | None = None
     source_kind: str | None = None
     source_label: str | None = None
+    source_owner: str | None = None
 
     def hook_summary_source(self) -> str:
         if isinstance(self.visual_summary_text, str) and self.visual_summary_text.strip():
@@ -72,6 +73,7 @@ class WorldStateVisualContext:
             ("vision_source_id", self.vision_source_id),
             ("source_kind", self.source_kind),
             ("source_label", self.source_label),
+            ("source_owner", self.source_owner),
             ("visual_summary_text", self.visual_summary_text),
             ("image_interpreted", self.image_interpreted),
             ("visual_confidence_hint", self.visual_confidence_hint),
@@ -94,6 +96,7 @@ class WorldStateVisualContext:
             ("vision_source_id", self.vision_source_id),
             ("source_kind", self.source_kind),
             ("source_label", self.source_label),
+            ("source_owner", self.source_owner),
         ):
             if isinstance(value, str) and value.strip():
                 payload[key] = value

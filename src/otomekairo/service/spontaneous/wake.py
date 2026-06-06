@@ -641,9 +641,11 @@ class ServiceSpontaneousWakeMixin:
         initiative_entry_check = client_context.get("initiative_entry_check")
         if isinstance(initiative_entry_check, dict):
             entry_kind = self._client_context_text(initiative_entry_check.get("entry_kind"), limit=24)
+            entry_basis = self._client_context_text(initiative_entry_check.get("entry_basis"), limit=48)
             reason_summary = self._client_context_text(initiative_entry_check.get("reason_summary"), limit=180)
             if entry_kind is not None and reason_summary is not None:
-                parts.append(f"自律入口判定は {entry_kind}。理由は {reason_summary}")
+                basis_text = f" basis={entry_basis}。" if entry_basis is not None else "。"
+                parts.append(f"自律入口判定は {entry_kind}{basis_text}理由は {reason_summary}")
 
         # 前景
         if isinstance(active_app, str):

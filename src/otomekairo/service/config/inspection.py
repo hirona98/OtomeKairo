@@ -5,6 +5,7 @@ from typing import Any
 
 from otomekairo.capabilities import capability_manifests
 from otomekairo.memory.utils import localize_timestamp_fields
+from otomekairo.service.input.source_owner import visual_source_owner
 
 
 class ServiceConfigInspectionMixin:
@@ -479,21 +480,25 @@ class ServiceConfigInspectionMixin:
             scope_key = world_state.get("scope_key")
             if not isinstance(scope_type, str) or not isinstance(scope_key, str):
                 continue
-            summaries.append(
-                {
-                    "state_type": world_state.get("state_type"),
-                    "scope": self._world_state_scope_ref(scope_type=scope_type, scope_key=scope_key),
-                    "summary_text": world_state.get("summary_text"),
-                    "confidence": world_state.get("confidence"),
-                    "salience": world_state.get("salience"),
-                    "integration_key": world_state.get("integration_key"),
-                    "age_label": self._world_state_age_label(
-                        reference_time=reference_time,
-                        observed_at=world_state.get("observed_at"),
-                        updated_at=world_state.get("updated_at"),
-                    ),
-                }
-            )
+            summary = {
+                "state_type": world_state.get("state_type"),
+                "scope": self._world_state_scope_ref(scope_type=scope_type, scope_key=scope_key),
+                "summary_text": world_state.get("summary_text"),
+                "confidence": world_state.get("confidence"),
+                "salience": world_state.get("salience"),
+                "integration_key": world_state.get("integration_key"),
+                "age_label": self._world_state_age_label(
+                    reference_time=reference_time,
+                    observed_at=world_state.get("observed_at"),
+                    updated_at=world_state.get("updated_at"),
+                ),
+            }
+            source_owner = world_state.get("source_owner")
+            if not isinstance(source_owner, str) or not source_owner.strip():
+                source_owner = visual_source_owner(world_state.get("source_kind"))
+            if isinstance(source_owner, str) and source_owner.strip():
+                summary["source_owner"] = source_owner.strip()
+            summaries.append(summary)
         if not summaries:
             return None
         return summaries

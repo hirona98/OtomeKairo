@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from otomekairo.llm.contexts import InitiativeContext
+from otomekairo.llm.contracts import INITIATIVE_ENTRY_ENTER_BASIS_VALUES
 from otomekairo.service.common import debug_log
 from otomekairo.world_state.models import WorldStateTrace
 
@@ -153,7 +154,11 @@ class ServiceInputInitiativeContextMixin:
         _ = trigger_kind, client_context
         if isinstance(selected_candidate, dict):
             return "自律判断の機会があり、保留中の候補を再評価する機会がある。"
-        if isinstance(initiative_entry_summary, dict) and initiative_entry_summary.get("entry_kind") == "enter":
+        if (
+            isinstance(initiative_entry_summary, dict)
+            and initiative_entry_summary.get("entry_kind") == "enter"
+            and initiative_entry_summary.get("entry_basis") in INITIATIVE_ENTRY_ENTER_BASIS_VALUES
+        ):
             return "自律判断の入口が成立しており、外向きに進むかを見直す機会がある。"
         return "自律判断の機会があり、前進可否を見直す機会がある。"
 
@@ -162,11 +167,13 @@ class ServiceInputInitiativeContextMixin:
         if not isinstance(entry_check, dict):
             return None
         entry_kind = self._client_context_text(entry_check.get("entry_kind"), limit=24)
+        entry_basis = self._client_context_text(entry_check.get("entry_basis"), limit=48)
         reason_summary = self._client_context_text(entry_check.get("reason_summary"), limit=180)
-        if entry_kind not in {"enter", "skip"} or reason_summary is None:
+        if entry_kind not in {"enter", "skip"} or entry_basis is None or reason_summary is None:
             return None
         return {
             "entry_kind": entry_kind,
+            "entry_basis": entry_basis,
             "reason_summary": reason_summary,
         }
 
@@ -265,6 +272,7 @@ class ServiceInputInitiativeContextMixin:
         payload: dict[str, Any] = {}
         for key, limit in (
             ("label", 120),
+            ("actor", 32),
             ("target", 120),
             ("age_label", 40),
             ("ended_age_label", 40),

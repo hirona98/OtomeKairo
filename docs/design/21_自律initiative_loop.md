@@ -71,7 +71,10 @@ initiative loop は、判断サイクル内の作業文脈として `initiative_
 
 `initiative_context` は inspection へ要約を残す。
 `initiative_context` そのものを永続的な状態正本にしない。
-`initiative_entry_summary` は `entry_kind / reason_summary` を含む。`entry_kind=enter` は外向き判断へ進む入口があることを表す。
+`initiative_entry_summary` は `entry_kind / entry_basis / reason_summary` を含む。
+`entry_basis` は `activity_mode_transition / strong_interest / same_activity_detail_change / observation_only` のいずれかである。
+`entry_kind=enter` は `entry_basis=activity_mode_transition / strong_interest` の場合だけ外向き判断へ進む入口があることを表す。
+`entry_basis=same_activity_detail_change / observation_only` は同じ活動内の詳細変化または観測のみを表し、`entry_kind=skip` にする。
 `drive_summaries` の各 entry は、生成時点に存在する `drive_kind / support_count / support_strength / freshness_hint / scope_alignment / signal_strength / persona_alignment / stability_hint` を含む。
 `time_context_summary` は `current_time_text / part_of_day / time_band_summary` を含む。
 `foreground_signal_summary` は `foreground_thinness / reason_summary / world_state_count` を含む。
@@ -84,6 +87,7 @@ initiative loop は、判断サイクル内の作業文脈として `initiative_
 `candidate_families` は追加観測を提案する場合に限り、`preferred_result_kind=capability_request / preferred_result_reason_summary / preferred_capability_id / preferred_capability_input` を持つ。
 `activity_context.current_activity` は現在活動の短期推定として扱う。
 `activity_context.previous_activity` は直前活動の参照情報として扱う。
+`activity_context.current_activity.actor` は活動主体を表す。`actor=user` はユーザー側の活動、`actor=self` は AI 本体の活動である。
 activity の `label / target` は自然文として LLM へ渡す。
 タイミング判断と結果選択は、activity を含む `initiative_context` 全体で行う。
 
@@ -96,13 +100,14 @@ initiative loop は、候補を次の 3 系統に分ける。
 - 再評価系
   - due になった `pending_intent`
 - 自発系
-  - `drive_state`、または `initiative_entry_summary.entry_kind=enter` と現在文脈が噛み合い、前へ出る理由があるもの
+  - `drive_state`、または強い `entry_basis` を持つ `initiative_entry_summary.entry_kind=enter` と現在文脈が噛み合い、前へ出る理由があるもの
 
-自発系の成立条件は、`drive_state`、`ongoing_action`、`pending_intent`、または `initiative_entry_summary` と現在文脈の噛み合いである。
+自発系の成立条件は、`drive_state`、`ongoing_action`、`pending_intent`、または強い `entry_basis` を持つ `initiative_entry_summary` と現在文脈の噛み合いである。
 `visual_context`、視覚観測の `first_seen / changed`、直近会話だけでは自発系を成立させない。
-`activity_context.previous_activity` から `activity_context.current_activity` への意味ある活動モード遷移は、`initiative_entry_check` の enter 候補として扱う。
-同じ活動内の画面差分、ファイル変更、同じゲーム内の画面遷移は enter 候補にしない。
-`pending_intent` が空の場合も、`drive_state`、`ongoing_action`、または `initiative_entry_summary.entry_kind=enter` があれば通常の判断入力へ進める。
+`activity_context.previous_activity` から `activity_context.current_activity` への意味ある活動モード遷移は、`initiative_entry_check` の `entry_basis=activity_mode_transition` として enter 候補にする。
+同じサービス内の別投稿、別検索結果、別動画、同じゲーム内の別画面は `entry_basis=same_activity_detail_change` として扱う。
+同じ活動内の画面差分、ファイル変更、同じゲーム内の画面遷移は `entry_basis=same_activity_detail_change` に分類する。
+`pending_intent` が空の場合も、`drive_state`、`ongoing_action`、または強い `entry_basis` を持つ `initiative_entry_summary.entry_kind=enter` があれば通常の判断入力へ進める。
 中期の `drive_state` は、人格設定と記憶から継続的に成立する向きだけを対象にする。
 AI 応答由来、`scope_duration=session`、その場限りの「控える」「見守る」は、直近文脈の材料として扱う。
 
@@ -163,13 +168,15 @@ visual capture の変化は `first_seen / changed / stable / same_as_recent_spee
 `first_seen / changed` 単体は外向き判断入口にしない。
 `same_as_recent_speech / stable` は反復性の前景シグナルとして扱う。
 活動遷移に触れる発話は、終わった・サボった・遊び始めたなどを断定せず、区切りや切り替えとして表現する。
+`source_owner=user_environment` の視覚観測、`world_state.visual_context`、`activity_context.actor=user` はユーザー側の状況として扱う。
+この文脈から speech する場合、`speech_stance=comment_on_user_context` として、ユーザー側の状況へのコメントとして表現する。
 `current_input.sender=system` かつ `current_input.response_target=none` の `wake / background_wake` では、speech 本文を観測、候補、現在文脈に根拠づける。
 `wake / background_wake` の `noop` 理由は、観測、候補、進行中応答、重複介入境界のいずれかに根拠づける。
 定期起床から dispatch した capability request の result は、source request の `source_current_input.response_target=none` を引き継ぐ。
 この capability result は内部観測結果として扱い、外向き結果を `noop` として trace に残す。
 直近自発 speech 後の新しい visual capture も観測内容の変化として渡す。
 LLM は `initiative_entry_summary`、`activity_context`、`drive_state`、`world_state`、`response_target`、候補理由、抑制要約を合わせて `speech / noop / pending_intent` を選ぶ。
-`drive_state`、`pending_intent`、進行中 action、`initiative_entry_summary.entry_kind=enter` が無い場合、視覚変化だけでは通常の判断入力へ進まない。
+`drive_state`、`pending_intent`、進行中 action、強い `entry_basis` を持つ `initiative_entry_summary.entry_kind=enter` が無い場合、視覚変化だけでは通常の判断入力へ進まない。
 同じ内容の反復は `same_as_recent_speech / stable` と同一 dedupe の直近介入で扱う。
 複数 observation がある場合も、server は取得結果を整理したあとに 1 回だけ initiative 判断を行う。
 system wake 起点で明示 source context が無い `visual_context / body / schedule / social_context / environment / location` 候補は、推測候補として正規化時に破棄する。
@@ -266,7 +273,7 @@ API起床の自律判断 matrix は次の 16 件に固定する。
 
 matrix の共通判定境界は前述の `initiative_context`、LLM とコードの責務、過剰介入抑制に従う。
 `visual_context` だけの前景は thin foreground として扱う。
-`visual_context` だけの前景は、`initiative_entry_check.entry_kind=enter` がある場合だけ通常の initiative 判断へ進む。
+`visual_context` だけの前景は、`initiative_entry_check.entry_kind=enter` かつ `entry_basis=activity_mode_transition / strong_interest` がある場合だけ通常の initiative 判断へ進む。
 強い `drive_state` があり、対応する grounded foreground がない場合、追加観測を短い speech より優先する。
 強い `drive_state` が特定の status family を要求する場合は、対応 state type の鮮度に応じて既存要約または capability を選ぶ。
 鮮度判定は、判断前から存在した foreground `world_state` と、同じ `wake / background_wake` cycle の 起床前観測 から反映された foreground `world_state` を使う。

@@ -83,6 +83,7 @@ class MockLLMClient(
             return {
                 "activity_candidates": [
                     {
+                        "actor": "user",
                         "label": "ゲームをプレイ中",
                         "target": "",
                         "confidence_hint": "medium",

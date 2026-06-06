@@ -1414,6 +1414,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             "observed_at": record["observed_at"],
             "vision_source_id": record.get("vision_source_id"),
             "source_label": record.get("source_label"),
+            "source_owner": record.get("source_owner"),
             "image_input_kind": record["image_input_kind"],
             "detailed_summary_text": record["detailed_summary_text"],
             "confidence_hint": record.get("confidence_hint"),

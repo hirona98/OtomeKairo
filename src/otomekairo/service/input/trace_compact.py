@@ -129,7 +129,7 @@ class ServiceInputTraceCompactMixin:
             initiative_entry_summary = initiative_payload.get("initiative_entry_summary")
             if isinstance(initiative_entry_summary, dict):
                 compact_entry: dict[str, Any] = {}
-                for key in ("entry_kind", "reason_summary"):
+                for key in ("entry_kind", "entry_basis", "reason_summary"):
                     value = initiative_entry_summary.get(key)
                     if isinstance(value, str) and value.strip():
                         compact_entry[key] = self._clamp(value.strip(), limit=180)
@@ -368,6 +368,9 @@ class ServiceInputTraceCompactMixin:
                 item["state_type"] = state_type.strip()
             if isinstance(summary_text, str) and summary_text.strip():
                 item["summary_text"] = self._clamp(summary_text.strip(), limit=160)
+            source_owner = summary.get("source_owner")
+            if isinstance(source_owner, str) and source_owner.strip():
+                item["source_owner"] = source_owner.strip()
             if item:
                 payload.append(item)
         return payload
@@ -387,6 +390,7 @@ class ServiceInputTraceCompactMixin:
                 "vision_source_id",
                 "source_kind",
                 "source_label",
+                "source_owner",
                 "visual_summary_text",
                 "reason_summary",
                 "error",

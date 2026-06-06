@@ -6,6 +6,7 @@ from typing import Any
 
 from otomekairo.llm.client import LLMError
 from otomekairo.service.common import debug_log
+from otomekairo.service.input.source_owner import first_visual_source_owner
 
 
 class ServiceInputActivityMixin:
@@ -144,6 +145,13 @@ class ServiceInputActivityMixin:
         previous_context = self._summarize_activity_context(previous_activity_state, current_time=started_at)
         if previous_context:
             payload["previous_activity_context"] = previous_context
+        source_owner = self._activity_source_owner(
+            client_context=client_context,
+            observation_summary=observation_summary,
+            visual_observation_context=visual_observation_context,
+        )
+        if source_owner is not None:
+            payload["source_owner"] = source_owner
         return payload
 
     def _should_generate_activity_state(self, source_pack: dict[str, Any]) -> bool:
@@ -179,6 +187,11 @@ class ServiceInputActivityMixin:
         )
         if visual_signals:
             payload["visual_observations"] = visual_signals
+            for signal in visual_signals:
+                source_owner = signal.get("source_owner")
+                if isinstance(source_owner, str) and source_owner.strip():
+                    payload["source_owner"] = source_owner.strip()
+                    break
         return payload
 
     def _activity_observation_summary(self, observation_summary: dict[str, Any] | None) -> dict[str, Any]:
@@ -206,10 +219,38 @@ class ServiceInputActivityMixin:
             value = self._client_context_text(observation_summary.get(key), limit=limit)
             if value is not None:
                 payload[key] = value
+        source_owner = first_visual_source_owner(payload)
+        if source_owner is not None:
+            payload["source_owner"] = source_owner
         image_interpreted = observation_summary.get("image_interpreted")
         if isinstance(image_interpreted, bool):
             payload["image_interpreted"] = image_interpreted
         return payload
+
+    def _activity_source_owner(
+        self,
+        *,
+        client_context: dict[str, Any],
+        observation_summary: dict[str, Any] | None,
+        visual_observation_context: dict[str, Any] | None,
+    ) -> str | None:
+        owner = first_visual_source_owner(observation_summary, visual_observation_context)
+        if owner is not None:
+            return owner
+        client_payload: dict[str, Any] | None = None
+        visual_signals = self._compact_visual_observation_signals(
+            client_context.get("visual_observation_signals")
+        )
+        for signal in visual_signals:
+            owner = first_visual_source_owner(signal)
+            if owner is not None:
+                return owner
+        if isinstance(client_context, dict):
+            client_payload = {"source_kind": client_context.get("source_kind")}
+        owner = first_visual_source_owner(client_payload)
+        if owner is not None:
+            return owner
+        return None
 
     def _activity_candidate(self, payload: dict[str, Any]) -> dict[str, Any] | None:
         candidates = payload.get("activity_candidates")
@@ -248,6 +289,7 @@ class ServiceInputActivityMixin:
             "activity_id": activity_id,
             "memory_set_id": memory_set_id,
             "label": self._clamp(str(candidate["label"]).strip(), limit=120),
+            "actor": str(candidate["actor"]).strip(),
             "target": self._clamp(str(candidate.get("target", "")).strip(), limit=120),
             "status": "active",
             "confidence": self._activity_score_from_hint(str(candidate["confidence_hint"])),
@@ -322,6 +364,9 @@ class ServiceInputActivityMixin:
             value = activity_state.get(key)
             if isinstance(value, str) and value.strip():
                 payload[key] = self._clamp(value.strip(), limit=120)
+        actor = activity_state.get("actor")
+        if isinstance(actor, str) and actor.strip():
+            payload["actor"] = actor.strip()
         for key in ("confidence", "salience"):
             value = activity_state.get(key)
             if isinstance(value, (int, float)):
@@ -353,7 +398,7 @@ class ServiceInputActivityMixin:
 
     def _activity_previous_prompt_summary(self, activity_state: dict[str, Any]) -> dict[str, Any]:
         payload: dict[str, Any] = {}
-        for key in ("label", "target", "reason_summary", "ended_age_label"):
+        for key in ("label", "actor", "target", "reason_summary", "ended_age_label"):
             value = activity_state.get(key)
             if isinstance(value, str) and value.strip():
                 limit = 160 if key == "reason_summary" else 120
@@ -393,6 +438,7 @@ class ServiceInputActivityMixin:
             key: candidate.get(key)
             for key in (
                 "label",
+                "actor",
                 "target",
                 "confidence_hint",
                 "salience_hint",

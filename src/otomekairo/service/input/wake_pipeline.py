@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from otomekairo.llm.contracts import INITIATIVE_ENTRY_ENTER_BASIS_VALUES
 from otomekairo.service.common import debug_log
 from otomekairo.service.input.constants import WORLD_STATE_FOREGROUND_LIMIT
 
@@ -235,9 +236,11 @@ class ServiceInputWakePipelineMixin:
             source_pack=source_pack,
         )
         entry_kind = str(payload["entry_kind"]).strip()
+        entry_basis = str(payload["entry_basis"]).strip()
         reason_summary = str(payload["reason_summary"]).strip()
         trace = {
             "entry_kind": entry_kind,
+            "entry_basis": entry_basis,
             "reason_summary": reason_summary,
             "result_status": "succeeded",
         }
@@ -245,7 +248,7 @@ class ServiceInputWakePipelineMixin:
             "Wake",
             (
                 f"{self._debug_cycle_label(cycle_id)} initiative_entry "
-                f"kind={entry_kind} reason={self._clamp(reason_summary)}"
+                f"kind={entry_kind} basis={entry_basis} reason={self._clamp(reason_summary)}"
             ),
         )
         return {
@@ -322,6 +325,7 @@ class ServiceInputWakePipelineMixin:
             "entry_policy": {
                 "allow_enter": True,
                 "allow_skip": True,
+                "enter_bases": sorted(INITIATIVE_ENTRY_ENTER_BASIS_VALUES),
                 "observation_only_is_skip": True,
                 "same_activity_detail_change_is_skip": True,
                 "meaningful_activity_transition_is_enter_candidate": True,
@@ -375,6 +379,7 @@ class ServiceInputWakePipelineMixin:
                 ("scope_key", 96),
                 ("summary_text", 180),
                 ("reason_summary", 180),
+                ("source_owner", 32),
                 ("freshness_hint", 32),
             ):
                 value = self._client_context_text(item.get(key), limit=limit)
@@ -394,7 +399,9 @@ class ServiceInputWakePipelineMixin:
         if not isinstance(client_context, dict):
             return False
         entry_check = client_context.get("initiative_entry_check")
-        return isinstance(entry_check, dict) and entry_check.get("entry_kind") == "enter"
+        if not isinstance(entry_check, dict) or entry_check.get("entry_kind") != "enter":
+            return False
+        return entry_check.get("entry_basis") in INITIATIVE_ENTRY_ENTER_BASIS_VALUES
 
     def _initiative_entry_check_skip_reason(
         self,

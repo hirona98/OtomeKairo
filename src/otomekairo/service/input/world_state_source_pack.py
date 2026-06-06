@@ -9,6 +9,7 @@ from otomekairo.service.input.constants import (
     WORLD_STATE_FOREGROUND_LIMIT,
     WORLD_STATE_MAX_ACTIVE,
 )
+from otomekairo.service.input.source_owner import visual_source_owner
 from otomekairo.world_state.models import (
     WorldStateCapabilityResultSummary,
     WorldStateClientContext,
@@ -392,6 +393,7 @@ class ServiceInputWorldStateSourcePackMixin:
             vision_source_id=vision_source_id,
             source_kind=source_kind,
             source_label=source_label,
+            source_owner=visual_source_owner(source_kind),
         )
 
     def _observation_summary_updates_visual_world_state(
@@ -835,6 +837,7 @@ class ServiceInputWorldStateSourcePackMixin:
                 ("vision_source_id", context.vision_source_id),
                 ("source_kind", context.source_kind),
                 ("source_label", context.source_label),
+                ("source_owner", context.source_owner),
             ):
                 if isinstance(value, str) and value.strip():
                     payload[key] = value

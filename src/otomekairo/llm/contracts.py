@@ -67,6 +67,21 @@ ACTIVITY_TRANSITION_VALUES = {
     "end",
     "none",
 }
+ACTIVITY_ACTOR_VALUES = {
+    "user",
+    "self",
+    "unknown",
+}
+INITIATIVE_ENTRY_BASIS_VALUES = {
+    "activity_mode_transition",
+    "strong_interest",
+    "same_activity_detail_change",
+    "observation_only",
+}
+INITIATIVE_ENTRY_ENTER_BASIS_VALUES = {
+    "activity_mode_transition",
+    "strong_interest",
+}
 
 MEMORY_TYPE_VALUES = {
     "fact",
@@ -402,6 +417,7 @@ def validate_activity_state_contract(payload: dict[str, Any]) -> None:
         _validate_exact_keys(
             candidate,
             {
+                "actor",
                 "label",
                 "target",
                 "confidence_hint",
@@ -420,6 +436,8 @@ def validate_activity_state_contract(payload: dict[str, Any]) -> None:
             raise LLMError("ActivityState.ttl_hint が不正です。")
         if candidate["transition"] not in ACTIVITY_TRANSITION_VALUES:
             raise LLMError("ActivityState.transition が不正です。")
+        if candidate["actor"] not in ACTIVITY_ACTOR_VALUES:
+            raise LLMError("ActivityState.actor が不正です。")
         for key in ("label", "target", "reason_summary"):
             value = candidate[key]
             if not isinstance(value, str):
@@ -1184,12 +1202,21 @@ def validate_pending_intent_selection_contract(payload: dict[str, Any], *, sourc
 
 def validate_initiative_entry_check_contract(payload: dict[str, Any]) -> None:
     # 必須キー群
-    _validate_exact_keys(payload, {"entry_kind", "reason_summary"}, "InitiativeEntryCheck")
+    _validate_exact_keys(payload, {"entry_kind", "entry_basis", "reason_summary"}, "InitiativeEntryCheck")
 
     # entry_kind
     entry_kind = payload["entry_kind"]
     if not isinstance(entry_kind, str) or entry_kind.strip() not in {"enter", "skip"}:
         raise LLMError("InitiativeEntryCheck entry_kind は enter または skip である必要があります。")
+    normalized_entry_kind = entry_kind.strip()
+
+    # entry_basis
+    entry_basis = payload["entry_basis"]
+    if not isinstance(entry_basis, str) or entry_basis.strip() not in INITIATIVE_ENTRY_BASIS_VALUES:
+        raise LLMError("InitiativeEntryCheck entry_basis が不正です。")
+    normalized_entry_basis = entry_basis.strip()
+    if normalized_entry_kind == "enter" and normalized_entry_basis not in INITIATIVE_ENTRY_ENTER_BASIS_VALUES:
+        raise LLMError("InitiativeEntryCheck enter には強い entry_basis が必要です。")
 
     # reason_summary
     reason_summary = payload["reason_summary"]

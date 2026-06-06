@@ -10,6 +10,7 @@ from otomekairo.service.input.constants import (
     WORLD_STATE_USER_INPUT_CURRENT_STATE_TERMS_BY_TYPE,
     WORLD_STATE_USER_INPUT_REQUEST_TERMS,
 )
+from otomekairo.service.input.source_owner import visual_source_owner
 from otomekairo.world_state.models import (
     WorldStateCandidate,
     WorldStateContext,
@@ -96,6 +97,9 @@ class ServiceInputWorldStateNormalizeMixin:
                     "integration_key": integration_policy["key"],
                 }
             )
+            source_owner = self._world_state_source_owner(state_type=state_type, source_context=source_context)
+            if source_owner is not None:
+                normalized[-1]["source_owner"] = source_owner
             if ttl_policy.get("capped_by") is not None:
                 normalized[-1]["ttl_capped_by"] = ttl_policy["capped_by"]
         normalized.sort(key=lambda record: (record["salience"], record["updated_at"]), reverse=True)
@@ -108,6 +112,18 @@ class ServiceInputWorldStateNormalizeMixin:
             if candidate is not None:
                 candidates.append(candidate)
         return candidates
+
+    def _world_state_source_owner(
+        self,
+        *,
+        state_type: str,
+        source_context: WorldStateContext | None,
+    ) -> str | None:
+        if state_type == "visual_context" and isinstance(source_context, WorldStateVisualContext):
+            if isinstance(source_context.source_owner, str) and source_context.source_owner.strip():
+                return source_context.source_owner.strip()
+            return visual_source_owner(source_context.source_kind)
+        return None
 
     def _should_skip_user_input_current_state_candidate(
         self,

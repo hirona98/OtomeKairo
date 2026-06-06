@@ -408,11 +408,13 @@ class LLMMockRecallMixin:
         if self._mock_has_activity_transition(activity_context):
             payload = {
                 "entry_kind": "enter",
+                "entry_basis": "activity_mode_transition",
                 "reason_summary": "活動が一区切りして切り替わったように見えるため、短く触れる自然さがある。",
             }
         else:
             payload = {
                 "entry_kind": "skip",
+                "entry_basis": "observation_only",
                 "reason_summary": "定期観測だけでは外向きの自律判断へ進める理由がまだ弱い。",
             }
         validate_initiative_entry_check_contract(payload)

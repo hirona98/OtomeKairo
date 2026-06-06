@@ -3,6 +3,7 @@ from typing import Any
 
 from otomekairo.llm.contexts import InitiativeContext
 from otomekairo.service.capability import CapabilityDispatchError
+from otomekairo.service.input.source_owner import visual_source_owner
 from otomekairo.world_state.models import WorldStateTrace
 
 
@@ -438,6 +439,7 @@ class ServiceInputTracePersistMixin:
             "cycle_id": cycle_id,
             "observed_at": observed_at,
             "source_kind": source_kind.strip(),
+            "source_owner": visual_source_owner(source_kind),
             "source_label": (
                 source_label.strip()
                 if isinstance(source_label, str) and source_label.strip()

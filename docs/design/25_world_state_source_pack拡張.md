@@ -63,7 +63,8 @@ raw response body、client 固有 ID、資格情報、内部 URL、base64 本文
     "capability_id": "vision.capture",
     "vision_source_id": "vision_source:main_display",
     "source_kind": "desktop",
-    "source_label": "メイン画面"
+    "source_label": "メイン画面",
+    "source_owner": "user_environment"
   },
   "social_context_context": {
     "summary_text": "Slack 上のやり取りが近い判断文脈として前景にある。",

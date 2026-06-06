@@ -11,6 +11,7 @@ from otomekairo.service.input.constants import (
     VISUAL_OBSERVATION_DATA_URI_PREFIX,
     VISUAL_OBSERVATION_IMAGE_LIMIT,
 )
+from otomekairo.service.input.source_owner import visual_source_owner
 
 
 class ServiceInputVisualMixin:
@@ -271,6 +272,9 @@ class ServiceInputVisualMixin:
             value = observation_summary.get(key)
             if value is not None:
                 payload[key] = value
+        source_owner = visual_source_owner(payload.get("source_kind"))
+        if source_owner is not None:
+            payload["source_owner"] = source_owner
         if source == "vision_capture_result":
             payload["retention_policy"] = "visual_record_candidate"
         return payload

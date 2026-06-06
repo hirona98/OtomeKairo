@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from otomekairo.llm.contexts import InitiativeContext, SpeechContext
+from otomekairo.llm.contracts import INITIATIVE_ENTRY_ENTER_BASIS_VALUES
 
 
 class LLMMockSpeechMixin:
@@ -280,7 +281,11 @@ class LLMMockSpeechMixin:
         if initiative_context is None:
             return False
         initiative_entry_summary = initiative_context.initiative_entry_summary
-        if isinstance(initiative_entry_summary, dict) and initiative_entry_summary.get("entry_kind") == "enter":
+        if (
+            isinstance(initiative_entry_summary, dict)
+            and initiative_entry_summary.get("entry_kind") == "enter"
+            and initiative_entry_summary.get("entry_basis") in INITIATIVE_ENTRY_ENTER_BASIS_VALUES
+        ):
             return True
         drive_summaries = initiative_context.drive_summaries
         if isinstance(drive_summaries, list) and drive_summaries:
