@@ -8,6 +8,7 @@ from otomekairo.llm.contracts import (
     RECALL_PACK_SECTION_NAMES,
     validate_answer_contract_contract,
     validate_event_evidence_contract,
+    validate_initiative_entry_check_contract,
     validate_pending_intent_selection_contract,
     validate_recall_hint_contract,
     validate_recall_pack_selection_contract,
@@ -394,6 +395,41 @@ class LLMMockRecallMixin:
         # 検証
         validate_pending_intent_selection_contract(payload, source_pack=source_pack)
         return payload
+
+    def generate_initiative_entry_check(
+        self,
+        role_definition: dict,
+        source_pack: dict[str, Any],
+    ) -> dict[str, Any]:
+        # model確認
+        self._assert_mock_model(role_definition)
+
+        activity_context = source_pack.get("activity_context")
+        if self._mock_has_activity_transition(activity_context):
+            payload = {
+                "entry_kind": "enter",
+                "reason_summary": "活動が一区切りして切り替わったように見えるため、短く触れる自然さがある。",
+            }
+        else:
+            payload = {
+                "entry_kind": "skip",
+                "reason_summary": "定期観測だけでは外向きの自律判断へ進める理由がまだ弱い。",
+            }
+        validate_initiative_entry_check_contract(payload)
+        return payload
+
+    def _mock_has_activity_transition(self, activity_context: Any) -> bool:
+        if not isinstance(activity_context, dict):
+            return False
+        current_activity = activity_context.get("current_activity")
+        previous_activity = activity_context.get("previous_activity")
+        if not isinstance(current_activity, dict) or not isinstance(previous_activity, dict):
+            return False
+        current_label = str(current_activity.get("label") or "").strip()
+        previous_label = str(previous_activity.get("label") or "").strip()
+        if not current_label or not previous_label:
+            return False
+        return current_label != previous_label
 
     def _mock_recall_pack_section_order(
         self,

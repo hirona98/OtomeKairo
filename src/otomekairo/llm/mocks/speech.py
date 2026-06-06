@@ -279,6 +279,9 @@ class LLMMockSpeechMixin:
     def _should_mock_autonomous_initiative_speech(self, initiative_context: InitiativeContext | None) -> bool:
         if initiative_context is None:
             return False
+        initiative_entry_summary = initiative_context.initiative_entry_summary
+        if isinstance(initiative_entry_summary, dict) and initiative_entry_summary.get("entry_kind") == "enter":
+            return True
         drive_summaries = initiative_context.drive_summaries
         if isinstance(drive_summaries, list) and drive_summaries:
             return True
@@ -316,6 +319,11 @@ class LLMMockSpeechMixin:
                 step_summary = ongoing_action_summary.get("step_summary")
                 if isinstance(step_summary, str) and step_summary.strip():
                     return f"{step_summary.strip()} が前景にあるから、ここは続きとして少し前へ進めるね。"
+        initiative_entry_summary = initiative_context.initiative_entry_summary
+        if isinstance(initiative_entry_summary, dict):
+            reason_summary = initiative_entry_summary.get("reason_summary")
+            if isinstance(reason_summary, str) and reason_summary.strip():
+                return f"{reason_summary.strip()}。短く触れておくね。"
         world_state_summary = initiative_context.world_state_summary
         if isinstance(world_state_summary, list):
             for item in world_state_summary:

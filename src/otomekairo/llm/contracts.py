@@ -1180,3 +1180,25 @@ def validate_pending_intent_selection_contract(payload: dict[str, Any], *, sourc
         raise LLMError("PendingIntentSelection selection_reason に改行を含めてはいけません。")
     if INTERNAL_IDENTIFIER_PATTERN.search(normalized_reason) is not None:
         raise LLMError("PendingIntentSelection selection_reason に内部識別子を含めてはいけません。")
+
+
+def validate_initiative_entry_check_contract(payload: dict[str, Any]) -> None:
+    # 必須キー群
+    _validate_exact_keys(payload, {"entry_kind", "reason_summary"}, "InitiativeEntryCheck")
+
+    # entry_kind
+    entry_kind = payload["entry_kind"]
+    if not isinstance(entry_kind, str) or entry_kind.strip() not in {"enter", "skip"}:
+        raise LLMError("InitiativeEntryCheck entry_kind は enter または skip である必要があります。")
+
+    # reason_summary
+    reason_summary = payload["reason_summary"]
+    if not isinstance(reason_summary, str):
+        raise LLMError("InitiativeEntryCheck reason_summary は文字列である必要があります。")
+    normalized_reason = reason_summary.strip()
+    if not normalized_reason:
+        raise LLMError("InitiativeEntryCheck reason_summary は空にできません。")
+    if "\n" in normalized_reason or "\r" in normalized_reason:
+        raise LLMError("InitiativeEntryCheck reason_summary に改行を含めてはいけません。")
+    if INTERNAL_IDENTIFIER_PATTERN.search(normalized_reason) is not None:
+        raise LLMError("InitiativeEntryCheck reason_summary に内部識別子を含めてはいけません。")

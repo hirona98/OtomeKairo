@@ -19,6 +19,7 @@ from otomekairo.llm.contracts import (
     validate_answer_contract_contract,
     validate_decision_contract,
     validate_event_evidence_contract,
+    validate_initiative_entry_check_contract,
     validate_memory_correction_reconciliation_contract,
     validate_memory_interpretation_contract,
     validate_memory_reflection_summary_contract,
@@ -39,6 +40,8 @@ from otomekairo.llm.prompts import (
     build_decision_repair_prompt,
     build_event_evidence_messages,
     build_event_evidence_repair_prompt,
+    build_initiative_entry_check_messages,
+    build_initiative_entry_check_repair_prompt,
     build_input_interpretation_messages,
     build_input_interpretation_repair_prompt,
     build_memory_correction_reconciliation_messages,
@@ -945,6 +948,41 @@ class LLMClient:
             validator=lambda payload: validate_pending_intent_selection_contract(payload, source_pack=source_pack),
             repair_prompt_builder=build_pending_intent_selection_repair_prompt,
             failure_message="PendingIntentSelection の生成に失敗しました。解析可能な応答が得られませんでした。",
+            wrap_validation_error=True,
+            operation=operation,
+        )
+
+    def generate_initiative_entry_check(
+        self,
+        *,
+        role_definition: dict,
+        source_pack: dict[str, Any],
+    ) -> dict[str, Any]:
+        operation = "initiative_entry_check"
+        debug_log(
+            "LLM",
+            (
+                f"{operation} start mode={self._debug_mode(role_definition)} "
+                f"model={self._debug_model(role_definition)}"
+            ),
+            level="DEBUG",
+        )
+        # モック経路
+        if self._is_mock_role_definition(role_definition):
+            payload = self.mock_client.generate_initiative_entry_check(role_definition, source_pack)
+            debug_log("LLM", f"{operation} done mode=mock keys={self._debug_payload_keys(payload)}", level="DEBUG")
+            return payload
+
+        # プロンプト構築
+        messages = build_initiative_entry_check_messages(
+            source_pack=source_pack,
+        )
+        return self._generate_structured_payload(
+            role_definition=role_definition,
+            messages=messages,
+            validator=validate_initiative_entry_check_contract,
+            repair_prompt_builder=build_initiative_entry_check_repair_prompt,
+            failure_message="InitiativeEntryCheck の生成に失敗しました。解析可能な応答が得られませんでした。",
             wrap_validation_error=True,
             operation=operation,
         )

@@ -41,7 +41,6 @@ class InitiativeCandidateFamily:
             "family": self.family,
             "available": self.available,
             "selected": self.selected,
-            "priority_score": self.priority_score,
         }
         for key, value in (
             ("reason_summary", self.reason_summary),
@@ -61,6 +60,7 @@ class InitiativeCandidateFamily:
 class InitiativeContext:
     trigger_kind: str
     opportunity_summary: str
+    initiative_entry_summary: dict[str, Any] | None
     time_context_summary: dict[str, Any]
     foreground_signal_summary: dict[str, Any]
     activity_context: dict[str, Any] | None
@@ -93,6 +93,7 @@ class InitiativeContext:
         return {
             "trigger_kind": self.trigger_kind,
             "opportunity_summary": self.opportunity_summary,
+            "initiative_entry_summary": self.initiative_entry_summary,
             "time_context_summary": self.time_context_summary,
             "foreground_signal_summary": self.foreground_signal_summary,
             "activity_context": self.activity_context,

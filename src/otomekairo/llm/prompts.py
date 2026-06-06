@@ -280,6 +280,22 @@ def build_pending_intent_selection_messages(
     ]
 
 
+def build_initiative_entry_check_messages(
+    *,
+    source_pack: dict[str, Any],
+) -> list[dict[str, str]]:
+    return [
+        {
+            "role": "system",
+            "content": _build_initiative_entry_check_system_prompt(),
+        },
+        {
+            "role": "user",
+            "content": _build_initiative_entry_check_user_prompt(source_pack),
+        },
+    ]
+
+
 def build_world_state_messages(
     *,
     source_pack: WorldStateSourcePack,
@@ -466,6 +482,18 @@ def build_pending_intent_selection_repair_prompt(validation_error: str) -> str:
         "selected_candidate_ref は source pack に含まれる candidate_ref か none のどちらかだけです。\n"
         "selection_reason は簡潔に、改行なし、内部識別子なしで返してください。\n"
         "新しい候補の追加、内部識別子、Markdown、コードフェンス、説明文は禁止です。"
+    )
+
+
+def build_initiative_entry_check_repair_prompt(validation_error: str) -> str:
+    return (
+        "前回の出力は initiative_entry_check 契約を満たしていませんでした。\n"
+        f"validator_error: {validation_error}\n"
+        "同じ source pack だけを根拠に、JSON オブジェクト 1 個だけを返し直してください。\n"
+        "トップレベルキーは entry_kind, reason_summary の 2 つだけです。\n"
+        "entry_kind は enter または skip のどちらかだけです。\n"
+        "reason_summary は簡潔に、改行なし、内部識別子なしで返してください。\n"
+        "Markdown、コードフェンス、説明文は禁止です。"
     )
 
 
@@ -819,21 +847,23 @@ def _build_decision_trigger_policy(
     if initiative_context is not None:
         policies.extend(
             [
-                "InitiativeContext には opportunity_summary, time_context_summary, foreground_signal_summary, activity_context, initiative_baseline, runtime_state_summary, recent_turn_summary, candidate_families, selected_candidate_family, intervention_state, suppression_summary, intervention_risk_summary が入ります。",
-                "InitiativeContext.candidate_families の priority_score, reason_summary, blocking_reason_summary は候補比較の材料です。decision.kind は全体文脈から選んでください。",
-                "selected_candidate_family は strongest family の要約です。reason_summary, drive_summaries, world_state_summary, recent_turn_summary, intervention_state, intervention_risk_summary を合わせて最終結果を選んでください。",
+                "InitiativeContext には opportunity_summary, initiative_entry_summary, time_context_summary, foreground_signal_summary, activity_context, initiative_baseline, runtime_state_summary, recent_turn_summary, candidate_families, selected_candidate_family, intervention_state, suppression_summary, intervention_risk_summary が入ります。",
+                "InitiativeContext.initiative_entry_summary は外向きの自律判断へ進んだ入口理由です。entry_kind=enter がある場合だけ、視覚や world_state を外向き判断の補助根拠として使ってください。",
+                "InitiativeContext.candidate_families の reason_summary, blocking_reason_summary は候補の意味説明です。selected_candidate_family と全体文脈から decision.kind を選んでください。",
+                "selected_candidate_family は今回扱う family の要約です。reason_summary, drive_summaries, world_state_summary, recent_turn_summary, intervention_state, intervention_risk_summary を合わせて最終結果を選んでください。",
                 "InitiativeContext.drive_summaries に drive_kind, support_count, freshness_hint, support_strength, scope_alignment, signal_strength, persona_alignment, stability_hint があるときは、中期の向きの比較材料として扱ってください。",
                 "InitiativeContext.candidate_families に preferred_capability_id と preferred_capability_input があるときは capability_request の提案です。現在文脈で追加観測が必要な場合だけ、その capability と最小 input を選んでください。",
                 "foreground_signal_summary が grounded で world_state_summary に該当状況が既にあるときは、既存要約を使って speech / noop / pending_intent を判断してください。",
-                "recent_turn_summary は直近文脈の補助材料です。反復性は visual_observations[].change_state と same_as_recent_speech を見て判断してください。",
-                "`background_wake` は定期起床であり、自律判断の通常入口です。noop を選ぶ場合は、観測、候補、進行中応答、重複介入境界のいずれかに根拠づけてください。",
-                "foreground_signal_summary.visual_observations は desktop / camera / virtual などの視覚観測です。speech を選ぶ場合は、観測に根拠づけた短い自発発話にしてください。",
-                "InitiativeContext.activity_context は自律判断時のタイミング補助材料です。結果選択は activity_context を含む InitiativeContext 全体で行ってください。",
-                "visual_observations[].change_state=first_seen / changed は新規性の前景シグナルです。観測内容の新しさと現在の流れへの接続を重く見てください。",
+                "recent_turn_summary は直近文脈の補助材料です。反復性は visual_observations[].change_state と same_as_recent_speech を補助的に見て判断してください。",
+                "`background_wake` は定期起床であり、自律判断の通常起点です。noop を選ぶ場合は、観測、候補、進行中応答、重複介入境界のいずれかに根拠づけてください。",
+                "foreground_signal_summary.visual_observations は desktop / camera / virtual などの視覚観測です。speech を選ぶ場合も、視覚観測は initiative_entry_summary や drive_state を支える補助根拠として扱ってください。",
+                "InitiativeContext.activity_context は自律判断時のタイミング補助材料です。previous_activity から current_activity への意味ある活動モード遷移は、initiative_entry_summary と整合する場合に speech 候補として扱ってください。",
+                "活動遷移に触れる speech は、終わった・サボった・遊び始めたなどを断定せず、区切りや切り替えとして短く表現してください。",
+                "visual_observations[].change_state=first_seen / changed は新規性の前景シグナルです。新規性だけを外向き発話理由にしないでください。",
                 "visual_observations[].change_state=same_as_recent_speech / stable は反復性の前景シグナルです。drive_state、pending_intent、world_state_summary と合わせて speech / noop / pending_intent を選んでください。",
-                "自発系の成立条件は drive_state と現在文脈の噛み合いです。pending_intent_summaries が空の場合も、drive_state / world_state / ongoing_action / visual_observations にいま触れる価値があるなら speech を選んでください。",
+                "自発系の成立条件は drive_state、ongoing_action、pending_intent、または initiative_entry_summary と現在文脈の噛み合いです。visual_observations だけを speech の成立条件にしないでください。",
                 "selected_candidate_family が ongoing_action で follow-up capability が available なときは、現在の流れを進める capability_request を検討してください。",
-                "foreground_signal_summary が thin のとき、特に `background_wake` の定期起床や initiative_baseline=low では、前へ出る価値と繰り返し感を比較して speech / noop / pending_intent を選んでください。",
+                "foreground_signal_summary が thin のとき、特に `background_wake` の定期起床や initiative_baseline=low では、入口理由が現在も成立しているかを見て speech / noop / pending_intent を選んでください。",
             ]
         )
     return policies
@@ -875,6 +905,7 @@ def _build_speech_system_prompt(persona: dict) -> str:
             "自律判断トリガー時だけ発話理由の短い InitiativeContext も入ります。\n"
             "current_input.sender が user ではないとき、current_input.text は内部文脈として扱い、本文は観測、候補、現在文脈に根拠づけてください。\n"
             "current_input.response_target=none のとき、発話本文は initiative や pending intent など外へ出る理由に基づく短い伝達にしてください。\n"
+            "ActivityContext の previous_activity から current_activity への活動遷移に触れる場合、終わった・サボった・遊び始めたなどを断定せず、区切りや切り替えとして控えめに表現してください。\n"
             "recall_hint.secondary_recall_focuses は話題継続や温度調整の補助にだけ使い、主方針は primary_recall_focus に従ってください。\n"
             "RecallPack の内容だけを根拠に、必要な範囲で自然に思い出や継続文脈を混ぜてください。\n"
             "RecallPack.visual_observations は過去画像から保存した詳細な視覚説明です。後から画像内の対象有無を確認するときは detailed_summary_text の範囲で判断してください。\n"
@@ -1159,6 +1190,26 @@ def _build_pending_intent_selection_system_prompt() -> str:
     )
 
 
+def _build_initiative_entry_check_system_prompt() -> str:
+    return (
+        "あなたは自律 AI 本体の内部処理 role `initiative_entry_check` です。\n"
+        "source pack を読み、外向きの自律判断へ進める入口があるかだけを JSON オブジェクト 1 個で返してください。\n"
+        "Markdown、コードフェンス、説明文は禁止です。\n"
+        "返すトップレベルキーは entry_kind, reason_summary の 2 つだけです。\n"
+        "entry_kind は enter または skip のどちらかだけです。\n"
+        "enter は、ユーザーへ短く話しかける、保留意図にする、または追加 capability を検討するだけの自然な入口がある場合に使ってください。\n"
+        "短い出来事でも、その人格・記憶・現在文脈から強い関心や関係上の意味があるなら enter を返してください。\n"
+        "activity_context に previous_activity と current_activity があり、作業、休憩、娯楽、対人、移動などの意味ある活動モード遷移が見える場合は enter 候補として扱ってください。\n"
+        "たとえば作業からゲームや休憩へ切り替わった場合は、画面差分ではなく活動モード遷移として扱い、短く触れることが自然なら enter を返してください。\n"
+        "同じ活動内の詳細変化、同じ作業内のファイル変更、同じゲーム内の画面遷移、調べ物や作業補助への移動だけなら skip を返してください。\n"
+        "単なる定期観測、画面変化、新規に見えたこと、現在状況の説明だけなら skip を返してください。\n"
+        "visual_observations は根拠の一部として扱い、視覚変化そのものを入口理由にしないでください。\n"
+        "活動遷移で enter を返す場合も、終わった・サボった・遊び始めたなどの断定を reason_summary に入れず、区切りや切り替えとして控えめに表現してください。\n"
+        "drive_state、ongoing_action、pending_intent が source pack にある場合でも、それらを数値化せず自然文として読んでください。\n"
+        "reason_summary は簡潔に、改行なし、内部識別子なしで返してください。"
+    )
+
+
 def _build_world_state_system_prompt() -> str:
     return (
         "あなたは自律 AI 本体の内部処理 role `world_state` 更新補助です。\n"
@@ -1275,6 +1326,10 @@ def _build_recall_pack_selection_user_prompt(source_pack: dict[str, Any]) -> str
 
 
 def _build_pending_intent_selection_user_prompt(source_pack: dict[str, Any]) -> str:
+    return _format_named_json_prompt_payload("SOURCE_PACK", source_pack, localize=False)
+
+
+def _build_initiative_entry_check_user_prompt(source_pack: dict[str, Any]) -> str:
     return _format_named_json_prompt_payload("SOURCE_PACK", source_pack, localize=False)
 
 
@@ -1402,6 +1457,18 @@ def _compact_speech_initiative_context(initiative_context: InitiativeContext | N
         value = initiative_payload.get(key)
         if isinstance(value, str) and value.strip():
             payload[key] = _compact_prompt_text(value, limit=limit)
+    initiative_entry_summary = initiative_payload.get("initiative_entry_summary")
+    if isinstance(initiative_entry_summary, dict):
+        compact_entry: dict[str, Any] = {}
+        for key, limit in (
+            ("entry_kind", 40),
+            ("reason_summary", 180),
+        ):
+            value = initiative_entry_summary.get(key)
+            if isinstance(value, str) and value.strip():
+                compact_entry[key] = _compact_prompt_text(value, limit=limit)
+        if compact_entry:
+            payload["initiative_entry_summary"] = compact_entry
     foreground_signal_summary = initiative_payload.get("foreground_signal_summary")
     if isinstance(foreground_signal_summary, dict):
         compact_foreground: dict[str, Any] = {}

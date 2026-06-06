@@ -126,6 +126,15 @@ class ServiceInputTraceCompactMixin:
             opportunity_summary = initiative_payload.get("opportunity_summary")
             if isinstance(opportunity_summary, str) and opportunity_summary.strip():
                 payload["opportunity_summary"] = self._clamp(opportunity_summary.strip(), limit=160)
+            initiative_entry_summary = initiative_payload.get("initiative_entry_summary")
+            if isinstance(initiative_entry_summary, dict):
+                compact_entry: dict[str, Any] = {}
+                for key in ("entry_kind", "reason_summary"):
+                    value = initiative_entry_summary.get(key)
+                    if isinstance(value, str) and value.strip():
+                        compact_entry[key] = self._clamp(value.strip(), limit=180)
+                if compact_entry:
+                    payload["initiative_entry_summary"] = compact_entry
             time_context_summary = initiative_payload.get("time_context_summary")
             if isinstance(time_context_summary, dict):
                 compact_time_context: dict[str, Any] = {}
@@ -292,9 +301,6 @@ class ServiceInputTraceCompactMixin:
             reason_summary = family.get("reason_summary")
             if isinstance(reason_summary, str) and reason_summary.strip():
                 item["reason_summary"] = self._clamp(reason_summary.strip(), limit=160)
-            priority_score = family.get("priority_score")
-            if isinstance(priority_score, (int, float)):
-                item["priority_score"] = round(float(priority_score), 2)
             preferred_result_kind = family.get("preferred_result_kind")
             if isinstance(preferred_result_kind, str) and preferred_result_kind.strip():
                 item["preferred_result_kind"] = preferred_result_kind.strip()

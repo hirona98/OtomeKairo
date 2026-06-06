@@ -48,6 +48,7 @@ class ServiceInputInitiativeContextMixin:
             client_context=client_context,
             world_state_summary=world_state_summary,
         )
+        initiative_entry_summary = self._initiative_entry_summary(client_context)
         intervention_state = self._initiative_intervention_state(
             current_time=current_time,
             trigger_kind=trigger_kind,
@@ -71,6 +72,7 @@ class ServiceInputInitiativeContextMixin:
             status_refresh_world_state_summary=status_refresh_world_state_summary,
             recent_turn_summary=recent_turn_summary,
             foreground_signal_summary=foreground_signal_summary,
+            initiative_entry_summary=initiative_entry_summary,
             suppression_summary=suppression_summary,
             ongoing_action_summary=ongoing_action_summary,
             selected_candidate=selected_candidate,
@@ -107,7 +109,9 @@ class ServiceInputInitiativeContextMixin:
                 trigger_kind=trigger_kind,
                 client_context=client_context,
                 selected_candidate=selected_candidate,
+                initiative_entry_summary=initiative_entry_summary,
             ),
+            initiative_entry_summary=initiative_entry_summary,
             time_context_summary=self._initiative_time_context_summary(time_context=time_context),
             foreground_signal_summary=foreground_signal_summary,
             activity_context=self._initiative_activity_context(activity_context),
@@ -144,11 +148,27 @@ class ServiceInputInitiativeContextMixin:
         trigger_kind: str,
         client_context: dict[str, Any],
         selected_candidate: dict[str, Any] | None,
+        initiative_entry_summary: dict[str, Any] | None,
     ) -> str:
         _ = trigger_kind, client_context
         if isinstance(selected_candidate, dict):
             return "自律判断の機会があり、保留中の候補を再評価する機会がある。"
+        if isinstance(initiative_entry_summary, dict) and initiative_entry_summary.get("entry_kind") == "enter":
+            return "自律判断の入口が成立しており、外向きに進むかを見直す機会がある。"
         return "自律判断の機会があり、前進可否を見直す機会がある。"
+
+    def _initiative_entry_summary(self, client_context: dict[str, Any]) -> dict[str, Any] | None:
+        entry_check = client_context.get("initiative_entry_check")
+        if not isinstance(entry_check, dict):
+            return None
+        entry_kind = self._client_context_text(entry_check.get("entry_kind"), limit=24)
+        reason_summary = self._client_context_text(entry_check.get("reason_summary"), limit=180)
+        if entry_kind not in {"enter", "skip"} or reason_summary is None:
+            return None
+        return {
+            "entry_kind": entry_kind,
+            "reason_summary": reason_summary,
+        }
 
     def _initiative_time_context_summary(self, *, time_context: dict[str, Any]) -> dict[str, Any]:
         payload: dict[str, Any] = {}
@@ -191,20 +211,6 @@ class ServiceInputInitiativeContextMixin:
                 if isinstance(item, dict) and isinstance(item.get("state_type"), str)
             }
         )
-        has_judgable_visual = any(
-            self._visual_observation_signal_is_judgable(signal)
-            for signal in visual_signals
-        )
-        if has_judgable_visual:
-            payload = {
-                "foreground_thinness": "ready",
-                "reason_summary": "視覚観測に前回からの変化があり、自律判断の材料になる。",
-                "world_state_count": len(world_state_summary),
-                "visual_observations": visual_signals,
-            }
-            if state_types:
-                payload["state_types"] = state_types[:4]
-            return payload
         if not world_state_summary:
             payload = {
                 "foreground_thinness": "thin",

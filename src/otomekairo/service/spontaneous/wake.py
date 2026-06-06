@@ -593,8 +593,8 @@ class ServiceSpontaneousWakeMixin:
             parts.append("いま保留中の会話候補を再評価したい。")
         else:
             parts.append(
-                "ユーザーへの応答要求ではなく、自律的に観測から短く話しかける機会として見る。"
-                "呼びかけの有無ではなく、drive_state と world_state と観測価値から前へ出るかを決めたい。"
+                "ユーザーへの応答要求ではなく、内部観測と自律判断入口の確認として見る。"
+                "外向きの入口が成立している場合だけ、次の判断へ進めたい。"
             )
         return " ".join(parts)
 
@@ -638,6 +638,12 @@ class ServiceSpontaneousWakeMixin:
                 parts.append(f"{source_text}視覚観測シグナルは change_state={change_state}。")
             if isinstance(reason_summary, str):
                 parts.append(f"視覚観測理由は {reason_summary}")
+        initiative_entry_check = client_context.get("initiative_entry_check")
+        if isinstance(initiative_entry_check, dict):
+            entry_kind = self._client_context_text(initiative_entry_check.get("entry_kind"), limit=24)
+            reason_summary = self._client_context_text(initiative_entry_check.get("reason_summary"), limit=180)
+            if entry_kind is not None and reason_summary is not None:
+                parts.append(f"自律入口判定は {entry_kind}。理由は {reason_summary}")
 
         # 前景
         if isinstance(active_app, str):

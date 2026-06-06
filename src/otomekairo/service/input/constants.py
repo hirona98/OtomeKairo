@@ -63,26 +63,6 @@ WORLD_STATE_USER_INPUT_CURRENT_STATE_TERMS_BY_TYPE = {
         "やり取り",
     ),
 }
-INITIATIVE_BASELINE_SCORES = {
-    "low": 0.18,
-    "medium": 0.3,
-    "high": 0.42,
-}
-INITIATIVE_DRIVE_KIND_SCORES = {
-    "follow_through": 0.2,
-    "relationship_attunement": 0.18,
-    "user_attention": 0.16,
-    "self_regulation": 0.14,
-    "topic_continuation": 0.12,
-    "resume_when_ready": 0.1,
-}
-INITIATIVE_DRIVE_FRESHNESS_ADJUSTMENTS = {
-    "fresh": 0.06,
-    "warm": 0.03,
-    "stale": -0.02,
-}
-INITIATIVE_AUTONOMOUS_PROBE_SCORE = 0.08
-INITIATIVE_AUTONOMOUS_PROBE_THRESHOLD = 0.34
 VISUAL_OBSERVATION_SIMILARITY_THRESHOLD = 0.3
 WORLD_STATE_HINT_SCORES = {
     "low": 0.35,

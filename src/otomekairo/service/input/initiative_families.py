@@ -3,10 +3,6 @@ from __future__ import annotations
 from typing import Any
 
 from otomekairo.llm.contexts import InitiativeCandidateFamily
-from otomekairo.service.input.constants import (
-    INITIATIVE_AUTONOMOUS_PROBE_SCORE,
-    INITIATIVE_BASELINE_SCORES,
-)
 
 
 class ServiceInputInitiativeFamiliesMixin:
@@ -19,6 +15,7 @@ class ServiceInputInitiativeFamiliesMixin:
         status_refresh_world_state_summary: list[dict[str, Any]],
         recent_turn_summary: list[dict[str, str]],
         foreground_signal_summary: dict[str, Any],
+        initiative_entry_summary: dict[str, Any] | None,
         suppression_summary: dict[str, Any],
         ongoing_action_summary: dict[str, Any] | None,
         selected_candidate: dict[str, Any] | None,
@@ -55,6 +52,7 @@ class ServiceInputInitiativeFamiliesMixin:
                 status_refresh_world_state_summary=status_refresh_world_state_summary,
                 recent_turn_summary=recent_turn_summary,
                 foreground_signal_summary=foreground_signal_summary,
+                initiative_entry_summary=initiative_entry_summary,
                 suppression_summary=suppression_summary,
                 initiative_baseline=initiative_baseline,
                 intervention_state=intervention_state,
@@ -87,31 +85,23 @@ class ServiceInputInitiativeFamiliesMixin:
         capability_available = isinstance(last_capability_id, str) and last_capability_id in available_ids
         preferred_result_kind: str | None = None
         preferred_result_reason: str | None = None
-        priority_score = 0.56
         blocking_reason: str | None = None
         if status == "waiting_result":
-            priority_score = 0.74
             blocking_reason = "ongoing_action が結果待ちで、今は新しい介入より待機を判断材料にする。"
         elif status in {"active", "continued"}:
             if capability_available:
-                priority_score = 0.82
                 preferred_result_kind = "capability_request"
                 if last_capability_id is not None:
                     preferred_result_reason = f"{last_capability_id} の follow-up を継続できる。"
                 else:
                     preferred_result_reason = "利用可能な follow-up capability があり、そのまま継続できる。"
             elif last_capability_id is not None:
-                priority_score = 0.48
                 blocking_reason = f"{last_capability_id} の follow-up を考えたいが、現時点では利用できない。"
-            else:
-                priority_score = 0.68
-        elif status == "on_hold":
-            priority_score = 0.42
         return InitiativeCandidateFamily(
             family="ongoing_action",
             available=True,
             selected=False,
-            priority_score=round(priority_score, 2),
+            priority_score=1.0,
             reason_summary=self._initiative_ongoing_action_family_reason(
                 ongoing_action_summary,
                 capability_available=capability_available,
@@ -134,7 +124,7 @@ class ServiceInputInitiativeFamiliesMixin:
                 family="pending_intent",
                 available=True,
                 selected=False,
-                priority_score=0.95,
+                priority_score=1.0,
                 reason_summary=self._initiative_pending_intent_family_reason(
                     selected_candidate=selected_candidate,
                     pool_count=pool_count,
@@ -145,15 +135,16 @@ class ServiceInputInitiativeFamiliesMixin:
         if eligible_count > 0:
             return InitiativeCandidateFamily(
                 family="pending_intent",
-                available=True,
+                available=False,
                 selected=False,
-                priority_score=0.52,
+                priority_score=0.0,
                 reason_summary=self._initiative_pending_intent_family_reason(
                     selected_candidate=None,
                     pool_count=pool_count,
                     eligible_count=eligible_count,
                     selection_reason=selection_reason,
                 ),
+                blocking_reason_summary="pending_intent 候補は due だが、今回の再評価対象には選ばれていない。",
             )
         if pool_count > 0:
             return InitiativeCandidateFamily(
@@ -186,91 +177,46 @@ class ServiceInputInitiativeFamiliesMixin:
         status_refresh_world_state_summary: list[dict[str, Any]],
         recent_turn_summary: list[dict[str, str]],
         foreground_signal_summary: dict[str, Any],
+        initiative_entry_summary: dict[str, Any] | None,
         suppression_summary: dict[str, Any],
         initiative_baseline: dict[str, Any],
         intervention_state: dict[str, Any],
         capability_summary: dict[str, Any],
     ) -> InitiativeCandidateFamily:
-        visual_signal = self._initiative_primary_visual_observation_signal(foreground_signal_summary)
-        available = bool(drive_summaries or world_state_summary or recent_turn_summary or visual_signal)
+        _ = status_refresh_world_state_summary, foreground_signal_summary, initiative_baseline, intervention_state
+        entry_kind = (
+            initiative_entry_summary.get("entry_kind")
+            if isinstance(initiative_entry_summary, dict)
+            else None
+        )
+        available = bool(drive_summaries or entry_kind == "enter")
         if not available:
             return InitiativeCandidateFamily(
                 family="autonomous",
                 available=False,
                 selected=False,
                 priority_score=0.0,
-                blocking_reason_summary="drive_state / world_state / 直近会話 / 視覚観測の前景がまだ弱い。",
+                blocking_reason_summary="drive_state も外向きの自律判断入口もまだ無い。",
             )
-        strongest_drive = self._initiative_strongest_drive_summary(drive_summaries)
-        level = self._client_context_text(initiative_baseline.get("level"), limit=16) or "medium"
-        foreground_thinness = self._initiative_foreground_thinness(foreground_signal_summary)
-        priority_score = INITIATIVE_BASELINE_SCORES.get(level, INITIATIVE_BASELINE_SCORES["medium"])
-        priority_score += self._initiative_drive_signal_score(drive_summaries)
-        priority_score += self._initiative_world_state_signal_score(world_state_summary)
-        priority_score += self._initiative_drive_world_alignment_bonus(
-            strongest_drive=strongest_drive,
-            world_state_summary=world_state_summary,
-        )
-        visual_change_state = (
-            self._client_context_text(visual_signal.get("change_state"), limit=32)
-            if isinstance(visual_signal, dict)
-            else None
-        )
-        if visual_change_state in {"first_seen", "changed"}:
-            priority_score += 0.08
-        elif visual_signal:
-            priority_score += 0.02
-        if foreground_thinness == "ready":
-            priority_score += 0.04
-        if recent_turn_summary:
-            priority_score += 0.08
-        if int(capability_summary.get("available_count", 0)) > 0:
-            priority_score += 0.06
-        probe_preference = self._initiative_autonomous_probe_preference(
-            trigger_kind=trigger_kind,
-            drive_summaries=drive_summaries,
-            world_state_summary=world_state_summary,
-            status_refresh_world_state_summary=status_refresh_world_state_summary,
-            foreground_signal_summary=foreground_signal_summary,
-            initiative_baseline=initiative_baseline,
-            capability_summary=capability_summary,
-        )
+        strongest_drive = drive_summaries[0] if drive_summaries else None
         preferred_result_kind: str | None = None
         preferred_result_reason: str | None = None
         preferred_capability_id: str | None = None
         preferred_capability_input: dict[str, Any] | None = None
-        if isinstance(probe_preference, dict):
-            preferred_result_kind = "capability_request"
-            preferred_result_reason = self._client_context_text(probe_preference.get("reason_summary"), limit=160)
-            priority_score += INITIATIVE_AUTONOMOUS_PROBE_SCORE
-            preferred_capability_id = probe_preference["capability_id"]
-            preferred_capability_input = probe_preference["input"]
-        blocking_reason = self._initiative_autonomous_blocking_reason(
-            trigger_kind=trigger_kind,
-            drive_summaries=drive_summaries,
-            strongest_drive=strongest_drive,
-            world_state_summary=world_state_summary,
-            foreground_signal_summary=foreground_signal_summary,
-            suppression_summary=suppression_summary,
-            initiative_baseline=initiative_baseline,
-            capability_summary=capability_summary,
-        )
+        blocking_reason = None
         return InitiativeCandidateFamily(
             family="autonomous",
             available=True,
             selected=False,
-            priority_score=round(max(0.0, min(priority_score, 0.9)), 2),
+            priority_score=1.0,
             reason_summary=self._initiative_autonomous_family_reason(
                 drive_summaries=drive_summaries,
                 strongest_drive=strongest_drive,
                 world_state_summary=world_state_summary,
                 recent_turn_summary=recent_turn_summary,
-                foreground_signal_summary=foreground_signal_summary,
+                initiative_entry_summary=initiative_entry_summary,
                 suppression_summary=suppression_summary,
-                initiative_baseline=initiative_baseline,
                 capability_summary=capability_summary,
-                probe_preference=probe_preference,
-                visual_signal=visual_signal,
             ),
             preferred_result_kind=preferred_result_kind,
             preferred_result_reason_summary=preferred_result_reason,
@@ -283,19 +229,11 @@ class ServiceInputInitiativeFamiliesMixin:
         self,
         candidate_families: list[InitiativeCandidateFamily],
     ) -> str | None:
-        selected_family: str | None = None
-        selected_score = -1.0
-        for family in candidate_families:
-            if family.available is not True:
-                continue
-            family_name = family.family
-            if not family_name.strip():
-                continue
-            if float(family.priority_score) <= selected_score:
-                continue
-            selected_family = family_name.strip()
-            selected_score = float(family.priority_score)
-        return selected_family
+        for family_name in ("pending_intent", "ongoing_action", "autonomous"):
+            for family in candidate_families:
+                if family.available is True and family.family == family_name:
+                    return family_name
+        return None
 
     def _initiative_selected_candidate_family(
         self,
@@ -390,25 +328,15 @@ class ServiceInputInitiativeFamiliesMixin:
         strongest_drive: dict[str, Any] | None,
         world_state_summary: list[dict[str, Any]],
         recent_turn_summary: list[dict[str, str]],
-        foreground_signal_summary: dict[str, Any],
+        initiative_entry_summary: dict[str, Any] | None,
         suppression_summary: dict[str, Any],
-        initiative_baseline: dict[str, Any],
         capability_summary: dict[str, Any],
-        probe_preference: dict[str, Any] | None,
-        visual_signal: dict[str, Any] | None,
     ) -> str | None:
         parts: list[str] = []
-        if visual_signal:
-            change_state = self._client_context_text(visual_signal.get("change_state"), limit=48)
-            source_kind = self._client_context_text(visual_signal.get("source_kind"), limit=32)
-            summary_text = self._client_context_text(visual_signal.get("summary_text"), limit=120)
-            source_label = source_kind or "visual"
-            if change_state is not None and summary_text is not None:
-                parts.append(f"{source_label} observation {change_state}:{summary_text}")
-            elif change_state is not None:
-                parts.append(f"{source_label} observation {change_state}")
-            else:
-                parts.append("視覚観測が自発判断の前景候補にある")
+        if isinstance(initiative_entry_summary, dict):
+            reason_summary = self._client_context_text(initiative_entry_summary.get("reason_summary"), limit=180)
+            if reason_summary is not None:
+                parts.append(f"自律入口理由={reason_summary}")
         if drive_summaries:
             parts.append(f"drive_state {len(drive_summaries)} 件")
         if isinstance(strongest_drive, dict):
@@ -416,8 +344,6 @@ class ServiceInputInitiativeFamiliesMixin:
             strongest_kind = self._client_context_text(strongest_drive.get("drive_kind"), limit=48)
             freshness_hint = self._client_context_text(strongest_drive.get("freshness_hint"), limit=16)
             stability_hint = self._client_context_text(strongest_drive.get("stability_hint"), limit=16)
-            support_strength = strongest_drive.get("support_strength")
-            signal_strength = strongest_drive.get("signal_strength")
             if strongest_summary is not None:
                 if strongest_kind is not None:
                     parts.append(f"strongest drive={strongest_kind}:{strongest_summary}")
@@ -427,30 +353,16 @@ class ServiceInputInitiativeFamiliesMixin:
                 parts.append(f"drive freshness={freshness_hint}")
             if stability_hint is not None:
                 parts.append(f"drive stability={stability_hint}")
-            if isinstance(support_strength, (int, float)):
-                parts.append(f"drive support={round(max(0.0, min(float(support_strength), 1.0)), 2)}")
-            if isinstance(signal_strength, (int, float)) and float(signal_strength) > 0.0:
-                parts.append(f"drive signal={round(max(0.0, min(float(signal_strength), 1.0)), 2)}")
         if world_state_summary:
             parts.append(f"foreground_world_state {len(world_state_summary)} 件")
         if recent_turn_summary:
             parts.append(f"recent_turn {len(recent_turn_summary)} 件")
-        foreground_thinness = self._initiative_foreground_thinness(foreground_signal_summary)
-        if foreground_thinness is not None:
-            parts.append(f"foreground={foreground_thinness}")
         suppression_level = self._initiative_suppression_level(suppression_summary)
         if suppression_level == "high":
             parts.append(f"suppression={suppression_level}")
         available_count = int(capability_summary.get("available_count", 0))
         if available_count > 0:
             parts.append(f"available capability {available_count} 件")
-        if isinstance(probe_preference, dict):
-            capability_id = self._client_context_text(probe_preference.get("capability_id"), limit=64)
-            if capability_id is not None:
-                parts.append(f"{capability_id} で前景確認したい")
-        baseline_level = self._client_context_text(initiative_baseline.get("level"), limit=16)
-        if baseline_level is not None:
-            parts.append(f"initiative_baseline={baseline_level}")
         if not parts:
             return None
-        return " / ".join(parts) + " が自発判断の前景候補にある。"
+        return " / ".join(parts) + " が外向き自律判断の入口にある。"
