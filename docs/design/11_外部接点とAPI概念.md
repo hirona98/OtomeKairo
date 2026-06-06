@@ -95,6 +95,7 @@ capability の正本は本体が持つ `CapabilityManifest` である。
 モデル role の `web_search_enabled` は、生成 provider へ渡す検索利用指示であり、実行連携面の capability ではない。
 OtomeKairo が外部サービスへ主体的にアクセスする機能は capability として定義し、provider 側検索 option と混同しない。
 capability state の pause は runtime の実行連携操作であり、現在設定や capability manifest の変更ではない。
+外部接続 connector の repository 配置と依存境界は `29_外部接続connector配置方針.md` を正とする。
 
 内部で保留した意図を、そのまま外向き結果に露出する必要はない。
 外向きに返す結果と、内部で持ち越す判断結果は分ける。
