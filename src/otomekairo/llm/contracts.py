@@ -741,6 +741,24 @@ def validate_memory_interpretation_contract(payload: dict[str, Any]) -> None:
             raise LLMError("MemoryInterpretation candidate_memory_unit.predicate_hint が不正です。")
         if not isinstance(candidate["object_hint"], str) or not candidate["object_hint"].strip():
             raise LLMError("MemoryInterpretation candidate_memory_unit.object_hint が不正です。")
+        if candidate["subject_hint"].strip().startswith("entity:") or candidate["object_hint"].strip().startswith(
+            "entity:"
+        ):
+            raise LLMError(
+                "MemoryInterpretation candidate_memory_unit では entity:<key> を使えません。"
+                " person:/place:/tool: の型付き参照を使ってください。"
+            )
+        if candidate["scope"] == "entity" and not _has_named_ref_prefix(candidate["subject_hint"].strip()):
+            raise LLMError(
+                "MemoryInterpretation candidate_memory_unit.scope が entity のとき、"
+                "subject_hint は person:/place:/tool: 形式である必要があります。"
+            )
+        if candidate["scope"] == "relationship":
+            _validate_scope_identity(
+                scope_type="relationship",
+                scope_key=candidate["subject_hint"],
+                label="MemoryInterpretation candidate_memory_unit.subject_hint",
+            )
         if not isinstance(candidate["qualifiers_hint"], dict):
             raise LLMError("MemoryInterpretation candidate_memory_unit.qualifiers_hint はオブジェクトである必要があります。")
         if not isinstance(candidate["summary_text"], str) or not candidate["summary_text"].strip():

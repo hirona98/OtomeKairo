@@ -71,6 +71,7 @@ TRANSIENT_SUPPORT_PREDICATES = {
     "watch_over",
     "stand_by",
 }
+NAMED_ENTITY_REF_PREFIXES = ("person:", "place:", "tool:")
 
 
 # 解決器
@@ -641,6 +642,12 @@ class MemoryActionResolver:
 
     def _normalize_ref_hint(self, value: Any, *, scope_type: str) -> str:
         text = str(value).strip()
+        if text.startswith("entity:"):
+            raise ValueError("entity:<key> は memory ref として使えません。person:/place:/tool: を使ってください。")
+        if scope_type == "entity":
+            if self._has_named_entity_ref_prefix(text):
+                return text
+            raise ValueError("scope=entity の subject_hint は person:/place:/tool: 形式である必要があります。")
         if text in {"self", "user", "world"}:
             return text
         if "|" in text:
@@ -651,8 +658,6 @@ class MemoryActionResolver:
             return scope_type
         if scope_type == "topic":
             return f"topic:{self._slug_hint(text)}"
-        if scope_type == "entity":
-            return f"entity:{self._slug_hint(text)}"
         if scope_type == "relationship":
             return self._normalize_relationship_key(text)
         return self._slug_hint(text)
@@ -663,6 +668,8 @@ class MemoryActionResolver:
             return None
         if not text:
             return None
+        if text.startswith("entity:"):
+            raise ValueError("entity:<key> は memory ref として使えません。person:/place:/tool: を使ってください。")
         if self._looks_like_ref(text):
             return text
         return self._slug_hint(text)
@@ -688,9 +695,9 @@ class MemoryActionResolver:
             return f"topic:{self._slug_hint(subject_ref)}"
         if scope_type == "entity":
             for value in (subject_ref, object_ref_or_value):
-                if isinstance(value, str) and self._looks_like_ref(value) and value not in {"self", "user", "world"}:
+                if isinstance(value, str) and self._has_named_entity_ref_prefix(value):
                     return value
-            return f"entity:{self._slug_hint(subject_ref)}"
+            raise ValueError("scope=entity の scope_key は person:/place:/tool: 形式である必要があります。")
         return subject_ref
 
     def _normalize_relationship_key(self, value: str) -> str:
@@ -708,13 +715,19 @@ class MemoryActionResolver:
 
     def _normalize_relationship_ref(self, value: str) -> str:
         text = value.strip()
-        if text in {"self", "user"} or self._looks_like_ref(text):
+        if text in {"self", "user"} or self._has_named_entity_ref_prefix(text):
             return text
-        return f"entity:{self._slug_hint(text)}"
+        if text.startswith("entity:"):
+            raise ValueError("entity:<key> は relationship ref として使えません。person:/place:/tool: を使ってください。")
+        raise ValueError("relationship ref は self/user/person:/place:/tool: のいずれかである必要があります。")
+
+    def _has_named_entity_ref_prefix(self, value: str) -> bool:
+        # entity の正本参照は person/place/tool の型付き参照だけにする。
+        return any(value.startswith(prefix) and value != prefix for prefix in NAMED_ENTITY_REF_PREFIXES)
 
     def _looks_like_ref(self, value: str) -> bool:
         return bool(
-            re.match(r"^(person|place|tool|topic|food|state|work|rhythm|preference|entity|commitment_state):", value)
+            re.match(r"^(person|place|tool|topic|food|state|work|rhythm|preference|commitment_state):", value)
         )
 
     def _slug_hint(self, value: str) -> str:
