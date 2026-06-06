@@ -103,6 +103,7 @@ class StoreAffectMixin:
         episode: dict[str, Any] | None,
         memory_actions: list[dict[str, Any]],
         episode_affects: list[dict[str, Any]],
+        recall_hint: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         memory_link_records: list[dict[str, Any]] = []
 
@@ -127,11 +128,82 @@ class StoreAffectMixin:
                 write_time=episode["formed_at"] if episode is not None else None,
             )
 
+        # entity_registry 更新
+        entity_registry_update = self._entity_registry_update_trace("not_started")
+        memory_set_id = self._turn_consolidation_memory_set_id(
+            episode=episode,
+            memory_actions=memory_actions,
+            episode_affects=episode_affects,
+        )
+        observed_at = self._turn_consolidation_observed_at(
+            episode=episode,
+            memory_actions=memory_actions,
+            episode_affects=episode_affects,
+        )
+        if memory_set_id is not None and observed_at is not None:
+            try:
+                entity_registry_update = self.update_entity_registry_from_turn(
+                    memory_set_id=memory_set_id,
+                    observed_at=observed_at,
+                    recall_hint=recall_hint,
+                    episode=episode,
+                    memory_actions=memory_actions,
+                    episode_affects=episode_affects,
+                )
+            except Exception as exc:  # noqa: BLE001
+                entity_registry_update = self._entity_registry_update_trace("failed", failure_reason=str(exc))
+
         # 結果
         return {
             "mood_state_update": mood_state_update,
             "affect_state_updates": [],
             "memory_link_update": self._memory_link_update_summary(memory_link_records),
+            "entity_registry_update": entity_registry_update,
+        }
+
+    def _turn_consolidation_memory_set_id(
+        self,
+        *,
+        episode: dict[str, Any] | None,
+        memory_actions: list[dict[str, Any]],
+        episode_affects: list[dict[str, Any]],
+    ) -> str | None:
+        # 対象 memory_set
+        if isinstance(episode, dict) and isinstance(episode.get("memory_set_id"), str):
+            return episode["memory_set_id"]
+        for action in memory_actions:
+            if isinstance(action.get("memory_set_id"), str):
+                return action["memory_set_id"]
+        for affect in episode_affects:
+            if isinstance(affect.get("memory_set_id"), str):
+                return affect["memory_set_id"]
+        return None
+
+    def _turn_consolidation_observed_at(
+        self,
+        *,
+        episode: dict[str, Any] | None,
+        memory_actions: list[dict[str, Any]],
+        episode_affects: list[dict[str, Any]],
+    ) -> str | None:
+        # 観測時刻
+        if isinstance(episode, dict) and isinstance(episode.get("formed_at"), str):
+            return episode["formed_at"]
+        for action in memory_actions:
+            if isinstance(action.get("occurred_at"), str):
+                return action["occurred_at"]
+        for affect in episode_affects:
+            if isinstance(affect.get("observed_at"), str):
+                return affect["observed_at"]
+        return None
+
+    def _entity_registry_update_trace(self, result_status: str, *, failure_reason: str | None = None) -> dict[str, Any]:
+        # entity_registry 更新サマリ
+        return {
+            "result_status": result_status,
+            "entity_count": 0,
+            "entity_refs": [],
+            "failure_reason": failure_reason,
         }
 
     def persist_affect_state_updates(self, *, affect_state_updates: list[dict[str, Any]]) -> dict[str, Any]:

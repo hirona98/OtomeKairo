@@ -10,7 +10,7 @@ from otomekairo.service.common import debug_log
 
 # 定数
 MEMORY_DB_FILE_NAME = "memory.db"
-CURRENT_MEMORY_DB_VERSION = 13
+CURRENT_MEMORY_DB_VERSION = 14
 SUPPORTED_MEMORY_DB_VERSIONS = {0, CURRENT_MEMORY_DB_VERSION}
 
 
@@ -296,6 +296,43 @@ class StoreSchemaMixin:
 
             CREATE INDEX IF NOT EXISTS idx_memory_units_scope_status
             ON memory_units(memory_set_id, scope_type, status, salience);
+
+            CREATE TABLE IF NOT EXISTS entity_registry (
+                entity_ref TEXT NOT NULL,
+                memory_set_id TEXT NOT NULL,
+                entity_type TEXT NOT NULL,
+                display_name TEXT NOT NULL,
+                aliases_json TEXT NOT NULL,
+                first_seen_at TEXT NOT NULL,
+                last_seen_at TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                salience REAL NOT NULL,
+                evidence_event_ids_json TEXT NOT NULL,
+                supporting_memory_unit_ids_json TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                PRIMARY KEY (memory_set_id, entity_ref)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_entity_registry_recent
+            ON entity_registry(memory_set_id, entity_type, last_seen_at, salience);
+
+            CREATE TABLE IF NOT EXISTS entity_aliases (
+                memory_set_id TEXT NOT NULL,
+                alias_key TEXT NOT NULL,
+                entity_ref TEXT NOT NULL,
+                alias_text TEXT NOT NULL,
+                entity_type TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                updated_at TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                PRIMARY KEY (memory_set_id, alias_key, entity_ref)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_entity_aliases_lookup
+            ON entity_aliases(memory_set_id, alias_key, confidence, updated_at);
+
+            CREATE INDEX IF NOT EXISTS idx_entity_aliases_entity
+            ON entity_aliases(memory_set_id, entity_ref);
 
             CREATE TABLE IF NOT EXISTS revisions (
                 revision_id TEXT PRIMARY KEY,

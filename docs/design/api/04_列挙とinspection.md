@@ -95,6 +95,7 @@ response:
       "pending_intent_candidates": [],
       "mood_state": {},
       "affect_states": [],
+      "entity_registry": [],
       "visual_daily_summary": null
     },
     "capability_inspection": {
@@ -107,6 +108,9 @@ response:
 
 `current_state.foreground_world_states` は現在有効な `world_state` の前景 snapshot を返す。
 `activity_context`、`drive_states`、`ongoing_action`、`mood_state`、`affect_states` は、現在の個を構成する内部状態の確認用 snapshot である。
+`current_state.entity_registry` は、選択中 `memory_set` の固有対象正規化を確認する compact snapshot である。
+`current_state.entity_registry` は `entity_ref / entity_type / display_name / aliases / first_seen_at / last_seen_at / confidence / salience / evidence_event_count / supporting_memory_unit_count` を返す。
+`current_state.entity_registry` は読み取り専用であり、対象の性格、好み、属性、関係本文を含めない。
 `runtime_detail` は scheduler、memory postprocess、visual daily worker、capability request 待ちのような process-local runtime state を返す。
 `runtime_detail.wake_policy_observations` は現在設定されている `wake_policy.observations` と process-local の直近実行結果を照合した snapshot である。
 `runtime_detail.wake_runtime_state.initial_delay_until` は、visual capture を有効化した直後の初回 5 秒待機が残っている間だけ入る。

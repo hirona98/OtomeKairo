@@ -118,6 +118,7 @@ class MemoryConsolidator:
             episode=episode,
             memory_actions=memory_actions,
             episode_affects=episode_affects,
+            recall_hint=recall_hint,
         )
 
         # 結果
@@ -150,6 +151,7 @@ class MemoryConsolidator:
                 "mood_state_update": affect_persist_result["mood_state_update"],
                 "affect_state_updates": affect_persist_result["affect_state_updates"],
                 "memory_link_update": affect_persist_result["memory_link_update"],
+                "entity_registry_update": affect_persist_result["entity_registry_update"],
                 "failure_reason": None,
                 "vector_index_sync": {
                     "result_status": "queued",

@@ -470,6 +470,7 @@ class ServiceMemoryMixin:
             "mood_state_update": None,
             "affect_state_updates": [],
             "memory_link_update": self._memory_link_update_trace("not_started"),
+            "entity_registry_update": self._entity_registry_update_trace("not_started"),
             "failure_reason": failure_reason,
             "vector_index_sync": {
                 "result_status": "not_started",
@@ -509,6 +510,7 @@ class ServiceMemoryMixin:
             "mood_state_update": None,
             "affect_state_updates": [],
             "memory_link_update": self._memory_link_update_trace("skipped"),
+            "entity_registry_update": self._entity_registry_update_trace("skipped"),
             "failure_reason": None,
             "skip_reason": reason,
             "vector_index_sync": {
@@ -637,6 +639,7 @@ class ServiceMemoryMixin:
             "mood_state_update": None,
             "affect_state_updates": [],
             "memory_link_update": self._memory_link_update_trace("not_started"),
+            "entity_registry_update": self._entity_registry_update_trace("not_started"),
             "failure_reason": None,
             "vector_index_sync": {
                 "result_status": "not_started",
@@ -686,6 +689,14 @@ class ServiceMemoryMixin:
             "link_count": 0,
             "labels": {},
             "memory_link_ids": [],
+        }
+
+    def _entity_registry_update_trace(self, result_status: str) -> dict[str, Any]:
+        return {
+            "result_status": result_status,
+            "entity_count": 0,
+            "entity_refs": [],
+            "failure_reason": None,
         }
 
     def _correction_reconciliation_trace(

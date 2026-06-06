@@ -201,6 +201,7 @@ class ServiceInputTraceBuildMixin:
             "selected_episode_ids": recall_pack["selected_episode_ids"],
             "selected_event_ids": recall_pack["selected_event_ids"],
             "recall_pack_summary": self._summarize_recall_pack(recall_pack),
+            "entity_resolution": recall_pack.get("entity_resolution", self._empty_entity_resolution_trace()),
             "candidate_count": recall_pack["candidate_count"],
             "selected_memory_ids": recall_pack["selected_memory_ids"],
             "memory_link_context": self._summarize_memory_link_context(
@@ -371,6 +372,7 @@ class ServiceInputTraceBuildMixin:
             "memory_link_context": self._summarize_memory_link_context(
                 recall_pack.get("memory_link_context")
             ),
+            "entity_resolution": recall_pack.get("entity_resolution", self._empty_entity_resolution_trace()),
             "recall_pack_selection": recall_pack.get(
                 "recall_pack_selection",
                 self._empty_recall_pack_selection_trace(),
@@ -389,6 +391,13 @@ class ServiceInputTraceBuildMixin:
             trace["fact_resolution_trace"] = self._empty_fact_resolution_trace()
         return trace
 
+    def _empty_entity_resolution_trace(self) -> dict[str, Any]:
+        return {
+            "requested_entity_refs": [],
+            "resolved_entities": [],
+            "unresolved_entity_refs": [],
+        }
+
     def _build_failure_recall_trace(
         self,
         *,
@@ -403,6 +412,7 @@ class ServiceInputTraceBuildMixin:
             "selected_event_ids": [],
             "event_evidence_generation": self._empty_event_evidence_generation_trace(),
             "memory_link_context": self._empty_memory_link_context_trace(),
+            "entity_resolution": self._empty_entity_resolution_trace(),
             "recall_pack_selection": recall_pack_selection or self._empty_recall_pack_selection_trace(),
             "recall_pack_summary": None,
             "adopted_reason_summary": None,

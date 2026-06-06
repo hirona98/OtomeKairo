@@ -5,6 +5,8 @@ import sqlite3
 import uuid
 from typing import Any
 
+from otomekairo.service.common import debug_log
+
 
 INACTIVE_MEMORY_LINK_TARGET_STATUSES = {"revoked", "superseded"}
 
@@ -21,8 +23,35 @@ class StoreMemoryLinksMixin:
             for action in memory_actions:
                 memory_link_records.extend(self._apply_memory_action(conn, action))
 
+        # entity_registry は記憶本体の保存後に同期する。
+        memory_set_id = self._memory_actions_memory_set_id(memory_actions)
+        observed_at = self._memory_actions_observed_at(memory_actions)
+        if memory_set_id is not None and observed_at is not None:
+            try:
+                self.update_entity_registry_from_turn(
+                    memory_set_id=memory_set_id,
+                    observed_at=observed_at,
+                    memory_actions=memory_actions,
+                )
+            except Exception as exc:  # noqa: BLE001
+                debug_log("Store", f"entity_registry update failed after memory_actions error={exc}", level="ERROR")
+
         # 結果
         return self._memory_link_update_summary(memory_link_records)
+
+    def _memory_actions_memory_set_id(self, memory_actions: list[dict[str, Any]]) -> str | None:
+        # 対象 memory_set
+        for action in memory_actions:
+            if isinstance(action.get("memory_set_id"), str) and action["memory_set_id"]:
+                return action["memory_set_id"]
+        return None
+
+    def _memory_actions_observed_at(self, memory_actions: list[dict[str, Any]]) -> str | None:
+        # 観測時刻
+        for action in memory_actions:
+            if isinstance(action.get("occurred_at"), str) and action["occurred_at"]:
+                return action["occurred_at"]
+        return None
 
     def list_memory_links_for_recall(
         self,

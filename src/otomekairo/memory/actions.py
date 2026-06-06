@@ -94,6 +94,10 @@ class MemoryActionResolver:
     ) -> list[dict[str, Any]]:
         # 候補
         normalized_candidate = self._normalized_candidate(candidate, finished_at=finished_at)
+        normalized_candidate = self._canonicalized_candidate_refs(
+            memory_set_id=memory_set_id,
+            candidate=normalized_candidate,
+        )
         if self._should_noop_candidate(normalized_candidate, allow_summary=allow_summary):
             return []
 
@@ -531,6 +535,122 @@ class MemoryActionResolver:
             "salience": clamp_score(candidate["salience"]),
             "qualifiers": dict(candidate.get("qualifiers", {})),
         }
+
+    def _canonicalized_candidate_refs(
+        self,
+        *,
+        memory_set_id: str,
+        candidate: dict[str, Any],
+    ) -> dict[str, Any]:
+        # 既存 registry にある entity ref だけを canonical へ寄せる。
+        refs = self._candidate_entity_refs(candidate)
+        if not refs:
+            return candidate
+        mapping = self.store.resolve_entity_refs(memory_set_id=memory_set_id, entity_refs=refs)
+        if not mapping:
+            return candidate
+
+        canonicalized = {
+            **candidate,
+            "subject_ref": self._canonicalized_ref_value(candidate.get("subject_ref"), mapping),
+            "object_ref_or_value": self._canonicalized_ref_value(candidate.get("object_ref_or_value"), mapping),
+            "qualifiers": self._canonicalized_ref_value(candidate.get("qualifiers", {}), mapping),
+        }
+        canonicalized["scope_key"] = self._canonicalized_scope_key(
+            scope_type=canonicalized["scope_type"],
+            scope_key=candidate["scope_key"],
+            subject_ref=canonicalized["subject_ref"],
+            object_ref_or_value=canonicalized.get("object_ref_or_value"),
+            mapping=mapping,
+        )
+        return canonicalized
+
+    def _canonicalized_scope_key(
+        self,
+        *,
+        scope_type: str,
+        scope_key: str,
+        subject_ref: Any,
+        object_ref_or_value: Any,
+        mapping: dict[str, str],
+    ) -> str:
+        # scope_key の canonical 化
+        if scope_type == "entity":
+            for value in (subject_ref, object_ref_or_value, scope_key):
+                if isinstance(value, str) and self._has_named_entity_ref_prefix(value):
+                    return mapping.get(value, value)
+            return scope_key
+        if scope_type == "relationship":
+            canonicalized = self._canonicalized_ref_value(scope_key, mapping)
+            return canonicalized if isinstance(canonicalized, str) else scope_key
+        return scope_key
+
+    def _canonicalized_ref_value(self, value: Any, mapping: dict[str, str]) -> Any:
+        # 参照値の再帰 canonical 化
+        if isinstance(value, str):
+            text = value.strip()
+            if self._has_named_entity_ref_prefix(text):
+                return mapping.get(text, text)
+            if "|" in text and self._is_relationship_ref_string(text):
+                refs = [
+                    mapping.get(part.strip(), part.strip())
+                    for part in text.split("|")
+                    if part.strip()
+                ]
+                return self._normalize_relationship_key("|".join(refs))
+            return value
+        if isinstance(value, dict):
+            return {
+                key: self._canonicalized_ref_value(child, mapping)
+                for key, child in value.items()
+            }
+        if isinstance(value, list):
+            return [
+                self._canonicalized_ref_value(child, mapping)
+                for child in value
+            ]
+        return value
+
+    def _candidate_entity_refs(self, candidate: dict[str, Any]) -> list[str]:
+        # 候補中の typed entity ref
+        refs: list[str] = []
+        values = [
+            candidate.get("scope_key"),
+            candidate.get("subject_ref"),
+            candidate.get("object_ref_or_value"),
+            candidate.get("qualifiers", {}),
+        ]
+        for value in values:
+            refs.extend(self._entity_refs_from_value(value))
+        return list(dict.fromkeys(refs))
+
+    def _entity_refs_from_value(self, value: Any) -> list[str]:
+        # 再帰抽出
+        refs: list[str] = []
+        if isinstance(value, str):
+            text = value.strip()
+            if self._has_named_entity_ref_prefix(text):
+                refs.append(text)
+            if "|" in text:
+                for part in text.split("|"):
+                    part = part.strip()
+                    if self._has_named_entity_ref_prefix(part):
+                        refs.append(part)
+        elif isinstance(value, dict):
+            for child in value.values():
+                refs.extend(self._entity_refs_from_value(child))
+        elif isinstance(value, list):
+            for child in value:
+                refs.extend(self._entity_refs_from_value(child))
+        return refs
+
+    def _is_relationship_ref_string(self, value: str) -> bool:
+        # relationship key 形状
+        refs = [part.strip() for part in value.split("|") if part.strip()]
+        return bool(refs) and all(
+            ref in {"self", "user"} or self._has_named_entity_ref_prefix(ref)
+            for ref in refs
+        )
 
     def _normalized_candidate_memo(self, candidate: dict[str, Any], *, finished_at: str) -> dict[str, Any]:
         # LLM の候補メモを memory_units の正本候補へ変換する。

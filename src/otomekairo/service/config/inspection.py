@@ -155,7 +155,33 @@ class ServiceConfigInspectionMixin:
                 memory_set_id=state["selected_memory_set_id"],
                 limit=6,
             ),
+            "entity_registry": [
+                self._compact_entity_registry_record(record)
+                for record in self.store.list_entity_registry_records(
+                    memory_set_id=state["selected_memory_set_id"],
+                    limit=12,
+                )
+            ],
             "visual_daily_summary": self._current_visual_daily_summary(state=state),
+        }
+
+    def _compact_entity_registry_record(self, record: dict[str, Any]) -> dict[str, Any]:
+        # entity registry の inspection 表示
+        return {
+            "entity_ref": record.get("entity_ref"),
+            "entity_type": record.get("entity_type"),
+            "display_name": record.get("display_name"),
+            "aliases": [
+                alias
+                for alias in record.get("aliases", [])
+                if isinstance(alias, str)
+            ][:6],
+            "first_seen_at": record.get("first_seen_at"),
+            "last_seen_at": record.get("last_seen_at"),
+            "confidence": record.get("confidence"),
+            "salience": record.get("salience"),
+            "evidence_event_count": len(record.get("evidence_event_ids", [])),
+            "supporting_memory_unit_count": len(record.get("supporting_memory_unit_ids", [])),
         }
 
     def get_visual_digest_inspection(

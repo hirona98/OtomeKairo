@@ -44,6 +44,11 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
     ) -> dict[str, Any]:
         # コンテキスト
         memory_set_id = state["selected_memory_set_id"]
+        entity_resolution = self._recall_hint_entity_resolution(
+            memory_set_id=memory_set_id,
+            recall_hint=recall_hint,
+        )
+        recall_hint = entity_resolution["recall_hint"]
         primary_recall_focus = recall_hint["primary_recall_focus"]
         scope_context = self._build_scope_context(recall_hint)
         raw_candidate_ids: set[str] = set()
@@ -272,6 +277,7 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             "selected_event_ids": selected_event_ids,
             "memory_link_context": memory_link_context,
             "recall_pack_selection": recall_pack_selection,
+            "entity_resolution": entity_resolution["entity_resolution"],
             "candidate_count": len(raw_candidate_ids),
         }
 
@@ -326,6 +332,162 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             "world_filters": world_filters,
             "episode_scope_filters": episode_scope_filters,
         }
+
+    def _canonicalized_recall_hint(
+        self,
+        *,
+        memory_set_id: str,
+        recall_hint: dict[str, Any],
+    ) -> dict[str, Any]:
+        # 呼び出し側互換のため canonicalized hint だけを返す。
+        return self._recall_hint_entity_resolution(
+            memory_set_id=memory_set_id,
+            recall_hint=recall_hint,
+        )["recall_hint"]
+
+    def _recall_hint_entity_resolution(
+        self,
+        *,
+        memory_set_id: str,
+        recall_hint: dict[str, Any],
+    ) -> dict[str, Any]:
+        # RecallHint の entity ref を registry の canonical ref へ寄せる。
+        refs = self._recall_hint_entity_refs(recall_hint)
+        entity_resolution = self._entity_resolution_trace(
+            requested_entity_refs=refs,
+            resolved_entities=[],
+            unresolved_entity_refs=refs,
+        )
+        if not refs:
+            return {
+                "recall_hint": recall_hint,
+                "entity_resolution": entity_resolution,
+            }
+        mapping = self.store.resolve_entity_refs(memory_set_id=memory_set_id, entity_refs=refs)
+        if not mapping:
+            return {
+                "recall_hint": recall_hint,
+                "entity_resolution": entity_resolution,
+            }
+
+        canonicalized = dict(recall_hint)
+        canonicalized["mentioned_entities"] = self._canonicalized_recall_hint_entities(
+            recall_hint.get("mentioned_entities", []),
+            mapping,
+        )
+        canonicalized["focus_scopes"] = self._canonicalized_recall_hint_focus_scopes(
+            recall_hint.get("focus_scopes", []),
+            mapping,
+        )
+        entity_resolution = self._entity_resolution_trace(
+            requested_entity_refs=refs,
+            resolved_entities=[
+                {
+                    "input_entity_ref": entity_ref,
+                    "canonical_entity_ref": canonical_ref,
+                }
+                for entity_ref, canonical_ref in mapping.items()
+            ],
+            unresolved_entity_refs=[
+                entity_ref
+                for entity_ref in refs
+                if entity_ref not in mapping
+            ],
+        )
+        return {
+            "recall_hint": canonicalized,
+            "entity_resolution": entity_resolution,
+        }
+
+    def _entity_resolution_trace(
+        self,
+        *,
+        requested_entity_refs: list[str],
+        resolved_entities: list[dict[str, str]],
+        unresolved_entity_refs: list[str],
+    ) -> dict[str, Any]:
+        # entity 解決トレース
+        return {
+            "requested_entity_refs": requested_entity_refs,
+            "resolved_entities": resolved_entities,
+            "unresolved_entity_refs": unresolved_entity_refs,
+        }
+
+    def _recall_hint_entity_refs(self, recall_hint: dict[str, Any]) -> list[str]:
+        # RecallHint 中の entity ref を集める。
+        refs: list[str] = []
+        for entity in recall_hint.get("mentioned_entities", []):
+            if isinstance(entity, str) and self._is_named_entity_ref(entity.strip()):
+                refs.append(entity.strip())
+        for scope in recall_hint.get("focus_scopes", []):
+            if not isinstance(scope, str):
+                continue
+            normalized = scope.strip()
+            if not normalized.startswith("relationship:"):
+                continue
+            for ref in normalized.removeprefix("relationship:").split("|"):
+                ref = ref.strip()
+                if self._is_named_entity_ref(ref):
+                    refs.append(ref)
+        return list(dict.fromkeys(refs))
+
+    def _canonicalized_recall_hint_entities(
+        self,
+        entities: list[Any],
+        mapping: dict[str, str],
+    ) -> list[str]:
+        # mentioned_entities の canonical 化
+        canonicalized: list[str] = []
+        seen: set[str] = set()
+        for entity in entities:
+            if not isinstance(entity, str):
+                continue
+            normalized = entity.strip()
+            if not self._is_named_entity_ref(normalized):
+                continue
+            resolved = mapping.get(normalized, normalized)
+            if resolved in seen:
+                continue
+            canonicalized.append(resolved)
+            seen.add(resolved)
+        return canonicalized
+
+    def _canonicalized_recall_hint_focus_scopes(
+        self,
+        scopes: list[Any],
+        mapping: dict[str, str],
+    ) -> list[str]:
+        # relationship focus 内の entity ref を canonical 化
+        canonicalized: list[str] = []
+        seen: set[str] = set()
+        for scope in scopes:
+            if not isinstance(scope, str):
+                continue
+            normalized = scope.strip()
+            if normalized.startswith("relationship:"):
+                relationship_key = normalized.removeprefix("relationship:")
+                refs = [
+                    mapping.get(ref.strip(), ref.strip())
+                    for ref in relationship_key.split("|")
+                    if ref.strip()
+                ]
+                normalized = "relationship:" + self._normalized_relationship_scope_key(refs)
+            if normalized in seen:
+                continue
+            canonicalized.append(normalized)
+            seen.add(normalized)
+        return canonicalized
+
+    def _normalized_relationship_scope_key(self, refs: list[str]) -> str:
+        # relationship scope key の正規化
+        unique_refs = list(dict.fromkeys(refs))
+        if "self" in unique_refs:
+            return "|".join(["self", *sorted(ref for ref in unique_refs if ref != "self")])
+        return "|".join(sorted(unique_refs))
+
+    def _is_named_entity_ref(self, value: str) -> bool:
+        # typed entity ref
+        return any(value.startswith(prefix) and value != prefix for prefix in ("person:", "place:", "tool:"))
 
     def _build_active_commitments(
         self,
@@ -742,7 +904,16 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             "association_selected_episode_ids": [],
             "selected_event_ids": [],
             "memory_link_context": self._empty_memory_link_context(),
+            "entity_resolution": self._empty_entity_resolution_trace(),
             "candidate_count": 0,
+        }
+
+    def _empty_entity_resolution_trace(self) -> dict[str, Any]:
+        # entity 解決なし
+        return {
+            "requested_entity_refs": [],
+            "resolved_entities": [],
+            "unresolved_entity_refs": [],
         }
 
     def _build_visual_observations(
