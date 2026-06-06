@@ -218,6 +218,10 @@ LLM の出力は JSON object 1 個に固定する。
 - 既存 state との統合、置換、失効
 - 件数上限と TTL
 
+更新に成功した cycle の decision 入力では、同じ `source_ref` の `world_state` を `foreground_world_state` の件数上限内で先に選ぶ。
+既存の高 salience state は残り slot へ入れる。
+これにより、capability result や起床前観測から得た現在状態を、既存の視覚前景が押し出さない。
+
 validator 失敗時は 1 回だけ再生成する。
 再生成後も契約を満たさない場合は、そのサイクルの `world_state` 更新だけを失敗として扱い、判断サイクル本体は入力と想起が成立していれば継続する。
 失敗は `world_state_trace` と audit event に残す。
