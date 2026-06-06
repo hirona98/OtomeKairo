@@ -158,12 +158,12 @@ LLM の自由文をそのまま状態遷移へ使わない。
 身体状態は body context、body capability result、明示的な身体状態 source を根拠にする。
 予定状態は schedule context、schedule capability result、明示的な予定 source を根拠にする。
 `wake_policy.observations` は 定期起床 の判断前に enabled 項目だけを順番に取得する。
-visual capture の source、result、保存、inspection の詳細は [26_視覚機能実装設計.md](26_視覚機能実装設計.md) を正とする。
+visual capture の source、result、保存、inspection の詳細は [26_視覚機能.md](26_視覚機能.md) を正とする。
 起床前観測 の運用時刻は `wake_policy` と process-local runtime で扱い、成功結果は内部観測と `initiative_entry_check` の材料として扱う。
 起床前観測 として同期取得する capability result は、`ongoing_action` 外の内部観測として扱う。
 ユーザー向け応答サイクルが進行中の間、server は `background_wake` の自発発話判断を `noop` にする。
 `background_wake` の観測中に `conversation_input` または `speech` が新しく増えた場合、server は観測前の直近会話 snapshot を使って発話せず、`noop` にする。
-visual capture の変化は `first_seen / changed / stable / same_as_recent_speech` の `change_state` に正規化し、正規化規則は [26_視覚機能実装設計.md](26_視覚機能実装設計.md) を正とする。
+visual capture の変化は `first_seen / changed / stable / same_as_recent_speech` の `change_state` に正規化し、正規化規則は [26_視覚機能.md](26_視覚機能.md) を正とする。
 `first_seen / changed` は新規性の前景シグナルとして扱う。
 `first_seen / changed` 単体は外向き判断入口にしない。
 `same_as_recent_speech / stable` は反復性の前景シグナルとして扱う。

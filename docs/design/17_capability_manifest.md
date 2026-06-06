@@ -176,7 +176,7 @@ inspection には運用確認に必要な binding 要約を出すが、token、c
 
 `vision.capture.input.vision_source_id` は `VisionSourceRegistry` に存在する id を指定する。
 `VisionSource` はカメラ、画面、仮想画面、watch 対象を表し、具体的な client と source metadata を持つ。
-`VisionSource` の意味境界は [26_視覚機能実装設計.md](26_視覚機能実装設計.md) を正とする。
+`VisionSource` の意味境界は [26_視覚機能.md](26_視覚機能.md) を正とする。
 server は `vision_source_id` から実行先 client と観測対象を一意に決める。
 source が一意に定まらない場合、server は `vision.capture` を dispatch しない。
 source ごとの `required_permissions` は `VisionSource` が持ち、manifest の `observe_vision` と合わせて検証する。

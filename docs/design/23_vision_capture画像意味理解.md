@@ -6,7 +6,7 @@
 詳細な視覚説明は、その場の判断だけでなく、後続会話、想起、記憶更新、日次整理の根拠として保存する。
 
 この文書は、画像意味理解、視覚記録、派生要約、日次整理の意味境界を定める。
-視覚 source の実行設計は [26_視覚機能実装設計.md](26_視覚機能実装設計.md) を正とする。
+視覚 source と `vision.capture` の意味境界は [26_視覚機能.md](26_視覚機能.md) を正とする。
 通常会話の添付画像の API 入力は [24_対話画像入力.md](24_対話画像入力.md) を正とする。
 `world_state` への反映は [22_world_state.md](22_world_state.md) を正とする。
 
@@ -179,8 +179,8 @@ LLM の出力は JSON object 1 個に固定する。
 6. 重要な視覚体験を episode と長期記憶へ接続する
 7. `daily_visual_digest` を作る
 
-現行実装では、前日以前の未整理日を background worker が処理する。
-日次整理は対象日の `visual_observation_record` を全件読み、毎分キャプチャのような高頻度入力でも同じ日の記録を整理対象から落とさない。
+日次整理は background worker が処理する。
+日次整理は対象日の `visual_observation_record` を読み、高頻度入力でも同じ日の記録を整理対象から落とさない。
 連続する類似視覚記録には `duplicate_group_id` を付ける。
 詳細説明は残し、低変化 group の中間記録だけ `retention_status=compressed` にする。
 日ごとの整理結果は `daily_visual_digest` として保存する。
@@ -235,14 +235,7 @@ LLM の出力は JSON object 1 個に固定する。
 ## しきい値調整
 
 視覚整理のしきい値は固定仕様ではなく、実ログを根拠に調整する運用値である。
-初期値は次とする。
-
-- 連続観測の duplicate 判定類似度: `0.86`
-- 1 日あたりの整理対象: 意味上の上限を持たず、対象日の全 `visual_observation_record`
-- 1 回の worker 実行で処理する未整理日数: `7`
-- `RecallPack.visual_observations` の投入上限: `3`
-- `RecallPack.visual_daily_digests` の投入上限: `2`
-- `daily_visual_digest` からの `memory_unit` 昇格上限: 1 日 `3`
+運用値として、duplicate 判定類似度、1 回の worker 実行で扱う未整理日数、RecallPack 投入上限、`daily_visual_digest` からの昇格上限を調整する。
 
 調整では次を観測する。
 
@@ -271,7 +264,6 @@ LLM の出力は JSON object 1 個に固定する。
 特定対象の有無確認では検索一致枠を優先し、query に強く一致する `compressed` を直近の `active` より上に置く。
 日次整理前の当日記録は大量に `active` のまま存在するため、`RecallPack.visual_observations` は直近性、query 一致、source 分散、duplicate group 分散で選ぶ。
 
-現行実装では、検索一致した視覚記録と直近の視覚記録を `RecallPack.visual_observations` へ少数投入する。
 応答と判断は `visual_observations[].detailed_summary_text` の範囲で、画像内の対象有無を確認する。
 
 `daily_visual_digest` は、特定の画像内対象を直接断定する根拠ではなく、1 日単位の視覚経験の索引である。
@@ -284,7 +276,7 @@ LLM の出力は JSON object 1 個に固定する。
 ## 実装状態
 
 現行実装の状態は `src/` と smoke 結果を正とする。
-`vision.capture` visual capture 経路の完了判定と次フェーズの候補は [26_視覚機能実装設計.md](26_視覚機能実装設計.md) を参照する。
+視覚 source と capability 実行の境界は [26_視覚機能.md](26_視覚機能.md) を参照する。
 この文書は、画像意味理解、視覚記録、派生要約、日次整理の意味境界を正本として扱う。
 
 ## failure の扱い
@@ -312,7 +304,7 @@ inspection では少なくとも次を見られるようにする。
 
 ## 他設計との関係
 
-- 視覚 source と capability 実行は [26_視覚機能実装設計.md](26_視覚機能実装設計.md) を正とする
+- 視覚 source と capability 実行の境界は [26_視覚機能.md](26_視覚機能.md) を正とする
 - `world_state` への反映先は [22_world_state.md](22_world_state.md) を正とする
 - capability wire は [api/05_実行連携.md](api/05_実行連携.md) を正とする
 - repo 全体の LLM 判断原則は [20_LLM判断優先方針.md](20_LLM判断優先方針.md) を正とする
