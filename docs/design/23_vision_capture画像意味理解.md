@@ -145,8 +145,8 @@ LLM の出力は JSON object 1 個に固定する。
 9. 会話や行動と結びつく場合は episode に紐づける
 10. 重要、反復、継続、会話結合を満たす場合は記憶候補にする
 
-この段階では、raw image から直接 `world_state` 行や memory row を作らない。
-`visual_observation_record` と派生データを経由して、短期状態、episode、記憶候補へ進める。
+この段階の出力は `visual_observation_record` と派生データに集約する。
+短期状態、episode、記憶候補は `visual_observation_record` と派生データを経由して作る。
 
 ## world_state との関係
 
@@ -156,7 +156,8 @@ LLM の出力は JSON object 1 個に固定する。
 
 `vision.capture` は `source_kind` に関係なく `world_state.visual_context` 更新候補になる。
 ただし `world_state` へ入れる値は詳細説明そのものではなく、現在判断に効く短い状態要約にする。
-詳細説明は `visual_observation_record` に残し、`world_state` から必要に応じて参照できるようにする。
+詳細説明は `visual_observation_record` に残す。
+詳細説明を扱う処理は `visual_observation_id` から `visual_observation_record` を参照する。
 
 通常会話の添付画像は、会話入力の補助視覚文脈として扱う。
 添付画像だけから現在外界の `world_state.visual_context` は更新しない。
@@ -213,7 +214,7 @@ LLM の出力は JSON object 1 個に固定する。
 `compressed` は詳細説明を保持したまま、通常想起での優先度を下げる。
 `excluded` はユーザー削除、記憶禁止、秘密情報の可能性がある場合だけ使い、通常想起と digest 昇格の対象から外す。
 
-視覚記録検索の ranking は、`retention_status` だけで決めない。
+視覚記録検索の ranking は、検索語との一致、重要度、鮮度、source、duplicate group、`retention_status` の組み合わせで決める。
 特定物体、場所、画面要素の有無確認では、query text と `detailed_summary_text / scene_entities / searchable_terms` の一致度を最優先する。
 `compressed` でも query に強く一致する記録は、query に弱く一致する `active` より上に置く。
 
@@ -266,9 +267,9 @@ LLM の出力は JSON object 1 個に固定する。
 5. 長期 memory
 
 `RecallPack.visual_observations` は、検索一致枠、重要枠、直近枠に分けて選ぶ。
-最終投入上限は `3` 件とし、同一 duplicate group または同一 source の連続記録で埋め尽くさない。
+最終投入上限は `3` 件とし、duplicate group と source の分散を入れて選ぶ。
 特定対象の有無確認では検索一致枠を優先し、query に強く一致する `compressed` を直近の `active` より上に置く。
-日次整理前の当日記録は大量に `active` のまま存在するため、直近枠だけで `RecallPack.visual_observations` を埋めない。
+日次整理前の当日記録は大量に `active` のまま存在するため、`RecallPack.visual_observations` は直近性、query 一致、source 分散、duplicate group 分散で選ぶ。
 
 現行実装では、検索一致した視覚記録と直近の視覚記録を `RecallPack.visual_observations` へ少数投入する。
 応答と判断は `visual_observations[].detailed_summary_text` の範囲で、画像内の対象有無を確認する。
