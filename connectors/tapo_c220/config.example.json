@@ -1,0 +1,36 @@
+{
+  "server": {
+    "base_url": "https://127.0.0.1:55601",
+    "access_token_env": "OTOMEKAIRO_ACCESS_TOKEN",
+    "tls_verify": false,
+    "request_timeout_seconds": 10,
+    "reconnect_delay_seconds": 5
+  },
+  "connector": {
+    "client_id": "tapo-c220-connector-main",
+    "vision_source_id": "vision_source:tapo_c220_main",
+    "label": "C220",
+    "aliases": ["カメラ", "部屋のカメラ", "C220"],
+    "default_for": ["visual", "camera"]
+  },
+  "camera": {
+    "host_env": "TAPO_C220_HOST",
+    "username_env": "TAPO_C220_USERNAME",
+    "password_env": "TAPO_C220_PASSWORD",
+    "rtsp_username_env": "TAPO_C220_RTSP_USERNAME",
+    "rtsp_password_env": "TAPO_C220_RTSP_PASSWORD",
+    "rtsp_port": 554,
+    "rtsp_path": "stream1",
+    "rtsp_transport": "tcp",
+    "rtsp_open_timeout_seconds": 8,
+    "jpeg_quality": 88,
+    "small_step": 8,
+    "medium_step": 18,
+    "operation_vectors": {
+      "move_up": [0, -1],
+      "move_down": [0, 1],
+      "move_left": [-1, 0],
+      "move_right": [1, 0]
+    }
+  }
+}

@@ -94,6 +94,7 @@ source が一意に定まらない状態で connector は登録しない。
 Tapo C220 connector は、制御可能な camera connector の初期対象である。
 C220 は `vision.capture` の `VisionSource(kind=camera, source_owner=self)` として登録し、pan / tilt は同じ source の `camera.ptz` として登録する。
 同じ物理 camera に対して、観測用 source id と制御用 source id を分けない。
+この repository 内の初期実装は `connectors/tapo_c220/` に置く。
 
 C220 connector の hello は次の形を基準にする。
 
