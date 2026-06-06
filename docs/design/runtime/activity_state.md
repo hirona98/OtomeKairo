@@ -85,7 +85,8 @@ LLM は文字列一致で活動を確定しない。
 LLM は複数 source の意味を見て、活動候補を返す。
 コード側もアプリ名やタイトルの文字列一致で活動内容を決めない。
 文字列比較は同一活動の統合、重複抑制、inspection の補助に限定する。
-`desktop / camera / virtual` の vision source と `source_owner=user_environment` はユーザー側の環境観測として扱い、activity candidate の `actor=user` にする。
+`desktop / virtual` の vision source と `source_owner=user_environment` はユーザー側の環境観測として扱い、activity candidate の `actor=user` にする。
+`source_owner=self` の camera 観測は OtomeKairo の視覚根拠として扱い、観測対象がユーザー活動だと判断できる場合だけ `actor=user` の activity candidate に使う。
 activity の `label / reason_summary` はユーザー側の観測事実から構成する。
 assistant の直近発話、約束、待機姿勢は activity とは別文脈として扱う。
 activity の `label` は投稿内容、検索語、曲名、ファイル名などの細部ではなく、X閲覧中、検索で調査中、コーディング中、ゲーム中、音楽鑑賞中のような活動モードにする。

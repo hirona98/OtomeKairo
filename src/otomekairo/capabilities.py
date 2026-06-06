@@ -90,6 +90,117 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
             "error",
         ],
     },
+    "camera.ptz": {
+        "id": "camera.ptz",
+        "version": "1",
+        "kind": "action",
+        "decision_description": "OtomeKairo の camera source の向きや画角を調整する",
+        "when_to_use": [
+            "OtomeKairo 自身の camera 視覚の向きや画角を変える必要がある",
+            "camera 観測前に対象を視野へ入れる必要がある",
+            "camera.ptz result 後に同じ camera source を観測したい",
+        ],
+        "do_not_use_when": [
+            "対象 source が camera ではない",
+            "source が requested operation または amount をサポートしていない",
+            "視覚根拠を得るだけで camera の向きや画角を変える必要がない",
+        ],
+        "required_permissions": ["control_camera_ptz"],
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "vision_source_id": {"type": "string", "pattern": "^vision_source:"},
+                "operation": {
+                    "type": "string",
+                    "enum": [
+                        "move_up",
+                        "move_down",
+                        "move_left",
+                        "move_right",
+                        "zoom_in",
+                        "zoom_out",
+                    ],
+                },
+                "amount": {"type": "string", "enum": ["small", "medium"]},
+            },
+            "required": ["vision_source_id", "operation", "amount"],
+            "additionalProperties": False,
+        },
+        "result_schema": {
+            "type": "object",
+            "properties": {
+                "status": {"type": "string", "enum": ["completed", "rejected", "failed"]},
+                "operation": {
+                    "type": "string",
+                    "enum": [
+                        "move_up",
+                        "move_down",
+                        "move_left",
+                        "move_right",
+                        "zoom_in",
+                        "zoom_out",
+                    ],
+                },
+                "amount": {"type": "string", "enum": ["small", "medium"]},
+                "client_context": {
+                    "type": ["object", "null"],
+                },
+                "error": {
+                    "type": ["string", "null"],
+                },
+            },
+            "required": ["status", "operation", "amount"],
+            "additionalProperties": False,
+        },
+        "side_effects": {
+            "external_world": True,
+            "user_visible": False,
+            "stores_raw_payload": False,
+        },
+        "timeout_ms": 5000,
+        "risk_level": "medium",
+        "memory_policy": {
+            "record_result_event": True,
+            "allow_memory_update": True,
+        },
+        "state_policy": {
+            "creates_ongoing_action": True,
+            "blocks_parallel_capability": True,
+            "result_context_hook": "camera_ptz",
+            "followup_hint_hook": "camera_ptz",
+            "allow_followup_capability_requests": [
+                {
+                    "capability_id": "vision.capture",
+                    "constraint": "same_vision_source_id",
+                }
+            ],
+            "unavailable_seconds_on_dispatch_failure": 15,
+            "unavailable_seconds_on_timeout": 15,
+        },
+        "decision_readiness": {
+            "family": "camera_control",
+            "world_state_type": "visual_context",
+            "input_keys": ["vision_source_id", "operation", "amount"],
+            "result_summary_keys": ["status", "operation", "amount"],
+        },
+        "inspection_fields": [
+            "capability_id",
+            "target_client_id",
+            "vision_source_id",
+            "source_kind",
+            "source_owner",
+            "source_label",
+            "operation",
+            "amount",
+            "status",
+            "data_source",
+            "unconnected_reason",
+            "body_state_summary",
+            "device_state_summary",
+            "schedule_summary",
+            "error",
+        ],
+    },
     "external.status": {
         "id": "external.status",
         "version": "1",

@@ -552,7 +552,8 @@ def build_activity_state_repair_prompt(validation_error: str) -> str:
         + " / ".join(sorted(WORLD_STATE_TTL_HINT_VALUES))
         + " のいずれかです。\n"
         "活動は source pack の複数情報を意味的に見て判断し、文字列一致は補助根拠として扱ってください。\n"
-        "desktop / camera / virtual の vision source や source_owner=user_environment はユーザー側の環境観測として扱い、actor=user にしてください。\n"
+        "desktop / virtual の vision source や source_owner=user_environment はユーザー側の環境観測として扱い、actor=user にしてください。\n"
+        "camera の vision source は source_owner=self のとき OtomeKairo 自身の視覚として扱ってください。\n"
         "actor=self は AI 本体の ongoing action など、AI 自身の活動だと構造的に分かる根拠がある場合だけ使ってください。\n"
         "ユーザー活動の label や reason_summary はユーザー側の観測事実から構成してください。assistant の直近発話、約束、待機姿勢は activity とは別文脈として扱ってください。\n"
         "新しい source や raw payload の創作、内部識別子、Markdown、コードフェンス、説明文は禁止です。"
@@ -751,6 +752,7 @@ def _build_decision_system_prompt(persona: dict) -> str:
             "VisualObservationContext.source=conversation_attachment かつ image_interpreted=true の場合、会話添付画像はすでに visual_summary_text として解釈済みです。画像に関する判断は visual_summary_text を根拠にしてください。\n"
             "VisualObservationContext.source=vision_capture_result の場合、その visual_summary_text は画像から生成した詳細な視覚説明です。source_kind に関係なく、判断、想起、記憶整理の根拠候補として扱ってください。\n"
             "source_owner=user_environment の視覚観測や foreground_world_state はユーザー側の環境観測です。AI 本体の一人称体験とは切り分けて扱ってください。\n"
+            "source_owner=self の camera 視覚観測は OtomeKairo 自身の視覚根拠として扱ってください。\n"
             "解釈済みの会話添付画像についてユーザーが質問している場合、visual_summary_text の範囲で自然に speech を選び、足りない点があれば短く確認してください。",
         ),
         (
@@ -772,6 +774,7 @@ def _build_decision_system_prompt(persona: dict) -> str:
             "ユーザーが現在状態の確認を明示的に依頼し、対応する status / observation capability が available=true のときは capability_request を選んでください。\n"
             "CapabilityDecisionView の項目に fresh_world_state_available=true がある場合、明示的なユーザー依頼ではない同じ現在状態の判断は fresh_world_state を根拠に speech / noop / pending_intent を選んでください。\n"
             "vision.capture に fresh_world_state_by_vision_source がある場合、明示的なユーザー依頼ではない同じ vision_source_id の判断は既存の visual_context を根拠にしてください。\n"
+            "camera.ptz は fresh visual_context があっても camera の向きや画角を変える必要がある場合に capability_request として選べます。\n"
             "capability_request.input は required_input に従う最小 object にしてください。target_client_id や資格情報は入れないでください。\n"
             "current_input.sender=user かつ response_target=user の text が非空なら、明示的な発話不要表現がない限り speech を選んでください。\n"
             "ユーザー発話への直接応答として自然に返せるなら speech を優先し、pending_intent を乱用しないでください。\n"
@@ -879,6 +882,7 @@ def _build_decision_trigger_policy(
                 "`background_wake` は定期起床であり、自律判断の通常起点です。noop を選ぶ場合は、観測、候補、進行中応答、重複介入境界のいずれかに根拠づけてください。",
                 "foreground_signal_summary.visual_observations は desktop / camera / virtual などの視覚観測です。speech を選ぶ場合も、視覚観測は initiative_entry_summary や drive_state を支える補助根拠として扱ってください。",
                 "source_owner=user_environment の視覚観測や ActivityContext.actor=user はユーザー側の状況です。判断理由に使う場合も、ユーザー側文脈として表現してください。",
+                "source_owner=self の camera 視覚観測は OtomeKairo 自身の視覚根拠として扱ってください。",
                 "InitiativeContext.activity_context は自律判断時のタイミング補助材料です。previous_activity から current_activity への意味ある活動モード遷移は、initiative_entry_summary.entry_basis=activity_mode_transition と整合する場合に speech 候補として扱ってください。",
                 "活動遷移に触れる speech は、終わった・サボった・遊び始めたなどを断定せず、区切りや切り替えとして短く表現してください。",
                 "visual_observations[].change_state=first_seen / changed は新規性の前景シグナルです。新規性だけを外向き発話理由にしないでください。",
@@ -920,7 +924,8 @@ def _build_speech_system_prompt(persona: dict) -> str:
             "internal_context.speech_stance は本文の立ち位置です。speech_stance.stance=comment_on_user_context のとき、観測対象はユーザー側の状況として書いてください。\n"
             "VisualObservationContext.source=conversation_attachment かつ image_interpreted=true の場合、会話添付画像は visual_summary_text として解釈済みです。本文ではその説明の範囲で答えてください。\n"
             "VisualObservationContext.source=vision_capture_result の場合、visual_summary_text は画像から生成した詳細な視覚説明です。本文ではその説明の範囲で答え、不確実な対象は断定しないでください。\n"
-            "source_owner=user_environment の視覚観測、foreground_world_state、ActivityContext.actor=user はユーザー側の環境または活動です。AI 本体の一人称体験とは切り分け、ユーザー側の見え方として表現してください。",
+            "source_owner=user_environment の視覚観測、foreground_world_state、ActivityContext.actor=user はユーザー側の環境または活動です。AI 本体の一人称体験とは切り分け、ユーザー側の見え方として表現してください。\n"
+            "source_owner=self の camera 視覚観測は OtomeKairo 自身の視覚根拠として表現できます。",
         ),
         (
             "応答ルール",
@@ -1303,7 +1308,8 @@ def _build_activity_state_system_prompt() -> str:
         "活動推定は desktop capture 専用ではありません。current_input、recent_turns、client_context、visual_observation_context、foreground_world_state、previous_activity_context を総合してください。\n"
         "活動内容は active_app、window_title、visual_summary_text、recent_turns、client_context、previous_activity_context を合わせた意味で判断してください。\n"
         "current_input.sender=user の本文はユーザー発話です。その他の観測要約は内部文脈として扱ってください。\n"
-        "source_owner=user_environment、desktop、camera、virtual の視覚観測、client_context の active_app/window_title はユーザー側の環境観測として扱い、actor=user にしてください。\n"
+        "source_owner=user_environment、desktop、virtual の視覚観測、client_context の active_app/window_title はユーザー側の環境観測として扱い、actor=user にしてください。\n"
+        "source_owner=self の camera 視覚観測は OtomeKairo 自身の視覚として扱ってください。\n"
         "actor=self は AI 本体の ongoing action など、AI 自身の活動だと構造的に分かる根拠がある場合だけ使ってください。\n"
         "活動 label と reason_summary はユーザー側の観測事実から構成してください。assistant の直近発話、約束、待機姿勢は activity とは別文脈として扱ってください。\n"
         "画面が会話 UI に戻っていても previous_activity_context に直前活動があり、ユーザー発話がその直後の反応として自然なら、直前活動を保持する transition=none または continue を選んでください。\n"

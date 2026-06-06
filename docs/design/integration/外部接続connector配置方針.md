@@ -51,10 +51,14 @@ OpenCV、デバイス SDK、外部サービス SDK、OS 固有ライブラリは
 
 Webカメラは新しい capability id として定義しない。
 Webカメラは `vision.capture` の `VisionSource(kind=camera)` として登録する。
+camera source は OtomeKairo の視覚なので、採用した camera source は `source_owner=self` とし、`wake_policy.observations` に含める。
 
 Webカメラ connector は、server から `vision.capture_request` を受けたときだけ still image を 1 枚取得する。
 connector は常時録画、常時監視、独自周期での撮影を行わない。
 定期観測は server の `wake_policy.observations` から `vision.capture` として発行する。
+制御可能な camera の pan / tilt / zoom は `camera.ptz` として扱う。
+`camera.ptz` の意味境界は [../capability/camera_ptz.md](../capability/camera_ptz.md) を正とする。
+privacy mode は connector capability として実装しない。
 
 Webカメラ connector の hello は次の形を基準にする。
 
@@ -73,7 +77,8 @@ Webカメラ connector の hello は次の形を基準にする。
       "aliases": ["カメラ", "Webカメラ", "部屋のカメラ"],
       "default_for": ["camera"],
       "capability_id": "vision.capture",
-      "required_permissions": ["observe_vision", "observe_camera"]
+      "required_permissions": ["observe_vision", "observe_camera"],
+      "source_owner": "self"
     }
   ]
 }
@@ -82,6 +87,54 @@ Webカメラ connector の hello は次の形を基準にする。
 `vision_source_id` は server 内で一意にする。
 複数の Webカメラを扱う場合は、`vision_source_id`、`label`、`aliases` を connector 設定で明示的に分ける。
 source が一意に定まらない状態で connector は登録しない。
+固定 Webカメラのように向きや画角を制御できない source は `supported_controls` を出さない。
+
+## Tapo C220 connector
+
+Tapo C220 connector は、制御可能な camera connector の初期対象である。
+C220 は `vision.capture` の `VisionSource(kind=camera, source_owner=self)` として登録し、pan / tilt は同じ source の `camera.ptz` として登録する。
+同じ物理 camera に対して、観測用 source id と制御用 source id を分けない。
+
+C220 connector の hello は次の形を基準にする。
+
+```json
+{
+  "type": "hello",
+  "client_id": "tapo-c220-connector-main",
+  "caps": [
+    { "id": "vision.capture", "version": "1" },
+    { "id": "camera.ptz", "version": "1" }
+  ],
+  "vision_sources": [
+    {
+      "vision_source_id": "vision_source:tapo_c220_main",
+      "kind": "camera",
+      "label": "C220",
+      "aliases": ["カメラ", "部屋のカメラ", "C220"],
+      "default_for": ["visual", "camera"],
+      "capability_id": "vision.capture",
+      "required_permissions": ["observe_vision", "observe_camera"],
+      "source_owner": "self",
+      "supported_controls": {
+        "camera.ptz": {
+          "operations": ["move_up", "move_down", "move_left", "move_right"],
+          "amounts": ["small", "medium"]
+        }
+      }
+    }
+  ]
+}
+```
+
+C220 の capture backend は `rtsp`、control backend は `pytapo` を初期基準にする。
+connector は `vision.capture_request` では RTSP から still image を 1 枚取得し、`camera.ptz_request` では `operation / amount` を C220 の pan / tilt API へ変換する。
+`small / medium` と実移動量の対応は connector 設定で持ち、server、decision view、inspection へ角度や生 API 名を出さない。
+zoom 操作は実機と connector 実装で検証するまで `supported_controls` に含めない。
+
+C220 の host、account、password、RTSP account、connector token は connector のローカル設定または環境変数で扱う。
+これらの値を repository、docs のサンプル、debug log、inspection、capability result に保存しない。
+privacy mode、録画、検知設定、アラーム、再起動は C220 connector の OtomeKairo capability として実装しない。
+失敗時は `camera.ptz` result に `status=failed` と短い `error` を返す。
 
 ## connector の責務
 

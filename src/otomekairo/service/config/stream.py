@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
 
 from otomekairo.capabilities import (
@@ -12,6 +13,18 @@ from otomekairo.service.config.constants import (
     EVENT_STREAM_CAPABILITY_PERMISSIONS,
     VISION_SOURCE_KINDS,
 )
+from otomekairo.service.input.source_owner import visual_source_owner
+
+
+CAMERA_PTZ_OPERATIONS = {
+    "move_up",
+    "move_down",
+    "move_left",
+    "move_right",
+    "zoom_in",
+    "zoom_out",
+}
+CAMERA_PTZ_AMOUNTS = {"small", "medium"}
 
 
 class ServiceConfigStreamMixin:
@@ -113,6 +126,7 @@ class ServiceConfigStreamMixin:
             )
         except ValueError as exc:
             raise ServiceError(400, "invalid_vision_sources", str(exc)) from exc
+        self._ensure_camera_sources_in_wake_policy_observations(vision_sources)
         debug_log(
             "EventStream",
             (
@@ -161,7 +175,8 @@ class ServiceConfigStreamMixin:
             current_time=generated_at,
             bound_client_ids=bindings["accepted"].get(normalized_capability_id, []),
             rejected_bindings=bindings["rejected"],
-            vision_sources=vision_sources if normalized_capability_id == "vision.capture" else None,
+            vision_sources=vision_sources if normalized_capability_id in {"vision.capture", "camera.ptz"} else None,
+            wake_policy_observations=self._wake_policy_observations_from_state(state),
             active_ongoing_action=active_ongoing_action,
         )
         debug_log(
@@ -260,6 +275,11 @@ class ServiceConfigStreamMixin:
                     "invalid_vision_sources",
                     "hello.vision_sources[].kind must be desktop, camera, or virtual.",
                 )
+            source_owner = self._normalize_hello_vision_source_owner(
+                value=source.get("source_owner"),
+                kind=kind,
+                label="hello.vision_sources[].source_owner",
+            )
             label = self._normalize_vision_source_text(source.get("label"), "hello.vision_sources[].label")
             aliases = self._normalize_vision_source_text_list(
                 source.get("aliases", []),
@@ -280,19 +300,137 @@ class ServiceConfigStreamMixin:
                     "invalid_vision_sources",
                     "hello.vision_sources[].required_permissions are not granted.",
                 )
+            supported_controls = self._normalize_hello_supported_controls(
+                value=source.get("supported_controls"),
+                kind=kind,
+                accepted_capabilities=accepted_capabilities,
+            )
             normalized_sources.append(
                 {
                     "vision_source_id": source_id,
                     "kind": kind,
+                    "source_owner": source_owner,
                     "label": self._clamp(label, limit=80),
                     "aliases": aliases[:8],
                     "default_for": default_for[:8],
                     "client_id": client_id,
                     "capability_id": capability_id,
                     "required_permissions": required_permissions,
+                    "supported_controls": supported_controls,
                 }
             )
         return normalized_sources
+
+    def _normalize_hello_vision_source_owner(
+        self,
+        *,
+        value: Any,
+        kind: str,
+        label: str,
+    ) -> str:
+        expected_owner = visual_source_owner(kind)
+        if expected_owner is None:
+            raise ServiceError(400, "invalid_vision_sources", f"{label} is unsupported for kind={kind}.")
+        if value is None:
+            return expected_owner
+        if not isinstance(value, str) or not value.strip():
+            raise ServiceError(400, "invalid_vision_sources", f"{label} must be a non-empty string.")
+        normalized = value.strip()
+        if normalized != expected_owner:
+            raise ServiceError(
+                400,
+                "invalid_vision_sources",
+                f"{label} must be {expected_owner} for kind={kind}.",
+            )
+        return normalized
+
+    def _normalize_hello_supported_controls(
+        self,
+        *,
+        value: Any,
+        kind: str,
+        accepted_capabilities: dict[str, str],
+    ) -> dict[str, Any]:
+        if value is None:
+            return {}
+        if not isinstance(value, dict):
+            raise ServiceError(400, "invalid_vision_sources", "hello.vision_sources[].supported_controls must be an object.")
+        if not value:
+            return {}
+        unsupported_controls = sorted(
+            str(key)
+            for key in value
+            if not isinstance(key, str) or key != "camera.ptz"
+        )
+        if unsupported_controls:
+            raise ServiceError(
+                400,
+                "invalid_vision_sources",
+                "hello.vision_sources[].supported_controls contains unsupported controls.",
+            )
+        camera_ptz = value.get("camera.ptz")
+        if camera_ptz is None:
+            return {}
+        if kind != "camera":
+            raise ServiceError(
+                400,
+                "invalid_vision_sources",
+                "hello.vision_sources[].supported_controls.camera.ptz requires kind=camera.",
+            )
+        if "camera.ptz" not in accepted_capabilities:
+            raise ServiceError(
+                400,
+                "invalid_vision_sources",
+                "hello.vision_sources[].supported_controls.camera.ptz requires accepted camera.ptz capability.",
+            )
+        if not isinstance(camera_ptz, dict):
+            raise ServiceError(
+                400,
+                "invalid_vision_sources",
+                "hello.vision_sources[].supported_controls.camera.ptz must be an object.",
+            )
+        operations = self._normalize_supported_control_values(
+            value=camera_ptz.get("operations"),
+            label="hello.vision_sources[].supported_controls.camera.ptz.operations",
+            allowed_values=CAMERA_PTZ_OPERATIONS,
+        )
+        amounts = self._normalize_supported_control_values(
+            value=camera_ptz.get("amounts"),
+            label="hello.vision_sources[].supported_controls.camera.ptz.amounts",
+            allowed_values=CAMERA_PTZ_AMOUNTS,
+        )
+        unsupported_fields = sorted(set(camera_ptz.keys()) - {"operations", "amounts"})
+        if unsupported_fields:
+            raise ServiceError(
+                400,
+                "invalid_vision_sources",
+                "hello.vision_sources[].supported_controls.camera.ptz has unsupported fields.",
+            )
+        return {
+            "camera.ptz": {
+                "operations": operations,
+                "amounts": amounts,
+            }
+        }
+
+    def _normalize_supported_control_values(
+        self,
+        *,
+        value: Any,
+        label: str,
+        allowed_values: set[str],
+    ) -> list[str]:
+        values = self._normalize_vision_source_text_list(value, label)
+        if not values:
+            raise ServiceError(400, "invalid_vision_sources", f"{label} must be a non-empty array.")
+        unsupported_values = sorted(set(values) - allowed_values)
+        if unsupported_values:
+            raise ServiceError(
+                400,
+                "invalid_vision_sources",
+                f"{label} contains unsupported values.",
+            )
+        return values
 
     def _normalize_vision_source_text(self, value: Any, label: str) -> str:
         if not isinstance(value, str) or not value.strip():
@@ -324,6 +462,7 @@ class ServiceConfigStreamMixin:
         bound_client_ids: list[str],
         rejected_bindings: list[dict[str, Any]],
         vision_sources: list[dict[str, Any]] | None = None,
+        wake_policy_observations: list[dict[str, Any]] | None = None,
         active_ongoing_action: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         capability_id = manifest["id"]
@@ -377,8 +516,17 @@ class ServiceConfigStreamMixin:
             and not parallel_blocked
         )
         normalized_vision_sources = self._inspection_vision_sources(vision_sources)
-        has_vision_source = bool(normalized_vision_sources)
-        if capability_id == "vision.capture" and available and not has_vision_source:
+        if capability_id == "camera.ptz":
+            normalized_vision_sources = self._camera_ptz_inspection_vision_sources(
+                vision_sources=normalized_vision_sources,
+                wake_policy_observations=wake_policy_observations,
+            )
+        has_vision_source = (
+            any(source.get("available") is True for source in normalized_vision_sources)
+            if capability_id == "camera.ptz"
+            else bool(normalized_vision_sources)
+        )
+        if capability_id in {"vision.capture", "camera.ptz"} and available and not has_vision_source:
             available = False
         unavailable_reason = None
         if not available:
@@ -394,6 +542,10 @@ class ServiceConfigStreamMixin:
                 unavailable_reason = "no_binding"
             elif capability_id == "vision.capture" and not has_vision_source:
                 unavailable_reason = "no_vision_source"
+            elif capability_id == "camera.ptz" and not normalized_vision_sources:
+                unavailable_reason = "no_supported_control"
+            elif capability_id == "camera.ptz" and not has_vision_source:
+                unavailable_reason = self._camera_ptz_unavailable_reason(normalized_vision_sources)
             elif parallel_blocked:
                 unavailable_reason = "parallel_blocked"
 
@@ -434,7 +586,7 @@ class ServiceConfigStreamMixin:
         readiness = capability_decision_readiness_from_manifest(manifest)
         if readiness is not None:
             result["readiness"] = readiness
-        if capability_id == "vision.capture":
+        if capability_id in {"vision.capture", "camera.ptz"}:
             result["vision_sources"] = normalized_vision_sources
         return result
 
@@ -452,10 +604,16 @@ class ServiceConfigStreamMixin:
                 continue
             if not isinstance(label, str) or not label.strip():
                 continue
+            normalized_kind = kind.strip()
+            source_owner = source.get("source_owner")
+            if not isinstance(source_owner, str) or not source_owner.strip():
+                source_owner = visual_source_owner(normalized_kind)
+            supported_controls = self._inspection_supported_controls(source.get("supported_controls"))
             normalized.append(
                 {
                     "vision_source_id": source_id.strip(),
-                    "kind": kind.strip(),
+                    "kind": normalized_kind,
+                    "source_owner": source_owner.strip() if isinstance(source_owner, str) else None,
                     "label": self._clamp(label.strip(), limit=80),
                     "aliases": [
                         value
@@ -473,10 +631,205 @@ class ServiceConfigStreamMixin:
                         for value in source.get("required_permissions", [])
                         if isinstance(value, str) and value.strip()
                     ],
+                    "supported_controls": supported_controls,
                     "unavailable_reason": source.get("unavailable_reason"),
                 }
             )
         return normalized
+
+    def _inspection_supported_controls(self, value: Any) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            return {}
+        camera_ptz = value.get("camera.ptz")
+        if not isinstance(camera_ptz, dict):
+            return {}
+        operations = [
+            operation
+            for operation in camera_ptz.get("operations", [])
+            if isinstance(operation, str) and operation in CAMERA_PTZ_OPERATIONS
+        ][:6]
+        amounts = [
+            amount
+            for amount in camera_ptz.get("amounts", [])
+            if isinstance(amount, str) and amount in CAMERA_PTZ_AMOUNTS
+        ][:2]
+        if not operations or not amounts:
+            return {}
+        return {
+            "camera.ptz": {
+                "operations": operations,
+                "amounts": amounts,
+            }
+        }
+
+    def _camera_ptz_inspection_vision_sources(
+        self,
+        *,
+        vision_sources: list[dict[str, Any]],
+        wake_policy_observations: list[dict[str, Any]] | None,
+    ) -> list[dict[str, Any]]:
+        wake_source_ids = self._wake_policy_observation_vision_source_ids(wake_policy_observations)
+        sources: list[dict[str, Any]] = []
+        for source in vision_sources:
+            if not isinstance(source, dict):
+                continue
+            if source.get("kind") != "camera":
+                continue
+            control = self._camera_ptz_control(source)
+            if control is None:
+                continue
+            source_id = source.get("vision_source_id")
+            wake_observation_status = (
+                "enabled" if isinstance(source_id, str) and source_id in wake_source_ids else "missing"
+            )
+            source_available = source.get("available") is True and wake_observation_status == "enabled"
+            item = {
+                "vision_source_id": source.get("vision_source_id"),
+                "kind": source.get("kind"),
+                "source_owner": source.get("source_owner"),
+                "label": source.get("label"),
+                "aliases": source.get("aliases", []),
+                "default_for": source.get("default_for", []),
+                "available": source_available,
+                "required_permissions": source.get("required_permissions", []),
+                "supported_controls": {
+                    "camera.ptz": control,
+                },
+                "supported_operations": control["operations"],
+                "supported_amounts": control["amounts"],
+                "wake_observation_status": wake_observation_status,
+                "unavailable_reason": None if source_available else "missing_wake_observation",
+            }
+            sources.append(item)
+        return sources
+
+    def _camera_ptz_unavailable_reason(self, vision_sources: list[dict[str, Any]]) -> str:
+        for source in vision_sources:
+            if isinstance(source, dict):
+                reason = source.get("unavailable_reason")
+                if isinstance(reason, str) and reason.strip():
+                    return reason.strip()
+        return "unavailable"
+
+    def _camera_ptz_control(self, source: dict[str, Any]) -> dict[str, list[str]] | None:
+        supported_controls = source.get("supported_controls")
+        if not isinstance(supported_controls, dict):
+            return None
+        control = supported_controls.get("camera.ptz")
+        if not isinstance(control, dict):
+            return None
+        operations = [
+            operation
+            for operation in control.get("operations", [])
+            if isinstance(operation, str) and operation in CAMERA_PTZ_OPERATIONS
+        ][:6]
+        amounts = [
+            amount
+            for amount in control.get("amounts", [])
+            if isinstance(amount, str) and amount in CAMERA_PTZ_AMOUNTS
+        ][:2]
+        if not operations or not amounts:
+            return None
+        return {
+            "operations": operations,
+            "amounts": amounts,
+        }
+
+    def _wake_policy_observations_from_state(self, state: dict[str, Any] | None) -> list[dict[str, Any]]:
+        wake_policy = state.get("wake_policy") if isinstance(state, dict) else None
+        observations = wake_policy.get("observations") if isinstance(wake_policy, dict) else None
+        if not isinstance(observations, list):
+            return []
+        return [observation for observation in observations if isinstance(observation, dict)]
+
+    def _wake_policy_observation_vision_source_ids(
+        self,
+        observations: list[dict[str, Any]] | None,
+    ) -> set[str]:
+        source_ids: set[str] = set()
+        for observation in observations or []:
+            if not isinstance(observation, dict) or observation.get("enabled") is not True:
+                continue
+            if observation.get("capability_id") != "vision.capture":
+                continue
+            input_payload = observation.get("input")
+            if not isinstance(input_payload, dict):
+                continue
+            vision_source_id = input_payload.get("vision_source_id")
+            if isinstance(vision_source_id, str) and vision_source_id.strip():
+                source_ids.add(vision_source_id.strip())
+        return source_ids
+
+    def _ensure_camera_sources_in_wake_policy_observations(self, vision_sources: list[dict[str, Any]]) -> None:
+        camera_source_ids: list[str] = []
+        for source in vision_sources:
+            if not isinstance(source, dict):
+                continue
+            if source.get("kind") != "camera" or source.get("source_owner") != "self":
+                continue
+            source_id = source.get("vision_source_id")
+            if isinstance(source_id, str) and source_id.strip():
+                camera_source_ids.append(source_id.strip())
+        if not camera_source_ids:
+            return
+
+        state = self.store.read_state()
+        wake_policy = state.get("wake_policy")
+        if not isinstance(wake_policy, dict):
+            return
+        previous_wake_policy = deepcopy(wake_policy)
+        observations = wake_policy.get("observations")
+        if not isinstance(observations, list):
+            observations = []
+        existing_source_ids = self._wake_policy_observation_vision_source_ids(
+            [observation for observation in observations if isinstance(observation, dict)]
+        )
+        changed = False
+        next_observations = list(observations)
+        existing_observation_ids = {
+            observation.get("observation_id")
+            for observation in next_observations
+            if isinstance(observation, dict) and isinstance(observation.get("observation_id"), str)
+        }
+        for source_id in camera_source_ids:
+            if source_id in existing_source_ids:
+                continue
+            observation_id = self._camera_wake_observation_id(source_id, existing_observation_ids)
+            existing_observation_ids.add(observation_id)
+            next_observations.append(
+                {
+                    "observation_id": observation_id,
+                    "enabled": True,
+                    "capability_id": "vision.capture",
+                    "input": {
+                        "vision_source_id": source_id,
+                        "mode": "still",
+                    },
+                }
+            )
+            changed = True
+        if not changed:
+            return
+        wake_policy["observations"] = next_observations
+        self._validate_wake_policy(wake_policy)
+        self.store.write_state(state)
+        self._sync_wake_policy_runtime_state(
+            previous_wake_policy=previous_wake_policy,
+            next_wake_policy=wake_policy,
+            current_time=self._now_iso(),
+        )
+
+    def _camera_wake_observation_id(self, source_id: str, existing_observation_ids: set[Any]) -> str:
+        base = "wake_observation:" + "".join(
+            character if character.isalnum() or character in "._-" else "_"
+            for character in source_id
+        )
+        if base not in existing_observation_ids:
+            return base
+        index = 2
+        while f"{base}_{index}" in existing_observation_ids:
+            index += 1
+        return f"{base}_{index}"
 
     def _build_capability_decision_view(
         self,
@@ -502,7 +855,8 @@ class ServiceConfigStreamMixin:
                 current_time=current_time or self._now_iso(),
                 bound_client_ids=accepted_bindings.get(capability_id, []),
                 rejected_bindings=rejected_bindings,
-                vision_sources=vision_sources if capability_id == "vision.capture" else None,
+                vision_sources=vision_sources if capability_id in {"vision.capture", "camera.ptz"} else None,
+                wake_policy_observations=self._wake_policy_observations_from_state(state),
                 active_ongoing_action=active_ongoing_action,
             )
             item = {
@@ -528,7 +882,7 @@ class ServiceConfigStreamMixin:
             readiness = capability_decision_readiness_from_manifest(manifest)
             if readiness is not None:
                 item["readiness"] = readiness
-            if capability_id == "vision.capture":
+            if capability_id in {"vision.capture", "camera.ptz"}:
                 item["vision_sources"] = availability.get("vision_sources", [])
             decision_view.append(item)
         if not decision_view:

@@ -1,0 +1,175 @@
+# camera.ptz
+
+## 目的
+
+`camera.ptz` は、OtomeKairo が所有する camera source の向きや画角を、外部 connector 経由で調整する action capability である。
+camera source は OtomeKairo の視覚であり、初期版からユーザー明示指示、API起床、定期起床、capability result follow-up、自律判断のいずれでも利用できる。
+この文書は `camera.ptz` の意味境界、判断利用、source metadata、結果の扱いを正本として定める。
+
+capability manifest、availability、decision view の共通規則は [capability_manifest.md](capability_manifest.md) を正とする。
+API wire は [../api/実行連携.md](../api/実行連携.md)、event stream は [../api/event_stream.md](../api/event_stream.md)、connector 配置は [../integration/外部接続connector配置方針.md](../integration/外部接続connector配置方針.md) を正とする。
+視覚観測そのものは [視覚機能.md](視覚機能.md) を正とする。
+
+## 境界
+
+`camera.ptz` に入れるものは次である。
+
+- camera source の pan / tilt 操作
+- camera source の zoom 操作
+- 汎用操作から機器固有 API への connector 側変換
+- 操作成否の短い結果
+- 操作対象の `vision_source_id`
+
+次は `camera.ptz` に入れない。
+
+- 静止画取得
+- 動画、音声、録画、常時監視
+- privacy mode の切替
+- reboot、format、録画設定、検知設定、アラーム、サイレン
+- 機器固有の raw API 名、角度、内部 URL、credential
+- 観測目的と結びつかない無目的な反復 pan / tilt
+
+## 基本方針
+
+`camera.ptz` は `VisionSource(kind=camera)` を対象にする source-targeted capability である。
+server は `camera.ptz.input.vision_source_id` から `VisionSource` を引き、実行先 client を一意に決める。
+source が存在しない、source が camera ではない、source が複数候補に分かれる、source が操作を advertised していない場合、server は dispatch しない。
+
+camera source は OtomeKairo の視覚 source として採用する。
+採用した camera source は `wake_policy.observations` に `vision.capture` として含める。
+camera source の観測結果は `source_owner=self` として扱い、OtomeKairo の視覚根拠として判断へ渡す。
+desktop や virtual source の観測とは所有境界を分ける。
+
+OtomeKairo は汎用操作だけを判断する。
+connector は汎用操作を機器固有 API、角度、方向、速度、ズーム方式へ変換する。
+設置向きや機器差分は connector 設定で吸収する。
+
+初期版から、server は `camera.ptz` を全ての判断起点の decision view に出す。
+対象 source が available で、権限、binding、`supported_controls`、`capability_state` を満たす限り、OtomeKairo はユーザー確認を挟まずに `camera.ptz` を使える。
+ここでの「自由に使える」は所有境界と判断権限の話であり、dispatch 境界の schema 検証、busy、timeout、同一 cycle の反復抑制は通常の capability と同じく適用する。
+
+## 操作
+
+初期版の `camera.ptz` は次の operation を扱う。
+
+| operation | 意味 |
+|------|------|
+| `move_up` | camera source を上方向へ動かす |
+| `move_down` | camera source を下方向へ動かす |
+| `move_left` | camera source を左方向へ動かす |
+| `move_right` | camera source を右方向へ動かす |
+| `zoom_in` | camera source の画角を狭める |
+| `zoom_out` | camera source の画角を広げる |
+
+`amount` は `small / medium` のいずれかにする。
+`small` は通常の微調整、`medium` は明示的に大きく動かす依頼に使う。
+connector は実機 API が連続値を要求する場合でも、server には連続値を出さない。
+
+source が対応しない operation は source metadata に出さない。
+LLM decision view には source ごとの対応 operation だけを渡す。
+server は `input.operation` が対象 source の対応 operation に含まれない場合、dispatch しない。
+
+## Source Metadata
+
+camera source は `vision_sources[]` の一部として登録する。
+`camera.ptz` を提供する source は、少なくとも次を追加で持つ。
+
+```json
+{
+  "vision_source_id": "vision_source:tapo_c220_main",
+  "kind": "camera",
+  "label": "C220",
+  "aliases": ["カメラ", "部屋のカメラ", "C220"],
+  "default_for": ["visual", "camera"],
+  "capability_id": "vision.capture",
+  "required_permissions": ["observe_vision", "observe_camera"],
+  "source_owner": "self",
+  "supported_controls": {
+    "camera.ptz": {
+      "operations": ["move_up", "move_down", "move_left", "move_right"],
+      "amounts": ["small", "medium"]
+    }
+  }
+}
+```
+
+`supported_controls` は source metadata であり、capability manifest の正本ではない。
+server は manifest、binding、接続主体の権限、source metadata を照合して availability を導出する。
+`supported_controls` は credential、内部 URL、機器 API 名、角度、設置場所の秘匿情報を含めない。
+`camera.ptz` が advertised された camera source は、同じ `vision_source_id` の enabled `wake_policy.observations` を持つ。
+この observation は camera source が OtomeKairo の視覚として常時判断材料へ戻るための設定であり、PTZ の許可条件ではない。
+
+## 判断利用
+
+`camera.ptz` を使う条件は次である。
+
+- ユーザーが camera source の向きや画角変更を明示した
+- ユーザーが「上」「左」「少し右」「ズームして」のように camera source 操作を依頼した
+- API起床または定期起床で、現在の camera 視覚前景だけでは判断対象が見切れている、低信頼、または明らかに視野外である
+- capability result follow-up で、同じ camera source の観測前に向きや画角を変える必要がある
+- 自律判断で、進行中の目的や保留意図に対して camera source の視野調整が必要である
+- 対象 camera source が一意に定まる
+- 対象 source が requested operation を advertised している
+
+`camera.ptz` を使わない条件は次である。
+
+- 現在の判断に camera source の視野調整が不要
+- ユーザーが privacy mode、録画、アラーム、再起動、検知設定を求めている
+- source が camera ではない
+- source が未接続、権限不足、busy、一時 unavailable である
+- operation が対象 source の対応 operation に含まれない
+- 同じ判断 cycle 内で、同じ `vision_source_id / operation / amount` の PTZ をすでに実行していて、追加観測なしに再実行しようとしている
+
+操作と観測が同じ目的に属する場合、server は `camera.ptz` を先に実行し、`camera.ptz` result follow-up で同じ `vision_source_id` の `vision.capture` を発行できる。
+この連鎖は `camera.ptz -> vision.capture` の同一 source に限定する。
+`camera.ptz` result から別 source や別 capability family へ広げる場合は、通常の decision validation と repair 対象にする。
+`vision.capture` result で新しい `world_state.visual_context` を作り、その後の判断や発話はその観測結果を根拠にする。
+
+## Privacy Mode
+
+privacy mode は `camera.ptz` に含めない。
+`camera.privacy` capability は定義しない。
+connector は privacy mode を `hello.caps`、`supported_controls`、inspection、capability result に出さない。
+OtomeKairo 側の camera availability は source availability、connector の接続状態、`wake_policy.observations`、capability 権限で扱う。
+機器側に privacy mode 相当の機能があっても、OtomeKairo の capability request として設計しない。
+
+## 結果
+
+`camera.ptz` result は操作成否の短い結果だけを返す。
+raw device response、内部 URL、credential、角度、機器固有 payload は返さない。
+
+result は少なくとも次を持つ。
+
+```json
+{
+  "status": "completed",
+  "operation": "move_up",
+  "amount": "small",
+  "client_context": {
+    "vision_source_id": "vision_source:tapo_c220_main",
+    "source_kind": "camera",
+    "source_label": "C220"
+  },
+  "error": null
+}
+```
+
+`status` は `completed / rejected / failed` のいずれかにする。
+`operation` と `amount` は request と同じ値を返す。
+`error` は失敗時だけ短い理由を入れる。
+server は result を capability audit と inspection に反映する。
+`camera.ptz` result だけから `world_state.visual_context` を更新しない。
+新しい視覚前景は次の `vision.capture` result から作る。
+
+## C220
+
+C220 connector は、画像取得 backend と制御 backend を分ける。
+画像取得 backend は source 設定で固定し、実行中に別 backend へ切り替えない。
+C220 初期版では画像取得を `rtsp`、制御を `pytapo` とする。
+
+C220 の host、username、password、RTSP account、connector token は connector のローカル設定または環境変数で扱う。
+これらの値を repository、docs のサンプル、debug log、inspection、capability result に保存しない。
+
+C220 connector は `move_up / move_down / move_left / move_right` を advertised する。
+zoom 操作は実機と connector 実装で検証した後に source metadata へ追加する。
+C220 connector は privacy mode を実装対象にしない。

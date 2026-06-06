@@ -163,8 +163,8 @@ response:
         },
         "binding": {
           "status": "bound",
-          "eligible_client_count": 1,
-          "bound_client_ids": ["console-..."]
+          "eligible_client_count": 2,
+          "bound_client_ids": ["console-...", "tapo-c220-connector-main"]
         },
         "permissions": {
           "required": ["observe_vision"],
@@ -178,6 +178,82 @@ response:
             "default_for": ["visual", "desktop"],
             "available": true,
             "required_permissions": ["observe_desktop"],
+            "source_owner": "user_environment",
+            "supported_controls": {},
+            "unavailable_reason": null
+          },
+          {
+            "vision_source_id": "vision_source:room_camera",
+            "kind": "camera",
+            "label": "部屋のカメラ",
+            "default_for": ["visual", "camera"],
+            "available": true,
+            "required_permissions": ["observe_vision", "observe_camera"],
+            "source_owner": "self",
+            "wake_observation": {
+              "observation_id": "observation:room_camera",
+              "enabled": true
+            },
+            "supported_controls": {
+              "camera.ptz": {
+                "operations": ["move_up", "move_down", "move_left", "move_right"],
+                "amounts": ["small", "medium"]
+              }
+            },
+            "unavailable_reason": null
+          }
+        ],
+        "state": {
+          "paused": false,
+          "busy": false,
+          "busy_request_id": null,
+          "busy_action_id": null,
+          "last_failure_at": null,
+          "last_failure_summary": null,
+          "last_result_at": null,
+          "last_result_summary": null,
+          "unavailable_active": false,
+          "unavailable_reason": null,
+          "unavailable_until": null,
+          "parallel_blocked_by_action_id": null
+        }
+      },
+      {
+        "capability_id": "camera.ptz",
+        "manifest_version": "1",
+        "kind": "action",
+        "available": true,
+        "unavailable_reason": null,
+        "readiness": {
+          "family": "camera_control",
+          "world_state_type": "visual_context",
+          "input_keys": ["vision_source_id", "operation", "amount"],
+          "result_summary_keys": ["status", "operation", "amount"]
+        },
+        "binding": {
+          "status": "bound",
+          "eligible_client_count": 1,
+          "bound_client_ids": ["tapo-c220-connector-main"]
+        },
+        "permissions": {
+          "required": ["control_camera_ptz"],
+          "missing": []
+        },
+        "vision_sources": [
+          {
+            "vision_source_id": "vision_source:room_camera",
+            "kind": "camera",
+            "label": "部屋のカメラ",
+            "default_for": ["visual", "camera"],
+            "available": true,
+            "required_permissions": ["observe_vision", "observe_camera"],
+            "source_owner": "self",
+            "supported_controls": {
+              "camera.ptz": {
+                "operations": ["move_up", "move_down", "move_left", "move_right"],
+                "amounts": ["small", "medium"]
+              }
+            },
             "unavailable_reason": null
           }
         ],
@@ -223,9 +299,14 @@ response:
 | `dispatch_failed` | 直近の配送失敗により一時的に実行不可である |
 | `request_timeout` | 直近の result timeout により一時的に実行不可である |
 | `parallel_blocked` | 並列実行制限により実行不可である |
+| `missing_wake_observation` | 採用済み camera source に対応する enabled `wake_policy.observations` がない |
 
 `readiness` は manifest 由来の family 前提条件であり、`family / world_state_type / input_keys / result_summary_keys / result_item_keys` を持つ。
 `readiness` は token、credential、内部 URL、transport 詳細を含まない。
+`vision_sources[].supported_controls` は source が advertised した action capability の対応操作だけを返す。
+`supported_controls` は credential、内部 URL、機器 API 名、角度を含まない。
+`kind=camera` かつ `source_owner=self` の source は、対応する `wake_observation` を返す。
+対応する enabled observation が無い場合、`wake_observation.enabled=false` とし、source または capability の `unavailable_reason` に `missing_wake_observation` を出す。
 
 `binding.status` は次のいずれかである。
 

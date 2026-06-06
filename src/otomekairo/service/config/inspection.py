@@ -74,7 +74,8 @@ class ServiceConfigInspectionMixin:
                     current_time=current_time,
                     bound_client_ids=accepted_bindings.get(capability_id, []),
                     rejected_bindings=rejected_bindings,
-                    vision_sources=vision_sources if capability_id == "vision.capture" else None,
+                    vision_sources=vision_sources if capability_id in {"vision.capture", "camera.ptz"} else None,
+                    wake_policy_observations=self._wake_policy_observations_from_state(state),
                     active_ongoing_action=active_ongoing_action,
                 )
                 for capability_id, manifest in sorted(manifests.items())

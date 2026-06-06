@@ -25,6 +25,7 @@ class LLMMockDecisionMixin:
         ongoing_action_summary = context.ongoing_action_summary
         capability_decision_view = context.capability_decision_view
         initiative_context = context.initiative_context
+        capability_result_context = context.capability_result_context
         recall_hint = context.recall_hint
         recall_pack = context.recall_pack
         _ = recent_turns
@@ -44,10 +45,15 @@ class LLMMockDecisionMixin:
         current_vad = mood_state.get("current_vad") or {}
         current_valence = float(current_vad.get("v", 0.0)) if isinstance(current_vad, dict) else 0.0
 
-        payload = self._mock_initiative_decision(
-            initiative_context=initiative_context,
+        payload = self._mock_capability_result_followup_decision(
+            capability_result_context=capability_result_context,
             capability_decision_view=capability_decision_view,
         )
+        if payload is None:
+            payload = self._mock_initiative_decision(
+                initiative_context=initiative_context,
+                capability_decision_view=capability_decision_view,
+            )
         if payload is None:
             payload = self._mock_capability_request_decision(
                 normalized=normalized,
@@ -78,6 +84,83 @@ class LLMMockDecisionMixin:
         payload.setdefault("capability_request", None)
         validate_decision_contract(payload)
         return payload
+
+    def _mock_capability_result_followup_decision(
+        self,
+        *,
+        capability_result_context: dict[str, Any] | None,
+        capability_decision_view: list[dict[str, Any]] | None,
+    ) -> dict[str, Any] | None:
+        if not isinstance(capability_result_context, dict):
+            return None
+        if capability_result_context.get("source_capability_id") != "camera.ptz":
+            return None
+        source_id = self._mock_camera_ptz_followup_vision_source_id(capability_result_context)
+        if source_id is None:
+            return None
+        if not self._mock_vision_source_available(
+            capability_decision_view=capability_decision_view,
+            vision_source_id=source_id,
+        ):
+            return None
+        return {
+            "kind": "capability_request",
+            "reason_code": "capability_result:camera.ptz",
+            "reason_summary": "camera.ptz の結果を受け、同じカメラ source を観測する。",
+            "requires_confirmation": False,
+            "pending_intent": None,
+            "capability_request": {
+                "capability_id": "vision.capture",
+                "input": {
+                    "vision_source_id": source_id,
+                    "mode": "still",
+                },
+            },
+        }
+
+    def _mock_camera_ptz_followup_vision_source_id(
+        self,
+        capability_result_context: dict[str, Any],
+    ) -> str | None:
+        constraints = capability_result_context.get("followup_constraints")
+        if isinstance(constraints, list):
+            for constraint in constraints:
+                if not isinstance(constraint, dict):
+                    continue
+                if constraint.get("capability_id") != "vision.capture":
+                    continue
+                if constraint.get("constraint") != "same_vision_source_id":
+                    continue
+                source_id = constraint.get("vision_source_id")
+                if isinstance(source_id, str) and source_id.strip():
+                    return source_id.strip()
+        source_request_summary = capability_result_context.get("source_request_summary")
+        if isinstance(source_request_summary, dict):
+            source_id = source_request_summary.get("vision_source_id")
+            if isinstance(source_id, str) and source_id.strip():
+                return source_id.strip()
+        return None
+
+    def _mock_vision_source_available(
+        self,
+        *,
+        capability_decision_view: list[dict[str, Any]] | None,
+        vision_source_id: str,
+    ) -> bool:
+        for item in capability_decision_view or []:
+            if not isinstance(item, dict):
+                continue
+            if item.get("id") != "vision.capture" or item.get("available") is not True:
+                continue
+            sources = item.get("vision_sources")
+            if not isinstance(sources, list):
+                return False
+            for source in sources:
+                if not isinstance(source, dict):
+                    continue
+                if source.get("vision_source_id") == vision_source_id:
+                    return True
+        return False
 
     def _mock_initiative_decision(
         self,

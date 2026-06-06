@@ -398,9 +398,11 @@ class ServiceInputInitiativeContextMixin:
                     "what_it_does": item.get("what_it_does"),
                     "required_input": item.get("required_input"),
                 }
-                if capability_id == "vision.capture":
-                    vision_sources = self._compact_vision_sources_for_decision(item.get("vision_sources"))
-                    available_item["vision_sources"] = vision_sources
+                if capability_id in {"vision.capture", "camera.ptz"}:
+                    compact_sources = self._compact_vision_sources_for_decision(item.get("vision_sources"))
+                    available_item["vision_sources"] = compact_sources
+                    if capability_id == "vision.capture":
+                        vision_sources = compact_sources
                 available_items.append(available_item)
                 continue
             unavailable_items.append(
@@ -435,6 +437,23 @@ class ServiceInputInitiativeContextMixin:
                 "kind": kind,
                 "label": label,
             }
+            source_owner = self._client_context_text(source.get("source_owner"), limit=32)
+            if source_owner is not None:
+                payload["source_owner"] = source_owner
+            supported_operations = [
+                value
+                for value in source.get("supported_operations", [])
+                if isinstance(value, str) and value.strip()
+            ][:6]
+            supported_amounts = [
+                value
+                for value in source.get("supported_amounts", [])
+                if isinstance(value, str) and value.strip()
+            ][:2]
+            if supported_operations:
+                payload["supported_operations"] = supported_operations
+            if supported_amounts:
+                payload["supported_amounts"] = supported_amounts
             default_for = [
                 value
                 for value in source.get("default_for", [])

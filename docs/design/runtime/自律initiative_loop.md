@@ -168,6 +168,7 @@ visual capture の変化は `first_seen / changed / stable / same_as_recent_spee
 `first_seen / changed` 単体は外向き判断入口にしない。
 `same_as_recent_speech / stable` は反復性の前景シグナルとして扱う。
 活動遷移に触れる発話は、終わった・サボった・遊び始めたなどを断定せず、区切りや切り替えとして表現する。
+`source_owner=self` の camera 視覚観測は OtomeKairo 自身の視覚根拠として扱う。
 `source_owner=user_environment` の視覚観測、`world_state.visual_context`、`activity_context.actor=user` はユーザー側の状況として扱う。
 この文脈から speech する場合、`speech_stance=comment_on_user_context` として、ユーザー側の状況へのコメントとして表現する。
 `current_input.sender=system` かつ `current_input.response_target=none` の `wake / background_wake` では、speech 本文を観測、候補、現在文脈に根拠づける。
