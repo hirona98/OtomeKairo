@@ -10,11 +10,12 @@ from urllib.parse import urlparse
 
 SUPPORTED_OPERATIONS = ("move_up", "move_down", "move_left", "move_right")
 SUPPORTED_AMOUNTS = ("small", "medium")
+# C220 ContinuousMove の符号を、現在映像に対する相対方向へ合わせる。
 DEFAULT_OPERATION_VECTORS: dict[str, tuple[float, float]] = {
-    "move_up": (0, -1),
-    "move_down": (0, 1),
-    "move_left": (-1, 0),
-    "move_right": (1, 0),
+    "move_up": (0, 1),
+    "move_down": (0, -1),
+    "move_left": (1, 0),
+    "move_right": (-1, 0),
 }
 
 

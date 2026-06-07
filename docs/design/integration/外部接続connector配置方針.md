@@ -129,9 +129,11 @@ C220 connector の hello は次の形を基準にする。
 
 C220 の capture backend は `rtsp`、control backend は `onvif` を初期基準にする。
 connector は `vision.capture_request` では RTSP から still image を 1 枚取得し、`camera.ptz_request` では `operation / amount` を ONVIF `ContinuousMove` と `Stop` へ変換する。
+`operation` は現在の映像に対する相対方向として扱い、ONVIF の座標符号と設置向きの対応は connector 設定で吸収する。
+C220 connector の初期 `operation_vectors` は実機で確認した ONVIF `ContinuousMove` の符号に合わせる。
 ONVIF port、移動時間、設置向きの対応は connector 設定で持ち、pan / tilt velocity は `1.0` に固定する。
 server、decision view、inspection へ角度や生 API 名を出さない。
-zoom 操作は実機と connector 実装で検証するまで `supported_controls` に含めない。
+C220 は物理ズームと ONVIF Zoom capability を持たないため、zoom 操作を `supported_controls` に含めない。
 
 C220 の host、camera account、connector token は connector のローカル設定または環境変数で扱う。
 これらの値を repository、docs のサンプル、debug log、inspection、capability result に保存しない。
