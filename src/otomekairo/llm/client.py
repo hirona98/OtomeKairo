@@ -69,6 +69,10 @@ from otomekairo.world_state.models import WorldStateSourcePack
 from otomekairo.llm.transport import complete_text, generate_embeddings as transport_generate_embeddings
 from otomekairo.service.common import debug_log
 
+ROUTINE_SUPPRESSED_LLM_OPERATIONS = {
+    "visual_observation",
+}
+
 # LiteLLM連携
 @dataclass(slots=True)
 class LLMClient:
@@ -1207,21 +1211,23 @@ class LLMClient:
         images: list[str],
     ) -> dict[str, Any]:
         operation = "visual_observation"
-        debug_log(
-            "LLM",
-            (
-                f"{operation} start mode={self._debug_mode(role_definition)} "
-                f"model={self._debug_model(role_definition)} images={len(images)}"
-            ),
-            level="DEBUG",
-        )
+        if self._should_log_routine_llm_operation(operation):
+            debug_log(
+                "LLM",
+                (
+                    f"{operation} start mode={self._debug_mode(role_definition)} "
+                    f"model={self._debug_model(role_definition)} images={len(images)}"
+                ),
+                level="DEBUG",
+            )
         if self._is_mock_role_definition(role_definition):
             payload = self.mock_client.generate_visual_observation_summary(
                 role_definition,
                 source_pack,
                 images,
             )
-            debug_log("LLM", f"{operation} done mode=mock keys={self._debug_payload_keys(payload)}", level="DEBUG")
+            if self._should_log_routine_llm_operation(operation):
+                debug_log("LLM", f"{operation} done mode=mock keys={self._debug_payload_keys(payload)}", level="DEBUG")
             return payload
 
         messages = build_visual_observation_messages(
@@ -1302,6 +1308,9 @@ class LLMClient:
         keys = sorted(str(key) for key in payload.keys())[:8]
         return ",".join(keys) if keys else "-"
 
+    def _should_log_routine_llm_operation(self, operation: str) -> bool:
+        return operation not in ROUTINE_SUPPRESSED_LLM_OPERATIONS
+
     def _is_mock_role_definition(self, role_definition: dict) -> bool:
         # model=mock* は開発用の内蔵ロジックへ切り替える。
         model = role_definition.get("model")
@@ -1324,20 +1333,26 @@ class LLMClient:
         last_error: LLMError | None = None
         attempt_messages = list(messages)
         for attempt in range(2):
-            debug_log("LLM", f"{operation} attempt={attempt + 1} request messages={len(attempt_messages)}", level="DEBUG")
+            if self._should_log_routine_llm_operation(operation):
+                debug_log(
+                    "LLM",
+                    f"{operation} attempt={attempt + 1} request messages={len(attempt_messages)}",
+                    level="DEBUG",
+                )
             content = complete_text(role_definition=role_definition, messages=attempt_messages)
             try:
                 payload = parse_json_object(content)
                 try:
                     validator(payload)
-                    debug_log(
-                        "LLM",
-                        (
-                            f"{operation} done attempt={attempt + 1} response_chars={len(content)} "
-                            f"keys={self._debug_payload_keys(payload)}"
-                        ),
-                        level="DEBUG",
-                    )
+                    if self._should_log_routine_llm_operation(operation):
+                        debug_log(
+                            "LLM",
+                            (
+                                f"{operation} done attempt={attempt + 1} response_chars={len(content)} "
+                                f"keys={self._debug_payload_keys(payload)}"
+                            ),
+                            level="DEBUG",
+                        )
                     return payload
                 except LLMError as exc:
                     last_error = LLMContractError(str(exc)) if wrap_validation_error else exc

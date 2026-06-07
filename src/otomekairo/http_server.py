@@ -25,6 +25,12 @@ CLIENT_DISCONNECT_SSL_REASONS = {
     "EOF_OCCURRED",
 }
 
+SUPPRESSED_HTTP_LOG_EXACT_PATHS = {
+    "/api/status",
+    "/api/bootstrap/probe",
+    "/api/autonomous-runs",
+    "/api/capability/result",
+}
 SUPPRESSED_HTTP_LOG_PATH_PREFIXES = ("/api/inspection",)
 
 
@@ -515,8 +521,8 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
         debug_log("HTTP", f"{self.command} {parsed.path} client_disconnected error={type(exc).__name__}", level="WARNING")
 
     def _should_log_http_path(self, path: str) -> bool:
-        # inspection は情報量が多く、正本は endpoint 応答側なので HTTP access log へ重複記録しない。
-        if path in {"/api/status", "/api/bootstrap/probe"}:
+        # 高頻度参照と観測返却は運用ログへ重複記録しない。
+        if path in SUPPRESSED_HTTP_LOG_EXACT_PATHS:
             return False
         return not any(path.startswith(prefix) for prefix in SUPPRESSED_HTTP_LOG_PATH_PREFIXES)
 
