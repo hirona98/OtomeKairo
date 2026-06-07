@@ -14,7 +14,7 @@ authors = [
 ]
 dependencies = [
   "opencv-python>=4.9",
-  "pytapo>=3.4.14,<4"
+  "onvif-zeep>=0.2.12,<1"
 ]
 
 [project.scripts]

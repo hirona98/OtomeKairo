@@ -7,7 +7,7 @@ OtomeKairo server 本体へ C220 固有依存を入れない。
 
 - 起動時に `/api/events/stream` へ接続し、`hello.caps` と `vision_sources` を送る
 - `vision.capture_request` を受けたときだけ RTSP から still image を 1 枚取得する
-- `camera.ptz_request` を受けたときだけ pytapo の `moveMotor(x, y)` を呼ぶ
+- `camera.ptz_request` を受けたときだけ ONVIF `ContinuousMove` と `Stop` を呼ぶ
 - `POST /api/capability/result` へ result を返す
 - `camera.ptz` result には `completed / failed`、`operation`、`amount`、source context だけを返す
 - privacy mode、録画、検知設定、アラーム、再起動を capability として扱わない
@@ -25,21 +25,22 @@ cp config.example.json config.local.json
 
 export OTOMEKAIRO_ACCESS_TOKEN="..."
 export TAPO_C220_HOST="192.168.1.52"
-export TAPO_C220_CONTROL_USERNAME="..."
-export TAPO_C220_CONTROL_PASSWORD="..."
+export TAPO_C220_ONVIF_USERNAME="..."
+export TAPO_C220_ONVIF_PASSWORD="..."
 export TAPO_C220_RTSP_USERNAME="..."
 export TAPO_C220_RTSP_PASSWORD="..."
 ```
 
-`TAPO_C220_CONTROL_USERNAME / TAPO_C220_CONTROL_PASSWORD` は pytapo が使う Tapo control account である。
-※ただし現状使用できない
+`TAPO_C220_ONVIF_USERNAME / TAPO_C220_ONVIF_PASSWORD` は C220 の camera account である。
+C220 の ONVIF port は `camera.onvif_port` で指定し、初期値は `2020` とする。
 `TAPO_C220_RTSP_USERNAME / TAPO_C220_RTSP_PASSWORD` は camera の RTSP account である。
-`TAPO_C220_RTSP_USERNAME / TAPO_C220_RTSP_PASSWORD` を省略した場合、RTSP も control account を使う。
+`TAPO_C220_RTSP_USERNAME / TAPO_C220_RTSP_PASSWORD` を省略した場合、RTSP も ONVIF account を使う。
 `host`、account、password、RTSP account、connector token は repository、sample、通常ログ、result に保存しない。
 
-`operation_vectors` は pytapo `moveMotor(x, y)` へ渡す向きベクトルである。
+`operation_vectors` は ONVIF `PanTilt` velocity へ掛ける向きベクトルである。
 設置向きが逆の場合は `config.local.json` の `operation_vectors` を変更する。
-`small_step / medium_step` は `amount` から実移動量へ変換する connector 内部設定であり、server、decision view、inspection へ出さない。
+`ptz_velocity` は ONVIF へ渡す移動速度であり、`0.01` から `1.0` の範囲で指定する。
+`small_move_seconds / medium_move_seconds` は `amount` から連続移動時間へ変換する connector 内部設定であり、server、decision view、inspection へ出さない。
 
 ## 実行
 
@@ -50,7 +51,7 @@ hello payload を確認する。
 ```
 
 実機への疎通を確認する。
-この確認は motor capability と RTSP still capture だけを実行し、camera を動かさない。
+この確認は ONVIF PTZ capability と RTSP still capture だけを実行し、camera を動かさない。
 
 ```bash
 .venv/bin/python -m otomekairo_tapo_c220_connector --config config.local.json --check-device

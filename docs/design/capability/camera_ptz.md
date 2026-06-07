@@ -165,9 +165,11 @@ server は result を capability audit と inspection に反映する。
 
 C220 connector は、画像取得 backend と制御 backend を分ける。
 画像取得 backend は source 設定で固定し、実行中に別 backend へ切り替えない。
-C220 初期版では画像取得を `rtsp`、制御を `pytapo` とする。
+C220 初期版では画像取得を `rtsp`、制御を `onvif` とする。
+ONVIF port は connector のローカル設定で持ち、初期値は `2020` とする。
+connector は `camera.ptz_request` の `operation / amount` を ONVIF `ContinuousMove` と `Stop` へ変換する。
 
-C220 の host、username、password、RTSP account、connector token は connector のローカル設定または環境変数で扱う。
+C220 の host、ONVIF account、RTSP account、connector token は connector のローカル設定または環境変数で扱う。
 これらの値を repository、docs のサンプル、debug log、inspection、capability result に保存しない。
 
 C220 connector は `move_up / move_down / move_left / move_right` を advertised する。

@@ -5,10 +5,10 @@ import sys
 import time
 from typing import Any
 
-from .capture import CaptureError, RtspStillCapture
+from .capture import RtspStillCapture
 from .config import AppConfig
 from .http import HttpError, JsonApiClient
-from .ptz import PtzError, TapoPtzController
+from .ptz import OnvifPtzController
 from .stream import EventStreamClient, StreamError
 
 
@@ -22,7 +22,7 @@ class TapoC220Connector:
             timeout_seconds=config.server.request_timeout_seconds,
         )
         self.capture = RtspStillCapture(config.camera)
-        self.ptz = TapoPtzController(config.camera)
+        self.ptz = OnvifPtzController(config.camera)
 
     def print_hello(self) -> None:
         print(json.dumps(self.config.hello_payload(), ensure_ascii=False, indent=2))
@@ -30,15 +30,15 @@ class TapoC220Connector:
     def check_device(self) -> int:
         failed = False
         try:
-            capability = self.ptz.motor_capability()
+            capability = self.ptz.service_capability()
             self._log(
-                "pytapo_motor_capability=ok"
-                f" error_code={capability.get('error_code')}"
-                f" has_motor={capability.get('has_motor')}"
+                "onvif_ptz_capability=ok"
+                f" profile_count={capability.get('profile_count')}"
+                f" profile_token_present={capability.get('profile_token_present')}"
             )
         except Exception as exc:  # noqa: BLE001
             failed = True
-            self._log(f"pytapo_motor_capability=failed error={self._short_error(exc)}")
+            self._log(f"onvif_ptz_capability=failed error={self._short_error(exc)}")
 
         try:
             image = self.capture.capture_data_uri(timeout_seconds=self.config.camera.rtsp_open_timeout_seconds)
@@ -185,8 +185,8 @@ class TapoC220Connector:
         for secret in (
             self.config.server.access_token,
             self.config.camera.host,
-            self.config.camera.username,
-            self.config.camera.password,
+            self.config.camera.onvif_username,
+            self.config.camera.onvif_password,
             self.config.camera.rtsp_username,
             self.config.camera.rtsp_password,
         ):

@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 
 SUPPORTED_OPERATIONS = ("move_up", "move_down", "move_left", "move_right")
 SUPPORTED_AMOUNTS = ("small", "medium")
-DEFAULT_OPERATION_VECTORS: dict[str, tuple[int, int]] = {
+DEFAULT_OPERATION_VECTORS: dict[str, tuple[float, float]] = {
     "move_up": (0, -1),
     "move_down": (0, 1),
     "move_left": (-1, 0),
@@ -43,8 +43,9 @@ class ConnectorConfig:
 @dataclass(frozen=True)
 class CameraConfig:
     host: str
-    username: str
-    password: str
+    onvif_username: str
+    onvif_password: str
+    onvif_port: int
     rtsp_username: str
     rtsp_password: str
     rtsp_port: int
@@ -52,9 +53,10 @@ class CameraConfig:
     rtsp_transport: str
     rtsp_open_timeout_seconds: float
     jpeg_quality: int
-    small_step: int
-    medium_step: int
-    operation_vectors: dict[str, tuple[int, int]]
+    ptz_velocity: float
+    small_move_seconds: float
+    medium_move_seconds: float
+    operation_vectors: dict[str, tuple[float, float]]
 
 
 @dataclass(frozen=True)
@@ -131,19 +133,19 @@ def load_config(
         default_for=_string_list(connector, "default_for", default=["visual", "camera"]),
     )
 
-    username = _secret_value(
+    onvif_username = _secret_value(
         camera,
-        "control_username",
-        "control_username_env",
-        default_env="TAPO_C220_CONTROL_USERNAME",
+        "onvif_username",
+        "onvif_username_env",
+        default_env="TAPO_C220_ONVIF_USERNAME",
         environ=env,
         required=require_runtime_secrets,
     )
-    password = _secret_value(
+    onvif_password = _secret_value(
         camera,
-        "control_password",
-        "control_password_env",
-        default_env="TAPO_C220_CONTROL_PASSWORD",
+        "onvif_password",
+        "onvif_password_env",
+        default_env="TAPO_C220_ONVIF_PASSWORD",
         environ=env,
         required=require_runtime_secrets,
     )
@@ -156,8 +158,9 @@ def load_config(
             environ=env,
             required=require_runtime_secrets,
         ),
-        username=username,
-        password=password,
+        onvif_username=onvif_username,
+        onvif_password=onvif_password,
+        onvif_port=_port_value(camera, "onvif_port", default=2020),
         rtsp_username=_secret_value(
             camera,
             "rtsp_username",
@@ -166,7 +169,7 @@ def load_config(
             environ=env,
             required=False,
         )
-        or username,
+        or onvif_username,
         rtsp_password=_secret_value(
             camera,
             "rtsp_password",
@@ -175,14 +178,15 @@ def load_config(
             environ=env,
             required=False,
         )
-        or password,
+        or onvif_password,
         rtsp_port=_port_value(camera, "rtsp_port", default=554),
         rtsp_path=_rtsp_path(_string_value(camera, "rtsp_path", default="stream1")),
         rtsp_transport=_rtsp_transport(_string_value(camera, "rtsp_transport", default="tcp")),
         rtsp_open_timeout_seconds=_positive_float(camera, "rtsp_open_timeout_seconds", default=8.0),
         jpeg_quality=_int_range(camera, "jpeg_quality", default=88, minimum=1, maximum=95),
-        small_step=_int_range(camera, "small_step", default=8, minimum=1, maximum=100),
-        medium_step=_int_range(camera, "medium_step", default=18, minimum=1, maximum=100),
+        ptz_velocity=_float_range(camera, "ptz_velocity", default=0.60, minimum=0.01, maximum=1.0),
+        small_move_seconds=_positive_float(camera, "small_move_seconds", default=0.20),
+        medium_move_seconds=_positive_float(camera, "medium_move_seconds", default=0.55),
         operation_vectors=_operation_vectors(camera.get("operation_vectors", DEFAULT_OPERATION_VECTORS)),
     )
 
@@ -262,6 +266,13 @@ def _positive_float(section: dict[str, Any], key: str, *, default: float) -> flo
     return float(value)
 
 
+def _float_range(section: dict[str, Any], key: str, *, default: float, minimum: float, maximum: float) -> float:
+    value = section.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, int | float) or not minimum <= float(value) <= maximum:
+        raise ConfigError(f"{key} must be a number between {minimum} and {maximum}.")
+    return float(value)
+
+
 def _int_range(section: dict[str, Any], key: str, *, default: int, minimum: int, maximum: int) -> int:
     value = section.get(key, default)
     if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
@@ -319,18 +330,20 @@ def _rtsp_transport(value: str) -> str:
     return normalized
 
 
-def _operation_vectors(value: Any) -> dict[str, tuple[int, int]]:
+def _operation_vectors(value: Any) -> dict[str, tuple[float, float]]:
     if not isinstance(value, dict):
         raise ConfigError("operation_vectors must be an object.")
-    vectors: dict[str, tuple[int, int]] = {}
+    vectors: dict[str, tuple[float, float]] = {}
     for operation in SUPPORTED_OPERATIONS:
         raw_vector = value.get(operation)
         if not isinstance(raw_vector, list | tuple) or len(raw_vector) != 2:
-            raise ConfigError(f"operation_vectors.{operation} must be an array of two integers.")
+            raise ConfigError(f"operation_vectors.{operation} must be an array of two numbers.")
         x, y = raw_vector
-        if isinstance(x, bool) or isinstance(y, bool) or not isinstance(x, int) or not isinstance(y, int):
-            raise ConfigError(f"operation_vectors.{operation} must contain integers.")
+        if isinstance(x, bool) or isinstance(y, bool) or not isinstance(x, int | float) or not isinstance(y, int | float):
+            raise ConfigError(f"operation_vectors.{operation} must contain numbers.")
+        if not -1.0 <= float(x) <= 1.0 or not -1.0 <= float(y) <= 1.0:
+            raise ConfigError(f"operation_vectors.{operation} values must be between -1.0 and 1.0.")
         if x == 0 and y == 0:
             raise ConfigError(f"operation_vectors.{operation} must not be [0, 0].")
-        vectors[operation] = (x, y)
+        vectors[operation] = (float(x), float(y))
     return vectors

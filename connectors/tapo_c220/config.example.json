@@ -15,8 +15,9 @@
   },
   "camera": {
     "host_env": "TAPO_C220_HOST",
-    "control_username_env": "TAPO_C220_CONTROL_USERNAME",
-    "control_password_env": "TAPO_C220_CONTROL_PASSWORD",
+    "onvif_username_env": "TAPO_C220_ONVIF_USERNAME",
+    "onvif_password_env": "TAPO_C220_ONVIF_PASSWORD",
+    "onvif_port": 2020,
     "rtsp_username_env": "TAPO_C220_RTSP_USERNAME",
     "rtsp_password_env": "TAPO_C220_RTSP_PASSWORD",
     "rtsp_port": 554,
@@ -24,8 +25,9 @@
     "rtsp_transport": "tcp",
     "rtsp_open_timeout_seconds": 8,
     "jpeg_quality": 88,
-    "small_step": 8,
-    "medium_step": 18,
+    "ptz_velocity": 0.6,
+    "small_move_seconds": 0.2,
+    "medium_move_seconds": 0.55,
     "operation_vectors": {
       "move_up": [0, -1],
       "move_down": [0, 1],
