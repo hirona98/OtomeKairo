@@ -31,6 +31,19 @@ class TapoPtzController:
                 raise PtzError("camera_rejected")
             raise PtzError("unexpected_camera_response")
 
+    def motor_capability(self) -> dict[str, Any]:
+        with self._lock:
+            response = self._tapo_client().getMotorCapability()
+            if not isinstance(response, dict):
+                raise PtzError("unexpected_camera_response")
+            error_code = response.get("error_code")
+            if error_code != 0:
+                raise PtzError("motor_capability_rejected")
+            return {
+                "error_code": error_code,
+                "has_motor": "motor" in response,
+            }
+
     def _step_for_amount(self, amount: str) -> int:
         if amount == "small":
             return self.config.small_step

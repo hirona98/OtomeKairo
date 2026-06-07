@@ -15,8 +15,8 @@
   },
   "camera": {
     "host_env": "TAPO_C220_HOST",
-    "username_env": "TAPO_C220_USERNAME",
-    "password_env": "TAPO_C220_PASSWORD",
+    "control_username_env": "TAPO_C220_CONTROL_USERNAME",
+    "control_password_env": "TAPO_C220_CONTROL_PASSWORD",
     "rtsp_username_env": "TAPO_C220_RTSP_USERNAME",
     "rtsp_password_env": "TAPO_C220_RTSP_PASSWORD",
     "rtsp_port": 554,

@@ -27,6 +27,29 @@ class TapoC220Connector:
     def print_hello(self) -> None:
         print(json.dumps(self.config.hello_payload(), ensure_ascii=False, indent=2))
 
+    def check_device(self) -> int:
+        failed = False
+        try:
+            capability = self.ptz.motor_capability()
+            self._log(
+                "pytapo_motor_capability=ok"
+                f" error_code={capability.get('error_code')}"
+                f" has_motor={capability.get('has_motor')}"
+            )
+        except Exception as exc:  # noqa: BLE001
+            failed = True
+            self._log(f"pytapo_motor_capability=failed error={self._short_error(exc)}")
+
+        try:
+            image = self.capture.capture_data_uri(timeout_seconds=self.config.camera.rtsp_open_timeout_seconds)
+            prefix = image.split(",", 1)[0]
+            self._log(f"rtsp_capture=ok prefix={prefix} bytes={len(image)}")
+        except Exception as exc:  # noqa: BLE001
+            failed = True
+            self._log(f"rtsp_capture=failed error={self._short_error(exc)}")
+
+        return 1 if failed else 0
+
     def run_forever(self) -> None:
         self._log(
             "starting"
@@ -78,7 +101,7 @@ class TapoC220Connector:
             }
             self._post_result(request_id=request_id, capability_id="vision.capture", result=result)
             self._log(f"vision.capture_result completed request_id={request_id}")
-        except (CaptureError, OSError) as exc:
+        except Exception as exc:  # noqa: BLE001
             result = {
                 "images": [],
                 "client_context": client_context,
@@ -110,7 +133,7 @@ class TapoC220Connector:
             }
             self._post_result(request_id=request_id, capability_id="camera.ptz", result=result)
             self._log(f"camera.ptz_result completed request_id={request_id}")
-        except (PtzError, OSError) as exc:
+        except Exception as exc:  # noqa: BLE001
             result = {
                 "status": "failed",
                 "operation": operation,
@@ -159,6 +182,16 @@ class TapoC220Connector:
 
     def _short_error(self, exc: BaseException) -> str:
         text = str(exc).strip() or exc.__class__.__name__
+        for secret in (
+            self.config.server.access_token,
+            self.config.camera.host,
+            self.config.camera.username,
+            self.config.camera.password,
+            self.config.camera.rtsp_username,
+            self.config.camera.rtsp_password,
+        ):
+            if secret:
+                text = text.replace(secret, "***")
         return text.replace("\n", " ")[:120]
 
     def _log(self, message: str) -> None:

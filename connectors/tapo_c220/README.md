@@ -25,13 +25,16 @@ cp config.example.json config.local.json
 
 export OTOMEKAIRO_ACCESS_TOKEN="..."
 export TAPO_C220_HOST="192.168.1.52"
-export TAPO_C220_USERNAME="..."
-export TAPO_C220_PASSWORD="..."
+export TAPO_C220_CONTROL_USERNAME="..."
+export TAPO_C220_CONTROL_PASSWORD="..."
 export TAPO_C220_RTSP_USERNAME="..."
 export TAPO_C220_RTSP_PASSWORD="..."
 ```
 
-`TAPO_C220_RTSP_USERNAME / TAPO_C220_RTSP_PASSWORD` を省略した場合、RTSP も `TAPO_C220_USERNAME / TAPO_C220_PASSWORD` を使う。
+`TAPO_C220_CONTROL_USERNAME / TAPO_C220_CONTROL_PASSWORD` は pytapo が使う Tapo control account である。
+※ただし現状使用できない
+`TAPO_C220_RTSP_USERNAME / TAPO_C220_RTSP_PASSWORD` は camera の RTSP account である。
+`TAPO_C220_RTSP_USERNAME / TAPO_C220_RTSP_PASSWORD` を省略した場合、RTSP も control account を使う。
 `host`、account、password、RTSP account、connector token は repository、sample、通常ログ、result に保存しない。
 
 `operation_vectors` は pytapo `moveMotor(x, y)` へ渡す向きベクトルである。
@@ -44,6 +47,13 @@ hello payload を確認する。
 
 ```bash
 .venv/bin/python -m otomekairo_tapo_c220_connector --config config.local.json --print-hello
+```
+
+実機への疎通を確認する。
+この確認は motor capability と RTSP still capture だけを実行し、camera を動かさない。
+
+```bash
+.venv/bin/python -m otomekairo_tapo_c220_connector --config config.local.json --check-device
 ```
 
 connector を起動する。

@@ -133,17 +133,17 @@ def load_config(
 
     username = _secret_value(
         camera,
-        "username",
-        "username_env",
-        default_env="TAPO_C220_USERNAME",
+        "control_username",
+        "control_username_env",
+        default_env="TAPO_C220_CONTROL_USERNAME",
         environ=env,
         required=require_runtime_secrets,
     )
     password = _secret_value(
         camera,
-        "password",
-        "password_env",
-        default_env="TAPO_C220_PASSWORD",
+        "control_password",
+        "control_password_env",
+        default_env="TAPO_C220_CONTROL_PASSWORD",
         environ=env,
         required=require_runtime_secrets,
     )
