@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from otomekairo.llm.contexts import (
+    AutonomousStepContext,
     CurrentInput,
     DecisionContext,
     InitiativeContext,
@@ -17,6 +18,7 @@ from otomekairo.llm.contracts import (
     normalize_recall_hint_payload,
     validate_activity_state_contract,
     validate_answer_contract_contract,
+    validate_autonomous_step_contract,
     validate_decision_contract,
     validate_event_evidence_contract,
     validate_initiative_entry_check_contract,
@@ -36,6 +38,8 @@ from otomekairo.llm.prompts import (
     build_answer_contract_repair_prompt,
     build_activity_state_messages,
     build_activity_state_repair_prompt,
+    build_autonomous_step_messages,
+    build_autonomous_step_repair_prompt,
     build_decision_messages,
     build_decision_repair_prompt,
     build_event_evidence_messages,
@@ -329,6 +333,65 @@ class LLMClient:
             context=context,
         )
 
+    def generate_autonomous_step(
+        self,
+        *,
+        role_definition: dict,
+        persona: dict,
+        context: AutonomousStepContext,
+    ) -> dict[str, Any]:
+        operation = "autonomous_step"
+        debug_log(
+            "LLM",
+            (
+                f"{operation} start mode={self._debug_mode(role_definition)} "
+                f"model={self._debug_model(role_definition)} run={context.run.get('run_id')}"
+            ),
+            level="DEBUG",
+        )
+        try:
+            if self._is_mock_role_definition(role_definition):
+                payload = self.mock_client.generate_autonomous_step(
+                    role_definition=role_definition,
+                    persona=persona,
+                    context=context,
+                )
+                validate_autonomous_step_contract(payload)
+                debug_log(
+                    "LLM",
+                    (
+                        f"{operation} done mode=mock action={payload.get('action', {}).get('kind')} "
+                        f"transition={payload.get('transition', {}).get('kind')}"
+                    ),
+                    level="DEBUG",
+                )
+                return payload
+
+            messages = build_autonomous_step_messages(
+                persona=persona,
+                context=context,
+            )
+            payload = self._generate_structured_payload(
+                role_definition=role_definition,
+                messages=messages,
+                validator=validate_autonomous_step_contract,
+                repair_prompt_builder=build_autonomous_step_repair_prompt,
+                failure_message="AutonomousStep の生成に失敗しました。解析可能な応答が得られませんでした。",
+                operation=operation,
+            )
+            debug_log(
+                "LLM",
+                (
+                    f"{operation} done action={payload.get('action', {}).get('kind')} "
+                    f"transition={payload.get('transition', {}).get('kind')}"
+                ),
+                level="DEBUG",
+            )
+            return payload
+        except Exception as exc:
+            debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc)}", level="ERROR")
+            raise
+
     def _validate_decision_visual_observation_context(
         self,
         *,
@@ -410,6 +473,7 @@ class LLMClient:
                 "requires_confirmation": False,
                 "pending_intent": None,
                 "capability_request": None,
+                "autonomous_run": None,
             }
         )
         debug_log(

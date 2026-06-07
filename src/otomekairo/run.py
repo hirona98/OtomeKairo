@@ -46,6 +46,7 @@ def main() -> None:
     debug_log("Run", "starting background workers")
     service.start_background_memory_postprocess_worker()
     service.start_background_visual_daily_worker()
+    service.start_background_autonomous_run_scheduler()
     service.start_background_wake_scheduler()
     debug_log("Run", "background workers started")
 
@@ -61,6 +62,7 @@ def main() -> None:
         debug_log("Run", "shutdown begin")
         service.close_event_streams()
         service.stop_background_wake_scheduler()
+        service.stop_background_autonomous_run_scheduler()
         service.stop_background_visual_daily_worker()
         service.stop_background_memory_postprocess_worker()
         server.server_close()

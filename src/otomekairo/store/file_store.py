@@ -422,6 +422,97 @@ class SQLiteMemoryStore(
         with self._memory_db() as conn:
             self._insert_ongoing_action(conn, ongoing_action)
 
+    def get_autonomous_run(self, *, run_id: str) -> dict[str, Any] | None:
+        # クエリ
+        with self._memory_db() as conn:
+            row = conn.execute(
+                """
+                SELECT payload_json
+                FROM autonomous_runs
+                WHERE run_id = ?
+                """,
+                (run_id,),
+            ).fetchone()
+
+        # 結果
+        if row is None:
+            return None
+        return json.loads(row["payload_json"])
+
+    def list_autonomous_runs(
+        self,
+        *,
+        memory_set_id: str,
+        statuses: list[str] | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        # Query部品群
+        clauses = ["memory_set_id = ?"]
+        params: list[Any] = [memory_set_id]
+        if statuses:
+            normalized_statuses = [
+                status
+                for status in statuses
+                if isinstance(status, str) and status.strip()
+            ]
+            if normalized_statuses:
+                placeholders = ", ".join("?" for _ in normalized_statuses)
+                clauses.append(f"status IN ({placeholders})")
+                params.extend(normalized_statuses)
+        query = f"""
+            SELECT payload_json
+            FROM autonomous_runs
+            WHERE {" AND ".join(clauses)}
+            ORDER BY updated_at DESC, rowid DESC
+            LIMIT ?
+        """
+        params.append(max(int(limit), 1))
+
+        # クエリ
+        with self._memory_db() as conn:
+            rows = conn.execute(query, params).fetchall()
+
+        # 結果
+        return [json.loads(row["payload_json"]) for row in rows]
+
+    def list_due_autonomous_runs(
+        self,
+        *,
+        memory_set_id: str,
+        current_time: str,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        # active は即時 due、waiting_timer は next_run_at 到来時に due として扱う。
+        with self._memory_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT payload_json
+                FROM autonomous_runs
+                WHERE memory_set_id = ?
+                  AND (
+                    status = 'active'
+                    OR (
+                      status = 'waiting_timer'
+                      AND next_run_at IS NOT NULL
+                      AND next_run_at <= ?
+                    )
+                  )
+                ORDER BY
+                  CASE WHEN next_run_at IS NULL THEN updated_at ELSE next_run_at END ASC,
+                  rowid ASC
+                LIMIT ?
+                """,
+                (memory_set_id, current_time, max(int(limit), 1)),
+            ).fetchall()
+
+        # 結果
+        return [json.loads(row["payload_json"]) for row in rows]
+
+    def upsert_autonomous_run(self, *, autonomous_run: dict[str, Any]) -> None:
+        # トランザクション
+        with self._memory_db() as conn:
+            self._insert_autonomous_run(conn, autonomous_run)
+
     def list_world_states(
         self,
         *,
@@ -561,6 +652,11 @@ class SQLiteMemoryStore(
         # トランザクション
         with self._memory_db() as conn:
             conn.execute("DELETE FROM ongoing_actions WHERE memory_set_id = ?", (memory_set_id,))
+
+    def clear_autonomous_runs(self, *, memory_set_id: str) -> None:
+        # トランザクション
+        with self._memory_db() as conn:
+            conn.execute("DELETE FROM autonomous_runs WHERE memory_set_id = ?", (memory_set_id,))
 
     def get_latest_reflection_run(
         self,
@@ -1181,6 +1277,35 @@ class SQLiteMemoryStore(
                 record["status"],
                 record["updated_at"],
                 record["expires_at"],
+                self._to_json(record),
+            ),
+        )
+
+    def _insert_autonomous_run(self, conn: sqlite3.Connection, record: dict[str, Any]) -> None:
+        # 追加
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO autonomous_runs (
+                run_id,
+                memory_set_id,
+                status,
+                next_run_at,
+                waiting_request_id,
+                created_at,
+                updated_at,
+                completed_at,
+                payload_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                record["run_id"],
+                record["memory_set_id"],
+                record["status"],
+                record.get("next_run_at"),
+                record.get("waiting_request_id"),
+                record["created_at"],
+                record["updated_at"],
+                record.get("completed_at"),
                 self._to_json(record),
             ),
         )

@@ -3,7 +3,13 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from otomekairo.llm.contexts import CurrentInput, DecisionContext, InitiativeContext, SpeechContext
+from otomekairo.llm.contexts import (
+    AutonomousStepContext,
+    CurrentInput,
+    DecisionContext,
+    InitiativeContext,
+    SpeechContext,
+)
 from otomekairo.llm.contracts import (
     ANSWER_BOUNDARY_VALUES,
     ANSWER_CONTRACT_VALUES,
@@ -108,6 +114,28 @@ def build_decision_messages(
                 recall_hint=context.recall_hint,
                 recall_pack=context.recall_pack,
             ),
+        },
+        {
+            "role": "user",
+            "content": _build_current_input_prompt(context.current_input),
+        },
+    ]
+
+
+# AutonomousStep 用の message 群を組み立てる。
+def build_autonomous_step_messages(
+    *,
+    persona: dict,
+    context: AutonomousStepContext,
+) -> list[dict[str, str]]:
+    return [
+        {
+            "role": "system",
+            "content": _build_autonomous_step_system_prompt(persona),
+        },
+        {
+            "role": "user",
+            "content": _build_autonomous_step_context_prompt(context),
         },
         {
             "role": "user",
@@ -410,17 +438,38 @@ def build_decision_repair_prompt(validation_error: str) -> str:
         "前回の出力は decision_generation 契約を満たしていませんでした。\n"
         f"validator_error: {validation_error}\n"
         "同じ入力だけを根拠に、JSON オブジェクト 1 個だけを返し直してください。\n"
-        "トップレベルキーは kind, reason_code, reason_summary, requires_confirmation, pending_intent, capability_request の 6 つだけです。\n"
+        "トップレベルキーは kind, reason_code, reason_summary, requires_confirmation, pending_intent, capability_request, autonomous_run の 7 つだけです。\n"
         "speech_text, text, message, content, output などの発話本文キーは禁止です。\n"
-        "kind は speech, noop, pending_intent, capability_request のいずれかだけです。\n"
-        "kind=speech のときは pending_intent と capability_request を null にしてください。\n"
-        "kind=noop のときは pending_intent と capability_request を null にしてください。\n"
+        "kind は speech, noop, pending_intent, capability_request, autonomous_run のいずれかだけです。\n"
+        "kind=speech のときは pending_intent, capability_request, autonomous_run を null にしてください。\n"
+        "kind=noop のときは pending_intent, capability_request, autonomous_run を null にしてください。\n"
         "kind=pending_intent のときだけ pending_intent を object にし、requires_confirmation は false にしてください。\n"
         "pending_intent object のキーは intent_kind, intent_summary, dedupe_key の 3 つだけです。\n"
         "kind=capability_request のときだけ capability_request を object にし、requires_confirmation は false にしてください。\n"
         "capability_request object のキーは capability_id, input の 2 つだけです。\n"
+        "kind=autonomous_run のときだけ autonomous_run を object にし、requires_confirmation は false にしてください。\n"
+        "autonomous_run object のキーは objective_summary, initial_step_summary の 2 つだけです。\n"
         "validator_error が fresh_world_state または新鮮な visual_context の再利用境界を示す場合は、既存要約を根拠に kind=noop または kind=speech を返してください。\n"
         "Markdown、コードフェンス、説明文は禁止です。"
+    )
+
+
+def build_autonomous_step_repair_prompt(validation_error: str) -> str:
+    return (
+        "前回の出力は autonomous_step_generation 契約を満たしていませんでした。\n"
+        f"validator_error: {validation_error}\n"
+        "同じ autonomous_run context だけを根拠に、JSON オブジェクト 1 個だけを返し直してください。\n"
+        "トップレベルキーは action, transition, run_update の 3 つだけです。\n"
+        "action のキーは kind, capability_request, speech の 3 つだけです。\n"
+        "action.kind は capability_request, speech, none のいずれかです。\n"
+        "capability_request action では capability_request に capability_id と input を入れ、speech を null にしてください。\n"
+        "speech action では speech に reason_code と reason_summary を入れ、capability_request を null にしてください。\n"
+        "none action では capability_request と speech を null にしてください。\n"
+        "transition のキーは kind, reason_code, reason_summary, next_run_at の 4 つだけです。\n"
+        "transition.kind は continue, wait_until, complete, cancel のいずれかです。\n"
+        "wait_until のときだけ next_run_at に offset 付きローカル ISO timestamp を入れ、それ以外では null にしてください。\n"
+        "run_update のキーは objective_summary, current_step_summary, history_summary の 3 つだけです。\n"
+        "秘密値、target_client_id、内部 URL、Markdown、コードフェンス、説明文は禁止です。"
     )
 
 
@@ -735,7 +784,7 @@ def _build_decision_system_prompt(persona: dict) -> str:
             "あなたは自律 AI 本体の内部処理 role `decision_generation` です。\n"
             "この role は、人格設定、記憶、現在状態、観測、能力を踏まえて行動を選ぶ判断主体の内部処理です。\n"
             "現在入力と内部文脈から、外向き伝達、能力実行、保留、見送りのどれを選ぶかを判断してください。\n"
-            "speech / noop / pending_intent / capability_request のいずれかを決め、JSON オブジェクト 1 個だけを返してください。\n"
+            "speech / noop / pending_intent / capability_request / autonomous_run のいずれかを決め、JSON オブジェクト 1 個だけを返してください。\n"
             "対象人格名:\n"
             f"{display_name}\n"
             "人格設定本文:\n"
@@ -771,6 +820,9 @@ def _build_decision_system_prompt(persona: dict) -> str:
             "active_commitments に qualifiers.scope_duration=session や qualifiers.source=assistant_response がある場合、それはその場限りの支援姿勢として直近文脈の材料にしてください。\n"
             "pending_intent は『今は返さないが、後で触れる価値がある』場合だけ選んでください。\n"
             "capability_request は CapabilityDecisionView に available=true で載っている能力が必要な場合だけ選んでください。\n"
+            "autonomous_run は、発話、能力実行、観測、待機をまたぐ複合目的を開始する場合だけ選んでください。\n"
+            "単発の発話だけなら speech、単発の能力実行だけなら capability_request、後で再評価する短期候補だけなら pending_intent を選んでください。\n"
+            "autonomous_run は目的単位です。次の一手そのものは autonomous_step_generation が決めます。\n"
             "ユーザーが現在状態の確認を明示的に依頼し、対応する status / observation capability が available=true のときは capability_request を選んでください。\n"
             "CapabilityDecisionView の項目に fresh_world_state_available=true がある場合、明示的なユーザー依頼ではない同じ現在状態の判断は fresh_world_state を根拠に speech / noop / pending_intent を選んでください。\n"
             "vision.capture に fresh_world_state_by_vision_source がある場合、明示的なユーザー依頼ではない同じ vision_source_id の判断は既存の visual_context を根拠にしてください。\n"
@@ -790,13 +842,14 @@ def _build_decision_system_prompt(persona: dict) -> str:
         ),
         (
             "出力契約",
-            "返すキーは必ず次の 6 個です:\n"
-            '- kind: "speech" または "noop" または "pending_intent" または "capability_request"\n'
+            "返すキーは必ず次の 7 個です:\n"
+            '- kind: "speech" または "noop" または "pending_intent" または "capability_request" または "autonomous_run"\n'
             "- reason_code: string\n"
             "- reason_summary: string\n"
             "- requires_confirmation: boolean\n"
             "- pending_intent: null または object\n"
             "- capability_request: null または object\n"
+            "- autonomous_run: null または object\n"
             "この role は発話本文を生成しません。speech_text, text, message, content, output などの本文キーは禁止です。\n"
             "発話本文は後続の expression_generation が生成します。\n"
             "kind が pending_intent のときだけ pending_intent object を返してください。\n"
@@ -804,7 +857,10 @@ def _build_decision_system_prompt(persona: dict) -> str:
             "kind が pending_intent のとき requires_confirmation は false にしてください。\n"
             "kind が capability_request のときだけ capability_request object を返してください。\n"
             "capability_request object のキーは capability_id, input の 2 個に固定してください。\n"
-            "kind が capability_request のとき requires_confirmation は false にしてください。",
+            "kind が capability_request のとき requires_confirmation は false にしてください。\n"
+            "kind が autonomous_run のときだけ autonomous_run object を返してください。\n"
+            "autonomous_run object のキーは objective_summary, initial_step_summary の 2 個に固定してください。\n"
+            "kind が autonomous_run のとき requires_confirmation は false にしてください。",
         ),
         (
             "禁止",
@@ -894,6 +950,66 @@ def _build_decision_trigger_policy(
             ]
         )
     return policies
+
+
+def _build_autonomous_step_system_prompt(persona: dict) -> str:
+    display_name = persona.get("display_name", "OtomeKairo")
+    persona_prompt = str(persona.get("persona_prompt", "")).strip()
+    return _render_prompt_sections(
+        (
+            "役割",
+            "あなたは自律 AI 本体の内部処理 role `autonomous_step_generation` です。\n"
+            "`autonomous_run` の目的、履歴、現在状態、能力可否、直近 result を踏まえて次の一手を決めてください。\n"
+            "この role は通常会話の返答ではありません。run の外へ出す action と run の次状態だけを JSON で返します。\n"
+            "対象人格名:\n"
+            f"{display_name}\n"
+            "人格設定本文:\n"
+            f"{persona_prompt or 'なし'}",
+        ),
+        (
+            "入力境界",
+            "internal context message には autonomous_run, current_input, recent_turns, time_context, foreground_world_state, activity_context, ongoing_action_summary, capability_decision_view, last_result_context が入ります。\n"
+            "current input message には `<<<OTOMEKAIRO_CURRENT_INPUT>>>` で囲われた current_input JSON だけが入ります。\n"
+            "current_input.sender=user かつ response_target=user の text だけをユーザー発話として扱います。\n"
+            "last_result_context は直前 capability result の要約です。ユーザー発話ではありません。\n"
+            "CapabilityDecisionView に available=true で載っている能力だけを capability_request 候補にしてください。\n"
+            "target_client_id、資格情報、内部 URL、配送先 client は出力に含めないでください。",
+        ),
+        (
+            "判断ルール",
+            "run.objective_summary に沿う次の一手だけを選んでください。\n"
+            "発話してから観測する、カメラを動かしてから観測する、観測してから別 source を見る、時間を置いて再観測する流れを扱えます。\n"
+            "capability result を受けた後も、目的に整合するなら別 capability を続けて選べます。\n"
+            "固定回数上限ではなく、目的整合、capability availability、busy、timeout、cancel を境界にしてください。\n"
+            "speech action は外へ短く伝える必要がある場合だけ選んでください。発話本文は expression_generation が作ります。\n"
+            "待つ必要がある場合は action.kind=none と transition.kind=wait_until を選んでください。\n"
+            "目的が満たされたら transition.kind=complete を選んでください。\n"
+            "目的が不成立、危険、文脈不整合、ユーザー停止指示がある場合は transition.kind=cancel を選んでください。",
+        ),
+        (
+            "出力契約",
+            "返すキーは必ず action, transition, run_update の 3 個です。\n"
+            "action.kind は capability_request, speech, none のいずれかです。\n"
+            "capability_request action では capability_request object のキーを capability_id, input の 2 個に固定してください。\n"
+            "speech action では speech object のキーを reason_code, reason_summary の 2 個に固定してください。\n"
+            "none action では capability_request と speech を null にしてください。\n"
+            "transition.kind は continue, wait_until, complete, cancel のいずれかです。\n"
+            "wait_until のときだけ next_run_at に offset 付きローカル ISO timestamp を入れ、それ以外は null にしてください。\n"
+            "run_update は objective_summary, current_step_summary, history_summary を持ちます。\n"
+            "objective_summary と current_step_summary は空にしないでください。",
+        ),
+        (
+            "禁止",
+            "Markdown、コードフェンス、説明文は禁止です。",
+        ),
+    )
+
+
+def _build_autonomous_step_context_prompt(context: AutonomousStepContext) -> str:
+    return _format_named_json_prompt_payload(
+        "AUTONOMOUS_RUN_CONTEXT",
+        context.to_prompt_payload(),
+    )
 
 
 def _build_speech_system_prompt(persona: dict) -> str:

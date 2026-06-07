@@ -30,6 +30,17 @@ class ServiceInputCycleMixin:
         started_at = self._now_iso()
         recent_turns = self._load_recent_turns(state)
         runtime_summary = self._build_runtime_summary(state)
+        cancel_autonomous_runs = self._conversation_requests_autonomous_run_cancel(input_text)
+        if cancel_autonomous_runs:
+            self._cancel_autonomous_runs_for_user_request(
+                state=state,
+                current_time=started_at,
+            )
+        else:
+            self._pause_autonomous_runs_for_user_interaction(
+                state=state,
+                current_time=started_at,
+            )
         debug_log(
             "Conversation",
             (
@@ -144,6 +155,11 @@ class ServiceInputCycleMixin:
             )
         finally:
             self._end_user_response_cycle()
+            if not cancel_autonomous_runs:
+                self._resume_autonomous_runs_after_user_interaction(
+                    state=state,
+                    current_time=self._now_iso(),
+                )
 
     def _finalize_cycle_failure(
         self,

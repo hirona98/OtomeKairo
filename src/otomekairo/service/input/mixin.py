@@ -127,6 +127,7 @@ class ServiceInputMixin(
                 "requires_confirmation": False,
                 "pending_intent": None,
                 "capability_request": None,
+                "autonomous_run": None,
             },
             "speech_payload": None,
         }

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 import math
 import re
 from typing import Any
@@ -638,11 +639,12 @@ def validate_decision_contract(payload: dict[str, Any]) -> None:
         "requires_confirmation",
         "pending_intent",
         "capability_request",
+        "autonomous_run",
     }
     _validate_exact_keys(payload, required_keys, "Decision")
 
     # 値Checks
-    if payload["kind"] not in {"speech", "noop", "pending_intent", "capability_request"}:
+    if payload["kind"] not in {"speech", "noop", "pending_intent", "capability_request", "autonomous_run"}:
         raise LLMError("Decision kind が不正です。")
     if not isinstance(payload["reason_code"], str) or not payload["reason_code"].strip():
         raise LLMError("Decision reason_code は空でない文字列である必要があります。")
@@ -687,6 +689,99 @@ def validate_decision_contract(payload: dict[str, Any]) -> None:
             raise LLMError("Decision capability_request では requires_confirmation=true を指定できません。")
     elif payload["capability_request"] is not None:
         raise LLMError("Decision kind が capability_request 以外のとき、capability_request は null である必要があります。")
+    if payload["kind"] == "autonomous_run":
+        autonomous_run = payload["autonomous_run"]
+        required_autonomous_run_keys = {
+            "objective_summary",
+            "initial_step_summary",
+        }
+        if not isinstance(autonomous_run, dict) or set(autonomous_run.keys()) != required_autonomous_run_keys:
+            raise LLMError("Decision autonomous_run が不正です。")
+        for key in required_autonomous_run_keys:
+            value = autonomous_run.get(key)
+            if not isinstance(value, str) or not value.strip():
+                raise LLMError(f"Decision autonomous_run.{key} は空でない文字列である必要があります。")
+        if payload["requires_confirmation"]:
+            raise LLMError("Decision autonomous_run では requires_confirmation=true を指定できません。")
+        if payload["pending_intent"] is not None or payload["capability_request"] is not None:
+            raise LLMError("Decision autonomous_run では pending_intent と capability_request を null にしてください。")
+    elif payload["autonomous_run"] is not None:
+        raise LLMError("Decision kind が autonomous_run 以外のとき、autonomous_run は null である必要があります。")
+
+
+# autonomous step検証
+def validate_autonomous_step_contract(payload: dict[str, Any]) -> None:
+    _validate_exact_keys(payload, {"action", "transition", "run_update"}, "AutonomousStep")
+
+    action = payload["action"]
+    _validate_exact_keys(action, {"kind", "capability_request", "speech"}, "AutonomousStep action")
+    if action["kind"] not in {"capability_request", "speech", "none"}:
+        raise LLMError("AutonomousStep action.kind が不正です。")
+    if action["kind"] == "capability_request":
+        capability_request = action["capability_request"]
+        if not isinstance(capability_request, dict) or set(capability_request.keys()) != {"capability_id", "input"}:
+            raise LLMError("AutonomousStep action.capability_request が不正です。")
+        capability_id = capability_request.get("capability_id")
+        if not isinstance(capability_id, str) or not capability_id.strip():
+            raise LLMError("AutonomousStep action.capability_request.capability_id が不正です。")
+        if not isinstance(capability_request.get("input"), dict):
+            raise LLMError("AutonomousStep action.capability_request.input は object である必要があります。")
+        if action["speech"] is not None:
+            raise LLMError("AutonomousStep capability_request action では speech は null です。")
+    elif action["capability_request"] is not None:
+        raise LLMError("AutonomousStep capability_request 以外の action では capability_request は null です。")
+
+    if action["kind"] == "speech":
+        speech = action["speech"]
+        if not isinstance(speech, dict) or set(speech.keys()) != {"reason_code", "reason_summary"}:
+            raise LLMError("AutonomousStep action.speech が不正です。")
+        if not isinstance(speech["reason_code"], str) or not speech["reason_code"].strip():
+            raise LLMError("AutonomousStep action.speech.reason_code は空でない文字列です。")
+        if not isinstance(speech["reason_summary"], str) or not speech["reason_summary"].strip():
+            raise LLMError("AutonomousStep action.speech.reason_summary は空でない文字列です。")
+    elif action["speech"] is not None:
+        raise LLMError("AutonomousStep speech 以外の action では speech は null です。")
+
+    transition = payload["transition"]
+    _validate_exact_keys(
+        transition,
+        {"kind", "reason_code", "reason_summary", "next_run_at"},
+        "AutonomousStep transition",
+    )
+    if transition["kind"] not in {"continue", "wait_until", "complete", "cancel"}:
+        raise LLMError("AutonomousStep transition.kind が不正です。")
+    if not isinstance(transition["reason_code"], str) or not transition["reason_code"].strip():
+        raise LLMError("AutonomousStep transition.reason_code は空でない文字列です。")
+    if not isinstance(transition["reason_summary"], str) or not transition["reason_summary"].strip():
+        raise LLMError("AutonomousStep transition.reason_summary は空でない文字列です。")
+    if transition["kind"] == "wait_until":
+        if not isinstance(transition["next_run_at"], str) or not transition["next_run_at"].strip():
+            raise LLMError("AutonomousStep wait_until では next_run_at が必要です。")
+        try:
+            next_run_at = datetime.fromisoformat(transition["next_run_at"].strip())
+        except ValueError as exc:
+            raise LLMError("AutonomousStep wait_until.next_run_at は ISO timestamp である必要があります。") from exc
+        if next_run_at.tzinfo is None:
+            raise LLMError("AutonomousStep wait_until.next_run_at は offset 付き ISO timestamp である必要があります。")
+    elif transition["next_run_at"] is not None:
+        raise LLMError("AutonomousStep wait_until 以外では next_run_at は null です。")
+    if action["kind"] == "capability_request" and transition["kind"] != "continue":
+        raise LLMError("AutonomousStep capability_request action では transition.kind=continue を使います。")
+
+    run_update = payload["run_update"]
+    _validate_exact_keys(
+        run_update,
+        {"objective_summary", "current_step_summary", "history_summary"},
+        "AutonomousStep run_update",
+    )
+    for key in ("objective_summary", "current_step_summary", "history_summary"):
+        value = run_update[key]
+        if not isinstance(value, str):
+            raise LLMError(f"AutonomousStep run_update.{key} は文字列です。")
+    if not run_update["objective_summary"].strip():
+        raise LLMError("AutonomousStep run_update.objective_summary は空にできません。")
+    if not run_update["current_step_summary"].strip():
+        raise LLMError("AutonomousStep run_update.current_step_summary は空にできません。")
 
 
 # memory interpretation検証

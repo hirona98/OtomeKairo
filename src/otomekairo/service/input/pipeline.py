@@ -175,6 +175,8 @@ class ServiceInputPipelineMixin:
             "speech_payload": output_result["speech_payload"],
             "capability_request_summary": output_result["capability_request_summary"],
             "ongoing_action_transition_summary": output_result["ongoing_action_transition_summary"],
+            "autonomous_run_summary": output_result["autonomous_run_summary"],
+            "autonomous_run_step_result": output_result["autonomous_run_step_result"],
         }
 
     def _build_current_input(
@@ -522,6 +524,8 @@ class ServiceInputPipelineMixin:
         # capability request
         dispatched_capability_request_summary: dict[str, Any] | None = None
         ongoing_action_transition_summary: dict[str, Any] | None = None
+        autonomous_run_summary: dict[str, Any] | None = None
+        autonomous_run_step_result: dict[str, Any] | None = None
         if decision["kind"] == "capability_request":
             dispatch_result = self._dispatch_decision_capability_request(
                 state=state,
@@ -544,6 +548,36 @@ class ServiceInputPipelineMixin:
 
         # 発話
         speech_payload: dict[str, Any] | None = None
+        if decision["kind"] == "autonomous_run":
+            start_result = self._start_autonomous_run_from_decision(
+                state=state,
+                current_time=self._now_iso(),
+                decision=decision,
+                source_current_input=current_input.to_prompt_payload(),
+                assistant_message_target_client_id=assistant_message_target_client_id,
+            )
+            run_payload = start_result.get("autonomous_run")
+            if isinstance(run_payload, dict):
+                autonomous_run_summary = self._autonomous_run_public_summary(
+                    run_payload,
+                    current_time=self._now_iso(),
+                )
+            step_result = start_result.get("step_result")
+            if isinstance(step_result, dict):
+                autonomous_run_step_result = step_result
+                step_speech_payload = step_result.get("speech_payload")
+                if isinstance(step_speech_payload, dict):
+                    speech_payload = step_speech_payload
+                step_capability_request = step_result.get("capability_request_summary")
+                if isinstance(step_capability_request, dict):
+                    dispatched_capability_request_summary = step_capability_request
+            debug_log(
+                "Pipeline",
+                (
+                    f"{cycle_label} autonomous_run started "
+                    f"run={autonomous_run_summary.get('run_id') if isinstance(autonomous_run_summary, dict) else '-'}"
+                ),
+            )
         speech_suppressed = (
             decision["kind"] == "speech"
             and current_input.source_kind == "capability_result"
@@ -562,6 +596,7 @@ class ServiceInputPipelineMixin:
                     "requires_confirmation": False,
                     "pending_intent": None,
                     "capability_request": None,
+                    "autonomous_run": None,
                 }
             )
             debug_log("Pipeline", f"{cycle_label} speech skipped capability_result_response_target=none")
@@ -582,6 +617,7 @@ class ServiceInputPipelineMixin:
                     "requires_confirmation": False,
                     "pending_intent": None,
                     "capability_request": None,
+                    "autonomous_run": None,
                 }
             )
             debug_log("Pipeline", f"{cycle_label} speech skipped background_wake_user_response_active")
@@ -620,6 +656,8 @@ class ServiceInputPipelineMixin:
             "speech_payload": speech_payload,
             "capability_request_summary": dispatched_capability_request_summary,
             "ongoing_action_transition_summary": ongoing_action_transition_summary,
+            "autonomous_run_summary": autonomous_run_summary,
+            "autonomous_run_step_result": autonomous_run_step_result,
         }
 
     def _build_decision_context(

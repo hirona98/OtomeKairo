@@ -106,6 +106,7 @@ class ServiceCapabilityMixin:
         source_current_input: dict[str, Any] | None = None,
         assistant_message_target_client_id: str | None = None,
         track_ongoing_action: bool = True,
+        autonomous_run_id: str | None = None,
     ) -> dict[str, Any] | None:
         # manifest と input schema を先に確定する。
         manifests = capability_manifests()
@@ -171,6 +172,7 @@ class ServiceCapabilityMixin:
             vision_source=vision_source if isinstance(vision_source, dict) else None,
             source_current_input=source_current_input,
             assistant_message_target_client_id=assistant_message_target_client_id,
+            autonomous_run_id=autonomous_run_id,
         )
         pending = {
             "event": threading.Event(),
@@ -638,6 +640,7 @@ class ServiceCapabilityMixin:
         vision_source: dict[str, Any] | None = None,
         source_current_input: dict[str, Any] | None = None,
         assistant_message_target_client_id: str | None = None,
+        autonomous_run_id: str | None = None,
     ) -> dict[str, Any]:
         request_id = f"{capability_id.replace('.', '_')}_request:{uuid.uuid4().hex}"
         expires_at = self._capability_ongoing_action_expires_at(current_time=current_time, timeout_ms=timeout_ms)
@@ -667,6 +670,8 @@ class ServiceCapabilityMixin:
         )
         if normalized_assistant_message_target_client_id is not None:
             record["assistant_message_target_client_id"] = normalized_assistant_message_target_client_id
+        if isinstance(autonomous_run_id, str) and autonomous_run_id.strip():
+            record["autonomous_run_id"] = autonomous_run_id.strip()
         if capability_id in {"vision.capture", "camera.ptz"} and isinstance(vision_source, dict):
             source_id = vision_source.get("vision_source_id")
             source_kind = vision_source.get("kind")
@@ -738,6 +743,9 @@ class ServiceCapabilityMixin:
         source_current_input = request_record.get("source_current_input")
         if isinstance(source_current_input, dict):
             summary["source_current_input"] = deepcopy(source_current_input)
+        autonomous_run_id = request_record.get("autonomous_run_id")
+        if isinstance(autonomous_run_id, str) and autonomous_run_id.strip():
+            summary["autonomous_run_id"] = autonomous_run_id.strip()
         return summary
 
     def _request_record_assistant_message_target_client_id(self, request_record: Any) -> str | None:

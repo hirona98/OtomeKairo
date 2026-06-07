@@ -11,6 +11,7 @@ from otomekairo.llm.client import LLMClient
 from otomekairo.log_stream import LogStreamRegistry
 from otomekairo.memory.consolidator import MemoryConsolidator
 from otomekairo.recall.builder import RecallBuilder
+from otomekairo.service.autonomous_run import ServiceAutonomousRunMixin
 from otomekairo.service.capability import ServiceCapabilityMixin
 from otomekairo.service.common import ServiceError, configure_debug_log_stream_sink, debug_log
 from otomekairo.service.config.mixin import ServiceConfigMixin
@@ -24,6 +25,7 @@ from otomekairo.store.file_store import FileStore
 # サービス
 class OtomeKairoService(
     ServiceCapabilityMixin,
+    ServiceAutonomousRunMixin,
     ServiceSpontaneousMixin,
     ServiceConfigMixin,
     ServiceInputMixin,
@@ -54,6 +56,8 @@ class OtomeKairoService(
         self._wake_observation_runtime_state: dict[str, dict[str, Any]] = {}
         self._background_wake_stop_event: threading.Event | None = None
         self._background_wake_thread: threading.Thread | None = None
+        self._background_autonomous_run_stop_event: threading.Event | None = None
+        self._background_autonomous_run_thread: threading.Thread | None = None
         self._background_memory_postprocess_stop_event: threading.Event | None = None
         self._background_memory_postprocess_thread: threading.Thread | None = None
         self._background_visual_daily_stop_event: threading.Event | None = None

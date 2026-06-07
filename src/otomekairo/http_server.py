@@ -132,6 +132,35 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
             if method == "GET" and parsed.path == "/api/logs/stream":
                 self._handle_logs_stream(token)
                 return
+            if method == "GET" and parsed.path == "/api/autonomous-runs":
+                self._write_success(HTTPStatus.OK, self.server.service.list_autonomous_runs_api(token))
+                return
+            if method == "POST" and parsed.path.startswith("/api/autonomous-runs/"):
+                path_parts = parsed.path.split("/")
+                if len(path_parts) != 5:
+                    raise ServiceError(404, "route_not_found", "The requested route does not exist.")
+                run_id = unquote(path_parts[3])
+                operation = path_parts[4]
+                self._read_json_body()
+                if operation == "pause":
+                    self._write_success(
+                        HTTPStatus.OK,
+                        self.server.service.pause_autonomous_run_api(token, run_id),
+                    )
+                    return
+                if operation == "resume":
+                    self._write_success(
+                        HTTPStatus.OK,
+                        self.server.service.resume_autonomous_run_api(token, run_id),
+                    )
+                    return
+                if operation == "cancel":
+                    self._write_success(
+                        HTTPStatus.OK,
+                        self.server.service.cancel_autonomous_run_api(token, run_id),
+                    )
+                    return
+                raise ServiceError(404, "route_not_found", "The requested route does not exist.")
 
             # 入力ルート
             if method == "POST" and parsed.path == "/api/conversation":

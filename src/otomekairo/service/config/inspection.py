@@ -86,13 +86,23 @@ class ServiceConfigInspectionMixin:
     def _build_runtime_summary(self, state: dict[str, Any]) -> dict[str, Any]:
         current_time = self._now_iso()
         ongoing_action = self._current_ongoing_action(state=state, current_time=current_time)
+        autonomous_runs = self.store.list_autonomous_runs(
+            memory_set_id=state["selected_memory_set_id"],
+            statuses=["active", "waiting_timer", "waiting_result", "paused"],
+            limit=50,
+        )
         with self._runtime_state_lock:
             memory_job_in_progress = self._memory_postprocess_runtime_state.get("current_cycle_id") is not None
             visual_daily_in_progress = self._visual_daily_runtime_state.get("current_digest_id") is not None
         return {
             "connection_state": "ready",
             "wake_scheduler_active": self._background_wake_scheduler_active() and state["wake_policy"]["mode"] == "interval",
+            "autonomous_run_scheduler_active": self._background_autonomous_run_scheduler_active(),
             "ongoing_action_exists": ongoing_action is not None,
+            "active_autonomous_run_count": len(
+                [run for run in autonomous_runs if run.get("status") in {"active", "waiting_timer", "waiting_result"}]
+            ),
+            "paused_autonomous_run_count": len([run for run in autonomous_runs if run.get("status") == "paused"]),
             "memory_job_worker_active": self._background_memory_postprocess_worker_active(),
             "visual_daily_worker_active": self._background_visual_daily_worker_active(),
             "pending_memory_job_count": self.store.count_memory_postprocess_jobs(
@@ -114,6 +124,13 @@ class ServiceConfigInspectionMixin:
             "memory_postprocess_runtime_state": self._snapshot_memory_postprocess_runtime_state(),
             "visual_daily_runtime_state": self._snapshot_visual_daily_runtime_state(),
             "pending_capability_requests": self._list_pending_capability_request_summaries(current_time=current_time),
+            "autonomous_runs": [
+                self._autonomous_run_public_summary(run, current_time=current_time)
+                for run in self.store.list_autonomous_runs(
+                    memory_set_id=state["selected_memory_set_id"],
+                    limit=20,
+                )
+            ],
         }
 
     def _build_current_state_snapshot(
@@ -144,6 +161,13 @@ class ServiceConfigInspectionMixin:
                 state=state,
                 current_time=current_time,
             ),
+            "autonomous_runs": [
+                self._autonomous_run_public_summary(run, current_time=current_time)
+                for run in self.store.list_autonomous_runs(
+                    memory_set_id=state["selected_memory_set_id"],
+                    limit=20,
+                )
+            ],
             "pending_intent_candidates": self._list_pending_intent_candidates_for_inspection(
                 state=state,
                 current_time=current_time,
@@ -398,6 +422,7 @@ class ServiceConfigInspectionMixin:
             summary["created_at"] = request_record.get("created_at")
             summary["expires_at"] = request_record.get("expires_at")
             summary["action_id"] = request_record.get("action_id")
+            summary["autonomous_run_id"] = request_record.get("autonomous_run_id")
             summary["goal_summary"] = request_record.get("goal_summary")
             summaries.append(summary)
         summaries.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
@@ -563,6 +588,13 @@ class ServiceConfigInspectionMixin:
     def _background_wake_scheduler_active(self) -> bool:
         with self._runtime_state_lock:
             return self._background_wake_thread is not None and self._background_wake_thread.is_alive()
+
+    def _background_autonomous_run_scheduler_active(self) -> bool:
+        with self._runtime_state_lock:
+            return (
+                self._background_autonomous_run_thread is not None
+                and self._background_autonomous_run_thread.is_alive()
+            )
 
     def _background_memory_postprocess_worker_active(self) -> bool:
         with self._runtime_state_lock:

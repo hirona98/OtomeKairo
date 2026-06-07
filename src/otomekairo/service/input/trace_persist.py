@@ -136,6 +136,9 @@ class ServiceInputTracePersistMixin:
             "result_kind": result_kind,
             "speech": {"text": speech_payload["speech_text"]} if speech_payload else None,
             "capability_request": capability_request_summary if isinstance(capability_request_summary, dict) else None,
+            "autonomous_run": pipeline.get("autonomous_run_summary")
+            if isinstance(pipeline.get("autonomous_run_summary"), dict)
+            else None,
         }
 
     def _persist_cycle_success(

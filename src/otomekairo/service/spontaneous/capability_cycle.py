@@ -59,6 +59,13 @@ class ServiceSpontaneousCapabilityCycleMixin:
         request_record = response.get("request_record")
         if isinstance(request_record, dict) and request_record.get("wait_for_response"):
             return {}
+        if isinstance(request_record, dict) and isinstance(request_record.get("autonomous_run_id"), str):
+            self._start_async_autonomous_capability_result_cycle(
+                state=state,
+                capability_response=response,
+                started_at=accepted_at,
+            )
+            return {}
         self._start_async_capability_result_cycle(
             state=state,
             capability_response=response,
