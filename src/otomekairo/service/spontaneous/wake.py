@@ -58,27 +58,9 @@ class ServiceSpontaneousWakeMixin:
 
     def _wake_assistant_message_target_client_id(self, client_context: dict[str, Any]) -> str | None:
         client_id = self._client_context_text(client_context.get("client_id"), limit=128)
-        if client_id is not None:
+        if client_id is not None and self._event_stream_registry.client_accepts_event(client_id, "assistant_message"):
             return client_id
-
-        wake_observations = client_context.get("wake_observations")
-        if not isinstance(wake_observations, list):
-            return None
-        for observation in wake_observations:
-            if not isinstance(observation, dict) or observation.get("status") != "succeeded":
-                continue
-            if observation.get("capability_id") != "vision.capture":
-                continue
-            vision_source_id = self._client_context_text(observation.get("vision_source_id"), limit=128)
-            if vision_source_id is None:
-                continue
-            vision_source = self._event_stream_registry.get_vision_source(vision_source_id)
-            if not isinstance(vision_source, dict):
-                continue
-            source_client_id = self._client_context_text(vision_source.get("client_id"), limit=128)
-            if source_client_id is not None:
-                return source_client_id
-        return None
+        return self._event_stream_registry.find_single_client_with_event_subscription("assistant_message")
 
     def _execute_wake_cycle(
         self,

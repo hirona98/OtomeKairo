@@ -65,6 +65,7 @@ class ServiceCapabilityMixin:
         state: dict[str, Any],
         current_time: str,
         source_current_input: dict[str, Any],
+        assistant_message_target_client_id: str | None,
         decision: dict[str, Any],
     ) -> dict[str, Any]:
         request_payload = decision.get("capability_request")
@@ -86,6 +87,7 @@ class ServiceCapabilityMixin:
             wait_for_response=False,
             component="Capability",
             source_current_input=source_current_input,
+            assistant_message_target_client_id=assistant_message_target_client_id,
         )
         if result is None:
             raise ValueError("Capability request dispatch failed.")
@@ -102,6 +104,7 @@ class ServiceCapabilityMixin:
         wait_for_response: bool,
         component: str,
         source_current_input: dict[str, Any] | None = None,
+        assistant_message_target_client_id: str | None = None,
         track_ongoing_action: bool = True,
     ) -> dict[str, Any] | None:
         # manifest と input schema を先に確定する。
@@ -167,6 +170,7 @@ class ServiceCapabilityMixin:
             wait_for_response=wait_for_response,
             vision_source=vision_source if isinstance(vision_source, dict) else None,
             source_current_input=source_current_input,
+            assistant_message_target_client_id=assistant_message_target_client_id,
         )
         pending = {
             "event": threading.Event(),
@@ -633,6 +637,7 @@ class ServiceCapabilityMixin:
         wait_for_response: bool,
         vision_source: dict[str, Any] | None = None,
         source_current_input: dict[str, Any] | None = None,
+        assistant_message_target_client_id: str | None = None,
     ) -> dict[str, Any]:
         request_id = f"{capability_id.replace('.', '_')}_request:{uuid.uuid4().hex}"
         expires_at = self._capability_ongoing_action_expires_at(current_time=current_time, timeout_ms=timeout_ms)
@@ -657,6 +662,11 @@ class ServiceCapabilityMixin:
         }
         if isinstance(source_current_input, dict):
             record["source_current_input"] = deepcopy(source_current_input)
+        normalized_assistant_message_target_client_id = self._normalize_capability_client_id(
+            assistant_message_target_client_id
+        )
+        if normalized_assistant_message_target_client_id is not None:
+            record["assistant_message_target_client_id"] = normalized_assistant_message_target_client_id
         if capability_id in {"vision.capture", "camera.ptz"} and isinstance(vision_source, dict):
             source_id = vision_source.get("vision_source_id")
             source_kind = vision_source.get("kind")
@@ -729,6 +739,16 @@ class ServiceCapabilityMixin:
         if isinstance(source_current_input, dict):
             summary["source_current_input"] = deepcopy(source_current_input)
         return summary
+
+    def _request_record_assistant_message_target_client_id(self, request_record: Any) -> str | None:
+        if not isinstance(request_record, dict):
+            return None
+        return self._normalize_capability_client_id(request_record.get("assistant_message_target_client_id"))
+
+    def _normalize_capability_client_id(self, value: Any) -> str | None:
+        if not isinstance(value, str) or not value.strip():
+            return None
+        return value.strip()
 
     def _validate_capability_result_source(
         self,

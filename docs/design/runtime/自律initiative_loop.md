@@ -279,7 +279,10 @@ matrix の共通判定境界は前述の `initiative_context`、LLM とコード
 強い `drive_state` が特定の status family を要求する場合は、対応 state type の鮮度に応じて既存要約または capability を選ぶ。
 鮮度判定は、判断前から存在した foreground `world_state` と、同じ `wake / background_wake` cycle の 起床前観測 から反映された foreground `world_state` を使う。
 再取得抑止に使う `world_state` は、判断前の foreground `world_state` または同じ cycle の 起床前観測 から反映された foreground `world_state` に限定する。
-`wake / background_wake` cycle が `speech` になった場合、server は `assistant_message` event を `source_kind=wake / background_wake` で client へ送る。送信先 client は cycle の client context または 起床前観測 の `vision_source_id` から解決する。
+`wake / background_wake` cycle が `speech` になった場合、server は `assistant_message` event を `source_kind=wake / background_wake` で client へ送る。
+送信先 client は `assistant_message` を購読している client に限定する。
+cycle の client context にある client が `assistant_message` を購読している場合はその client へ送る。
+cycle の client context から決まらない場合、`assistant_message` を購読している接続中 client が 1 件だけのときだけその client へ送る。
 decision contract validation の repair 対象は、契約 shape、capability availability と権限、`fresh_world_state_available=true` の capability request、同じ `vision_source_id` の新鮮な `vision.capture` request、ユーザー入力への応答義務に限定する。
 `speech / noop / pending_intent` の妥当性は LLM decision と decision summary で追跡し、contract validation は契約・実行境界に閉じる。
 `preferred_result_kind=capability_request` は追加観測の提案として扱う。

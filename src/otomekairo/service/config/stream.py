@@ -24,6 +24,7 @@ CAMERA_PTZ_OPERATIONS = {
     "zoom_out",
 }
 CAMERA_PTZ_AMOUNTS = {"small", "medium"}
+EVENT_STREAM_EVENT_SUBSCRIPTIONS = {"assistant_message"}
 
 
 class ServiceConfigStreamMixin:
@@ -47,6 +48,7 @@ class ServiceConfigStreamMixin:
             raise ServiceError(400, "invalid_client_id", "hello.client_id must be a non-empty string.")
         if not isinstance(caps, list):
             raise ServiceError(400, "invalid_caps", "hello.caps must be an array.")
+        event_subscriptions = self._normalize_event_subscriptions(payload.get("event_subscriptions"))
 
         # binding 候補
         manifests = capability_manifests()
@@ -121,6 +123,7 @@ class ServiceConfigStreamMixin:
                 client_id=client_id.strip(),
                 capabilities=accepted_capabilities,
                 rejected_bindings=rejected_bindings,
+                event_subscriptions=event_subscriptions,
                 vision_sources=vision_sources,
             )
         except ValueError as exc:
@@ -130,9 +133,37 @@ class ServiceConfigStreamMixin:
             (
                 f"hello client_id={client_id.strip()} "
                 f"accepted={sorted(accepted_capabilities)} rejected={len(rejected_bindings)} "
+                f"event_subscriptions={event_subscriptions} "
                 f"vision_sources={len(vision_sources)}"
             ),
         )
+
+    def _normalize_event_subscriptions(self, value: Any) -> list[str]:
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise ServiceError(
+                400,
+                "invalid_event_subscriptions",
+                "hello.event_subscriptions must be an array.",
+            )
+        normalized: list[str] = []
+        for item in value:
+            if not isinstance(item, str) or not item.strip():
+                raise ServiceError(
+                    400,
+                    "invalid_event_subscriptions",
+                    "hello.event_subscriptions must contain non-empty strings.",
+                )
+            event_type = item.strip()
+            if event_type not in EVENT_STREAM_EVENT_SUBSCRIPTIONS:
+                raise ServiceError(
+                    400,
+                    "invalid_event_subscriptions",
+                    "hello.event_subscriptions contains unsupported event types.",
+                )
+            normalized.append(event_type)
+        return sorted(set(normalized))
 
     def patch_capability_state(
         self,

@@ -174,6 +174,7 @@ class EventStreamRegistry:
                 "capabilities": {},
                 "permissions": sorted(set(permissions or [])),
                 "rejected_bindings": [],
+                "event_subscriptions": [],
                 "vision_sources": [],
             }
 
@@ -202,10 +203,18 @@ class EventStreamRegistry:
         client_id: str,
         capabilities: dict[str, str],
         rejected_bindings: list[dict[str, Any]],
+        event_subscriptions: list[str] | None = None,
         vision_sources: list[dict[str, Any]] | None = None,
     ) -> None:
         # スナップショット
         replaced_sessions: list[dict[str, Any]] = []
+        normalized_event_subscriptions = sorted(
+            {
+                event_type.strip()
+                for event_type in event_subscriptions or []
+                if isinstance(event_type, str) and event_type.strip()
+            }
+        )
         normalized_vision_sources = [dict(source) for source in vision_sources or []]
         with self._lock:
             session = self._sessions.get(session_id)
@@ -246,6 +255,7 @@ class EventStreamRegistry:
             session["client_id"] = client_id
             session["capabilities"] = dict(capabilities)
             session["rejected_bindings"] = list(rejected_bindings)
+            session["event_subscriptions"] = normalized_event_subscriptions
             session["vision_sources"] = normalized_vision_sources
 
         # 置換済み接続のクローズ
@@ -272,6 +282,44 @@ class EventStreamRegistry:
 
         # 空
         return False
+
+    def client_accepts_event(self, client_id: str, event_type: str) -> bool:
+        # 走査
+        normalized_client_id = client_id.strip()
+        normalized_event_type = event_type.strip()
+        if not normalized_client_id or not normalized_event_type:
+            return False
+        with self._lock:
+            for session in self._sessions.values():
+                if session.get("client_id") != normalized_client_id:
+                    continue
+                event_subscriptions = session.get("event_subscriptions", [])
+                if normalized_event_type in event_subscriptions:
+                    return True
+
+        # 空
+        return False
+
+    def find_single_client_with_event_subscription(self, event_type: str) -> str | None:
+        # event を受け取れる接続中 client 群
+        normalized_event_type = event_type.strip()
+        if not normalized_event_type:
+            return None
+        with self._lock:
+            client_ids = sorted(
+                {
+                    client_id.strip()
+                    for session in self._sessions.values()
+                    if isinstance((client_id := session.get("client_id")), str)
+                    and client_id.strip()
+                    and normalized_event_type in session.get("event_subscriptions", [])
+                }
+            )
+
+        # 1 台だけのときだけ採用する
+        if len(client_ids) != 1:
+            return None
+        return client_ids[0]
 
     def find_single_client_with_capability(self, capability: str) -> str | None:
         # capability を持つ接続中 client 群

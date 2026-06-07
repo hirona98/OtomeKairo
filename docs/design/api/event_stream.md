@@ -33,6 +33,7 @@ client -> server:
       "version": "1"
     }
   ],
+  "event_subscriptions": ["assistant_message"],
   "vision_sources": [
     {
       "vision_source_id": "vision_source:main_display",
@@ -65,6 +66,8 @@ client -> server:
 
 - `client_id` は対象 client の安定識別子である
 - `caps` はその client が現在受けられる capability binding 候補の一覧である
+- `event_subscriptions` はその client が受信して処理する server-driven event の一覧である
+- `assistant_message` を表示できる client だけが `event_subscriptions` に `assistant_message` を入れる
 - `vision_sources` はその client が `vision.capture` で観測できる視覚 source の一覧である
 - capability 識別子は `vision.capture` のような canonical 名を使う
 - `version` は server が持つ `CapabilityManifest` の版と照合する
@@ -90,6 +93,7 @@ event type の分類軸は次に固定する。
 
 - `*_request` は server から client への capability 実行要求である
 - `assistant_message` は server が生成した assistant 発話を client に表示させる通知である
+- server は `event_subscriptions` に `assistant_message` を宣言した client だけへ `assistant_message` を送る
 - `assistant_message.data.source_kind` は発話生成の起点を示し、event type を増やして起点ごとの発話通知を分けない
 - capability result follow-up の発話通知は `assistant_message` に `source_kind=capability_result`、`request_id`、`capability_id` を入れる
 - `wake / background_wake` の発話通知は `assistant_message` に `source_kind=wake / background_wake`、`trigger_kind` を入れる
@@ -255,7 +259,8 @@ server -> client の代表例:
 `vision.capture_request`、`camera.ptz_request`、`external.status_request`、`schedule.status_request`、`device.status_request`、`body.status_request`、`environment.status_request`、`location.status_request`、`social.status_request` は capability 実行要求である。
 `assistant_message` は server が生成した assistant 発話を client へ表示させる通知である。
 `assistant_message.data.source_kind` は `capability_result / wake / background_wake` のいずれかであり、capability result follow-up の場合だけ `request_id / capability_id` を持つ。
-`wake / background_wake` の `assistant_message` は、同じ cycle の client context または 起床前観測 の `vision_source_id` から解決した client へ送る。
+`wake / background_wake` の `assistant_message` は、同じ cycle の client context にある client が `assistant_message` を購読している場合はその client へ送る。
+同じ cycle の client context から決まらない場合、server は `assistant_message` を購読している接続中 client が 1 件だけのときだけその client へ送る。
 capability 実行要求と結果の対応は [実行連携.md](実行連携.md) を正とする。
 
 主な失敗:
@@ -265,3 +270,4 @@ capability 実行要求と結果の対応は [実行連携.md](実行連携.md) 
 | `400` | `invalid_websocket_upgrade` | `Upgrade: websocket` が不正 |
 | `400` | `missing_websocket_key` | `Sec-WebSocket-Key` が無い |
 | `400` | `invalid_websocket_version` | `Sec-WebSocket-Version` が `13` ではない |
+| `400` | `invalid_event_subscriptions` | `hello.event_subscriptions` が不正 |

@@ -162,8 +162,8 @@ def load_config(
         rtsp_transport="tcp",
         rtsp_open_timeout_seconds=8.0,
         jpeg_quality=88,
-        small_move_seconds=0.50,
-        medium_move_seconds=1.0,
+        small_move_seconds=0.4,
+        medium_move_seconds=1.1,
         operation_vectors=dict(DEFAULT_OPERATION_VECTORS),
     )
 
