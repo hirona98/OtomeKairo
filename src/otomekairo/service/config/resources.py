@@ -326,6 +326,119 @@ class ServiceConfigResourcesMixin:
             deleted_key="deleted_model_preset_id",
         )
 
+    def list_camera_sources(self, token: str | None) -> dict[str, Any]:
+        # 認可
+        state = self._require_token(token)
+        camera_sources = self._camera_sources_from_state(state)
+        return {
+            "camera_sources": [
+                self._public_camera_source(camera_source)
+                for camera_source in sorted(
+                    camera_sources.values(),
+                    key=lambda item: str(item.get("vision_source_id") or ""),
+                )
+            ],
+        }
+
+    def get_camera_source(self, token: str | None, vision_source_id: str) -> dict[str, Any]:
+        # 認可
+        state = self._require_token(token)
+        camera_source = self._camera_sources_from_state(state).get(vision_source_id)
+        if camera_source is None:
+            raise ServiceError(404, "camera_source_not_found", "The requested vision_source_id does not exist.")
+        return {
+            "camera_source": self._public_camera_source(camera_source),
+        }
+
+    def replace_camera_source(
+        self,
+        token: str | None,
+        vision_source_id: str,
+        definition: dict[str, Any],
+    ) -> dict[str, Any]:
+        # 認可
+        state = self._require_token(token)
+        camera_sources = self._camera_sources_from_state(state)
+
+        # 正規化と検証
+        stored_definition = self._normalize_camera_source_definition(vision_source_id, definition)
+        self._validate_camera_source_definition(vision_source_id, stored_definition)
+
+        # 永続化
+        camera_sources[vision_source_id] = deepcopy(stored_definition)
+        self.store.write_state(state)
+        return {
+            "camera_source": self._public_camera_source(stored_definition),
+        }
+
+    def delete_camera_source(self, token: str | None, vision_source_id: str) -> dict[str, Any]:
+        # 認可
+        state = self._require_token(token)
+        camera_sources = self._camera_sources_from_state(state)
+        if vision_source_id not in camera_sources:
+            raise ServiceError(404, "camera_source_not_found", "The requested vision_source_id does not exist.")
+
+        # 削除
+        camera_sources.pop(vision_source_id, None)
+        self.store.write_state(state)
+        return {
+            "deleted_vision_source_id": vision_source_id,
+        }
+
+    def get_camera_sources_editor_state(self, token: str | None) -> dict[str, Any]:
+        # 認可
+        state = self._require_token(token)
+        self._append_camera_sources_editor_state_audit_event(state=state, operation="read")
+        return self._build_camera_sources_editor_state(state)
+
+    def replace_camera_sources_editor_state(self, token: str | None, definition: dict[str, Any]) -> dict[str, Any]:
+        # 認可
+        state = self._require_token(token)
+
+        # 入力
+        camera_sources = self._camera_source_entries_by_id(definition.get("camera_sources"))
+        normalized_sources: dict[str, dict[str, Any]] = {}
+        for vision_source_id, camera_source in camera_sources.items():
+            stored_definition = self._normalize_camera_source_definition(vision_source_id, camera_source)
+            self._validate_camera_source_definition(vision_source_id, stored_definition)
+            normalized_sources[vision_source_id] = stored_definition
+
+        # 永続化
+        state["camera_sources"] = normalized_sources
+        self.store.write_state(state)
+        self._append_camera_sources_editor_state_audit_event(state=state, operation="write")
+        return self._build_camera_sources_editor_state(state)
+
+    def get_connector_runtime_config(self, token: str | None, client_id: str) -> dict[str, Any]:
+        # 認可
+        state = self._require_token(token)
+        if not isinstance(client_id, str) or not client_id.strip():
+            raise ServiceError(400, "invalid_connector_client_id", "client_id must be a non-empty string.")
+        normalized_client_id = client_id.strip()
+        camera_sources = [
+            deepcopy(camera_source)
+            for camera_source in self._camera_sources_from_state(state).values()
+            if camera_source.get("client_id") == normalized_client_id and camera_source.get("enabled") is True
+        ]
+        if not camera_sources:
+            raise ServiceError(
+                404,
+                "connector_runtime_config_not_found",
+                "The requested connector runtime config does not exist.",
+            )
+        self._append_connector_runtime_config_audit_event(
+            state=state,
+            client_id=normalized_client_id,
+            camera_source_count=len(camera_sources),
+        )
+        return {
+            "client_id": normalized_client_id,
+            "camera_sources": sorted(
+                camera_sources,
+                key=lambda item: str(item.get("vision_source_id") or ""),
+            ),
+        }
+
     def replace_editor_state(self, token: str | None, definition: dict[str, Any]) -> dict[str, Any]:
         # 認可
         state = self._require_token(token)
@@ -435,6 +548,18 @@ class ServiceConfigResourcesMixin:
             "personas": [deepcopy(value) for value in state["personas"].values()],
             "memory_sets": [deepcopy(value) for value in state["memory_sets"].values()],
             "model_presets": [deepcopy(value) for value in state["model_presets"].values()],
+        }
+
+    def _build_camera_sources_editor_state(self, state: dict[str, Any]) -> dict[str, Any]:
+        camera_sources = self._camera_sources_from_state(state)
+        return {
+            "camera_sources": [
+                deepcopy(value)
+                for value in sorted(
+                    camera_sources.values(),
+                    key=lambda item: str(item.get("vision_source_id") or ""),
+                )
+            ],
         }
 
     def _clear_runtime_state_layers(
@@ -564,6 +689,60 @@ class ServiceConfigResourcesMixin:
             result[entry_id] = entry
         return result
 
+    def _camera_source_entries_by_id(self, entries: Any) -> dict[str, dict[str, Any]]:
+        if not isinstance(entries, list):
+            raise ServiceError(400, "invalid_camera_sources", "camera_sources must be an array.")
+
+        result: dict[str, dict[str, Any]] = {}
+        for entry in entries:
+            if not isinstance(entry, dict):
+                raise ServiceError(400, "invalid_camera_source", "Each camera_source entry must be an object.")
+            vision_source_id = self._camera_source_entry_id(entry, set(result))
+            if vision_source_id in result:
+                raise ServiceError(
+                    400,
+                    "duplicate_camera_source_id",
+                    f"{vision_source_id} is duplicated in camera_sources.",
+                )
+            result[vision_source_id] = entry
+        return result
+
+    def _camera_source_entry_id(self, entry: dict[str, Any], existing_ids: set[str]) -> str:
+        vision_source_id = entry.get("vision_source_id")
+        if isinstance(vision_source_id, str) and vision_source_id.strip():
+            normalized = vision_source_id.strip()
+            if not normalized.startswith("vision_source:"):
+                raise ServiceError(
+                    400,
+                    "invalid_camera_source_field",
+                    "camera_source.vision_source_id must start with vision_source:.",
+                )
+            return normalized
+
+        label = entry.get("label")
+        connection = entry.get("connection")
+        host = connection.get("host") if isinstance(connection, dict) else None
+        source_text = label if isinstance(label, str) and label.strip() else host
+        if not isinstance(source_text, str) or not source_text.strip():
+            raise ServiceError(
+                400,
+                "invalid_camera_source_field",
+                "camera_source requires label or connection.host to generate vision_source_id.",
+            )
+        slug = "".join(
+            character if character.isalnum() or character in "._-" else "_"
+            for character in source_text.strip().lower()
+        ).strip("_")
+        if not slug:
+            slug = "camera"
+        base_id = f"vision_source:camera:{slug}"
+        if base_id not in existing_ids:
+            return base_id
+        index = 2
+        while f"{base_id}_{index}" in existing_ids:
+            index += 1
+        return f"{base_id}_{index}"
+
     def _append_editor_state_audit_event(self, *, state: dict[str, Any], operation: str) -> None:
         # 秘密値を含む editor-state 本文は audit に残さない。
         self.store.append_events(
@@ -581,6 +760,51 @@ class ServiceConfigResourcesMixin:
                     "persona_count": len(state["personas"]),
                     "memory_set_count": len(state["memory_sets"]),
                     "model_preset_count": len(state["model_presets"]),
+                }
+            ]
+        )
+
+    def _append_camera_sources_editor_state_audit_event(self, *, state: dict[str, Any], operation: str) -> None:
+        # 秘密値を含む camera source editor-state 本文は audit に残さない。
+        self.store.append_events(
+            events=[
+                {
+                    "event_id": f"event:config_audit:{uuid.uuid4().hex}",
+                    "cycle_id": "config:camera-sources-editor-state",
+                    "memory_set_id": state["selected_memory_set_id"],
+                    "kind": f"camera_sources_editor_state_{operation}",
+                    "role": "system",
+                    "created_at": self._now_iso(),
+                    "selected_persona_id": state["selected_persona_id"],
+                    "selected_memory_set_id": state["selected_memory_set_id"],
+                    "selected_model_preset_id": state["selected_model_preset_id"],
+                    "camera_source_count": len(self._camera_sources_from_state(state)),
+                }
+            ]
+        )
+
+    def _append_connector_runtime_config_audit_event(
+        self,
+        *,
+        state: dict[str, Any],
+        client_id: str,
+        camera_source_count: int,
+    ) -> None:
+        # 秘密値を含む runtime config 本文は audit に残さない。
+        self.store.append_events(
+            events=[
+                {
+                    "event_id": f"event:config_audit:{uuid.uuid4().hex}",
+                    "cycle_id": "config:connector-runtime-config",
+                    "memory_set_id": state["selected_memory_set_id"],
+                    "kind": "connector_runtime_config_read",
+                    "role": "system",
+                    "created_at": self._now_iso(),
+                    "selected_persona_id": state["selected_persona_id"],
+                    "selected_memory_set_id": state["selected_memory_set_id"],
+                    "selected_model_preset_id": state["selected_model_preset_id"],
+                    "client_id": client_id,
+                    "camera_source_count": camera_source_count,
                 }
             ]
         )
@@ -628,6 +852,32 @@ class ServiceConfigResourcesMixin:
             "api_key_present": bool(definition.get("api_key")),
         }
         public_definition.pop("api_key", None)
+        return public_definition
+
+    def _camera_sources_from_state(self, state: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        camera_sources = state.get("camera_sources")
+        if not isinstance(camera_sources, dict):
+            state["camera_sources"] = {}
+            return state["camera_sources"]
+        return camera_sources
+
+    def _camera_source_is_enabled(self, vision_source_id: str) -> bool:
+        state = self.store.read_state()
+        camera_sources = state.get("camera_sources")
+        if not isinstance(camera_sources, dict):
+            return False
+        camera_source = camera_sources.get(vision_source_id)
+        return isinstance(camera_source, dict) and camera_source.get("enabled") is True
+
+    def _public_camera_source(self, definition: dict[str, Any]) -> dict[str, Any]:
+        public_definition = deepcopy(definition)
+        connection = public_definition.get("connection")
+        if isinstance(connection, dict):
+            public_definition["connection"] = {
+                "host_present": bool(connection.get("host")),
+                "camera_username_present": bool(connection.get("camera_username")),
+                "camera_password_present": bool(connection.get("camera_password")),
+            }
         return public_definition
 
     def _delete_resource(

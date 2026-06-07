@@ -56,12 +56,67 @@ class ServiceInputWakeObservationMixin:
             return []
         observations = wake_policy.get("observations")
         if not isinstance(observations, list):
-            return []
-        return [
+            observations = []
+        enabled_observations = [
             observation
             for observation in observations
             if isinstance(observation, dict) and observation.get("enabled") is True
         ]
+        return enabled_observations + self._enabled_camera_source_wake_observations(
+            state=state,
+            existing_observations=enabled_observations,
+        )
+
+    def _enabled_camera_source_wake_observations(
+        self,
+        *,
+        state: dict[str, Any],
+        existing_observations: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        observed_source_ids: set[str] = set()
+        for observation in existing_observations:
+            input_payload = observation.get("input")
+            if not isinstance(input_payload, dict):
+                continue
+            vision_source_id = input_payload.get("vision_source_id")
+            if isinstance(vision_source_id, str) and vision_source_id.strip():
+                observed_source_ids.add(vision_source_id.strip())
+
+        camera_sources = state.get("camera_sources")
+        if not isinstance(camera_sources, dict):
+            return []
+        dynamic_observations: list[dict[str, Any]] = []
+        for camera_source in sorted(
+            camera_sources.values(),
+            key=lambda item: str(item.get("vision_source_id") or "") if isinstance(item, dict) else "",
+        ):
+            if not isinstance(camera_source, dict) or camera_source.get("enabled") is not True:
+                continue
+            vision_source_id = camera_source.get("vision_source_id")
+            if not isinstance(vision_source_id, str) or not vision_source_id.strip():
+                continue
+            normalized_source_id = vision_source_id.strip()
+            if normalized_source_id in observed_source_ids:
+                continue
+            dynamic_observations.append(
+                {
+                    "observation_id": self._camera_source_wake_observation_id(normalized_source_id),
+                    "enabled": True,
+                    "capability_id": "vision.capture",
+                    "input": {
+                        "vision_source_id": normalized_source_id,
+                        "mode": "still",
+                    },
+                }
+            )
+        return dynamic_observations
+
+    def _camera_source_wake_observation_id(self, vision_source_id: str) -> str:
+        slug = "".join(
+            character if character.isalnum() or character in "._-" else "_"
+            for character in vision_source_id
+        ).strip("_")
+        return f"wake_observation:{slug or 'camera'}"
 
     def _run_wake_policy_observation(
         self,

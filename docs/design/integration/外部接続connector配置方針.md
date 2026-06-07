@@ -21,6 +21,8 @@ connector 実装を `src/otomekairo/` 配下へ入れない。
 外部接続 connector は capability manifest を定義しない。
 connector は `hello.caps` と必要な source metadata を送る。
 server は既知の manifest、binding、state、権限から availability と dispatch 先を決める。
+camera connector は機器接続に必要な host と camera account を OtomeKairo の runtime config API から取得する。
+camera connector は host と camera account をローカル設定の正本として持たない。
 
 ## repository 配置
 
@@ -51,11 +53,11 @@ OpenCV、デバイス SDK、外部サービス SDK、OS 固有ライブラリは
 
 Webカメラは新しい capability id として定義しない。
 Webカメラは `vision.capture` の `VisionSource(kind=camera)` として登録する。
-camera source は OtomeKairo の視覚なので、採用した camera source は `source_owner=self` とし、`wake_policy.observations` に含める。
+camera source は OtomeKairo の視覚なので、採用した camera source は `source_owner=self` とし、`camera_source.enabled=true` のとき定期起床処理の観測対象に含める。
 
 Webカメラ connector は、server から `vision.capture_request` を受けたときだけ still image を 1 枚取得する。
 connector は常時録画、常時監視、独自周期での撮影を行わない。
-定期観測は server の `wake_policy.observations` から `vision.capture` として発行する。
+定期観測は server の定期起床処理が有効な camera source を解決し、`vision.capture` として発行する。
 制御可能な camera の pan / tilt / zoom は `camera.ptz` として扱う。
 `camera.ptz` の意味境界は [../capability/camera_ptz.md](../capability/camera_ptz.md) を正とする。
 privacy mode は connector capability として実装しない。
@@ -85,7 +87,7 @@ Webカメラ connector の hello は次の形を基準にする。
 ```
 
 `vision_source_id` は server 内で一意にする。
-複数の Webカメラを扱う場合は、`vision_source_id`、`label`、`aliases` を connector 設定で明示的に分ける。
+複数の Webカメラを扱う場合は、`vision_source_id` と `label` を `camera_source` 設定定義で明示的に分ける。
 source が一意に定まらない状態で connector は登録しない。
 固定 Webカメラのように向きや画角を制御できない source は `supported_controls` を出さない。
 
@@ -129,14 +131,17 @@ C220 connector の hello は次の形を基準にする。
 
 C220 の capture backend は `rtsp`、control backend は `onvif` を初期基準にする。
 connector は `vision.capture_request` では RTSP から still image を 1 枚取得し、`camera.ptz_request` では `operation / amount` を ONVIF `ContinuousMove` と `Stop` へ変換する。
-`operation` は現在の映像に対する相対方向として扱い、ONVIF の座標符号と設置向きの対応は connector 設定で吸収する。
+`operation` は現在の映像に対する相対方向として扱い、ONVIF の座標符号と設置向きの対応は connector 実装の既定値で吸収する。
 C220 connector の初期 `operation_vectors` は実機で確認した ONVIF `ContinuousMove` の符号に合わせる。
-ONVIF port、移動時間、設置向きの対応は connector 設定で持ち、pan / tilt velocity は `1.0` に固定する。
+ONVIF port、移動時間、設置向きの対応は connector 実装の既定値で扱う。
+pan / tilt velocity は `1.0` に固定する。
 server、decision view、inspection へ角度や生 API 名を出さない。
 C220 は物理ズームと ONVIF Zoom capability を持たないため、zoom 操作を `supported_controls` に含めない。
 
-C220 の host、camera account、connector token は connector のローカル設定または環境変数で扱う。
-これらの値を repository、docs のサンプル、debug log、inspection、capability result に保存しない。
+C220 の host と camera account は OtomeKairo の `camera_source` 設定定義で保持する。
+connector は起動時に `GET /api/config/connectors/{client_id}/runtime-config` を呼び、自分に割り当てられた C220 の runtime config を取得する。
+OtomeKairo access token は現行 API の `console_access_token` とし、connector のローカル設定または環境変数で扱う。
+host、camera account、OtomeKairo access token を repository、docs のサンプル、debug log、inspection、capability result に保存しない。
 privacy mode、録画、検知設定、アラーム、再起動は C220 connector の OtomeKairo capability として実装しない。
 失敗時は `camera.ptz` result に `status=failed` と短い `error` を返す。
 
@@ -164,7 +169,8 @@ connector は次を担わない。
 
 ## 設定と秘密情報
 
-connector の設定は connector package 内の設定ファイルまたは環境変数で扱う。
+connector のローカル設定は server URL、OtomeKairo access token、TLS 検証、再接続間隔、`client_id` など、OtomeKairo へ接続するための項目に限定する。
+camera connector の host と camera account は OtomeKairo 本体の `camera_source` 設定定義で扱う。
 `config.example.json` には秘密値を入れない。
 実 token、API key、password、内部 URL の秘密部分を repository に保存しない。
 

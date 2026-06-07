@@ -14,8 +14,14 @@ OtomeKairo server 本体へ C220 固有依存を入れない。
 
 ## 設定
 
-`config.example.json` を元にローカル設定を作る。
-秘密値は環境変数で渡す。
+OtomeKairo 側に `camera_source` を登録する。
+通常は CocoroConsole の camera source 設定画面から登録する。
+API で登録する場合は `PUT /api/config/camera-sources/{vision_source_id}` を使う。
+CocoroConsole では有効/無効、識別名、IP address または hostname、camera account だけを設定する。
+RTSP / ONVIF / PTZ の詳細値は connector 実装の既定値として扱う。
+
+connector のローカル設定には OtomeKairo への接続情報と `client_id` だけを置く。
+OtomeKairo access token は環境変数で渡す。
 
 ```bash
 cd connectors/tapo_c220
@@ -24,27 +30,26 @@ python3 -m venv .venv
 cp config.example.json config.local.json
 
 export OTOMEKAIRO_ACCESS_TOKEN="..."
-export TAPO_C220_HOST="192.168.1.52"
-export TAPO_C220_CAMERA_USERNAME="..."
-export TAPO_C220_CAMERA_PASSWORD="..."
 ```
 
-`TAPO_C220_CAMERA_USERNAME / TAPO_C220_CAMERA_PASSWORD` は C220 の camera account である。
-connector は同じ camera account を ONVIF control と RTSP capture に使う。
-C220 の ONVIF port は `camera.onvif_port` で指定し、初期値は `2020` とする。
-`host`、camera account、connector token は repository、sample、通常ログ、result に保存しない。
+`OTOMEKAIRO_ACCESS_TOKEN` には現行 API の `console_access_token` を設定する。
+C220 の camera account は OtomeKairo の `camera_source.connection` に保存する。
+connector は起動時に `GET /api/config/connectors/{client_id}/runtime-config` から runtime config を取得し、同じ camera account を ONVIF control と RTSP capture に使う。
+C220 の ONVIF port は connector 実装の既定値 `2020` とする。
+`host`、camera account、OtomeKairo access token は repository、sample、通常ログ、result に保存しない。
 
 `operation_vectors` は ONVIF `PanTilt` velocity へ掛ける向きベクトルである。
 `move_up / move_down / move_left / move_right` は現在の映像に対する相対方向である。
-`config.example.json` の `operation_vectors` は C220 実機で確認した ONVIF `ContinuousMove` の符号に合わせる。
-設置向きや ONVIF 座標符号が映像上の向きと合わない場合は、`config.local.json` の `operation_vectors` を変更する。
+初期値の `operation_vectors` は C220 実機で確認した ONVIF `ContinuousMove` の符号に合わせる。
+設置向きや ONVIF 座標符号が映像上の向きと合わない場合は、connector 実装の既定値を変更する。
 ONVIF へ渡す移動速度は connector 実装で `1.0` に固定する。
-`small_move_seconds / medium_move_seconds` は `amount` から連続移動時間へ変換する connector 内部設定であり、server、decision view、inspection へ出さない。
+`small_move_seconds / medium_move_seconds` は `amount` から連続移動時間へ変換する connector 既定値であり、decision view、inspection、capability request、capability result へ出さない。
 C220 は物理ズームと ONVIF Zoom capability を持たないため、`zoom_in / zoom_out` を source metadata に出さない。
 
 ## 実行
 
 hello payload を確認する。
+このコマンドは OtomeKairo から runtime config を取得する。
 
 ```bash
 .venv/bin/python -m otomekairo_tapo_c220_connector --config config.local.json --print-hello
@@ -52,6 +57,7 @@ hello payload を確認する。
 
 実機への疎通を確認する。
 この確認は ONVIF PTZ capability と RTSP still capture だけを実行し、camera を動かさない。
+このコマンドも OtomeKairo から runtime config を取得する。
 
 ```bash
 .venv/bin/python -m otomekairo_tapo_c220_connector --config config.local.json --check-device
@@ -77,8 +83,8 @@ hello で送る source metadata は次の形に固定する。
   "kind": "camera",
   "source_owner": "self",
   "label": "C220",
-  "aliases": ["カメラ", "部屋のカメラ", "C220"],
-  "default_for": ["visual", "camera"],
+  "aliases": ["C220"],
+  "default_for": ["camera"],
   "required_permissions": ["observe_vision", "observe_camera"],
   "supported_controls": {
     "camera.ptz": {

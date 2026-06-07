@@ -16,7 +16,7 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        config = load_config(args.config, require_runtime_secrets=not args.print_hello)
+        config = load_config(args.config)
         connector = TapoC220Connector(config)
         if args.print_hello:
             connector.print_hello()

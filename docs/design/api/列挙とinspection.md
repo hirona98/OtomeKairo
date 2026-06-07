@@ -299,14 +299,14 @@ response:
 | `dispatch_failed` | 直近の配送失敗により一時的に実行不可である |
 | `request_timeout` | 直近の result timeout により一時的に実行不可である |
 | `parallel_blocked` | 並列実行制限により実行不可である |
-| `missing_wake_observation` | 採用済み camera source に対応する enabled `wake_policy.observations` がない |
+| `camera_source_disabled` | 採用済み camera source が無効である |
 
 `readiness` は manifest 由来の family 前提条件であり、`family / world_state_type / input_keys / result_summary_keys / result_item_keys` を持つ。
 `readiness` は token、credential、内部 URL、transport 詳細を含まない。
 `vision_sources[].supported_controls` は source が advertised した action capability の対応操作だけを返す。
 `supported_controls` は credential、内部 URL、機器 API 名、角度を含まない。
-`kind=camera` かつ `source_owner=self` の source は、対応する `wake_observation` を返す。
-対応する enabled observation が無い場合、`wake_observation.enabled=false` とし、source または capability の `unavailable_reason` に `missing_wake_observation` を出す。
+`kind=camera` かつ `source_owner=self` の source は、対応する `camera_source_status` を返す。
+対応する camera source が無効の場合、source または capability の `unavailable_reason` に `camera_source_disabled` を出す。
 
 `binding.status` は次のいずれかである。
 

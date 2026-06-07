@@ -383,6 +383,12 @@ class ServiceCapabilityMixin:
         vision_source = self._event_stream_registry.get_vision_source(vision_source_id.strip())
         if not isinstance(vision_source, dict):
             raise ValueError(f"Capability is unavailable: vision.capture no_binding {vision_source_id.strip()}")
+        if (
+            vision_source.get("kind") == "camera"
+            and vision_source.get("source_owner") == "self"
+            and not self._camera_source_is_enabled(vision_source_id.strip())
+        ):
+            raise ValueError(f"Capability is unavailable: vision.capture camera_source_disabled {vision_source_id.strip()}")
         client_id = vision_source.get("client_id")
         if not isinstance(client_id, str) or not client_id.strip():
             raise ValueError(f"Capability is unavailable: vision.capture no_binding {vision_source_id.strip()}")
@@ -408,8 +414,8 @@ class ServiceCapabilityMixin:
             raise ValueError(f"Capability is unavailable: camera.ptz source_not_camera {normalized_source_id}")
         if vision_source.get("source_owner") != "self":
             raise ValueError(f"Capability is unavailable: camera.ptz source_not_self {normalized_source_id}")
-        if not self._camera_ptz_source_has_enabled_wake_observation(normalized_source_id):
-            raise ValueError(f"Capability is unavailable: camera.ptz missing_wake_observation {normalized_source_id}")
+        if not self._camera_source_is_enabled(normalized_source_id):
+            raise ValueError(f"Capability is unavailable: camera.ptz camera_source_disabled {normalized_source_id}")
         control = self._camera_ptz_source_control(vision_source)
         if control is None:
             raise ValueError(f"Capability is unavailable: camera.ptz no_supported_control {normalized_source_id}")
@@ -449,24 +455,6 @@ class ServiceCapabilityMixin:
             "operations": operations,
             "amounts": amounts,
         }
-
-    def _camera_ptz_source_has_enabled_wake_observation(self, vision_source_id: str) -> bool:
-        state = self.store.read_state()
-        wake_policy = state.get("wake_policy")
-        observations = wake_policy.get("observations") if isinstance(wake_policy, dict) else None
-        if not isinstance(observations, list):
-            return False
-        for observation in observations:
-            if not isinstance(observation, dict) or observation.get("enabled") is not True:
-                continue
-            if observation.get("capability_id") != "vision.capture":
-                continue
-            input_payload = observation.get("input")
-            if not isinstance(input_payload, dict):
-                continue
-            if input_payload.get("vision_source_id") == vision_source_id:
-                return True
-        return False
 
     def _select_capability_target_client(self, *, capability_id: str) -> str:
         bindings = self._event_stream_registry.list_capability_bindings()

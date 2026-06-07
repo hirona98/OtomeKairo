@@ -7,29 +7,6 @@
     "reconnect_delay_seconds": 5
   },
   "connector": {
-    "client_id": "tapo-c220-connector-main",
-    "vision_source_id": "vision_source:tapo_c220_main",
-    "label": "C220",
-    "aliases": ["カメラ", "部屋のカメラ", "C220"],
-    "default_for": ["visual", "camera"]
-  },
-  "camera": {
-    "host_env": "TAPO_C220_HOST",
-    "camera_username_env": "TAPO_C220_CAMERA_USERNAME",
-    "camera_password_env": "TAPO_C220_CAMERA_PASSWORD",
-    "onvif_port": 2020,
-    "rtsp_port": 554,
-    "rtsp_path": "stream1",
-    "rtsp_transport": "tcp",
-    "rtsp_open_timeout_seconds": 8,
-    "jpeg_quality": 88,
-    "small_move_seconds": 0.2,
-    "medium_move_seconds": 0.55,
-    "operation_vectors": {
-      "move_up": [0, 1],
-      "move_down": [0, -1],
-      "move_left": [1, 0],
-      "move_right": [-1, 0]
-    }
+    "client_id": "tapo-c220-connector-main"
   }
 }

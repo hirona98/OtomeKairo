@@ -5,7 +5,9 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
+
+from .http import HttpError, JsonApiClient
 
 
 SUPPORTED_OPERATIONS = ("move_up", "move_down", "move_left", "move_right")
@@ -96,13 +98,11 @@ def load_config(
     path: Path | None,
     *,
     environ: Mapping[str, str] | None = None,
-    require_runtime_secrets: bool = True,
 ) -> AppConfig:
     env = environ if environ is not None else os.environ
     raw = _read_json_config(path)
     server = _object(raw.get("server", {}), "server")
     connector = _object(raw.get("connector", {}), "connector")
-    camera = _object(raw.get("camera", {}), "camera")
 
     server_config = ServerConfig(
         base_url=_normalize_base_url(
@@ -114,59 +114,50 @@ def load_config(
             "access_token_env",
             default_env="OTOMEKAIRO_ACCESS_TOKEN",
             environ=env,
-            required=require_runtime_secrets,
+            required=True,
         ),
         tls_verify=_bool_value(server, "tls_verify", default=False),
         request_timeout_seconds=_positive_float(server, "request_timeout_seconds", default=10.0),
         reconnect_delay_seconds=_positive_float(server, "reconnect_delay_seconds", default=5.0),
     )
 
+    client_id = _string_value(connector, "client_id", default="tapo-c220-connector-main")
+    runtime_source = _fetch_runtime_camera_source(server_config=server_config, client_id=client_id)
+    if runtime_source.get("enabled") is not True:
+        raise ConfigError("runtime camera_source.enabled must be true.")
+    label = _required_string(runtime_source, "label", "runtime camera_source.label")
     connector_config = ConnectorConfig(
-        client_id=_string_value(connector, "client_id", default="tapo-c220-connector-main"),
+        client_id=client_id,
         vision_source_id=_vision_source_id(
-            _string_value(connector, "vision_source_id", default="vision_source:tapo_c220_main")
+            _required_string(runtime_source, "vision_source_id", "runtime camera_source.vision_source_id")
         ),
-        label=_string_value(connector, "label", default="C220"),
-        aliases=_string_list(connector, "aliases", default=["camera", "C220"]),
-        default_for=_string_list(connector, "default_for", default=["visual", "camera"]),
+        label=label,
+        aliases=[label],
+        default_for=["camera"],
     )
 
-    camera_username = _secret_value(
-        camera,
-        "camera_username",
-        "camera_username_env",
-        default_env="TAPO_C220_CAMERA_USERNAME",
-        environ=env,
-        required=require_runtime_secrets,
-    )
-    camera_password = _secret_value(
-        camera,
-        "camera_password",
-        "camera_password_env",
-        default_env="TAPO_C220_CAMERA_PASSWORD",
-        environ=env,
-        required=require_runtime_secrets,
-    )
+    connection = _object(runtime_source.get("connection"), "runtime camera_source.connection")
     camera_config = CameraConfig(
-        host=_secret_value(
-            camera,
-            "host",
-            "host_env",
-            default_env="TAPO_C220_HOST",
-            environ=env,
-            required=require_runtime_secrets,
+        host=_required_string(connection, "host", "runtime camera_source.connection.host"),
+        camera_username=_required_string(
+            connection,
+            "camera_username",
+            "runtime camera_source.connection.camera_username",
         ),
-        camera_username=camera_username,
-        camera_password=camera_password,
-        onvif_port=_port_value(camera, "onvif_port", default=2020),
-        rtsp_port=_port_value(camera, "rtsp_port", default=554),
-        rtsp_path=_rtsp_path(_string_value(camera, "rtsp_path", default="stream1")),
-        rtsp_transport=_rtsp_transport(_string_value(camera, "rtsp_transport", default="tcp")),
-        rtsp_open_timeout_seconds=_positive_float(camera, "rtsp_open_timeout_seconds", default=8.0),
-        jpeg_quality=_int_range(camera, "jpeg_quality", default=88, minimum=1, maximum=95),
-        small_move_seconds=_positive_float(camera, "small_move_seconds", default=0.20),
-        medium_move_seconds=_positive_float(camera, "medium_move_seconds", default=0.55),
-        operation_vectors=_operation_vectors(camera.get("operation_vectors", DEFAULT_OPERATION_VECTORS)),
+        camera_password=_required_string(
+            connection,
+            "camera_password",
+            "runtime camera_source.connection.camera_password",
+        ),
+        onvif_port=2020,
+        rtsp_port=554,
+        rtsp_path="stream1",
+        rtsp_transport="tcp",
+        rtsp_open_timeout_seconds=8.0,
+        jpeg_quality=88,
+        small_move_seconds=0.20,
+        medium_move_seconds=0.55,
+        operation_vectors=dict(DEFAULT_OPERATION_VECTORS),
     )
 
     return AppConfig(server=server_config, connector=connector_config, camera=camera_config)
@@ -187,6 +178,30 @@ def _read_json_config(path: Path | None) -> dict[str, Any]:
     return payload
 
 
+def _fetch_runtime_camera_source(*, server_config: ServerConfig, client_id: str) -> dict[str, Any]:
+    client = JsonApiClient(
+        base_url=server_config.base_url,
+        access_token=server_config.access_token,
+        tls_verify=server_config.tls_verify,
+        timeout_seconds=server_config.request_timeout_seconds,
+    )
+    try:
+        data = client.get(f"/api/config/connectors/{quote(client_id, safe='')}/runtime-config")
+    except HttpError as exc:
+        raise ConfigError(f"runtime config fetch failed: {exc}") from exc
+    sources = data.get("camera_sources")
+    if not isinstance(sources, list):
+        raise ConfigError("runtime config camera_sources must be an array.")
+    tapo_sources = [
+        source
+        for source in sources
+        if isinstance(source, dict) and source.get("connector_kind") == "tapo_c220"
+    ]
+    if len(tapo_sources) != 1:
+        raise ConfigError("runtime config must contain exactly one tapo_c220 camera_source for this client_id.")
+    return tapo_sources[0]
+
+
 def _object(value: Any, label: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ConfigError(f"{label} must be an object.")
@@ -204,6 +219,13 @@ def _string_value(section: dict[str, Any], key: str, *, default: str) -> str:
     value = section.get(key, default)
     if not isinstance(value, str) or not value.strip():
         raise ConfigError(f"{key} must be a non-empty string.")
+    return value.strip()
+
+
+def _required_string(section: dict[str, Any], key: str, label: str) -> str:
+    value = section.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError(f"{label} must be a non-empty string.")
     return value.strip()
 
 
@@ -245,34 +267,6 @@ def _positive_float(section: dict[str, Any], key: str, *, default: float) -> flo
     return float(value)
 
 
-def _int_range(section: dict[str, Any], key: str, *, default: int, minimum: int, maximum: int) -> int:
-    value = section.get(key, default)
-    if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
-        raise ConfigError(f"{key} must be an integer between {minimum} and {maximum}.")
-    return value
-
-
-def _port_value(section: dict[str, Any], key: str, *, default: int) -> int:
-    return _int_range(section, key, default=default, minimum=1, maximum=65535)
-
-
-def _string_list(section: dict[str, Any], key: str, *, default: list[str]) -> list[str]:
-    value = section.get(key, default)
-    if not isinstance(value, list):
-        raise ConfigError(f"{key} must be an array.")
-    normalized: list[str] = []
-    seen: set[str] = set()
-    for item in value:
-        if not isinstance(item, str) or not item.strip():
-            raise ConfigError(f"{key} must contain non-empty strings.")
-        text = item.strip()
-        if text in seen:
-            continue
-        seen.add(text)
-        normalized.append(text)
-    return normalized
-
-
 def _vision_source_id(value: str) -> str:
     if not value.startswith("vision_source:"):
         raise ConfigError("vision_source_id must start with vision_source:.")
@@ -286,36 +280,3 @@ def _normalize_base_url(value: str) -> str:
     if not parsed.hostname:
         raise ConfigError("server.base_url must include host.")
     return value.rstrip("/")
-
-
-def _rtsp_path(value: str) -> str:
-    path = value.strip().lstrip("/")
-    if not path:
-        raise ConfigError("rtsp_path must be a non-empty path.")
-    return path
-
-
-def _rtsp_transport(value: str) -> str:
-    normalized = value.strip().lower()
-    if normalized not in {"tcp", "udp"}:
-        raise ConfigError("rtsp_transport must be tcp or udp.")
-    return normalized
-
-
-def _operation_vectors(value: Any) -> dict[str, tuple[float, float]]:
-    if not isinstance(value, dict):
-        raise ConfigError("operation_vectors must be an object.")
-    vectors: dict[str, tuple[float, float]] = {}
-    for operation in SUPPORTED_OPERATIONS:
-        raw_vector = value.get(operation)
-        if not isinstance(raw_vector, list | tuple) or len(raw_vector) != 2:
-            raise ConfigError(f"operation_vectors.{operation} must be an array of two numbers.")
-        x, y = raw_vector
-        if isinstance(x, bool) or isinstance(y, bool) or not isinstance(x, int | float) or not isinstance(y, int | float):
-            raise ConfigError(f"operation_vectors.{operation} must contain numbers.")
-        if not -1.0 <= float(x) <= 1.0 or not -1.0 <= float(y) <= 1.0:
-            raise ConfigError(f"operation_vectors.{operation} values must be between -1.0 and 1.0.")
-        if x == 0 and y == 0:
-            raise ConfigError(f"operation_vectors.{operation} must not be [0, 0].")
-        vectors[operation] = (float(x), float(y))
-    return vectors

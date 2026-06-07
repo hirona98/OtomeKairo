@@ -29,17 +29,25 @@ class JsonApiClient:
             self.ssl_context.verify_mode = ssl.CERT_NONE
 
     def post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", path, payload)
+
+    def get(self, path: str) -> dict[str, Any]:
+        return self._request("GET", path, None)
+
+    def _request(self, method: str, path: str, payload: dict[str, Any] | None) -> dict[str, Any]:
         url = f"{self.base_url}{path}"
-        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8") if payload is not None else None
+        headers = {
+            "Accept": "application/json",
+            "Authorization": f"Bearer {self.access_token}",
+        }
+        if payload is not None:
+            headers["Content-Type"] = "application/json"
         request = urllib.request.Request(
             url=url,
             data=body,
-            method="POST",
-            headers={
-                "Accept": "application/json",
-                "Authorization": f"Bearer {self.access_token}",
-                "Content-Type": "application/json",
-            },
+            method=method,
+            headers=headers,
         )
         try:
             with urllib.request.urlopen(
@@ -53,22 +61,22 @@ class JsonApiClient:
             status_code = int(exc.code)
             raw_body = exc.read().decode("utf-8", errors="replace")
         except urllib.error.URLError as exc:
-            raise HttpError(f"POST {path} failed: {exc.reason}") from exc
+            raise HttpError(f"{method} {path} failed: {exc.reason}") from exc
 
         try:
             envelope = json.loads(raw_body)
         except json.JSONDecodeError as exc:
-            raise HttpError(f"POST {path} returned invalid JSON.") from exc
+            raise HttpError(f"{method} {path} returned invalid JSON.") from exc
         if not isinstance(envelope, dict):
-            raise HttpError(f"POST {path} returned a non-object envelope.")
+            raise HttpError(f"{method} {path} returned a non-object envelope.")
         if status_code >= 400 or envelope.get("ok") is not True:
             error = envelope.get("error")
             if isinstance(error, dict):
                 code = error.get("code")
                 message = error.get("message")
-                raise HttpError(f"POST {path} failed: HTTP {status_code} {code}: {message}")
-            raise HttpError(f"POST {path} failed: HTTP {status_code}")
+                raise HttpError(f"{method} {path} failed: HTTP {status_code} {code}: {message}")
+            raise HttpError(f"{method} {path} failed: HTTP {status_code}")
         data = envelope.get("data")
         if not isinstance(data, dict):
-            raise HttpError(f"POST {path} returned a non-object data payload.")
+            raise HttpError(f"{method} {path} returned a non-object data payload.")
         return data
