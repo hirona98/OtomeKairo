@@ -42,7 +42,11 @@ class ServiceInputTracePersistMixin:
         if not isinstance(followup_capability_request_summary, dict):
             followup_capability_request_summary = None
         internal_result_kind = decision["kind"]
-        result_kind = self._external_result_kind(internal_result_kind)
+        result_kind = self._external_result_kind(
+            internal_result_kind,
+            speech_payload=speech_payload,
+            capability_request_summary=capability_request_summary,
+        )
         finished_at = self._now_iso()
         pending_intent_summary = self._apply_pending_intent_candidate(
             cycle_id=cycle_id,

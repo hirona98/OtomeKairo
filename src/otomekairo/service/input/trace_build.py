@@ -88,9 +88,21 @@ class ServiceInputTraceBuildMixin:
         # 要約
         return "候補収集後に recall_pack_selection で採否を絞り、件数上限と dedupe を優先した。"
 
-    def _external_result_kind(self, internal_result_kind: str) -> str:
-        # マッピング
+    def _external_result_kind(
+        self,
+        internal_result_kind: str,
+        *,
+        speech_payload: dict[str, Any] | None = None,
+        capability_request_summary: dict[str, Any] | None = None,
+    ) -> str:
+        # 外向き結果は内部判断ではなく、HTTP response で返す主 payload に合わせる。
         if internal_result_kind == "pending_intent":
+            return "noop"
+        if internal_result_kind == "autonomous_run":
+            if isinstance(speech_payload, dict):
+                return "speech"
+            if isinstance(capability_request_summary, dict):
+                return "capability_request"
             return "noop"
         return internal_result_kind
 

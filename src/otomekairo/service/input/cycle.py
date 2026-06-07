@@ -225,4 +225,5 @@ class ServiceInputCycleMixin:
             "result_kind": "internal_failure",
             "speech": None,
             "capability_request": None,
+            "autonomous_run": None,
         }

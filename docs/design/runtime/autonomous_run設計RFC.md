@@ -77,7 +77,9 @@ run の次の一手は `autonomous_step_generation` が決める。
 }
 ```
 
+`action` は常に `kind / capability_request / speech` の 3 キーを持つ。
 `action.kind` は `capability_request / speech / none` のいずれかである。
+使わない `capability_request` と `speech` は `null` にする。
 `transition.kind` は `continue / wait_until / complete / cancel` のいずれかである。
 `wait_until` は `next_run_at` を必ず持つ。
 `capability_request` action は `transition.kind=continue` に固定する。
