@@ -21,18 +21,19 @@ CocoroConsole では有効/無効、識別名、IP address または hostname、
 RTSP / ONVIF / PTZ の詳細値は connector 実装の既定値として扱う。
 
 connector のローカル設定には OtomeKairo への接続情報と `client_id` だけを置く。
-OtomeKairo access token は環境変数で渡す。
+OtomeKairo access token は、明示設定、ローカル server state、bootstrap の順に connector が解決する。
 
 ```bash
 cd connectors/tapo_c220
 python3 -m venv .venv
 .venv/bin/pip install -e .
 cp config.example.json config.local.json
-
-export OTOMEKAIRO_ACCESS_TOKEN="..."
 ```
 
-`OTOMEKAIRO_ACCESS_TOKEN` には現行 API の `console_access_token` を設定する。
+明示 token が必要な場合は、`OTOMEKAIRO_ACCESS_TOKEN` に現行 API の `console_access_token` を設定する。
+通常は同一 PC 内の `server_state.json` から `console_access_token` を読み取る。
+`console_access_token` が未発行の場合は bootstrap API で初回発行する。
+connector を repository 外から起動する場合は、`server.data_dir` または `server.state_path` で OtomeKairo の local state を指定する。
 C220 の camera account は OtomeKairo の `camera_source.connection` に保存する。
 connector は起動時に `GET /api/config/connectors/{client_id}/runtime-config` から runtime config を取得し、同じ camera account を ONVIF control と RTSP capture に使う。
 C220 の ONVIF port は connector 実装の既定値 `2020` とする。
@@ -68,6 +69,24 @@ connector を起動する。
 ```bash
 .venv/bin/python -m otomekairo_tapo_c220_connector --config config.local.json
 ```
+
+## VSCode F5 debug
+
+workspace root の VSCode F5 は OtomeKairo server と Tapo C220 connector を compound debug で同時起動する。
+停止ボタンは server と connector の両方を停止する。
+
+F5 debug でも通常起動と同じ token 解決を使う。
+token は launch 設定、コード、通常ログへ保存しない。
+
+F5 debug でローカル上書きが必要な場合だけ、`connectors/tapo_c220/.env` に token を設定する。
+`.env` は repository に含めない。
+
+```bash
+OTOMEKAIRO_ACCESS_TOKEN=...
+```
+
+F5 debug の connector は `https://127.0.0.1:55601` の server 起動を待ってから runtime config を取得する。
+camera source は CocoroConsole の camera source 設定画面で登録し、`enabled=true`、`connector_kind=tapo_c220`、`client_id=tapo-c220-connector-main` にする。
 
 server のローカル開発 TLS 証明書を使う場合、`server.tls_verify=false` のまま使う。
 実運用の信頼済み証明書を使う場合、`server.tls_verify=true` にする。

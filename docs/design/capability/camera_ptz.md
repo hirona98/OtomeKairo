@@ -176,7 +176,9 @@ connector は `camera.ptz_request` の `operation / amount` を ONVIF `Continuou
 ONVIF へ渡す pan / tilt velocity は `1.0` に固定する。
 
 C220 の host と camera account は OtomeKairo の `camera_source` 設定定義で保持する。
-OtomeKairo access token は現行 API の `console_access_token` とし、connector のローカル設定または環境変数で扱う。
+OtomeKairo access token は現行 API の `console_access_token` とする。
+connector は明示設定または環境変数の token を優先し、未設定の場合は同一 PC 内の `server_state.json` から `console_access_token` を読む。
+`console_access_token` が未発行の場合は bootstrap API で初回発行する。
 host、camera account、OtomeKairo access token を repository、docs のサンプル、debug log、inspection、capability result に保存しない。
 
 C220 connector は `move_up / move_down / move_left / move_right` を advertised する。

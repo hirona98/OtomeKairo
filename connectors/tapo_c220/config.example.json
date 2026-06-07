@@ -1,7 +1,6 @@
 {
   "server": {
     "base_url": "https://127.0.0.1:55601",
-    "access_token_env": "OTOMEKAIRO_ACCESS_TOKEN",
     "tls_verify": false,
     "request_timeout_seconds": 10,
     "reconnect_delay_seconds": 5

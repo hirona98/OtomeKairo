@@ -1,17 +1,17 @@
 {
-  // VSCode debug launch definitions.
+  // VSCode デバッグ起動定義。
   "version": "0.2.0",
   "configurations": [
     {
-      // Launch the OtomeKairo HTTPS server with the workspace venv.
-      "name": "OtomeKairo: Debug Server",
+      // workspace venv で OtomeKairo HTTPS server を起動する。
+      "name": "OtomeKairo: Server",
       "type": "debugpy",
       "request": "launch",
       "module": "otomekairo.run",
       "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
       "justMyCode": true,
       "console": "integratedTerminal",
-      "preLaunchTask": "otomekairo: prepare debug env",
       "env": {
         "PYTHONPATH": "${workspaceFolder}/src",
         "OTOMEKAIRO_HOST": "127.0.0.1",
@@ -19,7 +19,40 @@
         "OTOMEKAIRO_TLS_CERT_FILE": "${workspaceFolder}/var/dev-tls/cert.pem",
         "OTOMEKAIRO_TLS_KEY_FILE": "${workspaceFolder}/var/dev-tls/key.pem",
         "OTOMEKAIRO_DATA_DIR": "${workspaceFolder}/var/otomekairo"
+      },
+      "presentation": {
+        "hidden": true
       }
+    },
+    {
+      // connector venv で Tapo C220 connector を起動する。
+      "name": "OtomeKairo: Tapo C220 Connector",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/debug_tapo_c220_connector.py",
+      "cwd": "${workspaceFolder}/connectors/tapo_c220",
+      "python": "${workspaceFolder}/connectors/tapo_c220/.venv/bin/python",
+      "justMyCode": true,
+      "console": "integratedTerminal",
+      "env": {
+        "OTOMEKAIRO_SERVER_URL": "https://127.0.0.1:55601",
+        "OTOMEKAIRO_DATA_DIR": "${workspaceFolder}/var/otomekairo"
+      },
+      "presentation": {
+        "hidden": true
+      }
+    }
+  ],
+  "compounds": [
+    {
+      // F5 では server と connector を同時に起動し、停止もまとめる。
+      "name": "OtomeKairo: Debug Server",
+      "configurations": [
+        "OtomeKairo: Server",
+        "OtomeKairo: Tapo C220 Connector"
+      ],
+      "preLaunchTask": "otomekairo: prepare full debug env",
+      "stopAll": true
     }
   ]
 }

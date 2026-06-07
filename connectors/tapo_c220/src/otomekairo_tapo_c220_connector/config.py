@@ -103,21 +103,28 @@ def load_config(
     raw = _read_json_config(path)
     server = _object(raw.get("server", {}), "server")
     connector = _object(raw.get("connector", {}), "connector")
+    base_url = _normalize_base_url(
+        _string_value(
+            server,
+            "base_url",
+            default=_env_value(env, "OTOMEKAIRO_SERVER_URL", "https://127.0.0.1:55601"),
+        )
+    )
+    tls_verify = _bool_value(server, "tls_verify", default=False)
+    request_timeout_seconds = _positive_float(server, "request_timeout_seconds", default=10.0)
 
     server_config = ServerConfig(
-        base_url=_normalize_base_url(
-            _string_value(server, "base_url", default=_env_value(env, "OTOMEKAIRO_SERVER_URL", "https://127.0.0.1:55601"))
-        ),
-        access_token=_secret_value(
-            server,
-            "access_token",
-            "access_token_env",
-            default_env="OTOMEKAIRO_ACCESS_TOKEN",
+        base_url=base_url,
+        access_token=_resolve_access_token(
+            server=server,
             environ=env,
-            required=True,
+            config_path=path,
+            base_url=base_url,
+            tls_verify=tls_verify,
+            request_timeout_seconds=request_timeout_seconds,
         ),
-        tls_verify=_bool_value(server, "tls_verify", default=False),
-        request_timeout_seconds=_positive_float(server, "request_timeout_seconds", default=10.0),
+        tls_verify=tls_verify,
+        request_timeout_seconds=request_timeout_seconds,
         reconnect_delay_seconds=_positive_float(server, "reconnect_delay_seconds", default=5.0),
     )
 
@@ -200,6 +207,143 @@ def _fetch_runtime_camera_source(*, server_config: ServerConfig, client_id: str)
     if len(tapo_sources) != 1:
         raise ConfigError("runtime config must contain exactly one tapo_c220 camera_source for this client_id.")
     return tapo_sources[0]
+
+
+def _resolve_access_token(
+    *,
+    server: dict[str, Any],
+    environ: Mapping[str, str],
+    config_path: Path | None,
+    base_url: str,
+    tls_verify: bool,
+    request_timeout_seconds: float,
+) -> str:
+    explicit_token = _secret_value(
+        server,
+        "access_token",
+        "access_token_env",
+        default_env="OTOMEKAIRO_ACCESS_TOKEN",
+        environ=environ,
+        required=False,
+    )
+    if explicit_token:
+        return explicit_token
+
+    local_token = _local_state_access_token(
+        server=server,
+        environ=environ,
+        config_path=config_path,
+    )
+    if local_token:
+        return local_token
+
+    bootstrap_token = _bootstrap_first_console_token(
+        base_url=base_url,
+        tls_verify=tls_verify,
+        request_timeout_seconds=request_timeout_seconds,
+    )
+    if bootstrap_token:
+        return bootstrap_token
+
+    raise ConfigError("access_token could not be resolved from environment, local server state, or bootstrap.")
+
+
+def _local_state_access_token(
+    *,
+    server: dict[str, Any],
+    environ: Mapping[str, str],
+    config_path: Path | None,
+) -> str:
+    for state_path in _candidate_state_paths(
+        server=server,
+        environ=environ,
+        config_path=config_path,
+    ):
+        token = _read_state_access_token(state_path)
+        if token:
+            return token
+    return ""
+
+
+def _candidate_state_paths(
+    *,
+    server: dict[str, Any],
+    environ: Mapping[str, str],
+    config_path: Path | None,
+) -> list[Path]:
+    paths: list[Path] = []
+    explicit_state_path = server.get("state_path")
+    if isinstance(explicit_state_path, str) and explicit_state_path.strip():
+        paths.append(_resolve_config_relative_path(explicit_state_path.strip(), config_path))
+
+    data_dirs: list[Path] = []
+    env_data_dir = environ.get("OTOMEKAIRO_DATA_DIR")
+    if isinstance(env_data_dir, str) and env_data_dir.strip():
+        data_dirs.append(Path(env_data_dir.strip()))
+    config_data_dir = server.get("data_dir")
+    if isinstance(config_data_dir, str) and config_data_dir.strip():
+        data_dirs.append(_resolve_config_relative_path(config_data_dir.strip(), config_path))
+
+    repo_root = Path(__file__).resolve().parents[4]
+    data_dirs.extend(
+        [
+            repo_root / "var" / "otomekairo",
+            Path.cwd() / "var" / "otomekairo",
+            Path.cwd().parent.parent / "var" / "otomekairo",
+        ]
+    )
+
+    for data_dir in data_dirs:
+        paths.append(data_dir / "server_state.json")
+    return _deduplicate_paths(paths)
+
+
+def _read_state_access_token(state_path: Path) -> str:
+    try:
+        payload = json.loads(state_path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        return ""
+    token = payload.get("console_access_token") if isinstance(payload, dict) else None
+    return token.strip() if isinstance(token, str) and token.strip() else ""
+
+
+def _bootstrap_first_console_token(
+    *,
+    base_url: str,
+    tls_verify: bool,
+    request_timeout_seconds: float,
+) -> str:
+    client = JsonApiClient(
+        base_url=base_url,
+        access_token="",
+        tls_verify=tls_verify,
+        timeout_seconds=request_timeout_seconds,
+    )
+    try:
+        data = client.post("/api/bootstrap/register-first-console", {})
+    except HttpError:
+        return ""
+    token = data.get("console_access_token")
+    return token.strip() if isinstance(token, str) and token.strip() else ""
+
+
+def _resolve_config_relative_path(value: str, config_path: Path | None) -> Path:
+    path = Path(value)
+    if path.is_absolute() or config_path is None:
+        return path
+    return config_path.parent / path
+
+
+def _deduplicate_paths(paths: list[Path]) -> list[Path]:
+    unique_paths: list[Path] = []
+    seen: set[str] = set()
+    for path in paths:
+        normalized = str(path.expanduser().resolve(strict=False))
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        unique_paths.append(path)
+    return unique_paths
 
 
 def _object(value: Any, label: str) -> dict[str, Any]:

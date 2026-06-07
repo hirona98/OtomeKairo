@@ -1,15 +1,35 @@
 {
-  // VSCode task definitions.
+  // VSCode タスク定義。
   "version": "2.0.0",
   "tasks": [
     {
-      // Prepare venv and development certificate before debugging.
+      // server 用 venv と開発用証明書を準備する。
       "label": "otomekairo: prepare debug env",
       "type": "shell",
       "command": "${workspaceFolder}/scripts/prepare_debug_env.sh",
       "options": {
         "cwd": "${workspaceFolder}"
       },
+      "problemMatcher": []
+    },
+    {
+      // connector 用 venv を準備する。
+      "label": "tapo_c220: prepare debug env",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/prepare_tapo_c220_connector_debug_env.sh",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      // F5 起動前に server と connector の両方の実行環境を準備する。
+      "label": "otomekairo: prepare full debug env",
+      "dependsOn": [
+        "otomekairo: prepare debug env",
+        "tapo_c220: prepare debug env"
+      ],
+      "dependsOrder": "sequence",
       "problemMatcher": []
     }
   ]
