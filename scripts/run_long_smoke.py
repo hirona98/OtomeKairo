@@ -444,8 +444,14 @@ class LongSmokeRunner:
         )
         self.event_client: SimpleWebSocketClient | None = None
         self.secondary_event_client: SimpleWebSocketClient | None = None
+        self.camera_event_client: SimpleWebSocketClient | None = None
+        self.camera_client_id = "long-smoke-camera-connector"
         self.capture_request_count = 0
         self.capture_response_count = 0
+        self.camera_capture_response_count = 0
+        self.camera_capture_request_ids: list[str] = []
+        self.camera_ptz_request_count = 0
+        self.camera_ptz_response_count = 0
         self.external_status_request_count = 0
         self.external_status_response_count = 0
         self.schedule_status_request_count = 0
@@ -490,6 +496,7 @@ class LongSmokeRunner:
         self.location_status_followup_verified_request_ids: list[str] = []
         self.social_status_request_ids: list[str] = []
         self.social_status_followup_verified_request_ids: list[str] = []
+        self.camera_ptz_request_ids: list[str] = []
         self.remaining_capture_empty_results = 0
         self.remaining_capture_mismatches = args.capture_mismatch_failures
         self.remaining_invalid_images_failures = args.capture_invalid_images_failures
@@ -503,6 +510,11 @@ class LongSmokeRunner:
         self.vision_capture_probe_cycle_id: str | None = None
         self.vision_capture_followup_cycle_id: str | None = None
         self.vision_capture_probe_verified = False
+        self.camera_ptz_probe_cycle_id: str | None = None
+        self.camera_ptz_followup_cycle_id: str | None = None
+        self.camera_ptz_capture_followup_request_id: str | None = None
+        self.camera_ptz_probe_verified = False
+        self.camera_ptz_inspection_verified = False
         self.external_status_probe_conversation_cycle_id: str | None = None
         self.external_status_probe_followup_cycle_id: str | None = None
         self.schedule_status_probe_conversation_cycle_id: str | None = None
@@ -550,6 +562,7 @@ class LongSmokeRunner:
         self._location_status_overrides: list[dict[str, Any]] = []
         self._social_status_overrides: list[dict[str, Any]] = []
         self._capture_lock = threading.Lock()
+        self._camera_ptz_lock = threading.Lock()
         self._external_status_lock = threading.Lock()
         self._schedule_status_lock = threading.Lock()
         self._device_status_lock = threading.Lock()
@@ -571,8 +584,11 @@ class LongSmokeRunner:
             if self.args.profile == "real-llm-smoke":
                 return self._run_real_llm_smoke()
             self._connect_desktop_client()
+            self._connect_camera_client()
             self._exercise_vision_capture_followup()
             self._wait_for_no_ongoing_action(label="vision capture followup")
+            self._exercise_camera_ptz_followup()
+            self._wait_for_no_ongoing_action(label="camera ptz followup")
             self._run_restart_probe()
             self._wait_for_no_ongoing_action(label="restart probe")
             self._exercise_capture_empty_result()
@@ -595,6 +611,8 @@ class LongSmokeRunner:
                 self.event_client.close()
             if self.secondary_event_client is not None:
                 self.secondary_event_client.close()
+            if self.camera_event_client is not None:
+                self.camera_event_client.close()
             self._stop_server()
 
     def _prepare_data_dir(self) -> None:
@@ -909,6 +927,48 @@ class LongSmokeRunner:
         )
         log(f"desktop client connected client_id={self.args.desktop_client_id}")
 
+    def _connect_camera_client(self) -> None:
+        token = self.api.token
+        if token is None:
+            raise SmokeError("camera client cannot connect before bootstrap.")
+        client = SimpleWebSocketClient(
+            host=self.host,
+            port=self.port,
+            token=token,
+            on_event=lambda event: self._handle_server_event(
+                client_label="camera",
+                connected_client_id=self.camera_client_id,
+                event=event,
+            ),
+        )
+        caps = [
+            {"id": "vision.capture", "version": "1"},
+            {"id": "camera.ptz", "version": "1"},
+        ]
+        vision_sources = [
+            {
+                "vision_source_id": self._camera_vision_source_id(),
+                "capability_id": "vision.capture",
+                "kind": "camera",
+                "source_owner": "self",
+                "label": "long smoke camera",
+                "aliases": ["camera", "long-smoke-camera"],
+                "default_for": ["camera"],
+                "required_permissions": ["observe_vision", "observe_camera"],
+                "supported_controls": {
+                    "camera.ptz": {
+                        "operations": ["move_up", "move_down", "move_left", "move_right"],
+                        "amounts": ["small", "medium"],
+                    }
+                },
+            }
+        ]
+        client.connect(client_id=self.camera_client_id, caps=caps, vision_sources=vision_sources)
+        self.camera_event_client = client
+        self._wait_for_camera_ptz_registration()
+        self.camera_ptz_inspection_verified = True
+        log(f"camera client connected client_id={self.camera_client_id}")
+
     def _connect_event_client(self, *, client_id: str, client_label: str) -> SimpleWebSocketClient:
         token = self.api.token
         if token is None:
@@ -949,6 +1009,98 @@ class LongSmokeRunner:
     def _vision_source_id_for_client(self, client_id: str) -> str:
         normalized = "".join(char if char.isalnum() else "_" for char in client_id.lower()).strip("_")
         return f"vision_source:{normalized or 'desktop'}"
+
+    def _camera_vision_source_id(self) -> str:
+        return "vision_source:long_smoke_camera"
+
+    def _wait_for_camera_ptz_registration(self) -> None:
+        deadline = time.monotonic() + 10.0 + self.api.request_timeout_seconds
+        last_reason = "not_checked"
+        while time.monotonic() < deadline:
+            self._assert_server_running()
+            self._assert_event_clients_healthy()
+            inspection = self.api.get("/api/inspection/current-state")
+            capability_inspection = inspection.get("capability_inspection")
+            current_runtime_detail = inspection.get("runtime_detail")
+            if not isinstance(capability_inspection, dict):
+                raise SmokeError("current-state capability_inspection was invalid.")
+            if not isinstance(current_runtime_detail, dict):
+                raise SmokeError("current-state runtime_detail was invalid.")
+            capabilities = capability_inspection.get("capabilities")
+            wake_observations = current_runtime_detail.get("wake_policy_observations")
+            if not isinstance(capabilities, list):
+                raise SmokeError("current-state capability list was invalid.")
+            if not isinstance(wake_observations, list):
+                raise SmokeError("current-state wake_policy_observations was invalid.")
+            camera_ptz = self._capability_inspection_entry(capabilities, "camera.ptz")
+            if camera_ptz is None:
+                last_reason = "missing_camera_ptz_capability"
+            elif not self._camera_ptz_inspection_source_ready(camera_ptz):
+                last_reason = "camera_ptz_source_not_ready"
+            elif not self._camera_wake_observation_registered(wake_observations):
+                last_reason = "camera_wake_observation_not_registered"
+            else:
+                return
+            time.sleep(0.25)
+        raise SmokeError(f"camera.ptz registration did not become ready: {last_reason}")
+
+    def _capability_inspection_entry(self, capabilities: list[Any], capability_id: str) -> dict[str, Any] | None:
+        for capability in capabilities:
+            if isinstance(capability, dict) and capability.get("capability_id") == capability_id:
+                return capability
+        return None
+
+    def _camera_ptz_inspection_source_ready(self, capability: dict[str, Any]) -> bool:
+        if capability.get("available") is not True:
+            return False
+        binding = capability.get("binding")
+        if not isinstance(binding, dict):
+            return False
+        bound_client_ids = binding.get("bound_client_ids")
+        if not isinstance(bound_client_ids, list) or self.camera_client_id not in bound_client_ids:
+            return False
+        permissions = capability.get("permissions")
+        if not isinstance(permissions, dict):
+            return False
+        required_permissions = permissions.get("required")
+        if not isinstance(required_permissions, list) or "control_camera_ptz" not in required_permissions:
+            return False
+        for source in capability.get("vision_sources", []):
+            if not isinstance(source, dict):
+                continue
+            if source.get("vision_source_id") != self._camera_vision_source_id():
+                continue
+            if source.get("kind") != "camera" or source.get("source_owner") != "self":
+                return False
+            if source.get("available") is not True or source.get("wake_observation_status") != "enabled":
+                return False
+            required = source.get("required_permissions")
+            if not isinstance(required, list) or "observe_camera" not in required:
+                return False
+            operations = source.get("supported_operations")
+            amounts = source.get("supported_amounts")
+            if not isinstance(operations, list) or "move_up" not in operations:
+                return False
+            if not isinstance(amounts, list) or "small" not in amounts:
+                return False
+            supported_controls = source.get("supported_controls")
+            return isinstance(supported_controls, dict) and "camera.ptz" in supported_controls
+        return False
+
+    def _camera_wake_observation_registered(self, wake_observations: list[Any]) -> bool:
+        for observation in wake_observations:
+            if not isinstance(observation, dict):
+                continue
+            if observation.get("enabled") is not True:
+                continue
+            if observation.get("capability_id") != "vision.capture":
+                continue
+            if observation.get("vision_source_id") != self._camera_vision_source_id():
+                continue
+            if observation.get("mode") != "still":
+                continue
+            return True
+        return False
 
     def _apply_status_client_context_source(
         self,
@@ -995,16 +1147,25 @@ class LongSmokeRunner:
                 raise SmokeError("capture_request did not include request_id.")
             if capability_id != "vision.capture":
                 raise SmokeError(f"capture_request capability_id was invalid: {capability_id}")
-            expected_vision_source_id = self._vision_source_id_for_client(connected_client_id)
+            expected_vision_source_id = (
+                self._camera_vision_source_id()
+                if client_label == "camera"
+                else self._vision_source_id_for_client(connected_client_id)
+            )
             if vision_source_id != expected_vision_source_id:
                 raise SmokeError(f"capture_request vision_source_id was invalid: {vision_source_id}")
-            if source_kind != "desktop":
+            expected_source_kind = "camera" if client_label == "camera" else "desktop"
+            if source_kind != expected_source_kind:
                 raise SmokeError(f"capture_request source_kind was invalid: {source_kind}")
+            if client_label == "camera" and data.get("source_owner") != "self":
+                raise SmokeError(f"camera capture_request source_owner was invalid: {data.get('source_owner')}")
             if not isinstance(source_label, str) or not source_label.strip():
                 raise SmokeError("capture_request did not include source_label.")
             with self._capture_lock:
                 sequence = self.capture_request_count
                 self.capture_request_count += 1
+                if client_label == "camera":
+                    self.camera_capture_request_ids.append(request_id)
                 should_inject_empty_result = self.remaining_capture_empty_results > 0
                 if should_inject_empty_result:
                     self.remaining_capture_empty_results -= 1
@@ -1055,6 +1216,7 @@ class LongSmokeRunner:
             client_context.setdefault("vision_source_id", vision_source_id)
             client_context.setdefault("source_kind", source_kind)
             client_context.setdefault("source_label", source_label)
+            is_camera_capture = client_label == "camera"
             if should_inject_empty_result:
                 self.api.post(
                     "/api/capability/result",
@@ -1070,6 +1232,8 @@ class LongSmokeRunner:
                     },
                 )
                 self.capture_response_count += 1
+                if is_camera_capture:
+                    self.camera_capture_response_count += 1
                 log(f"capture-response empty_result verified request_id={request_id}")
                 return
             if should_inject_mismatch:
@@ -1152,6 +1316,73 @@ class LongSmokeRunner:
                 },
             )
             self.capture_response_count += 1
+            if is_camera_capture:
+                self.camera_capture_response_count += 1
+            return
+        if event_type == "camera.ptz_request":
+            if client_label != "camera":
+                raise SmokeError(f"{client_label} client unexpectedly received camera.ptz_request.")
+            request_id = data.get("request_id")
+            capability_id = data.get("capability_id")
+            vision_source_id = data.get("vision_source_id")
+            source_kind = data.get("source_kind")
+            source_owner = data.get("source_owner")
+            source_label = data.get("source_label")
+            operation = data.get("operation")
+            amount = data.get("amount")
+            if not isinstance(request_id, str) or not request_id:
+                raise SmokeError("camera.ptz_request did not include request_id.")
+            if capability_id != "camera.ptz":
+                raise SmokeError(f"camera.ptz_request capability_id was invalid: {capability_id}")
+            if vision_source_id != self._camera_vision_source_id():
+                raise SmokeError(f"camera.ptz_request vision_source_id was invalid: {vision_source_id}")
+            if source_kind != "camera":
+                raise SmokeError(f"camera.ptz_request source_kind was invalid: {source_kind}")
+            if source_owner != "self":
+                raise SmokeError(f"camera.ptz_request source_owner was invalid: {source_owner}")
+            if not isinstance(source_label, str) or not source_label.strip():
+                raise SmokeError("camera.ptz_request did not include source_label.")
+            if operation != "move_up":
+                raise SmokeError(f"camera.ptz_request operation was invalid: {operation}")
+            if amount != "small":
+                raise SmokeError(f"camera.ptz_request amount was invalid: {amount}")
+            forbidden_fields = {
+                "target_client_id",
+                "client_id",
+                "host",
+                "credential",
+                "credentials",
+                "internal_url",
+                "device_api",
+                "angle",
+                "privacy_mode",
+            }
+            leaked_fields = sorted(field for field in forbidden_fields if field in data)
+            if leaked_fields:
+                raise SmokeError(f"camera.ptz_request leaked internal fields: {', '.join(leaked_fields)}")
+            with self._camera_ptz_lock:
+                self.camera_ptz_request_count += 1
+                self.camera_ptz_request_ids.append(request_id)
+            self.api.post(
+                "/api/capability/result",
+                {
+                    "request_id": request_id,
+                    "client_id": connected_client_id,
+                    "capability_id": "camera.ptz",
+                    "result": {
+                        "status": "completed",
+                        "operation": operation,
+                        "amount": amount,
+                        "client_context": {
+                            "vision_source_id": vision_source_id,
+                            "source_kind": source_kind,
+                            "source_label": source_label,
+                        },
+                        "error": None,
+                    },
+                },
+            )
+            self.camera_ptz_response_count += 1
             return
         if event_type == "external.status_request":
             if client_label != "primary":
@@ -1531,6 +1762,8 @@ class LongSmokeRunner:
             raise SmokeError(f"desktop client failed: {self.event_client.error}")
         if self.secondary_event_client is not None and self.secondary_event_client.error is not None:
             raise SmokeError(f"secondary desktop client failed: {self.secondary_event_client.error}")
+        if self.camera_event_client is not None and self.camera_event_client.error is not None:
+            raise SmokeError(f"camera client failed: {self.camera_event_client.error}")
 
     def _exercise_vision_capture_followup(self) -> None:
         marker = "LongSmokeVisionCaptureProbe"
@@ -1574,6 +1807,111 @@ class LongSmokeRunner:
             f" followup_cycle_id={followup_cycle_id}"
             f" request_id={request_id}"
         )
+
+    def _exercise_camera_ptz_followup(self) -> None:
+        marker = "LongSmokeCameraPtzProbe"
+        camera_capture_response_count_before = self.camera_capture_response_count
+        conversation_cycle_id = self._post_conversation(
+            text=f"{marker}。カメラの向きを少し上に動かして、その同じカメラで見て確認してください。",
+            source="long_smoke_camera_ptz_probe",
+            client_id="long-smoke-camera-ptz-probe",
+            active_app="LongSmokeCameraPtzProbe",
+            window_title=marker,
+        )
+        self.camera_ptz_probe_cycle_id = conversation_cycle_id
+        deadline = time.monotonic() + WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS + self.api.request_timeout_seconds
+        request_id: str | None = None
+        request_summary: dict[str, Any] | None = None
+        while time.monotonic() < deadline:
+            self._assert_server_running()
+            self._assert_event_clients_healthy()
+            trace = self.api.get(f"/api/inspection/cycles/{conversation_cycle_id}")
+            candidate = ((trace.get("result_trace") or {}).get("capability_request_summary"))
+            if (
+                isinstance(candidate, dict)
+                and candidate.get("capability_id") == "camera.ptz"
+                and candidate.get("status") == "dispatched"
+            ):
+                candidate_request_id = candidate.get("request_id")
+                if isinstance(candidate_request_id, str) and candidate_request_id:
+                    request_id = candidate_request_id
+                    request_summary = candidate
+                    break
+            time.sleep(0.25)
+        if request_id is None or request_summary is None:
+            raise SmokeError("camera.ptz probe did not dispatch a request.")
+        self._assert_capability_request_readiness_digest(
+            request_summary,
+            "camera.ptz",
+            "camera.ptz probe",
+        )
+        if request_summary.get("vision_source_id") != self._camera_vision_source_id():
+            raise SmokeError("camera.ptz probe vision_source_id was invalid.")
+        if request_summary.get("source_kind") != "camera" or request_summary.get("source_owner") != "self":
+            raise SmokeError("camera.ptz probe source metadata was invalid.")
+        if request_summary.get("operation") != "move_up" or request_summary.get("amount") != "small":
+            raise SmokeError("camera.ptz probe operation or amount was invalid.")
+
+        followup_trace = self._wait_for_capability_result_followup_by_request_id(request_id=request_id)
+        followup_cycle_id = followup_trace.get("cycle_id")
+        if not isinstance(followup_cycle_id, str) or not followup_cycle_id:
+            raise SmokeError("camera.ptz follow-up cycle_id was not recorded.")
+        self.camera_ptz_followup_cycle_id = followup_cycle_id
+        result_trace = followup_trace.get("result_trace")
+        if not isinstance(result_trace, dict):
+            raise SmokeError("camera.ptz follow-up result_trace was invalid.")
+        followup_summary = result_trace.get("capability_result_followup_summary")
+        if not isinstance(followup_summary, dict):
+            raise SmokeError("camera.ptz follow-up summary was invalid.")
+        source_request_summary = followup_summary.get("source_request_summary")
+        if not isinstance(source_request_summary, dict):
+            raise SmokeError("camera.ptz follow-up source_request_summary was invalid.")
+        if source_request_summary.get("request_id") != request_id:
+            raise SmokeError("camera.ptz follow-up source request_id did not match.")
+        if source_request_summary.get("capability_id") != "camera.ptz":
+            raise SmokeError("camera.ptz follow-up source capability_id was invalid.")
+        followup_dispatch_summary = result_trace.get("capability_dispatch_summary")
+        if not isinstance(followup_dispatch_summary, dict):
+            raise SmokeError("camera.ptz follow-up capability_dispatch_summary was invalid.")
+        if followup_dispatch_summary.get("capability_id") != "vision.capture":
+            raise SmokeError("camera.ptz follow-up did not dispatch vision.capture.")
+        followup_request_summary = followup_dispatch_summary.get("request_summary")
+        if not isinstance(followup_request_summary, dict):
+            raise SmokeError("camera.ptz follow-up capability_request_summary was invalid.")
+        if followup_request_summary.get("capability_id") != "vision.capture":
+            raise SmokeError("camera.ptz follow-up did not dispatch vision.capture.")
+        if followup_request_summary.get("status") != "dispatched":
+            raise SmokeError("camera.ptz follow-up vision.capture was not dispatched.")
+        if followup_request_summary.get("vision_source_id") != self._camera_vision_source_id():
+            raise SmokeError("camera.ptz follow-up vision.capture source did not match.")
+        if followup_request_summary.get("source_kind") != "camera" or followup_request_summary.get("source_owner") != "self":
+            raise SmokeError("camera.ptz follow-up vision.capture source metadata was invalid.")
+        followup_capture_request_id = followup_request_summary.get("request_id")
+        if not isinstance(followup_capture_request_id, str) or not followup_capture_request_id:
+            raise SmokeError("camera.ptz follow-up vision.capture request_id was invalid.")
+        self.camera_ptz_capture_followup_request_id = followup_capture_request_id
+        self._wait_for_camera_capture_result(
+            request_id=followup_capture_request_id,
+            previous_response_count=camera_capture_response_count_before,
+        )
+        self.camera_ptz_probe_verified = True
+        log(
+            "camera.ptz followup confirmed"
+            f" conversation_cycle_id={conversation_cycle_id}"
+            f" followup_cycle_id={followup_cycle_id}"
+            f" request_id={request_id}"
+            f" capture_request_id={followup_capture_request_id}"
+        )
+
+    def _wait_for_camera_capture_result(self, *, request_id: str, previous_response_count: int) -> None:
+        deadline = time.monotonic() + WAIT_EXTERNAL_STATUS_PROBE_TIMEOUT_SECONDS + self.api.request_timeout_seconds
+        while time.monotonic() < deadline:
+            self._assert_server_running()
+            self._assert_event_clients_healthy()
+            if request_id in self.camera_capture_request_ids and self.camera_capture_response_count > previous_response_count:
+                return
+            time.sleep(0.25)
+        raise SmokeError(f"camera vision.capture result was not observed: request_id={request_id}")
 
     def _run_restart_probe(self) -> None:
         if self.args.restart_burst_conversations <= 0:
@@ -4070,6 +4408,7 @@ class LongSmokeRunner:
                     f" pending_jobs={runtime_summary.get('pending_memory_job_count')}"
                     f" in_progress={runtime_summary.get('memory_job_in_progress')}"
                     f" captures={self.capture_request_count}"
+                    f" camera_ptz={self.camera_ptz_request_count}"
                     f" external_status={self.external_status_request_count}"
                 )
                 last_status_log_at = now
@@ -5154,6 +5493,17 @@ class LongSmokeRunner:
             trace = self.api.get(f"/api/inspection/cycles/{cycle_id}")
             restart_probe_traces.append(trace)
 
+        camera_ptz_probe_conversation_trace = None
+        if isinstance(self.camera_ptz_probe_cycle_id, str) and self.camera_ptz_probe_cycle_id:
+            camera_ptz_probe_conversation_trace = self.api.get(
+                f"/api/inspection/cycles/{self.camera_ptz_probe_cycle_id}"
+            )
+        camera_ptz_probe_followup_trace = None
+        if isinstance(self.camera_ptz_followup_cycle_id, str) and self.camera_ptz_followup_cycle_id:
+            camera_ptz_probe_followup_trace = self.api.get(
+                f"/api/inspection/cycles/{self.camera_ptz_followup_cycle_id}"
+            )
+
         external_status_probe_conversation_trace = None
         if (
             isinstance(self.external_status_probe_conversation_cycle_id, str)
@@ -5296,6 +5646,11 @@ class LongSmokeRunner:
             "failed_cycle_ids": failed_cycle_ids,
             "capture_request_count": self.capture_request_count,
             "capture_response_count": self.capture_response_count,
+            "camera_capture_response_count": self.camera_capture_response_count,
+            "camera_capture_request_ids": self.camera_capture_request_ids,
+            "camera_ptz_request_count": self.camera_ptz_request_count,
+            "camera_ptz_response_count": self.camera_ptz_response_count,
+            "camera_ptz_request_ids": self.camera_ptz_request_ids,
             "server_log_capture_response_count": self._count_server_log_occurrences(
                 "[CapabilityResult] capability response accepted request=vision_capture_request:"
             ),
@@ -5341,6 +5696,11 @@ class LongSmokeRunner:
             "vision_capture_probe_cycle_id": self.vision_capture_probe_cycle_id,
             "vision_capture_followup_cycle_id": self.vision_capture_followup_cycle_id,
             "vision_capture_probe_verified": self.vision_capture_probe_verified,
+            "camera_ptz_probe_cycle_id": self.camera_ptz_probe_cycle_id,
+            "camera_ptz_followup_cycle_id": self.camera_ptz_followup_cycle_id,
+            "camera_ptz_capture_followup_request_id": self.camera_ptz_capture_followup_request_id,
+            "camera_ptz_probe_verified": self.camera_ptz_probe_verified,
+            "camera_ptz_inspection_verified": self.camera_ptz_inspection_verified,
             "external_status_probe_conversation_cycle_id": self.external_status_probe_conversation_cycle_id,
             "external_status_probe_followup_cycle_id": self.external_status_probe_followup_cycle_id,
             "external_status_probe_verified": self.external_status_probe_verified,
@@ -5364,6 +5724,8 @@ class LongSmokeRunner:
             "social_status_probe_verified": self.social_status_probe_verified,
             "external_status_multi_service_verified": self.external_status_multi_service_verified,
             "external_status_persisted_integration_keys": self.external_status_persisted_integration_keys,
+            "camera_ptz_probe_conversation_trace": camera_ptz_probe_conversation_trace,
+            "camera_ptz_probe_followup_trace": camera_ptz_probe_followup_trace,
             "external_status_probe_conversation_trace": external_status_probe_conversation_trace,
             "external_status_probe_followup_trace": external_status_probe_followup_trace,
             "schedule_status_probe_conversation_trace": schedule_status_probe_conversation_trace,
@@ -5415,6 +5777,7 @@ class LongSmokeRunner:
         capability_followup_missing_request_ids = [
             request_id
             for request_id in [
+                *self.camera_ptz_request_ids,
                 *self.external_status_request_ids,
                 *self.schedule_status_request_ids,
                 *self.device_status_request_ids,
@@ -6290,6 +6653,21 @@ class LongSmokeRunner:
             raise SmokeError(f"failed cycles were recorded: {', '.join(summary['failed_cycle_ids'])}")
         if not summary["vision_capture_probe_verified"]:
             raise SmokeError("vision.capture follow-up boundary was not verified.")
+        if not summary["camera_ptz_inspection_verified"]:
+            raise SmokeError("camera.ptz inspection and wake observation registration were not verified.")
+        if not summary["camera_ptz_probe_verified"]:
+            raise SmokeError("camera.ptz follow-up boundary was not verified.")
+        if summary["camera_ptz_request_count"] < 1:
+            raise SmokeError("no camera.ptz_request event was received.")
+        if summary["camera_ptz_response_count"] != summary["camera_ptz_request_count"]:
+            raise SmokeError("camera.ptz request / response counts did not match.")
+        camera_capture_request_id = summary.get("camera_ptz_capture_followup_request_id")
+        if not isinstance(camera_capture_request_id, str) or not camera_capture_request_id:
+            raise SmokeError("camera.ptz follow-up capture request_id was not recorded.")
+        if camera_capture_request_id not in summary.get("camera_capture_request_ids", []):
+            raise SmokeError("camera.ptz follow-up capture request was not received by the camera client.")
+        if int(summary.get("camera_capture_response_count", 0)) < 1:
+            raise SmokeError("camera vision.capture response was not observed.")
         if self.args.capture_empty_result_failures > 0:
             if len(summary["capture_empty_result_request_ids"]) != self.args.capture_empty_result_failures:
                 raise SmokeError("capture empty_result injection count did not match the requested failure count.")
@@ -7416,6 +7794,8 @@ class LongSmokeRunner:
             f" background_wake={summary['trigger_counts'].get('background_wake', 0)}"
             f" capability_result={summary['trigger_counts'].get('capability_result', 0)}"
             f" captures={summary['capture_request_count']}"
+            f" camera_ptz={summary['camera_ptz_request_count']}"
+            f" camera_captures={summary['camera_capture_response_count']}"
             f" external_status={summary['external_status_request_count']}"
             f" empty_result={len(summary['capture_empty_result_request_ids'])}"
             f" mismatch={len(summary['capture_mismatch_request_ids'])}"
@@ -7435,6 +7815,9 @@ class LongSmokeRunner:
         if self.secondary_event_client is not None:
             self.secondary_event_client.close()
             self.secondary_event_client = None
+        if self.camera_event_client is not None:
+            self.camera_event_client.close()
+            self.camera_event_client = None
         if self.server_process is not None:
             if self.server_process.poll() is None:
                 self.server_process.terminate()
@@ -7471,7 +7854,8 @@ class LongSmokeRunner:
         if not runtime_summary.get("memory_job_worker_active"):
             raise SmokeError("memory worker is not active after restart.")
         self._connect_desktop_client()
-        log("server restarted and desktop client reconnected")
+        self._connect_camera_client()
+        log("server restarted and event clients reconnected")
 
     def _post_conversation(
         self,

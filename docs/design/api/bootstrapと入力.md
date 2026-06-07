@@ -257,6 +257,9 @@ API起床は少なくとも次の挙動を持つ。
 - server 内の定期起床スケジューラは `current_input.sender=system`、`source_kind=background_wake`、`response_target=none` として shared pipeline に渡す
 - capability request は dispatch 時点の `current_input` を request record の `source_current_input` に保存し、capability result の `response_target` は `source_current_input.response_target` を引き継ぐ
 - `source_current_input.response_target=none` の capability result は内部観測結果として扱い、実効判断を `noop` に正規化し、assistant message を送信しない
+- `source_current_input.response_target=user` の capability request は request record に外向き応答先 client を内部保存し、follow-up capability request へ引き継ぐ
+- capability result follow-up の assistant message は、capability result を返した client ではなく request record の外向き応答先 client へ送る
+- `wake / background_wake` の判断で `camera.ptz` を dispatch した場合も同じ `source_current_input` を保存し、result follow-up から同じ camera source の `vision.capture` を内部観測として発行できる
 - visual observation は wake 判断へ渡し、`change_state=first_seen / changed` は wake 判断へ進む前景シグナルとして扱うが、speech 義務ではない
 - visual observation signature は `vision_source_id / source_kind / source_label / visual_summary_text` を持ち、`window_title` を持たない。signature 比較は `vision_source_id / source_kind` の不一致と `visual_summary_text` の類似度を使う
 - visual observation は wake 判断へ渡す。LLM は change_state、drive_state、world_state、同一観測の反復有無を合わせて `speech / noop / pending_intent` を選ぶ

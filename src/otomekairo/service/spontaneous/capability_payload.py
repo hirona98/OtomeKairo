@@ -209,6 +209,11 @@ class ServiceSpontaneousCapabilityPayloadMixin:
             images = result_payload.get("images")
             image_count = len(images) if isinstance(images, list) else 0
             return f"images={image_count} error={bool(result_payload.get('error'))}"
+        if capability_id == "camera.ptz":
+            status = result_payload.get("status")
+            operation = result_payload.get("operation")
+            amount = result_payload.get("amount")
+            return f"status={status} operation={operation} amount={amount} error={bool(result_payload.get('error'))}"
         spec = SIMPLE_CAPABILITY_RESULT_PAYLOAD_SPECS.get(capability_id)
         if spec is not None:
             summary_text = result_payload.get(spec.summary_field)

@@ -65,6 +65,7 @@ class ServiceCapabilityMixin:
         state: dict[str, Any],
         current_time: str,
         source_current_input: dict[str, Any],
+        assistant_message_target_client_id: str | None,
         decision: dict[str, Any],
     ) -> dict[str, Any]:
         request_payload = decision.get("capability_request")
@@ -86,6 +87,7 @@ class ServiceCapabilityMixin:
             wait_for_response=False,
             component="Capability",
             source_current_input=source_current_input,
+            assistant_message_target_client_id=assistant_message_target_client_id,
         )
         if result is None:
             raise ValueError("Capability request dispatch failed.")
@@ -102,6 +104,7 @@ class ServiceCapabilityMixin:
         wait_for_response: bool,
         component: str,
         source_current_input: dict[str, Any] | None = None,
+        assistant_message_target_client_id: str | None = None,
         track_ongoing_action: bool = True,
     ) -> dict[str, Any] | None:
         # manifest と input schema を先に確定する。
@@ -167,6 +170,7 @@ class ServiceCapabilityMixin:
             wait_for_response=wait_for_response,
             vision_source=vision_source if isinstance(vision_source, dict) else None,
             source_current_input=source_current_input,
+            assistant_message_target_client_id=assistant_message_target_client_id,
         )
         pending = {
             "event": threading.Event(),
@@ -370,6 +374,8 @@ class ServiceCapabilityMixin:
         capability_id: str,
         input_payload: dict[str, Any],
     ) -> dict[str, Any]:
+        if capability_id == "camera.ptz":
+            return self._select_camera_ptz_target(input_payload=input_payload)
         if capability_id != "vision.capture":
             return {
                 "target_client_id": self._select_capability_target_client(capability_id=capability_id),
@@ -381,12 +387,77 @@ class ServiceCapabilityMixin:
         vision_source = self._event_stream_registry.get_vision_source(vision_source_id.strip())
         if not isinstance(vision_source, dict):
             raise ValueError(f"Capability is unavailable: vision.capture no_binding {vision_source_id.strip()}")
+        if (
+            vision_source.get("kind") == "camera"
+            and vision_source.get("source_owner") == "self"
+            and not self._camera_source_is_enabled(vision_source_id.strip())
+        ):
+            raise ValueError(f"Capability is unavailable: vision.capture camera_source_disabled {vision_source_id.strip()}")
         client_id = vision_source.get("client_id")
         if not isinstance(client_id, str) or not client_id.strip():
             raise ValueError(f"Capability is unavailable: vision.capture no_binding {vision_source_id.strip()}")
         return {
             "target_client_id": client_id.strip(),
             "vision_source": vision_source,
+        }
+
+    def _select_camera_ptz_target(self, *, input_payload: dict[str, Any]) -> dict[str, Any]:
+        vision_source_id = input_payload.get("vision_source_id")
+        if not isinstance(vision_source_id, str) or not vision_source_id.strip():
+            raise ValueError("Capability is unavailable: camera.ptz no_binding vision_source_id")
+        normalized_source_id = vision_source_id.strip()
+        vision_source = self._event_stream_registry.get_vision_source(normalized_source_id)
+        if not isinstance(vision_source, dict):
+            raise ValueError(f"Capability is unavailable: camera.ptz no_binding {normalized_source_id}")
+        client_id = vision_source.get("client_id")
+        if not isinstance(client_id, str) or not client_id.strip():
+            raise ValueError(f"Capability is unavailable: camera.ptz no_binding {normalized_source_id}")
+        if not self._event_stream_registry.has_capability(client_id.strip(), "camera.ptz"):
+            raise ValueError(f"Capability is unavailable: camera.ptz no_binding {normalized_source_id}")
+        if vision_source.get("kind") != "camera":
+            raise ValueError(f"Capability is unavailable: camera.ptz source_not_camera {normalized_source_id}")
+        if vision_source.get("source_owner") != "self":
+            raise ValueError(f"Capability is unavailable: camera.ptz source_not_self {normalized_source_id}")
+        if not self._camera_source_is_enabled(normalized_source_id):
+            raise ValueError(f"Capability is unavailable: camera.ptz camera_source_disabled {normalized_source_id}")
+        control = self._camera_ptz_source_control(vision_source)
+        if control is None:
+            raise ValueError(f"Capability is unavailable: camera.ptz no_supported_control {normalized_source_id}")
+        operation = input_payload.get("operation")
+        amount = input_payload.get("amount")
+        operations = control.get("operations", [])
+        amounts = control.get("amounts", [])
+        if not isinstance(operation, str) or operation not in operations:
+            raise ValueError(f"Capability is unavailable: camera.ptz unsupported_operation {normalized_source_id}")
+        if not isinstance(amount, str) or amount not in amounts:
+            raise ValueError(f"Capability is unavailable: camera.ptz unsupported_amount {normalized_source_id}")
+        return {
+            "target_client_id": client_id.strip(),
+            "vision_source": vision_source,
+        }
+
+    def _camera_ptz_source_control(self, vision_source: dict[str, Any]) -> dict[str, list[str]] | None:
+        supported_controls = vision_source.get("supported_controls")
+        if not isinstance(supported_controls, dict):
+            return None
+        control = supported_controls.get("camera.ptz")
+        if not isinstance(control, dict):
+            return None
+        operations = [
+            operation
+            for operation in control.get("operations", [])
+            if isinstance(operation, str) and operation
+        ]
+        amounts = [
+            amount
+            for amount in control.get("amounts", [])
+            if isinstance(amount, str) and amount
+        ]
+        if not operations or not amounts:
+            return None
+        return {
+            "operations": operations,
+            "amounts": amounts,
         }
 
     def _select_capability_target_client(self, *, capability_id: str) -> str:
@@ -566,6 +637,7 @@ class ServiceCapabilityMixin:
         wait_for_response: bool,
         vision_source: dict[str, Any] | None = None,
         source_current_input: dict[str, Any] | None = None,
+        assistant_message_target_client_id: str | None = None,
     ) -> dict[str, Any]:
         request_id = f"{capability_id.replace('.', '_')}_request:{uuid.uuid4().hex}"
         expires_at = self._capability_ongoing_action_expires_at(current_time=current_time, timeout_ms=timeout_ms)
@@ -590,14 +662,22 @@ class ServiceCapabilityMixin:
         }
         if isinstance(source_current_input, dict):
             record["source_current_input"] = deepcopy(source_current_input)
-        if capability_id == "vision.capture" and isinstance(vision_source, dict):
+        normalized_assistant_message_target_client_id = self._normalize_capability_client_id(
+            assistant_message_target_client_id
+        )
+        if normalized_assistant_message_target_client_id is not None:
+            record["assistant_message_target_client_id"] = normalized_assistant_message_target_client_id
+        if capability_id in {"vision.capture", "camera.ptz"} and isinstance(vision_source, dict):
             source_id = vision_source.get("vision_source_id")
             source_kind = vision_source.get("kind")
+            source_owner = vision_source.get("source_owner")
             source_label = vision_source.get("label")
             if isinstance(source_id, str) and source_id.strip():
                 record["vision_source_id"] = source_id.strip()
             if isinstance(source_kind, str) and source_kind.strip():
                 record["source_kind"] = source_kind.strip()
+            if isinstance(source_owner, str) and source_owner.strip():
+                record["source_owner"] = source_owner.strip()
             if isinstance(source_label, str) and source_label.strip():
                 record["source_label"] = source_label.strip()
             record["vision_source"] = deepcopy(vision_source)
@@ -615,8 +695,8 @@ class ServiceCapabilityMixin:
         input_payload = request_record.get("input")
         if isinstance(input_payload, dict):
             payload.update(deepcopy(input_payload))
-        if request_record.get("capability_id") == "vision.capture":
-            for source_key in ("source_kind", "source_label"):
+        if request_record.get("capability_id") in {"vision.capture", "camera.ptz"}:
+            for source_key in ("source_kind", "source_owner", "source_label"):
                 value = request_record.get(source_key)
                 if isinstance(value, str) and value.strip():
                     payload[source_key] = value.strip()
@@ -645,15 +725,30 @@ class ServiceCapabilityMixin:
         )
         if isinstance(readiness_digest, dict):
             summary["readiness_digest"] = readiness_digest
-        if capability_id == "vision.capture":
-            for source_key in ("vision_source_id", "source_kind", "source_label"):
+        if capability_id in {"vision.capture", "camera.ptz"}:
+            for source_key in ("vision_source_id", "source_kind", "source_owner", "source_label"):
                 value = request_record.get(source_key)
                 if isinstance(value, str) and value.strip():
                     summary[source_key] = value.strip()
+        if capability_id == "camera.ptz" and isinstance(input_payload, dict):
+            for input_key in ("operation", "amount"):
+                value = input_payload.get(input_key)
+                if isinstance(value, str) and value.strip():
+                    summary[input_key] = value.strip()
         source_current_input = request_record.get("source_current_input")
         if isinstance(source_current_input, dict):
             summary["source_current_input"] = deepcopy(source_current_input)
         return summary
+
+    def _request_record_assistant_message_target_client_id(self, request_record: Any) -> str | None:
+        if not isinstance(request_record, dict):
+            return None
+        return self._normalize_capability_client_id(request_record.get("assistant_message_target_client_id"))
+
+    def _normalize_capability_client_id(self, value: Any) -> str | None:
+        if not isinstance(value, str) or not value.strip():
+            return None
+        return value.strip()
 
     def _validate_capability_result_source(
         self,
@@ -662,6 +757,12 @@ class ServiceCapabilityMixin:
         request_record: dict[str, Any],
         result_payload: dict[str, Any],
     ) -> None:
+        if capability_id == "camera.ptz":
+            self._validate_camera_ptz_result_source(
+                request_record=request_record,
+                result_payload=result_payload,
+            )
+            return
         if capability_id != "vision.capture":
             return
         client_context = result_payload.get("client_context")
@@ -678,6 +779,40 @@ class ServiceCapabilityMixin:
             actual_value = client_context.get(field_name)
             if not isinstance(actual_value, str) or actual_value.strip() != expected_value.strip():
                 raise ValueError(f"vision.capture result.client_context.{field_name} does not match the request.")
+
+    def _validate_camera_ptz_result_source(
+        self,
+        *,
+        request_record: dict[str, Any],
+        result_payload: dict[str, Any],
+    ) -> None:
+        input_payload = request_record.get("input")
+        if not isinstance(input_payload, dict):
+            raise ValueError("camera.ptz request_record.input is missing.")
+        for field_name in ("operation", "amount"):
+            expected_value = input_payload.get(field_name)
+            actual_value = result_payload.get(field_name)
+            if not isinstance(expected_value, str) or not expected_value.strip():
+                raise ValueError(f"camera.ptz request_record.input.{field_name} is missing.")
+            if not isinstance(actual_value, str) or actual_value.strip() != expected_value.strip():
+                raise ValueError(f"camera.ptz result.{field_name} does not match the request.")
+
+        client_context = result_payload.get("client_context")
+        if client_context is None:
+            return
+        if not isinstance(client_context, dict):
+            raise ValueError("camera.ptz result.client_context must be an object or null.")
+        expected_fields = {
+            "vision_source_id": request_record.get("vision_source_id"),
+            "source_kind": request_record.get("source_kind"),
+            "source_label": request_record.get("source_label"),
+        }
+        for field_name, expected_value in expected_fields.items():
+            if not isinstance(expected_value, str) or not expected_value.strip():
+                raise ValueError(f"camera.ptz request_record.{field_name} is missing.")
+            actual_value = client_context.get(field_name)
+            if not isinstance(actual_value, str) or actual_value.strip() != expected_value.strip():
+                raise ValueError(f"camera.ptz result.client_context.{field_name} does not match the request.")
 
     def _capability_state_policy(self, capability_id: str) -> dict[str, Any]:
         manifest = capability_manifests().get(capability_id, {})
@@ -984,6 +1119,13 @@ class ServiceCapabilityMixin:
                     reason_code="result_empty",
                     result_error=False,
                 )
+        if capability_id == "camera.ptz":
+            status = result_payload.get("status")
+            if status in {"rejected", "failed"}:
+                return self._capability_terminal_transition_reason_summary(
+                    reason_code="result_error",
+                    result_error=True,
+                )
         return self._capability_terminal_transition_reason_summary(
             reason_code="result_received",
             result_error=False,
@@ -993,6 +1135,8 @@ class ServiceCapabilityMixin:
         error = result_payload.get("error")
         if isinstance(error, str) and error.strip():
             return f"{capability_id} が error で終了した。"
+        if capability_id == "camera.ptz" and result_payload.get("status") in {"rejected", "failed"}:
+            return f"{capability_id} が {result_payload.get('status')} で終了した。"
         return f"{capability_id} の結果を受け取った。"
 
     def _prune_pending_capability_requests(self, *, current_time: str) -> None:

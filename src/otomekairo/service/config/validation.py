@@ -4,7 +4,12 @@ from typing import Any
 
 from otomekairo.capabilities import capability_manifests
 from otomekairo.service.common import REQUIRED_MODEL_ROLE_NAMES, ServiceError
-from otomekairo.service.config.constants import PERSONA_INITIATIVE_BASELINES
+from otomekairo.service.config.constants import (
+    CAMERA_CONNECTOR_KINDS,
+    CAMERA_DEFAULT_CLIENT_ID,
+    CAMERA_DEFAULT_CONNECTOR_KIND,
+    PERSONA_INITIATIVE_BASELINES,
+)
 
 
 class ServiceConfigValidationMixin:
@@ -150,6 +155,117 @@ class ServiceConfigValidationMixin:
         expression_addon = definition.get("expression_addon")
         if expression_addon is not None and not isinstance(expression_addon, str):
             raise ServiceError(400, "invalid_expression_addon", "expression_addon must be a string.")
+
+    def _validate_camera_source_definition(self, vision_source_id: str, definition: dict[str, Any]) -> None:
+        if not isinstance(definition, dict):
+            raise ServiceError(400, "invalid_camera_source", "camera_source must be an object.")
+        if definition.get("vision_source_id") != vision_source_id:
+            raise ServiceError(400, "vision_source_id_mismatch", "vision_source_id must match the path.")
+        if not isinstance(vision_source_id, str) or not vision_source_id.startswith("vision_source:"):
+            raise ServiceError(
+                400,
+                "invalid_camera_source_field",
+                "camera_source.vision_source_id must start with vision_source:.",
+            )
+        supported_fields = {
+            "vision_source_id",
+            "connector_kind",
+            "client_id",
+            "kind",
+            "source_owner",
+            "enabled",
+            "label",
+            "connection",
+        }
+        unsupported_fields = sorted(set(definition.keys()) - supported_fields)
+        if unsupported_fields:
+            raise ServiceError(
+                400,
+                "unsupported_camera_source_field",
+                f"camera_source has unsupported fields: {', '.join(unsupported_fields)}.",
+            )
+        connector_kind = definition.get("connector_kind")
+        if connector_kind not in CAMERA_CONNECTOR_KINDS:
+            raise ServiceError(
+                400,
+                "unsupported_camera_connector_kind",
+                "camera_source.connector_kind is not supported.",
+            )
+        self._validate_required_text_field(definition, "client_id", "camera_source.client_id")
+        enabled = definition.get("enabled")
+        if not isinstance(enabled, bool):
+            raise ServiceError(400, "invalid_camera_source_field", "camera_source.enabled must be a boolean.")
+        self._validate_required_text_field(definition, "label", "camera_source.label")
+        if definition.get("kind") != "camera":
+            raise ServiceError(400, "invalid_camera_source_field", "camera_source.kind must be camera.")
+        if definition.get("source_owner") != "self":
+            raise ServiceError(400, "invalid_camera_source_field", "camera_source.source_owner must be self.")
+
+        connection = definition.get("connection")
+        if not isinstance(connection, dict):
+            raise ServiceError(400, "invalid_camera_source_field", "camera_source.connection must be an object.")
+        self._validate_required_text_field(connection, "host", "camera_source.connection.host")
+        self._validate_required_text_field(
+            connection,
+            "camera_username",
+            "camera_source.connection.camera_username",
+        )
+        self._validate_required_text_field(
+            connection,
+            "camera_password",
+            "camera_source.connection.camera_password",
+        )
+        self._validate_allowed_fields(
+            connection,
+            {"host", "camera_username", "camera_password"},
+            "camera_source.connection",
+        )
+
+    def _normalize_camera_source_definition(self, vision_source_id: str, definition: dict[str, Any]) -> dict[str, Any]:
+        normalized = {
+            "vision_source_id": definition.get("vision_source_id", vision_source_id),
+            "connector_kind": definition.get("connector_kind", CAMERA_DEFAULT_CONNECTOR_KIND),
+            "client_id": definition.get("client_id", CAMERA_DEFAULT_CLIENT_ID),
+            "kind": "camera",
+            "source_owner": "self",
+            "enabled": definition.get("enabled"),
+            "label": definition.get("label"),
+            "connection": definition.get("connection"),
+        }
+        for field_name in ("vision_source_id", "connector_kind", "client_id", "label"):
+            value = normalized.get(field_name)
+            if isinstance(value, str):
+                normalized[field_name] = value.strip()
+
+        connection = definition.get("connection")
+        if isinstance(connection, dict):
+            normalized["connection"] = self._normalize_text_fields(
+                connection,
+                ("host", "camera_username", "camera_password"),
+            )
+        return normalized
+
+    def _validate_required_text_field(self, definition: dict[str, Any], key: str, label: str) -> None:
+        value = definition.get(key)
+        if not isinstance(value, str) or not value.strip():
+            raise ServiceError(400, "invalid_camera_source_field", f"{label} must be a non-empty string.")
+
+    def _validate_allowed_fields(self, definition: dict[str, Any], allowed_fields: set[str], label: str) -> None:
+        unsupported_fields = sorted(set(definition.keys()) - allowed_fields)
+        if unsupported_fields:
+            raise ServiceError(
+                400,
+                "unsupported_camera_source_field",
+                f"{label} has unsupported fields: {', '.join(unsupported_fields)}.",
+            )
+
+    def _normalize_text_fields(self, definition: dict[str, Any], field_names: tuple[str, ...]) -> dict[str, Any]:
+        normalized = dict(definition)
+        for field_name in field_names:
+            value = normalized.get(field_name)
+            if isinstance(value, str):
+                normalized[field_name] = value.strip()
+        return normalized
 
     def _normalize_persona_definition(self, definition: dict[str, Any]) -> dict[str, Any]:
         normalized = {

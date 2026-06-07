@@ -80,6 +80,7 @@ def build_default_state() -> dict:
         "model_presets": {
             DEFAULT_MODEL_PRESET_ID: build_default_model_preset(),
         },
+        "camera_sources": {},
     }
 
 

@@ -26,7 +26,7 @@ capability は次の三つを分けて扱う。
 
 `CapabilityManifest` は、何ができるか、いつ使うか、何を禁止するか、どの入力と結果を受けるかを定義する。
 `CapabilityBinding` は、接続中 client と manifest を結びつける。
-`vision.capture` のように複数の実行対象を持つ capability は、binding に加えて `VisionSource` で具体的な観測対象を指定する。
+`vision.capture` や `camera.ptz` のように複数の実行対象を持つ capability は、binding に加えて `VisionSource` で具体的な対象を指定する。
 `CapabilityState` は、manifest と binding を踏まえた現在の実行条件を持つ。
 
 client の `hello.caps` は `CapabilityBinding` の材料であり、manifest の正本ではない。
@@ -82,7 +82,7 @@ inspection には運用確認に必要な binding 要約を出すが、token、c
 ## Manifest 例
 
 `vision.capture` の manifest は次の形を基準にする。
-現行の concrete capability は `vision.capture`、`external.status`、`schedule.status`、`device.status`、`body.status`、`environment.status`、`location.status`、`social.status` である。
+現行の concrete capability は `vision.capture`、`camera.ptz`、`external.status`、`schedule.status`、`device.status`、`body.status`、`environment.status`、`location.status`、`social.status` である。
 `external.status` は短い外部状態要約、`schedule.status` は短い予定要約と deterministic な schedule slot、`device.status` は短い端末状態要約、`body.status` は短い身体状態要約、`environment.status` は短い周囲環境要約、`location.status` は短い場所状態要約、`social.status` は短い対人文脈要約を result として返す。
 現行では各 capability の `client_context.body_state_summary / device_state_summary / schedule_summary / environment_summary / location_summary / social_context_summary`、`schedule.status.schedule_slots`、`device.status.device_state_summary`、`body.status.body_state_summary`、`environment.status.environment_summary`、`location.status.location_summary`、`social.status.social_context_summary` を inspection_fields 経由で短い観測要約へ投影する。
 
@@ -180,7 +180,123 @@ inspection には運用確認に必要な binding 要約を出すが、token、c
 server は `vision_source_id` から実行先 client と観測対象を一意に決める。
 source が一意に定まらない場合、server は `vision.capture` を dispatch しない。
 source ごとの `required_permissions` は `VisionSource` が持ち、manifest の `observe_vision` と合わせて検証する。
-現行実装では event stream 接続へ `observe_vision / observe_desktop / observe_camera` を固定付与し、hello 登録時に manifest と source の `required_permissions` を検証する。
+vision source の観測では、event stream 接続主体に `observe_vision / observe_desktop / observe_camera` を付与し、hello 登録時に manifest と source の `required_permissions` を検証する。
+camera source 制御では、event stream 接続主体に `control_camera_ptz` を付与し、hello 登録時に manifest、source、`supported_controls` の権限を検証する。
+
+`camera.ptz` の manifest は次の形を基準にする。
+`camera.ptz` の意味境界は [camera_ptz.md](camera_ptz.md) を正とする。
+
+```json
+{
+  "id": "camera.ptz",
+  "version": "1",
+  "kind": "action",
+  "decision_description": "指定された camera source の向きや画角を調整する",
+  "when_to_use": [
+    "ユーザーが camera source の向きや画角変更を依頼した",
+    "API起床、定期起床、capability result follow-up、自律判断で camera source の視野調整が必要",
+    "同じ camera source の vision.capture の前に視野を変える必要がある"
+  ],
+  "do_not_use_when": [
+    "現在の判断に camera source の視野調整が不要",
+    "対象の vision_source_id が一意に定まらない",
+    "対象 source が camera ではない",
+    "対象 source が requested operation を advertised していない",
+    "privacy mode、録画、アラーム、再起動、検知設定など PTZ 以外の機器操作を求めている"
+  ],
+  "required_permissions": ["control_camera_ptz"],
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "vision_source_id": { "type": "string", "pattern": "^vision_source:" },
+      "operation": {
+        "type": "string",
+        "enum": ["move_up", "move_down", "move_left", "move_right", "zoom_in", "zoom_out"]
+      },
+      "amount": {
+        "type": "string",
+        "enum": ["small", "medium"],
+        "description": "通常のカメラ移動は medium。少しまたは微調整の意図が明示されている場合だけ small。"
+      }
+    },
+    "required": ["vision_source_id", "operation", "amount"],
+    "additionalProperties": false
+  },
+  "result_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string",
+        "enum": ["completed", "rejected", "failed"]
+      },
+      "operation": {
+        "type": "string",
+        "enum": ["move_up", "move_down", "move_left", "move_right", "zoom_in", "zoom_out"]
+      },
+      "amount": {
+        "type": "string",
+        "enum": ["small", "medium"]
+      },
+      "client_context": {
+        "type": ["object", "null"]
+      },
+      "error": {
+        "type": ["string", "null"]
+      }
+    },
+    "required": ["status", "operation", "amount"],
+    "additionalProperties": false
+  },
+  "side_effects": {
+    "external_world": true,
+    "user_visible": false,
+    "stores_raw_payload": false
+  },
+  "risk_level": "medium",
+  "timeout_ms": 5000,
+  "memory_policy": {
+    "record_result_event": true,
+    "allow_memory_update": false
+  },
+  "state_policy": {
+    "creates_ongoing_action": true,
+    "blocks_parallel_capability": true,
+    "result_context_hook": "camera_ptz",
+    "followup_hint_hook": "camera_ptz",
+    "allow_followup_capability_requests": [
+      {
+        "capability_id": "vision.capture",
+        "same_vision_source_id": true
+      }
+    ],
+    "unavailable_seconds_on_dispatch_failure": 15,
+    "unavailable_seconds_on_timeout": 15
+  },
+  "decision_readiness": {
+    "family": "camera_control",
+    "world_state_type": "visual_context",
+    "input_keys": ["vision_source_id", "operation", "amount"],
+    "result_summary_keys": ["status", "operation", "amount"]
+  },
+  "inspection_fields": [
+    "capability_id",
+    "target_client_id",
+    "vision_source_id",
+    "source_kind",
+    "source_label",
+    "operation",
+    "amount",
+    "status",
+    "error"
+  ]
+}
+```
+
+`camera.ptz.input.vision_source_id` は `VisionSourceRegistry` に存在する `kind=camera` の id を指定する。
+server は `vision_source_id` から実行先 client と制御対象を一意に決める。
+source ごとの `supported_controls.camera.ptz.operations` と `amounts` は source metadata が持ち、manifest の schema と合わせて検証する。
+`camera.ptz` result だけでは `world_state.visual_context` を更新しない。
+`camera.ptz` 後に視覚根拠が必要な場合は、同じ `vision_source_id` の `vision.capture` を follow-up で発行する。
 
 `state_policy` は少なくとも次を持つ。
 
@@ -188,6 +304,7 @@ source ごとの `required_permissions` は `VisionSource` が持ち、manifest 
 - `blocks_parallel_capability`: 同系統の result 待ち中に並列実行を止めるか
 - `result_context_hook`: accepted async result を follow-up 入力へ意味付けするときの hook 名
 - `followup_hint_hook`: follow-up 結果要約や runtime state 要約を作る hook 名
+- `allow_followup_capability_requests`: result follow-up で同一目的の capability 連鎖を許可する例外条件
 - `unavailable_seconds_on_dispatch_failure` / `unavailable_seconds_on_timeout`: dispatch failure や timeout を一時 unavailable として残す秒数
 
 ## LLM へ渡す decision view
@@ -221,7 +338,7 @@ server は manifest、binding、state、権限で提案を検証する。
 busy、権限不足、動的一時 unavailable は decision view の `available: false` に反映する。
 直近成功、直近失敗は inspection の `CapabilityState` へ残し、明示的な capability 要求まで一律に遮断する理由にはしない。
 `readiness` は manifest の `decision_readiness` から作る。
-`readiness.family` は `visual_observation / external_status / schedule_status / device_status / body_status / environment_status / location_status / social_status` のいずれかである。
+`readiness.family` は `visual_observation / camera_control / external_status / schedule_status / device_status / body_status / environment_status / location_status / social_status` のいずれかである。
 `readiness.world_state_type` は fresh `world_state` 再利用、status family の不足判定、result 投影先を揃えるための正本である。
 `readiness.input_keys` は LLM が capability 固有入力を組み立てる最小 key を表す。
 `readiness.result_summary_keys` と `readiness.result_item_keys` は result が判断・記憶・inspection へ投影される要約 key を表す。
@@ -232,6 +349,12 @@ busy、権限不足、動的一時 unavailable は decision view の `available:
 `source_kind` は保存可否を決めないため、desktop と camera は同じ `fresh_world_state_by_vision_source` の対象にする。
 `capability_result` follow-up では、desktop 以外の result から作った current foreground `world_state` も同じ再利用対象にする。
 `fresh_world_state_available=true` の capability request と、`fresh_world_state_by_vision_source` にある同じ `vision_source_id` の `vision.capture` request は、同じ現在状態の再取得として decision contract validation の repair 対象にする。
+`camera.ptz` は fresh `visual_context` がある場合でも decision view から外さない。
+fresh `visual_context` は現在見えている内容の根拠であり、視野調整の不要条件そのものではない。
+server は `camera.ptz` の decision view に、対象 camera source ごとの `vision_source_id / source_label / supported_operations / supported_amounts` だけを入れる。
+`camera.ptz` の decision view には target client、host、credential、内部 URL、機器 API 名、角度を入れない。
+`camera.ptz` は `user_message / wake / background_wake / capability_result` の全起点で available な場合に出す。
+`camera.ptz` result follow-up では、同じ `vision_source_id` の `vision.capture` request だけを許可された follow-up capability request として扱う。
 通常会話でユーザーが明示的に現在状態確認を依頼した場合、この freshness による遮断は適用しない。
 通常会話でユーザーが `status` 系または観測系 capability に対応する現在状態確認を明示した場合、対応 capability が `available=true` なら decision contract validation は `capability_request` 以外の判断を repair 対象にする。
 自律判断で強い `drive_state` が特定の status family を要求し、対応 state type が不足または古い場合、server は `initiative_context.candidate_families` の selected autonomous entry に capability 提案として `preferred_result_kind=capability_request` と対応 `preferred_capability_id` を入れる。

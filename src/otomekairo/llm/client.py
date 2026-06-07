@@ -312,6 +312,7 @@ class LLMClient:
                 input_text=context.input_text,
                 trigger_kind=context.trigger_kind,
                 capability_decision_view=context.capability_decision_view,
+                capability_result_context=context.capability_result_context,
             )
         except LLMError as exc:
             if context.trigger_kind != "user_message" and payload.get("kind") == "capability_request":
@@ -484,6 +485,7 @@ class LLMClient:
         input_text: str,
         trigger_kind: str,
         capability_decision_view: list[dict[str, Any]] | None,
+        capability_result_context: dict[str, Any] | None = None,
     ) -> None:
         if payload.get("kind") != "capability_request":
             return
@@ -499,6 +501,11 @@ class LLMClient:
         if (
             trigger_kind == "user_message"
             and self._explicit_status_request_capability_id(input_text) == normalized_request_capability_id
+        ):
+            return
+        if self._capability_result_context_allows_same_vision_source_capture(
+            request_payload=request_payload,
+            capability_result_context=capability_result_context,
         ):
             return
         capability_entry = self._capability_decision_view_entry(
@@ -612,7 +619,13 @@ class LLMClient:
             for capability_id in allowed_capability_ids
             if isinstance(capability_id, str) and capability_id.strip()
         }
-        if request_capability_id.strip() in normalized_allowed:
+        normalized_request_capability_id = request_capability_id.strip()
+        if normalized_request_capability_id in normalized_allowed:
+            self._validate_decision_capability_result_followup_constraints(
+                request_payload=request_payload,
+                capability_result_context=capability_result_context,
+                request_capability_id=normalized_request_capability_id,
+            )
             return
         source_capability_id = capability_result_context.get("source_capability_id")
         if not isinstance(source_capability_id, str) or not source_capability_id.strip():
@@ -625,6 +638,75 @@ class LLMClient:
             f"{request_capability_id.strip()} の capability_request は不正です。"
             "受け取った result に基づく speech / noop / pending_intent を返してください。"
         )
+
+    def _validate_decision_capability_result_followup_constraints(
+        self,
+        *,
+        request_payload: dict[str, Any],
+        capability_result_context: dict[str, Any],
+        request_capability_id: str,
+    ) -> None:
+        constraints = capability_result_context.get("followup_constraints")
+        if not isinstance(constraints, list):
+            return
+        input_payload = request_payload.get("input")
+        if not isinstance(input_payload, dict):
+            input_payload = {}
+        for constraint in constraints:
+            if not isinstance(constraint, dict):
+                continue
+            if constraint.get("capability_id") != request_capability_id:
+                continue
+            constraint_kind = constraint.get("constraint")
+            if constraint_kind != "same_vision_source_id":
+                continue
+            expected_source_id = constraint.get("vision_source_id")
+            actual_source_id = input_payload.get("vision_source_id")
+            if (
+                isinstance(expected_source_id, str)
+                and expected_source_id.strip()
+                and isinstance(actual_source_id, str)
+                and actual_source_id.strip() == expected_source_id.strip()
+            ):
+                continue
+            raise LLMError(
+                "CapabilityResultContext の followup_constraints は "
+                f"{request_capability_id} に same_vision_source_id を要求しています。"
+                f"vision_source_id={expected_source_id} と異なる capability_request は不正です。"
+            )
+
+    def _capability_result_context_allows_same_vision_source_capture(
+        self,
+        *,
+        request_payload: dict[str, Any],
+        capability_result_context: dict[str, Any] | None,
+    ) -> bool:
+        if not isinstance(capability_result_context, dict):
+            return False
+        if capability_result_context.get("source_capability_id") != "camera.ptz":
+            return False
+        if request_payload.get("capability_id") != "vision.capture":
+            return False
+        constraints = capability_result_context.get("followup_constraints")
+        if not isinstance(constraints, list):
+            return False
+        input_payload = request_payload.get("input")
+        if not isinstance(input_payload, dict):
+            return False
+        requested_source_id = input_payload.get("vision_source_id")
+        if not isinstance(requested_source_id, str) or not requested_source_id.strip():
+            return False
+        for constraint in constraints:
+            if not isinstance(constraint, dict):
+                continue
+            if constraint.get("capability_id") != "vision.capture":
+                continue
+            if constraint.get("constraint") != "same_vision_source_id":
+                continue
+            expected_source_id = constraint.get("vision_source_id")
+            if isinstance(expected_source_id, str) and requested_source_id.strip() == expected_source_id.strip():
+                return True
+        return False
 
     def generate_speech(
         self,

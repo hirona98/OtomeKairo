@@ -107,6 +107,22 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
             if method == "GET" and parsed.path == "/api/config/editor-state":
                 self._write_success(HTTPStatus.OK, self.server.service.get_editor_state(token))
                 return
+            if method == "GET" and parsed.path == "/api/config/camera-sources":
+                self._write_success(HTTPStatus.OK, self.server.service.list_camera_sources(token))
+                return
+            if method == "GET" and parsed.path == "/api/config/camera-sources/editor-state":
+                self._write_success(HTTPStatus.OK, self.server.service.get_camera_sources_editor_state(token))
+                return
+            if method == "GET" and parsed.path.startswith("/api/config/connectors/") and parsed.path.endswith("/runtime-config"):
+                path_parts = parsed.path.split("/")
+                if len(path_parts) != 6 or path_parts[5] != "runtime-config":
+                    raise ServiceError(404, "route_not_found", "The requested route does not exist.")
+                client_id = unquote(path_parts[4])
+                self._write_success(
+                    HTTPStatus.OK,
+                    self.server.service.get_connector_runtime_config(token, client_id),
+                )
+                return
             if method == "GET" and parsed.path == "/api/catalog":
                 self._write_success(HTTPStatus.OK, self.server.service.get_catalog(token))
                 return
@@ -187,6 +203,29 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
                     HTTPStatus.OK,
                     self.server.service.replace_editor_state(token, payload),
                 )
+                return
+            if method == "PUT" and parsed.path == "/api/config/camera-sources/editor-state":
+                payload = self._read_json_body()
+                self._write_success(
+                    HTTPStatus.OK,
+                    self.server.service.replace_camera_sources_editor_state(token, payload),
+                )
+                return
+            if method == "GET" and parsed.path.startswith("/api/config/camera-sources/"):
+                vision_source_id = unquote(parsed.path.rsplit("/", 1)[-1])
+                self._write_success(HTTPStatus.OK, self.server.service.get_camera_source(token, vision_source_id))
+                return
+            if method == "PUT" and parsed.path.startswith("/api/config/camera-sources/"):
+                vision_source_id = unquote(parsed.path.rsplit("/", 1)[-1])
+                payload = self._read_json_body()
+                self._write_success(
+                    HTTPStatus.OK,
+                    self.server.service.replace_camera_source(token, vision_source_id, payload),
+                )
+                return
+            if method == "DELETE" and parsed.path.startswith("/api/config/camera-sources/"):
+                vision_source_id = unquote(parsed.path.rsplit("/", 1)[-1])
+                self._write_success(HTTPStatus.OK, self.server.service.delete_camera_source(token, vision_source_id))
                 return
             if method == "GET" and parsed.path.startswith("/api/config/personas/"):
                 persona_id = parsed.path.rsplit("/", 1)[-1]

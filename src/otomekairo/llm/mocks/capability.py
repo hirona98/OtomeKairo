@@ -8,6 +8,12 @@ from otomekairo.llm.contracts import validate_visual_observation_contract
 
 MOCK_CAPABILITY_REQUEST_RULES = (
     (
+        "camera.ptz",
+        "_should_mock_camera_ptz_request",
+        "_build_mock_camera_ptz_request_input",
+        "OtomeKairo 自身のカメラの向きや画角を調整する必要がある。",
+    ),
+    (
         "vision.capture",
         "_should_mock_vision_capture_request",
         "_build_mock_vision_capture_request_input",
@@ -114,6 +120,22 @@ class LLMMockCapabilityMixin:
     ) -> dict[str, Any] | None:
         _ = normalized
         return self._mock_vision_capture_input(capability_decision_view)
+
+    def _build_mock_camera_ptz_request_input(
+        self,
+        *,
+        normalized: str,
+        capability_decision_view: list[dict[str, Any]] | None,
+    ) -> dict[str, Any] | None:
+        operation = self._mock_camera_ptz_operation(normalized)
+        if operation is None:
+            return None
+        amount = self._mock_camera_ptz_amount(normalized)
+        return self._mock_camera_ptz_input(
+            capability_decision_view=capability_decision_view,
+            operation=operation,
+            amount=amount,
+        )
 
     def _build_mock_schedule_status_request_input(
         self,
@@ -262,6 +284,44 @@ class LLMMockCapabilityMixin:
             "どう",
         )
         return any(marker in normalized for marker in action_markers)
+
+    def _should_mock_camera_ptz_request(
+        self,
+        *,
+        normalized: str,
+        ongoing_action_summary: dict[str, Any] | None,
+        capability_decision_view: list[dict[str, Any]] | None,
+    ) -> bool:
+        if isinstance(ongoing_action_summary, dict) and ongoing_action_summary.get("status") == "waiting_result":
+            return False
+        if normalized.startswith("capability result を受信"):
+            return False
+        if not self._mock_capability_available(capability_decision_view, "camera.ptz"):
+            return False
+        operation = self._mock_camera_ptz_operation(normalized)
+        if operation is None:
+            return False
+        amount = self._mock_camera_ptz_amount(normalized)
+        if (
+            self._mock_camera_ptz_input(
+                capability_decision_view=capability_decision_view,
+                operation=operation,
+                amount=amount,
+            )
+            is None
+        ):
+            return False
+        camera_markers = (
+            "カメラ",
+            "視野",
+            "視界",
+            "画角",
+            "向き",
+            "ズーム",
+            "pan",
+            "tilt",
+        )
+        return any(marker in normalized for marker in camera_markers)
 
     def _should_mock_external_status_request(
         self,
@@ -585,6 +645,107 @@ class LLMMockCapabilityMixin:
                 "mode": "still",
             }
         return None
+
+    def _mock_camera_ptz_input(
+        self,
+        *,
+        capability_decision_view: list[dict[str, Any]] | None,
+        operation: str,
+        amount: str,
+    ) -> dict[str, str] | None:
+        for item in capability_decision_view or []:
+            if not isinstance(item, dict):
+                continue
+            if item.get("id") != "camera.ptz" or item.get("available") is not True:
+                continue
+            source_id = self._mock_default_camera_ptz_source_id(
+                value=item.get("vision_sources"),
+                operation=operation,
+                amount=amount,
+            )
+            if source_id is None:
+                return None
+            return {
+                "vision_source_id": source_id,
+                "operation": operation,
+                "amount": amount,
+            }
+        return None
+
+    def _mock_camera_ptz_operation(self, normalized: str) -> str | None:
+        lowered = normalized.lower()
+        if "zoom out" in lowered or "ズームアウト" in normalized or "引いて" in normalized or "広く" in normalized:
+            return "zoom_out"
+        if "zoom in" in lowered or "ズームイン" in normalized or "ズーム" in normalized or "拡大" in normalized:
+            return "zoom_in"
+        if "上" in normalized or "up" in lowered or "tilt up" in lowered:
+            return "move_up"
+        if "下" in normalized or "down" in lowered or "tilt down" in lowered:
+            return "move_down"
+        if "左" in normalized or "left" in lowered or "pan left" in lowered:
+            return "move_left"
+        if "右" in normalized or "right" in lowered or "pan right" in lowered:
+            return "move_right"
+        return None
+
+    def _mock_camera_ptz_amount(self, normalized: str) -> str:
+        lowered = normalized.lower()
+        if "medium" in lowered or "midium" in lowered:
+            return "medium"
+        if any(marker in normalized for marker in ("少し", "すこし", "ちょっと", "ちょい", "微調整", "小さく", "小さめ")):
+            return "small"
+        if "small" in lowered:
+            return "small"
+        return "medium"
+
+    def _mock_default_camera_ptz_source_id(
+        self,
+        *,
+        value: Any,
+        operation: str,
+        amount: str,
+    ) -> str | None:
+        if not isinstance(value, list):
+            return None
+        candidates = [
+            source
+            for source in value
+            if isinstance(source, dict)
+            and source.get("available") is True
+            and self._mock_camera_ptz_source_supports(source, operation=operation, amount=amount)
+        ]
+        for default_name in ("camera", "visual"):
+            for source in candidates:
+                source_id = source.get("vision_source_id")
+                default_for = source.get("default_for")
+                if (
+                    isinstance(source_id, str)
+                    and source_id.strip()
+                    and isinstance(default_for, list)
+                    and default_name in default_for
+                ):
+                    return source_id.strip()
+        for source in candidates:
+            source_id = source.get("vision_source_id")
+            if isinstance(source_id, str) and source_id.strip():
+                return source_id.strip()
+        return None
+
+    def _mock_camera_ptz_source_supports(
+        self,
+        source: dict[str, Any],
+        *,
+        operation: str,
+        amount: str,
+    ) -> bool:
+        operations = source.get("supported_operations")
+        amounts = source.get("supported_amounts")
+        if not isinstance(operations, list) or not isinstance(amounts, list):
+            supported_controls = source.get("supported_controls")
+            control = supported_controls.get("camera.ptz") if isinstance(supported_controls, dict) else None
+            operations = control.get("operations") if isinstance(control, dict) else []
+            amounts = control.get("amounts") if isinstance(control, dict) else []
+        return operation in operations and amount in amounts
 
     def _mock_default_vision_source_id(self, value: Any) -> str | None:
         if not isinstance(value, list):

@@ -140,13 +140,18 @@ class ServiceInputWorldStateSourcePackMixin:
                 world_states=world_states,
                 max_active=WORLD_STATE_MAX_ACTIVE,
             )
+            current_world_states = self._list_current_world_states(
+                state=state,
+                current_time=started_at,
+                limit=WORLD_STATE_MAX_ACTIVE,
+            )
+            foreground_records = self._foreground_world_state_records_for_current_source(
+                world_states=current_world_states,
+                source_ref=source_ref,
+            )
             foreground_world_state = (
                 self._summarize_foreground_world_states(
-                    self._list_current_world_states(
-                        state=state,
-                        current_time=started_at,
-                        limit=WORLD_STATE_FOREGROUND_LIMIT,
-                    ),
+                    foreground_records,
                     current_time=started_at,
                 )
                 or []
@@ -216,6 +221,33 @@ class ServiceInputWorldStateSourcePackMixin:
                 world_state_trace,
                 visible_foreground_world_state,
             )
+
+    def _foreground_world_state_records_for_current_source(
+        self,
+        *,
+        world_states: list[dict[str, Any]],
+        source_ref: str,
+    ) -> list[dict[str, Any]]:
+        # 現 cycle で得た状態は、既存の高 salience 状態に押し出されず判断前景へ入れる。
+        selected: list[dict[str, Any]] = []
+        selected_ids: set[str] = set()
+
+        for prefer_current_source in (True, False):
+            for world_state in world_states:
+                if not isinstance(world_state, dict):
+                    continue
+                if prefer_current_source and world_state.get("source_ref") != source_ref:
+                    continue
+                world_state_id = world_state.get("world_state_id")
+                if not isinstance(world_state_id, str) or not world_state_id.strip():
+                    continue
+                if world_state_id in selected_ids:
+                    continue
+                selected.append(world_state)
+                selected_ids.add(world_state_id)
+                if len(selected) >= WORLD_STATE_FOREGROUND_LIMIT:
+                    return selected
+        return selected
 
     def _should_generate_world_state(
         self,

@@ -12,6 +12,19 @@ from otomekairo.service.config.constants import (
     EVENT_STREAM_CAPABILITY_PERMISSIONS,
     VISION_SOURCE_KINDS,
 )
+from otomekairo.service.input.source_owner import visual_source_owner
+
+
+CAMERA_PTZ_OPERATIONS = {
+    "move_up",
+    "move_down",
+    "move_left",
+    "move_right",
+    "zoom_in",
+    "zoom_out",
+}
+CAMERA_PTZ_AMOUNTS = {"small", "medium"}
+EVENT_STREAM_EVENT_SUBSCRIPTIONS = {"assistant_message"}
 
 
 class ServiceConfigStreamMixin:
@@ -35,6 +48,7 @@ class ServiceConfigStreamMixin:
             raise ServiceError(400, "invalid_client_id", "hello.client_id must be a non-empty string.")
         if not isinstance(caps, list):
             raise ServiceError(400, "invalid_caps", "hello.caps must be an array.")
+        event_subscriptions = self._normalize_event_subscriptions(payload.get("event_subscriptions"))
 
         # binding 候補
         manifests = capability_manifests()
@@ -109,6 +123,7 @@ class ServiceConfigStreamMixin:
                 client_id=client_id.strip(),
                 capabilities=accepted_capabilities,
                 rejected_bindings=rejected_bindings,
+                event_subscriptions=event_subscriptions,
                 vision_sources=vision_sources,
             )
         except ValueError as exc:
@@ -118,9 +133,37 @@ class ServiceConfigStreamMixin:
             (
                 f"hello client_id={client_id.strip()} "
                 f"accepted={sorted(accepted_capabilities)} rejected={len(rejected_bindings)} "
+                f"event_subscriptions={event_subscriptions} "
                 f"vision_sources={len(vision_sources)}"
             ),
         )
+
+    def _normalize_event_subscriptions(self, value: Any) -> list[str]:
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise ServiceError(
+                400,
+                "invalid_event_subscriptions",
+                "hello.event_subscriptions must be an array.",
+            )
+        normalized: list[str] = []
+        for item in value:
+            if not isinstance(item, str) or not item.strip():
+                raise ServiceError(
+                    400,
+                    "invalid_event_subscriptions",
+                    "hello.event_subscriptions must contain non-empty strings.",
+                )
+            event_type = item.strip()
+            if event_type not in EVENT_STREAM_EVENT_SUBSCRIPTIONS:
+                raise ServiceError(
+                    400,
+                    "invalid_event_subscriptions",
+                    "hello.event_subscriptions contains unsupported event types.",
+                )
+            normalized.append(event_type)
+        return sorted(set(normalized))
 
     def patch_capability_state(
         self,
@@ -161,7 +204,8 @@ class ServiceConfigStreamMixin:
             current_time=generated_at,
             bound_client_ids=bindings["accepted"].get(normalized_capability_id, []),
             rejected_bindings=bindings["rejected"],
-            vision_sources=vision_sources if normalized_capability_id == "vision.capture" else None,
+            vision_sources=vision_sources if normalized_capability_id in {"vision.capture", "camera.ptz"} else None,
+            wake_policy_observations=self._wake_policy_observations_from_state(state),
             active_ongoing_action=active_ongoing_action,
         )
         debug_log(
@@ -224,6 +268,7 @@ class ServiceConfigStreamMixin:
                 "hello.vision_sources must be a non-empty array when vision.capture is accepted.",
             )
 
+        registered_camera_sources = self._camera_sources_from_state(self.store.read_state())
         normalized_sources: list[dict[str, Any]] = []
         seen_source_ids: set[str] = set()
         for source in raw_sources:
@@ -260,6 +305,11 @@ class ServiceConfigStreamMixin:
                     "invalid_vision_sources",
                     "hello.vision_sources[].kind must be desktop, camera, or virtual.",
                 )
+            source_owner = self._normalize_hello_vision_source_owner(
+                value=source.get("source_owner"),
+                kind=kind,
+                label="hello.vision_sources[].source_owner",
+            )
             label = self._normalize_vision_source_text(source.get("label"), "hello.vision_sources[].label")
             aliases = self._normalize_vision_source_text_list(
                 source.get("aliases", []),
@@ -280,19 +330,182 @@ class ServiceConfigStreamMixin:
                     "invalid_vision_sources",
                     "hello.vision_sources[].required_permissions are not granted.",
                 )
-            normalized_sources.append(
-                {
-                    "vision_source_id": source_id,
-                    "kind": kind,
-                    "label": self._clamp(label, limit=80),
-                    "aliases": aliases[:8],
-                    "default_for": default_for[:8],
-                    "client_id": client_id,
-                    "capability_id": capability_id,
-                    "required_permissions": required_permissions,
-                }
+            supported_controls = self._normalize_hello_supported_controls(
+                value=source.get("supported_controls"),
+                kind=kind,
+                accepted_capabilities=accepted_capabilities,
             )
+            normalized_source = {
+                "vision_source_id": source_id,
+                "kind": kind,
+                "source_owner": source_owner,
+                "label": self._clamp(label, limit=80),
+                "aliases": aliases[:8],
+                "default_for": default_for[:8],
+                "client_id": client_id,
+                "capability_id": capability_id,
+                "required_permissions": required_permissions,
+                "supported_controls": supported_controls,
+            }
+            if kind == "camera" and source_owner == "self":
+                registered_source = registered_camera_sources.get(source_id)
+                if not isinstance(registered_source, dict):
+                    raise ServiceError(
+                        400,
+                        "invalid_vision_sources",
+                        "hello.vision_sources[] camera source is not registered.",
+                    )
+                if registered_source.get("enabled") is not True:
+                    raise ServiceError(
+                        400,
+                        "invalid_vision_sources",
+                        "hello.vision_sources[] camera source is disabled.",
+                    )
+                self._validate_registered_camera_source_hello(
+                    hello_source=normalized_source,
+                    registered_source=registered_source,
+                )
+            normalized_sources.append(normalized_source)
         return normalized_sources
+
+    def _validate_registered_camera_source_hello(
+        self,
+        *,
+        hello_source: dict[str, Any],
+        registered_source: dict[str, Any],
+    ) -> None:
+        expected_fields = ("client_id", "kind", "source_owner", "label")
+        for field_name in expected_fields:
+            if hello_source.get(field_name) != registered_source.get(field_name):
+                raise ServiceError(
+                    400,
+                    "invalid_vision_sources",
+                    f"hello.vision_sources[].{field_name} does not match registered camera_source.",
+                )
+        expected_aliases = [registered_source["label"]]
+        if hello_source.get("aliases") != expected_aliases:
+            raise ServiceError(
+                400,
+                "invalid_vision_sources",
+                "hello.vision_sources[].aliases does not match registered camera_source.",
+            )
+        if hello_source.get("default_for") != ["camera"]:
+            raise ServiceError(
+                400,
+                "invalid_vision_sources",
+                "hello.vision_sources[].default_for does not match registered camera_source.",
+            )
+
+    def _normalize_hello_vision_source_owner(
+        self,
+        *,
+        value: Any,
+        kind: str,
+        label: str,
+    ) -> str:
+        expected_owner = visual_source_owner(kind)
+        if expected_owner is None:
+            raise ServiceError(400, "invalid_vision_sources", f"{label} is unsupported for kind={kind}.")
+        if value is None:
+            return expected_owner
+        if not isinstance(value, str) or not value.strip():
+            raise ServiceError(400, "invalid_vision_sources", f"{label} must be a non-empty string.")
+        normalized = value.strip()
+        if normalized != expected_owner:
+            raise ServiceError(
+                400,
+                "invalid_vision_sources",
+                f"{label} must be {expected_owner} for kind={kind}.",
+            )
+        return normalized
+
+    def _normalize_hello_supported_controls(
+        self,
+        *,
+        value: Any,
+        kind: str,
+        accepted_capabilities: dict[str, str],
+    ) -> dict[str, Any]:
+        if value is None:
+            return {}
+        if not isinstance(value, dict):
+            raise ServiceError(400, "invalid_vision_sources", "hello.vision_sources[].supported_controls must be an object.")
+        if not value:
+            return {}
+        unsupported_controls = sorted(
+            str(key)
+            for key in value
+            if not isinstance(key, str) or key != "camera.ptz"
+        )
+        if unsupported_controls:
+            raise ServiceError(
+                400,
+                "invalid_vision_sources",
+                "hello.vision_sources[].supported_controls contains unsupported controls.",
+            )
+        camera_ptz = value.get("camera.ptz")
+        if camera_ptz is None:
+            return {}
+        if kind != "camera":
+            raise ServiceError(
+                400,
+                "invalid_vision_sources",
+                "hello.vision_sources[].supported_controls.camera.ptz requires kind=camera.",
+            )
+        if "camera.ptz" not in accepted_capabilities:
+            raise ServiceError(
+                400,
+                "invalid_vision_sources",
+                "hello.vision_sources[].supported_controls.camera.ptz requires accepted camera.ptz capability.",
+            )
+        if not isinstance(camera_ptz, dict):
+            raise ServiceError(
+                400,
+                "invalid_vision_sources",
+                "hello.vision_sources[].supported_controls.camera.ptz must be an object.",
+            )
+        operations = self._normalize_supported_control_values(
+            value=camera_ptz.get("operations"),
+            label="hello.vision_sources[].supported_controls.camera.ptz.operations",
+            allowed_values=CAMERA_PTZ_OPERATIONS,
+        )
+        amounts = self._normalize_supported_control_values(
+            value=camera_ptz.get("amounts"),
+            label="hello.vision_sources[].supported_controls.camera.ptz.amounts",
+            allowed_values=CAMERA_PTZ_AMOUNTS,
+        )
+        unsupported_fields = sorted(set(camera_ptz.keys()) - {"operations", "amounts"})
+        if unsupported_fields:
+            raise ServiceError(
+                400,
+                "invalid_vision_sources",
+                "hello.vision_sources[].supported_controls.camera.ptz has unsupported fields.",
+            )
+        return {
+            "camera.ptz": {
+                "operations": operations,
+                "amounts": amounts,
+            }
+        }
+
+    def _normalize_supported_control_values(
+        self,
+        *,
+        value: Any,
+        label: str,
+        allowed_values: set[str],
+    ) -> list[str]:
+        values = self._normalize_vision_source_text_list(value, label)
+        if not values:
+            raise ServiceError(400, "invalid_vision_sources", f"{label} must be a non-empty array.")
+        unsupported_values = sorted(set(values) - allowed_values)
+        if unsupported_values:
+            raise ServiceError(
+                400,
+                "invalid_vision_sources",
+                f"{label} contains unsupported values.",
+            )
+        return values
 
     def _normalize_vision_source_text(self, value: Any, label: str) -> str:
         if not isinstance(value, str) or not value.strip():
@@ -324,6 +537,7 @@ class ServiceConfigStreamMixin:
         bound_client_ids: list[str],
         rejected_bindings: list[dict[str, Any]],
         vision_sources: list[dict[str, Any]] | None = None,
+        wake_policy_observations: list[dict[str, Any]] | None = None,
         active_ongoing_action: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         capability_id = manifest["id"]
@@ -377,8 +591,16 @@ class ServiceConfigStreamMixin:
             and not parallel_blocked
         )
         normalized_vision_sources = self._inspection_vision_sources(vision_sources)
-        has_vision_source = bool(normalized_vision_sources)
-        if capability_id == "vision.capture" and available and not has_vision_source:
+        if capability_id == "camera.ptz":
+            normalized_vision_sources = self._camera_ptz_inspection_vision_sources(
+                vision_sources=normalized_vision_sources,
+            )
+        has_vision_source = (
+            any(source.get("available") is True for source in normalized_vision_sources)
+            if capability_id in {"vision.capture", "camera.ptz"}
+            else bool(normalized_vision_sources)
+        )
+        if capability_id in {"vision.capture", "camera.ptz"} and available and not has_vision_source:
             available = False
         unavailable_reason = None
         if not available:
@@ -392,8 +614,14 @@ class ServiceConfigStreamMixin:
                 unavailable_reason = "busy"
             elif not bound_client_ids:
                 unavailable_reason = "no_binding"
-            elif capability_id == "vision.capture" and not has_vision_source:
+            elif capability_id == "vision.capture" and not normalized_vision_sources:
                 unavailable_reason = "no_vision_source"
+            elif capability_id == "vision.capture" and not has_vision_source:
+                unavailable_reason = self._vision_source_unavailable_reason(normalized_vision_sources)
+            elif capability_id == "camera.ptz" and not normalized_vision_sources:
+                unavailable_reason = "no_supported_control"
+            elif capability_id == "camera.ptz" and not has_vision_source:
+                unavailable_reason = self._vision_source_unavailable_reason(normalized_vision_sources)
             elif parallel_blocked:
                 unavailable_reason = "parallel_blocked"
 
@@ -434,7 +662,7 @@ class ServiceConfigStreamMixin:
         readiness = capability_decision_readiness_from_manifest(manifest)
         if readiness is not None:
             result["readiness"] = readiness
-        if capability_id == "vision.capture":
+        if capability_id in {"vision.capture", "camera.ptz"}:
             result["vision_sources"] = normalized_vision_sources
         return result
 
@@ -452,31 +680,152 @@ class ServiceConfigStreamMixin:
                 continue
             if not isinstance(label, str) or not label.strip():
                 continue
-            normalized.append(
-                {
-                    "vision_source_id": source_id.strip(),
-                    "kind": kind.strip(),
-                    "label": self._clamp(label.strip(), limit=80),
-                    "aliases": [
-                        value
-                        for value in source.get("aliases", [])
-                        if isinstance(value, str) and value.strip()
-                    ][:8],
-                    "default_for": [
-                        value
-                        for value in source.get("default_for", [])
-                        if isinstance(value, str) and value.strip()
-                    ][:8],
-                    "available": source.get("available") is True,
-                    "required_permissions": [
-                        value
-                        for value in source.get("required_permissions", [])
-                        if isinstance(value, str) and value.strip()
-                    ],
-                    "unavailable_reason": source.get("unavailable_reason"),
-                }
-            )
+            normalized_kind = kind.strip()
+            source_owner = source.get("source_owner")
+            if not isinstance(source_owner, str) or not source_owner.strip():
+                source_owner = visual_source_owner(normalized_kind)
+            supported_controls = self._inspection_supported_controls(source.get("supported_controls"))
+            normalized_source_id = source_id.strip()
+            normalized_source_owner = source_owner.strip() if isinstance(source_owner, str) else None
+            source_available = source.get("available") is True
+            camera_source_enabled = None
+            if normalized_kind == "camera" and normalized_source_owner == "self":
+                camera_source_enabled = self._camera_source_is_enabled(normalized_source_id)
+                source_available = source_available and camera_source_enabled
+            item = {
+                "vision_source_id": normalized_source_id,
+                "kind": normalized_kind,
+                "source_owner": normalized_source_owner,
+                "label": self._clamp(label.strip(), limit=80),
+                "aliases": [
+                    value
+                    for value in source.get("aliases", [])
+                    if isinstance(value, str) and value.strip()
+                ][:8],
+                "default_for": [
+                    value
+                    for value in source.get("default_for", [])
+                    if isinstance(value, str) and value.strip()
+                ][:8],
+                "available": source_available,
+                "required_permissions": [
+                    value
+                    for value in source.get("required_permissions", [])
+                    if isinstance(value, str) and value.strip()
+                ],
+                "supported_controls": supported_controls,
+                "unavailable_reason": source.get("unavailable_reason"),
+            }
+            if camera_source_enabled is not None:
+                item["camera_source_status"] = "enabled" if camera_source_enabled else "disabled"
+                if not camera_source_enabled:
+                    item["unavailable_reason"] = "camera_source_disabled"
+            normalized.append(item)
         return normalized
+
+    def _inspection_supported_controls(self, value: Any) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            return {}
+        camera_ptz = value.get("camera.ptz")
+        if not isinstance(camera_ptz, dict):
+            return {}
+        operations = [
+            operation
+            for operation in camera_ptz.get("operations", [])
+            if isinstance(operation, str) and operation in CAMERA_PTZ_OPERATIONS
+        ][:6]
+        amounts = [
+            amount
+            for amount in camera_ptz.get("amounts", [])
+            if isinstance(amount, str) and amount in CAMERA_PTZ_AMOUNTS
+        ][:2]
+        if not operations or not amounts:
+            return {}
+        return {
+            "camera.ptz": {
+                "operations": operations,
+                "amounts": amounts,
+            }
+        }
+
+    def _camera_ptz_inspection_vision_sources(
+        self,
+        *,
+        vision_sources: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        sources: list[dict[str, Any]] = []
+        for source in vision_sources:
+            if not isinstance(source, dict):
+                continue
+            if source.get("kind") != "camera":
+                continue
+            control = self._camera_ptz_control(source)
+            if control is None:
+                continue
+            source_id = source.get("vision_source_id")
+            camera_source_enabled = isinstance(source_id, str) and self._camera_source_is_enabled(source_id)
+            source_available = source.get("available") is True and camera_source_enabled
+            unavailable_reason = source.get("unavailable_reason") if camera_source_enabled else "camera_source_disabled"
+            if not isinstance(unavailable_reason, str) or not unavailable_reason.strip():
+                unavailable_reason = "unavailable"
+            item = {
+                "vision_source_id": source.get("vision_source_id"),
+                "kind": source.get("kind"),
+                "source_owner": source.get("source_owner"),
+                "label": source.get("label"),
+                "aliases": source.get("aliases", []),
+                "default_for": source.get("default_for", []),
+                "available": source_available,
+                "required_permissions": source.get("required_permissions", []),
+                "supported_controls": {
+                    "camera.ptz": control,
+                },
+                "supported_operations": control["operations"],
+                "supported_amounts": control["amounts"],
+                "camera_source_status": "enabled" if camera_source_enabled else "disabled",
+                "unavailable_reason": None if source_available else unavailable_reason,
+            }
+            sources.append(item)
+        return sources
+
+    def _vision_source_unavailable_reason(self, vision_sources: list[dict[str, Any]]) -> str:
+        for source in vision_sources:
+            if isinstance(source, dict):
+                reason = source.get("unavailable_reason")
+                if isinstance(reason, str) and reason.strip():
+                    return reason.strip()
+        return "unavailable"
+
+    def _camera_ptz_control(self, source: dict[str, Any]) -> dict[str, list[str]] | None:
+        supported_controls = source.get("supported_controls")
+        if not isinstance(supported_controls, dict):
+            return None
+        control = supported_controls.get("camera.ptz")
+        if not isinstance(control, dict):
+            return None
+        operations = [
+            operation
+            for operation in control.get("operations", [])
+            if isinstance(operation, str) and operation in CAMERA_PTZ_OPERATIONS
+        ][:6]
+        amounts = [
+            amount
+            for amount in control.get("amounts", [])
+            if isinstance(amount, str) and amount in CAMERA_PTZ_AMOUNTS
+        ][:2]
+        if not operations or not amounts:
+            return None
+        return {
+            "operations": operations,
+            "amounts": amounts,
+        }
+
+    def _wake_policy_observations_from_state(self, state: dict[str, Any] | None) -> list[dict[str, Any]]:
+        wake_policy = state.get("wake_policy") if isinstance(state, dict) else None
+        observations = wake_policy.get("observations") if isinstance(wake_policy, dict) else None
+        if not isinstance(observations, list):
+            return []
+        return [observation for observation in observations if isinstance(observation, dict)]
 
     def _build_capability_decision_view(
         self,
@@ -502,7 +851,8 @@ class ServiceConfigStreamMixin:
                 current_time=current_time or self._now_iso(),
                 bound_client_ids=accepted_bindings.get(capability_id, []),
                 rejected_bindings=rejected_bindings,
-                vision_sources=vision_sources if capability_id == "vision.capture" else None,
+                vision_sources=vision_sources if capability_id in {"vision.capture", "camera.ptz"} else None,
+                wake_policy_observations=self._wake_policy_observations_from_state(state),
                 active_ongoing_action=active_ongoing_action,
             )
             item = {
@@ -528,7 +878,7 @@ class ServiceConfigStreamMixin:
             readiness = capability_decision_readiness_from_manifest(manifest)
             if readiness is not None:
                 item["readiness"] = readiness
-            if capability_id == "vision.capture":
+            if capability_id in {"vision.capture", "camera.ptz"}:
                 item["vision_sources"] = availability.get("vision_sources", [])
             decision_view.append(item)
         if not decision_view:
@@ -548,12 +898,15 @@ class ServiceConfigStreamMixin:
             if not isinstance(field_name, str) or not field_name.strip():
                 continue
             property_schema = properties.get(field_name, {})
+            description = property_schema.get("description") if isinstance(property_schema, dict) else None
             if (
                 isinstance(property_schema, dict)
                 and isinstance(property_schema.get("enum"), list)
                 and len(property_schema["enum"]) == 1
             ):
                 parts.append(f"{field_name}={property_schema['enum'][0]}")
+            elif isinstance(description, str) and description.strip():
+                parts.append(f"{field_name}({self._clamp(description.strip(), limit=80)})")
             else:
                 parts.append(field_name)
         if not parts:

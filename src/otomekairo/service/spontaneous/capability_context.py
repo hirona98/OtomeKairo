@@ -107,6 +107,8 @@ class ServiceSpontaneousCapabilityContextMixin:
                     value = capability_response.get(field)
                     if value is None:
                         value = request_input.get(field)
+                    if value is None and isinstance(request_record, dict):
+                        value = request_record.get(field)
                     if value is None and isinstance(client_context, dict):
                         value = client_context.get(field)
                 if isinstance(value, str):
@@ -148,6 +150,12 @@ class ServiceSpontaneousCapabilityContextMixin:
             )
             input_text = self._build_capability_result_input_text(
                 client_context=client_context,
+                capability_response=capability_response,
+            )
+        elif hook_name == "camera_ptz":
+            client_context, observation_summary, input_text = self._prepare_camera_ptz_result_context(
+                client_context=client_context,
+                observation_summary=observation_summary,
                 capability_response=capability_response,
             )
         elif hook_name == "external_status":
@@ -193,6 +201,54 @@ class ServiceSpontaneousCapabilityContextMixin:
                 capability_response=capability_response,
             )
         return client_context, observation_summary, input_text
+
+    def _prepare_camera_ptz_result_context(
+        self,
+        *,
+        client_context: dict[str, Any],
+        observation_summary: dict[str, Any],
+        capability_response: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any], str]:
+        request_record = capability_response.get("request_record")
+        request_input = request_record.get("input") if isinstance(request_record, dict) else {}
+        if not isinstance(request_input, dict):
+            request_input = {}
+        enriched_client_context = dict(client_context)
+        for key, limit in (
+            ("vision_source_id", 96),
+            ("source_kind", 32),
+            ("source_owner", 32),
+            ("source_label", 80),
+        ):
+            value = self._client_context_text(enriched_client_context.get(key), limit=limit)
+            if value is None and isinstance(request_record, dict):
+                value = self._client_context_text(request_record.get(key), limit=limit)
+            if value is not None:
+                enriched_client_context[key] = value
+        for key in ("status", "operation", "amount"):
+            value = self._client_context_text(capability_response.get(key), limit=32)
+            if value is None:
+                value = self._client_context_text(request_input.get(key), limit=32)
+            if value is not None:
+                enriched_client_context[key] = value
+        enriched_observation_summary = dict(observation_summary)
+        for key in (
+            "vision_source_id",
+            "source_kind",
+            "source_owner",
+            "source_label",
+            "status",
+            "operation",
+            "amount",
+        ):
+            value = enriched_client_context.get(key)
+            if isinstance(value, str) and value.strip():
+                enriched_observation_summary[key] = value.strip()
+        input_text = self._build_capability_result_input_text(
+            client_context=enriched_client_context,
+            capability_response=capability_response,
+        )
+        return enriched_client_context, enriched_observation_summary, input_text
 
     def _prepare_external_status_result_context(
         self,
@@ -357,6 +413,18 @@ class ServiceSpontaneousCapabilityContextMixin:
             if image_count is not None and image_count <= 0:
                 return "視覚観測は空で、追加の手掛かりを得られなかった。"
             return None
+        if hook_name == "camera_ptz":
+            if not isinstance(observation_summary, dict):
+                return None
+            status = observation_summary.get("status")
+            operation = observation_summary.get("operation")
+            amount = observation_summary.get("amount")
+            if isinstance(status, str) and isinstance(operation, str) and isinstance(amount, str):
+                return self._clamp(
+                    f"カメラ制御結果: status={status.strip()} operation={operation.strip()} amount={amount.strip()}",
+                    limit=160,
+                )
+            return None
         if hook_name == "external_status":
             status_text = None
             service = None
@@ -467,6 +535,16 @@ class ServiceSpontaneousCapabilityContextMixin:
         status_text = self._capability_result_status_text(capability_response)
         if status_text is not None:
             parts.append(f"結果要約は {status_text}")
+        elif capability_id == "camera.ptz":
+            status = self._client_context_text(capability_response.get("status"), limit=32)
+            operation = self._client_context_text(capability_response.get("operation"), limit=32)
+            amount = self._client_context_text(capability_response.get("amount"), limit=32)
+            if status is not None and operation is not None and amount is not None:
+                parts.append(f"カメラ制御結果は status={status} operation={operation} amount={amount}。")
+            else:
+                parts.append("カメラ制御結果を受け取った。")
+            if vision_source_id is not None:
+                parts.append(f"必要なら同じ vision_source_id={vision_source_id} を vision.capture で見て確認したい。")
         elif capability_id == "schedule.status":
             schedule_summary = self._client_context_text(capability_response.get("schedule_summary"), limit=160)
             if schedule_summary is not None:

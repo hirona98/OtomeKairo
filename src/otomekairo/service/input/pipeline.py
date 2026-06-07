@@ -21,6 +21,7 @@ class ServiceInputPipelineMixin:
         pending_intent_selection: dict[str, Any] | None = None,
         observation_summary: dict[str, Any] | None = None,
         capability_request_summary: dict[str, Any] | None = None,
+        assistant_message_target_client_id: str | None = None,
     ) -> dict[str, Any]:
         cycle_label = self._debug_cycle_label(cycle_id)
         current_client_context = client_context or {}
@@ -28,6 +29,11 @@ class ServiceInputPipelineMixin:
             input_text=input_text,
             trigger_kind=trigger_kind,
             capability_request_summary=capability_request_summary,
+        )
+        pipeline_assistant_message_target_client_id = self._pipeline_assistant_message_target_client_id(
+            current_input=current_input,
+            client_context=current_client_context,
+            inherited_target_client_id=assistant_message_target_client_id,
         )
         augmented_query_text = self._pipeline_augmented_query_text(
             input_text=input_text,
@@ -140,6 +146,7 @@ class ServiceInputPipelineMixin:
             speech_role=speech_role,
             persona=persona,
             decision=decision,
+            assistant_message_target_client_id=pipeline_assistant_message_target_client_id,
             cycle_label=cycle_label,
         )
 
@@ -207,6 +214,22 @@ class ServiceInputPipelineMixin:
             if isinstance(source_current_input, dict) and source_current_input.get("response_target") == "user":
                 return "user"
         return "none"
+
+    def _pipeline_assistant_message_target_client_id(
+        self,
+        *,
+        current_input: CurrentInput,
+        client_context: dict[str, Any],
+        inherited_target_client_id: str | None,
+    ) -> str | None:
+        if current_input.response_target != "user":
+            return None
+        inherited_target = self._client_context_text(inherited_target_client_id, limit=128)
+        if inherited_target is not None:
+            return inherited_target
+        if current_input.sender == "user" and current_input.source_kind == "user_message":
+            return self._client_context_text(client_context.get("client_id"), limit=128)
+        return None
 
     def _build_pipeline_recall_inputs(
         self,
@@ -493,6 +516,7 @@ class ServiceInputPipelineMixin:
         speech_role: dict[str, Any],
         persona: dict[str, Any],
         decision: dict[str, Any],
+        assistant_message_target_client_id: str | None,
         cycle_label: str,
     ) -> dict[str, Any]:
         # capability request
@@ -503,6 +527,7 @@ class ServiceInputPipelineMixin:
                 state=state,
                 current_time=self._now_iso(),
                 source_current_input=current_input.to_prompt_payload(),
+                assistant_message_target_client_id=assistant_message_target_client_id,
                 decision=decision,
             )
             dispatched_capability_request_summary = dispatch_result.get("capability_request_summary")

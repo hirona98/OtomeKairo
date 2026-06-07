@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "otomekairo-tapo-c220-connector"
+version = "0.1.0"
+description = "Tapo C220 connector for OtomeKairo"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Apache License 2.0" }
+authors = [
+  { name = "hiro9" }
+]
+dependencies = [
+  "opencv-python>=4.9",
+  "onvif-zeep>=0.2.12,<1"
+]
+
+[project.scripts]
+otomekairo-tapo-c220-connector = "otomekairo_tapo_c220_connector.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
