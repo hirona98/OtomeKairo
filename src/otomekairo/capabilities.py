@@ -121,7 +121,11 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
                         "zoom_out",
                     ],
                 },
-                "amount": {"type": "string", "enum": ["small", "medium"]},
+                "amount": {
+                    "type": "string",
+                    "enum": ["small", "medium"],
+                    "description": "通常のカメラ移動は medium。少しまたは微調整の意図が明示されている場合だけ small。",
+                },
             },
             "required": ["vision_source_id", "operation", "amount"],
             "additionalProperties": False,

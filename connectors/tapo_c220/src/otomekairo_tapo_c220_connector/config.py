@@ -16,8 +16,8 @@ SUPPORTED_AMOUNTS = ("small", "medium")
 DEFAULT_OPERATION_VECTORS: dict[str, tuple[float, float]] = {
     "move_up": (0, 1),
     "move_down": (0, -1),
-    "move_left": (1, 0),
-    "move_right": (-1, 0),
+    "move_left": (-1, 0),
+    "move_right": (1, 0),
 }
 
 
@@ -162,8 +162,8 @@ def load_config(
         rtsp_transport="tcp",
         rtsp_open_timeout_seconds=8.0,
         jpeg_quality=88,
-        small_move_seconds=0.20,
-        medium_move_seconds=0.55,
+        small_move_seconds=0.50,
+        medium_move_seconds=1.0,
         operation_vectors=dict(DEFAULT_OPERATION_VECTORS),
     )
 

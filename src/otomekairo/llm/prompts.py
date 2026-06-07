@@ -775,6 +775,7 @@ def _build_decision_system_prompt(persona: dict) -> str:
             "CapabilityDecisionView の項目に fresh_world_state_available=true がある場合、明示的なユーザー依頼ではない同じ現在状態の判断は fresh_world_state を根拠に speech / noop / pending_intent を選んでください。\n"
             "vision.capture に fresh_world_state_by_vision_source がある場合、明示的なユーザー依頼ではない同じ vision_source_id の判断は既存の visual_context を根拠にしてください。\n"
             "camera.ptz は fresh visual_context があっても camera の向きや画角を変える必要がある場合に capability_request として選べます。\n"
+            "camera.ptz.input.amount は通常 medium を選び、少しまたは微調整の意図が明示されている場合だけ small を選んでください。\n"
             "capability_request.input は required_input に従う最小 object にしてください。target_client_id や資格情報は入れないでください。\n"
             "current_input.sender=user かつ response_target=user の text が非空なら、明示的な発話不要表現がない限り speech を選んでください。\n"
             "ユーザー発話への直接応答として自然に返せるなら speech を優先し、pending_intent を乱用しないでください。\n"

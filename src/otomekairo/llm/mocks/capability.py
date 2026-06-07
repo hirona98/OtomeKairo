@@ -689,9 +689,14 @@ class LLMMockCapabilityMixin:
         return None
 
     def _mock_camera_ptz_amount(self, normalized: str) -> str:
-        if any(marker in normalized for marker in ("大きく", "もっと", "しっかり", "大きめ", "medium")):
+        lowered = normalized.lower()
+        if "medium" in lowered or "midium" in lowered:
             return "medium"
-        return "small"
+        if any(marker in normalized for marker in ("少し", "すこし", "ちょっと", "ちょい", "微調整", "小さく", "小さめ")):
+            return "small"
+        if "small" in lowered:
+            return "small"
+        return "medium"
 
     def _mock_default_camera_ptz_source_id(
         self,

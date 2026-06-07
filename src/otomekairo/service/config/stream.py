@@ -867,12 +867,15 @@ class ServiceConfigStreamMixin:
             if not isinstance(field_name, str) or not field_name.strip():
                 continue
             property_schema = properties.get(field_name, {})
+            description = property_schema.get("description") if isinstance(property_schema, dict) else None
             if (
                 isinstance(property_schema, dict)
                 and isinstance(property_schema.get("enum"), list)
                 and len(property_schema["enum"]) == 1
             ):
                 parts.append(f"{field_name}={property_schema['enum'][0]}")
+            elif isinstance(description, str) and description.strip():
+                parts.append(f"{field_name}({self._clamp(description.strip(), limit=80)})")
             else:
                 parts.append(field_name)
         if not parts:

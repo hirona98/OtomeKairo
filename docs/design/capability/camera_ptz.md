@@ -63,7 +63,8 @@ connector は現在の映像に対する相対方向を機器固有 API、座標
 | `zoom_out` | camera source の画角を広げる |
 
 `amount` は `small / medium` のいずれかにする。
-`small` は通常の微調整、`medium` は明示的に大きく動かす依頼に使う。
+通常のカメラ移動は `medium` にする。
+少し、すこし、ちょっと、微調整などの小さい移動の意図が明示されている場合だけ `small` にする。
 connector は実機 API が連続値を要求する場合でも、server には連続値を出さない。
 connector は `operation / amount` を実機の座標、符号、速度、継続時間へ変換する。
 server、decision view、inspection は実機座標、符号、角度、速度、継続時間を扱わない。
