@@ -6,6 +6,8 @@ from typing import Any
 
 from .config import CameraConfig
 
+PTZ_VELOCITY = 1.0
+
 
 class PtzError(RuntimeError):
     pass
@@ -26,8 +28,8 @@ class OnvifPtzController:
             if vector is None:
                 raise PtzError("unsupported_operation")
             duration_seconds = self._duration_for_amount(amount)
-            x = vector[0] * self.config.ptz_velocity
-            y = vector[1] * self.config.ptz_velocity
+            x = vector[0] * PTZ_VELOCITY
+            y = vector[1] * PTZ_VELOCITY
             self._continuous_move(x=x, y=y, duration_seconds=duration_seconds)
 
     def service_capability(self) -> dict[str, Any]:
@@ -112,8 +114,8 @@ class OnvifPtzController:
         self._camera = ONVIFCamera(
             self.config.host,
             self.config.onvif_port,
-            self.config.onvif_username,
-            self.config.onvif_password,
+            self.config.camera_username,
+            self.config.camera_password,
             no_cache=True,
         )
         return self._camera

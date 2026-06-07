@@ -25,21 +25,18 @@ cp config.example.json config.local.json
 
 export OTOMEKAIRO_ACCESS_TOKEN="..."
 export TAPO_C220_HOST="192.168.1.52"
-export TAPO_C220_ONVIF_USERNAME="..."
-export TAPO_C220_ONVIF_PASSWORD="..."
-export TAPO_C220_RTSP_USERNAME="..."
-export TAPO_C220_RTSP_PASSWORD="..."
+export TAPO_C220_CAMERA_USERNAME="..."
+export TAPO_C220_CAMERA_PASSWORD="..."
 ```
 
-`TAPO_C220_ONVIF_USERNAME / TAPO_C220_ONVIF_PASSWORD` は C220 の camera account である。
+`TAPO_C220_CAMERA_USERNAME / TAPO_C220_CAMERA_PASSWORD` は C220 の camera account である。
+connector は同じ camera account を ONVIF control と RTSP capture に使う。
 C220 の ONVIF port は `camera.onvif_port` で指定し、初期値は `2020` とする。
-`TAPO_C220_RTSP_USERNAME / TAPO_C220_RTSP_PASSWORD` は camera の RTSP account である。
-`TAPO_C220_RTSP_USERNAME / TAPO_C220_RTSP_PASSWORD` を省略した場合、RTSP も ONVIF account を使う。
-`host`、account、password、RTSP account、connector token は repository、sample、通常ログ、result に保存しない。
+`host`、camera account、connector token は repository、sample、通常ログ、result に保存しない。
 
 `operation_vectors` は ONVIF `PanTilt` velocity へ掛ける向きベクトルである。
 設置向きが逆の場合は `config.local.json` の `operation_vectors` を変更する。
-`ptz_velocity` は ONVIF へ渡す移動速度であり、`0.01` から `1.0` の範囲で指定する。
+ONVIF へ渡す移動速度は connector 実装で `1.0` に固定する。
 `small_move_seconds / medium_move_seconds` は `amount` から連続移動時間へ変換する connector 内部設定であり、server、decision view、inspection へ出さない。
 
 ## 実行

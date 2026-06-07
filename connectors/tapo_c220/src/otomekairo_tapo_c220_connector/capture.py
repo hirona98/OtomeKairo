@@ -50,8 +50,8 @@ class RtspStillCapture:
                 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = old_options
 
     def _rtsp_url(self) -> str:
-        username = quote(self.config.rtsp_username, safe="")
-        password = quote(self.config.rtsp_password, safe="")
+        username = quote(self.config.camera_username, safe="")
+        password = quote(self.config.camera_password, safe="")
         host = self.config.host
         path = quote(self.config.rtsp_path, safe="/")
         return f"rtsp://{username}:{password}@{host}:{self.config.rtsp_port}/{path}"

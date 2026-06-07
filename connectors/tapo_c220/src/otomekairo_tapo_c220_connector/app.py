@@ -185,10 +185,8 @@ class TapoC220Connector:
         for secret in (
             self.config.server.access_token,
             self.config.camera.host,
-            self.config.camera.onvif_username,
-            self.config.camera.onvif_password,
-            self.config.camera.rtsp_username,
-            self.config.camera.rtsp_password,
+            self.config.camera.camera_username,
+            self.config.camera.camera_password,
         ):
             if secret:
                 text = text.replace(secret, "***")

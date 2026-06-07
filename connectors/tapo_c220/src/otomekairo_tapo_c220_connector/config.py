@@ -43,17 +43,14 @@ class ConnectorConfig:
 @dataclass(frozen=True)
 class CameraConfig:
     host: str
-    onvif_username: str
-    onvif_password: str
+    camera_username: str
+    camera_password: str
     onvif_port: int
-    rtsp_username: str
-    rtsp_password: str
     rtsp_port: int
     rtsp_path: str
     rtsp_transport: str
     rtsp_open_timeout_seconds: float
     jpeg_quality: int
-    ptz_velocity: float
     small_move_seconds: float
     medium_move_seconds: float
     operation_vectors: dict[str, tuple[float, float]]
@@ -133,19 +130,19 @@ def load_config(
         default_for=_string_list(connector, "default_for", default=["visual", "camera"]),
     )
 
-    onvif_username = _secret_value(
+    camera_username = _secret_value(
         camera,
-        "onvif_username",
-        "onvif_username_env",
-        default_env="TAPO_C220_ONVIF_USERNAME",
+        "camera_username",
+        "camera_username_env",
+        default_env="TAPO_C220_CAMERA_USERNAME",
         environ=env,
         required=require_runtime_secrets,
     )
-    onvif_password = _secret_value(
+    camera_password = _secret_value(
         camera,
-        "onvif_password",
-        "onvif_password_env",
-        default_env="TAPO_C220_ONVIF_PASSWORD",
+        "camera_password",
+        "camera_password_env",
+        default_env="TAPO_C220_CAMERA_PASSWORD",
         environ=env,
         required=require_runtime_secrets,
     )
@@ -158,33 +155,14 @@ def load_config(
             environ=env,
             required=require_runtime_secrets,
         ),
-        onvif_username=onvif_username,
-        onvif_password=onvif_password,
+        camera_username=camera_username,
+        camera_password=camera_password,
         onvif_port=_port_value(camera, "onvif_port", default=2020),
-        rtsp_username=_secret_value(
-            camera,
-            "rtsp_username",
-            "rtsp_username_env",
-            default_env="TAPO_C220_RTSP_USERNAME",
-            environ=env,
-            required=False,
-        )
-        or onvif_username,
-        rtsp_password=_secret_value(
-            camera,
-            "rtsp_password",
-            "rtsp_password_env",
-            default_env="TAPO_C220_RTSP_PASSWORD",
-            environ=env,
-            required=False,
-        )
-        or onvif_password,
         rtsp_port=_port_value(camera, "rtsp_port", default=554),
         rtsp_path=_rtsp_path(_string_value(camera, "rtsp_path", default="stream1")),
         rtsp_transport=_rtsp_transport(_string_value(camera, "rtsp_transport", default="tcp")),
         rtsp_open_timeout_seconds=_positive_float(camera, "rtsp_open_timeout_seconds", default=8.0),
         jpeg_quality=_int_range(camera, "jpeg_quality", default=88, minimum=1, maximum=95),
-        ptz_velocity=_float_range(camera, "ptz_velocity", default=0.60, minimum=0.01, maximum=1.0),
         small_move_seconds=_positive_float(camera, "small_move_seconds", default=0.20),
         medium_move_seconds=_positive_float(camera, "medium_move_seconds", default=0.55),
         operation_vectors=_operation_vectors(camera.get("operation_vectors", DEFAULT_OPERATION_VECTORS)),
@@ -263,13 +241,6 @@ def _positive_float(section: dict[str, Any], key: str, *, default: float) -> flo
     value = section.get(key, default)
     if isinstance(value, bool) or not isinstance(value, int | float) or value <= 0:
         raise ConfigError(f"{key} must be a positive number.")
-    return float(value)
-
-
-def _float_range(section: dict[str, Any], key: str, *, default: float, minimum: float, maximum: float) -> float:
-    value = section.get(key, default)
-    if isinstance(value, bool) or not isinstance(value, int | float) or not minimum <= float(value) <= maximum:
-        raise ConfigError(f"{key} must be a number between {minimum} and {maximum}.")
     return float(value)
 
 
