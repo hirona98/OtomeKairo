@@ -477,6 +477,7 @@ class ServiceInputTraceBuildMixin:
             "primary_candidate_kind": decision["kind"],
             "pending_intent_candidate_summary": pending_intent_summary,
             "capability_request_candidate_summary": self._decision_capability_request_summary(decision),
+            "autonomous_run_candidate_summary": self._decision_autonomous_run_summary(decision),
         }
         input_context_addition_summary = self._input_context_addition_summary(
             input_text=input_text,
@@ -505,6 +506,24 @@ class ServiceInputTraceBuildMixin:
             "capability_id": capability_id,
             "input": input_payload,
         }
+
+    def _decision_autonomous_run_summary(self, decision: dict[str, Any]) -> dict[str, Any] | None:
+        # run 調整判断を後から追えるよう decision_trace に残す。
+        autonomous_run = decision.get("autonomous_run")
+        if not isinstance(autonomous_run, dict):
+            return None
+        coordination = autonomous_run.get("coordination")
+        payload: dict[str, Any] = {
+            "objective_summary": autonomous_run.get("objective_summary"),
+            "initial_step_summary": autonomous_run.get("initial_step_summary"),
+        }
+        if isinstance(coordination, dict):
+            payload["coordination"] = {
+                "mode": coordination.get("mode"),
+                "target_run_ids": coordination.get("target_run_ids"),
+                "reason_summary": coordination.get("reason_summary"),
+            }
+        return payload
 
     def _input_context_addition_summary(
         self,

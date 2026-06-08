@@ -54,6 +54,7 @@ class OtomeKairoService(
             "active_user_response_cycle_count": 0,
         }
         self._wake_observation_runtime_state: dict[str, dict[str, Any]] = {}
+        self._autonomous_run_execution_locks: dict[str, threading.RLock] = {}
         self._background_wake_stop_event: threading.Event | None = None
         self._background_wake_thread: threading.Thread | None = None
         self._background_autonomous_run_stop_event: threading.Event | None = None

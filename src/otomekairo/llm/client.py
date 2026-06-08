@@ -303,6 +303,10 @@ class LLMClient:
         context: DecisionContext,
     ) -> None:
         validate_decision_contract(payload)
+        self._validate_decision_autonomous_run_coordination(
+            payload=payload,
+            context=context,
+        )
         self._validate_decision_explicit_status_request(
             payload=payload,
             input_text=context.input_text,
@@ -336,6 +340,36 @@ class LLMClient:
             payload=payload,
             context=context,
         )
+
+    def _validate_decision_autonomous_run_coordination(
+        self,
+        *,
+        payload: dict[str, Any],
+        context: DecisionContext,
+    ) -> None:
+        if payload.get("kind") != "autonomous_run":
+            return
+        autonomous_run = payload.get("autonomous_run")
+        if not isinstance(autonomous_run, dict):
+            return
+        coordination = autonomous_run.get("coordination")
+        if not isinstance(coordination, dict):
+            return
+        target_run_ids = coordination.get("target_run_ids")
+        if not isinstance(target_run_ids, list) or not target_run_ids:
+            return
+        summaries_by_id = {
+            str(summary.get("run_id") or "").strip(): summary
+            for summary in context.autonomous_run_summaries or []
+            if isinstance(summary, dict)
+        }
+        for run_id in target_run_ids:
+            target = summaries_by_id.get(str(run_id).strip())
+            if not isinstance(target, dict):
+                raise LLMError(
+                    "Decision autonomous_run.coordination.target_run_ids には "
+                    "AutonomousRunSummaries に含まれる run_id だけを指定してください。"
+                )
 
     def generate_autonomous_step(
         self,

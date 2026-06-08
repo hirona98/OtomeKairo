@@ -125,6 +125,7 @@ class DecisionContext:
     foreground_world_state: list[dict[str, Any]] | None
     activity_context: dict[str, Any] | None
     ongoing_action_summary: dict[str, Any] | None
+    autonomous_run_summaries: list[dict[str, Any]] | None
     capability_decision_view: list[dict[str, Any]] | None
     initiative_context: InitiativeContext | None
     capability_result_context: dict[str, Any] | None

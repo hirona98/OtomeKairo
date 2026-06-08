@@ -116,6 +116,7 @@ class ServiceInputPipelineMixin:
             foreground_world_state=pipeline_contexts["foreground_world_state"],
             activity_context=pipeline_contexts["activity_context"],
             ongoing_action_summary=pipeline_contexts["ongoing_action_summary"],
+            autonomous_run_summaries=pipeline_contexts["autonomous_run_summaries"],
             capability_decision_view=pipeline_contexts["capability_decision_view"],
             initiative_context=pipeline_contexts["initiative_context"],
             capability_result_context=pipeline_contexts["capability_result_context"],
@@ -166,6 +167,7 @@ class ServiceInputPipelineMixin:
             "activity_context": pipeline_contexts["activity_context"],
             "activity_trace": pipeline_contexts["activity_trace"],
             "ongoing_action_summary": pipeline_contexts["ongoing_action_summary"],
+            "autonomous_run_summaries": pipeline_contexts["autonomous_run_summaries"],
             "capability_decision_view": pipeline_contexts["capability_decision_view"],
             "initiative_context": pipeline_contexts["initiative_context"],
             "capability_result_context": pipeline_contexts["capability_result_context"],
@@ -369,6 +371,10 @@ class ServiceInputPipelineMixin:
                 current_time=started_at,
             )
         )
+        autonomous_run_summaries = self._list_autonomous_run_prompt_summaries(
+            state=state,
+            current_time=started_at,
+        )
         capability_decision_view = self._build_capability_decision_view(
             state=state,
             current_time=started_at,
@@ -426,6 +432,7 @@ class ServiceInputPipelineMixin:
                 f"{cycle_label} context done affect_states={len(affect_context.get('affect_states', []))} "
                 f"drives={len(drive_state_summary or [])} world_states={len(foreground_world_state or [])} "
                 f"ongoing_action={isinstance(ongoing_action_summary, dict)} "
+                f"autonomous_runs={len(autonomous_run_summaries or [])} "
                 f"capabilities={len(capability_decision_view or [])} initiative={initiative_context is not None}"
             ),
             level="DEBUG",
@@ -439,6 +446,7 @@ class ServiceInputPipelineMixin:
             "activity_context": activity_context,
             "activity_trace": activity_trace,
             "ongoing_action_summary": ongoing_action_summary,
+            "autonomous_run_summaries": autonomous_run_summaries,
             "capability_decision_view": capability_decision_view,
             "initiative_context": initiative_context,
             "capability_result_context": capability_result_context,
@@ -457,6 +465,7 @@ class ServiceInputPipelineMixin:
         foreground_world_state: list[dict[str, Any]] | None,
         activity_context: dict[str, Any] | None,
         ongoing_action_summary: dict[str, Any] | None,
+        autonomous_run_summaries: list[dict[str, Any]] | None,
         capability_decision_view: list[dict[str, Any]] | None,
         initiative_context: InitiativeContext | None,
         capability_result_context: dict[str, Any] | None,
@@ -480,6 +489,7 @@ class ServiceInputPipelineMixin:
             foreground_world_state=foreground_world_state,
             activity_context=activity_context,
             ongoing_action_summary=ongoing_action_summary,
+            autonomous_run_summaries=autonomous_run_summaries,
             capability_decision_view=capability_decision_view,
             initiative_context=initiative_context,
             capability_result_context=capability_result_context,
@@ -578,27 +588,6 @@ class ServiceInputPipelineMixin:
                     f"run={autonomous_run_summary.get('run_id') if isinstance(autonomous_run_summary, dict) else '-'}"
                 ),
             )
-            if speech_payload is None:
-                speech_payload = self._generate_autonomous_run_start_ack_speech(
-                    input_text=input_text,
-                    current_input=current_input,
-                    recent_turns=recent_turns,
-                    time_context=time_context,
-                    affect_context=affect_context,
-                    drive_state_summary=drive_state_summary,
-                    foreground_world_state=foreground_world_state,
-                    activity_context=activity_context,
-                    ongoing_action_summary=ongoing_action_summary,
-                    initiative_context=initiative_context,
-                    visual_observation_context=visual_observation_context,
-                    recall_hint=recall_hint,
-                    recall_pack=recall_pack,
-                    speech_role=speech_role,
-                    persona=persona,
-                    autonomous_run_summary=autonomous_run_summary,
-                    autonomous_run_step_result=autonomous_run_step_result,
-                    cycle_label=cycle_label,
-                )
         speech_suppressed = (
             decision["kind"] == "speech"
             and current_input.source_kind == "capability_result"
@@ -683,94 +672,6 @@ class ServiceInputPipelineMixin:
             "autonomous_run_step_result": autonomous_run_step_result,
         }
 
-    def _generate_autonomous_run_start_ack_speech(
-        self,
-        *,
-        input_text: str,
-        current_input: CurrentInput,
-        recent_turns: list[dict[str, Any]],
-        time_context: dict[str, Any],
-        affect_context: dict[str, Any],
-        drive_state_summary: list[dict[str, Any]] | None,
-        foreground_world_state: list[dict[str, Any]] | None,
-        activity_context: dict[str, Any] | None,
-        ongoing_action_summary: dict[str, Any] | None,
-        initiative_context: InitiativeContext | None,
-        visual_observation_context: dict[str, Any] | None,
-        recall_hint: dict[str, Any],
-        recall_pack: dict[str, Any],
-        speech_role: dict[str, Any],
-        persona: dict[str, Any],
-        autonomous_run_summary: dict[str, Any] | None,
-        autonomous_run_step_result: dict[str, Any] | None,
-        cycle_label: str,
-    ) -> dict[str, Any] | None:
-        if current_input.sender != "user" or current_input.response_target != "user":
-            return None
-        objective_summary = ""
-        current_step_summary = ""
-        next_run_at = None
-        if isinstance(autonomous_run_summary, dict):
-            objective_summary = str(autonomous_run_summary.get("objective_summary") or "").strip()
-            current_step_summary = str(autonomous_run_summary.get("current_step_summary") or "").strip()
-            next_run_at = autonomous_run_summary.get("next_run_at")
-        step_transition = None
-        if isinstance(autonomous_run_step_result, dict):
-            step = autonomous_run_step_result.get("step")
-            if isinstance(step, dict) and isinstance(step.get("transition"), dict):
-                step_transition = step["transition"]
-                if next_run_at is None:
-                    next_run_at = step_transition.get("next_run_at")
-        reason_parts = ["ユーザーから、あとで実行する依頼を受けた。"]
-        if objective_summary:
-            reason_parts.append(f"目的: {objective_summary}")
-        if current_step_summary:
-            reason_parts.append(f"現在の段階: {current_step_summary}")
-        if isinstance(step_transition, dict) and step_transition.get("kind") == "wait_until":
-            reason_parts.append("次の実行時刻まで待機する。")
-        if isinstance(next_run_at, str) and next_run_at.strip():
-            reason_parts.append(f"次回実行時刻: {next_run_at.strip()}")
-        decision = {
-            "kind": "speech",
-            "reason_code": "autonomous_run_started_ack",
-            "reason_summary": " ".join(reason_parts),
-            "requires_confirmation": False,
-            "pending_intent": None,
-            "capability_request": None,
-            "autonomous_run": None,
-        }
-        speech_context = self._build_speech_context(
-            input_text=input_text,
-            current_input=current_input,
-            recent_turns=recent_turns,
-            time_context=time_context,
-            affect_context=affect_context,
-            drive_state_summary=drive_state_summary,
-            foreground_world_state=foreground_world_state,
-            activity_context=activity_context,
-            ongoing_action_summary=ongoing_action_summary,
-            initiative_context=initiative_context,
-            visual_observation_context=visual_observation_context,
-            recall_hint=recall_hint,
-            recall_pack=recall_pack,
-            decision=decision,
-        )
-        speech_payload = self.llm.generate_speech(
-            role_definition=speech_role,
-            persona=persona,
-            context=speech_context,
-        )
-        debug_log(
-            "Pipeline",
-            f"{cycle_label} autonomous_run ack speech done speech_chars={len(speech_payload['speech_text'])}",
-        )
-        self._emit_live_log(
-            level="INFO",
-            component="Result",
-            message=f"{cycle_label} autonomous_run ack speech={self._conversation_log_excerpt(speech_payload['speech_text'])}",
-        )
-        return speech_payload
-
     def _build_decision_context(
         self,
         *,
@@ -784,6 +685,7 @@ class ServiceInputPipelineMixin:
         foreground_world_state: list[dict[str, Any]] | None,
         activity_context: dict[str, Any] | None,
         ongoing_action_summary: dict[str, Any] | None,
+        autonomous_run_summaries: list[dict[str, Any]] | None,
         capability_decision_view: list[dict[str, Any]] | None,
         initiative_context: InitiativeContext | None,
         capability_result_context: dict[str, Any] | None,
@@ -802,6 +704,7 @@ class ServiceInputPipelineMixin:
             foreground_world_state=foreground_world_state,
             activity_context=activity_context,
             ongoing_action_summary=ongoing_action_summary,
+            autonomous_run_summaries=autonomous_run_summaries,
             capability_decision_view=capability_decision_view,
             initiative_context=initiative_context,
             capability_result_context=capability_result_context,

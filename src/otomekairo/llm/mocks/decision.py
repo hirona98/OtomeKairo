@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from typing import Any
 
 from otomekairo.llm.contexts import AutonomousStepContext, DecisionContext
@@ -23,6 +24,7 @@ class LLMMockDecisionMixin:
         time_context = context.time_context
         affect_context = context.affect_context
         ongoing_action_summary = context.ongoing_action_summary
+        autonomous_run_summaries = context.autonomous_run_summaries
         capability_decision_view = context.capability_decision_view
         initiative_context = context.initiative_context
         capability_result_context = context.capability_result_context
@@ -55,7 +57,10 @@ class LLMMockDecisionMixin:
                 capability_decision_view=capability_decision_view,
             )
         if payload is None:
-            payload = self._mock_autonomous_run_decision(normalized=normalized)
+            payload = self._mock_autonomous_run_decision(
+                normalized=normalized,
+                autonomous_run_summaries=autonomous_run_summaries,
+            )
         if payload is None:
             payload = self._mock_capability_request_decision(
                 normalized=normalized,
@@ -108,8 +113,6 @@ class LLMMockDecisionMixin:
         action: dict[str, Any]
         transition = {
             "kind": "complete",
-            "reason_code": "mock_complete",
-            "reason_summary": "mock autonomous_run の目的を完了した。",
             "next_run_at": None,
         }
         current_step_summary = "mock autonomous_run を完了した。"
@@ -124,10 +127,8 @@ class LLMMockDecisionMixin:
                 },
             }
             transition = {
-                "kind": "continue",
-                "reason_code": "speech_then_continue",
-                "reason_summary": "発話後も autonomous_run の目的が残っている。",
-                "next_run_at": None,
+                "kind": "wait_until",
+                "next_run_at": self._mock_autonomous_step_next_run_at(),
             }
             current_step_summary = "発話後の次の一手を待つ。"
         elif self._mock_autonomous_step_needs_camera_ptz(
@@ -151,8 +152,6 @@ class LLMMockDecisionMixin:
             }
             transition = {
                 "kind": "continue",
-                "reason_code": "camera_ptz_then_observe",
-                "reason_summary": "カメラ操作後に観測して確認する。",
                 "next_run_at": None,
             }
             current_step_summary = "camera.ptz の結果を待つ。"
@@ -177,8 +176,6 @@ class LLMMockDecisionMixin:
             }
             transition = {
                 "kind": "continue",
-                "reason_code": "observe_next_context",
-                "reason_summary": "目的に必要な視覚観測を行う。",
                 "next_run_at": None,
             }
             current_step_summary = "vision.capture の結果を待つ。"
@@ -193,7 +190,6 @@ class LLMMockDecisionMixin:
             "action": action,
             "transition": transition,
             "run_update": {
-                "objective_summary": objective or "mock autonomous_run",
                 "current_step_summary": current_step_summary,
                 "history_summary": self._mock_autonomous_run_history_update(
                     history=history,
@@ -205,7 +201,15 @@ class LLMMockDecisionMixin:
         validate_autonomous_step_contract(payload)
         return payload
 
-    def _mock_autonomous_run_decision(self, *, normalized: str) -> dict[str, Any] | None:
+    def _mock_autonomous_step_next_run_at(self) -> str:
+        return (datetime.now().astimezone() + timedelta(seconds=5)).isoformat()
+
+    def _mock_autonomous_run_decision(
+        self,
+        *,
+        normalized: str,
+        autonomous_run_summaries: list[dict[str, Any]] | None,
+    ) -> dict[str, Any] | None:
         if not normalized:
             return None
         markers = (
@@ -232,7 +236,22 @@ class LLMMockDecisionMixin:
             "autonomous_run": {
                 "objective_summary": normalized[:180],
                 "initial_step_summary": "目的に沿って最初の一手を決める。",
+                "coordination": self._mock_autonomous_run_coordination(
+                    autonomous_run_summaries=autonomous_run_summaries,
+                ),
             },
+        }
+
+    def _mock_autonomous_run_coordination(
+        self,
+        *,
+        autonomous_run_summaries: list[dict[str, Any]] | None,
+    ) -> dict[str, Any]:
+        _ = autonomous_run_summaries
+        return {
+            "mode": "create_new",
+            "target_run_ids": [],
+            "reason_summary": "既存 run との関係を持たない新しい目的として開始する。",
         }
 
     def _mock_autonomous_step_needs_initial_speech(self, *, objective: str, history: str) -> bool:
