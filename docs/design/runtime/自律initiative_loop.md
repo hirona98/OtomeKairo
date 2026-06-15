@@ -158,6 +158,8 @@ LLM は次を担う。
 LLM に実行権限、資格情報、配送先 client、秘密値を渡さない。
 LLM の自由文をそのまま状態遷移へ使わない。
 `wake / background_wake` の「定期起床」「wake」という入力文言は判断機会の説明として扱う。
+`wake / background_wake` の入力文は、直接応答要求の有無ではなく、観測、`drive_state`、直近文脈、候補を合わせて判断する自律判断機会を表す。
+`wake / background_wake` の入力文は、`noop` を誘導する説明を持たない。
 身体状態は body context、body capability result、明示的な身体状態 source を根拠にする。
 予定状態は schedule context、schedule capability result、明示的な予定 source を根拠にする。
 `wake_policy.observations` は 定期起床 の判断前に enabled 項目だけを順番に取得する。

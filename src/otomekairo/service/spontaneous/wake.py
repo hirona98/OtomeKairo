@@ -575,8 +575,8 @@ class ServiceSpontaneousWakeMixin:
             parts.append("いま保留中の会話候補を再評価したい。")
         else:
             parts.append(
-                "ユーザーへの応答要求ではなく、内部観測と自律判断入口の確認として見る。"
-                "外向きの入口が成立している場合だけ、次の判断へ進めたい。"
+                "観測、drive_state、直近文脈、候補を合わせて、"
+                "speech / noop / pending_intent を判断する自律判断機会として見る。"
             )
         return " ".join(parts)
 
