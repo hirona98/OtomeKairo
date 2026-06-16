@@ -10,7 +10,7 @@ from otomekairo.service.common import debug_log
 
 # 定数
 MEMORY_DB_FILE_NAME = "memory.db"
-CURRENT_MEMORY_DB_VERSION = 14
+CURRENT_MEMORY_DB_VERSION = 15
 SUPPORTED_MEMORY_DB_VERSIONS = {0, CURRENT_MEMORY_DB_VERSION}
 
 
@@ -149,6 +149,24 @@ class StoreSchemaMixin:
 
             CREATE INDEX IF NOT EXISTS idx_ongoing_actions_memory_set_expires_at
             ON ongoing_actions(memory_set_id, expires_at, updated_at);
+
+            CREATE TABLE IF NOT EXISTS autonomous_runs (
+                run_id TEXT PRIMARY KEY,
+                memory_set_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                next_run_at TEXT,
+                waiting_request_id TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                completed_at TEXT,
+                payload_json TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_autonomous_runs_memory_status_updated
+            ON autonomous_runs(memory_set_id, status, updated_at);
+
+            CREATE INDEX IF NOT EXISTS idx_autonomous_runs_memory_next_run
+            ON autonomous_runs(memory_set_id, status, next_run_at);
 
             CREATE TABLE IF NOT EXISTS world_states (
                 world_state_id TEXT PRIMARY KEY,

@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from otomekairo.llm.contexts import (
+    AutonomousStepContext,
     CurrentInput,
     DecisionContext,
     InitiativeContext,
@@ -17,6 +18,7 @@ from otomekairo.llm.contracts import (
     normalize_recall_hint_payload,
     validate_activity_state_contract,
     validate_answer_contract_contract,
+    validate_autonomous_step_contract,
     validate_decision_contract,
     validate_event_evidence_contract,
     validate_initiative_entry_check_contract,
@@ -36,6 +38,8 @@ from otomekairo.llm.prompts import (
     build_answer_contract_repair_prompt,
     build_activity_state_messages,
     build_activity_state_repair_prompt,
+    build_autonomous_step_messages,
+    build_autonomous_step_repair_prompt,
     build_decision_messages,
     build_decision_repair_prompt,
     build_event_evidence_messages,
@@ -64,6 +68,10 @@ from otomekairo.llm.prompts import (
 from otomekairo.world_state.models import WorldStateSourcePack
 from otomekairo.llm.transport import complete_text, generate_embeddings as transport_generate_embeddings
 from otomekairo.service.common import debug_log
+
+ROUTINE_SUPPRESSED_LLM_OPERATIONS = {
+    "visual_observation",
+}
 
 # LiteLLM連携
 @dataclass(slots=True)
@@ -295,6 +303,10 @@ class LLMClient:
         context: DecisionContext,
     ) -> None:
         validate_decision_contract(payload)
+        self._validate_decision_autonomous_run_coordination(
+            payload=payload,
+            context=context,
+        )
         self._validate_decision_explicit_status_request(
             payload=payload,
             input_text=context.input_text,
@@ -328,6 +340,95 @@ class LLMClient:
             payload=payload,
             context=context,
         )
+
+    def _validate_decision_autonomous_run_coordination(
+        self,
+        *,
+        payload: dict[str, Any],
+        context: DecisionContext,
+    ) -> None:
+        if payload.get("kind") != "autonomous_run":
+            return
+        autonomous_run = payload.get("autonomous_run")
+        if not isinstance(autonomous_run, dict):
+            return
+        coordination = autonomous_run.get("coordination")
+        if not isinstance(coordination, dict):
+            return
+        target_run_ids = coordination.get("target_run_ids")
+        if not isinstance(target_run_ids, list) or not target_run_ids:
+            return
+        summaries_by_id = {
+            str(summary.get("run_id") or "").strip(): summary
+            for summary in context.autonomous_run_summaries or []
+            if isinstance(summary, dict)
+        }
+        for run_id in target_run_ids:
+            target = summaries_by_id.get(str(run_id).strip())
+            if not isinstance(target, dict):
+                raise LLMError(
+                    "Decision autonomous_run.coordination.target_run_ids には "
+                    "AutonomousRunSummaries に含まれる run_id だけを指定してください。"
+                )
+
+    def generate_autonomous_step(
+        self,
+        *,
+        role_definition: dict,
+        persona: dict,
+        context: AutonomousStepContext,
+    ) -> dict[str, Any]:
+        operation = "autonomous_step"
+        debug_log(
+            "LLM",
+            (
+                f"{operation} start mode={self._debug_mode(role_definition)} "
+                f"model={self._debug_model(role_definition)} run={context.run.get('run_id')}"
+            ),
+            level="DEBUG",
+        )
+        try:
+            if self._is_mock_role_definition(role_definition):
+                payload = self.mock_client.generate_autonomous_step(
+                    role_definition=role_definition,
+                    persona=persona,
+                    context=context,
+                )
+                validate_autonomous_step_contract(payload)
+                debug_log(
+                    "LLM",
+                    (
+                        f"{operation} done mode=mock action={payload.get('action', {}).get('kind')} "
+                        f"transition={payload.get('transition', {}).get('kind')}"
+                    ),
+                    level="DEBUG",
+                )
+                return payload
+
+            messages = build_autonomous_step_messages(
+                persona=persona,
+                context=context,
+            )
+            payload = self._generate_structured_payload(
+                role_definition=role_definition,
+                messages=messages,
+                validator=validate_autonomous_step_contract,
+                repair_prompt_builder=build_autonomous_step_repair_prompt,
+                failure_message="AutonomousStep の生成に失敗しました。解析可能な応答が得られませんでした。",
+                operation=operation,
+            )
+            debug_log(
+                "LLM",
+                (
+                    f"{operation} done action={payload.get('action', {}).get('kind')} "
+                    f"transition={payload.get('transition', {}).get('kind')}"
+                ),
+                level="DEBUG",
+            )
+            return payload
+        except Exception as exc:
+            debug_log("LLM", f"{operation} failed error={type(exc).__name__}: {self._debug_error(exc)}", level="ERROR")
+            raise
 
     def _validate_decision_visual_observation_context(
         self,
@@ -410,6 +511,7 @@ class LLMClient:
                 "requires_confirmation": False,
                 "pending_intent": None,
                 "capability_request": None,
+                "autonomous_run": None,
             }
         )
         debug_log(
@@ -1143,21 +1245,23 @@ class LLMClient:
         images: list[str],
     ) -> dict[str, Any]:
         operation = "visual_observation"
-        debug_log(
-            "LLM",
-            (
-                f"{operation} start mode={self._debug_mode(role_definition)} "
-                f"model={self._debug_model(role_definition)} images={len(images)}"
-            ),
-            level="DEBUG",
-        )
+        if self._should_log_routine_llm_operation(operation):
+            debug_log(
+                "LLM",
+                (
+                    f"{operation} start mode={self._debug_mode(role_definition)} "
+                    f"model={self._debug_model(role_definition)} images={len(images)}"
+                ),
+                level="DEBUG",
+            )
         if self._is_mock_role_definition(role_definition):
             payload = self.mock_client.generate_visual_observation_summary(
                 role_definition,
                 source_pack,
                 images,
             )
-            debug_log("LLM", f"{operation} done mode=mock keys={self._debug_payload_keys(payload)}", level="DEBUG")
+            if self._should_log_routine_llm_operation(operation):
+                debug_log("LLM", f"{operation} done mode=mock keys={self._debug_payload_keys(payload)}", level="DEBUG")
             return payload
 
         messages = build_visual_observation_messages(
@@ -1238,6 +1342,9 @@ class LLMClient:
         keys = sorted(str(key) for key in payload.keys())[:8]
         return ",".join(keys) if keys else "-"
 
+    def _should_log_routine_llm_operation(self, operation: str) -> bool:
+        return operation not in ROUTINE_SUPPRESSED_LLM_OPERATIONS
+
     def _is_mock_role_definition(self, role_definition: dict) -> bool:
         # model=mock* は開発用の内蔵ロジックへ切り替える。
         model = role_definition.get("model")
@@ -1260,20 +1367,26 @@ class LLMClient:
         last_error: LLMError | None = None
         attempt_messages = list(messages)
         for attempt in range(2):
-            debug_log("LLM", f"{operation} attempt={attempt + 1} request messages={len(attempt_messages)}", level="DEBUG")
+            if self._should_log_routine_llm_operation(operation):
+                debug_log(
+                    "LLM",
+                    f"{operation} attempt={attempt + 1} request messages={len(attempt_messages)}",
+                    level="DEBUG",
+                )
             content = complete_text(role_definition=role_definition, messages=attempt_messages)
             try:
                 payload = parse_json_object(content)
                 try:
                     validator(payload)
-                    debug_log(
-                        "LLM",
-                        (
-                            f"{operation} done attempt={attempt + 1} response_chars={len(content)} "
-                            f"keys={self._debug_payload_keys(payload)}"
-                        ),
-                        level="DEBUG",
-                    )
+                    if self._should_log_routine_llm_operation(operation):
+                        debug_log(
+                            "LLM",
+                            (
+                                f"{operation} done attempt={attempt + 1} response_chars={len(content)} "
+                                f"keys={self._debug_payload_keys(payload)}"
+                            ),
+                            level="DEBUG",
+                        )
                     return payload
                 except LLMError as exc:
                     last_error = LLMContractError(str(exc)) if wrap_validation_error else exc

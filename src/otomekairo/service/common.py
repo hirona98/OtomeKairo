@@ -25,6 +25,7 @@ def _read_non_negative_int_env(name: str, default: int) -> int:
 REQUIRED_MODEL_ROLE_NAMES = (
     "expression_generation",
     "decision_generation",
+    "autonomous_step_generation",
     "input_interpretation",
     "memory_interpretation",
     "memory_correction_reconciliation",

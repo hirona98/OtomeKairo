@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from typing import Any
 
-from otomekairo.llm.contexts import DecisionContext
-from otomekairo.llm.contracts import validate_decision_contract
+from otomekairo.llm.contexts import AutonomousStepContext, DecisionContext
+from otomekairo.llm.contracts import validate_autonomous_step_contract, validate_decision_contract
 from otomekairo.llm.mocks.capability import MOCK_CAPABILITY_REQUEST_RULES
 
 
@@ -23,6 +24,7 @@ class LLMMockDecisionMixin:
         time_context = context.time_context
         affect_context = context.affect_context
         ongoing_action_summary = context.ongoing_action_summary
+        autonomous_run_summaries = context.autonomous_run_summaries
         capability_decision_view = context.capability_decision_view
         initiative_context = context.initiative_context
         capability_result_context = context.capability_result_context
@@ -55,6 +57,11 @@ class LLMMockDecisionMixin:
                 capability_decision_view=capability_decision_view,
             )
         if payload is None:
+            payload = self._mock_autonomous_run_decision(
+                normalized=normalized,
+                autonomous_run_summaries=autonomous_run_summaries,
+            )
+        if payload is None:
             payload = self._mock_capability_request_decision(
                 normalized=normalized,
                 ongoing_action_summary=ongoing_action_summary,
@@ -82,8 +89,243 @@ class LLMMockDecisionMixin:
 
         # 検証
         payload.setdefault("capability_request", None)
+        payload.setdefault("autonomous_run", None)
         validate_decision_contract(payload)
         return payload
+
+    def generate_autonomous_step(
+        self,
+        *,
+        role_definition: dict,
+        persona: dict,
+        context: AutonomousStepContext,
+    ) -> dict[str, Any]:
+        # model確認
+        _ = persona
+        self._assert_mock_model(role_definition)
+
+        run = context.run
+        objective = str(run.get("objective_summary") or "").strip()
+        history = str(run.get("history_summary") or "").strip()
+        last_result_context = context.last_result_context if isinstance(context.last_result_context, dict) else {}
+        capability_decision_view = context.capability_decision_view
+
+        action: dict[str, Any]
+        transition = {
+            "kind": "complete",
+            "next_run_at": None,
+        }
+        current_step_summary = "mock autonomous_run を完了した。"
+
+        if self._mock_autonomous_step_needs_initial_speech(objective=objective, history=history):
+            action = {
+                "kind": "speech",
+                "capability_request": None,
+                "speech": {
+                    "reason_code": "autonomous_run:initial_speech",
+                    "reason_summary": "複合行動の最初に短く伝える。",
+                },
+            }
+            transition = {
+                "kind": "wait_until",
+                "next_run_at": self._mock_autonomous_step_next_run_at(),
+            }
+            current_step_summary = "発話後の次の一手を待つ。"
+        elif self._mock_autonomous_step_needs_camera_ptz(
+            objective=objective,
+            history=history,
+            last_result_context=last_result_context,
+            capability_decision_view=capability_decision_view,
+        ):
+            request_input = self._mock_camera_ptz_input(
+                capability_decision_view=capability_decision_view,
+                operation=self._mock_camera_ptz_operation(objective) or "move_right",
+                amount=self._mock_camera_ptz_amount(objective),
+            )
+            action = {
+                "kind": "capability_request",
+                "capability_request": {
+                    "capability_id": "camera.ptz",
+                    "input": request_input or {},
+                },
+                "speech": None,
+            }
+            transition = {
+                "kind": "continue",
+                "next_run_at": None,
+            }
+            current_step_summary = "camera.ptz の結果を待つ。"
+        elif self._mock_autonomous_step_needs_vision_capture(
+            objective=objective,
+            history=history,
+            last_result_context=last_result_context,
+            capability_decision_view=capability_decision_view,
+        ):
+            request_input = self._mock_autonomous_vision_capture_input(
+                objective=objective,
+                capability_decision_view=capability_decision_view,
+                last_result_context=last_result_context,
+            )
+            action = {
+                "kind": "capability_request",
+                "capability_request": {
+                    "capability_id": "vision.capture",
+                    "input": request_input or {},
+                },
+                "speech": None,
+            }
+            transition = {
+                "kind": "continue",
+                "next_run_at": None,
+            }
+            current_step_summary = "vision.capture の結果を待つ。"
+        else:
+            action = {
+                "kind": "none",
+                "capability_request": None,
+                "speech": None,
+            }
+
+        payload = {
+            "action": action,
+            "transition": transition,
+            "run_update": {
+                "current_step_summary": current_step_summary,
+                "history_summary": self._mock_autonomous_run_history_update(
+                    history=history,
+                    action=action,
+                    transition=transition,
+                ),
+            },
+        }
+        validate_autonomous_step_contract(payload)
+        return payload
+
+    def _mock_autonomous_step_next_run_at(self) -> str:
+        return (datetime.now().astimezone() + timedelta(seconds=5)).isoformat()
+
+    def _mock_autonomous_run_decision(
+        self,
+        *,
+        normalized: str,
+        autonomous_run_summaries: list[dict[str, Any]] | None,
+    ) -> dict[str, Any] | None:
+        if not normalized:
+            return None
+        markers = (
+            "自律実行",
+            "自律run",
+            "autonomous_run",
+            "続けて",
+            "してから",
+            "見てから",
+            "話してから",
+            "言ってから",
+            "3分後",
+            "三分後",
+        )
+        if not any(marker in normalized for marker in markers):
+            return None
+        return {
+            "kind": "autonomous_run",
+            "reason_code": "autonomous_run:start",
+            "reason_summary": "複数の行動や待機をまたぐ目的として扱う。",
+            "requires_confirmation": False,
+            "pending_intent": None,
+            "capability_request": None,
+            "autonomous_run": {
+                "objective_summary": normalized[:180],
+                "initial_step_summary": "目的に沿って最初の一手を決める。",
+                "coordination": self._mock_autonomous_run_coordination(
+                    autonomous_run_summaries=autonomous_run_summaries,
+                ),
+            },
+        }
+
+    def _mock_autonomous_run_coordination(
+        self,
+        *,
+        autonomous_run_summaries: list[dict[str, Any]] | None,
+    ) -> dict[str, Any]:
+        _ = autonomous_run_summaries
+        return {
+            "mode": "create_new",
+            "target_run_ids": [],
+            "reason_summary": "既存 run との関係を持たない新しい目的として開始する。",
+        }
+
+    def _mock_autonomous_step_needs_initial_speech(self, *, objective: str, history: str) -> bool:
+        if history:
+            return False
+        markers = ("発話", "話して", "言って", "伝えて", "speech")
+        return any(marker in objective for marker in markers)
+
+    def _mock_autonomous_step_needs_camera_ptz(
+        self,
+        *,
+        objective: str,
+        history: str,
+        last_result_context: dict[str, Any],
+        capability_decision_view: list[dict[str, Any]] | None,
+    ) -> bool:
+        _ = last_result_context
+        if "camera.ptz" in history:
+            return False
+        if not self._mock_capability_available(capability_decision_view, "camera.ptz"):
+            return False
+        camera_markers = ("カメラ", "視野", "視界", "画角", "向き")
+        operation = self._mock_camera_ptz_operation(objective)
+        return operation is not None and any(marker in objective for marker in camera_markers)
+
+    def _mock_autonomous_step_needs_vision_capture(
+        self,
+        *,
+        objective: str,
+        history: str,
+        last_result_context: dict[str, Any],
+        capability_decision_view: list[dict[str, Any]] | None,
+    ) -> bool:
+        if not self._mock_capability_available(capability_decision_view, "vision.capture"):
+            return False
+        if "vision.capture" in history and last_result_context.get("source_capability_id") == "vision.capture":
+            return False
+        markers = ("見て", "見る", "観測", "確認", "画面", "デスクトップ", "カメラ", "視覚")
+        return any(marker in objective for marker in markers) or last_result_context.get("source_capability_id") == "camera.ptz"
+
+    def _mock_autonomous_vision_capture_input(
+        self,
+        *,
+        objective: str,
+        capability_decision_view: list[dict[str, Any]] | None,
+        last_result_context: dict[str, Any],
+    ) -> dict[str, str] | None:
+        source_request_summary = last_result_context.get("source_request_summary")
+        if isinstance(source_request_summary, dict):
+            source_id = source_request_summary.get("vision_source_id")
+            if isinstance(source_id, str) and source_id.strip():
+                return {
+                    "vision_source_id": source_id.strip(),
+                    "mode": "still",
+                }
+        vision_input = self._mock_vision_capture_input(capability_decision_view)
+        if "デスクトップ" not in objective and "画面" not in objective:
+            return vision_input
+        return vision_input
+
+    def _mock_autonomous_run_history_update(
+        self,
+        *,
+        history: str,
+        action: dict[str, Any],
+        transition: dict[str, Any],
+    ) -> str:
+        action_kind = action.get("kind")
+        capability_request = action.get("capability_request")
+        entry = f"action={action_kind}"
+        if isinstance(capability_request, dict):
+            entry += f":{capability_request.get('capability_id')}"
+        entry += f" transition={transition.get('kind')}"
+        return f"{history} / {entry}" if history else entry
 
     def _mock_capability_result_followup_decision(
         self,

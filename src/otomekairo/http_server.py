@@ -25,6 +25,12 @@ CLIENT_DISCONNECT_SSL_REASONS = {
     "EOF_OCCURRED",
 }
 
+SUPPRESSED_HTTP_LOG_EXACT_PATHS = {
+    "/api/status",
+    "/api/bootstrap/probe",
+    "/api/autonomous-runs",
+    "/api/capability/result",
+}
 SUPPRESSED_HTTP_LOG_PATH_PREFIXES = ("/api/inspection",)
 
 
@@ -132,6 +138,35 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
             if method == "GET" and parsed.path == "/api/logs/stream":
                 self._handle_logs_stream(token)
                 return
+            if method == "GET" and parsed.path == "/api/autonomous-runs":
+                self._write_success(HTTPStatus.OK, self.server.service.list_autonomous_runs_api(token))
+                return
+            if method == "POST" and parsed.path.startswith("/api/autonomous-runs/"):
+                path_parts = parsed.path.split("/")
+                if len(path_parts) != 5:
+                    raise ServiceError(404, "route_not_found", "The requested route does not exist.")
+                run_id = unquote(path_parts[3])
+                operation = path_parts[4]
+                self._read_json_body()
+                if operation == "pause":
+                    self._write_success(
+                        HTTPStatus.OK,
+                        self.server.service.pause_autonomous_run_api(token, run_id),
+                    )
+                    return
+                if operation == "resume":
+                    self._write_success(
+                        HTTPStatus.OK,
+                        self.server.service.resume_autonomous_run_api(token, run_id),
+                    )
+                    return
+                if operation == "cancel":
+                    self._write_success(
+                        HTTPStatus.OK,
+                        self.server.service.cancel_autonomous_run_api(token, run_id),
+                    )
+                    return
+                raise ServiceError(404, "route_not_found", "The requested route does not exist.")
 
             # 入力ルート
             if method == "POST" and parsed.path == "/api/conversation":
@@ -486,8 +521,8 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
         debug_log("HTTP", f"{self.command} {parsed.path} client_disconnected error={type(exc).__name__}", level="WARNING")
 
     def _should_log_http_path(self, path: str) -> bool:
-        # inspection は情報量が多く、正本は endpoint 応答側なので HTTP access log へ重複記録しない。
-        if path in {"/api/status", "/api/bootstrap/probe"}:
+        # 高頻度参照と観測返却は運用ログへ重複記録しない。
+        if path in SUPPRESSED_HTTP_LOG_EXACT_PATHS:
             return False
         return not any(path.startswith(prefix) for prefix in SUPPRESSED_HTTP_LOG_PATH_PREFIXES)
 

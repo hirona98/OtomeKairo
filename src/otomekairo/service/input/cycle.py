@@ -30,21 +30,35 @@ class ServiceInputCycleMixin:
         started_at = self._now_iso()
         recent_turns = self._load_recent_turns(state)
         runtime_summary = self._build_runtime_summary(state)
-        debug_log(
-            "Conversation",
-            (
-                f"{self._short_cycle_id(cycle_id)} start input_chars={len(input_text)} "
-                f"recent_turns={len(recent_turns)} context_keys={self._debug_context_keys(client_context)}"
-            ),
-            level="DEBUG",
-        )
-        self._emit_live_log(
-            level="INFO",
-            component="Input",
-            message=f"{self._short_cycle_id(cycle_id)} user_message input={self._conversation_log_excerpt(input_text)}",
-        )
-
+        cancel_autonomous_runs = self._conversation_requests_autonomous_run_cancel(input_text)
         self._begin_user_response_cycle()
+        try:
+            if cancel_autonomous_runs:
+                self._cancel_autonomous_runs_for_user_request(
+                    state=state,
+                    current_time=started_at,
+                )
+            else:
+                self._pause_autonomous_runs_for_user_interaction(
+                    state=state,
+                    current_time=started_at,
+                )
+            debug_log(
+                "Conversation",
+                (
+                    f"{self._short_cycle_id(cycle_id)} start input_chars={len(input_text)} "
+                    f"recent_turns={len(recent_turns)} context_keys={self._debug_context_keys(client_context)}"
+                ),
+                level="DEBUG",
+            )
+            self._emit_live_log(
+                level="INFO",
+                component="Input",
+                message=f"{self._short_cycle_id(cycle_id)} user_message input={self._conversation_log_excerpt(input_text)}",
+            )
+        except Exception:  # noqa: BLE001
+            self._end_user_response_cycle()
+            raise
         try:
             # 会話添付画像は capability 実行ではなく、会話入力の補助要約として扱う。
             if input_images:
@@ -144,6 +158,11 @@ class ServiceInputCycleMixin:
             )
         finally:
             self._end_user_response_cycle()
+            if not cancel_autonomous_runs:
+                self._resume_autonomous_runs_after_user_interaction(
+                    state=state,
+                    current_time=self._now_iso(),
+                )
 
     def _finalize_cycle_failure(
         self,
@@ -209,4 +228,5 @@ class ServiceInputCycleMixin:
             "result_kind": "internal_failure",
             "speech": None,
             "capability_request": None,
+            "autonomous_run": None,
         }

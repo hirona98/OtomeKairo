@@ -116,6 +116,7 @@ class ServiceInputPipelineMixin:
             foreground_world_state=pipeline_contexts["foreground_world_state"],
             activity_context=pipeline_contexts["activity_context"],
             ongoing_action_summary=pipeline_contexts["ongoing_action_summary"],
+            autonomous_run_summaries=pipeline_contexts["autonomous_run_summaries"],
             capability_decision_view=pipeline_contexts["capability_decision_view"],
             initiative_context=pipeline_contexts["initiative_context"],
             capability_result_context=pipeline_contexts["capability_result_context"],
@@ -166,6 +167,7 @@ class ServiceInputPipelineMixin:
             "activity_context": pipeline_contexts["activity_context"],
             "activity_trace": pipeline_contexts["activity_trace"],
             "ongoing_action_summary": pipeline_contexts["ongoing_action_summary"],
+            "autonomous_run_summaries": pipeline_contexts["autonomous_run_summaries"],
             "capability_decision_view": pipeline_contexts["capability_decision_view"],
             "initiative_context": pipeline_contexts["initiative_context"],
             "capability_result_context": pipeline_contexts["capability_result_context"],
@@ -175,6 +177,8 @@ class ServiceInputPipelineMixin:
             "speech_payload": output_result["speech_payload"],
             "capability_request_summary": output_result["capability_request_summary"],
             "ongoing_action_transition_summary": output_result["ongoing_action_transition_summary"],
+            "autonomous_run_summary": output_result["autonomous_run_summary"],
+            "autonomous_run_step_result": output_result["autonomous_run_step_result"],
         }
 
     def _build_current_input(
@@ -367,6 +371,10 @@ class ServiceInputPipelineMixin:
                 current_time=started_at,
             )
         )
+        autonomous_run_summaries = self._list_autonomous_run_prompt_summaries(
+            state=state,
+            current_time=started_at,
+        )
         capability_decision_view = self._build_capability_decision_view(
             state=state,
             current_time=started_at,
@@ -424,6 +432,7 @@ class ServiceInputPipelineMixin:
                 f"{cycle_label} context done affect_states={len(affect_context.get('affect_states', []))} "
                 f"drives={len(drive_state_summary or [])} world_states={len(foreground_world_state or [])} "
                 f"ongoing_action={isinstance(ongoing_action_summary, dict)} "
+                f"autonomous_runs={len(autonomous_run_summaries or [])} "
                 f"capabilities={len(capability_decision_view or [])} initiative={initiative_context is not None}"
             ),
             level="DEBUG",
@@ -437,6 +446,7 @@ class ServiceInputPipelineMixin:
             "activity_context": activity_context,
             "activity_trace": activity_trace,
             "ongoing_action_summary": ongoing_action_summary,
+            "autonomous_run_summaries": autonomous_run_summaries,
             "capability_decision_view": capability_decision_view,
             "initiative_context": initiative_context,
             "capability_result_context": capability_result_context,
@@ -455,6 +465,7 @@ class ServiceInputPipelineMixin:
         foreground_world_state: list[dict[str, Any]] | None,
         activity_context: dict[str, Any] | None,
         ongoing_action_summary: dict[str, Any] | None,
+        autonomous_run_summaries: list[dict[str, Any]] | None,
         capability_decision_view: list[dict[str, Any]] | None,
         initiative_context: InitiativeContext | None,
         capability_result_context: dict[str, Any] | None,
@@ -478,6 +489,7 @@ class ServiceInputPipelineMixin:
             foreground_world_state=foreground_world_state,
             activity_context=activity_context,
             ongoing_action_summary=ongoing_action_summary,
+            autonomous_run_summaries=autonomous_run_summaries,
             capability_decision_view=capability_decision_view,
             initiative_context=initiative_context,
             capability_result_context=capability_result_context,
@@ -522,6 +534,8 @@ class ServiceInputPipelineMixin:
         # capability request
         dispatched_capability_request_summary: dict[str, Any] | None = None
         ongoing_action_transition_summary: dict[str, Any] | None = None
+        autonomous_run_summary: dict[str, Any] | None = None
+        autonomous_run_step_result: dict[str, Any] | None = None
         if decision["kind"] == "capability_request":
             dispatch_result = self._dispatch_decision_capability_request(
                 state=state,
@@ -544,6 +558,36 @@ class ServiceInputPipelineMixin:
 
         # 発話
         speech_payload: dict[str, Any] | None = None
+        if decision["kind"] == "autonomous_run":
+            start_result = self._start_autonomous_run_from_decision(
+                state=state,
+                current_time=self._now_iso(),
+                decision=decision,
+                source_current_input=current_input.to_prompt_payload(),
+                assistant_message_target_client_id=assistant_message_target_client_id,
+            )
+            run_payload = start_result.get("autonomous_run")
+            if isinstance(run_payload, dict):
+                autonomous_run_summary = self._autonomous_run_public_summary(
+                    run_payload,
+                    current_time=self._now_iso(),
+                )
+            step_result = start_result.get("step_result")
+            if isinstance(step_result, dict):
+                autonomous_run_step_result = step_result
+                step_speech_payload = step_result.get("speech_payload")
+                if isinstance(step_speech_payload, dict):
+                    speech_payload = step_speech_payload
+                step_capability_request = step_result.get("capability_request_summary")
+                if isinstance(step_capability_request, dict):
+                    dispatched_capability_request_summary = step_capability_request
+            debug_log(
+                "Pipeline",
+                (
+                    f"{cycle_label} autonomous_run started "
+                    f"run={autonomous_run_summary.get('run_id') if isinstance(autonomous_run_summary, dict) else '-'}"
+                ),
+            )
         speech_suppressed = (
             decision["kind"] == "speech"
             and current_input.source_kind == "capability_result"
@@ -562,6 +606,7 @@ class ServiceInputPipelineMixin:
                     "requires_confirmation": False,
                     "pending_intent": None,
                     "capability_request": None,
+                    "autonomous_run": None,
                 }
             )
             debug_log("Pipeline", f"{cycle_label} speech skipped capability_result_response_target=none")
@@ -582,6 +627,7 @@ class ServiceInputPipelineMixin:
                     "requires_confirmation": False,
                     "pending_intent": None,
                     "capability_request": None,
+                    "autonomous_run": None,
                 }
             )
             debug_log("Pipeline", f"{cycle_label} speech skipped background_wake_user_response_active")
@@ -614,12 +660,16 @@ class ServiceInputPipelineMixin:
                 component="Result",
                 message=f"{cycle_label} speech done speech={self._conversation_log_excerpt(speech_payload['speech_text'])}",
             )
+        elif speech_payload is not None:
+            debug_log("Pipeline", f"{cycle_label} speech prepared decision_kind={decision['kind']}")
         else:
             debug_log("Pipeline", f"{cycle_label} speech skipped decision_kind={decision['kind']}")
         return {
             "speech_payload": speech_payload,
             "capability_request_summary": dispatched_capability_request_summary,
             "ongoing_action_transition_summary": ongoing_action_transition_summary,
+            "autonomous_run_summary": autonomous_run_summary,
+            "autonomous_run_step_result": autonomous_run_step_result,
         }
 
     def _build_decision_context(
@@ -635,6 +685,7 @@ class ServiceInputPipelineMixin:
         foreground_world_state: list[dict[str, Any]] | None,
         activity_context: dict[str, Any] | None,
         ongoing_action_summary: dict[str, Any] | None,
+        autonomous_run_summaries: list[dict[str, Any]] | None,
         capability_decision_view: list[dict[str, Any]] | None,
         initiative_context: InitiativeContext | None,
         capability_result_context: dict[str, Any] | None,
@@ -653,6 +704,7 @@ class ServiceInputPipelineMixin:
             foreground_world_state=foreground_world_state,
             activity_context=activity_context,
             ongoing_action_summary=ongoing_action_summary,
+            autonomous_run_summaries=autonomous_run_summaries,
             capability_decision_view=capability_decision_view,
             initiative_context=initiative_context,
             capability_result_context=capability_result_context,

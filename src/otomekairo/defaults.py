@@ -13,6 +13,7 @@ DEFAULT_PROMPT_WINDOW_RECENT_TURN_LIMIT = 30
 DEFAULT_PROMPT_WINDOW_RECENT_TURN_MINUTES = 30
 DEFAULT_INPUT_MAX_OUTPUT_TOKENS = 3000
 DEFAULT_DECISION_MAX_OUTPUT_TOKENS = 3000
+DEFAULT_AUTONOMOUS_STEP_MAX_OUTPUT_TOKENS = 2500
 DEFAULT_EXPRESSION_MAX_OUTPUT_TOKENS = 4000
 DEFAULT_MEMORY_MAX_OUTPUT_TOKENS = 3000
 DEFAULT_MEMORY_CORRECTION_MAX_OUTPUT_TOKENS = 1200
@@ -119,6 +120,13 @@ def build_default_model_preset() -> dict:
                 "model": DEFAULT_GEMINI_GENERATION_MODEL,
                 "api_key": "",
                 "max_output_tokens": DEFAULT_DECISION_MAX_OUTPUT_TOKENS,
+                "timeout_seconds": DEFAULT_GENERATION_TIMEOUT_SECONDS,
+                "web_search_enabled": False,
+            },
+            "autonomous_step_generation": {
+                "model": DEFAULT_GEMINI_GENERATION_MODEL,
+                "api_key": "",
+                "max_output_tokens": DEFAULT_AUTONOMOUS_STEP_MAX_OUTPUT_TOKENS,
                 "timeout_seconds": DEFAULT_GENERATION_TIMEOUT_SECONDS,
                 "web_search_enabled": False,
             },

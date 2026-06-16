@@ -125,12 +125,39 @@ class DecisionContext:
     foreground_world_state: list[dict[str, Any]] | None
     activity_context: dict[str, Any] | None
     ongoing_action_summary: dict[str, Any] | None
+    autonomous_run_summaries: list[dict[str, Any]] | None
     capability_decision_view: list[dict[str, Any]] | None
     initiative_context: InitiativeContext | None
     capability_result_context: dict[str, Any] | None
     visual_observation_context: dict[str, Any] | None
     recall_hint: dict[str, Any]
     recall_pack: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousStepContext:
+    run: dict[str, Any]
+    current_input: CurrentInput
+    recent_turns: list[dict[str, Any]]
+    time_context: dict[str, Any]
+    foreground_world_state: list[dict[str, Any]] | None
+    activity_context: dict[str, Any] | None
+    ongoing_action_summary: dict[str, Any] | None
+    capability_decision_view: list[dict[str, Any]] | None
+    last_result_context: dict[str, Any] | None
+
+    def to_prompt_payload(self) -> dict[str, Any]:
+        return {
+            "run": self.run,
+            "current_input": self.current_input.to_prompt_payload(),
+            "recent_turns": self.recent_turns,
+            "time_context": self.time_context,
+            "foreground_world_state": self.foreground_world_state,
+            "activity_context": self.activity_context,
+            "ongoing_action_summary": self.ongoing_action_summary,
+            "capability_decision_view": self.capability_decision_view,
+            "last_result_context": self.last_result_context,
+        }
 
 
 @dataclass(frozen=True, slots=True)
