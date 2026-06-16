@@ -6,6 +6,12 @@ from otomekairo.llm.contexts import InitiativeCandidateFamily
 from otomekairo.llm.contracts import INITIATIVE_ENTRY_ENTER_BASIS_VALUES
 
 
+INITIATIVE_DRIVE_SPEECH_MIN_SUPPORT_COUNT = 2
+INITIATIVE_DRIVE_SPEECH_MIN_SUPPORT_STRENGTH = 0.72
+INITIATIVE_DRIVE_SPEECH_SINGLE_SUPPORT_STRENGTH = 0.82
+INITIATIVE_DRIVE_SPEECH_SIGNAL_STRENGTH = 0.45
+
+
 class ServiceInputInitiativeFamiliesMixin:
     def _initiative_candidate_families(
         self,
@@ -197,19 +203,39 @@ class ServiceInputInitiativeFamiliesMixin:
         )
         # 自発 speech は活動モード遷移または強い関心の入口だけで成立させる。
         entry_is_strong = entry_kind == "enter" and entry_basis in INITIATIVE_ENTRY_ENTER_BASIS_VALUES
-        available = bool(drive_summaries or entry_is_strong)
+        speech_ready_drives = self._initiative_speech_ready_drive_summaries(drive_summaries)
+        available = bool(speech_ready_drives or entry_is_strong)
         if not available:
             blocking_reason = "drive_state も外向きの自律判断入口もまだ無い。"
+            if drive_summaries:
+                blocking_reason = "drive_state はあるが、単独で autonomous speech の入口になる強度ではない。"
             if entry_kind == "enter":
-                blocking_reason = "自律入口判定は enter だが、entry_basis が同一活動内の詳細変化または観測のみで、autonomous speech の入口として扱わない。"
+                blocking_reason = (
+                    "自律入口判定は enter だが、entry_basis が同一活動内の詳細変化または観測のみで、"
+                    "autonomous speech の入口として扱わない。drive_state も単独入口になる強度ではない。"
+                )
             return InitiativeCandidateFamily(
                 family="autonomous",
                 available=False,
                 selected=False,
                 priority_score=0.0,
+                reason_summary=self._initiative_autonomous_family_reason(
+                    drive_summaries=drive_summaries,
+                    speech_ready_drive_summaries=speech_ready_drives,
+                    strongest_drive=drive_summaries[0] if drive_summaries else None,
+                    world_state_summary=world_state_summary,
+                    recent_turn_summary=recent_turn_summary,
+                    initiative_entry_summary=initiative_entry_summary,
+                    suppression_summary=suppression_summary,
+                    capability_summary=capability_summary,
+                ),
                 blocking_reason_summary=blocking_reason,
             )
-        strongest_drive = drive_summaries[0] if drive_summaries else None
+        strongest_drive = (
+            speech_ready_drives[0]
+            if speech_ready_drives
+            else drive_summaries[0] if drive_summaries else None
+        )
         preferred_result_kind: str | None = None
         preferred_result_reason: str | None = None
         preferred_capability_id: str | None = None
@@ -222,6 +248,7 @@ class ServiceInputInitiativeFamiliesMixin:
             priority_score=1.0,
             reason_summary=self._initiative_autonomous_family_reason(
                 drive_summaries=drive_summaries,
+                speech_ready_drive_summaries=speech_ready_drives,
                 strongest_drive=strongest_drive,
                 world_state_summary=world_state_summary,
                 recent_turn_summary=recent_turn_summary,
@@ -235,6 +262,48 @@ class ServiceInputInitiativeFamiliesMixin:
             preferred_capability_id=preferred_capability_id,
             preferred_capability_input=preferred_capability_input,
         )
+
+    def _initiative_speech_ready_drive_summaries(
+        self,
+        drive_summaries: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        # drive_state は背景動機なので、本文ではなく構造化された強度だけで入口判定する。
+        return [
+            drive_summary
+            for drive_summary in drive_summaries
+            if self._initiative_drive_is_speech_ready(drive_summary)
+        ]
+
+    def _initiative_drive_is_speech_ready(self, drive_summary: dict[str, Any]) -> bool:
+        freshness_hint = self._client_context_text(drive_summary.get("freshness_hint"), limit=16)
+        stability_hint = self._client_context_text(drive_summary.get("stability_hint"), limit=16)
+        if freshness_hint == "stale" or stability_hint == "weak":
+            return False
+
+        support_count = self._initiative_drive_support_count(drive_summary)
+        support_strength = self._initiative_drive_score(drive_summary, "support_strength")
+        signal_strength = self._initiative_drive_score(drive_summary, "signal_strength")
+
+        if signal_strength >= INITIATIVE_DRIVE_SPEECH_SIGNAL_STRENGTH:
+            return True
+        if support_strength >= INITIATIVE_DRIVE_SPEECH_SINGLE_SUPPORT_STRENGTH:
+            return True
+        return (
+            support_count >= INITIATIVE_DRIVE_SPEECH_MIN_SUPPORT_COUNT
+            and support_strength >= INITIATIVE_DRIVE_SPEECH_MIN_SUPPORT_STRENGTH
+        )
+
+    def _initiative_drive_support_count(self, drive_summary: dict[str, Any]) -> int:
+        support_count = drive_summary.get("support_count")
+        if isinstance(support_count, int):
+            return max(0, support_count)
+        return 0
+
+    def _initiative_drive_score(self, drive_summary: dict[str, Any], key: str) -> float:
+        value = drive_summary.get(key)
+        if isinstance(value, (int, float)):
+            return max(0.0, min(float(value), 1.0))
+        return 0.0
 
     def _initiative_selected_candidate_family_name(
         self,
@@ -336,6 +405,7 @@ class ServiceInputInitiativeFamiliesMixin:
         self,
         *,
         drive_summaries: list[dict[str, Any]],
+        speech_ready_drive_summaries: list[dict[str, Any]],
         strongest_drive: dict[str, Any] | None,
         world_state_summary: list[dict[str, Any]],
         recent_turn_summary: list[dict[str, str]],
@@ -353,6 +423,10 @@ class ServiceInputInitiativeFamiliesMixin:
                 parts.append(f"自律入口理由={reason_summary}")
         if drive_summaries:
             parts.append(f"drive_state {len(drive_summaries)} 件")
+            if speech_ready_drive_summaries:
+                parts.append(f"speech-ready drive_state {len(speech_ready_drive_summaries)} 件")
+            else:
+                parts.append("speech-ready drive_state なし")
         if isinstance(strongest_drive, dict):
             strongest_summary = self._client_context_text(strongest_drive.get("summary_text"), limit=120)
             strongest_kind = self._client_context_text(strongest_drive.get("drive_kind"), limit=48)
@@ -379,4 +453,4 @@ class ServiceInputInitiativeFamiliesMixin:
             parts.append(f"available capability {available_count} 件")
         if not parts:
             return None
-        return " / ".join(parts) + " が外向き自律判断の入口にある。"
+        return " / ".join(parts) + " が自律判断の材料にある。"

@@ -842,7 +842,7 @@ def _build_decision_system_prompt(persona: dict) -> str:
             "capability_request.input は required_input に従う最小 object にしてください。target_client_id や資格情報は入れないでください。\n"
             "current_input.sender=user かつ response_target=user の text が非空でも、この応答で完結しない目的が残る場合は autonomous_run を選んでください。\n"
             "ユーザー発話への直接応答として自然に返せて、かつ残る目的がない場合は speech を選び、pending_intent を乱用しないでください。\n"
-            "非ユーザー起点では、drive_state、world_state、ongoing_action、pending_intent、initiative_context、capability_result_context のいずれかに外へ出る理由がある場合に speech を選んでください。\n"
+            "非ユーザー起点では、speech-ready drive_state、world_state、ongoing_action、pending_intent、initiative_context、capability_result_context のいずれかに外へ出る理由がある場合に speech を選んでください。\n"
             "ActivityContext.current_activity は現在活動の短期推定です。ActivityContext.previous_activity は直前活動の参照情報です。\n"
             "ActivityContext の actor=user はユーザーの活動、actor=self は AI 本体の活動、actor=unknown は主体不明を表します。\n"
             "自律判断時の ActivityContext はタイミング判断の補助材料です。結果選択は ActivityContext を含む internal_context 全体で行ってください。\n"
@@ -952,6 +952,7 @@ def _build_decision_trigger_policy(
                 "InitiativeContext.candidate_families の reason_summary, blocking_reason_summary は候補の意味説明です。selected_candidate_family と全体文脈から decision.kind を選んでください。",
                 "selected_candidate_family は今回扱う family の要約です。reason_summary, drive_summaries, world_state_summary, recent_turn_summary, intervention_state, intervention_risk_summary を合わせて最終結果を選んでください。",
                 "InitiativeContext.drive_summaries に drive_kind, support_count, freshness_hint, support_strength, scope_alignment, signal_strength, persona_alignment, stability_hint があるときは、中期の向きの比較材料として扱ってください。",
+                "candidate_families の autonomous が speech-ready drive_state なしで unavailable の場合、drive_summaries は背景材料であり、それだけを speech の入口にしないでください。",
                 "InitiativeContext.candidate_families に preferred_capability_id と preferred_capability_input があるときは capability_request の提案です。現在文脈で追加観測が必要な場合だけ、その capability と最小 input を選んでください。",
                 "foreground_signal_summary が grounded で world_state_summary に該当状況が既にあるときは、既存要約を使って speech / noop / pending_intent を判断してください。",
                 "recent_turn_summary は直近文脈の補助材料です。反復性は visual_observations[].change_state と same_as_recent_speech を補助的に見て判断してください。",
@@ -963,7 +964,7 @@ def _build_decision_trigger_policy(
                 "活動遷移に触れる speech は、終わった・サボった・遊び始めたなどを断定せず、区切りや切り替えとして短く表現してください。",
                 "visual_observations[].change_state=first_seen / changed は新規性の前景シグナルです。新規性だけを外向き発話理由にしないでください。",
                 "visual_observations[].change_state=same_as_recent_speech / stable は反復性の前景シグナルです。drive_state、pending_intent、world_state_summary と合わせて speech / noop / pending_intent を選んでください。",
-                "自発系の成立条件は drive_state、ongoing_action、pending_intent、または強い entry_basis を持つ initiative_entry_summary と現在文脈の噛み合いです。visual_observations だけを speech の成立条件にしないでください。",
+                "自発系の成立条件は speech-ready drive_state、ongoing_action、pending_intent、または強い entry_basis を持つ initiative_entry_summary と現在文脈の噛み合いです。visual_observations だけを speech の成立条件にしないでください。",
                 "selected_candidate_family が ongoing_action で follow-up capability が available なときは、現在の流れを進める capability_request を検討してください。",
                 "foreground_signal_summary が thin のとき、特に `background_wake` の定期起床や initiative_baseline=low では、入口理由が現在も成立しているかを見て speech / noop / pending_intent を選んでください。",
             ]
