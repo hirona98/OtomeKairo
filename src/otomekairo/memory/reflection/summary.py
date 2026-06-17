@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from typing import Any
 
+from otomekairo.llm.contexts import build_persona_context
 from otomekairo.llm.client import LLMError
 from otomekairo.memory.reflection.constants import (
     ACTIVE_MEMORY_STATUSES,
@@ -13,7 +14,6 @@ from otomekairo.memory.reflection.constants import (
     REFLECTION_HIGH_SALIENCE_THRESHOLD,
     REFLECTION_MIN_SUMMARY_EPISODES,
     REFLECTION_MIN_SUMMARY_EVIDENCE,
-    REFLECTION_PERSONA_PROMPT_LIMIT,
     REFLECTION_SCOPE_AFFECT_LIMIT,
     REFLECTION_SCOPE_SIGNAL_SALIENCE,
     REFLECTION_SUMMARY_PACK_EPISODE_LIMIT,
@@ -145,8 +145,14 @@ class MemoryReflectionSummaryMixin:
         active_units: list[dict[str, Any]],
         embedding_definition: dict[str, Any],
         reflection_summary_role: dict[str, Any],
+        selected_persona: dict[str, Any],
         scope_support_index: dict[tuple[str, str], dict[str, Any]],
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        persona_context = build_persona_context(
+            selected_persona,
+            role="memory_reflection_summary",
+        )
+
         # グループ化
         episode_groups: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
         memory_groups: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
@@ -210,6 +216,7 @@ class MemoryReflectionSummaryMixin:
             try:
                 summary_payload = self.llm.generate_memory_reflection_summary(
                     role_definition=reflection_summary_role,
+                    persona_context=persona_context,
                     evidence_pack=evidence_pack,
                 )
             except Exception as exc:  # noqa: BLE001
@@ -522,7 +529,7 @@ class MemoryReflectionSummaryMixin:
         if scope_type in {"self", "relationship"}:
             persona_context = self._reflective_persona_context(selected_persona)
             if persona_context is not None:
-                support_kinds.append("persona")
+                support_kinds.append("persona_context")
 
         mood_context = None
         if scope_type == "self":
@@ -545,7 +552,7 @@ class MemoryReflectionSummaryMixin:
             "scope_key": scope_key,
             "scope_label": self._reflective_scope_label(scope_type=scope_type, scope_key=scope_key),
             "support_kinds": support_kinds,
-            "persona": persona_context,
+            "persona_context": persona_context,
             "mood_state": mood_context,
             "affect_state": affect_context,
         }
@@ -731,9 +738,9 @@ class MemoryReflectionSummaryMixin:
                 for value in support_kinds
                 if isinstance(value, str) and value
             ]
-        persona_context = support.get("persona")
+        persona_context = support.get("persona_context")
         if isinstance(persona_context, dict) and persona_context:
-            payload["persona"] = persona_context
+            payload["persona_context"] = persona_context
         mood_context = support.get("mood_state")
         if isinstance(mood_context, dict) and mood_context:
             payload["mood_state"] = mood_context
@@ -832,18 +839,10 @@ class MemoryReflectionSummaryMixin:
         return display_scope_key(scope_key)
 
     def _reflective_persona_context(self, persona: dict[str, Any]) -> dict[str, Any] | None:
-        payload: dict[str, Any] = {}
-        display_name = optional_text(persona.get("display_name"))
-        if display_name is not None:
-            payload["display_name"] = display_name
-        initiative_baseline = optional_text(persona.get("initiative_baseline"))
-        if initiative_baseline is not None:
-            payload["initiative_baseline"] = initiative_baseline
-        persona_prompt = optional_text(persona.get("persona_prompt"))
-        if persona_prompt is not None:
-            prompt_excerpt = " ".join(persona_prompt.split())
-            payload["persona_prompt_excerpt"] = prompt_excerpt[:REFLECTION_PERSONA_PROMPT_LIMIT]
-        return payload or None
+        return build_persona_context(
+            persona,
+            role="memory_reflection_summary",
+        ).to_summary_payload()
 
     def _reflective_mood_context(self, mood_state: dict[str, Any]) -> dict[str, Any] | None:
         current_vad = mood_state.get("current_vad")

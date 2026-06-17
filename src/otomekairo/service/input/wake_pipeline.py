@@ -231,8 +231,10 @@ class ServiceInputWakePipelineMixin:
         role_definition = state["model_presets"][state["selected_model_preset_id"]]["roles"][
             "pending_intent_selection"
         ]
+        persona_context = self._build_selected_persona_context(state=state, role="initiative_entry_check")
         payload = self.llm.generate_initiative_entry_check(
             role_definition=role_definition,
+            persona_context=persona_context,
             source_pack=source_pack,
         )
         entry_kind = str(payload["entry_kind"]).strip()
@@ -298,11 +300,10 @@ class ServiceInputWakePipelineMixin:
         recent_turns: list[dict[str, Any]],
         foreground_world_state: list[dict[str, Any]] | None,
     ) -> dict[str, Any]:
-        persona = state["personas"][state["selected_persona_id"]]
+        persona_context = self._build_selected_persona_context(state=state, role="initiative_entry_check")
         input_context: dict[str, Any] = {
             "trigger_kind": trigger_kind,
             "current_time": current_time,
-            "initiative_baseline": persona.get("initiative_baseline"),
             "source": self._client_context_text(client_context.get("source"), limit=48) or trigger_kind,
         }
         for key, limit in (
@@ -318,6 +319,7 @@ class ServiceInputWakePipelineMixin:
             client_context.get("visual_observation_signals")
         )
         source_pack: dict[str, Any] = {
+            "persona_context": persona_context.to_prompt_payload(),
             "input_context": input_context,
             "recent_turns": self._initiative_entry_check_recent_turns(recent_turns),
             "foreground_world_state": self._initiative_entry_check_world_state(foreground_world_state),

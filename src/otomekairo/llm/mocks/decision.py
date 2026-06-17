@@ -13,11 +13,11 @@ class LLMMockDecisionMixin:
         self,
         *,
         role_definition: dict,
-        persona: dict,
+        persona_context: Any,
         context: DecisionContext,
     ) -> dict[str, Any]:
         # model確認
-        _ = persona
+        _ = persona_context
         self._assert_mock_model(role_definition)
         input_text = context.input_text
         recent_turns = context.recent_turns
@@ -97,11 +97,11 @@ class LLMMockDecisionMixin:
         self,
         *,
         role_definition: dict,
-        persona: dict,
+        persona_context: Any,
         context: AutonomousStepContext,
     ) -> dict[str, Any]:
         # model確認
-        _ = persona
+        _ = persona_context
         self._assert_mock_model(role_definition)
 
         run = context.run

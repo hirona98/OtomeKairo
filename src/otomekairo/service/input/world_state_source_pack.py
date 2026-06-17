@@ -38,6 +38,7 @@ class ServiceInputWorldStateSourcePackMixin:
         selected_candidate: dict[str, Any] | None,
         observation_summary: dict[str, Any] | None,
         capability_request_summary: dict[str, Any] | None,
+        persona_context: Any,
     ) -> tuple[WorldStateTrace, list[dict[str, Any]]]:
         previous_foreground_world_state = (
             self._summarize_foreground_world_states(
@@ -69,6 +70,7 @@ class ServiceInputWorldStateSourcePackMixin:
                 source_ref=source_ref,
                 selected_candidate=selected_candidate,
                 observation_summary=observation_summary,
+                persona_context=persona_context,
             )
             source_pack_contexts = self._summarize_world_state_source_pack_contexts(source_pack)
             source_pack_state_type_hooks = self._summarize_world_state_state_type_hooks(source_pack)
@@ -114,6 +116,7 @@ class ServiceInputWorldStateSourcePackMixin:
             role_definition = state["model_presets"][state["selected_model_preset_id"]]["roles"]["input_interpretation"]
             payload = self.llm.generate_world_state(
                 role_definition=role_definition,
+                persona_context=persona_context,
                 source_pack=source_pack,
             )
             world_states = self._normalize_world_state_candidates(
@@ -288,6 +291,7 @@ class ServiceInputWorldStateSourcePackMixin:
         source_ref: str,
         selected_candidate: dict[str, Any] | None,
         observation_summary: dict[str, Any] | None,
+        persona_context: Any,
     ) -> WorldStateSourcePack:
         payload = WorldStateSourcePack(
             trigger_kind=trigger_kind,
@@ -296,6 +300,7 @@ class ServiceInputWorldStateSourcePackMixin:
             source_ref=source_ref,
             time_context=llm_local_time_text(started_at).replace("\n", " / "),
             client_context=self._build_world_state_client_context(client_context),
+            persona_context=persona_context.to_prompt_payload(),
         )
         visual_context = self._build_world_state_visual_context(
             observation_summary=observation_summary,
@@ -808,6 +813,10 @@ class ServiceInputWorldStateSourcePackMixin:
         summary: dict[str, Any] = {}
         if source_pack.allowed_state_types:
             summary["allowed_state_types"] = list(source_pack.allowed_state_types)
+        if isinstance(source_pack.persona_context, dict):
+            persona_summary = self._persona_context_trace_summary(source_pack.persona_context)
+            if persona_summary:
+                summary["persona_context_summary"] = persona_summary
         for key in (
             "client_context",
             "visual_context",

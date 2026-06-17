@@ -4,6 +4,107 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 
+PERSONA_PROMPT_EXCERPT_LIMIT = 240
+
+
+PERSONA_CONTEXT_USE_POLICIES = {
+    "decision_generation": "行動選択、見送り、能力実行、保留、継続目的の基底として使う。記憶、観測、候補集合を上書きしない。",
+    "autonomous_step_generation": "autonomous_run の次 step と継続境界の基底として使う。run 目的、能力可否、観測事実を上書きしない。",
+    "expression_generation": "外向き本文の立ち位置、距離感、言い回し、注目点に使う。判断結果と根拠文脈の外を補わない。",
+    "pending_intent_selection": "今前へ出る自然さ、関心の強さ、距離感の判断に使う。候補外の意図を作らない。",
+    "initiative_entry_check": "外向き自律判断へ進む自然さ、関心の強さ、距離感の判断に使う。観測事実を追加しない。",
+    "input_interpretation": "入力内で何を重く見るかの補助に使う。ユーザー発話、時刻参照、根拠分類を上書きしない。",
+    "recall_hint": "想起焦点の重みづけの補助に使う。ユーザー発話や明示された参照を人格で補完しない。",
+    "answer_contract": "回答に必要な根拠種別の重みづけ補助に使う。正確性要求や境界指定を人格で変えない。",
+    "recall_pack_selection": "想起候補の優先順位の補助に使う。候補集合、候補本文、conflict を上書きしない。",
+    "event_evidence_generation": "証拠要約の注目点の補助に使う。source pack 外の出来事や言い換えを足さない。",
+    "memory_interpretation": "self / relationship の反応や関係温度の解釈補助に使う。ユーザー事実を人格で補完しない。",
+    "memory_correction_reconciliation": "訂正らしさの意味判断の補助に使う。対象候補外の revision を作らない。",
+    "memory_reflection_summary": "言い回しと注目点の補助に使う。episodes と memory_units を根拠の中心にする。",
+    "world_state": "観測事実の優先順位と要約粒度の補助に使う。見えていない短期状態を足さない。",
+    "activity_state": "活動推定の注目点と要約粒度の補助に使う。観測外の活動を足さない。",
+    "visual_observation": "画像内で判断に効く部分の優先順位と要約粒度の補助に使う。見えていないものを足さない。",
+    "drive_state": "drive の種類、根拠記憶、scope support と合わせた整合度評価に使う。人格本文を状態へ複写しない。",
+}
+
+
+@dataclass(frozen=True, slots=True)
+class PersonaContext:
+    display_name: str
+    initiative_baseline: dict[str, Any]
+    persona_prompt_text: str
+    expression_addon: str | None
+    use_policy: str
+
+    def to_prompt_payload(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "initiative_baseline": self.initiative_baseline,
+            "persona_prompt_text": self.persona_prompt_text,
+            "use_policy": self.use_policy,
+        }
+        if isinstance(self.expression_addon, str) and self.expression_addon.strip():
+            payload["expression_addon"] = self.expression_addon
+        return payload
+
+    def to_summary_payload(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "initiative_baseline": self.initiative_baseline,
+            "persona_prompt_excerpt": self._prompt_excerpt(),
+        }
+        return payload
+
+    def _prompt_excerpt(self) -> str:
+        normalized = " ".join(self.persona_prompt_text.split())
+        if len(normalized) <= PERSONA_PROMPT_EXCERPT_LIMIT:
+            return normalized
+        return normalized[: PERSONA_PROMPT_EXCERPT_LIMIT - 1].rstrip() + "…"
+
+
+def build_persona_context(
+    persona: dict[str, Any],
+    *,
+    role: str,
+    include_expression: bool = False,
+) -> PersonaContext:
+    normalized_role = role.strip()
+    use_policy = PERSONA_CONTEXT_USE_POLICIES.get(normalized_role)
+    if use_policy is None:
+        raise ValueError(f"unsupported persona_context role: {role}")
+    display_name = _persona_text(persona.get("display_name")) or "OtomeKairo"
+    initiative_level = _persona_text(persona.get("initiative_baseline")) or "medium"
+    persona_prompt_text = _persona_text(persona.get("persona_prompt")) or ""
+    expression_addon = _persona_text(persona.get("expression_addon")) if include_expression else None
+    return PersonaContext(
+        display_name=display_name,
+        initiative_baseline={
+            "level": initiative_level,
+            "summary_text": persona_initiative_baseline_summary(initiative_level),
+        },
+        persona_prompt_text=persona_prompt_text,
+        expression_addon=expression_addon,
+        use_policy=use_policy,
+    )
+
+
+def build_persona_context_summary(persona: dict[str, Any]) -> dict[str, Any]:
+    return build_persona_context(persona, role="decision_generation").to_summary_payload()
+
+
+def persona_initiative_baseline_summary(level: str) -> str:
+    if level == "low":
+        return "自発介入は控えめ寄りで、前景理由が弱ければ見送る。"
+    if level == "high":
+        return "自発介入は強めで、前景理由が揃えば一歩前へ出る。"
+    return "自発介入は中庸で、具体的な前景変化があれば短く前へ出る。"
+
+
+def _persona_text(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
 @dataclass(frozen=True, slots=True)
 class CurrentInput:
     sender: str
@@ -65,6 +166,7 @@ class InitiativeContext:
     foreground_signal_summary: dict[str, Any]
     activity_context: dict[str, Any] | None
     initiative_baseline: dict[str, Any]
+    persona_context_summary: dict[str, Any]
     runtime_state_summary: dict[str, Any]
     recent_turn_summary: list[dict[str, str]]
     drive_summaries: list[dict[str, Any]]
@@ -98,6 +200,7 @@ class InitiativeContext:
             "foreground_signal_summary": self.foreground_signal_summary,
             "activity_context": self.activity_context,
             "initiative_baseline": self.initiative_baseline,
+            "persona_context_summary": self.persona_context_summary,
             "runtime_state_summary": self.runtime_state_summary,
             "recent_turn_summary": self.recent_turn_summary,
             "drive_summaries": self.drive_summaries,

@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 from otomekairo.llm.client import LLMContractError, LLMError
+from otomekairo.llm.contexts import PersonaContext
 from otomekairo.llm.contracts import RECALL_PACK_SECTION_NAMES
 from otomekairo.memory.utils import normalized_text_list
 from otomekairo.recall.association import ACTIVE_MEMORY_STATUSES
@@ -124,6 +125,7 @@ class RecallSelectionMixin:
         candidate_sections: dict[str, list[dict[str, Any]]],
         conflicts: list[dict[str, Any]],
         role_definition: dict[str, Any],
+        persona_context: PersonaContext,
     ) -> dict[str, Any]:
         # 初期状態
         trace = self._empty_recall_pack_selection()
@@ -144,6 +146,7 @@ class RecallSelectionMixin:
                 recall_hint=recall_hint,
                 candidate_sections=candidate_sections,
                 conflicts=conflicts,
+                persona_context=persona_context,
             )
         except (KeyError, TypeError, ValueError) as exc:
             trace["result_status"] = "failed"
@@ -159,6 +162,7 @@ class RecallSelectionMixin:
         try:
             payload = self.llm.generate_recall_pack_selection(
                 role_definition=role_definition,
+                persona_context=persona_context,
                 source_pack=source_pack,
             )
         except LLMContractError as exc:
@@ -215,6 +219,7 @@ class RecallSelectionMixin:
         recall_hint: dict[str, Any],
         candidate_sections: dict[str, list[dict[str, Any]]],
         conflicts: list[dict[str, Any]],
+        persona_context: PersonaContext,
     ) -> dict[str, Any]:
         # section 群
         source_sections: list[dict[str, Any]] = []
@@ -246,6 +251,7 @@ class RecallSelectionMixin:
 
         # 結果
         return {
+            "persona_context": persona_context.to_prompt_payload(),
             "augmented_query_text": augmented_query_text.strip(),
             "recall_hint": recall_hint,
             "constraints": {

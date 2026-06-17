@@ -117,9 +117,11 @@ class ServiceSpontaneousPendingIntentMixin:
 
         # 選択
         role_definition = state["model_presets"][state["selected_model_preset_id"]]["roles"]["pending_intent_selection"]
+        persona_context = self._build_selected_persona_context(state=state, role="pending_intent_selection")
         try:
             payload = self.llm.generate_pending_intent_selection(
                 role_definition=role_definition,
+                persona_context=persona_context,
                 source_pack=source_pack,
             )
         except LLMContractError as exc:
@@ -216,6 +218,10 @@ class ServiceSpontaneousPendingIntentMixin:
     ) -> dict[str, Any]:
         return {
             "trigger_kind": trigger_kind,
+            "persona_context": self._build_selected_persona_context(
+                state=state,
+                role="pending_intent_selection",
+            ).to_prompt_payload(),
             "input_context": self._build_pending_intent_selection_input_context(
                 state=state,
                 trigger_kind=trigger_kind,

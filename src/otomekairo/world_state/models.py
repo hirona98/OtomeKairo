@@ -335,6 +335,7 @@ class WorldStateSourcePack:
     environment_context: WorldStateEnvironmentContext | None = None
     location_context: WorldStateLocationContext | None = None
     capability_result_summary: WorldStateCapabilityResultSummary | None = None
+    persona_context: dict[str, Any] | None = None
 
     def context(self, context_key: str) -> WorldStateContext | None:
         value = getattr(self, context_key, None)
@@ -382,6 +383,8 @@ class WorldStateSourcePack:
             capability_result_payload = self.capability_result_summary.to_prompt_payload()
             if capability_result_payload:
                 payload["capability_result_summary"] = capability_result_payload
+        if isinstance(self.persona_context, dict) and self.persona_context:
+            payload["persona_context"] = self.persona_context
         return payload
 
 

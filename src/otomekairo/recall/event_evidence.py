@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from otomekairo.llm.contracts import LLMContractError, LLMError
+from otomekairo.llm.contexts import PersonaContext
 
 
 # 定数
@@ -44,6 +45,7 @@ class RecallEventEvidenceMixin:
         recall_hint: dict[str, Any],
         sections: dict[str, list[dict[str, Any]]],
         role_definition: dict[str, Any],
+        persona_context: PersonaContext,
     ) -> dict[str, Any]:
         # 初期状態
         result = self._empty_event_evidence_result()
@@ -147,6 +149,7 @@ class RecallEventEvidenceMixin:
                         recall_hint=recall_hint,
                         sections=sections,
                         role_definition=role_definition,
+                        persona_context=persona_context,
                         work_item=work_item,
                     )
                     for work_item in work_items
@@ -181,6 +184,7 @@ class RecallEventEvidenceMixin:
         recall_hint: dict[str, Any],
         sections: dict[str, list[dict[str, Any]]],
         role_definition: dict[str, Any],
+        persona_context: PersonaContext,
         work_item: dict[str, Any],
     ) -> dict[str, Any]:
         # event 単位の LLM 圧縮を独立実行し、呼び出し元で元順序へ戻せる形で返す。
@@ -197,6 +201,7 @@ class RecallEventEvidenceMixin:
                 record=record,
                 selection_mode=str(work_item["selection_mode"]),
                 precise_reason_summary=work_item.get("precise_reason_summary"),
+                persona_context=persona_context,
             )
         except Exception as exc:  # noqa: BLE001
             return {
@@ -213,6 +218,7 @@ class RecallEventEvidenceMixin:
         try:
             payload = self.llm.generate_event_evidence(
                 role_definition=role_definition,
+                persona_context=persona_context,
                 source_pack=source_pack,
             )
         except LLMContractError as exc:
@@ -629,6 +635,7 @@ class RecallEventEvidenceMixin:
         record: dict[str, Any],
         selection_mode: str = "standard",
         precise_reason_summary: str | None = None,
+        persona_context: PersonaContext,
     ) -> dict[str, Any]:
         # source 群
         matched_sources = self._matched_event_evidence_sources(
@@ -643,6 +650,7 @@ class RecallEventEvidenceMixin:
 
         # 結果
         return {
+            "persona_context": persona_context.to_prompt_payload(),
             "primary_recall_focus": primary_recall_focus,
             "secondary_recall_focuses": self._secondary_recall_focuses(recall_hint),
             "time_reference": str(recall_hint.get("time_reference") or "none"),

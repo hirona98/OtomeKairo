@@ -260,6 +260,7 @@ class ServiceInputWakeObservationMixin:
                 selected_candidate=None,
                 observation_summary=observation_summary,
                 capability_request_summary=capability_request_summary,
+                persona_context=self._build_selected_persona_context(state=state, role="world_state"),
             )
             visual_observation_context = self._build_visual_observation_decision_context(
                 trigger_kind="capability_result",
@@ -282,6 +283,7 @@ class ServiceInputWakeObservationMixin:
                 foreground_world_state=None,
                 cycle_id=cycle_id,
                 cycle_label=self._debug_cycle_label(cycle_id),
+                persona_context=self._build_selected_persona_context(state=state, role="activity_state"),
             )
             transition_summary = self._finish_wake_policy_observation_ongoing_action(
                 request_record=request_record,

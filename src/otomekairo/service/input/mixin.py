@@ -13,6 +13,7 @@ from otomekairo.memory.utils import (
     now_iso,
     stable_json,
 )
+from otomekairo.llm.contexts import PersonaContext, build_persona_context
 from otomekairo.service.common import ServiceError
 from otomekairo.service.input.constants import (
     RECALL_HINT_RECENT_TURN_LIMIT,
@@ -542,6 +543,43 @@ class ServiceInputMixin(
         started = self._parse_iso(started_at)
         finished = self._parse_iso(finished_at)
         return max(int((finished - started).total_seconds() * 1000), 0)
+
+    def _build_selected_persona_context(
+        self,
+        *,
+        state: dict[str, Any],
+        role: str,
+        include_expression: bool = False,
+    ) -> PersonaContext:
+        persona = state["personas"][state["selected_persona_id"]]
+        return build_persona_context(
+            persona,
+            role=role,
+            include_expression=include_expression,
+        )
+
+    def _persona_context_trace_summary(self, value: Any) -> dict[str, Any]:
+        if isinstance(value, PersonaContext):
+            return value.to_summary_payload()
+        if not isinstance(value, dict):
+            return {}
+        display_name = self._client_context_text(value.get("display_name"), limit=120)
+        initiative_baseline = value.get("initiative_baseline")
+        prompt_text = self._client_context_text(value.get("persona_prompt_text"), limit=240)
+        payload: dict[str, Any] = {}
+        if display_name is not None:
+            payload["display_name"] = display_name
+        if isinstance(initiative_baseline, dict):
+            compact_baseline: dict[str, Any] = {}
+            for key, limit in (("level", 16), ("summary_text", 160)):
+                text = self._client_context_text(initiative_baseline.get(key), limit=limit)
+                if text is not None:
+                    compact_baseline[key] = text
+            if compact_baseline:
+                payload["initiative_baseline"] = compact_baseline
+        if prompt_text is not None:
+            payload["persona_prompt_excerpt"] = prompt_text
+        return payload
 
     def _clamp(self, value: str | None, limit: int = 160) -> str | None:
         # 範囲制限

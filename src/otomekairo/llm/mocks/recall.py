@@ -22,11 +22,14 @@ class LLMMockRecallMixin:
         input_text: str,
         recall_hint: dict[str, Any],
         current_time: str,
+        *,
+        persona_context: Any,
     ) -> dict[str, Any]:
         # model確認
         self._assert_mock_model(role_definition)
         _ = recall_hint
         _ = current_time
+        _ = persona_context
 
         # モックは開発検証用の固定規則。実運用の契約判定は LLM が行う。
         text = input_text.strip()
@@ -77,9 +80,12 @@ class LLMMockRecallMixin:
         input_text: str,
         recent_turns: list[dict],
         current_time: str,
+        *,
+        persona_context: Any,
     ) -> dict[str, Any]:
         # model確認
         self._assert_mock_model(role_definition)
+        _ = persona_context
 
         # ヒューリスティックfocus
         normalized = input_text.strip()

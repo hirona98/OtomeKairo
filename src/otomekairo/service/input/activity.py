@@ -25,6 +25,7 @@ class ServiceInputActivityMixin:
         foreground_world_state: list[dict[str, Any]] | None,
         cycle_id: str | None,
         cycle_label: str,
+        persona_context: Any,
     ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
         memory_set_id = state["selected_memory_set_id"]
         previous_state = self.store.get_current_activity_state(
@@ -42,6 +43,7 @@ class ServiceInputActivityMixin:
             visual_observation_context=visual_observation_context,
             foreground_world_state=foreground_world_state,
             previous_activity_state=previous_state,
+            persona_context=persona_context,
         )
         trace: dict[str, Any] = {
             "result_status": "skipped",
@@ -59,6 +61,7 @@ class ServiceInputActivityMixin:
             role_definition = state["model_presets"][state["selected_model_preset_id"]]["roles"]["input_interpretation"]
             payload = self.llm.generate_activity_state(
                 role_definition=role_definition,
+                persona_context=persona_context,
                 source_pack=source_pack,
             )
             candidate = self._activity_candidate(payload)
@@ -124,9 +127,11 @@ class ServiceInputActivityMixin:
         visual_observation_context: dict[str, Any] | None,
         foreground_world_state: list[dict[str, Any]] | None,
         previous_activity_state: dict[str, Any] | None,
+        persona_context: Any,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "trigger_kind": trigger_kind,
+            "persona_context": persona_context.to_prompt_payload(),
             "time_context": self._build_time_context(current_time=started_at),
             "current_input": current_input,
             "current_input_summary": self._clamp(input_text.strip(), limit=200) or "",
@@ -422,7 +427,7 @@ class ServiceInputActivityMixin:
         return f"{minutes // 60}時間前"
 
     def _summarize_activity_source_pack(self, source_pack: dict[str, Any]) -> dict[str, Any]:
-        return {
+        summary = {
             "trigger_kind": source_pack.get("trigger_kind"),
             "has_client_context": isinstance(source_pack.get("client_context"), dict),
             "has_observation_summary": isinstance(source_pack.get("observation_summary"), dict),
@@ -430,6 +435,10 @@ class ServiceInputActivityMixin:
             "has_previous_activity_context": isinstance(source_pack.get("previous_activity_context"), dict),
             "recent_turn_count": len(source_pack.get("recent_turns", [])) if isinstance(source_pack.get("recent_turns"), list) else 0,
         }
+        persona_summary = self._persona_context_trace_summary(source_pack.get("persona_context"))
+        if persona_summary:
+            summary["persona_context_summary"] = persona_summary
+        return summary
 
     def _compact_activity_candidate(self, candidate: dict[str, Any] | None) -> dict[str, Any] | None:
         if not isinstance(candidate, dict):

@@ -11,7 +11,7 @@ class LLMMockSpeechMixin:
         self,
         *,
         role_definition: dict,
-        persona: dict,
+        persona_context: Any,
         context: SpeechContext,
     ) -> dict[str, Any]:
         # model確認
@@ -26,7 +26,7 @@ class LLMMockSpeechMixin:
         decision = context.decision
 
         # コンテキスト
-        persona_prompt = str(persona.get("persona_prompt", "")).strip()
+        persona_prompt = str(getattr(persona_context, "persona_prompt_text", "") or "").strip()
         primary_recall_focus = recall_hint["primary_recall_focus"]
         secondary_recall_focuses = self._secondary_recall_focuses(recall_hint)
         text = input_text.strip()

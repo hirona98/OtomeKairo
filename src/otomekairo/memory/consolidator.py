@@ -6,6 +6,7 @@ import uuid
 from typing import Any
 
 from otomekairo.llm.client import LLMClient
+from otomekairo.llm.contexts import build_persona_context
 from otomekairo.memory.actions import MemoryActionResolver
 from otomekairo.memory.correction import MemoryCorrectionReconciler
 from otomekairo.memory.reflection.consolidator import ReflectiveConsolidator
@@ -56,6 +57,7 @@ class MemoryConsolidator:
         memory_role = selected_preset["roles"]["memory_interpretation"]
         selected_memory_set_id = state["selected_memory_set_id"]
         embedding_definition = state["memory_sets"][selected_memory_set_id]["embedding"]
+        selected_persona = state["personas"][state["selected_persona_id"]]
 
         # 訂正候補
         correction_prepared = self.correction.prepare(
@@ -67,6 +69,10 @@ class MemoryConsolidator:
         # 解釈
         interpretation = self.llm.generate_memory_interpretation(
             role_definition=memory_role,
+            persona_context=build_persona_context(
+                selected_persona,
+                role="memory_interpretation",
+            ),
             input_text=input_text,
             recall_hint=recall_hint,
             decision=decision,
@@ -317,9 +323,14 @@ class MemoryConsolidator:
             state_snapshot = job["state_snapshot"]
             selected_model_preset = state_snapshot["model_presets"][state_snapshot["selected_model_preset_id"]]
             role_definition = selected_model_preset["roles"]["memory_correction_reconciliation"]
+            selected_persona = state_snapshot["personas"][state_snapshot["selected_persona_id"]]
             return self.correction.run(
                 llm=self.llm,
                 role_definition=role_definition,
+                persona_context=build_persona_context(
+                    selected_persona,
+                    role="memory_correction_reconciliation",
+                ),
                 context=correction_context,
                 finished_at=finished_at,
             )

@@ -18,10 +18,13 @@ class LLMMockMemoryMixin:
         decision: dict,
         speech_text: str | None,
         memory_context: dict[str, Any] | None = None,
+        *,
+        persona_context: Any,
     ) -> dict[str, Any]:
         # model確認
         self._assert_mock_model(role_definition)
         _ = memory_context
+        _ = persona_context
 
         # Episode要約
         normalized = input_text.strip()
@@ -65,7 +68,7 @@ class LLMMockMemoryMixin:
         counts = evidence_pack.get("evidence_counts", {})
         open_loop_count = counts.get("open_loops", 0) if isinstance(counts, dict) else 0
         summary_status = str(evidence_pack.get("summary_status_candidate") or "inferred")
-        persona = evidence_pack.get("persona")
+        persona = evidence_pack.get("persona_context")
         mood_state = evidence_pack.get("mood_state")
         affect_state = evidence_pack.get("affect_state")
         theme = self._mock_reflection_theme(
@@ -512,7 +515,11 @@ class LLMMockMemoryMixin:
     def _mock_reflection_persona_lead(self, persona: Any) -> str:
         if not isinstance(persona, dict):
             return ""
-        initiative_baseline = str(persona.get("initiative_baseline") or "").strip()
+        initiative_baseline_payload = persona.get("initiative_baseline")
+        if isinstance(initiative_baseline_payload, dict):
+            initiative_baseline = str(initiative_baseline_payload.get("level") or "").strip()
+        else:
+            initiative_baseline = str(initiative_baseline_payload or "").strip()
         if initiative_baseline == "low":
             return "無理を押しすぎず、"
         if initiative_baseline == "high":

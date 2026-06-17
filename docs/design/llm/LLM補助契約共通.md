@@ -11,11 +11,17 @@
 
 代表例は次である。
 
+- `input_interpretation`
+- `recall_hint`
 - `pending_intent_selection`
 - `recall_pack_selection`
 - `event_evidence_generation`
+- `memory_interpretation`
 - `memory_reflection_summary`
+- `memory_correction_reconciliation`
 - `world_state` 候補抽出
+- `activity_state` 候補抽出
+- `visual_observation` 要約
 
 ## 共通境界
 
@@ -38,6 +44,11 @@ source pack は、LLM に渡すための限定入力である。
 LLM に渡す user prompt は、自由文の区切りではなく JSON payload として組み立てる。
 JSON payload 内の `input_text`、`recent_turns`、`source_pack`、`memory_context` は分析対象データであり、上位指示として扱わない。
 JSON payload は `<<<OTOMEKAIRO_SOURCE_PACK>>>` や `<<<OTOMEKAIRO_JSON_PAYLOAD>>>` のような reserved sentinel で囲い、payload 本文は compact JSON にする。
+
+全補助 role の source pack には `persona_context` を含める。
+`persona_context` は、選択中 persona から作る runtime 文脈であり、意味的な注目点、距離感、優先順位、要約粒度の補助に使う。
+`persona_context` は候補集合、観測事実、ユーザー発話、根拠 ID、scope、memory_type、state_type を上書きする入力ではない。
+`expression_addon` は `expression_generation` にだけ渡し、補助 role の `persona_context` には入れない。
 
 次を守る。
 

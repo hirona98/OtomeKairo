@@ -153,6 +153,7 @@ class ReflectiveConsolidator(
                 active_units=active_units,
                 embedding_definition=embedding_definition,
                 reflection_summary_role=reflection_summary_role,
+                selected_persona=selected_persona,
                 scope_support_index=scope_support_index,
             )
             reflection_actions.extend(summary_actions)

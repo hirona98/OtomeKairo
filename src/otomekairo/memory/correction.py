@@ -8,6 +8,7 @@ from otomekairo.memory.utils import action_counts
 
 if TYPE_CHECKING:
     from otomekairo.llm.client import LLMClient
+    from otomekairo.llm.contexts import PersonaContext
     from otomekairo.store.file_store import FileStore
 
 
@@ -79,6 +80,7 @@ class MemoryCorrectionReconciler:
         *,
         llm: "LLMClient",
         role_definition: dict[str, Any],
+        persona_context: "PersonaContext",
         context: dict[str, Any] | None,
         finished_at: str,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -100,9 +102,11 @@ class MemoryCorrectionReconciler:
                 for target in targets
                 if isinstance(target, dict)
             ],
+            "persona_context": persona_context.to_prompt_payload(),
         }
         selection = llm.generate_memory_correction_reconciliation(
             role_definition=role_definition,
+            persona_context=persona_context,
             source_pack=source_pack,
         )
 

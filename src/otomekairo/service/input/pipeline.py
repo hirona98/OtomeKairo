@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from otomekairo.llm.contexts import CurrentInput, DecisionContext, InitiativeContext, SpeechContext
+from otomekairo.llm.contexts import (
+    CurrentInput,
+    DecisionContext,
+    InitiativeContext,
+    SpeechContext,
+    build_persona_context_summary,
+)
 from otomekairo.service.common import debug_log
 
 
@@ -66,6 +72,9 @@ class ServiceInputPipelineMixin:
         decision_role = selected_preset["roles"]["decision_generation"]
         speech_role = selected_preset["roles"]["expression_generation"]
         persona = state["personas"][state["selected_persona_id"]]
+        persona_context_summary = self._persona_context_trace_summary(
+            self._build_selected_persona_context(state=state, role="decision_generation")
+        )
 
         # 想起入力
         recall_inputs = self._build_pipeline_recall_inputs(
@@ -78,6 +87,7 @@ class ServiceInputPipelineMixin:
             visual_observation_context=visual_observation_context,
             activity_context=initial_activity_context,
             recall_role=recall_role,
+            persona_context=self._build_selected_persona_context(state=state, role="input_interpretation"),
             cycle_label=cycle_label,
         )
         recall_hint = recall_inputs["recall_hint"]
@@ -124,7 +134,7 @@ class ServiceInputPipelineMixin:
             recall_pack=recall_pack,
             visual_observation_context=visual_observation_context,
             decision_role=decision_role,
-            persona=persona,
+            persona_context=self._build_selected_persona_context(state=state, role="decision_generation"),
             cycle_label=cycle_label,
         )
 
@@ -145,7 +155,11 @@ class ServiceInputPipelineMixin:
             recall_pack=recall_pack,
             visual_observation_context=visual_observation_context,
             speech_role=speech_role,
-            persona=persona,
+            persona_context=self._build_selected_persona_context(
+                state=state,
+                role="expression_generation",
+                include_expression=True,
+            ),
             decision=decision,
             assistant_message_target_client_id=pipeline_assistant_message_target_client_id,
             cycle_label=cycle_label,
@@ -160,6 +174,7 @@ class ServiceInputPipelineMixin:
             "recall_pack": recall_pack,
             "answer_contract": answer_contract,
             "evidence_pack": evidence_pack,
+            "persona_context_summary": persona_context_summary,
             "time_context": pipeline_contexts["time_context"],
             "affect_context": pipeline_contexts["affect_context"],
             "drive_state_summary": pipeline_contexts["drive_state_summary"],
@@ -247,6 +262,7 @@ class ServiceInputPipelineMixin:
         visual_observation_context: dict[str, Any] | None,
         activity_context: dict[str, Any] | None,
         recall_role: dict[str, Any],
+        persona_context: Any,
         cycle_label: str,
     ) -> dict[str, Any]:
         # 入口解釈
@@ -254,6 +270,7 @@ class ServiceInputPipelineMixin:
         debug_log("Pipeline", f"{cycle_label} input_interpretation start recent_turns={len(recall_hint_recent_turns)}", level="DEBUG")
         input_interpretation = self.llm.generate_input_interpretation(
             role_definition=recall_role,
+            persona_context=persona_context,
             input_text=input_text,
             current_input=current_input,
             recent_turns=recall_hint_recent_turns,
@@ -364,6 +381,7 @@ class ServiceInputPipelineMixin:
             selected_candidate=selected_candidate,
             observation_summary=observation_summary,
             capability_request_summary=capability_request_summary,
+            persona_context=self._build_selected_persona_context(state=state, role="world_state"),
         )
         ongoing_action_summary = self._summarize_ongoing_action(
             self._current_ongoing_action(
@@ -403,10 +421,12 @@ class ServiceInputPipelineMixin:
             foreground_world_state=foreground_world_state,
             cycle_id=cycle_id,
             cycle_label=cycle_label,
+            persona_context=self._build_selected_persona_context(state=state, role="activity_state"),
         )
         initiative_context = self._build_initiative_context(
             state=state,
             persona=persona,
+            persona_context_summary=build_persona_context_summary(persona),
             current_time=started_at,
             time_context=time_context,
             recent_turns=recent_turns,
@@ -473,7 +493,7 @@ class ServiceInputPipelineMixin:
         recall_hint: dict[str, Any],
         recall_pack: dict[str, Any],
         decision_role: dict[str, Any],
-        persona: dict[str, Any],
+        persona_context: Any,
         cycle_label: str,
     ) -> dict[str, Any]:
         # decision生成
@@ -499,7 +519,7 @@ class ServiceInputPipelineMixin:
         )
         decision = self.llm.generate_decision(
             role_definition=decision_role,
-            persona=persona,
+            persona_context=persona_context,
             context=decision_context,
         )
         debug_log(
@@ -526,7 +546,7 @@ class ServiceInputPipelineMixin:
         recall_hint: dict[str, Any],
         recall_pack: dict[str, Any],
         speech_role: dict[str, Any],
-        persona: dict[str, Any],
+        persona_context: Any,
         decision: dict[str, Any],
         assistant_message_target_client_id: str | None,
         cycle_label: str,
@@ -651,7 +671,7 @@ class ServiceInputPipelineMixin:
             )
             speech_payload = self.llm.generate_speech(
                 role_definition=speech_role,
-                persona=persona,
+                persona_context=persona_context,
                 context=speech_context,
             )
             debug_log("Pipeline", f"{cycle_label} speech done speech_chars={len(speech_payload['speech_text'])}")

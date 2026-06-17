@@ -66,18 +66,21 @@ class ServiceInputVisualMixin:
         # role/source pack
         selected_preset = state["model_presets"][state["selected_model_preset_id"]]
         interpretation_role = selected_preset["roles"]["input_interpretation"]
+        persona_context = self._build_selected_persona_context(state=state, role="visual_observation")
         source_pack = self._build_visual_observation_source_pack(
             started_at=started_at,
             input_text=input_text,
             trigger_kind=trigger_kind,
             client_context=client_context,
             observation_summary=observation_summary,
+            persona_context=persona_context,
         )
 
         # 実行
         try:
             payload = self.llm.generate_visual_observation_summary(
                 role_definition=interpretation_role,
+                persona_context=persona_context,
                 source_pack=source_pack,
                 images=images,
             )
@@ -117,9 +120,11 @@ class ServiceInputVisualMixin:
         trigger_kind: str,
         client_context: dict[str, Any],
         observation_summary: dict[str, Any],
+        persona_context: Any,
     ) -> dict[str, Any]:
         return {
             "trigger_kind": trigger_kind,
+            "persona_context": persona_context.to_prompt_payload(),
             "image_input_kind": self._visual_observation_input_kind(
                 trigger_kind=trigger_kind,
                 observation_summary=observation_summary,

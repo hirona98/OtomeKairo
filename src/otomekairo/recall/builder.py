@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from otomekairo.llm.client import LLMClient
+from otomekairo.llm.contexts import build_persona_context
 from otomekairo.memory.utils import normalized_text_list
 from otomekairo.recall.association import (
     ACTIVE_COMMITMENT_STATES,
@@ -207,6 +208,10 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             candidate_sections=candidate_sections,
             conflicts=conflicts,
             role_definition=recall_pack_selection_role,
+            persona_context=build_persona_context(
+                state["personas"][state["selected_persona_id"]],
+                role="recall_pack_selection",
+            ),
         )
         sections = selection_result["sections"]
 
@@ -249,6 +254,10 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
             recall_hint=recall_hint,
             sections=sections,
             role_definition=event_evidence_role,
+            persona_context=build_persona_context(
+                state["personas"][state["selected_persona_id"]],
+                role="event_evidence_generation",
+            ),
         )
         event_evidence = event_evidence_result["event_evidence"]
         selected_event_ids = event_evidence_result["selected_event_ids"]

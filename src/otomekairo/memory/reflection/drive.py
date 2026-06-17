@@ -4,6 +4,7 @@ from collections import defaultdict
 from datetime import timedelta
 from typing import Any
 
+from otomekairo.llm.contexts import PersonaContext, build_persona_context
 from otomekairo.memory.reflection.constants import (
     ACTIVE_MEMORY_STATUSES,
     DRIVE_CANDIDATE_FRESHNESS_WEIGHTS,
@@ -58,6 +59,7 @@ class MemoryReflectionDriveMixin:
         scope_support_index: dict[tuple[str, str], dict[str, Any]],
         summary_update_index: dict[tuple[str, str], dict[str, Any]],
     ) -> dict[str, Any]:
+        persona_context = build_persona_context(selected_persona, role="drive_state")
         existing_drive_states = self.store.list_drive_states(
             memory_set_id=memory_set_id,
             current_time=finished_at,
@@ -74,7 +76,7 @@ class MemoryReflectionDriveMixin:
             memory_set_id=memory_set_id,
             finished_at=finished_at,
             source_units=source_units,
-            selected_persona=selected_persona,
+            persona_context=persona_context,
             mood_state=mood_state,
             affect_states=affect_states,
             scope_support_index=scope_support_index,
@@ -103,6 +105,7 @@ class MemoryReflectionDriveMixin:
             "active_drive_ids": [drive_state["drive_id"] for drive_state in drive_states],
             "removed_drive_ids": sorted(existing_ids - current_ids),
             "drive_summaries": self._drive_state_summaries(drive_states),
+            "persona_context_summary": persona_context.to_summary_payload(),
             "scope_supports": self._build_drive_scope_support_summaries(
                 drive_states=drive_states,
                 scope_support_index=scope_support_index,
@@ -116,7 +119,7 @@ class MemoryReflectionDriveMixin:
         memory_set_id: str,
         finished_at: str,
         source_units: list[dict[str, Any]],
-        selected_persona: dict[str, Any],
+        persona_context: PersonaContext,
         mood_state: dict[str, Any],
         affect_states: list[dict[str, Any]],
         scope_support_index: dict[tuple[str, str], dict[str, Any]],
@@ -144,7 +147,7 @@ class MemoryReflectionDriveMixin:
                 memory_set_id=memory_set_id,
                 finished_at=finished_at,
                 candidates=grouped_candidates[group_key],
-                selected_persona=selected_persona,
+                persona_context=persona_context,
                 mood_state=mood_state,
                 affect_states=affect_states,
                 scope_support_index=scope_support_index,
@@ -224,7 +227,7 @@ class MemoryReflectionDriveMixin:
         memory_set_id: str,
         finished_at: str,
         candidates: list[dict[str, Any]],
-        selected_persona: dict[str, Any],
+        persona_context: PersonaContext,
         mood_state: dict[str, Any],
         affect_states: list[dict[str, Any]],
         scope_support_index: dict[tuple[str, str], dict[str, Any]],
@@ -310,8 +313,12 @@ class MemoryReflectionDriveMixin:
         persona_alignment = round(
             self._drive_persona_alignment(
                 drive_kind=drive_kind,
-                selected_persona=selected_persona,
+                persona_context=persona_context,
                 scope_support_kinds=scope_support_kinds,
+                supporting_memory_types=supporting_memory_types,
+                support_count=support_count,
+                support_strength=support_strength,
+                scope_alignment=scope_alignment,
             ),
             3,
         )
@@ -606,14 +613,32 @@ class MemoryReflectionDriveMixin:
         self,
         *,
         drive_kind: str,
-        selected_persona: dict[str, Any],
+        persona_context: PersonaContext,
         scope_support_kinds: list[str],
+        supporting_memory_types: list[str],
+        support_count: int,
+        support_strength: float,
+        scope_alignment: float,
     ) -> float:
-        baseline = optional_text(selected_persona.get("initiative_baseline")) or "medium"
+        baseline_payload = persona_context.initiative_baseline
+        baseline = str(baseline_payload.get("level") or "medium").strip() if isinstance(baseline_payload, dict) else "medium"
         table = DRIVE_PERSONA_ALIGNMENT_BY_BASELINE.get(baseline, DRIVE_PERSONA_ALIGNMENT_BY_BASELINE["medium"])
         alignment = float(table.get(drive_kind, 0.5))
-        if "persona" in scope_support_kinds:
-            alignment += 0.06
+        if "persona_context" in scope_support_kinds:
+            alignment += 0.04
+        if "commitment" in supporting_memory_types and drive_kind in {"follow_through", "resume_when_ready"}:
+            alignment += 0.04
+        if "summary" in supporting_memory_types and drive_kind in {
+            "relationship_attunement",
+            "user_attention",
+            "self_regulation",
+            "topic_continuation",
+        }:
+            alignment += 0.02
+        alignment += (scope_alignment - 0.5) * 0.08
+        alignment += min(0.04, clamp_score(support_strength) * 0.04)
+        if support_count >= 2:
+            alignment += 0.02
         return clamp_score(alignment)
 
     def _drive_mixed_penalty(
