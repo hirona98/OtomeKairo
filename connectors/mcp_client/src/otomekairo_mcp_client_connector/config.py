@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
@@ -140,7 +141,7 @@ def _resolve_access_token(
     explicit_token = _secret_value(server, "access_token", "access_token_env", default_env="OTOMEKAIRO_ACCESS_TOKEN", environ=environ)
     if explicit_token:
         return explicit_token
-    local_token = _local_state_access_token(server=server, environ=environ, config_path=config_path)
+    local_token = _local_config_access_token(server=server, environ=environ, config_path=config_path)
     if local_token:
         return local_token
     bootstrap_token = _bootstrap_first_console_token(
@@ -150,38 +151,48 @@ def _resolve_access_token(
     )
     if bootstrap_token:
         return bootstrap_token
-    raise ConfigError("access_token could not be resolved from environment, local server state, or bootstrap.")
+    raise ConfigError("access_token could not be resolved from environment, local config.db, or bootstrap.")
 
 
-def _local_state_access_token(*, server: dict[str, Any], environ: Mapping[str, str], config_path: Path | None) -> str:
-    for state_path in _candidate_state_paths(server=server, environ=environ, config_path=config_path):
-        try:
-            with state_path.open("r", encoding="utf-8") as handle:
-                state = json.load(handle)
-        except (FileNotFoundError, json.JSONDecodeError, OSError):
-            continue
-        if isinstance(state, dict) and isinstance(state.get("console_access_token"), str):
-            token = state["console_access_token"].strip()
-            if token:
-                return token
+def _local_config_access_token(*, server: dict[str, Any], environ: Mapping[str, str], config_path: Path | None) -> str:
+    for db_path in _candidate_config_db_paths(server=server, environ=environ, config_path=config_path):
+        token = _read_config_db_access_token(db_path)
+        if token:
+            return token
     return ""
 
 
-def _candidate_state_paths(*, server: dict[str, Any], environ: Mapping[str, str], config_path: Path | None) -> list[Path]:
+def _candidate_config_db_paths(*, server: dict[str, Any], environ: Mapping[str, str], config_path: Path | None) -> list[Path]:
     paths: list[Path] = []
-    for key in ("state_path",):
+    for key in ("config_db_path",):
         value = server.get(key)
         if isinstance(value, str) and value.strip():
             paths.append(Path(value.strip()).expanduser())
     data_dir = server.get("data_dir")
     if isinstance(data_dir, str) and data_dir.strip():
-        paths.append(Path(data_dir.strip()).expanduser() / "server_state.json")
+        paths.append(Path(data_dir.strip()).expanduser() / "config.db")
     env_data_dir = environ.get("OTOMEKAIRO_DATA_DIR")
     if env_data_dir:
-        paths.append(Path(env_data_dir).expanduser() / "server_state.json")
+        paths.append(Path(env_data_dir).expanduser() / "config.db")
     if config_path is not None:
-        paths.append(config_path.resolve().parents[2] / ".local" / "server_state.json")
+        paths.append(config_path.resolve().parents[2] / ".local" / "config.db")
     return paths
+
+
+def _read_config_db_access_token(db_path: Path) -> str:
+    try:
+        with sqlite3.connect(db_path) as conn:
+            row = conn.execute(
+                """
+                SELECT console_access_token
+                FROM server_identity
+                WHERE id = 1
+                """
+            ).fetchone()
+    except sqlite3.Error:
+        return ""
+    token = row[0] if row is not None else None
+    return token.strip() if isinstance(token, str) and token.strip() else ""
 
 
 def _bootstrap_first_console_token(*, base_url: str, tls_verify: bool, request_timeout_seconds: float) -> str:

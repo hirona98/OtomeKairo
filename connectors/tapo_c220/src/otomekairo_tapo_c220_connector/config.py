@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
@@ -229,7 +230,7 @@ def _resolve_access_token(
     if explicit_token:
         return explicit_token
 
-    local_token = _local_state_access_token(
+    local_token = _local_config_access_token(
         server=server,
         environ=environ,
         config_path=config_path,
@@ -245,36 +246,36 @@ def _resolve_access_token(
     if bootstrap_token:
         return bootstrap_token
 
-    raise ConfigError("access_token could not be resolved from environment, local server state, or bootstrap.")
+    raise ConfigError("access_token could not be resolved from environment, local config.db, or bootstrap.")
 
 
-def _local_state_access_token(
+def _local_config_access_token(
     *,
     server: dict[str, Any],
     environ: Mapping[str, str],
     config_path: Path | None,
 ) -> str:
-    for state_path in _candidate_state_paths(
+    for db_path in _candidate_config_db_paths(
         server=server,
         environ=environ,
         config_path=config_path,
     ):
-        token = _read_state_access_token(state_path)
+        token = _read_config_db_access_token(db_path)
         if token:
             return token
     return ""
 
 
-def _candidate_state_paths(
+def _candidate_config_db_paths(
     *,
     server: dict[str, Any],
     environ: Mapping[str, str],
     config_path: Path | None,
 ) -> list[Path]:
     paths: list[Path] = []
-    explicit_state_path = server.get("state_path")
-    if isinstance(explicit_state_path, str) and explicit_state_path.strip():
-        paths.append(_resolve_config_relative_path(explicit_state_path.strip(), config_path))
+    explicit_config_db_path = server.get("config_db_path")
+    if isinstance(explicit_config_db_path, str) and explicit_config_db_path.strip():
+        paths.append(_resolve_config_relative_path(explicit_config_db_path.strip(), config_path))
 
     data_dirs: list[Path] = []
     env_data_dir = environ.get("OTOMEKAIRO_DATA_DIR")
@@ -294,16 +295,23 @@ def _candidate_state_paths(
     )
 
     for data_dir in data_dirs:
-        paths.append(data_dir / "server_state.json")
+        paths.append(data_dir / "config.db")
     return _deduplicate_paths(paths)
 
 
-def _read_state_access_token(state_path: Path) -> str:
+def _read_config_db_access_token(db_path: Path) -> str:
     try:
-        payload = json.loads(state_path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        with sqlite3.connect(db_path) as conn:
+            row = conn.execute(
+                """
+                SELECT console_access_token
+                FROM server_identity
+                WHERE id = 1
+                """
+            ).fetchone()
+    except sqlite3.Error:
         return ""
-    token = payload.get("console_access_token") if isinstance(payload, dict) else None
+    token = row[0] if row is not None else None
     return token.strip() if isinstance(token, str) and token.strip() else ""
 
 

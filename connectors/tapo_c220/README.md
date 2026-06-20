@@ -21,7 +21,7 @@ CocoroConsole では有効/無効、識別名、IP address または hostname、
 RTSP / ONVIF / PTZ の詳細値は connector 実装の既定値として扱う。
 
 connector のローカル設定には OtomeKairo への接続情報と `client_id` だけを置く。
-OtomeKairo access token は、明示設定、ローカル server state、bootstrap の順に connector が解決する。
+OtomeKairo access token は、明示設定、ローカル `config.db`、bootstrap の順に connector が解決する。
 
 ```bash
 cd connectors/tapo_c220
@@ -31,9 +31,9 @@ cp config.example.json config.local.json
 ```
 
 明示 token が必要な場合は、`OTOMEKAIRO_ACCESS_TOKEN` に現行 API の `console_access_token` を設定する。
-通常は同一 PC 内の `server_state.json` から `console_access_token` を読み取る。
+通常は同一 PC 内の `config.db` から `console_access_token` を読み取る。
 `console_access_token` が未発行の場合は bootstrap API で初回発行する。
-connector を repository 外から起動する場合は、`server.data_dir` または `server.state_path` で OtomeKairo の local state を指定する。
+connector を repository 外から起動する場合は、`server.data_dir` または `server.config_db_path` で OtomeKairo の config DB を指定する。
 C220 の camera account は OtomeKairo の `camera_source.connection` に保存する。
 connector は起動時に `GET /api/config/connectors/{client_id}/runtime-config` から runtime config を取得し、同じ camera account を ONVIF control と RTSP capture に使う。
 C220 の ONVIF port は connector 実装の既定値 `2020` とする。

@@ -55,6 +55,6 @@ connector を起動する。
 .venv/bin/python -m otomekairo_mcp_client_connector --config config.local.json
 ```
 
-OtomeKairo access token は、`OTOMEKAIRO_ACCESS_TOKEN`、ローカル `server_state.json`、bootstrap の順に解決する。
+OtomeKairo access token は、`OTOMEKAIRO_ACCESS_TOKEN`、ローカル `config.db`、bootstrap の順に解決する。
 MCP server 設定は `GET /api/config/connectors/{client_id}/runtime-config` から取得する。
 実 token と ELYTH API key を repository、sample、通常ログ、result に保存しない。
