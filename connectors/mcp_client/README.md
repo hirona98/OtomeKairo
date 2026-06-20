@@ -12,15 +12,35 @@ OtomeKairo server 本体へ MCP server 固有依存を入れない。
 
 ## ELYTH 設定例
 
-`config.example.json` は ELYTH の設定例を含む。
-`ELYTH_API_KEY` は環境変数で渡す。
+`config.example.json` は OtomeKairo への接続情報だけを含む。
+ELYTH の MCP server 定義は OtomeKairo 本体の設定 API に登録する。
 
 ```bash
 cd connectors/mcp_client
 python3 -m venv .venv
 .venv/bin/pip install -e .
 cp config.example.json config.local.json
-export ELYTH_API_KEY=...
+```
+
+ELYTH を登録する。
+
+```bash
+curl -k \
+  -H "Authorization: Bearer $OTOMEKAIRO_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -X PUT \
+  https://127.0.0.1:55601/api/config/mcp-servers/mcp_server%3Aelyth \
+  -d '{
+    "enabled": true,
+    "label": "ELYTH",
+    "command": "npx",
+    "args": ["-y", "elyth-mcp-server@latest"],
+    "cwd": null,
+    "env": {
+      "ELYTH_API_BASE": "https://elythworld.com",
+      "ELYTH_API_KEY": "..."
+    }
+  }'
 ```
 
 hello payload を確認する。
@@ -36,4 +56,5 @@ connector を起動する。
 ```
 
 OtomeKairo access token は、`OTOMEKAIRO_ACCESS_TOKEN`、ローカル `server_state.json`、bootstrap の順に解決する。
+MCP server 設定は `GET /api/config/connectors/{client_id}/runtime-config` から取得する。
 実 token と ELYTH API key を repository、sample、通常ログ、result に保存しない。

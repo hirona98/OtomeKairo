@@ -24,6 +24,9 @@ class JsonApiClient:
     def post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", path, payload)
 
+    def get(self, path: str) -> dict[str, Any]:
+        return self._request("GET", path, None)
+
     def _request(self, method: str, path: str, payload: dict[str, Any] | None) -> dict[str, Any]:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8") if payload is not None else None
         headers = {"Accept": "application/json", "Authorization": f"Bearer {self.access_token}"}

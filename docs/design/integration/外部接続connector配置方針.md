@@ -153,26 +153,28 @@ MCP client connector は、stdio MCP server を OtomeKairo の `mcp.call_tool` c
 ELYTH は MCP server 設定例の 1 つとして扱い、OtomeKairo server 本体へ ELYTH 固有コードを入れない。
 この repository 内の初期実装は `connectors/mcp_client/` に置く。
 
-MCP client connector は起動時に設定済み MCP server を `initialize` し、`tools/list` の結果を `hello.mcp_servers` へ載せる。
+MCP client connector は起動時に `GET /api/config/connectors/{client_id}/runtime-config` から設定済み MCP server を取得する。
+MCP client connector は取得した MCP server を `initialize` し、`tools/list` の結果を `hello.mcp_servers` へ載せる。
 server は `mcp_server_id / tool_name / inputSchema` を判断 view、inspection、dispatch 検証に使う。
 connector は `mcp.call_tool_request` を受けたときだけ MCP `tools/call` を実行し、`POST /api/capability/result` へ result を返す。
 
-ELYTH の接続は次の設定を基準にする。
+ELYTH の接続は `PUT /api/config/mcp-servers/mcp_server%3Aelyth` で次の設定を登録する。
 
 ```json
 {
-  "mcp_server_id": "mcp_server:elyth",
+  "enabled": true,
   "label": "ELYTH",
   "command": "npx",
   "args": ["-y", "elyth-mcp-server@latest"],
+  "cwd": null,
   "env": {
-    "ELYTH_API_BASE": "https://elythworld.com"
-  },
-  "env_passthrough": ["ELYTH_API_KEY"]
+    "ELYTH_API_BASE": "https://elythworld.com",
+    "ELYTH_API_KEY": "..."
+  }
 }
 ```
 
-`ELYTH_API_KEY` は環境変数で渡す。
+`ELYTH_API_KEY` は設定値として OtomeKairo 本体に保持する。
 MCP server の API key、token、command env、内部 URL の秘密部分を `hello`、result、inspection、通常ログへ入れない。
 MCP server の tool 名、description、input schema は capability manifest の正本ではなく、接続中 MCP server の tool catalog として扱う。
 
@@ -202,6 +204,7 @@ connector は次を担わない。
 
 connector のローカル設定は server URL、TLS 検証、再接続間隔、`client_id`、token 明示上書きなど、OtomeKairo へ接続するための項目に限定する。
 camera connector の host と camera account は OtomeKairo 本体の `camera_source` 設定定義で扱う。
+MCP client connector の command、args、cwd、env は OtomeKairo 本体の `mcp_server` 設定定義で扱う。
 `config.example.json` には秘密値を入れない。
 実 token、API key、password、内部 URL の秘密部分を repository に保存しない。
 

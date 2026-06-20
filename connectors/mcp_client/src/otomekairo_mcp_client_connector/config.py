@@ -5,7 +5,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from .http import HttpError, JsonApiClient
 
@@ -43,32 +43,50 @@ class AppConfig:
 def load_config(path: Path | None, *, environ: Mapping[str, str] | None = None) -> AppConfig:
     env = environ if environ is not None else os.environ
     raw = _read_json_config(path)
+    if "mcp_servers" in raw:
+        raise ConfigError("mcp_servers must be configured through OtomeKairo runtime-config API.")
     server = _object(raw.get("server", {}), "server")
     connector = _object(raw.get("connector", {}), "connector")
     base_url = _normalize_base_url(_string_value(server, "base_url", default=_env_value(env, "OTOMEKAIRO_SERVER_URL", "https://127.0.0.1:55601")))
     tls_verify = _bool_value(server, "tls_verify", default=False)
     timeout_seconds = _positive_float(server, "request_timeout_seconds", default=30.0)
-    return AppConfig(
-        server=ServerConfig(
+    server_config = ServerConfig(
+        base_url=base_url,
+        access_token=_resolve_access_token(
+            server=server,
+            environ=env,
+            config_path=path,
             base_url=base_url,
-            access_token=_resolve_access_token(
-                server=server,
-                environ=env,
-                config_path=path,
-                base_url=base_url,
-                tls_verify=tls_verify,
-                request_timeout_seconds=timeout_seconds,
-            ),
             tls_verify=tls_verify,
             request_timeout_seconds=timeout_seconds,
-            reconnect_delay_seconds=_positive_float(server, "reconnect_delay_seconds", default=5.0),
         ),
-        client_id=_string_value(connector, "client_id", default="mcp-client-connector-main"),
-        mcp_servers=_mcp_server_configs(raw.get("mcp_servers"), env),
+        tls_verify=tls_verify,
+        request_timeout_seconds=timeout_seconds,
+        reconnect_delay_seconds=_positive_float(server, "reconnect_delay_seconds", default=5.0),
+    )
+    client_id = _string_value(connector, "client_id", default="mcp-client-connector-main")
+    return AppConfig(
+        server=server_config,
+        client_id=client_id,
+        mcp_servers=_fetch_runtime_mcp_servers(server_config=server_config, client_id=client_id),
     )
 
 
-def _mcp_server_configs(value: Any, environ: Mapping[str, str]) -> list[McpServerConfig]:
+def _fetch_runtime_mcp_servers(*, server_config: ServerConfig, client_id: str) -> list[McpServerConfig]:
+    client = JsonApiClient(
+        base_url=server_config.base_url,
+        access_token=server_config.access_token,
+        tls_verify=server_config.tls_verify,
+        timeout_seconds=server_config.request_timeout_seconds,
+    )
+    try:
+        data = client.get(f"/api/config/connectors/{quote(client_id, safe='')}/runtime-config")
+    except HttpError as exc:
+        raise ConfigError(f"runtime config fetch failed: {exc}") from exc
+    return _mcp_server_configs(data.get("mcp_servers"))
+
+
+def _mcp_server_configs(value: Any) -> list[McpServerConfig]:
     if not isinstance(value, list) or not value:
         raise ConfigError("mcp_servers must be a non-empty array.")
     servers: list[McpServerConfig] = []
@@ -82,9 +100,6 @@ def _mcp_server_configs(value: Any, environ: Mapping[str, str]) -> list[McpServe
             raise ConfigError("mcp_servers contains duplicate mcp_server_id.")
         seen.add(server_id)
         env_values = _string_dict(server.get("env", {}), "mcp_servers[].env")
-        for env_name in _string_list(server.get("env_passthrough", []), "mcp_servers[].env_passthrough"):
-            if env_name in environ:
-                env_values[env_name] = environ[env_name]
         servers.append(
             McpServerConfig(
                 mcp_server_id=server_id,
