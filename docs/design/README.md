@@ -22,7 +22,6 @@ API wire、記憶詳細、LLM 補助契約、capability 境界を分け、同じ
 - HTTP / WebSocket の path、method、認証、request / response、error code は `api/` に置く
 - 記憶 subsystem の内部契約は `memory/` に置く
 - 感情モデルは [runtime/感情モデル.md](./runtime/感情モデル.md) を正とし、memory 文書はそこへリンクする
-- 現行実装の状態は `src/` と smoke 結果を正とする
 
 ## 目的別の読む順
 

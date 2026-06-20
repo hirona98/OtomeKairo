@@ -2,39 +2,8 @@
 
 ## 位置づけ
 
-この文書は `RecallPack` 候補選別の完成形を定める。
-実装状態は `src/` と smoke 結果を正とする。
+この文書は `RecallPack` 候補選別を定める。
 LLM 補助処理の共通境界、source pack、出力、failure、inspection の共通ルールは [../llm/LLM補助契約共通.md](../llm/LLM補助契約共通.md) を正とする。
-背景で述べる fixed priority / fixed boost は、導入前の比較対象として扱う。
-
-## 背景
-
-導入前の `RecallPack` は、候補収集までは `RecallHint` と deterministic な query / filter で絞り、
-最終採用は固定ロジックで決めている。
-
-導入前の実装では、少なくとも次がロジック主体だった。
-
-- `primary_recall_focus` ごとの fixed な section priority
-- `secondary_recall_focuses` による fixed な section boost
-- `association_query_weight()` による query 種別重み
-- `association_score()` による候補 score 補正
-- `conflicts.summary_text` の固定文
-
-この方式は、初期段階では次の点で有利だった。
-
-- 壊れにくい
-- trace と inspection で追いやすい
-- recall の責務境界を早く固めやすい
-
-一方で、このまま本命実装にすると次の問題が出る。
-
-- focus ごとの差が fixed priority に閉じ、文脈の細かな違いに追従しにくい
-- `secondary_recall_focuses` や `time_reference` の効き方が、固定 boost の足し算に潰れやすい
-- `association` 候補の意味的な良し悪しを、distance と手書き補正だけで扱い続けることになる
-- `conflicts.summary_text` が常に同じ文面になり、何が競合しているかが見えにくい
-- repo 全体の LLM 判断優先方針に対して、想起の中心選別だけがロジック寄りのまま残る
-
-そのため、`RecallPack` のうち **意味的な候補選別、section 配置、`conflicts` 文面** を LLM へ分離する。
 
 ## 採用方針
 
@@ -96,9 +65,9 @@ OtomeKairo では、`RecallPack` 全体を LLM 任せにはしない。
 ここで重要なのは、LLM が **候補の外側を増やさない** ことである。
 新しい候補、未知 section、未検出 conflict を作ってはいけない。
 
-## 追加する論理 role
+## 論理 role
 
-この機能では、モデルプリセットに `recall_pack_selection` という論理 role を追加する。
+モデルプリセットは `recall_pack_selection` という論理 role を持つ。
 
 この role の責務は次だけである。
 
@@ -216,7 +185,7 @@ LLM に渡すのは raw DB row 群ではなく、候補群を request-local ref 
 - section 名は canonical なものだけを使う
 - 各 candidate は `summary_text` と意味判断に効く最小の構造化項目に絞る
 - `retrieval_lane` は残し、`association` 候補が補助レーンであることは downstream にも保つ
-- 現行の `association_score` や query 種別は、source pack に残すが、本命判断値としては育てない
+- `association_score` や query 種別は、source pack に残すが、本命判断値としては育てない
 - `memory_link_summary` は label count と代表関係だけを持ち、永続 ID を含めない
 - `memory_link_summary` は `supports / contradicts / derived_from / about_same_scope / affects` の関係を選別補助として渡す
 - `conflicts` には compare key と variant の短い summary だけを入れ、memory unit の内部 ID は渡さない
@@ -366,4 +335,4 @@ inspection で追いやすくするため、`cycle_trace.recall_trace` に `reca
 - LLM は候補の外側を増やさない
 - `association` 候補は補助レーンのまま扱う
 - deterministic な件数制約は最後に必ずコード側で強制する
-- 失敗を旧ロジックでごまかさない
+- 失敗を fallback で隠さない

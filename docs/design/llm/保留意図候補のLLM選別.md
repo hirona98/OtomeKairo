@@ -3,7 +3,6 @@
 ## 位置づけ
 
 この文書は、保留意図候補の最終選別を定める。
-実装状態は `src/` と smoke 結果を正とする。
 LLM 補助処理の共通境界、source pack、出力、failure、inspection の共通ルールは [LLM補助契約共通.md](LLM補助契約共通.md) を正とする。
 
 ## 目的
@@ -71,9 +70,9 @@ LLM は候補の外側を増やさない。
 - 同じ `dedupe_key` の recent speech 抑制
 - `selected_candidate_ref=none` のときに `wake_noop` へ落とすこと
 
-## 追加する論理 role
+## 論理 role
 
-この機能では、モデルプリセットに `pending_intent_selection` という論理 role を追加する。
+モデルプリセットは `pending_intent_selection` という論理 role を持つ。
 
 この role の責務は次だけである。
 
@@ -217,7 +216,7 @@ inspection で追いやすくするため、`cycle_trace.input_trace` に `pendi
 `selected_candidate_id` は trace 上の内部確認用であり、LLM 入出力には使わない。
 
 `decision_trace.pending_intent_candidate_summary` と `result_trace.pending_intent_summary` は、新しい保留意図を queue へ作成 / 更新した結果を表す。
-今回追加する `pending_intent_selection` trace とは責務を混ぜない。
+`pending_intent_selection` trace は eligible 候補から判断へ戻す候補を選んだ結果を表す。
 
 監査 event として `pending_intent_selection_failure` を追加する。
 この event は `failure_stage` と `failure_reason` を持ち、cycle 単位で選別失敗を追えるようにする。

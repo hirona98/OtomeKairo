@@ -1,9 +1,8 @@
-# world_state source pack 拡張
+# world_state source pack
 
 ## 目的
 
-`world_state` 第一段では、視覚前景と current summary を同じ source pack に入れていた。
-この拡張では、`vision.capture` の視覚補助要約と、対人文脈、周囲環境、場所、外部サービス、身体、機器、予定の current summary を state-type 別 context として同じ source pack に入れ、LLM が `world_state` 候補を選びやすくする。
+`world_state` source pack は、`vision.capture` の視覚補助要約と、対人文脈、周囲環境、場所、外部サービス、身体、機器、予定の current summary を state-type 別 context として同じ source pack に入れ、LLM が `world_state` 候補を選びやすくする。
 `vision.capture` は `source_kind` に関係なく `visual_context` の候補にする。
 
 ここで扱う正本状態は **structured summary** である。
@@ -15,7 +14,7 @@ raw payload 保存、長い OCR、配送先 client の露出は入れない。
 
 ## 入力境界
 
-`world_state` source pack に追加する入力は次に限る。
+`world_state` source pack に入れる入力は次に限る。
 
 - `vision.capture` result から得た `visual_summary_text / visual_observation_id / image_interpreted / visual_confidence_hint / image_count / vision_source_id / source_kind / source_label`
 - `client_context.social_context_summary`
@@ -44,13 +43,13 @@ raw response body、client 固有 ID、資格情報、内部 URL、base64 本文
 
 ## source pack shape
 
-追加後の source pack 例:
+source pack 例:
 
 ```json
 {
-  "trigger_kind": "wake",
+  "trigger_kind": "background_wake",
   "current_input_summary": "定期起床。いま保留中の会話候補を再評価したい。",
-  "source_kind": "system_observation",
+  "source_kind": "client_context",
   "source_ref": "cycle:...",
   "time_context": "2026年4月25日 土曜日 9時00分（日本時間）",
   "client_context": {
@@ -181,7 +180,7 @@ real schedule source が複数あるときは、`schedule_context.schedule_slots
 
 ## やらないこと
 
-- 外部サービス capability の新設
+- 外部サービス capability の定義
 - 身体や機器の raw telemetry 保存
 - pending-intent queue 全件を source pack に載せること
 - `world_state` に capability manifest や binding を直接複写すること

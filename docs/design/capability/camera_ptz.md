@@ -3,7 +3,7 @@
 ## 目的
 
 `camera.ptz` は、OtomeKairo が所有する camera source の向きや画角を、外部 connector 経由で調整する action capability である。
-camera source は OtomeKairo の視覚であり、初期版からユーザー明示指示、API起床、定期起床、capability result follow-up、自律判断のいずれでも利用できる。
+camera source は OtomeKairo の視覚であり、ユーザー明示指示、API起床、定期起床、capability result follow-up、自律判断のいずれでも利用できる。
 この文書は `camera.ptz` の意味境界、判断利用、source metadata、結果の扱いを正本として定める。
 
 capability manifest、availability、decision view の共通規則は [capability_manifest.md](capability_manifest.md) を正とする。
@@ -42,15 +42,15 @@ desktop や virtual source の観測とは所有境界を分ける。
 
 OtomeKairo は現在の映像に対する相対方向と汎用操作だけを判断する。
 connector は現在の映像に対する相対方向を機器固有 API、座標符号、角度、速度、ズーム方式へ変換する。
-初期版の設置向きや機器差分は connector 実装の既定値で吸収する。
+設置向きや機器差分は connector 実装の既定値で吸収する。
 
-初期版から、server は `camera.ptz` を全ての判断起点の decision view に出す。
+server は `camera.ptz` を全ての判断起点の decision view に出す。
 対象 source が available で、権限、binding、`supported_controls`、`capability_state` を満たす限り、OtomeKairo はユーザー確認を挟まずに `camera.ptz` を使える。
 ここでの「自由に使える」は所有境界と判断権限の話であり、dispatch 境界の schema 検証、busy、timeout、同一 cycle の反復抑制は通常の capability と同じく適用する。
 
 ## 操作
 
-初期版の `camera.ptz` は次の operation を扱う。
+`camera.ptz` は次の operation を扱う。
 方向系 operation は、camera 本体や ONVIF 座標の方向ではなく、現在の映像内で次に視覚中心を移したい方向を表す。
 
 | operation | 意味 |
@@ -171,13 +171,13 @@ server は result を capability audit と inspection に反映する。
 
 C220 connector は、画像取得 backend と制御 backend を分ける。
 画像取得 backend は source 設定で固定し、実行中に別 backend へ切り替えない。
-C220 初期版では画像取得を `rtsp`、制御を `onvif` とする。
+C220 では画像取得を `rtsp`、制御を `onvif` とする。
 ONVIF port は connector 実装の既定値 `2020` とする。
 connector は `camera.ptz_request` の `operation / amount` を ONVIF `ContinuousMove` と `Stop` へ変換する。
 ONVIF へ渡す pan / tilt velocity は `1.0` に固定する。
 
 C220 の host と camera account は OtomeKairo の `camera_source` 設定定義で保持する。
-OtomeKairo access token は現行 API の `console_access_token` とする。
+OtomeKairo access token は API の `console_access_token` とする。
 connector は明示設定または環境変数の token を優先し、未設定の場合は同一 PC 内の `server_state.json` から `console_access_token` を読む。
 `console_access_token` が未発行の場合は bootstrap API で初回発行する。
 host、camera account、OtomeKairo access token を repository、docs のサンプル、debug log、inspection、capability result に保存しない。

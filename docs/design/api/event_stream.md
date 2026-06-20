@@ -152,6 +152,19 @@ server -> client の代表例:
 ```json
 {
   "event_id": 3,
+  "type": "schedule.status_request",
+  "data": {
+    "request_id": "schedule_status_request:...",
+    "capability_id": "schedule.status",
+    "range": "このあと",
+    "timeout_ms": 5000
+  }
+}
+```
+
+```json
+{
+  "event_id": 4,
   "type": "device.status_request",
   "data": {
     "request_id": "device_status_request:...",
@@ -164,7 +177,7 @@ server -> client の代表例:
 
 ```json
 {
-  "event_id": 4,
+  "event_id": 5,
   "type": "body.status_request",
   "data": {
     "request_id": "body_status_request:...",
@@ -177,7 +190,7 @@ server -> client の代表例:
 
 ```json
 {
-  "event_id": 5,
+  "event_id": 6,
   "type": "environment.status_request",
   "data": {
     "request_id": "environment_status_request:...",
@@ -190,7 +203,7 @@ server -> client の代表例:
 
 ```json
 {
-  "event_id": 6,
+  "event_id": 7,
   "type": "location.status_request",
   "data": {
     "request_id": "location_status_request:...",
@@ -203,7 +216,7 @@ server -> client の代表例:
 
 ```json
 {
-  "event_id": 7,
+  "event_id": 8,
   "type": "social.status_request",
   "data": {
     "request_id": "social_status_request:...",
@@ -216,7 +229,7 @@ server -> client の代表例:
 
 ```json
 {
-  "event_id": 8,
+  "event_id": 9,
   "type": "assistant_message",
   "data": {
     "cycle_id": "cycle:...",
@@ -231,7 +244,7 @@ server -> client の代表例:
 
 ```json
 {
-  "event_id": 9,
+  "event_id": 10,
   "type": "assistant_message",
   "data": {
     "cycle_id": "cycle:...",

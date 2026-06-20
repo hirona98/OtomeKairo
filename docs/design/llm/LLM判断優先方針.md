@@ -103,14 +103,9 @@ OtomeKairo では、次の分離を基本形にする。
 
 - LLM の自由文をそのまま state 遷移へ使う
 - validator を置かずに structured output を信じる
-- 失敗を旧ロジック fallback で隠す
+- 失敗を fallback で隠す
 - 失敗を silent に正常系へ丸める
 - 安全境界や実行権限を LLM に持たせる
-
-## 現状参照
-
-どの意味判断が現時点で実装済みか、どこまで入っているかは `src/` と smoke 結果を正とする。
-この文書では「何を LLM に寄せるべきか」という原則だけを扱い、実装済み項目の列挙は持たない。
 
 ## 個別設計との関係
 
@@ -126,4 +121,3 @@ OtomeKairo では、次の分離を基本形にする。
 - inspection と監査への露出
 
 `reflective consolidation` の summary 文面については [../memory/内省要約のLLM生成.md](../memory/内省要約のLLM生成.md) を正とする。
-実装状態は `src/` と smoke 結果を正とする。

@@ -99,7 +99,7 @@ LLM 補助処理は、失敗範囲を個別文書で固定する。
 
 - サイクル中核の選別が失敗した場合は、その cycle を `internal_failure` とする
 - event 単位、scope 単位、候補単位の補助生成が失敗した場合は、その単位だけを落として継続する
-- 旧ロジック fallback へ戻さない
+- fallback へ戻さない
 - silent に正常系へ丸めない
 - repair prompt を使う場合は、個別文書で回数と条件を固定する
 

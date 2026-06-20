@@ -39,7 +39,7 @@
 | `state_type` | `visual_context / environment / location / external_service / body / device / schedule / social_context` のいずれか |
 | `scope_type / scope_key` | 主にどの対象領域の世界状態か |
 | `summary_text` | 判断へ渡す短い要約 |
-| `source_kind` | `capability_result / user_input / client_context / system_observation` のいずれか |
+| `source_kind` | `capability_result / user_input / client_context` のいずれか |
 | `source_ref` | 根拠となる `event_id`、`request_id`、`cycle_id` など |
 | `confidence` | 状態解釈の確からしさ |
 | `salience` | 判断前景へ出す強さ |
@@ -67,6 +67,9 @@
 
 個別のハードウェア名やサービス名は `state_type` に入れない。
 具体的な取得元は `source_kind`、`source_ref`、capability result の payload 側で扱う。
+`current_input.source_kind` と `world_state.source_kind` は別の値体系である。
+会話入力の `current_input.source_kind=user_message` は `world_state.source_kind=user_input` に対応する。
+`wake / background_wake` の source pack 由来の状態は `world_state.source_kind=client_context` に対応する。
 
 ## 更新責務
 
@@ -95,7 +98,7 @@ LLM が返した自由文をそのまま正本状態へ入れない。
 ## LLM 更新契約
 
 `world_state` 更新に使う LLM 契約は、観測や実行結果から短期世界状態候補を抽出するための補助契約である。
-現行設計では専用のモデル role を増やさず、`model_preset.roles.input_interpretation` を使う。
+専用のモデル role を増やさず、`model_preset.roles.input_interpretation` を使う。
 
 LLM に渡す source pack は少なくとも次を持つ。
 
