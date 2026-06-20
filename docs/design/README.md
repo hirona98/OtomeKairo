@@ -18,6 +18,7 @@ API wire、記憶詳細、LLM 補助契約、capability 境界を分け、同じ
 
 ## 正本境界
 
+- 横断的な今後課題の入口は [今後の設計実装課題.md](./今後の設計実装課題.md) に置く
 - 意味境界、状態遷移、判断責務は `foundation/`、`runtime/`、`configuration/`、`llm/`、`capability/`、`integration/` に置く
 - HTTP / WebSocket の path、method、認証、request / response、error code は `api/` に置く
 - 記憶 subsystem の内部契約は `memory/` に置く
