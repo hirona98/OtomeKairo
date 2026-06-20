@@ -1,0 +1,11 @@
+{
+  "server": {
+    "base_url": "https://127.0.0.1:55601",
+    "tls_verify": false,
+    "request_timeout_seconds": 30,
+    "reconnect_delay_seconds": 5
+  },
+  "connector": {
+    "client_id": "mcp-client-connector-main"
+  }
+}

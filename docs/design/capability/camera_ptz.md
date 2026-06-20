@@ -178,7 +178,7 @@ ONVIF へ渡す pan / tilt velocity は `1.0` に固定する。
 
 C220 の host と camera account は OtomeKairo の `camera_source` 設定定義で保持する。
 OtomeKairo access token は API の `console_access_token` とする。
-connector は明示設定または環境変数の token を優先し、未設定の場合は同一 PC 内の `server_state.json` から `console_access_token` を読む。
+connector は明示設定または環境変数の token を優先し、未設定の場合は同一 PC 内の `config.db` から `console_access_token` を読む。
 `console_access_token` が未発行の場合は bootstrap API で初回発行する。
 host、camera account、OtomeKairo access token を repository、docs のサンプル、debug log、inspection、capability result に保存しない。
 

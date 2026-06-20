@@ -6,10 +6,10 @@ from pathlib import Path
 from typing import Any
 
 from otomekairo.memory.utils import now_iso
-from otomekairo.store.state import StateStore
 from otomekairo.store.affect import StoreAffectMixin
 from otomekairo.store.activity import StoreActivityMixin
 from otomekairo.store.clone import StoreCloneMixin
+from otomekairo.store.config import ConfigStore
 from otomekairo.store.cycle import StoreCycleMixin
 from otomekairo.store.entity_registry import StoreEntityRegistryMixin
 from otomekairo.store.memory_links import StoreMemoryLinksMixin
@@ -1446,18 +1446,18 @@ class FileStore:
     def __init__(self, root_dir: Path) -> None:
         # 依存関係
         self.root_dir = root_dir
-        self.state_store = StateStore(root_dir)
+        self.config_store = ConfigStore(root_dir)
         self.memory_store = SQLiteMemoryStore(root_dir)
-        self.state_path = self.state_store.state_path
+        self.config_db_path = self.config_store.config_db_path
         self.memory_db_path = self.memory_store.memory_db_path
 
     def read_state(self) -> dict:
         # 委譲
-        return self.state_store.read_state()
+        return self.config_store.read_state()
 
     def write_state(self, state: dict) -> None:
         # 委譲
-        self.state_store.write_state(state)
+        self.config_store.write_state(state)
 
     def __getattr__(self, name: str) -> Any:
         # 委譲

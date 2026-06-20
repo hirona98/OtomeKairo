@@ -119,6 +119,12 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
             if method == "GET" and parsed.path == "/api/config/camera-sources/editor-state":
                 self._write_success(HTTPStatus.OK, self.server.service.get_camera_sources_editor_state(token))
                 return
+            if method == "GET" and parsed.path == "/api/config/mcp-servers":
+                self._write_success(HTTPStatus.OK, self.server.service.list_mcp_servers(token))
+                return
+            if method == "GET" and parsed.path == "/api/config/mcp-servers/editor-state":
+                self._write_success(HTTPStatus.OK, self.server.service.get_mcp_servers_editor_state(token))
+                return
             if method == "GET" and parsed.path.startswith("/api/config/connectors/") and parsed.path.endswith("/runtime-config"):
                 path_parts = parsed.path.split("/")
                 if len(path_parts) != 6 or path_parts[5] != "runtime-config":
@@ -246,6 +252,13 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
                     self.server.service.replace_camera_sources_editor_state(token, payload),
                 )
                 return
+            if method == "PUT" and parsed.path == "/api/config/mcp-servers/editor-state":
+                payload = self._read_json_body()
+                self._write_success(
+                    HTTPStatus.OK,
+                    self.server.service.replace_mcp_servers_editor_state(token, payload),
+                )
+                return
             if method == "GET" and parsed.path.startswith("/api/config/camera-sources/"):
                 vision_source_id = unquote(parsed.path.rsplit("/", 1)[-1])
                 self._write_success(HTTPStatus.OK, self.server.service.get_camera_source(token, vision_source_id))
@@ -261,6 +274,22 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
             if method == "DELETE" and parsed.path.startswith("/api/config/camera-sources/"):
                 vision_source_id = unquote(parsed.path.rsplit("/", 1)[-1])
                 self._write_success(HTTPStatus.OK, self.server.service.delete_camera_source(token, vision_source_id))
+                return
+            if method == "GET" and parsed.path.startswith("/api/config/mcp-servers/"):
+                mcp_server_id = unquote(parsed.path.rsplit("/", 1)[-1])
+                self._write_success(HTTPStatus.OK, self.server.service.get_mcp_server(token, mcp_server_id))
+                return
+            if method == "PUT" and parsed.path.startswith("/api/config/mcp-servers/"):
+                mcp_server_id = unquote(parsed.path.rsplit("/", 1)[-1])
+                payload = self._read_json_body()
+                self._write_success(
+                    HTTPStatus.OK,
+                    self.server.service.replace_mcp_server(token, mcp_server_id, payload),
+                )
+                return
+            if method == "DELETE" and parsed.path.startswith("/api/config/mcp-servers/"):
+                mcp_server_id = unquote(parsed.path.rsplit("/", 1)[-1])
+                self._write_success(HTTPStatus.OK, self.server.service.delete_mcp_server(token, mcp_server_id))
                 return
             if method == "GET" and parsed.path.startswith("/api/config/personas/"):
                 persona_id = parsed.path.rsplit("/", 1)[-1]

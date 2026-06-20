@@ -200,6 +200,12 @@ class ServiceSpontaneousCapabilityContextMixin:
                 observation_summary=observation_summary,
                 capability_response=capability_response,
             )
+        elif hook_name == "mcp_call_tool":
+            client_context, observation_summary, input_text = self._prepare_mcp_call_tool_result_context(
+                client_context=client_context,
+                observation_summary=observation_summary,
+                capability_response=capability_response,
+            )
         return client_context, observation_summary, input_text
 
     def _prepare_camera_ptz_result_context(
@@ -395,6 +401,32 @@ class ServiceSpontaneousCapabilityContextMixin:
         )
         return enriched_client_context, enriched_observation_summary, input_text
 
+    def _prepare_mcp_call_tool_result_context(
+        self,
+        *,
+        client_context: dict[str, Any],
+        observation_summary: dict[str, Any],
+        capability_response: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any], str]:
+        enriched_client_context = dict(client_context)
+        for key in ("mcp_server_id", "tool_name", "status"):
+            value = self._client_context_text(capability_response.get(key), limit=120)
+            if value is not None:
+                enriched_client_context[key] = value
+        summary = self._mcp_result_summary(capability_response)
+        if summary is not None:
+            enriched_client_context["mcp_result_summary"] = summary
+        enriched_observation_summary = dict(observation_summary)
+        for key in ("mcp_server_id", "tool_name", "status", "mcp_result_summary"):
+            value = enriched_client_context.get(key)
+            if isinstance(value, str) and value.strip():
+                enriched_observation_summary[key] = value.strip()
+        input_text = self._build_capability_result_input_text(
+            client_context=enriched_client_context,
+            capability_response=capability_response,
+        )
+        return enriched_client_context, enriched_observation_summary, input_text
+
     def _capability_result_followup_hint_summary(
         self,
         *,
@@ -480,6 +512,14 @@ class ServiceSpontaneousCapabilityContextMixin:
                 social_context_summary = observation_summary.get("social_context_summary")
             if isinstance(social_context_summary, str) and social_context_summary.strip():
                 return f"対人文脈: {social_context_summary.strip()}"
+            return None
+        if hook_name == "mcp_call_tool":
+            if not isinstance(observation_summary, dict):
+                return None
+            tool_name = observation_summary.get("tool_name")
+            summary = observation_summary.get("mcp_result_summary")
+            if isinstance(tool_name, str) and isinstance(summary, str) and summary.strip():
+                return f"MCP tool {tool_name.strip()} の結果: {summary.strip()}"
             return None
         return None
 
@@ -581,11 +621,51 @@ class ServiceSpontaneousCapabilityContextMixin:
                 parts.append(f"対人文脈要約は {social_context_summary}")
             else:
                 parts.append("対人文脈確認の結果を踏まえて返答や次の行動を決めたい。")
+        elif capability_id == "mcp.call_tool":
+            mcp_server_id = self._client_context_text(capability_response.get("mcp_server_id"), limit=80)
+            tool_name = self._client_context_text(capability_response.get("tool_name"), limit=120)
+            mcp_status = self._client_context_text(capability_response.get("status"), limit=32)
+            summary = self._client_context_text(client_context.get("mcp_result_summary"), limit=300)
+            if mcp_server_id is not None and tool_name is not None:
+                parts.append(f"MCP tool は {mcp_server_id}/{tool_name}。")
+            if mcp_status is not None:
+                parts.append(f"MCP 実行 status は {mcp_status}。")
+            if summary is not None:
+                parts.append(f"MCP 結果要約は {summary}")
+            else:
+                parts.append("MCP tool の結果を踏まえて返答や次の行動を決めたい。")
         elif capability_id == "vision.capture" and image_count is not None and image_count <= 0:
             parts.append("観測結果は空だった。")
         else:
             parts.append("受け取った結果を踏まえて返答や次の行動を決めたい。")
         return " ".join(parts)
+
+    def _mcp_result_summary(self, capability_response: dict[str, Any]) -> str | None:
+        client_context = capability_response.get("client_context")
+        if isinstance(client_context, dict):
+            value = self._client_context_text(client_context.get("mcp_result_summary"), limit=300)
+            if value is not None:
+                return value
+        error = capability_response.get("error")
+        if isinstance(error, str) and error.strip():
+            return f"error={error.strip()}"
+        content = capability_response.get("content")
+        if not isinstance(content, list):
+            return None
+        text_parts: list[str] = []
+        for item in content:
+            if not isinstance(item, dict):
+                continue
+            if item.get("type") != "text":
+                continue
+            text = item.get("text")
+            if isinstance(text, str) and text.strip():
+                text_parts.append(text.strip())
+        if text_parts:
+            return " ".join(text_parts)
+        if content:
+            return f"{len(content)} 件の MCP content を受け取った。"
+        return None
 
     def _capability_result_active_step_summary(self, *, capability_id: str, result_payload: dict[str, Any]) -> str:
         error = result_payload.get("error")

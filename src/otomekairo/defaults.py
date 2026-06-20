@@ -82,6 +82,7 @@ def build_default_state() -> dict:
             DEFAULT_MODEL_PRESET_ID: build_default_model_preset(),
         },
         "camera_sources": {},
+        "mcp_servers": {},
     }
 
 

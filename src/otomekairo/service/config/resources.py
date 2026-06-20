@@ -5,6 +5,12 @@ from copy import deepcopy
 from typing import Any
 
 from otomekairo.service.common import ServiceError
+from otomekairo.service.config.constants import (
+    MCP_CONNECTOR_KINDS,
+    MCP_DEFAULT_CLIENT_ID,
+    MCP_DEFAULT_CONNECTOR_KIND,
+    MCP_TRANSPORTS,
+)
 
 
 class ServiceConfigResourcesMixin:
@@ -409,6 +415,89 @@ class ServiceConfigResourcesMixin:
         self._append_camera_sources_editor_state_audit_event(state=state, operation="write")
         return self._build_camera_sources_editor_state(state)
 
+    def list_mcp_servers(self, token: str | None) -> dict[str, Any]:
+        # 認可
+        state = self._require_token(token)
+        mcp_servers = self._mcp_servers_from_state(state)
+        return {
+            "mcp_servers": [
+                self._public_mcp_server(mcp_server)
+                for mcp_server in sorted(
+                    mcp_servers.values(),
+                    key=lambda item: str(item.get("mcp_server_id") or ""),
+                )
+            ],
+        }
+
+    def get_mcp_server(self, token: str | None, mcp_server_id: str) -> dict[str, Any]:
+        # 認可
+        state = self._require_token(token)
+        mcp_server = self._mcp_servers_from_state(state).get(mcp_server_id)
+        if mcp_server is None:
+            raise ServiceError(404, "mcp_server_not_found", "The requested mcp_server_id does not exist.")
+        return {
+            "mcp_server": self._public_mcp_server(mcp_server),
+        }
+
+    def replace_mcp_server(
+        self,
+        token: str | None,
+        mcp_server_id: str,
+        definition: dict[str, Any],
+    ) -> dict[str, Any]:
+        # 認可
+        state = self._require_token(token)
+        mcp_servers = self._mcp_servers_from_state(state)
+
+        # 正規化と検証
+        stored_definition = self._normalize_mcp_server_definition(mcp_server_id, definition)
+        self._validate_mcp_server_definition(mcp_server_id, stored_definition)
+
+        # 永続化
+        mcp_servers[mcp_server_id] = deepcopy(stored_definition)
+        self.store.write_state(state)
+        return {
+            "mcp_server": self._public_mcp_server(stored_definition),
+        }
+
+    def delete_mcp_server(self, token: str | None, mcp_server_id: str) -> dict[str, Any]:
+        # 認可
+        state = self._require_token(token)
+        mcp_servers = self._mcp_servers_from_state(state)
+        if mcp_server_id not in mcp_servers:
+            raise ServiceError(404, "mcp_server_not_found", "The requested mcp_server_id does not exist.")
+
+        # 削除
+        mcp_servers.pop(mcp_server_id, None)
+        self.store.write_state(state)
+        return {
+            "deleted_mcp_server_id": mcp_server_id,
+        }
+
+    def get_mcp_servers_editor_state(self, token: str | None) -> dict[str, Any]:
+        # 認可
+        state = self._require_token(token)
+        self._append_mcp_servers_editor_state_audit_event(state=state, operation="read")
+        return self._build_mcp_servers_editor_state(state)
+
+    def replace_mcp_servers_editor_state(self, token: str | None, definition: dict[str, Any]) -> dict[str, Any]:
+        # 認可
+        state = self._require_token(token)
+
+        # 入力
+        mcp_servers = self._mcp_server_entries_by_id(definition.get("mcp_servers"))
+        normalized_servers: dict[str, dict[str, Any]] = {}
+        for mcp_server_id, mcp_server in mcp_servers.items():
+            stored_definition = self._normalize_mcp_server_definition(mcp_server_id, mcp_server)
+            self._validate_mcp_server_definition(mcp_server_id, stored_definition)
+            normalized_servers[mcp_server_id] = stored_definition
+
+        # 永続化
+        state["mcp_servers"] = normalized_servers
+        self.store.write_state(state)
+        self._append_mcp_servers_editor_state_audit_event(state=state, operation="write")
+        return self._build_mcp_servers_editor_state(state)
+
     def get_connector_runtime_config(self, token: str | None, client_id: str) -> dict[str, Any]:
         # 認可
         state = self._require_token(token)
@@ -420,7 +509,12 @@ class ServiceConfigResourcesMixin:
             for camera_source in self._camera_sources_from_state(state).values()
             if camera_source.get("client_id") == normalized_client_id and camera_source.get("enabled") is True
         ]
-        if not camera_sources:
+        mcp_servers = [
+            deepcopy(mcp_server)
+            for mcp_server in self._mcp_servers_from_state(state).values()
+            if mcp_server.get("client_id") == normalized_client_id and mcp_server.get("enabled") is True
+        ]
+        if not camera_sources and not mcp_servers:
             raise ServiceError(
                 404,
                 "connector_runtime_config_not_found",
@@ -430,12 +524,17 @@ class ServiceConfigResourcesMixin:
             state=state,
             client_id=normalized_client_id,
             camera_source_count=len(camera_sources),
+            mcp_server_count=len(mcp_servers),
         )
         return {
             "client_id": normalized_client_id,
             "camera_sources": sorted(
                 camera_sources,
                 key=lambda item: str(item.get("vision_source_id") or ""),
+            ),
+            "mcp_servers": sorted(
+                mcp_servers,
+                key=lambda item: str(item.get("mcp_server_id") or ""),
             ),
         }
 
@@ -558,6 +657,18 @@ class ServiceConfigResourcesMixin:
                 for value in sorted(
                     camera_sources.values(),
                     key=lambda item: str(item.get("vision_source_id") or ""),
+                )
+            ],
+        }
+
+    def _build_mcp_servers_editor_state(self, state: dict[str, Any]) -> dict[str, Any]:
+        mcp_servers = self._mcp_servers_from_state(state)
+        return {
+            "mcp_servers": [
+                deepcopy(value)
+                for value in sorted(
+                    mcp_servers.values(),
+                    key=lambda item: str(item.get("mcp_server_id") or ""),
                 )
             ],
         }
@@ -743,6 +854,29 @@ class ServiceConfigResourcesMixin:
             index += 1
         return f"{base_id}_{index}"
 
+    def _mcp_server_entries_by_id(self, entries: Any) -> dict[str, dict[str, Any]]:
+        if not isinstance(entries, list):
+            raise ServiceError(400, "invalid_mcp_servers", "mcp_servers must be an array.")
+
+        result: dict[str, dict[str, Any]] = {}
+        for entry in entries:
+            if not isinstance(entry, dict):
+                raise ServiceError(400, "invalid_mcp_server", "Each mcp_server entry must be an object.")
+            mcp_server_id = entry.get("mcp_server_id")
+            if not isinstance(mcp_server_id, str) or not mcp_server_id.strip():
+                raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.mcp_server_id must be a non-empty string.")
+            normalized = mcp_server_id.strip()
+            if not normalized.startswith("mcp_server:"):
+                raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.mcp_server_id must start with mcp_server:.")
+            if normalized in result:
+                raise ServiceError(
+                    400,
+                    "duplicate_mcp_server_id",
+                    f"{normalized} is duplicated in mcp_servers.",
+                )
+            result[normalized] = entry
+        return result
+
     def _append_editor_state_audit_event(self, *, state: dict[str, Any], operation: str) -> None:
         # 秘密値を含む editor-state 本文は audit に残さない。
         self.store.append_events(
@@ -783,12 +917,32 @@ class ServiceConfigResourcesMixin:
             ]
         )
 
+    def _append_mcp_servers_editor_state_audit_event(self, *, state: dict[str, Any], operation: str) -> None:
+        # 秘密値を含む MCP server editor-state 本文は audit に残さない。
+        self.store.append_events(
+            events=[
+                {
+                    "event_id": f"event:config_audit:{uuid.uuid4().hex}",
+                    "cycle_id": "config:mcp-servers-editor-state",
+                    "memory_set_id": state["selected_memory_set_id"],
+                    "kind": f"mcp_servers_editor_state_{operation}",
+                    "role": "system",
+                    "created_at": self._now_iso(),
+                    "selected_persona_id": state["selected_persona_id"],
+                    "selected_memory_set_id": state["selected_memory_set_id"],
+                    "selected_model_preset_id": state["selected_model_preset_id"],
+                    "mcp_server_count": len(self._mcp_servers_from_state(state)),
+                }
+            ]
+        )
+
     def _append_connector_runtime_config_audit_event(
         self,
         *,
         state: dict[str, Any],
         client_id: str,
         camera_source_count: int,
+        mcp_server_count: int,
     ) -> None:
         # 秘密値を含む runtime config 本文は audit に残さない。
         self.store.append_events(
@@ -805,6 +959,7 @@ class ServiceConfigResourcesMixin:
                     "selected_model_preset_id": state["selected_model_preset_id"],
                     "client_id": client_id,
                     "camera_source_count": camera_source_count,
+                    "mcp_server_count": mcp_server_count,
                 }
             ]
         )
@@ -861,6 +1016,13 @@ class ServiceConfigResourcesMixin:
             return state["camera_sources"]
         return camera_sources
 
+    def _mcp_servers_from_state(self, state: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        mcp_servers = state.get("mcp_servers")
+        if not isinstance(mcp_servers, dict):
+            state["mcp_servers"] = {}
+            return state["mcp_servers"]
+        return mcp_servers
+
     def _camera_source_is_enabled(self, vision_source_id: str) -> bool:
         state = self.store.read_state()
         camera_sources = state.get("camera_sources")
@@ -879,6 +1041,102 @@ class ServiceConfigResourcesMixin:
                 "camera_password_present": bool(connection.get("camera_password")),
             }
         return public_definition
+
+    def _public_mcp_server(self, definition: dict[str, Any]) -> dict[str, Any]:
+        public_definition = deepcopy(definition)
+        env = public_definition.get("env")
+        if isinstance(env, dict):
+            public_definition["env"] = {
+                key: {"value_present": bool(value)}
+                for key, value in sorted(env.items())
+            }
+        return public_definition
+
+    def _normalize_mcp_server_definition(self, mcp_server_id: str, definition: dict[str, Any]) -> dict[str, Any]:
+        normalized = {
+            "mcp_server_id": definition.get("mcp_server_id", mcp_server_id),
+            "connector_kind": definition.get("connector_kind", MCP_DEFAULT_CONNECTOR_KIND),
+            "client_id": definition.get("client_id", MCP_DEFAULT_CLIENT_ID),
+            "enabled": definition.get("enabled"),
+            "transport": definition.get("transport", "stdio"),
+            "command": definition.get("command"),
+            "args": definition.get("args", []),
+            "cwd": definition.get("cwd"),
+            "env": definition.get("env", {}),
+        }
+        for field_name in ("mcp_server_id", "connector_kind", "client_id", "transport", "command", "cwd"):
+            value = normalized.get(field_name)
+            if isinstance(value, str):
+                normalized[field_name] = value.strip()
+        args = normalized.get("args")
+        if isinstance(args, list):
+            normalized["args"] = [item.strip() if isinstance(item, str) else item for item in args]
+        env = normalized.get("env")
+        if isinstance(env, dict):
+            normalized["env"] = {
+                key.strip() if isinstance(key, str) else key: value
+                for key, value in env.items()
+            }
+        return normalized
+
+    def _validate_mcp_server_definition(self, mcp_server_id: str, definition: dict[str, Any]) -> None:
+        if not isinstance(definition, dict):
+            raise ServiceError(400, "invalid_mcp_server", "mcp_server must be an object.")
+        if definition.get("mcp_server_id") != mcp_server_id:
+            raise ServiceError(400, "mcp_server_id_mismatch", "mcp_server_id must match the path.")
+        if not isinstance(mcp_server_id, str) or not mcp_server_id.startswith("mcp_server:"):
+            raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.mcp_server_id must start with mcp_server:.")
+        supported_fields = {
+            "mcp_server_id",
+            "connector_kind",
+            "client_id",
+            "enabled",
+            "transport",
+            "command",
+            "args",
+            "cwd",
+            "env",
+        }
+        unsupported_fields = sorted(set(definition.keys()) - supported_fields)
+        if unsupported_fields:
+            raise ServiceError(
+                400,
+                "unsupported_mcp_server_field",
+                f"mcp_server has unsupported fields: {', '.join(unsupported_fields)}.",
+            )
+        connector_kind = definition.get("connector_kind")
+        if connector_kind not in MCP_CONNECTOR_KINDS:
+            raise ServiceError(400, "unsupported_mcp_connector_kind", "mcp_server.connector_kind is not supported.")
+        self._validate_mcp_required_text_field(definition, "client_id", "mcp_server.client_id")
+        enabled = definition.get("enabled")
+        if not isinstance(enabled, bool):
+            raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.enabled must be a boolean.")
+        transport = definition.get("transport")
+        if transport not in MCP_TRANSPORTS:
+            raise ServiceError(400, "unsupported_mcp_transport", "mcp_server.transport is not supported.")
+        self._validate_mcp_required_text_field(definition, "command", "mcp_server.command")
+        args = definition.get("args")
+        if not isinstance(args, list):
+            raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.args must be an array.")
+        for item in args:
+            if not isinstance(item, str) or not item.strip():
+                raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.args must contain non-empty strings.")
+        cwd = definition.get("cwd")
+        if cwd is not None and (not isinstance(cwd, str) or not cwd.strip()):
+            raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.cwd must be a non-empty string or null.")
+        env = definition.get("env")
+        if not isinstance(env, dict):
+            raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.env must be an object.")
+        for key, value in env.items():
+            if not isinstance(key, str) or not key.strip():
+                raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.env keys must be non-empty strings.")
+            if not isinstance(value, str):
+                raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.env values must be strings.")
+
+    def _validate_mcp_required_text_field(self, definition: dict[str, Any], key: str, label: str) -> None:
+        value = definition.get(key)
+        if not isinstance(value, str) or not value.strip():
+            raise ServiceError(400, "invalid_mcp_server_field", f"{label} must be a non-empty string.")
 
     def _delete_resource(
         self,

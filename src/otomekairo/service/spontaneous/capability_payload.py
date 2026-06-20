@@ -61,6 +61,8 @@ class ServiceSpontaneousCapabilityPayloadMixin:
                 "client_context": client_context or {},
                 "error": error.strip() if isinstance(error, str) and error.strip() else None,
             }
+        if capability_id == "mcp.call_tool":
+            return self._normalize_mcp_call_tool_result_payload(result_payload=result_payload)
         spec = SIMPLE_CAPABILITY_RESULT_PAYLOAD_SPECS.get(capability_id)
         if spec is not None:
             return self._normalize_simple_capability_result_payload(
@@ -115,6 +117,45 @@ class ServiceSpontaneousCapabilityPayloadMixin:
         if "error" in payload:
             payload["error"] = error.strip() if isinstance(error, str) and error.strip() else None
         return payload
+
+    def _normalize_mcp_call_tool_result_payload(self, *, result_payload: dict[str, Any]) -> dict[str, Any]:
+        status = result_payload.get("status")
+        mcp_server_id = result_payload.get("mcp_server_id")
+        tool_name = result_payload.get("tool_name")
+        is_error = result_payload.get("is_error")
+        content = result_payload.get("content")
+        structured_content = result_payload.get("structured_content")
+        client_context = result_payload.get("client_context")
+        error = result_payload.get("error")
+        if status not in {"completed", "failed"}:
+            raise ServiceError(400, "invalid_capability_result", "mcp.call_tool result.status is invalid.")
+        if not isinstance(mcp_server_id, str) or not mcp_server_id.strip():
+            raise ServiceError(400, "invalid_capability_result", "mcp.call_tool result.mcp_server_id must be a non-empty string.")
+        if not isinstance(tool_name, str) or not tool_name.strip():
+            raise ServiceError(400, "invalid_capability_result", "mcp.call_tool result.tool_name must be a non-empty string.")
+        if not isinstance(is_error, bool):
+            raise ServiceError(400, "invalid_capability_result", "mcp.call_tool result.is_error must be a boolean.")
+        if not isinstance(content, list):
+            raise ServiceError(400, "invalid_capability_result", "mcp.call_tool result.content must be an array.")
+        if structured_content is not None and not isinstance(structured_content, dict):
+            raise ServiceError(400, "invalid_capability_result", "mcp.call_tool result.structured_content must be an object or null.")
+        if client_context is not None and not isinstance(client_context, dict):
+            raise ServiceError(400, "invalid_capability_result", "mcp.call_tool result.client_context must be an object.")
+        if error is not None and not isinstance(error, str):
+            raise ServiceError(400, "invalid_capability_result", "mcp.call_tool result.error must be a string or null.")
+        normalized_client_context = dict(client_context or {})
+        normalized_client_context["mcp_content_item_count"] = len(content)
+        normalized_client_context["mcp_structured_content_present"] = structured_content is not None
+        return {
+            "status": status,
+            "mcp_server_id": mcp_server_id.strip(),
+            "tool_name": tool_name.strip(),
+            "is_error": is_error,
+            "content": [],
+            "structured_content": None,
+            "client_context": normalized_client_context,
+            "error": error.strip() if isinstance(error, str) and error.strip() else None,
+        }
 
     def _normalize_simple_capability_result_payload(
         self,
@@ -214,6 +255,14 @@ class ServiceSpontaneousCapabilityPayloadMixin:
             operation = result_payload.get("operation")
             amount = result_payload.get("amount")
             return f"status={status} operation={operation} amount={amount} error={bool(result_payload.get('error'))}"
+        if capability_id == "mcp.call_tool":
+            content = result_payload.get("content")
+            content_count = len(content) if isinstance(content, list) else 0
+            return (
+                f"server={result_payload.get('mcp_server_id')} tool={result_payload.get('tool_name')} "
+                f"status={result_payload.get('status')} content_items={content_count} "
+                f"error={bool(result_payload.get('error') or result_payload.get('is_error'))}"
+            )
         spec = SIMPLE_CAPABILITY_RESULT_PAYLOAD_SPECS.get(capability_id)
         if spec is not None:
             summary_text = result_payload.get(spec.summary_field)
