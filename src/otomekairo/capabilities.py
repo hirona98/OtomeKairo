@@ -740,6 +740,82 @@ CAPABILITY_MANIFESTS: dict[str, dict[str, Any]] = {
             "error",
         ],
     },
+    "mcp.call_tool": {
+        "id": "mcp.call_tool",
+        "version": "1",
+        "kind": "external_service",
+        "decision_description": "接続中の MCP server が公開する tool を呼び出す",
+        "when_to_use": [
+            "判断に MCP tool 経由の外部情報取得や外部サービス操作が必要",
+            "MCP tool catalog に目的へ合う tool が available として載っている",
+        ],
+        "do_not_use_when": [
+            "目的に合う MCP tool が tool catalog に存在しない",
+            "tool の入力 schema を満たす arguments を組み立てられない",
+            "MCP tool を使わず既存の専用 capability で足りる",
+        ],
+        "required_permissions": ["use_mcp_tools"],
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "mcp_server_id": {"type": "string"},
+                "tool_name": {"type": "string"},
+                "arguments": {"type": "object"},
+            },
+            "required": ["mcp_server_id", "tool_name", "arguments"],
+            "additionalProperties": False,
+        },
+        "result_schema": {
+            "type": "object",
+            "properties": {
+                "status": {"type": "string", "enum": ["completed", "failed"]},
+                "mcp_server_id": {"type": "string"},
+                "tool_name": {"type": "string"},
+                "is_error": {"type": "boolean"},
+                "content": {"type": "array"},
+                "structured_content": {"type": ["object", "null"]},
+                "client_context": {"type": ["object", "null"]},
+                "error": {"type": ["string", "null"]},
+            },
+            "required": ["status", "mcp_server_id", "tool_name", "is_error", "content"],
+            "additionalProperties": False,
+        },
+        "side_effects": {
+            "external_world": True,
+            "user_visible": True,
+            "stores_raw_payload": False,
+        },
+        "timeout_ms": 30000,
+        "risk_level": "high",
+        "memory_policy": {
+            "record_result_event": True,
+            "allow_memory_update": True,
+        },
+        "state_policy": {
+            "creates_ongoing_action": True,
+            "blocks_parallel_capability": True,
+            "result_context_hook": "mcp_call_tool",
+            "followup_hint_hook": "mcp_call_tool",
+            "unavailable_seconds_on_dispatch_failure": 30,
+            "unavailable_seconds_on_timeout": 30,
+        },
+        "decision_readiness": {
+            "family": "mcp_tool",
+            "world_state_type": "external_service",
+            "input_keys": ["mcp_server_id", "tool_name", "arguments"],
+            "result_summary_keys": ["mcp_result_summary"],
+        },
+        "inspection_fields": [
+            "capability_id",
+            "target_client_id",
+            "mcp_server_id",
+            "tool_name",
+            "status",
+            "is_error",
+            "mcp_result_summary",
+            "error",
+        ],
+    },
 }
 
 

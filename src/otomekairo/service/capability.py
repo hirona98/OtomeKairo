@@ -145,6 +145,8 @@ class ServiceCapabilityMixin:
             raise
         target_client_id = target["target_client_id"]
         vision_source = target.get("vision_source")
+        mcp_server = target.get("mcp_server")
+        mcp_tool = target.get("mcp_tool")
         timeout_ms = int(manifest.get("timeout_ms") or 0)
         if timeout_ms <= 0:
             raise ValueError(f"Capability timeout_ms is invalid: {capability_id}")
@@ -170,6 +172,8 @@ class ServiceCapabilityMixin:
             action_seed=action_seed,
             wait_for_response=wait_for_response,
             vision_source=vision_source if isinstance(vision_source, dict) else None,
+            mcp_server=mcp_server if isinstance(mcp_server, dict) else None,
+            mcp_tool=mcp_tool if isinstance(mcp_tool, dict) else None,
             source_current_input=source_current_input,
             assistant_message_target_client_id=assistant_message_target_client_id,
             autonomous_run_id=autonomous_run_id,
@@ -376,6 +380,8 @@ class ServiceCapabilityMixin:
         capability_id: str,
         input_payload: dict[str, Any],
     ) -> dict[str, Any]:
+        if capability_id == "mcp.call_tool":
+            return self._select_mcp_call_tool_target(input_payload=input_payload)
         if capability_id == "camera.ptz":
             return self._select_camera_ptz_target(input_payload=input_payload)
         if capability_id != "vision.capture":
@@ -401,6 +407,44 @@ class ServiceCapabilityMixin:
         return {
             "target_client_id": client_id.strip(),
             "vision_source": vision_source,
+        }
+
+    def _select_mcp_call_tool_target(self, *, input_payload: dict[str, Any]) -> dict[str, Any]:
+        mcp_server_id = input_payload.get("mcp_server_id")
+        tool_name = input_payload.get("tool_name")
+        arguments = input_payload.get("arguments")
+        if not isinstance(mcp_server_id, str) or not mcp_server_id.strip():
+            raise ValueError("Capability is unavailable: mcp.call_tool no_binding mcp_server_id")
+        if not isinstance(tool_name, str) or not tool_name.strip():
+            raise ValueError("Capability is unavailable: mcp.call_tool no_binding tool_name")
+        if not isinstance(arguments, dict):
+            raise ValueError("mcp.call_tool arguments must be an object.")
+        normalized_server_id = mcp_server_id.strip()
+        normalized_tool_name = tool_name.strip()
+        target = self._event_stream_registry.get_mcp_tool_target(
+            mcp_server_id=normalized_server_id,
+            tool_name=normalized_tool_name,
+        )
+        if not isinstance(target, dict):
+            raise ValueError(f"Capability is unavailable: mcp.call_tool no_binding {normalized_server_id}/{normalized_tool_name}")
+        tool = target.get("tool")
+        if not isinstance(tool, dict):
+            raise ValueError(f"Capability is unavailable: mcp.call_tool no_tool {normalized_server_id}/{normalized_tool_name}")
+        input_schema = tool.get("inputSchema")
+        if isinstance(input_schema, dict):
+            self._validate_capability_schema_value(
+                value=arguments,
+                schema=input_schema,
+                path=f"mcp.call_tool.arguments.{normalized_tool_name}",
+            )
+        client_id = target.get("client_id")
+        if not isinstance(client_id, str) or not client_id.strip():
+            raise ValueError(f"Capability is unavailable: mcp.call_tool no_binding {normalized_server_id}/{normalized_tool_name}")
+        return {
+            "target_client_id": client_id.strip(),
+            "vision_source": None,
+            "mcp_server": target.get("mcp_server"),
+            "mcp_tool": tool,
         }
 
     def _select_camera_ptz_target(self, *, input_payload: dict[str, Any]) -> dict[str, Any]:
@@ -638,6 +682,8 @@ class ServiceCapabilityMixin:
         action_seed: dict[str, Any] | None,
         wait_for_response: bool,
         vision_source: dict[str, Any] | None = None,
+        mcp_server: dict[str, Any] | None = None,
+        mcp_tool: dict[str, Any] | None = None,
         source_current_input: dict[str, Any] | None = None,
         assistant_message_target_client_id: str | None = None,
         autonomous_run_id: str | None = None,
@@ -686,6 +732,17 @@ class ServiceCapabilityMixin:
             if isinstance(source_label, str) and source_label.strip():
                 record["source_label"] = source_label.strip()
             record["vision_source"] = deepcopy(vision_source)
+        if capability_id == "mcp.call_tool":
+            mcp_server_id = input_payload.get("mcp_server_id")
+            tool_name = input_payload.get("tool_name")
+            if isinstance(mcp_server_id, str) and mcp_server_id.strip():
+                record["mcp_server_id"] = mcp_server_id.strip()
+            if isinstance(tool_name, str) and tool_name.strip():
+                record["tool_name"] = tool_name.strip()
+            if isinstance(mcp_server, dict):
+                record["mcp_server"] = deepcopy(mcp_server)
+            if isinstance(mcp_tool, dict):
+                record["mcp_tool"] = deepcopy(mcp_tool)
         return record
 
     def _capability_request_event_type(self, capability_id: str) -> str:
@@ -740,6 +797,11 @@ class ServiceCapabilityMixin:
                 value = input_payload.get(input_key)
                 if isinstance(value, str) and value.strip():
                     summary[input_key] = value.strip()
+        if capability_id == "mcp.call_tool":
+            for input_key in ("mcp_server_id", "tool_name"):
+                value = request_record.get(input_key)
+                if isinstance(value, str) and value.strip():
+                    summary[input_key] = value.strip()
         source_current_input = request_record.get("source_current_input")
         if isinstance(source_current_input, dict):
             summary["source_current_input"] = deepcopy(source_current_input)
@@ -765,6 +827,12 @@ class ServiceCapabilityMixin:
         request_record: dict[str, Any],
         result_payload: dict[str, Any],
     ) -> None:
+        if capability_id == "mcp.call_tool":
+            self._validate_mcp_call_tool_result_source(
+                request_record=request_record,
+                result_payload=result_payload,
+            )
+            return
         if capability_id == "camera.ptz":
             self._validate_camera_ptz_result_source(
                 request_record=request_record,
@@ -787,6 +855,20 @@ class ServiceCapabilityMixin:
             actual_value = client_context.get(field_name)
             if not isinstance(actual_value, str) or actual_value.strip() != expected_value.strip():
                 raise ValueError(f"vision.capture result.client_context.{field_name} does not match the request.")
+
+    def _validate_mcp_call_tool_result_source(
+        self,
+        *,
+        request_record: dict[str, Any],
+        result_payload: dict[str, Any],
+    ) -> None:
+        for field_name in ("mcp_server_id", "tool_name"):
+            expected_value = request_record.get(field_name)
+            actual_value = result_payload.get(field_name)
+            if not isinstance(expected_value, str) or not expected_value.strip():
+                raise ValueError(f"mcp.call_tool request_record.{field_name} is missing.")
+            if not isinstance(actual_value, str) or actual_value.strip() != expected_value.strip():
+                raise ValueError(f"mcp.call_tool result.{field_name} does not match the request.")
 
     def _validate_camera_ptz_result_source(
         self,
@@ -1134,6 +1216,12 @@ class ServiceCapabilityMixin:
                     reason_code="result_error",
                     result_error=True,
                 )
+        if capability_id == "mcp.call_tool":
+            if result_payload.get("status") == "failed" or result_payload.get("is_error") is True:
+                return self._capability_terminal_transition_reason_summary(
+                    reason_code="result_error",
+                    result_error=True,
+                )
         return self._capability_terminal_transition_reason_summary(
             reason_code="result_received",
             result_error=False,
@@ -1145,6 +1233,10 @@ class ServiceCapabilityMixin:
             return f"{capability_id} が error で終了した。"
         if capability_id == "camera.ptz" and result_payload.get("status") in {"rejected", "failed"}:
             return f"{capability_id} が {result_payload.get('status')} で終了した。"
+        if capability_id == "mcp.call_tool" and (
+            result_payload.get("status") == "failed" or result_payload.get("is_error") is True
+        ):
+            return "mcp.call_tool が error で終了した。"
         return f"{capability_id} の結果を受け取った。"
 
     def _prune_pending_capability_requests(self, *, current_time: str) -> None:

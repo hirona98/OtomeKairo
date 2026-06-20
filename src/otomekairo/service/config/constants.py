@@ -6,6 +6,7 @@ EVENT_STREAM_CAPABILITY_PERMISSIONS = (
     "observe_desktop",
     "observe_camera",
     "control_camera_ptz",
+    "use_mcp_tools",
 )
 PERSONA_INITIATIVE_BASELINES = {"low", "medium", "high"}
 VISION_SOURCE_KINDS = {"desktop", "camera", "virtual"}

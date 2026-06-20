@@ -176,6 +176,7 @@ class EventStreamRegistry:
                 "rejected_bindings": [],
                 "event_subscriptions": [],
                 "vision_sources": [],
+                "mcp_servers": [],
             }
 
         # 結果
@@ -205,6 +206,7 @@ class EventStreamRegistry:
         rejected_bindings: list[dict[str, Any]],
         event_subscriptions: list[str] | None = None,
         vision_sources: list[dict[str, Any]] | None = None,
+        mcp_servers: list[dict[str, Any]] | None = None,
     ) -> None:
         # スナップショット
         replaced_sessions: list[dict[str, Any]] = []
@@ -216,6 +218,7 @@ class EventStreamRegistry:
             }
         )
         normalized_vision_sources = [dict(source) for source in vision_sources or []]
+        normalized_mcp_servers = [dict(server) for server in mcp_servers or []]
         with self._lock:
             session = self._sessions.get(session_id)
             if session is None:
@@ -250,6 +253,25 @@ class EventStreamRegistry:
             )
             if duplicate_source_ids:
                 raise ValueError(f"duplicate_vision_source_id: {', '.join(duplicate_source_ids)}")
+            existing_mcp_server_ids: set[str] = set()
+            for existing_session in self._sessions.values():
+                if existing_session.get("session_id") == session_id:
+                    continue
+                for mcp_server in existing_session.get("mcp_servers", []):
+                    if not isinstance(mcp_server, dict):
+                        continue
+                    mcp_server_id = mcp_server.get("mcp_server_id")
+                    if isinstance(mcp_server_id, str) and mcp_server_id.strip():
+                        existing_mcp_server_ids.add(mcp_server_id.strip())
+            duplicate_mcp_server_ids = sorted(
+                {
+                    mcp_server["mcp_server_id"]
+                    for mcp_server in normalized_mcp_servers
+                    if mcp_server.get("mcp_server_id") in existing_mcp_server_ids
+                }
+            )
+            if duplicate_mcp_server_ids:
+                raise ValueError(f"duplicate_mcp_server_id: {', '.join(duplicate_mcp_server_ids)}")
 
             # 更新
             session["client_id"] = client_id
@@ -257,6 +279,7 @@ class EventStreamRegistry:
             session["rejected_bindings"] = list(rejected_bindings)
             session["event_subscriptions"] = normalized_event_subscriptions
             session["vision_sources"] = normalized_vision_sources
+            session["mcp_servers"] = normalized_mcp_servers
 
         # 置換済み接続のクローズ
         for replaced_session in replaced_sessions:
@@ -354,6 +377,7 @@ class EventStreamRegistry:
         accepted: dict[str, set[str]] = {}
         rejected: list[dict[str, Any]] = []
         vision_sources: list[dict[str, Any]] = []
+        mcp_servers: list[dict[str, Any]] = []
         with self._lock:
             for session in self._sessions.values():
                 client_id = session.get("client_id")
@@ -381,6 +405,17 @@ class EventStreamRegistry:
                             "unavailable_reason": None,
                         }
                     )
+                for mcp_server in session.get("mcp_servers", []):
+                    if not isinstance(mcp_server, dict):
+                        continue
+                    mcp_servers.append(
+                        {
+                            **dict(mcp_server),
+                            "client_id": client_id.strip(),
+                            "available": True,
+                            "unavailable_reason": None,
+                        }
+                    )
 
         return {
             "accepted": {
@@ -392,7 +427,56 @@ class EventStreamRegistry:
                 vision_sources,
                 key=lambda item: str(item.get("vision_source_id") or ""),
             ),
+            "mcp_servers": sorted(
+                mcp_servers,
+                key=lambda item: str(item.get("mcp_server_id") or ""),
+            ),
         }
+
+    def get_mcp_tool_target(self, *, mcp_server_id: str, tool_name: str) -> dict[str, Any] | None:
+        # dispatch 用に MCP server id と tool 名から接続中 client を引く。
+        normalized_server_id = mcp_server_id.strip()
+        normalized_tool_name = tool_name.strip()
+        if not normalized_server_id or not normalized_tool_name:
+            return None
+        matches: list[dict[str, Any]] = []
+        with self._lock:
+            for session in self._sessions.values():
+                client_id = session.get("client_id")
+                if not isinstance(client_id, str) or not client_id.strip():
+                    continue
+                capabilities = session.get("capabilities", {})
+                if not isinstance(capabilities, dict) or "mcp.call_tool" not in capabilities:
+                    continue
+                for mcp_server in session.get("mcp_servers", []):
+                    if not isinstance(mcp_server, dict):
+                        continue
+                    if mcp_server.get("mcp_server_id") != normalized_server_id:
+                        continue
+                    tools = mcp_server.get("tools", [])
+                    if not isinstance(tools, list):
+                        continue
+                    matched_tool = None
+                    for tool in tools:
+                        if not isinstance(tool, dict):
+                            continue
+                        if tool.get("name") == normalized_tool_name:
+                            matched_tool = dict(tool)
+                            break
+                    if matched_tool is None:
+                        continue
+                    matches.append(
+                        {
+                            "client_id": client_id.strip(),
+                            "mcp_server": dict(mcp_server),
+                            "tool": matched_tool,
+                        }
+                    )
+        if not matches:
+            return None
+        if len(matches) > 1:
+            raise ValueError(f"MCP tool target is ambiguous: {normalized_server_id}/{normalized_tool_name}")
+        return matches[0]
 
     def get_vision_source(self, vision_source_id: str) -> dict[str, Any] | None:
         # dispatch 用に vision_source_id から接続中 client と source metadata を引く。

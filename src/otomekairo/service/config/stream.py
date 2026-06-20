@@ -25,6 +25,7 @@ CAMERA_PTZ_OPERATIONS = {
 }
 CAMERA_PTZ_AMOUNTS = {"small", "medium"}
 EVENT_STREAM_EVENT_SUBSCRIPTIONS = {"assistant_message"}
+MCP_TRANSPORTS = {"stdio"}
 
 
 class ServiceConfigStreamMixin:
@@ -115,6 +116,10 @@ class ServiceConfigStreamMixin:
             accepted_capabilities=accepted_capabilities,
             granted_permissions=granted_permissions,
         )
+        mcp_servers = self._normalize_hello_mcp_servers(
+            payload=payload,
+            accepted_capabilities=accepted_capabilities,
+        )
 
         # 登録
         try:
@@ -125,16 +130,19 @@ class ServiceConfigStreamMixin:
                 rejected_bindings=rejected_bindings,
                 event_subscriptions=event_subscriptions,
                 vision_sources=vision_sources,
+                mcp_servers=mcp_servers,
             )
         except ValueError as exc:
-            raise ServiceError(400, "invalid_vision_sources", str(exc)) from exc
+            error_code = "invalid_mcp_servers" if "mcp_server" in str(exc) else "invalid_vision_sources"
+            raise ServiceError(400, error_code, str(exc)) from exc
         debug_log(
             "EventStream",
             (
                 f"hello client_id={client_id.strip()} "
                 f"accepted={sorted(accepted_capabilities)} rejected={len(rejected_bindings)} "
                 f"event_subscriptions={event_subscriptions} "
-                f"vision_sources={len(vision_sources)}"
+                f"vision_sources={len(vision_sources)} "
+                f"mcp_servers={len(mcp_servers)}"
             ),
         )
 
@@ -195,6 +203,7 @@ class ServiceConfigStreamMixin:
         generated_at = self._now_iso()
         bindings = self._event_stream_registry.list_capability_bindings()
         vision_sources = bindings.get("vision_sources", [])
+        mcp_servers = bindings.get("mcp_servers", [])
         active_ongoing_action = self._current_ongoing_action(
             state=state,
             current_time=generated_at,
@@ -205,6 +214,7 @@ class ServiceConfigStreamMixin:
             bound_client_ids=bindings["accepted"].get(normalized_capability_id, []),
             rejected_bindings=bindings["rejected"],
             vision_sources=vision_sources if normalized_capability_id in {"vision.capture", "camera.ptz"} else None,
+            mcp_servers=mcp_servers if normalized_capability_id == "mcp.call_tool" else None,
             wake_policy_observations=self._wake_policy_observations_from_state(state),
             active_ongoing_action=active_ongoing_action,
         )
@@ -367,6 +377,122 @@ class ServiceConfigStreamMixin:
                 )
             normalized_sources.append(normalized_source)
         return normalized_sources
+
+    def _normalize_hello_mcp_servers(
+        self,
+        *,
+        payload: dict[str, Any],
+        accepted_capabilities: dict[str, str],
+    ) -> list[dict[str, Any]]:
+        raw_servers = payload.get("mcp_servers")
+        if "mcp.call_tool" not in accepted_capabilities:
+            if raw_servers is None:
+                return []
+            if isinstance(raw_servers, list) and not raw_servers:
+                return []
+            raise ServiceError(
+                400,
+                "invalid_mcp_servers",
+                "hello.mcp_servers requires accepted mcp.call_tool capability.",
+            )
+        if not isinstance(raw_servers, list) or not raw_servers:
+            raise ServiceError(
+                400,
+                "invalid_mcp_servers",
+                "hello.mcp_servers must be a non-empty array when mcp.call_tool is accepted.",
+            )
+
+        normalized_servers: list[dict[str, Any]] = []
+        seen_server_ids: set[str] = set()
+        for raw_server in raw_servers:
+            if not isinstance(raw_server, dict):
+                raise ServiceError(400, "invalid_mcp_servers", "hello.mcp_servers must contain objects.")
+            server_id = self._normalize_mcp_text(
+                raw_server.get("mcp_server_id"),
+                "hello.mcp_servers[].mcp_server_id",
+                limit=80,
+            )
+            if not server_id.startswith("mcp_server:"):
+                raise ServiceError(
+                    400,
+                    "invalid_mcp_servers",
+                    "hello.mcp_servers[].mcp_server_id must start with mcp_server:.",
+                )
+            if server_id in seen_server_ids:
+                raise ServiceError(400, "invalid_mcp_servers", "hello.mcp_servers contains duplicate ids.")
+            seen_server_ids.add(server_id)
+            transport = self._normalize_mcp_text(
+                raw_server.get("transport"),
+                "hello.mcp_servers[].transport",
+                limit=32,
+            )
+            if transport not in MCP_TRANSPORTS:
+                raise ServiceError(
+                    400,
+                    "invalid_mcp_servers",
+                    "hello.mcp_servers[].transport is unsupported.",
+                )
+            tools = self._normalize_hello_mcp_tools(raw_server.get("tools"))
+            normalized_servers.append(
+                {
+                    "mcp_server_id": server_id,
+                    "label": self._normalize_mcp_text(
+                        raw_server.get("label", server_id),
+                        "hello.mcp_servers[].label",
+                        limit=80,
+                    ),
+                    "transport": transport,
+                    "tools": tools,
+                }
+            )
+        return normalized_servers
+
+    def _normalize_hello_mcp_tools(self, value: Any) -> list[dict[str, Any]]:
+        if not isinstance(value, list) or not value:
+            raise ServiceError(
+                400,
+                "invalid_mcp_servers",
+                "hello.mcp_servers[].tools must be a non-empty array.",
+            )
+        normalized_tools: list[dict[str, Any]] = []
+        seen_tool_names: set[str] = set()
+        for raw_tool in value:
+            if not isinstance(raw_tool, dict):
+                raise ServiceError(400, "invalid_mcp_servers", "hello.mcp_servers[].tools must contain objects.")
+            tool_name = self._normalize_mcp_text(
+                raw_tool.get("name"),
+                "hello.mcp_servers[].tools[].name",
+                limit=120,
+            )
+            if tool_name in seen_tool_names:
+                raise ServiceError(400, "invalid_mcp_servers", "hello.mcp_servers[].tools contains duplicate names.")
+            seen_tool_names.add(tool_name)
+            description = raw_tool.get("description")
+            input_schema = raw_tool.get("inputSchema")
+            if input_schema is None:
+                input_schema = raw_tool.get("input_schema")
+            if input_schema is not None and not isinstance(input_schema, dict):
+                raise ServiceError(
+                    400,
+                    "invalid_mcp_servers",
+                    "hello.mcp_servers[].tools[].inputSchema must be an object.",
+                )
+            tool = {
+                "name": tool_name,
+                "description": (
+                    description.strip()
+                    if isinstance(description, str) and description.strip()
+                    else ""
+                ),
+                "inputSchema": input_schema or {"type": "object"},
+            }
+            normalized_tools.append(tool)
+        return normalized_tools
+
+    def _normalize_mcp_text(self, value: Any, label: str, *, limit: int) -> str:
+        if not isinstance(value, str) or not value.strip():
+            raise ServiceError(400, "invalid_mcp_servers", f"{label} must be a non-empty string.")
+        return self._clamp(value.strip(), limit=limit)
 
     def _validate_registered_camera_source_hello(
         self,
@@ -537,6 +663,7 @@ class ServiceConfigStreamMixin:
         bound_client_ids: list[str],
         rejected_bindings: list[dict[str, Any]],
         vision_sources: list[dict[str, Any]] | None = None,
+        mcp_servers: list[dict[str, Any]] | None = None,
         wake_policy_observations: list[dict[str, Any]] | None = None,
         active_ongoing_action: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -602,6 +729,14 @@ class ServiceConfigStreamMixin:
         )
         if capability_id in {"vision.capture", "camera.ptz"} and available and not has_vision_source:
             available = False
+        normalized_mcp_servers = self._inspection_mcp_servers(mcp_servers)
+        has_mcp_tool = (
+            any(server.get("available") is True and server.get("tools") for server in normalized_mcp_servers)
+            if capability_id == "mcp.call_tool"
+            else True
+        )
+        if capability_id == "mcp.call_tool" and available and not has_mcp_tool:
+            available = False
         unavailable_reason = None
         if not available:
             if missing_permissions:
@@ -624,6 +759,8 @@ class ServiceConfigStreamMixin:
                 unavailable_reason = self._vision_source_unavailable_reason(normalized_vision_sources)
             elif parallel_blocked:
                 unavailable_reason = "parallel_blocked"
+            elif capability_id == "mcp.call_tool" and not has_mcp_tool:
+                unavailable_reason = "no_mcp_tool"
 
         result = {
             "capability_id": capability_id,
@@ -664,7 +801,59 @@ class ServiceConfigStreamMixin:
             result["readiness"] = readiness
         if capability_id in {"vision.capture", "camera.ptz"}:
             result["vision_sources"] = normalized_vision_sources
+        if capability_id == "mcp.call_tool":
+            result["mcp_servers"] = normalized_mcp_servers
         return result
+
+    def _inspection_mcp_servers(self, mcp_servers: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+        normalized: list[dict[str, Any]] = []
+        for server in mcp_servers or []:
+            if not isinstance(server, dict):
+                continue
+            server_id = server.get("mcp_server_id")
+            label = server.get("label")
+            transport = server.get("transport")
+            if not isinstance(server_id, str) or not server_id.strip():
+                continue
+            if not isinstance(label, str) or not label.strip():
+                continue
+            tools = self._inspection_mcp_tools(server.get("tools"))
+            normalized.append(
+                {
+                    "mcp_server_id": server_id.strip(),
+                    "label": self._clamp(label.strip(), limit=80),
+                    "transport": transport.strip() if isinstance(transport, str) and transport.strip() else "stdio",
+                    "available": server.get("available") is True and bool(tools),
+                    "unavailable_reason": server.get("unavailable_reason") if not tools else None,
+                    "tools": tools,
+                }
+            )
+        return normalized
+
+    def _inspection_mcp_tools(self, value: Any) -> list[dict[str, Any]]:
+        if not isinstance(value, list):
+            return []
+        tools: list[dict[str, Any]] = []
+        for tool in value:
+            if not isinstance(tool, dict):
+                continue
+            name = tool.get("name")
+            if not isinstance(name, str) or not name.strip():
+                continue
+            description = tool.get("description")
+            input_schema = tool.get("inputSchema")
+            tools.append(
+                {
+                    "name": self._clamp(name.strip(), limit=120),
+                    "description": (
+                        description.strip()
+                        if isinstance(description, str) and description.strip()
+                        else ""
+                    ),
+                    "input_schema": input_schema if isinstance(input_schema, dict) else {"type": "object"},
+                }
+            )
+        return tools
 
     def _inspection_vision_sources(self, vision_sources: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
         normalized: list[dict[str, Any]] = []
@@ -836,6 +1025,7 @@ class ServiceConfigStreamMixin:
         accepted_bindings = bindings["accepted"]
         rejected_bindings = bindings["rejected"]
         vision_sources = bindings.get("vision_sources", [])
+        mcp_servers = bindings.get("mcp_servers", [])
         active_ongoing_action = None
         if isinstance(state, dict):
             active_ongoing_action = self._current_ongoing_action(
@@ -850,6 +1040,7 @@ class ServiceConfigStreamMixin:
                 bound_client_ids=accepted_bindings.get(capability_id, []),
                 rejected_bindings=rejected_bindings,
                 vision_sources=vision_sources if capability_id in {"vision.capture", "camera.ptz"} else None,
+                mcp_servers=mcp_servers if capability_id == "mcp.call_tool" else None,
                 wake_policy_observations=self._wake_policy_observations_from_state(state),
                 active_ongoing_action=active_ongoing_action,
             )
@@ -878,6 +1069,8 @@ class ServiceConfigStreamMixin:
                 item["readiness"] = readiness
             if capability_id in {"vision.capture", "camera.ptz"}:
                 item["vision_sources"] = availability.get("vision_sources", [])
+            if capability_id == "mcp.call_tool":
+                item["mcp_servers"] = availability.get("mcp_servers", [])
             decision_view.append(item)
         if not decision_view:
             return None

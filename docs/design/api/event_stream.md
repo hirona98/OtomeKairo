@@ -34,6 +34,20 @@ client -> server:
     }
   ],
   "event_subscriptions": ["assistant_message"],
+  "mcp_servers": [
+    {
+      "mcp_server_id": "mcp_server:elyth",
+      "label": "ELYTH",
+      "transport": "stdio",
+      "tools": [
+        {
+          "name": "get_information",
+          "description": "ELYTH の現在情報を取得する",
+          "inputSchema": { "type": "object" }
+        }
+      ]
+    }
+  ],
   "vision_sources": [
     {
       "vision_source_id": "vision_source:main_display",
@@ -68,11 +82,17 @@ client -> server:
 - `caps` はその client が現在受けられる capability binding 候補の一覧である
 - `event_subscriptions` はその client が受信して処理する server-driven event の一覧である
 - `assistant_message` を表示できる client だけが `event_subscriptions` に `assistant_message` を入れる
+- `mcp_servers` は `mcp.call_tool` を実行できる client が接続中 MCP server と tool catalog を通知する一覧である
 - `vision_sources` はその client が `vision.capture` で観測できる視覚 source の一覧である
 - capability 識別子は `vision.capture` のような canonical 名を使う
 - `version` は server が持つ `CapabilityManifest` の版と照合する
 - client は capability manifest を送らない
 - 未知の capability id または非対応 version は実行不可として扱う
+- `mcp.call_tool` が accepted された client は、`mcp_servers` を必須かつ 1 件以上にする
+- `mcp_servers[].mcp_server_id` は `mcp_server:` で始め、接続中 server 全体で一意にする
+- `mcp_servers[].transport` の初期対応値は `stdio` とする
+- `mcp_servers[].tools[]` は MCP `tools/list` の `name / description / inputSchema` を渡す
+- `mcp_servers` には API key、token、内部 URL、command、env を入れない
 - `vision.capture` が accepted された client は、`vision_sources` を必須かつ 1 件以上にする
 - `vision.capture` が accepted されない client では、`vision_sources` は省略または空配列にする
 - `vision_sources[].vision_source_id` は server 内で一意に扱う
@@ -267,9 +287,10 @@ server -> client の代表例:
 - `environment.status_request`: 周辺環境状態の取得を client に要求する
 - `location.status_request`: 位置状態の取得を client に要求する
 - `social.status_request`: 社会的文脈の状態取得を client に要求する
+- `mcp.call_tool_request`: MCP server の tool 実行を client に要求する
 - `assistant_message`: server が生成した assistant 発話を client に表示させる
 
-`vision.capture_request`、`camera.ptz_request`、`external.status_request`、`schedule.status_request`、`device.status_request`、`body.status_request`、`environment.status_request`、`location.status_request`、`social.status_request` は capability 実行要求である。
+`vision.capture_request`、`camera.ptz_request`、`external.status_request`、`schedule.status_request`、`device.status_request`、`body.status_request`、`environment.status_request`、`location.status_request`、`social.status_request`、`mcp.call_tool_request` は capability 実行要求である。
 `assistant_message` は server が生成した assistant 発話を client へ表示させる通知である。
 `assistant_message.data.source_kind` は `capability_result / wake / background_wake` のいずれかであり、capability result follow-up の場合だけ `request_id / capability_id` を持つ。
 `wake / background_wake` の `assistant_message` は、同じ cycle の client context にある client が `assistant_message` を購読している場合はその client へ送る。

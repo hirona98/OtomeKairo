@@ -62,6 +62,7 @@ class ServiceConfigInspectionMixin:
         accepted_bindings = bindings["accepted"]
         rejected_bindings = bindings["rejected"]
         vision_sources = bindings.get("vision_sources", [])
+        mcp_servers = bindings.get("mcp_servers", [])
         active_ongoing_action = self._current_ongoing_action(
             state=state,
             current_time=current_time,
@@ -75,6 +76,7 @@ class ServiceConfigInspectionMixin:
                     bound_client_ids=accepted_bindings.get(capability_id, []),
                     rejected_bindings=rejected_bindings,
                     vision_sources=vision_sources if capability_id in {"vision.capture", "camera.ptz"} else None,
+                    mcp_servers=mcp_servers if capability_id == "mcp.call_tool" else None,
                     wake_policy_observations=self._enabled_wake_policy_observations(state),
                     active_ongoing_action=active_ongoing_action,
                 )
