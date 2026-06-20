@@ -49,6 +49,15 @@ OpenCV、デバイス SDK、外部サービス SDK、OS 固有ライブラリは
 2 個以上の connector で同じ処理が継続して必要になった段階で、共通 package の要否を判断する。
 共通 package を作る場合も、OtomeKairo server 本体 package へ connector 実装依存を入れない。
 
+## 簡易常駐起動
+
+専用 PC で運用する場合、repository を `/opt/OtomeKairo` に固定し、OtomeKairo server、Tapo C220 connector、MCP client connector を単一の systemd service lifecycle でまとめて起動してよい。
+これは運用上の process 管理単位であり、connector の実行 client 境界、hello、capability request / result、runtime config API の意味境界は変更しない。
+
+この単一 service は、server を `0.0.0.0:55601` で listen させ、同一 PC 上の connector は `https://127.0.0.1:55601` へ接続する。
+どれか 1 つの process が終了した場合は service 全体を終了させ、systemd の restart に任せる。
+camera source または MCP server の runtime config が未登録の場合も、connector を自動的に無効化せず、service 起動失敗として扱う。
+
 ## Webカメラ connector
 
 Webカメラは新しい capability id として定義しない。
