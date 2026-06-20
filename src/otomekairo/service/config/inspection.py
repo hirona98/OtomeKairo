@@ -75,7 +75,7 @@ class ServiceConfigInspectionMixin:
                     bound_client_ids=accepted_bindings.get(capability_id, []),
                     rejected_bindings=rejected_bindings,
                     vision_sources=vision_sources if capability_id in {"vision.capture", "camera.ptz"} else None,
-                    wake_policy_observations=self._wake_policy_observations_from_state(state),
+                    wake_policy_observations=self._enabled_wake_policy_observations(state),
                     active_ongoing_action=active_ongoing_action,
                 )
                 for capability_id, manifest in sorted(manifests.items())
@@ -322,9 +322,7 @@ class ServiceConfigInspectionMixin:
 
     def _snapshot_wake_policy_observations(self, *, state: dict[str, Any]) -> list[dict[str, Any]]:
         wake_policy = state.get("wake_policy")
-        observations = wake_policy.get("observations") if isinstance(wake_policy, dict) else None
-        if not isinstance(observations, list):
-            return []
+        observations = self._enabled_wake_policy_observations(state)
         interval_seconds = wake_policy.get("interval_seconds") if isinstance(wake_policy, dict) else None
         with self._runtime_state_lock:
             runtime_snapshot = {

@@ -790,6 +790,8 @@ class LongSmokeRunner:
                 "interval_seconds": self.args.wake_interval_seconds,
             }
         self.api.put("/api/config/editor-state", editor_state)
+        if self.args.profile != "real-llm-smoke":
+            self._configure_camera_sources()
 
         status = self._get_status()
         runtime_summary = status["runtime_summary"]
@@ -803,6 +805,30 @@ class LongSmokeRunner:
             f" profile={self.args.profile}"
             f" selected_model_preset_id={self.selected_model_preset_id}"
             f" selected_memory_set_id={self.selected_memory_set_id}"
+        )
+
+    def _configure_camera_sources(self) -> None:
+        camera_password = base64.urlsafe_b64encode(os.urandom(18)).decode("ascii").rstrip("=")
+        self.api.put(
+            "/api/config/camera-sources/editor-state",
+            {
+                "camera_sources": [
+                    {
+                        "vision_source_id": self._camera_vision_source_id(),
+                        "connector_kind": "tapo_c220",
+                        "client_id": self.camera_client_id,
+                        "kind": "camera",
+                        "source_owner": "self",
+                        "enabled": True,
+                        "label": "long smoke camera",
+                        "connection": {
+                            "host": "127.0.0.1",
+                            "camera_username": "long-smoke",
+                            "camera_password": camera_password,
+                        },
+                    }
+                ]
+            },
         )
 
     def _apply_real_llm_config(self, editor_state: dict[str, Any]) -> None:
@@ -952,7 +978,7 @@ class LongSmokeRunner:
                 "kind": "camera",
                 "source_owner": "self",
                 "label": "long smoke camera",
-                "aliases": ["camera", "long-smoke-camera"],
+                "aliases": ["long smoke camera"],
                 "default_for": ["camera"],
                 "required_permissions": ["observe_vision", "observe_camera"],
                 "supported_controls": {
@@ -1072,7 +1098,7 @@ class LongSmokeRunner:
                 continue
             if source.get("kind") != "camera" or source.get("source_owner") != "self":
                 return False
-            if source.get("available") is not True or source.get("wake_observation_status") != "enabled":
+            if source.get("available") is not True:
                 return False
             required = source.get("required_permissions")
             if not isinstance(required, list) or "observe_camera" not in required:

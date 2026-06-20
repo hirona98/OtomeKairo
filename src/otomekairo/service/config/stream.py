@@ -821,11 +821,9 @@ class ServiceConfigStreamMixin:
         }
 
     def _wake_policy_observations_from_state(self, state: dict[str, Any] | None) -> list[dict[str, Any]]:
-        wake_policy = state.get("wake_policy") if isinstance(state, dict) else None
-        observations = wake_policy.get("observations") if isinstance(wake_policy, dict) else None
-        if not isinstance(observations, list):
+        if not isinstance(state, dict):
             return []
-        return [observation for observation in observations if isinstance(observation, dict)]
+        return self._enabled_wake_policy_observations(state)
 
     def _build_capability_decision_view(
         self,
