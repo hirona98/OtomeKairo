@@ -79,6 +79,7 @@ class OtomeKairoService(
         self._stream_event_lock = threading.Lock()
         self._next_stream_event_value = 1
         self.recover_capability_runtime_state_after_startup()
+        self.recover_autonomous_run_runtime_state_after_startup()
         debug_log("Service", "initialized")
 
     def _append_debug_log_stream_record(self, record: dict[str, Any]) -> None:

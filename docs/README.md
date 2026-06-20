@@ -35,7 +35,6 @@ OtomeKairo は、人格設定と記憶を基盤に、その時点で成立する
 
 ## 目的別の入口
 
-- 今後の設計実装課題: [design/今後の設計実装課題.md](design/今後の設計実装課題.md)
 - 検証基盤: [design/verification/検証基盤.md](design/verification/検証基盤.md)
 - 全体構成: [design/foundation/アーキテクチャ.md](design/foundation/アーキテクチャ.md)
 - 人格設定と記憶: [design/foundation/人格と記憶.md](design/foundation/人格と記憶.md)

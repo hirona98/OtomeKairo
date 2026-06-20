@@ -20,6 +20,47 @@ AUTONOMOUS_RUN_TERMINAL_STATUSES = {"completed", "cancelled"}
 
 
 class ServiceAutonomousRunMixin:
+    def recover_autonomous_run_runtime_state_after_startup(self) -> None:
+        # capability request の照合表は process-local なので、再起動後の result 待ちは再評価へ戻す。
+        current_time = self._now_iso()
+        state = self.store.read_state()
+        memory_sets = state.get("memory_sets")
+        if not isinstance(memory_sets, dict):
+            return
+
+        recovered_run_ids: list[str] = []
+        for memory_set_id in memory_sets:
+            if not isinstance(memory_set_id, str) or not memory_set_id.strip():
+                continue
+            runs = self.store.list_autonomous_runs(
+                memory_set_id=memory_set_id,
+                statuses=["waiting_result", "paused"],
+                limit=200,
+            )
+            for run in runs:
+                waiting_request_id = run.get("waiting_request_id")
+                if not isinstance(waiting_request_id, str) or not waiting_request_id.strip():
+                    continue
+                request_record = self._autonomous_run_orphaned_request_record(run)
+                updated = self._mark_autonomous_run_capability_wait_interrupted(
+                    request_record=request_record,
+                    current_time=current_time,
+                    reason_code="orphaned_after_startup",
+                    reason_summary=(
+                        "process startup により capability result 照合表が失われたため、"
+                        "autonomous_run の result 待ちを再評価へ戻した。"
+                    ),
+                )
+                if isinstance(updated, dict):
+                    recovered_run_ids.append(str(updated.get("run_id") or ""))
+
+        recovered_run_ids = [run_id for run_id in recovered_run_ids if run_id]
+        if recovered_run_ids:
+            debug_log(
+                "AutonomousRun",
+                f"startup recovered orphaned waiting runs count={len(recovered_run_ids)}",
+            )
+
     def start_background_autonomous_run_scheduler(self) -> None:
         # due autonomous_run は background_wake とは別 worker で監視する。
         with self._runtime_state_lock:
@@ -220,11 +261,158 @@ class ServiceAutonomousRunMixin:
         )
         return True
 
+    def _autonomous_run_orphaned_request_record(self, run: dict[str, Any]) -> dict[str, Any]:
+        last_step = run.get("last_step")
+        action = last_step.get("action") if isinstance(last_step, dict) else None
+        capability_request = action.get("capability_request") if isinstance(action, dict) else None
+        input_payload = capability_request.get("input") if isinstance(capability_request, dict) else None
+        capability_id = capability_request.get("capability_id") if isinstance(capability_request, dict) else None
+        request_record: dict[str, Any] = {
+            "request_id": run.get("waiting_request_id"),
+            "autonomous_run_id": run.get("run_id"),
+            "memory_set_id": run.get("memory_set_id"),
+            "capability_id": capability_id if isinstance(capability_id, str) else "unknown",
+            "input": input_payload if isinstance(input_payload, dict) else {},
+        }
+        if isinstance(input_payload, dict):
+            for key in ("vision_source_id", "operation", "amount", "mcp_server_id", "tool_name"):
+                value = input_payload.get(key)
+                if isinstance(value, str) and value.strip():
+                    request_record[key] = value.strip()
+        for key in ("vision_source_id", "source_kind", "source_owner", "source_label"):
+            value = run.get(key)
+            if isinstance(value, str) and value.strip():
+                request_record[key] = value.strip()
+        return request_record
+
+    def _autonomous_run_interrupted_result_context(
+        self,
+        *,
+        request_record: dict[str, Any],
+        reason_code: str,
+        reason_summary: str,
+    ) -> dict[str, Any]:
+        capability_id = request_record.get("capability_id")
+        source_capability_id = (
+            capability_id.strip()
+            if isinstance(capability_id, str) and capability_id.strip()
+            else "unknown"
+        )
+        source_request_summary: dict[str, Any] = {
+            "request_id": request_record.get("request_id"),
+            "capability_id": source_capability_id,
+            "status": reason_code,
+        }
+        timeout_ms = request_record.get("timeout_ms")
+        if isinstance(timeout_ms, int):
+            source_request_summary["timeout_ms"] = timeout_ms
+        for key in (
+            "vision_source_id",
+            "source_kind",
+            "source_owner",
+            "source_label",
+            "operation",
+            "amount",
+            "mcp_server_id",
+            "tool_name",
+        ):
+            value = request_record.get(key)
+            if isinstance(value, str) and value.strip():
+                source_request_summary[key] = value.strip()
+        return {
+            "source_capability_id": source_capability_id,
+            "allowed_followup_capability_ids": [source_capability_id],
+            "followup_policy_summary": (
+                "capability result 待ちが成立しなかったため、"
+                "目的に照らして再試行、待機、完了、cancel を判断する。"
+            ),
+            "source_request_summary": source_request_summary,
+            "observation_summary": {
+                "result_status": "failed",
+                "error_kind": reason_code,
+                "summary_text": reason_summary,
+            },
+        }
+
+    def _append_autonomous_interrupted_result_history(
+        self,
+        *,
+        run: dict[str, Any],
+        reason_summary: str,
+    ) -> str:
+        existing = str(run.get("history_summary") or "").strip()
+        entry = f"result={reason_summary}"
+        return f"{existing} / {entry}" if existing else entry
+
+    def _mark_autonomous_run_capability_wait_interrupted(
+        self,
+        *,
+        request_record: dict[str, Any],
+        current_time: str,
+        reason_code: str,
+        reason_summary: str,
+    ) -> dict[str, Any] | None:
+        run_id = request_record.get("autonomous_run_id")
+        request_id = request_record.get("request_id")
+        if not isinstance(run_id, str) or not run_id.strip():
+            return None
+        if not isinstance(request_id, str) or not request_id.strip():
+            return None
+
+        with self._autonomous_run_execution_lock(run_id.strip()):
+            run = self.store.get_autonomous_run(run_id=run_id.strip())
+            if not isinstance(run, dict):
+                return None
+            if run.get("status") in AUTONOMOUS_RUN_TERMINAL_STATUSES:
+                return None
+            if run.get("status") not in {"waiting_result", "paused"}:
+                return None
+            if run.get("waiting_request_id") != request_id.strip():
+                return None
+
+            last_result_context = self._autonomous_run_interrupted_result_context(
+                request_record=request_record,
+                reason_code=reason_code,
+                reason_summary=reason_summary,
+            )
+            updated = {
+                **run,
+                "waiting_request_id": None,
+                "last_result_context": last_result_context,
+                "history_summary": self._append_autonomous_interrupted_result_history(
+                    run=run,
+                    reason_summary=reason_summary,
+                ),
+                "updated_at": current_time,
+            }
+            if run.get("status") == "paused":
+                updated["resume_status"] = "active"
+            else:
+                updated.update(
+                    {
+                        "status": "active",
+                        "next_run_at": current_time,
+                        "pause_reason": None,
+                        "resume_status": None,
+                    }
+                )
+            self.store.upsert_autonomous_run(autonomous_run=updated)
+            debug_log(
+                "AutonomousRun",
+                (
+                    f"capability wait interrupted run={run_id.strip()} request={request_id.strip()} "
+                    f"reason={reason_code}"
+                ),
+                level="WARNING",
+            )
+            return updated
+
     def _background_autonomous_run_loop(self, stop_event: threading.Event) -> None:
         while not stop_event.wait(AUTONOMOUS_RUN_POLL_SECONDS):
             try:
                 state = self.store.read_state()
                 current_time = self._now_iso()
+                self._prune_pending_capability_requests(current_time=current_time)
                 due_runs = self.store.list_due_autonomous_runs(
                     memory_set_id=state["selected_memory_set_id"],
                     current_time=current_time,

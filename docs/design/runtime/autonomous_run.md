@@ -114,6 +114,15 @@ run 内では、目的に整合する capability 連鎖を許可する。
 manifest は schema、権限、source 条件、timeout、busy 判定を担当する。
 固定 step 数や固定観測回数の上限は置かない。
 
+capability request が timeout した場合、server は該当 run の `waiting_request_id` を消し、timeout 事実を `last_result_context` と `history_summary` に記録する。
+pause 中ではない run は `active` に戻し、`next_run_at` を現在時刻にして `autonomous_step_generation` の再評価対象にする。
+pause 中の run は `paused` を維持し、再開時に `active` へ戻る状態にする。
+timeout 後に再試行、待機、完了、cancel のどれを選ぶかは `autonomous_step_generation` が判断する。
+
+process startup 時点では capability request の内部照合表が空になる。
+このため、`waiting_result` の run と `waiting_request_id` を持つ `paused` run は、再起動前の result を照合できない orphan として扱う。
+server は orphan を timeout と同じ再評価可能状態へ戻し、未完了 request で新しい能力実行を塞がない。
+
 ## 継続監視
 
 期限なし監視、曖昧な期間の見守り、条件付き通知、継続観測は `autonomous_run` の目的として扱う。
