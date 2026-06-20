@@ -138,6 +138,9 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
             if method == "GET" and parsed.path == "/api/catalog":
                 self._write_success(HTTPStatus.OK, self.server.service.get_catalog(token))
                 return
+            if method == "GET" and parsed.path == "/api/docs":
+                self._write_success(HTTPStatus.OK, self.server.service.get_docs(token))
+                return
             if method == "GET" and parsed.path == "/api/events/stream":
                 self._handle_events_stream(token)
                 return

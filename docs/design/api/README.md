@@ -25,6 +25,7 @@ API 仕様は次のように分ける。
   - 設定定義の read / replace / delete
 - [列挙とinspection.md](列挙とinspection.md)
   - `catalog`
+  - `docs`
   - `inspection`
   - capability availability の確認
   - `logs/stream`

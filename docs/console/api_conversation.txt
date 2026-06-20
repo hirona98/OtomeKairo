@@ -1,0 +1,64 @@
+エンドポイント
+--------------
+
+POST {BASE_URL}/api/conversation
+
+認証
+----
+
+Authorization: Bearer <TOKEN>
+
+リクエストボディ
+----------------
+
+{
+  "text": "こんにちは",
+  "images": ["data:image/png;base64,..."],
+  "client_context": {
+    "source": "CocoroConsole",
+    "client_id": "console-...",
+    "active_app": "Slack",
+    "window_title": "general | Slack",
+    "locale": "ja-JP"
+  }
+}
+
+images は任意の画像 Data URI 配列である。指定時は最大 1 件にする。
+client_context は任意の object である。
+標準の client_context は source、client_id、active_app、window_title、locale を含める。
+
+レスポンス例
+------------
+
+{
+  "ok": true,
+  "data": {
+    "cycle_id": "cycle:...",
+    "result_kind": "speech",
+    "speech": {
+      "text": "こんにちは"
+    },
+    "capability_request": null,
+    "autonomous_run": null
+  }
+}
+
+result_kind は speech、capability_request、noop、internal_failure のいずれかである。
+発話がない結果では speech は null になる。
+
+cURLの例
+--------
+
+curl.exe -k -X POST {BASE_URL}/api/conversation ^
+  -H "Authorization: Bearer <TOKEN>" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"text\":\"こんにちは\",\"client_context\":{\"source\":\"CocoroConsole\",\"client_id\":\"console-...\",\"locale\":\"ja-JP\"}}"
+
+PowerShellの例
+--------------
+
+Invoke-RestMethod -Method Post `
+  -Uri "{BASE_URL}/api/conversation" `
+  -Headers @{ Authorization = "Bearer <TOKEN>" } `
+  -ContentType "application/json; charset=utf-8" `
+  -Body '{"text":"こんにちは","client_context":{"source":"CocoroConsole","client_id":"console-...","locale":"ja-JP"}}'
