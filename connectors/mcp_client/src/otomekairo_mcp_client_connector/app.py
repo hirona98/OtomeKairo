@@ -31,7 +31,6 @@ class McpClientConnector:
             "mcp_servers": [
                 {
                     "mcp_server_id": server.mcp_server_id,
-                    "label": server.label,
                     "transport": "stdio",
                     "tools": self._tools_by_server.get(server.mcp_server_id, []),
                 }

@@ -163,7 +163,6 @@ ELYTH の接続は `PUT /api/config/mcp-servers/mcp_server%3Aelyth` で次の設
 ```json
 {
   "enabled": true,
-  "label": "ELYTH",
   "command": "npx",
   "args": ["-y", "elyth-mcp-server@latest"],
   "cwd": null,

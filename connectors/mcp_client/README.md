@@ -32,7 +32,6 @@ curl -k \
   https://127.0.0.1:55601/api/config/mcp-servers/mcp_server%3Aelyth \
   -d '{
     "enabled": true,
-    "label": "ELYTH",
     "command": "npx",
     "args": ["-y", "elyth-mcp-server@latest"],
     "cwd": null,

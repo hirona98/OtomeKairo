@@ -436,11 +436,6 @@ class ServiceConfigStreamMixin:
             normalized_servers.append(
                 {
                     "mcp_server_id": server_id,
-                    "label": self._normalize_mcp_text(
-                        raw_server.get("label", server_id),
-                        "hello.mcp_servers[].label",
-                        limit=80,
-                    ),
                     "transport": transport,
                     "tools": tools,
                 }
@@ -811,17 +806,13 @@ class ServiceConfigStreamMixin:
             if not isinstance(server, dict):
                 continue
             server_id = server.get("mcp_server_id")
-            label = server.get("label")
             transport = server.get("transport")
             if not isinstance(server_id, str) or not server_id.strip():
-                continue
-            if not isinstance(label, str) or not label.strip():
                 continue
             tools = self._inspection_mcp_tools(server.get("tools"))
             normalized.append(
                 {
                     "mcp_server_id": server_id.strip(),
-                    "label": self._clamp(label.strip(), limit=80),
                     "transport": transport.strip() if isinstance(transport, str) and transport.strip() else "stdio",
                     "available": server.get("available") is True and bool(tools),
                     "unavailable_reason": server.get("unavailable_reason") if not tools else None,

@@ -36,7 +36,6 @@ class McpCapabilityTests(unittest.TestCase):
                 "mcp_servers": [
                     {
                         "mcp_server_id": "mcp_server:elyth",
-                        "label": "ELYTH",
                         "transport": "stdio",
                         "tools": [
                             {
@@ -71,7 +70,6 @@ class McpCapabilityTests(unittest.TestCase):
                 "mcp_servers": [
                     {
                         "mcp_server_id": "mcp_server:elyth",
-                        "label": "ELYTH",
                         "transport": "stdio",
                         "tools": [{"name": "get_information", "description": "", "inputSchema": {"type": "object"}}],
                     }
@@ -102,7 +100,6 @@ class McpCapabilityTests(unittest.TestCase):
                     "mcp_servers": [
                         {
                             "mcp_server_id": "mcp_server:elyth",
-                            "label": "ELYTH",
                             "transport": "stdio",
                             "tools": [{"name": "get_information"}],
                         }
@@ -122,7 +119,6 @@ class McpCapabilityTests(unittest.TestCase):
             "mcp_servers": [
                 {
                     "mcp_server_id": "mcp_server:elyth",
-                    "label": "ELYTH",
                     "transport": "stdio",
                     "tools": [{"name": "get_information", "description": "", "inputSchema": {"type": "object"}}],
                 }

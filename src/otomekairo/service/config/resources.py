@@ -1058,14 +1058,13 @@ class ServiceConfigResourcesMixin:
             "connector_kind": definition.get("connector_kind", MCP_DEFAULT_CONNECTOR_KIND),
             "client_id": definition.get("client_id", MCP_DEFAULT_CLIENT_ID),
             "enabled": definition.get("enabled"),
-            "label": definition.get("label"),
             "transport": definition.get("transport", "stdio"),
             "command": definition.get("command"),
             "args": definition.get("args", []),
             "cwd": definition.get("cwd"),
             "env": definition.get("env", {}),
         }
-        for field_name in ("mcp_server_id", "connector_kind", "client_id", "label", "transport", "command", "cwd"):
+        for field_name in ("mcp_server_id", "connector_kind", "client_id", "transport", "command", "cwd"):
             value = normalized.get(field_name)
             if isinstance(value, str):
                 normalized[field_name] = value.strip()
@@ -1092,7 +1091,6 @@ class ServiceConfigResourcesMixin:
             "connector_kind",
             "client_id",
             "enabled",
-            "label",
             "transport",
             "command",
             "args",
@@ -1113,7 +1111,6 @@ class ServiceConfigResourcesMixin:
         enabled = definition.get("enabled")
         if not isinstance(enabled, bool):
             raise ServiceError(400, "invalid_mcp_server_field", "mcp_server.enabled must be a boolean.")
-        self._validate_mcp_required_text_field(definition, "label", "mcp_server.label")
         transport = definition.get("transport")
         if transport not in MCP_TRANSPORTS:
             raise ServiceError(400, "unsupported_mcp_transport", "mcp_server.transport is not supported.")

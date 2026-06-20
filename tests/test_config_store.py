@@ -35,7 +35,6 @@ class ConfigStoreTests(unittest.TestCase):
                     "connector_kind": "mcp_client",
                     "client_id": "mcp-client-connector-main",
                     "enabled": True,
-                    "label": "ELYTH",
                     "transport": "stdio",
                     "command": "npx",
                     "args": ["-y", "elyth-mcp-server@latest"],

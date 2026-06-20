@@ -39,7 +39,6 @@ class McpConfigApiTests(unittest.TestCase):
             "mcp_server:elyth",
             {
                 "enabled": True,
-                "label": "ELYTH",
                 "command": "npx",
                 "args": ["-y", "elyth-mcp-server@latest"],
                 "env": {
@@ -69,7 +68,6 @@ class McpConfigApiTests(unittest.TestCase):
                         "connector_kind": "mcp_client",
                         "client_id": "mcp-client-connector-main",
                         "enabled": True,
-                        "label": "ELYTH",
                         "transport": "stdio",
                         "command": "npx",
                         "args": ["-y", "elyth-mcp-server@latest"],
@@ -93,7 +91,6 @@ class McpConfigApiTests(unittest.TestCase):
                         "mcp_server_id": "mcp_server:elyth",
                         "client_id": "mcp-client-connector-main",
                         "enabled": True,
-                        "label": "ELYTH",
                         "command": "npx",
                         "args": ["-y", "elyth-mcp-server@latest"],
                         "env": {"ELYTH_API_KEY": "secret"},
@@ -102,7 +99,6 @@ class McpConfigApiTests(unittest.TestCase):
                         "mcp_server_id": "mcp_server:disabled",
                         "client_id": "mcp-client-connector-main",
                         "enabled": False,
-                        "label": "disabled",
                         "command": "npx",
                         "args": ["-y", "disabled"],
                         "env": {},
@@ -111,7 +107,6 @@ class McpConfigApiTests(unittest.TestCase):
                         "mcp_server_id": "mcp_server:other",
                         "client_id": "mcp-client-connector-other",
                         "enabled": True,
-                        "label": "other",
                         "command": "npx",
                         "args": ["-y", "other"],
                         "env": {},
@@ -136,7 +131,6 @@ class McpConfigApiTests(unittest.TestCase):
                 "mcp_server:elyth",
                 {
                     "enabled": True,
-                    "label": "ELYTH",
                     "transport": "sse",
                     "command": "npx",
                 },

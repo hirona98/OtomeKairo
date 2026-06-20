@@ -27,7 +27,6 @@ class ServerConfig:
 @dataclass(frozen=True)
 class McpServerConfig:
     mcp_server_id: str
-    label: str
     command: str
     args: list[str]
     env: dict[str, str]
@@ -104,7 +103,6 @@ def _mcp_server_configs(value: Any) -> list[McpServerConfig]:
         servers.append(
             McpServerConfig(
                 mcp_server_id=server_id,
-                label=_string_value(server, "label", default=server_id),
                 command=_required_string(server, "command", "mcp_servers[].command"),
                 args=_string_list(server.get("args", []), "mcp_servers[].args"),
                 env=env_values,

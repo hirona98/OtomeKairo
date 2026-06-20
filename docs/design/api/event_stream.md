@@ -37,7 +37,6 @@ client -> server:
   "mcp_servers": [
     {
       "mcp_server_id": "mcp_server:elyth",
-      "label": "ELYTH",
       "transport": "stdio",
       "tools": [
         {
