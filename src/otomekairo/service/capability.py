@@ -971,7 +971,7 @@ class ServiceCapabilityMixin:
         with self._runtime_state_lock:
             entry = self._capability_runtime_state_entry(capability_id)
             entry["last_failure_at"] = current_time
-            entry["last_failure_summary"] = self._clamp(failure_summary, limit=160)
+            entry["last_failure_summary"] = failure_summary.strip()
             if unavailable_reason and unavailable_seconds > 0:
                 entry["unavailable_reason"] = unavailable_reason
                 entry["unavailable_until"] = (
@@ -988,7 +988,7 @@ class ServiceCapabilityMixin:
         with self._runtime_state_lock:
             entry = self._capability_runtime_state_entry(capability_id)
             entry["last_result_at"] = current_time
-            entry["last_result_summary"] = self._clamp(result_summary, limit=160)
+            entry["last_result_summary"] = result_summary.strip()
             entry["unavailable_reason"] = None
             entry["unavailable_until"] = None
 
@@ -1064,7 +1064,7 @@ class ServiceCapabilityMixin:
     def _capability_transition_detail_summary(self, detail_summary: Any) -> str | None:
         if not isinstance(detail_summary, str) or not detail_summary.strip():
             return None
-        return self._clamp(detail_summary.strip(), limit=160)
+        return detail_summary.strip()
 
     def _capability_dispatch_transition_reason_summary(self, *, reason_code: str) -> str:
         if reason_code == "dispatch_failed":

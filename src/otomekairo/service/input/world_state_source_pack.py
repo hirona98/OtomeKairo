@@ -295,7 +295,7 @@ class ServiceInputWorldStateSourcePackMixin:
     ) -> WorldStateSourcePack:
         payload = WorldStateSourcePack(
             trigger_kind=trigger_kind,
-            current_input_summary=self._clamp(input_text.strip(), limit=200) or "",
+            current_input_summary=input_text.strip(),
             source_kind=source_kind,
             source_ref=source_ref,
             time_context=llm_local_time_text(started_at).replace("\n", " / "),
@@ -404,14 +404,10 @@ class ServiceInputWorldStateSourcePackMixin:
             capability_id = observation_summary.get("capability_id")
             if isinstance(capability_id, str) and capability_id.strip():
                 capability_id_text = capability_id.strip()
-            for source_key, limit in (
-                ("vision_source_id", 96),
-                ("source_kind", 32),
-                ("source_label", 80),
-            ):
+            for source_key in ("vision_source_id", "source_kind", "source_label"):
                 value = observation_summary.get(source_key)
                 if isinstance(value, str) and value.strip():
-                    normalized_value = self._clamp(value.strip(), limit=limit)
+                    normalized_value = value.strip()
                     if source_key == "vision_source_id":
                         vision_source_id = normalized_value
                     elif source_key == "source_kind":
@@ -562,7 +558,7 @@ class ServiceInputWorldStateSourcePackMixin:
         source = None
         value = client_context.get("source")
         if isinstance(value, str) and value.strip():
-            source = self._clamp(value.strip(), limit=48)
+            source = value.strip()
         return WorldStateClientContext(source=source)
 
     def _build_world_state_social_context_context(

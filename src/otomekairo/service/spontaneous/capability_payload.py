@@ -186,13 +186,13 @@ class ServiceSpontaneousCapabilityPayloadMixin:
                     "invalid_capability_result",
                     "schedule.status result.schedule_slots[].summary_text must be a non-empty string.",
                 )
-            normalized_slot_key = self._clamp(slot_key.strip(), limit=160)
+            normalized_slot_key = slot_key.strip()
             if normalized_slot_key in seen_slot_keys:
                 continue
             seen_slot_keys.add(normalized_slot_key)
             slot_payload: dict[str, Any] = {
                 "slot_key": normalized_slot_key,
-                "summary_text": self._clamp(summary_text.strip(), limit=160),
+                "summary_text": summary_text.strip(),
             }
             for key in ("not_before", "expires_at"):
                 value = item.get(key)
@@ -254,4 +254,4 @@ class ServiceSpontaneousCapabilityPayloadMixin:
         status_text = capability_response.get("status_text")
         if not isinstance(status_text, str) or not status_text.strip():
             return None
-        return self._clamp(status_text.strip(), limit=160)
+        return status_text.strip()

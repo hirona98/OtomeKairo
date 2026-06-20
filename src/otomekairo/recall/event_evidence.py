@@ -700,19 +700,19 @@ class RecallEventEvidenceMixin:
         }
 
     def _event_evidence_source_summary(self, item: dict[str, Any]) -> str | None:
-        return self._compact_text(item.get("summary_text"), limit=96)
+        return self._optional_text(item.get("summary_text"))
 
     def _event_evidence_source_event(self, record: dict[str, Any]) -> dict[str, Any]:
         kind = self._event_evidence_kind(record)
         return {
             "kind": kind,
-            "role": self._compact_text(record.get("role"), limit=32),
-            "created_at": self._compact_text(record.get("created_at"), limit=40),
-            "text": self._compact_text(record.get("text"), limit=120),
-            "result_kind": self._compact_text(record.get("result_kind"), limit=32),
-            "external_result_kind": self._compact_text(record.get("external_result_kind"), limit=32),
-            "reason_code": self._compact_text(record.get("reason_code"), limit=48),
-            "reason_summary": self._compact_text(record.get("reason_summary"), limit=120),
+            "role": self._optional_text(record.get("role")),
+            "created_at": self._optional_text(record.get("created_at")),
+            "text": self._optional_text(record.get("text")),
+            "result_kind": self._optional_text(record.get("result_kind")),
+            "external_result_kind": self._optional_text(record.get("external_result_kind")),
+            "reason_code": self._optional_text(record.get("reason_code")),
+            "reason_summary": self._optional_text(record.get("reason_summary")),
             "pending_intent_summary": self._compact_pending_intent_summary(record.get("pending_intent_summary")),
         }
 
@@ -721,12 +721,8 @@ class RecallEventEvidenceMixin:
             return None
 
         payload: dict[str, str] = {}
-        for key_name, limit in (
-            ("intent_kind", 48),
-            ("intent_summary", 120),
-            ("reason_summary", 120),
-        ):
-            normalized = self._compact_text(value.get(key_name), limit=limit)
+        for key_name in ("intent_kind", "intent_summary", "reason_summary"):
+            normalized = self._optional_text(value.get(key_name))
             if normalized is not None:
                 payload[key_name] = normalized
         if not payload:
@@ -760,15 +756,11 @@ class RecallEventEvidenceMixin:
     def _event_evidence_kind(self, record: dict[str, Any]) -> str:
         return str(record.get("kind", "event")).strip() or "event"
 
-    def _compact_text(self, value: Any, *, limit: int) -> str | None:
-        # 正規化
+    def _optional_text(self, value: Any) -> str | None:
+        # LLM 根拠として渡す文字列は、長さでは切らない。
         if not isinstance(value, str):
             return None
-        normalized = " ".join(value.split()).strip()
+        normalized = value.strip()
         if not normalized:
             return None
-
-        # 結果
-        if len(normalized) <= limit:
-            return normalized
-        return normalized[: limit - 1].rstrip() + "…"
+        return normalized

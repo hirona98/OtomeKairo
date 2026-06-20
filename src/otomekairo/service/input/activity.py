@@ -134,7 +134,7 @@ class ServiceInputActivityMixin:
             "persona_context": persona_context.to_prompt_payload(),
             "time_context": self._build_time_context(current_time=started_at),
             "current_input": current_input,
-            "current_input_summary": self._clamp(input_text.strip(), limit=200) or "",
+            "current_input_summary": input_text.strip(),
             "recent_turns": recent_turns[-4:],
         }
         compact_client_context = self._activity_client_context(client_context)
@@ -293,15 +293,15 @@ class ServiceInputActivityMixin:
         return {
             "activity_id": activity_id,
             "memory_set_id": memory_set_id,
-            "label": self._clamp(str(candidate["label"]).strip(), limit=120),
+            "label": str(candidate["label"]).strip(),
             "actor": str(candidate["actor"]).strip(),
-            "target": self._clamp(str(candidate.get("target", "")).strip(), limit=120),
+            "target": str(candidate.get("target", "")).strip(),
             "status": "active",
             "confidence": self._activity_score_from_hint(str(candidate["confidence_hint"])),
             "salience": self._activity_score_from_hint(str(candidate["salience_hint"])),
             "source_kinds": self._activity_source_kinds(source_pack),
             "source_refs": [cycle_id] if isinstance(cycle_id, str) and cycle_id.strip() else [],
-            "reason_summary": self._clamp(str(candidate["reason_summary"]).strip(), limit=180),
+            "reason_summary": str(candidate["reason_summary"]).strip(),
             "started_at": started_source,
             "updated_at": started_at,
             "expires_at": (self._parse_iso(started_at) + timedelta(seconds=ttl_seconds)).isoformat(),
@@ -368,7 +368,7 @@ class ServiceInputActivityMixin:
         for key in ("label", "target"):
             value = activity_state.get(key)
             if isinstance(value, str) and value.strip():
-                payload[key] = self._clamp(value.strip(), limit=120)
+                payload[key] = value.strip()
         actor = activity_state.get("actor")
         if isinstance(actor, str) and actor.strip():
             payload["actor"] = actor.strip()
@@ -381,7 +381,7 @@ class ServiceInputActivityMixin:
             payload["age_label"] = self._activity_age_label(updated_at, current_time=current_time)
         reason_summary = activity_state.get("reason_summary")
         if isinstance(reason_summary, str) and reason_summary.strip():
-            payload["reason_summary"] = self._clamp(reason_summary.strip(), limit=160)
+            payload["reason_summary"] = reason_summary.strip()
         return payload
 
     def _activity_previous_summary(
@@ -406,8 +406,7 @@ class ServiceInputActivityMixin:
         for key in ("label", "actor", "target", "reason_summary", "ended_age_label"):
             value = activity_state.get(key)
             if isinstance(value, str) and value.strip():
-                limit = 160 if key == "reason_summary" else 120
-                payload[key] = self._clamp(value.strip(), limit=limit)
+                payload[key] = value.strip()
         for key in ("confidence", "salience"):
             value = activity_state.get(key)
             if isinstance(value, (int, float)):

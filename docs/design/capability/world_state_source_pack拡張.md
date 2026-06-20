@@ -2,11 +2,13 @@
 
 ## 目的
 
-`world_state` 第一段では、視覚前景と短い current summary を同じ source pack に入れていた。
-この拡張では、`vision.capture` の視覚補助要約と、対人文脈、周囲環境、場所、外部サービス、身体、機器、予定の短い current summary を state-type 別 context として同じ source pack に入れ、LLM が `world_state` 候補を選びやすくする。
+`world_state` 第一段では、視覚前景と current summary を同じ source pack に入れていた。
+この拡張では、`vision.capture` の視覚補助要約と、対人文脈、周囲環境、場所、外部サービス、身体、機器、予定の current summary を state-type 別 context として同じ source pack に入れ、LLM が `world_state` 候補を選びやすくする。
 `vision.capture` は `source_kind` に関係なく `visual_context` の候補にする。
 
-ここで扱う正本状態は **短い structured summary だけ** である。
+ここで扱う正本状態は **structured summary** である。
+短いことが必要な `world_state.summary_text` は、LLM の出力契約で 1 文程度として生成させる。
+server は source pack に入れる summary 文字列を文字数で切り詰めない。
 詳細な視覚説明は `visual_observation_record` の正本に置き、source pack では `visual_observation_id` と補助根拠として参照する。
 capability 自体の安定契約は [capability_manifest.md](capability_manifest.md) と [../api/README.md](../api/README.md) を正本にし、この文書は source pack に入れる summary 境界だけを扱う。
 raw payload 保存、長い OCR、配送先 client の露出は入れない。
@@ -20,19 +22,19 @@ raw payload 保存、長い OCR、配送先 client の露出は入れない。
 - `client_context.environment_summary`
 - `client_context.location_summary`
 - `client_context.external_service_summary`
-- `external.status` result から得た短い `service / status_text`
-- `schedule.status` result から得た短い `schedule_summary / schedule_slots`
-- `device.status` result から得た短い `device_state_summary`
-- `body.status` result から得た短い `body_state_summary`
-- `environment.status` result から得た短い `environment_summary`
-- `location.status` result から得た短い `location_summary`
-- `social.status` result から得た短い `social_context_summary`
-- capability result の `client_context` から得た短い `social_context_summary`
-- capability result の `client_context` から得た短い `body_state_summary`
-- capability result の `client_context` から得た短い `device_state_summary`
-- capability result の `client_context` から得た短い `schedule_summary`
-- capability result の `client_context` から得た短い `environment_summary`
-- capability result の `client_context` から得た短い `location_summary`
+- `external.status` result から得た `service / status_text`
+- `schedule.status` result から得た `schedule_summary / schedule_slots`
+- `device.status` result から得た `device_state_summary`
+- `body.status` result から得た `body_state_summary`
+- `environment.status` result から得た `environment_summary`
+- `location.status` result から得た `location_summary`
+- `social.status` result から得た `social_context_summary`
+- capability result の `client_context` から得た `social_context_summary`
+- capability result の `client_context` から得た `body_state_summary`
+- capability result の `client_context` から得た `device_state_summary`
+- capability result の `client_context` から得た `schedule_summary`
+- capability result の `client_context` から得た `environment_summary`
+- capability result の `client_context` から得た `location_summary`
 - wake で再評価対象として選ばれた pending-intent の
   `intent_kind / intent_summary / reason_summary / not_before / expires_at`
 
@@ -135,10 +137,10 @@ source pack では、標準の `client_context` と state-type 別の structured
 視覚前景は `vision.capture` result の視覚説明を根拠に `visual_context` へ載せ、`vision_source_id` で観測 source を識別する。
 `vision.capture` result follow-up の `foreground_world_state` は、result の `vision_source_id` と一致する `visual_context` だけを decision / speech に渡す。
 一致しない `visual_context` は保存済み state と inspection 用 trace に残し、同じ follow-up の判断材料にしない。
-その他の短い current summary は dedicated context へ載せる。
+その他の current summary は dedicated context へ載せる。
 `current_input_summary` は入力意図と、人が明示した状態値だけを補助する。
 確認依頼だけの入力から現在場所、身体状態、端末状態、周囲環境、対人文脈を推測して state 候補を作らない。
-`social_context_context / environment_context / location_context` は、`client_context` から取った短い summary をそのまま dedicated context へ写す。
+`social_context_context / environment_context / location_context` は、`client_context` から取った summary をそのまま dedicated context へ写す。
 `social.status` result は、`social_context_context.summary_text / social_context_summary` へ投影する。
 `external.status` のような capability result は、`external_service_context.summary_text` に加えて `service / status_text` を載せる。
 `schedule.status` result は、`schedule_context.summary_text / schedule_summary / schedule_slots` へ投影する。
@@ -155,7 +157,7 @@ real schedule source が複数あるときは、`schedule_context.schedule_slots
 
 ## コード責務
 
-- capability result の `client_context` から短い summary を抜き出す
+- capability result の `client_context` から summary を抜き出す
 - `vision.capture` result の visual summary、`visual_observation_id`、`vision_source_id / source_kind / source_label` を `visual_context` へ投影する
 - `vision.capture` result follow-up では異なる `vision_source_id` の `visual_context` を判断入力から除外する
 - `client_context.social_context_summary / environment_summary / location_summary` を対応する dedicated context へ投影する
@@ -183,4 +185,4 @@ real schedule source が複数あるときは、`schedule_context.schedule_slots
 - 身体や機器の raw telemetry 保存
 - pending-intent queue 全件を source pack に載せること
 - `world_state` に capability manifest や binding を直接複写すること
-- 長い summary や複数段の構造化 payload をそのまま LLM に渡すこと
+- raw response body、raw telemetry、長い OCR、複数段の外部 payload をそのまま LLM に渡すこと

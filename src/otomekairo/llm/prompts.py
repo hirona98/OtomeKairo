@@ -1807,39 +1807,31 @@ def _compact_speech_initiative_context(initiative_context: InitiativeContext | N
         return {}
     initiative_payload = initiative_context.to_prompt_payload()
     payload: dict[str, Any] = {}
-    for key, limit in (
-        ("trigger_kind", 40),
-        ("opportunity_summary", 160),
-        ("selected_candidate_family", 80),
-        ("intervention_risk_summary", 160),
+    for key in (
+        "trigger_kind",
+        "opportunity_summary",
+        "selected_candidate_family",
+        "intervention_risk_summary",
     ):
         value = initiative_payload.get(key)
         if isinstance(value, str) and value.strip():
-            payload[key] = _compact_prompt_text(value, limit=limit)
+            payload[key] = value.strip()
     initiative_entry_summary = initiative_payload.get("initiative_entry_summary")
     if isinstance(initiative_entry_summary, dict):
         compact_entry: dict[str, Any] = {}
-        for key, limit in (
-            ("entry_kind", 40),
-            ("entry_basis", 48),
-            ("reason_summary", 180),
-        ):
+        for key in ("entry_kind", "entry_basis", "reason_summary"):
             value = initiative_entry_summary.get(key)
             if isinstance(value, str) and value.strip():
-                compact_entry[key] = _compact_prompt_text(value, limit=limit)
+                compact_entry[key] = value.strip()
         if compact_entry:
             payload["initiative_entry_summary"] = compact_entry
     foreground_signal_summary = initiative_payload.get("foreground_signal_summary")
     if isinstance(foreground_signal_summary, dict):
         compact_foreground: dict[str, Any] = {}
-        for key, limit in (
-            ("foreground_thinness", 40),
-            ("reason_summary", 160),
-            ("active_app", 80),
-        ):
+        for key in ("foreground_thinness", "reason_summary", "active_app"):
             value = foreground_signal_summary.get(key)
             if isinstance(value, str) and value.strip():
-                compact_foreground[key] = _compact_prompt_text(value, limit=limit)
+                compact_foreground[key] = value.strip()
         world_state_count = foreground_signal_summary.get("world_state_count")
         if isinstance(world_state_count, int):
             compact_foreground["world_state_count"] = world_state_count
@@ -1850,17 +1842,17 @@ def _compact_speech_initiative_context(initiative_context: InitiativeContext | N
                 if not isinstance(observation, dict):
                     continue
                 compact_observation: dict[str, Any] = {}
-                for key, limit in (
-                    ("change_state", 40),
-                    ("source_kind", 32),
-                    ("source_label", 80),
-                    ("source_owner", 32),
-                    ("summary_text", 160),
-                    ("reason_summary", 160),
+                for key in (
+                    "change_state",
+                    "source_kind",
+                    "source_label",
+                    "source_owner",
+                    "summary_text",
+                    "reason_summary",
                 ):
                     value = observation.get(key)
                     if isinstance(value, str) and value.strip():
-                        compact_observation[key] = _compact_prompt_text(value, limit=limit)
+                        compact_observation[key] = value.strip()
                 if compact_observation:
                     compact_visual_observations.append(compact_observation)
             if compact_visual_observations:
@@ -1868,14 +1860,6 @@ def _compact_speech_initiative_context(initiative_context: InitiativeContext | N
         if compact_foreground:
             payload["foreground_signal_summary"] = compact_foreground
     return payload
-
-
-def _compact_prompt_text(value: str, *, limit: int) -> str:
-    normalized = " ".join(value.split())
-    if len(normalized) <= limit:
-        return normalized
-    return normalized[: limit - 1].rstrip() + "…"
-
 
 def _build_internal_context_payload(
     time_context: dict[str, Any],

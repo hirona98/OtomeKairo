@@ -132,6 +132,7 @@ visual observation では、process-local 変化判定用に `last_observation_s
 digest 詳細を inspection で見る API は、認証必須の `GET /api/inspection/visual-digests` とする。
 query は `limit` と `local_date` だけを受け付ける。
 response は `daily_visual_digests` の compact 表示に限り、`group_summaries[].summary_text` は短縮した値だけを返す。
+inspection の短縮表示は表示専用であり、LLM 入力、検索 index、永続正本には使わない。
 
 ### `GET /api/inspection/capabilities`
 

@@ -1176,9 +1176,8 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
                 representatives = bucket["representative_links"]
                 if len(representatives) >= MEMORY_LINK_RECALL_HINT_LIMIT:
                     continue
-                related_summary = self._short_relation_text(
+                related_summary = self._relation_text(
                     related_unit.get("summary_text") if isinstance(related_unit, dict) else None,
-                    limit=72,
                 )
                 if related_summary is None:
                     continue
@@ -1369,6 +1368,13 @@ class RecallBuilder(RecallSelectionMixin, RecallAssociationMixin, RecallEventEvi
         if len(normalized) <= limit:
             return normalized
         return normalized[: limit - 1].rstrip() + "…"
+
+    def _relation_text(self, value: Any) -> str | None:
+        # RecallPack 選別に渡す関連記憶は、長さでは切らない。
+        if not isinstance(value, str):
+            return None
+        normalized = " ".join(value.strip().split())
+        return normalized or None
 
     def _record_id(self, item: dict[str, Any]) -> str:
         # 記憶単位

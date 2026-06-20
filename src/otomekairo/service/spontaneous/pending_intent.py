@@ -295,7 +295,7 @@ class ServiceSpontaneousPendingIntentMixin:
             compact_turns.append(
                 {
                     "role": role.strip(),
-                    "text": self._clamp(text.strip(), limit=120),
+                    "text": text.strip(),
                 }
             )
         return compact_turns
@@ -328,8 +328,8 @@ class ServiceSpontaneousPendingIntentMixin:
         return {
             "candidate_ref": candidate_ref,
             "intent_kind": intent_kind.strip(),
-            "intent_summary": self._clamp(intent_summary.strip(), limit=120),
-            "reason_summary": self._clamp(reason_summary.strip(), limit=160),
+            "intent_summary": intent_summary.strip(),
+            "reason_summary": reason_summary.strip(),
             "minutes_since_created": self._pending_intent_selection_minutes_since(
                 current_time=current_time,
                 timestamp=created_at,

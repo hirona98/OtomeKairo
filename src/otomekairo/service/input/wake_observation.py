@@ -382,7 +382,7 @@ class ServiceInputWakeObservationMixin:
         has_error = isinstance(error, str) and error.strip()
         payload["status"] = "failed" if has_error else "succeeded"
         if has_error:
-            payload["reason_summary"] = self._clamp(error.strip(), limit=160)
+            payload["reason_summary"] = error.strip()
         request_id = capability_response.get("request_id")
         if isinstance(request_id, str) and request_id.strip():
             payload["request_id"] = request_id.strip()
@@ -397,7 +397,7 @@ class ServiceInputWakeObservationMixin:
         ):
             value = observation_summary.get(key)
             if isinstance(value, str) and value.strip():
-                payload[key] = self._clamp(value.strip(), limit=160)
+                payload[key] = value.strip()
         image_count = observation_summary.get("image_count")
         if isinstance(image_count, int):
             payload["image_count"] = image_count
@@ -414,7 +414,7 @@ class ServiceInputWakeObservationMixin:
     ) -> dict[str, Any]:
         payload = self._wake_policy_observation_base_summary(observation)
         payload["status"] = "failed"
-        payload["reason_summary"] = self._clamp(reason_summary, limit=160)
+        payload["reason_summary"] = reason_summary.strip()
         if isinstance(capability_request_summary, dict):
             payload["capability_request_summary"] = capability_request_summary
         return payload
@@ -453,7 +453,7 @@ class ServiceInputWakeObservationMixin:
                 continue
             reason = self._client_context_text(summary.get("reason_summary"), limit=120) or "取得失敗"
             parts.append(f"{label}: failed {reason}")
-        return self._clamp(" / ".join(parts), limit=360) or "定期観測結果は空。"
+        return " / ".join(parts) or "定期観測結果は空。"
 
     def _record_wake_policy_observation_runtime_state(
         self,
@@ -642,7 +642,7 @@ class ServiceInputWakeObservationMixin:
         if not parts:
             return None
         normalized = " | ".join(" ".join(part.lower().split()) for part in parts)
-        return self._clamp(normalized, limit=360)
+        return normalized
 
     def _visual_observation_signatures_similar(
         self,

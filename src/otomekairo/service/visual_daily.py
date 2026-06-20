@@ -239,7 +239,7 @@ class ServiceVisualDailyMixin:
             "first_observed_at": first_record["observed_at"],
             "last_observed_at": last_record["observed_at"],
             "representative_visual_observation_id": first_record["visual_observation_id"],
-            "summary_text": self._clamp(first_record["detailed_summary_text"], limit=260),
+            "summary_text": first_record["detailed_summary_text"].strip(),
             "retention_status": "compressed" if len(group_records) >= 3 else "active",
         }
 
@@ -294,7 +294,7 @@ class ServiceVisualDailyMixin:
 
     def _visual_daily_similarity_text(self, value: str) -> str:
         # 比較用に空白だけ潰す。
-        return " ".join(value.strip().split())[:1200]
+        return " ".join(value.strip().split())
 
     def _visual_daily_digest_id(self, *, memory_set_id: str, local_date: str) -> str:
         # 安定ID

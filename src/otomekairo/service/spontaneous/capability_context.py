@@ -115,7 +115,7 @@ class ServiceSpontaneousCapabilityContextMixin:
                     normalized = value.strip()
                     if not normalized:
                         continue
-                    summary[field] = self._clamp(normalized, limit=160)
+                    summary[field] = normalized
                 elif isinstance(value, (int, float, bool)):
                     summary[field] = value
                 elif field == "schedule_slots" and isinstance(value, list):
@@ -408,7 +408,7 @@ class ServiceSpontaneousCapabilityContextMixin:
             if isinstance(observation_summary, dict):
                 visual_summary_text = observation_summary.get("visual_summary_text")
             if isinstance(visual_summary_text, str) and visual_summary_text.strip():
-                return self._clamp(f"視覚観測では {visual_summary_text.strip()}", limit=160)
+                return f"視覚観測では {visual_summary_text.strip()}"
             image_count = self._capability_result_payload_image_count(result_payload or {})
             if image_count is not None and image_count <= 0:
                 return "視覚観測は空で、追加の手掛かりを得られなかった。"
@@ -420,10 +420,7 @@ class ServiceSpontaneousCapabilityContextMixin:
             operation = observation_summary.get("operation")
             amount = observation_summary.get("amount")
             if isinstance(status, str) and isinstance(operation, str) and isinstance(amount, str):
-                return self._clamp(
-                    f"カメラ制御結果: status={status.strip()} operation={operation.strip()} amount={amount.strip()}",
-                    limit=160,
-                )
+                return f"カメラ制御結果: status={status.strip()} operation={operation.strip()} amount={amount.strip()}"
             return None
         if hook_name == "external_status":
             status_text = None
@@ -433,8 +430,8 @@ class ServiceSpontaneousCapabilityContextMixin:
                 service = observation_summary.get("service")
             if isinstance(status_text, str) and status_text.strip():
                 if isinstance(service, str) and service.strip():
-                    return self._clamp(f"{service.strip()} の状態要約: {status_text.strip()}", limit=160)
-                return self._clamp(status_text.strip(), limit=160)
+                    return f"{service.strip()} の状態要約: {status_text.strip()}"
+                return status_text.strip()
             return None
         if hook_name == "schedule_status":
             schedule_summary = None
@@ -445,7 +442,7 @@ class ServiceSpontaneousCapabilityContextMixin:
                 if isinstance(schedule_slots, list):
                     slot_count = len(schedule_slots)
             if isinstance(schedule_summary, str) and schedule_summary.strip():
-                return self._clamp(f"予定要約: {schedule_summary.strip()}", limit=160)
+                return f"予定要約: {schedule_summary.strip()}"
             if isinstance(slot_count, int) and slot_count > 0:
                 return f"近い予定が {slot_count} 件ある。"
             return None
@@ -454,35 +451,35 @@ class ServiceSpontaneousCapabilityContextMixin:
             if isinstance(observation_summary, dict):
                 device_state_summary = observation_summary.get("device_state_summary")
             if isinstance(device_state_summary, str) and device_state_summary.strip():
-                return self._clamp(f"端末状態: {device_state_summary.strip()}", limit=160)
+                return f"端末状態: {device_state_summary.strip()}"
             return None
         if hook_name == "body_status":
             body_state_summary = None
             if isinstance(observation_summary, dict):
                 body_state_summary = observation_summary.get("body_state_summary")
             if isinstance(body_state_summary, str) and body_state_summary.strip():
-                return self._clamp(f"身体状態: {body_state_summary.strip()}", limit=160)
+                return f"身体状態: {body_state_summary.strip()}"
             return None
         if hook_name == "environment_status":
             environment_summary = None
             if isinstance(observation_summary, dict):
                 environment_summary = observation_summary.get("environment_summary")
             if isinstance(environment_summary, str) and environment_summary.strip():
-                return self._clamp(f"環境状態: {environment_summary.strip()}", limit=160)
+                return f"環境状態: {environment_summary.strip()}"
             return None
         if hook_name == "location_status":
             location_summary = None
             if isinstance(observation_summary, dict):
                 location_summary = observation_summary.get("location_summary")
             if isinstance(location_summary, str) and location_summary.strip():
-                return self._clamp(f"場所状態: {location_summary.strip()}", limit=160)
+                return f"場所状態: {location_summary.strip()}"
             return None
         if hook_name == "social_status":
             social_context_summary = None
             if isinstance(observation_summary, dict):
                 social_context_summary = observation_summary.get("social_context_summary")
             if isinstance(social_context_summary, str) and social_context_summary.strip():
-                return self._clamp(f"対人文脈: {social_context_summary.strip()}", limit=160)
+                return f"対人文脈: {social_context_summary.strip()}"
             return None
         return None
 
@@ -531,7 +528,7 @@ class ServiceSpontaneousCapabilityContextMixin:
             parts.append(f"source kind は {source_kind}。")
         error = capability_response.get("error")
         if isinstance(error, str) and error.strip():
-            parts.append(f"結果は error だった。 error={self._clamp(error, limit=120)}")
+            parts.append(f"結果は error だった。 error={error.strip()}")
         status_text = self._capability_result_status_text(capability_response)
         if status_text is not None:
             parts.append(f"結果要約は {status_text}")
@@ -641,7 +638,7 @@ class ServiceSpontaneousCapabilityContextMixin:
         observation_summary: dict[str, Any] | None = None,
         result_payload: dict[str, Any] | None = None,
     ) -> str | None:
-        decision_reason = self._clamp(str(decision.get("reason_summary") or "").strip(), limit=160)
+        decision_reason = str(decision.get("reason_summary") or "").strip()
         if decision_reason:
             return decision_reason
         hook_summary = self._capability_result_followup_hint_summary(
@@ -654,7 +651,7 @@ class ServiceSpontaneousCapabilityContextMixin:
         if isinstance(result_payload, dict):
             error = result_payload.get("error")
             if isinstance(error, str) and error.strip():
-                return self._clamp(error.strip(), limit=160)
+                return error.strip()
         return None
 
     def _apply_capability_runtime_state_followup(

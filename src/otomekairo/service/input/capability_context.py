@@ -225,7 +225,7 @@ class ServiceInputCapabilityContextMixin:
             compact_summary = {
                 "state_type": state_type.strip(),
                 "scope": summary.get("scope"),
-                "summary_text": self._clamp(summary_text.strip(), limit=120),
+                "summary_text": summary_text.strip(),
                 "age_label": summary.get("age_label"),
                 "confidence": summary.get("confidence"),
                 "salience": summary.get("salience"),

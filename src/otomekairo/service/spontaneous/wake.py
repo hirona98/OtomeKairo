@@ -652,10 +652,10 @@ class ServiceSpontaneousWakeMixin:
         return parts
 
     def _client_context_text(self, value: Any, *, limit: int) -> str | None:
-        # 型
+        # LLM 入力や保存用の正本文字列は、長さでは切らない。
         if not isinstance(value, str):
             return None
         stripped = value.strip()
         if not stripped:
             return None
-        return self._clamp(stripped, limit=limit)
+        return stripped

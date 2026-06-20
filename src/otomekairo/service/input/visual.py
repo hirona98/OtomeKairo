@@ -136,7 +136,7 @@ class ServiceInputVisualMixin:
                 observation_summary=observation_summary,
             ),
             "observation_summary": self._build_visual_observation_observation_summary(observation_summary),
-            "current_input_summary": self._clamp(input_text.strip(), limit=200) or "",
+            "current_input_summary": input_text.strip(),
         }
 
     def _visual_observation_input_kind(
@@ -178,7 +178,7 @@ class ServiceInputVisualMixin:
                 continue
             value = client_context.get(key)
             if isinstance(value, str) and value.strip():
-                payload[key] = self._clamp(value.strip(), limit=limit)
+                payload[key] = value.strip()
         return payload
 
     def _build_visual_observation_observation_summary(
@@ -271,7 +271,7 @@ class ServiceInputVisualMixin:
             "source": source,
             "image_input_kind": image_input_kind,
             "image_interpreted": observation_summary.get("image_interpreted") is True,
-            "visual_summary_text": self._clamp(summary_text, limit=1200),
+            "visual_summary_text": summary_text,
         }
         for key in ("image_count", "visual_confidence_hint", "vision_source_id", "source_kind", "source_label"):
             value = observation_summary.get(key)

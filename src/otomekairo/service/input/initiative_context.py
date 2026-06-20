@@ -341,12 +341,12 @@ class ServiceInputInitiativeContextMixin:
                 continue
             if not isinstance(text, str) or not text.strip():
                 continue
-            payload.append(
-                {
-                    "role": role.strip(),
-                    "text": self._clamp(text.strip(), limit=80) or "",
-                }
-            )
+                payload.append(
+                    {
+                        "role": role.strip(),
+                        "text": text.strip(),
+                    }
+                )
         return payload
 
     def _initiative_intervention_state(

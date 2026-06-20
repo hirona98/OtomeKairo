@@ -361,7 +361,7 @@ class ServiceInputWakePipelineMixin:
             compact_turns.append(
                 {
                     "role": role.strip(),
-                    "text": self._clamp(text.strip(), limit=120),
+                    "text": text.strip(),
                 }
             )
         return compact_turns

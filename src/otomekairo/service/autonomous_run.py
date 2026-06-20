@@ -328,7 +328,7 @@ class ServiceAutonomousRunMixin:
         existing = str(run.get("history_summary") or "").strip()
         entry = f"coordination={mode} reason={reason_summary}"
         merged = f"{existing} / {entry}" if existing else entry
-        return self._clamp(merged, limit=1200)
+        return merged
 
     def _start_autonomous_run_from_decision(
         self,
@@ -662,7 +662,7 @@ class ServiceAutonomousRunMixin:
                 run=run,
                 current_time=current_time,
                 status="cancelled",
-                reason_summary=f"autonomous_run step に失敗した: {self._clamp(str(exc))}",
+                reason_summary=f"autonomous_run step に失敗した: {str(exc).strip()}",
             )
             self.store.upsert_autonomous_run(autonomous_run=updated_run)
             if isinstance(source_request_record, dict):
@@ -955,7 +955,7 @@ class ServiceAutonomousRunMixin:
         if isinstance(run_update, dict):
             history_summary = run_update.get("history_summary")
             if isinstance(history_summary, str) and history_summary.strip():
-                return self._clamp(history_summary.strip(), limit=1200)
+                return history_summary.strip()
         action_kind = step.get("action", {}).get("kind") if isinstance(step.get("action"), dict) else None
         transition_kind = step.get("transition", {}).get("kind") if isinstance(step.get("transition"), dict) else None
         step_summary = run_update.get("current_step_summary") if isinstance(run_update, dict) else None
@@ -966,7 +966,7 @@ class ServiceAutonomousRunMixin:
             entry += f" step={step_summary.strip()}"
         existing = str(run.get("history_summary") or "").strip()
         merged = f"{existing} / {entry}" if existing else entry
-        return self._clamp(merged, limit=1200)
+        return merged
 
     def _autonomous_step_reason_summary(self, step: dict[str, Any], *, fallback: str) -> str:
         # transition は状態だけを持つため、説明は action と run_update から作る。
@@ -976,13 +976,13 @@ class ServiceAutonomousRunMixin:
             if isinstance(speech, dict):
                 reason_summary = speech.get("reason_summary")
                 if isinstance(reason_summary, str) and reason_summary.strip():
-                    return self._clamp(reason_summary.strip(), limit=180)
+                    return reason_summary.strip()
         run_update = step.get("run_update")
         if isinstance(run_update, dict):
             for key in ("current_step_summary", "history_summary"):
                 value = run_update.get(key)
                 if isinstance(value, str) and value.strip():
-                    return self._clamp(value.strip(), limit=180)
+                    return value.strip()
         return fallback
 
     def _terminal_autonomous_run(
@@ -1158,7 +1158,7 @@ class ServiceAutonomousRunMixin:
                 run=run,
                 current_time=self._now_iso(),
                 status="cancelled",
-                reason_summary=f"capability result 後の autonomous_run step に失敗した: {self._clamp(str(exc))}",
+                reason_summary=f"capability result 後の autonomous_run step に失敗した: {str(exc).strip()}",
             )
             self.store.upsert_autonomous_run(autonomous_run=interrupted)
             self._finish_capability_ongoing_action(
@@ -1195,7 +1195,7 @@ class ServiceAutonomousRunMixin:
             result_summary = f"{capability_id} の結果を受け取った。"
         existing = str(run.get("history_summary") or "").strip()
         merged = f"{existing} / result={result_summary}" if existing else f"result={result_summary}"
-        return self._clamp(merged, limit=1200)
+        return merged
 
     def _pause_autonomous_runs_for_user_interaction(
         self,

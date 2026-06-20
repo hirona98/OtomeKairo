@@ -478,12 +478,12 @@ class ServiceInputTracePersistMixin:
             ),
             "retention_status": "active",
             "index": {
-                "short_summary_text": self._clamp(detailed_summary_text.strip(), limit=240),
+                "short_summary_text": detailed_summary_text.strip(),
                 "searchable_terms": self._visual_observation_searchable_terms(
                     observation_summary=observation_summary,
                     client_context=client_context,
                 ),
-                "embedding_text": self._clamp(detailed_summary_text.strip(), limit=1200),
+                "embedding_text": detailed_summary_text.strip(),
             },
             "client_context_summary": {
                 "active_app": active_app.strip() if isinstance(active_app, str) and active_app.strip() else None,
@@ -516,7 +516,7 @@ class ServiceInputTracePersistMixin:
             for key in ("source_kind", "source_label", "vision_source_id", "active_app", "window_title"):
                 value = source.get(key)
                 if isinstance(value, str) and value.strip() and value.strip() not in terms:
-                    terms.append(self._clamp(value.strip(), limit=120))
+                    terms.append(value.strip())
         return terms
 
     def _exception_capability_dispatch_trace(

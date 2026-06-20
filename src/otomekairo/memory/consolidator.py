@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from copy import deepcopy
-import json
 import uuid
 from typing import Any
 
@@ -17,7 +16,6 @@ from otomekairo.store.file_store import FileStore
 
 # memory_interpretation に渡す events は補助文脈に留める。
 MEMORY_CONTEXT_EVENT_LIMIT = 12
-MEMORY_CONTEXT_EVENT_TOTAL_CHAR_LIMIT = 1600
 
 
 # 統合器
@@ -421,7 +419,6 @@ class MemoryConsolidator:
                     "original_count": len(compact_events),
                     "included_count": len(limited_events),
                     "event_limit": MEMORY_CONTEXT_EVENT_LIMIT,
-                    "total_char_limit": MEMORY_CONTEXT_EVENT_TOTAL_CHAR_LIMIT,
                 }
         return payload
 
@@ -454,19 +451,9 @@ class MemoryConsolidator:
         }
 
     def _limit_memory_context_events(self, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        selected = events
         if len(events) > MEMORY_CONTEXT_EVENT_LIMIT:
-            selected = [events[0], *events[-(MEMORY_CONTEXT_EVENT_LIMIT - 1) :]]
-
-        limited: list[dict[str, Any]] = []
-        total_chars = 0
-        for event in selected:
-            event_chars = len(json.dumps(event, ensure_ascii=False, sort_keys=True))
-            if limited and total_chars + event_chars > MEMORY_CONTEXT_EVENT_TOTAL_CHAR_LIMIT:
-                break
-            limited.append(event)
-            total_chars += event_chars
-        return limited
+            return [events[0], *events[-(MEMORY_CONTEXT_EVENT_LIMIT - 1) :]]
+        return events
 
     def _compact_event_for_memory_context(self, event: dict[str, Any]) -> dict[str, Any]:
         payload: dict[str, Any] = {}
@@ -486,20 +473,14 @@ class MemoryConsolidator:
                 normalized = value.strip()
                 if not normalized:
                     continue
-                payload[key] = self._compact_text(normalized)
+                payload[key] = normalized
                 continue
             if isinstance(value, (int, float, bool, list, dict)):
                 payload[key] = value
         text = event.get("text")
         if isinstance(text, str) and text.strip():
-            payload["text_summary"] = self._compact_text(text.strip())
+            payload["text_summary"] = text.strip()
         return payload
-
-    def _compact_text(self, value: str, limit: int = 200) -> str:
-        normalized = " ".join(value.split())
-        if len(normalized) <= limit:
-            return normalized
-        return normalized[: limit - 1].rstrip() + "…"
 
     def _build_episode(
         self,

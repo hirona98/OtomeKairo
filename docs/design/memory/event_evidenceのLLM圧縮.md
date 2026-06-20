@@ -148,7 +148,6 @@ LLM に渡すのは raw `events` 全文ではなく、selected event 1 件ぶん
 - `selection_basis.selection_mode` は `standard | precise` を使い、追加ロードした event だけ `precise` を入れる
 - `selection_basis.precise_reason_summary` は precise event のときだけ入れ、なぜ追加確認したかを短く伝える
 - `created_at` のような正本 timestamp は、生活文脈向けに整形した `created_time_label` として渡す
-- `event.text` は改行を畳み、必要なら長さを切り詰める
 - `decision` event では `reason_summary` と `result_kind` を優先して渡す
 - `speech` / `observation` event では `text` を主材料にし、不要なメタデータは増やさない
 - `event_id`、`cycle_id`、`memory_set_id` は LLM へ渡さない

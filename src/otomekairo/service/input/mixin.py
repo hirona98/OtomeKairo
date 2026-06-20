@@ -563,16 +563,19 @@ class ServiceInputMixin(
             return value.to_summary_payload()
         if not isinstance(value, dict):
             return {}
-        display_name = self._client_context_text(value.get("display_name"), limit=120)
+        display_name_value = value.get("display_name")
+        display_name = self._clamp(display_name_value, limit=120) if isinstance(display_name_value, str) else None
         initiative_baseline = value.get("initiative_baseline")
-        prompt_text = self._client_context_text(value.get("persona_prompt_text"), limit=240)
+        prompt_text_value = value.get("persona_prompt_text")
+        prompt_text = self._clamp(prompt_text_value, limit=240) if isinstance(prompt_text_value, str) else None
         payload: dict[str, Any] = {}
         if display_name is not None:
             payload["display_name"] = display_name
         if isinstance(initiative_baseline, dict):
             compact_baseline: dict[str, Any] = {}
             for key, limit in (("level", 16), ("summary_text", 160)):
-                text = self._client_context_text(initiative_baseline.get(key), limit=limit)
+                baseline_value = initiative_baseline.get(key)
+                text = self._clamp(baseline_value, limit=limit) if isinstance(baseline_value, str) else None
                 if text is not None:
                     compact_baseline[key] = text
             if compact_baseline:
