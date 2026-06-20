@@ -6,6 +6,153 @@ from otomekairo.service.app import OtomeKairoService
 
 
 class AutonomousRunRecoveryTests(unittest.TestCase):
+    def test_links_autonomous_run_to_commitment_created_by_source_cycle(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            state = service.store.read_state()
+            memory_set_id = state["selected_memory_set_id"]
+            run = self._commitment_run_record(memory_set_id=memory_set_id)
+            commitment = self._persist_commitment(
+                service=service,
+                memory_set_id=memory_set_id,
+                memory_unit_id="memory_unit:linked",
+            )
+            service.store.upsert_autonomous_run(autonomous_run=run)
+
+            service._link_autonomous_run_source_commitments(
+                state=state,
+                pipeline={
+                    "decision": {"kind": "autonomous_run"},
+                    "autonomous_run_summary": {"run_id": run["run_id"]},
+                },
+                memory_trace={
+                    "turn_consolidation_status": "succeeded",
+                    "updated_memory_unit_ids": [commitment["memory_unit_id"]],
+                },
+                current_time="2026-06-20T11:00:10+09:00",
+            )
+
+            updated = service.store.get_autonomous_run(run_id=run["run_id"])
+            self.assertEqual(updated["source_commitment_memory_unit_ids"], [commitment["memory_unit_id"]])
+
+    def test_terminal_run_resolves_commitment_after_late_source_link(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            state = service.store.read_state()
+            memory_set_id = state["selected_memory_set_id"]
+            commitment = self._persist_commitment(
+                service=service,
+                memory_set_id=memory_set_id,
+                memory_unit_id="memory_unit:late_link",
+            )
+            run = self._commitment_run_record(memory_set_id=memory_set_id, status="completed")
+            run["commitment_resolution"] = {
+                "result_status": "skipped",
+                "reason": "no_linked_commitments",
+                "terminal_status": "completed",
+            }
+            service.store.upsert_autonomous_run(autonomous_run=run)
+            service.memory.vector_indexer.sync = lambda **_: None
+
+            service._link_autonomous_run_source_commitments(
+                state=state,
+                pipeline={
+                    "decision": {"kind": "autonomous_run"},
+                    "autonomous_run_summary": {"run_id": run["run_id"]},
+                },
+                memory_trace={
+                    "turn_consolidation_status": "succeeded",
+                    "updated_memory_unit_ids": [commitment["memory_unit_id"]],
+                },
+                current_time="2026-06-20T11:03:00+09:00",
+            )
+
+            updated_commitment = service.store.list_memory_units_by_id(
+                memory_set_id=memory_set_id,
+                memory_unit_ids=[commitment["memory_unit_id"]],
+            )[0]
+            updated_run = service.store.get_autonomous_run(run_id=run["run_id"])
+            self.assertEqual(updated_commitment["commitment_state"], "done")
+            self.assertEqual(updated_run["commitment_resolution"]["result_status"], "updated")
+
+    def test_completed_autonomous_run_marks_linked_commitment_done(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            state = service.store.read_state()
+            memory_set_id = state["selected_memory_set_id"]
+            commitment = self._persist_commitment(
+                service=service,
+                memory_set_id=memory_set_id,
+                memory_unit_id="memory_unit:done",
+            )
+            run = self._commitment_run_record(
+                memory_set_id=memory_set_id,
+                status="completed",
+                source_commitment_memory_unit_ids=[commitment["memory_unit_id"]],
+            )
+            service.store.upsert_autonomous_run(autonomous_run=run)
+            service.memory.vector_indexer.sync = lambda **_: None
+
+            updated_run = service._finalize_autonomous_run_commitments(
+                state=state,
+                run=run,
+                terminal_status="completed",
+                current_time="2026-06-20T11:03:00+09:00",
+                evidence_events=[],
+            )
+
+            updated_commitment = service.store.list_memory_units_by_id(
+                memory_set_id=memory_set_id,
+                memory_unit_ids=[commitment["memory_unit_id"]],
+            )[0]
+            active_commitments = service.store.list_memory_units_for_recall(
+                memory_set_id=memory_set_id,
+                current_time="2026-06-20T11:04:00+09:00",
+                include_memory_types=["commitment"],
+                statuses=["inferred", "confirmed"],
+                commitment_states=["open", "waiting_confirmation", "on_hold"],
+                limit=20,
+            )
+
+            self.assertEqual(updated_commitment["commitment_state"], "done")
+            self.assertEqual(updated_run["commitment_resolution"]["result_status"], "updated")
+            self.assertNotIn(
+                commitment["memory_unit_id"],
+                [unit["memory_unit_id"] for unit in active_commitments],
+            )
+
+    def test_cancelled_autonomous_run_marks_linked_commitment_cancelled(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = OtomeKairoService(Path(temp_dir))
+            state = service.store.read_state()
+            memory_set_id = state["selected_memory_set_id"]
+            commitment = self._persist_commitment(
+                service=service,
+                memory_set_id=memory_set_id,
+                memory_unit_id="memory_unit:cancelled",
+            )
+            run = self._commitment_run_record(
+                memory_set_id=memory_set_id,
+                status="cancelled",
+                source_commitment_memory_unit_ids=[commitment["memory_unit_id"]],
+            )
+            service.store.upsert_autonomous_run(autonomous_run=run)
+            service.memory.vector_indexer.sync = lambda **_: None
+
+            service._finalize_autonomous_run_commitments(
+                state=state,
+                run=run,
+                terminal_status="cancelled",
+                current_time="2026-06-20T11:03:00+09:00",
+                evidence_events=[],
+            )
+
+            updated_commitment = service.store.list_memory_units_by_id(
+                memory_set_id=memory_set_id,
+                memory_unit_ids=[commitment["memory_unit_id"]],
+            )[0]
+            self.assertEqual(updated_commitment["commitment_state"], "cancelled")
+
     def test_timeout_returns_waiting_result_run_to_active(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             service = OtomeKairoService(Path(temp_dir))
@@ -180,6 +327,89 @@ class AutonomousRunRecoveryTests(unittest.TestCase):
             "source_owner": "self",
             "source_label": "main",
         }
+
+    def _commitment_run_record(
+        self,
+        *,
+        memory_set_id: str,
+        status: str = "active",
+        source_commitment_memory_unit_ids: list[str] | None = None,
+    ) -> dict:
+        return {
+            "run_id": "autonomous_run:commitment",
+            "memory_set_id": memory_set_id,
+            "status": status,
+            "objective_summary": "3分後にユーザーへ声をかける",
+            "origin_kind": "user_message",
+            "current_step_summary": "予定時刻にユーザーへ声をかける。",
+            "history_summary": "3分後のリマインド依頼を受諾した。",
+            "next_run_at": None,
+            "waiting_request_id": None,
+            "pause_reason": None,
+            "resume_status": None,
+            "created_at": "2026-06-20T11:00:00+09:00",
+            "updated_at": "2026-06-20T11:00:00+09:00",
+            "completed_at": "2026-06-20T11:03:00+09:00" if status in {"completed", "cancelled"} else None,
+            "source_cycle_id": "cycle:source",
+            "source_current_input": {
+                "sender": "user",
+                "source_kind": "user_message",
+                "response_target": "user",
+                "text": "3分後に声をかけて",
+            },
+            "source_commitment_memory_unit_ids": source_commitment_memory_unit_ids or [],
+        }
+
+    def _persist_commitment(
+        self,
+        *,
+        service: OtomeKairoService,
+        memory_set_id: str,
+        memory_unit_id: str,
+    ) -> dict:
+        unit = {
+            "memory_unit_id": memory_unit_id,
+            "memory_set_id": memory_set_id,
+            "memory_type": "commitment",
+            "scope_type": "self",
+            "scope_key": "self",
+            "subject_ref": "self",
+            "predicate": "notify",
+            "object_ref_or_value": "user",
+            "summary_text": "3分後にユーザーへ声をかけること。",
+            "status": "inferred",
+            "commitment_state": "open",
+            "confidence": 0.58,
+            "salience": 0.36,
+            "formed_at": "2026-06-20T11:00:00+09:00",
+            "last_confirmed_at": None,
+            "valid_from": None,
+            "valid_to": "2026-06-21T03:00:00+09:00",
+            "evidence_event_ids": [],
+            "evidence_cycle_ids": ["cycle:source"],
+            "qualifiers": {
+                "source": "assistant_response",
+                "commitment_actor": "self",
+                "scope_duration": "session",
+            },
+        }
+        action = service.memory.action_resolver.build_memory_action(
+            operation="new",
+            memory_set_id=memory_set_id,
+            finished_at="2026-06-20T11:00:00+09:00",
+            memory_unit=unit,
+            related_memory_unit_ids=[],
+            before_snapshot=None,
+            after_snapshot=unit,
+            reason="test commitment",
+            event_ids=[],
+        )
+        service.store.persist_turn_consolidation(
+            episode=None,
+            memory_actions=[action],
+            episode_affects=[],
+        )
+        return unit
 
 
 if __name__ == "__main__":

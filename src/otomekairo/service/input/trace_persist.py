@@ -105,8 +105,9 @@ class ServiceInputTracePersistMixin:
         )
 
         # memory trace更新
+        memory_trace: dict[str, Any] | None = None
         if consolidate_memory:
-            self._finalize_memory_trace(
+            memory_trace = self._finalize_memory_trace(
                 cycle_id=cycle_id,
                 finished_at=finished_at,
                 state=state,
@@ -122,6 +123,12 @@ class ServiceInputTracePersistMixin:
                 capability_request_summary=capability_request_summary,
                 followup_capability_request_summary=followup_capability_request_summary,
                 ongoing_action_transition_summary=ongoing_action_transition_summary,
+            )
+            self._link_autonomous_run_source_commitments(
+                state=state,
+                pipeline=pipeline,
+                memory_trace=memory_trace,
+                current_time=finished_at,
             )
         else:
             skipped_memory_trace = self._skipped_memory_trace(f"{trigger_kind}_cycle")

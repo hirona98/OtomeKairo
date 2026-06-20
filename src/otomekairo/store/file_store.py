@@ -318,6 +318,20 @@ class SQLiteMemoryStore(
             if memory_unit_id in units_by_id
         ]
 
+    def list_memory_units_by_id(
+        self,
+        *,
+        memory_set_id: str,
+        memory_unit_ids: list[Any],
+    ) -> list[dict[str, Any]]:
+        # ID 指定で memory_units を読み込む。
+        with self._memory_db() as conn:
+            return self._load_memory_units_by_id(
+                conn,
+                memory_set_id=memory_set_id,
+                memory_unit_ids=memory_unit_ids,
+            )
+
     def list_cycle_summaries(self, limit: int) -> list[dict[str, Any]]:
         # クエリ
         with self._memory_db() as conn:

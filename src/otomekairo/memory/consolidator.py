@@ -9,13 +9,14 @@ from otomekairo.llm.contexts import build_persona_context
 from otomekairo.memory.actions import MemoryActionResolver
 from otomekairo.memory.correction import MemoryCorrectionReconciler
 from otomekairo.memory.reflection.consolidator import ReflectiveConsolidator
-from otomekairo.memory.utils import clamp_score, normalized_text_list, optional_text
+from otomekairo.memory.utils import clamp_score, merged_event_ids, normalized_text_list, optional_text
 from otomekairo.memory.vector import MemoryVectorIndexer
 from otomekairo.store.file_store import FileStore
 
 
 # memory_interpretation に渡す events は補助文脈に留める。
 MEMORY_CONTEXT_EVENT_LIMIT = 12
+ACTIVE_COMMITMENT_STATES = {"open", "waiting_confirmation", "on_hold"}
 
 
 # 統合器
@@ -218,6 +219,138 @@ class MemoryConsolidator:
                 ),
             ),
         )
+
+    def resolve_autonomous_run_commitments(
+        self,
+        *,
+        state: dict[str, Any],
+        run: dict[str, Any],
+        terminal_status: str,
+        finished_at: str,
+        evidence_event_ids: list[str],
+    ) -> dict[str, Any]:
+        # autonomous_run に紐づいた commitment を terminal 状態へ進める。
+        target_state = "done" if terminal_status == "completed" else "cancelled" if terminal_status == "cancelled" else None
+        if target_state is None:
+            return self._autonomous_run_commitment_resolution_trace(
+                result_status="skipped",
+                reason="non_terminal_status",
+            )
+
+        memory_set_id = str(run.get("memory_set_id") or state.get("selected_memory_set_id") or "").strip()
+        linked_ids = [
+            value
+            for value in run.get("source_commitment_memory_unit_ids", [])
+            if isinstance(value, str) and value.strip()
+        ]
+        if not memory_set_id or not linked_ids:
+            return self._autonomous_run_commitment_resolution_trace(
+                result_status="skipped",
+                reason="no_linked_commitments",
+            )
+
+        units = self.store.list_memory_units_by_id(
+            memory_set_id=memory_set_id,
+            memory_unit_ids=linked_ids,
+        )
+        actions: list[dict[str, Any]] = []
+        updated_ids: list[str] = []
+        for unit in units:
+            if unit.get("memory_type") != "commitment":
+                continue
+            if unit.get("commitment_state") not in ACTIVE_COMMITMENT_STATES:
+                continue
+            after = deepcopy(unit)
+            after["commitment_state"] = target_state
+            after["last_confirmed_at"] = finished_at if target_state == "done" else after.get("last_confirmed_at")
+            after["evidence_event_ids"] = merged_event_ids(after.get("evidence_event_ids", []), evidence_event_ids)
+            qualifiers = dict(after.get("qualifiers", {}))
+            run_ids = [
+                value
+                for value in qualifiers.get("autonomous_run_ids", [])
+                if isinstance(value, str) and value.strip()
+            ]
+            run_id = run.get("run_id")
+            if isinstance(run_id, str) and run_id and run_id not in run_ids:
+                run_ids.append(run_id)
+            if run_ids:
+                qualifiers["autonomous_run_ids"] = run_ids
+            qualifiers["autonomous_run_terminal_status"] = terminal_status
+            after["qualifiers"] = qualifiers
+            actions.append(
+                self.action_resolver.build_memory_action(
+                    operation="refine",
+                    memory_set_id=memory_set_id,
+                    finished_at=finished_at,
+                    memory_unit=after,
+                    related_memory_unit_ids=[],
+                    before_snapshot=unit,
+                    after_snapshot=after,
+                    reason=f"linked autonomous_run が {terminal_status} になったため、対応する commitment を {target_state} に更新した。",
+                    event_ids=evidence_event_ids,
+                )
+            )
+            updated_ids.append(str(unit["memory_unit_id"]))
+
+        if not actions:
+            return self._autonomous_run_commitment_resolution_trace(
+                result_status="skipped",
+                reason="no_active_linked_commitments",
+            )
+
+        persist_result = self.store.persist_turn_consolidation(
+            episode=None,
+            memory_actions=actions,
+            episode_affects=[],
+        )
+        vector_status = "succeeded"
+        vector_failure_reason = None
+        try:
+            self.vector_indexer.sync(
+                state=state,
+                finished_at=finished_at,
+                episode=None,
+                memory_actions=actions,
+            )
+        except Exception as exc:  # noqa: BLE001
+            vector_status = "failed"
+            vector_failure_reason = str(exc)
+
+        return {
+            "result_status": "updated",
+            "reason": None,
+            "terminal_status": terminal_status,
+            "target_commitment_state": target_state,
+            "updated_memory_unit_ids": updated_ids,
+            "memory_action_count": len(actions),
+            "memory_link_update": persist_result.get("memory_link_update"),
+            "entity_registry_update": persist_result.get("entity_registry_update"),
+            "vector_index_sync": {
+                "result_status": vector_status,
+                "failure_reason": vector_failure_reason,
+            },
+        }
+
+    def _autonomous_run_commitment_resolution_trace(
+        self,
+        *,
+        result_status: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        return {
+            "result_status": result_status,
+            "reason": reason,
+            "terminal_status": None,
+            "target_commitment_state": None,
+            "updated_memory_unit_ids": [],
+            "memory_action_count": 0,
+            "memory_link_update": None,
+            "entity_registry_update": None,
+            "vector_index_sync": {
+                "result_status": "not_started",
+                "failure_reason": None,
+            },
+        }
 
     def run_postprocess_job(self, *, job: dict[str, Any]) -> dict[str, Any]:
         # job状態

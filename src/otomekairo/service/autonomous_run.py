@@ -171,6 +171,13 @@ class ServiceAutonomousRunMixin:
                 reason_summary="手動操作により autonomous_run を cancel した。",
             )
             self.store.upsert_autonomous_run(autonomous_run=run)
+            run = self._finalize_autonomous_run_commitments(
+                state=state,
+                run=run,
+                terminal_status="cancelled",
+                current_time=current_time,
+                evidence_events=[],
+            )
         return {"autonomous_run": self._autonomous_run_public_summary(run, current_time=current_time)}
 
     def _require_autonomous_run(self, run_id: str) -> dict[str, Any]:
@@ -525,6 +532,7 @@ class ServiceAutonomousRunMixin:
         current_time: str,
         decision: dict[str, Any],
         source_current_input: dict[str, Any],
+        source_cycle_id: str | None,
         assistant_message_target_client_id: str | None,
     ) -> dict[str, Any]:
         run_payload = decision.get("autonomous_run")
@@ -543,6 +551,7 @@ class ServiceAutonomousRunMixin:
         origin_kind = str(source_current_input.get("source_kind") or "user_message").strip() or "user_message"
         if coordination["mode"] == "replace_existing":
             self._replace_existing_autonomous_runs_from_decision(
+                state=state,
                 target_runs=coordination["target_runs"],
                 current_time=current_time,
                 reason_summary=str(coordination["reason_summary"]),
@@ -568,6 +577,8 @@ class ServiceAutonomousRunMixin:
                 "reason_summary": coordination["reason_summary"],
             },
         }
+        if isinstance(source_cycle_id, str) and source_cycle_id.strip():
+            run["source_cycle_id"] = source_cycle_id.strip()
         normalized_target = self._normalize_capability_client_id(assistant_message_target_client_id)
         if normalized_target is not None:
             run["assistant_message_target_client_id"] = normalized_target
@@ -596,6 +607,7 @@ class ServiceAutonomousRunMixin:
     def _replace_existing_autonomous_runs_from_decision(
         self,
         *,
+        state: dict[str, Any],
         target_runs: list[dict[str, Any]],
         current_time: str,
         reason_summary: str,
@@ -619,6 +631,13 @@ class ServiceAutonomousRunMixin:
                     reason_summary=reason_summary,
                 )
                 self.store.upsert_autonomous_run(autonomous_run=updated)
+                updated = self._finalize_autonomous_run_commitments(
+                    state=state,
+                    run=updated,
+                    terminal_status="cancelled",
+                    current_time=current_time,
+                    evidence_events=[],
+                )
                 replaced.append(run_id)
         if replaced:
             debug_log("AutonomousRun", f"replaced runs={','.join(replaced)} reason={self._clamp(reason_summary)}")
@@ -688,6 +707,7 @@ class ServiceAutonomousRunMixin:
 
         speech_payload: dict[str, Any] | None = None
         capability_request_summary: dict[str, Any] | None = None
+        speech_events: list[dict[str, Any]] = []
         previous_request_finished = False
 
         try:
@@ -766,6 +786,15 @@ class ServiceAutonomousRunMixin:
                         run=run,
                         speech_payload=speech_payload,
                     )
+                    speech_event = self._persist_autonomous_run_speech_event(
+                        run=run,
+                        speech_payload=speech_payload,
+                        created_at=current_time,
+                        step=step,
+                        transition=transition,
+                    )
+                    if isinstance(speech_event, dict):
+                        speech_events.append(speech_event)
             elif action_kind == "capability_request":
                 current_time = self._now_iso()
                 guard_result = self._autonomous_run_step_guard(
@@ -843,6 +872,14 @@ class ServiceAutonomousRunMixin:
                 current_time=current_time,
                 capability_request_summary=capability_request_summary,
             )
+            if updated_run.get("status") in AUTONOMOUS_RUN_TERMINAL_STATUSES:
+                updated_run = self._finalize_autonomous_run_commitments(
+                    state=state,
+                    run=updated_run,
+                    terminal_status=str(updated_run.get("status") or ""),
+                    current_time=current_time,
+                    evidence_events=speech_events,
+                )
         except (LLMError, KeyError, ValueError, CapabilityDispatchError) as exc:
             current_time = self._now_iso()
             run = self.store.get_autonomous_run(run_id=run_id) or run
@@ -853,6 +890,13 @@ class ServiceAutonomousRunMixin:
                 reason_summary=f"autonomous_run step に失敗した: {str(exc).strip()}",
             )
             self.store.upsert_autonomous_run(autonomous_run=updated_run)
+            updated_run = self._finalize_autonomous_run_commitments(
+                state=state,
+                run=updated_run,
+                terminal_status="cancelled",
+                current_time=current_time,
+                evidence_events=[],
+            )
             if isinstance(source_request_record, dict):
                 previous_request_finished = True
                 self._finish_capability_ongoing_action(
@@ -1349,6 +1393,13 @@ class ServiceAutonomousRunMixin:
                 reason_summary=f"capability result 後の autonomous_run step に失敗した: {str(exc).strip()}",
             )
             self.store.upsert_autonomous_run(autonomous_run=interrupted)
+            interrupted = self._finalize_autonomous_run_commitments(
+                state=state,
+                run=interrupted,
+                terminal_status="cancelled",
+                current_time=self._now_iso(),
+                evidence_events=[],
+            )
             self._finish_capability_ongoing_action(
                 request_record=request_record,
                 current_time=self._now_iso(),
@@ -1484,6 +1535,13 @@ class ServiceAutonomousRunMixin:
                 reason_summary="ユーザーが停止を明示したため cancel した。",
             )
             self.store.upsert_autonomous_run(autonomous_run=updated)
+            updated = self._finalize_autonomous_run_commitments(
+                state=state,
+                run=updated,
+                terminal_status="cancelled",
+                current_time=current_time,
+                evidence_events=[],
+            )
             cancelled.append(str(run.get("run_id") or ""))
         return [run_id for run_id in cancelled if run_id]
 
@@ -1506,6 +1564,228 @@ class ServiceAutonomousRunMixin:
         if normalized in stop_command_terms or normalized.rstrip("。.!！") in stop_command_terms:
             return True
         return any(term in normalized for term in stop_terms) and any(term in normalized for term in run_terms)
+
+    def _link_autonomous_run_source_commitments(
+        self,
+        *,
+        state: dict[str, Any],
+        pipeline: dict[str, Any],
+        memory_trace: dict[str, Any] | None,
+        current_time: str,
+    ) -> None:
+        if not isinstance(memory_trace, dict) or memory_trace.get("turn_consolidation_status") != "succeeded":
+            return
+        decision = pipeline.get("decision")
+        if not isinstance(decision, dict) or decision.get("kind") != "autonomous_run":
+            return
+        run_summary = pipeline.get("autonomous_run_summary")
+        run_id = run_summary.get("run_id") if isinstance(run_summary, dict) else None
+        if not isinstance(run_id, str) or not run_id.strip():
+            return
+        updated_memory_unit_ids = [
+            value
+            for value in memory_trace.get("updated_memory_unit_ids", [])
+            if isinstance(value, str) and value.strip()
+        ]
+        if not updated_memory_unit_ids:
+            return
+
+        memory_set_id = str(state.get("selected_memory_set_id") or "").strip()
+        units = self.store.list_memory_units_by_id(
+            memory_set_id=memory_set_id,
+            memory_unit_ids=updated_memory_unit_ids,
+        )
+        commitment_ids = [
+            unit["memory_unit_id"]
+            for unit in units
+            if unit.get("memory_type") == "commitment"
+            and unit.get("commitment_state") in {"open", "waiting_confirmation", "on_hold"}
+            and isinstance(unit.get("memory_unit_id"), str)
+        ]
+        if not commitment_ids:
+            return
+
+        run = self.store.get_autonomous_run(run_id=run_id)
+        if not isinstance(run, dict):
+            return
+        existing_ids = [
+            value
+            for value in run.get("source_commitment_memory_unit_ids", [])
+            if isinstance(value, str) and value.strip()
+        ]
+        merged_ids = [*existing_ids]
+        for commitment_id in commitment_ids:
+            if commitment_id not in merged_ids:
+                merged_ids.append(commitment_id)
+        if merged_ids == existing_ids:
+            return
+
+        updated = {
+            **run,
+            "source_commitment_memory_unit_ids": merged_ids,
+            "updated_at": current_time,
+        }
+        self.store.upsert_autonomous_run(autonomous_run=updated)
+        if updated.get("status") in AUTONOMOUS_RUN_TERMINAL_STATUSES:
+            updated = self._finalize_autonomous_run_commitments(
+                state=state,
+                run=updated,
+                terminal_status=str(updated.get("status") or ""),
+                current_time=current_time,
+                evidence_events=[],
+            )
+        debug_log(
+            "AutonomousRun",
+            (
+                f"linked commitments run={run_id} "
+                f"memory_units={self._format_id_list_for_log(commitment_ids)}"
+            ),
+            level="DEBUG",
+        )
+
+    def _persist_autonomous_run_speech_event(
+        self,
+        *,
+        run: dict[str, Any],
+        speech_payload: dict[str, Any],
+        created_at: str,
+        step: dict[str, Any],
+        transition: dict[str, Any],
+    ) -> dict[str, Any]:
+        event = {
+            "event_id": f"event:{uuid.uuid4().hex}",
+            "cycle_id": self._autonomous_run_event_cycle_id(run),
+            "memory_set_id": run["memory_set_id"],
+            "kind": "speech",
+            "role": "assistant",
+            "text": speech_payload["speech_text"],
+            "created_at": created_at,
+            "source_kind": "autonomous_run",
+            "run_id": run.get("run_id"),
+            "transition_kind": transition.get("kind"),
+            "reason_summary": self._autonomous_step_reason_summary(
+                step,
+                fallback="autonomous_run が発話した。",
+            ),
+        }
+        self.store.append_events(events=[event])
+        return event
+
+    def _append_autonomous_run_terminal_event(
+        self,
+        *,
+        run: dict[str, Any],
+        terminal_status: str,
+        current_time: str,
+    ) -> dict[str, Any]:
+        event = {
+            "event_id": f"event:{uuid.uuid4().hex}",
+            "cycle_id": self._autonomous_run_event_cycle_id(run),
+            "memory_set_id": run["memory_set_id"],
+            "kind": "autonomous_run_terminal",
+            "role": "system",
+            "text": None,
+            "created_at": current_time,
+            "source_kind": "autonomous_run",
+            "run_id": run.get("run_id"),
+            "terminal_status": terminal_status,
+            "objective_summary": run.get("objective_summary"),
+            "history_summary": run.get("history_summary"),
+        }
+        self.store.append_events(events=[event])
+        return event
+
+    def _finalize_autonomous_run_commitments(
+        self,
+        *,
+        state: dict[str, Any],
+        run: dict[str, Any],
+        terminal_status: str,
+        current_time: str,
+        evidence_events: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        if terminal_status not in AUTONOMOUS_RUN_TERMINAL_STATUSES:
+            return run
+        existing_resolution = run.get("commitment_resolution")
+        if (
+            isinstance(existing_resolution, dict)
+            and existing_resolution.get("terminal_status") == terminal_status
+            and (
+                existing_resolution.get("result_status") == "updated"
+                or (
+                    existing_resolution.get("result_status") == "skipped"
+                    and existing_resolution.get("reason") != "no_linked_commitments"
+                )
+            )
+        ):
+            return run
+
+        terminal_event = self._append_autonomous_run_terminal_event(
+            run=run,
+            terminal_status=terminal_status,
+            current_time=current_time,
+        )
+        evidence_event_ids = [
+            event["event_id"]
+            for event in [*evidence_events, terminal_event]
+            if isinstance(event.get("event_id"), str)
+        ]
+        try:
+            resolution = self.memory.resolve_autonomous_run_commitments(
+                state=state,
+                run=run,
+                terminal_status=terminal_status,
+                finished_at=current_time,
+                evidence_event_ids=evidence_event_ids,
+            )
+        except Exception as exc:  # noqa: BLE001
+            resolution = {
+                "result_status": "failed",
+                "reason": str(exc),
+                "terminal_status": terminal_status,
+                "target_commitment_state": None,
+                "updated_memory_unit_ids": [],
+                "memory_action_count": 0,
+                "memory_link_update": None,
+                "entity_registry_update": None,
+                "vector_index_sync": {
+                    "result_status": "not_started",
+                    "failure_reason": None,
+                },
+            }
+            debug_log(
+                "AutonomousRun",
+                f"commitment resolution failed run={run.get('run_id')} error={type(exc).__name__}: {self._clamp(str(exc))}",
+                level="ERROR",
+            )
+
+        updated = {
+            **run,
+            "commitment_resolution": {
+                **resolution,
+                "terminal_status": terminal_status,
+                "evidence_event_ids": evidence_event_ids,
+                "updated_at": current_time,
+            },
+            "updated_at": current_time,
+        }
+        self.store.upsert_autonomous_run(autonomous_run=updated)
+        debug_log(
+            "AutonomousRun",
+            (
+                f"commitment resolution run={run.get('run_id')} "
+                f"status={resolution.get('result_status')} "
+                f"updated={len(resolution.get('updated_memory_unit_ids', []))}"
+            ),
+            level="DEBUG",
+        )
+        return updated
+
+    def _autonomous_run_event_cycle_id(self, run: dict[str, Any]) -> str:
+        source_cycle_id = run.get("source_cycle_id")
+        if isinstance(source_cycle_id, str) and source_cycle_id.strip():
+            return source_cycle_id.strip()
+        return f"cycle:{uuid.uuid4().hex}"
 
     def _emit_autonomous_run_assistant_message_event(
         self,

@@ -1,4 +1,4 @@
-# autonomous_run 設計RFC
+# autonomous_run
 
 ## 目的
 
@@ -26,9 +26,23 @@
 | `waiting_request_id` | capability result 待ちの request |
 | `pause_reason` | pause 理由 |
 | `created_at / updated_at / completed_at` | lifecycle 時刻 |
+| `source_cycle_id` | run を開始した入力サイクル |
+| `source_commitment_memory_unit_ids` | run の根拠になった commitment memory |
+| `commitment_resolution` | terminal 時の commitment 更新結果 |
 
 `autonomous_run` は capability request の wire payload に載せない。
 `request_id` と `run_id` の紐付けは server 内部記録に保持する。
+
+## commitment 連携
+
+ユーザー依頼から `autonomous_run` を開始した場合、server は run に `source_cycle_id` を保存する。
+入力サイクルの記憶統合で active な `commitment` が作成または更新された場合、server はその `memory_unit_id` を `source_commitment_memory_unit_ids` に保存する。
+この紐付けは ID によって行い、目的文や発話文の文字列一致で推定しない。
+
+run が `completed` に遷移した場合、server は紐付いた active `commitment` の `commitment_state` を `done` に更新する。
+run が `cancelled` に遷移した場合、server は紐付いた active `commitment` の `commitment_state` を `cancelled` に更新する。
+terminal 時の発話と terminal 監査イベントは `events` に残し、commitment 更新の evidence に使う。
+更新は memory action と revision として記録し、`commitment_resolution` に結果を保持する。
 
 ## 判断契約
 
