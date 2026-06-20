@@ -15,6 +15,7 @@ from otomekairo.service.autonomous_run import ServiceAutonomousRunMixin
 from otomekairo.service.capability import ServiceCapabilityMixin
 from otomekairo.service.common import ServiceError, configure_debug_log_stream_sink, debug_log
 from otomekairo.service.config.mixin import ServiceConfigMixin
+from otomekairo.service.docs import ServiceDocsMixin
 from otomekairo.service.memory import ServiceMemoryMixin
 from otomekairo.service.input.mixin import ServiceInputMixin
 from otomekairo.service.spontaneous.mixin import ServiceSpontaneousMixin
@@ -25,6 +26,7 @@ from otomekairo.store.file_store import FileStore
 # サービス
 class OtomeKairoService(
     ServiceCapabilityMixin,
+    ServiceDocsMixin,
     ServiceAutonomousRunMixin,
     ServiceSpontaneousMixin,
     ServiceConfigMixin,
@@ -77,6 +79,7 @@ class OtomeKairoService(
         self._stream_event_lock = threading.Lock()
         self._next_stream_event_value = 1
         self.recover_capability_runtime_state_after_startup()
+        self.recover_autonomous_run_runtime_state_after_startup()
         debug_log("Service", "initialized")
 
     def _append_debug_log_stream_record(self, record: dict[str, Any]) -> None:

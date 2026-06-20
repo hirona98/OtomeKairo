@@ -15,9 +15,11 @@ API wire、記憶詳細、LLM 補助契約、capability 境界を分け、同じ
 | [integration/](integration/) | 外部接点、権限境界、connector 配置 | [integration/外部接点とAPI概念.md](./integration/外部接点とAPI概念.md) |
 | [api/](api/) | HTTP / WebSocket API の wire 契約 | [api/README.md](./api/README.md) |
 | [memory/](memory/) | 記憶 subsystem のデータ、想起、更新、管理 | [memory/README.md](./memory/README.md) |
+| [verification/](verification/) | 検証層、通常検証、重い検証、合否基準 | [verification/検証基盤.md](./verification/検証基盤.md) |
 
 ## 正本境界
 
+- 検証層と合否基準は [verification/検証基盤.md](./verification/検証基盤.md) に置く
 - 意味境界、状態遷移、判断責務は `foundation/`、`runtime/`、`configuration/`、`llm/`、`capability/`、`integration/` に置く
 - HTTP / WebSocket の path、method、認証、request / response、error code は `api/` に置く
 - 記憶 subsystem の内部契約は `memory/` に置く

@@ -141,6 +141,7 @@ class ServiceInputPipelineMixin:
         # 出力
         output_result = self._run_pipeline_output(
             state=state,
+            cycle_id=cycle_id,
             input_text=input_text,
             current_input=current_input,
             recent_turns=recent_turns,
@@ -532,6 +533,7 @@ class ServiceInputPipelineMixin:
         self,
         *,
         state: dict[str, Any],
+        cycle_id: str | None,
         input_text: str,
         current_input: CurrentInput,
         recent_turns: list[dict[str, Any]],
@@ -584,6 +586,7 @@ class ServiceInputPipelineMixin:
                 current_time=self._now_iso(),
                 decision=decision,
                 source_current_input=current_input.to_prompt_payload(),
+                source_cycle_id=cycle_id,
                 assistant_message_target_client_id=assistant_message_target_client_id,
             )
             run_payload = start_result.get("autonomous_run")

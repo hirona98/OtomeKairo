@@ -43,6 +43,40 @@ response:
 }
 ```
 
+### `GET /api/docs`
+
+- 認証: 必要
+- 役割: CocoroConsole などの UI が表示するために OtomeKairo が選定したプレーンテキスト文書一式を返す
+- `docs/` 全体の任意読み取り API ではない
+- 初期対象は会話 API と API起床の Console 表示用文書だけとする
+- 表示用文書は利用者向け説明であり、API wire 契約の正本は `docs/design/api/` 配下の該当文書とする
+- response に token、API key、credential、内部 URL、絶対パスを含めない
+
+response:
+
+```json
+{
+  "ok": true,
+  "data": {
+    "document_set_id": "console_docs",
+    "title": "OtomeKairo Docs",
+    "format": "plain_text",
+    "sections": [
+      {
+        "section_id": "conversation",
+        "title": "会話API",
+        "body_text": "会話API\n======\n..."
+      },
+      {
+        "section_id": "wake",
+        "title": "API起床",
+        "body_text": "API起床\n======\n..."
+      }
+    ]
+  }
+}
+```
+
 ## inspection 面
 
 ### `GET /api/inspection/current-state`

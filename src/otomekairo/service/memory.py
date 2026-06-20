@@ -257,7 +257,7 @@ class ServiceMemoryMixin:
         reflective_consolidation: dict[str, Any],
         correction_reconciliation: dict[str, Any] | None = None,
         emit_logs: bool = True,
-    ) -> None:
+    ) -> dict[str, Any]:
         # 検索
         cycle_trace = self.store.get_cycle_trace(cycle_id)
         if cycle_trace is None:
@@ -368,7 +368,7 @@ class ServiceMemoryMixin:
         # 後段job投入
         if postprocess_job is None:
             debug_log("Memory", f"turn consolidation done cycle={self._short_cycle_id(cycle_id)} postprocess=none", level="DEBUG")
-            return
+            return memory_trace
         try:
             self._queue_memory_postprocess_job(postprocess_job)
             debug_log("Memory", f"turn consolidation done cycle={self._short_cycle_id(cycle_id)} postprocess=queued", level="DEBUG")
@@ -417,6 +417,8 @@ class ServiceMemoryMixin:
                 cycle_id=cycle_id,
                 memory_trace=failed_postprocess_trace,
             )
+            return failed_postprocess_trace
+        return memory_trace
 
     def _build_turn_memory_context(
         self,

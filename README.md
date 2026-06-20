@@ -95,7 +95,18 @@ connector を有効にする前に、CocoroConsole または設定 API で camer
 設定定義の意味は `docs/` を正とする。
 API key は設定値として扱い、コード、ログ、サンプルへ書かない。
 
-## smoke
+## 検証
+
+通常検証は 1 分以内で終わる fast test を標準にする。
+
+```bash
+.venv/bin/python -m pytest tests
+```
+
+fast test は契約、validation、境界処理を確認する。
+サーバ起動、scheduler、memory worker、実 LLM 呼び出しを含む検証は通常検証へ入れない。
+
+## 重い検証
 
 mock 経路の smoke は次で実行する。
 
@@ -104,6 +115,7 @@ mock 経路の smoke は次で実行する。
 ```
 
 この profile は隔離データディレクトリでサーバを起動し、通常会話、定期起床、capability request / result follow-up、memory worker、vision capture、記憶と想起の代表ケースを確認する。
+大きな変更前後に手動で実行する。
 
 実 LLM 用の API key を保存済みの `var/otomekairo/server_state.json` に設定している場合、隔離データディレクトリへ model / memory 設定だけをコピーして短い実 LLM smoke を実行する。
 
@@ -111,4 +123,4 @@ mock 経路の smoke は次で実行する。
 .venv/bin/python scripts/run_long_smoke.py --profile real-llm-smoke --keep-artifacts
 ```
 
-詳細な確認観点は `scripts/run_long_smoke.py` と `docs/` を正とする。
+詳細な検証層と合否基準は [docs/design/verification/検証基盤.md](docs/design/verification/検証基盤.md) を正とする。

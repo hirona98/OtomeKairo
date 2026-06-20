@@ -1,0 +1,60 @@
+エンドポイント
+--------------
+
+POST {BASE_URL}/api/wake
+
+認証
+----
+
+Authorization: Bearer <TOKEN>
+
+リクエストボディ
+----------------
+
+{
+  "client_context": {
+    "source": "CocoroConsole",
+    "client_id": "console-...",
+    "active_app": "Slack",
+    "window_title": "general | Slack",
+    "locale": "ja-JP"
+  }
+}
+
+client_context は任意の object である。
+source、active_app、window_title、locale は起床入力の整形に使われる。
+API起床は自律判断の機会を与える。必ず発話する命令ではない。
+
+レスポンス例
+------------
+
+{
+  "ok": true,
+  "data": {
+    "cycle_id": "cycle:...",
+    "result_kind": "noop",
+    "speech": null,
+    "capability_request": null,
+    "autonomous_run": null
+  }
+}
+
+result_kind は speech、capability_request、noop、internal_failure のいずれかである。
+外向き発話がない wake では result_kind は noop になり、speech は null になる。
+
+cURLの例
+--------
+
+curl.exe -k -X POST {BASE_URL}/api/wake ^
+  -H "Authorization: Bearer <TOKEN>" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"client_context\":{\"source\":\"CocoroConsole\",\"client_id\":\"console-...\",\"locale\":\"ja-JP\"}}"
+
+PowerShellの例
+--------------
+
+Invoke-RestMethod -Method Post `
+  -Uri "{BASE_URL}/api/wake" `
+  -Headers @{ Authorization = "Bearer <TOKEN>" } `
+  -ContentType "application/json; charset=utf-8" `
+  -Body '{"client_context":{"source":"CocoroConsole","client_id":"console-...","locale":"ja-JP"}}'

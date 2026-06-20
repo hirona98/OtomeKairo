@@ -1284,6 +1284,15 @@ class ServiceCapabilityMixin:
                     reason_code="request_timeout",
                 ),
             )
+            if isinstance(request_record.get("autonomous_run_id"), str):
+                self._mark_autonomous_run_capability_wait_interrupted(
+                    request_record=request_record,
+                    current_time=current_time,
+                    reason_code="request_timeout",
+                    reason_summary=self._capability_dispatch_transition_reason_summary(
+                        reason_code="request_timeout",
+                    ),
+                )
 
     def _validate_capability_payload(self, *, payload: Any, schema: Any, label: str) -> None:
         # 現行 manifest で使う JSON Schema の最小 subset だけを検証する。

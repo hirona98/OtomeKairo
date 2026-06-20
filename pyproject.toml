@@ -14,6 +14,7 @@ authors = [
 ]
 dependencies = [
   "litellm>=1.0.0",
+  "pytest>=8.0.0",
   "sqlite-vec>=0.1.6"
 ]
 
@@ -22,3 +23,7 @@ otomekairo-run = "otomekairo.run:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
