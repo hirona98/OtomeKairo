@@ -18,6 +18,9 @@ dependencies = [
 
 [project.scripts]
 otomekairo-mcp-client-connector = "otomekairo_mcp_client_connector.__main__:main"
+otomekairo-mcp-stdio-trace-proxy = "otomekairo_mcp_client_connector.stdio_trace_proxy:main"
+otomekairo-elyth-http-recorder = "otomekairo_mcp_client_connector.elyth_http_recorder:main"
+otomekairo-elyth-fake-mcp-server = "otomekairo_mcp_client_connector.elyth_fake_mcp_server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

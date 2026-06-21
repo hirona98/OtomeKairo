@@ -10,6 +10,8 @@ import struct
 from typing import Any, Callable
 from urllib.parse import urlparse
 
+from .trace import TraceWriter
+
 
 WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
@@ -19,7 +21,15 @@ class StreamError(RuntimeError):
 
 
 class EventStreamClient:
-    def __init__(self, *, base_url: str, access_token: str, tls_verify: bool, socket_timeout_seconds: float) -> None:
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        access_token: str,
+        tls_verify: bool,
+        socket_timeout_seconds: float,
+        trace: TraceWriter | None = None,
+    ) -> None:
         parsed = urlparse(base_url)
         if parsed.scheme not in {"http", "https"}:
             raise StreamError("base_url must use http or https.")
@@ -31,6 +41,7 @@ class EventStreamClient:
         self.base_path = parsed.path.rstrip("/")
         self.access_token = access_token
         self.socket_timeout_seconds = socket_timeout_seconds
+        self.trace = trace
         self.ssl_context = ssl.create_default_context()
         if not tls_verify:
             self.ssl_context.check_hostname = False
@@ -40,6 +51,8 @@ class EventStreamClient:
     def run(self, *, hello_payload: dict[str, Any], on_event: Callable[[dict[str, Any]], None]) -> None:
         self._connect()
         try:
+            if self.trace is not None:
+                self.trace.write(boundary="otomekairo_event", direction="send", kind="hello", payload=hello_payload)
             self._send_json(hello_payload)
             while True:
                 opcode, payload = self._read_frame()
@@ -55,6 +68,13 @@ class EventStreamClient:
                 event = json.loads(payload.decode("utf-8"))
                 if not isinstance(event, dict):
                     raise StreamError("event stream payload must be a JSON object.")
+                if self.trace is not None:
+                    self.trace.write(
+                        boundary="otomekairo_event",
+                        direction="receive",
+                        kind=str(event.get("type", "event")),
+                        payload=event,
+                    )
                 on_event(event)
         finally:
             self.close()
