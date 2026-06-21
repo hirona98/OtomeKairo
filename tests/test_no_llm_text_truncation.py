@@ -82,6 +82,10 @@ class TextTruncationTests(unittest.TestCase):
             initiative_context=None,
             capability_result_context=None,
             visual_observation_context=None,
+            self_state_context=None,
+            relationship_context=None,
+            prediction_error_context=None,
+            default_mode_context=None,
         )
 
         summaries = [candidate["summary_text"] for candidate in payload["workspace_candidates"]]

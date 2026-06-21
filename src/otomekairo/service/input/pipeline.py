@@ -26,6 +26,7 @@ WORKSPACE_MEMORY_SECTIONS = (
     "visual_observations",
 )
 WORKSPACE_MEMORY_ITEMS_PER_SECTION = 2
+DEFAULT_MODE_CANDIDATE_LIMIT = 8
 
 
 class ServiceInputPipelineMixin:
@@ -148,6 +149,10 @@ class ServiceInputPipelineMixin:
             capability_decision_view=pipeline_contexts["capability_decision_view"],
             initiative_context=pipeline_contexts["initiative_context"],
             capability_result_context=pipeline_contexts["capability_result_context"],
+            self_state_context=pipeline_contexts["self_state_context"],
+            relationship_context=pipeline_contexts["relationship_context"],
+            prediction_error_context=pipeline_contexts["prediction_error_context"],
+            default_mode_context=pipeline_contexts["default_mode_context"],
             workspace_context=pipeline_contexts["workspace_context"],
             recall_hint=recall_hint,
             recall_pack=recall_pack,
@@ -171,6 +176,9 @@ class ServiceInputPipelineMixin:
             activity_context=pipeline_contexts["activity_context"],
             ongoing_action_summary=pipeline_contexts["ongoing_action_summary"],
             initiative_context=pipeline_contexts["initiative_context"],
+            self_state_context=pipeline_contexts["self_state_context"],
+            relationship_context=pipeline_contexts["relationship_context"],
+            prediction_error_context=pipeline_contexts["prediction_error_context"],
             workspace_context=pipeline_contexts["workspace_context"],
             recall_hint=recall_hint,
             recall_pack=recall_pack,
@@ -207,6 +215,10 @@ class ServiceInputPipelineMixin:
             "capability_decision_view": pipeline_contexts["capability_decision_view"],
             "initiative_context": pipeline_contexts["initiative_context"],
             "capability_result_context": pipeline_contexts["capability_result_context"],
+            "self_state_context": pipeline_contexts["self_state_context"],
+            "relationship_context": pipeline_contexts["relationship_context"],
+            "prediction_error_context": pipeline_contexts["prediction_error_context"],
+            "default_mode_context": pipeline_contexts["default_mode_context"],
             "workspace_context": pipeline_contexts["workspace_context"],
             "visual_observation_context": visual_observation_context,
             "world_state_trace": pipeline_contexts["world_state_trace"],
@@ -466,6 +478,26 @@ class ServiceInputPipelineMixin:
             observation_summary=observation_summary,
             capability_request_summary=capability_request_summary,
         )
+        self_state_context = self._build_self_state_context(
+            foreground_world_state=foreground_world_state,
+            ongoing_action_summary=ongoing_action_summary,
+            capability_result_context=capability_result_context,
+            visual_observation_context=visual_observation_context,
+        )
+        relationship_context = self._build_relationship_context(
+            state=state,
+            recall_pack=recall_pack,
+            affect_context=affect_context,
+        )
+        prediction_error_context = self._build_prediction_error_context(
+            world_state_trace=world_state_trace,
+            foreground_world_state=foreground_world_state,
+            capability_result_context=capability_result_context,
+        )
+        default_mode_context = self._build_default_mode_context(
+            recall_pack=recall_pack,
+            affect_context=affect_context,
+        )
         workspace_context = self._build_workspace_context(
             current_input=current_input,
             recall_pack=recall_pack,
@@ -478,6 +510,10 @@ class ServiceInputPipelineMixin:
             initiative_context=initiative_context,
             capability_result_context=capability_result_context,
             visual_observation_context=visual_observation_context,
+            self_state_context=self_state_context,
+            relationship_context=relationship_context,
+            prediction_error_context=prediction_error_context,
+            default_mode_context=default_mode_context,
         )
         debug_log(
             "Pipeline",
@@ -503,7 +539,288 @@ class ServiceInputPipelineMixin:
             "capability_decision_view": capability_decision_view,
             "initiative_context": initiative_context,
             "capability_result_context": capability_result_context,
+            "self_state_context": self_state_context,
+            "relationship_context": relationship_context,
+            "prediction_error_context": prediction_error_context,
+            "default_mode_context": default_mode_context,
             "workspace_context": workspace_context,
+        }
+
+    def _build_self_state_context(
+        self,
+        *,
+        foreground_world_state: list[dict[str, Any]] | None,
+        ongoing_action_summary: dict[str, Any] | None,
+        capability_result_context: dict[str, Any] | None,
+        visual_observation_context: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        sensory_confidence: list[dict[str, Any]] = []
+        if isinstance(visual_observation_context, dict):
+            visual_entry: dict[str, Any] = {
+                "channel": "visual",
+                "source": "visual_observation_context",
+                "image_interpreted": visual_observation_context.get("image_interpreted"),
+            }
+            for key in ("source", "source_kind", "source_owner", "confidence_hint"):
+                value = visual_observation_context.get(key)
+                if value is not None:
+                    visual_entry[key] = value
+            summary_text = self._workspace_item_summary(
+                visual_observation_context,
+                ("visual_summary_text", "summary_text"),
+            )
+            if summary_text is not None:
+                visual_entry["summary_text"] = summary_text
+            sensory_confidence.append(visual_entry)
+        for index, item in enumerate(foreground_world_state or []):
+            if not isinstance(item, dict):
+                continue
+            confidence_hint = self._workspace_text(item.get("confidence_hint"))
+            if confidence_hint is None:
+                continue
+            sensory_entry: dict[str, Any] = {
+                "channel": item.get("state_type") or f"world_state:{index}",
+                "source": "foreground_world_state",
+                "confidence_hint": confidence_hint,
+            }
+            for key in ("scope", "source_owner", "summary_text"):
+                value = item.get(key)
+                if isinstance(value, str) and value.strip():
+                    sensory_entry[key] = value.strip()
+            sensory_confidence.append(sensory_entry)
+
+        agency_confidence: list[dict[str, Any]] = []
+        if isinstance(capability_result_context, dict):
+            source_request_summary = capability_result_context.get("source_request_summary")
+            source_capability_id = capability_result_context.get("source_capability_id")
+            if isinstance(source_request_summary, dict):
+                source_capability_id = source_request_summary.get("capability_id") or source_capability_id
+            observation_summary = capability_result_context.get("observation_summary")
+            agency_entry: dict[str, Any] = {
+                "source": "capability_result_context",
+                "capability_id": source_capability_id,
+            }
+            if isinstance(observation_summary, dict):
+                for key in ("status", "status_text", "error", "result_status"):
+                    value = observation_summary.get(key)
+                    if value is not None:
+                        agency_entry[key] = value
+            agency_confidence.append(agency_entry)
+
+        focus_stability: dict[str, Any] | None = None
+        if isinstance(ongoing_action_summary, dict):
+            focus_stability = {
+                "source": "ongoing_action_summary",
+                "status": ongoing_action_summary.get("status"),
+                "capability_id": ongoing_action_summary.get("capability_id"),
+                "summary_text": self._workspace_item_summary(
+                    ongoing_action_summary,
+                    ("reason_summary", "current_step_summary", "summary_text"),
+                ),
+            }
+
+        payload: dict[str, Any] = {
+            "state_boundary": "self_state_context は sensor / agency / focus の短期派生 view であり、mood_state と統合しない。",
+        }
+        if sensory_confidence:
+            payload["sensory_confidence"] = sensory_confidence
+        if agency_confidence:
+            payload["agency_confidence"] = agency_confidence
+        if focus_stability:
+            payload["focus_stability"] = focus_stability
+        return payload if len(payload) > 1 else None
+
+    def _build_relationship_context(
+        self,
+        *,
+        state: dict[str, Any],
+        recall_pack: dict[str, Any],
+        affect_context: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        relationship_items = self._relationship_context_items(
+            recall_pack=recall_pack,
+        )
+        entity_registry_items = self._relationship_entity_registry_items(state=state)
+        affect_items = [
+            item
+            for item in affect_context.get("affect_states", [])
+            if isinstance(item, dict)
+            and item.get("target_scope_type") in {"relationship", "user"}
+        ]
+        payload: dict[str, Any] = {
+            "state_boundary": "relationship_context は recall_pack と affect_context から派生する現在 view であり、関係記憶の正本ではない。",
+        }
+        if relationship_items:
+            payload["relationship_items"] = relationship_items
+        if entity_registry_items:
+            payload["entity_registry_items"] = entity_registry_items
+        if affect_items:
+            payload["affect_items"] = affect_items
+        return payload if len(payload) > 1 else None
+
+    def _relationship_entity_registry_items(self, *, state: dict[str, Any]) -> list[dict[str, Any]]:
+        memory_set_id = state.get("selected_memory_set_id")
+        if not isinstance(memory_set_id, str) or not memory_set_id.strip():
+            return []
+        records = self.store.list_entity_registry_records(
+            memory_set_id=memory_set_id,
+            limit=4,
+        )
+        items: list[dict[str, Any]] = []
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            entity_ref = self._workspace_text(record.get("entity_ref"))
+            if entity_ref is None:
+                continue
+            item: dict[str, Any] = {
+                "item_ref": entity_ref,
+                "source": "entity_registry",
+                "entity_ref": entity_ref,
+            }
+            for key in ("display_name", "entity_type", "salience", "last_seen_at"):
+                value = record.get(key)
+                if value is not None:
+                    item[key] = value
+            items.append(item)
+        return items
+
+    def _relationship_context_items(self, *, recall_pack: dict[str, Any]) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        for section in ("relationship_model", "user_model", "active_commitments", "active_topics"):
+            section_items = recall_pack.get(section)
+            if not isinstance(section_items, list):
+                continue
+            for index, item in enumerate(section_items[:2]):
+                if not isinstance(item, dict):
+                    continue
+                summary_text = self._workspace_item_summary(
+                    item,
+                    ("summary_text", "outcome_text"),
+                )
+                if summary_text is None:
+                    continue
+                items.append(
+                    {
+                        "item_ref": self._workspace_item_ref(
+                            item,
+                            ("memory_unit_id", "episode_id", "event_id"),
+                            fallback=f"{section}:{index}",
+                        ),
+                        "source": f"recall_pack.{section}",
+                        "summary_text": summary_text,
+                        "metadata": self._workspace_metadata(
+                            item,
+                            ("memory_type", "scope_type", "scope_key", "commitment_state", "retrieval_lane"),
+                        ),
+                    }
+                )
+        return items
+
+    def _build_prediction_error_context(
+        self,
+        *,
+        world_state_trace: Any,
+        foreground_world_state: list[dict[str, Any]] | None,
+        capability_result_context: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        signals: list[dict[str, Any]] = []
+        previous = (
+            world_state_trace.previous_foreground_world_state
+            if world_state_trace is not None
+            and isinstance(getattr(world_state_trace, "previous_foreground_world_state", None), list)
+            else []
+        )
+        current = foreground_world_state or (
+            world_state_trace.foreground_world_state
+            if world_state_trace is not None
+            and isinstance(getattr(world_state_trace, "foreground_world_state", None), list)
+            else []
+        )
+        if previous or current:
+            changed = self._foreground_world_state_signature(previous) != self._foreground_world_state_signature(current)
+            signals.append(
+                {
+                    "signal_kind": "world_state_difference",
+                    "summary_text": "foreground_world_state の構造化署名に差分候補がある。",
+                    "changed": changed,
+                    "previous_count": len(previous),
+                    "current_count": len(current),
+                    "previous_summaries": previous[:3],
+                    "current_summaries": current[:3],
+                }
+            )
+        if isinstance(capability_result_context, dict):
+            observation_summary = capability_result_context.get("observation_summary")
+            signal: dict[str, Any] = {
+                "signal_kind": "capability_result",
+                "summary_text": "capability result を受け取り、実行結果の差分候補として扱う。",
+                "source_capability_id": capability_result_context.get("source_capability_id"),
+            }
+            if isinstance(observation_summary, dict):
+                for key in ("status", "status_text", "error", "result_status"):
+                    value = observation_summary.get(key)
+                    if value is not None:
+                        signal[key] = value
+            signals.append(signal)
+        if not signals:
+            return None
+        return {
+            "state_boundary": "prediction_error_context は期待との差分候補を扱う派生 view であり、世界状態や記憶の正本ではない。",
+            "signals": signals,
+        }
+
+    def _build_default_mode_context(
+        self,
+        *,
+        recall_pack: dict[str, Any],
+        affect_context: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        candidates: list[dict[str, Any]] = []
+        for section in ("active_commitments", "active_topics", "relationship_model", "episodic_evidence"):
+            items = recall_pack.get(section)
+            if not isinstance(items, list):
+                continue
+            for index, item in enumerate(items[:2]):
+                if not isinstance(item, dict):
+                    continue
+                summary_text = self._workspace_item_summary(
+                    item,
+                    ("summary_text", "outcome_text"),
+                )
+                if summary_text is None:
+                    continue
+                candidates.append(
+                    {
+                        "candidate_ref": f"default_mode:{section}:{self._workspace_item_ref(item, ('memory_unit_id', 'episode_id', 'event_id'), fallback=str(index))}",
+                        "source": f"recall_pack.{section}",
+                        "summary_text": summary_text,
+                        "resurfacing_policy": "即発話せず、workspace の前景化候補として扱う。",
+                    }
+                )
+        for index, item in enumerate(affect_context.get("recent_episode_affects", [])[:2]):
+            if not isinstance(item, dict):
+                continue
+            summary_text = self._workspace_item_summary(
+                item,
+                ("summary_text", "affect_label"),
+            )
+            if summary_text is None:
+                continue
+            candidates.append(
+                {
+                    "candidate_ref": f"default_mode:recent_episode_affect:{index}",
+                    "source": "affect_context.recent_episode_affects",
+                    "summary_text": summary_text,
+                    "resurfacing_policy": "即発話せず、workspace の前景化候補として扱う。",
+                }
+            )
+        if not candidates:
+            return None
+        return {
+            "state_boundary": "default_mode_context は静かな再浮上候補の派生 view であり、自律発話の決定ではない。",
+            "resurfacing_candidates": candidates[:DEFAULT_MODE_CANDIDATE_LIMIT],
+            "total_candidate_count": len(candidates),
         }
 
     def _build_workspace_context(
@@ -520,6 +837,10 @@ class ServiceInputPipelineMixin:
         initiative_context: InitiativeContext | None,
         capability_result_context: dict[str, Any] | None,
         visual_observation_context: dict[str, Any] | None,
+        self_state_context: dict[str, Any] | None,
+        relationship_context: dict[str, Any] | None,
+        prediction_error_context: dict[str, Any] | None,
+        default_mode_context: dict[str, Any] | None,
     ) -> dict[str, Any]:
         candidates: list[dict[str, Any]] = []
         used_refs: set[str] = set()
@@ -649,6 +970,15 @@ class ServiceInputPipelineMixin:
             summary_keys=("visual_summary_text", "summary_text"),
             metadata_keys=("source", "source_kind", "source_owner", "image_interpreted"),
         )
+        self._append_workspace_derived_context_candidates(
+            candidates=candidates,
+            used_refs=used_refs,
+            source_counts=source_counts,
+            self_state_context=self_state_context,
+            relationship_context=relationship_context,
+            prediction_error_context=prediction_error_context,
+            default_mode_context=default_mode_context,
+        )
         self._append_workspace_memory_candidates(
             candidates=candidates,
             used_refs=used_refs,
@@ -670,6 +1000,135 @@ class ServiceInputPipelineMixin:
             "source_counts": source_counts,
             "state_boundary": "workspace_context は判断用の派生 view であり、events / episodes / memory_units / affect などの正本を更新しない。",
         }
+
+    def _append_workspace_derived_context_candidates(
+        self,
+        *,
+        candidates: list[dict[str, Any]],
+        used_refs: set[str],
+        source_counts: dict[str, int],
+        self_state_context: dict[str, Any] | None,
+        relationship_context: dict[str, Any] | None,
+        prediction_error_context: dict[str, Any] | None,
+        default_mode_context: dict[str, Any] | None,
+    ) -> None:
+        if isinstance(self_state_context, dict):
+            for source_key in ("sensory_confidence", "agency_confidence"):
+                entries = self_state_context.get(source_key)
+                if not isinstance(entries, list):
+                    continue
+                for index, entry in enumerate(entries[:3]):
+                    if not isinstance(entry, dict):
+                        continue
+                    self._append_workspace_context_item(
+                        candidates=candidates,
+                        used_refs=used_refs,
+                        source_counts=source_counts,
+                        factor_ref=f"self_state:{source_key}:{index}",
+                        kind="self_state",
+                        source=f"self_state_context.{source_key}",
+                        item=entry,
+                        summary_keys=("summary_text", "status_text", "error", "confidence_hint"),
+                        metadata_keys=("channel", "source", "capability_id", "image_interpreted", "source_owner"),
+                    )
+            focus_stability = self_state_context.get("focus_stability")
+            self._append_workspace_context_item(
+                candidates=candidates,
+                used_refs=used_refs,
+                source_counts=source_counts,
+                factor_ref="self_state:focus_stability",
+                kind="self_state",
+                source="self_state_context.focus_stability",
+                item=focus_stability if isinstance(focus_stability, dict) else None,
+                summary_keys=("summary_text", "status"),
+                metadata_keys=("source", "status", "capability_id"),
+            )
+        if isinstance(relationship_context, dict):
+            relationship_items = relationship_context.get("relationship_items")
+            if isinstance(relationship_items, list):
+                for index, item in enumerate(relationship_items[:4]):
+                    if not isinstance(item, dict):
+                        continue
+                    item_ref = self._workspace_item_ref(item, ("item_ref",), fallback=str(index))
+                    self._append_workspace_context_item(
+                        candidates=candidates,
+                        used_refs=used_refs,
+                        source_counts=source_counts,
+                        factor_ref=f"relationship:{item_ref}",
+                        kind="relationship",
+                        source=str(item.get("source") or "relationship_context"),
+                        item=item,
+                        summary_keys=("summary_text",),
+                        metadata_keys=("source",),
+                    )
+            entity_registry_items = relationship_context.get("entity_registry_items")
+            if isinstance(entity_registry_items, list):
+                for index, item in enumerate(entity_registry_items[:4]):
+                    if not isinstance(item, dict):
+                        continue
+                    item_ref = self._workspace_item_ref(item, ("item_ref", "entity_ref"), fallback=str(index))
+                    self._append_workspace_context_item(
+                        candidates=candidates,
+                        used_refs=used_refs,
+                        source_counts=source_counts,
+                        factor_ref=f"relationship_entity:{item_ref}",
+                        kind="relationship",
+                        source="relationship_context.entity_registry_items",
+                        item=item,
+                        summary_keys=("display_name", "entity_ref"),
+                        metadata_keys=("source", "entity_type", "salience", "last_seen_at"),
+                    )
+            affect_items = relationship_context.get("affect_items")
+            if isinstance(affect_items, list):
+                for index, item in enumerate(affect_items[:2]):
+                    if not isinstance(item, dict):
+                        continue
+                    self._append_workspace_context_item(
+                        candidates=candidates,
+                        used_refs=used_refs,
+                        source_counts=source_counts,
+                        factor_ref=f"relationship_affect:{index}",
+                        kind="relationship",
+                        source="relationship_context.affect_items",
+                        item=item,
+                        summary_keys=("summary_text", "affect_label"),
+                        metadata_keys=("target_scope_type", "target_scope_key", "intensity", "confidence"),
+                    )
+        if isinstance(prediction_error_context, dict):
+            signals = prediction_error_context.get("signals")
+            if isinstance(signals, list):
+                for index, signal in enumerate(signals[:4]):
+                    if not isinstance(signal, dict):
+                        continue
+                    self._append_workspace_context_item(
+                        candidates=candidates,
+                        used_refs=used_refs,
+                        source_counts=source_counts,
+                        factor_ref=f"prediction_error:{index}",
+                        kind="prediction_error",
+                        source="prediction_error_context.signals",
+                        item=signal,
+                        summary_keys=("summary_text", "status_text", "error"),
+                        metadata_keys=("changed", "previous_count", "current_count", "source_capability_id"),
+                    )
+        if isinstance(default_mode_context, dict):
+            resurfacing_candidates = default_mode_context.get("resurfacing_candidates")
+            if isinstance(resurfacing_candidates, list):
+                for item in resurfacing_candidates[:DEFAULT_MODE_CANDIDATE_LIMIT]:
+                    if not isinstance(item, dict):
+                        continue
+                    item_ref = self._workspace_item_ref(item, ("candidate_ref",), fallback="candidate")
+                    self._append_workspace_context_item(
+                        candidates=candidates,
+                        used_refs=used_refs,
+                        source_counts=source_counts,
+                        factor_ref=item_ref,
+                        kind="default_mode",
+                        source=str(item.get("source") or "default_mode_context"),
+                        item=item,
+                        summary_keys=("summary_text",),
+                        metadata_keys=("source", "resurfacing_policy"),
+                    )
 
     def _append_workspace_initiative_candidates(
         self,
@@ -909,6 +1368,10 @@ class ServiceInputPipelineMixin:
         capability_decision_view: list[dict[str, Any]] | None,
         initiative_context: InitiativeContext | None,
         capability_result_context: dict[str, Any] | None,
+        self_state_context: dict[str, Any] | None,
+        relationship_context: dict[str, Any] | None,
+        prediction_error_context: dict[str, Any] | None,
+        default_mode_context: dict[str, Any] | None,
         workspace_context: dict[str, Any] | None,
         visual_observation_context: dict[str, Any] | None,
         recall_hint: dict[str, Any],
@@ -935,6 +1398,10 @@ class ServiceInputPipelineMixin:
             initiative_context=initiative_context,
             capability_result_context=capability_result_context,
             visual_observation_context=visual_observation_context,
+            self_state_context=self_state_context,
+            relationship_context=relationship_context,
+            prediction_error_context=prediction_error_context,
+            default_mode_context=default_mode_context,
             workspace_context=workspace_context,
             recall_hint=recall_hint,
             recall_pack=recall_pack,
@@ -965,6 +1432,9 @@ class ServiceInputPipelineMixin:
         activity_context: dict[str, Any] | None,
         ongoing_action_summary: dict[str, Any] | None,
         initiative_context: InitiativeContext | None,
+        self_state_context: dict[str, Any] | None,
+        relationship_context: dict[str, Any] | None,
+        prediction_error_context: dict[str, Any] | None,
         workspace_context: dict[str, Any] | None,
         visual_observation_context: dict[str, Any] | None,
         recall_hint: dict[str, Any],
@@ -1090,6 +1560,9 @@ class ServiceInputPipelineMixin:
                 ongoing_action_summary=ongoing_action_summary,
                 initiative_context=initiative_context,
                 visual_observation_context=visual_observation_context,
+                self_state_context=self_state_context,
+                relationship_context=relationship_context,
+                prediction_error_context=prediction_error_context,
                 workspace_context=workspace_context,
                 recall_hint=recall_hint,
                 recall_pack=recall_pack,
@@ -1136,6 +1609,10 @@ class ServiceInputPipelineMixin:
         initiative_context: InitiativeContext | None,
         capability_result_context: dict[str, Any] | None,
         visual_observation_context: dict[str, Any] | None,
+        self_state_context: dict[str, Any] | None,
+        relationship_context: dict[str, Any] | None,
+        prediction_error_context: dict[str, Any] | None,
+        default_mode_context: dict[str, Any] | None,
         workspace_context: dict[str, Any] | None,
         recall_hint: dict[str, Any],
         recall_pack: dict[str, Any],
@@ -1156,6 +1633,10 @@ class ServiceInputPipelineMixin:
             initiative_context=initiative_context,
             capability_result_context=capability_result_context,
             visual_observation_context=visual_observation_context,
+            self_state_context=self_state_context,
+            relationship_context=relationship_context,
+            prediction_error_context=prediction_error_context,
+            default_mode_context=default_mode_context,
             workspace_context=workspace_context,
             recall_hint=recall_hint,
             recall_pack=recall_pack,
@@ -1175,6 +1656,9 @@ class ServiceInputPipelineMixin:
         ongoing_action_summary: dict[str, Any] | None,
         initiative_context: InitiativeContext | None,
         visual_observation_context: dict[str, Any] | None,
+        self_state_context: dict[str, Any] | None,
+        relationship_context: dict[str, Any] | None,
+        prediction_error_context: dict[str, Any] | None,
         workspace_context: dict[str, Any] | None,
         recall_hint: dict[str, Any],
         recall_pack: dict[str, Any],
@@ -1192,6 +1676,9 @@ class ServiceInputPipelineMixin:
             ongoing_action_summary=ongoing_action_summary,
             initiative_context=initiative_context,
             visual_observation_context=visual_observation_context,
+            self_state_context=self_state_context,
+            relationship_context=relationship_context,
+            prediction_error_context=prediction_error_context,
             workspace_context=workspace_context,
             recall_hint=recall_hint,
             recall_pack=recall_pack,

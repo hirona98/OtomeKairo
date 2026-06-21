@@ -448,6 +448,10 @@ class ServiceInputTraceBuildMixin:
         initiative_context: InitiativeContext | None,
         capability_result_context: dict[str, Any] | None,
         visual_observation_context: dict[str, Any] | None,
+        self_state_context: dict[str, Any] | None,
+        relationship_context: dict[str, Any] | None,
+        prediction_error_context: dict[str, Any] | None,
+        default_mode_context: dict[str, Any] | None,
         workspace_context: dict[str, Any] | None,
         recall_pack: dict[str, Any],
         decision: dict[str, Any],
@@ -470,6 +474,10 @@ class ServiceInputTraceBuildMixin:
                 "initiative_context": initiative_context.to_prompt_payload() if initiative_context is not None else None,
                 "capability_result_context": capability_result_context,
                 "visual_observation_context": visual_observation_context,
+                "self_state_context": self_state_context,
+                "relationship_context": relationship_context,
+                "prediction_error_context": prediction_error_context,
+                "default_mode_context": default_mode_context,
                 "workspace_context_summary": self._summarize_workspace_context(workspace_context),
                 "foreground_selection": decision.get("foreground_selection"),
                 "recall_pack_summary": self._summarize_recall_pack(recall_pack),
@@ -495,6 +503,14 @@ class ServiceInputTraceBuildMixin:
             trace["ongoing_action_summary"] = ongoing_action_summary
         if isinstance(capability_result_context, dict):
             trace["capability_result_context"] = capability_result_context
+        if isinstance(self_state_context, dict):
+            trace["self_state_context"] = self_state_context
+        if isinstance(relationship_context, dict):
+            trace["relationship_context"] = relationship_context
+        if isinstance(prediction_error_context, dict):
+            trace["prediction_error_context"] = prediction_error_context
+        if isinstance(default_mode_context, dict):
+            trace["default_mode_context"] = default_mode_context
         if isinstance(workspace_context, dict):
             trace["workspace_context_summary"] = self._summarize_workspace_context(workspace_context)
         if isinstance(decision.get("foreground_selection"), dict):
