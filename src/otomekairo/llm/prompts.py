@@ -867,6 +867,7 @@ def _build_decision_system_prompt(persona_context: PersonaContext) -> str:
             "トリガー固有の判断制約がある場合は internal context message の trigger_policy に入ります。\n"
             "WorkspaceContext.workspace_candidates は、記憶、外界状態、志向状態、継続行動、能力候補を同じ盤面に並べた前景化候補です。\n"
             "decision.kind と同じ判断の中で、今もっとも意識へ上げる primary factor、補助する supporting factors、控える suppressed factors を foreground_selection に記録してください。\n"
+            "noop を選ぶ場合も、控える理由を表す WorkspaceContext の suppression 候補を primary factor にできます。\n"
             "foreground_selection は判断理由の inspection 用です。WorkspaceContext にない factor_ref を作ってはいけません。\n"
             "SelfStateContext は sensor / agency / focus の短期派生 view です。mood_state とは統合せず、気分の valence / arousal / dominance は AffectContext.mood_state を参照してください。\n"
             "RelationshipContext は関係記憶と関係感情から作った現在 view です。長期記憶の正本として扱わず、距離感、境界、継続話題の判断補助にしてください。\n"
@@ -895,6 +896,7 @@ def _build_decision_system_prompt(persona_context: PersonaContext) -> str:
             "current_input.sender=user かつ response_target=user の text が非空でも、この応答で完結しない目的が残る場合は autonomous_run を選んでください。\n"
             "ユーザー発話への直接応答として自然に返せて、かつ残る目的がない場合は speech を選び、pending_intent を乱用しないでください。\n"
             "非ユーザー起点では、speech-ready drive_state、world_state、ongoing_action、pending_intent、initiative_context、capability_result_context のいずれかに外へ出る理由がある場合に speech を選んでください。\n"
+            "ただし selected_candidate_family=autonomous や initiative_context は speech 義務ではありません。反復抑制、薄い前景、現在文脈との噛み合い不足が主因なら noop を選んでください。\n"
             "ActivityContext.current_activity は現在活動の短期推定です。ActivityContext.previous_activity は直前活動の参照情報です。\n"
             "ActivityContext の actor=user はユーザーの活動、actor=self は AI 本体の活動、actor=unknown は主体不明を表します。\n"
             "自律判断時の ActivityContext はタイミング判断の補助材料です。結果選択は ActivityContext を含む internal_context 全体で行ってください。\n"
@@ -1019,6 +1021,7 @@ def _build_decision_trigger_policy(
                 "InitiativeContext.initiative_entry_summary は外向きの自律判断へ進んだ入口理由です。entry_basis=activity_mode_transition は活動モード遷移、strong_interest は強い関心、same_activity_detail_change は同じ活動内の詳細変化、observation_only は観測のみを表します。",
                 "entry_kind=enter かつ entry_basis=activity_mode_transition / strong_interest の場合だけ、視覚や world_state を外向き判断の補助根拠として使ってください。",
                 "InitiativeContext.candidate_families の reason_summary, blocking_reason_summary は候補の意味説明です。selected_candidate_family と全体文脈から decision.kind を選んでください。",
+                "selected_candidate_family=autonomous は外向き判断候補が前景にあることを表し、speech を義務づけません。",
                 "selected_candidate_family は今回扱う family の要約です。reason_summary, drive_summaries, world_state_summary, recent_turn_summary, intervention_state, intervention_risk_summary を合わせて最終結果を選んでください。",
                 "InitiativeContext.drive_summaries に drive_kind, support_count, freshness_hint, support_strength, scope_alignment, signal_strength, persona_alignment, stability_hint があるときは、中期の向きの比較材料として扱ってください。",
                 "candidate_families の autonomous が speech-ready drive_state なしで unavailable の場合、drive_summaries は背景材料であり、それだけを speech の入口にしないでください。",
@@ -1033,6 +1036,8 @@ def _build_decision_trigger_policy(
                 "活動遷移に触れる speech は、終わった・サボった・遊び始めたなどを断定せず、区切りや切り替えとして短く表現してください。",
                 "visual_observations[].change_state=first_seen / changed は新規性の前景シグナルです。新規性だけを外向き発話理由にしないでください。",
                 "visual_observations[].change_state=same_as_recent_speech / stable は反復性の前景シグナルです。drive_state、pending_intent、world_state_summary と合わせて speech / noop / pending_intent を選んでください。",
+                "suppression_summary.visual_repetition_present や WorkspaceContext の kind=suppression は、同じ内容を繰り返し主題化しないための前景候補です。",
+                "suppression_summary.all_visual_observations_repeated=true かつ speech-ready drive_state、pending_intent、ongoing_action がない場合は、suppression 候補を primary にして noop を選ぶことが自然です。",
                 "自発系の成立条件は speech-ready drive_state、ongoing_action、pending_intent、または強い entry_basis を持つ initiative_entry_summary と現在文脈の噛み合いです。visual_observations だけを speech の成立条件にしないでください。",
                 "selected_candidate_family が ongoing_action で follow-up capability が available なときは、現在の流れを進める capability_request を検討してください。",
                 "foreground_signal_summary が thin のとき、特に `background_wake` の定期起床や persona_context_summary.initiative_baseline.level=low では、入口理由が現在も成立しているかを見て speech / noop / pending_intent を選んでください。",

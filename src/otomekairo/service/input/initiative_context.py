@@ -64,6 +64,8 @@ class ServiceInputInitiativeContextMixin:
             capability_summary=capability_summary,
         )
         suppression_summary = self._initiative_suppression_summary(
+            drive_summaries=drive_summaries,
+            foreground_signal_summary=foreground_signal_summary,
             intervention_state=intervention_state,
             intervention_risk_summary=intervention_risk_summary,
         )
@@ -359,8 +361,6 @@ class ServiceInputInitiativeContextMixin:
         payload: dict[str, Any] = {
             "background_trigger": trigger_kind == "background_wake",
         }
-        if trigger_kind == "background_wake":
-            payload.update(self._recent_spontaneous_speech_state(current_time=current_time))
         if isinstance(selected_candidate, dict):
             dedupe_key = selected_candidate.get("dedupe_key")
             if isinstance(dedupe_key, str) and dedupe_key:
@@ -547,8 +547,6 @@ class ServiceInputInitiativeContextMixin:
             reasons.append("initiative_baseline が low で、押し出しは控えめにしたい。")
         if intervention_state.get("same_dedupe_recently_replied") is True:
             reasons.append("同じ pending_intent 系統には最近 speech 済みで、連続介入は避けたい。")
-        if intervention_state.get("recent_spontaneous_speech") is True:
-            reasons.append("直近に定期起床から自発発話済みで、生活上の介入負荷を抑えたい。")
         if isinstance(ongoing_action_summary, dict) and ongoing_action_summary.get("status") == "waiting_result":
             reasons.append("ongoing_action が結果待ちで、重複介入は抑えたい。")
         if int(capability_summary.get("available_count", 0)) == 0:
@@ -560,25 +558,61 @@ class ServiceInputInitiativeContextMixin:
     def _initiative_suppression_summary(
         self,
         *,
+        drive_summaries: list[dict[str, Any]],
+        foreground_signal_summary: dict[str, Any],
         intervention_state: dict[str, Any],
         intervention_risk_summary: str | None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {}
+        visual_repetition = self._initiative_visual_repetition_summary(foreground_signal_summary)
         suppression_level = "low"
-        if (
-            intervention_state.get("same_dedupe_recently_replied") is True
-            or intervention_state.get("recent_spontaneous_speech") is True
-        ):
+        speech_ready_drives = self._initiative_speech_ready_drive_summaries(drive_summaries)
+        if intervention_state.get("same_dedupe_recently_replied") is True:
+            suppression_level = "high"
+        elif visual_repetition.get("all_visual_observations_repeated") is True and not speech_ready_drives:
             suppression_level = "high"
         payload["suppression_level"] = suppression_level
+        reason_parts: list[str] = []
         if intervention_risk_summary is not None:
-            payload["reason_summary"] = intervention_risk_summary
-        for key in ("background_trigger", "same_dedupe_recently_replied", "recent_spontaneous_speech"):
+            reason_parts.append(intervention_risk_summary)
+        if visual_repetition.get("all_visual_observations_repeated") is True:
+            reason_parts.append("視覚観測は既に触れた内容または安定状態だけで、反復主題化を控える材料がある。")
+        elif visual_repetition.get("visual_repetition_present") is True:
+            reason_parts.append("一部の視覚観測に反復性があり、前へ出る理由との競合材料として扱う。")
+        if reason_parts:
+            payload["reason_summary"] = " / ".join(reason_parts)
+        for key in ("background_trigger", "same_dedupe_recently_replied"):
             value = intervention_state.get(key)
             if isinstance(value, bool):
                 payload[key] = value
-        for key in ("seconds_since_last_spontaneous_speech", "suppression_window_minutes"):
-            value = intervention_state.get(key)
-            if isinstance(value, int):
-                payload[key] = value
+        payload.update(visual_repetition)
         return payload
+
+    def _initiative_visual_repetition_summary(
+        self,
+        foreground_signal_summary: dict[str, Any],
+    ) -> dict[str, Any]:
+        visual_signals = self._initiative_visual_observation_signals(foreground_signal_summary)
+        if not visual_signals:
+            return {
+                "visual_repetition_present": False,
+                "same_as_recent_speech_present": False,
+                "all_visual_observations_repeated": False,
+                "visual_observation_count": 0,
+                "repeated_visual_observation_count": 0,
+            }
+        repeated_count = 0
+        same_as_recent_speech_present = False
+        for signal in visual_signals:
+            change_state = signal.get("change_state")
+            if change_state in {"same_as_recent_speech", "stable"}:
+                repeated_count += 1
+            if change_state == "same_as_recent_speech" or signal.get("same_as_recent_speech") is True:
+                same_as_recent_speech_present = True
+        return {
+            "visual_repetition_present": repeated_count > 0,
+            "same_as_recent_speech_present": same_as_recent_speech_present,
+            "all_visual_observations_repeated": repeated_count == len(visual_signals),
+            "visual_observation_count": len(visual_signals),
+            "repeated_visual_observation_count": repeated_count,
+        }

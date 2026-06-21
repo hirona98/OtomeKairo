@@ -223,11 +223,17 @@ class ServiceInputTraceCompactMixin:
                     value = suppression_summary.get(key)
                     if isinstance(value, str) and value.strip():
                         compact_suppression[key] = self._clamp(value.strip(), limit=160)
-                for key in ("background_trigger", "same_dedupe_recently_replied", "recent_spontaneous_speech"):
+                for key in (
+                    "background_trigger",
+                    "same_dedupe_recently_replied",
+                    "visual_repetition_present",
+                    "same_as_recent_speech_present",
+                    "all_visual_observations_repeated",
+                ):
                     value = suppression_summary.get(key)
                     if isinstance(value, bool):
                         compact_suppression[key] = value
-                for key in ("seconds_since_last_spontaneous_speech", "suppression_window_minutes"):
+                for key in ("visual_observation_count", "repeated_visual_observation_count"):
                     value = suppression_summary.get(key)
                     if isinstance(value, int):
                         compact_suppression[key] = value
@@ -352,13 +358,9 @@ class ServiceInputTraceCompactMixin:
         payload: dict[str, Any] = {}
         if not isinstance(intervention_state, dict):
             return payload
-        for key in ("background_trigger", "same_dedupe_recently_replied", "recent_spontaneous_speech"):
+        for key in ("background_trigger", "same_dedupe_recently_replied"):
             value = intervention_state.get(key)
             if isinstance(value, bool):
-                payload[key] = value
-        for key in ("seconds_since_last_spontaneous_speech", "suppression_window_minutes"):
-            value = intervention_state.get(key)
-            if isinstance(value, int):
                 payload[key] = value
         return payload
 

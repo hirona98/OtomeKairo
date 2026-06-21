@@ -876,6 +876,12 @@ class ServiceInputPipelineMixin:
             source_counts=source_counts,
             initiative_context=initiative_context,
         )
+        self._append_workspace_suppression_candidates(
+            candidates=candidates,
+            used_refs=used_refs,
+            source_counts=source_counts,
+            initiative_context=initiative_context,
+        )
         self._append_workspace_context_item(
             candidates=candidates,
             used_refs=used_refs,
@@ -1129,6 +1135,45 @@ class ServiceInputPipelineMixin:
                         summary_keys=("summary_text",),
                         metadata_keys=("source", "resurfacing_policy"),
                     )
+
+    def _append_workspace_suppression_candidates(
+        self,
+        *,
+        candidates: list[dict[str, Any]],
+        used_refs: set[str],
+        source_counts: dict[str, int],
+        initiative_context: InitiativeContext | None,
+    ) -> None:
+        if initiative_context is None:
+            return
+        suppression_summary = initiative_context.suppression_summary
+        if not isinstance(suppression_summary, dict):
+            return
+        if suppression_summary.get("visual_repetition_present") is not True:
+            return
+        self._append_workspace_candidate(
+            candidates=candidates,
+            used_refs=used_refs,
+            source_counts=source_counts,
+            factor_ref="suppression:visual_repetition",
+            kind="suppression",
+            source="initiative_context.suppression_summary",
+            summary_text=(
+                "視覚観測に stable または same_as_recent_speech が含まれており、"
+                "同じ内容を繰り返し主題化しないための控える候補。"
+            ),
+            metadata=self._workspace_metadata(
+                suppression_summary,
+                (
+                    "suppression_level",
+                    "visual_repetition_present",
+                    "same_as_recent_speech_present",
+                    "all_visual_observations_repeated",
+                    "visual_observation_count",
+                    "repeated_visual_observation_count",
+                ),
+            ),
+        )
 
     def _append_workspace_initiative_candidates(
         self,

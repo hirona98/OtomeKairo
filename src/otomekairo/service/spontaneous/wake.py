@@ -10,7 +10,6 @@ from otomekairo.service.common import (
     BACKGROUND_WAKE_POLL_SECONDS,
     INITIAL_VISUAL_CAPTURE_DELAY_SECONDS,
     WAKE_RECENT_DEDUPE_WINDOW_MINUTES,
-    WAKE_RECENT_SPONTANEOUS_SPEECH_SUPPRESSION_MINUTES,
     debug_log,
 )
 from otomekairo.service.spontaneous.pending_intent import PendingIntentSelectionError
@@ -117,14 +116,8 @@ class ServiceSpontaneousWakeMixin:
                         pending_intent_selection=pending_intent_selection,
                     )
                 # due 判定
-                due = self._wake_is_due(
-                    state=state,
-                    current_time=started_at,
-                    trigger_kind=trigger_kind,
-                )
+                due = self._wake_is_due(state=state, current_time=started_at)
                 if due["should_skip"]:
-                    if due.get("consume_interval") is True:
-                        self._set_last_wake_at(started_at)
                     debug_log("Wake", f"{self._short_cycle_id(cycle_id)} skip due reason={self._clamp(due['reason_summary'])}")
                     pipeline = self._noop_pipeline(
                         state=state,
@@ -492,7 +485,7 @@ class ServiceSpontaneousWakeMixin:
                 self._wake_runtime_state["retry_after"] = None
         return None
 
-    def _wake_is_due(self, *, state: dict[str, Any], current_time: str, trigger_kind: str) -> dict[str, Any]:
+    def _wake_is_due(self, *, state: dict[str, Any], current_time: str) -> dict[str, Any]:
         # 無効時
         wake_policy = state.get("wake_policy", {})
         if wake_policy.get("mode") != "interval":
@@ -500,16 +493,6 @@ class ServiceSpontaneousWakeMixin:
                 "should_skip": True,
                 "reason_summary": "wake_policy が disabled のため、自発判断は止まっている。",
             }
-
-        # 介入負荷
-        if trigger_kind == "background_wake":
-            recent_spontaneous = self._recent_spontaneous_speech_state(current_time=current_time)
-            if recent_spontaneous["recent_spontaneous_speech"]:
-                return {
-                    "should_skip": True,
-                    "reason_summary": self._recent_spontaneous_speech_suppression_reason(recent_spontaneous),
-                    "consume_interval": True,
-                }
 
         # 初回観測待ち
         initial_delay_seconds = self._wake_initial_delay_remaining_seconds(current_time=current_time)
@@ -551,33 +534,6 @@ class ServiceSpontaneousWakeMixin:
             "should_skip": False,
             "reason_summary": None,
         }
-
-    def _recent_spontaneous_speech_state(self, *, current_time: str) -> dict[str, Any]:
-        with self._runtime_state_lock:
-            last_spontaneous_at = self._wake_runtime_state.get("last_spontaneous_at")
-        payload: dict[str, Any] = {
-            "recent_spontaneous_speech": False,
-            "last_spontaneous_at": last_spontaneous_at if isinstance(last_spontaneous_at, str) else None,
-            "suppression_window_minutes": WAKE_RECENT_SPONTANEOUS_SPEECH_SUPPRESSION_MINUTES,
-        }
-        if not isinstance(last_spontaneous_at, str) or not last_spontaneous_at:
-            return payload
-        elapsed_seconds = (self._parse_iso(current_time) - self._parse_iso(last_spontaneous_at)).total_seconds()
-        payload["seconds_since_last_spontaneous_speech"] = max(0, int(elapsed_seconds))
-        payload["recent_spontaneous_speech"] = elapsed_seconds < (
-            WAKE_RECENT_SPONTANEOUS_SPEECH_SUPPRESSION_MINUTES * 60
-        )
-        return payload
-
-    def _recent_spontaneous_speech_suppression_reason(self, recent_spontaneous: dict[str, Any]) -> str:
-        elapsed_seconds = recent_spontaneous.get("seconds_since_last_spontaneous_speech")
-        if isinstance(elapsed_seconds, int):
-            elapsed_minutes = elapsed_seconds // 60
-            return (
-                f"直近 {elapsed_minutes} 分以内に定期起床から自発発話済みのため、"
-                "介入負荷を抑えて今回は発話しない。"
-            )
-        return "直近に定期起床から自発発話済みのため、介入負荷を抑えて今回は発話しない。"
 
     def _was_recently_replied(self, *, dedupe_key: str, current_time: str) -> bool:
         # 検索
