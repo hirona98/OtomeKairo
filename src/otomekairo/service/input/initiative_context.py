@@ -359,6 +359,8 @@ class ServiceInputInitiativeContextMixin:
         payload: dict[str, Any] = {
             "background_trigger": trigger_kind == "background_wake",
         }
+        if trigger_kind == "background_wake":
+            payload.update(self._recent_spontaneous_speech_state(current_time=current_time))
         if isinstance(selected_candidate, dict):
             dedupe_key = selected_candidate.get("dedupe_key")
             if isinstance(dedupe_key, str) and dedupe_key:
@@ -545,6 +547,8 @@ class ServiceInputInitiativeContextMixin:
             reasons.append("initiative_baseline が low で、押し出しは控えめにしたい。")
         if intervention_state.get("same_dedupe_recently_replied") is True:
             reasons.append("同じ pending_intent 系統には最近 speech 済みで、連続介入は避けたい。")
+        if intervention_state.get("recent_spontaneous_speech") is True:
+            reasons.append("直近に定期起床から自発発話済みで、生活上の介入負荷を抑えたい。")
         if isinstance(ongoing_action_summary, dict) and ongoing_action_summary.get("status") == "waiting_result":
             reasons.append("ongoing_action が結果待ちで、重複介入は抑えたい。")
         if int(capability_summary.get("available_count", 0)) == 0:
@@ -561,13 +565,20 @@ class ServiceInputInitiativeContextMixin:
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {}
         suppression_level = "low"
-        if intervention_state.get("same_dedupe_recently_replied") is True:
+        if (
+            intervention_state.get("same_dedupe_recently_replied") is True
+            or intervention_state.get("recent_spontaneous_speech") is True
+        ):
             suppression_level = "high"
         payload["suppression_level"] = suppression_level
         if intervention_risk_summary is not None:
             payload["reason_summary"] = intervention_risk_summary
-        for key in ("background_trigger", "same_dedupe_recently_replied"):
+        for key in ("background_trigger", "same_dedupe_recently_replied", "recent_spontaneous_speech"):
             value = intervention_state.get(key)
             if isinstance(value, bool):
+                payload[key] = value
+        for key in ("seconds_since_last_spontaneous_speech", "suppression_window_minutes"):
+            value = intervention_state.get(key)
+            if isinstance(value, int):
                 payload[key] = value
         return payload

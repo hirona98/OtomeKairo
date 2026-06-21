@@ -37,8 +37,14 @@ class ServiceInputWakePipelineMixin:
         )
 
         # 起床ポリシー
-        due = self._wake_is_due(state=state, current_time=started_at)
+        due = self._wake_is_due(
+            state=state,
+            current_time=started_at,
+            trigger_kind=trigger_kind,
+        )
         if due["should_skip"]:
+            if due.get("consume_interval") is True:
+                self._set_last_wake_at(started_at)
             debug_log("Wake", f"{cycle_label} skipped reason={self._clamp(due['reason_summary'])}")
             return (
                 self._noop_pipeline(state=state, started_at=started_at, reason_summary=due["reason_summary"]),

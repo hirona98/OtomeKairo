@@ -5,6 +5,7 @@ from typing import Any
 
 from otomekairo.capabilities import capability_manifests
 from otomekairo.memory.utils import localize_timestamp_fields
+from otomekairo.service.common import WAKE_RECENT_SPONTANEOUS_SPEECH_SUPPRESSION_MINUTES
 from otomekairo.service.input.source_owner import visual_source_owner
 
 
@@ -307,6 +308,7 @@ class ServiceConfigInspectionMixin:
                 "last_spontaneous_at": self._wake_runtime_state.get("last_spontaneous_at"),
                 "initial_delay_until": self._wake_runtime_state.get("initial_delay_until"),
                 "retry_after": self._wake_runtime_state.get("retry_after"),
+                "spontaneous_speech_suppression_minutes": WAKE_RECENT_SPONTANEOUS_SPEECH_SUPPRESSION_MINUTES,
                 "speech_history_count": len(speech_history) if isinstance(speech_history, dict) else 0,
             }
 
