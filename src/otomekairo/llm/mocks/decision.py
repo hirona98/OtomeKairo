@@ -90,8 +90,37 @@ class LLMMockDecisionMixin:
         # 検証
         payload.setdefault("capability_request", None)
         payload.setdefault("autonomous_run", None)
+        payload.setdefault("foreground_selection", self._mock_foreground_selection(context))
         validate_decision_contract(payload)
         return payload
+
+    def _mock_foreground_selection(self, context: DecisionContext) -> dict[str, Any]:
+        workspace_context = context.workspace_context if isinstance(context.workspace_context, dict) else {}
+        candidates = workspace_context.get("workspace_candidates")
+        if not isinstance(candidates, list):
+            candidates = []
+        factor_refs = [
+            str(candidate.get("factor_ref")).strip()
+            for candidate in candidates
+            if isinstance(candidate, dict)
+            and isinstance(candidate.get("factor_ref"), str)
+            and candidate.get("factor_ref").strip()
+        ]
+        primary_factor_ref = factor_refs[0] if factor_refs else None
+        supporting_factor_refs = factor_refs[1:4]
+        suppressed_factors = [
+            {
+                "factor_ref": factor_ref,
+                "reason_summary": "mock decision では前景化の主因または補助因子に選ばれなかった。",
+            }
+            for factor_ref in factor_refs[4:9]
+        ]
+        return {
+            "primary_factor_ref": primary_factor_ref,
+            "supporting_factor_refs": supporting_factor_refs,
+            "suppressed_factors": suppressed_factors,
+            "summary_text": "mock decision は workspace 候補順で前景化結果を作った。",
+        }
 
     def generate_autonomous_step(
         self,

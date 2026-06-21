@@ -1018,6 +1018,12 @@ class ServiceAutonomousRunMixin:
             "pending_intent": None,
             "capability_request": None,
             "autonomous_run": None,
+            "foreground_selection": {
+                "primary_factor_ref": None,
+                "supporting_factor_refs": [],
+                "suppressed_factors": [],
+                "summary_text": "autonomous_step_generation が発話一手を選んだ。",
+            },
         }
         speech_context = self._build_speech_context(
             input_text=step_context.current_input.text,
@@ -1043,6 +1049,7 @@ class ServiceAutonomousRunMixin:
             ongoing_action_summary=step_context.ongoing_action_summary,
             initiative_context=None,
             visual_observation_context=None,
+            workspace_context=None,
             recall_hint=self._empty_recall_hint(),
             recall_pack=self._empty_recall_pack(),
             decision=decision,

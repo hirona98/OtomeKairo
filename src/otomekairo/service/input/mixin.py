@@ -129,6 +129,12 @@ class ServiceInputMixin(
                 "pending_intent": None,
                 "capability_request": None,
                 "autonomous_run": None,
+                "foreground_selection": {
+                    "primary_factor_ref": None,
+                    "supporting_factor_refs": [],
+                    "suppressed_factors": [],
+                    "summary_text": reason_summary,
+                },
             },
             "speech_payload": None,
         }

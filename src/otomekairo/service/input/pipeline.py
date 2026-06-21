@@ -12,6 +12,22 @@ from otomekairo.llm.contexts import (
 from otomekairo.service.common import debug_log
 
 
+WORKSPACE_CANDIDATE_LIMIT = 24
+WORKSPACE_SUPPORTING_SELECTION_LIMIT = 3
+WORKSPACE_SUPPRESSED_SELECTION_LIMIT = 5
+WORKSPACE_MEMORY_SECTIONS = (
+    "active_commitments",
+    "active_topics",
+    "relationship_model",
+    "self_model",
+    "user_model",
+    "episodic_evidence",
+    "event_evidence",
+    "visual_observations",
+)
+WORKSPACE_MEMORY_ITEMS_PER_SECTION = 2
+
+
 class ServiceInputPipelineMixin:
     def _run_input_pipeline(
         self,
@@ -101,6 +117,7 @@ class ServiceInputPipelineMixin:
             persona=persona,
             started_at=started_at,
             input_text=input_text,
+            current_input=current_input,
             recent_turns=recent_turns,
             trigger_kind=trigger_kind,
             client_context=current_client_context,
@@ -111,6 +128,7 @@ class ServiceInputPipelineMixin:
             capability_request_summary=capability_request_summary,
             visual_observation_context=visual_observation_context,
             recall_hint=recall_hint,
+            recall_pack=recall_pack,
             cycle_label=cycle_label,
         )
 
@@ -130,6 +148,7 @@ class ServiceInputPipelineMixin:
             capability_decision_view=pipeline_contexts["capability_decision_view"],
             initiative_context=pipeline_contexts["initiative_context"],
             capability_result_context=pipeline_contexts["capability_result_context"],
+            workspace_context=pipeline_contexts["workspace_context"],
             recall_hint=recall_hint,
             recall_pack=recall_pack,
             visual_observation_context=visual_observation_context,
@@ -152,6 +171,7 @@ class ServiceInputPipelineMixin:
             activity_context=pipeline_contexts["activity_context"],
             ongoing_action_summary=pipeline_contexts["ongoing_action_summary"],
             initiative_context=pipeline_contexts["initiative_context"],
+            workspace_context=pipeline_contexts["workspace_context"],
             recall_hint=recall_hint,
             recall_pack=recall_pack,
             visual_observation_context=visual_observation_context,
@@ -187,6 +207,7 @@ class ServiceInputPipelineMixin:
             "capability_decision_view": pipeline_contexts["capability_decision_view"],
             "initiative_context": pipeline_contexts["initiative_context"],
             "capability_result_context": pipeline_contexts["capability_result_context"],
+            "workspace_context": pipeline_contexts["workspace_context"],
             "visual_observation_context": visual_observation_context,
             "world_state_trace": pipeline_contexts["world_state_trace"],
             "decision": decision,
@@ -346,6 +367,7 @@ class ServiceInputPipelineMixin:
         persona: dict[str, Any],
         started_at: str,
         input_text: str,
+        current_input: CurrentInput,
         recent_turns: list[dict[str, Any]],
         trigger_kind: str,
         client_context: dict[str, Any],
@@ -356,6 +378,7 @@ class ServiceInputPipelineMixin:
         capability_request_summary: dict[str, Any] | None,
         visual_observation_context: dict[str, Any] | None,
         recall_hint: dict[str, Any],
+        recall_pack: dict[str, Any],
         cycle_label: str,
     ) -> dict[str, Any]:
         # 内部コンテキスト
@@ -409,11 +432,7 @@ class ServiceInputPipelineMixin:
             state=state,
             started_at=started_at,
             input_text=input_text,
-            current_input=self._build_current_input(
-                input_text=input_text,
-                trigger_kind=trigger_kind,
-                capability_request_summary=capability_request_summary,
-            ).to_prompt_payload(),
+            current_input=current_input.to_prompt_payload(),
             recent_turns=recent_turns,
             trigger_kind=trigger_kind,
             client_context=client_context,
@@ -447,6 +466,19 @@ class ServiceInputPipelineMixin:
             observation_summary=observation_summary,
             capability_request_summary=capability_request_summary,
         )
+        workspace_context = self._build_workspace_context(
+            current_input=current_input,
+            recall_pack=recall_pack,
+            drive_state_summary=drive_state_summary,
+            foreground_world_state=foreground_world_state,
+            activity_context=activity_context,
+            ongoing_action_summary=ongoing_action_summary,
+            autonomous_run_summaries=autonomous_run_summaries,
+            capability_decision_view=capability_decision_view,
+            initiative_context=initiative_context,
+            capability_result_context=capability_result_context,
+            visual_observation_context=visual_observation_context,
+        )
         debug_log(
             "Pipeline",
             (
@@ -471,7 +503,394 @@ class ServiceInputPipelineMixin:
             "capability_decision_view": capability_decision_view,
             "initiative_context": initiative_context,
             "capability_result_context": capability_result_context,
+            "workspace_context": workspace_context,
         }
+
+    def _build_workspace_context(
+        self,
+        *,
+        current_input: CurrentInput,
+        recall_pack: dict[str, Any],
+        drive_state_summary: list[dict[str, Any]] | None,
+        foreground_world_state: list[dict[str, Any]] | None,
+        activity_context: dict[str, Any] | None,
+        ongoing_action_summary: dict[str, Any] | None,
+        autonomous_run_summaries: list[dict[str, Any]] | None,
+        capability_decision_view: list[dict[str, Any]] | None,
+        initiative_context: InitiativeContext | None,
+        capability_result_context: dict[str, Any] | None,
+        visual_observation_context: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        candidates: list[dict[str, Any]] = []
+        used_refs: set[str] = set()
+        source_counts: dict[str, int] = {}
+        self._append_workspace_candidate(
+            candidates=candidates,
+            used_refs=used_refs,
+            source_counts=source_counts,
+            factor_ref=f"current_input:{current_input.source_kind}",
+            kind="current_input",
+            source="current_input",
+            summary_text=current_input.text.strip() or f"{current_input.source_kind} trigger",
+            metadata={
+                "sender": current_input.sender,
+                "source_kind": current_input.source_kind,
+                "response_target": current_input.response_target,
+            },
+        )
+        self._append_workspace_context_item(
+            candidates=candidates,
+            used_refs=used_refs,
+            source_counts=source_counts,
+            factor_ref="capability_result:current",
+            kind="capability_result",
+            source="capability_result_context",
+            item=capability_result_context,
+            summary_keys=("status_text", "result_summary_text", "summary_text", "error"),
+            metadata_keys=("capability_id", "request_id", "result_status", "response_target"),
+        )
+        self._append_workspace_initiative_candidates(
+            candidates=candidates,
+            used_refs=used_refs,
+            source_counts=source_counts,
+            initiative_context=initiative_context,
+        )
+        self._append_workspace_context_item(
+            candidates=candidates,
+            used_refs=used_refs,
+            source_counts=source_counts,
+            factor_ref="ongoing_action:current",
+            kind="ongoing_action",
+            source="ongoing_action_summary",
+            item=ongoing_action_summary,
+            summary_keys=("reason_summary", "current_step_summary", "summary_text", "status"),
+            metadata_keys=("action_id", "status", "capability_id"),
+        )
+        for index, item in enumerate(autonomous_run_summaries or []):
+            if not isinstance(item, dict):
+                continue
+            run_id = self._workspace_item_ref(item, ("run_id",), fallback=f"run:{index}")
+            self._append_workspace_context_item(
+                candidates=candidates,
+                used_refs=used_refs,
+                source_counts=source_counts,
+                factor_ref=f"autonomous_run:{run_id}",
+                kind="autonomous_run",
+                source="autonomous_run_summaries",
+                item=item,
+                summary_keys=("objective_summary", "current_step_summary", "history_summary", "status"),
+                metadata_keys=("run_id", "status", "next_run_at"),
+            )
+        for index, item in enumerate(foreground_world_state or []):
+            if not isinstance(item, dict):
+                continue
+            state_ref = self._workspace_item_ref(
+                item,
+                ("world_state_id", "state_id", "integration_key", "scope"),
+                fallback=f"state:{index}",
+            )
+            self._append_workspace_context_item(
+                candidates=candidates,
+                used_refs=used_refs,
+                source_counts=source_counts,
+                factor_ref=f"world_state:{state_ref}",
+                kind="world_state",
+                source="foreground_world_state",
+                item=item,
+                summary_keys=("summary_text", "visual_summary_text", "reason_summary"),
+                metadata_keys=("state_type", "scope", "summary_source", "confidence_hint", "salience_hint", "ttl_hint"),
+            )
+        self._append_workspace_activity_candidates(
+            candidates=candidates,
+            used_refs=used_refs,
+            source_counts=source_counts,
+            activity_context=activity_context,
+        )
+        for index, item in enumerate(drive_state_summary or []):
+            if not isinstance(item, dict):
+                continue
+            drive_ref = self._workspace_item_ref(item, ("drive_id",), fallback=f"drive:{index}")
+            self._append_workspace_context_item(
+                candidates=candidates,
+                used_refs=used_refs,
+                source_counts=source_counts,
+                factor_ref=f"drive_state:{drive_ref}",
+                kind="drive_state",
+                source="drive_state_summary",
+                item=item,
+                summary_keys=("summary_text",),
+                metadata_keys=("drive_id", "drive_kind", "salience", "support_strength", "focus_scope_type", "focus_scope_key"),
+            )
+        for index, item in enumerate(capability_decision_view or []):
+            if not isinstance(item, dict):
+                continue
+            if item.get("available") is not True:
+                continue
+            capability_id = self._workspace_item_ref(item, ("id",), fallback=f"capability:{index}")
+            self._append_workspace_context_item(
+                candidates=candidates,
+                used_refs=used_refs,
+                source_counts=source_counts,
+                factor_ref=f"capability:{capability_id}",
+                kind="capability",
+                source="capability_decision_view",
+                item=item,
+                summary_keys=("what_it_does", "fresh_world_state_policy"),
+                metadata_keys=("id", "kind", "risk_level", "readiness", "fresh_world_state_available"),
+            )
+        self._append_workspace_context_item(
+            candidates=candidates,
+            used_refs=used_refs,
+            source_counts=source_counts,
+            factor_ref="visual_observation:current",
+            kind="visual_observation",
+            source="visual_observation_context",
+            item=visual_observation_context,
+            summary_keys=("visual_summary_text", "summary_text"),
+            metadata_keys=("source", "source_kind", "source_owner", "image_interpreted"),
+        )
+        self._append_workspace_memory_candidates(
+            candidates=candidates,
+            used_refs=used_refs,
+            source_counts=source_counts,
+            recall_pack=recall_pack,
+        )
+        limited_candidates = candidates[:WORKSPACE_CANDIDATE_LIMIT]
+        return {
+            "workspace_candidates": limited_candidates,
+            "selection_policy": {
+                "primary_factor_count": 1,
+                "supporting_factor_ref_limit": WORKSPACE_SUPPORTING_SELECTION_LIMIT,
+                "suppressed_factor_limit": WORKSPACE_SUPPRESSED_SELECTION_LIMIT,
+                "meaning_selection_owner": "decision_generation",
+            },
+            "candidate_count": len(limited_candidates),
+            "total_candidate_count": len(candidates),
+            "dropped_candidate_count": max(0, len(candidates) - len(limited_candidates)),
+            "source_counts": source_counts,
+            "state_boundary": "workspace_context は判断用の派生 view であり、events / episodes / memory_units / affect などの正本を更新しない。",
+        }
+
+    def _append_workspace_initiative_candidates(
+        self,
+        *,
+        candidates: list[dict[str, Any]],
+        used_refs: set[str],
+        source_counts: dict[str, int],
+        initiative_context: InitiativeContext | None,
+    ) -> None:
+        if initiative_context is None:
+            return
+        for family in initiative_context.candidate_families:
+            summary_text = (
+                family.reason_summary
+                or family.preferred_result_reason_summary
+                or family.blocking_reason_summary
+                or family.family
+            )
+            self._append_workspace_candidate(
+                candidates=candidates,
+                used_refs=used_refs,
+                source_counts=source_counts,
+                factor_ref=f"initiative:{family.family}",
+                kind="initiative_candidate",
+                source="initiative_context",
+                summary_text=summary_text,
+                metadata={
+                    "family": family.family,
+                    "available": family.available,
+                    "selected": family.selected,
+                    "preferred_result_kind": family.preferred_result_kind,
+                    "preferred_capability_id": family.preferred_capability_id,
+                },
+            )
+
+    def _append_workspace_activity_candidates(
+        self,
+        *,
+        candidates: list[dict[str, Any]],
+        used_refs: set[str],
+        source_counts: dict[str, int],
+        activity_context: dict[str, Any] | None,
+    ) -> None:
+        if not isinstance(activity_context, dict):
+            return
+        for key in ("current_activity", "previous_activity"):
+            activity = activity_context.get(key)
+            if not isinstance(activity, dict):
+                continue
+            summary_text = self._workspace_item_summary(
+                activity,
+                ("reason_summary", "label", "target", "actor"),
+            )
+            self._append_workspace_candidate(
+                candidates=candidates,
+                used_refs=used_refs,
+                source_counts=source_counts,
+                factor_ref=f"activity:{key}",
+                kind="activity",
+                source="activity_context",
+                summary_text=summary_text,
+                metadata=self._workspace_metadata(
+                    activity,
+                    ("label", "actor", "target", "confidence", "salience", "age_label", "ended_age_label"),
+                ),
+            )
+
+    def _append_workspace_memory_candidates(
+        self,
+        *,
+        candidates: list[dict[str, Any]],
+        used_refs: set[str],
+        source_counts: dict[str, int],
+        recall_pack: dict[str, Any],
+    ) -> None:
+        for section in WORKSPACE_MEMORY_SECTIONS:
+            items = recall_pack.get(section)
+            if not isinstance(items, list):
+                continue
+            for index, item in enumerate(items[:WORKSPACE_MEMORY_ITEMS_PER_SECTION]):
+                if not isinstance(item, dict):
+                    continue
+                item_ref = self._workspace_item_ref(
+                    item,
+                    (
+                        "memory_unit_id",
+                        "episode_id",
+                        "event_id",
+                        "visual_observation_id",
+                        "compare_key",
+                    ),
+                    fallback=f"{section}:{index}",
+                )
+                self._append_workspace_context_item(
+                    candidates=candidates,
+                    used_refs=used_refs,
+                    source_counts=source_counts,
+                    factor_ref=f"memory:{section}:{item_ref}",
+                    kind="memory",
+                    source=f"recall_pack.{section}",
+                    item=item,
+                    summary_keys=(
+                        "summary_text",
+                        "detailed_summary_text",
+                        "anchor",
+                        "topic",
+                        "decision_or_result",
+                        "tone_or_note",
+                    ),
+                    metadata_keys=("memory_type", "scope_type", "scope_key", "primary_scope_type", "primary_scope_key", "retrieval_lane"),
+                )
+
+    def _append_workspace_context_item(
+        self,
+        *,
+        candidates: list[dict[str, Any]],
+        used_refs: set[str],
+        source_counts: dict[str, int],
+        factor_ref: str,
+        kind: str,
+        source: str,
+        item: dict[str, Any] | None,
+        summary_keys: tuple[str, ...],
+        metadata_keys: tuple[str, ...],
+    ) -> None:
+        if not isinstance(item, dict):
+            return
+        summary_text = self._workspace_item_summary(item, summary_keys)
+        self._append_workspace_candidate(
+            candidates=candidates,
+            used_refs=used_refs,
+            source_counts=source_counts,
+            factor_ref=factor_ref,
+            kind=kind,
+            source=source,
+            summary_text=summary_text,
+            metadata=self._workspace_metadata(item, metadata_keys),
+        )
+
+    def _append_workspace_candidate(
+        self,
+        *,
+        candidates: list[dict[str, Any]],
+        used_refs: set[str],
+        source_counts: dict[str, int],
+        factor_ref: str,
+        kind: str,
+        source: str,
+        summary_text: str | None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        text = self._workspace_text(summary_text)
+        if text is None:
+            return
+        normalized_ref = self._unique_workspace_factor_ref(factor_ref, used_refs)
+        candidate: dict[str, Any] = {
+            "factor_ref": normalized_ref,
+            "kind": kind,
+            "source": source,
+            "summary_text": text,
+        }
+        if metadata:
+            candidate["metadata"] = metadata
+        candidates.append(candidate)
+        source_counts[source] = source_counts.get(source, 0) + 1
+
+    def _workspace_item_summary(self, item: dict[str, Any], keys: tuple[str, ...]) -> str | None:
+        parts: list[str] = []
+        for key in keys:
+            value = item.get(key)
+            if isinstance(value, str) and value.strip():
+                parts.append(value.strip())
+        if not parts:
+            return None
+        return " / ".join(parts)
+
+    def _workspace_metadata(self, item: dict[str, Any], keys: tuple[str, ...]) -> dict[str, Any] | None:
+        metadata: dict[str, Any] = {}
+        for key in keys:
+            value = item.get(key)
+            if value is None:
+                continue
+            if isinstance(value, str):
+                stripped = value.strip()
+                if stripped:
+                    metadata[key] = stripped
+                continue
+            if isinstance(value, (int, float, bool, list, dict)):
+                metadata[key] = value
+        return metadata or None
+
+    def _workspace_item_ref(
+        self,
+        item: dict[str, Any],
+        keys: tuple[str, ...],
+        *,
+        fallback: str,
+    ) -> str:
+        for key in keys:
+            value = item.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return fallback
+
+    def _unique_workspace_factor_ref(self, factor_ref: str, used_refs: set[str]) -> str:
+        base_ref = factor_ref.strip() or "workspace:factor"
+        if base_ref not in used_refs:
+            used_refs.add(base_ref)
+            return base_ref
+        suffix = 2
+        while f"{base_ref}:{suffix}" in used_refs:
+            suffix += 1
+        unique_ref = f"{base_ref}:{suffix}"
+        used_refs.add(unique_ref)
+        return unique_ref
+
+    def _workspace_text(self, value: str | None) -> str | None:
+        if not isinstance(value, str):
+            return None
+        stripped = value.strip()
+        return stripped or None
 
     def _run_pipeline_decision(
         self,
@@ -490,6 +909,7 @@ class ServiceInputPipelineMixin:
         capability_decision_view: list[dict[str, Any]] | None,
         initiative_context: InitiativeContext | None,
         capability_result_context: dict[str, Any] | None,
+        workspace_context: dict[str, Any] | None,
         visual_observation_context: dict[str, Any] | None,
         recall_hint: dict[str, Any],
         recall_pack: dict[str, Any],
@@ -515,6 +935,7 @@ class ServiceInputPipelineMixin:
             initiative_context=initiative_context,
             capability_result_context=capability_result_context,
             visual_observation_context=visual_observation_context,
+            workspace_context=workspace_context,
             recall_hint=recall_hint,
             recall_pack=recall_pack,
         )
@@ -544,6 +965,7 @@ class ServiceInputPipelineMixin:
         activity_context: dict[str, Any] | None,
         ongoing_action_summary: dict[str, Any] | None,
         initiative_context: InitiativeContext | None,
+        workspace_context: dict[str, Any] | None,
         visual_observation_context: dict[str, Any] | None,
         recall_hint: dict[str, Any],
         recall_pack: dict[str, Any],
@@ -668,6 +1090,7 @@ class ServiceInputPipelineMixin:
                 ongoing_action_summary=ongoing_action_summary,
                 initiative_context=initiative_context,
                 visual_observation_context=visual_observation_context,
+                workspace_context=workspace_context,
                 recall_hint=recall_hint,
                 recall_pack=recall_pack,
                 decision=decision,
@@ -713,6 +1136,7 @@ class ServiceInputPipelineMixin:
         initiative_context: InitiativeContext | None,
         capability_result_context: dict[str, Any] | None,
         visual_observation_context: dict[str, Any] | None,
+        workspace_context: dict[str, Any] | None,
         recall_hint: dict[str, Any],
         recall_pack: dict[str, Any],
     ) -> DecisionContext:
@@ -732,6 +1156,7 @@ class ServiceInputPipelineMixin:
             initiative_context=initiative_context,
             capability_result_context=capability_result_context,
             visual_observation_context=visual_observation_context,
+            workspace_context=workspace_context,
             recall_hint=recall_hint,
             recall_pack=recall_pack,
         )
@@ -750,6 +1175,7 @@ class ServiceInputPipelineMixin:
         ongoing_action_summary: dict[str, Any] | None,
         initiative_context: InitiativeContext | None,
         visual_observation_context: dict[str, Any] | None,
+        workspace_context: dict[str, Any] | None,
         recall_hint: dict[str, Any],
         recall_pack: dict[str, Any],
         decision: dict[str, Any],
@@ -766,6 +1192,7 @@ class ServiceInputPipelineMixin:
             ongoing_action_summary=ongoing_action_summary,
             initiative_context=initiative_context,
             visual_observation_context=visual_observation_context,
+            workspace_context=workspace_context,
             recall_hint=recall_hint,
             recall_pack=recall_pack,
             decision=decision,

@@ -448,6 +448,7 @@ class ServiceInputTraceBuildMixin:
         initiative_context: InitiativeContext | None,
         capability_result_context: dict[str, Any] | None,
         visual_observation_context: dict[str, Any] | None,
+        workspace_context: dict[str, Any] | None,
         recall_pack: dict[str, Any],
         decision: dict[str, Any],
         pending_intent_summary: dict[str, Any] | None,
@@ -469,6 +470,8 @@ class ServiceInputTraceBuildMixin:
                 "initiative_context": initiative_context.to_prompt_payload() if initiative_context is not None else None,
                 "capability_result_context": capability_result_context,
                 "visual_observation_context": visual_observation_context,
+                "workspace_context_summary": self._summarize_workspace_context(workspace_context),
+                "foreground_selection": decision.get("foreground_selection"),
                 "recall_pack_summary": self._summarize_recall_pack(recall_pack),
                 "memory_link_context": self._summarize_memory_link_context(
                     recall_pack.get("memory_link_context")
@@ -492,7 +495,40 @@ class ServiceInputTraceBuildMixin:
             trace["ongoing_action_summary"] = ongoing_action_summary
         if isinstance(capability_result_context, dict):
             trace["capability_result_context"] = capability_result_context
+        if isinstance(workspace_context, dict):
+            trace["workspace_context_summary"] = self._summarize_workspace_context(workspace_context)
+        if isinstance(decision.get("foreground_selection"), dict):
+            trace["foreground_selection"] = decision["foreground_selection"]
         return trace
+
+    def _summarize_workspace_context(self, workspace_context: dict[str, Any] | None) -> dict[str, Any] | None:
+        if not isinstance(workspace_context, dict):
+            return None
+        candidates = workspace_context.get("workspace_candidates")
+        if not isinstance(candidates, list):
+            candidates = []
+        compact_candidates: list[dict[str, Any]] = []
+        for candidate in candidates[:8]:
+            if not isinstance(candidate, dict):
+                continue
+            compact_candidate: dict[str, Any] = {}
+            for key in ("factor_ref", "kind", "source", "summary_text"):
+                value = candidate.get(key)
+                if isinstance(value, str) and value.strip():
+                    compact_candidate[key] = self._clamp(value.strip(), limit=200)
+            metadata = candidate.get("metadata")
+            if isinstance(metadata, dict):
+                compact_candidate["metadata"] = metadata
+            if compact_candidate:
+                compact_candidates.append(compact_candidate)
+        return {
+            "candidate_count": workspace_context.get("candidate_count", len(candidates)),
+            "total_candidate_count": workspace_context.get("total_candidate_count", len(candidates)),
+            "dropped_candidate_count": workspace_context.get("dropped_candidate_count", 0),
+            "source_counts": workspace_context.get("source_counts", {}),
+            "workspace_candidates": compact_candidates,
+            "state_boundary": workspace_context.get("state_boundary"),
+        }
 
     def _decision_capability_request_summary(self, decision: dict[str, Any]) -> dict[str, Any] | None:
         capability_request = decision.get("capability_request")

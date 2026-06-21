@@ -640,6 +640,7 @@ def validate_decision_contract(payload: dict[str, Any]) -> None:
         "pending_intent",
         "capability_request",
         "autonomous_run",
+        "foreground_selection",
     }
     _validate_exact_keys(payload, required_keys, "Decision")
 
@@ -734,6 +735,56 @@ def validate_decision_contract(payload: dict[str, Any]) -> None:
             raise LLMError("Decision autonomous_run では pending_intent と capability_request を null にしてください。")
     elif payload["autonomous_run"] is not None:
         raise LLMError("Decision kind が autonomous_run 以外のとき、autonomous_run は null である必要があります。")
+    _validate_decision_foreground_selection(payload["foreground_selection"])
+
+
+def _validate_decision_foreground_selection(value: Any) -> None:
+    required_keys = {
+        "primary_factor_ref",
+        "supporting_factor_refs",
+        "suppressed_factors",
+        "summary_text",
+    }
+    _validate_exact_keys(value, required_keys, "Decision foreground_selection")
+    primary_factor_ref = value.get("primary_factor_ref")
+    if primary_factor_ref is not None and (
+        not isinstance(primary_factor_ref, str) or not primary_factor_ref.strip()
+    ):
+        raise LLMError("Decision foreground_selection.primary_factor_ref は null または空でない文字列です。")
+    supporting_factor_refs = value.get("supporting_factor_refs")
+    if not isinstance(supporting_factor_refs, list):
+        raise LLMError("Decision foreground_selection.supporting_factor_refs は配列である必要があります。")
+    if len(supporting_factor_refs) > 3:
+        raise LLMError("Decision foreground_selection.supporting_factor_refs は最大 3 件です。")
+    seen_refs: set[str] = set()
+    if isinstance(primary_factor_ref, str):
+        seen_refs.add(primary_factor_ref)
+    for factor_ref in supporting_factor_refs:
+        if not isinstance(factor_ref, str) or not factor_ref.strip():
+            raise LLMError("Decision foreground_selection.supporting_factor_refs の各要素は空でない文字列です。")
+        if factor_ref in seen_refs:
+            raise LLMError("Decision foreground_selection の factor_ref に重複があります。")
+        seen_refs.add(factor_ref)
+    suppressed_factors = value.get("suppressed_factors")
+    if not isinstance(suppressed_factors, list):
+        raise LLMError("Decision foreground_selection.suppressed_factors は配列である必要があります。")
+    if len(suppressed_factors) > 5:
+        raise LLMError("Decision foreground_selection.suppressed_factors は最大 5 件です。")
+    for item in suppressed_factors:
+        required_suppressed_keys = {"factor_ref", "reason_summary"}
+        _validate_exact_keys(item, required_suppressed_keys, "Decision foreground_selection.suppressed_factors[]")
+        factor_ref = item.get("factor_ref")
+        reason_summary = item.get("reason_summary")
+        if not isinstance(factor_ref, str) or not factor_ref.strip():
+            raise LLMError("Decision foreground_selection.suppressed_factors[].factor_ref は空でない文字列です。")
+        if factor_ref in seen_refs:
+            raise LLMError("Decision foreground_selection の factor_ref に重複があります。")
+        seen_refs.add(factor_ref)
+        if not isinstance(reason_summary, str) or not reason_summary.strip():
+            raise LLMError("Decision foreground_selection.suppressed_factors[].reason_summary は空でない文字列です。")
+    summary_text = value.get("summary_text")
+    if not isinstance(summary_text, str) or not summary_text.strip():
+        raise LLMError("Decision foreground_selection.summary_text は空でない文字列です。")
 
 
 # autonomous step検証
