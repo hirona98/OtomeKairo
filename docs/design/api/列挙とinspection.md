@@ -438,6 +438,36 @@ exact answer 系の cycle では、`recall_trace` に `answer_contract`、`evide
 | `result_trace` | [../runtime/判断と行動.md](../runtime/判断と行動.md)、[../capability/capability_manifest.md](../capability/capability_manifest.md) |
 | `memory_trace` | [../runtime/デバッグ可能性.md](../runtime/デバッグ可能性.md)、[../memory/記憶更新と再整理.md](../memory/記憶更新と再整理.md)、[../memory/内省要約のLLM生成.md](../memory/内省要約のLLM生成.md) |
 
+### `GET /api/inspection/cycles/{cycle_id}/cognitive-context`
+
+- 認証: 必要
+- 役割: 指定した `cycle_id` の前景化と派生 cognitive view を `CocoroConsole` のデバッグ表示向けに返す
+- この endpoint は `cycle_trace.decision_trace` から inspection 用の派生 view だけを取り出す
+- 返却内容は正本状態ではない
+
+response:
+
+```json
+{
+  "ok": true,
+  "data": {
+    "cycle_id": "cycle:...",
+    "cycle_summary": {},
+    "foreground_selection": {},
+    "workspace_context_summary": {},
+    "self_state_context": {},
+    "relationship_context": {},
+    "prediction_error_context": {},
+    "default_mode_context": {}
+  }
+}
+```
+
+`foreground_selection` は判断時点で主役、補助、抑制へ分けた workspace candidate 参照である。
+`workspace_context_summary` は候補盤面の要約であり、workspace 全量ではない。
+`self_state_context`、`relationship_context`、`prediction_error_context`、`default_mode_context` は判断時点の派生 view であり、記憶、世界状態、感情状態の正本ではない。
+存在しない派生 view は空 object として返す。
+
 主な失敗:
 
 | HTTP | `error.code` | 意味 |

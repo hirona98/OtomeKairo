@@ -85,7 +85,9 @@ autonomous speech の入口として扱う `drive_state` は、`support_count / 
 speech-ready ではない `drive_state` は autonomous speech の入口にしない。
 `time_context_summary` は `current_time_text / part_of_day / time_band_summary` を含む。
 `foreground_signal_summary` は `foreground_thinness / reason_summary / world_state_count` を含む。
-`suppression_summary` は `suppression_level / background_trigger / same_dedupe_recently_replied` を含む。
+`suppression_summary` は `suppression_level / background_trigger / same_dedupe_recently_replied / visual_repetition_present / same_as_recent_speech_present / all_visual_observations_repeated` を含む。
+`suppression_summary.visual_observation_count` は判断に渡した visual observation signal の件数である。
+`suppression_summary.repeated_visual_observation_count` は `stable / same_as_recent_speech` の件数である。
 `suppression_summary.reason_summary` は具体的な抑制理由がある場合に含む。
 `suppression_summary.suppression_level` は `low / high` のいずれかである。
 `candidate_families` の各 entry は `family / available / selected` を含む。

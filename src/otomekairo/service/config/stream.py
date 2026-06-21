@@ -412,11 +412,11 @@ class ServiceConfigStreamMixin:
                 "hello.mcp_servers[].mcp_server_id",
                 limit=80,
             )
-            if not server_id.startswith("mcp_server:"):
+            if not server_id.startswith("mcp:"):
                 raise ServiceError(
                     400,
                     "invalid_mcp_servers",
-                    "hello.mcp_servers[].mcp_server_id must start with mcp_server:.",
+                    "hello.mcp_servers[].mcp_server_id must start with mcp:.",
                 )
             if server_id in seen_server_ids:
                 raise ServiceError(400, "invalid_mcp_servers", "hello.mcp_servers contains duplicate ids.")

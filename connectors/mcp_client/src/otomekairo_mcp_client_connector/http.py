@@ -6,16 +6,27 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+from .trace import TraceWriter
+
 
 class HttpError(RuntimeError):
     pass
 
 
 class JsonApiClient:
-    def __init__(self, *, base_url: str, access_token: str, tls_verify: bool, timeout_seconds: float) -> None:
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        access_token: str,
+        tls_verify: bool,
+        timeout_seconds: float,
+        trace: TraceWriter | None = None,
+    ) -> None:
         self.base_url = base_url.rstrip("/")
         self.access_token = access_token
         self.timeout_seconds = timeout_seconds
+        self.trace = trace
         self.ssl_context = ssl.create_default_context()
         if not tls_verify:
             self.ssl_context.check_hostname = False
@@ -32,6 +43,13 @@ class JsonApiClient:
         headers = {"Accept": "application/json", "Authorization": f"Bearer {self.access_token}"}
         if payload is not None:
             headers["Content-Type"] = "application/json"
+        if self.trace is not None:
+            self.trace.write(
+                boundary="otomekairo_http",
+                direction="request",
+                kind=f"{method} {path}",
+                payload={"method": method, "path": path, "headers": headers, "body": payload},
+            )
         request = urllib.request.Request(
             url=f"{self.base_url}{path}",
             data=body,
@@ -47,6 +65,13 @@ class JsonApiClient:
             raw_body = exc.read().decode("utf-8", errors="replace")
         except urllib.error.URLError as exc:
             raise HttpError(f"{method} {path} failed: {exc.reason}") from exc
+        if self.trace is not None:
+            self.trace.write(
+                boundary="otomekairo_http",
+                direction="response",
+                kind=f"{status_code} {method} {path}",
+                payload={"status_code": status_code, "body": _json_or_text(raw_body)},
+            )
         try:
             envelope = json.loads(raw_body)
         except json.JSONDecodeError as exc:
@@ -60,3 +85,10 @@ class JsonApiClient:
             raise HttpError(f"{method} {path} failed: HTTP {status_code}")
         data = envelope.get("data")
         return data if isinstance(data, dict) else {}
+
+
+def _json_or_text(raw_body: str) -> Any:
+    try:
+        return json.loads(raw_body)
+    except json.JSONDecodeError:
+        return raw_body

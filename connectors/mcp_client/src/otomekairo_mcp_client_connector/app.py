@@ -9,16 +9,19 @@ from .config import AppConfig, McpServerConfig
 from .http import HttpError, JsonApiClient
 from .mcp_bridge import call_tool, list_tools
 from .stream import EventStreamClient, StreamError
+from .trace import trace_writer_from_env
 
 
 class McpClientConnector:
     def __init__(self, config: AppConfig) -> None:
         self.config = config
+        self._trace = trace_writer_from_env()
         self._http = JsonApiClient(
             base_url=config.server.base_url,
             access_token=config.server.access_token,
             tls_verify=config.server.tls_verify,
             timeout_seconds=config.server.request_timeout_seconds,
+            trace=self._trace,
         )
         self._tools_by_server: dict[str, list[dict[str, Any]]] = {}
         self._servers_by_id = {server.mcp_server_id: server for server in config.mcp_servers}
@@ -57,6 +60,7 @@ class McpClientConnector:
                     access_token=self.config.server.access_token,
                     tls_verify=self.config.server.tls_verify,
                     socket_timeout_seconds=self.config.server.request_timeout_seconds,
+                    trace=self._trace,
                 )
                 stream.run(hello_payload=self.hello_payload(), on_event=self._handle_event)
             except (StreamError, OSError, HttpError, RuntimeError) as exc:
@@ -77,6 +81,18 @@ class McpClientConnector:
             return
         if not isinstance(arguments, dict):
             arguments = {}
+        if self._trace is not None:
+            self._trace.write(
+                boundary="otomekairo_event",
+                direction="receive",
+                kind="mcp.call_tool_request.normalized",
+                payload={
+                    "request_id": request_id,
+                    "mcp_server_id": mcp_server_id,
+                    "tool_name": tool_name,
+                    "arguments": arguments,
+                },
+            )
         server = self._servers_by_id.get(mcp_server_id)
         if server is None:
             self._post_result(
@@ -150,4 +166,11 @@ class McpClientConnector:
                 "error": error,
             },
         }
+        if self._trace is not None:
+            self._trace.write(
+                boundary="otomekairo_event",
+                direction="send",
+                kind="mcp.call_tool_result",
+                payload=payload,
+            )
         self._http.post("/api/capability/result", payload)

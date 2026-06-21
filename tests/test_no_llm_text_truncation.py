@@ -1,10 +1,11 @@
 import unittest
 
-from otomekairo.llm.contexts import InitiativeContext
+from otomekairo.llm.contexts import CurrentInput, InitiativeContext
 from otomekairo.llm.prompts import _compact_speech_initiative_context
 from otomekairo.memory.consolidator import MemoryConsolidator
 from otomekairo.recall.builder import RecallBuilder
 from otomekairo.recall.event_evidence import RecallEventEvidenceMixin
+from otomekairo.service.input.pipeline import ServiceInputPipelineMixin
 from otomekairo.service.spontaneous.wake import ServiceSpontaneousWakeMixin
 
 
@@ -52,6 +53,44 @@ class TextTruncationTests(unittest.TestCase):
         text = "b" * 240 + "末尾"
 
         self.assertEqual(service._client_context_text(text, limit=40), text)
+
+    def test_workspace_context_text_is_not_truncated(self) -> None:
+        service = ServiceInputPipelineMixin()
+        text = "w" * 240 + "末尾"
+
+        payload = service._build_workspace_context(
+            current_input=CurrentInput(
+                sender="user",
+                source_kind="user_message",
+                response_target="user",
+                text=text,
+            ),
+            recall_pack={
+                "active_commitments": [
+                    {
+                        "memory_unit_id": "memory_unit:long",
+                        "summary_text": text,
+                    }
+                ],
+            },
+            drive_state_summary=None,
+            foreground_world_state=[{"state_type": "environment", "scope": "world", "summary_text": text}],
+            activity_context=None,
+            ongoing_action_summary=None,
+            autonomous_run_summaries=None,
+            capability_decision_view=None,
+            initiative_context=None,
+            capability_result_context=None,
+            visual_observation_context=None,
+            self_state_context=None,
+            relationship_context=None,
+            prediction_error_context=None,
+            default_mode_context=None,
+        )
+
+        summaries = [candidate["summary_text"] for candidate in payload["workspace_candidates"]]
+        self.assertIn(text, summaries)
+        self.assertTrue(all(summary.endswith("末尾") for summary in summaries if summary.startswith("w")))
 
     def test_memory_context_keeps_event_text_and_count_limit(self) -> None:
         consolidator = MemoryConsolidator.__new__(MemoryConsolidator)

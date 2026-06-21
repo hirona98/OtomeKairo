@@ -9,6 +9,7 @@ from typing import Any, Mapping
 from urllib.parse import quote, urlparse
 
 from .http import HttpError, JsonApiClient
+from .trace import trace_writer_from_env
 
 
 class ConfigError(ValueError):
@@ -78,6 +79,7 @@ def _fetch_runtime_mcp_servers(*, server_config: ServerConfig, client_id: str) -
         access_token=server_config.access_token,
         tls_verify=server_config.tls_verify,
         timeout_seconds=server_config.request_timeout_seconds,
+        trace=trace_writer_from_env(),
     )
     try:
         data = client.get(f"/api/config/connectors/{quote(client_id, safe='')}/runtime-config")
@@ -94,8 +96,8 @@ def _mcp_server_configs(value: Any) -> list[McpServerConfig]:
     for item in value:
         server = _object(item, "mcp_servers[]")
         server_id = _required_string(server, "mcp_server_id", "mcp_servers[].mcp_server_id")
-        if not server_id.startswith("mcp_server:"):
-            raise ConfigError("mcp_servers[].mcp_server_id must start with mcp_server:.")
+        if not server_id.startswith("mcp:"):
+            raise ConfigError("mcp_servers[].mcp_server_id must start with mcp:.")
         if server_id in seen:
             raise ConfigError("mcp_servers contains duplicate mcp_server_id.")
         seen.add(server_id)
@@ -194,7 +196,13 @@ def _read_config_db_access_token(db_path: Path) -> str:
 
 
 def _bootstrap_first_console_token(*, base_url: str, tls_verify: bool, request_timeout_seconds: float) -> str:
-    client = JsonApiClient(base_url=base_url, access_token="", tls_verify=tls_verify, timeout_seconds=request_timeout_seconds)
+    client = JsonApiClient(
+        base_url=base_url,
+        access_token="",
+        tls_verify=tls_verify,
+        timeout_seconds=request_timeout_seconds,
+        trace=trace_writer_from_env(),
+    )
     try:
         data = client.post("/api/bootstrap/register-first-console", {})
     except HttpError:

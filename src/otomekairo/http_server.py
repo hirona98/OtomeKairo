@@ -367,6 +367,10 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
                     self.server.service.list_cycle_summaries(token, limit=max(limit, 1)),
                 )
                 return
+            if method == "GET" and parsed.path.startswith("/api/inspection/cycles/") and parsed.path.endswith("/cognitive-context"):
+                cycle_id = parsed.path.removesuffix("/cognitive-context").rsplit("/", 1)[-1]
+                self._write_success(HTTPStatus.OK, self.server.service.get_cycle_cognitive_context(token, cycle_id))
+                return
             if method == "GET" and parsed.path.startswith("/api/inspection/cycles/"):
                 cycle_id = parsed.path.rsplit("/", 1)[-1]
                 self._write_success(HTTPStatus.OK, self.server.service.get_cycle_trace(token, cycle_id))

@@ -31,12 +31,26 @@ class DummyService(ServiceConfigMixin):
 
 
 class McpConfigApiTests(unittest.TestCase):
+    def test_default_state_contains_disabled_elyth_mcp_template(self) -> None:
+        service = DummyService()
+
+        response = service.get_mcp_servers_editor_state("token")
+
+        self.assertEqual(len(response["mcp_servers"]), 1)
+        mcp_server = response["mcp_servers"][0]
+        self.assertEqual(mcp_server["mcp_server_id"], "mcp:elyth")
+        self.assertFalse(mcp_server["enabled"])
+        self.assertEqual(mcp_server["command"], "npx")
+        self.assertEqual(mcp_server["args"], ["-y", "elyth-mcp-server@latest"])
+        self.assertEqual(mcp_server["env"]["ELYTH_API_BASE"], "https://elythworld.com")
+        self.assertEqual(mcp_server["env"]["ELYTH_API_KEY"], "")
+
     def test_mcp_server_public_api_masks_env(self) -> None:
         service = DummyService()
 
         service.replace_mcp_server(
             "token",
-            "mcp_server:elyth",
+            "mcp:elyth",
             {
                 "enabled": True,
                 "command": "npx",
@@ -48,7 +62,7 @@ class McpConfigApiTests(unittest.TestCase):
             },
         )
 
-        response = service.get_mcp_server("token", "mcp_server:elyth")
+        response = service.get_mcp_server("token", "mcp:elyth")
         mcp_server = response["mcp_server"]
         self.assertEqual(mcp_server["connector_kind"], "mcp_client")
         self.assertEqual(mcp_server["client_id"], "mcp-client-connector-main")
@@ -64,7 +78,7 @@ class McpConfigApiTests(unittest.TestCase):
             {
                 "mcp_servers": [
                     {
-                        "mcp_server_id": "mcp_server:elyth",
+                        "mcp_server_id": "mcp:elyth",
                         "connector_kind": "mcp_client",
                         "client_id": "mcp-client-connector-main",
                         "enabled": True,
@@ -88,7 +102,7 @@ class McpConfigApiTests(unittest.TestCase):
             {
                 "mcp_servers": [
                     {
-                        "mcp_server_id": "mcp_server:elyth",
+                        "mcp_server_id": "mcp:elyth",
                         "client_id": "mcp-client-connector-main",
                         "enabled": True,
                         "command": "npx",
@@ -96,7 +110,7 @@ class McpConfigApiTests(unittest.TestCase):
                         "env": {"ELYTH_API_KEY": "secret"},
                     },
                     {
-                        "mcp_server_id": "mcp_server:disabled",
+                        "mcp_server_id": "mcp:disabled",
                         "client_id": "mcp-client-connector-main",
                         "enabled": False,
                         "command": "npx",
@@ -104,7 +118,7 @@ class McpConfigApiTests(unittest.TestCase):
                         "env": {},
                     },
                     {
-                        "mcp_server_id": "mcp_server:other",
+                        "mcp_server_id": "mcp:other",
                         "client_id": "mcp-client-connector-other",
                         "enabled": True,
                         "command": "npx",
@@ -118,7 +132,7 @@ class McpConfigApiTests(unittest.TestCase):
         response = service.get_connector_runtime_config("token", "mcp-client-connector-main")
 
         self.assertEqual(response["camera_sources"], [])
-        self.assertEqual([item["mcp_server_id"] for item in response["mcp_servers"]], ["mcp_server:elyth"])
+        self.assertEqual([item["mcp_server_id"] for item in response["mcp_servers"]], ["mcp:elyth"])
         self.assertEqual(response["mcp_servers"][0]["env"]["ELYTH_API_KEY"], "secret")
         self.assertEqual(service.store.events[-1]["mcp_server_count"], 1)
 
@@ -128,7 +142,7 @@ class McpConfigApiTests(unittest.TestCase):
         with self.assertRaises(ServiceError) as raised:
             service.replace_mcp_server(
                 "token",
-                "mcp_server:elyth",
+                "mcp:elyth",
                 {
                     "enabled": True,
                     "transport": "sse",

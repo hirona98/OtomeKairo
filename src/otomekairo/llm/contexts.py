@@ -233,6 +233,11 @@ class DecisionContext:
     initiative_context: InitiativeContext | None
     capability_result_context: dict[str, Any] | None
     visual_observation_context: dict[str, Any] | None
+    self_state_context: dict[str, Any] | None
+    relationship_context: dict[str, Any] | None
+    prediction_error_context: dict[str, Any] | None
+    default_mode_context: dict[str, Any] | None
+    workspace_context: dict[str, Any] | None
     recall_hint: dict[str, Any]
     recall_pack: dict[str, Any]
 
@@ -276,6 +281,10 @@ class SpeechContext:
     ongoing_action_summary: dict[str, Any] | None
     initiative_context: InitiativeContext | None
     visual_observation_context: dict[str, Any] | None
+    self_state_context: dict[str, Any] | None
+    relationship_context: dict[str, Any] | None
+    prediction_error_context: dict[str, Any] | None
+    workspace_context: dict[str, Any] | None
     recall_hint: dict[str, Any]
     recall_pack: dict[str, Any]
     decision: dict[str, Any]

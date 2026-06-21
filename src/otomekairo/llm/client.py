@@ -316,6 +316,10 @@ class LLMClient:
         context: DecisionContext,
     ) -> None:
         validate_decision_contract(payload)
+        self._validate_decision_foreground_selection_refs(
+            payload=payload,
+            context=context,
+        )
         self._validate_decision_autonomous_run_coordination(
             payload=payload,
             context=context,
@@ -353,6 +357,54 @@ class LLMClient:
             payload=payload,
             context=context,
         )
+
+    def _validate_decision_foreground_selection_refs(
+        self,
+        *,
+        payload: dict[str, Any],
+        context: DecisionContext,
+    ) -> None:
+        workspace_context = context.workspace_context if isinstance(context.workspace_context, dict) else {}
+        candidates = workspace_context.get("workspace_candidates")
+        candidate_refs = {
+            candidate["factor_ref"].strip()
+            for candidate in candidates
+            if isinstance(candidate, dict)
+            and isinstance(candidate.get("factor_ref"), str)
+            and candidate["factor_ref"].strip()
+        } if isinstance(candidates, list) else set()
+        foreground_selection = payload.get("foreground_selection")
+        if not isinstance(foreground_selection, dict):
+            return
+        selected_refs: list[str] = []
+        primary_factor_ref = foreground_selection.get("primary_factor_ref")
+        if isinstance(primary_factor_ref, str):
+            selected_refs.append(primary_factor_ref.strip())
+        supporting_factor_refs = foreground_selection.get("supporting_factor_refs")
+        if isinstance(supporting_factor_refs, list):
+            selected_refs.extend(
+                factor_ref.strip()
+                for factor_ref in supporting_factor_refs
+                if isinstance(factor_ref, str)
+            )
+        suppressed_factors = foreground_selection.get("suppressed_factors")
+        if isinstance(suppressed_factors, list):
+            selected_refs.extend(
+                item.get("factor_ref", "").strip()
+                for item in suppressed_factors
+                if isinstance(item, dict) and isinstance(item.get("factor_ref"), str)
+            )
+        missing_refs = sorted({factor_ref for factor_ref in selected_refs if factor_ref not in candidate_refs})
+        if missing_refs:
+            raise LLMError(
+                "Decision foreground_selection には WorkspaceContext.workspace_candidates[].factor_ref "
+                f"に含まれる参照だけを指定してください。不明な参照={','.join(missing_refs)}"
+            )
+        if candidate_refs and primary_factor_ref is None:
+            raise LLMError(
+                "WorkspaceContext.workspace_candidates があるときは "
+                "foreground_selection.primary_factor_ref を 1 件指定してください。"
+            )
 
     def _validate_decision_autonomous_run_coordination(
         self,
