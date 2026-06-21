@@ -764,7 +764,7 @@ class ServiceInputWakeObservationMixin:
         change_state: str,
     ) -> str:
         if change_state == "same_as_recent_speech":
-            return "この視覚観測には既に自発 speech 済みなので、繰り返さない。"
+            return "この視覚観測には既に触れているため、繰り返さない。"
         if change_state == "first_seen":
             return "初めて見る視覚観測を自律判断の材料として渡す。"
         if change_state == "changed":

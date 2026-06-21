@@ -300,7 +300,7 @@ API起床は少なくとも次の挙動を持つ。
 - `source_current_input.response_target=user` の capability request は request record に外向き応答先 client を内部保存し、follow-up capability request へ引き継ぐ
 - capability result follow-up の assistant message は、capability result を返した client ではなく request record の外向き応答先 client へ送る
 - `wake / background_wake` の判断で `camera.ptz` を dispatch した場合も同じ `source_current_input` を保存し、result follow-up から同じ camera source の `vision.capture` を内部観測として発行できる
-- visual observation は wake 判断へ渡し、`change_state=first_seen / changed` は wake 判断へ進む前景シグナルとして扱うが、speech 義務ではない
+- visual observation は wake 判断へ渡し、`change_state=first_seen / changed` は wake 判断へ進む前景シグナルとして扱い、発話可否は `speech / noop / pending_intent` の比較で決める
 - visual observation signature は `vision_source_id / source_kind / source_label / visual_summary_text` を持ち、`window_title` を持たない。signature 比較は `vision_source_id / source_kind` の不一致と `visual_summary_text` の類似度を使う
 - visual observation は wake 判断へ渡す。LLM は change_state、drive_state、world_state、同一観測の反復有無を合わせて `speech / noop / pending_intent` を選ぶ
 - 再評価時刻に達した保留意図があれば再評価し、必要なら `speech`

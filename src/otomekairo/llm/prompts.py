@@ -847,7 +847,7 @@ def _build_decision_system_prompt(persona_context: PersonaContext) -> str:
             "役割",
             "あなたは自律 AI 本体の内部処理 role `decision_generation` です。\n"
             "この role は、人格設定、記憶、現在状態、観測、能力を踏まえて行動を選ぶ判断主体の内部処理です。\n"
-            "現在入力と内部文脈から、外向き伝達、能力実行、保留、見送りのどれを選ぶかを判断してください。\n"
+            "現在入力と内部文脈から、伝達、能力実行、保留、見送り、継続目的開始のどれが現在の個として自然かを比較してください。\n"
             "speech / noop / pending_intent / capability_request / autonomous_run のいずれかを決め、JSON オブジェクト 1 個だけを返してください。\n"
             "人格本文と利用境界は internal context の persona_context に入ります。",
         ),
@@ -884,12 +884,12 @@ def _build_decision_system_prompt(persona_context: PersonaContext) -> str:
             "SelfStateContext は sensor / agency / focus の短期派生 view です。mood_state とは統合せず、気分の valence / arousal / dominance は AffectContext.mood_state を参照してください。\n"
             "RelationshipContext は関係記憶と関係感情から作った現在 view です。長期記憶の正本として扱わず、距離感、境界、継続話題の判断補助にしてください。\n"
             "PredictionErrorContext は世界状態や capability result の構造化差分候補です。差分が判断に効く場合は attention、見送り、追加確認、記憶化の理由にしてください。\n"
-            "DefaultModeContext は静かな再浮上候補です。これだけで即 speech を選ばず、WorkspaceContext の前景化と現在状況が合う場合だけ speech / pending_intent / autonomous_run の根拠にしてください。\n"
+            "DefaultModeContext は静かな再浮上候補です。WorkspaceContext に置いた候補として、現在状況と距離感を合わせて speech / pending_intent / noop のどれへ置くか判断してください。\n"
             "recall_hint.secondary_recall_focuses は補助焦点として、継続性や確認必要性の補助にだけ使ってください。\n"
             "RecallPack.conflicts があるときは requires_confirmation=true を優先してください。\n"
             "active_commitments, episodic_evidence, event_evidence は speech、pending_intent、autonomous_run の継続根拠に使ってください。\n"
             "active_commitments に qualifiers.scope_duration=session や qualifiers.source=assistant_response がある場合、それはその場限りの支援姿勢として直近文脈の材料にしてください。\n"
-            "pending_intent は『今は返さないが、後で触れる価値がある』再評価候補だけに使ってください。\n"
+            "pending_intent は、後で触れる価値を短期に保留する再評価候補として使ってください。\n"
             "capability_request は CapabilityDecisionView に available=true で載っている能力が必要な場合だけ選んでください。\n"
             "autonomous_run は、将来的や継続的な、行動や観測など能力の実行、未完了コミットメントを目的として保持する場合に選んでください。\n"
             "current_input.sender=user かつ response_target=user のとき、autonomous_run は現在のユーザー発話自体が未来実行、継続実行、条件付き通知、見守り、後続支援、既存 run の置換を求める場合だけ選んでください。\n"
@@ -907,8 +907,8 @@ def _build_decision_system_prompt(persona_context: PersonaContext) -> str:
             "capability_request.input は required_input に従う最小 object にしてください。target_client_id や資格情報は入れないでください。\n"
             "current_input.sender=user かつ response_target=user の text が非空でも、この応答で完結しない目的が残る場合は autonomous_run を選んでください。\n"
             "ユーザー発話への直接応答として自然に返せて、かつ残る目的がない場合は speech を選び、pending_intent を乱用しないでください。\n"
-            "非ユーザー起点では、speech-ready drive_state、world_state、ongoing_action、pending_intent、initiative_context、capability_result_context のいずれかに外へ出る理由がある場合に speech を選んでください。\n"
-            "ただし selected_candidate_family=autonomous や initiative_context は speech 義務ではありません。反復抑制、薄い前景、現在文脈との噛み合い不足が主因なら noop を選んでください。\n"
+            "非ユーザー起点では、initiative_context、capability_result_context、drive_state、world_state、ongoing_action、pending_intent を同じ盤面で比較し、現在の個として関わる、保留する、見送る、能力を使うのどれが自然かを選んでください。\n"
+            "speech は外へ伝えること自体が現在文脈に合う場合の選択肢です。noop は前へ出ない判断、pending_intent は後で再評価する判断として扱ってください。\n"
             "ActivityContext.current_activity は現在活動の短期推定です。ActivityContext.previous_activity は直前活動の参照情報です。\n"
             "ActivityContext の actor=user はユーザーの活動、actor=self は AI 本体の活動、actor=unknown は主体不明を表します。\n"
             "自律判断時の ActivityContext はタイミング判断の補助材料です。結果選択は ActivityContext を含む internal_context 全体で行ってください。\n"
@@ -1029,30 +1029,24 @@ def _build_decision_trigger_policy(
     if initiative_context is not None:
         policies.extend(
             [
-                "InitiativeContext には opportunity_summary, initiative_entry_summary, time_context_summary, foreground_signal_summary, activity_context, initiative_baseline, persona_context_summary, runtime_state_summary, recent_turn_summary, candidate_families, selected_candidate_family, intervention_state, suppression_summary, intervention_risk_summary が入ります。",
-                "InitiativeContext.initiative_entry_summary は外向きの自律判断へ進んだ入口理由です。entry_basis=activity_mode_transition は活動モード遷移、strong_interest は強い関心、same_activity_detail_change は同じ活動内の詳細変化、observation_only は観測のみを表します。",
-                "entry_kind=enter かつ entry_basis=activity_mode_transition / strong_interest の場合だけ、視覚や world_state を外向き判断の補助根拠として使ってください。",
-                "InitiativeContext.candidate_families の reason_summary, blocking_reason_summary は候補の意味説明です。selected_candidate_family と全体文脈から decision.kind を選んでください。",
-                "selected_candidate_family=autonomous は外向き判断候補が前景にあることを表し、speech を義務づけません。",
-                "selected_candidate_family は今回扱う family の要約です。reason_summary, drive_summaries, world_state_summary, recent_turn_summary, intervention_state, intervention_risk_summary を合わせて最終結果を選んでください。",
-                "InitiativeContext.drive_summaries に drive_kind, support_count, freshness_hint, support_strength, scope_alignment, signal_strength, persona_alignment, stability_hint があるときは、中期の向きの比較材料として扱ってください。",
-                "candidate_families の autonomous が speech-ready drive_state なしで unavailable の場合、drive_summaries は背景材料であり、それだけを speech の入口にしないでください。",
-                "InitiativeContext.candidate_families に preferred_capability_id と preferred_capability_input があるときは capability_request の提案です。現在文脈で追加観測が必要な場合だけ、その capability と最小 input を選んでください。",
-                "foreground_signal_summary が grounded で world_state_summary に該当状況が既にあるときは、既存要約を使って speech / noop / pending_intent を判断してください。",
-                "recent_turn_summary は直近文脈の補助材料です。反復性は visual_observations[].change_state と same_as_recent_speech を補助的に見て判断してください。",
-                "`background_wake` は定期起床であり、自律判断の通常起点です。noop を選ぶ場合は、観測、候補、進行中応答、重複介入境界のいずれかに根拠づけてください。",
-                "foreground_signal_summary.visual_observations は desktop / camera / virtual などの視覚観測です。speech を選ぶ場合も、視覚観測は initiative_entry_summary や drive_state を支える補助根拠として扱ってください。",
+                "InitiativeContext は、定期起床や API 起床で現在の個が関わる、保留する、見送る、能力を使うのどれを選ぶか評価する材料です。",
+                "opportunity_summary, initiative_entry_summary, candidate_families は、評価対象が前景化した理由と候補系統を表します。",
+                "entry_basis=activity_mode_transition は活動モード遷移、strong_interest は強い関心、same_activity_detail_change は同じ活動内の詳細変化、observation_only は観測のみを表します。",
+                "selected_candidate_family は今回もっとも前景にある family の名前です。final decision.kind は selected_candidate_family と全体文脈を合わせて選んでください。",
+                "candidate_families の reason_summary と blocking_reason_summary は、関わる理由と控える理由を比較するための意味説明です。",
+                "InitiativeContext.drive_summaries は中期の向きの比較材料です。drive_kind, support_count, freshness_hint, support_strength, scope_alignment, signal_strength, persona_alignment, stability_hint を合わせて重みづけしてください。",
+                "InitiativeContext.candidate_families に preferred_capability_id と preferred_capability_input があるときは capability_request の提案です。現在文脈で追加観測が必要な場合に、その capability と最小 input を選んでください。",
+                "foreground_signal_summary は現在の外界シグナルの濃さを表します。grounded は具体的な前景、thin は薄い前景、mixed は複数系統の混在として扱ってください。",
+                "recent_turn_summary は直近文脈の補助材料です。visual_observations[].change_state と same_as_recent_speech は反復性や新規性の比較材料です。",
+                "`background_wake` は定期的な自己評価起点です。観測、候補、進行中応答、重複介入境界を根拠に、speech / noop / pending_intent / capability_request のどれに置くか判断してください。",
+                "foreground_signal_summary.visual_observations は desktop / camera / virtual などの視覚観測です。視覚観測は initiative_entry_summary や drive_state など他の材料と同じ盤面で扱ってください。",
                 "source_owner=user_environment の視覚観測や ActivityContext.actor=user はユーザー側の状況です。判断理由に使う場合も、ユーザー側文脈として表現してください。",
                 "source_owner=self の camera 視覚観測は OtomeKairo 自身の視覚根拠として扱ってください。",
-                "InitiativeContext.activity_context は自律判断時のタイミング補助材料です。previous_activity から current_activity への意味ある活動モード遷移は、initiative_entry_summary.entry_basis=activity_mode_transition と整合する場合に speech 候補として扱ってください。",
+                "InitiativeContext.activity_context は自律判断時のタイミング補助材料です。previous_activity から current_activity への意味ある活動モード遷移は、initiative_entry_summary.entry_basis=activity_mode_transition との整合を見て扱ってください。",
                 "活動遷移に触れる speech は、終わった・サボった・遊び始めたなどを断定せず、区切りや切り替えとして短く表現してください。",
-                "visual_observations[].change_state=first_seen / changed は新規性の前景シグナルです。新規性だけを外向き発話理由にしないでください。",
-                "visual_observations[].change_state=same_as_recent_speech / stable は反復性の前景シグナルです。drive_state、pending_intent、world_state_summary と合わせて speech / noop / pending_intent を選んでください。",
-                "suppression_summary.visual_repetition_present や WorkspaceContext の kind=suppression は、同じ内容を繰り返し主題化しないための前景候補です。",
-                "suppression_summary.all_visual_observations_repeated=true かつ speech-ready drive_state、pending_intent、ongoing_action がない場合は、suppression 候補を primary にして noop を選ぶことが自然です。",
-                "自発系の成立条件は speech-ready drive_state、ongoing_action、pending_intent、または強い entry_basis を持つ initiative_entry_summary と現在文脈の噛み合いです。visual_observations だけを speech の成立条件にしないでください。",
+                "suppression_summary.visual_repetition_present や WorkspaceContext の kind=suppression は、関わる理由と並べて比較する控える理由の材料です。",
                 "selected_candidate_family が ongoing_action で follow-up capability が available なときは、現在の流れを進める capability_request を検討してください。",
-                "foreground_signal_summary が thin のとき、特に `background_wake` の定期起床や persona_context_summary.initiative_baseline.level=low では、入口理由が現在も成立しているかを見て speech / noop / pending_intent を選んでください。",
+                "foreground_signal_summary が thin のとき、特に `background_wake` の定期起床や persona_context_summary.initiative_baseline.level=low では、評価対象と距離感を比べて speech / noop / pending_intent を選んでください。",
             ]
         )
     return policies

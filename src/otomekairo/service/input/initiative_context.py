@@ -157,14 +157,14 @@ class ServiceInputInitiativeContextMixin:
     ) -> str:
         _ = trigger_kind, client_context
         if isinstance(selected_candidate, dict):
-            return "自律判断の機会があり、保留中の候補を再評価する機会がある。"
+            return "自律判断の評価機会があり、保留候補をいま扱うか、保留を続けるか、見送るかを選ぶ。"
         if (
             isinstance(initiative_entry_summary, dict)
             and initiative_entry_summary.get("entry_kind") == "enter"
             and initiative_entry_summary.get("entry_basis") in INITIATIVE_ENTRY_ENTER_BASIS_VALUES
         ):
-            return "自律判断の入口が成立しており、外向きに進むかを見直す機会がある。"
-        return "自律判断の機会があり、前進可否を見直す機会がある。"
+            return "自律判断の評価対象が前景化しており、関わる、保留する、見送るのどれが自然かを見直す。"
+        return "自律判断の評価機会があり、関わる、保留する、見送るのどれが自然かを見直す。"
 
     def _initiative_entry_summary(self, client_context: dict[str, Any]) -> dict[str, Any] | None:
         entry_check = client_context.get("initiative_entry_check")
@@ -197,12 +197,12 @@ class ServiceInputInitiativeContextMixin:
 
     def _initiative_time_band_summary(self, *, part_of_day: str) -> str:
         if part_of_day == "morning":
-            return "朝の立ち上がり帯で、軽い前進か様子見かを決めたい時間帯。"
+            return "朝の立ち上がり帯で、軽い関わり、保留、見送りを比べたい時間帯。"
         if part_of_day == "daytime":
-            return "日中の活動帯で、前景理由があれば動きやすい時間帯。"
+            return "日中の活動帯で、前景理由と控える理由を比べて選びやすい時間帯。"
         if part_of_day == "evening":
-            return "夕方から夜への移行帯で、流れの整理や軽い声かけが自然な時間帯。"
-        return "夜間で、短く静かな声かけとして前へ出るかを見たい時間帯。"
+            return "夕方から夜への移行帯で、流れの整理、保留、見送りを比べたい時間帯。"
+        return "夜間で、静かな見送り、保留、短い関わりを慎重に比べたい時間帯。"
 
     def _initiative_foreground_signal_summary(
         self,
@@ -303,9 +303,9 @@ class ServiceInputInitiativeContextMixin:
         if level == "low":
             summary_text = "自発介入は控えめ寄りで、前景理由が弱ければ見送る。"
         elif level == "high":
-            summary_text = "自発介入は強めで、前景理由が揃えば一歩前へ出る。"
+            summary_text = "自発介入は強めで、前景理由が揃うと関わる判断を取りやすい。"
         else:
-            summary_text = "自発介入は中庸で、具体的な前景変化があれば短く前へ出る。"
+            summary_text = "自発介入は中庸で、関わる、保留する、見送るを文脈で選ぶ。"
         return {
             "level": level,
             "summary_text": summary_text,
@@ -566,10 +566,10 @@ class ServiceInputInitiativeContextMixin:
         payload: dict[str, Any] = {}
         visual_repetition = self._initiative_visual_repetition_summary(foreground_signal_summary)
         suppression_level = "low"
-        speech_ready_drives = self._initiative_speech_ready_drive_summaries(drive_summaries)
+        foreground_drives = self._initiative_foreground_drive_summaries(drive_summaries)
         if intervention_state.get("same_dedupe_recently_replied") is True:
             suppression_level = "high"
-        elif visual_repetition.get("all_visual_observations_repeated") is True and not speech_ready_drives:
+        elif visual_repetition.get("all_visual_observations_repeated") is True and not foreground_drives:
             suppression_level = "high"
         payload["suppression_level"] = suppression_level
         reason_parts: list[str] = []

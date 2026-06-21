@@ -41,7 +41,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
 
         self.assertFalse(due["should_skip"])
 
-    def test_visual_repetition_sets_high_suppression_without_speech_ready_drive(self) -> None:
+    def test_visual_repetition_sets_high_suppression_without_foreground_drive(self) -> None:
         service = DummyInputService()
         summary = service._initiative_suppression_summary(
             drive_summaries=[],
@@ -152,6 +152,48 @@ class WakeInterventionLoadTests(unittest.TestCase):
         self.assertEqual(len(suppression_candidates), 1)
         self.assertEqual(suppression_candidates[0]["kind"], "suppression")
         self.assertTrue(suppression_candidates[0]["metadata"]["all_visual_observations_repeated"])
+
+    def test_initiative_opportunity_summary_is_evaluation_framed(self) -> None:
+        service = DummyInputService()
+
+        summary = service._initiative_opportunity_summary(
+            trigger_kind="background_wake",
+            client_context={},
+            selected_candidate=None,
+            initiative_entry_summary={
+                "entry_kind": "enter",
+                "entry_basis": "activity_mode_transition",
+                "reason_summary": "活動が切り替わった。",
+            },
+        )
+
+        self.assertIn("評価対象", summary)
+        self.assertIn("関わる、保留する、見送る", summary)
+        self.assertNotIn("外向き", summary)
+
+    def test_autonomous_family_reason_uses_evaluation_terms(self) -> None:
+        service = DummyInputService()
+        drive_summary = {
+            "drive_kind": "care",
+            "summary_text": "様子を気にかけている。",
+            "freshness_hint": "fresh",
+            "stability_hint": "stable",
+        }
+
+        reason = service._initiative_autonomous_family_reason(
+            drive_summaries=[drive_summary],
+            foreground_drive_summaries=[drive_summary],
+            strongest_drive=drive_summary,
+            world_state_summary=[],
+            recent_turn_summary=[],
+            initiative_entry_summary=None,
+            suppression_summary={},
+            capability_summary={},
+        )
+
+        self.assertIn("強く前景化した drive_state", reason)
+        self.assertNotIn("speech-ready", reason)
+        self.assertNotIn("speech の入口", reason)
 
 
 if __name__ == "__main__":

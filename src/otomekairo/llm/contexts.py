@@ -106,8 +106,8 @@ def persona_initiative_baseline_summary(level: str) -> str:
     if level == "low":
         return "自発介入は控えめ寄りで、前景理由が弱ければ見送る。"
     if level == "high":
-        return "自発介入は強めで、前景理由が揃えば一歩前へ出る。"
-    return "自発介入は中庸で、具体的な前景変化があれば短く前へ出る。"
+        return "自発介入は強めで、前景理由が揃うと関わる判断を取りやすい。"
+    return "自発介入は中庸で、関わる、保留する、見送るを文脈で選ぶ。"
 
 
 def _persona_text(value: Any) -> str | None:
