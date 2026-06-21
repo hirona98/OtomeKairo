@@ -18,7 +18,7 @@ OtomeKairo は、人格設定と記憶を基盤に、その時点で成立する
 
 | 場所 | 役割 |
 | --- | --- |
-| [reference/](reference/) | 用語の正規語、wire/code 表記、避ける表記 |
+| [reference/](reference/) | 用語の正規語、wire/code 表記、避ける表記、参考資料の整理 |
 | [design/](design/) | 設計地図と領域別の意味境界 |
 | [design/api/](design/api/) | HTTP / WebSocket の path、method、認証、request / response、error code |
 | [design/memory/](design/memory/) | 記憶 subsystem の内部構造、想起、更新、管理境界 |
