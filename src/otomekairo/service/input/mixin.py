@@ -67,6 +67,59 @@ class ServiceInputMixin(
 
         raise ServiceError(404, "cycle_not_found", "The requested cycle_id does not exist.")
 
+    def get_cycle_cognitive_context(self, token: str | None, cycle_id: str) -> dict[str, Any]:
+        # 認可
+        self._require_token(token)
+
+        # レコード検索
+        trace = self.store.get_cycle_trace(cycle_id)
+        if trace is None:
+            raise ServiceError(404, "cycle_not_found", "The requested cycle_id does not exist.")
+
+        decision_trace = trace.get("decision_trace")
+        if not isinstance(decision_trace, dict):
+            decision_trace = {}
+        internal_context = decision_trace.get("internal_context_summary")
+        if not isinstance(internal_context, dict):
+            internal_context = {}
+
+        payload = {
+            "cycle_id": trace.get("cycle_id", cycle_id),
+            "cycle_summary": trace.get("cycle_summary", {}),
+            "foreground_selection": self._first_dict(
+                decision_trace.get("foreground_selection"),
+                internal_context.get("foreground_selection"),
+            ),
+            "workspace_context_summary": self._first_dict(
+                decision_trace.get("workspace_context_summary"),
+                internal_context.get("workspace_context_summary"),
+            ),
+            "self_state_context": self._first_dict(
+                decision_trace.get("self_state_context"),
+                internal_context.get("self_state_context"),
+            ),
+            "relationship_context": self._first_dict(
+                decision_trace.get("relationship_context"),
+                internal_context.get("relationship_context"),
+            ),
+            "prediction_error_context": self._first_dict(
+                decision_trace.get("prediction_error_context"),
+                internal_context.get("prediction_error_context"),
+            ),
+            "default_mode_context": self._first_dict(
+                decision_trace.get("default_mode_context"),
+                internal_context.get("default_mode_context"),
+            ),
+        }
+        return localize_timestamp_fields(payload)
+
+    def _first_dict(self, *values: Any) -> dict[str, Any]:
+        # inspection API の返却 shape を安定させるため、欠落時は空 object にそろえる。
+        for value in values:
+            if isinstance(value, dict):
+                return value
+        return {}
+
     def register_log_stream_connection(self, websocket: Any) -> str:
         # 結果
         return self._log_stream_registry.add_connection(websocket)
