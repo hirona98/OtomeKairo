@@ -73,7 +73,7 @@ initiative loop は、判断サイクル内の作業文脈として `initiative_
 
 `initiative_context` は inspection へ要約を残す。
 `initiative_context` そのものを永続的な状態正本にしない。
-`persona_context_summary` は `initiative_baseline`、`persona_prompt_excerpt` だけを持つ。
+`persona_context_summary` は `initiative_baseline`、`reference_style`、`persona_prompt_excerpt` を持つ。
 `initiative_context` は `initiative_baseline` を単独の人格判断値として扱わず、`persona_context_summary.initiative_baseline` と前景文脈を合わせて扱う。
 `initiative_entry_summary` は `entry_kind / entry_basis / reason_summary` を含む。
 `entry_basis` は `activity_mode_transition / strong_interest / same_activity_detail_change / observation_only` のいずれかである。

@@ -5,6 +5,8 @@ from typing import Any
 
 
 PERSONA_PROMPT_EXCERPT_LIMIT = 240
+PERSONA_REFERENCE_STYLE_USER_NATURAL_REFERENCE = "user_natural_reference"
+PERSONA_SCHEMA_USER_REFERENCE = "user"
 
 
 PERSONA_CONTEXT_USE_POLICIES = {
@@ -32,6 +34,7 @@ PERSONA_CONTEXT_USE_POLICIES = {
 class PersonaContext:
     display_name: str
     initiative_baseline: dict[str, Any]
+    reference_style: dict[str, str]
     persona_prompt_text: str
     expression_addon: str | None
     use_policy: str
@@ -39,6 +42,10 @@ class PersonaContext:
     def to_prompt_payload(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "initiative_baseline": self.initiative_baseline,
+            "reference_style": {
+                "schema_user_reference": PERSONA_SCHEMA_USER_REFERENCE,
+                "user_natural_reference": self.reference_style[PERSONA_REFERENCE_STYLE_USER_NATURAL_REFERENCE],
+            },
             "persona_prompt_text": self.persona_prompt_text,
             "use_policy": self.use_policy,
         }
@@ -49,6 +56,9 @@ class PersonaContext:
     def to_summary_payload(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "initiative_baseline": self.initiative_baseline,
+            "reference_style": {
+                "user_natural_reference": self.reference_style[PERSONA_REFERENCE_STYLE_USER_NATURAL_REFERENCE],
+            },
             "persona_prompt_excerpt": self._prompt_excerpt(),
         }
         return payload
@@ -72,6 +82,7 @@ def build_persona_context(
         raise ValueError(f"unsupported persona_context role: {role}")
     display_name = _persona_text(persona.get("display_name")) or "OtomeKairo"
     initiative_level = _persona_text(persona.get("initiative_baseline")) or "medium"
+    reference_style = _persona_reference_style(persona.get("reference_style"))
     persona_prompt_text = _persona_text(persona.get("persona_prompt")) or ""
     expression_addon = _persona_text(persona.get("expression_addon")) if include_expression else None
     return PersonaContext(
@@ -80,6 +91,7 @@ def build_persona_context(
             "level": initiative_level,
             "summary_text": persona_initiative_baseline_summary(initiative_level),
         },
+        reference_style=reference_style,
         persona_prompt_text=persona_prompt_text,
         expression_addon=expression_addon,
         use_policy=use_policy,
@@ -103,6 +115,17 @@ def _persona_text(value: Any) -> str | None:
         return None
     normalized = value.strip()
     return normalized or None
+
+
+def _persona_reference_style(value: Any) -> dict[str, str]:
+    if not isinstance(value, dict):
+        raise ValueError("persona.reference_style must be an object.")
+    user_natural_reference = _persona_text(value.get(PERSONA_REFERENCE_STYLE_USER_NATURAL_REFERENCE))
+    if user_natural_reference is None:
+        raise ValueError("persona.reference_style.user_natural_reference must be a non-empty string.")
+    return {
+        PERSONA_REFERENCE_STYLE_USER_NATURAL_REFERENCE: user_natural_reference,
+    }
 
 
 @dataclass(frozen=True, slots=True)
