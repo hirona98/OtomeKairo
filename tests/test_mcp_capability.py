@@ -35,7 +35,7 @@ class McpCapabilityTests(unittest.TestCase):
                 "caps": [{"id": "mcp.call_tool", "version": "1"}],
                 "mcp_servers": [
                     {
-                        "mcp_server_id": "mcp_server:elyth",
+                        "mcp_server_id": "mcp:elyth",
                         "transport": "stdio",
                         "tools": [
                             {
@@ -56,7 +56,7 @@ class McpCapabilityTests(unittest.TestCase):
 
         bindings = service._event_stream_registry.list_capability_bindings()
         self.assertEqual(bindings["accepted"]["mcp.call_tool"], ["mcp-client-connector-main"])
-        self.assertEqual(bindings["mcp_servers"][0]["mcp_server_id"], "mcp_server:elyth")
+        self.assertEqual(bindings["mcp_servers"][0]["mcp_server_id"], "mcp:elyth")
 
     def test_registry_resolves_mcp_tool_target(self) -> None:
         service = DummyService()
@@ -69,7 +69,7 @@ class McpCapabilityTests(unittest.TestCase):
                 "caps": [{"id": "mcp.call_tool", "version": "1"}],
                 "mcp_servers": [
                     {
-                        "mcp_server_id": "mcp_server:elyth",
+                        "mcp_server_id": "mcp:elyth",
                         "transport": "stdio",
                         "tools": [{"name": "get_information", "description": "", "inputSchema": {"type": "object"}}],
                     }
@@ -78,7 +78,7 @@ class McpCapabilityTests(unittest.TestCase):
         )
 
         target = service._event_stream_registry.get_mcp_tool_target(
-            mcp_server_id="mcp_server:elyth",
+            mcp_server_id="mcp:elyth",
             tool_name="get_information",
         )
 
@@ -99,7 +99,7 @@ class McpCapabilityTests(unittest.TestCase):
                     "caps": [],
                     "mcp_servers": [
                         {
-                            "mcp_server_id": "mcp_server:elyth",
+                            "mcp_server_id": "mcp:elyth",
                             "transport": "stdio",
                             "tools": [{"name": "get_information"}],
                         }
@@ -118,7 +118,7 @@ class McpCapabilityTests(unittest.TestCase):
             "caps": [{"id": "mcp.call_tool", "version": "1"}],
             "mcp_servers": [
                 {
-                    "mcp_server_id": "mcp_server:elyth",
+                    "mcp_server_id": "mcp:elyth",
                     "transport": "stdio",
                     "tools": [{"name": "get_information", "description": "", "inputSchema": {"type": "object"}}],
                 }
@@ -140,7 +140,7 @@ class McpCapabilityTests(unittest.TestCase):
         payload = service._normalize_mcp_call_tool_result_payload(
             result_payload={
                 "status": "completed",
-                "mcp_server_id": "mcp_server:elyth",
+                "mcp_server_id": "mcp:elyth",
                 "tool_name": "get_information",
                 "is_error": False,
                 "content": [{"type": "text", "text": "raw result"}],

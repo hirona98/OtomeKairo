@@ -167,7 +167,7 @@ MCP client connector は取得した MCP server を `initialize` し、`tools/li
 server は `mcp_server_id / tool_name / inputSchema` を判断 view、inspection、dispatch 検証に使う。
 connector は `mcp.call_tool_request` を受けたときだけ MCP `tools/call` を実行し、`POST /api/capability/result` へ result を返す。
 
-ELYTH の接続は `PUT /api/config/mcp-servers/mcp_server%3Aelyth` で次の設定を登録する。
+ELYTH の接続は `PUT /api/config/mcp-servers/mcp%3Aelyth` で次の設定を登録する。
 
 ```json
 {

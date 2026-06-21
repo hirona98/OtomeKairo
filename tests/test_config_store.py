@@ -30,8 +30,8 @@ class ConfigStoreTests(unittest.TestCase):
                 }
             }
             state["mcp_servers"] = {
-                "mcp_server:elyth": {
-                    "mcp_server_id": "mcp_server:elyth",
+                "mcp:elyth": {
+                    "mcp_server_id": "mcp:elyth",
                     "connector_kind": "mcp_client",
                     "client_id": "mcp-client-connector-main",
                     "enabled": True,
@@ -52,7 +52,7 @@ class ConfigStoreTests(unittest.TestCase):
             self.assertFalse((root_dir / "server_state.json").exists())
             self.assertEqual(reloaded_state["console_access_token"], "token")
             self.assertEqual(reloaded_state["camera_sources"]["vision_source:main"]["connection"]["camera_password"], "password")
-            self.assertEqual(reloaded_state["mcp_servers"]["mcp_server:elyth"]["env"]["ELYTH_API_KEY"], "secret")
+            self.assertEqual(reloaded_state["mcp_servers"]["mcp:elyth"]["env"]["ELYTH_API_KEY"], "secret")
 
 
 if __name__ == "__main__":
