@@ -14,6 +14,7 @@ from otomekairo.llm.contexts import (
 from otomekairo.llm.contracts import (
     ANSWER_BOUNDARY_VALUES,
     ANSWER_CONTRACT_VALUES,
+    ANSWER_CONTRACT_REQUIRED_KEYS,
     ANSWER_TARGET_ACTOR_VALUES,
     ACTIVITY_ACTOR_VALUES,
     ACTIVITY_TRANSITION_VALUES,
@@ -21,6 +22,7 @@ from otomekairo.llm.contracts import (
     INITIATIVE_ENTRY_ENTER_BASIS_VALUES,
     RECALL_PACK_SECTION_NAMES,
     RECALL_FOCUS_VALUES,
+    RECALL_HINT_REQUIRED_KEYS,
     RISK_FLAG_VALUES,
     TIME_REFERENCE_VALUES,
     WORLD_STATE_HINT_VALUES,
@@ -686,10 +688,11 @@ def build_input_interpretation_repair_prompt(validation_error: str) -> str:
         f"validator_error: {validation_error}\n"
         "同じ入力だけを根拠に、JSON オブジェクト 1 個だけを返し直してください。\n"
         "トップレベルキーは recall_hint, answer_contract の 2 つだけです。\n"
-        "recall_hint は primary_recall_focus, secondary_recall_focuses, confidence, time_reference, focus_scopes, mentioned_entities, mentioned_topics, risk_flags の 8 キーだけを持ちます。\n"
+        f"recall_hint は {', '.join(RECALL_HINT_REQUIRED_KEYS)} の 8 キーだけを持ちます。\n"
+        "recall_hint の配列 field は対象がない場合も省略せず [] を入れてください。\n"
         "recall_hint.confidence は 0.0 以上 1.0 以下の JSON number です。文字列、low/medium/high、百分率は禁止です。\n"
         "mentioned_topics の各要素は topic:<name> 形式です。例: [\"topic:仕事\"]。話題タグを特定できないなら [] にしてください。\n"
-        "answer_contract は contract, reason_codes, boundary, target_actor, query_terms の 5 キーだけを持ちます。\n"
+        f"answer_contract は {', '.join(ANSWER_CONTRACT_REQUIRED_KEYS)} の 5 キーだけを持ちます。\n"
         "Markdown、コードフェンス、説明文は禁止です。"
     )
 
@@ -717,7 +720,11 @@ def _build_input_interpretation_system_prompt() -> str:
         ("自然呼称", _reference_style_instruction()),
         (
             "出力契約",
-            "recall_hint.primary_recall_focus と secondary_recall_focuses は次のいずれかです: "
+            "返す JSON はトップレベルに recall_hint と answer_contract だけを持ちます。\n"
+            + f"recall_hint は {', '.join(RECALL_HINT_REQUIRED_KEYS)} の 8 キーだけを必ず持ちます。\n"
+            + "recall_hint の配列 field は対象がない場合も省略せず [] を入れてください。\n"
+            + f"answer_contract は {', '.join(ANSWER_CONTRACT_REQUIRED_KEYS)} の 5 キーだけを必ず持ちます。\n"
+            + "recall_hint.primary_recall_focus と secondary_recall_focuses は次のいずれかです: "
             + ", ".join(sorted(RECALL_FOCUS_VALUES))
             + "\n"
             + "recall_hint.time_reference は次のいずれかです: "
@@ -732,7 +739,6 @@ def _build_input_interpretation_system_prompt() -> str:
             + "第三者名や固有名は focus_scopes ではなく mentioned_entities に入れてください。\n"
             + "world は focus_scopes に入れず、世界条件が主題のとき primary_recall_focus=state または fact を選んでください。\n"
             + "answer_contract は回答生成前にどの根拠を直接確認するかの契約です。一般応答は summary を返してください。\n"
-            + "answer_contract は contract, reason_codes, boundary, target_actor, query_terms の 5 キーだけを持ちます。\n"
             + "初回・最新の境界を求める入力は exact_boundary、発話の原文を求める入力は exact_statement、根拠や出典を求める入力は provenance、矛盾確認を求める入力は conflict_check を選んでください。\n"
             + "正確な日時を求める入力は、初回・最新の境界が主題なら exact_boundary、特定発話や根拠の日時が主題なら provenance を選んでください。\n"
             + "一字一句の原文要求と初回・最初・初めてが同時に含まれる入力は exact_statement を選び、boundary=first にしてください。\n"

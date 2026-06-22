@@ -15,6 +15,7 @@ from otomekairo.llm.contexts import (
 from otomekairo.llm.contracts import (
     LLMContractError,
     LLMError,
+    _validate_exact_keys,
     normalize_answer_contract_payload,
     normalize_recall_hint_payload,
     validate_activity_state_contract,
@@ -167,9 +168,7 @@ class LLMClient:
             raise
 
     def _validate_input_interpretation_contract(self, payload: dict[str, Any]) -> None:
-        required_keys = {"recall_hint", "answer_contract"}
-        if set(payload.keys()) != required_keys:
-            raise LLMError("InputInterpretation のキーが契約と一致しません。")
+        _validate_exact_keys(payload, {"recall_hint", "answer_contract"}, "InputInterpretation")
         recall_hint = payload["recall_hint"]
         if not isinstance(recall_hint, dict):
             raise LLMError("InputInterpretation.recall_hint は object である必要があります。")

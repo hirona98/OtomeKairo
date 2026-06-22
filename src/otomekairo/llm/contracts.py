@@ -41,6 +41,16 @@ TIME_REFERENCE_VALUES = {
     "future",
     "persistent",
 }
+RECALL_HINT_REQUIRED_KEYS = (
+    "primary_recall_focus",
+    "secondary_recall_focuses",
+    "confidence",
+    "time_reference",
+    "focus_scopes",
+    "mentioned_entities",
+    "mentioned_topics",
+    "risk_flags",
+)
 WORLD_STATE_TYPE_VALUES = {
     "visual_context",
     "environment",
@@ -149,6 +159,13 @@ ANSWER_TARGET_ACTOR_VALUES = {
 }
 MAX_ANSWER_CONTRACT_REASON_CODES = 3
 MAX_ANSWER_CONTRACT_QUERY_TERMS = 5
+ANSWER_CONTRACT_REQUIRED_KEYS = (
+    "contract",
+    "reason_codes",
+    "boundary",
+    "target_actor",
+    "query_terms",
+)
 INTERNAL_IDENTIFIER_PATTERN = re.compile(
     r"\b(?:event|episode|memory_unit|cycle|reflection_run|retrieval_run|pending_intent|candidate|conflict):[A-Za-z0-9._-]+\b"
 )
@@ -362,7 +379,7 @@ def validate_answer_contract_contract(payload: dict[str, Any]) -> None:
     # 形状
     _validate_exact_keys(
         payload,
-        {"contract", "reason_codes", "boundary", "target_actor", "query_terms"},
+        set(ANSWER_CONTRACT_REQUIRED_KEYS),
         "AnswerContract",
     )
 
@@ -566,18 +583,7 @@ def _validate_world_state_scope_ref(value: Any, label: str) -> None:
 # recall_hint検証
 def validate_recall_hint_contract(payload: dict[str, Any]) -> None:
     # 必須キー群
-    required_keys = {
-        "primary_recall_focus",
-        "secondary_recall_focuses",
-        "confidence",
-        "time_reference",
-        "focus_scopes",
-        "mentioned_entities",
-        "mentioned_topics",
-        "risk_flags",
-    }
-    if set(payload.keys()) != required_keys:
-        raise LLMError("RecallHint のキーが契約と一致しません。")
+    _validate_exact_keys(payload, set(RECALL_HINT_REQUIRED_KEYS), "RecallHint")
 
     # 値検証
     if not isinstance(payload["primary_recall_focus"], str) or not payload["primary_recall_focus"].strip():
