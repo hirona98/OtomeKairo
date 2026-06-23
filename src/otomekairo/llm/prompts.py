@@ -42,6 +42,27 @@ def _reference_style_instruction() -> str:
     )
 
 
+def _semantic_layer_boundary_instruction(role_layer: str) -> str:
+    return (
+        "内部処理は次の意味レイヤーを分けます。\n"
+        "- 観測事実層: 画像、client context、capability result から見える対象、配置、状態、動作、変化を扱います。\n"
+        "- 活動推定層: 観測事実と直近文脈から、短期の活動モード、対象、遷移だけを扱います。\n"
+        "- 行動判断層: decision_generation だけが、speech / noop / pending_intent / capability_request / autonomous_run と抑制根拠を比較します。\n"
+        "- 表現層: expression_generation だけが、決定済み判断を外向き本文へ変換します。\n"
+        f"この role の担当は {role_layer} です。出力値と reason_summary は担当レイヤーの材料で構成してください。"
+    )
+
+
+def _intervention_suppression_boundary_instruction() -> str:
+    return (
+        "行動判断の理由は、観測可能な活動事実と構造化済みの抑制根拠で構成してください。\n"
+        "自己申告された注意状態は、ユーザー発話の内容として扱ってください。\n"
+        "割り込み抑制は行動判断層の評価項目です。評価材料は、明示的なユーザー発話、直近会話での希望、same_as_recent_speech、suppression_summary、WorkspaceContext の kind=suppression 候補、進行中コミットメントです。\n"
+        "観測事実層の画面注視、入力操作、閲覧、ゲームプレイ、活動推定層の作業中・閲覧中・ゲーム中は活動事実として表現してください。\n"
+        "見送り理由は、反復抑制、直近で触れた内容、明示された希望、進行中コミットメントのような根拠名で説明してください。観測から内的な注意状態を推定して理由にしないでください。"
+    )
+
+
 # 入力解釈用の message 群を組み立てる。
 def build_input_interpretation_messages(
     *,
@@ -488,6 +509,10 @@ def build_decision_repair_prompt(validation_error: str) -> str:
         "前回の出力は decision_generation 契約を満たしていませんでした。\n"
         f"validator_error: {validation_error}\n"
         "同じ入力だけを根拠に、JSON オブジェクト 1 個だけを返し直してください。\n"
+        + _semantic_layer_boundary_instruction("行動判断層")
+        + "\n"
+        + _intervention_suppression_boundary_instruction()
+        + "\n"
         "トップレベルキーは kind, reason_code, reason_summary, requires_confirmation, pending_intent, capability_request, autonomous_run, foreground_selection の 8 つだけです。\n"
         "speech_text, text, message, content, output などの発話本文キーは禁止です。\n"
         "kind は speech, noop, pending_intent, capability_request, autonomous_run のいずれかだけです。\n"
@@ -642,6 +667,8 @@ def build_activity_state_repair_prompt(validation_error: str) -> str:
         "前回の出力は activity_state 契約を満たしていませんでした。\n"
         f"validator_error: {validation_error}\n"
         "同じ source pack だけを根拠に、JSON オブジェクト 1 個だけを返し直してください。\n"
+        + _semantic_layer_boundary_instruction("活動推定層")
+        + "\n"
         "トップレベルキーは activity_candidates だけです。\n"
         "activity_candidates は最大 1 件です。候補がなければ空配列を返してください。\n"
         "各候補は actor, label, target, confidence_hint, salience_hint, ttl_hint, transition, reason_summary だけを持つ object にしてください。\n"
@@ -673,11 +700,16 @@ def build_visual_observation_repair_prompt(validation_error: str) -> str:
         "前回の出力は visual_observation 契約を満たしていませんでした。\n"
         f"validator_error: {validation_error}\n"
         "同じ画像と source pack だけを根拠に、JSON オブジェクト 1 個だけを返し直してください。\n"
-        "トップレベルキーは summary_text, confidence_hint の 2 つだけです。\n"
+        + _semantic_layer_boundary_instruction("観測事実層")
+        + "\n"
+        "トップレベルキーは summary_text, confidence_hint, change_state, change_basis, change_reason_summary の 5 つだけです。\n"
         "summary_text は 2～5 文、改行なし、内部識別子なしで返してください。\n"
         "confidence_hint は "
         + " / ".join(sorted(WORLD_STATE_HINT_VALUES))
         + " のいずれかです。\n"
+        "change_state は first_seen / changed / stable / same_as_recent_speech のいずれかです。\n"
+        "change_basis は no_previous_observation / semantic_change / semantic_stability / recent_speech_repetition / source_identity_changed のいずれかです。\n"
+        "change_reason_summary は変化判定の短い理由を改行なしで返してください。\n"
         "raw payload、資格情報、内部 URL、配送先 client、base64 本文、Markdown、コードフェンス、説明文は禁止です。"
     )
 
@@ -718,6 +750,12 @@ def _build_input_interpretation_system_prompt() -> str:
             "persona_context は何を重く見るかの補助文脈です。ユーザー発話、時刻参照、根拠分類を人格で上書きしてはいけません。",
         ),
         ("自然呼称", _reference_style_instruction()),
+        (
+            "意味レイヤー境界",
+            _semantic_layer_boundary_instruction("入力解釈層")
+            + "\n"
+            "input_interpretation は想起焦点と回答根拠契約だけを決めます。行動選択、外向き発話、抑制根拠の比較は decision_generation に残してください。",
+        ),
         (
             "出力契約",
             "返す JSON はトップレベルに recall_hint と answer_contract だけを持ちます。\n"
@@ -874,6 +912,12 @@ def _build_decision_system_prompt(persona_context: PersonaContext) -> str:
         ),
         ("自然呼称", _reference_style_instruction()),
         (
+            "意味レイヤー境界",
+            _semantic_layer_boundary_instruction("行動判断層")
+            + "\n"
+            + _intervention_suppression_boundary_instruction(),
+        ),
+        (
             "判断ルール",
             "RecallPack.evidence_pack.status=grounded のとき、正確な原文・日時・出典に関する判断は evidence_items の範囲で行ってください。\n"
             "recent_turns、過去の assistant 発話、要約記憶は会話の文脈や表現調整に使い、原文・日時・出典は evidence_items を正本にしてください。\n"
@@ -887,7 +931,7 @@ def _build_decision_system_prompt(persona_context: PersonaContext) -> str:
             "decision.kind と同じ判断の中で、今もっとも意識へ上げる primary factor、補助する supporting factors、控える suppressed factors を foreground_selection に記録してください。\n"
             "noop を選ぶ場合も、控える理由を表す WorkspaceContext の suppression 候補を primary factor にできます。\n"
             "foreground_selection は判断理由の inspection 用です。WorkspaceContext にない factor_ref を作ってはいけません。\n"
-            "SelfStateContext は sensor / agency / focus の短期派生 view です。mood_state とは統合せず、気分の valence / arousal / dominance は AffectContext.mood_state を参照してください。\n"
+            "SelfStateContext は AI 本体側の感覚信頼度、働きかけやすさ、継続行動の安定を表す短期派生 view です。mood_state とは統合せず、気分の valence / arousal / dominance は AffectContext.mood_state を参照してください。\n"
             "RelationshipContext は関係記憶と関係感情から作った現在 view です。長期記憶の正本として扱わず、距離感、境界、継続話題の判断補助にしてください。\n"
             "PredictionErrorContext は世界状態や capability result の構造化差分候補です。差分が判断に効く場合は attention、見送り、追加確認、記憶化の理由にしてください。\n"
             "DefaultModeContext は静かな再浮上候補です。WorkspaceContext に置いた候補として、現在状況と距離感を合わせて speech / pending_intent / noop のどれへ置くか判断してください。\n"
@@ -1046,13 +1090,14 @@ def _build_decision_trigger_policy(
                 "recent_turn_summary は直近文脈の補助材料です。visual_observations[].change_state と same_as_recent_speech は反復性や新規性の比較材料です。",
                 "`background_wake` は定期的な自己評価起点です。観測、候補、進行中応答、重複介入境界を根拠に、speech / noop / pending_intent / capability_request のどれに置くか判断してください。",
                 "foreground_signal_summary.visual_observations は desktop / camera / virtual などの視覚観測です。視覚観測は initiative_entry_summary や drive_state など他の材料と同じ盤面で扱ってください。",
+                "visual_observations[].change_state=first_seen / changed は wake 判断の前景候補です。suppression_summary.suppression_level=low で、反復、直近で触れた内容、明示された希望、進行中コミットメント待ちがなければ、対応する WorkspaceContext の visual_observation 候補を主因にして短い speech を第一候補として比較してください。",
                 "source_owner=user_environment の視覚観測や ActivityContext.actor=user はユーザー側の状況です。判断理由に使う場合も、ユーザー側文脈として表現してください。",
                 "source_owner=self の camera 視覚観測は OtomeKairo 自身の視覚根拠として扱ってください。",
                 "InitiativeContext.activity_context は自律判断時のタイミング補助材料です。previous_activity から current_activity への意味ある活動モード遷移は、initiative_entry_summary.entry_basis=activity_mode_transition との整合を見て扱ってください。",
                 "活動遷移に触れる speech は、終わった・サボった・遊び始めたなどを断定せず、区切りや切り替えとして短く表現してください。",
                 "suppression_summary.visual_repetition_present や WorkspaceContext の kind=suppression は、関わる理由と並べて比較する控える理由の材料です。",
                 "selected_candidate_family が ongoing_action で follow-up capability が available なときは、現在の流れを進める capability_request を検討してください。",
-                "foreground_signal_summary が thin のとき、特に `background_wake` の定期起床や persona_context_summary.initiative_baseline.level=low では、評価対象と距離感を比べて speech / noop / pending_intent を選んでください。",
+                "foreground_signal_summary が thin のときも、first_seen / changed の視覚観測は薄い前景だけとして扱わず、具体的な抑制根拠がある場合に noop、後で扱う価値だけが残る場合に pending_intent を選んでください。",
             ]
         )
     return policies
@@ -1161,6 +1206,12 @@ def _build_speech_system_prompt(persona_context: PersonaContext) -> str:
             "persona_context は言い回し、距離感、注目点の補助です。decision と internal_context の根拠外の事実を足してはいけません。",
         ),
         ("自然呼称", _reference_style_instruction()),
+        (
+            "意味レイヤー境界",
+            _semantic_layer_boundary_instruction("表現層")
+            + "\n"
+            "表現層は decision.kind と foreground_selection を維持し、外向き本文を decision.reason_summary と internal_context の根拠で構成してください。",
+        ),
         (
             "応答ルール",
             "decision.kind=speech の理由と decision.reason_summary に沿って本文を作ってください。\n"
@@ -1566,6 +1617,9 @@ def _build_initiative_entry_check_system_prompt() -> str:
         "persona_context は外向き自律判断へ進む自然さの補助です。観測事実や活動状態を人格で追加してはいけません。\n"
         + _reference_style_instruction()
         + "\n"
+        + _semantic_layer_boundary_instruction("行動判断層へ渡す入口判定")
+        + "\n"
+        "initiative_entry_check は entry_kind と entry_basis だけを決めます。speech / noop / pending_intent の最終選択と抑制根拠の比較は decision_generation に残してください。\n"
         "活動遷移で enter を返す場合も、終わった・サボった・遊び始めたなどの断定を reason_summary に入れず、区切りや切り替えとして控えめに表現してください。\n"
         "drive_state、ongoing_action、pending_intent が source pack にある場合でも、それらを数値化せず自然文として読んでください。\n"
         "reason_summary は簡潔に、改行なし、内部識別子なしで返してください。"
@@ -1579,6 +1633,9 @@ def _build_world_state_system_prompt() -> str:
         "persona_context は観測事実の優先順位と要約粒度の補助です。見えていない短期状態を足してはいけません。\n"
         + _reference_style_instruction()
         + "\n"
+        + _semantic_layer_boundary_instruction("観測事実層から現在状態候補を作る層")
+        + "\n"
+        "world_state は外界や環境の短期状態候補を作ります。ユーザー活動モードは activity_state、発話や見送りは decision_generation に残してください。\n"
         "Markdown、コードフェンス、説明文は禁止です。\n"
         "返すトップレベルキーは state_candidates だけです。\n"
         "各候補は state_type, scope, summary_text, confidence_hint, salience_hint, ttl_hint の 6 キーだけを持つ object にしてください。\n"
@@ -1615,6 +1672,8 @@ def _build_activity_state_system_prompt() -> str:
         "source pack を読み、ユーザーが現在または直前に何をしているかの短期推定だけを JSON オブジェクト 1 個で返してください。\n"
         "persona_context は活動推定の注目点と要約粒度の補助です。観測外の活動を足してはいけません。\n"
         + _reference_style_instruction()
+        + "\n"
+        + _semantic_layer_boundary_instruction("活動推定層")
         + "\n"
         "Markdown、コードフェンス、説明文は禁止です。\n"
         "返すトップレベルキーは activity_candidates だけです。\n"
@@ -1655,13 +1714,23 @@ def _build_visual_observation_system_prompt() -> str:
         "persona_context は画像内で判断に効く部分の優先順位と要約粒度の補助です。見えていないものを足してはいけません。\n"
         + _reference_style_instruction()
         + "\n"
+        + _semantic_layer_boundary_instruction("観測事実層")
+        + "\n"
         "Markdown、コードフェンス、説明文は禁止です。\n"
-        "返すトップレベルキーは summary_text, confidence_hint の 2 つだけです。\n"
+        "返すトップレベルキーは summary_text, confidence_hint, change_state, change_basis, change_reason_summary の 5 つだけです。\n"
         "summary_text は 2～5 文、改行なし、内部識別子なしにしてください。\n"
         "source_pack.image_input_kind が conversation_attachment の場合は、対話入力に添付された画像として、後続の判断と発話に必要な見えている内容を詳細な説明文に変換してください。\n"
         "source_pack.image_input_kind が vision_capture_result の場合は、現在の視覚前景として、判断に効く対象、状態、配置、変化を詳細な説明文に変換してください。\n"
         "summary_text では、画像に見えている内容のうち判断に効く部分を具体的に書いてください。\n"
         "後から視覚確認に使えるよう、主要な物体、場所、背景要素、活動、状態を含めてください。\n"
+        "source_pack.change_context.previous_observation_context は同じ起床前観測の前回要約です。\n"
+        "source_pack.change_context.last_prompted_observation_context は直近で外向き発話に使った同じ起床前観測の要約です。\n"
+        "previous_observation_context が無い場合、change_state は first_seen、change_basis は no_previous_observation にしてください。\n"
+        "現在の画像が last_prompted_observation_context と意味上同じなら、change_state は same_as_recent_speech、change_basis は recent_speech_repetition にしてください。\n"
+        "現在の画像が previous_observation_context と意味上同じなら、change_state は stable、change_basis は semantic_stability にしてください。\n"
+        "現在の画像が previous_observation_context と意味上変わったなら、change_state は changed、change_basis は semantic_change にしてください。\n"
+        "source の種類や対象が変わった場合、change_state は changed、change_basis は source_identity_changed にしてください。\n"
+        "change_reason_summary は変化判定の根拠を短く書き、summary_text の繰り返しだけにしないでください。\n"
         "不確実な対象は断定せず、「らしき」「可能性がある」として書いてください。\n"
         "細かな OCR の全文、座標、UI 構造、資格情報、内部 URL、配送先 client、base64 本文を書いてはいけません。\n"
         "画像に自信が持てない場合は、控えめな summary_text と low confidence を返してください。\n"

@@ -175,6 +175,8 @@ class ServiceInputWakePipelineMixin:
     ) -> bool:
         if self._client_context_has_initiative_entry(client_context):
             return True
+        if self._client_context_has_judgable_visual_observation(client_context):
+            return True
         drive_state_summary = self._summarize_drive_states(
             self._list_current_drive_states(
                 state=state,
@@ -206,6 +208,11 @@ class ServiceInputWakePipelineMixin:
             current_time=current_time,
         ):
             return client_context
+        if self._client_context_has_judgable_visual_observation(client_context):
+            return {
+                **client_context,
+                "autonomous_visual_observation_direct_entry": True,
+            }
         foreground_world_state = self._summarize_foreground_world_states(
             self._list_current_world_states(
                 state=state,
@@ -415,6 +422,17 @@ class ServiceInputWakePipelineMixin:
         if not isinstance(entry_check, dict) or entry_check.get("entry_kind") != "skip":
             return None
         return self._client_context_text(entry_check.get("reason_summary"), limit=180)
+
+    def _client_context_has_judgable_visual_observation(
+        self,
+        client_context: dict[str, Any] | None,
+    ) -> bool:
+        if not isinstance(client_context, dict):
+            return False
+        visual_signals = self._compact_visual_observation_signals(
+            client_context.get("visual_observation_signals")
+        )
+        return any(self._visual_observation_signal_needs_wake_judgement(signal) for signal in visual_signals)
 
     def _client_context_has_successful_wake_observation(
         self,

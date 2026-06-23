@@ -393,17 +393,30 @@ class ServiceSpontaneousWakeMixin:
                 continue
             observation_id = signal.get("observation_id")
             observation_signature = signal.get("observation_signature")
+            summary_text = signal.get("summary_text")
             if not isinstance(observation_id, str) or not observation_id.strip():
                 continue
             normalized_id = observation_id.strip()
             if normalized_id in seen_observation_ids:
                 continue
-            if not isinstance(observation_signature, str) or not observation_signature.strip():
+            if not isinstance(summary_text, str) or not summary_text.strip():
                 continue
             runtime = self._wake_observation_runtime_state.get(normalized_id)
             if not isinstance(runtime, dict):
                 continue
-            runtime["last_prompted_observation_signature"] = observation_signature.strip()
+            if isinstance(observation_signature, str) and observation_signature.strip():
+                runtime["last_prompted_observation_signature"] = observation_signature.strip()
+            runtime["last_prompted_observation_summary"] = summary_text.strip()
+            for signal_key, runtime_key in (
+                ("vision_source_id", "last_prompted_vision_source_id"),
+                ("source_kind", "last_prompted_source_kind"),
+                ("source_label", "last_prompted_source_label"),
+                ("active_app", "last_prompted_active_app"),
+                ("window_title", "last_prompted_window_title"),
+            ):
+                value = signal.get(signal_key)
+                if isinstance(value, str) and value.strip():
+                    runtime[runtime_key] = value.strip()
             runtime["last_prompted_at"] = current_time
             seen_observation_ids.add(normalized_id)
 

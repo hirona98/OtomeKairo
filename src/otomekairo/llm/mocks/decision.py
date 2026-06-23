@@ -457,10 +457,14 @@ class LLMMockDecisionMixin:
                 "capability_request": capability_request,
             }
         if self._should_mock_autonomous_initiative_speech(initiative_context):
+            visual_summary = self._mock_initiative_changed_visual_summary(initiative_context)
+            reason_summary = "現在の drive_state や world_state から自発的に前へ出る理由がある。"
+            if visual_summary is not None:
+                reason_summary = f"視覚観測の変化があり、短く触れる理由がある。{visual_summary}"
             return {
                 "kind": "speech",
                 "reason_code": "initiative_context",
-                "reason_summary": "現在の drive_state や world_state から自発的に前へ出る理由がある。",
+                "reason_summary": reason_summary,
                 "requires_confirmation": False,
                 "pending_intent": None,
             }

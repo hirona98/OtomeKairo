@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-from difflib import SequenceMatcher
 from typing import Any
 
 from otomekairo.llm.client import LLMError
 from otomekairo.service.capability import CapabilityDispatchError
 from otomekairo.service.common import debug_log
-from otomekairo.service.input.constants import VISUAL_OBSERVATION_SIMILARITY_THRESHOLD
 from otomekairo.service.input.source_owner import visual_source_owner
 
 
@@ -147,6 +145,10 @@ class ServiceInputWakeObservationMixin:
             **observation,
             "input": resolved_input_payload,
         }
+        with self._runtime_state_lock:
+            previous_observation_runtime = dict(
+                self._wake_observation_runtime_state.get(observation_id.strip(), {})
+            )
 
         try:
             capability_response = self._dispatch_capability_request(
@@ -181,6 +183,7 @@ class ServiceInputWakeObservationMixin:
             observation=resolved_observation,
             capability_response=capability_response,
             cycle_id=cycle_id,
+            previous_observation_runtime=previous_observation_runtime,
         )
 
     def _resolve_wake_policy_observation_input(
@@ -230,6 +233,7 @@ class ServiceInputWakeObservationMixin:
         observation: dict[str, Any],
         capability_response: dict[str, Any],
         cycle_id: str | None,
+        previous_observation_runtime: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         capability_id = self._capability_result_capability_id(capability_response)
         request_record = capability_response.get("request_record")
@@ -249,6 +253,9 @@ class ServiceInputWakeObservationMixin:
                 observation_summary=observation_summary,
                 input_text=input_text,
                 capability_response=capability_response,
+                visual_observation_change_context=self._build_visual_observation_change_context(
+                    previous_observation_runtime
+                ),
             )
             self._refresh_world_state_context(
                 state=state,
@@ -393,6 +400,9 @@ class ServiceInputWakeObservationMixin:
             "active_app",
             "window_title",
             "visual_summary_text",
+            "change_state",
+            "change_basis",
+            "change_reason_summary",
             "error",
         ):
             value = observation_summary.get(key)
@@ -455,6 +465,60 @@ class ServiceInputWakeObservationMixin:
             parts.append(f"{label}: failed {reason}")
         return " / ".join(parts) or "定期観測結果は空。"
 
+    def _build_visual_observation_change_context(
+        self,
+        previous_runtime: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if not isinstance(previous_runtime, dict) or not previous_runtime:
+            return None
+        payload: dict[str, Any] = {}
+        previous_context = self._wake_observation_runtime_visual_context(
+            runtime=previous_runtime,
+            summary_key="last_summary",
+            observed_at_key="last_success_at",
+            source_prefix="last",
+        )
+        if previous_context is not None:
+            payload["previous_observation_context"] = previous_context
+        prompted_context = self._wake_observation_runtime_visual_context(
+            runtime=previous_runtime,
+            summary_key="last_prompted_observation_summary",
+            observed_at_key="last_prompted_at",
+            source_prefix="last_prompted",
+        )
+        if prompted_context is not None:
+            payload["last_prompted_observation_context"] = prompted_context
+        return payload or None
+
+    def _wake_observation_runtime_visual_context(
+        self,
+        *,
+        runtime: dict[str, Any],
+        summary_key: str,
+        observed_at_key: str,
+        source_prefix: str,
+    ) -> dict[str, Any] | None:
+        summary_text = self._client_context_text(runtime.get(summary_key), limit=240)
+        if summary_text is None:
+            return None
+        payload: dict[str, Any] = {
+            "summary_text": summary_text,
+        }
+        observed_at = self._client_context_text(runtime.get(observed_at_key), limit=64)
+        if observed_at is not None:
+            payload["observed_at"] = observed_at
+        for runtime_key, output_key, limit in (
+            (f"{source_prefix}_vision_source_id", "vision_source_id", 96),
+            (f"{source_prefix}_source_kind", "source_kind", 32),
+            (f"{source_prefix}_source_label", "source_label", 80),
+            (f"{source_prefix}_active_app", "active_app", 80),
+            (f"{source_prefix}_window_title", "window_title", 120),
+        ):
+            value = self._client_context_text(runtime.get(runtime_key), limit=limit)
+            if value is not None:
+                payload[output_key] = value
+        return payload
+
     def _record_wake_policy_observation_runtime_state(
         self,
         *,
@@ -498,6 +562,7 @@ class ServiceInputWakeObservationMixin:
             "last_error": last_error,
             "last_request_id": summary.get("request_id") if isinstance(summary.get("request_id"), str) else None,
             "last_vision_source_id": summary.get("vision_source_id") if isinstance(summary.get("vision_source_id"), str) else None,
+            "last_source_kind": summary.get("source_kind") if isinstance(summary.get("source_kind"), str) else None,
             "last_source_label": summary.get("source_label") if isinstance(summary.get("source_label"), str) else None,
             "last_active_app": summary.get("active_app") if isinstance(summary.get("active_app"), str) else None,
             "last_window_title": summary.get("window_title") if isinstance(summary.get("window_title"), str) else None,
@@ -508,6 +573,12 @@ class ServiceInputWakeObservationMixin:
             "last_observation_signature",
             "same_observation_count",
             "last_prompted_observation_signature",
+            "last_prompted_observation_summary",
+            "last_prompted_vision_source_id",
+            "last_prompted_source_kind",
+            "last_prompted_source_label",
+            "last_prompted_active_app",
+            "last_prompted_window_title",
             "last_prompted_at",
         ):
             if key not in payload and key in previous_runtime:
@@ -529,70 +600,66 @@ class ServiceInputWakeObservationMixin:
         previous_runtime: dict[str, Any],
         current_time: str,
     ) -> dict[str, Any] | None:
+        _ = current_time
         if not self._wake_observation_is_vision_capture(summary):
             return None
         observation_signature = self._visual_observation_signature(summary)
         if observation_signature is None:
             return None
-        previous_signature = self._client_context_text(previous_runtime.get("last_observation_signature"), limit=360)
-        last_prompted_signature = self._client_context_text(
-            previous_runtime.get("last_prompted_observation_signature"),
-            limit=360,
-        )
-        previous_similarity = self._visual_observation_signature_similarity(
-            observation_signature,
-            previous_signature,
-            compare_target="previous",
-        )
-        same_as_previous = previous_similarity["similar"]
-        prompted_similarity = self._visual_observation_signature_similarity(
-            observation_signature,
-            last_prompted_signature,
-            compare_target="prompted",
-        )
-        same_as_prompted = prompted_similarity["similar"]
+        change_state = self._client_context_text(summary.get("change_state"), limit=48)
+        change_basis = self._client_context_text(summary.get("change_basis"), limit=48)
+        reason_summary = self._client_context_text(summary.get("change_reason_summary"), limit=180)
+        if change_state not in {"first_seen", "changed", "stable", "same_as_recent_speech"}:
+            return None
+        if change_basis not in {
+            "no_previous_observation",
+            "semantic_change",
+            "semantic_stability",
+            "recent_speech_repetition",
+            "source_identity_changed",
+        }:
+            return None
+        if reason_summary is None:
+            return None
 
-        if same_as_prompted:
-            change_state = "same_as_recent_speech"
-        elif previous_signature is None:
+        previous_present = self._previous_visual_observation_runtime_present(previous_runtime)
+        source_identity_change = self._visual_observation_source_identity_change(
+            summary=summary,
+            previous_runtime=previous_runtime,
+        )
+        if not previous_present:
             change_state = "first_seen"
-        elif same_as_previous:
-            change_state = "stable"
-        else:
+            change_basis = "no_previous_observation"
+            reason_summary = "同じ起床前観測の前回成功記録が無いため初回観測として扱う。"
+        elif source_identity_change is not None:
             change_state = "changed"
+            change_basis = "source_identity_changed"
+            reason_summary = f"観測 source の {source_identity_change} が前回と異なる。"
 
-        reason_summary = self._visual_observation_signal_reason(
-            change_state=change_state,
-        )
-        self._debug_log_visual_observation_similarity(
-            observation_signature=observation_signature,
-            previous_signature=previous_signature,
-            prompted_signature=last_prompted_signature,
-            change_state=change_state,
-        )
         signal: dict[str, Any] = {
             "observation_id": summary.get("observation_id"),
             "change_state": change_state,
             "reason_summary": reason_summary,
             "observation_signature": observation_signature,
-            "same_as_recent_speech": same_as_prompted,
+            "same_as_recent_speech": change_state == "same_as_recent_speech",
             "summary_text": self._client_context_text(summary.get("visual_summary_text"), limit=160),
             "vision_source_id": self._client_context_text(summary.get("vision_source_id"), limit=96),
             "source_kind": self._client_context_text(summary.get("source_kind"), limit=32),
             "source_label": self._client_context_text(summary.get("source_label"), limit=80),
             "active_app": self._client_context_text(summary.get("active_app"), limit=80),
             "window_title": self._client_context_text(summary.get("window_title"), limit=120),
+            "change_basis": change_basis,
         }
         source_owner = visual_source_owner(signal.get("source_kind"))
         if source_owner is not None:
             signal["source_owner"] = source_owner
-        similarity = previous_similarity.get("similarity")
-        if isinstance(similarity, int | float):
-            signal["similarity"] = round(float(similarity), 3)
-        basis = prompted_similarity.get("reason") if same_as_prompted else previous_similarity.get("reason")
-        if isinstance(basis, str) and basis:
-            signal["change_basis"] = basis
-        return {key: value for key, value in signal.items() if value is not None}
+        compact_signal = {key: value for key, value in signal.items() if value is not None}
+        self._debug_log_visual_observation_change(
+            signal=compact_signal,
+            previous_present=previous_present,
+            prompted_present=self._prompted_visual_observation_runtime_present(previous_runtime),
+        )
+        return compact_signal
 
     def _apply_visual_observation_runtime_payload(
         self,
@@ -608,21 +675,26 @@ class ServiceInputWakeObservationMixin:
         observation_signature = self._client_context_text(signal.get("observation_signature"), limit=360)
         if observation_signature is None:
             return
-        previous_signature = self._client_context_text(previous_runtime.get("last_observation_signature"), limit=360)
         same_count = previous_runtime.get("same_observation_count")
         if not isinstance(same_count, int) or same_count < 0:
             same_count = 0
+        change_state = self._client_context_text(signal.get("change_state"), limit=48)
         payload["last_success_at"] = current_time
         payload["last_observation_signature"] = observation_signature
-        if self._visual_observation_signatures_similar(
-            observation_signature,
-            previous_signature,
-            compare_target="previous",
-        ):
+        if change_state in {"stable", "same_as_recent_speech"}:
             payload["same_observation_count"] = same_count + 1
         else:
             payload["same_observation_count"] = 1
-        for key in ("last_prompted_observation_signature", "last_prompted_at"):
+        for key in (
+            "last_prompted_observation_signature",
+            "last_prompted_observation_summary",
+            "last_prompted_vision_source_id",
+            "last_prompted_source_kind",
+            "last_prompted_source_label",
+            "last_prompted_active_app",
+            "last_prompted_window_title",
+            "last_prompted_at",
+        ):
             value = previous_runtime.get(key)
             if isinstance(value, str) and value.strip():
                 payload[key] = value.strip()
@@ -644,132 +716,57 @@ class ServiceInputWakeObservationMixin:
         normalized = " | ".join(" ".join(part.lower().split()) for part in parts)
         return normalized
 
-    def _visual_observation_signatures_similar(
+    def _previous_visual_observation_runtime_present(
         self,
-        current: str | None,
-        previous: str | None,
-        *,
-        compare_target: str,
+        previous_runtime: dict[str, Any],
     ) -> bool:
-        return self._visual_observation_signature_similarity(current, previous, compare_target=compare_target)["similar"]
+        return (
+            previous_runtime.get("last_status") == "succeeded"
+            and isinstance(previous_runtime.get("last_success_at"), str)
+            and isinstance(previous_runtime.get("last_summary"), str)
+            and bool(str(previous_runtime["last_summary"]).strip())
+        )
 
-    def _visual_observation_signature_similarity(
+    def _prompted_visual_observation_runtime_present(
         self,
-        current: str | None,
-        previous: str | None,
-        *,
-        compare_target: str,
-    ) -> dict[str, Any]:
-        threshold = self._visual_observation_similarity_threshold()
-        if current is None or previous is None:
-            return {
-                "target": compare_target,
-                "similar": False,
-                "similarity": None,
-                "reason": "missing_signature",
-                "threshold": threshold,
-            }
-        if current == previous:
-            return {
-                "target": compare_target,
-                "similar": True,
-                "similarity": 1.0,
-                "reason": "exact_match",
-                "threshold": threshold,
-            }
-        current_fields = self._visual_observation_signature_fields(current)
-        previous_fields = self._visual_observation_signature_fields(previous)
-        for key in ("vision_source_id", "source_kind"):
-            current_value = current_fields.get(key)
-            previous_value = previous_fields.get(key)
-            if current_value and previous_value and current_value != previous_value:
-                return {
-                    "target": compare_target,
-                    "similar": False,
-                    "similarity": 0.0,
-                    "reason": f"{key}_mismatch",
-                    "threshold": threshold,
-                }
-        current_summary = current_fields.get("visual_summary_text") or current
-        previous_summary = previous_fields.get("visual_summary_text") or previous
-        similarity = SequenceMatcher(None, current_summary, previous_summary).ratio()
-        return {
-            "target": compare_target,
-            "similar": similarity >= threshold,
-            "similarity": similarity,
-            "reason": "summary_similarity",
-            "threshold": threshold,
-        }
+        previous_runtime: dict[str, Any],
+    ) -> bool:
+        prompted_summary = previous_runtime.get("last_prompted_observation_summary")
+        return isinstance(prompted_summary, str) and bool(prompted_summary.strip())
 
-    def _debug_log_visual_observation_similarity(
+    def _visual_observation_source_identity_change(
         self,
         *,
-        observation_signature: str,
-        previous_signature: str | None,
-        prompted_signature: str | None,
-        change_state: str,
+        summary: dict[str, Any],
+        previous_runtime: dict[str, Any],
+    ) -> str | None:
+        for summary_key, runtime_key, label in (
+            ("vision_source_id", "last_vision_source_id", "vision_source_id"),
+            ("source_kind", "last_source_kind", "source_kind"),
+        ):
+            current_value = self._client_context_text(summary.get(summary_key), limit=120)
+            previous_value = self._client_context_text(previous_runtime.get(runtime_key), limit=120)
+            if current_value is not None and previous_value is not None and current_value != previous_value:
+                return label
+        return None
+
+    def _debug_log_visual_observation_change(
+        self,
+        *,
+        signal: dict[str, Any],
+        previous_present: bool,
+        prompted_present: bool,
     ) -> None:
-        # 人間が見るログは、現在シーンの最終判定につき1行だけ出す。
-        comparisons = [
-            self._visual_observation_signature_similarity(
-                observation_signature,
-                previous_signature,
-                compare_target="previous",
-            ),
-            self._visual_observation_signature_similarity(
-                observation_signature,
-                prompted_signature,
-                compare_target="prompted",
-            ),
-        ]
-        primary = next((item for item in comparisons if item["target"] == "previous" and item["similarity"] is not None), None)
-        if primary is None:
-            primary = next((item for item in comparisons if item["similarity"] is not None), comparisons[0])
-
-        similarity = primary["similarity"]
-        similarity_text = "-" if similarity is None else f"{similarity:.2f}"
         debug_log(
             "Wake",
             (
-                f"visual observation similarity target={primary['target']} "
-                f"result={'same' if primary['similar'] else 'changed'} "
-                f"reason={primary['reason']} similarity={similarity_text} "
-                f"threshold={primary['threshold']:.2f} change_state={change_state}"
+                "visual observation change "
+                f"state={signal.get('change_state')} basis={signal.get('change_basis')} "
+                f"previous={'present' if previous_present else 'missing'} "
+                f"prompted={'present' if prompted_present else 'missing'} "
+                f"source={signal.get('source_kind') or '-'}"
             ),
         )
-
-    def _visual_observation_similarity_threshold(self) -> float:
-        state = self.store.read_state()
-        wake_policy = state.get("wake_policy")
-        if not isinstance(wake_policy, dict):
-            return VISUAL_OBSERVATION_SIMILARITY_THRESHOLD
-        value = wake_policy.get("visual_observation_similarity_threshold")
-        if isinstance(value, bool) or not isinstance(value, int | float):
-            return VISUAL_OBSERVATION_SIMILARITY_THRESHOLD
-        if not 0 <= value <= 1:
-            return VISUAL_OBSERVATION_SIMILARITY_THRESHOLD
-        return float(value)
-
-    def _visual_observation_signature_fields(self, signature: str) -> dict[str, str]:
-        fields: dict[str, str] = {}
-        for part in signature.split(" | "):
-            key, separator, value = part.partition("=")
-            if separator and key and value:
-                fields[key] = value
-        return fields
-
-    def _visual_observation_signal_reason(
-        self,
-        *,
-        change_state: str,
-    ) -> str:
-        if change_state == "same_as_recent_speech":
-            return "この視覚観測には既に触れているため、繰り返さない。"
-        if change_state == "first_seen":
-            return "初めて見る視覚観測を自律判断の材料として渡す。"
-        if change_state == "changed":
-            return "前回から変化した視覚観測を自律判断の材料として渡す。"
-        return "視覚観測は前回と大きく変わらないため、通常は見送る材料として扱う。"
 
     def _wake_policy_visual_observation_signals(self, summaries: list[dict[str, Any]]) -> list[dict[str, Any]]:
         signals: list[dict[str, Any]] = []
@@ -804,9 +801,6 @@ class ServiceInputWakeObservationMixin:
         same_as_recent_speech = signal.get("same_as_recent_speech")
         if isinstance(same_as_recent_speech, bool):
             payload["same_as_recent_speech"] = same_as_recent_speech
-        similarity = signal.get("similarity")
-        if isinstance(similarity, int | float):
-            payload["similarity"] = round(float(similarity), 3)
         return payload or None
 
     def _compact_visual_observation_signals(self, value: Any) -> list[dict[str, Any]]:

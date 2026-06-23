@@ -290,7 +290,7 @@ API起床は少なくとも次の挙動を持つ。
 
 - `wake_policy.mode=disabled` なら `noop`
 - `mode=interval` で次回時刻にまだ達していなければ `noop`
-- `mode=interval` で `wake_policy.observations` がある場合、enabled observation を順番に取得し、成功結果をその回の判断へ進む前景シグナルとして扱い、visual capture は runtime の `change_state` を判定し、視覚記録と `world_state` を整理してから wake 判断を 1 回だけ行う
+- `mode=interval` で `wake_policy.observations` がある場合、enabled observation を順番に取得し、成功結果をその回の判断へ進む前景シグナルとして扱い、visual capture は `visual_observation` の構造化出力で `change_state` を受け取り、視覚記録と `world_state` を整理してから wake 判断を 1 回だけ行う
 - 起床前観測 が vision source 未接続の一時失敗だけで終わった場合、server は interval を消費せず短い再試行待ちにする
 - 起床前観測 の同期 capability request は内部観測として扱い、`ongoing_action` を作らない
 - server は wake 入力を `current_input.sender=system`、`source_kind=wake`、`response_target=none` として shared pipeline に渡す
@@ -300,9 +300,9 @@ API起床は少なくとも次の挙動を持つ。
 - `source_current_input.response_target=user` の capability request は request record に外向き応答先 client を内部保存し、follow-up capability request へ引き継ぐ
 - capability result follow-up の assistant message は、capability result を返した client ではなく request record の外向き応答先 client へ送る
 - `wake / background_wake` の判断で `camera.ptz` を dispatch した場合も同じ `source_current_input` を保存し、result follow-up から同じ camera source の `vision.capture` を内部観測として発行できる
-- visual observation は wake 判断へ渡し、`change_state=first_seen / changed` は wake 判断へ進む前景シグナルとして扱い、発話可否は `speech / noop / pending_intent` の比較で決める
-- visual observation signature は `vision_source_id / source_kind / source_label / visual_summary_text` を持ち、`window_title` を持たない。signature 比較は `vision_source_id / source_kind` の不一致と `visual_summary_text` の類似度を使う
-- visual observation は wake 判断へ渡す。LLM は change_state、drive_state、world_state、同一観測の反復有無を合わせて `speech / noop / pending_intent` を選ぶ
+- visual observation は wake 判断へ渡し、`change_state=first_seen / changed` は wake 判断の `visual_observation` 前景候補として扱い、具体的な抑制根拠がなければ短い `speech` を第一候補として比較する
+- visual observation の意味変化は `visual_observation` の `change_state / change_basis / change_reason_summary` を正とする。signature は runtime 追跡用の診断値として扱う
+- visual observation は wake 判断へ渡す。LLM は change_state、drive_state、world_state、同一観測の反復有無、直近で触れた内容、進行中コミットメントを合わせて `speech / noop / pending_intent` を選ぶ
 - 再評価時刻に達した保留意図があれば再評価し、必要なら `speech`
 
 server 内の定期起床スケジューラも、同じ wake 1 サイクルを内部的に使う。

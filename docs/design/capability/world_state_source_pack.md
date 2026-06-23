@@ -73,8 +73,8 @@ source pack 例:
     "capability_id": "social.status"
   },
   "environment_context": {
-    "summary_text": "作業部屋は静かで、集中しやすい環境にある。",
-    "environment_summary": "作業部屋は静かで、集中しやすい環境にある。",
+    "summary_text": "作業部屋は静かで、机上環境が整っている。",
+    "environment_summary": "作業部屋は静かで、机上環境が整っている。",
     "capability_id": "environment.status"
   },
   "location_context": {

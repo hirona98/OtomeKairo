@@ -25,7 +25,19 @@ class DummyWakeService(ServiceSpontaneousWakeMixin):
 
 
 class DummyInputService(ServiceInputMixin, ServiceSpontaneousWakeMixin):
-    pass
+    def _list_current_drive_states(self, *, state: dict, current_time: str) -> list[dict]:
+        _ = state, current_time
+        return []
+
+    def _summarize_drive_states(self, drive_states: list[dict]) -> list[dict]:
+        return drive_states
+
+    def _current_ongoing_action(self, *, state: dict, current_time: str) -> dict | None:
+        _ = state, current_time
+        return None
+
+    def _summarize_ongoing_action(self, ongoing_action: dict | None) -> dict | None:
+        return ongoing_action
 
 
 class WakeInterventionLoadTests(unittest.TestCase):
@@ -79,6 +91,97 @@ class WakeInterventionLoadTests(unittest.TestCase):
         self.assertEqual(summary["suppression_level"], "low")
         self.assertTrue(summary["visual_repetition_present"])
         self.assertFalse(summary["all_visual_observations_repeated"])
+
+    def test_changed_visual_observation_makes_autonomous_family_available(self) -> None:
+        service = DummyInputService()
+
+        family = service._initiative_autonomous_family(
+            trigger_kind="background_wake",
+            drive_summaries=[],
+            world_state_summary=[],
+            status_refresh_world_state_summary=[],
+            recent_turn_summary=[],
+            foreground_signal_summary={
+                "visual_observations": [
+                    {
+                        "observation_id": "observation:desktop",
+                        "change_state": "changed",
+                        "reason_summary": "画面内容が変化している。",
+                    }
+                ]
+            },
+            initiative_entry_summary=None,
+            suppression_summary={"suppression_level": "low"},
+            initiative_baseline={},
+            intervention_state={"background_trigger": True},
+            capability_summary={},
+        )
+
+        self.assertTrue(family.available)
+        self.assertIn("視覚変化候補 1 件", family.reason_summary)
+        self.assertIn("visual change_state=changed", family.reason_summary)
+
+    def test_changed_visual_observation_enters_autonomous_context_without_entry_check(self) -> None:
+        service = DummyInputService()
+        client_context = {
+            "visual_observation_signals": [
+                {
+                    "observation_id": "observation:desktop",
+                    "change_state": "changed",
+                    "change_basis": "semantic_change",
+                    "reason_summary": "画面内容が変化している。",
+                    "summary_text": "作業画面が別の内容に切り替わっている。",
+                }
+            ]
+        }
+
+        checked_context = service._run_autonomous_initiative_entry_check(
+            state={},
+            current_time="2026-06-22T22:30:00+09:00",
+            trigger_kind="background_wake",
+            client_context=client_context,
+            recent_turns=[],
+            cycle_id=None,
+        )
+
+        self.assertIsNot(checked_context, client_context)
+        self.assertNotIn("initiative_entry_check", checked_context)
+        self.assertTrue(checked_context["autonomous_visual_observation_direct_entry"])
+        self.assertTrue(
+            service._has_autonomous_initiative_context(
+                state={},
+                current_time="2026-06-22T22:30:00+09:00",
+                client_context=checked_context,
+            )
+        )
+
+    def test_visual_observation_direct_entry_skips_recall_interpretation(self) -> None:
+        service = DummyInputService()
+
+        recall_inputs = service._build_pipeline_recall_inputs(
+            state={},
+            started_at="2026-06-22T22:30:00+09:00",
+            input_text="定期起床。",
+            current_input=CurrentInput(
+                sender="system",
+                source_kind="background_wake",
+                response_target="none",
+                text="定期起床。",
+            ),
+            recent_turns=[],
+            augmented_query_text="定期起床。",
+            visual_observation_context=None,
+            activity_context=None,
+            recall_role={},
+            persona_context=None,
+            client_context={"autonomous_visual_observation_direct_entry": True},
+            cycle_label="[test]",
+        )
+
+        self.assertEqual(recall_inputs["recall_hint"], service._empty_recall_hint())
+        self.assertEqual(recall_inputs["answer_contract"]["contract"], "summary")
+        self.assertEqual(recall_inputs["recall_pack"]["candidate_count"], 0)
+        self.assertEqual(recall_inputs["evidence_pack"]["status"], "summary")
 
     def test_workspace_context_includes_visual_repetition_suppression_candidate(self) -> None:
         service = DummyInputService()
@@ -153,6 +256,98 @@ class WakeInterventionLoadTests(unittest.TestCase):
         self.assertEqual(suppression_candidates[0]["kind"], "suppression")
         self.assertTrue(suppression_candidates[0]["metadata"]["all_visual_observations_repeated"])
 
+    def test_workspace_context_includes_changed_visual_observation_candidate(self) -> None:
+        service = DummyInputService()
+        initiative_context = InitiativeContext(
+            trigger_kind="background_wake",
+            opportunity_summary="定期起床。",
+            initiative_entry_summary=None,
+            time_context_summary={},
+            foreground_signal_summary={
+                "visual_observations": [
+                    {
+                        "observation_id": "observation:desktop",
+                        "change_state": "changed",
+                        "change_basis": "semantic_change",
+                        "reason_summary": "画面内容が変化している。",
+                        "summary_text": "作業画面が別の内容に切り替わっている。",
+                        "source_kind": "desktop",
+                        "source_owner": "user_environment",
+                    }
+                ]
+            },
+            activity_context=None,
+            initiative_baseline={},
+            persona_context_summary={},
+            runtime_state_summary={},
+            recent_turn_summary=[],
+            drive_summaries=[],
+            pending_intent_summaries=[],
+            world_state_summary=[],
+            ongoing_action_summary=None,
+            capability_summary={},
+            candidate_families=[],
+            selected_candidate_family=None,
+            intervention_state={"background_trigger": True},
+            suppression_summary={
+                "suppression_level": "low",
+                "visual_repetition_present": False,
+            },
+            intervention_risk_summary=None,
+        )
+
+        payload = service._build_workspace_context(
+            current_input=CurrentInput(
+                sender="system",
+                source_kind="background_wake",
+                response_target="none",
+                text="定期起床。",
+            ),
+            recall_pack={},
+            drive_state_summary=None,
+            foreground_world_state=None,
+            activity_context=None,
+            ongoing_action_summary=None,
+            autonomous_run_summaries=None,
+            capability_decision_view=None,
+            initiative_context=initiative_context,
+            capability_result_context=None,
+            visual_observation_context=None,
+            self_state_context=None,
+            relationship_context=None,
+            prediction_error_context=None,
+            default_mode_context=None,
+        )
+
+        visual_candidates = [
+            candidate
+            for candidate in payload["workspace_candidates"]
+            if candidate["factor_ref"] == "visual_observation_signal:observation:desktop"
+        ]
+
+        self.assertEqual(len(visual_candidates), 1)
+        self.assertEqual(visual_candidates[0]["kind"], "visual_observation")
+        self.assertEqual(visual_candidates[0]["metadata"]["change_state"], "changed")
+        self.assertEqual(payload["workspace_candidates"][0]["factor_ref"], "visual_observation_signal:observation:desktop")
+
+    def test_initiative_recent_turn_summary_keeps_recent_turns(self) -> None:
+        service = DummyInputService()
+
+        summary = service._initiative_recent_turn_summary(
+            [
+                {"role": "assistant", "text": "さっき触れた内容。"},
+                {"role": "user", "text": "了解。"},
+            ]
+        )
+
+        self.assertEqual(
+            summary,
+            [
+                {"role": "assistant", "text": "さっき触れた内容。"},
+                {"role": "user", "text": "了解。"},
+            ],
+        )
+
     def test_initiative_opportunity_summary_is_evaluation_framed(self) -> None:
         service = DummyInputService()
 
@@ -187,6 +382,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
             world_state_summary=[],
             recent_turn_summary=[],
             initiative_entry_summary=None,
+            changed_visual_signals=[],
             suppression_summary={},
             capability_summary={},
         )

@@ -362,6 +362,7 @@ class ServiceConfigInspectionMixin:
             for runtime_key in (
                 "last_request_id",
                 "last_vision_source_id",
+                "last_source_kind",
                 "last_source_label",
                 "last_active_app",
                 "last_window_title",
@@ -371,6 +372,12 @@ class ServiceConfigInspectionMixin:
                 "same_observation_count",
                 "last_prompted_at",
                 "last_prompted_observation_signature",
+                "last_prompted_observation_summary",
+                "last_prompted_vision_source_id",
+                "last_prompted_source_kind",
+                "last_prompted_source_label",
+                "last_prompted_active_app",
+                "last_prompted_window_title",
             ):
                 value = runtime.get(runtime_key)
                 if value is not None:

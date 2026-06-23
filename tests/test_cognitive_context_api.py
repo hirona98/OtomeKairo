@@ -41,7 +41,7 @@ class CognitiveContextInspectionTests(unittest.TestCase):
                 "decision_trace": {
                     "internal_context_summary": {
                         "self_state_context": {
-                            "focus_stability": {"summary_text": "集中は安定している。"},
+                            "focus_stability": {"summary_text": "継続行動は安定している。"},
                         }
                     }
                 },
@@ -53,7 +53,7 @@ class CognitiveContextInspectionTests(unittest.TestCase):
 
         self.assertEqual(
             payload["self_state_context"]["focus_stability"]["summary_text"],
-            "集中は安定している。",
+            "継続行動は安定している。",
         )
 
 

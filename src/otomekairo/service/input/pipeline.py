@@ -105,6 +105,7 @@ class ServiceInputPipelineMixin:
             activity_context=initial_activity_context,
             recall_role=recall_role,
             persona_context=self._build_selected_persona_context(state=state, role="input_interpretation"),
+            client_context=current_client_context,
             cycle_label=cycle_label,
         )
         recall_hint = recall_inputs["recall_hint"]
@@ -297,8 +298,19 @@ class ServiceInputPipelineMixin:
         activity_context: dict[str, Any] | None,
         recall_role: dict[str, Any],
         persona_context: Any,
+        client_context: dict[str, Any],
         cycle_label: str,
     ) -> dict[str, Any]:
+        if self._should_skip_recall_interpretation_for_wake_visual_observation(
+            current_input=current_input,
+            client_context=client_context,
+        ):
+            return self._build_visual_observation_direct_recall_inputs(
+                augmented_query_text=augmented_query_text,
+                current_time=started_at,
+                cycle_label=cycle_label,
+            )
+
         # 入口解釈
         recall_hint_recent_turns = self._recall_hint_recent_turns(recent_turns)
         debug_log("Pipeline", f"{cycle_label} input_interpretation start recent_turns={len(recall_hint_recent_turns)}", level="DEBUG")
@@ -365,6 +377,65 @@ class ServiceInputPipelineMixin:
                 f"evidence_status={evidence_pack.get('status')}"
             ),
         )
+        return {
+            "recall_hint": recall_hint,
+            "recall_pack": recall_pack,
+            "answer_contract": answer_contract,
+            "evidence_pack": evidence_pack,
+        }
+
+    def _should_skip_recall_interpretation_for_wake_visual_observation(
+        self,
+        *,
+        current_input: CurrentInput,
+        client_context: dict[str, Any],
+    ) -> bool:
+        return (
+            current_input.sender == "system"
+            and current_input.source_kind in {"wake", "background_wake"}
+            and client_context.get("autonomous_visual_observation_direct_entry") is True
+        )
+
+    def _build_visual_observation_direct_recall_inputs(
+        self,
+        *,
+        augmented_query_text: str,
+        current_time: str,
+        cycle_label: str,
+    ) -> dict[str, Any]:
+        debug_log(
+            "Pipeline",
+            f"{cycle_label} input_interpretation skipped reason=visual_observation_direct_entry",
+            level="DEBUG",
+        )
+        recall_hint = self._empty_recall_hint()
+        answer_contract = {
+            "contract": "summary",
+            "reason_codes": ["visual_observation_direct_entry"],
+            "boundary": "none",
+            "target_actor": "any",
+            "query_terms": [],
+            "requires_direct_evidence": False,
+        }
+        evidence_pack = {
+            "status": "summary",
+            "answer_contract": answer_contract,
+            "requires_direct_evidence": False,
+            "evidence_items": [],
+            "speech_guidance": "視覚観測と現在文脈で判断する。",
+        }
+        fact_resolution_trace = self._empty_fact_resolution_trace()
+        fact_resolution_trace["query"] = {
+            **fact_resolution_trace["query"],
+            "augmented_query_text": augmented_query_text,
+            "current_time": current_time,
+            "reason_codes": answer_contract["reason_codes"],
+        }
+        fact_resolution_trace["speech_guidance"] = evidence_pack["speech_guidance"]
+        recall_pack = self._empty_recall_pack()
+        recall_pack["answer_contract"] = answer_contract
+        recall_pack["evidence_pack"] = evidence_pack
+        recall_pack["fact_resolution_trace"] = fact_resolution_trace
         return {
             "recall_hint": recall_hint,
             "recall_pack": recall_pack,
@@ -620,7 +691,7 @@ class ServiceInputPipelineMixin:
             }
 
         payload: dict[str, Any] = {
-            "state_boundary": "self_state_context は sensor / agency / focus の短期派生 view であり、mood_state と統合しない。",
+            "state_boundary": "self_state_context は AI 本体側の感覚信頼度、働きかけやすさ、継続行動の安定を表す短期派生 view であり、mood_state と統合しない。",
         }
         if sensory_confidence:
             payload["sensory_confidence"] = sensory_confidence
@@ -845,6 +916,12 @@ class ServiceInputPipelineMixin:
         candidates: list[dict[str, Any]] = []
         used_refs: set[str] = set()
         source_counts: dict[str, int] = {}
+        self._append_workspace_visual_observation_candidates(
+            candidates=candidates,
+            used_refs=used_refs,
+            source_counts=source_counts,
+            initiative_context=initiative_context,
+        )
         self._append_workspace_candidate(
             candidates=candidates,
             used_refs=used_refs,
@@ -1174,6 +1251,58 @@ class ServiceInputPipelineMixin:
                 ),
             ),
         )
+
+    def _append_workspace_visual_observation_candidates(
+        self,
+        *,
+        candidates: list[dict[str, Any]],
+        used_refs: set[str],
+        source_counts: dict[str, int],
+        initiative_context: InitiativeContext | None,
+    ) -> None:
+        if initiative_context is None:
+            return
+        foreground_signal_summary = initiative_context.foreground_signal_summary
+        if not isinstance(foreground_signal_summary, dict):
+            return
+        visual_observations = foreground_signal_summary.get("visual_observations")
+        if not isinstance(visual_observations, list):
+            return
+        for index, observation in enumerate(visual_observations[:6]):
+            if not isinstance(observation, dict):
+                continue
+            if observation.get("change_state") not in {"first_seen", "changed"}:
+                continue
+            observation_ref = self._workspace_item_ref(
+                observation,
+                ("observation_id", "vision_source_id"),
+                fallback=f"wake:{index}",
+            )
+            summary_text = self._workspace_item_summary(
+                observation,
+                ("reason_summary", "summary_text", "source_label", "source_kind"),
+            )
+            self._append_workspace_candidate(
+                candidates=candidates,
+                used_refs=used_refs,
+                source_counts=source_counts,
+                factor_ref=f"visual_observation_signal:{observation_ref}",
+                kind="visual_observation",
+                source="initiative_context.foreground_signal_summary.visual_observations",
+                summary_text=summary_text,
+                metadata=self._workspace_metadata(
+                    observation,
+                    (
+                        "change_state",
+                        "change_basis",
+                        "same_as_recent_speech",
+                        "vision_source_id",
+                        "source_kind",
+                        "source_label",
+                        "source_owner",
+                    ),
+                ),
+            )
 
     def _append_workspace_initiative_candidates(
         self,

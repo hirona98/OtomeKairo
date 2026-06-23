@@ -21,7 +21,7 @@ class ServiceConfigValidationMixin:
         if mode not in {"disabled", "interval"}:
             raise ServiceError(400, "invalid_wake_policy_mode", "wake_policy.mode must be disabled or interval.")
 
-        allowed_fields = {"mode", "observations", "visual_observation_similarity_threshold"}
+        allowed_fields = {"mode", "observations"}
         if mode == "interval":
             allowed_fields.add("interval_seconds")
             interval_seconds = wake_policy.get("interval_seconds")
@@ -30,15 +30,6 @@ class ServiceConfigValidationMixin:
                     400,
                     "invalid_wake_policy_interval_seconds",
                     "wake_policy.interval_seconds must be an integer >= 1.",
-                )
-
-        if "visual_observation_similarity_threshold" in wake_policy:
-            threshold = wake_policy["visual_observation_similarity_threshold"]
-            if isinstance(threshold, bool) or not isinstance(threshold, int | float) or not 0 <= threshold <= 1:
-                raise ServiceError(
-                    400,
-                    "invalid_wake_policy_visual_observation_similarity_threshold",
-                    "wake_policy.visual_observation_similarity_threshold must be a number between 0 and 1.",
                 )
 
         if "observations" in wake_policy:

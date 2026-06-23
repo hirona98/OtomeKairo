@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import uuid
 
-from otomekairo.service.input.constants import VISUAL_OBSERVATION_SIMILARITY_THRESHOLD
-
 
 # 既定の識別子
 DEFAULT_PERSONA_ID = "persona:default"
@@ -66,7 +64,6 @@ def build_default_state() -> dict:
         "selected_model_preset_id": DEFAULT_MODEL_PRESET_ID,
         "wake_policy": {
             "mode": "disabled",
-            "visual_observation_similarity_threshold": VISUAL_OBSERVATION_SIMILARITY_THRESHOLD,
         },
         "personas": {
             DEFAULT_PERSONA_ID: {

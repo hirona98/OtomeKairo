@@ -29,6 +29,7 @@ OtomeKairo は、対話入力、API起床要求、観測能力の結果、外部
 - ユーザーの恒久的な習慣や人物理解
 - OtomeKairo 自身の実行列
 - OtomeKairo の直近発話、約束、待機姿勢をユーザー活動として混ぜたもの
+- `speech / noop / pending_intent` の選択、抑制根拠、割り込み可否
 - capability manifest や binding
 - 期限の無い状態
 
@@ -36,6 +37,7 @@ OtomeKairo は、対話入力、API起床要求、観測能力の結果、外部
 `activity_state` はユーザー活動の推定を保持する。
 `ongoing_action` は OtomeKairo 自身の継続中の能力実行を保持する。
 この 3 つを混同しない。
+活動推定層と行動判断層の境界は [../llm/プロンプト文脈分離方針.md](../llm/プロンプト文脈分離方針.md) を正とする。
 
 ## 最小構造
 

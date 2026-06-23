@@ -280,6 +280,11 @@ class LLMMockSpeechMixin:
     def _should_mock_autonomous_initiative_speech(self, initiative_context: InitiativeContext | None) -> bool:
         if initiative_context is None:
             return False
+        if (
+            self._mock_initiative_has_changed_visual_observation(initiative_context)
+            and self._mock_initiative_suppression_level(initiative_context) != "high"
+        ):
+            return True
         initiative_entry_summary = initiative_context.initiative_entry_summary
         if (
             isinstance(initiative_entry_summary, dict)
@@ -324,6 +329,9 @@ class LLMMockSpeechMixin:
                 step_summary = ongoing_action_summary.get("step_summary")
                 if isinstance(step_summary, str) and step_summary.strip():
                     return f"{step_summary.strip()} が前景にあるから、ここは続きとして少し前へ進めるね。"
+        visual_summary = self._mock_initiative_changed_visual_summary(initiative_context)
+        if visual_summary is not None:
+            return f"{visual_summary}。短く触れておくね。"
         initiative_entry_summary = initiative_context.initiative_entry_summary
         if isinstance(initiative_entry_summary, dict):
             reason_summary = initiative_entry_summary.get("reason_summary")
@@ -350,3 +358,33 @@ class LLMMockSpeechMixin:
                 if isinstance(summary_text, str) and summary_text.strip():
                     return f"{summary_text.strip()} が前景にあるから、今のうちに少しだけ前へ出てみるね。"
         return "今の文脈には少し前へ出る理由があると見て、そっと声をかけるね。"
+
+    def _mock_initiative_suppression_level(self, initiative_context: InitiativeContext) -> str | None:
+        suppression_summary = initiative_context.suppression_summary
+        if not isinstance(suppression_summary, dict):
+            return None
+        value = suppression_summary.get("suppression_level")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        return None
+
+    def _mock_initiative_has_changed_visual_observation(self, initiative_context: InitiativeContext) -> bool:
+        return self._mock_initiative_changed_visual_summary(initiative_context) is not None
+
+    def _mock_initiative_changed_visual_summary(self, initiative_context: InitiativeContext) -> str | None:
+        foreground_signal_summary = initiative_context.foreground_signal_summary
+        if not isinstance(foreground_signal_summary, dict):
+            return None
+        visual_observations = foreground_signal_summary.get("visual_observations")
+        if not isinstance(visual_observations, list):
+            return None
+        for observation in visual_observations:
+            if not isinstance(observation, dict):
+                continue
+            if observation.get("change_state") not in {"first_seen", "changed"}:
+                continue
+            for key in ("reason_summary", "summary_text", "source_label", "source_kind"):
+                value = observation.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+        return None

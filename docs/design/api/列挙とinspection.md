@@ -114,6 +114,7 @@ response:
           "last_request_id": "vision_capture_request:...",
           "last_observation_signature": "vision_source_id=... | source_kind=... | source_label=... | visual_summary_text=...",
           "same_observation_count": 1,
+          "last_prompted_observation_summary": null,
           "last_prompted_at": null
         }
       ],
@@ -153,7 +154,7 @@ response:
 `runtime_detail.wake_runtime_state.initial_delay_until` は、visual capture を有効化した直後の初回 5 秒待機が残っている間だけ入る。
 `runtime_detail.wake_runtime_state.retry_after` は、起床前観測 の一時失敗後に interval を消費せず短く再試行する時刻を表す。
 各項目は `enabled / vision_source_id / interval_seconds / last_run_at / last_status / last_summary / last_error` を返す。
-visual observation では、process-local 変化判定用に `last_observation_signature / same_observation_count / last_prompted_at` も返す。
+visual observation では、比較入力と発話済み観測の追跡用に `last_observation_signature / same_observation_count / last_prompted_observation_summary / last_prompted_at` も返す。
 `last_*` は process-local runtime state であり、server restart をまたいで保持しない。
 `capability_inspection` は `GET /api/inspection/capabilities` と同じ availability 導出結果を current-state snapshot の中で参照しやすく束ねたものである。
 

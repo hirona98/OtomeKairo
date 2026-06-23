@@ -66,6 +66,19 @@ WORLD_STATE_HINT_VALUES = {
     "medium",
     "high",
 }
+VISUAL_OBSERVATION_CHANGE_STATE_VALUES = {
+    "first_seen",
+    "changed",
+    "stable",
+    "same_as_recent_speech",
+}
+VISUAL_OBSERVATION_CHANGE_BASIS_VALUES = {
+    "no_previous_observation",
+    "semantic_change",
+    "semantic_stability",
+    "recent_speech_repetition",
+    "source_identity_changed",
+}
 WORLD_STATE_TTL_HINT_VALUES = {
     "short",
     "medium",
@@ -1151,7 +1164,11 @@ def validate_world_state_contract(payload: dict[str, Any]) -> None:
 
 def validate_visual_observation_contract(payload: dict[str, Any]) -> None:
     # 必須キー群
-    _validate_exact_keys(payload, {"summary_text", "confidence_hint"}, "VisualObservation")
+    _validate_exact_keys(
+        payload,
+        {"summary_text", "confidence_hint", "change_state", "change_basis", "change_reason_summary"},
+        "VisualObservation",
+    )
 
     # summary_text
     summary_text = payload["summary_text"]
@@ -1170,6 +1187,27 @@ def validate_visual_observation_contract(payload: dict[str, Any]) -> None:
     confidence_hint = payload["confidence_hint"]
     if confidence_hint not in WORLD_STATE_HINT_VALUES:
         raise LLMError("VisualObservation confidence_hint が不正です。")
+    # change_state
+    change_state = payload["change_state"]
+    if change_state not in VISUAL_OBSERVATION_CHANGE_STATE_VALUES:
+        raise LLMError("VisualObservation change_state が不正です。")
+    # change_basis
+    change_basis = payload["change_basis"]
+    if change_basis not in VISUAL_OBSERVATION_CHANGE_BASIS_VALUES:
+        raise LLMError("VisualObservation change_basis が不正です。")
+    # change_reason_summary
+    change_reason_summary = payload["change_reason_summary"]
+    if not isinstance(change_reason_summary, str):
+        raise LLMError("VisualObservation change_reason_summary は文字列である必要があります。")
+    normalized_change_reason = change_reason_summary.strip()
+    if not normalized_change_reason:
+        raise LLMError("VisualObservation change_reason_summary は空にできません。")
+    if "\n" in normalized_change_reason or "\r" in normalized_change_reason:
+        raise LLMError("VisualObservation change_reason_summary に改行を含めてはいけません。")
+    if len(normalized_change_reason) > 240:
+        raise LLMError("VisualObservation change_reason_summary が最大長を超えています。")
+    if INTERNAL_IDENTIFIER_PATTERN.search(normalized_change_reason) is not None:
+        raise LLMError("VisualObservation change_reason_summary に内部識別子を含めてはいけません。")
 
 
 def _recall_pack_candidate_refs_by_section(source_pack: dict[str, Any]) -> dict[str, set[str]]:
