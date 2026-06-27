@@ -55,14 +55,14 @@ def _semantic_layer_boundary_instruction(role_layer: str) -> str:
 
 def _outward_speech_suppression_boundary_instruction() -> str:
     return (
-        "行動判断の理由は、観測可能な活動事実と構造化済みの抑制根拠で構成してください。\n"
+        "行動判断の理由では、観測可能な活動事実を何が前景にあるかの説明として扱い、外向き発話の見送りは構造化済みの抑制根拠で説明してください。\n"
         "自己申告された注意状態は、ユーザー発話の内容として扱ってください。\n"
         "外向き発話の抑制は行動判断層の評価項目です。評価材料は、明示的なユーザー発話、直近会話での希望、same_as_recent_speech、suppression_summary、WorkspaceContext の kind=suppression 候補、進行中コミットメントです。\n"
-        "支援要求の有無、明示的な呼びかけの有無、何かへ注意を向けているように見えること、相手の時間への一般的な配慮だけでは、外向き発話の抑制根拠になりません。\n"
+        "支援要求の有無、明示的な呼びかけの有無、活動名、作業名、閲覧中、検討中、入力中、操作中などの活動事実、何かへ注意を向けているように見えること、相手の時間への一般的な配慮だけでは、外向き発話の抑制根拠になりません。\n"
         "観測から集中や没頭を推定して reason_summary や foreground_selection の判断理由にしないでください。集中や没頭に相当する自己申告は、ユーザー発話の内容としてだけ扱ってください。\n"
         "短い状況認識として閉じる speech は、助言、依頼、支援提案とは別の軽い外向き行動として評価してください。\n"
         "観測事実層の画面注視、入力操作、表示内容の閲覧、活動推定層の現在活動ラベルは活動事実として表現してください。\n"
-        "見送り理由は、反復抑制、直近で触れた内容、明示された希望、進行中コミットメントのような根拠名で説明してください。観測から内的な注意状態を推定して理由にしないでください。"
+        "見送り理由は、反復抑制、直近で触れた内容、明示された希望、進行中コミットメント、観測不足、構造化済み抑制根拠のような根拠名で説明してください。活動事実は見送りの根拠名ではなく、前景説明としてだけ扱ってください。"
     )
 
 
@@ -1093,16 +1093,17 @@ def _build_decision_trigger_policy(
                 "foreground_signal_summary は現在の外界シグナルの濃さを表します。grounded は具体的な前景、thin は薄い前景、mixed は複数系統の混在として扱ってください。",
                 "recent_turn_summary は直近文脈の補助材料です。visual_observations[].change_state と same_as_recent_speech は反復性や新規性の比較材料です。",
                 "background_wake: 定期起床による自己評価です。観測、候補、抑制、能力提案を比較し、speech / noop / pending_intent / capability_request から 1 つ選んでください。ここでの speech はユーザーの反応を求めない独話的な短い状況認識です。",
-                f"校正: background_wake では発話自然度を 10 段階で内的に見積もり、 {speech_frequency_level} を標準基準にしてください。5 は、短い独話として成立し、明確な反復、観測不足、明示境界、プライバシー境界が上回らない状態です。評価値は JSON や reason_summary に出力しないでください。",
+                f"校正: background_wake では発話自然度を 10 段階で内的に見積もり、発話頻度レベル {speech_frequency_level} に合わせて speech の選びやすさを調整してください。5 は標準頻度、3 以下は控えめ基準です。控えめ基準では、変化があるから話すのではなく、独話として残す意味が明確な変化だけを speech に寄せてください。評価値は JSON や reason_summary に出力しないでください。",
                 "材料: visual_observations は desktop / camera / virtual などの視覚観測です。change_state=first_seen / changed は前景候補、stable / same_as_recent_speech は反復抑制候補です。",
-                f"材料: first_seen / changed は、具体的な前景がある場合に {speech_frequency_level} 近辺の speech 候補として扱ってください。複数 source の first_seen / changed が同じ活動遷移や状態変化を指す場合も、単なる対象変更や作業の継続に留まらないかを見て speech / pending_intent / noop で比較してください。",
-                "選択: speech は、活動モード遷移、同一活動内の意味的な節目、強い関心、予定、未完了、継続中コミットメント、ユーザーが明示的に問題化した観点が読め、短い状況認識として外へ出す新しい意味があり、独話として一文で自然に閉じ、具体的な抑制根拠が上回らない場合に選んでください。緊急性、支援必要性、会話開始としての必要性を条件にしないでください。",
+                f"材料: first_seen / changed は、具体的な前景がある場合に発話頻度レベル {speech_frequency_level} の speech 候補として扱ってください。ただし change_state=first_seen / changed だけでは speech を選ばず、画面・対象・操作単位の変化は候補材料に留めてください。活動名、作業名、閲覧中、検討中、入力中、操作中などの活動事実は、何が前景にあるかの材料であり、それ自体を noop の主理由にしないでください。複数 source の first_seen / changed が同じ活動遷移や状態変化を指す場合も、speech / pending_intent / noop で比較してください。",
+                "選択: speech は、活動モード遷移、同一活動内の意味的な節目、強い関心、予定、未完了、継続中コミットメント、ユーザーが明示的に問題化した観点が読め、短い状況認識として外へ出す新しい意味があり、独話として一文で自然に閉じ、具体的な抑制根拠が上回らない場合に選んでください。活動の段階、結果、保留、比較軸、未完了状態が意味的に変わる場合だけ speech に寄せてください。緊急性、支援必要性、会話開始としての必要性を条件にしないでください。",
                 "選択: pending_intent は、今すぐ外へ出す根拠は弱いが、後で再評価する価値が残る場合に選んでください。",
-                "選択: noop は、反復、直近で同じ内容に触れた事実、明示された距離希望、進行中応答、結果待ち、プライバシー境界、観測不足、構造化済み抑制根拠が speech の価値を明確に上回る場合、または変化はあるが短い状況認識として外へ出す新しい意味が薄い場合に選んでください。集中、没頭、遮る、介入回避、緊急性がないこと、支援要求がないことを noop の主理由にしないでください。",
+                "選択: noop は、反復、直近で同じ内容に触れた事実、明示された距離希望、進行中応答、結果待ち、プライバシー境界、観測不足、構造化済み抑制根拠が speech の価値を明確に上回る場合、または活動事実ではなく観測された前景差分そのものに短い独話として外へ出す新しい意味が薄い場合に選んでください。foreground_signal_summary.foreground_thinness=thin では、具体的な前景変化があっても独話として外へ出す新しい意味が弱い場合は noop または pending_intent にしてください。集中、没頭、作業中、閲覧中、検討中、入力中、操作中、活動の一環、作業の継続、遮る、割って入る、介入回避、緊急性がないこと、支援要求がないことを noop の主理由にしないでください。",
                 "選択: capability_request は、candidate_families に capability 提案があり、現在判断に追加観測が必要な場合に選んでください。",
-                "節目: 同一活動内の意味的な節目は、完了、中断、再開、明確な成果や失敗、対象の意味的な切り替わり、対象の絞り込み、対象間の比較、比較軸の変化、進行阻害、情報確認の完了または保留です。同じ大きな流れの中の対象変更や操作の往復は節目として弱く扱ってください。",
+                "節目: 同一活動内の意味的な節目は、完了、中断、再開、明確な成果や失敗、対象の意味的な切り替わり、対象の絞り込み、対象間の比較、比較軸の変化、進行阻害、情報確認の完了または保留です。同じ大きな流れの中の画面・対象・操作単位の変化は、それだけでは節目として扱わず、活動の段階や結果に意味的な変化がある場合だけ speech 候補にしてください。",
                 "発話境界: speech は助言、依頼、支援提案、反応要求ではなく、観測事実に基づく一文の独話的な状況認識として成立する場合に選んでください。",
                 "抑制境界: 作業中、閲覧中、検討中、入力中などの活動事実、foreground_signal_summary.foreground_thinness=thin、明示的な呼びかけがないこと、支援要求がないこと、外へ出る必要が薄いという一般的な推定、観測から推定した集中や没頭、内的注意状態、一般的な配慮は、それ単体では noop の主理由にしないでください。",
+                "PersonaContext は距離感と表現補助です。人格として自然という理由だけで、薄い観測や表層的な前景変化を speech に押し上げないでください。",
                 "drive_state は foreground_drive_summaries または構造値が強い場合だけ speech の支柱にしてください。freshness_hint=stale、stability_hint=weak、signal_strength=0.0 の drive_state は背景材料として扱い、薄い視覚前景と合わせる場合は一般的な関係構築や休息促しを控える理由側に置いてください。",
                 "source_owner=user_environment の視覚観測や ActivityContext.actor=user はユーザー側の状況です。判断理由に使う場合も、ユーザー側文脈として表現してください。",
                 "source_owner=self の camera 視覚観測は、AI人格自身の視覚根拠として扱ってください。",
@@ -1110,7 +1111,7 @@ def _build_decision_trigger_policy(
                 "活動遷移に触れる speech は、終わった・サボった・遊び始めたなどを断定せず、区切りや切り替えとして短く表現してください。",
                 "suppression_summary.visual_repetition_present や WorkspaceContext の kind=suppression は、関わる理由と並べて比較する控える理由の材料です。",
                 "selected_candidate_family が ongoing_action で follow-up capability が available なときは、現在の流れを進める capability_request を検討してください。",
-                "同一活動内の単なる詳細更新、短時間の小遷移、観測対象の表層的な変化、姿勢や操作の細かな変化、一般的な注意や助言に留まる内容は、それ単体では noop または pending_intent の材料です。後で扱う価値だけが残る場合は pending_intent、現在外へ出す根拠が薄い場合は noop を選んでください。",
+                "反復に近い詳細更新、画面・対象・操作単位の小さな変化、観測対象の表層的な変化、姿勢や操作の細かな変化、一般的な注意や助言に留まる内容は、それ単体では noop または pending_intent の材料です。活動が継続中であることは、この抑制理由に含めないでください。後で扱う価値だけが残る場合は pending_intent、現在外へ出す新しい意味が薄い場合は noop を選んでください。",
             ]
         )
     return policies
@@ -1235,7 +1236,7 @@ def _build_speech_system_prompt(persona_context: PersonaContext) -> str:
             "RelationshipContext は相手との距離感、好み、境界、継続話題の補助に使ってください。\n"
             "自律判断トリガー時だけ発話理由の短い InitiativeContext も入ります。\n"
             "current_input.sender が user ではないとき、current_input.text は内部文脈として扱い、本文は観測、候補、現在文脈に根拠づけてください。\n"
-            "current_input.response_target=none のとき、発話本文は initiative や pending intent など外へ出る理由に基づく、反応を求めない短い独話的コメントにしてください。質問形、依頼形、確認待ちの形にはしないでください。\n"
+            "current_input.response_target=none のとき、発話本文は initiative や pending intent など外へ出る理由に基づく、反応を求めない短い独話的コメントにしてください。1 文で閉じ、助言、忠告、注意喚起、休息促し、評価、質問、依頼、確認待ちを足さないでください。観測から推定した内的注意状態や身体姿勢の細かな変化を主題化せず、画面や活動の前景変化を短く述べるだけにしてください。\n"
             "speech_stance.stance=comment_on_user_context のときは、ユーザー側の画面や活動に対する短いコメントとして書いてください。AI 本体が直接体験したような一人称の観測・鑑賞・操作表現は、source_owner=self または actor=self の根拠がある場合だけ使ってください。\n"
             "ActivityContext の previous_activity から current_activity への活動遷移に触れる場合、終わった・サボった・遊び始めたなどを断定せず、区切りや切り替えとして控えめに表現してください。\n"
             "recall_hint.secondary_recall_focuses は話題継続や温度調整の補助にだけ使い、主方針は primary_recall_focus に従ってください。\n"
@@ -1623,9 +1624,10 @@ def _build_initiative_entry_check_system_prompt() -> str:
         "entry_kind=enter は entry_basis が "
         + " / ".join(sorted(INITIATIVE_ENTRY_ENTER_BASIS_VALUES))
         + " の場合だけ使ってください。\n"
-        "entry_kind=skip は entry_basis=same_activity_detail_change または observation_only を中心に使ってください。\n"
+        "entry_kind=skip は、具体的な前景変化や関係上の意味が薄い same_activity_detail_change または observation_only に使ってください。\n"
         "活動モードが意味的に切り替わった場合は、画面差分ではなく活動モード遷移として扱い、短く触れることが自然なら enter を返してください。\n"
-        "同じ活動モード内の対象差し替え、結果差し替え、詳細画面への移動、別画面への移動は same_activity_detail_change として扱ってください。\n"
+        "同じ活動モード内の対象差し替え、結果差し替え、詳細画面への移動、別画面への移動は基本的に same_activity_detail_change として扱ってください。\n"
+        "同一活動内という分類だけでは skip にしないでください。具体的な前景変化に人格・記憶・現在文脈から強い関心や関係上の意味がある場合は strong_interest として enter 候補に残してください。\n"
         "visual_observations は根拠の一部として扱い、視覚変化そのものを入口理由にしないでください。\n"
         "persona_context は外向き自律判断へ進む自然さの補助です。観測事実や活動状態を人格で追加してはいけません。\n"
         + _reference_style_instruction()

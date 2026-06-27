@@ -14,6 +14,7 @@ from otomekairo.llm.prompts import (
     build_activity_state_messages,
     build_activity_state_repair_prompt,
     build_decision_messages,
+    build_initiative_entry_check_messages,
     build_speech_messages,
     build_visual_observation_messages,
     build_visual_observation_repair_prompt,
@@ -113,13 +114,16 @@ class DecisionPromptAutonomousWakeTests(unittest.TestCase):
         self.assertIn("控える理由の材料", context_prompt)
         self.assertIn("意味レイヤー境界", system_prompt)
         self.assertIn("内部処理は次の意味レイヤー", system_prompt)
-        self.assertIn("行動判断の理由は、観測可能な活動事実と構造化済みの抑制根拠", system_prompt)
+        self.assertIn("観測可能な活動事実を何が前景にあるかの説明", system_prompt)
+        self.assertIn("外向き発話の見送りは構造化済みの抑制根拠", system_prompt)
         self.assertIn("自己申告された注意状態は、ユーザー発話の内容", system_prompt)
         self.assertIn("外向き発話の抑制は行動判断層", system_prompt)
         self.assertIn("活動事実として表現", system_prompt)
         self.assertIn("現在活動ラベルは活動事実として表現", system_prompt)
         self.assertIn("見送り理由は、反復抑制、直近で触れた内容", system_prompt)
+        self.assertIn("活動事実は見送りの根拠名ではなく", system_prompt)
         self.assertIn("支援要求の有無、明示的な呼びかけの有無", system_prompt)
+        self.assertIn("活動名、作業名、閲覧中、検討中、入力中、操作中などの活動事実", system_prompt)
         self.assertIn("外向き発話の抑制根拠になりません", system_prompt)
         self.assertIn("観測から集中や没頭を推定して", system_prompt)
         self.assertIn("判断理由にしない", system_prompt)
@@ -130,6 +134,9 @@ class DecisionPromptAutonomousWakeTests(unittest.TestCase):
         self.assertIn("発話自然度を 10 段階", context_prompt)
         self.assertIn("発話頻度レベル 7", context_prompt)
         self.assertIn("5 は標準頻度", context_prompt)
+        self.assertIn("3 以下は控えめ基準", context_prompt)
+        self.assertIn("変化があるから話すのではなく", context_prompt)
+        self.assertIn("独話として残す意味が明確な変化だけ", context_prompt)
         self.assertIn("評価値は JSON や reason_summary に出力しない", context_prompt)
         self.assertIn("材料: visual_observations", context_prompt)
         self.assertIn("選択: speech", context_prompt)
@@ -140,36 +147,54 @@ class DecisionPromptAutonomousWakeTests(unittest.TestCase):
         self.assertIn("stable / same_as_recent_speech は反復抑制候補", context_prompt)
         self.assertIn("複数 source の first_seen / changed", context_prompt)
         self.assertIn("具体的な前景がある場合に発話頻度レベル 7 の speech 候補", context_prompt)
-        self.assertIn("単なる対象変更や作業の継続に留まらないか", context_prompt)
+        self.assertIn("change_state=first_seen / changed だけでは speech を選ばず", context_prompt)
+        self.assertIn("画面・対象・操作単位の変化は候補材料に留めてください", context_prompt)
+        self.assertIn("活動名、作業名、閲覧中、検討中、入力中、操作中などの活動事実", context_prompt)
+        self.assertIn("何が前景にあるかの材料", context_prompt)
+        self.assertIn("それ自体を noop の主理由にしない", context_prompt)
         self.assertIn("speech / pending_intent / noop で比較", context_prompt)
         self.assertIn("活動モード遷移、同一活動内の意味的な節目", context_prompt)
         self.assertIn("短い状況認識として外へ出す新しい意味", context_prompt)
         self.assertIn("独話として一文で自然に閉じ", context_prompt)
         self.assertIn("具体的な抑制根拠が上回らない", context_prompt)
+        self.assertIn("活動の段階、結果、保留、比較軸、未完了状態", context_prompt)
+        self.assertIn("意味的に変わる場合だけ speech に寄せてください", context_prompt)
         self.assertIn("緊急性、支援必要性、会話開始としての必要性を条件にしない", context_prompt)
         self.assertIn("後で再評価する価値が残る", context_prompt)
         self.assertIn("反復、直近で同じ内容に触れた事実", context_prompt)
         self.assertIn("speech の価値を明確に上回る", context_prompt)
+        self.assertIn("活動事実ではなく観測された前景差分そのもの", context_prompt)
         self.assertIn("新しい意味が薄い場合", context_prompt)
-        self.assertIn("集中、没頭、遮る、介入回避、緊急性がないこと、支援要求がないこと", context_prompt)
+        self.assertIn("foreground_signal_summary.foreground_thinness=thin では", context_prompt)
+        self.assertIn("独話として外へ出す新しい意味が弱い場合は noop または pending_intent", context_prompt)
+        self.assertIn("集中、没頭、作業中、閲覧中、検討中、入力中、操作中", context_prompt)
+        self.assertIn("活動の一環、作業の継続、遮る、割って入る、介入回避", context_prompt)
         self.assertIn("プライバシー境界、観測不足", context_prompt)
         self.assertIn("candidate_families に capability 提案", context_prompt)
         self.assertIn("対象の意味的な切り替わり、対象の絞り込み", context_prompt)
         self.assertIn("比較軸の変化、進行阻害", context_prompt)
-        self.assertIn("同じ大きな流れの中の対象変更や操作の往復は節目として弱く扱ってください", context_prompt)
+        self.assertIn("同じ大きな流れの中の画面・対象・操作単位の変化", context_prompt)
+        self.assertIn("それだけでは節目として扱わず", context_prompt)
+        self.assertIn("活動の段階や結果に意味的な変化がある場合だけ speech 候補", context_prompt)
         self.assertIn("foreground_signal_summary.foreground_thinness=thin", context_prompt)
         self.assertIn("支援要求がないこと、外へ出る必要が薄いという一般的な推定", context_prompt)
         self.assertIn("観測から推定した集中や没頭", context_prompt)
         self.assertIn("それ単体では noop の主理由にしない", context_prompt)
         self.assertIn("観測事実に基づく一文の独話的な状況認識として成立する場合", context_prompt)
         self.assertIn("助言、依頼、支援提案、反応要求ではなく", context_prompt)
+        self.assertIn("PersonaContext は距離感と表現補助", context_prompt)
+        self.assertIn("薄い観測や表層的な前景変化を speech に押し上げない", context_prompt)
         self.assertIn("foreground_drive_summaries または構造値が強い場合だけ speech の支柱", context_prompt)
         self.assertIn("freshness_hint=stale、stability_hint=weak、signal_strength=0.0", context_prompt)
         self.assertIn("一般的な関係構築や休息促しを控える理由側", context_prompt)
-        self.assertIn("同一活動内の単なる詳細更新、短時間の小遷移", context_prompt)
+        self.assertIn("反復に近い詳細更新", context_prompt)
+        self.assertIn("画面・対象・操作単位の小さな変化", context_prompt)
         self.assertIn("観測対象の表層的な変化", context_prompt)
         self.assertIn("一般的な注意や助言に留まる内容", context_prompt)
         self.assertIn("それ単体では noop または pending_intent の材料", context_prompt)
+        self.assertIn("活動が継続中であることは、この抑制理由に含めない", context_prompt)
+        self.assertNotIn("単なる対象変更や作業の継続に留まらないか", combined)
+        self.assertNotIn("節目として弱く扱ってください", combined)
         self.assertNotIn("外へ伝える必然性", combined)
         self.assertNotIn("直近で問題化された観点", combined)
         self.assertNotIn("関係、生活状態、活動モード遷移", combined)
@@ -198,6 +223,45 @@ class DecisionPromptAutonomousWakeTests(unittest.TestCase):
         self.assertNotIn("内的注意状態を理由にしない", combined)
         self.assertNotIn("外向き介入が不要", combined)
         self.assertNotIn("割り込み抑制", combined)
+
+    def test_initiative_entry_check_does_not_skip_by_same_activity_alone(self) -> None:
+        persona_context = build_persona_context(
+            {
+                "display_name": "テスト",
+                "initiative_baseline": "medium",
+                "reference_style": {"user_natural_reference": "マスター"},
+                "persona_prompt": "落ち着いて判断する。",
+            },
+            role="initiative_entry_check",
+        )
+        messages = build_initiative_entry_check_messages(
+            persona_context=persona_context,
+            source_pack={
+                "input_context": {"trigger_kind": "background_wake"},
+                "activity_context": {
+                    "previous_activity": {"label": "同じ活動", "target": "前の対象"},
+                    "current_activity": {"label": "同じ活動", "target": "今の対象"},
+                },
+                "entry_policy": {
+                    "allow_enter": True,
+                    "allow_skip": True,
+                    "enter_bases": ["activity_mode_transition", "strong_interest"],
+                    "same_activity_detail_change_without_independent_meaning_is_skip": True,
+                    "same_activity_detail_change_with_strong_interest_uses_strong_interest": True,
+                },
+            },
+        )
+        system_prompt = messages[0]["content"]
+        user_prompt = messages[1]["content"]
+
+        self.assertIn("具体的な前景変化や関係上の意味が薄い same_activity_detail_change", system_prompt)
+        self.assertIn("同一活動内という分類だけでは skip にしない", system_prompt)
+        self.assertIn("strong_interest として enter 候補に残してください", system_prompt)
+        self.assertIn("speech / noop / pending_intent の最終選択", system_prompt)
+        self.assertIn("same_activity_detail_change_without_independent_meaning_is_skip", user_prompt)
+        self.assertIn("same_activity_detail_change_with_strong_interest_uses_strong_interest", user_prompt)
+        self.assertNotIn("same_activity_detail_change_is_skip", user_prompt)
+        self.assertNotIn("ゲーム中", system_prompt + "\n" + user_prompt)
 
     def test_observation_prompts_use_shared_semantic_layer_boundary(self) -> None:
         persona = {
@@ -281,7 +345,11 @@ class DecisionPromptAutonomousWakeTests(unittest.TestCase):
         self.assertIn("decision.kind と foreground_selection を維持", system_prompt)
         self.assertIn("decision.reason_summary と internal_context の根拠", system_prompt)
         self.assertIn("反応を求めない短い独話的コメント", system_prompt)
-        self.assertIn("質問形、依頼形、確認待ちの形にはしない", system_prompt)
+        self.assertIn("1 文で閉じ", system_prompt)
+        self.assertIn("助言、忠告、注意喚起、休息促し、評価", system_prompt)
+        self.assertIn("質問、依頼、確認待ちを足さない", system_prompt)
+        self.assertIn("内的注意状態や身体姿勢の細かな変化を主題化せず", system_prompt)
+        self.assertIn("画面や活動の前景変化を短く述べるだけ", system_prompt)
         self.assertNotIn("decision に無い抑制理由", system_prompt)
         self.assertNotIn("集中", system_prompt)
         self.assertNotIn("没頭", system_prompt)

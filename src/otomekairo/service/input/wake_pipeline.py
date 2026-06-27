@@ -336,7 +336,8 @@ class ServiceInputWakePipelineMixin:
                 "allow_skip": True,
                 "enter_bases": sorted(INITIATIVE_ENTRY_ENTER_BASIS_VALUES),
                 "observation_only_is_skip": True,
-                "same_activity_detail_change_is_skip": True,
+                "same_activity_detail_change_without_independent_meaning_is_skip": True,
+                "same_activity_detail_change_with_strong_interest_uses_strong_interest": True,
                 "meaningful_activity_transition_is_enter_candidate": True,
             },
         }
