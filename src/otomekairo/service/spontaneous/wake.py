@@ -7,7 +7,7 @@ from typing import Any
 from otomekairo.llm.client import LLMError
 from otomekairo.recall.builder import RecallPackSelectionError
 from otomekairo.service.common import (
-    BACKGROUND_WAKE_POLL_SECONDS,
+    BACKGROUND_THINKING_POLL_SECONDS,
     INITIAL_VISUAL_CAPTURE_DELAY_SECONDS,
     WAKE_RECENT_DEDUPE_WINDOW_MINUTES,
     debug_log,
@@ -24,7 +24,7 @@ class ServiceSpontaneousWakeMixin:
         client_context: dict[str, Any],
         pipeline: dict[str, Any],
     ) -> None:
-        if trigger_kind not in {"wake", "background_wake"}:
+        if trigger_kind not in {"wake", "background_thinking"}:
             return
         speech_payload = pipeline.get("speech_payload")
         if not isinstance(speech_payload, dict):
@@ -71,7 +71,7 @@ class ServiceSpontaneousWakeMixin:
     ) -> dict[str, Any]:
         # 直列化実行
         with self._wake_execution_lock:
-            input_event_kind = "background_wake" if trigger_kind == "background_wake" else "wake"
+            input_event_kind = "background_thinking" if trigger_kind == "background_thinking" else "wake"
             cycle_id = self._new_cycle_id()
             started_at = self._now_iso()
             recent_turns = self._load_recent_turns(state)
@@ -92,8 +92,8 @@ class ServiceSpontaneousWakeMixin:
             )
 
             try:
-                if trigger_kind == "background_wake" and self._user_response_cycle_active():
-                    reason_summary = "ユーザー向け応答サイクルが進行中のため、定期起床の自発発話は行わない。"
+                if trigger_kind == "background_thinking" and self._user_response_cycle_active():
+                    reason_summary = "ユーザー向け応答サイクルが進行中のため、定期思考の自発発話は行わない。"
                     self._set_last_wake_at(started_at)
                     debug_log("Wake", f"{self._short_cycle_id(cycle_id)} skip user_response_active")
                     pipeline = self._noop_pipeline(
@@ -288,41 +288,41 @@ class ServiceSpontaneousWakeMixin:
                     ongoing_action_transition_summary=ongoing_action_transition_summary,
                 )
 
-    def _background_wake_loop(self, stop_event: threading.Event) -> None:
+    def _background_thinking_loop(self, stop_event: threading.Event) -> None:
         # ループ
         while not stop_event.is_set():
             try:
                 state = self.store.read_state()
-                delay_seconds = self._background_wake_delay_seconds(state=state, current_time=self._now_iso())
+                delay_seconds = self._background_thinking_delay_seconds(state=state, current_time=self._now_iso())
                 if delay_seconds > 0:
                     stop_event.wait(timeout=delay_seconds)
                     continue
                 self._execute_wake_cycle(
                     state=state,
-                    client_context={"source": "background_wake_scheduler"},
-                    trigger_kind="background_wake",
+                    client_context={"source": "background_thinking_scheduler"},
+                    trigger_kind="background_thinking",
                 )
             except Exception as exc:  # noqa: BLE001
-                debug_log("Wake", f"background loop error={type(exc).__name__}: {self._clamp(str(exc))}", level="ERROR")
-                stop_event.wait(timeout=BACKGROUND_WAKE_POLL_SECONDS)
+                debug_log("Wake", f"background thinking loop error={type(exc).__name__}: {self._clamp(str(exc))}", level="ERROR")
+                stop_event.wait(timeout=BACKGROUND_THINKING_POLL_SECONDS)
 
-    def _background_wake_delay_seconds(self, *, state: dict[str, Any], current_time: str) -> float:
+    def _background_thinking_delay_seconds(self, *, state: dict[str, Any], current_time: str) -> float:
         # 無効時
         wake_policy = state.get("wake_policy", {})
         if wake_policy.get("mode") != "interval":
-            return BACKGROUND_WAKE_POLL_SECONDS
+            return BACKGROUND_THINKING_POLL_SECONDS
 
         # 初回観測待ち
         initial_delay_seconds = self._wake_initial_delay_remaining_seconds(current_time=current_time)
         if initial_delay_seconds is not None:
-            return min(initial_delay_seconds, BACKGROUND_WAKE_POLL_SECONDS)
+            return min(initial_delay_seconds, BACKGROUND_THINKING_POLL_SECONDS)
 
         # 一時失敗後の再試行待ち
         retry_delay_seconds = self._wake_retry_delay_remaining_seconds(current_time=current_time)
         if retry_delay_seconds is not None:
-            return min(retry_delay_seconds, BACKGROUND_WAKE_POLL_SECONDS)
+            return min(retry_delay_seconds, BACKGROUND_THINKING_POLL_SECONDS)
 
-        # 初回起床
+        # 初回定期思考
         with self._runtime_state_lock:
             last_wake_at = self._wake_runtime_state.get("last_wake_at")
         if not isinstance(last_wake_at, str) or not last_wake_at:
@@ -337,7 +337,7 @@ class ServiceSpontaneousWakeMixin:
             return 0.0
 
         # ポーリング上限
-        return min(remaining_seconds, BACKGROUND_WAKE_POLL_SECONDS)
+        return min(remaining_seconds, BACKGROUND_THINKING_POLL_SECONDS)
 
     def _record_wake_outcome(
         self,
@@ -435,7 +435,7 @@ class ServiceSpontaneousWakeMixin:
 
     def _set_wake_retry_after(self, current_time: str) -> None:
         # 一時失敗は interval を消費せず、短い再試行だけを待つ。
-        retry_at = self._parse_iso(current_time) + timedelta(seconds=BACKGROUND_WAKE_POLL_SECONDS)
+        retry_at = self._parse_iso(current_time) + timedelta(seconds=BACKGROUND_THINKING_POLL_SECONDS)
         with self._runtime_state_lock:
             self._wake_runtime_state["retry_after"] = retry_at.isoformat()
 
@@ -504,7 +504,7 @@ class ServiceSpontaneousWakeMixin:
         if wake_policy.get("mode") != "interval":
             return {
                 "should_skip": True,
-                "reason_summary": "wake_policy が disabled のため、自発判断は止まっている。",
+                "reason_summary": "`wake_policy.mode=disabled` のため、自発判断は止まっている。",
             }
 
         # 初回観測待ち
@@ -520,10 +520,10 @@ class ServiceSpontaneousWakeMixin:
         if retry_delay_seconds is not None:
             return {
                 "should_skip": True,
-                "reason_summary": "起床前観測 の一時失敗後の再試行待機中。",
+                "reason_summary": "思考前観測 の一時失敗後の再試行待機中。",
             }
 
-        # 初回起床
+        # 初回定期思考
         with self._runtime_state_lock:
             last_wake_at = self._wake_runtime_state.get("last_wake_at")
         if not isinstance(last_wake_at, str) or not last_wake_at:
@@ -539,7 +539,7 @@ class ServiceSpontaneousWakeMixin:
         if current_dt < due_at:
             return {
                 "should_skip": True,
-                "reason_summary": "定期起床 の次回時刻にまだ達していない。",
+                "reason_summary": "定期思考 の次回時刻にまだ達していない。",
             }
 
         # 期限到来
@@ -563,7 +563,7 @@ class ServiceSpontaneousWakeMixin:
         intent_kind = candidate.get("intent_kind", "conversation_follow_up")
         if intent_kind == "conversation_follow_up":
             return "約束の続きとして会話を再開したい。いま話しかける価値があるかを見たい。"
-        return "定期起床。未完了の保留候補を再評価したい。"
+        return "定期思考。未完了の保留候補を再評価したい。"
 
     def _build_wake_input_text(
         self,
@@ -573,7 +573,7 @@ class ServiceSpontaneousWakeMixin:
         selected_candidate: dict[str, Any] | None,
     ) -> str:
         # プレフィックス
-        parts = ["定期起床。"]
+        parts = ["定期思考。"]
         persona = state["personas"][state["selected_persona_id"]]
         parts.append(f"initiative_baseline は {persona['initiative_baseline']}。")
         parts.extend(
@@ -609,8 +609,8 @@ class ServiceSpontaneousWakeMixin:
 
         # source取得
         if include_source and isinstance(source, str):
-            if source == "background_wake_scheduler":
-                parts.append("入力源は定期起床スケジューラ。")
+            if source == "background_thinking_scheduler":
+                parts.append("入力源は定期思考スケジューラ。")
             else:
                 parts.append(f"入力源は {source}。")
         wake_observation_summary = self._client_context_text(

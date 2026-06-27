@@ -98,7 +98,7 @@ class ServiceConfigInspectionMixin:
             visual_daily_in_progress = self._visual_daily_runtime_state.get("current_digest_id") is not None
         return {
             "connection_state": "ready",
-            "wake_scheduler_active": self._background_wake_scheduler_active() and state["wake_policy"]["mode"] == "interval",
+            "background_thinking_scheduler_active": self._background_thinking_scheduler_active() and state["wake_policy"]["mode"] == "interval",
             "autonomous_run_scheduler_active": self._background_autonomous_run_scheduler_active(),
             "ongoing_action_exists": ongoing_action is not None,
             "active_autonomous_run_count": len(
@@ -592,9 +592,9 @@ class ServiceConfigInspectionMixin:
             return f"{delta_seconds // 60}分前"
         return f"{delta_seconds // 3600}時間前"
 
-    def _background_wake_scheduler_active(self) -> bool:
+    def _background_thinking_scheduler_active(self) -> bool:
         with self._runtime_state_lock:
-            return self._background_wake_thread is not None and self._background_wake_thread.is_alive()
+            return self._background_thinking_thread is not None and self._background_thinking_thread.is_alive()
 
     def _background_autonomous_run_scheduler_active(self) -> bool:
         with self._runtime_state_lock:

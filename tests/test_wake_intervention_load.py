@@ -96,7 +96,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
         service = DummyInputService()
 
         family = service._initiative_autonomous_family(
-            trigger_kind="background_wake",
+            trigger_kind="background_thinking",
             drive_summaries=[],
             world_state_summary=[],
             status_refresh_world_state_summary=[],
@@ -138,7 +138,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
         checked_context = service._run_autonomous_initiative_entry_check(
             state={},
             current_time="2026-06-22T22:30:00+09:00",
-            trigger_kind="background_wake",
+            trigger_kind="background_thinking",
             client_context=client_context,
             recent_turns=[],
             cycle_id=None,
@@ -161,15 +161,15 @@ class WakeInterventionLoadTests(unittest.TestCase):
         recall_inputs = service._build_pipeline_recall_inputs(
             state={},
             started_at="2026-06-22T22:30:00+09:00",
-            input_text="定期起床。",
+            input_text="定期思考。",
             current_input=CurrentInput(
                 sender="system",
-                source_kind="background_wake",
+                source_kind="background_thinking",
                 response_target="none",
-                text="定期起床。",
+                text="定期思考。",
             ),
             recent_turns=[],
-            augmented_query_text="定期起床。",
+            augmented_query_text="定期思考。",
             visual_observation_context=None,
             activity_context=None,
             recall_role={},
@@ -186,8 +186,8 @@ class WakeInterventionLoadTests(unittest.TestCase):
     def test_workspace_context_includes_visual_repetition_suppression_candidate(self) -> None:
         service = DummyInputService()
         initiative_context = InitiativeContext(
-            trigger_kind="background_wake",
-            opportunity_summary="定期起床。",
+            trigger_kind="background_thinking",
+            opportunity_summary="定期思考。",
             initiative_entry_summary=None,
             time_context_summary={},
             foreground_signal_summary={},
@@ -226,9 +226,9 @@ class WakeInterventionLoadTests(unittest.TestCase):
         payload = service._build_workspace_context(
             current_input=CurrentInput(
                 sender="system",
-                source_kind="background_wake",
+                source_kind="background_thinking",
                 response_target="none",
-                text="定期起床。",
+                text="定期思考。",
             ),
             recall_pack={},
             drive_state_summary=None,
@@ -259,8 +259,8 @@ class WakeInterventionLoadTests(unittest.TestCase):
     def test_workspace_context_includes_changed_visual_observation_candidate(self) -> None:
         service = DummyInputService()
         initiative_context = InitiativeContext(
-            trigger_kind="background_wake",
-            opportunity_summary="定期起床。",
+            trigger_kind="background_thinking",
+            opportunity_summary="定期思考。",
             initiative_entry_summary=None,
             time_context_summary={},
             foreground_signal_summary={
@@ -299,9 +299,9 @@ class WakeInterventionLoadTests(unittest.TestCase):
         payload = service._build_workspace_context(
             current_input=CurrentInput(
                 sender="system",
-                source_kind="background_wake",
+                source_kind="background_thinking",
                 response_target="none",
-                text="定期起床。",
+                text="定期思考。",
             ),
             recall_pack={},
             drive_state_summary=None,
@@ -352,7 +352,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
         service = DummyInputService()
 
         summary = service._initiative_opportunity_summary(
-            trigger_kind="background_wake",
+            trigger_kind="background_thinking",
             client_context={},
             selected_candidate=None,
             initiative_entry_summary={

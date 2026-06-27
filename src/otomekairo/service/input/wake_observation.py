@@ -130,7 +130,7 @@ class ServiceInputWakeObservationMixin:
         if not isinstance(input_payload, dict):
             return self._wake_policy_observation_failure_summary(
                 observation=observation,
-                reason_summary="起床前観測 input が不正。",
+                reason_summary="思考前観測 input が不正。",
             )
         resolved_input_payload = self._resolve_wake_policy_observation_input(
             capability_id=capability_id,
@@ -156,7 +156,7 @@ class ServiceInputWakeObservationMixin:
                 capability_id=capability_id,
                 input_payload=resolved_input_payload,
                 current_time=self._now_iso(),
-                goal_summary=f"起床前観測 {observation_id}",
+                goal_summary=f"思考前観測 {observation_id}",
                 wait_for_response=True,
                 component="WakeObservation",
                 track_ongoing_action=False,
@@ -349,16 +349,16 @@ class ServiceInputWakeObservationMixin:
         result_error = capability_response.get("error") not in {None, ""} or failure_reason is not None
         terminal_kind = "interrupted" if result_error else "completed"
         terminal_reason = (
-            "起床前観測 の取得または反映に失敗した。"
+            "思考前観測 の取得または反映に失敗した。"
             if result_error
-            else "起床前観測 の取得結果を判断材料へ反映した。"
+            else "思考前観測 の取得結果を判断材料へ反映した。"
         )
         if result_error:
-            final_step_summary = "起床前観測 を中断した。"
+            final_step_summary = "思考前観測 を中断した。"
         elif self._observation_summary_is_vision_capture(observation_summary):
-            final_step_summary = "視覚の起床前観測の結果を視覚記録候補と判断材料へ反映した。"
+            final_step_summary = "視覚の思考前観測の結果を視覚記録候補と判断材料へ反映した。"
         else:
-            final_step_summary = "起床前観測 の結果を world_state へ反映した。"
+            final_step_summary = "思考前観測 の結果を world_state へ反映した。"
         detail_summary = failure_reason or self._capability_result_followup_hint_summary(
             capability_id=capability_id,
             observation_summary=observation_summary,
@@ -630,7 +630,7 @@ class ServiceInputWakeObservationMixin:
         if not previous_present:
             change_state = "first_seen"
             change_basis = "no_previous_observation"
-            reason_summary = "同じ起床前観測の前回成功記録が無いため初回観測として扱う。"
+            reason_summary = "同じ思考前観測の前回成功記録が無いため初回観測として扱う。"
         elif source_identity_change is not None:
             change_state = "changed"
             change_basis = "source_identity_changed"

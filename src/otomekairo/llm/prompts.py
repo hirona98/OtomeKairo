@@ -1083,7 +1083,7 @@ def _build_decision_trigger_policy(
         speech_frequency_level = initiative_context.speech_frequency_level
         policies.extend(
             [
-                "InitiativeContext は、定期起床や API 起床で現在の個が関わる、保留する、見送る、能力を使うのどれを選ぶか評価する材料です。",
+                "InitiativeContext は、定期思考や API 起床で現在の個が関わる、保留する、見送る、能力を使うのどれを選ぶか評価する材料です。",
                 "opportunity_summary, initiative_entry_summary, candidate_families は、評価対象が前景化した理由と候補系統を表します。",
                 "entry_basis=activity_mode_transition は活動モード遷移、strong_interest は強い関心、same_activity_detail_change は同じ活動内の詳細変化、observation_only は観測のみを表します。",
                 "selected_candidate_family は今回もっとも前景にある family の名前です。final decision.kind は selected_candidate_family と全体文脈を合わせて選んでください。",
@@ -1092,8 +1092,8 @@ def _build_decision_trigger_policy(
                 "InitiativeContext.candidate_families に preferred_capability_id と preferred_capability_input があるときは capability_request の提案です。現在文脈で追加観測が必要な場合に、その capability と最小 input を選んでください。",
                 "foreground_signal_summary は現在の外界シグナルの濃さを表します。grounded は具体的な前景、thin は薄い前景、mixed は複数系統の混在として扱ってください。",
                 "recent_turn_summary は直近文脈の補助材料です。visual_observations[].change_state と same_as_recent_speech は反復性や新規性の比較材料です。",
-                "background_wake: 定期起床による自己評価です。観測、候補、抑制、能力提案を比較し、speech / noop / pending_intent / capability_request から 1 つ選んでください。ここでの speech はユーザーの反応を求めない独話的な短い状況認識です。",
-                f"校正: background_wake では発話自然度を 10 段階で内的に見積もり、発話頻度レベル {speech_frequency_level} に合わせて speech の選びやすさを調整してください。5 は標準頻度、3 以下は控えめ基準です。控えめ基準では、変化があるから話すのではなく、独話として残す意味が明確な変化だけを speech に寄せてください。評価値は JSON や reason_summary に出力しないでください。",
+                "background_thinking: 定期思考による自己評価です。観測、候補、抑制、能力提案を比較し、speech / noop / pending_intent / capability_request から 1 つ選んでください。ここでの speech はユーザーの反応を求めない独話的な短い状況認識です。",
+                f"校正: background_thinking では発話自然度を 10 段階で内的に見積もり、発話頻度レベル {speech_frequency_level} に合わせて speech の選びやすさを調整してください。5 は標準頻度、3 以下は控えめ基準です。控えめ基準では、変化があるから話すのではなく、独話として残す意味が明確な変化だけを speech に寄せてください。評価値は JSON や reason_summary に出力しないでください。",
                 "材料: visual_observations は desktop / camera / virtual などの視覚観測です。change_state=first_seen / changed は前景候補、stable / same_as_recent_speech は反復抑制候補です。",
                 f"材料: first_seen / changed は、具体的な前景がある場合に発話頻度レベル {speech_frequency_level} の speech 候補として扱ってください。ただし change_state=first_seen / changed だけでは speech を選ばず、画面・対象・操作単位の変化は候補材料に留めてください。活動名、作業名、閲覧中、検討中、入力中、操作中などの活動事実は、何が前景にあるかの材料であり、それ自体を noop の主理由にしないでください。複数 source の first_seen / changed が同じ活動遷移や状態変化を指す場合も、speech / pending_intent / noop で比較してください。",
                 "選択: speech は、活動モード遷移、同一活動内の意味的な節目、強い関心、予定、未完了、継続中コミットメント、ユーザーが明示的に問題化した観点が読め、短い状況認識として外へ出す新しい意味があり、独話として一文で自然に閉じ、具体的な抑制根拠が上回らない場合に選んでください。活動の段階、結果、保留、比較軸、未完了状態が意味的に変わる場合だけ speech に寄せてください。緊急性、支援必要性、会話開始としての必要性を条件にしないでください。",
@@ -1738,8 +1738,8 @@ def _build_visual_observation_system_prompt() -> str:
         "source_pack.image_input_kind が vision_capture_result の場合は、現在の視覚前景として、判断に効く対象、状態、配置、変化を詳細な説明文に変換してください。\n"
         "summary_text では、画像に見えている内容のうち判断に効く部分を具体的に書いてください。\n"
         "後から視覚確認に使えるよう、主要な物体、場所、背景要素、活動、状態を含めてください。\n"
-        "source_pack.change_context.previous_observation_context は同じ起床前観測の前回要約です。\n"
-        "source_pack.change_context.last_prompted_observation_context は直近で外向き発話に使った同じ起床前観測の要約です。\n"
+        "source_pack.change_context.previous_observation_context は同じ思考前観測の前回要約です。\n"
+        "source_pack.change_context.last_prompted_observation_context は直近で外向き発話に使った同じ思考前観測の要約です。\n"
         "previous_observation_context が無い場合、change_state は first_seen、change_basis は no_previous_observation にしてください。\n"
         "現在の画像が last_prompted_observation_context と意味上同じなら、change_state は same_as_recent_speech、change_basis は recent_speech_repetition にしてください。\n"
         "現在の画像が previous_observation_context と意味上同じなら、change_state は stable、change_basis は semantic_stability にしてください。\n"

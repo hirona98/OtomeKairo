@@ -441,7 +441,7 @@ class LLMMockDecisionMixin:
     ) -> dict[str, Any] | None:
         initiative_trigger = initiative_context.trigger_kind if initiative_context is not None else None
         initiative_pending = initiative_context.pending_intent_summaries if initiative_context is not None else []
-        if initiative_trigger not in {"wake", "background_wake"} or initiative_pending:
+        if initiative_trigger not in {"wake", "background_thinking"} or initiative_pending:
             return None
         capability_request = self._mock_autonomous_initiative_capability_request(
             initiative_context=initiative_context,

@@ -54,7 +54,7 @@ class PersonaReferenceStyleTests(unittest.TestCase):
 
         messages = build_activity_state_messages(
             persona_context=context,
-            source_pack={"current_input": {"sender": "system", "text": "background wake"}},
+            source_pack={"current_input": {"sender": "system", "text": "background thinking"}},
         )
 
         self.assertIn("persona_context.reference_style", messages[0]["content"])

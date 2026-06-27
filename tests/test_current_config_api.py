@@ -24,30 +24,30 @@ class DummyService(ServiceConfigMixin):
 
 
 class CurrentConfigApiTests(unittest.TestCase):
-    def test_default_background_wake_speech_frequency_level_is_standard(self) -> None:
+    def test_default_thinking_speech_level_is_standard(self) -> None:
         service = DummyService()
 
         response = service.get_config("token")
 
-        self.assertEqual(response["settings_snapshot"]["background_wake_speech_frequency_level"], 5)
+        self.assertEqual(response["settings_snapshot"]["thinking_speech_level"], 5)
 
-    def test_patch_current_accepts_background_wake_speech_frequency_bounds(self) -> None:
+    def test_patch_current_accepts_thinking_speech_bounds(self) -> None:
         service = DummyService()
 
-        response = service.patch_current("token", {"background_wake_speech_frequency_level": 1})
-        self.assertEqual(response["settings_snapshot"]["background_wake_speech_frequency_level"], 1)
+        response = service.patch_current("token", {"thinking_speech_level": 1})
+        self.assertEqual(response["settings_snapshot"]["thinking_speech_level"], 1)
 
-        response = service.patch_current("token", {"background_wake_speech_frequency_level": 10})
-        self.assertEqual(response["settings_snapshot"]["background_wake_speech_frequency_level"], 10)
+        response = service.patch_current("token", {"thinking_speech_level": 10})
+        self.assertEqual(response["settings_snapshot"]["thinking_speech_level"], 10)
 
-    def test_patch_current_rejects_invalid_background_wake_speech_frequency_level(self) -> None:
+    def test_patch_current_rejects_invalid_thinking_speech_level(self) -> None:
         service = DummyService()
 
         for value in (0, 11, True, "5"):
             with self.subTest(value=value):
                 with self.assertRaises(ServiceError) as raised:
-                    service.patch_current("token", {"background_wake_speech_frequency_level": value})
-                self.assertEqual(raised.exception.error_code, "invalid_background_wake_speech_frequency_level")
+                    service.patch_current("token", {"thinking_speech_level": value})
+                self.assertEqual(raised.exception.error_code, "invalid_thinking_speech_level")
 
 
 if __name__ == "__main__":

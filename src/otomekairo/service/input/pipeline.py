@@ -243,7 +243,7 @@ class ServiceInputPipelineMixin:
             sender = "user"
             source_kind = "user_message"
             response_target = "user"
-        elif normalized_trigger in {"wake", "background_wake"}:
+        elif normalized_trigger in {"wake", "background_thinking"}:
             sender = "system"
             source_kind = normalized_trigger
             response_target = "none"
@@ -392,7 +392,7 @@ class ServiceInputPipelineMixin:
     ) -> bool:
         return (
             current_input.sender == "system"
-            and current_input.source_kind in {"wake", "background_wake"}
+            and current_input.source_kind in {"wake", "background_thinking"}
             and client_context.get("autonomous_visual_observation_direct_entry") is True
         )
 
@@ -1701,17 +1701,17 @@ class ServiceInputPipelineMixin:
             debug_log("Pipeline", f"{cycle_label} speech skipped capability_result_response_target=none")
         elif (
             decision["kind"] == "speech"
-            and current_input.source_kind == "background_wake"
+            and current_input.source_kind == "background_thinking"
             and self._user_response_cycle_active()
         ):
             original_reason = str(decision.get("reason_summary") or "").strip()
-            reason_summary = "ユーザー向け応答サイクルが進行中のため、定期起床の自発発話は行わない。"
+            reason_summary = "ユーザー向け応答サイクルが進行中のため、定期思考の自発発話は行わない。"
             if original_reason:
                 reason_summary = f"{reason_summary} 元判断: {original_reason}"
             decision.update(
                 {
                     "kind": "noop",
-                    "reason_code": "background_wake_user_response_active",
+                    "reason_code": "background_thinking_user_response_active",
                     "reason_summary": reason_summary,
                     "requires_confirmation": False,
                     "pending_intent": None,
@@ -1719,7 +1719,7 @@ class ServiceInputPipelineMixin:
                     "autonomous_run": None,
                 }
             )
-            debug_log("Pipeline", f"{cycle_label} speech skipped background_wake_user_response_active")
+            debug_log("Pipeline", f"{cycle_label} speech skipped background_thinking_user_response_active")
         elif decision["kind"] == "speech":
             debug_log("Pipeline", f"{cycle_label} speech start", level="DEBUG")
             speech_context = self._build_speech_context(

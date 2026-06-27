@@ -317,7 +317,7 @@ class LLMMockSpeechMixin:
     ) -> str | None:
         if initiative_context is None or decision.get("kind") != "speech":
             return None
-        if initiative_context.trigger_kind not in {"wake", "background_wake"}:
+        if initiative_context.trigger_kind not in {"wake", "background_thinking"}:
             return None
         pending_intent_summaries = initiative_context.pending_intent_summaries
         if isinstance(pending_intent_summaries, list) and pending_intent_summaries:

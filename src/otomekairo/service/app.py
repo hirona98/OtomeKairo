@@ -57,8 +57,8 @@ class OtomeKairoService(
         }
         self._wake_observation_runtime_state: dict[str, dict[str, Any]] = {}
         self._autonomous_run_execution_locks: dict[str, threading.RLock] = {}
-        self._background_wake_stop_event: threading.Event | None = None
-        self._background_wake_thread: threading.Thread | None = None
+        self._background_thinking_stop_event: threading.Event | None = None
+        self._background_thinking_thread: threading.Thread | None = None
         self._background_autonomous_run_stop_event: threading.Event | None = None
         self._background_autonomous_run_thread: threading.Thread | None = None
         self._background_memory_postprocess_stop_event: threading.Event | None = None
@@ -85,38 +85,38 @@ class OtomeKairoService(
     def _append_debug_log_stream_record(self, record: dict[str, Any]) -> None:
         self._log_stream_registry.append_logs([record])
 
-    def start_background_wake_scheduler(self) -> None:
+    def start_background_thinking_scheduler(self) -> None:
         # 既存
         with self._runtime_state_lock:
-            if self._background_wake_thread is not None and self._background_wake_thread.is_alive():
-                debug_log("Wake", "background scheduler already running")
+            if self._background_thinking_thread is not None and self._background_thinking_thread.is_alive():
+                debug_log("Wake", "background thinking scheduler already running")
                 return
 
             stop_event = threading.Event()
             thread = threading.Thread(
-                target=self._background_wake_loop,
+                target=self._background_thinking_loop,
                 args=(stop_event,),
-                name="otomekairo-background-wake",
+                name="otomekairo-background-thinking",
                 daemon=True,
             )
-            self._background_wake_stop_event = stop_event
-            self._background_wake_thread = thread
+            self._background_thinking_stop_event = stop_event
+            self._background_thinking_thread = thread
 
         # 開始
         thread.start()
-        debug_log("Wake", f"background scheduler started thread={thread.name}", level="DEBUG")
+        debug_log("Wake", f"background thinking scheduler started thread={thread.name}", level="DEBUG")
 
-    def stop_background_wake_scheduler(self) -> None:
+    def stop_background_thinking_scheduler(self) -> None:
         # スナップショット
         with self._runtime_state_lock:
-            stop_event = self._background_wake_stop_event
-            thread = self._background_wake_thread
-            self._background_wake_stop_event = None
-            self._background_wake_thread = None
+            stop_event = self._background_thinking_stop_event
+            thread = self._background_thinking_thread
+            self._background_thinking_stop_event = None
+            self._background_thinking_thread = None
 
         # 停止
         if stop_event is not None:
             stop_event.set()
         if thread is not None and thread.is_alive():
             thread.join(timeout=5.0)
-        debug_log("Wake", "background scheduler stopped")
+        debug_log("Wake", "background thinking scheduler stopped")

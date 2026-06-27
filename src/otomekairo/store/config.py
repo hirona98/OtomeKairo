@@ -6,13 +6,12 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from otomekairo.defaults import DEFAULT_BACKGROUND_WAKE_SPEECH_FREQUENCY_LEVEL, build_default_state
+from otomekairo.defaults import DEFAULT_THINKING_SPEECH_LEVEL, build_default_state
 from otomekairo.service.common import debug_log
 
 
 CONFIG_DB_FILE_NAME = "config.db"
-CURRENT_CONFIG_DB_VERSION = 2
-SUPPORTED_CONFIG_DB_VERSIONS = {0, 1, CURRENT_CONFIG_DB_VERSION}
+CURRENT_CONFIG_DB_VERSION = 4
 
 
 class ConfigStore:
@@ -41,7 +40,7 @@ class ConfigStore:
                     selected_persona_id,
                     selected_memory_set_id,
                     selected_model_preset_id,
-                    background_wake_speech_frequency_level,
+                    thinking_speech_level,
                     wake_policy_json
                 FROM current_config
                 WHERE id = 1
@@ -57,8 +56,8 @@ class ConfigStore:
                 "selected_persona_id": current["selected_persona_id"],
                 "selected_memory_set_id": current["selected_memory_set_id"],
                 "selected_model_preset_id": current["selected_model_preset_id"],
-                "background_wake_speech_frequency_level": current[
-                    "background_wake_speech_frequency_level"
+                "thinking_speech_level": current[
+                    "thinking_speech_level"
                 ],
                 "wake_policy": json.loads(current["wake_policy_json"]),
                 "personas": self._read_payload_table(conn, "personas", "persona_id"),
@@ -82,7 +81,7 @@ class ConfigStore:
                 f"config_db open path={self.config_db_path} user_version={version} expected={CURRENT_CONFIG_DB_VERSION}",
                 level="DEBUG",
             )
-            if version not in SUPPORTED_CONFIG_DB_VERSIONS:
+            if version not in {0, CURRENT_CONFIG_DB_VERSION}:
                 debug_log("Store", f"config_db unsupported_schema user_version={version}", level="ERROR")
                 raise RuntimeError(
                     f"Unsupported config.db schema version: {version}. "
@@ -94,12 +93,6 @@ class ConfigStore:
                 self._write_state(conn, build_default_state())
                 conn.execute(f"PRAGMA user_version = {CURRENT_CONFIG_DB_VERSION}")
                 debug_log("Store", f"config_db initialized user_version={CURRENT_CONFIG_DB_VERSION}")
-            elif version != CURRENT_CONFIG_DB_VERSION:
-                conn.execute(f"PRAGMA user_version = {CURRENT_CONFIG_DB_VERSION}")
-                debug_log(
-                    "Store",
-                    f"config_db schema updated user_version={CURRENT_CONFIG_DB_VERSION}",
-                )
             else:
                 debug_log("Store", f"config_db schema ready user_version={version}")
 
@@ -141,7 +134,7 @@ class ConfigStore:
                 selected_persona_id TEXT NOT NULL,
                 selected_memory_set_id TEXT NOT NULL,
                 selected_model_preset_id TEXT NOT NULL,
-                background_wake_speech_frequency_level INTEGER NOT NULL DEFAULT 5,
+                thinking_speech_level INTEGER NOT NULL DEFAULT 5,
                 wake_policy_json TEXT NOT NULL
             );
 
@@ -173,10 +166,10 @@ class ConfigStore:
         )
         self._ensure_current_config_column(
             conn=conn,
-            column_name="background_wake_speech_frequency_level",
+            column_name="thinking_speech_level",
             column_definition=(
-                "background_wake_speech_frequency_level INTEGER NOT NULL "
-                f"DEFAULT {DEFAULT_BACKGROUND_WAKE_SPEECH_FREQUENCY_LEVEL}"
+                "thinking_speech_level INTEGER NOT NULL "
+                f"DEFAULT {DEFAULT_THINKING_SPEECH_LEVEL}"
             ),
         )
 
@@ -221,7 +214,7 @@ class ConfigStore:
                 selected_persona_id,
                 selected_memory_set_id,
                 selected_model_preset_id,
-                background_wake_speech_frequency_level,
+                thinking_speech_level,
                 wake_policy_json
             )
             VALUES (1, ?, ?, ?, ?, ?)
@@ -230,7 +223,7 @@ class ConfigStore:
                 state["selected_persona_id"],
                 state["selected_memory_set_id"],
                 state["selected_model_preset_id"],
-                state["background_wake_speech_frequency_level"],
+                state["thinking_speech_level"],
                 self._to_json(state["wake_policy"]),
             ),
         )

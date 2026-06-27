@@ -152,7 +152,7 @@ class ServiceInputWorldStateNormalizeMixin:
         source_context: WorldStateContext | None,
         source_pack: WorldStateSourcePack,
     ) -> bool:
-        if source_pack.trigger_kind not in {"wake", "background_wake"}:
+        if source_pack.trigger_kind not in {"wake", "background_thinking"}:
             return False
         if source_context is not None:
             return False

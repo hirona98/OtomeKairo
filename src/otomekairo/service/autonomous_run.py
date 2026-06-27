@@ -62,7 +62,7 @@ class ServiceAutonomousRunMixin:
             )
 
     def start_background_autonomous_run_scheduler(self) -> None:
-        # due autonomous_run は background_wake とは別 worker で監視する。
+        # due autonomous_run は background_thinking とは別 worker で監視する。
         with self._runtime_state_lock:
             if (
                 self._background_autonomous_run_thread is not None

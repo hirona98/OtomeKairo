@@ -111,7 +111,7 @@ class ServiceConfigResourcesMixin:
             "selected_persona_id",
             "selected_memory_set_id",
             "selected_model_preset_id",
-            "background_wake_speech_frequency_level",
+            "thinking_speech_level",
             "wake_policy",
         }
         unsupported_fields = sorted(set(payload.keys()) - supported_fields)
@@ -150,12 +150,12 @@ class ServiceConfigResourcesMixin:
             state["selected_model_preset_id"] = model_preset_id
 
         # 動作設定
-        if "background_wake_speech_frequency_level" in payload:
-            self._validate_background_wake_speech_frequency_level(
-                payload["background_wake_speech_frequency_level"]
+        if "thinking_speech_level" in payload:
+            self._validate_thinking_speech_level(
+                payload["thinking_speech_level"]
             )
-            state["background_wake_speech_frequency_level"] = payload[
-                "background_wake_speech_frequency_level"
+            state["thinking_speech_level"] = payload[
+                "thinking_speech_level"
             ]
 
         if "wake_policy" in payload:
@@ -595,7 +595,7 @@ class ServiceConfigResourcesMixin:
             "selected_persona_id",
             "selected_memory_set_id",
             "selected_model_preset_id",
-            "background_wake_speech_frequency_level",
+            "thinking_speech_level",
             "wake_policy",
         }
         unsupported_current_fields = sorted(set(current.keys()) - supported_current_fields)
@@ -608,7 +608,7 @@ class ServiceConfigResourcesMixin:
         selected_persona_id = current.get("selected_persona_id")
         selected_memory_set_id = current.get("selected_memory_set_id")
         selected_model_preset_id = current.get("selected_model_preset_id")
-        background_wake_speech_frequency_level = current.get("background_wake_speech_frequency_level")
+        thinking_speech_level = current.get("thinking_speech_level")
         if selected_persona_id not in personas:
             raise ServiceError(404, "persona_not_found", "The selected_persona_id does not exist in personas.")
         if selected_memory_set_id not in memory_sets:
@@ -617,14 +617,14 @@ class ServiceConfigResourcesMixin:
             raise ServiceError(404, "model_preset_not_found", "The selected_model_preset_id does not exist in model_presets.")
 
         # 動作設定検証
-        self._validate_background_wake_speech_frequency_level(background_wake_speech_frequency_level)
+        self._validate_thinking_speech_level(thinking_speech_level)
         self._validate_wake_policy(current.get("wake_policy"))
 
         # 永続化
         state["selected_persona_id"] = selected_persona_id
         state["selected_memory_set_id"] = selected_memory_set_id
         state["selected_model_preset_id"] = selected_model_preset_id
-        state["background_wake_speech_frequency_level"] = background_wake_speech_frequency_level
+        state["thinking_speech_level"] = thinking_speech_level
         state["wake_policy"] = current["wake_policy"]
         state["personas"] = personas
         state["memory_sets"] = memory_sets
@@ -652,7 +652,7 @@ class ServiceConfigResourcesMixin:
             "selected_memory_set_id": state["selected_memory_set_id"],
             "wake_policy": deepcopy(state["wake_policy"]),
             "selected_model_preset_id": state["selected_model_preset_id"],
-            "background_wake_speech_frequency_level": state["background_wake_speech_frequency_level"],
+            "thinking_speech_level": state["thinking_speech_level"],
         }
 
     def _build_editor_state(self, state: dict[str, Any]) -> dict[str, Any]:

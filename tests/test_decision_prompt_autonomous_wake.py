@@ -22,7 +22,7 @@ from otomekairo.llm.prompts import (
 
 
 class DecisionPromptAutonomousWakeTests(unittest.TestCase):
-    def test_background_wake_prompt_presents_evaluation_not_speech_request(self) -> None:
+    def test_background_thinking_prompt_presents_evaluation_not_speech_request(self) -> None:
         persona_context = build_persona_context(
             {
                 "display_name": "テスト",
@@ -33,7 +33,7 @@ class DecisionPromptAutonomousWakeTests(unittest.TestCase):
             role="decision_generation",
         )
         initiative_context = InitiativeContext(
-            trigger_kind="background_wake",
+            trigger_kind="background_thinking",
             opportunity_summary="自律判断の評価機会。",
             initiative_entry_summary={
                 "entry_kind": "enter",
@@ -74,14 +74,14 @@ class DecisionPromptAutonomousWakeTests(unittest.TestCase):
             speech_frequency_level=7,
         )
         context = DecisionContext(
-            input_text="定期起床。",
+            input_text="定期思考。",
             current_input=CurrentInput(
                 sender="system",
-                source_kind="background_wake",
+                source_kind="background_thinking",
                 response_target="none",
-                text="定期起床。",
+                text="定期思考。",
             ),
-            trigger_kind="background_wake",
+            trigger_kind="background_thinking",
             recent_turns=[],
             time_context={},
             affect_context={},
@@ -110,7 +110,7 @@ class DecisionPromptAutonomousWakeTests(unittest.TestCase):
 
         self.assertIn("現在の個として関わる、保留する、見送る、能力を使う", system_prompt)
         self.assertIn("noop は前へ出ない判断", system_prompt)
-        self.assertIn("定期起床による自己評価", context_prompt)
+        self.assertIn("定期思考による自己評価", context_prompt)
         self.assertIn("控える理由の材料", context_prompt)
         self.assertIn("意味レイヤー境界", system_prompt)
         self.assertIn("内部処理は次の意味レイヤー", system_prompt)
@@ -129,7 +129,7 @@ class DecisionPromptAutonomousWakeTests(unittest.TestCase):
         self.assertIn("判断理由にしない", system_prompt)
         self.assertIn("短い状況認識として閉じる speech", system_prompt)
         self.assertIn("支援提案とは別の軽い外向き行動", system_prompt)
-        self.assertIn("background_wake: 定期起床による自己評価", context_prompt)
+        self.assertIn("background_thinking: 定期思考による自己評価", context_prompt)
         self.assertIn("ユーザーの反応を求めない独話的な短い状況認識", context_prompt)
         self.assertIn("発話自然度を 10 段階", context_prompt)
         self.assertIn("発話頻度レベル 7", context_prompt)
@@ -218,7 +218,7 @@ class DecisionPromptAutonomousWakeTests(unittest.TestCase):
         self.assertNotIn("非ユーザー起点では、speech-ready", combined)
         self.assertNotIn("speech 義務", combined)
         self.assertNotIn("新規性だけ", combined)
-        self.assertNotIn("background_wake 判断表", combined)
+        self.assertNotIn("background_thinking 判断表", combined)
         self.assertNotIn("判断対象にしません", combined)
         self.assertNotIn("内的注意状態を理由にしない", combined)
         self.assertNotIn("外向き介入が不要", combined)
@@ -237,7 +237,7 @@ class DecisionPromptAutonomousWakeTests(unittest.TestCase):
         messages = build_initiative_entry_check_messages(
             persona_context=persona_context,
             source_pack={
-                "input_context": {"trigger_kind": "background_wake"},
+                "input_context": {"trigger_kind": "background_thinking"},
                 "activity_context": {
                     "previous_activity": {"label": "同じ活動", "target": "前の対象"},
                     "current_activity": {"label": "同じ活動", "target": "今の対象"},
@@ -273,7 +273,7 @@ class DecisionPromptAutonomousWakeTests(unittest.TestCase):
         activity_context = build_persona_context(persona, role="activity_state")
         activity_system_prompt = build_activity_state_messages(
             persona_context=activity_context,
-            source_pack={"current_input": {"sender": "system", "text": "background wake"}},
+            source_pack={"current_input": {"sender": "system", "text": "background thinking"}},
         )[0]["content"]
         visual_context = build_persona_context(persona, role="visual_observation")
         visual_system_prompt = build_visual_observation_messages(
@@ -314,12 +314,12 @@ class DecisionPromptAutonomousWakeTests(unittest.TestCase):
         )
         current_input = CurrentInput(
             sender="system",
-            source_kind="background_wake",
+            source_kind="background_thinking",
             response_target="none",
-            text="定期起床。",
+            text="定期思考。",
         )
         context = SpeechContext(
-            input_text="定期起床。",
+            input_text="定期思考。",
             current_input=current_input,
             recent_turns=[],
             time_context={},

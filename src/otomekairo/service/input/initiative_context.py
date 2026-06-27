@@ -29,7 +29,7 @@ class ServiceInputInitiativeContextMixin:
         selected_candidate: dict[str, Any] | None,
         pending_intent_selection: dict[str, Any] | None,
     ) -> InitiativeContext | None:
-        if trigger_kind not in {"wake", "background_wake"}:
+        if trigger_kind not in {"wake", "background_thinking"}:
             return None
         drive_summaries = self._initiative_drive_summaries(drive_state_summary)
         pending_intent_summaries = self._initiative_pending_intent_summaries(selected_candidate)
@@ -133,7 +133,7 @@ class ServiceInputInitiativeContextMixin:
             intervention_state=intervention_state,
             suppression_summary=suppression_summary,
             intervention_risk_summary=intervention_risk_summary,
-            speech_frequency_level=state["background_wake_speech_frequency_level"],
+            speech_frequency_level=state["thinking_speech_level"],
         )
 
     def _initiative_status_refresh_world_state_summary(
@@ -143,7 +143,7 @@ class ServiceInputInitiativeContextMixin:
         world_state_trace: WorldStateTrace | None,
         trigger_kind: str,
     ) -> list[dict[str, Any]]:
-        if trigger_kind in {"wake", "background_wake"}:
+        if trigger_kind in {"wake", "background_thinking"}:
             previous = world_state_trace.previous_foreground_world_state if world_state_trace is not None else None
             return self._merge_foreground_world_state_for_reuse(foreground_world_state, previous)
         return foreground_world_state or []
@@ -321,7 +321,7 @@ class ServiceInputInitiativeContextMixin:
         with self._runtime_state_lock:
             memory_job_in_progress = self._memory_postprocess_runtime_state.get("current_cycle_id") is not None
         return {
-            "wake_scheduler_active": self._background_wake_scheduler_active() and state["wake_policy"]["mode"] == "interval",
+            "background_thinking_scheduler_active": self._background_thinking_scheduler_active() and state["wake_policy"]["mode"] == "interval",
             "ongoing_action_exists": isinstance(ongoing_action_summary, dict),
             "memory_job_worker_active": self._background_memory_postprocess_worker_active(),
             "pending_memory_job_count": self.store.count_memory_postprocess_jobs(
@@ -360,7 +360,7 @@ class ServiceInputInitiativeContextMixin:
         selected_candidate: dict[str, Any] | None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
-            "background_trigger": trigger_kind == "background_wake",
+            "background_trigger": trigger_kind == "background_thinking",
         }
         if isinstance(selected_candidate, dict):
             dedupe_key = selected_candidate.get("dedupe_key")

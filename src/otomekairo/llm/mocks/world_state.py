@@ -79,7 +79,7 @@ class LLMMockWorldStateMixin:
                     "scope": "self",
                     "summary_text": schedule_summary,
                     "confidence_hint": "medium",
-                    "salience_hint": "high" if trigger_kind in {"wake", "background_wake"} else "medium",
+                    "salience_hint": "high" if trigger_kind in {"wake", "background_thinking"} else "medium",
                     "ttl_hint": "medium",
                 }
             )

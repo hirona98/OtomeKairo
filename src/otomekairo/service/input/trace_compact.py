@@ -61,7 +61,7 @@ class ServiceInputTraceCompactMixin:
     def _trigger_compact_family(self, trigger_kind: str) -> str:
         if trigger_kind == "capability_result":
             return "capability_result_followup"
-        if trigger_kind in {"wake", "background_wake"}:
+        if trigger_kind in {"wake", "background_thinking"}:
             return "initiative"
         if trigger_kind == "user_message":
             return "conversation"
@@ -86,7 +86,7 @@ class ServiceInputTraceCompactMixin:
             payload["source_request_summary"] = self._compact_capability_request_summary(capability_request_summary)
             payload["observation_summary"] = compact_observation_summary
             return payload
-        if trigger_kind in {"wake", "background_wake"}:
+        if trigger_kind in {"wake", "background_thinking"}:
             payload.update(
                 self._compact_initiative_entry_summary(
                     initiative_context=initiative_context,
@@ -189,7 +189,7 @@ class ServiceInputTraceCompactMixin:
             runtime_state_summary = initiative_payload.get("runtime_state_summary")
             if isinstance(runtime_state_summary, dict):
                 payload["runtime_state_summary"] = {
-                    "wake_scheduler_active": runtime_state_summary.get("wake_scheduler_active"),
+                    "background_thinking_scheduler_active": runtime_state_summary.get("background_thinking_scheduler_active"),
                     "ongoing_action_exists": runtime_state_summary.get("ongoing_action_exists"),
                     "pending_memory_job_count": runtime_state_summary.get("pending_memory_job_count"),
                 }

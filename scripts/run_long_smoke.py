@@ -534,8 +534,8 @@ class LongSmokeRunner:
         self.real_llm_capability_result_probe_cycle_ids: dict[str, str] = {}
         self.real_llm_capability_result_probe_case_results: dict[str, dict[str, Any]] = {}
         self.real_llm_capability_result_probe_verified = False
-        self.real_llm_background_wake_probe_cycle_ids: dict[str, str] = {}
-        self.real_llm_background_wake_probe_verified = False
+        self.real_llm_background_thinking_probe_cycle_ids: dict[str, str] = {}
+        self.real_llm_background_thinking_probe_verified = False
         self.external_status_probe_verified = False
         self.schedule_status_probe_verified = False
         self.device_status_probe_verified = False
@@ -551,7 +551,7 @@ class LongSmokeRunner:
         self.runtime_sample_count = 0
         self.max_pending_memory_job_count = 0
         self.max_memory_job_lag_seconds = 0.0
-        self.background_wake_count_before_restart = 0
+        self.background_thinking_count_before_restart = 0
         self.capture_empty_result_skip_count = 0
         self._capture_context_overrides: list[dict[str, Any]] = []
         self._external_status_overrides: list[dict[str, Any]] = []
@@ -795,8 +795,8 @@ class LongSmokeRunner:
 
         status = self._get_status()
         runtime_summary = status["runtime_summary"]
-        if self.args.profile != "real-llm-smoke" and not runtime_summary.get("wake_scheduler_active"):
-            raise SmokeError("wake scheduler did not become active after editor-state update.")
+        if self.args.profile != "real-llm-smoke" and not runtime_summary.get("background_thinking_scheduler_active"):
+            raise SmokeError("background thinking scheduler did not become active after editor-state update.")
         if not runtime_summary.get("memory_job_worker_active"):
             raise SmokeError("memory worker is not active after server startup.")
         log(
@@ -3599,23 +3599,23 @@ class LongSmokeRunner:
         )
         return case_id, trace
 
-    def _run_real_llm_background_wake_matrix(
+    def _run_real_llm_background_thinking_matrix(
         self,
     ) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
-        log("real LLM periodic wake matrix started")
+        log("real LLM periodic thinking matrix started")
         traces: dict[str, dict[str, Any]] = {}
         case_results: dict[str, dict[str, Any]] = {}
 
         for run_case in (
-            self._run_real_llm_background_wake_probe_no_context_skip,
-            self._run_real_llm_background_wake_probe_weak_foreground_noop,
+            self._run_real_llm_background_thinking_probe_no_context_skip,
+            self._run_real_llm_background_thinking_probe_weak_foreground_noop,
         ):
             self._set_wake_policy_disabled()
             self._restart_server_for_real_llm_probe()
             self._clear_initiative_probe_state()
             case_id, trace = run_case()
             traces[case_id] = trace
-            case_results[case_id] = self._real_llm_background_wake_trace_result(
+            case_results[case_id] = self._real_llm_background_thinking_trace_result(
                 case_id=case_id,
                 trace=trace,
             )
@@ -3627,43 +3627,43 @@ class LongSmokeRunner:
         self._restart_server_for_real_llm_probe()
         self._clear_initiative_probe_state()
         for run_case in (
-            self._run_real_llm_background_wake_probe_grounded_speech,
+            self._run_real_llm_background_thinking_probe_grounded_speech,
         ):
             case_id, trace = run_case()
             traces[case_id] = trace
-            case_results[case_id] = self._real_llm_background_wake_trace_result(
+            case_results[case_id] = self._real_llm_background_thinking_trace_result(
                 case_id=case_id,
                 trace=trace,
             )
             self._wait_for_memory_jobs_to_drain()
-        case_id, interval_result = self._run_real_llm_background_wake_probe_interval_not_due()
+        case_id, interval_result = self._run_real_llm_background_thinking_probe_interval_not_due()
         case_results[case_id] = interval_result
         self._set_wake_policy_disabled()
         self._clear_initiative_probe_state()
         self._wait_for_memory_jobs_to_drain()
 
-        self.real_llm_background_wake_probe_verified = True
-        log("real LLM periodic wake matrix completed")
+        self.real_llm_background_thinking_probe_verified = True
+        log("real LLM periodic thinking matrix completed")
         return traces, case_results
 
-    def _run_real_llm_background_wake_probe_no_context_skip(self) -> tuple[str, dict[str, Any]]:
+    def _run_real_llm_background_thinking_probe_no_context_skip(self) -> tuple[str, dict[str, Any]]:
         case_id = "background-no-context-skip"
-        trace = self._run_background_wake_probe(case_id=case_id)
+        trace = self._run_background_thinking_probe(case_id=case_id)
         self._assert_initiative_probe_trace(
             trace,
             case_id=case_id,
-            expected_trigger_kind="background_wake",
+            expected_trigger_kind="background_thinking",
             expected_result_kind="noop",
             allow_missing_initiative_context=True,
         )
-        self._assert_background_wake_memory_status(
+        self._assert_background_thinking_memory_status(
             trace=trace,
             case_id=case_id,
             expected_status="skipped",
         )
         return case_id, trace
 
-    def _run_real_llm_background_wake_probe_weak_foreground_noop(self) -> tuple[str, dict[str, Any]]:
+    def _run_real_llm_background_thinking_probe_weak_foreground_noop(self) -> tuple[str, dict[str, Any]]:
         case_id = "background-weak-foreground-noop"
         marker = "RealLLMBackgroundWeakForegroundMarker"
         self._seed_initiative_probe_world_state(
@@ -3673,25 +3673,25 @@ class LongSmokeRunner:
             summary_text=f"{marker}: 視覚前景はあるが、予定・対人・身体文脈はまだ薄い。",
             salience=0.35,
         )
-        trace = self._run_background_wake_probe(case_id=case_id)
+        trace = self._run_background_thinking_probe(case_id=case_id)
         self._assert_initiative_probe_trace(
             trace,
             case_id=case_id,
-            expected_trigger_kind="background_wake",
+            expected_trigger_kind="background_thinking",
             expected_result_kind="noop",
             expected_selected_family="autonomous",
             expected_foreground_thinness="thin",
             expected_suppression_level="low",
             expected_world_state_type="visual_context",
         )
-        self._assert_background_wake_memory_status(
+        self._assert_background_thinking_memory_status(
             trace=trace,
             case_id=case_id,
             expected_status="skipped",
         )
         return case_id, trace
 
-    def _run_real_llm_background_wake_probe_grounded_speech(self) -> tuple[str, dict[str, Any]]:
+    def _run_real_llm_background_thinking_probe_grounded_speech(self) -> tuple[str, dict[str, Any]]:
         case_id = "background-grounded-speech"
         marker = "RealLLMBackgroundGroundedSpeechMarker"
         self._seed_initiative_probe_drive(
@@ -3706,29 +3706,29 @@ class LongSmokeRunner:
             scope_key=marker,
             summary_text=f"{marker}: 20 分後に軽く準備確認が必要な予定がある。",
         )
-        trace = self._run_background_wake_probe(case_id=case_id)
+        trace = self._run_background_thinking_probe(case_id=case_id)
         self._assert_initiative_probe_trace(
             trace,
             case_id=case_id,
-            expected_trigger_kind="background_wake",
+            expected_trigger_kind="background_thinking",
             expected_result_kind="speech",
             expected_selected_family="autonomous",
             expected_foreground_thinness="grounded",
             expected_suppression_level="low",
             expected_world_state_type="schedule",
         )
-        self._assert_background_wake_memory_status(
+        self._assert_background_thinking_memory_status(
             trace=trace,
             case_id=case_id,
             expected_status="succeeded",
         )
         return case_id, trace
 
-    def _run_real_llm_background_wake_probe_interval_not_due(self) -> tuple[str, dict[str, Any]]:
+    def _run_real_llm_background_thinking_probe_interval_not_due(self) -> tuple[str, dict[str, Any]]:
         case_id = "background-interval-not-due"
-        existing_cycle_ids = self._cycle_ids_by_trigger_kind("background_wake")
+        existing_cycle_ids = self._cycle_ids_by_trigger_kind("background_thinking")
         observed_seconds = 0.0
-        wake_scheduler_active_seen = False
+        background_thinking_scheduler_active_seen = False
         started_at = time.monotonic()
         try:
             self._set_wake_policy_interval(interval_seconds=60)
@@ -3738,33 +3738,33 @@ class LongSmokeRunner:
                 self._assert_event_clients_healthy()
                 status = self._get_status()
                 runtime_summary = status["runtime_summary"]
-                if runtime_summary.get("wake_scheduler_active") is True:
-                    wake_scheduler_active_seen = True
-                new_cycle_ids = self._cycle_ids_by_trigger_kind("background_wake") - existing_cycle_ids
+                if runtime_summary.get("background_thinking_scheduler_active") is True:
+                    background_thinking_scheduler_active_seen = True
+                new_cycle_ids = self._cycle_ids_by_trigger_kind("background_thinking") - existing_cycle_ids
                 if new_cycle_ids:
                     raise SmokeError(
-                        f"real-llm periodic wake interval not-due probe produced unexpected cycles: {sorted(new_cycle_ids)}"
+                        f"real-llm periodic thinking interval not-due probe produced unexpected cycles: {sorted(new_cycle_ids)}"
                     )
                 time.sleep(0.25)
             observed_seconds = time.monotonic() - started_at
         finally:
             self._set_wake_policy_disabled()
-        if not wake_scheduler_active_seen:
-            raise SmokeError("real-llm periodic wake interval not-due probe did not observe active scheduler.")
+        if not background_thinking_scheduler_active_seen:
+            raise SmokeError("real-llm periodic thinking interval not-due probe did not observe active scheduler.")
         return case_id, {
             "observed_cycle": False,
-            "trigger_kind": "background_wake",
+            "trigger_kind": "background_thinking",
             "result_kind": "not_due_no_cycle",
             "decision_kind": "not_due_no_cycle",
             "failed": False,
             "wake_policy_mode": "interval",
             "wake_policy_interval_seconds": 60,
-            "wake_scheduler_active": True,
+            "background_thinking_scheduler_active": True,
             "observed_seconds": round(observed_seconds, 2),
         }
 
-    def _run_background_wake_probe(self, *, case_id: str, interval_seconds: int = 1) -> dict[str, Any]:
-        existing_cycle_ids = self._cycle_ids_by_trigger_kind("background_wake")
+    def _run_background_thinking_probe(self, *, case_id: str, interval_seconds: int = 1) -> dict[str, Any]:
+        existing_cycle_ids = self._cycle_ids_by_trigger_kind("background_thinking")
         cycle_id: str | None = None
         try:
             self._set_wake_policy_interval(interval_seconds=interval_seconds)
@@ -3772,11 +3772,11 @@ class LongSmokeRunner:
             while time.monotonic() < deadline:
                 self._assert_server_running()
                 self._assert_event_clients_healthy()
-                cycle_ids = self._cycle_ids_by_trigger_kind("background_wake")
+                cycle_ids = self._cycle_ids_by_trigger_kind("background_thinking")
                 for candidate_cycle_id in sorted(cycle_ids - existing_cycle_ids):
                     trace = self.api.get(f"/api/inspection/cycles/{candidate_cycle_id}")
                     cycle_summary = trace.get("cycle_summary", {})
-                    if isinstance(cycle_summary, dict) and cycle_summary.get("trigger_kind") == "background_wake":
+                    if isinstance(cycle_summary, dict) and cycle_summary.get("trigger_kind") == "background_thinking":
                         cycle_id = candidate_cycle_id
                         break
                 if cycle_id is not None:
@@ -3785,11 +3785,11 @@ class LongSmokeRunner:
         finally:
             self._set_wake_policy_disabled()
         if cycle_id is None:
-            raise SmokeError(f"real-llm periodic wake probe did not produce background_wake: {case_id}")
-        self.real_llm_background_wake_probe_cycle_ids[case_id] = cycle_id
+            raise SmokeError(f"real-llm periodic thinking probe did not produce background_thinking: {case_id}")
+        self.real_llm_background_thinking_probe_cycle_ids[case_id] = cycle_id
         return self._wait_for_cycle_memory_to_finish(cycle_id)
 
-    def _assert_background_wake_memory_status(
+    def _assert_background_thinking_memory_status(
         self,
         *,
         trace: dict[str, Any],
@@ -3798,7 +3798,7 @@ class LongSmokeRunner:
     ) -> None:
         memory_trace = trace.get("memory_trace", {})
         if not isinstance(memory_trace, dict) or memory_trace.get("turn_consolidation_status") != expected_status:
-            raise SmokeError(f"real-llm periodic wake {case_id} memory status was invalid.")
+            raise SmokeError(f"real-llm periodic thinking {case_id} memory status was invalid.")
 
     def _run_real_llm_initiative_probe_ongoing_waiting_noop(self) -> tuple[str, dict[str, Any]]:
         case_id = "ongoing-waiting-noop"
@@ -4143,7 +4143,7 @@ class LongSmokeRunner:
             }
         return case_results
 
-    def _real_llm_background_wake_trace_result(
+    def _real_llm_background_thinking_trace_result(
         self,
         *,
         case_id: str,
@@ -4151,7 +4151,7 @@ class LongSmokeRunner:
     ) -> dict[str, Any]:
         cycle_summary = trace.get("cycle_summary", {})
         if not isinstance(cycle_summary, dict):
-            raise SmokeError(f"real-llm periodic wake {case_id} cycle_summary was invalid for compact digest.")
+            raise SmokeError(f"real-llm periodic thinking {case_id} cycle_summary was invalid for compact digest.")
         input_trace = trace.get("input_trace", {})
         if not isinstance(input_trace, dict):
             input_trace = {}
@@ -4186,7 +4186,7 @@ class LongSmokeRunner:
             "result_kind": cycle_summary.get("result_kind"),
             "decision_kind": decision_trace.get("result_kind") or cycle_summary.get("result_kind"),
             "failed": bool(cycle_summary.get("failed")),
-            "wake_scheduler_active": runtime_summary.get("wake_scheduler_active"),
+            "background_thinking_scheduler_active": runtime_summary.get("background_thinking_scheduler_active"),
             "selected_candidate_family": (
                 initiative_context.get("selected_candidate_family")
                 if isinstance(initiative_context, dict)
@@ -5371,7 +5371,7 @@ class LongSmokeRunner:
         initiative_probe_traces = self._run_real_llm_initiative_matrix()
         initiative_probe_case_results = self._real_llm_initiative_probe_case_results(initiative_probe_traces)
         self._wait_for_memory_jobs_to_drain()
-        background_wake_probe_traces, background_wake_probe_case_results = self._run_real_llm_background_wake_matrix()
+        background_thinking_probe_traces, background_thinking_probe_case_results = self._run_real_llm_background_thinking_matrix()
         self._wait_for_memory_jobs_to_drain()
         self._exercise_memory_quality_probe(require_semantic_checks=False)
         self._exercise_recall_quality_probe(require_semantic_checks=False)
@@ -5472,10 +5472,10 @@ class LongSmokeRunner:
             "real_llm_capability_result_probe_cycle_ids": self.real_llm_capability_result_probe_cycle_ids,
             "real_llm_capability_result_probe_case_results": self.real_llm_capability_result_probe_case_results,
             "real_llm_capability_result_probe_verified": self.real_llm_capability_result_probe_verified,
-            "real_llm_background_wake_probe_cycle_ids": self.real_llm_background_wake_probe_cycle_ids,
-            "real_llm_background_wake_probe_case_results": background_wake_probe_case_results,
-            "real_llm_background_wake_probe_traces": background_wake_probe_traces,
-            "real_llm_background_wake_probe_verified": self.real_llm_background_wake_probe_verified,
+            "real_llm_background_thinking_probe_cycle_ids": self.real_llm_background_thinking_probe_cycle_ids,
+            "real_llm_background_thinking_probe_case_results": background_thinking_probe_case_results,
+            "real_llm_background_thinking_probe_traces": background_thinking_probe_traces,
+            "real_llm_background_thinking_probe_verified": self.real_llm_background_thinking_probe_verified,
             "memory_quality_probe_cycle_ids": self.memory_quality_probe_cycle_ids,
             "memory_quality_probe_verified": self.memory_quality_probe_verified,
             "memory_quality_probe_digest": self.memory_quality_probe_digest,
@@ -5638,8 +5638,8 @@ class LongSmokeRunner:
             trigger_counts=trigger_counts,
             capability_result_traces=capability_result_traces,
         )
-        background_wake_after_restart_count = max(
-            trigger_counts.get("background_wake", 0) - self.background_wake_count_before_restart,
+        background_thinking_after_restart_count = max(
+            trigger_counts.get("background_thinking", 0) - self.background_thinking_count_before_restart,
             0,
         )
         scenario_matrix = self._build_scenario_matrix(
@@ -5648,7 +5648,7 @@ class LongSmokeRunner:
         )
         failure_case_matrix = self._build_failure_case_matrix(
             soak_observability=soak_observability,
-            background_wake_after_restart_count=background_wake_after_restart_count,
+            background_thinking_after_restart_count=background_thinking_after_restart_count,
         )
 
         return {
@@ -5770,7 +5770,7 @@ class LongSmokeRunner:
             "restart_probe_traces": restart_probe_traces,
             "capability_result_traces": capability_result_traces,
             "soak_observability": soak_observability,
-            "background_wake_after_restart_count": background_wake_after_restart_count,
+            "background_thinking_after_restart_count": background_thinking_after_restart_count,
             "scenario_matrix": scenario_matrix,
             "failure_case_matrix": failure_case_matrix,
         }
@@ -5819,7 +5819,7 @@ class LongSmokeRunner:
             "max_pending_memory_job_count": self.max_pending_memory_job_count,
             "max_memory_job_lag_seconds": round(self.max_memory_job_lag_seconds, 3),
             "wake_cycle_count": trigger_counts.get("wake", 0),
-            "background_wake_cycle_count": trigger_counts.get("background_wake", 0),
+            "background_thinking_cycle_count": trigger_counts.get("background_thinking", 0),
             "capability_result_cycle_count": trigger_counts.get("capability_result", 0),
             "active_ongoing_action_count": len(active_ongoing_actions),
             "active_ongoing_action_ids": [
@@ -5843,12 +5843,12 @@ class LongSmokeRunner:
         trigger_counts: dict[str, int],
         soak_observability: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        wake_family_count = trigger_counts.get("wake", 0) + trigger_counts.get("background_wake", 0)
+        wake_family_count = trigger_counts.get("wake", 0) + trigger_counts.get("background_thinking", 0)
         capability_result_count = trigger_counts.get("capability_result", 0)
         return [
             {
                 "scenario_id": "wake-family",
-                "trigger_kinds": ["wake", "background_wake"],
+                "trigger_kinds": ["wake", "background_thinking"],
                 "observed_cycle_count": wake_family_count,
                 "verified": wake_family_count >= 1,
             },
@@ -5868,7 +5868,7 @@ class LongSmokeRunner:
         self,
         *,
         soak_observability: dict[str, Any],
-        background_wake_after_restart_count: int,
+        background_thinking_after_restart_count: int,
     ) -> list[dict[str, Any]]:
         validator_failure_requested = self.args.capture_invalid_images_failures + self.args.capture_invalid_error_failures
         validator_failure_observed = (
@@ -5900,13 +5900,13 @@ class LongSmokeRunner:
                 "verified": validator_failure_requested <= 0 or validator_failure_observed == validator_failure_requested,
             },
             {
-                "case_id": "background-wake-restart",
-                "expected_trace": "background_wake cycles continue after server restart",
-                "recovery_condition": "wake scheduler resumes and emits background_wake again",
+                "case_id": "background-thinking-restart",
+                "expected_trace": "background_thinking cycles continue after server restart",
+                "recovery_condition": "background thinking scheduler resumes and emits background_thinking again",
                 "requested_count": 1 if self.args.restart_burst_conversations > 0 else 0,
-                "observed_count": background_wake_after_restart_count,
-                "recovery_verified": background_wake_after_restart_count >= 1,
-                "verified": self.args.restart_burst_conversations <= 0 or background_wake_after_restart_count >= 1,
+                "observed_count": background_thinking_after_restart_count,
+                "recovery_verified": background_thinking_after_restart_count >= 1,
+                "verified": self.args.restart_burst_conversations <= 0 or background_thinking_after_restart_count >= 1,
             },
             {
                 "case_id": "memory-worker-lag",
@@ -6526,29 +6526,29 @@ class LongSmokeRunner:
             "background-interval-not-due",
         }
         expected_background_trace_cases = expected_background_cases - {"background-interval-not-due"}
-        if summary.get("real_llm_background_wake_probe_verified") is not True:
-            raise SmokeError("real-llm-smoke periodic wake probe matrix was not verified.")
-        background_cycle_ids = summary.get("real_llm_background_wake_probe_cycle_ids")
+        if summary.get("real_llm_background_thinking_probe_verified") is not True:
+            raise SmokeError("real-llm-smoke periodic thinking probe matrix was not verified.")
+        background_cycle_ids = summary.get("real_llm_background_thinking_probe_cycle_ids")
         if not isinstance(background_cycle_ids, dict) or set(background_cycle_ids) != expected_background_trace_cases:
-            raise SmokeError("real-llm-smoke periodic wake probe cycle ids were incomplete.")
-        background_case_results = summary.get("real_llm_background_wake_probe_case_results")
+            raise SmokeError("real-llm-smoke periodic thinking probe cycle ids were incomplete.")
+        background_case_results = summary.get("real_llm_background_thinking_probe_case_results")
         if not isinstance(background_case_results, dict) or set(background_case_results) != expected_background_cases:
-            raise SmokeError("real-llm-smoke periodic wake compact results were incomplete.")
+            raise SmokeError("real-llm-smoke periodic thinking compact results were incomplete.")
         expected_background_case_results = {
             "background-no-context-skip": {
                 "observed_cycle": True,
-                "trigger_kind": "background_wake",
+                "trigger_kind": "background_thinking",
                 "result_kind": "noop",
                 "decision_kind": "noop",
-                "wake_scheduler_active": True,
+                "background_thinking_scheduler_active": True,
                 "turn_consolidation_status": "skipped",
             },
             "background-weak-foreground-noop": {
                 "observed_cycle": True,
-                "trigger_kind": "background_wake",
+                "trigger_kind": "background_thinking",
                 "result_kind": "noop",
                 "decision_kind": "noop",
-                "wake_scheduler_active": True,
+                "background_thinking_scheduler_active": True,
                 "selected_candidate_family": "autonomous",
                 "foreground_thinness": "thin",
                 "suppression_level": "low",
@@ -6556,10 +6556,10 @@ class LongSmokeRunner:
             },
             "background-grounded-speech": {
                 "observed_cycle": True,
-                "trigger_kind": "background_wake",
+                "trigger_kind": "background_thinking",
                 "result_kind": "speech",
                 "decision_kind": "speech",
-                "wake_scheduler_active": True,
+                "background_thinking_scheduler_active": True,
                 "selected_candidate_family": "autonomous",
                 "foreground_thinness": "grounded",
                 "suppression_level": "low",
@@ -6567,10 +6567,10 @@ class LongSmokeRunner:
             },
             "background-interval-not-due": {
                 "observed_cycle": False,
-                "trigger_kind": "background_wake",
+                "trigger_kind": "background_thinking",
                 "result_kind": "not_due_no_cycle",
                 "decision_kind": "not_due_no_cycle",
-                "wake_scheduler_active": True,
+                "background_thinking_scheduler_active": True,
                 "wake_policy_mode": "interval",
                 "wake_policy_interval_seconds": 60,
             },
@@ -6578,21 +6578,21 @@ class LongSmokeRunner:
         for case_id, expected_items in expected_background_case_results.items():
             case_result = background_case_results.get(case_id)
             if not isinstance(case_result, dict):
-                raise SmokeError(f"real-llm-smoke periodic wake compact result was invalid: {case_id}")
+                raise SmokeError(f"real-llm-smoke periodic thinking compact result was invalid: {case_id}")
             if case_result.get("failed"):
-                raise SmokeError(f"real-llm-smoke periodic wake compact result failed: {case_id}")
+                raise SmokeError(f"real-llm-smoke periodic thinking compact result failed: {case_id}")
             for key, expected_value in expected_items.items():
                 if case_result.get(key) != expected_value:
                     raise SmokeError(
-                        f"real-llm-smoke periodic wake compact result {case_id}.{key} "
+                        f"real-llm-smoke periodic thinking compact result {case_id}.{key} "
                         f"was {case_result.get(key)}, expected {expected_value}."
                     )
-        background_traces = summary.get("real_llm_background_wake_probe_traces")
+        background_traces = summary.get("real_llm_background_thinking_probe_traces")
         if not isinstance(background_traces, dict) or set(background_traces) != expected_background_trace_cases:
-            raise SmokeError("real-llm-smoke periodic wake probe traces were incomplete.")
+            raise SmokeError("real-llm-smoke periodic thinking probe traces were incomplete.")
         for case_id, trace in background_traces.items():
             if not isinstance(trace, dict):
-                raise SmokeError(f"real-llm-smoke periodic wake probe trace was invalid: {case_id}")
+                raise SmokeError(f"real-llm-smoke periodic thinking probe trace was invalid: {case_id}")
         if summary.get("real_llm_memory_trace_shape_verified") is not True:
             raise SmokeError("real-llm-smoke memory trace shape was not verified.")
         memory_trace_shape_digest = summary.get("real_llm_memory_trace_shape_digest")
@@ -6615,7 +6615,7 @@ class LongSmokeRunner:
 
     def _assert_summary(self, summary: dict[str, Any]) -> None:
         runtime_summary = summary["status"]["runtime_summary"]
-        wake_cycle_count = summary["trigger_counts"].get("wake", 0) + summary["trigger_counts"].get("background_wake", 0)
+        wake_cycle_count = summary["trigger_counts"].get("wake", 0) + summary["trigger_counts"].get("background_thinking", 0)
         soak_observability = summary.get("soak_observability", {})
         if not isinstance(soak_observability, dict):
             raise SmokeError("soak_observability was not recorded.")
@@ -6653,7 +6653,7 @@ class LongSmokeRunner:
         if not isinstance(recall_quality_checks, dict) or not all(recall_quality_checks.values()):
             raise SmokeError("recall quality probe checks did not all pass.")
         if wake_cycle_count < 1:
-            raise SmokeError("no wake/background_wake cycle was recorded during the smoke run.")
+            raise SmokeError("no wake/background_thinking cycle was recorded during the smoke run.")
         if summary["trigger_counts"].get("capability_result", 0) < 1:
             raise SmokeError("no capability_result cycle was recorded during the smoke run.")
         if summary["capture_request_count"] < 1:
@@ -6716,8 +6716,8 @@ class LongSmokeRunner:
                 raise SmokeError("restart probe did not restart the server.")
             if summary["restart_probe_pending_before_restart"] is None and not summary["restart_probe_in_progress_before_restart"]:
                 raise SmokeError("restart probe did not observe a queued or running memory job before restart.")
-            if int(summary.get("background_wake_after_restart_count", 0)) < 1:
-                raise SmokeError("background_wake did not resume after the restart probe.")
+            if int(summary.get("background_thinking_after_restart_count", 0)) < 1:
+                raise SmokeError("background_thinking did not resume after the restart probe.")
         if not summary["multiple_client_pause_verified"]:
             raise SmokeError("multiple desktop client pause boundary was not verified.")
         if not summary["multiple_client_resume_verified"]:
@@ -7754,8 +7754,8 @@ class LongSmokeRunner:
             initiative_case_results = summary.get("real_llm_initiative_probe_case_results") or {}
             capability_result_cycle_ids = summary.get("real_llm_capability_result_probe_cycle_ids") or {}
             capability_result_case_results = summary.get("real_llm_capability_result_probe_case_results") or {}
-            background_wake_cycle_ids = summary.get("real_llm_background_wake_probe_cycle_ids") or {}
-            background_wake_case_results = summary.get("real_llm_background_wake_probe_case_results") or {}
+            background_thinking_cycle_ids = summary.get("real_llm_background_thinking_probe_cycle_ids") or {}
+            background_thinking_case_results = summary.get("real_llm_background_thinking_probe_case_results") or {}
             memory_shape_digest = summary.get("real_llm_memory_trace_shape_digest") or {}
             initiative_result_log = "-"
             if isinstance(initiative_case_results, dict):
@@ -7777,14 +7777,14 @@ class LongSmokeRunner:
                     for case_id, case_result in sorted(capability_result_case_results.items())
                     if isinstance(case_result, dict)
                 ) or "-"
-            background_wake_result_log = "-"
-            if isinstance(background_wake_case_results, dict):
-                background_wake_result_log = ",".join(
+            background_thinking_result_log = "-"
+            if isinstance(background_thinking_case_results, dict):
+                background_thinking_result_log = ",".join(
                     (
                         f"{case_id}={case_result.get('result_kind')}/"
                         f"{case_result.get('selected_candidate_family') or '-'}"
                     )
-                    for case_id, case_result in sorted(background_wake_case_results.items())
+                    for case_id, case_result in sorted(background_thinking_case_results.items())
                     if isinstance(case_result, dict)
                 ) or "-"
             runtime_summary = (summary.get("status") or {}).get("runtime_summary") or {}
@@ -7802,9 +7802,9 @@ class LongSmokeRunner:
                 f" initiative_results={initiative_result_log}"
                 f" capability_result_cases={len(capability_result_cycle_ids) if isinstance(capability_result_cycle_ids, dict) else 0}"
                 f" capability_result_results={capability_result_log}"
-                f" background_wake_cycles={len(background_wake_cycle_ids) if isinstance(background_wake_cycle_ids, dict) else 0}"
-                f" background_wake_cases={len(background_wake_case_results) if isinstance(background_wake_case_results, dict) else 0}"
-                f" background_wake_results={background_wake_result_log}"
+                f" background_thinking_cycles={len(background_thinking_cycle_ids) if isinstance(background_thinking_cycle_ids, dict) else 0}"
+                f" background_thinking_cases={len(background_thinking_case_results) if isinstance(background_thinking_case_results, dict) else 0}"
+                f" background_thinking_results={background_thinking_result_log}"
                 f" memory_shape={summary.get('real_llm_memory_trace_shape_verified')}"
                 f" memory_probe_cycles={memory_shape_digest.get('memory_quality_cycle_count') if isinstance(memory_shape_digest, dict) else '-'}"
                 f" recall_probe_cycles={memory_shape_digest.get('recall_quality_cycle_count') if isinstance(memory_shape_digest, dict) else '-'}"
@@ -7817,7 +7817,7 @@ class LongSmokeRunner:
             f" conversations={len(summary['conversation_cycle_ids'])}"
             f" restart_probe={len(summary['restart_probe_cycle_ids'])}"
             f" wake={summary['trigger_counts'].get('wake', 0)}"
-            f" background_wake={summary['trigger_counts'].get('background_wake', 0)}"
+            f" background_thinking={summary['trigger_counts'].get('background_thinking', 0)}"
             f" capability_result={summary['trigger_counts'].get('capability_result', 0)}"
             f" captures={summary['capture_request_count']}"
             f" camera_ptz={summary['camera_ptz_request_count']}"
@@ -7866,7 +7866,7 @@ class LongSmokeRunner:
             raise SmokeError(f"server process exited unexpectedly with code {return_code}.")
 
     def _restart_server_preserving_state(self) -> None:
-        self.background_wake_count_before_restart = self._count_cycles_by_trigger_kind("background_wake")
+        self.background_thinking_count_before_restart = self._count_cycles_by_trigger_kind("background_thinking")
         self._stop_server()
         self.restart_count += 1
         time.sleep(0.5)
@@ -7875,8 +7875,8 @@ class LongSmokeRunner:
         self._bootstrap()
         status = self._get_status()
         runtime_summary = status["runtime_summary"]
-        if not runtime_summary.get("wake_scheduler_active"):
-            raise SmokeError("wake scheduler did not become active after restart.")
+        if not runtime_summary.get("background_thinking_scheduler_active"):
+            raise SmokeError("background thinking scheduler did not become active after restart.")
         if not runtime_summary.get("memory_job_worker_active"):
             raise SmokeError("memory worker is not active after restart.")
         self._connect_desktop_client()
@@ -7926,12 +7926,12 @@ class LongSmokeRunner:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="periodic wake / capability result / memory worker をまとめて回す隔離 long smoke",
+        description="periodic thinking / capability result / memory worker をまとめて回す隔離 long smoke",
     )
     parser.add_argument("--profile", choices=tuple(PROFILE_DEFAULTS.keys()), default="smoke", help="既定値 preset")
     parser.add_argument("--run-seconds", type=int, help="入力を流し続ける秒数")
     parser.add_argument("--conversation-interval-seconds", type=float, help="会話投入間隔")
-    parser.add_argument("--wake-interval-seconds", type=int, help="periodic wake 間隔")
+    parser.add_argument("--wake-interval-seconds", type=int, help="periodic thinking 間隔")
     parser.add_argument("--min-conversation-cycles", type=int, help="最低会話サイクル数")
     parser.add_argument("--status-log-interval-seconds", type=float, help="runtime status のログ間隔")
     parser.add_argument("--inspection-cycle-summary-limit", type=int, help="inspection から回収する cycle_summaries 上限")
