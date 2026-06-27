@@ -114,9 +114,31 @@ initiative loop は、候補を次の 3 系統に分ける。
 
 自発系は、強く前景化した `drive_state`、`ongoing_action`、`pending_intent`、強い `entry_basis` を持つ `initiative_entry_summary`、または視覚観測の `first_seen / changed` と現在文脈の噛み合いを材料にする。
 視覚観測の `first_seen / changed` は `workspace_context` の `visual_observation` 候補として扱う。
+`background_wake` は定期起床による自己評価である。
+`decision_generation` は観測、候補、抑制、能力提案を比較し、`speech / noop / pending_intent / capability_request` から 1 つ選ぶ。
+`visual_observations[].change_state=first_seen / changed` は前景候補、`stable / same_as_recent_speech` は反復抑制候補である。
+`background_wake` の `speech` は、ユーザーの反応を求めない独話的な短い状況認識である。
+`background_wake` は発話自然度を 10 段階で内的に見積もり、5 を標準基準にする。
+5 は、短い独話として成立し、明確な反復、観測不足、明示境界、プライバシー境界が上回らない状態である。
+評価値は JSON や `reason_summary` に出力しない。
+`first_seen / changed` は、具体的な前景がある場合に 5 近辺の `speech` 候補として扱う。
+複数 source の `first_seen / changed` が同じ活動遷移や状態変化を指す場合も、単なる対象変更や作業の継続に留まらないかを見て `speech / pending_intent / noop` で比較する。
+`speech` は、活動モード遷移、同一活動内の意味的な節目、強い関心、予定、未完了、継続中コミットメント、ユーザーが明示的に問題化した観点が読め、短い状況認識として外へ出す新しい意味があり、独話として一文で自然に閉じ、具体的な抑制根拠が上回らない場合に選ぶ。
+緊急性、支援必要性、会話開始としての必要性は `speech` の条件にしない。
+`pending_intent` は、今すぐ外へ出す根拠は弱いが、後で再評価する価値が残る場合に選ぶ。
+`noop` は、反復、直近で同じ内容に触れた事実、明示された距離希望、進行中応答、結果待ち、プライバシー境界、観測不足、構造化済み抑制根拠が `speech` の価値を明確に上回る場合、または変化はあるが短い状況認識として外へ出す新しい意味が薄い場合に選ぶ。
+集中、没頭、遮る、介入回避、緊急性がないこと、支援要求がないことは `noop` の主理由にしない。
+`capability_request` は、`candidate_families` に capability 提案があり、現在判断に追加観測が必要な場合に選ぶ。
+同一活動内の意味的な節目は、完了、中断、再開、明確な成果や失敗、対象の意味的な切り替わり、対象の絞り込み、対象間の比較、比較軸の変化、進行阻害、情報確認の完了または保留である。
+同じ大きな流れの中の対象変更や操作の往復は節目として弱く扱う。
+`speech` は助言、依頼、支援提案、反応要求ではなく、観測事実に基づく一文の独話的な状況認識として成立する場合に選ぶ。
+支援提案、作業中断、休息促し、身体注意、画面への一般コメント、長い感想は控える理由側に置く。
+作業中、閲覧中、検討中、入力中などの活動事実、`foreground_signal_summary.foreground_thinness=thin`、明示的な呼びかけがないこと、支援要求がないこと、外へ出る必要が薄いという一般的な推定、観測から推定した集中や没頭、内的注意状態、一般的な配慮は、それ単体では `noop` の主理由にしない。
+`foreground_drive_summaries` に入っていない `drive_state`、`freshness_hint=stale`、`stability_hint=weak`、`signal_strength=0.0` の `drive_state` は背景材料として扱い、薄い視覚前景と合わせる場合は一般的な関係構築や休息促しを控える理由側に置く。
+同一活動内の単なる詳細更新、短時間の小遷移、観測対象の表層的な変化、姿勢や操作の細かな変化、一般的な注意や助言に留まる内容は、それ単体では `noop` または `pending_intent` の材料として扱う。
 `activity_context.previous_activity` から `activity_context.current_activity` への意味ある活動モード遷移は、`initiative_entry_check` の `entry_basis=activity_mode_transition` として enter 候補にする。
-同じサービス内の別投稿、別検索結果、別動画、同じゲーム内の別画面は `entry_basis=same_activity_detail_change` として扱う。
-同じ活動内の画面差分、ファイル変更、同じゲーム内の画面遷移は `entry_basis=same_activity_detail_change` に分類する。
+同じ活動モード内の対象差し替え、結果差し替え、詳細画面への移動、別画面への移動は `entry_basis=same_activity_detail_change` として扱う。
+同じ活動内の画面差分、局所的な状態変化、表示単位の移動は `entry_basis=same_activity_detail_change` に分類する。
 `pending_intent` が空の場合も、`drive_state`、`autonomous_run`、`ongoing_action`、視覚観測の `first_seen / changed`、または強い `entry_basis` を持つ `initiative_entry_summary.entry_kind=enter` があれば通常の判断入力へ進める。
 中期の `drive_state` は、人格設定と記憶から継続的に成立する向きだけを対象にする。
 AI 応答由来、`scope_duration=session`、その場限りの「控える」「見守る」は、直近文脈の材料として扱う。
@@ -165,7 +187,7 @@ LLM は次を担う。
 
 LLM に実行権限、資格情報、配送先 client、秘密値を渡さない。
 LLM の自由文をそのまま状態遷移へ使わない。
-`wake / background_wake` の「定期起床」「wake」という入力文言は、定期的な自己評価起点の説明として扱う。
+`wake / background_wake` の「定期起床」「wake」という入力文言は、定期起床による自己評価の説明として扱う。
 `wake / background_wake` の入力文は、観測、`drive_state`、直近文脈、候補を合わせて、関わる、保留する、見送る、能力を使うのどれが自然かを評価する自律判断機会を表す。
 身体状態は body context、body capability result、明示的な身体状態 source を根拠にする。
 予定状態は schedule context、schedule capability result、明示的な予定 source を根拠にする。
@@ -184,6 +206,7 @@ visual capture の変化は `first_seen / changed / stable / same_as_recent_spee
 `first_seen / changed` は新規性の前景シグナルとして扱う。
 `same_as_recent_speech / stable` は反復性の前景シグナルとして扱う。
 新規性と反復性は、`drive_state`、`world_state`、`activity_context`、`pending_intent`、抑制要約と同じ盤面で比較する。
+薄い視覚前景だけで成立する新規性は、`noop` または `pending_intent` と同じ盤面で比較する。
 活動遷移に触れる発話は、終わった・サボった・遊び始めたなどを断定せず、区切りや切り替えとして表現する。
 `source_owner=self` の camera 視覚観測は OtomeKairo 自身の視覚根拠として扱う。
 `source_owner=user_environment` の視覚観測、`world_state.visual_context`、`activity_context.actor=user` はユーザー側の状況として扱う。

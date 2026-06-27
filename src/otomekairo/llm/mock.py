@@ -78,22 +78,6 @@ class MockLLMClient(
         self._assert_mock_model(role_definition)
 
         # モックは契約形状だけを満たす。
-        text = str(source_pack)
-        if self._mock_contains_any(text, ("ゲーム", "プレイ", "game")):
-            return {
-                "activity_candidates": [
-                    {
-                        "actor": "user",
-                        "label": "ゲームをプレイ中",
-                        "target": "",
-                        "confidence_hint": "medium",
-                        "salience_hint": "medium",
-                        "ttl_hint": "short",
-                        "transition": "continue",
-                        "reason_summary": "観測文脈にゲームプレイの活動が含まれる。",
-                    }
-                ]
-            }
         return {"activity_candidates": []}
 
     def _assert_mock_model(self, role_definition: dict) -> None:

@@ -91,20 +91,20 @@ LLM は複数 source の意味を見て、活動候補を返す。
 `source_owner=self` の camera 観測は OtomeKairo の視覚根拠として扱い、観測対象がユーザー活動だと判断できる場合だけ `actor=user` の activity candidate に使う。
 activity の `label / reason_summary` はユーザー側の観測事実から構成する。
 assistant の直近発話、約束、待機姿勢は activity とは別文脈として扱う。
-activity の `label` は投稿内容、検索語、曲名、ファイル名などの細部ではなく、X閲覧中、検索で調査中、コーディング中、ゲーム中、音楽鑑賞中のような活動モードにする。
-作品名、曲名、投稿内容、作業対象などの詳細は `target / reason_summary` に置く。
+activity の `label` は具体的な内容名や対象名ではなく、判断と発話でそのまま使える短い活動モードにする。
+内容名、対象名、作業対象などの詳細は `target / reason_summary` に置く。
 
 ### 活動内容の表現
 
 活動内容は enum にしない。
 活動内容は `label` の自然文で表す。
-`label` は「リズムゲームをプレイ中」「資料を読みながら作業中」「休憩している」のように、判断と発話でそのまま使える短い表現にする。
+`label` は判断と発話でそのまま使える短い自然文にする。
 
 `target` は活動対象が自然に分かる場合だけ入れる。
 対象が不明な場合は空文字にする。
 
 活動内容を分類語だけにしない。
-「gameplay」「work」「media」のような分類名だけの `label` は使わない。
+分類名だけの `label` は使わない。
 根拠不足で活動内容を自然文にできない場合、LLM は候補を返さない。
 
 ## LLM 出力契約
@@ -116,13 +116,13 @@ LLM の出力は JSON object 1 個に固定する。
   "activity_candidates": [
     {
       "actor": "user",
-      "label": "リズムゲームをプレイ中",
-      "target": "KAMITSUBAKI CITY ENSEMBLE",
+      "label": "活動モードを短く表す自然文",
+      "target": "活動対象を短く表す文字列",
       "confidence_hint": "high",
       "salience_hint": "high",
       "ttl_hint": "short",
       "transition": "continue",
-      "reason_summary": "視覚観測でゲームプレイ画面が継続している。"
+      "reason_summary": "観測事実から活動モードを判断した根拠"
     }
   ]
 }
@@ -161,7 +161,7 @@ LLM の出力は JSON object 1 個に固定する。
 LLM は `status` を出力しない。
 
 現在入力が user message で、直前 activity が短時間以内に存在する場合、`previous_activity` を判断文脈へ出す。
-これは「今はチャット画面に戻っているが、直前までゲームをしていた」のような発話解釈に使う。
+これは現在入力だけでは参照先が曖昧な発話を、直前活動の文脈で解釈するために使う。
 
 ## 判断入力
 
@@ -175,15 +175,15 @@ LLM は `status` を出力しない。
 {
   "current_activity": {
     "actor": "user",
-    "label": "CocoroAI で会話中",
+    "label": "現在活動を短く表す自然文",
     "confidence": 0.7,
     "salience": 0.5,
     "age_label": "直前"
   },
   "previous_activity": {
     "actor": "user",
-    "label": "リズムゲームをプレイしていた",
-    "target": "KAMITSUBAKI CITY ENSEMBLE",
+    "label": "直前活動を短く表す自然文",
+    "target": "直前活動の対象",
     "ended_age_label": "直前",
     "confidence": 0.82
   }

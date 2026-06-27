@@ -53,12 +53,15 @@ def _semantic_layer_boundary_instruction(role_layer: str) -> str:
     )
 
 
-def _intervention_suppression_boundary_instruction() -> str:
+def _outward_speech_suppression_boundary_instruction() -> str:
     return (
         "行動判断の理由は、観測可能な活動事実と構造化済みの抑制根拠で構成してください。\n"
         "自己申告された注意状態は、ユーザー発話の内容として扱ってください。\n"
-        "割り込み抑制は行動判断層の評価項目です。評価材料は、明示的なユーザー発話、直近会話での希望、same_as_recent_speech、suppression_summary、WorkspaceContext の kind=suppression 候補、進行中コミットメントです。\n"
-        "観測事実層の画面注視、入力操作、閲覧、ゲームプレイ、活動推定層の作業中・閲覧中・ゲーム中は活動事実として表現してください。\n"
+        "外向き発話の抑制は行動判断層の評価項目です。評価材料は、明示的なユーザー発話、直近会話での希望、same_as_recent_speech、suppression_summary、WorkspaceContext の kind=suppression 候補、進行中コミットメントです。\n"
+        "支援要求の有無、明示的な呼びかけの有無、何かへ注意を向けているように見えること、相手の時間への一般的な配慮だけでは、外向き発話の抑制根拠になりません。\n"
+        "観測から集中や没頭を推定して reason_summary や foreground_selection の判断理由にしないでください。集中や没頭に相当する自己申告は、ユーザー発話の内容としてだけ扱ってください。\n"
+        "短い状況認識として閉じる speech は、助言、依頼、支援提案とは別の軽い外向き行動として評価してください。\n"
+        "観測事実層の画面注視、入力操作、表示内容の閲覧、活動推定層の現在活動ラベルは活動事実として表現してください。\n"
         "見送り理由は、反復抑制、直近で触れた内容、明示された希望、進行中コミットメントのような根拠名で説明してください。観測から内的な注意状態を推定して理由にしないでください。"
     )
 
@@ -511,7 +514,7 @@ def build_decision_repair_prompt(validation_error: str) -> str:
         "同じ入力だけを根拠に、JSON オブジェクト 1 個だけを返し直してください。\n"
         + _semantic_layer_boundary_instruction("行動判断層")
         + "\n"
-        + _intervention_suppression_boundary_instruction()
+        + _outward_speech_suppression_boundary_instruction()
         + "\n"
         "トップレベルキーは kind, reason_code, reason_summary, requires_confirmation, pending_intent, capability_request, autonomous_run, foreground_selection の 8 つだけです。\n"
         "speech_text, text, message, content, output などの発話本文キーは禁止です。\n"
@@ -675,8 +678,8 @@ def build_activity_state_repair_prompt(validation_error: str) -> str:
         "actor は "
         + " / ".join(sorted(ACTIVITY_ACTOR_VALUES))
         + " のいずれかです。\n"
-        "label は投稿内容、検索語、曲名、ファイル名などの細部ではなく、X閲覧中、検索で調査中、コーディング中、ゲーム中、音楽鑑賞中のような活動モードを短く書いてください。\n"
-        "target と reason_summary に、作品名、曲名、投稿内容、作業対象などの詳細を書いてください。\n"
+        "label は具体的な内容名や対象名ではなく、判断と発話でそのまま使える短い活動モードを書いてください。\n"
+        "target と reason_summary に、内容名、対象名、作業対象などの詳細を書いてください。\n"
         "transition は "
         + " / ".join(sorted(ACTIVITY_TRANSITION_VALUES))
         + " のいずれかです。\n"
@@ -688,7 +691,7 @@ def build_activity_state_repair_prompt(validation_error: str) -> str:
         + " のいずれかです。\n"
         "活動は source pack の複数情報を意味的に見て判断し、文字列一致は補助根拠として扱ってください。\n"
         "desktop / virtual の vision source や source_owner=user_environment はユーザー側の環境観測として扱い、actor=user にしてください。\n"
-        "camera の vision source は source_owner=self のとき OtomeKairo 自身の視覚として扱ってください。\n"
+        "camera の vision source は source_owner=self のとき、AI人格自身の視覚として扱ってください。\n"
         "actor=self は AI 本体の ongoing action など、AI 自身の活動だと構造的に分かる根拠がある場合だけ使ってください。\n"
         "ユーザー活動の label や reason_summary はユーザー側の観測事実から構成してください。assistant の直近発話、約束、待機姿勢は activity とは別文脈として扱ってください。\n"
         "新しい source や raw payload の創作、内部識別子、Markdown、コードフェンス、説明文は禁止です。"
@@ -906,7 +909,7 @@ def _build_decision_system_prompt(persona_context: PersonaContext) -> str:
             "VisualObservationContext.source=conversation_attachment かつ image_interpreted=true の場合、会話添付画像はすでに visual_summary_text として解釈済みです。画像に関する判断は visual_summary_text を根拠にしてください。\n"
             "VisualObservationContext.source=vision_capture_result の場合、その visual_summary_text は画像から生成した詳細な視覚説明です。source_kind に関係なく、判断、想起、記憶整理の根拠候補として扱ってください。\n"
             "source_owner=user_environment の視覚観測や foreground_world_state はユーザー側の環境観測です。AI 本体の一人称体験とは切り分けて扱ってください。\n"
-            "source_owner=self の camera 視覚観測は OtomeKairo 自身の視覚根拠として扱ってください。\n"
+            "source_owner=self の camera 視覚観測は、AI人格自身の視覚根拠として扱ってください。\n"
             "解釈済みの会話添付画像についてユーザーが質問している場合、visual_summary_text の範囲で自然に speech を選び、足りない点があれば短く確認してください。\n"
             "persona_context は行動選択の基底です。記憶、観測、能力候補、候補集合を人格で上書きしてはいけません。",
         ),
@@ -915,7 +918,7 @@ def _build_decision_system_prompt(persona_context: PersonaContext) -> str:
             "意味レイヤー境界",
             _semantic_layer_boundary_instruction("行動判断層")
             + "\n"
-            + _intervention_suppression_boundary_instruction(),
+            + _outward_speech_suppression_boundary_instruction(),
         ),
         (
             "判断ルール",
@@ -1088,16 +1091,25 @@ def _build_decision_trigger_policy(
                 "InitiativeContext.candidate_families に preferred_capability_id と preferred_capability_input があるときは capability_request の提案です。現在文脈で追加観測が必要な場合に、その capability と最小 input を選んでください。",
                 "foreground_signal_summary は現在の外界シグナルの濃さを表します。grounded は具体的な前景、thin は薄い前景、mixed は複数系統の混在として扱ってください。",
                 "recent_turn_summary は直近文脈の補助材料です。visual_observations[].change_state と same_as_recent_speech は反復性や新規性の比較材料です。",
-                "`background_wake` は定期的な自己評価起点です。観測、候補、進行中応答、重複介入境界を根拠に、speech / noop / pending_intent / capability_request のどれに置くか判断してください。",
-                "foreground_signal_summary.visual_observations は desktop / camera / virtual などの視覚観測です。視覚観測は initiative_entry_summary や drive_state など他の材料と同じ盤面で扱ってください。",
-                "visual_observations[].change_state=first_seen / changed は wake 判断の前景候補です。suppression_summary.suppression_level=low で、反復、直近で触れた内容、明示された希望、進行中コミットメント待ちがなければ、対応する WorkspaceContext の visual_observation 候補を主因にして短い speech を第一候補として比較してください。",
+                "background_wake: 定期起床による自己評価です。観測、候補、抑制、能力提案を比較し、speech / noop / pending_intent / capability_request から 1 つ選んでください。ここでの speech はユーザーの反応を求めない独話的な短い状況認識です。",
+                "校正: background_wake では発話自然度を 10 段階で内的に見積もり、5 を標準基準にしてください。5 は、短い独話として成立し、明確な反復、観測不足、明示境界、プライバシー境界が上回らない状態です。評価値は JSON や reason_summary に出力しないでください。",
+                "材料: visual_observations は desktop / camera / virtual などの視覚観測です。change_state=first_seen / changed は前景候補、stable / same_as_recent_speech は反復抑制候補です。",
+                "材料: first_seen / changed は、具体的な前景がある場合に 5 近辺の speech 候補として扱ってください。複数 source の first_seen / changed が同じ活動遷移や状態変化を指す場合も、単なる対象変更や作業の継続に留まらないかを見て speech / pending_intent / noop で比較してください。",
+                "選択: speech は、活動モード遷移、同一活動内の意味的な節目、強い関心、予定、未完了、継続中コミットメント、ユーザーが明示的に問題化した観点が読め、短い状況認識として外へ出す新しい意味があり、独話として一文で自然に閉じ、具体的な抑制根拠が上回らない場合に選んでください。緊急性、支援必要性、会話開始としての必要性を条件にしないでください。",
+                "選択: pending_intent は、今すぐ外へ出す根拠は弱いが、後で再評価する価値が残る場合に選んでください。",
+                "選択: noop は、反復、直近で同じ内容に触れた事実、明示された距離希望、進行中応答、結果待ち、プライバシー境界、観測不足、構造化済み抑制根拠が speech の価値を明確に上回る場合、または変化はあるが短い状況認識として外へ出す新しい意味が薄い場合に選んでください。集中、没頭、遮る、介入回避、緊急性がないこと、支援要求がないことを noop の主理由にしないでください。",
+                "選択: capability_request は、candidate_families に capability 提案があり、現在判断に追加観測が必要な場合に選んでください。",
+                "節目: 同一活動内の意味的な節目は、完了、中断、再開、明確な成果や失敗、対象の意味的な切り替わり、対象の絞り込み、対象間の比較、比較軸の変化、進行阻害、情報確認の完了または保留です。同じ大きな流れの中の対象変更や操作の往復は節目として弱く扱ってください。",
+                "発話境界: speech は助言、依頼、支援提案、反応要求ではなく、観測事実に基づく一文の独話的な状況認識として成立する場合に選んでください。",
+                "抑制境界: 作業中、閲覧中、検討中、入力中などの活動事実、foreground_signal_summary.foreground_thinness=thin、明示的な呼びかけがないこと、支援要求がないこと、外へ出る必要が薄いという一般的な推定、観測から推定した集中や没頭、内的注意状態、一般的な配慮は、それ単体では noop の主理由にしないでください。",
+                "drive_state は foreground_drive_summaries または構造値が強い場合だけ speech の支柱にしてください。freshness_hint=stale、stability_hint=weak、signal_strength=0.0 の drive_state は背景材料として扱い、薄い視覚前景と合わせる場合は一般的な関係構築や休息促しを控える理由側に置いてください。",
                 "source_owner=user_environment の視覚観測や ActivityContext.actor=user はユーザー側の状況です。判断理由に使う場合も、ユーザー側文脈として表現してください。",
-                "source_owner=self の camera 視覚観測は OtomeKairo 自身の視覚根拠として扱ってください。",
+                "source_owner=self の camera 視覚観測は、AI人格自身の視覚根拠として扱ってください。",
                 "InitiativeContext.activity_context は自律判断時のタイミング補助材料です。previous_activity から current_activity への意味ある活動モード遷移は、initiative_entry_summary.entry_basis=activity_mode_transition との整合を見て扱ってください。",
                 "活動遷移に触れる speech は、終わった・サボった・遊び始めたなどを断定せず、区切りや切り替えとして短く表現してください。",
                 "suppression_summary.visual_repetition_present や WorkspaceContext の kind=suppression は、関わる理由と並べて比較する控える理由の材料です。",
                 "selected_candidate_family が ongoing_action で follow-up capability が available なときは、現在の流れを進める capability_request を検討してください。",
-                "foreground_signal_summary が thin のときも、first_seen / changed の視覚観測は薄い前景だけとして扱わず、具体的な抑制根拠がある場合に noop、後で扱う価値だけが残る場合に pending_intent を選んでください。",
+                "同一活動内の単なる詳細更新、短時間の小遷移、観測対象の表層的な変化、姿勢や操作の細かな変化、一般的な注意や助言に留まる内容は、それ単体では noop または pending_intent の材料です。後で扱う価値だけが残る場合は pending_intent、現在外へ出す根拠が薄い場合は noop を選んでください。",
             ]
         )
     return policies
@@ -1202,7 +1214,7 @@ def _build_speech_system_prompt(persona_context: PersonaContext) -> str:
             "VisualObservationContext.source=conversation_attachment かつ image_interpreted=true の場合、会話添付画像は visual_summary_text として解釈済みです。本文ではその説明の範囲で答えてください。\n"
             "VisualObservationContext.source=vision_capture_result の場合、visual_summary_text は画像から生成した詳細な視覚説明です。本文ではその説明の範囲で答え、不確実な対象は断定しないでください。\n"
             "source_owner=user_environment の視覚観測、foreground_world_state、ActivityContext.actor=user はユーザー側の環境または活動です。AI 本体の一人称体験とは切り分け、ユーザー側の見え方として表現してください。\n"
-            "source_owner=self の camera 視覚観測は OtomeKairo 自身の視覚根拠として表現できます。\n"
+            "source_owner=self の camera 視覚観測はAI人格自身の視覚根拠として表現できます。\n"
             "persona_context は言い回し、距離感、注目点の補助です。decision と internal_context の根拠外の事実を足してはいけません。",
         ),
         ("自然呼称", _reference_style_instruction()),
@@ -1222,7 +1234,7 @@ def _build_speech_system_prompt(persona_context: PersonaContext) -> str:
             "RelationshipContext は相手との距離感、好み、境界、継続話題の補助に使ってください。\n"
             "自律判断トリガー時だけ発話理由の短い InitiativeContext も入ります。\n"
             "current_input.sender が user ではないとき、current_input.text は内部文脈として扱い、本文は観測、候補、現在文脈に根拠づけてください。\n"
-            "current_input.response_target=none のとき、発話本文は initiative や pending intent など外へ出る理由に基づく短い伝達にしてください。\n"
+            "current_input.response_target=none のとき、発話本文は initiative や pending intent など外へ出る理由に基づく、反応を求めない短い独話的コメントにしてください。質問形、依頼形、確認待ちの形にはしないでください。\n"
             "speech_stance.stance=comment_on_user_context のときは、ユーザー側の画面や活動に対する短いコメントとして書いてください。AI 本体が直接体験したような一人称の観測・鑑賞・操作表現は、source_owner=self または actor=self の根拠がある場合だけ使ってください。\n"
             "ActivityContext の previous_activity から current_activity への活動遷移に触れる場合、終わった・サボった・遊び始めたなどを断定せず、区切りや切り替えとして控えめに表現してください。\n"
             "recall_hint.secondary_recall_focuses は話題継続や温度調整の補助にだけ使い、主方針は primary_recall_focus に従ってください。\n"
@@ -1603,16 +1615,16 @@ def _build_initiative_entry_check_system_prompt() -> str:
         "entry_basis は "
         + " / ".join(sorted(INITIATIVE_ENTRY_BASIS_VALUES))
         + " のいずれかだけです。\n"
-        "entry_basis=activity_mode_transition は、activity_context の previous_activity から current_activity へ、作業、休憩、娯楽、対人、移動などの意味ある活動モード遷移が見える場合に使ってください。\n"
+        "entry_basis=activity_mode_transition は、activity_context の previous_activity から current_activity へ、意味ある活動モード遷移が見える場合に使ってください。\n"
         "entry_basis=strong_interest は、短い出来事でも、その人格・記憶・現在文脈から強い関心や関係上の意味がある場合に使ってください。\n"
-        "entry_basis=same_activity_detail_change は、同じ活動内の詳細変化、同じ作業内のファイル変更、同じゲーム内の画面遷移、同じサービス内の別投稿や別ページへの移動に使ってください。\n"
+        "entry_basis=same_activity_detail_change は、同じ活動内の詳細変化、同じ活動モード内の局所変更、表示単位や対象単位の移動に使ってください。\n"
         "entry_basis=observation_only は、定期観測、画面変化、新規に見えたこと、現在状況の説明に留まる場合に使ってください。\n"
         "entry_kind=enter は entry_basis が "
         + " / ".join(sorted(INITIATIVE_ENTRY_ENTER_BASIS_VALUES))
         + " の場合だけ使ってください。\n"
         "entry_kind=skip は entry_basis=same_activity_detail_change または observation_only を中心に使ってください。\n"
-        "作業からゲームや休憩へ切り替わった場合は、画面差分ではなく活動モード遷移として扱い、短く触れることが自然なら enter を返してください。\n"
-        "X、検索、YouTube、ゲームなど同じ活動モード内の別投稿、別検索結果、別動画、別画面は same_activity_detail_change として扱ってください。\n"
+        "活動モードが意味的に切り替わった場合は、画面差分ではなく活動モード遷移として扱い、短く触れることが自然なら enter を返してください。\n"
+        "同じ活動モード内の対象差し替え、結果差し替え、詳細画面への移動、別画面への移動は same_activity_detail_change として扱ってください。\n"
         "visual_observations は根拠の一部として扱い、視覚変化そのものを入口理由にしないでください。\n"
         "persona_context は外向き自律判断へ進む自然さの補助です。観測事実や活動状態を人格で追加してはいけません。\n"
         + _reference_style_instruction()
@@ -1682,8 +1694,8 @@ def _build_activity_state_system_prompt() -> str:
         "actor は "
         + " / ".join(sorted(ACTIVITY_ACTOR_VALUES))
         + " のいずれかだけを使ってください。\n"
-        "label は投稿内容、検索語、曲名、ファイル名などの細部ではなく、X閲覧中、検索で調査中、コーディング中、ゲーム中、音楽鑑賞中のような活動モードを短く書いてください。\n"
-        "target と reason_summary に、作品名、曲名、投稿内容、作業対象などの詳細を書いてください。\n"
+        "label は具体的な内容名や対象名ではなく、判断と発話でそのまま使える短い活動モードを書いてください。\n"
+        "target と reason_summary に、内容名、対象名、作業対象などの詳細を書いてください。\n"
         "transition は "
         + " / ".join(sorted(ACTIVITY_TRANSITION_VALUES))
         + " のいずれかだけを使ってください。\n"
@@ -1697,7 +1709,7 @@ def _build_activity_state_system_prompt() -> str:
         "活動内容は active_app、window_title、visual_summary_text、recent_turns、client_context、previous_activity_context を合わせた意味で判断してください。\n"
         "current_input.sender=user の本文はユーザー発話です。その他の観測要約は内部文脈として扱ってください。\n"
         "source_owner=user_environment、desktop、virtual の視覚観測、client_context の active_app/window_title はユーザー側の環境観測として扱い、actor=user にしてください。\n"
-        "source_owner=self の camera 視覚観測は OtomeKairo 自身の視覚として扱ってください。\n"
+        "source_owner=self の camera 視覚観測は、AI人格自身の視覚として扱ってください。\n"
         "actor=self は AI 本体の ongoing action など、AI 自身の活動だと構造的に分かる根拠がある場合だけ使ってください。\n"
         "活動 label と reason_summary はユーザー側の観測事実から構成してください。assistant の直近発話、約束、待機姿勢は activity とは別文脈として扱ってください。\n"
         "画面が会話 UI に戻っていても previous_activity_context に直前活動があり、ユーザー発話がその直後の反応として自然なら、直前活動を保持する transition=none または continue を選んでください。\n"
