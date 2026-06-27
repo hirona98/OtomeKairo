@@ -133,6 +133,7 @@ class ServiceInputInitiativeContextMixin:
             intervention_state=intervention_state,
             suppression_summary=suppression_summary,
             intervention_risk_summary=intervention_risk_summary,
+            speech_frequency_level=state["background_wake_speech_frequency_level"],
         )
 
     def _initiative_status_refresh_world_state_summary(

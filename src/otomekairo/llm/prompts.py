@@ -1080,6 +1080,7 @@ def _build_decision_trigger_policy(
             ]
         )
     if initiative_context is not None:
+        speech_frequency_level = initiative_context.speech_frequency_level
         policies.extend(
             [
                 "InitiativeContext は、定期起床や API 起床で現在の個が関わる、保留する、見送る、能力を使うのどれを選ぶか評価する材料です。",
@@ -1092,9 +1093,9 @@ def _build_decision_trigger_policy(
                 "foreground_signal_summary は現在の外界シグナルの濃さを表します。grounded は具体的な前景、thin は薄い前景、mixed は複数系統の混在として扱ってください。",
                 "recent_turn_summary は直近文脈の補助材料です。visual_observations[].change_state と same_as_recent_speech は反復性や新規性の比較材料です。",
                 "background_wake: 定期起床による自己評価です。観測、候補、抑制、能力提案を比較し、speech / noop / pending_intent / capability_request から 1 つ選んでください。ここでの speech はユーザーの反応を求めない独話的な短い状況認識です。",
-                "校正: background_wake では発話自然度を 10 段階で内的に見積もり、5 を標準基準にしてください。5 は、短い独話として成立し、明確な反復、観測不足、明示境界、プライバシー境界が上回らない状態です。評価値は JSON や reason_summary に出力しないでください。",
+                f"校正: background_wake では発話自然度を 10 段階で内的に見積もり、 {speech_frequency_level} を標準基準にしてください。5 は、短い独話として成立し、明確な反復、観測不足、明示境界、プライバシー境界が上回らない状態です。評価値は JSON や reason_summary に出力しないでください。",
                 "材料: visual_observations は desktop / camera / virtual などの視覚観測です。change_state=first_seen / changed は前景候補、stable / same_as_recent_speech は反復抑制候補です。",
-                "材料: first_seen / changed は、具体的な前景がある場合に 5 近辺の speech 候補として扱ってください。複数 source の first_seen / changed が同じ活動遷移や状態変化を指す場合も、単なる対象変更や作業の継続に留まらないかを見て speech / pending_intent / noop で比較してください。",
+                f"材料: first_seen / changed は、具体的な前景がある場合に {speech_frequency_level} 近辺の speech 候補として扱ってください。複数 source の first_seen / changed が同じ活動遷移や状態変化を指す場合も、単なる対象変更や作業の継続に留まらないかを見て speech / pending_intent / noop で比較してください。",
                 "選択: speech は、活動モード遷移、同一活動内の意味的な節目、強い関心、予定、未完了、継続中コミットメント、ユーザーが明示的に問題化した観点が読め、短い状況認識として外へ出す新しい意味があり、独話として一文で自然に閉じ、具体的な抑制根拠が上回らない場合に選んでください。緊急性、支援必要性、会話開始としての必要性を条件にしないでください。",
                 "選択: pending_intent は、今すぐ外へ出す根拠は弱いが、後で再評価する価値が残る場合に選んでください。",
                 "選択: noop は、反復、直近で同じ内容に触れた事実、明示された距離希望、進行中応答、結果待ち、プライバシー境界、観測不足、構造化済み抑制根拠が speech の価値を明確に上回る場合、または変化はあるが短い状況認識として外へ出す新しい意味が薄い場合に選んでください。集中、没頭、遮る、介入回避、緊急性がないこと、支援要求がないことを noop の主理由にしないでください。",

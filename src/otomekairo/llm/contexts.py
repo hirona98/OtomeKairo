@@ -202,6 +202,7 @@ class InitiativeContext:
     intervention_state: dict[str, Any]
     suppression_summary: dict[str, Any]
     intervention_risk_summary: str
+    speech_frequency_level: int = 5
 
     def selected_family_entry(self) -> InitiativeCandidateFamily | None:
         for family in self.candidate_families:
@@ -236,6 +237,7 @@ class InitiativeContext:
             "intervention_state": self.intervention_state,
             "suppression_summary": self.suppression_summary,
             "intervention_risk_summary": self.intervention_risk_summary,
+            "speech_frequency_level": self.speech_frequency_level,
         }
 
 

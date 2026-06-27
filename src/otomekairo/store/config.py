@@ -6,13 +6,13 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from otomekairo.defaults import build_default_state
+from otomekairo.defaults import DEFAULT_BACKGROUND_WAKE_SPEECH_FREQUENCY_LEVEL, build_default_state
 from otomekairo.service.common import debug_log
 
 
 CONFIG_DB_FILE_NAME = "config.db"
-CURRENT_CONFIG_DB_VERSION = 1
-SUPPORTED_CONFIG_DB_VERSIONS = {0, CURRENT_CONFIG_DB_VERSION}
+CURRENT_CONFIG_DB_VERSION = 2
+SUPPORTED_CONFIG_DB_VERSIONS = {0, 1, CURRENT_CONFIG_DB_VERSION}
 
 
 class ConfigStore:
@@ -37,7 +37,12 @@ class ConfigStore:
             ).fetchone()
             current = conn.execute(
                 """
-                SELECT selected_persona_id, selected_memory_set_id, selected_model_preset_id, wake_policy_json
+                SELECT
+                    selected_persona_id,
+                    selected_memory_set_id,
+                    selected_model_preset_id,
+                    background_wake_speech_frequency_level,
+                    wake_policy_json
                 FROM current_config
                 WHERE id = 1
                 """
@@ -52,6 +57,9 @@ class ConfigStore:
                 "selected_persona_id": current["selected_persona_id"],
                 "selected_memory_set_id": current["selected_memory_set_id"],
                 "selected_model_preset_id": current["selected_model_preset_id"],
+                "background_wake_speech_frequency_level": current[
+                    "background_wake_speech_frequency_level"
+                ],
                 "wake_policy": json.loads(current["wake_policy_json"]),
                 "personas": self._read_payload_table(conn, "personas", "persona_id"),
                 "memory_sets": self._read_payload_table(conn, "memory_sets", "memory_set_id"),
@@ -86,6 +94,12 @@ class ConfigStore:
                 self._write_state(conn, build_default_state())
                 conn.execute(f"PRAGMA user_version = {CURRENT_CONFIG_DB_VERSION}")
                 debug_log("Store", f"config_db initialized user_version={CURRENT_CONFIG_DB_VERSION}")
+            elif version != CURRENT_CONFIG_DB_VERSION:
+                conn.execute(f"PRAGMA user_version = {CURRENT_CONFIG_DB_VERSION}")
+                debug_log(
+                    "Store",
+                    f"config_db schema updated user_version={CURRENT_CONFIG_DB_VERSION}",
+                )
             else:
                 debug_log("Store", f"config_db schema ready user_version={version}")
 
@@ -127,6 +141,7 @@ class ConfigStore:
                 selected_persona_id TEXT NOT NULL,
                 selected_memory_set_id TEXT NOT NULL,
                 selected_model_preset_id TEXT NOT NULL,
+                background_wake_speech_frequency_level INTEGER NOT NULL DEFAULT 5,
                 wake_policy_json TEXT NOT NULL
             );
 
@@ -156,6 +171,28 @@ class ConfigStore:
             );
             """
         )
+        self._ensure_current_config_column(
+            conn=conn,
+            column_name="background_wake_speech_frequency_level",
+            column_definition=(
+                "background_wake_speech_frequency_level INTEGER NOT NULL "
+                f"DEFAULT {DEFAULT_BACKGROUND_WAKE_SPEECH_FREQUENCY_LEVEL}"
+            ),
+        )
+
+    def _ensure_current_config_column(
+        self,
+        *,
+        conn: sqlite3.Connection,
+        column_name: str,
+        column_definition: str,
+    ) -> None:
+        columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(current_config)").fetchall()
+        }
+        if column_name not in columns:
+            conn.execute(f"ALTER TABLE current_config ADD COLUMN {column_definition}")
 
     def _write_state(self, conn: sqlite3.Connection, state: dict[str, Any]) -> None:
         conn.execute("DELETE FROM server_identity")
@@ -180,14 +217,20 @@ class ConfigStore:
         conn.execute(
             """
             INSERT INTO current_config (
-                id, selected_persona_id, selected_memory_set_id, selected_model_preset_id, wake_policy_json
+                id,
+                selected_persona_id,
+                selected_memory_set_id,
+                selected_model_preset_id,
+                background_wake_speech_frequency_level,
+                wake_policy_json
             )
-            VALUES (1, ?, ?, ?, ?)
+            VALUES (1, ?, ?, ?, ?, ?)
             """,
             (
                 state["selected_persona_id"],
                 state["selected_memory_set_id"],
                 state["selected_model_preset_id"],
+                state["background_wake_speech_frequency_level"],
                 self._to_json(state["wake_policy"]),
             ),
         )

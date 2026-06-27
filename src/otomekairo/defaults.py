@@ -7,6 +7,7 @@ import uuid
 DEFAULT_PERSONA_ID = "persona:default"
 DEFAULT_MEMORY_SET_ID = "memory_set:default"
 DEFAULT_MODEL_PRESET_ID = "model_preset:default"
+DEFAULT_BACKGROUND_WAKE_SPEECH_FREQUENCY_LEVEL = 5
 DEFAULT_PROMPT_WINDOW_RECENT_TURN_LIMIT = 30
 DEFAULT_PROMPT_WINDOW_RECENT_TURN_MINUTES = 30
 DEFAULT_INPUT_MAX_OUTPUT_TOKENS = 3000
@@ -62,6 +63,7 @@ def build_default_state() -> dict:
         "selected_persona_id": DEFAULT_PERSONA_ID,
         "selected_memory_set_id": DEFAULT_MEMORY_SET_ID,
         "selected_model_preset_id": DEFAULT_MODEL_PRESET_ID,
+        "background_wake_speech_frequency_level": DEFAULT_BACKGROUND_WAKE_SPEECH_FREQUENCY_LEVEL,
         "wake_policy": {
             "mode": "disabled",
         },

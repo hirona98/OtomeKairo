@@ -13,6 +13,14 @@ from otomekairo.service.config.constants import (
 
 
 class ServiceConfigValidationMixin:
+    def _validate_background_wake_speech_frequency_level(self, value: Any) -> None:
+        if type(value) is not int or value < 1 or value > 10:
+            raise ServiceError(
+                400,
+                "invalid_background_wake_speech_frequency_level",
+                "background_wake_speech_frequency_level must be an integer from 1 to 10.",
+            )
+
     def _validate_wake_policy(self, wake_policy: dict[str, Any]) -> None:
         if not isinstance(wake_policy, dict):
             raise ServiceError(400, "invalid_wake_policy", "wake_policy must be an object.")

@@ -70,6 +70,7 @@ class DecisionPromptAutonomousWakeTests(unittest.TestCase):
                 "visual_repetition_present": False,
             },
             intervention_risk_summary="",
+            speech_frequency_level=7,
         )
         context = DecisionContext(
             input_text="定期起床。",
@@ -127,7 +128,8 @@ class DecisionPromptAutonomousWakeTests(unittest.TestCase):
         self.assertIn("background_wake: 定期起床による自己評価", context_prompt)
         self.assertIn("ユーザーの反応を求めない独話的な短い状況認識", context_prompt)
         self.assertIn("発話自然度を 10 段階", context_prompt)
-        self.assertIn("5 を標準基準", context_prompt)
+        self.assertIn("発話頻度レベル 7", context_prompt)
+        self.assertIn("5 は標準頻度", context_prompt)
         self.assertIn("評価値は JSON や reason_summary に出力しない", context_prompt)
         self.assertIn("材料: visual_observations", context_prompt)
         self.assertIn("選択: speech", context_prompt)
@@ -137,7 +139,7 @@ class DecisionPromptAutonomousWakeTests(unittest.TestCase):
         self.assertIn("change_state=first_seen / changed は前景候補", context_prompt)
         self.assertIn("stable / same_as_recent_speech は反復抑制候補", context_prompt)
         self.assertIn("複数 source の first_seen / changed", context_prompt)
-        self.assertIn("具体的な前景がある場合に 5 近辺の speech 候補", context_prompt)
+        self.assertIn("具体的な前景がある場合に発話頻度レベル 7 の speech 候補", context_prompt)
         self.assertIn("単なる対象変更や作業の継続に留まらないか", context_prompt)
         self.assertIn("speech / pending_intent / noop で比較", context_prompt)
         self.assertIn("活動モード遷移、同一活動内の意味的な節目", context_prompt)
