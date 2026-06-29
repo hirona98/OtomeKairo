@@ -104,10 +104,10 @@ def build_persona_context_summary(persona: dict[str, Any]) -> dict[str, Any]:
 
 def persona_initiative_baseline_summary(level: str) -> str:
     if level == "low":
-        return "自発介入は控えめ寄りで、前景理由が弱ければ見送る。"
+        return "自発発話は控えめ寄りで、前景理由が弱ければ見送る。"
     if level == "high":
-        return "自発介入は強めで、前景理由が揃うと関わる判断を取りやすい。"
-    return "自発介入は中庸で、関わる、保留する、見送るを文脈で選ぶ。"
+        return "自発発話は強めで、前景理由が揃うと関わる判断を取りやすい。"
+    return "自発発話は中庸で、関わる、保留する、見送るを文脈で選ぶ。"
 
 
 def _persona_text(value: Any) -> str | None:
@@ -199,9 +199,9 @@ class InitiativeContext:
     capability_summary: dict[str, Any]
     candidate_families: list[InitiativeCandidateFamily]
     selected_candidate_family: str | None
-    intervention_state: dict[str, Any]
+    speech_timing_state: dict[str, Any]
     suppression_summary: dict[str, Any]
-    intervention_risk_summary: str
+    speech_timing_summary: str
     speech_frequency_level: int = 5
 
     def selected_family_entry(self) -> InitiativeCandidateFamily | None:
@@ -234,9 +234,9 @@ class InitiativeContext:
             "capability_summary": self.capability_summary,
             "candidate_families": [family.to_prompt_payload() for family in self.candidate_families],
             "selected_candidate_family": self.selected_candidate_family,
-            "intervention_state": self.intervention_state,
+            "speech_timing_state": self.speech_timing_state,
             "suppression_summary": self.suppression_summary,
-            "intervention_risk_summary": self.intervention_risk_summary,
+            "speech_timing_summary": self.speech_timing_summary,
             "speech_frequency_level": self.speech_frequency_level,
         }
 

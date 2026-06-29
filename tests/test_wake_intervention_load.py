@@ -63,16 +63,16 @@ class WakeInterventionLoadTests(unittest.TestCase):
                     {"change_state": "same_as_recent_speech", "same_as_recent_speech": True},
                 ]
             },
-            intervention_state={"background_trigger": True},
-            intervention_risk_summary=None,
+            speech_timing_state={"background_trigger": True},
+            speech_timing_summary=None,
         )
 
         self.assertEqual(summary["suppression_level"], "high")
         self.assertTrue(summary["visual_repetition_present"])
         self.assertTrue(summary["same_as_recent_speech_present"])
-        self.assertTrue(summary["all_visual_observations_repeated"])
+        self.assertFalse(summary["all_visual_observations_repeated"])
         self.assertEqual(summary["visual_observation_count"], 2)
-        self.assertEqual(summary["repeated_visual_observation_count"], 2)
+        self.assertEqual(summary["repeated_visual_observation_count"], 1)
 
     def test_changed_visual_observation_does_not_set_high_repetition_suppression(self) -> None:
         service = DummyInputService()
@@ -84,12 +84,12 @@ class WakeInterventionLoadTests(unittest.TestCase):
                     {"change_state": "changed"},
                 ]
             },
-            intervention_state={"background_trigger": True},
-            intervention_risk_summary=None,
+            speech_timing_state={"background_trigger": True},
+            speech_timing_summary=None,
         )
 
         self.assertEqual(summary["suppression_level"], "low")
-        self.assertTrue(summary["visual_repetition_present"])
+        self.assertFalse(summary["visual_repetition_present"])
         self.assertFalse(summary["all_visual_observations_repeated"])
 
     def test_changed_visual_observation_makes_autonomous_family_available(self) -> None:
@@ -113,13 +113,42 @@ class WakeInterventionLoadTests(unittest.TestCase):
             initiative_entry_summary=None,
             suppression_summary={"suppression_level": "low"},
             initiative_baseline={},
-            intervention_state={"background_trigger": True},
+            speech_timing_state={"background_trigger": True},
             capability_summary={},
         )
 
         self.assertTrue(family.available)
-        self.assertIn("視覚変化候補 1 件", family.reason_summary)
+        self.assertIn("現在観測候補 1 件", family.reason_summary)
         self.assertIn("visual change_state=changed", family.reason_summary)
+
+    def test_stable_visual_observation_makes_autonomous_family_available(self) -> None:
+        service = DummyInputService()
+
+        family = service._initiative_autonomous_family(
+            trigger_kind="background_thinking",
+            drive_summaries=[],
+            world_state_summary=[],
+            status_refresh_world_state_summary=[],
+            recent_turn_summary=[],
+            foreground_signal_summary={
+                "visual_observations": [
+                    {
+                        "observation_id": "observation:desktop",
+                        "change_state": "stable",
+                        "reason_summary": "現在状態が続いている。",
+                    }
+                ]
+            },
+            initiative_entry_summary=None,
+            suppression_summary={"suppression_level": "low"},
+            initiative_baseline={},
+            speech_timing_state={"background_trigger": True},
+            capability_summary={},
+        )
+
+        self.assertTrue(family.available)
+        self.assertIn("現在観測候補 1 件", family.reason_summary)
+        self.assertIn("visual change_state=stable", family.reason_summary)
 
     def test_changed_visual_observation_enters_autonomous_context_without_entry_check(self) -> None:
         service = DummyInputService()
@@ -211,7 +240,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
                 )
             ],
             selected_candidate_family="autonomous",
-            intervention_state={"background_trigger": True},
+            speech_timing_state={"background_trigger": True},
             suppression_summary={
                 "suppression_level": "high",
                 "visual_repetition_present": True,
@@ -220,7 +249,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
                 "visual_observation_count": 2,
                 "repeated_visual_observation_count": 2,
             },
-            intervention_risk_summary="視覚観測が反復している。",
+            speech_timing_summary="視覚観測が反復している。",
         )
 
         payload = service._build_workspace_context(
@@ -288,12 +317,12 @@ class WakeInterventionLoadTests(unittest.TestCase):
             capability_summary={},
             candidate_families=[],
             selected_candidate_family=None,
-            intervention_state={"background_trigger": True},
+            speech_timing_state={"background_trigger": True},
             suppression_summary={
                 "suppression_level": "low",
                 "visual_repetition_present": False,
             },
-            intervention_risk_summary=None,
+            speech_timing_summary=None,
         )
 
         payload = service._build_workspace_context(
@@ -382,7 +411,7 @@ class WakeInterventionLoadTests(unittest.TestCase):
             world_state_summary=[],
             recent_turn_summary=[],
             initiative_entry_summary=None,
-            changed_visual_signals=[],
+            visual_signals=[],
             suppression_summary={},
             capability_summary={},
         )

@@ -33,14 +33,15 @@ class TextTruncationTests(unittest.TestCase):
             capability_summary={},
             candidate_families=[],
             selected_candidate_family=None,
-            intervention_state={},
+            speech_timing_state={},
             suppression_summary={},
-            intervention_risk_summary=text,
+            speech_timing_summary=text,
         )
 
         payload = _compact_speech_initiative_context(context)
 
         self.assertEqual(payload["opportunity_summary"], text)
+        self.assertEqual(payload["speech_timing_summary"], text)
         self.assertEqual(payload["initiative_entry_summary"]["reason_summary"], text)
         self.assertEqual(payload["foreground_signal_summary"]["reason_summary"], text)
         self.assertEqual(

@@ -1236,7 +1236,7 @@ class ServiceInputPipelineMixin:
             kind="suppression",
             source="initiative_context.suppression_summary",
             summary_text=(
-                "視覚観測に stable または same_as_recent_speech が含まれており、"
+                "視覚観測に same_as_recent_speech が含まれており、"
                 "同じ内容を繰り返し主題化しないための控える候補。"
             ),
             metadata=self._workspace_metadata(

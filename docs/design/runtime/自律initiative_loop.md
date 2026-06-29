@@ -5,7 +5,7 @@
 自律 initiative loop は、人からの直近入力がない状況でも、OtomeKairo が現在の個として何を気にかけ、何を前へ出すかを評価するための設計である。
 
 ここでいう initiative は、単なる `pending_intent` の再評価ではない。
-`drive_state`、現在文脈、`world_state`、`ongoing_action`、capability availability、過剰介入抑制を合わせて、その回に前進する理由があるかを判断する。
+`drive_state`、現在文脈、`world_state`、`ongoing_action`、capability availability、自発発話抑制を合わせて、その回に前進する理由があるかを判断する。
 
 ## 位置づけ
 
@@ -39,7 +39,7 @@ initiative loop は、少なくとも次を入力にする。
 - `runtime_state` の運用要約
 - capability decision view
 - 直近会話の短い要約
-- 過剰介入抑制状態
+- 自発発話抑制状態
 - `current_input` の `sender / source_kind / response_target`
 
 LLM には offset 付き timestamp を主要表現として渡さない。
@@ -68,8 +68,9 @@ initiative loop は、判断サイクル内の作業文脈として `initiative_
 | `world_state_summary` | 現在文脈として効く世界状態の要約 |
 | `ongoing_action_summary` | 継続中の実行列がある場合の要約 |
 | `capability_summary` | 使える能力と使えない能力の判断用要約 |
-| `suppression_summary` | 重複介入境界とタイミング事実の要約 |
-| `intervention_risk_summary` | 過剰介入、重複、タイミング不自然さの要約 |
+| `suppression_summary` | 重複発話境界とタイミング事実の要約 |
+| `speech_timing_state` | 定期思考や直近発話済み事実など、発話タイミングの構造値 |
+| `speech_timing_summary` | 自発発話の頻度、重複、タイミング不自然さの要約 |
 
 `initiative_context` は inspection へ要約を残す。
 `initiative_context` そのものを永続的な状態正本にしない。
@@ -78,7 +79,7 @@ initiative loop は、判断サイクル内の作業文脈として `initiative_
 `initiative_entry_summary` は `entry_kind / entry_basis / reason_summary` を含む。
 `entry_basis` は `activity_mode_transition / strong_interest / same_activity_detail_change / observation_only` のいずれかである。
 `entry_kind=enter` は `entry_basis=activity_mode_transition / strong_interest` の場合に評価対象として強く前景化したことを表す。
-`entry_basis=same_activity_detail_change / observation_only` は同じ活動内の詳細変化または観測のみを表す。
+`entry_basis=same_activity_detail_change / observation_only` は同じ活動モード内の詳細変化または観測のみを表す。
 具体的な前景変化や関係上の意味が薄い `same_activity_detail_change / observation_only` は `entry_kind=skip` にする。
 同一活動内でも、人格・記憶・現在文脈から強い関心や関係上の意味がある場合は `entry_basis=strong_interest` として `entry_kind=enter` にする。
 `drive_summaries` の各 entry は、生成時点に存在する `drive_kind / support_count / support_strength / freshness_hint / scope_alignment / signal_strength / persona_alignment / stability_hint` を含む。
@@ -89,7 +90,7 @@ initiative loop は、判断サイクル内の作業文脈として `initiative_
 `foreground_signal_summary` は `foreground_thinness / reason_summary / world_state_count` を含む。
 `suppression_summary` は `suppression_level / background_trigger / same_dedupe_recently_replied / visual_repetition_present / same_as_recent_speech_present / all_visual_observations_repeated` を含む。
 `suppression_summary.visual_observation_count` は判断に渡した visual observation signal の件数である。
-`suppression_summary.repeated_visual_observation_count` は `stable / same_as_recent_speech` の件数である。
+`suppression_summary.repeated_visual_observation_count` は `same_as_recent_speech` の件数である。
 `suppression_summary.reason_summary` は具体的な抑制理由がある場合に含む。
 `suppression_summary.suppression_level` は `low / high` のいずれかである。
 `candidate_families` の各 entry は `family / available / selected` を含む。
@@ -118,37 +119,44 @@ initiative loop は、候補を次の 3 系統に分ける。
 視覚観測の `first_seen / changed` は `workspace_context` の `visual_observation` 候補として扱う。
 `background_thinking` は定期思考による自己評価である。
 `decision_generation` は観測、候補、抑制、能力提案を比較し、`speech / noop / pending_intent / capability_request` から 1 つ選ぶ。
-`visual_observations[].change_state=first_seen / changed` は前景候補、`stable / same_as_recent_speech` は反復抑制候補である。
-`background_thinking` の `speech` は、ユーザーの反応を求めない独話的な短い状況認識である。
-`background_thinking` は発話自然度を 10 段階で内的に見積もり、`current.thinking_speech_level` に合わせて `speech` の選びやすさを調整する。
-`thinking_speech_level=5` は標準頻度である。
+`visual_observations[].change_state=first_seen / changed` は前景候補、`stable` は現在状態の継続シグナル、`same_as_recent_speech` は直近重複の抑制候補である。
+`background_thinking` の `speech` は、観測差分の実況ではなく、現在の個の短い見方として一言にまとまる独り言である。
+`background_thinking` は短い独話として前へ出る自然さを 10 段階で内的に見積もり、`current.thinking_speech_level` を前へ出る軽さの補助として使う。
+`thinking_speech_level=5` は標準である。
 `thinking_speech_level=3` 以下は控えめ基準である。
-標準頻度では、短い独話として成立し、明確な反復、観測不足、明示境界、プライバシー境界が上回らない状態を `speech` 候補にする。
-控えめ基準では、変化があるから話すのではなく、独話として残す意味が明確な変化だけを `speech` に寄せる。
+`foreground_thinness=thin`、`change_state=stable`、`change_state=changed`、同一活動継続は `speech` を義務づけない。
+観測と人格、記憶、関心、現在文脈が噛み合い、短い一言として自然にまとまる場合は `speech` と比較する。
 評価値は JSON や `reason_summary` に出力しない。
-`first_seen / changed` は、具体的な前景がある場合に `current.thinking_speech_level` に応じた `speech` 候補として扱う。
-`change_state=first_seen / changed` だけでは `speech` を選ばず、画面・対象・操作単位の変化は候補材料に留める。
-活動名、作業名、閲覧中、検討中、入力中、操作中などの活動事実は、何が前景にあるかの材料であり、それ自体を `noop` の主理由にしない。
-複数 source の `first_seen / changed` が同じ活動遷移や状態変化を指す場合も、`speech / pending_intent / noop` で比較する。
-`speech` は、活動モード遷移、同一活動内の意味的な節目、強い関心、予定、未完了、継続中コミットメント、ユーザーが明示的に問題化した観点が読め、短い状況認識として外へ出す新しい意味があり、独話として一文で自然に閉じ、具体的な抑制根拠が上回らない場合に選ぶ。
-活動の段階、結果、保留、比較軸、未完了状態が意味的に変わる場合だけ `speech` に寄せる。
-緊急性、支援必要性、会話開始としての必要性は `speech` の条件にしない。
-`pending_intent` は、今すぐ外へ出す根拠は弱いが、後で再評価する価値が残る場合に選ぶ。
-`noop` は、反復、直近で同じ内容に触れた事実、明示された距離希望、進行中応答、結果待ち、プライバシー境界、観測不足、構造化済み抑制根拠が `speech` の価値を明確に上回る場合、または活動事実ではなく観測された前景差分そのものに短い独話として外へ出す新しい意味が薄い場合に選ぶ。
-`foreground_signal_summary.foreground_thinness=thin` では、具体的な前景変化があっても独話として外へ出す新しい意味が弱い場合は `noop` または `pending_intent` にする。
-集中、没頭、作業中、閲覧中、検討中、入力中、操作中、活動の一環、作業の継続、遮る、割って入る、介入回避、緊急性がないこと、支援要求がないことは `noop` の主理由にしない。
+`first_seen / changed / stable` は外界を理解するための観測事実として扱う。
+同一活動内の画面・表示対象・操作単位の変化は、具体名や表示内容を主題化せず、`speech / pending_intent / noop` を比較する材料として扱う。
+活動名、作業名、閲覧中、検討中、入力中、操作中などの活動事実は、何が前景にあるかの材料であり、活動事実だけを `speech` の主理由にしない。
+`foreground_signal_summary.foreground_thinness=thin` の同じ活動モード内の対象差し替え、表示単位の移動、閲覧先変更、詳細画面への移動は、実況にはせず、現在の個の短い見方や区切りとしてまとまる場合だけ `speech` と比較する。
+操作媒体、対象種別、身体動作の組み合わせが、同じ活動モード内の対象差し替えでは説明できないほど変わる場合は、活動モードや状態の上位変化として比較する。
+複数 source の `first_seen / changed / stable` が同じ活動や状態を指す場合も、反復実況を避けつつ、軽い節目として一言にまとまるかを比較する。
+`speech` は、現在の観測、活動の継続、変化、安定、切り替わり、予定、未完了、継続中コミットメントを材料にして、現在の個の短い見方として一言にまとまるときに選ぶ。
+同じ活動モード内で対象名、表示内容、閲覧先、画面単位だけが変わった場合は、具体名や表示内容を主題化せずに扱う。
+操作媒体、対象種別、身体動作の組み合わせが、同じ活動モード内の対象差し替えでは説明できないほど変わる場合はこの抑制に含めない。
+`speech` は会話開始ではなく、反応要求を含まない短い独り言として比較する。
+`pending_intent` は、あとで再評価する材料だけを残す場合に選ぶ。
+`noop` は、直近で同じ内容に触れた事実、明示された距離希望、進行中応答、結果待ち、プライバシー境界、観測失敗、観測不足、構造化済み抑制根拠がある場合、または短い独話として一言にまとまらない場合に選ぶ。
+`foreground_signal_summary.foreground_thinness=thin` は自動 `speech` にしない。ただし、軽い節目としてまとまる場合は `speech` と比較する。
+`change_state=stable` と同一活動継続は自動 `speech` にしない。ただし、継続そのものに現在の個の短い見方が立つ場合は `speech` と比較する。
+`noop` の `reason_summary` は、該当する具体根拠名で説明し、活動事実や距離感の補助だけを主理由にしない。
 `capability_request` は、`candidate_families` に capability 提案があり、現在判断に追加観測が必要な場合に選ぶ。
-同一活動内の意味的な節目は、完了、中断、再開、明確な成果や失敗、対象の意味的な切り替わり、対象の絞り込み、対象間の比較、比較軸の変化、進行阻害、情報確認の完了または保留である。
-同じ大きな流れの中の画面・対象・操作単位の変化は、それだけでは節目として扱わず、活動の段階や結果に意味的な変化がある場合だけ `speech` 候補にする。
-`speech` は助言、依頼、支援提案、反応要求ではなく、観測事実に基づく一文の独話的な状況認識として成立する場合に選ぶ。
-支援提案、作業中断、休息促し、身体注意、画面への一般コメント、長い感想は控える理由側に置く。
-作業中、閲覧中、検討中、入力中などの活動事実、`foreground_signal_summary.foreground_thinness=thin`、明示的な呼びかけがないこと、支援要求がないこと、外へ出る必要が薄いという一般的な推定、観測から推定した集中や没頭、内的注意状態、一般的な配慮は、それ単体では `noop` の主理由にしない。
-`persona_context` は距離感と表現補助であり、人格として自然という理由だけで、薄い観測や表層的な前景変化を `speech` に押し上げない。
-`foreground_drive_summaries` に入っていない `drive_state`、`freshness_hint=stale`、`stability_hint=weak`、`signal_strength=0.0` の `drive_state` は背景材料として扱い、薄い視覚前景と合わせる場合は一般的な関係構築や休息促しを控える理由側に置く。
-反復に近い詳細更新、画面・対象・操作単位の小さな変化、観測対象の表層的な変化、姿勢や操作の細かな変化、一般的な注意や助言に留まる内容は、それ単体では `noop` または `pending_intent` の材料として扱う。
-活動が継続中であることは、この抑制理由に含めない。
+同一活動内の画面・表示対象・操作単位の変化、作業や閲覧の継続、安定状態は現在状態の材料である。
+`speech` は助言、依頼、支援提案、反応要求ではなく、観測事実に基づく一文の独話的な状況認識として作る。
+`background_thinking` の `speech` は独り言として扱い、相手の反応や会話継続を前提にしない。
+支援提案、作業停止の促し、休息促し、身体注意、画面への一般コメント、長い感想は控える理由側に置く。
+`noop` を選ぶ場合は、明示された距離希望、直近重複、進行中応答、結果待ち、プライバシー境界、観測失敗、観測不足、構造化済み抑制根拠、独話としてまとまらないことのいずれかを主理由にする。
+作業中、閲覧中、検討中、入力中などの活動事実、`foreground_signal_summary.foreground_thinness=thin`、内的注意状態、距離感の補助だけを `reason_summary` の主理由にしない。
+`persona_context` は距離感と表現補助であり、観測にない内容を `speech` に押し上げない。
+`foreground_drive_summaries` に入っていない `drive_state`、`freshness_hint=stale`、`stability_hint=weak`、`signal_strength=0.0` の `drive_state` は背景材料として扱い、薄い視覚前景と合わせる場合は `speech` の支柱にせず、補助材料としてだけ扱う。
+反復に近い詳細更新、同一活動内の画面・表示対象・操作単位の小さな変化、観測対象の表層的な変化、姿勢や操作の細かな変化、同じ活動モード内の対象名や表示内容だけの差し替え、一般的な注意や助言に留まる内容は、自動 `speech` にせず、軽い節目としてまとまる場合だけ `speech` と比較する。
+操作媒体、対象種別、身体動作の組み合わせが、同じ活動モード内の対象差し替えでは説明できないほど変わる場合は、この抑制理由に含めない。
+活動が継続中であることだけで `speech` を選ばず、継続への短い見方が立つ場合は `speech` と比較する。
 `activity_context.previous_activity` から `activity_context.current_activity` への意味ある活動モード遷移は、`initiative_entry_check` の `entry_basis=activity_mode_transition` として enter 候補にする。
 同じ活動モード内の対象差し替え、結果差し替え、詳細画面への移動、別画面への移動は基本的に `entry_basis=same_activity_detail_change` として扱う。
+操作媒体、対象種別、身体動作の組み合わせが、同じ活動モード内の対象差し替えでは説明できないほど変わる場合は、`entry_basis=same_activity_detail_change` に分類しない。
 同じ活動内の画面差分、局所的な状態変化、表示単位の移動は基本的に `entry_basis=same_activity_detail_change` に分類する。
 同一活動内という分類だけでは `skip` にしない。具体的な前景変化に人格・記憶・現在文脈から強い関心や関係上の意味がある場合は `strong_interest` として `enter` 候補に残す。
 `pending_intent` が空の場合も、`drive_state`、`autonomous_run`、`ongoing_action`、視覚観測の `first_seen / changed`、または強い `entry_basis` を持つ `initiative_entry_summary.entry_kind=enter` があれば通常の判断入力へ進める。
@@ -187,7 +195,7 @@ LLM は次を担う。
 - wake の due 判定
 - 思考前観測の取得、視覚記録、`world_state`、`activity_context` への反映
 - `drive_state / ongoing_action / pending_intent / initiative_entry_summary` による自律評価対象の前景化制御
-- 観測変化、直近発話済み観測、重複介入事実の補助文脈化
+- 観測変化、直近発話済み観測、重複発話事実の補助文脈化
 - 期限切れ候補の除外
 - capability availability と権限の検証
 - 1 サイクル 1 主結果の制約
@@ -216,7 +224,7 @@ in-flight capability result は受け取るが、ユーザー向け応答中は 
 `background_thinking` の観測中に `conversation_input` または `speech` が新しく増えた場合、server は観測前の直近会話 snapshot を使って発話せず、`noop` にする。
 visual capture の変化は `first_seen / changed / stable / same_as_recent_speech` の `change_state` に正規化し、正規化規則は [../capability/視覚機能.md](../capability/視覚機能.md) を正とする。
 `first_seen / changed` は新規性の前景シグナルとして扱う。
-`same_as_recent_speech / stable` は反復性の前景シグナルとして扱う。
+`same_as_recent_speech` は直近発話との重複シグナル、`stable` は現在状態の継続シグナルとして扱う。
 新規性と反復性は、`drive_state`、`world_state`、`activity_context`、`pending_intent`、抑制要約と同じ盤面で比較する。
 薄い視覚前景だけで成立する新規性は、`noop` または `pending_intent` と同じ盤面で比較する。
 活動遷移に触れる発話は、終わった・サボった・遊び始めたなどを断定せず、区切りや切り替えとして表現する。
@@ -224,23 +232,23 @@ visual capture の変化は `first_seen / changed / stable / same_as_recent_spee
 `source_owner=user_environment` の視覚観測、`world_state.visual_context`、`activity_context.actor=user` はユーザー側の状況として扱う。
 この文脈から speech する場合、`speech_stance=comment_on_user_context` として、ユーザー側の状況へのコメントとして表現する。
 `current_input.sender=system` かつ `current_input.response_target=none` の `wake / background_thinking` では、decision は観測、候補、現在文脈を比較して `speech / noop / pending_intent / capability_request` を選ぶ。
-`wake / background_thinking` の `noop` 理由は、観測、候補、進行中応答、重複介入境界のいずれかに根拠づける。
+`wake / background_thinking` の `noop` 理由は、観測、候補、進行中応答、重複発話境界のいずれかに根拠づける。
 定期思考から dispatch した capability request の result は、source request の `source_current_input.response_target=none` を引き継ぐ。
 この capability result は内部観測結果として扱い、外向き結果を `noop` として trace に残す。
 直近で発話済みの内容と異なる visual capture も観測内容の変化として渡す。
 LLM は `initiative_entry_summary`、`activity_context`、`drive_state`、`world_state`、`response_target`、候補理由、抑制要約を合わせて `speech / noop / pending_intent / capability_request` を選ぶ。
-同じ内容の反復は `same_as_recent_speech / stable` と同一 dedupe の直近介入で扱う。
+同じ内容の反復は `same_as_recent_speech` と同一 dedupe の直近発話で扱う。
 複数 observation がある場合も、server は取得結果を整理したあとに 1 回だけ initiative 判断を行う。
 system wake 起点で明示 source context が無い `visual_context / body / schedule / social_context / environment / location` 候補は、推測候補として正規化時に破棄する。
 
-## 過剰介入抑制
+## 自発発話抑制
 
 initiative loop は、前へ出る理由と見送る理由を判断入力に含める。
 
 少なくとも次を評価する。
 
-- 同じ `dedupe_key` の直近介入
-- 同じ話題での連続介入
+- 同じ `dedupe_key` の直近発話
+- 同じ話題での連続発話
 - 直近で相手が休止や拒否を示した事実
 - `autonomous_run` または `ongoing_action` が結果待ちであること
 - capability が unavailable であること
@@ -250,8 +258,8 @@ visual observation の `change_state=first_seen / changed` は自律判断の前
 autonomous family の availability は、強い `initiative_entry_summary`、構造値が強い `drive_state`、または視覚観測の `first_seen / changed` で組み立てる。
 autonomous family の priority は、`drive_state`、現在文脈、前景世界状態、候補理由の強さで決める。
 `foreground_thinness=thin`、`trigger_kind=background_thinking`、`suppression_level=high` は、LLM が `speech / noop / pending_intent` を判断するための文脈事実として渡す。
-同じ `dedupe_key` の直近介入は server の重複介入境界として扱う。
-同じ `dedupe_key` の直近介入だけを `suppression_level=high` にする。
+同じ `dedupe_key` の直近発話は server の重複発話境界として扱う。
+同じ `dedupe_key` の直近発話だけを `suppression_level=high` にする。
 `autonomous_run.status=waiting_result` と `ongoing_action.status=waiting_result` は LLM へ渡す判断材料として扱う。
 
 抑制情報は判断入力として使う。
@@ -281,7 +289,7 @@ inspection では、少なくとも次を追えるようにする。
 - 選ばれた候補系統
 - 候補系統ごとの capability 提案と blocking 理由
 - 見送り理由または前進理由
-- 過剰介入抑制に効いた要素
+- 自発発話抑制に効いた要素
 - 失敗理由
 
 `input_trace.initiative_context` に要約を残し、`decision_trace` には最終判断に効いた initiative 要素だけを残す。
@@ -321,11 +329,11 @@ API起床の自律判断 matrix は次の 16 件に固定する。
 | case | 入力条件 | 期待する構造 |
 | --- | --- | --- |
 | `background-no-context-skip` | interval 初回定期思考で `drive_state / world_state / ongoing_action` が空 | 定期思考 cycle を作り、`initiative_context` なしの `decision.kind=noop` と `memory_trace=skipped` を残す |
-| `background-weak-foreground-noop` | interval 初回定期思考で `visual_context` 系の薄い `world_state` だけがあり、視覚観測の `change_state` が `stable / same_as_recent_speech` である | `initiative_context` なしの `decision.kind=noop`、`memory_trace=skipped` |
+| `background-recent-duplicate-noop` | interval 初回定期思考で視覚観測の `change_state` が `same_as_recent_speech` である | `suppression_level=high`、`decision.kind=noop`、`memory_trace=skipped` |
 | `background-grounded-speech` | interval 初回定期思考で予定 `world_state` と整合する構造値が強い `drive_state` がある | `background_thinking_scheduler_active=true`、`foreground_thinness=grounded`、`selected_candidate_family=autonomous`、`decision.kind=speech`、`memory_trace=succeeded` |
 | `background-interval-not-due` | `last_wake_at` 相当の直後に長い interval を設定する | `background_thinking_scheduler_active=true` を観測し、新しい定期思考 cycle を作らない |
 
-matrix の共通判定境界は前述の `initiative_context`、LLM とコードの責務、過剰介入抑制に従う。
+matrix の共通判定境界は前述の `initiative_context`、LLM とコードの責務、自発発話抑制に従う。
 `visual_context` だけの前景は thin foreground として扱う。
 視覚観測の `change_state=first_seen / changed` は通常の initiative 判断へ進み、`initiative_entry_check` を追加で呼ばない。
 構造値が強い `drive_state` があり、対応する grounded foreground がない場合、発話より追加観測が自然かを同じ判断盤面で比較する。
@@ -356,6 +364,6 @@ decision contract validation の repair 対象は、契約 shape、capability av
 - 自律判断を通常判断と別の結果系にすること
 - `pending_intent` がないと自発判断できない設計にすること
 - `drive_state` だけで能力実行を確定すること
-- `world_state` だけで人へ介入すること
+- `world_state` だけで人へ発話すること
 - `risk_level` から initiative loop 専用の安全ポリシーを作ること
 - 見送りを失敗として扱うこと

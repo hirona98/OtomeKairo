@@ -143,7 +143,7 @@ class ServiceInputWakePipelineMixin:
                     self._noop_pipeline(
                         state=state,
                         started_at=started_at,
-                        reason_summary="同じ pending_intent 候補には最近 speech 済みのため、今回は再介入しない。",
+                        reason_summary="同じ pending_intent 候補には最近 speech 済みのため、今回は同じ内容を繰り返さない。",
                     ),
                     input_text,
                     client_context,

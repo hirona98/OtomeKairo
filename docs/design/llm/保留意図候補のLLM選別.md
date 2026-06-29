@@ -82,7 +82,7 @@ LLM は候補の外側を増やさない。
 
 この role を `input_interpretation` や `decision_generation` から分ける理由は次である。
 
-- 自発再介入の入口選別と、その後の本体判断を分離できる
+- 自発再評価の入口選別と、その後の本体判断を分離できる
 - wake 系 trigger の候補選びを回帰確認しやすい
 - pending 候補管理の deterministic 部分を service 側へ残したまま、意味的比較だけを差し替えられる
 

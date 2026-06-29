@@ -29,7 +29,7 @@ OtomeKairo は、対話入力、API起床要求、観測能力の結果、外部
 - ユーザーの恒久的な習慣や人物理解
 - OtomeKairo 自身の実行列
 - OtomeKairo の直近発話、約束、待機姿勢をユーザー活動として混ぜたもの
-- `speech / noop / pending_intent` の選択、抑制根拠、割り込み可否
+- `speech / noop / pending_intent` の選択、抑制根拠、発話タイミング判断
 - capability manifest や binding
 - 期限の無い状態
 
