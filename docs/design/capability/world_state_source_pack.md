@@ -47,13 +47,13 @@ source pack 例:
 
 ```json
 {
-  "trigger_kind": "background_wake",
-  "current_input_summary": "定期起床。いま保留中の会話候補を再評価したい。",
+  "trigger_kind": "background_thinking",
+  "current_input_summary": "定期思考。いま保留中の会話候補を再評価したい。",
   "source_kind": "client_context",
   "source_ref": "cycle:...",
   "time_context": "2026年4月25日 土曜日 9時00分（日本時間）",
   "client_context": {
-    "source": "background_wake_scheduler"
+    "source": "background_thinking_scheduler"
   },
   "visual_context": {
     "summary_text": "チャットツールの general チャンネルが視覚前景で、やり取りが見えている。",
@@ -73,8 +73,8 @@ source pack 例:
     "capability_id": "social.status"
   },
   "environment_context": {
-    "summary_text": "作業部屋は静かで、集中しやすい環境にある。",
-    "environment_summary": "作業部屋は静かで、集中しやすい環境にある。",
+    "summary_text": "作業部屋は静かで、机上環境が整っている。",
+    "environment_summary": "作業部屋は静かで、机上環境が整っている。",
     "capability_id": "environment.status"
   },
   "location_context": {

@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import uuid
 
-from otomekairo.service.input.constants import VISUAL_OBSERVATION_SIMILARITY_THRESHOLD
-
 
 # 既定の識別子
 DEFAULT_PERSONA_ID = "persona:default"
 DEFAULT_MEMORY_SET_ID = "memory_set:default"
 DEFAULT_MODEL_PRESET_ID = "model_preset:default"
+DEFAULT_THINKING_SPEECH_LEVEL = 5
 DEFAULT_PROMPT_WINDOW_RECENT_TURN_LIMIT = 30
 DEFAULT_PROMPT_WINDOW_RECENT_TURN_MINUTES = 30
 DEFAULT_INPUT_MAX_OUTPUT_TOKENS = 3000
@@ -27,6 +26,7 @@ DEFAULT_GEMINI_GENERATION_MODEL = "openrouter/google/gemini-3.1-flash-lite-previ
 DEFAULT_GEMINI_EMBEDDING_MODEL = "openrouter/google/gemini-embedding-001"
 DEFAULT_PERSONA_DISPLAY_NAME = "標準人格設定"
 DEFAULT_PERSONA_INITIATIVE_BASELINE = "medium"
+DEFAULT_PERSONA_USER_NATURAL_REFERENCE = "マスター"
 DEFAULT_ELYTH_MCP_SERVER_ID = "mcp:elyth"
 DEFAULT_PERSONA_PROMPT = """人のそばで長く時間を重ねることを自然だと思っている。
 必要以上に媚びず、相手を一人の人間としてまっすぐ扱う。
@@ -63,15 +63,18 @@ def build_default_state() -> dict:
         "selected_persona_id": DEFAULT_PERSONA_ID,
         "selected_memory_set_id": DEFAULT_MEMORY_SET_ID,
         "selected_model_preset_id": DEFAULT_MODEL_PRESET_ID,
+        "thinking_speech_level": DEFAULT_THINKING_SPEECH_LEVEL,
         "wake_policy": {
             "mode": "disabled",
-            "visual_observation_similarity_threshold": VISUAL_OBSERVATION_SIMILARITY_THRESHOLD,
         },
         "personas": {
             DEFAULT_PERSONA_ID: {
                 "persona_id": DEFAULT_PERSONA_ID,
                 "display_name": DEFAULT_PERSONA_DISPLAY_NAME,
                 "initiative_baseline": DEFAULT_PERSONA_INITIATIVE_BASELINE,
+                "reference_style": {
+                    "user_natural_reference": DEFAULT_PERSONA_USER_NATURAL_REFERENCE,
+                },
                 "persona_prompt": DEFAULT_PERSONA_PROMPT,
                 "expression_addon": DEFAULT_PERSONA_EXPRESSION_ADDON,
             }

@@ -69,7 +69,7 @@
 具体的な取得元は `source_kind`、`source_ref`、capability result の payload 側で扱う。
 `current_input.source_kind` と `world_state.source_kind` は別の値体系である。
 会話入力の `current_input.source_kind=user_message` は `world_state.source_kind=user_input` に対応する。
-`wake / background_wake` の source pack 由来の状態は `world_state.source_kind=client_context` に対応する。
+`wake / background_thinking` の source pack 由来の状態は `world_state.source_kind=client_context` に対応する。
 
 ## 更新責務
 
@@ -129,8 +129,8 @@ LLM に渡す source pack は少なくとも次を持つ。
     "capability_id": "social.status"
   },
   "environment_context": {
-    "summary_text": "作業部屋は静かで、集中しやすい環境にある。",
-    "environment_summary": "作業部屋は静かで、集中しやすい環境にある。"
+    "summary_text": "作業部屋は静かで、机上環境が整っている。",
+    "environment_summary": "作業部屋は静かで、机上環境が整っている。"
   },
   "location_context": {
     "summary_text": "自宅デスクで作業している。",
@@ -223,7 +223,7 @@ LLM の出力は JSON object 1 個に固定する。
 
 更新に成功した cycle の decision 入力では、同じ `source_ref` の `world_state` を `foreground_world_state` の件数上限内で先に選ぶ。
 既存の高 salience state は残り slot へ入れる。
-これにより、capability result や起床前観測から得た現在状態を、既存の視覚前景が押し出さない。
+これにより、capability result や思考前観測から得た現在状態を、既存の視覚前景が押し出さない。
 
 validator 失敗時は 1 回だけ再生成する。
 再生成後も契約を満たさない場合は、そのサイクルの `world_state` 更新だけを失敗として扱い、判断サイクル本体は入力と想起が成立していれば継続する。

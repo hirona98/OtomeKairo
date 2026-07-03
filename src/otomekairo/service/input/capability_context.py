@@ -105,7 +105,7 @@ class ServiceInputCapabilityContextMixin:
     ) -> list[dict[str, Any]]:
         if trigger_kind == "capability_result":
             return foreground_world_state or []
-        if trigger_kind in {"wake", "background_wake"}:
+        if trigger_kind in {"wake", "background_thinking"}:
             return self._merge_foreground_world_state_for_reuse(
                 foreground_world_state,
                 world_state_trace.previous_foreground_world_state if world_state_trace is not None else None,
@@ -168,7 +168,7 @@ class ServiceInputCapabilityContextMixin:
             vision_source_id = self._client_context_text(observation.get("vision_source_id"), limit=96)
             if vision_source_id is None:
                 continue
-            # 起床前観測は同じ cycle で取得済みの視覚観測として扱う。
+            # 思考前観測は同じ cycle で取得済みの視覚観測として扱う。
             payload: dict[str, Any] = {
                 "vision_source_id": vision_source_id,
                 "age_label": "たった今",

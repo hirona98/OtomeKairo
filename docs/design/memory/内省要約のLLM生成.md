@@ -108,7 +108,10 @@ LLM に渡す入力は raw `events` ではなく、圧縮済みの `episodes` �
   "persona_context": {
     "initiative_baseline": {
       "level": "medium",
-      "summary_text": "自発介入は中庸で、具体的な前景変化があれば短く前へ出る。"
+      "summary_text": "自発発話は中庸で、具体的な前景変化があれば短く前へ出る。"
+    },
+    "reference_style": {
+      "user_natural_reference": "マスター"
     },
     "persona_prompt_excerpt": "必要以上に媚びず、相手を一人の人間としてまっすぐ扱う。"
   },

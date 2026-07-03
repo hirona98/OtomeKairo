@@ -7,7 +7,7 @@ LLM 補助処理の共通境界、source pack、出力、failure、inspection �
 
 ## 目的
 
-`wake` と定期起床では、runtime-only の `pending_intent_candidates` から期限内かつ due な候補を拾ったあと、どの候補を今の判断へ戻すかを決める必要がある。
+`wake` と定期思考では、runtime-only の `pending_intent_candidates` から期限内かつ due な候補を拾ったあと、どの候補を今の判断へ戻すかを決める必要がある。
 
 この選別は fixed logic の時刻順ではなく、`trigger_kind`、直近会話、`intent_summary`、`reason_summary`、現在の `drive_state` に照らした意味判断で行う。
 ただし、保留意図キュー全体を LLM 任せにはしない。
@@ -33,7 +33,7 @@ LLM には時刻の生活文脈要約だけを渡す。
 - eligible な保留意図候補群の最終選択
 - trigger ごとの差分を含む source pack 構築
 - LLM 入出力契約
-- wake と定期起床への選択結果の適用
+- wake と定期思考への選択結果の適用
 - 失敗時の扱いと inspection / audit への露出
 
 ## 対象外
@@ -42,7 +42,7 @@ LLM には時刻の生活文脈要約だけを渡す。
 
 - `pending_intent` 自体の生成契約
 - `pending_intent_candidates` の upsert / dedupe / expiry 管理
-- wake scheduler の interval 制御
+- background thinking scheduler の interval 制御
 - capability result の follow-up
 - `decision_generation` / `expression_generation`
 - 記憶更新と `turn consolidation`
@@ -62,7 +62,7 @@ LLM は候補の外側を増やさない。
 
 ## trigger ごとにコード側へ残す境界
 
-### `wake` / 定期起床
+### `wake` / 定期思考
 
 - `wake_policy` の due 判定
 - `memory_set_id` 一致
@@ -82,7 +82,7 @@ LLM は候補の外側を増やさない。
 
 この role を `input_interpretation` や `decision_generation` から分ける理由は次である。
 
-- 自発再介入の入口選別と、その後の本体判断を分離できる
+- 自発再評価の入口選別と、その後の本体判断を分離できる
 - wake 系 trigger の候補選びを回帰確認しやすい
 - pending 候補管理の deterministic 部分を service 側へ残したまま、意味的比較だけを差し替えられる
 
@@ -94,9 +94,9 @@ LLM に渡すのは runtime candidate の生オブジェクトではなく、req
 
 ```json
 {
-  "trigger_kind": "background_wake",
+  "trigger_kind": "background_thinking",
   "input_context": {
-    "source": "background_wake_scheduler",
+    "source": "background_thinking_scheduler",
     "drive_state_summary": [
       {
         "drive_kind": "follow_through",
@@ -182,7 +182,7 @@ user prompt では、trigger、入力文脈、直近会話、候補群を構造�
 
 ## trigger ごとの適用
 
-### `wake` / 定期起床
+### `wake` / 定期思考
 
 1. due をコードで確認する
 2. eligible 候補が無ければ LLM を呼ばず `wake_noop` にする

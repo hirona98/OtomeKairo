@@ -105,12 +105,38 @@ class LLMMockCapabilityMixin:
         else:
             summary_text = "現在の画像内容が見えており、主題となる内容と周辺の表示が読み取れる。"
 
+        change_state, change_basis, change_reason_summary = self._mock_visual_observation_change(
+            source_pack=source_pack,
+            summary_text=summary_text,
+        )
         payload = {
             "summary_text": summary_text,
             "confidence_hint": "medium",
+            "change_state": change_state,
+            "change_basis": change_basis,
+            "change_reason_summary": change_reason_summary,
         }
         validate_visual_observation_contract(payload)
         return payload
+
+    def _mock_visual_observation_change(
+        self,
+        *,
+        source_pack: dict[str, Any],
+        summary_text: str,
+    ) -> tuple[str, str, str]:
+        change_context = source_pack.get("change_context") if isinstance(source_pack, dict) else None
+        if not isinstance(change_context, dict):
+            return "first_seen", "no_previous_observation", "前回観測が無いため初回観測として扱う。"
+        prompted = change_context.get("last_prompted_observation_context")
+        if isinstance(prompted, dict) and prompted.get("summary_text") == summary_text:
+            return "same_as_recent_speech", "recent_speech_repetition", "直近発話に使った視覚観測と同じ内容。"
+        previous = change_context.get("previous_observation_context")
+        if not isinstance(previous, dict):
+            return "first_seen", "no_previous_observation", "前回観測が無いため初回観測として扱う。"
+        if previous.get("summary_text") == summary_text:
+            return "stable", "semantic_stability", "前回観測と意味上同じ内容。"
+        return "changed", "semantic_change", "前回観測から意味上変化している。"
 
     def _build_mock_vision_capture_request_input(
         self,

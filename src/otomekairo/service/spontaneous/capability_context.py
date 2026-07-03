@@ -137,6 +137,7 @@ class ServiceSpontaneousCapabilityContextMixin:
         observation_summary: dict[str, Any],
         input_text: str,
         capability_response: dict[str, Any],
+        visual_observation_change_context: dict[str, Any] | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any], str]:
         hook_name = self._capability_result_context_hook_name(capability_id)
         if hook_name == "vision_capture":
@@ -147,6 +148,7 @@ class ServiceSpontaneousCapabilityContextMixin:
                 observation_summary=observation_summary,
                 input_text=input_text,
                 capability_response=capability_response,
+                visual_observation_change_context=visual_observation_change_context,
             )
             input_text = self._build_capability_result_input_text(
                 client_context=client_context,
@@ -532,6 +534,7 @@ class ServiceSpontaneousCapabilityContextMixin:
         observation_summary: dict[str, Any],
         input_text: str,
         capability_response: dict[str, Any],
+        visual_observation_change_context: dict[str, Any] | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         images = self._normalize_visual_observation_images(
             capability_response.get("images", []),
@@ -545,6 +548,7 @@ class ServiceSpontaneousCapabilityContextMixin:
             observation_summary=observation_summary,
             input_text=input_text,
             images=images,
+            visual_observation_change_context=visual_observation_change_context,
         )
 
     def _build_capability_result_input_text(

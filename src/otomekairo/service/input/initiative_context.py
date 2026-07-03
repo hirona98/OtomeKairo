@@ -29,7 +29,7 @@ class ServiceInputInitiativeContextMixin:
         selected_candidate: dict[str, Any] | None,
         pending_intent_selection: dict[str, Any] | None,
     ) -> InitiativeContext | None:
-        if trigger_kind not in {"wake", "background_wake"}:
+        if trigger_kind not in {"wake", "background_thinking"}:
             return None
         drive_summaries = self._initiative_drive_summaries(drive_state_summary)
         pending_intent_summaries = self._initiative_pending_intent_summaries(selected_candidate)
@@ -51,23 +51,23 @@ class ServiceInputInitiativeContextMixin:
             world_state_summary=world_state_summary,
         )
         initiative_entry_summary = self._initiative_entry_summary(client_context)
-        intervention_state = self._initiative_intervention_state(
+        speech_timing_state = self._initiative_speech_timing_state(
             current_time=current_time,
             trigger_kind=trigger_kind,
             selected_candidate=selected_candidate,
         )
         capability_summary = self._initiative_capability_summary(capability_decision_view)
-        intervention_risk_summary = self._initiative_intervention_risk_summary(
+        speech_timing_summary = self._initiative_speech_timing_summary(
             initiative_baseline=initiative_baseline,
-            intervention_state=intervention_state,
+            speech_timing_state=speech_timing_state,
             ongoing_action_summary=ongoing_action_summary,
             capability_summary=capability_summary,
         )
         suppression_summary = self._initiative_suppression_summary(
             drive_summaries=drive_summaries,
             foreground_signal_summary=foreground_signal_summary,
-            intervention_state=intervention_state,
-            intervention_risk_summary=intervention_risk_summary,
+            speech_timing_state=speech_timing_state,
+            speech_timing_summary=speech_timing_summary,
         )
         candidate_families = self._initiative_candidate_families(
             trigger_kind=trigger_kind,
@@ -82,7 +82,7 @@ class ServiceInputInitiativeContextMixin:
             selected_candidate=selected_candidate,
             pending_intent_selection=pending_intent_selection,
             initiative_baseline=initiative_baseline,
-            intervention_state=intervention_state,
+            speech_timing_state=speech_timing_state,
             capability_summary=capability_summary,
         )
         selected_candidate_family = self._initiative_selected_candidate_family(candidate_families)
@@ -130,9 +130,10 @@ class ServiceInputInitiativeContextMixin:
             capability_summary=capability_summary,
             candidate_families=candidate_families,
             selected_candidate_family=selected_candidate_family,
-            intervention_state=intervention_state,
+            speech_timing_state=speech_timing_state,
             suppression_summary=suppression_summary,
-            intervention_risk_summary=intervention_risk_summary,
+            speech_timing_summary=speech_timing_summary,
+            speech_frequency_level=state["thinking_speech_level"],
         )
 
     def _initiative_status_refresh_world_state_summary(
@@ -142,7 +143,7 @@ class ServiceInputInitiativeContextMixin:
         world_state_trace: WorldStateTrace | None,
         trigger_kind: str,
     ) -> list[dict[str, Any]]:
-        if trigger_kind in {"wake", "background_wake"}:
+        if trigger_kind in {"wake", "background_thinking"}:
             previous = world_state_trace.previous_foreground_world_state if world_state_trace is not None else None
             return self._merge_foreground_world_state_for_reuse(foreground_world_state, previous)
         return foreground_world_state or []
@@ -157,14 +158,14 @@ class ServiceInputInitiativeContextMixin:
     ) -> str:
         _ = trigger_kind, client_context
         if isinstance(selected_candidate, dict):
-            return "自律判断の機会があり、保留中の候補を再評価する機会がある。"
+            return "自律判断の評価機会があり、保留候補をいま扱うか、保留を続けるか、見送るかを選ぶ。"
         if (
             isinstance(initiative_entry_summary, dict)
             and initiative_entry_summary.get("entry_kind") == "enter"
             and initiative_entry_summary.get("entry_basis") in INITIATIVE_ENTRY_ENTER_BASIS_VALUES
         ):
-            return "自律判断の入口が成立しており、外向きに進むかを見直す機会がある。"
-        return "自律判断の機会があり、前進可否を見直す機会がある。"
+            return "自律判断の評価対象が前景化しており、関わる、保留する、見送るのどれが自然かを見直す。"
+        return "自律判断の評価機会があり、関わる、保留する、見送るのどれが自然かを見直す。"
 
     def _initiative_entry_summary(self, client_context: dict[str, Any]) -> dict[str, Any] | None:
         entry_check = client_context.get("initiative_entry_check")
@@ -197,12 +198,12 @@ class ServiceInputInitiativeContextMixin:
 
     def _initiative_time_band_summary(self, *, part_of_day: str) -> str:
         if part_of_day == "morning":
-            return "朝の立ち上がり帯で、軽い前進か様子見かを決めたい時間帯。"
+            return "朝の立ち上がり帯で、軽い関わり、保留、見送りを比べたい時間帯。"
         if part_of_day == "daytime":
-            return "日中の活動帯で、前景理由があれば動きやすい時間帯。"
+            return "日中の活動帯で、前景理由と控える理由を比べて選びやすい時間帯。"
         if part_of_day == "evening":
-            return "夕方から夜への移行帯で、流れの整理や軽い声かけが自然な時間帯。"
-        return "夜間で、短く静かな声かけとして前へ出るかを見たい時間帯。"
+            return "夕方から夜への移行帯で、流れの整理、保留、見送りを比べたい時間帯。"
+        return "夜間で、静かな見送り、保留、短い関わりを慎重に比べたい時間帯。"
 
     def _initiative_foreground_signal_summary(
         self,
@@ -301,11 +302,11 @@ class ServiceInputInitiativeContextMixin:
         if level is None:
             return {}
         if level == "low":
-            summary_text = "自発介入は控えめ寄りで、前景理由が弱ければ見送る。"
+            summary_text = "自発発話は控えめ寄りで、前景理由が弱ければ見送る。"
         elif level == "high":
-            summary_text = "自発介入は強めで、前景理由が揃えば一歩前へ出る。"
+            summary_text = "自発発話は強めで、前景理由が揃うと関わる判断を取りやすい。"
         else:
-            summary_text = "自発介入は中庸で、具体的な前景変化があれば短く前へ出る。"
+            summary_text = "自発発話は中庸で、関わる、保留する、見送るを文脈で選ぶ。"
         return {
             "level": level,
             "summary_text": summary_text,
@@ -320,7 +321,7 @@ class ServiceInputInitiativeContextMixin:
         with self._runtime_state_lock:
             memory_job_in_progress = self._memory_postprocess_runtime_state.get("current_cycle_id") is not None
         return {
-            "wake_scheduler_active": self._background_wake_scheduler_active() and state["wake_policy"]["mode"] == "interval",
+            "background_thinking_scheduler_active": self._background_thinking_scheduler_active() and state["wake_policy"]["mode"] == "interval",
             "ongoing_action_exists": isinstance(ongoing_action_summary, dict),
             "memory_job_worker_active": self._background_memory_postprocess_worker_active(),
             "pending_memory_job_count": self.store.count_memory_postprocess_jobs(
@@ -343,15 +344,15 @@ class ServiceInputInitiativeContextMixin:
                 continue
             if not isinstance(text, str) or not text.strip():
                 continue
-                payload.append(
-                    {
-                        "role": role.strip(),
-                        "text": text.strip(),
-                    }
-                )
+            payload.append(
+                {
+                    "role": role.strip(),
+                    "text": text.strip(),
+                }
+            )
         return payload
 
-    def _initiative_intervention_state(
+    def _initiative_speech_timing_state(
         self,
         *,
         current_time: str,
@@ -359,7 +360,7 @@ class ServiceInputInitiativeContextMixin:
         selected_candidate: dict[str, Any] | None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
-            "background_trigger": trigger_kind == "background_wake",
+            "background_trigger": trigger_kind == "background_thinking",
         }
         if isinstance(selected_candidate, dict):
             dedupe_key = selected_candidate.get("dedupe_key")
@@ -533,22 +534,22 @@ class ServiceInputInitiativeContextMixin:
                 return signal
         return signals[0] if signals else None
 
-    def _initiative_intervention_risk_summary(
+    def _initiative_speech_timing_summary(
         self,
         *,
         initiative_baseline: dict[str, Any],
-        intervention_state: dict[str, Any],
+        speech_timing_state: dict[str, Any],
         ongoing_action_summary: dict[str, Any] | None,
         capability_summary: dict[str, Any],
     ) -> str | None:
         reasons: list[str] = []
         baseline_level = self._client_context_text(initiative_baseline.get("level"), limit=16)
         if baseline_level == "low":
-            reasons.append("initiative_baseline が low で、押し出しは控えめにしたい。")
-        if intervention_state.get("same_dedupe_recently_replied") is True:
-            reasons.append("同じ pending_intent 系統には最近 speech 済みで、連続介入は避けたい。")
+            reasons.append("initiative_baseline が low で、自発発話は控えめにしたい。")
+        if speech_timing_state.get("same_dedupe_recently_replied") is True:
+            reasons.append("同じ pending_intent 系統には最近 speech 済みで、同じ内容の連続発話を避けたい。")
         if isinstance(ongoing_action_summary, dict) and ongoing_action_summary.get("status") == "waiting_result":
-            reasons.append("ongoing_action が結果待ちで、重複介入は抑えたい。")
+            reasons.append("ongoing_action が結果待ちで、同じ流れの重複発話は抑えたい。")
         if int(capability_summary.get("available_count", 0)) == 0:
             reasons.append("現時点で使える capability が見当たらない。")
         if not reasons:
@@ -560,29 +561,27 @@ class ServiceInputInitiativeContextMixin:
         *,
         drive_summaries: list[dict[str, Any]],
         foreground_signal_summary: dict[str, Any],
-        intervention_state: dict[str, Any],
-        intervention_risk_summary: str | None,
+        speech_timing_state: dict[str, Any],
+        speech_timing_summary: str | None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {}
         visual_repetition = self._initiative_visual_repetition_summary(foreground_signal_summary)
         suppression_level = "low"
-        speech_ready_drives = self._initiative_speech_ready_drive_summaries(drive_summaries)
-        if intervention_state.get("same_dedupe_recently_replied") is True:
+        foreground_drives = self._initiative_foreground_drive_summaries(drive_summaries)
+        if speech_timing_state.get("same_dedupe_recently_replied") is True:
             suppression_level = "high"
-        elif visual_repetition.get("all_visual_observations_repeated") is True and not speech_ready_drives:
+        elif visual_repetition.get("same_as_recent_speech_present") is True and not foreground_drives:
             suppression_level = "high"
         payload["suppression_level"] = suppression_level
         reason_parts: list[str] = []
-        if intervention_risk_summary is not None:
-            reason_parts.append(intervention_risk_summary)
-        if visual_repetition.get("all_visual_observations_repeated") is True:
-            reason_parts.append("視覚観測は既に触れた内容または安定状態だけで、反復主題化を控える材料がある。")
-        elif visual_repetition.get("visual_repetition_present") is True:
-            reason_parts.append("一部の視覚観測に反復性があり、前へ出る理由との競合材料として扱う。")
+        if speech_timing_summary is not None:
+            reason_parts.append(speech_timing_summary)
+        if visual_repetition.get("same_as_recent_speech_present") is True:
+            reason_parts.append("視覚観測には直近で発話済みの内容があり、同じ内容の重複発話を抑える材料がある。")
         if reason_parts:
             payload["reason_summary"] = " / ".join(reason_parts)
         for key in ("background_trigger", "same_dedupe_recently_replied"):
-            value = intervention_state.get(key)
+            value = speech_timing_state.get(key)
             if isinstance(value, bool):
                 payload[key] = value
         payload.update(visual_repetition)
@@ -605,7 +604,7 @@ class ServiceInputInitiativeContextMixin:
         same_as_recent_speech_present = False
         for signal in visual_signals:
             change_state = signal.get("change_state")
-            if change_state in {"same_as_recent_speech", "stable"}:
+            if change_state == "same_as_recent_speech":
                 repeated_count += 1
             if change_state == "same_as_recent_speech" or signal.get("same_as_recent_speech") is True:
                 same_as_recent_speech_present = True

@@ -115,7 +115,7 @@ event type の分類軸は次に固定する。
 - server は `event_subscriptions` に `assistant_message` を宣言した client だけへ `assistant_message` を送る
 - `assistant_message.data.source_kind` は発話生成の起点を示し、event type を増やして起点ごとの発話通知を分けない
 - capability result follow-up の発話通知は `assistant_message` に `source_kind=capability_result`、`request_id`、`capability_id` を入れる
-- `wake / background_wake` の発話通知は `assistant_message` に `source_kind=wake / background_wake`、`trigger_kind` を入れる
+- `wake / background_thinking` の発話通知は `assistant_message` に `source_kind=wake / background_thinking`、`trigger_kind` を入れる
 
 `capability_result` は event type として使わない。capability result そのものは client が `/api/capability/result` へ HTTP POST する payload であり、event stream の発話通知ではない。
 `spontaneous_speech` は event type として使わない。自発発話も `assistant_message` に統一し、起点は `source_kind` で表す。
@@ -267,9 +267,9 @@ server -> client の代表例:
   "type": "assistant_message",
   "data": {
     "cycle_id": "cycle:...",
-    "source_kind": "background_wake",
-    "trigger_kind": "background_wake",
-    "system_text": "[background_wake]",
+    "source_kind": "background_thinking",
+    "trigger_kind": "background_thinking",
+    "system_text": "[background_thinking]",
     "message": "このあと 22 時の予定が近づいています。今の作業を切り上げる目安にしてください。"
   }
 }
@@ -291,8 +291,8 @@ server -> client の代表例:
 
 `vision.capture_request`、`camera.ptz_request`、`external.status_request`、`schedule.status_request`、`device.status_request`、`body.status_request`、`environment.status_request`、`location.status_request`、`social.status_request`、`mcp.call_tool_request` は capability 実行要求である。
 `assistant_message` は server が生成した assistant 発話を client へ表示させる通知である。
-`assistant_message.data.source_kind` は `capability_result / wake / background_wake` のいずれかであり、capability result follow-up の場合だけ `request_id / capability_id` を持つ。
-`wake / background_wake` の `assistant_message` は、同じ cycle の client context にある client が `assistant_message` を購読している場合はその client へ送る。
+`assistant_message.data.source_kind` は `capability_result / wake / background_thinking` のいずれかであり、capability result follow-up の場合だけ `request_id / capability_id` を持つ。
+`wake / background_thinking` の `assistant_message` は、同じ cycle の client context にある client が `assistant_message` を購読している場合はその client へ送る。
 同じ cycle の client context から決まらない場合、server は `assistant_message` を購読している接続中 client が 1 件だけのときだけその client へ送る。
 capability 実行要求と結果の対応は [実行連携.md](実行連携.md) を正とする。
 

@@ -401,7 +401,7 @@ class ServiceInputMixin(
         observation_summary: dict[str, Any] | None,
         client_context: dict[str, Any] | None = None,
     ) -> bool:
-        if trigger_kind not in {"wake", "background_wake", "capability_result"}:
+        if trigger_kind not in {"wake", "background_thinking", "capability_result"}:
             return False
         if self._observation_summary_is_vision_capture(observation_summary):
             return False
@@ -551,7 +551,7 @@ class ServiceInputMixin(
         return recent_turns[-RECALL_HINT_RECENT_TURN_LIMIT:]
 
     def _begin_user_response_cycle(self) -> None:
-        # ユーザー向け応答中は定期起床の外向き発話を止める。
+        # ユーザー向け応答中は定期思考の外向き発話を止める。
         with self._runtime_state_lock:
             count = self._wake_runtime_state.get("active_user_response_cycle_count")
             if not isinstance(count, int) or count < 0:
@@ -625,6 +625,7 @@ class ServiceInputMixin(
         display_name_value = value.get("display_name")
         display_name = self._clamp(display_name_value, limit=120) if isinstance(display_name_value, str) else None
         initiative_baseline = value.get("initiative_baseline")
+        reference_style = value.get("reference_style")
         prompt_text_value = value.get("persona_prompt_text")
         prompt_text = self._clamp(prompt_text_value, limit=240) if isinstance(prompt_text_value, str) else None
         payload: dict[str, Any] = {}
@@ -639,6 +640,12 @@ class ServiceInputMixin(
                     compact_baseline[key] = text
             if compact_baseline:
                 payload["initiative_baseline"] = compact_baseline
+        if isinstance(reference_style, dict):
+            user_natural_reference = reference_style.get("user_natural_reference")
+            if isinstance(user_natural_reference, str) and user_natural_reference.strip():
+                payload["reference_style"] = {
+                    "user_natural_reference": user_natural_reference.strip(),
+                }
         if prompt_text is not None:
             payload["persona_prompt_excerpt"] = prompt_text
         return payload

@@ -61,7 +61,7 @@ class ServiceInputTraceCompactMixin:
     def _trigger_compact_family(self, trigger_kind: str) -> str:
         if trigger_kind == "capability_result":
             return "capability_result_followup"
-        if trigger_kind in {"wake", "background_wake"}:
+        if trigger_kind in {"wake", "background_thinking"}:
             return "initiative"
         if trigger_kind == "user_message":
             return "conversation"
@@ -86,7 +86,7 @@ class ServiceInputTraceCompactMixin:
             payload["source_request_summary"] = self._compact_capability_request_summary(capability_request_summary)
             payload["observation_summary"] = compact_observation_summary
             return payload
-        if trigger_kind in {"wake", "background_wake"}:
+        if trigger_kind in {"wake", "background_thinking"}:
             payload.update(
                 self._compact_initiative_entry_summary(
                     initiative_context=initiative_context,
@@ -189,7 +189,7 @@ class ServiceInputTraceCompactMixin:
             runtime_state_summary = initiative_payload.get("runtime_state_summary")
             if isinstance(runtime_state_summary, dict):
                 payload["runtime_state_summary"] = {
-                    "wake_scheduler_active": runtime_state_summary.get("wake_scheduler_active"),
+                    "background_thinking_scheduler_active": runtime_state_summary.get("background_thinking_scheduler_active"),
                     "ongoing_action_exists": runtime_state_summary.get("ongoing_action_exists"),
                     "pending_memory_job_count": runtime_state_summary.get("pending_memory_job_count"),
                 }
@@ -208,11 +208,11 @@ class ServiceInputTraceCompactMixin:
             )
             if compact_world_state_summaries:
                 payload["world_state_summaries"] = compact_world_state_summaries
-            compact_intervention_state = self._compact_initiative_intervention_state(
-                initiative_payload.get("intervention_state")
+            compact_speech_timing_state = self._compact_initiative_speech_timing_state(
+                initiative_payload.get("speech_timing_state")
             )
-            if compact_intervention_state:
-                payload["intervention_state"] = compact_intervention_state
+            if compact_speech_timing_state:
+                payload["speech_timing_state"] = compact_speech_timing_state
             suppression_summary = initiative_payload.get("suppression_summary")
             if isinstance(suppression_summary, dict):
                 compact_suppression: dict[str, Any] = {}
@@ -239,9 +239,9 @@ class ServiceInputTraceCompactMixin:
                         compact_suppression[key] = value
                 if compact_suppression:
                     payload["suppression_summary"] = compact_suppression
-            intervention_risk_summary = initiative_payload.get("intervention_risk_summary")
-            if isinstance(intervention_risk_summary, str) and intervention_risk_summary.strip():
-                payload["intervention_risk_summary"] = self._clamp(intervention_risk_summary.strip(), limit=160)
+            speech_timing_summary = initiative_payload.get("speech_timing_summary")
+            if isinstance(speech_timing_summary, str) and speech_timing_summary.strip():
+                payload["speech_timing_summary"] = self._clamp(speech_timing_summary.strip(), limit=160)
         compact_pending_intent_selection = self._compact_pending_intent_selection_summary(
             pending_intent_selection
         )
@@ -354,12 +354,12 @@ class ServiceInputTraceCompactMixin:
             )
         return payload
 
-    def _compact_initiative_intervention_state(self, intervention_state: Any) -> dict[str, Any]:
+    def _compact_initiative_speech_timing_state(self, speech_timing_state: Any) -> dict[str, Any]:
         payload: dict[str, Any] = {}
-        if not isinstance(intervention_state, dict):
+        if not isinstance(speech_timing_state, dict):
             return payload
         for key in ("background_trigger", "same_dedupe_recently_replied"):
-            value = intervention_state.get(key)
+            value = speech_timing_state.get(key)
             if isinstance(value, bool):
                 payload[key] = value
         return payload

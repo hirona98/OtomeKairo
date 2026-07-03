@@ -98,7 +98,7 @@ class ServiceConfigInspectionMixin:
             visual_daily_in_progress = self._visual_daily_runtime_state.get("current_digest_id") is not None
         return {
             "connection_state": "ready",
-            "wake_scheduler_active": self._background_wake_scheduler_active() and state["wake_policy"]["mode"] == "interval",
+            "background_thinking_scheduler_active": self._background_thinking_scheduler_active() and state["wake_policy"]["mode"] == "interval",
             "autonomous_run_scheduler_active": self._background_autonomous_run_scheduler_active(),
             "ongoing_action_exists": ongoing_action is not None,
             "active_autonomous_run_count": len(
@@ -362,6 +362,7 @@ class ServiceConfigInspectionMixin:
             for runtime_key in (
                 "last_request_id",
                 "last_vision_source_id",
+                "last_source_kind",
                 "last_source_label",
                 "last_active_app",
                 "last_window_title",
@@ -371,6 +372,12 @@ class ServiceConfigInspectionMixin:
                 "same_observation_count",
                 "last_prompted_at",
                 "last_prompted_observation_signature",
+                "last_prompted_observation_summary",
+                "last_prompted_vision_source_id",
+                "last_prompted_source_kind",
+                "last_prompted_source_label",
+                "last_prompted_active_app",
+                "last_prompted_window_title",
             ):
                 value = runtime.get(runtime_key)
                 if value is not None:
@@ -585,9 +592,9 @@ class ServiceConfigInspectionMixin:
             return f"{delta_seconds // 60}分前"
         return f"{delta_seconds // 3600}時間前"
 
-    def _background_wake_scheduler_active(self) -> bool:
+    def _background_thinking_scheduler_active(self) -> bool:
         with self._runtime_state_lock:
-            return self._background_wake_thread is not None and self._background_wake_thread.is_alive()
+            return self._background_thinking_thread is not None and self._background_thinking_thread.is_alive()
 
     def _background_autonomous_run_scheduler_active(self) -> bool:
         with self._runtime_state_lock:

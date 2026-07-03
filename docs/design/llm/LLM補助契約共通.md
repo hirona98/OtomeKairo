@@ -50,6 +50,12 @@ JSON payload は `<<<OTOMEKAIRO_SOURCE_PACK>>>` や `<<<OTOMEKAIRO_JSON_PAYLOAD>
 `persona_context` は候補集合、観測事実、ユーザー発話、根拠 ID、scope、memory_type、state_type を上書きする入力ではない。
 `expression_addon` は `expression_generation` にだけ渡し、補助 role の `persona_context` には入れない。
 
+`persona_context.reference_style` は `user` 主体の表記境界を持つ。
+`schema_user_reference` は schema、enum、`sender`、`actor`、`scope`、`target_actor` で使う固定値 `user` である。
+`user_natural_reference` は `reason_summary`、`summary_text`、`outcome_text`、`label`、`target`、発話本文のような自然文で使う呼称である。
+LLM 補助 role は自然文の `user` 主体を `user_natural_reference` で表現する。
+schema 値や enum 値を自然呼称へ置き換えない。
+
 次を守る。
 
 - raw DB row をそのまま渡さない

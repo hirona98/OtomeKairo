@@ -114,7 +114,7 @@ mock 経路の smoke は次で実行する。
 .venv/bin/python scripts/run_long_smoke.py --profile smoke
 ```
 
-この profile は隔離データディレクトリでサーバを起動し、通常会話、定期起床、capability request / result follow-up、memory worker、vision capture、記憶と想起の代表ケースを確認する。
+この profile は隔離データディレクトリでサーバを起動し、通常会話、定期思考、capability request / result follow-up、memory worker、vision capture、記憶と想起の代表ケースを確認する。
 大きな変更前後に手動で実行する。
 
 実 LLM 用の API key を保存済みの `var/otomekairo/server_state.json` に設定している場合、隔離データディレクトリへ model / memory 設定だけをコピーして短い実 LLM smoke を実行する。

@@ -41,6 +41,16 @@ TIME_REFERENCE_VALUES = {
     "future",
     "persistent",
 }
+RECALL_HINT_REQUIRED_KEYS = (
+    "primary_recall_focus",
+    "secondary_recall_focuses",
+    "confidence",
+    "time_reference",
+    "focus_scopes",
+    "mentioned_entities",
+    "mentioned_topics",
+    "risk_flags",
+)
 WORLD_STATE_TYPE_VALUES = {
     "visual_context",
     "environment",
@@ -55,6 +65,19 @@ WORLD_STATE_HINT_VALUES = {
     "low",
     "medium",
     "high",
+}
+VISUAL_OBSERVATION_CHANGE_STATE_VALUES = {
+    "first_seen",
+    "changed",
+    "stable",
+    "same_as_recent_speech",
+}
+VISUAL_OBSERVATION_CHANGE_BASIS_VALUES = {
+    "no_previous_observation",
+    "semantic_change",
+    "semantic_stability",
+    "recent_speech_repetition",
+    "source_identity_changed",
 }
 WORLD_STATE_TTL_HINT_VALUES = {
     "short",
@@ -149,6 +172,13 @@ ANSWER_TARGET_ACTOR_VALUES = {
 }
 MAX_ANSWER_CONTRACT_REASON_CODES = 3
 MAX_ANSWER_CONTRACT_QUERY_TERMS = 5
+ANSWER_CONTRACT_REQUIRED_KEYS = (
+    "contract",
+    "reason_codes",
+    "boundary",
+    "target_actor",
+    "query_terms",
+)
 INTERNAL_IDENTIFIER_PATTERN = re.compile(
     r"\b(?:event|episode|memory_unit|cycle|reflection_run|retrieval_run|pending_intent|candidate|conflict):[A-Za-z0-9._-]+\b"
 )
@@ -362,7 +392,7 @@ def validate_answer_contract_contract(payload: dict[str, Any]) -> None:
     # 形状
     _validate_exact_keys(
         payload,
-        {"contract", "reason_codes", "boundary", "target_actor", "query_terms"},
+        set(ANSWER_CONTRACT_REQUIRED_KEYS),
         "AnswerContract",
     )
 
@@ -566,18 +596,7 @@ def _validate_world_state_scope_ref(value: Any, label: str) -> None:
 # recall_hint検証
 def validate_recall_hint_contract(payload: dict[str, Any]) -> None:
     # 必須キー群
-    required_keys = {
-        "primary_recall_focus",
-        "secondary_recall_focuses",
-        "confidence",
-        "time_reference",
-        "focus_scopes",
-        "mentioned_entities",
-        "mentioned_topics",
-        "risk_flags",
-    }
-    if set(payload.keys()) != required_keys:
-        raise LLMError("RecallHint のキーが契約と一致しません。")
+    _validate_exact_keys(payload, set(RECALL_HINT_REQUIRED_KEYS), "RecallHint")
 
     # 値検証
     if not isinstance(payload["primary_recall_focus"], str) or not payload["primary_recall_focus"].strip():
@@ -1145,7 +1164,11 @@ def validate_world_state_contract(payload: dict[str, Any]) -> None:
 
 def validate_visual_observation_contract(payload: dict[str, Any]) -> None:
     # 必須キー群
-    _validate_exact_keys(payload, {"summary_text", "confidence_hint"}, "VisualObservation")
+    _validate_exact_keys(
+        payload,
+        {"summary_text", "confidence_hint", "change_state", "change_basis", "change_reason_summary"},
+        "VisualObservation",
+    )
 
     # summary_text
     summary_text = payload["summary_text"]
@@ -1164,6 +1187,27 @@ def validate_visual_observation_contract(payload: dict[str, Any]) -> None:
     confidence_hint = payload["confidence_hint"]
     if confidence_hint not in WORLD_STATE_HINT_VALUES:
         raise LLMError("VisualObservation confidence_hint が不正です。")
+    # change_state
+    change_state = payload["change_state"]
+    if change_state not in VISUAL_OBSERVATION_CHANGE_STATE_VALUES:
+        raise LLMError("VisualObservation change_state が不正です。")
+    # change_basis
+    change_basis = payload["change_basis"]
+    if change_basis not in VISUAL_OBSERVATION_CHANGE_BASIS_VALUES:
+        raise LLMError("VisualObservation change_basis が不正です。")
+    # change_reason_summary
+    change_reason_summary = payload["change_reason_summary"]
+    if not isinstance(change_reason_summary, str):
+        raise LLMError("VisualObservation change_reason_summary は文字列である必要があります。")
+    normalized_change_reason = change_reason_summary.strip()
+    if not normalized_change_reason:
+        raise LLMError("VisualObservation change_reason_summary は空にできません。")
+    if "\n" in normalized_change_reason or "\r" in normalized_change_reason:
+        raise LLMError("VisualObservation change_reason_summary に改行を含めてはいけません。")
+    if len(normalized_change_reason) > 240:
+        raise LLMError("VisualObservation change_reason_summary が最大長を超えています。")
+    if INTERNAL_IDENTIFIER_PATTERN.search(normalized_change_reason) is not None:
+        raise LLMError("VisualObservation change_reason_summary に内部識別子を含めてはいけません。")
 
 
 def _recall_pack_candidate_refs_by_section(source_pack: dict[str, Any]) -> dict[str, set[str]]:

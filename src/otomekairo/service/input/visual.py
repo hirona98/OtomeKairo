@@ -59,6 +59,7 @@ class ServiceInputVisualMixin:
         observation_summary: dict[str, Any],
         input_text: str,
         images: list[str],
+        visual_observation_change_context: dict[str, Any] | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         if not images:
             return client_context, observation_summary
@@ -74,6 +75,7 @@ class ServiceInputVisualMixin:
             client_context=client_context,
             observation_summary=observation_summary,
             persona_context=persona_context,
+            visual_observation_change_context=visual_observation_change_context,
         )
 
         # 実行
@@ -91,6 +93,9 @@ class ServiceInputVisualMixin:
         # 反映
         visual_summary_text = str(payload["summary_text"]).strip()
         visual_confidence_hint = str(payload["confidence_hint"]).strip()
+        change_state = str(payload["change_state"]).strip()
+        change_basis = str(payload["change_basis"]).strip()
+        change_reason_summary = str(payload["change_reason_summary"]).strip()
         enriched_client_context = {
             **client_context,
             "image_summary_text": visual_summary_text,
@@ -101,6 +106,9 @@ class ServiceInputVisualMixin:
             "image_interpreted": True,
             "visual_summary_text": visual_summary_text,
             "visual_confidence_hint": visual_confidence_hint,
+            "change_state": change_state,
+            "change_basis": change_basis,
+            "change_reason_summary": change_reason_summary,
         }
         capability_id = enriched_observation_summary.get("capability_id")
         readiness_digest = (
@@ -121,8 +129,9 @@ class ServiceInputVisualMixin:
         client_context: dict[str, Any],
         observation_summary: dict[str, Any],
         persona_context: Any,
+        visual_observation_change_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "trigger_kind": trigger_kind,
             "persona_context": persona_context.to_prompt_payload(),
             "image_input_kind": self._visual_observation_input_kind(
@@ -138,6 +147,9 @@ class ServiceInputVisualMixin:
             "observation_summary": self._build_visual_observation_observation_summary(observation_summary),
             "current_input_summary": input_text.strip(),
         }
+        if isinstance(visual_observation_change_context, dict) and visual_observation_change_context:
+            payload["change_context"] = visual_observation_change_context
+        return payload
 
     def _visual_observation_input_kind(
         self,
@@ -274,6 +286,10 @@ class ServiceInputVisualMixin:
             "visual_summary_text": summary_text,
         }
         for key in ("image_count", "visual_confidence_hint", "vision_source_id", "source_kind", "source_label"):
+            value = observation_summary.get(key)
+            if value is not None:
+                payload[key] = value
+        for key in ("change_state", "change_basis", "change_reason_summary"):
             value = observation_summary.get(key)
             if value is not None:
                 payload[key] = value
