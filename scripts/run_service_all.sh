@@ -23,6 +23,7 @@ CONNECTOR_SERVER_URL="${OTOMEKAIRO_SERVER_URL:-https://127.0.0.1:${SERVER_PORT}}
 SERVER_PID=""
 TAPO_PID=""
 MCP_PID=""
+CHILD_PIDS=()
 
 require_executable() {
   local path="$1"
@@ -77,6 +78,40 @@ while True:
 PY
 }
 
+connector_runtime_config_ready() {
+  local label="$1"
+  local connector_kind="$2"
+  local default_client_id="$3"
+  local config_file="$4"
+  local config_args=()
+
+  if [[ -f "${config_file}" ]]; then
+    config_args=(--config "${config_file}")
+  fi
+
+  set +e
+  "${SERVER_VENV_DIR}/bin/python" "${SCRIPT_DIR}/connector_runtime_config_ready.py" \
+    --connector-kind "${connector_kind}" \
+    --default-client-id "${default_client_id}" \
+    "${config_args[@]}"
+  local status="$?"
+  set -e
+
+  case "${status}" in
+    0)
+      return 0
+      ;;
+    10)
+      echo "skipping ${label} connector: no enabled runtime config" >&2
+      return 1
+      ;;
+    *)
+      echo "${label} connector runtime config preflight failed: status=${status}" >&2
+      exit "${status}"
+      ;;
+  esac
+}
+
 trap 'cleanup 143' INT TERM
 trap 'cleanup $?' EXIT
 
@@ -116,16 +151,24 @@ if [[ -f "${MCP_CONFIG_FILE}" ]]; then
   mcp_args=(--config "${MCP_CONFIG_FILE}")
 fi
 
-echo "starting Tapo C220 connector" >&2
-"${TAPO_VENV_DIR}/bin/python" -m otomekairo_tapo_c220_connector "${tapo_args[@]}" &
-TAPO_PID="$!"
+if connector_runtime_config_ready "Tapo C220" "tapo_c220" "tapo-c220-connector-main" "${TAPO_CONFIG_FILE}"; then
+  echo "starting Tapo C220 connector" >&2
+  "${TAPO_VENV_DIR}/bin/python" -m otomekairo_tapo_c220_connector "${tapo_args[@]}" &
+  TAPO_PID="$!"
+  CHILD_PIDS+=("${TAPO_PID}")
+fi
 
-echo "starting MCP client connector" >&2
-"${MCP_VENV_DIR}/bin/python" -m otomekairo_mcp_client_connector "${mcp_args[@]}" &
-MCP_PID="$!"
+if connector_runtime_config_ready "MCP client" "mcp_client" "mcp-client-connector-main" "${MCP_CONFIG_FILE}"; then
+  echo "starting MCP client connector" >&2
+  "${MCP_VENV_DIR}/bin/python" -m otomekairo_mcp_client_connector "${mcp_args[@]}" &
+  MCP_PID="$!"
+  CHILD_PIDS+=("${MCP_PID}")
+fi
+
+CHILD_PIDS+=("${SERVER_PID}")
 
 set +e
-wait -n "${SERVER_PID}" "${TAPO_PID}" "${MCP_PID}"
+wait -n "${CHILD_PIDS[@]}"
 status="$?"
 set -e
 echo "OtomeKairo child process exited: status=${status}" >&2

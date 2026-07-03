@@ -12,15 +12,14 @@ bootstrap、対話入力、API起床、観測能力、設定、inspection、even
 設計判断は `docs/` を正とする。
 現行実装の状態は `src/` と smoke 結果を正とする。
 
-## セットアップ
+## 開発用セットアップと実行
 
 ```bash
 ./scripts/setup_venv.sh
 ```
 
 このスクリプトは `.venv` を作成し、`pyproject.toml` に定義した依存関係をインストールする。
-
-## 実行
+開発環境で `./scripts/run_dev_server.sh` を使う場合は、このセットアップを先に実行する。
 
 ```bash
 ./scripts/run_dev_server.sh
@@ -42,6 +41,8 @@ bootstrap、対話入力、API起床、観測能力、設定、inspection、even
 
 専用 PC で常時起動する場合は、repository を `/opt/OtomeKairo` に置き、単一の systemd service として起動する。
 この構成では OtomeKairo server、Tapo C220 connector、MCP client connector を 1 つの service lifecycle でまとめて扱う。
+daemon 用の初回セットアップでは `./scripts/setup_venv.sh` を別途実行しない。
+`./scripts/prepare_service_env.sh` が server 用 `./scripts/setup_venv.sh` を内部で実行し、そのうえで connector 用 `.venv`、`var/otomekairo/`、TLS 証明書まで準備する。
 
 ```bash
 sudo mkdir -p /opt
