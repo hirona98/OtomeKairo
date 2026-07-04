@@ -3,6 +3,7 @@ from __future__ import annotations
 import errno
 import json
 import ssl
+from importlib import resources
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
@@ -32,6 +33,13 @@ SUPPRESSED_HTTP_LOG_EXACT_PATHS = {
     "/api/capability/result",
 }
 SUPPRESSED_HTTP_LOG_PATH_PREFIXES = ("/api/inspection",)
+WEB_STATIC_PACKAGE = "otomekairo.web.static"
+WEB_STATIC_FILES = {
+    "/ui/": ("index.html", "text/html; charset=utf-8", "no-store"),
+    "/ui/index.html": ("index.html", "text/html; charset=utf-8", "no-store"),
+    "/ui/app.js": ("app.js", "text/javascript; charset=utf-8", "max-age=60"),
+    "/ui/styles.css": ("styles.css", "text/css; charset=utf-8", "max-age=60"),
+}
 
 
 # クライアント切断
@@ -83,6 +91,20 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
             token = self._bearer_token()
             if self._should_log_http_path(parsed.path):
                 debug_log("HTTP", f"{method} {parsed.path} begin query_keys={sorted(query)} auth={bool(token)}", level="DEBUG")
+
+            # ブラウザUI
+            if method == "GET" and parsed.path == "/":
+                self._redirect("/ui/")
+                return
+            if method == "GET" and parsed.path == "/ui":
+                self._redirect("/ui/")
+                return
+            if parsed.path.startswith("/ui/api/"):
+                self._handle_web_ui_api(method, parsed.path)
+                return
+            if method == "GET" and parsed.path.startswith("/ui"):
+                self._handle_web_static(parsed.path)
+                return
 
             # 起動時ルート
             if method == "GET" and parsed.path == "/api/bootstrap/probe":
@@ -495,6 +517,114 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
         if not authorization.startswith("Bearer "):
             return None
         return authorization.removeprefix("Bearer ").strip()
+
+    # ブラウザUI補助
+    def _redirect(self, location: str) -> None:
+        try:
+            self.send_response(HTTPStatus.FOUND)
+            self.send_header("Location", location)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+        except Exception as exc:  # noqa: BLE001
+            if self._is_client_disconnect(exc):
+                self.close_connection = True
+                raise ClientDisconnectedError(str(exc)) from exc
+            raise
+        debug_log("HTTP", f"{self.command} {urlparse(self.path).path} -> {HTTPStatus.FOUND}")
+
+    def _handle_web_static(self, path: str) -> None:
+        static_file = WEB_STATIC_FILES.get(path)
+        if static_file is None:
+            self._write_static_not_found()
+            return
+
+        file_name, content_type, cache_control = static_file
+        try:
+            body = resources.files(WEB_STATIC_PACKAGE).joinpath(file_name).read_bytes()
+        except FileNotFoundError:
+            self._write_static_not_found()
+            return
+
+        self._write_static_response(
+            status=HTTPStatus.OK,
+            body=body,
+            content_type=content_type,
+            cache_control=cache_control,
+        )
+
+    def _write_static_not_found(self) -> None:
+        self._write_static_response(
+            status=HTTPStatus.NOT_FOUND,
+            body=b"Not Found",
+            content_type="text/plain; charset=utf-8",
+            cache_control="no-store",
+        )
+
+    def _write_static_response(
+        self,
+        *,
+        status: HTTPStatus,
+        body: bytes,
+        content_type: str,
+        cache_control: str,
+    ) -> None:
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Cache-Control", cache_control)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except Exception as exc:  # noqa: BLE001
+            if self._is_client_disconnect(exc):
+                self.close_connection = True
+                raise ClientDisconnectedError(str(exc)) from exc
+            raise
+        debug_log("HTTP", f"{self.command} {urlparse(self.path).path} -> {status}")
+
+    def _handle_web_ui_api(self, method: str, path: str) -> None:
+        token = self._web_ui_console_token()
+
+        if method == "GET" and path == "/ui/api/bootstrap/server-identity":
+            self._write_success(HTTPStatus.OK, self.server.service.read_server_identity())
+            return
+        if method == "GET" and path == "/ui/api/status":
+            self._write_success(HTTPStatus.OK, self.server.service.get_status(token))
+            return
+        if method == "GET" and path == "/ui/api/config/editor-state":
+            self._write_success(HTTPStatus.OK, self.server.service.get_editor_state(token))
+            return
+        if method == "PUT" and path == "/ui/api/config/editor-state":
+            payload = self._read_json_body()
+            self._write_success(HTTPStatus.OK, self.server.service.replace_editor_state(token, payload))
+            return
+        if method == "GET" and path == "/ui/api/config/camera-sources/editor-state":
+            self._write_success(HTTPStatus.OK, self.server.service.get_camera_sources_editor_state(token))
+            return
+        if method == "PUT" and path == "/ui/api/config/camera-sources/editor-state":
+            payload = self._read_json_body()
+            self._write_success(HTTPStatus.OK, self.server.service.replace_camera_sources_editor_state(token, payload))
+            return
+        if method == "GET" and path == "/ui/api/config/mcp-servers/editor-state":
+            self._write_success(HTTPStatus.OK, self.server.service.get_mcp_servers_editor_state(token))
+            return
+        if method == "PUT" and path == "/ui/api/config/mcp-servers/editor-state":
+            payload = self._read_json_body()
+            self._write_success(HTTPStatus.OK, self.server.service.replace_mcp_servers_editor_state(token, payload))
+            return
+
+        raise ServiceError(404, "route_not_found", "The requested route does not exist.")
+
+    def _web_ui_console_token(self) -> str:
+        state = self.server.service.store.read_state()
+        token = state.get("console_access_token")
+        if isinstance(token, str) and token:
+            return token
+
+        state["console_access_token"] = self.server.service._new_console_token()
+        self.server.service.store.write_state(state)
+        debug_log("Auth", "web_ui console token initialized")
+        return state["console_access_token"]
 
     # レスポンス補助
     def _write_success(self, status: int, data: dict) -> None:

@@ -37,6 +37,14 @@ bootstrap、対話入力、API起床、観測能力、設定、inspection、even
 デバッグログは `var/otomekairo/server.log` に保存する。
 ログは既定で 5MiB を超えるとローテーションし、`server.log` 本体と 3 世代を合わせて最大約 20MiB 保持する。
 
+ブラウザ設定 UI は同じ HTTPS サーバから配信する。
+開発環境では次へアクセスする。
+ブラウザ設定 UI は token 入力なしで同じサーバの設定 API を呼び出す。
+
+```text
+https://127.0.0.1:55601/ui/
+```
+
 ## daemon 実行
 
 専用 PC で常時起動する場合は、repository を `/opt/OtomeKairo` に置き、単一の systemd service として起動する。
@@ -61,6 +69,13 @@ sudo systemctl enable --now otomekairo
 https://<このPCのIPアドレス>:55601
 ```
 
+ブラウザ設定 UI は次で開く。
+ブラウザ設定 UI は token 入力なしで同じサーバの設定 API を呼び出す。
+
+```text
+https://<このPCのIPアドレス>:55601/ui/
+```
+
 操作は通常の systemd コマンドを使う。
 
 ```bash
@@ -81,13 +96,13 @@ sudo systemctl restart otomekairo
 
 Tapo C220 connector と MCP client connector は起動時に OtomeKairo server から runtime config を取得する。
 camera source または MCP server が未登録の場合、service 全体を起動失敗として扱う。
-connector を有効にする前に、CocoroConsole または設定 API で camera source と MCP server を登録する。
+connector を有効にする前に、ブラウザ設定 UI、CocoroConsole、設定 API のいずれかで camera source と MCP server を登録する。
 初回登録がまだの場合は、daemon 有効化前に `OTOMEKAIRO_HOST=0.0.0.0 ./scripts/run_dev_server.sh` で server だけを起動して設定する。
 
 ## LLM 接続
 
 生成系モデルは `model_presets.roles.*`、埋め込みモデルは `memory_sets.embedding` で管理する。
-通常は `CocoroConsole` の設定画面から編集する。
+通常はブラウザ設定 UI または `CocoroConsole` の設定画面から編集する。
 
 `model` が `mock` で始まるときは、内蔵の開発用モック経路を使う。
 それ以外の生成系 role は LiteLLM を通して呼び出す。

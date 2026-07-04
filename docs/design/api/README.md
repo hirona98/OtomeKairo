@@ -35,6 +35,15 @@ API 仕様は次のように分ける。
   - capability binding と HTTP / WebSocket 通信仕様
   - capability state 操作
 
+## ブラウザUI配信面
+
+`GET /ui/` とその静的 asset は、同一 HTTPS server から配信するブラウザ設定 UI である。
+`/ui/` は API wire 契約の正本ではなく、既存 `/api/...` endpoint を呼び出す client 実装として扱う。
+`GET /` は `/ui/` へリダイレクトする。
+`/ui/api/...` はブラウザ設定 UI 専用の同一 server 内部呼び出し面であり、外部接点向け API として扱わない。
+ブラウザ設定 UI は `/ui/api/...` を通じて既存設定操作を呼び出し、画面上で `console_access_token` の入力を要求しない。
+`/ui/` と `/ui/api/...` の追加は `/api/...` の path、method、認証、request / response 形式を変更しない。
+
 ## 更新ルール
 
 API を実装または変更する場合は、少なくとも次を同じ変更内で更新する。

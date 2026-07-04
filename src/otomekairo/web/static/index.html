@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>OtomeKairo 設定</title>
+    <link rel="stylesheet" href="/ui/styles.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>OtomeKairo 設定</h1>
+        <p id="server-summary">接続確認中</p>
+      </div>
+      <div class="status" id="connection-status">未接続</div>
+    </header>
+
+    <main class="layout">
+      <section class="panel" id="auth-panel">
+        <div class="panel-heading">
+          <h2>接続</h2>
+          <button type="button" id="reload-identity">再確認</button>
+        </div>
+        <div id="bootstrap-actions" class="stack">同一サーバの設定APIへ接続します。</div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <h2>現在状態</h2>
+          <button type="button" id="load-status">読み込み</button>
+        </div>
+        <dl class="summary-grid" id="status-summary"></dl>
+      </section>
+
+      <section class="panel editor-panel">
+        <div class="panel-heading">
+          <h2>基本設定</h2>
+          <div class="button-row">
+            <button type="button" data-load="editor">読み込み</button>
+            <button type="button" data-save="editor">保存</button>
+          </div>
+        </div>
+        <textarea id="editor-state" spellcheck="false"></textarea>
+      </section>
+
+      <section class="panel editor-panel">
+        <div class="panel-heading">
+          <h2>Camera Source</h2>
+          <div class="button-row">
+            <button type="button" data-load="camera">読み込み</button>
+            <button type="button" data-save="camera">保存</button>
+          </div>
+        </div>
+        <textarea id="camera-state" spellcheck="false"></textarea>
+      </section>
+
+      <section class="panel editor-panel">
+        <div class="panel-heading">
+          <h2>MCP Server</h2>
+          <div class="button-row">
+            <button type="button" data-load="mcp">読み込み</button>
+            <button type="button" data-save="mcp">保存</button>
+          </div>
+        </div>
+        <textarea id="mcp-state" spellcheck="false"></textarea>
+      </section>
+    </main>
+
+    <div id="notice" class="notice" hidden></div>
+    <script src="/ui/app.js" defer></script>
+  </body>
+</html>
