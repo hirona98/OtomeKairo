@@ -241,6 +241,7 @@ async function sendMessage(event) {
   clearAttachment();
   state.sending = true;
   element("send-message").disabled = true;
+  setStatus("状態: 対話入力処理中", "processing");
   try {
     const result = await apiRequest("/ui/api/conversation", {
       method: "POST",
@@ -258,6 +259,7 @@ async function sendMessage(event) {
     addMessage(rendered.kind, rendered.text);
     await loadStatus({ silent: true });
   } catch (error) {
+    setStatus("送信失敗", "error");
     addMessage("system", error.message);
     showNotice(error.message, true);
   } finally {
@@ -307,7 +309,6 @@ function closeSettings() {
 }
 
 async function loadSettingsDrafts() {
-  element("settings-status").textContent = "読み込み中";
   try {
     const [editor, camera, mcp] = await Promise.all([
       apiRequest("/ui/api/config/editor-state"),
@@ -323,9 +324,7 @@ async function loadSettingsDrafts() {
     state.selectedCameraId = state.camera.camera_sources[0]?.vision_source_id || "";
     state.selectedMcpId = state.mcp.mcp_servers[0]?.mcp_server_id || "";
     renderSettings();
-    element("settings-status").textContent = "読み込み済み";
   } catch (error) {
-    element("settings-status").textContent = "読み込み失敗";
     showNotice(error.message, true);
   }
 }

@@ -358,6 +358,10 @@ input[readonly] {
   color: var(--ok);
 }
 
+.status.processing {
+  color: var(--accent);
+}
+
 .status.error {
   color: var(--danger);
 }
@@ -395,24 +399,24 @@ input[readonly] {
   justify-content: space-between;
   gap: var(--space-4);
   padding: 10px 12px;
-  border-bottom: 1px solid var(--line);
 }
 
 .settings-header .icon-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
   border-color: var(--line);
   background: #ffffff;
   color: var(--text);
+  font-size: 18px;
+  line-height: 0;
+  padding-bottom: 2px;
 }
 
 .settings-header h2 {
   font-size: var(--heading-size);
   line-height: 1.15;
-}
-
-#settings-status {
-  margin-top: 2px;
-  color: var(--muted);
-  font-size: 11px;
 }
 
 .settings-tabs {
@@ -426,6 +430,7 @@ input[readonly] {
   min-width: 76px;
   min-height: 34px;
   border: 0;
+  border-top: 1px solid var(--line);
   border-right: 1px solid var(--line);
   border-radius: 0;
   background: #f8fafc;

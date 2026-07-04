@@ -61,7 +61,7 @@ class WebUiStaticTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("text/html", headers["Content-Type"])
         html = body.decode("utf-8")
-        self.assertIn("<title>OtomeKairo</title>", html)
+        self.assertIn("<title>CocoroAI</title>", html)
         self.assertIn("チャット", html)
         self.assertIn("人格設定", html)
         self.assertIn("システム", html)
