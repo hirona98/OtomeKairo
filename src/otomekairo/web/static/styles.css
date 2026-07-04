@@ -354,18 +354,6 @@ input[readonly] {
   color: var(--muted);
 }
 
-.status.ready {
-  color: var(--ok);
-}
-
-.status.processing {
-  color: var(--accent);
-}
-
-.status.error {
-  color: var(--danger);
-}
-
 .settings-backdrop {
   position: fixed;
   inset: 0;

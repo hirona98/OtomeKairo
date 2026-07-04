@@ -163,7 +163,7 @@ function formatEnv(value) {
 
 async function loadIdentity() {
   try {
-    setStatus("接続済み", "ready");
+    setStatus("接続済み");
   } catch (error) {
     setStatus("接続失敗", "error");
     showNotice(error.message, true);
@@ -174,7 +174,7 @@ async function loadStatus({ silent = false } = {}) {
   try {
     const data = await apiRequest("/ui/api/status");
     const runtime = data.runtime_summary || {};
-    setStatus(runtime.connection_state === "ready" ? "接続済み" : String(runtime.connection_state || "接続中"), "ready");
+    setStatus(runtime.connection_state === "ready" ? "接続済み" : String(runtime.connection_state || "接続中"));
     if (!silent) {
       showNotice("現在状態を読み込みました。");
     }
