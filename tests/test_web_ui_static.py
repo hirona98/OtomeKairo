@@ -77,6 +77,13 @@ class WebUiStaticTests(unittest.TestCase):
         self.assertIn(b"/ui/api/status", js_body)
         self.assertIn(b"/ui/api/conversation", js_body)
         self.assertIn(b"const images = state.attachment ? [state.attachment.data] : [];", js_body)
+        self.assertIn(b"state.editor.current.selected_persona_id = state.selectedPersonaId;", js_body)
+        self.assertIn(b"state.editor.current.selected_memory_set_id = state.selectedMemorySetId;", js_body)
+        self.assertIn(b"state.editor.current.selected_model_preset_id = state.selectedModelPresetId;", js_body)
+        save_settings_body = js_body[
+            js_body.index(b"async function saveSettings") : js_body.index(b"function renderSettings")
+        ]
+        self.assertNotIn(b"Promise.all", save_settings_body)
         self.assertNotIn(b"{ data: state.attachment.data }", js_body)
         self.assertNotIn(b"Authorization", js_body)
         self.assertNotIn(b"localStorage", js_body)
@@ -111,6 +118,57 @@ class WebUiStaticTests(unittest.TestCase):
         self.assertTrue(token.startswith("tok_"))
         self.assertEqual(status, 200)
         self.assertTrue(payload["ok"])
+
+    def test_web_ui_sequential_settings_save_keeps_editor_changes_after_capability_saves(self) -> None:
+        editor_status, _, editor_body = self.request("GET", "/ui/api/config/editor-state")
+        camera_status, _, camera_body = self.request("GET", "/ui/api/config/camera-sources/editor-state")
+        mcp_status, _, mcp_body = self.request("GET", "/ui/api/config/mcp-servers/editor-state")
+        editor_payload = json.loads(editor_body.decode("utf-8"))["data"]
+        camera_payload = json.loads(camera_body.decode("utf-8"))["data"]
+        mcp_payload = json.loads(mcp_body.decode("utf-8"))["data"]
+        expected_display_name = "model preset save regression"
+
+        self.assertEqual(editor_status, 200)
+        self.assertEqual(camera_status, 200)
+        self.assertEqual(mcp_status, 200)
+
+        for model_preset in editor_payload["model_presets"]:
+            if model_preset["model_preset_id"] == editor_payload["current"]["selected_model_preset_id"]:
+                model_preset["display_name"] = expected_display_name
+                break
+        else:
+            self.fail("selected model preset was not present in editor-state")
+
+        self.request(
+            "PUT",
+            "/ui/api/config/editor-state",
+            body=json.dumps(editor_payload),
+            headers={"Content-Type": "application/json"},
+        )
+        self.request(
+            "PUT",
+            "/ui/api/config/camera-sources/editor-state",
+            body=json.dumps(camera_payload),
+            headers={"Content-Type": "application/json"},
+        )
+        self.request(
+            "PUT",
+            "/ui/api/config/mcp-servers/editor-state",
+            body=json.dumps(mcp_payload),
+            headers={"Content-Type": "application/json"},
+        )
+
+        status, _, body = self.request("GET", "/ui/api/config/editor-state")
+        reloaded_payload = json.loads(body.decode("utf-8"))["data"]
+        selected_model_preset_id = reloaded_payload["current"]["selected_model_preset_id"]
+        selected_model_preset = next(
+            model_preset
+            for model_preset in reloaded_payload["model_presets"]
+            if model_preset["model_preset_id"] == selected_model_preset_id
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(selected_model_preset["display_name"], expected_display_name)
 
     def test_web_ui_conversation_uses_server_token_without_browser_token(self) -> None:
         captured = {}

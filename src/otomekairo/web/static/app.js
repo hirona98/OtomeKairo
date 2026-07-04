@@ -332,20 +332,18 @@ async function loadSettingsDrafts() {
 async function saveSettings({ closeAfterSave = false } = {}) {
   try {
     syncAllForms();
-    const [editor, camera, mcp] = await Promise.all([
-      apiRequest("/ui/api/config/editor-state", {
-        method: "PUT",
-        body: JSON.stringify(state.editor),
-      }),
-      apiRequest("/ui/api/config/camera-sources/editor-state", {
-        method: "PUT",
-        body: JSON.stringify(state.camera),
-      }),
-      apiRequest("/ui/api/config/mcp-servers/editor-state", {
-        method: "PUT",
-        body: JSON.stringify(state.mcp),
-      }),
-    ]);
+    const editor = await apiRequest("/ui/api/config/editor-state", {
+      method: "PUT",
+      body: JSON.stringify(state.editor),
+    });
+    const camera = await apiRequest("/ui/api/config/camera-sources/editor-state", {
+      method: "PUT",
+      body: JSON.stringify(state.camera),
+    });
+    const mcp = await apiRequest("/ui/api/config/mcp-servers/editor-state", {
+      method: "PUT",
+      body: JSON.stringify(state.mcp),
+    });
     state.editor = clone(editor);
     state.camera = clone(camera);
     state.mcp = clone(mcp);
@@ -378,6 +376,9 @@ function renderCurrent() {
 }
 
 function syncCurrent() {
+  state.editor.current.selected_persona_id = state.selectedPersonaId;
+  state.editor.current.selected_memory_set_id = state.selectedMemorySetId;
+  state.editor.current.selected_model_preset_id = state.selectedModelPresetId;
   state.editor.current.thinking_speech_level = intValue("current-thinking-level", 5);
   const observations = state.editor.current.wake_policy?.observations;
   state.editor.current.wake_policy = element("current-wake-enabled").checked
