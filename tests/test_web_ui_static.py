@@ -60,7 +60,12 @@ class WebUiStaticTests(unittest.TestCase):
 
         self.assertEqual(status, 200)
         self.assertIn("text/html", headers["Content-Type"])
-        self.assertIn("OtomeKairo 設定", body.decode("utf-8"))
+        html = body.decode("utf-8")
+        self.assertIn("<title>OtomeKairo</title>", html)
+        self.assertIn("チャット", html)
+        self.assertIn("人格設定", html)
+        self.assertIn("システム", html)
+        self.assertIn("判断機会ポリシー", html)
         self.assertEqual(headers["Cache-Control"], "no-store")
 
     def test_web_ui_assets_are_served_without_token(self) -> None:
@@ -70,9 +75,13 @@ class WebUiStaticTests(unittest.TestCase):
         self.assertEqual(js_status, 200)
         self.assertIn("text/javascript", js_headers["Content-Type"])
         self.assertIn(b"/ui/api/status", js_body)
+        self.assertIn(b"/ui/api/conversation", js_body)
+        self.assertNotIn(b"Authorization", js_body)
+        self.assertNotIn(b"localStorage", js_body)
         self.assertEqual(css_status, 200)
         self.assertIn("text/css", css_headers["Content-Type"])
         self.assertIn(b".topbar", css_body)
+        self.assertIn(b"#4873cf", css_body)
 
     def test_web_ui_api_uses_server_token_without_browser_token(self) -> None:
         status, headers, body = self.request("GET", "/ui/api/status")
@@ -100,6 +109,35 @@ class WebUiStaticTests(unittest.TestCase):
         self.assertTrue(token.startswith("tok_"))
         self.assertEqual(status, 200)
         self.assertTrue(payload["ok"])
+
+    def test_web_ui_conversation_uses_server_token_without_browser_token(self) -> None:
+        captured = {}
+
+        def handle_conversation(token: str | None, payload: dict) -> dict:
+            captured["token"] = token
+            captured["payload"] = payload
+            return {
+                "result_kind": "speech",
+                "speech": {"text": "応答しました。"},
+            }
+
+        self.service.handle_conversation = handle_conversation
+
+        status, headers, body = self.request(
+            "POST",
+            "/ui/api/conversation",
+            body=json.dumps({"text": "こんにちは", "client_context": {"source": "test"}}),
+            headers={"Content-Type": "application/json"},
+        )
+        payload = json.loads(body.decode("utf-8"))
+
+        self.assertEqual(status, 200)
+        self.assertIn("application/json", headers["Content-Type"])
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["data"]["speech"]["text"], "応答しました。")
+        self.assertIsInstance(captured["token"], str)
+        self.assertTrue(captured["token"].startswith("tok_"))
+        self.assertEqual(captured["payload"]["text"], "こんにちは")
 
     def test_existing_api_still_requires_token(self) -> None:
         status, headers, body = self.request("GET", "/api/status")

@@ -37,11 +37,13 @@ API 仕様は次のように分ける。
 
 ## ブラウザUI配信面
 
-`GET /ui/` とその静的 asset は、同一 HTTPS server から配信するブラウザ設定 UI である。
+`GET /ui/` とその静的 asset は、同一 HTTPS server から配信するブラウザ UI である。
 `/ui/` は API wire 契約の正本ではなく、既存 `/api/...` endpoint を呼び出す client 実装として扱う。
 `GET /` は `/ui/` へリダイレクトする。
-`/ui/api/...` はブラウザ設定 UI 専用の同一 server 内部呼び出し面であり、外部接点向け API として扱わない。
-ブラウザ設定 UI は `/ui/api/...` を通じて既存設定操作を呼び出し、画面上で `console_access_token` の入力を要求しない。
+`/ui/api/...` はブラウザ UI 専用の同一 server 内部呼び出し面であり、外部接点向け API として扱わない。
+ブラウザ UI は `/ui/api/conversation` を通じて既存の会話入力処理を呼び出す。
+ブラウザ UI は `/ui/api/config/...` を通じて既存設定操作を呼び出す。
+ブラウザ UI は画面上で `console_access_token` の入力を要求しない。
 `/ui/` と `/ui/api/...` の追加は `/api/...` の path、method、認証、request / response 形式を変更しない。
 
 ## 更新ルール

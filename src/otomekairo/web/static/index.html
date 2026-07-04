@@ -1,72 +1,201 @@
 <!doctype html>
 <html lang="ja">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>OtomeKairo 設定</title>
-    <link rel="stylesheet" href="/ui/styles.css">
-  </head>
-  <body>
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OtomeKairo</title>
+  <link rel="stylesheet" href="/ui/styles.css">
+</head>
+
+<body>
+  <div class="app-shell">
     <header class="topbar">
-      <div>
-        <h1>OtomeKairo 設定</h1>
+      <div class="brand-block">
+        <h1>OtomeKairo</h1>
         <p id="server-summary">接続確認中</p>
       </div>
-      <div class="status" id="connection-status">未接続</div>
+      <div class="topbar-actions">
+        <button type="button" class="icon-button" id="reload-identity" title="再接続">↻</button>
+        <button type="button" class="icon-button" id="open-settings" title="設定">⚙</button>
+      </div>
     </header>
 
-    <main class="layout">
-      <section class="panel" id="auth-panel">
-        <div class="panel-heading">
-          <h2>接続</h2>
-          <button type="button" id="reload-identity">再確認</button>
-        </div>
-        <div id="bootstrap-actions" class="stack">同一サーバの設定APIへ接続します。</div>
-      </section>
-
-      <section class="panel">
-        <div class="panel-heading">
-          <h2>現在状態</h2>
-          <button type="button" id="load-status">読み込み</button>
-        </div>
-        <dl class="summary-grid" id="status-summary"></dl>
-      </section>
-
-      <section class="panel editor-panel">
-        <div class="panel-heading">
-          <h2>基本設定</h2>
-          <div class="button-row">
-            <button type="button" data-load="editor">読み込み</button>
-            <button type="button" data-save="editor">保存</button>
+    <main class="chat-layout">
+      <section class="chat-panel" aria-label="チャット">
+        <div class="messages" id="messages" aria-live="polite"></div>
+        <form class="composer" id="composer">
+          <div class="attachment-preview" id="attachment-preview" hidden>
+            <img id="attachment-image" alt="添付画像プレビュー">
+            <button type="button" class="plain-button" id="remove-attachment">削除</button>
           </div>
-        </div>
-        <textarea id="editor-state" spellcheck="false"></textarea>
-      </section>
-
-      <section class="panel editor-panel">
-        <div class="panel-heading">
-          <h2>Camera Source</h2>
-          <div class="button-row">
-            <button type="button" data-load="camera">読み込み</button>
-            <button type="button" data-save="camera">保存</button>
+          <textarea id="message-input" rows="3" placeholder="テキストと画像の入力が可能です"></textarea>
+          <div class="composer-actions">
+            <label class="file-button">
+              画像
+              <input type="file" id="image-input" accept="image/*">
+            </label>
+            <button type="submit" id="send-message">送信</button>
           </div>
-        </div>
-        <textarea id="camera-state" spellcheck="false"></textarea>
-      </section>
-
-      <section class="panel editor-panel">
-        <div class="panel-heading">
-          <h2>MCP Server</h2>
-          <div class="button-row">
-            <button type="button" data-load="mcp">読み込み</button>
-            <button type="button" data-save="mcp">保存</button>
-          </div>
-        </div>
-        <textarea id="mcp-state" spellcheck="false"></textarea>
+        </form>
       </section>
     </main>
 
-    <div id="notice" class="notice" hidden></div>
-    <script src="/ui/app.js" defer></script>
-  </body>
+    <footer class="statusbar">
+      <span id="connection-status" class="status">未接続</span>
+      <span id="runtime-status">状態未取得</span>
+    </footer>
+  </div>
+
+  <div class="settings-backdrop" id="settings-backdrop" hidden></div>
+  <aside class="settings-panel" id="settings-panel" aria-label="設定" aria-hidden="true">
+    <div class="settings-header">
+      <div>
+        <h2>設定</h2>
+        <p id="settings-status">未読み込み</p>
+      </div>
+      <button type="button" class="icon-button" id="close-settings" title="閉じる">×</button>
+    </div>
+
+    <div class="settings-tabs" role="tablist">
+      <button type="button" class="tab-button active" data-tab="persona">人格設定</button>
+      <button type="button" class="tab-button" data-tab="model">モデル</button>
+      <button type="button" class="tab-button" data-tab="memory">記憶</button>
+      <button type="button" class="tab-button" data-tab="system">システム</button>
+      <button type="button" class="tab-button" data-tab="capability">能力</button>
+    </div>
+
+    <div class="settings-body">
+      <section class="tab-page active" data-page="persona">
+        <div class="selector-row">
+          <select id="persona-select"></select>
+          <button type="button" data-action="add-persona">追加</button>
+          <button type="button" data-action="duplicate-persona">複製</button>
+          <button type="button" data-action="delete-persona">削除</button>
+        </div>
+        <div class="form-grid">
+          <label>プリセット名<input id="persona-display-name"></label>
+          <label>ユーザー呼称<input id="persona-user-reference"></label>
+        </div>
+        <label class="wide-label">人格本文<textarea id="persona-prompt" class="persona-prompt-field"
+            rows="20"></textarea></label>
+        <label class="wide-label">表現補助<textarea id="persona-expression-addon" rows="8"></textarea></label>
+      </section>
+
+      <section class="tab-page" data-page="model">
+        <div class="selector-row">
+          <select id="model-select"></select>
+          <button type="button" data-action="add-model">追加</button>
+          <button type="button" data-action="duplicate-model">複製</button>
+          <button type="button" data-action="delete-model">削除</button>
+        </div>
+        <div class="model-preset-name-row">
+          <label>プリセット名<input id="model-display-name"></label>
+        </div>
+        <fieldset class="settings-group">
+          <legend>直近会話の取り込み範囲（記憶は別途入ります）</legend>
+          <div class="settings-group-grid">
+            <label>件数<input id="model-recent-turn-limit" type="number" min="1"></label>
+            <label>時間（分）<input id="model-recent-turn-minutes" type="number" min="1"></label>
+          </div>
+        </fieldset>
+        <div class="role-list" id="role-list"></div>
+      </section>
+
+      <section class="tab-page" data-page="memory">
+        <div class="selector-row">
+          <select id="memory-select"></select>
+          <button type="button" data-action="add-memory">追加</button>
+          <button type="button" data-action="duplicate-memory">設定複製</button>
+          <button type="button" data-action="delete-memory">削除</button>
+        </div>
+        <div class="memory-settings-card">
+          <label>プリセット名<input id="memory-display-name"></label>
+          <label>モデル<input id="memory-embedding-model"></label>
+          <label>エンドポイントURL<input id="memory-api-base"></label>
+          <label>次元数<input id="memory-dimension" type="number" min="1"></label>
+          <label class="api-key-field">APIキー
+            <span class="inline-control-row">
+              <input id="memory-api-key" type="password" autocomplete="new-password">
+              <button type="button" class="plain-button" id="copy-memory-api-key">コピー</button>
+              <button type="button" class="plain-button" id="paste-memory-api-key">上書き貼り付け</button>
+              <button type="button" class="plain-button" id="paste-llm-api-key-to-memory">LLMモデルのAPIキーを貼り付け</button>
+            </span>
+          </label>
+        </div>
+      </section>
+
+      <section class="tab-page" data-page="system">
+        <fieldset class="settings-group">
+          <legend>判断機会ポリシー</legend>
+          <div class="settings-group-grid system-policy-grid">
+            <label class="checkbox-field system-policy-checkbox">定期思考を有効にする<input id="current-wake-enabled"
+                type="checkbox"></label>
+            <label>定期思考間隔<input id="current-wake-interval" type="number" min="1"></label>
+            <label>発話頻度（1 控えめ / 5 標準 / 10 多め）<input id="current-thinking-level" type="number" min="1" max="10"></label>
+          </div>
+        </fieldset>
+      </section>
+
+      <section class="tab-page" data-page="capability">
+        <div class="capability-columns">
+          <fieldset class="settings-group capability-group">
+            <legend>視覚</legend>
+            <div class="field-caption">登録済みカメラ</div>
+            <div class="selector-row">
+              <select id="camera-select"></select>
+              <button type="button" data-action="add-camera">追加</button>
+              <button type="button" data-action="delete-camera">削除</button>
+            </div>
+            <div class="form-grid mcp-form-grid">
+              <label class="checkbox-field">有効<input id="camera-enabled" type="checkbox"></label>
+              <label>表示名<input id="camera-display-name"></label>
+              <label>ホスト/IP<input id="camera-host"></label>
+              <label>ユーザー名<input id="camera-username"></label>
+              <label>パスワード<input id="camera-password" type="password" autocomplete="new-password"></label>
+              <label>接続種別<input id="camera-connector-kind" readonly></label>
+              <label>接続クライアント<input id="camera-client-id" readonly></label>
+              <label>視覚ソースID<input id="camera-vision-source-id" readonly></label>
+            </div>
+          </fieldset>
+
+          <fieldset class="settings-group capability-group">
+            <legend>MCP</legend>
+            <div class="field-caption">登録済みMCP server</div>
+            <div class="selector-row">
+              <select id="mcp-select"></select>
+              <button type="button" data-action="add-mcp">追加</button>
+              <button type="button" data-action="delete-mcp">削除</button>
+            </div>
+            <div class="form-grid">
+              <label class="checkbox-field">有効<input id="mcp-enabled" type="checkbox"></label>
+              <label>MCP server ID<input id="mcp-server-id"></label>
+              <label>command<input id="mcp-command"></label>
+              <label class="wide-label">args<textarea id="mcp-args" rows="3" spellcheck="false"></textarea>
+                <span class="field-hint">command に渡す引数。1 行を 1 引数として保存します。</span>
+              </label>
+              <label>cwd<input id="mcp-cwd"></label>
+              <label>接続クライアント<input id="mcp-client-id"></label>
+              <label>transport<input id="mcp-transport" readonly></label>
+              <label>接続種別<input id="mcp-connector-kind"></label>
+              <label class="wide-label">env<textarea id="mcp-env" rows="4" spellcheck="false"></textarea>
+                <span class="field-hint">KEY=VALUE を 1 行ずつ入力します。</span>
+              </label>
+            </div>
+          </fieldset>
+        </div>
+      </section>
+    </div>
+
+    <div class="settings-actions">
+      <button type="button" class="plain-button" id="cancel-settings">キャンセル</button>
+      <button type="button" id="apply-settings">適用</button>
+      <button type="button" id="ok-settings">OK</button>
+    </div>
+  </aside>
+
+  <div id="notice" class="notice" hidden></div>
+  <script src="/ui/app.js" defer></script>
+</body>
+
 </html>

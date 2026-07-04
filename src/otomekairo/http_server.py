@@ -591,6 +591,10 @@ class OtomeKairoHandler(BaseHTTPRequestHandler):
         if method == "GET" and path == "/ui/api/status":
             self._write_success(HTTPStatus.OK, self.server.service.get_status(token))
             return
+        if method == "POST" and path == "/ui/api/conversation":
+            payload = self._read_json_body()
+            self._write_success(HTTPStatus.OK, self.server.service.handle_conversation(token, payload))
+            return
         if method == "GET" and path == "/ui/api/config/editor-state":
             self._write_success(HTTPStatus.OK, self.server.service.get_editor_state(token))
             return
