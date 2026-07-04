@@ -32,8 +32,14 @@
   box-sizing: border-box;
 }
 
+html,
+body {
+  height: 100%;
+}
+
 body {
   margin: 0;
+  overflow: hidden;
   background: var(--bg);
   color: var(--text);
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -108,7 +114,9 @@ p {
 .app-shell {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
 }
 
 .topbar {
@@ -160,6 +168,7 @@ p {
 .chat-layout {
   display: grid;
   min-height: 0;
+  overflow: hidden;
   padding: 0;
 }
 
@@ -167,6 +176,7 @@ p {
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
   min-height: 0;
+  overflow: hidden;
   background: var(--chat-bg);
 }
 
@@ -176,6 +186,7 @@ p {
   gap: 10px;
   min-height: 0;
   padding: 14px 14px 8px;
+  overscroll-behavior: contain;
   overflow-y: auto;
 }
 
@@ -257,8 +268,17 @@ input[readonly] {
   max-height: 150px;
 }
 
+.composer-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 64px;
+  gap: var(--space-3);
+  align-items: stretch;
+}
+
 .composer-actions {
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: stretch;
 }
 
 .file-button {
@@ -273,6 +293,14 @@ input[readonly] {
   color: var(--text);
   cursor: pointer;
   font-size: 12px;
+}
+
+.composer-actions .file-button,
+.composer-actions button {
+  flex: 1;
+  min-height: 0;
+  padding-left: 6px;
+  padding-right: 6px;
 }
 
 .file-button input {
@@ -351,12 +379,13 @@ input[readonly] {
   width: min(840px, 100vw);
   height: 100vh;
   background: #ffffff;
-  box-shadow: -10px 0 28px rgba(16, 24, 40, 0.22);
-  transform: translateX(100%);
-  transition: transform 160ms ease;
+  box-shadow: none;
+  transform: translateX(calc(100% + 32px));
+  transition: transform 160ms ease, box-shadow 160ms ease;
 }
 
 .settings-panel.open {
+  box-shadow: -10px 0 28px rgba(16, 24, 40, 0.22);
   transform: translateX(0);
 }
 

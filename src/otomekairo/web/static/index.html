@@ -4,7 +4,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>OtomeKairo</title>
+  <title>CocoroAI</title>
   <link rel="stylesheet" href="/ui/styles.css">
 </head>
 
@@ -12,11 +12,9 @@
   <div class="app-shell">
     <header class="topbar">
       <div class="brand-block">
-        <h1>OtomeKairo</h1>
-        <p id="server-summary">接続確認中</p>
+        <h1>CocoroAI</h1>
       </div>
       <div class="topbar-actions">
-        <button type="button" class="icon-button" id="reload-identity" title="再接続">↻</button>
         <button type="button" class="icon-button" id="open-settings" title="設定">⚙</button>
       </div>
     </header>
@@ -29,13 +27,15 @@
             <img id="attachment-image" alt="添付画像プレビュー">
             <button type="button" class="plain-button" id="remove-attachment">削除</button>
           </div>
-          <textarea id="message-input" rows="3" placeholder="テキストと画像の入力が可能です"></textarea>
-          <div class="composer-actions">
-            <label class="file-button">
-              画像
-              <input type="file" id="image-input" accept="image/*">
-            </label>
-            <button type="submit" id="send-message">送信</button>
+          <div class="composer-input-row">
+            <textarea id="message-input" rows="3" placeholder="テキストと画像の入力が可能です"></textarea>
+            <div class="composer-actions">
+              <label class="file-button">
+                画像
+                <input type="file" id="image-input" accept="image/*">
+              </label>
+              <button type="submit" id="send-message">送信</button>
+            </div>
           </div>
         </form>
       </section>
@@ -43,7 +43,6 @@
 
     <footer class="statusbar">
       <span id="connection-status" class="status">未接続</span>
-      <span id="runtime-status">状態未取得</span>
     </footer>
   </div>
 

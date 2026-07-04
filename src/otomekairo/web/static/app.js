@@ -58,10 +58,6 @@ function setStatus(text, kind) {
   status.className = `status ${kind || ""}`.trim();
 }
 
-function setRuntimeStatus(text) {
-  element("runtime-status").textContent = text;
-}
-
 function showNotice(message, isError = false) {
   const notice = element("notice");
   notice.textContent = message;
@@ -165,21 +161,8 @@ function formatEnv(value) {
     .join("\n");
 }
 
-function renderIdentity() {
-  const summary = element("server-summary");
-  const identity = state.identity;
-  if (!identity) {
-    summary.textContent = "接続確認中";
-    return;
-  }
-  summary.textContent = `${identity.server_display_name} / ${identity.server_id} / API ${identity.api_version}`;
-}
-
 async function loadIdentity() {
   try {
-    const data = await apiRequest("/ui/api/bootstrap/server-identity");
-    state.identity = data;
-    renderIdentity();
     setStatus("接続済み", "ready");
   } catch (error) {
     setStatus("接続失敗", "error");
@@ -190,11 +173,7 @@ async function loadIdentity() {
 async function loadStatus({ silent = false } = {}) {
   try {
     const data = await apiRequest("/ui/api/status");
-    const snapshot = data.settings_snapshot || {};
     const runtime = data.runtime_summary || {};
-    setRuntimeStatus(
-      `persona: ${snapshot.selected_persona_id || ""} / model: ${snapshot.selected_model_preset_id || ""} / memory: ${snapshot.selected_memory_set_id || ""}`,
-    );
     setStatus(runtime.connection_state === "ready" ? "接続済み" : String(runtime.connection_state || "接続中"), "ready");
     if (!silent) {
       showNotice("現在状態を読み込みました。");
@@ -932,10 +911,6 @@ function switchTab(tab) {
 }
 
 function bindEvents() {
-  element("reload-identity").addEventListener("click", () => {
-    loadIdentity();
-    loadStatus({ silent: true });
-  });
   element("composer").addEventListener("submit", sendMessage);
   element("message-input").addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey) {
@@ -1012,6 +987,5 @@ function bindEvents() {
 }
 
 bindEvents();
-addMessage("system", "ブラウザから本体へ接続します。");
 loadIdentity();
 loadStatus({ silent: true });
