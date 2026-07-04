@@ -426,10 +426,18 @@ input[readonly] {
   font-size: 12px;
 }
 
+.tab-button:hover {
+  background: #eef3f8;
+}
+
 .tab-button.active {
   background: #ffffff;
   color: var(--accent);
   font-weight: 700;
+}
+
+.tab-button.active:hover {
+  background: #f8fafc;
 }
 
 .settings-body {
@@ -620,6 +628,10 @@ label textarea {
   justify-content: flex-end;
   padding: 10px 12px;
   border-top: 1px solid var(--line);
+}
+
+.settings-actions button {
+  min-width: 82px;
 }
 
 .notice {
