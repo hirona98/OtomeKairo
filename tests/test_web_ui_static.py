@@ -76,6 +76,8 @@ class WebUiStaticTests(unittest.TestCase):
         self.assertIn("text/javascript", js_headers["Content-Type"])
         self.assertIn(b"/ui/api/status", js_body)
         self.assertIn(b"/ui/api/conversation", js_body)
+        self.assertIn(b"const images = state.attachment ? [state.attachment.data] : [];", js_body)
+        self.assertNotIn(b"{ data: state.attachment.data }", js_body)
         self.assertNotIn(b"Authorization", js_body)
         self.assertNotIn(b"localStorage", js_body)
         self.assertEqual(css_status, 200)

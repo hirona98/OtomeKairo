@@ -235,7 +235,7 @@ async function sendMessage(event) {
   if (!text && !state.attachment) {
     return;
   }
-  const images = state.attachment ? [{ data: state.attachment.data }] : [];
+  const images = state.attachment ? [state.attachment.data] : [];
   addMessage("user", text, images);
   input.value = "";
   clearAttachment();
