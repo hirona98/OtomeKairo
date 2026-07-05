@@ -6,6 +6,8 @@ OtomeKairo は、LLM を用いて人間を模した自立可能な個を作る�
 現行実装は HTTPS API サーバとして動作する。
 bootstrap、対話入力、API起床、観測能力、設定、inspection、event stream、log stream を扱う。
 
+CocoroAIのコアとして動作する。
+
 ## 文書
 
 設計、API 仕様、記憶設計、用語表は [docs/README.md](docs/README.md) から読む。
